@@ -11,6 +11,7 @@ import { AIConfigModal } from './components/AIConfigModal';
 import { CoverageReportModal } from './components/CoverageReportModal';
 import { CloneModal } from './components/CloneModal';
 import { UserModal } from './components/UserModal';
+import { AddProjectModal } from './components/AddProjectModal';
 import { ActivityView } from './components/ActivityView';
 import { GithubView } from './components/GithubView';
 
@@ -51,9 +52,11 @@ export default function App() {
   const [isAIConfigOpen, setIsAIConfigOpen] = useState(false);
   const [isCoverageOpen, setIsCoverageOpen] = useState(false);
   const [isCloneOpen, setIsCloneOpen] = useState(false);
+  const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
   const [isUserOpen, setIsUserOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isGeneratingChecklist, setIsGeneratingChecklist] = useState(false);
+  const [isDispatching, setIsDispatching] = useState(false);
   const [aiConfig, setAiConfig] = useState<any>(null);
   const [lastTests, setLastTests] = useState<string[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
@@ -252,7 +255,7 @@ export default function App() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let done = false;
-      let finalTasks: string[] = [];
+      let finalTasksFromEvent: any[] = [];
 
       while (!done) {
         const { value, done: readerDone } = await reader.read();
@@ -270,22 +273,11 @@ export default function App() {
                   throw new Error(data.error);
                 }
 
-                // Handle LangGraph stream events
-                if (data.event === "on_chat_model_stream") {
-                  // Optional: log streaming tokens
+                // Handle the new final_result event with structured todos
+                if (data.event === "final_result") {
+                  finalTasksFromEvent = data.todos;
                 } else if (data.event === "on_tool_start") {
                   setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] AGENT_OBSERVATION: Running tool ${data.name}...`]);
-                } else if (data.event === "on_chain_end" && data.name === "my_deep_agent") {
-                   // Try to parse final output
-                   const output = data.data?.output?.messages?.[data.data.output.messages.length - 1]?.content;
-                   if (output) {
-                     try {
-                       const jsonMatch = output.match(/\[.*\]/s);
-                       finalTasks = jsonMatch ? JSON.parse(jsonMatch[0]) : [output];
-                     } catch (e) {
-                       finalTasks = [output];
-                     }
-                   }
                 }
               } catch (e) {
                 console.error("Error parsing SSE chunk", e);
@@ -295,12 +287,12 @@ export default function App() {
         }
       }
 
-      if (finalTasks.length > 0) {
-        const newTasks = finalTasks.map((text: string, i: number) => ({
-          id: `task-${i}-${Date.now()}`,
-          text,
-          completed: false,
-          status: 'pending' as const
+      if (finalTasksFromEvent.length > 0) {
+        const newTasks = finalTasksFromEvent.map((todo: any, i: number) => ({
+          id: todo.id || `task-${i}-${Date.now()}`,
+          text: todo.content,
+          completed: todo.status === 'completed',
+          status: (todo.status as any) === 'cancelled' ? 'pending' : (todo.status as any) || 'pending'
         }));
 
         // Update backend
@@ -320,6 +312,46 @@ export default function App() {
       setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: Deep Agent failed: ${error.message}`]);
     } finally {
       setIsGeneratingChecklist(false);
+    }
+  };
+
+  const handleDispatchAll = async () => {
+    if (!selectedProject || tasks.length === 0) return;
+    
+    setIsDispatching(true);
+    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Initiating GitHub Pipeline Dispatch for ${tasks.length} tasks...`]);
+    
+    try {
+      // For now we use the project name as a placeholder for repo details
+      // In a real app, these would come from project settings
+      const repoOwner = "JayDataEngineer"; 
+      const repoName = selectedProject;
+
+      const res = await fetch('/api/dispatch/all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          project: selectedProject, 
+          todos: tasks.map(t => ({ content: t.text })),
+          repoOwner,
+          repoName
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] SUCCESS: Successfully dispatched tasks to ${repoOwner}/${repoName}.`]);
+        data.results.forEach((r: any) => {
+          setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] - Created: ${r.issueUrl}`]);
+        });
+      } else {
+        throw new Error(data.error || "Dispatch failed");
+      }
+    } catch (error: any) {
+      console.error("Failed to dispatch all tasks", error);
+      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: GitHub Dispatch failed: ${error.message}`]);
+    } finally {
+      setIsDispatching(false);
     }
   };
 
@@ -405,6 +437,28 @@ export default function App() {
     }
   };
 
+  const handleAddProject = async (name: string, path: string) => {
+    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] SYSTEM: Registering existing project "${name}" at ${path}...`]);
+    try {
+      const res = await fetch('/api/projects/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, path })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] SYSTEM: ${data.message}`]);
+        await fetchProjects();
+        setSelectedProject(name);
+      } else {
+        throw new Error(data.error || "Failed to add project");
+      }
+    } catch (e: any) {
+      console.error("Failed to add project", e);
+      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: ${e.message}`]);
+    }
+  };
+
   const handleTerminalCommand = (cmd: string) => {
     setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] $ ${cmd}`]);
     
@@ -464,6 +518,7 @@ export default function App() {
           onMenuToggle={() => setIsSidebarOpen(true)}
           onCoverageClick={() => setIsCoverageOpen(true)}
           onCloneClick={() => setIsCloneOpen(true)}
+          onAddExistingClick={() => setIsAddProjectOpen(true)}
           onRefreshProjects={fetchProjects}
           fullAutomationMode={aiConfig?.fullAutomationMode ?? false}
           projects={projects}
@@ -477,7 +532,9 @@ export default function App() {
               <Checklist 
                 tasks={tasks} 
                 onGenerateAI={handleGenerateChecklist}
+                onDispatchAll={handleDispatchAll}
                 isGenerating={isGeneratingChecklist}
+                isDispatching={isDispatching}
               />
 
               <section className="flex-1 lg:w-1/2 flex flex-col p-4 lg:p-6 gap-4 lg:gap-6 bg-black overflow-hidden">
@@ -526,6 +583,11 @@ export default function App() {
         isOpen={isCloneOpen} 
         onClose={() => setIsCloneOpen(false)} 
         onClone={handleClone}
+      />
+      <AddProjectModal 
+        isOpen={isAddProjectOpen} 
+        onClose={() => setIsAddProjectOpen(false)} 
+        onAdd={handleAddProject}
       />
       <UserModal 
         isOpen={isUserOpen} 

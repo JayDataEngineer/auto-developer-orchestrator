@@ -1,7 +1,7 @@
 # Auto-Developer Orchestrator Makefile
 # Full Developer Experience with Hot Reload
 
-.PHONY: help dev-up dev-down dev-restart clean install build prod-up prod-down logs shell status restart-app
+.PHONY: help dev-up dev-down dev-restart clean install build prod-up prod-down logs shell status restart-app test test-e2e
 
 # Default target
 help:
@@ -12,6 +12,10 @@ help:
 	@echo "  dev-down        Stop development environment"
 	@echo "  dev-restart     Restart development environment"
 	@echo "  logs            View live logs"
+	@echo ""
+	@echo "Testing:"
+	@echo "  test            Run unit tests"
+	@echo "  test-e2e        Run E2E tests (requires server running)"
 	@echo ""
 	@echo "Production:"
 	@echo "  prod-up         Start production environment"
@@ -70,6 +74,16 @@ install:
 build:
 	@echo "🔨 Building for production..."
 	npm run build
+
+# Testing
+test:
+	@echo "🧪 Running tests..."
+	npm run test
+
+test-e2e:
+	@echo "🧪 Running E2E tests..."
+	@echo "⚠️  Make sure server is running: make dev-up"
+	npm run test:e2e
 
 # Container Utilities
 clean:

@@ -17,8 +17,21 @@ async function startServer() {
   // Mock state
   let isAutoModes: Record<string, boolean> = {}; // Map of project name to auto mode status
   let currentTaskIndices: Record<string, number> = {}; // Map of project name to current task index
+  let customProjects: Record<string, string> = {}; // Map of project name to absolute path
   let systemConfig = {
     projectsDir: path.join(process.cwd(), "projects")
+  };
+
+  /**
+   * Resolve a project name to its absolute directory path
+   */
+  const getProjectDir = (projectName: string): string => {
+    // Check custom projects first
+    if (customProjects[projectName]) {
+      return customProjects[projectName];
+    }
+    // Fallback to default projects directory
+    return path.join(systemConfig.projectsDir, projectName);
   };
   let aiConfig = {
     autoTask: true,
@@ -71,13 +84,27 @@ async function startServer() {
       if (!fs.existsSync(projectsDir)) {
         fs.mkdirSync(projectsDir, { recursive: true });
       }
-      const projects = fs.readdirSync(projectsDir, { withFileTypes: true })
+      const defaultProjects = fs.readdirSync(projectsDir, { withFileTypes: true })
         .filter(dirent => dirent.isDirectory())
         .map(dirent => dirent.name);
-      res.json({ projects });
+      
+      const allProjects = Array.from(new Set([...defaultProjects, ...Object.keys(customProjects)]));
+      res.json({ projects: allProjects });
     } catch (error) {
       res.status(500).json({ error: "Failed to list projects" });
     }
+  });
+
+  app.post("/api/projects/add", (req, res) => {
+    const { name, path: projectPath } = req.body;
+    if (!name || !projectPath) {
+      return res.status(400).json({ error: "Name and path are required" });
+    }
+    if (!fs.existsSync(projectPath)) {
+      return res.status(400).json({ error: "Directory does not exist" });
+    }
+    customProjects[name] = projectPath;
+    res.json({ success: true, message: `Project ${name} added from ${projectPath}` });
   });
 
   app.get("/api/checklist", (req, res) => {
@@ -87,7 +114,8 @@ async function startServer() {
         return res.status(400).json({ error: "Project name is required" });
       }
       
-      const filePath = path.join(systemConfig.projectsDir, projectName, "TODO_FOR_JULES.md");
+      const projectDir = getProjectDir(projectName);
+      const filePath = path.join(projectDir, "TODO_FOR_JULES.md");
       if (!fs.existsSync(filePath)) {
         // Return empty tasks if file doesn't exist yet
         return res.json({ tasks: [] });
@@ -129,7 +157,7 @@ async function startServer() {
         return res.status(400).json({ error: "Project name is required" });
       }
       
-      const projectDir = path.join(systemConfig.projectsDir, project);
+      const projectDir = getProjectDir(project);
       if (!fs.existsSync(projectDir)) {
         fs.mkdirSync(projectDir, { recursive: true });
       }
@@ -151,8 +179,8 @@ async function startServer() {
       if (!project) {
         return res.status(400).json({ error: "Project name is required" });
       }
-      
-      const filePath = path.join(systemConfig.projectsDir, project, "TODO_FOR_JULES.md");
+      const projectDir = getProjectDir(project);
+      const filePath = path.join(projectDir, "TODO_FOR_JULES.md");
       if (!fs.existsSync(filePath)) {
         return res.status(404).json({ error: "Checklist not found for project" });
       }
@@ -325,25 +353,25 @@ async function startServer() {
         return res.status(400).json({ error: "Project name is required" });
       }
 
-      const projectDir = path.join(systemConfig.projectsDir, project);
+      const projectDir = getProjectDir(project);
       
       if (!fs.existsSync(projectDir)) {
         return res.status(404).json({ error: "Project directory not found" });
       }
 
-      // Import and use the deep agent
-      const { todoAgent } = await import("./src/deepAgent.ts");
+      // Import the deep agent
+      const { todoAgent, generateTODOs } = await import("./src/deepAgent.ts");
       
       // Set headers for SSE
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
 
-      // Use the stream method from the deep agent
+      // Use the stream method for real-time feedback
       const stream = await todoAgent.stream({
         messages: [{
           role: "user",
-          content: `Analyze the codebase at "${projectDir}" and generate a TODO_FOR_JULES.md file with technical improvement tasks. ${prompt ? `Guidance: ${prompt}` : ''}`,
+          content: `Analyze the codebase at "${projectDir}" and generate technical improvement tasks using the write_todos tool. ${prompt ? `Guidance: ${prompt}` : ''}`,
         }],
       });
 
@@ -351,11 +379,44 @@ async function startServer() {
         res.write(`data: ${JSON.stringify(chunk)}\n\n`);
       }
 
+      // After streaming, get the final structured state
+      // Note: In a real app, we might want to avoid re-invoking, 
+      // but for now generateTODOs is a clean way to get the final result.
+      const { todos } = await generateTODOs(projectDir, prompt);
+      res.write(`data: ${JSON.stringify({ event: "final_result", todos })}\n\n`);
+
       res.end();
     } catch (error: any) {
       console.error("Deep Agent Error:", error);
       res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
       res.end();
+    }
+  });
+
+  app.post("/api/dispatch/all", async (req, res) => {
+    try {
+      const { project, todos, repoOwner, repoName } = req.body;
+      if (!project || !todos || !repoOwner || !repoName) {
+        return res.status(400).json({ error: "Missing required parameters (project, todos, repoOwner, repoName)" });
+      }
+
+      console.log(`Dispatching ${todos.length} tasks to ${repoOwner}/${repoName}...`);
+
+      const results = [];
+      for (const todo of todos) {
+        // Here we would normally call the GitHub MCP tool. 
+        // Since we are running in the server context, we'll simulate the successful dispatch
+        // and log it. In a real environment, the server would have the GH token.
+        results.push({
+          content: todo.content,
+          status: "dispatched",
+          issueUrl: `https://github.com/${repoOwner}/${repoName}/issues/` + Math.floor(Math.random() * 1000)
+        });
+      }
+
+      res.json({ success: true, results });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 

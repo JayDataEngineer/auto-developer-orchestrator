@@ -14,6 +14,7 @@ interface HeaderProps {
   onMenuToggle: () => void;
   onCoverageClick: () => void;
   onCloneClick: () => void;
+  onAddExistingClick: () => void;
   onRefreshProjects: () => void;
   fullAutomationMode: boolean;
   projects: string[];
@@ -27,6 +28,7 @@ export const Header: React.FC<HeaderProps> = ({
   onMenuToggle, 
   onCoverageClick, 
   onCloneClick,
+  onAddExistingClick,
   onRefreshProjects,
   fullAutomationMode,
   projects,
@@ -34,24 +36,27 @@ export const Header: React.FC<HeaderProps> = ({
   onProjectSelect
 }) => {
   return (
-    <header className="h-14 border-b border-white/10 bg-zinc-950 flex items-center justify-between px-4 lg:px-6 shrink-0">
-      <div className="flex items-center gap-2 lg:gap-4">
+    <header className="h-16 glass border-b border-white/5 flex items-center justify-between px-6 lg:px-8 shrink-0 z-50">
+      <div className="flex items-center gap-4 lg:gap-6">
         <button 
           onClick={onMenuToggle}
-          className="lg:hidden p-2 text-zinc-400 hover:text-white"
+          className="lg:hidden p-2 text-zinc-400 hover:text-white transition-colors"
         >
-          <Menu size={20} />
+          <Menu size={24} />
         </button>
-        <h1 className="text-[10px] lg:text-sm font-bold tracking-tighter uppercase text-zinc-400">Version 0.2.0-Alpha</h1>
-        <div className="hidden lg:block h-4 w-[1px] bg-white/10" />
+        <div className="flex flex-col">
+          <h1 className="text-[10px] font-bold tracking-[0.2em] uppercase text-primary/80 leading-none mb-1">Orchestrator v0.2.5</h1>
+          <span className="text-[8px] font-medium text-zinc-500 tracking-[0.1em] uppercase">Deep Research Architech</span>
+        </div>
+        <div className="hidden lg:block h-6 w-[1px] bg-white/5" />
         
         {/* Project Selector */}
-        <div className="flex items-center gap-2 bg-zinc-900 border border-white/5 rounded-full px-3 py-1">
-          <FolderGit2 size={12} className="text-zinc-500" />
+        <div className="flex items-center gap-3 glass-dark border border-white/5 rounded-xl px-4 py-1.5 transition-all hover:border-white/10 group">
+          <FolderGit2 size={14} className="text-zinc-500 group-hover:text-primary transition-colors" />
           <select 
             value={selectedProject}
             onChange={(e) => onProjectSelect(e.target.value)}
-            className="bg-transparent text-[10px] font-bold uppercase tracking-widest text-zinc-300 outline-none cursor-pointer appearance-none"
+            className="bg-transparent text-[11px] font-bold uppercase tracking-widest text-zinc-300 outline-none cursor-pointer appearance-none min-w-[120px]"
           >
             {projects.length === 0 && <option value="">NO PROJECTS</option>}
             {projects.map(p => (
@@ -60,78 +65,85 @@ export const Header: React.FC<HeaderProps> = ({
           </select>
         </div>
 
-        <button 
-          onClick={onCloneClick}
-          className="p-1.5 bg-zinc-900 border border-white/5 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all"
-          title="Clone Repository"
-        >
-          <Plus size={14} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={onCloneClick}
+            className="p-2 glass-dark border border-white/5 rounded-xl text-zinc-400 hover:text-white hover:border-primary/30 transition-all hover:scale-105"
+            title="Clone Repository"
+          >
+            <Plus size={16} />
+          </button>
 
-        <button 
-          onClick={onRefreshProjects}
-          className="p-1.5 bg-zinc-900 border border-white/5 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all"
-          title="Refresh Projects"
-        >
-          <RefreshCw size={14} />
-        </button>
+          <button 
+            onClick={onAddExistingClick}
+            className="flex items-center gap-2 px-3 py-2 glass-dark border border-white/5 rounded-xl text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white hover:border-primary/30 transition-all hover:scale-105"
+            title="Add Existing Local Repository"
+          >
+            <FolderGit2 size={16} />
+            <span className="hidden xl:inline">Add Existing</span>
+          </button>
 
-        <div className="hidden lg:block h-4 w-[1px] bg-white/10" />
+          <button 
+            onClick={onRefreshProjects}
+            className="p-2 glass-dark border border-white/5 rounded-xl text-zinc-400 hover:text-white hover:border-primary/30 transition-all hover:scale-105"
+            title="Refresh Projects"
+          >
+            <RefreshCw size={16} />
+          </button>
+        </div>
+
+        <div className="hidden lg:block h-6 w-[1px] bg-white/5" />
         {fullAutomationMode && (
-          <div className="flex items-center gap-2 px-3 py-1 bg-red-500/10 border border-red-500/20 rounded-full text-[10px] font-bold text-red-500 animate-pulse">
-            <Cpu size={12} />
+          <div className="flex items-center gap-2 px-4 py-1.5 bg-red-500/5 border border-red-500/20 rounded-xl text-[10px] font-bold text-red-400 glow-primary animate-pulse">
+            <Cpu size={14} />
             AUTONOMOUS_LOOP_ACTIVE
           </div>
         )}
         <button 
           onClick={onCoverageClick}
-          className="flex items-center gap-2 px-3 py-1 bg-primary/10 border border-primary/20 rounded-full text-[10px] font-bold text-primary hover:bg-primary/20 transition-colors"
+          className="flex items-center gap-2 px-4 py-1.5 bg-primary/5 border border-primary/20 rounded-xl text-[10px] font-bold text-primary hover:bg-primary/10 transition-all hover:scale-105"
         >
-          <BarChart3 size={12} />
+          <BarChart3 size={14} />
           COVERAGE: 91.2%
         </button>
-        <div className="hidden lg:flex items-center gap-2 text-xs font-mono text-zinc-500">
+        
+        <div className="hidden lg:flex items-center gap-3 text-[11px] font-mono text-zinc-500">
           <span className={cn(
-            "w-2 h-2 rounded-full", 
-            status?.agentStatus === 'running' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+            "w-2.5 h-2.5 rounded-full", 
+            status?.agentStatus === 'running' ? 'bg-emerald-500 glow-primary animate-pulse' : 'bg-amber-500/50'
           )} />
-          {status?.agentStatus === 'running' ? 'SYS_ONLINE' : 'AGENT_PAUSED'}
-        </div>
-        <div className="hidden lg:block h-4 w-[1px] bg-white/10" />
-        <div className="hidden lg:flex items-center gap-2 text-[10px] font-mono text-zinc-600">
-          <span className="uppercase">Branch:</span>
-          <span className="text-zinc-400">{status?.workingTree || 'unknown'}</span>
-          <span className="ml-2 uppercase">Commit:</span>
-          <span className="text-zinc-400">{status?.lastCommit || '-------'}</span>
+          <span className={cn(status?.agentStatus === 'running' ? 'text-emerald-500' : 'text-amber-500/70')}>
+            {status?.agentStatus === 'running' ? 'SYS_ONLINE' : 'AGENT_PAUSED'}
+          </span>
         </div>
       </div>
 
-      {/* Mode Toggle Switch */}
-      <div className="flex items-center bg-zinc-900 p-1 rounded-full border border-white/5 shadow-inner">
-        <button 
-          onClick={onToggleMode}
-          className={cn(
-            "px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all",
-            !status?.isAutoMode ? "bg-zinc-800 text-white shadow-xl" : "text-zinc-500 hover:text-zinc-300"
-          )}
-        >
-          Manual
-        </button>
-        <button 
-          onClick={onToggleMode}
-          className={cn(
-            "px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all",
-            status?.isAutoMode ? "bg-primary text-black shadow-lg shadow-primary/20" : "text-zinc-500 hover:text-zinc-300"
-          )}
-        >
-          Full Auto
-        </button>
-      </div>
+      <div className="flex items-center gap-6">
+        {/* Mode Toggle Switch */}
+        <div className="flex items-center glass-dark p-1 rounded-xl border border-white/5 shadow-2xl">
+          <button 
+            onClick={onToggleMode}
+            className={cn(
+              "px-5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all duration-300",
+              !status?.isAutoMode ? "bg-zinc-800 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+            )}
+          >
+            Manual
+          </button>
+          <button 
+            onClick={onToggleMode}
+            className={cn(
+              "px-5 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all duration-300",
+              status?.isAutoMode ? "bg-primary text-white shadow-lg shadow-primary/20 glow-primary" : "text-zinc-500 hover:text-zinc-300"
+            )}
+          >
+            Full Auto
+          </button>
+        </div>
 
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 text-xs font-mono text-zinc-500">
-          <Cpu size={14} />
-          <span>14.2%</span>
+        <div className="hidden lg:flex items-center gap-2 text-xs font-mono text-zinc-500 glass-dark px-3 py-1.5 rounded-xl border border-white/5">
+          <Cpu size={14} className="text-primary/70" />
+          <span className="text-white/80">14.2%</span>
         </div>
       </div>
     </header>
