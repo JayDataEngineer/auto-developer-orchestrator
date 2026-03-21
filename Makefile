@@ -15,13 +15,17 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  test            Run unit tests"
+	@echo "  test-unit       Run unit tests"
+	@echo "  test-integration Run integration tests"
 	@echo "  test-e2e        Run E2E tests (requires server running)"
+	@echo "  test-all        Run unit, integration, and E2E tests"
 	@echo ""
 	@echo "Production:"
 	@echo "  prod-up         Start production environment"
 	@echo "  prod-down       Stop production environment"
 	@echo ""
 	@echo "Utilities:"
+	@echo "  setup           Install dependencies and setup git hooks"
 	@echo "  install         Install Node.js dependencies locally"
 	@echo "  build           Build for production"
 	@echo "  clean           Remove containers and volumes"
@@ -69,7 +73,12 @@ logs:
 # Local Development (without Docker)
 install:
 	@echo "📦 Installing dependencies..."
-	npm install
+	npm install --legacy-peer-deps
+
+setup: install
+	@echo "🔧 Setting up project and git hooks..."
+	chmod +x scripts/setup-hooks.sh
+	./scripts/setup-hooks.sh
 
 build:
 	@echo "🔨 Building for production..."
@@ -77,13 +86,27 @@ build:
 
 # Testing
 test:
-	@echo "🧪 Running tests..."
+	@echo "🧪 Running all tests..."
 	npm run test
+
+test-unit:
+	@echo "🧪 Running unit tests..."
+	npx vitest run tests/unit
+
+test-integration:
+	@echo "🧪 Running integration tests..."
+	@echo "⚠️  Make sure server is running: make dev-up"
+	npx vitest run tests/integration
 
 test-e2e:
 	@echo "🧪 Running E2E tests..."
 	@echo "⚠️  Make sure server is running: make dev-up"
 	npm run test:e2e
+
+test-all:
+	@echo "🧪 Running unit, integration, and E2E tests..."
+	@echo "⚠️  Make sure server is running: make dev-up"
+	npx vitest run tests/unit && npx vitest run tests/integration && npm run test:e2e
 
 # Container Utilities
 clean:
