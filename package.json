@@ -15,8 +15,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@google/genai": "^1.29.0",
-    "@langchain/anthropic": "^1.0.0",
+    "@langchain/openai": "^0.5.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/cors": "^2.8.19",
     "@types/morgan": "^1.9.10",

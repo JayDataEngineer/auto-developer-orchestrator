@@ -5,20 +5,31 @@
  * file with technical tasks to feed to Jules (Google's AI coding agent).
  *
  * Configuration via .env:
- * - DEEP_AGENT_MODEL: Model string (default: "claude-sonnet-4-20250514")
- *   Format: "provider:model-name" e.g., "anthropic:claude-sonnet-4-20250514"
- * - CLAUDE_API_KEY: API key for Claude
+ * - DEEP_AGENT_MODEL: Model name (default: "gpt-4o")
+ * - DEEP_AGENT_BASE_URL: API base URL (default: "https://api.openai.com/v1")
+ * - OPENAI_API_KEY: API key for OpenAI-compatible API
  *
  * All AI access goes through LangChain's deepagents package.
  */
 
 import { createDeepAgent, LocalShellBackend } from "deepagents";
+import { ChatOpenAI } from "@langchain/openai";
 import * as fs from "fs";
 import * as path from "path";
 
-// Get model configuration from environment variables
-// deepagents accepts model strings like "claude-sonnet-4-20250514"
-const DEEP_AGENT_MODEL = process.env.DEEP_AGENT_MODEL || "claude-sonnet-4-20250514";
+// Get configuration from environment variables
+const DEEP_AGENT_MODEL = process.env.DEEP_AGENT_MODEL || "gpt-4o";
+const DEEP_AGENT_BASE_URL = process.env.DEEP_AGENT_BASE_URL || "https://api.openai.com/v1";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+// Create OpenAI-compatible chat model
+const chatModel = new ChatOpenAI({
+  model: DEEP_AGENT_MODEL,
+  apiKey: OPENAI_API_KEY,
+  configuration: {
+    baseURL: DEEP_AGENT_BASE_URL,
+  },
+});
 
 // System prompt for TODO generation
 const todoGeneratorPrompt = `You are an expert software architect and technical lead. Your job is to analyze a codebase and generate a comprehensive TODO list for improvement.
@@ -54,7 +65,7 @@ Remember: This TODO list will be executed by Jules (an AI coding agent), so be s
 // Define the Explorer Subagent
 export const explorerSubagent = createDeepAgent({
   name: "explorer",
-  model: DEEP_AGENT_MODEL,
+  model: chatModel,
   systemPrompt: "You are a code exploration expert. Your job is to deeply analyze codebase structures, find patterns, and identify technical issues. Use your tools to search, read, and understand the code thoroughly.",
   backend: new LocalShellBackend({
     rootDir: process.cwd(),
@@ -65,7 +76,7 @@ export const explorerSubagent = createDeepAgent({
 // Create the deep agent with filesystem access and subagents
 export const todoAgent = createDeepAgent({
   name: "my_deep_agent",
-  model: DEEP_AGENT_MODEL,
+  model: chatModel,
   systemPrompt: todoGeneratorPrompt,
   subagents: [explorerSubagent],
   backend: new LocalShellBackend({
