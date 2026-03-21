@@ -30,6 +30,40 @@ interface Status {
   lastCommit: string;
 }
 
+interface AIConfig {
+  autoTask: boolean;
+  autoTest: boolean;
+  fullAutomationMode: boolean;
+  postMergeTestGen: boolean;
+  testGenPrompt: string;
+  testTypes: {
+    unit: boolean;
+    e2e: boolean;
+    integration: boolean;
+    chaos: boolean;
+    security: boolean;
+    performance: boolean;
+  };
+}
+
+interface TestResult {
+  test: string;
+  status: 'PASSED' | 'FAILED';
+  duration: number;
+}
+
+interface AgentTodo {
+  id: string;
+  content: string;
+  status: 'pending' | 'in-progress' | 'completed' | 'cancelled';
+}
+
+interface DispatchResult {
+  content: string;
+  status: string;
+  issueUrl: string;
+}
+
 const LOG_MESSAGES = [
   "Initialized task execution environment.",
   "Reading file src/api/routes/index.ts...",
@@ -57,7 +91,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isGeneratingChecklist, setIsGeneratingChecklist] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
-  const [aiConfig, setAiConfig] = useState<any>(null);
+  const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
   const [lastTests, setLastTests] = useState<string[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
@@ -184,13 +218,13 @@ export default function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ tests: genData.tests })
           });
-          const runData = await runRes.json();
+          const runData: { results: TestResult[] } = await runRes.json();
 
-          runData.results.forEach((res: any) => {
+          runData.results.forEach((res: TestResult) => {
             setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [TEST RUN] ${res.test} ... ${res.status} (${res.duration}ms)`]);
           });
 
-          const allPassed = runData.results.every((r: any) => r.status === 'PASSED');
+          const allPassed = runData.results.every((r: TestResult) => r.status === 'PASSED');
           if (!allPassed) {
             setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: One or more tests failed. Pausing automation for manual review.`]);
             return;
@@ -199,7 +233,7 @@ export default function App() {
           setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] All tests passed. Moving to next to-do item...`]);
           
           // Find next task from the FRESH data
-          const nextTask = checklistData.tasks.find((t: any) => t.status === 'pending');
+          const nextTask = checklistData.tasks.find((t: Task) => t.status === 'pending');
           if (nextTask) {
             setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Next task identified: "${nextTask.text}"`]);
             setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Automatically creating issue and assigning to JULES...`]);
@@ -255,7 +289,7 @@ export default function App() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let done = false;
-      let finalTasksFromEvent: any[] = [];
+      let finalTasksFromEvent: AgentTodo[] = [];
 
       while (!done) {
         const { value, done: readerDone } = await reader.read();
@@ -288,11 +322,11 @@ export default function App() {
       }
 
       if (finalTasksFromEvent.length > 0) {
-        const newTasks = finalTasksFromEvent.map((todo: any, i: number) => ({
+        const newTasks = finalTasksFromEvent.map((todo: AgentTodo, i: number) => ({
           id: todo.id || `task-${i}-${Date.now()}`,
           text: todo.content,
           completed: todo.status === 'completed',
-          status: (todo.status as any) === 'cancelled' ? 'pending' : (todo.status as any) || 'pending'
+          status: (todo.status as string) === 'cancelled' ? 'pending' : (todo.status as Task['status']) || 'pending'
         }));
 
         // Update backend
@@ -307,9 +341,10 @@ export default function App() {
       } else {
         setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] DEEP AGENT: Completed but no tasks were generated.`]);
       }
-    } catch (error: any) {
-      console.error("Failed to generate checklist", error);
-      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: Deep Agent failed: ${error.message}`]);
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error("Failed to generate checklist", err);
+      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: Deep Agent failed: ${err.message}`]);
     } finally {
       setIsGeneratingChecklist(false);
     }
@@ -341,15 +376,16 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] SUCCESS: Successfully dispatched tasks to ${repoOwner}/${repoName}.`]);
-        data.results.forEach((r: any) => {
+        data.results.forEach((r: DispatchResult) => {
           setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] - Created: ${r.issueUrl}`]);
         });
       } else {
         throw new Error(data.error || "Dispatch failed");
       }
-    } catch (error: any) {
-      console.error("Failed to dispatch all tasks", error);
-      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: GitHub Dispatch failed: ${error.message}`]);
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error("Failed to dispatch all tasks", err);
+      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: GitHub Dispatch failed: ${err.message}`]);
     } finally {
       setIsDispatching(false);
     }
@@ -401,13 +437,13 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tests: lastTests })
       });
-      const runData = await runRes.json();
+      const runData: { results: TestResult[] } = await runRes.json();
 
-      runData.results.forEach((res: any) => {
+      runData.results.forEach((res: TestResult) => {
         setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [TEST RUN] ${res.test} ... ${res.status} (${res.duration}ms)`]);
       });
 
-      const allPassed = runData.results.every((r: any) => r.status === 'PASSED');
+      const allPassed = runData.results.every((r: TestResult) => r.status === 'PASSED');
       if (!allPassed) {
         setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: Tests failed again. Manual intervention required.`]);
         return;
@@ -418,7 +454,7 @@ export default function App() {
       // Resume automation loop logic
       const checklistRes = await fetch('/api/checklist');
       const checklistData = await checklistRes.json();
-      const nextTask = checklistData.tasks.find((t: any) => t.status === 'pending');
+      const nextTask = checklistData.tasks.find((t: Task) => t.status === 'pending');
       if (nextTask) {
         setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Next task identified: "${nextTask.text}"`]);
         setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Automatically creating issue and assigning to JULES...`]);
@@ -453,9 +489,10 @@ export default function App() {
       } else {
         throw new Error(data.error || "Failed to add project");
       }
-    } catch (e: any) {
-      console.error("Failed to add project", e);
-      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: ${e.message}`]);
+    } catch (e: unknown) {
+      const err = e as Error;
+      console.error("Failed to add project", err);
+      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: ${err.message}`]);
     }
   };
 
