@@ -7,8 +7,8 @@ services:
       dockerfile: Dockerfile.dev
     container_name: auto-dev-orchestrator
     ports:
-      - "3000:3000"
-      - "5173:5173"
+      - "3847:3847"
+      - "5194:5194"
     volumes:
       # Mount source code for hot reload
       - .:/app
@@ -22,11 +22,13 @@ services:
     environment:
       - NODE_ENV=development
       - VITE_HOST=0.0.0.0
+      - VITE_PORT=5194
+      - SERVER_PORT=3847
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - APP_URL=${APP_URL:-http://localhost:3000}
+      - APP_URL=${APP_URL:-http://localhost:3847}
     depends_on:
       - langgraph-agent
     networks:
@@ -47,11 +49,11 @@ services:
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     ports:
-      - "8123:8123"
+      - "8194:8194"
     command: >
       sh -c "
         pip install --no-cache-dir langgraph langchain langchain-community uvicorn fastapi &&
-        python -m uvicorn agent:app --host 0.0.0.0 --port 8123 --reload
+        python -m uvicorn agent:app --host 0.0.0.0 --port 8194 --reload
       "
     networks:
       - orchestrator-network

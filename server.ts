@@ -8,7 +8,7 @@ import { Client } from "@langchain/langgraph-sdk";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.SERVER_PORT || 3847;
 
   app.use(cors());
   app.use(express.json());
@@ -323,7 +323,7 @@ async function startServer() {
       const { prompt, project } = req.body;
       
       // Connect to the Python LangGraph Server
-      const client = new Client({ apiUrl: "http://localhost:8123" });
+      const client = new Client({ apiUrl: "http://localhost:8194" });
       
       // 1. Create a persistent thread for memory & file system isolation
       const thread = await client.threads.create();

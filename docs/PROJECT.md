@@ -9,13 +9,13 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Frontend (React + Vite)                  │
-│                     http://localhost:3000                   │
+│                     http://localhost:3847                   │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                  Backend (Express + TypeScript)             │
-│                      server.ts (Port 3000)                  │
+│                      server.ts (Port 3847)                  │
 │  - Project management                                       │
 │  - Task coordination                                        │
 │  - AI provider routing                                      │
@@ -25,7 +25,7 @@
               ▼                               ▼
 ┌─────────────────────────┐     ┌─────────────────────────────┐
 │   LangGraph Agent       │     │   External AI Services      │
-│   (Python - Port 8123)  │     │   - Google Jules            │
+│   (Python - Port 8194)  │     │   - Google Jules            │
 │   - Deep agent tasks    │     │   - Gemini API              │
 │   - File system ops     │     │   - Claude API              │
 │                         │     │   - OpenAI API              │
@@ -36,9 +36,9 @@
 
 | Component | Technology | Port | Purpose |
 |-----------|------------|------|---------|
-| **Frontend** | React 19 + Vite | 3000 | Dashboard UI |
-| **Backend** | Express + TypeScript | 3000 | API server, orchestration |
-| **LangGraph Agent** | Python + LangGraph | 8123 | Autonomous agent tasks |
+| **Frontend** | React 19 + Vite | 3847 | Dashboard UI |
+| **Backend** | Express + TypeScript | 3847 | API server, orchestration |
+| **LangGraph Agent** | Python + LangGraph | 8194 | Autonomous agent tasks |
 | **External AI** | Various APIs | - | Jules, Gemini, Claude, OpenAI |
 
 ## Project Structure

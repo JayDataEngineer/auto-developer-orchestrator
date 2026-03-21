@@ -31,7 +31,7 @@ A Dockerized orchestration platform for managing AI coding tasks via GitHub, fea
    ```
 
 4. **Configure Local Path**:
-   - Open the app in your browser (`http://localhost:3000`).
+   - Open the app in your browser (`http://localhost:3847`).
    - Click the **Settings (gear icon)** in the sidebar.
    - Enter the absolute path to your repositories folder (e.g., `/Users/username/code/repos`).
    - Click **Save Configuration**.
