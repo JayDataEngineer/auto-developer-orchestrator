@@ -208,7 +208,7 @@ export default function App() {
               const dispatchRes = await fetch('/api/dispatch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId: nextTask.id, project: selectedProject })
+                body: JSON.stringify({ taskId: nextTask.id, project: selectedProject, repoOwner: "JayDataEngineer", repoName: selectedProject })
               });
               const dispatchData = await dispatchRes.json();
               setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${dispatchData.message}: ${dispatchData.issueUrl}`]);
@@ -426,7 +426,7 @@ export default function App() {
         const dispatchRes = await fetch('/api/dispatch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId: nextTask.id })
+          body: JSON.stringify({ taskId: nextTask.id, project: selectedProject, repoOwner: "JayDataEngineer", repoName: selectedProject })
         });
         const dispatchData = await dispatchRes.json();
         setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${dispatchData.message}: ${dispatchData.issueUrl}`]);
@@ -488,7 +488,7 @@ export default function App() {
       const res = await fetch('/api/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId, project: selectedProject })
+        body: JSON.stringify({ taskId, project: selectedProject, repoOwner: "JayDataEngineer", repoName: selectedProject })
       });
       const data = await res.json();
       setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${data.message}: ${data.issueUrl}`]);

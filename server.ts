@@ -279,8 +279,8 @@ async function startServer() {
     }, 1500);
   });
 
-  app.post("/api/dispatch", (req, res) => {
-    const { taskId, project } = req.body;
+  app.post("/api/dispatch", async (req, res) => {
+    const { taskId, project, repoOwner, repoName } = req.body;
     if (!project) {
       return res.status(400).json({ error: "Project name is required" });
     }
@@ -288,12 +288,63 @@ async function startServer() {
     const index = parseInt(taskId.split('-')[1]);
     currentTaskIndices[project] = index;
     
-    res.json({ 
-      success: true, 
-      message: `Task ${taskId} dispatched to JULES`,
-      taskId,
-      issueUrl: "https://github.com/user/repo/issues/102"
-    });
+    const projectDir = getProjectDir(project);
+    const filePath = path.join(projectDir, "TODO_FOR_JULES.md");
+    let taskText = `Task ${taskId}`;
+
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, "utf-8");
+      const lines = content.split("\n").filter(line => line.trim().startsWith("- ["));
+      if (lines[index]) {
+        taskText = lines[index].replace(/- \[[x ]\] /, "").trim();
+      }
+    }
+
+    const julesApiKey = process.env.JULES_API_KEY;
+    if (!julesApiKey) {
+      console.warn("JULES_API_KEY not found, returning mock response");
+      return res.json({
+        success: true,
+        message: `Task ${taskId} dispatched to JULES`,
+        taskId,
+        issueUrl: "https://github.com/user/repo/issues/102"
+      });
+    }
+
+    try {
+      const julesRes = await fetch("https://jules.googleapis.com/v1alpha/sessions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": julesApiKey
+        },
+        body: JSON.stringify({
+          prompt: taskText,
+          sourceContext: {
+            source: `sources/github/${repoOwner || 'JayDataEngineer'}/${repoName || project}`
+          },
+          automationMode: "AUTO_CREATE_PR",
+          title: taskText.length > 50 ? taskText.substring(0, 47) + "..." : taskText
+        })
+      });
+
+      if (!julesRes.ok) {
+        const errData = await julesRes.text();
+        throw new Error(`Jules API error: ${julesRes.status} ${errData}`);
+      }
+
+      const julesData = await julesRes.json();
+
+      res.json({
+        success: true,
+        message: `Task ${taskId} dispatched to JULES`,
+        taskId,
+        issueUrl: `https://jules.google.com/session/${julesData.id || ''}`
+      });
+    } catch (error: any) {
+      console.error("Failed to call Jules REST API:", error);
+      res.status(500).json({ error: error.message || "Failed to call Jules API" });
+    }
   });
 
   app.post("/api/settings/mode", (req, res) => {
@@ -407,16 +458,57 @@ async function startServer() {
 
       console.log(`Dispatching ${todos.length} tasks to ${repoOwner}/${repoName}...`);
 
-      const results = [];
-      for (const todo of todos) {
-        // Here we would normally call the GitHub MCP tool. 
-        // Since we are running in the server context, we'll simulate the successful dispatch
-        // and log it. In a real environment, the server would have the GH token.
-        results.push({
+      const julesApiKey = process.env.JULES_API_KEY;
+      if (!julesApiKey) {
+        console.warn("JULES_API_KEY not found, returning mock response");
+        const results = todos.map((todo: any) => ({
           content: todo.content,
           status: "dispatched",
           issueUrl: `https://github.com/${repoOwner}/${repoName}/issues/` + Math.floor(Math.random() * 1000)
-        });
+        }));
+        return res.json({ success: true, results });
+      }
+
+      const results = [];
+      for (const todo of todos) {
+        const taskText = todo.content;
+        try {
+          const julesRes = await fetch("https://jules.googleapis.com/v1alpha/sessions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": julesApiKey
+            },
+            body: JSON.stringify({
+              prompt: taskText,
+              sourceContext: {
+                source: `sources/github/${repoOwner}/${repoName}`
+              },
+              automationMode: "AUTO_CREATE_PR",
+              title: taskText.length > 50 ? taskText.substring(0, 47) + "..." : taskText
+            })
+          });
+
+          if (!julesRes.ok) {
+            const errData = await julesRes.text();
+            console.error(`Jules API error for task "${taskText}": ${julesRes.status} ${errData}`);
+            throw new Error(`Jules API error: ${julesRes.status}`);
+          }
+
+          const julesData = await julesRes.json();
+          results.push({
+            content: todo.content,
+            status: "dispatched",
+            issueUrl: `https://jules.google.com/session/${julesData.id || ''}`
+          });
+        } catch (error: any) {
+          console.error("Failed to dispatch task to Jules:", error);
+          results.push({
+            content: todo.content,
+            status: "failed",
+            error: error.message
+          });
+        }
       }
 
       res.json({ success: true, results });
