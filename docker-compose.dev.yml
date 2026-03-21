@@ -1,0 +1,61 @@
+# Development Docker Compose with Hot Reload
+services:
+  # Node.js/TypeScript Server with Vite Hot Reload
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: auto-dev-orchestrator
+    ports:
+      - "3000:3000"
+      - "5173:5173"
+    volumes:
+      # Mount source code for hot reload
+      - .:/app
+      # Prevent node_modules from being overwritten
+      - /app/node_modules
+      # Mount projects directory for local development
+      - ./projects:/app/projects
+      # SSH keys for Git operations (optional)
+      - ~/.ssh:/root/.ssh:ro
+      - ~/.gitconfig:/root/.gitconfig:ro
+    environment:
+      - NODE_ENV=development
+      - VITE_HOST=0.0.0.0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - APP_URL=${APP_URL:-http://localhost:3000}
+    depends_on:
+      - langgraph-agent
+    networks:
+      - orchestrator-network
+
+  # Python LangGraph Microservice
+  langgraph-agent:
+    image: python:3.11-slim
+    container_name: langgraph-agent
+    working_dir: /app
+    volumes:
+      # Mount Python agent code for hot reload
+      - ./python_agent:/app
+      - /app/.venv
+    environment:
+      - PYTHONUNBUFFERED=1
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    ports:
+      - "8123:8123"
+    command: >
+      sh -c "
+        pip install --no-cache-dir langgraph langchain langchain-community uvicorn fastapi &&
+        python -m uvicorn agent:app --host 0.0.0.0 --port 8123 --reload
+      "
+    networks:
+      - orchestrator-network
+
+networks:
+  orchestrator-network:
+    driver: bridge
