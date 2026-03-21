@@ -1,0 +1,30 @@
+# CI Failure Fixer
+# Automatically invokes Jules AI to fix failing CI builds
+
+name: CI Failure Fixer
+
+on:
+  workflow_run:
+    workflows: ["CI"] # Triggers when CI workflow fails
+    types: [completed]
+
+jobs:
+  fix-on-failure:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    steps:
+      - uses: google-labs-code/jules-invoke@v1
+        with:
+          jules_api_key: ${{ secrets.JULES_API_KEY }}
+          prompt: |
+            The CI build just failed in workflow run #${{ github.event.workflow_run.id }}.
+            
+            Please:
+            1. Analyze the CI logs to identify the failure
+            2. Fix the bug or issue
+            3. Update the PR with your changes
+            4. Ensure tests pass
+            
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.event.workflow_run.head_branch }}
+            Commit: ${{ github.event.workflow_run.head_sha }}
