@@ -1,7 +1,7 @@
 # Auto-Developer Orchestrator Makefile
 # Full Developer Experience with Hot Reload
 
-.PHONY: help dev-up dev-down dev-restart clean install build prod-up prod-down logs shell
+.PHONY: help dev-up dev-down dev-restart clean install build prod-up prod-down logs shell status restart-app
 
 # Default target
 help:
@@ -22,12 +22,16 @@ help:
 	@echo "  build           Build for production"
 	@echo "  clean           Remove containers and volumes"
 	@echo "  shell           Open shell in app container"
+	@echo "  status          Check service status"
 	@echo ""
+
+# Docker Compose command (v2 syntax)
+COMPOSE = docker compose -f docker-compose.dev.yml
 
 # Development Environment
 dev-up:
 	@echo "🚀 Starting development environment with hot reload..."
-	docker-compose -f docker-compose.dev.yml up -d --build
+	$(COMPOSE) up -d --build
 	@echo "✅ Services started!"
 	@echo ""
 	@echo "📍 Access points:"
@@ -38,7 +42,7 @@ dev-up:
 
 dev-down:
 	@echo "🛑 Stopping development environment..."
-	docker-compose -f docker-compose.dev.yml down
+	$(COMPOSE) down
 	@echo "✅ Services stopped"
 
 dev-restart: dev-down dev-up
@@ -47,16 +51,16 @@ dev-restart: dev-down dev-up
 # Production Environment
 prod-up:
 	@echo "🚀 Starting production environment..."
-	docker-compose up -d --build
-	@echo "✅ Production services started on http://localhost:3000"
+	docker compose up -d --build
+	@echo "✅ Production services started on http://localhost:3847"
 
 prod-down:
 	@echo "🛑 Stopping production environment..."
-	docker-compose down
+	docker compose down
 
 # Logs
 logs:
-	docker-compose -f docker-compose.dev.yml logs -f
+	$(COMPOSE) logs -f
 
 # Local Development (without Docker)
 install:
@@ -70,20 +74,20 @@ build:
 # Container Utilities
 clean:
 	@echo "🧹 Cleaning containers and volumes..."
-	docker-compose -f docker-compose.dev.yml down -v --remove-orphans
-	docker-compose down -v --remove-orphans 2>/dev/null || true
+	$(COMPOSE) down -v --remove-orphans
+	docker compose down -v --remove-orphans 2>/dev/null || true
 	@echo "✅ Clean complete"
 
 shell:
 	@echo "🔌 Opening shell in app container..."
-	docker-compose -f docker-compose.dev.yml exec app sh
+	$(COMPOSE) exec app sh
 
 # Status check
 status:
 	@echo "📊 Service Status:"
-	docker-compose -f docker-compose.dev.yml ps
+	$(COMPOSE) ps
 
 # Restart service
 restart-app:
 	@echo "🔄 Restarting app service..."
-	docker-compose -f docker-compose.dev.yml restart app
+	$(COMPOSE) restart app

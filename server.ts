@@ -318,9 +318,9 @@ async function startServer() {
     }
   });
 
-  app.post("/api/ai/generate-todos", async (req, res) => {
+  app.post("/api/ai/agent-checklist", async (req, res) => {
     try {
-      const { project } = req.body;
+      const { project, prompt } = req.body;
       if (!project) {
         return res.status(400).json({ error: "Project name is required" });
       }
@@ -332,19 +332,30 @@ async function startServer() {
       }
 
       // Import and use the deep agent
-      const { generateTODOs } = await import("./deepAgent.js");
+      const { todoAgent } = await import("./src/deepAgent.ts");
       
-      // Generate TODOs using deep agents
-      const todoContent = await generateTODOs(projectDir);
+      // Set headers for SSE
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
 
-      res.json({
-        success: true,
-        message: "TODO list generated successfully",
-        todos: todoContent
+      // Use the stream method from the deep agent
+      const stream = await todoAgent.stream({
+        messages: [{
+          role: "user",
+          content: `Analyze the codebase at "${projectDir}" and generate a TODO_FOR_JULES.md file with technical improvement tasks. ${prompt ? `Guidance: ${prompt}` : ''}`,
+        }],
       });
+
+      for await (const chunk of stream) {
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+
+      res.end();
     } catch (error: any) {
       console.error("Deep Agent Error:", error);
-      res.status(500).json({ error: error.message });
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+      res.end();
     }
   });
 
