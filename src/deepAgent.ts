@@ -1,14 +1,62 @@
 /**
  * Deep Agent for generating TODO lists from codebase analysis
- * 
+ *
  * This agent analyzes a codebase and automatically generates a TODO_FOR_JULES.md
  * file with technical tasks to feed to Jules (Google's AI coding agent).
+ *
+ * Configuration via .env:
+ * - DEEP_AGENT_MODEL: Model to use (default: "claude-3-7-sonnet-20250219")
+ * - DEEP_AGENT_PROVIDER: Provider - "anthropic", "openai", "gemini" (default: "anthropic")
+ * - CLAUDE_API_KEY: Required if using Anthropic
+ * - OPENAI_API_KEY: Required if using OpenAI
+ * - GEMINI_API_KEY: Required if using Gemini
  */
 
 import { createDeepAgent, LocalShellBackend } from "deepagents";
 import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatOpenAI } from "@langchain/openai";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import * as fs from "fs";
 import * as path from "path";
+
+// Get model configuration from environment variables
+const DEEP_AGENT_PROVIDER = process.env.DEEP_AGENT_PROVIDER || "anthropic";
+const DEEP_AGENT_MODEL = process.env.DEEP_AGENT_MODEL || "claude-3-7-sonnet-20250219";
+const DEEP_AGENT_TEMPERATURE = parseFloat(process.env.DEEP_AGENT_TEMPERATURE || "0");
+
+/**
+ * Create a chat model based on the configured provider
+ */
+function createChatModel() {
+  switch (DEEP_AGENT_PROVIDER.toLowerCase()) {
+    case "anthropic":
+      return new ChatAnthropic({
+        model: DEEP_AGENT_MODEL,
+        temperature: DEEP_AGENT_TEMPERATURE,
+        apiKey: process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY,
+      });
+    case "openai":
+      return new ChatOpenAI({
+        model: DEEP_AGENT_MODEL,
+        temperature: DEEP_AGENT_TEMPERATURE,
+        apiKey: process.env.OPENAI_API_KEY,
+      });
+    case "gemini":
+      return new ChatGoogleGenerativeAI({
+        model: DEEP_AGENT_MODEL,
+        temperature: DEEP_AGENT_TEMPERATURE,
+        apiKey: process.env.GEMINI_API_KEY,
+      });
+    default:
+      throw new Error(
+        `Unknown DEEP_AGENT_PROVIDER: ${DEEP_AGENT_PROVIDER}. ` +
+        "Supported providers: anthropic, openai, gemini"
+      );
+  }
+}
+
+// Create the chat model instance
+const chatModel = createChatModel();
 
 // System prompt for TODO generation
 const todoGeneratorPrompt = `You are an expert software architect and technical lead. Your job is to analyze a codebase and generate a comprehensive TODO list for improvement.
@@ -44,10 +92,7 @@ Remember: This TODO list will be executed by Jules (an AI coding agent), so be s
 // Define the Explorer Subagent
 export const explorerSubagent = createDeepAgent({
   name: "explorer",
-  model: new ChatAnthropic({
-    model: "claude-3-7-sonnet-20250219",
-    temperature: 0,
-  }),
+  model: chatModel,
   systemPrompt: "You are a code exploration expert. Your job is to deeply analyze codebase structures, find patterns, and identify technical issues. Use your tools to search, read, and understand the code thoroughly.",
   backend: new LocalShellBackend({
     rootDir: process.cwd(),
@@ -58,10 +103,7 @@ export const explorerSubagent = createDeepAgent({
 // Create the deep agent with filesystem access and subagents
 export const todoAgent = createDeepAgent({
   name: "my_deep_agent",
-  model: new ChatAnthropic({
-    model: "claude-3-7-sonnet-20250219",
-    temperature: 0,
-  }),
+  model: chatModel,
   systemPrompt: todoGeneratorPrompt,
   subagents: [explorerSubagent],
   backend: new LocalShellBackend({
