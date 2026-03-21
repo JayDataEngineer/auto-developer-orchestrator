@@ -150,7 +150,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/checklist/update", (req, res) => {
+  app.post("/api/checklist/update", async (req, res) => {
     try {
       const { tasks, project } = req.body;
       if (!project) {
@@ -158,14 +158,12 @@ async function startServer() {
       }
       
       const projectDir = getProjectDir(project);
-      if (!fs.existsSync(projectDir)) {
-        fs.mkdirSync(projectDir, { recursive: true });
-      }
+      await fs.promises.mkdir(projectDir, { recursive: true });
       
       const filePath = path.join(projectDir, "TODO_FOR_JULES.md");
       
       const content = tasks.map((t: any) => `- [${t.completed ? 'x' : ' '}] ${t.text}`).join('\n');
-      fs.writeFileSync(filePath, content);
+      await fs.promises.writeFile(filePath, content);
       
       res.json({ success: true, message: "Checklist updated successfully" });
     } catch (error) {
