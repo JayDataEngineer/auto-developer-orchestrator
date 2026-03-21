@@ -4,7 +4,7 @@
 
 | Document | Description |
 |----------|-------------|
-| [JULES.md](./JULES.md) | **必读** Technical reference for Google Jules (external AI service) |
+| [JULES.md](./JULES.md) | **Required Reading** — Technical reference for Google Jules (external AI service) |
 | [PROJECT.md](./PROJECT.md) | Project overview and architecture |
 
 ## Quick Reference
