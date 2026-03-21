@@ -318,17 +318,29 @@ async function startServer() {
     }
   });
 
-  app.post("/api/ai/agent-checklist", async (req, res) => {
+  app.post("/api/ai/generate-todos", async (req, res) => {
     try {
-      const { prompt, project } = req.body;
+      const { project } = req.body;
+      if (!project) {
+        return res.status(400).json({ error: "Project name is required" });
+      }
 
-      // Deep Agents is now handled client-side via deepagentsjs
-      // The frontend will use the deepagentsjs library directly
+      const projectDir = path.join(systemConfig.projectsDir, project);
       
+      if (!fs.existsSync(projectDir)) {
+        return res.status(404).json({ error: "Project directory not found" });
+      }
+
+      // Import and use the deep agent
+      const { generateTODOs } = await import("./deepAgent.js");
+      
+      // Generate TODOs using deep agents
+      const todoContent = await generateTODOs(projectDir);
+
       res.json({
         success: true,
-        message: "Deep Agents integration is now handled client-side via deepagentsjs library",
-        note: "See ref_docs/deepagentsjs/README.md for documentation"
+        message: "TODO list generated successfully",
+        todos: todoContent
       });
     } catch (error: any) {
       console.error("Deep Agent Error:", error);
