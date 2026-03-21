@@ -1,0 +1,12 @@
+services:
+  orchestrator:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - ~/.ssh:/root/.ssh:ro
+      - ~/.gitconfig:/root/.gitconfig:ro
+    environment:
+      - NODE_ENV=production
+      - GEMINI_API_KEY=${GEMINI_API_KEY}

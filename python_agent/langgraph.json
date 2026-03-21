@@ -1,0 +1,5 @@
+{
+  "graphs": {
+    "my_deep_agent": "./agent.py:app"
+  }
+}

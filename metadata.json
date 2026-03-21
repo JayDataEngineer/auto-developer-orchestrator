@@ -1,0 +1,5 @@
+{
+  "name": "Auto-Developer Orchestrator",
+  "description": "A Dockerized orchestration platform for managing AI coding tasks via GitHub, featuring autonomous and manual modes.",
+  "requestFramePermissions": []
+}
