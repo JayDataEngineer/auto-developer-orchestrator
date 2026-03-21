@@ -393,5 +393,59 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       });
       expect(updateRes.status).toBeGreaterThanOrEqual(200);
     });
+
+    it('should automatically append a debug task after merging a feature', async () => {
+      const projectName = 'merge-test-project';
+
+      // Setup initial checklist with an active task
+      await fetch(`${BASE_URL}/api/checklist/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project: projectName,
+          tasks: [
+            { id: 'task-0', text: 'Implement cool new feature', completed: false }
+          ]
+        })
+      });
+
+      // Dispatch the task (simulates Jules picking it up)
+      await fetch(`${BASE_URL}/api/dispatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskId: 'task-0',
+          project: projectName
+        })
+      });
+
+      // Merge the task
+      const mergeRes = await fetch(`${BASE_URL}/api/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project: projectName
+        })
+      });
+
+      expect(mergeRes.status).toBe(200);
+      const mergeData = await mergeRes.json();
+      expect(mergeData.success).toBe(true);
+      expect(mergeData.summary).toBe('Implement cool new feature');
+
+      // Fetch the updated checklist to verify the new task was added
+      const checklistRes = await fetch(`${BASE_URL}/api/checklist?project=${projectName}`);
+      const checklistData = await checklistRes.json();
+
+      // The original task should be marked complete
+      const originalTask = checklistData.tasks.find((t: any) => t.text === 'Implement cool new feature');
+      expect(originalTask).toBeDefined();
+      expect(originalTask.completed).toBe(true);
+
+      // A new debug/testing task should exist and not be completed
+      const debugTask = checklistData.tasks.find((t: any) => t.text === 'Debug / enhance testing around: Implement cool new feature');
+      expect(debugTask).toBeDefined();
+      expect(debugTask.completed).toBe(false);
+    });
   });
 });

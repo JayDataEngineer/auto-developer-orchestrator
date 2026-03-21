@@ -202,6 +202,11 @@ async function startServer() {
         return line;
       });
 
+      // Automatically append a task to test/debug the new feature
+      if (mergedTaskText) {
+        updatedLines.push(`- [ ] Debug / enhance testing around: ${mergedTaskText}`);
+      }
+
       fs.writeFileSync(filePath, updatedLines.join("\n"));
       currentTaskIndices[project] = -1; // No task in progress after merge
       
