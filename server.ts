@@ -321,44 +321,18 @@ async function startServer() {
   app.post("/api/ai/agent-checklist", async (req, res) => {
     try {
       const { prompt, project } = req.body;
-      
-      // Connect to the Python LangGraph Server
-      const client = new Client({ apiUrl: "http://localhost:8194" });
-      
-      // 1. Create a persistent thread for memory & file system isolation
-      const thread = await client.threads.create();
 
-      // 2. Set up Server-Sent Events (SSE) to stream to the frontend
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
+      // Deep Agents is now handled client-side via deepagentsjs
+      // The frontend will use the deepagentsjs library directly
+      
+      res.json({
+        success: true,
+        message: "Deep Agents integration is now handled client-side via deepagentsjs library",
+        note: "See ref_docs/deepagentsjs/README.md for documentation"
       });
-
-      const defaultPrompt = `Analyze the current codebase for project '${project || 'default'}' and generate a list of 5-7 technical tasks/todos to improve or expand the application. Focus on real architectural needs or missing features based on what you see in the files. Return the tasks as a JSON array of strings. ONLY return the JSON array in your final answer.`;
-      const finalPrompt = prompt ? `${defaultPrompt}\n\nAdditional Guidance: ${prompt}` : defaultPrompt;
-
-      // 3. Stream the execution of the deep agent
-      const stream = client.runs.stream(thread.thread_id, "my_deep_agent", {
-        input: { messages: [{ role: "user", content: finalPrompt }] },
-        streamMode: "events", // Crucial for seeing sub-agent and tool-calling progress
-      });
-
-      for await (const chunk of stream) {
-        // Stream updates to the frontend
-        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-      }
-      
-      res.end();
     } catch (error: any) {
       console.error("Deep Agent Error:", error);
-      // If the SSE connection hasn't started, we can send a normal JSON error
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Failed to connect to Python LangGraph Server. Ensure it is running on port 8123." });
-      } else {
-        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
-        res.end();
-      }
+      res.status(500).json({ error: error.message });
     }
   });
 

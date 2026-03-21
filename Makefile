@@ -11,9 +11,7 @@ help:
 	@echo "  dev-up          Start development environment with hot reload"
 	@echo "  dev-down        Stop development environment"
 	@echo "  dev-restart     Restart development environment"
-	@echo "  logs            View live logs from all services"
-	@echo "  logs-app        View only app server logs"
-	@echo "  logs-agent      View only LangGraph agent logs"
+	@echo "  logs            View live logs"
 	@echo ""
 	@echo "Production:"
 	@echo "  prod-up         Start production environment"
@@ -24,7 +22,6 @@ help:
 	@echo "  build           Build for production"
 	@echo "  clean           Remove containers and volumes"
 	@echo "  shell           Open shell in app container"
-	@echo "  shell-agent     Open shell in LangGraph agent container"
 	@echo ""
 
 # Development Environment
@@ -35,7 +32,6 @@ dev-up:
 	@echo ""
 	@echo "📍 Access points:"
 	@echo "   - App Server:   http://localhost:3847"
-	@echo "   - LangGraph:    http://localhost:8194"
 	@echo ""
 	@echo "📝 View logs: make logs"
 	@echo "🛑 Stop:        make dev-down"
@@ -62,12 +58,6 @@ prod-down:
 logs:
 	docker-compose -f docker-compose.dev.yml logs -f
 
-logs-app:
-	docker-compose -f docker-compose.dev.yml logs -f app
-
-logs-agent:
-	docker-compose -f docker-compose.dev.yml logs -f langgraph-agent
-
 # Local Development (without Docker)
 install:
 	@echo "📦 Installing dependencies..."
@@ -88,20 +78,12 @@ shell:
 	@echo "🔌 Opening shell in app container..."
 	docker-compose -f docker-compose.dev.yml exec app sh
 
-shell-agent:
-	@echo "🔌 Opening shell in LangGraph agent container..."
-	docker-compose -f docker-compose.dev.yml exec langgraph-agent sh
-
 # Status check
 status:
 	@echo "📊 Service Status:"
 	docker-compose -f docker-compose.dev.yml ps
 
-# Restart individual services
+# Restart service
 restart-app:
 	@echo "🔄 Restarting app service..."
 	docker-compose -f docker-compose.dev.yml restart app
-
-restart-agent:
-	@echo "🔄 Restarting LangGraph agent..."
-	docker-compose -f docker-compose.dev.yml restart langgraph-agent

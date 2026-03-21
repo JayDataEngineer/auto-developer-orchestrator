@@ -21,15 +21,15 @@
 │  - AI provider routing                                      │
 └─────────────────────────────────────────────────────────────┘
                               │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌─────────────────────────┐     ┌─────────────────────────────┐
-│   LangGraph Agent       │     │   External AI Services      │
-│   (Python - Port 8194)  │     │   - Google Jules            │
-│   - Deep agent tasks    │     │   - Gemini API              │
-│   - File system ops     │     │   - Claude API              │
-│                         │     │   - OpenAI API              │
-└─────────────────────────┘     └─────────────────────────────┘
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│   External AI Services                                      │
+│   - Google Jules (cloud)                                    │
+│   - Gemini API                                              │
+│   - Claude API                                              │
+│   - OpenAI API                                              │
+│   - deepagentsjs (client-side)                              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Components
@@ -38,8 +38,7 @@
 |-----------|------------|------|---------|
 | **Frontend** | React 19 + Vite | 3847 | Dashboard UI |
 | **Backend** | Express + TypeScript | 3847 | API server, orchestration |
-| **LangGraph Agent** | Python + LangGraph | 8194 | Autonomous agent tasks |
-| **External AI** | Various APIs | - | Jules, Gemini, Claude, OpenAI |
+| **External AI** | Various APIs | - | Jules, Gemini, Claude, OpenAI, deepagentsjs |
 
 ## Project Structure
 
@@ -49,14 +48,13 @@ auto-developer-orchestrator/
 │   ├── components/         # UI components
 │   ├── lib/               # Utilities
 │   └── App.tsx            # Main application
-├── python_agent/          # LangGraph Python agent
-│   ├── agent.py           # Agent implementation
-│   └── langgraph.json     # LangGraph config
 ├── server.ts              # Express backend
 ├── docker-compose.dev.yml # Development Docker setup
 ├── Dockerfile.dev         # Dev Dockerfile with hot reload
 ├── Makefile               # Developer commands
-└── docs/                  # Documentation
+├── ref_docs/              # Reference documentation (not git-tracked)
+│   └── deepagentsjs/      # LangChain Deep Agents JS library
+└── docs/                  # Project documentation
     ├── JULES.md          # Jules reference (external service)
     └── PROJECT.md        # This file
 ```
@@ -100,7 +98,8 @@ See `Makefile` for all commands.
 ## Important Distinctions
 
 - **Jules** = External Google service (autonomous AI agent)
-- **This App** = Local orchestrator that coordinates Jules + other AI providers
-- **LangGraph Agent** = Python microservice for deep agent tasks
+- **deepagentsjs** = LangChain's JavaScript library for deep agents (local reference in `ref_docs/`)
+- **Auto-Developer Orchestrator** = Our local app that orchestrates Jules + other AI providers
 
 See `docs/JULES.md` for detailed Jules documentation.
+See `ref_docs/deepagentsjs/README.md` for Deep Agents documentation.
