@@ -10,7 +10,7 @@ interface TerminalProps {
 }
 
 export const Terminal: React.FC<TerminalProps> = ({ logs, logEndRef, onRetry, onCommand }) => {
-  const hasFailure = logs.some(log => log.includes('FAILED') || log.includes('ERROR'));
+  const hasFailure = (logs || []).some(log => log.includes('FAILED') || log.includes('ERROR'));
 
   const [command, setCommand] = React.useState('');
 
@@ -53,7 +53,7 @@ export const Terminal: React.FC<TerminalProps> = ({ logs, logEndRef, onRetry, on
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-6 font-mono text-[11px] leading-relaxed text-zinc-400 terminal-scrollbar mask-gradient select-text">
-        {logs.map((log, i) => (
+        {(logs || []).map((log, i) => (
           <div key={i} className="mb-2 group hover:bg-white/[0.03] px-2 py-1 rounded-lg transition-all border border-transparent hover:border-white/5">
             <span className="text-zinc-600 mr-3 select-none tabular-nums opacity-60">[{log.split(']')[0].split('[')[1]}]</span>
             <span className={cn(

@@ -60,8 +60,9 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClos
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 ml-1">Project Name</label>
+                <label htmlFor="projectName" className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 ml-1">Project Name</label>
                 <input 
+                  id="projectName"
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -72,8 +73,9 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClos
               </div>
 
               <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 ml-1">Absolute File Path</label>
+                <label htmlFor="projectPath" className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 ml-1">Absolute File Path</label>
                 <input 
+                  id="projectPath"
                   type="text"
                   value={path}
                   onChange={(e) => setPath(e.target.value)}

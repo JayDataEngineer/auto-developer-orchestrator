@@ -82,8 +82,9 @@ export const CloneModal: React.FC<CloneModalProps> = ({ isOpen, onClose, onClone
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">GitHub Repository URL</label>
+                  <label htmlFor="repoUrl" className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">GitHub Repository URL</label>
                   <input 
+                    id="repoUrl"
                     type="text"
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
