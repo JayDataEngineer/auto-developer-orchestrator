@@ -1,0 +1,109 @@
+# Air configuration for Go hot reload
+# https://github.com/air-verse/air
+
+# Working directory
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Binary name
+  bin = "tmp/main"
+  
+  # Command to build the binary
+  cmd = "go build -o ./tmp/main ./cmd/server"
+  
+  # Delay to wait before rebuilding
+  delay = 1000
+  
+  # Exclude directories
+  exclude_dir = ["tmp", "vendor", "data", "projects"]
+  
+  # Exclude files
+  exclude_file = []
+  
+  # Exclude regex patterns
+  exclude_regex = ["_test\\.go"]
+  
+  # Exclude unchanged files
+  exclude_unchanged = false
+  
+  # Follow symlink
+  follow_symlink = false
+  
+  # Full binary path
+  full_bin = ""
+  
+  # Go arguments
+  go_args = []
+  
+  # Ignore files/regex
+  ignore = ["tmp/*", "vendor/*", "data/*", "projects/*"]
+  
+  # Include extensions
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  
+  # Kill delay
+  kill_delay = "0s"
+  
+  # Log main output
+  log = "main"
+  
+  # Poll files
+  poll = false
+  
+  # Poll interval
+  poll_interval = 0
+  
+  # Post build command
+  post_cmd = ""
+  
+  # Pre build command
+  pre_cmd = ""
+  
+  # Rerun when binary changes
+  rerun = false
+  
+  # Rerun delay
+  rerun_delay = 500
+  
+  # Send interrupt signal
+  send_interrupt = false
+  
+  # Stop on error
+  stop_on_error = false
+
+[color]
+  # Custom colors
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  # Show main log time
+  main_only = false
+  
+  # Log time format
+  time = false
+
+[misc]
+  # Clean on exit
+  clean_on_exit = false
+
+[screen]
+  # Clear on rebuild
+  clear_on_rebuild = false
+  
+  # Keep scroll position
+  keep_scroll = true
+
+[proxy]
+  # Enable proxy
+  enabled = false
+  
+  # Proxy port
+  proxy_port = 8090
+  
+  # App port
+  app_port = 3847

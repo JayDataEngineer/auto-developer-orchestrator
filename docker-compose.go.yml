@@ -1,0 +1,109 @@
+# Production Docker Compose - Multi-Service Architecture
+services:
+  # ===========================================
+  # Nginx Reverse Proxy
+  # ===========================================
+  nginx:
+    image: nginx:alpine
+    container_name: orchestrator-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./dist:/usr/share/nginx/html:ro
+    depends_on:
+      - go-backend
+      - python-agent
+    networks:
+      - orchestrator-network
+    restart: unless-stopped
+
+  # ===========================================
+  # Go Backend API Server
+  # ===========================================
+  go-backend:
+    build:
+      context: ./go-backend
+      dockerfile: Dockerfile
+    container_name: orchestrator-go
+    ports:
+      - "3847:3847"
+    environment:
+      - SERVER_PORT=3847
+      - DATABASE_URL=/data/orchestrator.db
+      - JULES_API_KEY=${JULES_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - PYTHON_SERVICE_URL=http://python-agent:8080
+      - LITELLM_PROXY_URL=${LITELLM_PROXY_URL:-http://litellm:4000}
+    volumes:
+      - ./projects:/app/projects
+      - ./data:/data
+      - ~/.ssh:/root/.ssh:ro
+      - ~/.gitconfig:/root/.gitconfig:ro
+    depends_on:
+      - python-agent
+    networks:
+      - orchestrator-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3847/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # Python Deep Agent Service
+  # ===========================================
+  python-agent:
+    build:
+      context: ./python-agent
+      dockerfile: Dockerfile
+    container_name: orchestrator-python
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHON_SERVICE_PORT=8080
+      - DEEP_AGENT_MODEL=${DEEP_AGENT_MODEL:-gpt-4o}
+      - DEEP_AGENT_BASE_URL=${DEEP_AGENT_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+    volumes:
+      - ./projects:/app/projects
+    networks:
+      - orchestrator-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # LiteLLM Proxy (Optional - if not in shared infra)
+  # ===========================================
+  # Uncomment if you need local LiteLLM
+  # litellm:
+  #   image: ghcr.io/berriai/litellm:main-latest
+  #   container_name: orchestrator-litellm
+  #   ports:
+  #     - "4000:4000"
+  #   volumes:
+  #     - ./litellm/config.yaml:/app/config.yaml
+  #   environment:
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - GEMINI_API_KEY=${GEMINI_API_KEY}
+  #     - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+  #   networks:
+  #     - orchestrator-network
+  #   restart: unless-stopped
+
+networks:
+  orchestrator-network:
+    driver: bridge
+
+volumes:
+  projects:
+  data:

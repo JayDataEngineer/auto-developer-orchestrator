@@ -1,0 +1,79 @@
+# Development Docker Compose - Hot Reload Enabled
+services:
+  # ===========================================
+  # Go Backend with Hot Reload
+  # ===========================================
+  go-backend:
+    build:
+      context: ./go-backend
+      dockerfile: Dockerfile.dev
+    container_name: orchestrator-go-dev
+    ports:
+      - "3847:3847"
+    environment:
+      - SERVER_PORT=3847
+      - DATABASE_URL=/data/orchestrator.db
+      - JULES_API_KEY=${JULES_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - PYTHON_SERVICE_URL=http://python-agent:8080
+      - LITELLM_PROXY_URL=${LITELLM_PROXY_URL:-http://litellm:4000}
+    volumes:
+      - ./go-backend:/app
+      - ./projects:/app/projects
+      - ./data:/data
+      - ~/.ssh:/root/.ssh:ro
+      - ~/.gitconfig:/root/.gitconfig:ro
+    depends_on:
+      - python-agent
+    networks:
+      - orchestrator-network
+    command: ["air", "-c", ".air.toml"] # Hot reload with air
+
+  # ===========================================
+  # Python Deep Agent Service with Hot Reload
+  # ===========================================
+  python-agent:
+    build:
+      context: ./python-agent
+      dockerfile: Dockerfile.dev
+    container_name: orchestrator-python-dev
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHON_SERVICE_PORT=8080
+      - DEEP_AGENT_MODEL=${DEEP_AGENT_MODEL:-gpt-4o}
+      - DEEP_AGENT_BASE_URL=${DEEP_AGENT_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+    volumes:
+      - ./python-agent:/app
+      - ./projects:/app/projects
+    networks:
+      - orchestrator-network
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+
+  # ===========================================
+  # React Frontend (Vite Dev Server)
+  # ===========================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: orchestrator-frontend-dev
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_HOST=0.0.0.0
+      - VITE_PORT=5173
+      - VITE_API_URL=http://localhost:3847
+    volumes:
+      - .:/app
+      - /app/node_modules
+    networks:
+      - orchestrator-network
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+
+networks:
+  orchestrator-network:
+    driver: bridge
