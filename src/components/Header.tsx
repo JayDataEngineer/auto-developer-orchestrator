@@ -1,5 +1,5 @@
 import React from 'react';
-import { Cpu, Menu, BarChart3, FolderGit2, Plus, RefreshCw } from 'lucide-react';
+import { Cpu, Menu, BarChart3, FolderGit2, Plus, RefreshCw, Terminal } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface HeaderProps {
@@ -16,6 +16,7 @@ interface HeaderProps {
   onCloneClick: () => void;
   onAddExistingClick: () => void;
   onRefreshProjects: () => void;
+  onCLIClick: () => void;
   fullAutomationMode: boolean;
   projects: string[];
   selectedProject: string;
@@ -83,12 +84,21 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hidden xl:inline">Add Existing</span>
           </button>
 
-          <button 
+          <button
             onClick={onRefreshProjects}
             className="p-2 glass-dark border border-white/5 rounded-xl text-zinc-400 hover:text-white hover:border-primary/30 transition-all hover:scale-105"
             title="Refresh Projects"
           >
             <RefreshCw size={16} />
+          </button>
+
+          <button
+            onClick={onCLIClick}
+            className="flex items-center gap-2 px-3 py-2 glass-dark border border-white/5 rounded-xl text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white hover:border-primary/30 transition-all hover:scale-105"
+            title="Open CLI Terminal"
+          >
+            <Terminal size={14} />
+            CLI
           </button>
         </div>
 
