@@ -73,6 +73,8 @@ func main() {
 		r.Get("/projects", projectHandler.List)
 		r.Post("/projects/add", projectHandler.Add)
 		r.Post("/clone", projectHandler.Clone)
+		r.Post("/branch/checkout", projectHandler.CheckoutBranch)
+		r.Get("/branch", projectHandler.GetBranch)
 
 		// Status
 		r.Get("/status", projectHandler.GetStatus)

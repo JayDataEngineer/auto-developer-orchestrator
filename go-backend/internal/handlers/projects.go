@@ -180,6 +180,101 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// CheckoutBranchRequest represents a branch checkout request
+type CheckoutBranchRequest struct {
+	Project string `json:"project"`
+	Branch  string `json:"branch"`
+}
+
+// CheckoutBranch checks out a branch in a project
+func (h *ProjectHandler) CheckoutBranch(w http.ResponseWriter, r *http.Request) {
+	var req CheckoutBranchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Project == "" || req.Branch == "" {
+		http.Error(w, "Project and branch are required", http.StatusBadRequest)
+		return
+	}
+
+	projectDir, err := h.db.GetProjectDir(r.Context(), req.Project)
+	if err != nil {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	checkoutOpts := git.CheckoutOptions{
+		Dir:    projectDir,
+		Branch: req.Branch,
+	}
+
+	if err := h.git.Checkout(ctx, checkoutOpts); err != nil {
+		h.logger.Error("Failed to checkout branch", 
+			zap.String("project", req.Project),
+			zap.String("branch", req.Branch),
+			zap.Error(err))
+		http.Error(w, fmt.Sprintf("Failed to checkout branch: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info("Branch checked out successfully",
+		zap.String("project", req.Project),
+		zap.String("branch", req.Branch))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"message":  fmt.Sprintf("Switched to branch '%s' in project '%s'", req.Branch, req.Project),
+		"project":  req.Project,
+		"branch":   req.Branch,
+		"project_dir": projectDir,
+	})
+}
+
+// GetBranchRequest represents a branch info request
+type GetBranchRequest struct {
+	Project string `json:"project"`
+}
+
+// GetBranch returns the current branch for a project
+func (h *ProjectHandler) GetBranch(w http.ResponseWriter, r *http.Request) {
+	projectName := r.URL.Query().Get("project")
+	if projectName == "" {
+		http.Error(w, "Project name is required", http.StatusBadRequest)
+		return
+	}
+
+	projectDir, err := h.db.GetProjectDir(r.Context(), projectName)
+	if err != nil {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	currentBranch, err := h.git.GetCurrentBranch(ctx, projectDir)
+	if err != nil {
+		h.logger.Error("Failed to get current branch",
+			zap.String("project", projectName),
+			zap.Error(err))
+		http.Error(w, fmt.Sprintf("Failed to get branch: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"project": projectName,
+		"branch":  currentBranch,
+	})
+}
+
 // GetStatus returns the status of a project
 func (h *ProjectHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	projectName := r.URL.Query().Get("project")
