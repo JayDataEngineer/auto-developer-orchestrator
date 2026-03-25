@@ -38,7 +38,8 @@ func main() {
 	checklistHandler := handlers.NewChecklistHandler(db, logger)
 	projectHandler := handlers.NewProjectHandler(db, logger, gitOps)
 	julesHandler := handlers.NewJulesHandler(db, logger)
-	aiHandler := handlers.NewAIHandler(logger) // Will call Python microservice
+	aiHandler := handlers.NewAIHandler(logger) // Python microservice
+	aiCLIHandler := handlers.NewAICLIHandler(logger) // CLI-based AI (OpenAI, Claude, Gemini)
 	configHandler := handlers.NewConfigHandler(logger)
 	cliHandler := handlers.NewCLIHandler(logger, "../") // CLI handler with project root
 
@@ -114,6 +115,9 @@ func main() {
 		r.Post("/cli/execute", cliHandler.ExecuteCommand)
 		r.Get("/cli/cat", cliHandler.ReadFile)
 		r.Get("/cli/ls", cliHandler.ListDirectory)
+
+		// AI Chat via CLI tools (OpenAI, Claude, Gemini - already authenticated)
+		r.Post("/ai/chat", aiCLIHandler.Chat)
 	})
 
 	// Serve static files (React frontend)

@@ -72,21 +72,34 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ className }) => {
     setIsLoading(true);
 
     try {
-      // TODO: Call actual AI provider API
-      // For now, simulate response
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Call Go backend which executes CLI tools
+      const response = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: selectedProvider,
+          message: input,
+          context: 'codebase-analysis' // Could include current project context
+        })
+      });
 
+      if (!response.ok) {
+        throw new Error('Failed to get response');
+      }
+
+      const data = await response.json();
+      
       const assistantMessage: Message = {
         role: 'assistant',
-        content: `[${PROVIDERS[selectedProvider].name}] I understand you want to: "${input}". This is a simulated response. In production, this would call the ${PROVIDERS[selectedProvider].model} API.`,
+        content: data.response || data.error || 'No response',
         timestamp: new Date().toLocaleTimeString()
       };
 
       setMessages(prev => [...prev, assistantMessage]);
-    } catch (error) {
+    } catch (error: any) {
       const errorMessage: Message = {
         role: 'assistant',
-        content: 'Error: Failed to get response from AI provider',
+        content: `Error: ${error.message}`,
         timestamp: new Date().toLocaleTimeString()
       };
       setMessages(prev => [...prev, errorMessage]);
