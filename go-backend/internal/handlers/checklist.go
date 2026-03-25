@@ -2,12 +2,16 @@ package handlers
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"go.uber.org/zap"
@@ -262,6 +266,12 @@ func (h *ChecklistHandler) GenerateChecklistStream(w http.ResponseWriter, r *htt
 		return
 	}
 
+	projectDir, err := h.db.GetProjectDir(r.Context(), req.Project)
+	if err != nil {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -278,8 +288,13 @@ func (h *ChecklistHandler) GenerateChecklistStream(w http.ResponseWriter, r *htt
 	sseChan := make(chan string, 100)
 	errChan := make(chan error, 1)
 
-	// TODO: Call Python microservice via gRPC
-	// For now, simulate SSE events
+	// Get Python service URL from environment
+	pythonServiceURL := os.Getenv("PYTHON_SERVICE_URL")
+	if pythonServiceURL == "" {
+		pythonServiceURL = "http://localhost:8080"
+	}
+
+	// Call Python microservice
 	go func() {
 		defer close(sseChan)
 
@@ -287,30 +302,61 @@ func (h *ChecklistHandler) GenerateChecklistStream(w http.ResponseWriter, r *htt
 		sseChan <- fmt.Sprintf(`data: {"event": "log", "message": "DEEP AGENT: Initializing connection to Python service..."}`)
 		flusher.Flush()
 
-		// Simulate tool calls
-		tools := []string{"read_file", "ls", "grep"}
-		for _, tool := range tools {
-			sseChan <- fmt.Sprintf(`data: {"event": "on_tool_start", "name": "%s"}`, tool)
-			flusher.Flush()
-			select {
-			case <-r.Context().Done():
-				return
-			default:
+		// Prepare request to Python service
+		pythonReqBody := map[string]interface{}{
+			"project_path": projectDir,
+			"prompt":       req.Prompt,
+		}
+		pythonReqJSON, _ := json.Marshal(pythonReqBody)
+
+		// Call Python service
+		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+		defer cancel()
+
+		pythonReq, err := http.NewRequestWithContext(
+			ctx,
+			"POST",
+			pythonServiceURL+"/api/v1/checklist/generate",
+			bytes.NewReader(pythonReqJSON),
+		)
+		if err != nil {
+			errChan <- fmt.Errorf("failed to create Python request: %w", err)
+			return
+		}
+		pythonReq.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{Timeout: 120 * time.Second}
+		resp, err := client.Do(pythonReq)
+		if err != nil {
+			errChan <- fmt.Errorf("failed to call Python service: %w", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			errChan <- fmt.Errorf("Python service error: %d %s", resp.StatusCode, string(body))
+			return
+		}
+
+		// Stream events from Python service to frontend
+		sseChan <- fmt.Sprintf(`data: {"event": "log", "message": "DEEP AGENT: Connected to Python service, starting analysis..."}`)
+		flusher.Flush()
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "data: ") {
+				sseChan <- line
+				flusher.Flush()
 			}
 		}
 
-		// Send final result
-		todos := []map[string]interface{}{
-			{"id": "task-1", "content": "Refactor database connection pooling", "status": "pending"},
-			{"id": "task-2", "content": "Add rate limiting to API endpoints", "status": "pending"},
-			{"id": "task-3", "content": "Implement caching layer for frequently accessed data", "status": "pending"},
-		}
-
-		sseChan <- fmt.Sprintf(`data: {"event": "final_result", "todos": %s}`, toJSON(todos))
+		sseChan <- fmt.Sprintf(`data: {"event": "log", "message": "DEEP AGENT: Analysis complete!"}`)
 		flusher.Flush()
 	}()
 
-	// Stream events
+	// Stream events to client
 	for {
 		select {
 		case event, ok := <-sseChan:
