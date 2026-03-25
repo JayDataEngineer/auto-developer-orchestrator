@@ -14,3 +14,8 @@ venv/
 *.swo
 *~
 ref_docs/
+
+# Go binaries
+go-backend/bin/
+*.exe
+data/
