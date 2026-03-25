@@ -7,7 +7,7 @@ import morgan from "morgan";
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.SERVER_PORT || 3847;
+  const PORT = parseInt(process.env.SERVER_PORT || "3848");
 
   app.use(cors());
   app.use(express.json());
