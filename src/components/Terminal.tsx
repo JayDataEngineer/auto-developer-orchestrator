@@ -9,7 +9,7 @@ interface TerminalProps {
   onCommand?: (cmd: string) => void;
 }
 
-export const Terminal: React.FC<TerminalProps> = ({ logs, logEndRef, onRetry, onCommand }) => {
+export const Terminal: React.FC<TerminalProps> = ({ logs = [], logEndRef, onRetry, onCommand }) => {
   const hasFailure = logs.some(log => log.includes('FAILED') || log.includes('ERROR'));
 
   const [command, setCommand] = React.useState('');
