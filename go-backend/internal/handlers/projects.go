@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
 
@@ -122,7 +122,7 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 
 	// Extract project name from URL
 	projectName := filepath.Base(req.URL)
-	projectName = filepath.TrimSuffix(projectName, ".git")
+	projectName = strings.TrimSuffix(projectName, ".git")
 
 	projectsDir := h.db.GetProjectsDir()
 	projectDir := filepath.Join(projectsDir, projectName)

@@ -22,7 +22,7 @@ func NewDatabase(dataSource string) (*Database, error) {
 	}
 
 	// Create tables
-	if err := db.Exec(`
+	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS custom_projects (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT UNIQUE NOT NULL,
@@ -58,12 +58,13 @@ func NewDatabase(dataSource string) (*Database, error) {
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		);
-	`).Err; err != nil {
+	`)
+	if err != nil {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
 
 	// Insert default config
-	db.Exec(`INSERT OR IGNORE INTO system_config (key, value) VALUES ('projectsDir', '/app/projects')`)
+	_, _ = db.Exec(`INSERT OR IGNORE INTO system_config (key, value) VALUES ('projectsDir', '/app/projects')`)
 
 	return &Database{
 		db:          db,

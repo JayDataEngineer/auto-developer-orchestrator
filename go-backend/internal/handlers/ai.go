@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -68,14 +69,14 @@ func (h *AIHandler) RunTests(w http.ResponseWriter, r *http.Request) {
 	results := make([]map[string]interface{}, len(req.Tests))
 	for i, test := range req.Tests {
 		status := "PASSED"
-		if rand.Float64() < 0.1 { // 10% failure rate
+		if rng.Float64() < 0.1 { // 10% failure rate
 			status = "FAILED"
 		}
 
 		results[i] = map[string]interface{}{
 			"test":     test,
 			"status":   status,
-			"duration": rand.Intn(500) + 100,
+			"duration": rng.Intn(500) + 100,
 		}
 	}
 

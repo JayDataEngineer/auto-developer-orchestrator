@@ -147,7 +147,7 @@ func (h *ChecklistHandler) Update(w http.ResponseWriter, r *http.Request) {
 		content.WriteString(fmt.Sprintf("- [%s] %s\n", checkbox, task.Text))
 	}
 
-	if err := os.WriteFile(filePath, content.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(content.String()), 0644); err != nil {
 		h.logger.Error("Failed to write checklist", zap.Error(err))
 		http.Error(w, "Failed to update checklist", http.StatusInternalServerError)
 		return
@@ -259,12 +259,6 @@ func (h *ChecklistHandler) GenerateChecklistStream(w http.ResponseWriter, r *htt
 
 	if req.Project == "" {
 		http.Error(w, "Project name is required", http.StatusBadRequest)
-		return
-	}
-
-	projectDir, err := h.db.GetProjectDir(r.Context(), req.Project)
-	if err != nil {
-		http.Error(w, "Project not found", http.StatusNotFound)
 		return
 	}
 
