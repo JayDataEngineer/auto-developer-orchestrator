@@ -1,5 +1,5 @@
 import React from 'react';
-import { Cpu, Menu, BarChart3, FolderGit2, Plus, RefreshCw, Terminal } from 'lucide-react';
+import { Cpu, Menu, BarChart3, FolderGit2, Plus, RefreshCw, Terminal, Bot } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface HeaderProps {
@@ -17,6 +17,7 @@ interface HeaderProps {
   onAddExistingClick: () => void;
   onRefreshProjects: () => void;
   onCLIClick: () => void;
+  onAgentsClick: () => void;
   fullAutomationMode: boolean;
   projects: string[];
   selectedProject: string;
@@ -99,6 +100,15 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Terminal size={14} />
             CLI
+          </button>
+
+          <button
+            onClick={onAgentsClick}
+            className="flex items-center gap-2 px-3 py-2 glass-dark border border-white/5 rounded-xl text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white hover:border-primary/30 transition-all hover:scale-105"
+            title="Open AI Agents"
+          >
+            <Bot size={14} />
+            Agents
           </button>
         </div>
 

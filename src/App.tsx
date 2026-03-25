@@ -6,6 +6,7 @@ import { Header } from './components/Header';
 import { Checklist } from './components/Checklist';
 import { Terminal } from './components/Terminal';
 import { CLITerminal } from './components/CLITerminal';
+import { AgentsView } from './components/AgentsView';
 import { ReviewModal } from './components/ReviewModal';
 import { CurrentTaskCard } from './components/CurrentTaskCard';
 import { AIConfigModal } from './components/AIConfigModal';
@@ -45,7 +46,7 @@ const LOG_MESSAGES = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'terminal' | 'activity' | 'github'>('terminal');
+  const [activeTab, setActiveTab] = useState<'terminal' | 'activity' | 'github' | 'agents'>('terminal');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -502,14 +503,15 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-black text-slate-100 font-sans selection:bg-primary/30 overflow-hidden relative">
-      <Sidebar 
+      <Sidebar
         activeTab={activeTab}
-        isOpen={isSidebarOpen} 
-        onClose={() => setIsSidebarOpen(false)} 
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
         onSettingsClick={() => setIsAIConfigOpen(true)}
         onTerminalClick={() => { setActiveTab('terminal'); setIsSidebarOpen(false); }}
         onActivityClick={() => { setActiveTab('activity'); setIsSidebarOpen(false); }}
         onGithubClick={() => { setActiveTab('github'); setIsSidebarOpen(false); }}
+        onAgentsClick={() => { setActiveTab('agents'); setIsSidebarOpen(false); }}
         onUserClick={() => setIsUserOpen(true)}
       />
 
@@ -563,6 +565,7 @@ export default function App() {
           )}
           {activeTab === 'activity' && <ActivityView logs={logs} />}
           {activeTab === 'github' && <GithubView />}
+          {activeTab === 'agents' && <AgentsView />}
         </div>
       </main>
 
