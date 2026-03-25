@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,7 +12,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"go.uber.org/zap"
 )
 
@@ -356,15 +357,24 @@ func (g *GitOps) GetLog(ctx context.Context, opts GetLogOptions) ([]LogEntry, er
 		return nil, fmt.Errorf("failed to open repository: %w", err)
 	}
 
+	ref, err := repo.Head()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get HEAD: %w", err)
+	}
+
 	logIter, err := repo.Log(&git.LogOptions{
-		NumberOfCommits: opts.Count,
+		From: ref.Hash(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get log: %w", err)
 	}
 
 	entries := []LogEntry{}
-	err = logIter.ForEach(func(commit *plumbing.Commit) error {
+	count := 0
+	err = logIter.ForEach(func(commit *object.Commit) error {
+		if opts.Count > 0 && count >= opts.Count {
+			return errors.New("limit reached")
+		}
 		entries = append(entries, LogEntry{
 			Hash:      commit.Hash.String(),
 			ShortHash: commit.Hash.String()[:7],
@@ -373,10 +383,11 @@ func (g *GitOps) GetLog(ctx context.Context, opts GetLogOptions) ([]LogEntry, er
 			Date:      commit.Author.When,
 			Message:   commit.Message,
 		})
+		count++
 		return nil
 	})
 
-	if err != nil {
+	if err != nil && err.Error() != "limit reached" {
 		return nil, fmt.Errorf("failed to iterate log: %w", err)
 	}
 

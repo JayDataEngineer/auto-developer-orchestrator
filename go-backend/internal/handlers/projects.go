@@ -1,12 +1,16 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"go.uber.org/zap"
 )
@@ -15,13 +19,15 @@ import (
 type ProjectHandler struct {
 	db     *storage.Database
 	logger *zap.Logger
+	git    *git.GitOps
 }
 
 // NewProjectHandler creates a new ProjectHandler
-func NewProjectHandler(db *storage.Database, logger *zap.Logger) *ProjectHandler {
+func NewProjectHandler(db *storage.Database, logger *zap.Logger, gitOps *git.GitOps) *ProjectHandler {
 	return &ProjectHandler{
 		db:     db,
 		logger: logger,
+		git:    gitOps,
 	}
 }
 
@@ -104,7 +110,7 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Clone simulates cloning a repository (actual git clone via CLI)
+// Clone clones a repository via git CLI
 func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL string `json:"url"`
@@ -133,14 +139,27 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Execute git clone via CLI
-	// For now, create directory and initial checklist
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
-		h.logger.Error("Failed to create project directory", zap.Error(err))
-		http.Error(w, "Failed to clone repository", http.StatusInternalServerError)
+	// Clone repository via git CLI
+	ctx, cancel := context.WithTimeout(r.Context(), 300*time.Second) // 5 minute timeout
+	defer cancel()
+
+	cloneOpts := git.CloneOptions{
+		URL:   req.URL,
+		Dir:   projectDir,
+		Depth: 1, // Shallow clone for speed
+	}
+
+	if err := h.git.Clone(ctx, cloneOpts); err != nil {
+		h.logger.Error("Failed to clone repository", zap.Error(err))
+		http.Error(w, fmt.Sprintf("Failed to clone repository: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	h.logger.Info("Repository cloned successfully", 
+		zap.String("project", projectName),
+		zap.String("dir", projectDir))
+
+	// Create initial checklist
 	checklistPath := filepath.Join(projectDir, "TODO_FOR_JULES.md")
 	initialChecklist := `- [ ] Initial codebase analysis
 - [ ] Configure CI/CD pipeline
@@ -149,8 +168,7 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 
 	if err := os.WriteFile(checklistPath, []byte(initialChecklist), 0644); err != nil {
 		h.logger.Error("Failed to create checklist", zap.Error(err))
-		http.Error(w, "Failed to create checklist", http.StatusInternalServerError)
-		return
+		// Don't fail the request, just log the error
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -158,6 +176,7 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 		"success":      true,
 		"message":      "Repository '" + projectName + "' cloned successfully to " + projectDir,
 		"project_name": projectName,
+		"project_dir":  projectDir,
 	})
 }
 
