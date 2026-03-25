@@ -77,7 +77,7 @@ func main() {
 		// Checklist
 		r.Get("/checklist", checklistHandler.Get)
 		r.Post("/checklist/update", checklistHandler.Update)
-		r.Post("/ai/agent-checklist", aiHandler.GenerateChecklist) // SSE streaming
+		r.Post("/ai/agent-checklist", checklistHandler.GenerateChecklistStream) // SSE streaming
 
 		// Task Dispatch
 		r.Post("/dispatch", julesHandler.Dispatch)
