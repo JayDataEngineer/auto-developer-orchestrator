@@ -14,11 +14,11 @@ export default defineConfig(() => {
     server: {
       hmr: true,
       host: '0.0.0.0',
-      port: 5173,
+      port: 5174,
       // Proxy API requests to Go backend
       proxy: {
         '/api': {
-          target: 'http://localhost:3847',
+          target: 'http://localhost:3848',
           changeOrigin: true,
         },
       },

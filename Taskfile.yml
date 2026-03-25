@@ -206,8 +206,8 @@ tasks:
       - |
         echo ""
         echo "✓ Dev server starting..."
-        echo "  Frontend: http://localhost:5173"
-        echo "  API Proxy: http://localhost:3847"
+        echo "  Frontend: http://localhost:5174"
+        echo "  API Proxy: http://localhost:3848"
         echo ""
         echo "Press Ctrl+C to stop"
 
