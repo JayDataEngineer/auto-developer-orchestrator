@@ -5,6 +5,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Header } from './components/Header';
 import { Checklist } from './components/Checklist';
 import { Terminal } from './components/Terminal';
+import { CLITerminal } from './components/CLITerminal';
 import { ReviewModal } from './components/ReviewModal';
 import { CurrentTaskCard } from './components/CurrentTaskCard';
 import { AIConfigModal } from './components/AIConfigModal';
@@ -57,6 +58,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isGeneratingChecklist, setIsGeneratingChecklist] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
+  const [isCLITerminalOpen, setIsCLITerminalOpen] = useState(false);
   const [aiConfig, setAiConfig] = useState<any>(null);
   const [lastTests, setLastTests] = useState<string[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
@@ -512,14 +514,15 @@ export default function App() {
       />
 
       <main className="flex-1 flex flex-col overflow-hidden w-full">
-        <Header 
-          status={status} 
-          onToggleMode={toggleMode} 
+        <Header
+          status={status}
+          onToggleMode={toggleMode}
           onMenuToggle={() => setIsSidebarOpen(true)}
           onCoverageClick={() => setIsCoverageOpen(true)}
           onCloneClick={() => setIsCloneOpen(true)}
           onAddExistingClick={() => setIsAddProjectOpen(true)}
           onRefreshProjects={fetchProjects}
+          onCLIClick={() => setIsCLITerminalOpen(true)}
           fullAutomationMode={aiConfig?.fullAutomationMode ?? false}
           projects={projects}
           selectedProject={selectedProject}
@@ -589,10 +592,16 @@ export default function App() {
         onClose={() => setIsAddProjectOpen(false)} 
         onAdd={handleAddProject}
       />
-      <UserModal 
-        isOpen={isUserOpen} 
-        onClose={() => setIsUserOpen(false)} 
+      <UserModal
+        isOpen={isUserOpen}
+        onClose={() => setIsUserOpen(false)}
         userEmail="protopomp@gmail.com"
+      />
+
+      {/* CLI Terminal */}
+      <CLITerminal
+        isOpen={isCLITerminalOpen}
+        onClose={() => setIsCLITerminalOpen(false)}
       />
     </div>
   );
