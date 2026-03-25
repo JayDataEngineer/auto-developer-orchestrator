@@ -234,6 +234,58 @@ tasks:
     cmds:
       - npm run preview
 
+  # ==========================================================================
+  # TESTING
+  # ==========================================================================
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - npm run test
+
+  test:e2e:
+    desc: Run E2E tests with Playwright
+    deps:
+      - task: test:playwright:install
+    cmds:
+      - npm run test:playwright
+
+  test:playwright:
+    desc: Run Playwright tests
+    cmds:
+      - npx playwright test
+
+  test:playwright:install:
+    desc: Install Playwright browsers
+    cmds:
+      - npx playwright install --with-deps chromium 2>/dev/null || npx playwright install chromium
+
+  test:playwright:ui:
+    desc: Run Playwright tests with UI
+    cmds:
+      - npm run test:playwright:ui
+
+  test:playwright:headed:
+    desc: Run Playwright tests in headed mode
+    cmds:
+      - npm run test:playwright:headed
+
+  test:playwright:debug:
+    desc: Debug Playwright tests
+    cmds:
+      - npm run test:playwright:debug
+
+  test:screenshot:
+    desc: Run visual screenshot tests
+    deps:
+      - task: test:playwright:install
+    cmds:
+      - echo "Starting dev server for tests..."
+      - npm run dev &
+      - sleep 5
+      - npx playwright test tests/e2e/visual.spec.ts
+      - echo "Screenshots saved to tests/e2e/screenshots/"
+
   dev:ps:
     desc: Check development service status
     cmds:
