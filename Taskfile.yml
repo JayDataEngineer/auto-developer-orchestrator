@@ -105,8 +105,9 @@ tasks:
       - task: setup:check
     cmds:
       - docker compose -f {{.PROD_COMPOSE}} up -d
-      - echo "✓ Production services started"
-      - echo "  Access: http://orchestrator.local"
+      - |
+        echo "✓ Production services started"
+        echo "  Access: http://orchestrator.local"
 
   prod:down:
     desc: Stop production environment
@@ -155,9 +156,10 @@ tasks:
       - task: setup:check
     cmds:
       - docker compose -f {{.DEV_COMPOSE}} up -d
-      - echo "✓ Development services started"
-      - echo "  Frontend: http://orchestrator.local"
-      - echo "  Go Backend: http://orchestrator-go.local"
+      - |
+        echo "✓ Development services started"
+        echo "  Frontend: http://orchestrator.local"
+        echo "  Go Backend: http://orchestrator-go.local"
 
   dev:down:
     desc: Stop development environment
