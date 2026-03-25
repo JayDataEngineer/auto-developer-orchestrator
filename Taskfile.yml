@@ -1,0 +1,541 @@
+# Taskfile for Auto-Developer Orchestrator
+# Docker management and development tasks
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  PROJECT_NAME: auto-developer-orchestrator
+  SHARED_INFRA_DIR: ~/Documents/programs/shared-docker-infra
+  PROD_COMPOSE: docker-compose.go.yml
+  DEV_COMPOSE: docker-compose.dev.go.yml
+  DEV_NODE_COMPOSE: docker-compose.dev.yml
+
+tasks:
+  # ==========================================================================
+  # DEFAULT & HELP
+  # ==========================================================================
+
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  help:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # ==========================================================================
+  # SETUP & INITIALIZATION
+  # ==========================================================================
+
+  setup:
+    desc: Run setup script to connect to shared-docker-infra
+    cmds:
+      - ./setup.sh
+
+  setup:check:
+    desc: Check if shared-docker-infra prerequisites are met
+    cmds:
+      - cmd: |
+          echo "Checking prerequisites..."
+          
+          # Check shared-docker-infra directory
+          if [ -d "{{.SHARED_INFRA_DIR}}" ]; then
+            echo "✓ shared-docker-infra found"
+          else
+            echo "✗ shared-docker-infra not found at {{.SHARED_INFRA_DIR}}"
+            exit 1
+          fi
+          
+          # Check shared-infra network
+          if docker network ls | grep -q "shared-infra"; then
+            echo "✓ shared-infra network exists"
+          else
+            echo "✗ shared-infra network not found"
+            echo "  Run: cd {{.SHARED_INFRA_DIR}} && task core:up"
+            exit 1
+          fi
+          
+          # Check Traefik
+          if docker ps | grep -q "traefik"; then
+            echo "✓ Traefik is running"
+          else
+            echo "✗ Traefik is not running"
+            echo "  Run: cd {{.SHARED_INFRA_DIR}} && task core:up"
+            exit 1
+          fi
+          
+          # Check LiteLLM
+          if docker ps | grep -q "litellm"; then
+            echo "✓ LiteLLM is running"
+          else
+            echo "⚠ LiteLLM is not running (optional)"
+          fi
+          
+          # Check Langfuse
+          if docker ps | grep -q "langfuse"; then
+            echo "✓ Langfuse is running"
+          else
+            echo "⚠ Langfuse is not running (optional)"
+          fi
+          
+          echo ""
+          echo "All prerequisites met!"
+
+  env:
+    desc: Create .env from .env.example
+    sources:
+      - .env.example
+    generates:
+      - .env
+    cmds:
+      - cp .env.example .env
+      - echo "✓ Created .env file"
+      - echo "⚠ Please edit .env and add your API keys"
+
+  # ==========================================================================
+  # PRODUCTION COMMANDS
+  # ==========================================================================
+
+  prod:up:
+    desc: Start production environment
+    deps:
+      - task: setup:check
+    cmds:
+      - docker compose -f {{.PROD_COMPOSE}} up -d
+      - echo "✓ Production services started"
+      - echo "  Access: http://orchestrator.local"
+
+  prod:down:
+    desc: Stop production environment
+    cmds:
+      - docker compose -f {{.PROD_COMPOSE}} down
+      - echo "✓ Production services stopped"
+
+  prod:restart:
+    desc: Restart production environment
+    cmds:
+      - task: prod:down
+      - task: prod:up
+
+  prod:logs:
+    desc: View production logs
+    cmds:
+      - docker compose -f {{.PROD_COMPOSE}} logs -f
+
+  prod:logs:go:
+    desc: View Go backend logs
+    cmds:
+      - docker compose -f {{.PROD_COMPOSE}} logs -f go-backend
+
+  prod:logs:python:
+    desc: View Python agent logs
+    cmds:
+      - docker compose -f {{.PROD_COMPOSE}} logs -f python-agent
+
+  prod:ps:
+    desc: Check production service status
+    cmds:
+      - docker compose -f {{.PROD_COMPOSE}} ps
+
+  prod:build:
+    desc: Build production images
+    cmds:
+      - docker compose -f {{.PROD_COMPOSE}} build
+
+  # ==========================================================================
+  # DEVELOPMENT COMMANDS
+  # ==========================================================================
+
+  dev:up:
+    desc: Start development environment (hot reload)
+    deps:
+      - task: setup:check
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} up -d
+      - echo "✓ Development services started"
+      - echo "  Frontend: http://orchestrator.local"
+      - echo "  Go Backend: http://orchestrator-go.local"
+
+  dev:down:
+    desc: Stop development environment
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} down
+      - echo "✓ Development services stopped"
+
+  dev:restart:
+    desc: Restart development environment
+    cmds:
+      - task: dev:down
+      - task: dev:up
+
+  dev:logs:
+    desc: View development logs
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} logs -f
+
+  dev:logs:go:
+    desc: View Go backend logs (dev)
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} logs -f go-backend
+
+  dev:logs:python:
+    desc: View Python agent logs (dev)
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} logs -f python-agent
+
+  dev:logs:frontend:
+    desc: View frontend logs (dev)
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} logs -f frontend
+
+  dev:ps:
+    desc: Check development service status
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} ps
+
+  dev:build:
+    desc: Build development images
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} build
+
+  # ==========================================================================
+  # NODE.JS DEV SERVER (Alternative)
+  # ==========================================================================
+
+  dev:node:up:
+    desc: Start Node.js development server
+    cmds:
+      - docker compose -f {{.DEV_NODE_COMPOSE}} up -d
+      - echo "✓ Node.js dev server started"
+
+  dev:node:down:
+    desc: Stop Node.js development server
+    cmds:
+      - docker compose -f {{.DEV_NODE_COMPOSE}} down
+      - echo "✓ Node.js dev server stopped"
+
+  dev:node:logs:
+    desc: View Node.js dev logs
+    cmds:
+      - docker compose -f {{.DEV_NODE_COMPOSE}} logs -f
+
+  # ==========================================================================
+  # SHARED INFRASTRUCTURE
+  # ==========================================================================
+
+  infra:up:
+    desc: Start shared-docker-infra core services
+    dir: "{{.SHARED_INFRA_DIR}}"
+    cmds:
+      - task core:up
+      - echo "✓ Shared infrastructure started"
+
+  infra:down:
+    desc: Stop shared-docker-infra core services
+    dir: "{{.SHARED_INFRA_DIR}}"
+    cmds:
+      - task core:down
+      - echo "✓ Shared infrastructure stopped"
+
+  infra:ps:
+    desc: Check shared infrastructure status
+    dir: "{{.SHARED_INFRA_DIR}}"
+    cmds:
+      - docker compose ps
+
+  infra:logs:
+    desc: View shared infrastructure logs
+    dir: "{{.SHARED_INFRA_DIR}}"
+    cmds:
+      - docker compose logs -f
+
+  infra:litellm:up:
+    desc: Start LiteLLM service
+    dir: "{{.SHARED_INFRA_DIR}}"
+    cmds:
+      - docker compose -f litellm/docker-compose.yml up -d
+      - echo "✓ LiteLLM started"
+
+  infra:langfuse:up:
+    desc: Start Langfuse service
+    dir: "{{.SHARED_INFRA_DIR}}"
+    cmds:
+      - docker compose -f langfuse/docker-compose.yml up -d
+      - echo "✓ Langfuse started"
+
+  # ==========================================================================
+  # HEALTH CHECKS
+  # ==========================================================================
+
+  health:
+    desc: Run health checks on all services
+    cmds:
+      - cmd: |
+          echo "=== Health Checks ==="
+          echo ""
+          
+          # Check Traefik
+          echo -n "Traefik: "
+          if curl -s http://traefik.local/ping > /dev/null 2>&1; then
+            echo "✓ OK"
+          else
+            echo "✗ DOWN"
+          fi
+          
+          # Check Orchestrator
+          echo -n "Orchestrator: "
+          if curl -s http://orchestrator.local/api/health > /dev/null 2>&1; then
+            echo "✓ OK"
+          else
+            echo "✗ DOWN"
+          fi
+          
+          # Check LiteLLM
+          echo -n "LiteLLM: "
+          if curl -s http://litellm.local/health > /dev/null 2>&1; then
+            echo "✓ OK"
+          else
+            echo "✗ DOWN"
+          fi
+          
+          # Check Langfuse
+          echo -n "Langfuse: "
+          if curl -s http://langfuse.local/api/health > /dev/null 2>&1; then
+            echo "✓ OK"
+          else
+            echo "✗ DOWN"
+          fi
+          
+          echo ""
+
+  health:orchestrator:
+    desc: Check orchestrator health
+    cmds:
+      - curl -s http://orchestrator.local/api/health | jq || echo "Service unavailable"
+
+  health:litellm:
+    desc: Check LiteLLM health
+    cmds:
+      - curl -s http://litellm.local/health | jq || echo "Service unavailable"
+
+  health:langfuse:
+    desc: Check Langfuse health
+    cmds:
+      - curl -s http://langfuse.local/api/health | jq || echo "Service unavailable"
+
+  # ==========================================================================
+  # TESTING
+  # ==========================================================================
+
+  test:litellm:
+    desc: Test LiteLLM connection
+    cmds:
+      - echo "=== Testing LiteLLM ==="
+      - echo ""
+      - echo "Listing models..."
+      - |
+        curl -s http://litellm.local/v1/models \
+          -H "Authorization: Bearer sk-litellm-master" | jq || echo "Failed"
+      - echo ""
+      - echo "Test chat completion..."
+      - |
+        curl -s http://litellm.local/v1/chat/completions \
+          -H "Authorization: Bearer sk-litellm-master" \
+          -H "Content-Type: application/json" \
+          -d '{"model": "qwen-35-27", "messages": [{"role": "user", "content": "Hello"}]}' | jq || echo "Failed"
+
+  test:orchestrator:
+    desc: Test orchestrator API
+    cmds:
+      - echo "=== Testing Orchestrator ==="
+      - echo ""
+      - echo "Health check..."
+      - curl -s http://orchestrator.local/api/health | jq || echo "Failed"
+      - echo ""
+      - echo "List projects..."
+      - curl -s http://orchestrator.local/api/projects | jq || echo "Failed"
+
+  test:e2e:
+    desc: Run end-to-end test
+    cmds:
+      - task: health
+      - task: test:litellm
+      - task: test:orchestrator
+
+  # ==========================================================================
+  # CLEANUP
+  # ==========================================================================
+
+  clean:
+    desc: Clean up Docker resources
+    cmds:
+      - echo "Cleaning Docker resources..."
+      - docker system prune -f
+      - echo "✓ Cleanup complete"
+
+  clean:all:
+    desc: Remove all containers, networks, and volumes
+    prompt: This will remove ALL Docker resources. Continue?
+    cmds:
+      - echo "Stopping all services..."
+      - docker compose -f {{.PROD_COMPOSE}} down -v || true
+      - docker compose -f {{.DEV_COMPOSE}} down -v || true
+      - echo "Removing orphaned containers..."
+      - docker container prune -f
+      - echo "Removing unused networks..."
+      - docker network prune -f
+      - echo "Removing unused volumes..."
+      - docker volume prune -f
+      - echo "Removing unused images..."
+      - docker image prune -af
+      - echo "✓ Complete cleanup done"
+
+  clean:volumes:
+    desc: Remove Docker volumes
+    prompt: This will remove all Docker volumes. Continue?
+    cmds:
+      - docker volume prune -f
+      - echo "✓ Volumes cleaned"
+
+  clean:images:
+    desc: Remove dangling images
+    cmds:
+      - docker image prune -f
+      - echo "✓ Images cleaned"
+
+  # ==========================================================================
+  # LOGS
+  # ==========================================================================
+
+  logs:
+    desc: View all logs (production)
+    cmds:
+      - docker compose -f {{.PROD_COMPOSE}} logs -f
+
+  logs:go:
+    desc: View Go backend logs (production)
+    cmds:
+      - docker compose -f {{.PROD_COMPOSE}} logs -f go-backend
+
+  logs:python:
+    desc: View Python agent logs (production)
+    cmds:
+      - docker compose -f {{.PROD_COMPOSE}} logs -f python-agent
+
+  # ==========================================================================
+  # DATABASE
+  # ==========================================================================
+
+  db:backup:
+    desc: Backup SQLite database
+    cmds:
+      - cmd: |
+          if [ -f "data/orchestrator.db" ]; then
+            cp data/orchestrator.db data/orchestrator.db.backup.$(date +%Y%m%d_%H%M%S)
+            echo "✓ Database backed up"
+          else
+            echo "✗ Database not found"
+          fi
+
+  db:restore:
+    desc: Restore SQLite database from backup
+    vars:
+      BACKUP: '{{.BACKUP | default "latest"}}'
+    cmds:
+      - cmd: |
+          if [ "{{.BACKUP}}" == "latest" ]; then
+            BACKUP_FILE=$(ls -t data/orchestrator.db.backup.* 2>/dev/null | head -1)
+          else
+            BACKUP_FILE="data/{{.BACKUP}}"
+          fi
+          
+          if [ -f "$BACKUP_FILE" ]; then
+            cp "$BACKUP_FILE" data/orchestrator.db
+            echo "✓ Database restored from $BACKUP_FILE"
+          else
+            echo "✗ Backup file not found"
+            exit 1
+          fi
+
+  # ==========================================================================
+  # UTILITIES
+  # ==========================================================================
+
+  shell:go:
+    desc: Open shell in Go backend container
+    vars:
+      ENV: '{{.ENV | default "prod"}}'
+    cmds:
+      - cmd: |
+          if [ "{{.ENV}}" == "dev" ]; then
+            docker compose -f {{.DEV_COMPOSE}} exec go-backend /bin/sh
+          else
+            docker compose -f {{.PROD_COMPOSE}} exec go-backend /bin/sh
+          fi
+
+  shell:python:
+    desc: Open shell in Python agent container
+    vars:
+      ENV: '{{.ENV | default "prod"}}'
+    cmds:
+      - cmd: |
+          if [ "{{.ENV}}" == "dev" ]; then
+            docker compose -f {{.DEV_COMPOSE}} exec python-agent /bin/sh
+          else
+            docker compose -f {{.PROD_COMPOSE}} exec python-agent /bin/sh
+          fi
+
+  restart:
+    desc: Restart all services
+    cmds:
+      - task: down
+      - task: up
+
+  up:
+    desc: Start production environment
+    cmds:
+      - task: prod:up
+
+  down:
+    desc: Stop all services
+    cmds:
+      - task: prod:down
+
+  ps:
+    desc: Check service status
+    cmds:
+      - task: prod:ps
+
+  # ==========================================================================
+  # BROWSER
+  # ==========================================================================
+
+  open:orchestrator:
+    desc: Open orchestrator dashboard
+    cmds:
+      - xdg-open http://orchestrator.local 2>/dev/null || open http://orchestrator.local 2>/dev/null || echo "Open http://orchestrator.local"
+
+  open:langfuse:
+    desc: Open Langfuse dashboard
+    cmds:
+      - xdg-open http://langfuse.local 2>/dev/null || open http://langfuse.local 2>/dev/null || echo "Open http://langfuse.local"
+
+  open:litellm:
+    desc: Open LiteLLM docs
+    cmds:
+      - xdg-open http://litellm.local 2>/dev/null || open http://litellm.local 2>/dev/null || echo "Open http://litellm.local"
+
+  open:traefik:
+    desc: Open Traefik dashboard
+    cmds:
+      - xdg-open http://traefik.local 2>/dev/null || open http://traefik.local 2>/dev/null || echo "Open http://traefik.local"
+
+  open:all:
+    desc: Open all dashboards
+    cmds:
+      - task: open:orchestrator
+      - task: open:langfuse
+      - task: open:traefik
