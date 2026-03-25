@@ -1,4 +1,5 @@
 # Development Docker Compose with Hot Reload
+# Integrated with shared-docker-infra via Traefik
 services:
   # Node.js/TypeScript Server with Vite Hot Reload
   app:
@@ -6,9 +7,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     container_name: auto-dev-orchestrator
-    ports:
-      - "3847:3847"
-      - "5194:5194"
+    # No ports exposed - access via Traefik
     volumes:
       # Mount source code for hot reload
       - .:/app
@@ -28,10 +27,24 @@ services:
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - APP_URL=${APP_URL:-http://localhost:3847}
+      - APP_URL=${APP_URL:-http://orchestrator.local}
+      # Shared infrastructure
+      - LITELLM_PROXY_URL=${LITELLM_PROXY_URL:-http://litellm.local}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse.local}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
     networks:
-      - orchestrator-network
+      - shared-infra
+    restart: unless-stopped
+    # Traefik labels for development access
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.orchestrator-dev.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`)"
+      - "traefik.http.routers.orchestrator-dev.entrypoints=http"
+      - "traefik.http.services.orchestrator-dev.loadbalancer.server.port=5194"
+      - "traefik.http.routers.orchestrator-dev.priority=10"
 
 networks:
-  orchestrator-network:
-    driver: bridge
+  shared-infra:
+    external: true
+    name: ${SHARED_NETWORK_NAME:-shared-infra}

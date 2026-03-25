@@ -1,6 +1,6 @@
 # Auto-Developer Orchestrator
 
-A high-performance, Dockerized orchestration platform for managing AI coding tasks via GitHub. Features a **Go backend** for concurrent operations, **Python deep agent microservice** for LangChain integration, and a **React 19 frontend** for the dashboard.
+A high-performance, Dockerized orchestration platform for managing AI coding tasks via GitHub. Features a **Go backend** for concurrent operations, **Python deep agent microservice** for LangChain integration, and **integration with shared-docker-infra** for LiteLLM and Langfuse observability.
 
 ## Features
 
@@ -8,14 +8,38 @@ A high-performance, Dockerized orchestration platform for managing AI coding tas
 - **Local File System Integration**: Point the orchestrator to your local folder containing GitHub repositories.
 - **Clone Repository**: Directly clone new repositories into your projects folder from the UI.
 - **Autonomous Loop**: Automatically generate tasks, write code, run tests, and merge PRs.
-- **AI Provider Integration**: Connect to Google JULES, Gemini, Claude, OpenAI via LiteLLM.
+- **AI Provider Integration**: Connect to Google JULES, Gemini, Claude, OpenAI via **shared LiteLLM** (Traefik-routed).
+- **Observability**: Automatic tracing to **Langfuse** via shared infrastructure.
 - **Real-time Terminal**: View live logs of agent actions and system status with SSE streaming.
 - **Coverage Reports**: Track test coverage across your projects.
 - **High Performance**: 8.5x faster concurrent requests, 4.7x less memory than Node.js.
+- **Traefik Integration**: Automatic routing via shared-docker-infra reverse proxy.
+
+## Prerequisites
+
+This project requires **shared-docker-infra** to be running:
+
+```bash
+# Start shared infrastructure first
+cd ~/Documents/programs/shared-docker-infra
+task core:up
+```
 
 ## Quick Start
 
-### Development (Hot Reload)
+### 1. Configure Environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and add:
+- Your API keys (JULES, OpenAI, Gemini, Claude, GitHub)
+- Langfuse credentials (from http://langfuse.local > Settings > API Keys)
+
+### 2. Start Services
+
+#### Development (Hot Reload)
 
 ```bash
 # Start all services with hot reload
@@ -28,7 +52,7 @@ make logs
 make dev-down
 ```
 
-### Production
+#### Production
 
 ```bash
 # Start production environment
@@ -41,30 +65,29 @@ make logs
 make prod-down
 ```
 
+### 3. Access the Dashboard
+
+- **Frontend**: http://orchestrator.local (via Traefik)
+- **Go API**: http://orchestrator.local/api
+- **Python Agent**: Internal only (not exposed)
+
 ### Manual Setup
 
-1. **Configure Environment**:
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `.env` and add your API keys (JULES, OpenAI, Gemini, Claude, GitHub, etc.).
+```bash
+# Go backend (Port 3847)
+cd go-backend && go run cmd/server/main.go
 
-2. **Start Services**:
-   ```bash
-   # Go backend (Port 3847)
-   cd go-backend && go run cmd/server/main.go
+# Python agent (Port 8080)
+cd python-agent && uvicorn main:app --reload
 
-   # Python agent (Port 8080)
-   cd python-agent && uvicorn main:app --reload
+# React frontend (Port 5173)
+npm run dev
+```
 
-   # React frontend (Port 5173)
-   npm run dev
-   ```
-
-3. **Access the Dashboard**:
-   - Frontend: `http://localhost:5173`
-   - Go API: `http://localhost:3847`
-   - Python Agent: `http://localhost:8080`
+Access at:
+- Frontend: `http://localhost:5173`
+- Go API: `http://localhost:3847`
+- Python Agent: `http://localhost:8080`
 
 ## Project Structure
 
@@ -141,7 +164,12 @@ Click the **Settings (gear icon)** to configure:
 | `SERVER_PORT` | 3847 | Go backend server port |
 | `DATABASE_URL` | /data/orchestrator.db | SQLite database path |
 | `PYTHON_SERVICE_URL` | http://python-agent:8080 | Python microservice URL |
-| `LITELLM_PROXY_URL` | http://litellm:4000 | LiteLLM proxy URL (shared infra) |
+| `LITELLM_PROXY_URL` | http://litellm.local | **LiteLLM via Traefik** (shared infra) |
+| `LANGFUSE_HOST` | http://langfuse.local | **Langfuse via Traefik** (shared infra) |
+| `LANGFUSE_PUBLIC_KEY` | - | Langfuse public key (pk-lf-...) |
+| `LANGFUSE_SECRET_KEY` | - | Langfuse secret key (sk-lf-...) |
+| `SHARED_NETWORK_NAME` | shared-infra | Docker network name for shared infra |
+| `INFRA_DOMAIN` | local | Domain suffix for Traefik routing |
 
 ### Python Agent
 
@@ -162,9 +190,12 @@ docker-compose -f docker-compose.go.yml up -d
 ```
 
 This starts:
-- **Nginx** (Port 80/443) - Reverse proxy and static file server
-- **Go Backend** (Internal) - REST API server
+- **Go Backend** (Internal) - REST API server, accessible via Traefik at http://orchestrator.local
 - **Python Agent** (Internal) - Deep agent service
+
+**Requirements:**
+- shared-docker-infra must be running with Traefik
+- The `shared-infra` Docker network must exist
 
 ### Development
 
@@ -175,7 +206,7 @@ docker-compose -f docker-compose.dev.go.yml up -d
 This starts:
 - **Go Backend** (Port 3847) - With hot reload (air)
 - **Python Agent** (Port 8080) - With hot reload
-- **Frontend** (Port 5173) - Vite dev server
+- **Frontend** (Port 5194) - Vite dev server, accessible via Traefik
 
 ## Makefile Commands
 
@@ -211,12 +242,12 @@ Run `make help` for all available commands.
 
 ## Architecture
 
+### With Shared Infrastructure
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Nginx (Port 80/443)                      │
-│  - SSL Termination                                          │
-│  - Load Balancing                                           │
-│  - Static File Serving                                      │
+│              Traefik (shared-docker-infra)                  │
+│  http://orchestrator.local → orchestrator-go:3847           │
 └────────────────────┬────────────────────────────────────────┘
                      │
      ┌───────────────┴───────────────┐
@@ -230,7 +261,15 @@ Run `make help` for all available commands.
 │ - Git Ops   │              │ - Deep      │
 │ - Jules API │              │   Agents    │
 │ - SQLite    │              │             │
-└─────────────┘              └─────────────┘
+└──────┬──────┘              └─────────────┘
+       │
+       │ (via Traefik)
+       ▼
+┌─────────────────────────────────────────────────────────────┐
+│           Shared Infrastructure Services                     │
+│  - LiteLLM (http://litellm.local) - AI gateway             │
+│  - Langfuse (http://langfuse.local) - Observability        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Performance
