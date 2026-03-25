@@ -5,4 +5,4 @@ import (
 	"time"
 )
 
-var rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+var rng = rand.New(rand.NewSource(time.Now().UnixNano()))

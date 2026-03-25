@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/jules"
@@ -75,9 +76,7 @@ func (h *JulesHandler) Dispatch(w http.ResponseWriter, r *http.Request) {
 		if index >= 0 && index < len(lines) {
 			line := string(lines[index])
 			if len(line) > 0 {
-				taskText = line
-				taskText = bytes.TrimPrefix([]byte(taskText), []byte("- [ ] ")).String()
-				taskText = bytes.TrimPrefix([]byte(taskText), []byte("- [x] ")).String()
+				taskText = strings.TrimPrefix(strings.TrimPrefix(line, "- [ ] "), "- [x] ")
 			}
 		}
 	}
