@@ -38,6 +38,7 @@ func main() {
 	julesHandler := handlers.NewJulesHandler(db, logger)
 	aiHandler := handlers.NewAIHandler(logger) // Will call Python microservice
 	configHandler := handlers.NewConfigHandler(logger)
+	cliHandler := handlers.NewCLIHandler(logger, "../") // CLI handler with project root
 
 	// Setup router
 	r := chi.NewRouter()
@@ -98,6 +99,12 @@ func main() {
 
 		// Settings
 		r.Post("/settings/mode", projectHandler.SetMode)
+
+		// CLI Commands (safe, sandboxed)
+		r.Get("/cli/commands", cliHandler.ListAllowedCommands)
+		r.Post("/cli/execute", cliHandler.ExecuteCommand)
+		r.Get("/cli/cat", cliHandler.ReadFile)
+		r.Get("/cli/ls", cliHandler.ListDirectory)
 	})
 
 	// Serve static files (React frontend)
