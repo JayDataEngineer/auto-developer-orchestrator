@@ -58,12 +58,10 @@ export const Terminal: React.FC<TerminalProps> = ({ logs, logEndRef, onRetry, on
             <span className="text-zinc-600 mr-3 select-none tabular-nums opacity-60">[{log.split(']')[0].split('[')[1]}]</span>
             <span className={cn(
               "font-medium",
-              log.includes('WARN') ? 'text-amber-400/90' : 
-              log.includes('ERROR') ? 'text-red-400/90' : 
+              log.includes('WARN') ? 'text-amber-400/90' :
+              log.includes('ERROR') ? 'text-red-400/90' :
               log.includes('PASSED') ? 'text-emerald-400/90' :
               log.includes('FAILED') ? 'text-rose-400/90' :
-              log.includes('AGENT_OBSERVATION') ? 'text-sky-400/80 italic' :
-              log.includes('DEEP AGENT') ? 'text-primary font-bold' :
               log.includes('SYSTEM') ? 'text-zinc-400 font-bold' :
               log.includes('$') ? 'text-white font-bold' :
               'text-zinc-300'
