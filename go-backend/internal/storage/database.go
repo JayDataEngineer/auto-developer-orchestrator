@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -48,10 +49,15 @@ func NewDatabase(dataSource string) (*Database, error) {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			project_name TEXT NOT NULL,
 			task_id TEXT NOT NULL,
-			session_id TEXT NOT NULL,
-			status TEXT DEFAULT 'pending',
+			session_id TEXT UNIQUE NOT NULL,
+			status TEXT DEFAULT 'PLANNING',
+			plan_approved BOOLEAN DEFAULT FALSE,
+			issue_url TEXT,
+			pr_url TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_polled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			error_message TEXT
 		);
 
 		CREATE TABLE IF NOT EXISTS system_config (
@@ -179,33 +185,100 @@ func (d *Database) SetCurrentTaskIndex(ctx context.Context, projectName string, 
 	return err
 }
 
-// StoreJulesSession stores a Jules session
-func (d *Database) StoreJulesSession(ctx context.Context, projectName, taskID, sessionID string) error {
-	_, err := d.db.ExecContext(ctx,
-		"INSERT INTO jules_sessions (project_name, task_id, session_id) VALUES (?, ?, ?)",
-		projectName, taskID, sessionID)
-	return err
+// JulesSession represents a Jules session
+type JulesSession struct {
+	ProjectName  string    `json:"project_name"`
+	TaskID       string    `json:"task_id"`
+	SessionID    string    `json:"session_id"`
+	Status       string    `json:"status"`
+	PlanApproved bool      `json:"plan_approved"`
+	IssueURL     string    `json:"issue_url"`
+	PRURL        string    `json:"pr_url"`
+	ErrorMessage string    `json:"error_message"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	LastPolledAt time.Time `json:"last_polled_at"`
 }
 
-// GetJulesSession retrieves a Jules session
+// GetActiveJulesSessions retrieves all active Jules sessions for polling
+func (d *Database) GetActiveJulesSessions(ctx context.Context) ([]JulesSession, error) {
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT project_name, task_id, session_id, status, plan_approved, issue_url, pr_url,
+		       created_at, updated_at, error_message, last_polled_at
+		FROM jules_sessions 
+		WHERE status IN ('PLANNING', 'IN_PROGRESS')
+		ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []JulesSession
+	for rows.Next() {
+		var session JulesSession
+		var planApproved sql.NullBool
+		var issueURL, prURL, errorMessage sql.NullString
+		var createdAt, updatedAt, lastPolledAt time.Time
+
+		err := rows.Scan(
+			&session.ProjectName, &session.TaskID, &session.SessionID,
+			&session.Status, &planApproved, &issueURL, &prURL,
+			&createdAt, &updatedAt, &errorMessage, &lastPolledAt)
+		if err != nil {
+			return nil, err
+		}
+
+		session.PlanApproved = planApproved.Bool
+		session.IssueURL = issueURL.String
+		session.PRURL = prURL.String
+		session.ErrorMessage = errorMessage.String
+		session.CreatedAt = createdAt
+		session.UpdatedAt = updatedAt
+		session.LastPolledAt = lastPolledAt
+
+		sessions = append(sessions, session)
+	}
+
+	return sessions, rows.Err()
+}
+
+// GetJulesSession retrieves a single Jules session by ID
 func (d *Database) GetJulesSession(ctx context.Context, sessionID string) (*JulesSession, error) {
 	var session JulesSession
 	err := d.db.QueryRowContext(ctx, `
-		SELECT project_name, task_id, session_id, status 
+		SELECT project_name, task_id, session_id, status, plan_approved, issue_url, pr_url,
+		       created_at, updated_at, error_message, last_polled_at
 		FROM jules_sessions WHERE session_id = ?`, sessionID).Scan(
-		&session.ProjectName, &session.TaskID, &session.SessionID, &session.Status)
+		&session.ProjectName, &session.TaskID, &session.SessionID, &session.Status,
+		&session.PlanApproved, &session.IssueURL, &session.PRURL,
+		&session.ErrorMessage, &session.CreatedAt, &session.UpdatedAt, &session.LastPolledAt)
 	if err != nil {
 		return nil, err
 	}
 	return &session, nil
 }
 
-// JulesSession represents a Jules session
-type JulesSession struct {
-	ProjectName string
-	TaskID      string
-	SessionID   string
-	Status      string
+// UpdateJulesSession updates a Jules session
+func (d *Database) UpdateJulesSession(ctx context.Context, session *JulesSession) error {
+	_, err := d.db.ExecContext(ctx, `
+		UPDATE jules_sessions
+		SET status = ?, plan_approved = ?, issue_url = ?, pr_url = ?,
+		    updated_at = ?, last_polled_at = ?, error_message = ?
+		WHERE session_id = ?`,
+		session.Status, session.PlanApproved, session.IssueURL, session.PRURL,
+		session.UpdatedAt, session.LastPolledAt, session.ErrorMessage,
+		session.SessionID)
+	return err
+}
+
+// CreateJulesSession creates a new Jules session
+func (d *Database) CreateJulesSession(ctx context.Context, session *JulesSession) error {
+	_, err := d.db.ExecContext(ctx, `
+		INSERT INTO jules_sessions (project_name, task_id, session_id, status, plan_approved, issue_url, pr_url)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		session.ProjectName, session.TaskID, session.SessionID, session.Status,
+		session.PlanApproved, session.IssueURL, session.PRURL)
+	return err
 }
 
 // GetSystemConfig returns a system configuration value
