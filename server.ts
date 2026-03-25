@@ -8,7 +8,7 @@ import { Client } from "@langchain/langgraph-sdk";
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.SERVER_PORT || 3847;
+  const PORT = process.env.SERVER_PORT ? parseInt(process.env.SERVER_PORT, 10) : 3847;
 
   app.use(cors());
   app.use(express.json());
@@ -424,12 +424,7 @@ async function startServer() {
       res.setHeader('Connection', 'keep-alive');
 
       // Use the stream method for real-time feedback
-      const stream = await todoAgent.stream({
-        messages: [{
-          role: "user",
-          content: `Analyze the codebase at "${projectDir}" and generate technical improvement tasks using the write_todos tool. ${prompt ? `Guidance: ${prompt}` : ''}`,
-        }],
-      });
+      const stream = await (todoAgent as any).stream({ messages: [{ role: "user", content: `Analyze the codebase at "${projectDir}" and generate technical improvement tasks using the write_todos tool. ${prompt ? `Guidance: ${prompt}` : ''}` }] } as any);
 
       for await (const chunk of stream) {
         res.write(`data: ${JSON.stringify(chunk)}\n\n`);

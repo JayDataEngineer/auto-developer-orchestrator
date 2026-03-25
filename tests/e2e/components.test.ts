@@ -10,7 +10,7 @@ describe('Frontend Components - E2E', () => {
     it('should import App component', async () => {
       const AppModule = await import('../../src/App');
       // App might be exported as default or named
-      expect(AppModule.App || AppModule.default).toBeDefined();
+      expect((AppModule as any).App || AppModule.default).toBeDefined();
     });
 
     it('should import Header component', async () => {

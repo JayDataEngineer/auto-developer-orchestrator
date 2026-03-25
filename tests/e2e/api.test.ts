@@ -33,7 +33,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       const response = await fetch(`${BASE_URL}/api/status?project=test-project`);
       expect(response.status).toBe(200);
       
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data).toHaveProperty('gitState');
       expect(data).toHaveProperty('workingTree');
       expect(data).toHaveProperty('isAutoMode');
@@ -48,7 +48,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       const response = await fetch(`${BASE_URL}/api/projects`);
       expect(response.status).toBe(200);
       
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data).toHaveProperty('projects');
       expect(Array.isArray(data.projects)).toBe(true);
     });
@@ -77,7 +77,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       const response = await fetch(`${BASE_URL}/api/checklist?project=${testProject}`);
       expect(response.status).toBe(200);
       
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data).toHaveProperty('tasks');
       expect(Array.isArray(data.tasks)).toBe(true);
     });
@@ -98,7 +98,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       });
 
       expect(response.status).toBeGreaterThanOrEqual(200);
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data.success).toBe(true);
     });
 
@@ -106,7 +106,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       const response = await fetch(`${BASE_URL}/api/checklist?project=${testProject}`);
       expect(response.status).toBe(200);
       
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data.tasks).toBeDefined();
     });
   });
@@ -116,7 +116,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       const response = await fetch(`${BASE_URL}/api/config/ai`);
       expect(response.status).toBe(200);
       
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data).toHaveProperty('autoTask');
       expect(data).toHaveProperty('autoTest');
       expect(data).toHaveProperty('fullAutomationMode');
@@ -136,7 +136,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data.success).toBe(true);
       expect(data.aiConfig.autoTask).toBe(false);
       expect(data.aiConfig.fullAutomationMode).toBe(true);
@@ -148,7 +148,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       const response = await fetch(`${BASE_URL}/api/config/system`);
       expect(response.status).toBe(200);
       
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data).toHaveProperty('projectsDir');
     });
 
@@ -164,7 +164,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data.success).toBe(true);
     });
   });
@@ -181,7 +181,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data.success).toBe(true);
       expect(data.isAutoMode).toBe(true);
     });
@@ -197,7 +197,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data.success).toBe(true);
       expect(data.isAutoMode).toBe(false);
     });
@@ -215,7 +215,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data.success).toBe(true);
       expect(data.taskId).toBe('task-0');
     });
@@ -249,7 +249,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data.success).toBe(true);
       expect(data.engine).toBe('gemini');
       expect(Array.isArray(data.tests)).toBe(true);
@@ -269,7 +269,7 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json() as any);
       expect(data.success).toBe(true);
       expect(Array.isArray(data.results)).toBe(true);
       expect(data.results[0]).toHaveProperty('test');
@@ -429,13 +429,13 @@ describe('Auto-Developer Orchestrator - E2E API Tests', () => {
       });
 
       expect(mergeRes.status).toBe(200);
-      const mergeData = await mergeRes.json();
+      const mergeData = (await mergeRes.json() as any);
       expect(mergeData.success).toBe(true);
       expect(mergeData.summary).toBe('Implement cool new feature');
 
       // Fetch the updated checklist to verify the new task was added
       const checklistRes = await fetch(`${BASE_URL}/api/checklist?project=${projectName}`);
-      const checklistData = await checklistRes.json();
+      const checklistData = (await checklistRes.json() as any);
 
       // The original task should be marked complete
       const originalTask = checklistData.tasks.find((t: any) => t.text === 'Implement cool new feature');

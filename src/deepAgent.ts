@@ -78,7 +78,7 @@ export const todoAgent = createDeepAgent({
   name: "my_deep_agent",
   model: chatModel,
   systemPrompt: todoGeneratorPrompt,
-  subagents: [explorerSubagent],
+  subagents: [explorerSubagent as any],
   backend: new LocalShellBackend({
     rootDir: process.cwd(),
     inheritEnv: true,
@@ -97,12 +97,9 @@ export interface AgentTodo {
 
 // Helper function to generate TODOs and return structured state
 export async function generateTODOs(projectPath: string, prompt?: string) {
-  const result = await todoAgent.invoke({
-    messages: [{
-      role: "user",
-      content: `Analyze the codebase at "${projectPath}" and generate technical improvement tasks using the write_todos tool. ${prompt ? `Guidance: ${prompt}` : ''}`,
-    }],
-  });
+  const result = await (todoAgent as any).invoke({
+    messages: [["user", `Analyze the codebase at "${projectPath}" and generate technical improvement tasks using the write_todos tool. ${prompt ? `Guidance: ${prompt}` : ''}`]]
+  } as any);
 
   // Extract structured todos from the agent's state channel
   const todos = (result as any).todos as AgentTodo[] || [];

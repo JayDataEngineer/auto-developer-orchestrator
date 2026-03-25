@@ -34,12 +34,7 @@ Tasks should be specific and actionable for Jules (AI coding agent) to execute.`
 async function main() {
   console.log("🤖 Deep Agent generating TODOs...");
   
-  const result = await todoAgent.invoke({
-    messages: [{
-      role: "user",
-      content: "Analyze this codebase and create a TODO_FOR_JULES.md with improvement tasks.",
-    }],
-  });
+  const result = await (todoAgent as any).invoke({ messages: [["user", "Analyze this codebase and create a TODO_FOR_JULES.md with improvement tasks."]] } as any);
   
   console.log("✅ TODO generation complete!");
   console.log("📝 Generated tasks:", result.todos);
