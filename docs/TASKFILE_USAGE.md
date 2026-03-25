@@ -62,10 +62,14 @@ task health
 
 | Task | Description |
 |------|-------------|
-| `task dev:up` | Start dev (hot reload) |
-| `task dev:down` | Stop dev |
-| `task dev:restart` | Restart dev |
-| `task dev:logs` | View dev logs |
+| `task dev:up` | Start local dev server (npm - **recommended**) |
+| `task dev:down` | Stop local dev server |
+| `task dev:restart` | Restart local dev server |
+| `task dev:build` | Build for production |
+| `task dev:preview` | Preview production build |
+| `task dev:docker:up` | Start Docker dev environment |
+| `task dev:docker:down` | Stop Docker dev environment |
+| `task dev:docker:logs` | View Docker dev logs |
 | `task dev:ps` | Check dev status |
 
 ### Shared Infrastructure

@@ -147,11 +147,11 @@ tasks:
       - docker compose -f {{.PROD_COMPOSE}} build
 
   # ==========================================================================
-  # DEVELOPMENT COMMANDS
+  # DEVELOPMENT COMMANDS (Docker)
   # ==========================================================================
 
-  dev:up:
-    desc: Start development environment (hot reload)
+  dev:docker:up:
+    desc: Start development environment with Docker (hot reload)
     deps:
       - task: setup:check
     cmds:
@@ -161,37 +161,78 @@ tasks:
         echo "  Frontend: http://orchestrator.local"
         echo "  Go Backend: http://orchestrator-go.local"
 
-  dev:down:
-    desc: Stop development environment
+  dev:docker:down:
+    desc: Stop development environment (Docker)
     cmds:
       - docker compose -f {{.DEV_COMPOSE}} down
       - echo "✓ Development services stopped"
 
+  dev:docker:restart:
+    desc: Restart development environment (Docker)
+    cmds:
+      - task: dev:docker:down
+      - task: dev:docker:up
+
+  dev:docker:logs:
+    desc: View development logs (Docker)
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} logs -f
+
+  dev:docker:logs:go:
+    desc: View Go backend logs (Docker)
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} logs -f go-backend
+
+  dev:docker:logs:python:
+    desc: View Python agent logs (Docker)
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} logs -f python-agent
+
+  dev:docker:logs:frontend:
+    desc: View frontend logs (Docker)
+    cmds:
+      - docker compose -f {{.DEV_COMPOSE}} logs -f frontend
+
+  # ==========================================================================
+  # LOCAL DEVELOPMENT (npm - Recommended for frontend work)
+  # ==========================================================================
+
+  dev:up:
+    desc: Start local dev server (npm run dev - hot reload)
+    cmds:
+      - echo "Starting Vite dev server..."
+      - npm install
+      - npm run dev &
+      - |
+        echo ""
+        echo "✓ Dev server starting..."
+        echo "  Frontend: http://localhost:5173"
+        echo "  API Proxy: http://localhost:3847"
+        echo ""
+        echo "Press Ctrl+C to stop"
+
+  dev:down:
+    desc: Stop local dev server
+    cmds:
+      - pkill -f "vite" || true
+      - echo "✓ Dev server stopped"
+
   dev:restart:
-    desc: Restart development environment
+    desc: Restart local dev server
     cmds:
       - task: dev:down
       - task: dev:up
 
-  dev:logs:
-    desc: View development logs
+  dev:build:
+    desc: Build for production
     cmds:
-      - docker compose -f {{.DEV_COMPOSE}} logs -f
+      - npm run build
+      - echo "✓ Build complete"
 
-  dev:logs:go:
-    desc: View Go backend logs (dev)
+  dev:preview:
+    desc: Preview production build
     cmds:
-      - docker compose -f {{.DEV_COMPOSE}} logs -f go-backend
-
-  dev:logs:python:
-    desc: View Python agent logs (dev)
-    cmds:
-      - docker compose -f {{.DEV_COMPOSE}} logs -f python-agent
-
-  dev:logs:frontend:
-    desc: View frontend logs (dev)
-    cmds:
-      - docker compose -f {{.DEV_COMPOSE}} logs -f frontend
+      - npm run preview
 
   dev:ps:
     desc: Check development service status
