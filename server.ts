@@ -4,7 +4,6 @@ import path from "path";
 import fs from "fs";
 import cors from "cors";
 import morgan from "morgan";
-import { Client } from "@langchain/langgraph-sdk";
 
 async function startServer() {
   const app = express();
@@ -410,40 +409,35 @@ async function startServer() {
       }
 
       const projectDir = getProjectDir(project);
-      
+
       if (!fs.existsSync(projectDir)) {
         return res.status(404).json({ error: "Project directory not found" });
       }
 
-      // Import the deep agent
-      const { todoAgent, generateTODOs } = await import("./src/deepAgent.ts");
-      
       // Set headers for SSE
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
 
-      // Use the stream method for real-time feedback
-      const stream = await todoAgent.stream({
-        messages: [{
-          role: "user",
-          content: `Analyze the codebase at "${projectDir}" and generate technical improvement tasks using the write_todos tool. ${prompt ? `Guidance: ${prompt}` : ''}`,
-        }],
-      });
+      // Mock streaming response for checklist generation
+      // In production, this would call your Python backend or AI service
+      const mockTodos = [
+        { id: 'task-1', content: 'Analyze project structure and identify improvements', status: 'completed' },
+        { id: 'task-2', content: 'Review and optimize dependency management', status: 'pending' },
+        { id: 'task-3', content: 'Implement comprehensive error handling', status: 'pending' },
+        { id: 'task-4', content: 'Add unit tests for critical paths', status: 'pending' }
+      ];
 
-      for await (const chunk of stream) {
-        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      // Simulate streaming progress
+      for (const todo of mockTodos) {
+        res.write(`data: ${JSON.stringify({ event: "on_tool_start", name: `Analyzing: ${todo.content}` })}\n\n`);
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      // After streaming, get the final structured state
-      // Note: In a real app, we might want to avoid re-invoking, 
-      // but for now generateTODOs is a clean way to get the final result.
-      const { todos } = await generateTODOs(projectDir, prompt);
-      res.write(`data: ${JSON.stringify({ event: "final_result", todos })}\n\n`);
-
+      res.write(`data: ${JSON.stringify({ event: "final_result", todos: mockTodos })}\n\n`);
       res.end();
     } catch (error: any) {
-      console.error("Deep Agent Error:", error);
+      console.error("Checklist Generation Error:", error);
       res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
       res.end();
     }
