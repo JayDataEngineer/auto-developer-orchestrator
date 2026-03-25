@@ -1,5 +1,5 @@
 import React from 'react';
-import { Terminal, Activity, Github, Settings, X } from 'lucide-react';
+import { Terminal, Activity, Github, Settings, X, Bot } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -11,23 +11,26 @@ interface SidebarProps {
   onTerminalClick?: () => void;
   onActivityClick?: () => void;
   onGithubClick?: () => void;
+  onAgentsClick?: () => void;
   onUserClick?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ 
-  activeTab = 'terminal', 
-  isOpen, 
-  onClose, 
+export const Sidebar: React.FC<SidebarProps> = ({
+  activeTab = 'terminal',
+  isOpen,
+  onClose,
   onSettingsClick,
   onTerminalClick,
   onActivityClick,
   onGithubClick,
+  onAgentsClick,
   onUserClick
 }) => {
   const navItems = [
     { id: 'terminal', icon: Terminal, label: 'Terminal', onClick: onTerminalClick },
     { id: 'activity', icon: Activity, label: 'Activity', onClick: onActivityClick },
     { id: 'github', icon: Github, label: 'GitHub', onClick: onGithubClick },
+    { id: 'agents', icon: Bot, label: 'Agents', onClick: onAgentsClick },
     { id: 'settings', icon: Settings, label: 'Settings', onClick: onSettingsClick },
   ];
 
