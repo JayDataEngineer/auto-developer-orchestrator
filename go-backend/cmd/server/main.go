@@ -84,6 +84,11 @@ func main() {
 		r.Post("/dispatch", julesHandler.Dispatch)
 		r.Post("/dispatch/all", julesHandler.DispatchAll)
 
+		// Jules Session Management
+		r.Get("/jules/sessions", julesHandler.ListSessions)
+		r.Get("/jules/sessions/:id", julesHandler.GetSession)
+		r.Post("/jules/sessions/:id/approve-plan", julesHandler.ApprovePlan)
+
 		// Merge
 		r.Post("/merge", checklistHandler.Merge)
 

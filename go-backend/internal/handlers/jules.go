@@ -9,26 +9,40 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/jules"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
+	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
 
 // JulesHandler handles Jules API integration
 type JulesHandler struct {
-	db        *storage.Database
-	logger    *zap.Logger
+	db          *storage.Database
+	logger      *zap.Logger
 	julesClient *jules.Client
 	httpClient  *http.Client
+	poller      *JulesPoller
+}
+
+// JulesPoller handles polling for Jules session status
+type JulesPoller struct {
+	db       *storage.Database
+	logger   *zap.Logger
+	httpClient *http.Client
+	ticker   *time.Ticker
+	done     chan bool
+	mu       sync.RWMutex
+	running  bool
 }
 
 // NewJulesHandler creates a new JulesHandler
 func NewJulesHandler(db *storage.Database, logger *zap.Logger) *JulesHandler {
 	apiKey := os.Getenv("JULES_API_KEY")
-	
-	return &JulesHandler{
+
+	handler := &JulesHandler{
 		db:     db,
 		logger: logger,
 		julesClient: jules.NewClient(apiKey),
@@ -36,6 +50,226 @@ func NewJulesHandler(db *storage.Database, logger *zap.Logger) *JulesHandler {
 			Timeout: 120 * time.Second,
 		},
 	}
+
+	// Initialize and start poller
+	handler.poller = NewJulesPoller(db, logger)
+	handler.poller.Start()
+
+	return handler
+}
+
+// NewJulesPoller creates a new JulesPoller
+func NewJulesPoller(db *storage.Database, logger *zap.Logger) *JulesPoller {
+	return &JulesPoller{
+		db:     db,
+		logger: logger,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		ticker:  time.NewTicker(30 * time.Second), // Poll every 30 seconds
+		done:    make(chan bool),
+		running: false,
+	}
+}
+
+// Start begins the polling loop
+func (p *JulesPoller) Start() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.running {
+		return
+	}
+
+	p.running = true
+	go p.pollLoop()
+
+	p.logger.Info("Jules poller started")
+}
+
+// Stop halts the polling loop
+func (p *JulesPoller) Stop() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.running {
+		return
+	}
+
+	p.done <- true
+	p.ticker.Stop()
+	p.running = false
+
+	p.logger.Info("Jules poller stopped")
+}
+
+// pollLoop runs the polling loop
+func (p *JulesPoller) pollLoop() {
+	for {
+		select {
+		case <-p.ticker.C:
+			p.pollActiveSessions()
+		case <-p.done:
+			return
+		}
+	}
+}
+
+// pollActiveSessions polls all active Jules sessions
+func (p *JulesPoller) pollActiveSessions() {
+	ctx := context.Background()
+
+	// Get all active sessions from database
+	sessions, err := p.db.GetActiveJulesSessions(ctx)
+	if err != nil {
+		p.logger.Error("Failed to get active sessions", zap.Error(err))
+		return
+	}
+
+	if len(sessions) == 0 {
+		return
+	}
+
+	apiKey := os.Getenv("JULES_API_KEY")
+	if apiKey == "" {
+		return
+	}
+
+	for _, session := range sessions {
+		p.pollSession(session, apiKey)
+	}
+}
+
+// pollSession polls a single Jules session
+func (p *JulesPoller) pollSession(session storage.JulesSession, apiKey string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Call Jules API to get session status
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		fmt.Sprintf("https://jules.googleapis.com/v1alpha/sessions/%s", session.SessionID),
+		nil)
+	if err != nil {
+		p.logger.Error("Failed to create Jules status request",
+			zap.String("session_id", session.SessionID),
+			zap.Error(err))
+		return
+	}
+
+	req.Header.Set("x-goog-api-key", apiKey)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		p.logger.Error("Failed to poll Jules session",
+			zap.String("session_id", session.SessionID),
+			zap.Error(err))
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		p.logger.Error("Failed to read Jules response",
+			zap.String("session_id", session.SessionID),
+			zap.Error(err))
+		return
+	}
+
+	// Parse response
+	var statusResp struct {
+		Name       string `json:"name"`
+		State      string `json:"state"`
+		Plan       *struct {
+			Description string `json:"description"`
+		} `json:"plan,omitempty"`
+		SourceContext *struct {
+			Git *struct {
+				PullRequest *struct {
+					Url string `json:"pullRequest"`
+				} `json:"git"`
+			} `json:"git,omitempty"`
+		} `json:"sourceContext,omitempty"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+
+	if err := json.Unmarshal(body, &statusResp); err != nil {
+		p.logger.Error("Failed to parse Jules status",
+			zap.String("session_id", session.SessionID),
+			zap.Error(err))
+		return
+	}
+
+	// Update session in database
+	session.Status = statusResp.State
+	session.UpdatedAt = time.Now()
+	session.LastPolledAt = time.Now()
+
+	// Extract PR URL if available
+	if statusResp.SourceContext != nil && statusResp.SourceContext.Git != nil &&
+		statusResp.SourceContext.Git.PullRequest != nil {
+		session.PRURL = statusResp.SourceContext.Git.PullRequest.Url
+	}
+
+	// Extract error if available
+	if statusResp.Error != nil {
+		session.ErrorMessage = statusResp.Error.Message
+	}
+
+	// Check if session is complete
+	if statusResp.State == "COMPLETED" || statusResp.State == "FAILED" {
+		// Update task in checklist
+		if err := p.markTaskComplete(session.ProjectName, session.TaskID); err != nil {
+			p.logger.Error("Failed to mark task complete",
+				zap.String("task_id", session.TaskID),
+				zap.Error(err))
+		}
+	}
+
+	// Save updated session
+	if err := p.db.UpdateJulesSession(ctx, &session); err != nil {
+		p.logger.Error("Failed to update session",
+			zap.String("session_id", session.SessionID),
+			zap.Error(err))
+	}
+
+	p.logger.Info("Polled Jules session",
+		zap.String("session_id", session.SessionID),
+		zap.String("status", session.Status),
+		zap.String("pr_url", session.PRURL))
+}
+
+// markTaskComplete marks a task as completed in the checklist
+func (p *JulesPoller) markTaskComplete(project, taskID string) error {
+	// Get project directory
+	projectDir, err := p.db.GetProjectDir(context.Background(), project)
+	if err != nil {
+		return err
+	}
+
+	// Read checklist
+	checklistPath := projectDir + "/TODO_FOR_JULES.md"
+	content, err := os.ReadFile(checklistPath)
+	if err != nil {
+		return err
+	}
+
+	// Parse task index from taskID (e.g., "task-4" -> 4)
+	var index int
+	fmt.Sscanf(taskID, "task-%d", &index)
+
+	// Update checklist
+	lines := bytes.Split(content, []byte("\n"))
+	if index >= 0 && index < len(lines) {
+		line := string(lines[index])
+		if strings.Contains(line, "- [ ]") {
+			lines[index] = []byte(strings.Replace(line, "- [ ]", "- [x]", 1))
+			return os.WriteFile(checklistPath, bytes.Join(lines, []byte("\n")), 0644)
+		}
+	}
+
+	return nil
 }
 
 // DispatchRequest represents a task dispatch request
@@ -115,7 +349,16 @@ func (h *JulesHandler) Dispatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store session in database for polling
-	if err := h.db.StoreJulesSession(r.Context(), req.Project, req.TaskID, session.ID); err != nil {
+	julesSession := &storage.JulesSession{
+		ProjectName:  req.Project,
+		TaskID:       req.TaskID,
+		SessionID:    session.ID,
+		Status:       "PLANNING",
+		PlanApproved: false,
+		IssueURL:     "",
+		PRURL:        "",
+	}
+	if err := h.db.CreateJulesSession(r.Context(), julesSession); err != nil {
 		h.logger.Warn("Failed to store session", zap.Error(err))
 	}
 
@@ -128,10 +371,10 @@ func (h *JulesHandler) Dispatch(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":   true,
-		"message":   fmt.Sprintf("Task %s dispatched to JULES", req.TaskID),
-		"task_id":   req.TaskID,
-		"issue_url": fmt.Sprintf("https://jules.google.com/session/%s", session.ID),
+		"success":    true,
+		"message":    fmt.Sprintf("Task %s dispatched to JULES", req.TaskID),
+		"task_id":    req.TaskID,
+		"issue_url":  fmt.Sprintf("https://jules.google.com/session/%s", session.ID),
 		"session_id": session.ID,
 	})
 }
@@ -374,4 +617,82 @@ func (c *JulesClient) ApprovePlan(ctx context.Context, sessionID string) error {
 	}
 
 	return nil
+}
+
+// ListSessions returns all Jules sessions
+func (h *JulesHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	sessions, err := h.db.GetActiveJulesSessions(ctx)
+	if err != nil {
+		h.logger.Error("Failed to get sessions", zap.Error(err))
+		http.Error(w, "Failed to get sessions", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"sessions": sessions,
+	})
+}
+
+// GetSession retrieves a single Jules session
+func (h *JulesHandler) GetSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	if sessionID == "" {
+		http.Error(w, "Session ID required", http.StatusBadRequest)
+		return
+	}
+
+	session, err := h.db.GetJulesSession(r.Context(), sessionID)
+	if err != nil {
+		h.logger.Error("Failed to get session", zap.Error(err))
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"session": session,
+	})
+}
+
+// ApprovePlan approves a Jules session plan
+func (h *JulesHandler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	if sessionID == "" {
+		http.Error(w, "Session ID required", http.StatusBadRequest)
+		return
+	}
+
+	apiKey := os.Getenv("JULES_API_KEY")
+	if apiKey == "" {
+		http.Error(w, "JULES_API_KEY not configured", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	if err := h.julesClient.ApprovePlan(ctx, sessionID); err != nil {
+		h.logger.Error("Failed to approve plan", zap.Error(err))
+		http.Error(w, fmt.Sprintf("Failed to approve plan: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Update session in database
+	session, err := h.db.GetJulesSession(ctx, sessionID)
+	if err == nil {
+		session.PlanApproved = true
+		session.Status = "IN_PROGRESS"
+		h.db.UpdateJulesSession(ctx, session)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Plan approved",
+	})
 }
