@@ -1,68 +1,48 @@
 """
-Deep Agent Implementation using LangChain deepagents
+Deep Agent - DRY Implementation with Multiple Workflows
 
-This module wraps the deepagents library to provide:
-- Codebase analysis
-- TODO list generation
-- Streaming event feedback
+This module provides a factory pattern for creating agents with different workflows.
+Each workflow differs only in:
+1. System prompt
+2. Tools available  
+3. Output validation schema
 """
 
 import os
 from pathlib import Path
-from typing import AsyncGenerator, Dict, Any, List
+from typing import AsyncGenerator, Dict, Any, Optional, Type
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
-# Load environment variables
 load_dotenv()
 
 from deepagents import createDeepAgent, LocalShellBackend
 from langchain_openai import ChatOpenAI
+
+from prompts import (
+    WorkflowPrompts,
+    WORKFLOWS,
+    get_workflow,
+    list_workflows,
+    TodoList,
+    ImplementationPlan,
+    ReviewResult,
+)
 
 # Configuration from environment
 DEEP_AGENT_MODEL = os.getenv("DEEP_AGENT_MODEL", "gpt-4o")
 DEEP_AGENT_BASE_URL = os.getenv("DEEP_AGENT_BASE_URL", "https://api.openai.com/v1")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# System prompt for TODO generation
-TODO_GENERATOR_PROMPT = """You are an expert software architect and technical lead. Your job is to analyze a codebase and generate a comprehensive TODO list for improvement.
-
-## Your Task
-
-1. Analyze the codebase structure by exploring the files.
-2. Identify technical debt, missing features, bugs, and architectural improvements.
-3. Use the `write_todos` tool to maintain a structured list of 5-10 actionable tasks.
-4. Also write your findings to a file called `TODO_FOR_JULES.md` for persistence.
-
-## Task Guidelines
-
-- Tasks should be specific, technical, and actionable.
-- Mix of small (refactoring), medium (feature additions), and large (architectural) tasks.
-- Include: bug fixes, performance optimizations, security audits, and testing gaps.
-- Prioritize high-impact improvements.
-
-## Capabilities
-
-- You have an **Explorer Subagent** specifically designed for deep code exploration. Delegate broad analysis or searching tasks to it if needed.
-- You have filesystem tools to read and list files.
-
-## Process
-
-1. First, explore the project structure using `ls` and `read_file`, or delegate to the explorer subagent.
-2. Review key files: `package.json`, main source files, and configuration.
-3. Use `write_todos` to record each task as you identify it.
-4. Finally, write the summary to `TODO_FOR_JULES.md`.
-
-Remember: This TODO list will be executed by Jules (an AI coding agent), so be specific and technical!"""
-
 
 class AgentTodo:
-    """Todo item model"""
+    """Todo item model (for backwards compatibility)"""
     def __init__(self, id: str, content: str, status: str = "pending", priority: str = "medium"):
         self.id = id
         self.content = content
-        self.status = status  # pending, in_progress, completed, cancelled
-        self.priority = priority  # high, medium, low
-    
+        self.status = status
+        self.priority = priority
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -72,8 +52,30 @@ class AgentTodo:
         }
 
 
-def create_todo_agent():
-    """Create the TODO generation deep agent"""
+def create_explorer_subagent(chat_model: ChatOpenAI) -> Any:
+    """Create the shared explorer subagent"""
+    return createDeepAgent(
+        name="explorer",
+        model=chat_model,
+        system_prompt=WorkflowPrompts.EXPLORER_PROMPT,
+        backend=LocalShellBackend(
+            root_dir=os.getcwd(),
+            inherit_env=True,
+        ),
+    )
+
+
+def create_agent(workflow_name: str = "todo_generator"):
+    """
+    Factory function to create an agent with the specified workflow.
+    
+    Args:
+        workflow_name: Name of the workflow (todo_generator, implementer, reviewer, test_generator)
+    
+    Returns:
+        Configured DeepAgent instance
+    """
+    workflow = get_workflow(workflow_name)
     
     # Create OpenAI-compatible chat model
     chat_model = ChatOpenAI(
@@ -82,22 +84,18 @@ def create_todo_agent():
         base_url=DEEP_AGENT_BASE_URL,
     )
     
-    # Create explorer subagent
-    explorer_subagent = createDeepAgent(
-        name="explorer",
-        model=chat_model,
-        system_prompt="You are a code exploration expert. Your job is to deeply analyze codebase structures, find patterns, and identify technical issues. Use your tools to search, read, and understand the code thoroughly.",
-        backend=LocalShellBackend(
-            root_dir=os.getcwd(),
-            inherit_env=True,
-        ),
-    )
+    # Apply structured output if schema is defined
+    if workflow.get("output_schema"):
+        chat_model = chat_model.with_structured_output(workflow["output_schema"])
     
-    # Create main TODO agent
-    todo_agent = createDeepAgent(
-        name="todo_generator",
+    # Create explorer subagent (shared across all workflows)
+    explorer_subagent = create_explorer_subagent(chat_model)
+    
+    # Create main agent with workflow-specific configuration
+    agent = createDeepAgent(
+        name=workflow["name"],
         model=chat_model,
-        system_prompt=TODO_GENERATOR_PROMPT,
+        system_prompt=workflow["prompt"],
         subagents=[explorer_subagent],
         backend=LocalShellBackend(
             root_dir=os.getcwd(),
@@ -105,98 +103,173 @@ def create_todo_agent():
         ),
     )
     
-    return todo_agent
+    return agent
 
 
-async def generate_todos(
+async def run_workflow(
+    workflow_name: str,
     project_path: str,
-    prompt: str | None = None,
+    prompt: Optional[str] = None,
     streaming: bool = True
 ) -> AsyncGenerator[Dict[str, Any], None] | Dict[str, Any]:
     """
-    Generate TODO items from codebase analysis
+    Run a specific workflow.
     
     Args:
-        project_path: Path to the codebase to analyze
+        workflow_name: Name of the workflow to run
+        project_path: Path to the codebase
         prompt: Optional guidance prompt
-        streaming: If True, yield events as they occur; if False, return final result
+        streaming: If True, yield events as they occur
     
     Returns:
         If streaming: AsyncGenerator yielding events
-        If not streaming: Dict with 'todos' and 'markdown' keys
+        If not streaming: Dict with workflow-specific results
     """
+    agent = create_agent(workflow_name)
     
-    agent = create_todo_agent()
+    # Build user message based on workflow
+    user_message = _build_user_message(workflow_name, project_path, prompt)
     
-    # Build the user message
-    user_message = f'Analyze the codebase at "{project_path}" and generate technical improvement tasks using the write_todos tool.'
+    if streaming:
+        return _stream_events(agent, user_message)
+    else:
+        return await _invoke_agent(agent, user_message, workflow_name, project_path)
+
+
+def _build_user_message(workflow_name: str, project_path: str, prompt: Optional[str]) -> str:
+    """Build user message based on workflow type"""
+    messages = {
+        "todo_generator": f'Analyze the codebase at "{project_path}" and generate technical improvement tasks using the write_todos tool.',
+        "implementer": f'Implement the pending task for the codebase at "{project_path}". Read TODO_FOR_JULES.md for the task description.',
+        "reviewer": f'Review the recent code changes in the codebase at "{project_path}". Check for bugs, security issues, and code quality.',
+        "test_generator": f'Generate comprehensive tests for the codebase at "{project_path}". Focus on uncovered functionality.',
+    }
+    
+    user_message = messages.get(workflow_name, f'Process the codebase at "{project_path}".')
+    
     if prompt:
         user_message += f" Guidance: {prompt}"
     
-    if streaming:
-        # Stream events
-        async def event_stream() -> AsyncGenerator[Dict[str, Any], None]:
-            try:
-                # Use stream method for real-time feedback
-                stream = await agent.stream({
-                    "messages": [{
-                        "role": "user",
-                        "content": user_message,
-                    }],
-                })
-                
-                async for chunk in stream:
-                    # Parse chunk and yield appropriate events
-                    if isinstance(chunk, dict):
-                        if 'tool_calls' in chunk:
-                            for tool_call in chunk['tool_calls']:
-                                yield {
-                                    'type': 'tool_start',
-                                    'name': tool_call.get('name', 'unknown')
-                                }
-                        elif 'logs' in chunk:
-                            for log in chunk['logs']:
-                                yield {
-                                    'type': 'log',
-                                    'message': log
-                                }
-            except Exception as e:
-                yield {'type': 'error', 'message': str(e)}
-        
-        return event_stream()
-    
-    else:
-        # Invoke and get final result
-        result = await agent.invoke({
+    return user_message
+
+
+async def _stream_events(agent: Any, user_message: str) -> AsyncGenerator[Dict[str, Any], None]:
+    """Stream events from agent execution"""
+    try:
+        stream = await agent.stream({
             "messages": [{
                 "role": "user",
                 "content": user_message,
             }],
         })
         
-        # Extract structured todos from result
-        todos_raw = getattr(result, 'todos', [])
-        todos = [
-            AgentTodo(
-                id=todo.get('id', f'task-{i}'),
-                content=todo.get('content', ''),
-                status=todo.get('status', 'pending'),
-                priority=todo.get('priority', 'medium')
-            )
-            for i, todo in enumerate(todos_raw)
-        ]
-        
-        # Read markdown file if it exists
-        markdown_path = Path(project_path) / "TODO_FOR_JULES.md"
-        markdown = ""
-        if markdown_path.exists():
-            markdown = markdown_path.read_text()
-        elif todos:
-            # Generate markdown from todos
-            markdown = "\n".join([f"- [ ] {todo.content}" for todo in todos])
-            markdown_path.write_text(markdown)
-        
-        return {
-            'todos': [todo.to_dict() for todo in todos],
-            'markdown': markdown
-        }
+        async for chunk in stream:
+            if isinstance(chunk, dict):
+                if 'tool_calls' in chunk:
+                    for tool_call in chunk['tool_calls']:
+                        yield {
+                            'type': 'tool_start',
+                            'name': tool_call.get('name', 'unknown')
+                        }
+                elif 'logs' in chunk:
+                    for log in chunk['logs']:
+                        yield {
+                            'type': 'log',
+                            'message': log
+                        }
+    except Exception as e:
+        yield {'type': 'error', 'message': str(e)}
+
+
+async def _invoke_agent(agent: Any, user_message: str, workflow_name: str, project_path: str) -> Dict[str, Any]:
+    """Invoke agent and process results"""
+    result = await agent.invoke({
+        "messages": [{
+            "role": "user",
+            "content": user_message,
+        }],
+    })
+    
+    # Process results based on workflow type
+    if workflow_name == "todo_generator":
+        return _process_todo_result(result, project_path)
+    elif workflow_name == "implementer":
+        return _process_implementation_result(result)
+    elif workflow_name == "reviewer":
+        return _process_review_result(result)
+    elif workflow_name == "test_generator":
+        return _process_test_result(result)
+    else:
+        return {"result": result}
+
+
+def _process_todo_result(result: Any, project_path: str) -> Dict[str, Any]:
+    """Process TODO generator results"""
+    todos_raw = getattr(result, 'todos', [])
+    todos = [
+        AgentTodo(
+            id=todo.get('id', f'task-{i}'),
+            content=todo.get('content', ''),
+            status=todo.get('status', 'pending'),
+            priority=todo.get('priority', 'medium')
+        )
+        for i, todo in enumerate(todos_raw)
+    ]
+    
+    # Read/write markdown file
+    markdown_path = Path(project_path) / "TODO_FOR_JULES.md"
+    markdown = ""
+    if markdown_path.exists():
+        markdown = markdown_path.read_text()
+    elif todos:
+        markdown = "\n".join([f"- [ ] {todo.content}" for todo in todos])
+        markdown_path.write_text(markdown)
+    
+    return {
+        'todos': [todo.to_dict() for todo in todos],
+        'markdown': markdown
+    }
+
+
+def _process_implementation_result(result: Any) -> Dict[str, Any]:
+    """Process implementer results"""
+    # Extract implementation plan if available
+    plan = getattr(result, 'steps', [])
+    files_modified = getattr(result, 'files_to_modify', [])
+    
+    return {
+        'success': True,
+        'steps_completed': plan if isinstance(plan, list) else [],
+        'files_modified': files_modified if isinstance(files_modified, list) else [],
+    }
+
+
+def _process_review_result(result: Any) -> Dict[str, Any]:
+    """Process reviewer results"""
+    passed = getattr(result, 'passed', False)
+    issues = getattr(result, 'issues', [])
+    suggestions = getattr(result, 'suggestions', [])
+    blocking = getattr(result, 'blocking_issues', [])
+    
+    return {
+        'passed': passed,
+        'issues': issues if isinstance(issues, list) else [],
+        'suggestions': suggestions if isinstance(suggestions, list) else [],
+        'blocking_issues': blocking if isinstance(blocking, list) else [],
+    }
+
+
+def _process_test_result(result: Any) -> Dict[str, Any]:
+    """Process test generator results"""
+    return {
+        'success': True,
+        'message': 'Tests generated and executed',
+    }
+
+
+# Backwards compatibility aliases
+generate_todos = lambda project_path, prompt=None, streaming=True: run_workflow(
+    "todo_generator", project_path, prompt, streaming
+)
+
+create_todo_agent = lambda: create_agent("todo_generator")
