@@ -233,11 +233,11 @@ export default function App() {
   const handleGenerateChecklist = async (prompt?: string) => {
     if (!selectedProject) return;
     setIsGeneratingChecklist(true);
-    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] DEEP AGENT: Initializing Python LangGraph Server connection...`]);
+    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Generating checklist from codebase analysis...`]);
     if (prompt) {
-      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] DEEP AGENT: Using guidance prompt: "${prompt}"`]);
+      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Using guidance prompt: "${prompt}"`]);
     }
-    
+
     try {
       const res = await fetch('/api/ai/agent-checklist', {
         method: 'POST',
@@ -247,9 +247,9 @@ export default function App() {
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || "Deep Agent failed");
+        throw new Error(data.error || "Checklist generation failed");
       }
-      
+
       if (!res.body) throw new Error("No response body");
 
       const reader = res.body.getReader();
@@ -263,12 +263,12 @@ export default function App() {
         if (value) {
           const chunk = decoder.decode(value, { stream: true });
           const lines = chunk.split('\n\n');
-          
+
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));
-                
+
                 if (data.error) {
                   throw new Error(data.error);
                 }
@@ -277,7 +277,7 @@ export default function App() {
                 if (data.event === "final_result") {
                   finalTasksFromEvent = data.todos;
                 } else if (data.event === "on_tool_start") {
-                  setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] AGENT_OBSERVATION: Running tool ${data.name}...`]);
+                  setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Running tool ${data.name}...`]);
                 }
               } catch (e) {
                 console.error("Error parsing SSE chunk", e);
@@ -302,14 +302,14 @@ export default function App() {
           body: JSON.stringify({ tasks: newTasks, project: selectedProject })
         });
 
-        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] DEEP AGENT: Analysis complete. Generated ${newTasks.length} architectural directives.`]);
+        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Analysis complete. Generated ${newTasks.length} tasks.`]);
         fetchChecklist();
       } else {
-        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] DEEP AGENT: Completed but no tasks were generated.`]);
+        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Completed but no tasks were generated.`]);
       }
     } catch (error: any) {
       console.error("Failed to generate checklist", error);
-      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: Deep Agent failed: ${error.message}`]);
+      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: ${error.message}`]);
     } finally {
       setIsGeneratingChecklist(false);
     }
