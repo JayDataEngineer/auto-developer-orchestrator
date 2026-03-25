@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/go-chi/chi/v5"
@@ -33,8 +34,9 @@ func main() {
 	defer db.Close()
 
 	// Initialize handlers
+	gitOps := git.NewGitOps(logger)
 	checklistHandler := handlers.NewChecklistHandler(db, logger)
-	projectHandler := handlers.NewProjectHandler(db, logger)
+	projectHandler := handlers.NewProjectHandler(db, logger, gitOps)
 	julesHandler := handlers.NewJulesHandler(db, logger)
 	aiHandler := handlers.NewAIHandler(logger) // Will call Python microservice
 	configHandler := handlers.NewConfigHandler(logger)
