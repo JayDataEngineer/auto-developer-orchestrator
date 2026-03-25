@@ -1,4 +1,5 @@
 # Development Docker Compose - Hot Reload Enabled
+# Integrated with shared-docker-infra via Traefik
 services:
   # ===========================================
   # Go Backend with Hot Reload
@@ -8,15 +9,19 @@ services:
       context: ./go-backend
       dockerfile: Dockerfile.dev
     container_name: orchestrator-go-dev
-    ports:
-      - "3847:3847"
+    # No ports exposed - access via Traefik
     environment:
       - SERVER_PORT=3847
       - DATABASE_URL=/data/orchestrator.db
       - JULES_API_KEY=${JULES_API_KEY}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - PYTHON_SERVICE_URL=http://python-agent:8080
-      - LITELLM_PROXY_URL=${LITELLM_PROXY_URL:-http://litellm:4000}
+      # Use shared LiteLLM via Traefik
+      - LITELLM_PROXY_URL=${LITELLM_PROXY_URL:-http://litellm.local}
+      # Langfuse observability
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse.local}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
     volumes:
       - ./go-backend:/app
       - ./projects:/app/projects
@@ -26,8 +31,15 @@ services:
     depends_on:
       - python-agent
     networks:
-      - orchestrator-network
+      - shared-infra
     command: ["air", "-c", ".air.toml"] # Hot reload with air
+    # Traefik labels for development access
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.orchestrator-go-dev.rule=Host(`orchestrator-go.${INFRA_DOMAIN:-local}`)"
+      - "traefik.http.routers.orchestrator-go-dev.entrypoints=http"
+      - "traefik.http.services.orchestrator-go-dev.loadbalancer.server.port=3847"
+      - "traefik.http.routers.orchestrator-go-dev.priority=10"
 
   # ===========================================
   # Python Deep Agent Service with Hot Reload
@@ -37,8 +49,7 @@ services:
       context: ./python-agent
       dockerfile: Dockerfile.dev
     container_name: orchestrator-python-dev
-    ports:
-      - "8080:8080"
+    # No ports exposed - internal only
     environment:
       - PYTHON_SERVICE_PORT=8080
       - DEEP_AGENT_MODEL=${DEEP_AGENT_MODEL:-gpt-4o}
@@ -46,11 +57,15 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      # Langfuse observability
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse.local}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
     volumes:
       - ./python-agent:/app
       - ./projects:/app/projects
     networks:
-      - orchestrator-network
+      - shared-infra
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
 
   # ===========================================
@@ -61,19 +76,26 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     container_name: orchestrator-frontend-dev
-    ports:
-      - "5173:5173"
+    # No ports exposed - access via Traefik
     environment:
       - VITE_HOST=0.0.0.0
-      - VITE_PORT=5173
-      - VITE_API_URL=http://localhost:3847
+      - VITE_PORT=5194
+      - VITE_API_URL=http://orchestrator.local/api
     volumes:
       - .:/app
       - /app/node_modules
     networks:
-      - orchestrator-network
-    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+      - shared-infra
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5194"]
+    # Traefik labels for frontend access
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.orchestrator-frontend.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`)"
+      - "traefik.http.routers.orchestrator-frontend.entrypoints=http"
+      - "traefik.http.services.orchestrator-frontend.loadbalancer.server.port=5194"
+      - "traefik.http.routers.orchestrator-frontend.priority=5"
 
 networks:
-  orchestrator-network:
-    driver: bridge
+  shared-infra:
+    external: true
+    name: ${SHARED_NETWORK_NAME:-shared-infra}
