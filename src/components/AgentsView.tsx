@@ -1,12 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, MessageSquare, Loader, Sparkles, Trash2, ChevronRight } from 'lucide-react';
+import { 
+  Send, Bot, MessageSquare, Loader, Sparkles, Trash2, 
+  ChevronRight, CheckCircle2, AlertTriangle, Play, ExternalLink,
+  Terminal as TerminalIcon, GitPullRequest, ListTodo, Link as LinkIcon
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { ConversationSidebar } from './ConversationSidebar';
 
 interface Message {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system' | 'jules_activity';
   content: string;
   timestamp: string;
+  activityData?: any;
 }
 
 interface Conversation {
@@ -15,6 +21,9 @@ interface Conversation {
   title: string;
   lastActive: string;
   messages: Message[];
+  julesSessionId?: string;
+  julesState?: string;
+  julesSource?: string;
 }
 
 interface AgentsViewProps {
@@ -23,7 +32,7 @@ interface AgentsViewProps {
   projects?: string[];
 }
 
-type AIProvider = 'openai' | 'claude' | 'gemini';
+type AIProvider = 'openai' | 'claude' | 'gemini' | 'jules';
 
 interface ProviderConfig {
   name: string;
@@ -54,48 +63,132 @@ const PROVIDERS: Record<AIProvider, ProviderConfig> = {
     color: 'border-blue-500/30',
     gradient: 'from-blue-500/20 to-blue-600/20',
     model: 'gemini-2.0'
+  },
+  jules: {
+    name: 'Jules AI',
+    icon: '⚡',
+    color: 'border-primary/30',
+    gradient: 'from-primary/20 to-magenta-500/20',
+    model: 'v1-autonomous'
   }
 };
 
 export const AgentsView: React.FC<AgentsViewProps> = ({ className, selectedProject, projects = [] }) => {
-  const [selectedProvider, setSelectedProvider] = useState<AIProvider>('gemini');
+  const [selectedProvider, setSelectedProvider] = useState<AIProvider>('jules');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [julesSources, setJulesSources] = useState<any[]>([]);
+  const [isSearchingSources, setIsSearchingSources] = useState(false);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const pollInterval = useRef<NodeJS.Timeout | null>(null);
 
   const activeConversation = conversations.find(c => c.id === activeConversationId);
   const messages = activeConversation?.messages || [];
 
-  // Fetch conversations on mount
+  // Fetch conversations and sources
   useEffect(() => {
-    const fetchConversations = async () => {
-      try {
-        const res = await fetch('/api/ai/conversations');
-        const data = await res.json();
-        setConversations(data.conversations || []);
-        if (data.conversations?.length > 0) {
-          setActiveConversationId(data.conversations[0].id);
-        }
-      } catch (e) {
-        console.error("Failed to fetch conversations");
-      }
-    };
     fetchConversations();
+    fetchJulesSources();
   }, []);
+
+  const fetchConversations = async () => {
+    try {
+      const res = await fetch('/api/ai/conversations');
+      const data = await res.json();
+      setConversations(data.conversations || []);
+      if (data.conversations?.length > 0) {
+        setActiveConversationId(data.conversations[0].id);
+      }
+    } catch (e) {
+      console.error("Failed to fetch conversations");
+    }
+  };
+
+  const fetchJulesSources = async () => {
+    setIsSearchingSources(true);
+    try {
+      const res = await fetch('/api/jules/sources');
+      const data = await res.json();
+      setJulesSources(data.sources || []);
+    } catch (e) {
+      console.error("Failed to fetch Jules sources");
+    } finally {
+      setIsSearchingSources(false);
+    }
+  };
 
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Polling for Jules activities
+  useEffect(() => {
+    if (activeConversation?.julesSessionId && activeConversation.julesState !== 'COMPLETED') {
+      startPolling();
+    } else {
+      stopPolling();
+    }
+    return () => stopPolling();
+  }, [activeConversationId, activeConversation?.julesSessionId, activeConversation?.julesState]);
+
+  const startPolling = () => {
+    stopPolling();
+    pollInterval.current = setInterval(syncJulesData, 10000);
+  };
+
+  const stopPolling = () => {
+    if (pollInterval.current) clearInterval(pollInterval.current);
+  };
+
+  const syncJulesData = async () => {
+    if (!activeConversation?.julesSessionId) return;
+    try {
+      const [sessionRes, activitiesRes] = await Promise.all([
+        fetch(`/api/jules/sessions/${activeConversation.julesSessionId}`),
+        fetch(`/api/jules/sessions/${activeConversation.julesSessionId}/activities`)
+      ]);
+      
+      const sessionData = await sessionRes.json();
+      const activitiesData = await activitiesRes.json();
+
+      // Jules returns activity list as { activities: [...] } or null if empty
+      const newActivities = activitiesData.activities || [];
+      const newMessages: Message[] = newActivities.map((act: any) => ({
+        role: 'jules_activity',
+        content: act.description || act.type,
+        timestamp: act.createTime,
+        activityData: act
+      }));
+
+      setConversations(prev => prev.map(c => 
+        c.id === activeConversationId 
+          ? { ...c, julesState: sessionData.state, messages: mergeMessages(c.messages, newMessages) } 
+          : c
+      ));
+    } catch (e) {
+      console.error("Sync failed", e);
+    }
+  };
+
+  const mergeMessages = (existing: Message[], incoming: Message[]) => {
+    const combined = [...existing];
+    incoming.forEach(inc => {
+      const exists = combined.find(ex => ex.timestamp === inc.timestamp && ex.role === 'jules_activity');
+      if (!exists) combined.push(inc);
+    });
+    return combined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  };
+
   const handleNewConversation = async (projectId: string) => {
     const newId = `conv-${Date.now()}`;
     const newConv: Conversation = {
       id: newId,
       projectId,
-      title: "New Architectural Sync",
+      title: "New Agent Sync",
       lastActive: new Date().toISOString(),
       messages: []
     };
@@ -122,67 +215,168 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ className, selectedProje
       timestamp: new Date().toISOString()
     };
 
-    // Optimistic update
     setConversations(prev => prev.map(c => 
       c.id === activeConversationId 
         ? { ...c, messages: [...c.messages, userMessage], lastActive: new Date().toISOString() } 
         : c
     ));
     
+    const currentInput = input;
     setInput('');
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: selectedProvider,
-          message: input,
-          context: activeConversation?.projectId || selectedProject || 'codebase-analysis',
-          conversationId: activeConversationId
-        })
-      });
+      if (selectedProvider === 'jules') {
+        if (!activeConversation?.julesSessionId) {
+          // Initialize Jules Session
+          // Try to auto-detect source if not already mapped
+          let source = activeConversation?.julesSource;
+          if (!source) {
+             const matched = julesSources.find(s => s.githubRepo?.repo === activeConversation?.projectId);
+             if (matched) source = matched.name;
+          }
 
-      if (!response.ok) throw new Error('AI Engine Offline');
+          if (!source) {
+             throw new Error("Target source not found. Please link this conversation to a Jules GitHub project.");
+          }
 
-      const data = await response.json();
-      
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: data.response || 'No valid synthesis received.',
-        timestamp: new Date().toISOString()
-      };
-
-      setConversations(prev => prev.map(c => 
-        c.id === activeConversationId 
-          ? { ...c, messages: [...c.messages, assistantMessage], lastActive: new Date().toISOString() } 
-          : c
-      ));
+          const res = await fetch('/api/dispatch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              taskId: `manual-${Date.now()}`,
+              project: activeConversation?.projectId,
+              repoName: activeConversation?.projectId,
+              prompt: currentInput
+            })
+          });
+          const data = await res.json();
+          if (data.success) {
+             setConversations(prev => prev.map(c => 
+               c.id === activeConversationId ? { ...c, julesSessionId: data.julesSessionId, julesState: 'QUEUED', julesSource: source } : c
+             ));
+          } else {
+            throw new Error(data.error || "Launch sequence failed.");
+          }
+        } else {
+          // Send message to existing Jules session
+          await fetch(`/api/jules/sessions/${activeConversation.julesSessionId}/message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: currentInput })
+          });
+        }
+      } else {
+        // Generic LLM handling
+        const response = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: selectedProvider,
+            message: currentInput,
+            context: activeConversation?.projectId || selectedProject,
+            conversationId: activeConversationId
+          })
+        });
+        const data = await response.json();
+        const assistantMessage: Message = {
+          role: 'assistant',
+          content: data.response || 'No synthesis received.',
+          timestamp: new Date().toISOString()
+        };
+        setConversations(prev => prev.map(c => 
+          c.id === activeConversationId 
+            ? { ...c, messages: [...c.messages, assistantMessage] } 
+            : c
+        ));
+      }
     } catch (error: any) {
-      const errorMessage: Message = {
-        role: 'assistant',
-        content: `CORE_ERROR: ${error.message}`,
+      const errMessage: Message = {
+        role: 'system',
+        content: `ERROR: ${error.message}`,
         timestamp: new Date().toISOString()
       };
       setConversations(prev => prev.map(c => 
-        c.id === activeConversationId ? { ...c, messages: [...c.messages, errorMessage] } : c
+        c.id === activeConversationId ? { ...c, messages: [...c.messages, errMessage] } : c
       ));
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+  const handleApprovePlan = async () => {
+    if (!activeConversation?.julesSessionId) return;
+    try {
+      await fetch(`/api/jules/sessions/${activeConversation.julesSessionId}/approve`, { method: 'POST' });
+      syncJulesData();
+    } catch (e) {
+      console.error("Approval failed", e);
     }
+  };
+
+  const handleLinkSource = (sourceName: string) => {
+    setConversations(prev => prev.map(c => 
+      c.id === activeConversationId ? { ...c, julesSource: sourceName } : c
+    ));
+  };
+
+  const renderActivity = (act: any) => {
+    if (act.planGenerated) {
+      return (
+        <div className="bg-zinc-900/50 border border-primary/20 p-6 rounded space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.4em] text-primary flex items-center gap-2">
+              <ListTodo size={14} /> Strategic Plan Generated
+            </h4>
+            <button 
+              onClick={handleApprovePlan}
+              disabled={activeConversation?.julesState !== 'AWAITING_PLAN_APPROVAL'}
+              className="px-4 py-1.5 bg-primary text-black text-[9px] font-black uppercase tracking-[0.2em] rounded disabled:opacity-20 flex items-center gap-2"
+            >
+              <Play size={10} fill="currentColor" /> Authorized Execution
+            </button>
+          </div>
+          <div className="space-y-3">
+             {act.planGenerated.plan?.steps.map((step: any) => (
+               <div key={step.id} className="flex gap-4">
+                 <span className="text-primary font-mono text-[10px] w-4 shrink-0">{step.index + 1}.</span>
+                 <div className="space-y-1">
+                    <div className="text-[11px] font-bold text-white uppercase tracking-tight">{step.title}</div>
+                    <div className="text-[10px] text-zinc-500">{step.description}</div>
+                 </div>
+               </div>
+             ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (act.artifacts?.[0]?.changeSet) {
+      const patch = act.artifacts[0].changeSet.gitPatch;
+      return (
+        <div className="bg-zinc-950 border border-white/5 rounded-sm overflow-hidden">
+          <div className="px-4 py-2 border-b border-white/5 bg-zinc-900/50 flex items-center justify-between">
+            <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500 flex items-center gap-2">
+              <GitPullRequest size={12} className="text-emerald-500" /> Proposed Changeset
+            </span>
+          </div>
+          <pre className="p-4 text-[10px] font-mono text-zinc-400 overflow-x-auto max-h-60 custom-scrollbar whitespace-pre">
+            {patch.unidiffPatch}
+          </pre>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-4 text-[10px] text-zinc-500 font-mono italic">
+        <span className="text-zinc-800 tracking-tighter">[{new Date(act.createTime).toLocaleTimeString()}]</span>
+        <span className="uppercase tracking-[0.2em]">{act.description}</span>
+      </div>
+    );
   };
 
   return (
     <div className={cn("flex h-full bg-black overflow-hidden", className)}>
-      {/* Nested Sidebar */}
       <ConversationSidebar 
         projects={projects}
         conversations={conversations}
@@ -191,17 +385,26 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ className, selectedProje
         onNewConversation={handleNewConversation}
       />
 
-      {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Navigation Header */}
+        {/* Header */}
         <div className="h-12 border-b border-white/5 flex items-center px-6 shrink-0 bg-black/50 backdrop-blur-md">
           <div className="flex items-center space-x-2 text-[10px] font-mono tracking-widest text-zinc-500 uppercase font-bold">
-            <span className="hover:text-primary transition-colors cursor-pointer">{activeConversation?.projectId || 'GLOBAL_COBEBASE'}</span>
-            <ChevronRight size={10} className="text-zinc-700" />
-            <span className="text-white truncate max-w-[300px]">{activeConversation?.title || 'SELECTING_CONTEXT...'}</span>
+            <span className="hover:text-primary transition-colors cursor-pointer">{activeConversation?.projectId || 'GLOBAL'}</span>
+            <ChevronRight size={10} />
+            <span className="text-white truncate">{activeConversation?.title || 'SYNCING...'}</span>
           </div>
           <div className="flex-1" />
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-6">
+            {activeConversation?.julesState && (
+              <div className="flex items-center gap-3">
+                 <div className={cn(
+                   "w-1.5 h-1.5 rounded-full animate-pulse",
+                   activeConversation.julesState === 'COMPLETED' ? "bg-emerald-500 glow-emerald" : "bg-primary glow-primary"
+                 )} />
+                 <span className="text-[9px] font-black text-white uppercase tracking-widest">{activeConversation.julesState}</span>
+              </div>
+            )}
+             <div className="h-4 w-px bg-white/10" />
              {(Object.keys(PROVIDERS) as AIProvider[]).map(p => (
                <button
                  key={p}
@@ -217,100 +420,83 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ className, selectedProje
           </div>
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
-          {!activeConversationId ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-12">
-              <div className="w-16 h-16 rounded-full bg-primary/5 border border-primary/20 flex items-center justify-center mb-6 glow-primary">
-                <Sparkles size={32} className="text-primary" />
-              </div>
-              <h3 className="text-xl font-black italic uppercase tracking-[0.3em] text-white mb-2">Sync Initialized</h3>
-              <p className="text-zinc-500 text-xs uppercase tracking-widest leading-relaxed max-w-sm">
-                Select a project workspace or create a new conversation to begin the deep-scan synthesis.
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-10 space-y-8 custom-scrollbar">
+          {selectedProvider === 'jules' && !activeConversation?.julesSessionId && !activeConversation?.julesSource && (
+            <div className="flex flex-col items-center justify-center h-full p-12 text-center bg-zinc-900/20 border border-white/5 rounded">
+              <LinkIcon size={32} className="text-zinc-800 mb-6" />
+              <h3 className="text-sm font-black uppercase tracking-[0.3em] text-white mb-2">Source Connection Required</h3>
+              <p className="text-zinc-500 text-[10px] uppercase tracking-widest max-w-sm mb-8">
+                JULES sessions must be anchored to an authenticated repository source. Select one below to begin.
               </p>
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center">
-              <Bot size={40} className="text-zinc-800 mb-4 animate-pulse" />
-              <div className="text-[10px] font-mono text-zinc-600 uppercase tracking-[0.4em] font-bold">
-                Awaiting Input // Context Ready
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl">
+                {julesSources.map(source => (
+                  <button
+                    key={source.name}
+                    onClick={() => handleLinkSource(source.name)}
+                    className="p-4 border border-white/5 bg-zinc-900/50 hover:border-primary/50 text-left transition-all group"
+                  >
+                    <div className="text-[11px] font-bold text-white group-hover:text-primary transition-colors">{source.githubRepo?.repo}</div>
+                    <div className="text-[8px] font-mono text-zinc-600 uppercase mt-1 tracking-tighter">{source.name}</div>
+                  </button>
+                ))}
               </div>
             </div>
-          ) : (
-            <>
-              {messages.map((message, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    'flex items-start space-x-4',
-                    message.role === 'user' ? 'justify-end' : 'justify-start'
-                  )}
-                >
+          )}
+
+          {messages.map((message, i) => (
+            <div key={i} className={cn('flex items-start gap-4', message.role === 'user' ? 'justify-end' : 'justify-start')}>
+              {message.role === 'jules_activity' ? (
+                 <div className="w-full">
+                    {renderActivity(message.activityData)}
+                 </div>
+              ) : (
+                <>
                   {message.role === 'assistant' && (
                     <div className="w-8 h-8 rounded shrink-0 bg-primary/10 border border-primary/20 flex items-center justify-center">
                       <Bot size={16} className="text-primary" />
                     </div>
                   )}
-                  
-                  <div className={cn(
-                    'max-w-[85%] rounded p-4 font-mono text-[11px] leading-relaxed',
-                    message.role === 'user'
-                      ? 'bg-zinc-900 text-zinc-300 border border-white/5 order-1'
-                      : 'text-zinc-400 border-l-2 border-primary/40 bg-white/5'
-                  )}>
-                    <div className="whitespace-pre-wrap">{message.content}</div>
-                    <div className="mt-2 text-[8px] opacity-30 text-right uppercase tracking-widest">
-                      {new Date(message.timestamp).toLocaleTimeString()}
-                    </div>
-                  </div>
-
-                  {message.role === 'user' && (
-                    <div className="w-8 h-8 rounded shrink-0 bg-zinc-800 border border-white/10 flex items-center justify-center order-2 ml-4">
-                      <span className="text-[10px] font-bold text-zinc-500">YOU</span>
+                  {message.role === 'system' && (
+                    <div className="w-8 h-8 rounded shrink-0 bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                      <AlertTriangle size={16} className="text-red-500" />
                     </div>
                   )}
-                </div>
-              ))}
-              
-              {isLoading && (
-                <div className="flex items-start space-x-4 animate-pulse">
-                  <div className="w-8 h-8 rounded shrink-0 bg-primary/10 border border-primary/20 flex items-center justify-center">
-                    <Loader size={16} className="text-primary animate-spin" />
+                  <div className={cn(
+                    'max-w-[85%] rounded p-5 font-mono text-[11px] leading-relaxed',
+                    message.role === 'user' ? 'bg-zinc-900 text-zinc-300 border border-white/5' : 
+                    message.role === 'system' ? 'text-red-400 bg-red-500/5 border border-red-500/10' :
+                    'text-zinc-400 border-l-2 border-primary/40 bg-white/5'
+                  )}>
+                    <div className="whitespace-pre-wrap">{message.content}</div>
                   </div>
-                  <div className="p-4 border-l-2 border-primary/20 bg-white/5 text-[10px] font-mono text-zinc-600 uppercase tracking-widest">
-                    Synthesizing response...
-                  </div>
-                </div>
+                </>
               )}
-              
-              <div ref={messagesEndRef} />
-            </>
-          )}
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Area */}
-        <div className="p-6 border-t border-white/5">
+        {/* Input */}
+        <div className="p-8 border-t border-white/5">
           <div className="relative">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={activeConversationId ? "Sync thoughts..." : "Select context first..."}
-              disabled={!activeConversationId || isLoading}
-              className="w-full bg-zinc-900 border border-white/5 rounded p-4 pr-16 text-[11px] text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-all resize-none font-mono"
-              rows={3}
+              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
+              placeholder={activeConversationId ? "Instruct Agent..." : "Initialize Context..."}
+              disabled={isLoading || !activeConversationId}
+              className="w-full bg-zinc-900 border border-white/5 rounded p-5 pr-16 text-[11px] text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-all font-mono"
+              rows={2}
             />
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isLoading || !activeConversationId}
-              className="absolute right-4 bottom-4 p-2 bg-primary text-black rounded hover:bg-primary/80 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+              disabled={!input.trim() || isLoading}
+              className="absolute right-5 bottom-5 p-2.5 bg-primary text-black rounded hover:bg-primary/80 disabled:opacity-20 transition-all"
             >
-              <Send size={16} />
+              <Send size={18} />
             </button>
-          </div>
-          <div className="mt-4 flex items-center justify-between text-[8px] font-mono text-zinc-700 uppercase tracking-[0.3em] font-bold">
-            <span>Security: encrypted</span>
-            <span>Agent: {PROVIDERS[selectedProvider].name} // online</span>
           </div>
         </div>
       </div>
