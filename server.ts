@@ -359,25 +359,31 @@ async function startServer() {
       res.json({ 
         success: true, 
         results,
-        timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString()
       });
     }, 1500);
   });
 
+  const conversationsPath = path.join(__dirname, "conversations.json");
+  if (!fs.existsSync(conversationsPath)) {
+    fs.writeFileSync(conversationsPath, JSON.stringify({ conversations: [] }, null, 2));
+  }
+
   app.post("/api/dispatch", async (req, res) => {
-    const { taskId, project, repoOwner, repoName } = req.body;
+    const { taskId, project, repoOwner, repoName, prompt } = req.body;
     if (!project) {
       return res.status(400).json({ error: "Project name is required" });
     }
-    // Extract index from taskId (e.g., "task-4")
-    const index = parseInt(taskId.split('-')[1]);
+    
+    // Extract index from taskId if available
+    const index = taskId?.includes('-') ? parseInt(taskId.split('-')[1]) : 0;
     currentTaskIndices[project] = index;
     
     const projectDir = getProjectDir(project);
     const filePath = path.join(projectDir, "TODO_FOR_JULES.md");
-    let taskText = `Task ${taskId}`;
+    let taskText = prompt || `Task ${taskId}`;
 
-    if (fs.existsSync(filePath)) {
+    if (!prompt && fs.existsSync(filePath)) {
       const content = fs.readFileSync(filePath, "utf-8");
       const lines = content.split("\n").filter(line => line.trim().startsWith("- ["));
       if (lines[index]) {
@@ -390,14 +396,14 @@ async function startServer() {
       console.warn("JULES_API_KEY not found, returning mock response");
       return res.json({
         success: true,
-        message: `Task ${taskId} dispatched to JULES`,
-        taskId,
+        message: `Task ${taskId || 'Manual'} dispatched to JULES_MOCK_ENV`,
+        taskId: taskId || 'manual',
         issueUrl: "https://github.com/user/repo/issues/102"
       });
     }
 
     try {
-      const promoText = taskText || "Review project for architectural consistency and efficiency";
+      const promoText = taskText || "Analyze repository structure and optimize architecture.";
       const payload = {
         prompt: promoText,
         sourceContext: {
@@ -407,7 +413,7 @@ async function startServer() {
         title: promoText.length > 50 ? promoText.substring(0, 47) + "..." : promoText
       };
 
-      console.log("Dispatching to Jules:", JSON.stringify(payload, null, 2));
+      console.log("JULES_DISPATCH_INIT:", JSON.stringify(payload, null, 2));
 
       const julesRes = await fetch("https://jules.googleapis.com/v1alpha/sessions", {
         method: "POST",
@@ -418,27 +424,122 @@ async function startServer() {
         body: JSON.stringify(payload)
       });
 
+      const julesData = await julesRes.json();
+
       if (!julesRes.ok) {
-        const errText = await julesRes.text();
-        console.error(`Jules API Error ${julesRes.status}:`, errText);
-        throw new Error(`Jules API Rejected Request: ${julesRes.status}`);
+        console.error("JULES_API_ERROR:", JSON.stringify(julesData));
+        throw new Error(julesData.error?.message || `Jules API Error: ${julesRes.status}`);
       }
 
-      const julesData = await julesRes.json();
       res.json({
         success: true,
-        message: `Task ${taskId} dispatched to JULES`,
-        taskId,
-        issueUrl: `https://jules.google.com/session/${julesData.id || ''}`
+        message: `Session initialized for ${repoName || project}`,
+        taskId: taskId || 'manual',
+        issueUrl: `https://jules.google.com/session/${julesData.id || ''}`,
+        julesSessionId: julesData.id
       });
     } catch (error: any) {
-      console.error("Critical Dispatch Failure:", error);
-      // Return a 200 with error info so the UI can display it gracefully instead of a blank 500
+      console.error("JULES_CRITICAL_FAILURE:", error);
       res.json({ 
         success: false, 
-        error: error.message || "Engine Offline",
-        message: "Jules session initialization failed."
+        error: error.message || "Dispatch Engine Offline",
+        message: "Jules session failed to manifest."
       });
+    }
+  });
+
+  // Jules REST API Proxy Endpoints
+  app.get("/api/jules/sources", async (req, res) => {
+    const julesApiKey = process.env.JULES_API_KEY;
+    if (!julesApiKey) return res.status(401).json({ error: "Missing Jules API Key" });
+    try {
+      const resp = await fetch("https://jules.googleapis.com/v1alpha/sources", {
+        headers: { "x-goog-api-key": julesApiKey }
+      });
+      const data = await resp.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/jules/sessions", async (req, res) => {
+    const julesApiKey = process.env.JULES_API_KEY;
+    if (!julesApiKey) return res.status(401).json({ error: "Missing Jules API Key" });
+    try {
+      const resp = await fetch("https://jules.googleapis.com/v1alpha/sessions?pageSize=20", {
+        headers: { "x-goog-api-key": julesApiKey }
+      });
+      const data = await resp.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/jules/sessions/:id", async (req, res) => {
+    const julesApiKey = process.env.JULES_API_KEY;
+    if (!julesApiKey) return res.status(401).json({ error: "Missing Jules API Key" });
+    try {
+      const resp = await fetch(`https://jules.googleapis.com/v1alpha/sessions/${req.params.id}`, {
+        headers: { "x-goog-api-key": julesApiKey }
+      });
+      const data = await resp.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/jules/sessions/:id/activities", async (req, res) => {
+    const julesApiKey = process.env.JULES_API_KEY;
+    if (!julesApiKey) return res.status(401).json({ error: "Missing Jules API Key" });
+    try {
+      const resp = await fetch(`https://jules.googleapis.com/v1alpha/sessions/${req.params.id}/activities?pageSize=50`, {
+        headers: { "x-goog-api-key": julesApiKey }
+      });
+      const data = await resp.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/jules/sessions/:id/message", async (req, res) => {
+    const julesApiKey = process.env.JULES_API_KEY;
+    if (!julesApiKey) return res.status(401).json({ error: "Missing Jules API Key" });
+    try {
+      const resp = await fetch(`https://jules.googleapis.com/v1alpha/sessions/${req.params.id}:sendMessage`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-goog-api-key": julesApiKey 
+        },
+        body: JSON.stringify(req.body)
+      });
+      const data = await resp.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/jules/sessions/:id/approve", async (req, res) => {
+    const julesApiKey = process.env.JULES_API_KEY;
+    if (!julesApiKey) return res.status(401).json({ error: "Missing Jules API Key" });
+    try {
+      const resp = await fetch(`https://jules.googleapis.com/v1alpha/sessions/${req.params.id}:approvePlan`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-goog-api-key": julesApiKey 
+        },
+        body: JSON.stringify({})
+      });
+      const data = await resp.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 
