@@ -1,10 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import { Github, GitPullRequest, GitBranch, Check, Clock, Star, AlertCircle, GitFork, Eye } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Github, GitPullRequest, GitBranch, Check, Clock, Star, 
+  AlertCircle, GitFork, Eye, Activity, Terminal as TerminalIcon,
+  ChevronRight, ArrowRight, User
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
 interface GithubViewProps {
   repoOwner?: string;
   repoName?: string;
+}
+
+interface GithubEvent {
+  id: string;
+  type: string;
+  actor: { login: string; avatar_url: string };
+  repo: { name: string };
+  payload: any;
+  created_at: string;
 }
 
 export const GithubView: React.FC<GithubViewProps> = ({ 
@@ -14,35 +28,117 @@ export const GithubView: React.FC<GithubViewProps> = ({
   const [prs, setPrs] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [branches, setBranches] = useState<any[]>([]);
+  const [events, setEvents] = useState<GithubEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLive, setIsLive] = useState(true);
+  const pollInterval = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (repoName) {
       fetchData();
+      if (isLive) {
+        startPolling();
+      }
     }
-  }, [repoOwner, repoName]);
+    return () => stopPolling();
+  }, [repoOwner, repoName, isLive]);
+
+  const startPolling = () => {
+    stopPolling();
+    pollInterval.current = setInterval(() => {
+      fetchActivity();
+    }, 30000); // 30s polling
+  };
+
+  const stopPolling = () => {
+    if (pollInterval.current) {
+      clearInterval(pollInterval.current);
+    }
+  };
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
       const query = `owner=${repoOwner}&repo=${repoName}`;
-      const [prRes, statsRes, branchRes] = await Promise.all([
+      const [prRes, statsRes, branchRes, activityRes] = await Promise.all([
         fetch(`/api/github/prs?${query}`),
         fetch(`/api/github/stats?${query}`),
-        fetch(`/api/github/branches?${query}`)
+        fetch(`/api/github/branches?${query}`),
+        fetch(`/api/github/activity?${query}`)
       ]);
 
       const prData = await prRes.json();
       const statsData = await statsRes.json();
       const branchData = await branchRes.json();
+      const activityData = await activityRes.json();
 
       setPrs(prData.prs || []);
       setStats(statsData.stats);
       setBranches(branchData.branches || []);
+      setEvents(activityData.events || []);
     } catch (e) {
       console.error("Failed to fetch GitHub data", e);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchActivity = async () => {
+    try {
+      const query = `owner=${repoOwner}&repo=${repoName}`;
+      const res = await fetch(`/api/github/activity?${query}`);
+      const data = await res.json();
+      if (data.events) {
+        setEvents(data.events);
+      }
+    } catch (e) {
+      console.error("Activity poll failed", e);
+    }
+  };
+
+  const renderEventIcon = (type: string) => {
+    switch (type) {
+      case 'PushEvent': return <ArrowRight size={14} className="text-emerald-500" />;
+      case 'PullRequestEvent': return <GitPullRequest size={14} className="text-purple-500" />;
+      case 'IssuesEvent': return <AlertCircle size={14} className="text-amber-500" />;
+      case 'WatchEvent': return <Star size={14} className="text-yellow-500" />;
+      case 'CreateEvent': return <PlusIcon size={14} className="text-blue-500" />;
+      default: return <Activity size={14} className="text-zinc-500" />;
+    }
+  };
+
+  const renderEventDescription = (event: GithubEvent) => {
+    const { type, payload, actor } = event;
+    switch (type) {
+      case 'PushEvent': 
+        return (
+          <span>
+            <span className="text-white font-bold">{actor.login}</span> pushed to{' '}
+            <span className="text-primary font-mono">{payload.ref?.replace('refs/heads/', '')}</span>
+          </span>
+        );
+      case 'PullRequestEvent':
+        return (
+          <span>
+            <span className="text-white font-bold">{actor.login}</span> {payload.action} PR{' '}
+            <span className="text-primary">#{payload.pull_request?.number}</span>
+          </span>
+        );
+      case 'IssuesEvent':
+        return (
+          <span>
+            <span className="text-white font-bold">{actor.login}</span> {payload.action} issue{' '}
+            <span className="text-primary">#{payload.issue?.number}</span>
+          </span>
+        );
+      case 'WatchEvent':
+        return (
+          <span>
+            <span className="text-white font-bold">{actor.login}</span> starred the repository
+          </span>
+        );
+      default:
+        return <span>System event: <span className="text-white">{type}</span> by {actor.login}</span>;
     }
   };
 
@@ -63,136 +159,157 @@ export const GithubView: React.FC<GithubViewProps> = ({
     );
   }
 
-  if (!repoName) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-black text-zinc-500 uppercase tracking-[0.2em] font-bold text-xs">
-        Select a project to view GitHub integration
-      </div>
-    );
-  }
-
   return (
-    <div className="flex-1 p-6 lg:p-10 hide-scrollbar overflow-y-auto bg-black text-slate-200">
-      <div className="max-w-5xl mx-auto">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <Github className="text-primary" size={20} />
-              <span className="text-[10px] font-black uppercase tracking-[0.4em] text-zinc-500">Repository Live Stream</span>
-            </div>
-            <h2 className="text-4xl font-black italic uppercase tracking-tight text-white">
-              {repoOwner}/<span className="text-primary glow-primary">{repoName}</span>
-            </h2>
-          </div>
-          
-          <div className="flex gap-4">
-            <button 
-              onClick={fetchData}
-              className="px-4 py-2 border border-border text-[10px] font-bold uppercase tracking-widest hover:bg-white/5 transition-all"
-            >
-              Refresh_Feed
-            </button>
+    <div className="flex-1 flex flex-col h-full bg-black overflow-hidden font-sans">
+      {/* Dynamic Activity Header */}
+      <div className="h-16 border-b border-white/5 flex items-center justify-between px-8 bg-zinc-950/20 backdrop-blur-md shrink-0">
+        <div className="flex items-center gap-4">
+          <TerminalIcon size={16} className="text-primary" />
+          <div className="flex flex-col">
+            <span className="text-[9px] font-black uppercase tracking-[0.4em] text-zinc-600">Unified Repository Stream</span>
+            <span className="text-xs font-mono font-bold text-white tracking-widest">
+              {repoOwner}/<span className="text-primary">{repoName}</span>
+            </span>
           </div>
         </div>
-        
-        {/* Real Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
-          {[
-            { label: 'Stars', value: stats?.stars ?? '-', icon: Star, color: 'text-yellow-400' },
-            { label: 'Open Issues', value: stats?.issues ?? '-', icon: AlertCircle, color: 'text-red-400' },
-            { label: 'Forks', value: stats?.forks ?? '-', icon: GitFork, color: 'text-blue-400' },
-            { label: 'Branches', value: branches.length || '-', icon: GitBranch, color: 'text-primary' },
-          ].map((stat, i) => (
-            <div key={i} className="p-6 border border-border bg-zinc-950 flex flex-col gap-2 relative overflow-hidden group">
-              <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
-                <stat.icon size={40} />
-              </div>
-              <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest">{stat.label}</span>
-              <span className={cn("text-3xl font-black", stat.color)}>{stat.value}</span>
-            </div>
-          ))}
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <div className={cn("w-1.5 h-1.5 rounded-full", isLive ? "bg-emerald-500 animate-pulse glow-emerald" : "bg-zinc-700")} />
+            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{isLive ? 'Live_Sync_Active' : 'Sync_Paused'}</span>
+          </div>
+          <button 
+            onClick={() => setIsLive(!isLive)}
+            className="text-[9px] font-black uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+          >
+            {isLive ? '[Pause]' : '[Resume]'}
+          </button>
         </div>
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-          <div className="lg:col-span-2 space-y-6">
-            <h3 className="text-[11px] font-black italic uppercase tracking-[0.3em] text-zinc-500 flex items-center gap-2">
-              <GitPullRequest size={14} className="text-primary" /> Active Pull Requests
-            </h3>
+      <div className="flex-1 flex overflow-hidden">
+        {/* Main Feed Section */}
+        <div className="flex-1 overflow-y-auto p-10 custom-scrollbar">
+          <div className="max-w-4xl mx-auto space-y-12">
             
-            <div className="space-y-3">
-              {isLoading ? (
-                Array(3).fill(0).map((_, i) => (
-                  <div key={i} className="h-24 w-full bg-zinc-900/50 animate-pulse border border-border" />
-                ))
-              ) : prs.length === 0 ? (
-                <div className="p-10 border border-border border-dashed text-center text-zinc-600 text-[10px] uppercase font-bold tracking-widest">
-                  No active pull requests found
+            {/* Stats Dashboard */}
+            <div className="grid grid-cols-4 gap-4">
+               {[
+                { label: 'Stars', value: stats?.stars ?? '-', color: 'text-yellow-500' },
+                { label: 'Issues', value: stats?.issues ?? '-', color: 'text-rose-500' },
+                { label: 'Forks', value: stats?.forks ?? '-', color: 'text-blue-500' },
+                { label: 'Activity', value: events.length || '0', color: 'text-emerald-500' },
+              ].map((s, i) => (
+                <div key={i} className="bg-zinc-900/30 border border-white/5 p-4 rounded-sm flex flex-col gap-1">
+                  <span className="text-[8px] font-black uppercase tracking-widest text-zinc-600">{s.label}</span>
+                  <span className={cn("text-2xl font-black italic", s.color)}>{s.value}</span>
                 </div>
-              ) : (
-                prs.map(pr => (
-                  <a 
-                    key={pr.id} 
-                    href={pr.html_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex flex-col sm:flex-row sm:items-center justify-between p-5 border border-border bg-zinc-950 hover:border-primary/30 transition-all gap-4 group"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className="mt-1">
-                        <GitPullRequest className={pr.state === 'open' ? 'text-emerald-400' : 'text-purple-400'} size={18} />
+              ))}
+            </div>
+
+            {/* Live Event Stream */}
+            <div className="space-y-6">
+              <h3 className="text-[10px] font-black italic uppercase tracking-[0.4em] text-zinc-500 flex items-center gap-3">
+                <Activity size={14} className="text-primary" /> Logistical Heartbeat
+              </h3>
+              
+              <div className="space-y-2 text-xs">
+                <AnimatePresence mode="popLayout">
+                  {events.map((event, i) => (
+                    <motion.div
+                      key={event.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                      className="group flex items-center gap-6 p-4 bg-zinc-950 border border-white/5 hover:border-primary/20 transition-all rounded-sm"
+                    >
+                      <div className="w-8 shrink-0 flex flex-col items-center gap-1">
+                        {renderEventIcon(event.type)}
                       </div>
-                      <div>
-                        <div className="font-bold text-white text-md group-hover:text-primary transition-colors leading-tight mb-1">{pr.title}</div>
-                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest flex flex-wrap items-center gap-3">
-                          <span className="text-zinc-400">#{pr.number}</span>
-                          <span className="w-1 h-1 bg-zinc-800 rounded-full" />
-                          <span className="flex items-center gap-1.5"><GitBranch size={12} /> {pr.head.ref}</span>
-                          <span className="w-1 h-1 bg-zinc-800 rounded-full" />
-                          <span className="flex items-center gap-1.5"><Clock size={12} /> {new Date(pr.created_at).toLocaleDateString()}</span>
+                      
+                      <div className="flex-1 flex items-center gap-4">
+                        <div className="w-6 h-6 rounded bg-zinc-900 overflow-hidden border border-white/10">
+                          <img src={event.actor.avatar_url} alt="" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" />
+                        </div>
+                        <div className="text-[11px] font-mono text-zinc-400 group-hover:text-zinc-200 transition-colors">
+                          {renderEventDescription(event)}
                         </div>
                       </div>
-                    </div>
-                    <div className="flex-shrink-0">
-                      <span className={cn(
-                        "px-3 py-1 text-[9px] font-black uppercase tracking-tighter border",
-                        pr.state === 'open' ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/5" : "border-zinc-800 text-zinc-500"
-                      )}>
-                        {pr.state}
-                      </span>
-                    </div>
-                  </a>
-                ))
-              )}
-            </div>
-          </div>
 
-          <div className="space-y-6">
-            <h3 className="text-[11px] font-black italic uppercase tracking-[0.3em] text-zinc-500 flex items-center gap-2">
-              <GitBranch size={14} className="text-primary" /> Repository Branches
-            </h3>
-            <div className="border border-border bg-zinc-950 divide-y divide-border">
-              {isLoading ? (
-                Array(5).fill(0).map((_, i) => (
-                  <div key={i} className="h-10 w-full bg-zinc-900/50 animate-pulse" />
-                ))
-              ) : branches.length === 0 ? (
-                <div className="p-4 text-center text-zinc-600 text-[10px] uppercase font-bold tracking-widest">
-                  No branches found
-                </div>
-              ) : (
-                branches.map(branch => (
-                  <div key={branch.name} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
-                    <span className="text-[11px] font-bold text-zinc-300 font-mono tracking-wider">{branch.name}</span>
-                    {branch.name === 'main' || branch.name === 'master' ? (
-                      <span className="text-[8px] bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 font-black uppercase tracking-tighter shadow-[0_0_5px_rgba(255,0,255,0.2)]">Protected</span>
-                    ) : null}
+                      <div className="shrink-0 text-[9px] font-mono text-zinc-700 group-hover:text-zinc-500 flex items-center gap-2">
+                         <span>{new Date(event.created_at).toLocaleTimeString()}</span>
+                         <ArrowRight size={10} className="opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all" />
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                
+                {events.length === 0 && !isLoading && (
+                  <div className="p-20 border border-dashed border-white/5 flex flex-col items-center gap-4">
+                    <Github size={32} className="text-zinc-900" />
+                    <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-widest">Awaiting system telemetry...</span>
                   </div>
-                ))
-              )}
+                )}
+              </div>
             </div>
           </div>
+        </div>
+
+        {/* Operational Sidebar (PRs & Branches) */}
+        <div className="w-96 border-l border-white/5 bg-zinc-950/20 p-8 overflow-y-auto custom-scrollbar shrink-0">
+          <div className="space-y-12">
+            {/* PR Section */}
+            <section className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Execution Phase</h4>
+                <span className="text-[8px] font-mono text-zinc-700">{prs.length} Open</span>
+              </div>
+              <div className="space-y-4">
+                {prs.map(pr => (
+                  <div key={pr.id} className="p-4 bg-zinc-900/50 border border-white/5 hover:border-primary/30 transition-all cursor-pointer group">
+                    <div className="text-[11px] font-bold text-white mb-2 line-clamp-2 leading-tight group-hover:text-primary transition-colors">{pr.title}</div>
+                    <div className="flex items-center justify-between text-[9px] font-mono text-zinc-600">
+                      <span>#{pr.number}</span>
+                      <span className="bg-purple-950/30 text-purple-500 px-1.5 py-0.5 border border-purple-500/20 uppercase tracking-tighter">Pull_Authored</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Branch Section */}
+            <section className="space-y-6">
+              <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Logical Branches</h4>
+              <div className="space-y-2 font-mono">
+                {branches.map(branch => (
+                  <div key={branch.name} className="flex items-center justify-between p-2 hover:bg-white/5 transition-colors group">
+                    <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300">{branch.name}</span>
+                    {branch.name === 'main' && <div className="w-1.5 h-1.5 rounded-full bg-primary glow-primary" />}
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      {/* Industrial Footer */}
+      <div className="h-8 bg-zinc-950 border-t border-white/5 flex items-center justify-between px-8 text-[8px] font-mono text-zinc-700 uppercase tracking-[0.5em] font-bold">
+        <div className="flex gap-6">
+          <span>GITHUB_HANDSHAKE: OK</span>
+          <span>STREAM_BUFFER: OPTIMAL</span>
+        </div>
+        <div className="flex gap-6">
+          <span>LATENCY: 42MS</span>
+          <span>SYNC_ID: {Math.random().toString(16).substring(2, 10).toUpperCase()}</span>
         </div>
       </div>
     </div>
   );
 };
+
+const PlusIcon = ({ size, className }: { size: number, className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="square" strokeLinejoin="miter" className={className}>
+    <line x1="12" y1="5" x2="12" y2="19"></line>
+    <line x1="5" y1="12" x2="19" y2="12"></line>
+  </svg>
+);

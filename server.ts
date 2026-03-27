@@ -397,13 +397,14 @@ async function startServer() {
     }
 
     try {
+      const promoText = taskText || "Review project for architectural consistency and efficiency";
       const payload = {
-        prompt: taskText,
+        prompt: promoText,
         sourceContext: {
           source: `sources/github/${repoOwner || 'JayDataEngineer'}/${repoName || project}`
         },
         automationMode: "AUTO_CREATE_PR",
-        title: taskText.length > 50 ? taskText.substring(0, 47) + "..." : taskText
+        title: promoText.length > 50 ? promoText.substring(0, 47) + "..." : promoText
       };
 
       console.log("Dispatching to Jules:", JSON.stringify(payload, null, 2));
@@ -605,6 +606,25 @@ async function startServer() {
       res.json({ branches: data });
     } catch (error) {
       res.json({ branches: [], error: "Failed to fetch branches" });
+    }
+  });
+
+  app.get("/api/github/activity", async (req, res) => {
+    const { owner, repo } = req.query;
+    const token = process.env.GITHUB_TOKEN;
+    if (!token || !owner || !repo) {
+      return res.json({ events: [] });
+    }
+    try {
+      const octokit = new Octokit({ auth: token });
+      const { data } = await octokit.rest.activity.listRepoEvents({
+        owner: owner as string,
+        repo: repo as string,
+        per_page: 20
+      });
+      res.json({ events: data });
+    } catch (error) {
+      res.json({ events: [], error: "Failed to fetch activity" });
     }
   });
 

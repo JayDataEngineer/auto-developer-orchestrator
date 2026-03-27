@@ -5,12 +5,12 @@ import { Shield, Zap, Box, Terminal as TerminalIcon, Globe } from 'lucide-react'
 export const ManifestoView: React.FC = () => {
   const points = [
     { 
-      icon: zap, 
+      icon: Zap, 
       title: "Autonomy over Assistance", 
       text: "We don't just 'suggest' code. We orchestrate the entire software engineering lifecycle—from task identification to Pull Request merging." 
     },
     { 
-      icon: box, 
+      icon: Box, 
       title: "Industrial Density", 
       text: "Modern engineering is high-density. Our Grok-inspired UI provides maximum information at a glance, eliminating 'white space' in favor of 'signal.'" 
     },
@@ -90,7 +90,3 @@ export const ManifestoView: React.FC = () => {
     </div>
   );
 };
-
-// Fix the icon references
-const zap = Zap;
-const box = Box;
