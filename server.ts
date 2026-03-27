@@ -653,16 +653,19 @@ async function startServer() {
       return res.json({ prs: [] });
     }
     try {
+      console.log(`[GITHUB] Fetching PRs for ${owner}/${repo}...`);
       const octokit = new Octokit({ auth: token });
       const { data } = await octokit.rest.pulls.list({
         owner: owner as string,
         repo: repo as string,
         state: 'all',
-        per_page: 5
+        per_page: 10
       });
       res.json({ prs: data });
-    } catch (error) {
-      res.json({ prs: [], error: "Failed to fetch PRs" });
+    } catch (error: any) {
+      console.error(`[GITHUB ERROR] PRs fetch failed: ${error.message}`);
+      // Return 200 with empty data to prevent frontend crash
+      res.json({ prs: [], error: "Failed to fetch PRs (Unauthorized or Not Found)" });
     }
   });
 
@@ -673,6 +676,7 @@ async function startServer() {
       return res.json({ stats: null });
     }
     try {
+      console.log(`[GITHUB] Fetching stats for ${owner}/${repo}...`);
       const octokit = new Octokit({ auth: token });
       const { data } = await octokit.rest.repos.get({
         owner: owner as string,
@@ -687,7 +691,8 @@ async function startServer() {
           visibility: data.visibility
         } 
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error(`[GITHUB ERROR] Stats fetch failed: ${error.message}`);
       res.json({ stats: null, error: "Failed to fetch stats" });
     }
   });
@@ -717,15 +722,17 @@ async function startServer() {
       return res.json({ events: [] });
     }
     try {
+      console.log(`[GITHUB] Fetching activity (events) for ${owner}/${repo}...`);
       const octokit = new Octokit({ auth: token });
       const { data } = await octokit.rest.activity.listRepoEvents({
         owner: owner as string,
         repo: repo as string,
-        per_page: 20
+        per_page: 30
       });
       res.json({ events: data });
-    } catch (error) {
-      res.json({ events: [], error: "Failed to fetch activity" });
+    } catch (error: any) {
+      console.error(`[GITHUB ERROR] Activity fetch failed: ${error.message}`);
+      res.json({ events: [], error: "Failed to fetch GitHub telemetry" });
     }
   });
 

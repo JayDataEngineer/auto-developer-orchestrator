@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Github, GitPullRequest, GitBranch, Check, Clock, Star, 
   AlertCircle, GitFork, Eye, Activity, Terminal as TerminalIcon,
-  ChevronRight, ArrowRight, User
+  ChevronRight, ArrowRight, User, Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -31,6 +31,7 @@ export const GithubView: React.FC<GithubViewProps> = ({
   const [events, setEvents] = useState<GithubEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLive, setIsLive] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const pollInterval = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -58,6 +59,7 @@ export const GithubView: React.FC<GithubViewProps> = ({
 
   const fetchData = async () => {
     setIsLoading(true);
+    setError(null);
     try {
       const query = `owner=${repoOwner}&repo=${repoName}`;
       const [prRes, statsRes, branchRes, activityRes] = await Promise.all([
@@ -67,17 +69,22 @@ export const GithubView: React.FC<GithubViewProps> = ({
         fetch(`/api/github/activity?${query}`)
       ]);
 
-      const prData = await prRes.json();
-      const statsData = await statsRes.json();
-      const branchData = await branchRes.json();
-      const activityData = await activityRes.json();
+      const prData = prRes.ok ? await prRes.json() : { prs: [] };
+      const statsData = statsRes.ok ? await statsRes.json() : { stats: null };
+      const branchData = branchRes.ok ? await branchRes.json() : { branches: [] };
+      const activityData = activityRes.ok ? await activityRes.json() : { events: [] };
 
       setPrs(prData.prs || []);
       setStats(statsData.stats);
       setBranches(branchData.branches || []);
       setEvents(activityData.events || []);
-    } catch (e) {
+
+      if (activityData.error || statsData.error) {
+         setError(activityData.error || statsData.error);
+      }
+    } catch (e: any) {
       console.error("Failed to fetch GitHub data", e);
+      setError("Network error: Failed to connect to GitHub Proxy");
     } finally {
       setIsLoading(false);
     }
@@ -87,6 +94,7 @@ export const GithubView: React.FC<GithubViewProps> = ({
     try {
       const query = `owner=${repoOwner}&repo=${repoName}`;
       const res = await fetch(`/api/github/activity?${query}`);
+      if (!res.ok) throw new Error("Activity poll failed");
       const data = await res.json();
       if (data.events) {
         setEvents(data.events);
@@ -102,7 +110,7 @@ export const GithubView: React.FC<GithubViewProps> = ({
       case 'PullRequestEvent': return <GitPullRequest size={14} className="text-purple-500" />;
       case 'IssuesEvent': return <AlertCircle size={14} className="text-amber-500" />;
       case 'WatchEvent': return <Star size={14} className="text-yellow-500" />;
-      case 'CreateEvent': return <PlusIcon size={14} className="text-blue-500" />;
+      case 'CreateEvent': return <Plus size={14} className="text-blue-500" />;
       default: return <Activity size={14} className="text-zinc-500" />;
     }
   };
@@ -173,6 +181,11 @@ export const GithubView: React.FC<GithubViewProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-6">
+          {error && (
+             <div className="flex items-center gap-2 text-red-500 text-[10px] font-mono uppercase font-bold animate-pulse">
+               <AlertCircle size={12} /> {error}
+             </div>
+          )}
           <div className="flex items-center gap-2">
             <div className={cn("w-1.5 h-1.5 rounded-full", isLive ? "bg-emerald-500 animate-pulse glow-emerald" : "bg-zinc-700")} />
             <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{isLive ? 'Live_Sync_Active' : 'Sync_Paused'}</span>
@@ -228,7 +241,12 @@ export const GithubView: React.FC<GithubViewProps> = ({
                       
                       <div className="flex-1 flex items-center gap-4">
                         <div className="w-6 h-6 rounded bg-zinc-900 overflow-hidden border border-white/10">
-                          <img src={event.actor.avatar_url} alt="" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" />
+                          <img 
+                            src={event.actor.avatar_url} 
+                            alt="" 
+                            className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" 
+                            onError={(e) => (e.currentTarget.src = 'https://github.com/identicons/jason.png')}
+                          />
                         </div>
                         <div className="text-[11px] font-mono text-zinc-400 group-hover:text-zinc-200 transition-colors">
                           {renderEventDescription(event)}
@@ -246,7 +264,9 @@ export const GithubView: React.FC<GithubViewProps> = ({
                 {events.length === 0 && !isLoading && (
                   <div className="p-20 border border-dashed border-white/5 flex flex-col items-center gap-4">
                     <Github size={32} className="text-zinc-900" />
-                    <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-widest">Awaiting system telemetry...</span>
+                    <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-widest">
+                       {error ? 'TELEMETRY_LINK_BROKEN' : 'Awaiting system telemetry...'}
+                    </span>
                   </div>
                 )}
               </div>
@@ -273,6 +293,9 @@ export const GithubView: React.FC<GithubViewProps> = ({
                     </div>
                   </div>
                 ))}
+                {prs.length === 0 && !isLoading && (
+                   <div className="text-[10px] text-zinc-800 italic uppercase">No active pull requests.</div>
+                )}
               </div>
             </section>
 
@@ -295,8 +318,8 @@ export const GithubView: React.FC<GithubViewProps> = ({
       {/* Industrial Footer */}
       <div className="h-8 bg-zinc-950 border-t border-white/5 flex items-center justify-between px-8 text-[8px] font-mono text-zinc-700 uppercase tracking-[0.5em] font-bold">
         <div className="flex gap-6">
-          <span>GITHUB_HANDSHAKE: OK</span>
-          <span>STREAM_BUFFER: OPTIMAL</span>
+          <span>GITHUB_HANDSHAKE: {error ? 'FAIL' : 'OK'}</span>
+          <span>STREAM_BUFFER: {events.length > 0 ? 'ACTIVE' : 'IDLE'}</span>
         </div>
         <div className="flex gap-6">
           <span>LATENCY: 42MS</span>
@@ -306,10 +329,3 @@ export const GithubView: React.FC<GithubViewProps> = ({
     </div>
   );
 };
-
-const PlusIcon = ({ size, className }: { size: number, className?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="square" strokeLinejoin="miter" className={className}>
-    <line x1="12" y1="5" x2="12" y2="19"></line>
-    <line x1="5" y1="12" x2="19" y2="12"></line>
-  </svg>
-);
