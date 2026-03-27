@@ -1,15 +1,26 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, MessageSquare, Loader, Sparkles } from 'lucide-react';
+import { Send, Bot, MessageSquare, Loader, Sparkles, Trash2, ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
-
-interface AgentsViewProps {
-  className?: string;
-}
+import { ConversationSidebar } from './ConversationSidebar';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+}
+
+interface Conversation {
+  id: string;
+  projectId: string;
+  title: string;
+  lastActive: string;
+  messages: Message[];
+}
+
+interface AgentsViewProps {
+  className?: string;
+  selectedProject?: string;
+  projects?: string[];
 }
 
 type AIProvider = 'openai' | 'claude' | 'gemini';
@@ -46,63 +57,117 @@ const PROVIDERS: Record<AIProvider, ProviderConfig> = {
   }
 };
 
-export const AgentsView: React.FC<AgentsViewProps> = ({ className }) => {
-  const [selectedProvider, setSelectedProvider] = useState<AIProvider>('openai');
-  const [messages, setMessages] = useState<Message[]>([]);
+export const AgentsView: React.FC<AgentsViewProps> = ({ className, selectedProject, projects = [] }) => {
+  const [selectedProvider, setSelectedProvider] = useState<AIProvider>('gemini');
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const activeConversation = conversations.find(c => c.id === activeConversationId);
+  const messages = activeConversation?.messages || [];
+
+  // Fetch conversations on mount
+  useEffect(() => {
+    const fetchConversations = async () => {
+      try {
+        const res = await fetch('/api/ai/conversations');
+        const data = await res.json();
+        setConversations(data.conversations || []);
+        if (data.conversations?.length > 0) {
+          setActiveConversationId(data.conversations[0].id);
+        }
+      } catch (e) {
+        console.error("Failed to fetch conversations");
+      }
+    };
+    fetchConversations();
+  }, []);
 
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const handleNewConversation = async (projectId: string) => {
+    const newId = `conv-${Date.now()}`;
+    const newConv: Conversation = {
+      id: newId,
+      projectId,
+      title: "New Architectural Sync",
+      lastActive: new Date().toISOString(),
+      messages: []
+    };
+
+    try {
+      await fetch('/api/ai/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newConv)
+      });
+      setConversations(prev => [newConv, ...prev]);
+      setActiveConversationId(newId);
+    } catch (e) {
+      console.error("Failed to create conversation");
+    }
+  };
+
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !activeConversationId) return;
 
     const userMessage: Message = {
       role: 'user',
       content: input,
-      timestamp: new Date().toLocaleTimeString()
+      timestamp: new Date().toISOString()
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    // Optimistic update
+    setConversations(prev => prev.map(c => 
+      c.id === activeConversationId 
+        ? { ...c, messages: [...c.messages, userMessage], lastActive: new Date().toISOString() } 
+        : c
+    ));
+    
     setInput('');
     setIsLoading(true);
 
     try {
-      // Call Go backend which executes CLI tools
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: selectedProvider,
           message: input,
-          context: 'codebase-analysis' // Could include current project context
+          context: activeConversation?.projectId || selectedProject || 'codebase-analysis',
+          conversationId: activeConversationId
         })
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to get response');
-      }
+      if (!response.ok) throw new Error('AI Engine Offline');
 
       const data = await response.json();
       
       const assistantMessage: Message = {
         role: 'assistant',
-        content: data.response || data.error || 'No response',
-        timestamp: new Date().toLocaleTimeString()
+        content: data.response || 'No valid synthesis received.',
+        timestamp: new Date().toISOString()
       };
 
-      setMessages(prev => [...prev, assistantMessage]);
+      setConversations(prev => prev.map(c => 
+        c.id === activeConversationId 
+          ? { ...c, messages: [...c.messages, assistantMessage], lastActive: new Date().toISOString() } 
+          : c
+      ));
     } catch (error: any) {
       const errorMessage: Message = {
         role: 'assistant',
-        content: `Error: ${error.message}`,
-        timestamp: new Date().toLocaleTimeString()
+        content: `CORE_ERROR: ${error.message}`,
+        timestamp: new Date().toISOString()
       };
-      setMessages(prev => [...prev, errorMessage]);
+      setConversations(prev => prev.map(c => 
+        c.id === activeConversationId ? { ...c, messages: [...c.messages, errorMessage] } : c
+      ));
     } finally {
       setIsLoading(false);
     }
@@ -115,151 +180,138 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ className }) => {
     }
   };
 
-  const clearChat = () => {
-    setMessages([]);
-  };
-
   return (
-    <div className={cn("flex flex-col h-full", className)}>
-      {/* Provider Selector */}
-      <div className="p-4 border-b border-white/5 shrink-0">
-        <div className="flex items-center gap-2 mb-3">
-          <Bot size={16} className="text-primary" />
-          <h2 className="text-xs font-bold uppercase tracking-widest text-white">AI Agents</h2>
-        </div>
-        <div className="flex gap-2">
-          {(Object.keys(PROVIDERS) as AIProvider[]).map(provider => (
-            <button
-              key={provider}
-              onClick={() => setSelectedProvider(provider)}
-              className={cn(
-                'flex-1 p-2 rounded-lg border transition-all text-left',
-                selectedProvider === provider
-                  ? `bg-gradient-to-r ${PROVIDERS[provider].gradient} ${PROVIDERS[provider].color} border-white/20`
-                  : 'glass-dark border-white/5 hover:border-white/10'
-              )}
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-lg">{PROVIDERS[provider].icon}</span>
-                <div>
-                  <div className="text-[9px] font-bold text-white">{PROVIDERS[provider].name}</div>
-                  <div className="text-[8px] text-zinc-400">{PROVIDERS[provider].model}</div>
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className={cn("flex h-full bg-black overflow-hidden", className)}>
+      {/* Nested Sidebar */}
+      <ConversationSidebar 
+        projects={projects}
+        conversations={conversations}
+        activeConversationId={activeConversationId || undefined}
+        onSelectConversation={setActiveConversationId}
+        onNewConversation={handleNewConversation}
+      />
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 ? (
-          <div className="h-full flex items-center justify-center">
-            <div className="text-center">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full glass-dark flex items-center justify-center">
-                <MessageSquare size={32} className="text-zinc-600" />
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Navigation Header */}
+        <div className="h-12 border-b border-white/5 flex items-center px-6 shrink-0 bg-black/50 backdrop-blur-md">
+          <div className="flex items-center space-x-2 text-[10px] font-mono tracking-widest text-zinc-500 uppercase font-bold">
+            <span className="hover:text-primary transition-colors cursor-pointer">{activeConversation?.projectId || 'GLOBAL_COBEBASE'}</span>
+            <ChevronRight size={10} className="text-zinc-700" />
+            <span className="text-white truncate max-w-[300px]">{activeConversation?.title || 'SELECTING_CONTEXT...'}</span>
+          </div>
+          <div className="flex-1" />
+          <div className="flex items-center space-x-4">
+             {(Object.keys(PROVIDERS) as AIProvider[]).map(p => (
+               <button
+                 key={p}
+                 onClick={() => setSelectedProvider(p)}
+                 className={cn(
+                   "text-[9px] font-black uppercase tracking-[0.2em] transition-all",
+                   selectedProvider === p ? "text-primary" : "text-zinc-700 hover:text-zinc-500"
+                 )}
+               >
+                 {p}
+               </button>
+             ))}
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
+          {!activeConversationId ? (
+            <div className="h-full flex flex-col items-center justify-center text-center p-12">
+              <div className="w-16 h-16 rounded-full bg-primary/5 border border-primary/20 flex items-center justify-center mb-6 glow-primary">
+                <Sparkles size={32} className="text-primary" />
               </div>
-              <h3 className="text-xs font-bold text-zinc-400 mb-2">No messages yet</h3>
-              <p className="text-[10px] text-zinc-500">Ask your AI assistant about your codebase</p>
-              <div className="mt-4 flex flex-wrap gap-2 justify-center">
-                {['Analyze codebase', 'Find bugs', 'Suggest improvements'].map(action => (
-                  <button
-                    key={action}
-                    onClick={() => setInput(action)}
-                    className="px-3 py-1.5 text-[9px] text-zinc-300 glass-dark border border-white/5 rounded-lg hover:border-white/10 transition-all"
-                  >
-                    {action}
-                  </button>
-                ))}
+              <h3 className="text-xl font-black italic uppercase tracking-[0.3em] text-white mb-2">Sync Initialized</h3>
+              <p className="text-zinc-500 text-xs uppercase tracking-widest leading-relaxed max-w-sm">
+                Select a project workspace or create a new conversation to begin the deep-scan synthesis.
+              </p>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center">
+              <Bot size={40} className="text-zinc-800 mb-4 animate-pulse" />
+              <div className="text-[10px] font-mono text-zinc-600 uppercase tracking-[0.4em] font-bold">
+                Awaiting Input // Context Ready
               </div>
             </div>
-          </div>
-        ) : (
-          <>
-            {messages.map((message, i) => (
-              <div
-                key={i}
-                className={cn(
-                  'flex gap-2',
-                  message.role === 'user' ? 'flex-row-reverse' : ''
-                )}
-              >
-                <div className={cn(
-                  'w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs',
-                  message.role === 'user'
-                    ? 'bg-primary text-white font-bold'
-                    : `bg-gradient-to-br ${PROVIDERS[selectedProvider].gradient}`
-                )}>
-                  {message.role === 'user' ? 'U' : PROVIDERS[selectedProvider].icon}
-                </div>
-                
-                <div className={cn(
-                  'max-w-[80%] rounded-xl p-3 glass-dark border',
-                  message.role === 'user'
-                    ? 'border-primary/30 bg-primary/10'
-                    : `border-white/10`
-                )}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[8px] font-bold uppercase tracking-widest text-zinc-400">
-                      {message.role === 'user' ? 'You' : PROVIDERS[selectedProvider].name}
-                    </span>
-                    <span className="text-[7px] text-zinc-600">{message.timestamp}</span>
+          ) : (
+            <>
+              {messages.map((message, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    'flex items-start space-x-4',
+                    message.role === 'user' ? 'justify-end' : 'justify-start'
+                  )}
+                >
+                  {message.role === 'assistant' && (
+                    <div className="w-8 h-8 rounded shrink-0 bg-primary/10 border border-primary/20 flex items-center justify-center">
+                      <Bot size={16} className="text-primary" />
+                    </div>
+                  )}
+                  
+                  <div className={cn(
+                    'max-w-[85%] rounded p-4 font-mono text-[11px] leading-relaxed',
+                    message.role === 'user'
+                      ? 'bg-zinc-900 text-zinc-300 border border-white/5 order-1'
+                      : 'text-zinc-400 border-l-2 border-primary/40 bg-white/5'
+                  )}>
+                    <div className="whitespace-pre-wrap">{message.content}</div>
+                    <div className="mt-2 text-[8px] opacity-30 text-right uppercase tracking-widest">
+                      {new Date(message.timestamp).toLocaleTimeString()}
+                    </div>
                   </div>
-                  <p className="text-[10px] text-zinc-200 whitespace-pre-wrap leading-relaxed">
-                    {message.content}
-                  </p>
-                </div>
-              </div>
-            ))}
-            
-            {isLoading && (
-              <div className="flex gap-2">
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 bg-gradient-to-br ${PROVIDERS[selectedProvider].gradient}`}>
-                  <span className="text-xs">{PROVIDERS[selectedProvider].icon}</span>
-                </div>
-                <div className="max-w-[80%] rounded-xl p-3 glass-dark border border-white/10">
-                  <div className="flex items-center gap-2">
-                    <Loader size={10} className="animate-spin text-primary" />
-                    <span className="text-[8px] font-bold uppercase tracking-widest text-zinc-400">
-                      Thinking...
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            <div ref={messagesEndRef} />
-          </>
-        )}
-      </div>
 
-      {/* Input Area */}
-      <div className="p-4 border-t border-white/5 shrink-0">
-        <div className="flex gap-2 mb-2">
-          <button
-            onClick={clearChat}
-            className="px-2 py-1 text-[8px] text-zinc-500 hover:text-white glass-dark border border-white/5 rounded transition-all"
-          >
-            Clear Chat
-          </button>
+                  {message.role === 'user' && (
+                    <div className="w-8 h-8 rounded shrink-0 bg-zinc-800 border border-white/10 flex items-center justify-center order-2 ml-4">
+                      <span className="text-[10px] font-bold text-zinc-500">YOU</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+              
+              {isLoading && (
+                <div className="flex items-start space-x-4 animate-pulse">
+                  <div className="w-8 h-8 rounded shrink-0 bg-primary/10 border border-primary/20 flex items-center justify-center">
+                    <Loader size={16} className="text-primary animate-spin" />
+                  </div>
+                  <div className="p-4 border-l-2 border-primary/20 bg-white/5 text-[10px] font-mono text-zinc-600 uppercase tracking-widest">
+                    Synthesizing response...
+                  </div>
+                </div>
+              )}
+              
+              <div ref={messagesEndRef} />
+            </>
+          )}
         </div>
-        <div className="flex gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={`Ask ${PROVIDERS[selectedProvider].name}...`}
-            className="flex-1 bg-transparent border border-white/5 rounded-lg px-3 py-2 text-[10px] text-white placeholder-zinc-500 outline-none focus:border-white/10 resize-none"
-            rows={2}
-            disabled={isLoading}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isLoading}
-            className="px-4 py-2 bg-primary text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:bg-primary/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1"
-          >
-            <Send size={12} />
-          </button>
+
+        {/* Input Area */}
+        <div className="p-6 border-t border-white/5">
+          <div className="relative">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={activeConversationId ? "Sync thoughts..." : "Select context first..."}
+              disabled={!activeConversationId || isLoading}
+              className="w-full bg-zinc-900 border border-white/5 rounded p-4 pr-16 text-[11px] text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-all resize-none font-mono"
+              rows={3}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || isLoading || !activeConversationId}
+              className="absolute right-4 bottom-4 p-2 bg-primary text-black rounded hover:bg-primary/80 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+            >
+              <Send size={16} />
+            </button>
+          </div>
+          <div className="mt-4 flex items-center justify-between text-[8px] font-mono text-zinc-700 uppercase tracking-[0.3em] font-bold">
+            <span>Security: encrypted</span>
+            <span>Agent: {PROVIDERS[selectedProvider].name} // online</span>
+          </div>
         </div>
       </div>
     </div>

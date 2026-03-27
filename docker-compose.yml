@@ -1,12 +1,80 @@
+# Production Docker Compose - High Performance Frontend + API
+# Integrated with shared-docker-infra via Traefik
+version: '3.8'
+
 services:
-  orchestrator:
-    build: .
-    ports:
-      - "3000:3000"
+  # ===========================================
+  # Go Backend Production
+  # ===========================================
+  go-backend:
+    build:
+      context: ./go-backend
+      dockerfile: Dockerfile
+    container_name: orchestrator-go-prod
+    restart: always
+    environment:
+      - SERVER_PORT=3847
+      - DATABASE_URL=/data/orchestrator.db
+      - JULES_API_KEY=${JULES_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - PYTHON_SERVICE_URL=http://python-agent:8080
+      - LITELLM_PROXY_URL=${LITELLM_PROXY_URL}
     volumes:
-      - .:/app
+      - ./projects:/app/projects
+      - ./data:/data
       - ~/.ssh:/root/.ssh:ro
       - ~/.gitconfig:/root/.gitconfig:ro
+    depends_on:
+      - python-agent
+    networks:
+      - shared-infra
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.orchestrator-api.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.orchestrator-api.entrypoints=http"
+      - "traefik.http.services.orchestrator-api.loadbalancer.server.port=3847"
+
+  # ===========================================
+  # Python Deep Agent Service Production
+  # ===========================================
+  python-agent:
+    build:
+      context: ./python-agent
+      dockerfile: Dockerfile
+    container_name: orchestrator-python-prod
+    restart: always
     environment:
-      - NODE_ENV=production
+      - PYTHON_SERVICE_PORT=8080
+      - DEEP_AGENT_MODEL=${DEEP_AGENT_MODEL:-gpt-4o}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+    volumes:
+      - ./projects:/app/projects
+    networks:
+      - shared-infra
+
+  # ===========================================
+  # React Frontend (Nginx Production)
+  # ===========================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=/api
+    container_name: orchestrator-frontend-prod
+    restart: always
+    networks:
+      - shared-infra
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.orchestrator.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`)"
+      - "traefik.http.routers.orchestrator.entrypoints=http"
+      - "traefik.http.services.orchestrator.loadbalancer.server.port=80"
+      - "traefik.http.routers.orchestrator.priority=1"
+
+networks:
+  shared-infra:
+    external: true
+    name: ${SHARED_NETWORK_NAME:-shared-infra}

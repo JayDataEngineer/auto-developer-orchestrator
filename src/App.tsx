@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AnimatePresence } from 'motion/react';
+import { cn } from './lib/utils';
 import { Sidebar } from './components/Sidebar';
-import { GoogleGenAI, Type } from "@google/genai";
 import { Header } from './components/Header';
 import { Checklist } from './components/Checklist';
 import { Terminal } from './components/Terminal';
@@ -14,6 +14,8 @@ import { CoverageReportModal } from './components/CoverageReportModal';
 import { CloneModal } from './components/CloneModal';
 import { UserModal } from './components/UserModal';
 import { AddProjectModal } from './components/AddProjectModal';
+import { GitHubConnectModal } from './components/GitHubConnectModal';
+import { ManifestoView } from './components/ManifestoView';
 import { ActivityView } from './components/ActivityView';
 import { GithubView } from './components/GithubView';
 
@@ -46,7 +48,8 @@ const LOG_MESSAGES = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'terminal' | 'activity' | 'github' | 'agents'>('terminal');
+  console.log("App component rendering...");
+  const [activeTab, setActiveTab] = useState<'terminal' | 'activity' | 'github' | 'agents' | 'manifesto'>('terminal');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -57,6 +60,9 @@ export default function App() {
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
   const [isUserOpen, setIsUserOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isGitHubConnectOpen, setIsGitHubConnectOpen] = useState(false);
+  const [isGitHubConnected, setIsGitHubConnected] = useState(false);
+  const [githubUser, setGithubUser] = useState<any>(null);
   const [isGeneratingChecklist, setIsGeneratingChecklist] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
   const [isCLITerminalOpen, setIsCLITerminalOpen] = useState(false);
@@ -69,6 +75,7 @@ export default function App() {
   useEffect(() => {
     fetchProjects();
     fetchAiConfig();
+    fetchGitHubStatus();
     
     // Simulate logs
     let i = 0;
@@ -138,6 +145,36 @@ export default function App() {
       setAiConfig(data);
     } catch (e) {
       console.error("Failed to fetch AI config", e);
+    }
+  };
+
+  const fetchGitHubStatus = async () => {
+    try {
+      const res = await fetch('/api/github/user');
+      const data = await res.json();
+      setIsGitHubConnected(data.connected);
+      setGithubUser(data.user || null);
+    } catch (e) {
+      console.error("Failed to fetch GitHub status", e);
+    }
+  };
+
+  const handleGitHubConnect = async (token: string) => {
+    try {
+      const res = await fetch('/api/config/github', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] SUCCESS: GitHub connection established.`]);
+        fetchGitHubStatus();
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (e: any) {
+      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ERROR: GitHub connection failed: ${e.message}`]);
     }
   };
 
@@ -211,7 +248,12 @@ export default function App() {
               const dispatchRes = await fetch('/api/dispatch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId: nextTask.id, project: selectedProject, repoOwner: "JayDataEngineer", repoName: selectedProject })
+                body: JSON.stringify({ 
+                  taskId: nextTask.id, 
+                  project: selectedProject, 
+                  repoOwner: githubUser?.login || "anonymous", 
+                  repoName: selectedProject 
+                })
               });
               const dispatchData = await dispatchRes.json();
               setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${dispatchData.message}: ${dispatchData.issueUrl}`]);
@@ -327,7 +369,7 @@ export default function App() {
     try {
       // For now we use the project name as a placeholder for repo details
       // In a real app, these would come from project settings
-      const repoOwner = "JayDataEngineer"; 
+      const repoOwner = githubUser?.login || "anonymous"; 
       const repoName = selectedProject;
 
       const res = await fetch('/api/dispatch/all', {
@@ -426,11 +468,16 @@ export default function App() {
         setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Next task identified: "${nextTask.text}"`]);
         setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Automatically creating issue and assigning to JULES...`]);
         
-        const dispatchRes = await fetch('/api/dispatch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId: nextTask.id, project: selectedProject, repoOwner: "JayDataEngineer", repoName: selectedProject })
-        });
+         const dispatchRes = await fetch('/api/dispatch', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ 
+             taskId: nextTask.id, 
+             project: selectedProject, 
+             repoOwner: githubUser?.login || "anonymous", 
+             repoName: selectedProject 
+           })
+         });
         const dispatchData = await dispatchRes.json();
         setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${dispatchData.message}: ${dispatchData.issueUrl}`]);
         fetchChecklist();
@@ -486,23 +533,34 @@ export default function App() {
 
   const handleDispatch = async (taskId: string) => {
     if (!selectedProject) return;
-    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Manually dispatching task ${taskId} to JULES...`]);
+    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] INITIATING_DISPATCH: Task ${taskId} -> JULES_CORE`]);
     try {
       const res = await fetch('/api/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId, project: selectedProject, repoOwner: "JayDataEngineer", repoName: selectedProject })
+        body: JSON.stringify({ 
+          taskId, 
+          project: selectedProject, 
+          repoOwner: githubUser?.login || "JayDataEngineer", 
+          repoName: selectedProject 
+        })
       });
       const data = await res.json();
-      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${data.message}: ${data.issueUrl}`]);
+      if (data.success) {
+        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] SUCCESS: ${data.message}`]);
+        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] LINK: ${data.issueUrl}`]);
+      } else {
+        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] DISPATCH_FAILURE: ${data.error || 'Unknown Error'}`]);
+      }
       fetchChecklist();
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to dispatch task", e);
+      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] NETWORK_ERROR: Failed to reach dispatch endpoint.`]);
     }
   };
 
   return (
-    <div className="flex h-screen bg-black text-slate-100 font-sans selection:bg-primary/30 overflow-hidden relative">
+    <div className="flex h-screen bg-black text-slate-100 font-sans selection:bg-primary/20 overflow-hidden relative">
       <Sidebar
         activeTab={activeTab}
         isOpen={isSidebarOpen}
@@ -512,10 +570,17 @@ export default function App() {
         onActivityClick={() => { setActiveTab('activity'); setIsSidebarOpen(false); }}
         onGithubClick={() => { setActiveTab('github'); setIsSidebarOpen(false); }}
         onAgentsClick={() => { setActiveTab('agents'); setIsSidebarOpen(false); }}
+        onManifestoClick={() => { setActiveTab('manifesto'); setIsSidebarOpen(false); }}
+        onConnectGitHubClick={() => setIsGitHubConnectOpen(true)}
+        isGitHubConnected={isGitHubConnected}
+        githubUser={githubUser}
         onUserClick={() => setIsUserOpen(true)}
       />
 
-      <main className="flex-1 flex flex-col overflow-hidden w-full">
+      <main className={cn(
+        "flex-1 flex flex-col overflow-hidden w-full transition-all duration-300",
+        isCLITerminalOpen ? "pb-96" : "pb-0"
+      )}>
         <Header
           status={status}
           onToggleMode={toggleMode}
@@ -525,6 +590,7 @@ export default function App() {
           onAddExistingClick={() => setIsAddProjectOpen(true)}
           onRefreshProjects={fetchProjects}
           onCLIClick={() => setIsCLITerminalOpen(true)}
+          onAgentsClick={() => { setActiveTab('agents'); setIsSidebarOpen(false); }}
           fullAutomationMode={aiConfig?.fullAutomationMode ?? false}
           projects={projects}
           selectedProject={selectedProject}
@@ -564,8 +630,9 @@ export default function App() {
             </>
           )}
           {activeTab === 'activity' && <ActivityView logs={logs} />}
-          {activeTab === 'github' && <GithubView />}
-          {activeTab === 'agents' && <AgentsView />}
+          {activeTab === 'github' && <GithubView repoOwner={githubUser?.login} repoName={selectedProject} />}
+          {activeTab === 'agents' && <AgentsView selectedProject={selectedProject} projects={projects} />}
+          {activeTab === 'manifesto' && <ManifestoView />}
         </div>
       </main>
 
@@ -595,10 +662,17 @@ export default function App() {
         onClose={() => setIsAddProjectOpen(false)} 
         onAdd={handleAddProject}
       />
+      <GitHubConnectModal
+        isOpen={isGitHubConnectOpen}
+        onClose={() => setIsGitHubConnectOpen(false)}
+        onConnect={handleGitHubConnect}
+      />
       <UserModal
         isOpen={isUserOpen}
         onClose={() => setIsUserOpen(false)}
-        userEmail="protopomp@gmail.com"
+        userEmail={githubUser?.email || "anonymous@orchestrator"}
+        userName={githubUser?.name || githubUser?.login}
+        avatarUrl={githubUser?.avatar_url}
       />
 
       {/* CLI Terminal */}

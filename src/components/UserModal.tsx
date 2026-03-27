@@ -6,9 +6,11 @@ interface UserModalProps {
   isOpen: boolean;
   onClose: () => void;
   userEmail: string;
+  userName?: string;
+  avatarUrl?: string;
 }
 
-export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, userEmail }) => {
+export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, userEmail, userName, avatarUrl }) => {
   return (
     <AnimatePresence>
       {isOpen && (
@@ -25,12 +27,12 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, userEmail
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="relative w-full max-w-sm bg-zinc-900 border border-white/10 rounded-3xl overflow-hidden shadow-2xl"
+            className="relative w-full max-w-sm bg-black border border-border overflow-hidden shadow-[0_0_40px_rgba(255,0,255,0.1)]"
           >
-            <div className="p-6 bg-gradient-to-br from-primary/20 to-transparent border-b border-white/5">
+            <div className="p-6 border-b border-border">
               <div className="flex items-center justify-between mb-6">
-                <div className="w-16 h-16 rounded-2xl bg-zinc-800 border border-white/10 overflow-hidden">
-                  <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="Avatar" referrerPolicy="no-referrer" />
+                <div className="w-16 h-16 bg-black border border-primary overflow-hidden shadow-[0_0_10px_rgba(255,0,255,0.3)]">
+                  <img src={avatarUrl || "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"} alt="Avatar" referrerPolicy="no-referrer" />
                 </div>
                 <button 
                   onClick={onClose}
@@ -39,9 +41,9 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, userEmail
                   <X size={18} />
                 </button>
               </div>
-              <h2 className="text-xl font-bold text-white tracking-tight">Felix Agent</h2>
-              <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1.5">
-                <Mail size={12} /> {userEmail}
+              <h2 className="text-xl font-black text-white tracking-[0.2em] uppercase italic">{userName || "Felix Agent"}</h2>
+              <p className="text-[10px] text-primary mt-1 font-bold uppercase tracking-widest flex items-center gap-1.5 opacity-80">
+                <Mail size={12} /> {userEmail || "anonymous@orchestrator"}
               </p>
             </div>
 
@@ -70,8 +72,8 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, userEmail
               </button>
             </div>
 
-            <div className="p-4 bg-zinc-950/50 border-t border-white/5 text-center">
-              <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-bold">JULES v1.4.2-stable</p>
+            <div className="p-4 bg-black border-t border-border text-center">
+              <p className="text-[10px] text-zinc-800 uppercase tracking-[0.4em] font-black italic">JULES_CORE_v2.1</p>
             </div>
           </motion.div>
         </div>

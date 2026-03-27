@@ -23,11 +23,11 @@ export const CurrentTaskCard: React.FC<CurrentTaskCardProps> = ({ task, isAutoMo
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="glass rounded-3xl p-8 shadow-2xl relative overflow-hidden shrink-0 border-white/10 glow-primary"
+      className="bg-black border border-border rounded-none p-10 shadow-2xl relative overflow-hidden shrink-0 glow-primary"
     >
-      <div className="absolute top-0 right-0 p-6">
-        <div className="text-[10px] font-bold tracking-[0.2em] text-primary/80 glass-dark px-3 py-1.5 rounded-xl border border-white/10 uppercase">
-          {task.id.replace('task-', 'TSK-')}
+      <div className="absolute top-0 right-0 p-8">
+        <div className="text-[10px] font-bold tracking-[0.3em] text-primary bg-primary/5 px-4 py-2 border border-primary/30 uppercase font-mono">
+          {task.id.replace('task-', 'TSK_')}
         </div>
       </div>
       <div className="flex items-center gap-3 mb-6">
@@ -49,18 +49,18 @@ export const CurrentTaskCard: React.FC<CurrentTaskCardProps> = ({ task, isAutoMo
           : "This architectural directive is staged for execution. Dispatch the agent to begin the implementation phase."}
       </p>
       
-      <div className="grid grid-cols-3 gap-4 lg:gap-8 pt-8 border-t border-white/5">
-        <div className="flex flex-col gap-1">
-          <span className="block text-[10px] uppercase font-bold tracking-widest text-zinc-500">Neural Agent</span>
-          <span className="text-xs lg:text-sm font-mono text-white/80">Jules-A1-Pro</span>
+      <div className="grid grid-cols-3 gap-4 lg:gap-12 pt-10 border-t border-border">
+        <div className="flex flex-col gap-2">
+          <span className="block text-[9px] uppercase font-bold tracking-[0.2em] text-zinc-600">Neural Agent</span>
+          <span className="text-xs lg:text-sm font-mono text-white font-bold uppercase tracking-tight">Jules-A1-Pro</span>
         </div>
-        <div className="flex flex-col gap-1">
-          <span className="block text-[10px] uppercase font-bold tracking-widest text-zinc-500">Active Buffer</span>
-          <span className="text-xs lg:text-sm font-mono text-white/80 truncate block">server.ts</span>
+        <div className="flex flex-col gap-2">
+          <span className="block text-[9px] uppercase font-bold tracking-[0.2em] text-zinc-600">Active Buffer</span>
+          <span className="text-xs lg:text-sm font-mono text-white truncate block font-bold">server.ts</span>
         </div>
-        <div className="flex flex-col gap-1">
-          <span className="block text-[10px] uppercase font-bold tracking-widest text-zinc-500">Processing Time</span>
-          <span className="text-xs lg:text-sm font-mono text-primary font-bold">00:04:23</span>
+        <div className="flex flex-col gap-2">
+          <span className="block text-[9px] uppercase font-bold tracking-[0.2em] text-zinc-600">Processing Time</span>
+          <span className="text-sm lg:text-base font-mono text-primary font-bold shadow-[0_0_10px_rgba(255,0,255,0.2)]">00:04:23</span>
         </div>
       </div>
 
@@ -83,9 +83,9 @@ export const CurrentTaskCard: React.FC<CurrentTaskCardProps> = ({ task, isAutoMo
           ) : (
             <button 
               onClick={onDispatch}
-              className="flex-1 glass border border-primary/40 text-primary font-bold py-5 rounded-2xl text-[11px] uppercase tracking-[0.2em] hover:bg-primary/5 transition-all flex items-center justify-center gap-3 glow-primary hover:scale-105 active:scale-95"
+              className="flex-1 bg-primary text-black font-black py-6 text-[12px] uppercase tracking-[0.4em] hover:bg-primary/90 transition-all flex items-center justify-center gap-4 glow-primary shadow-[0_0_25px_rgba(255,0,255,0.4)] active:scale-95"
             >
-              <Zap size={18} className="animate-pulse" />
+              <Zap size={20} fill="currentColor" />
               Initialize Execution
             </button>
           )}
