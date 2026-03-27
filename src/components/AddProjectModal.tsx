@@ -37,9 +37,9 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClos
             initial={{ scale: 0.95, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.95, opacity: 0, y: 20 }}
-            className="relative w-full max-w-lg glass-dark border border-white/10 rounded-3xl p-8 lg:p-10 shadow-2xl overflow-hidden"
+            className="relative w-full max-w-lg bg-black border border-border p-10 shadow-2xl overflow-hidden"
           >
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary/50 to-primary/20" />
+            <div className="absolute top-0 left-0 w-full h-1 bg-primary" />
             
             <button 
               onClick={onClose}
@@ -53,8 +53,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClos
                 <FolderPlus size={24} />
               </div>
               <div>
-                <h2 className="text-xl font-bold tracking-tight text-white">Add Existing Project</h2>
-                <p className="text-sm text-zinc-400">Link a local repository from your machine</p>
+                <h2 className="text-xl font-bold tracking-[0.1em] text-white uppercase italic">Add Existing Project</h2>
+                <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest mt-1">Link a local repository from your machine</p>
               </div>
             </div>
 
@@ -66,7 +66,7 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClos
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. my-awesome-app"
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-primary/50 focus:bg-primary/5 transition-all"
+                  className="w-full bg-black border border-border px-5 py-4 text-sm text-white placeholder:text-zinc-900 outline-none focus:border-primary transition-all font-mono"
                   autoFocus
                 />
               </div>
@@ -78,7 +78,7 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClos
                   value={path}
                   onChange={(e) => setPath(e.target.value)}
                   placeholder="e.g. /home/user/projects/my-app"
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-primary/50 focus:bg-primary/5 transition-all text-mono"
+                  className="w-full bg-black border border-border px-5 py-4 text-sm text-white placeholder:text-zinc-900 outline-none focus:border-primary transition-all font-mono"
                 />
               </div>
 
@@ -90,7 +90,7 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClos
               <button 
                 type="submit"
                 disabled={!name || !path}
-                className="w-full py-4 bg-primary text-white text-[11px] font-bold uppercase tracking-widest rounded-2xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:scale-100 disabled:shadow-none glow-primary"
+                className="w-full py-5 bg-primary text-black text-[12px] font-black uppercase tracking-[0.4em] shadow-lg hover:bg-primary/90 transition-all disabled:opacity-30 disabled:grayscale-0 glow-primary"
               >
                 Register Project
               </button>

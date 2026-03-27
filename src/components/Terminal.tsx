@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronRight, Zap } from 'lucide-react';
+import { ChevronRight, Zap, Square, Terminal as TerminalIcon } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface TerminalProps {
@@ -23,46 +23,46 @@ export const Terminal: React.FC<TerminalProps> = ({ logs = [], logEndRef, onRetr
   };
 
   return (
-    <div className="flex-1 flex flex-col glass border border-white/5 rounded-2xl overflow-hidden shadow-2xl min-h-[300px] lg:min-h-0 relative glow-primary">
-      <div className="h-12 glass-dark border-b border-white/5 flex items-center justify-between px-6 shrink-0 z-10">
+    <div className="flex-1 flex flex-col bg-black border border-border overflow-hidden min-h-[300px] lg:min-h-0 relative group">
+      <div className="h-10 bg-secondary border-b border-border flex items-center justify-between px-6 shrink-0 z-10">
         <div className="flex items-center gap-3">
-          <div className="flex gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/40" />
-            <div className="w-3 h-3 rounded-full bg-amber-500/20 border border-amber-500/40" />
-            <div className="w-3 h-3 rounded-full bg-emerald-500/20 border border-emerald-500/40" />
+          <div className="flex gap-1.5">
+            <div className="w-2.5 h-2.5 border border-border bg-black" />
+            <div className="w-2.5 h-2.5 border border-border bg-black" />
+            <div className="w-2.5 h-2.5 border border-border bg-black" />
           </div>
           <div className="ml-4 flex items-center gap-2">
-            <Terminal size={14} className="text-primary/70" />
-            <span className="text-[10px] font-bold tracking-[0.2em] text-zinc-500 uppercase">System Core — bash</span>
+            <TerminalIcon size={12} className="text-primary" />
+            <span className="text-[10px] font-bold tracking-[0.25em] text-zinc-500 uppercase font-mono">SYS_CORE_BASH</span>
           </div>
         </div>
         <div className="flex items-center gap-4">
           {hasFailure && onRetry && (
             <button 
               onClick={onRetry}
-              className="px-3 py-1 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-[10px] font-bold rounded-lg hover:bg-rose-500/20 transition-all flex items-center gap-2 glow-primary animate-pulse"
+              className="px-3 py-1 bg-red-500/10 border border-red-500/30 text-red-500 text-[10px] font-bold hover:bg-red-500/20 transition-all flex items-center gap-2 glow-primary"
             >
               <Zap size={12} />
               RETRY_SEQUENCE
             </button>
           )}
-          <div className="h-6 w-[1px] bg-white/5 mx-2" />
-          <button className="text-zinc-500 hover:text-white transition-colors p-1 hover:bg-white/5 rounded">
-            <ChevronRight size={16} className="rotate-90" />
+          <div className="h-4 w-[1px] bg-border mx-2" />
+          <button className="text-zinc-500 hover:text-white transition-colors p-1">
+            <ChevronRight size={14} className="rotate-90" />
           </button>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-6 font-mono text-[11px] leading-relaxed text-zinc-400 terminal-scrollbar mask-gradient select-text">
+      <div className="flex-1 overflow-y-auto p-6 font-mono text-[11px] leading-relaxed text-zinc-400 terminal-scrollbar select-text bg-black">
         {logs.map((log, i) => (
-          <div key={i} className="mb-2 group hover:bg-white/[0.03] px-2 py-1 rounded-lg transition-all border border-transparent hover:border-white/5">
+          <div key={i} className="mb-1 group hover:bg-primary/5 px-2 py-0.5 transition-all border-l-2 border-transparent hover:border-primary">
             <span className="text-zinc-600 mr-3 select-none tabular-nums opacity-60">[{log.split(']')[0].split('[')[1]}]</span>
             <span className={cn(
-              "font-medium",
-              log.includes('WARN') ? 'text-amber-400/90' :
-              log.includes('ERROR') ? 'text-red-400/90' :
-              log.includes('PASSED') ? 'text-emerald-400/90' :
-              log.includes('FAILED') ? 'text-rose-400/90' :
-              log.includes('SYSTEM') ? 'text-zinc-400 font-bold' :
+              "font-mono tracking-tight",
+              log.includes('WARN') ? 'text-warning font-bold' :
+              log.includes('ERROR') ? 'text-error font-bold' :
+              log.includes('PASSED') ? 'text-success font-bold' :
+              log.includes('FAILED') ? 'text-error font-bold' :
+              log.includes('SYSTEM') ? 'text-primary font-bold' :
               log.includes('$') ? 'text-white font-bold' :
               'text-zinc-300'
             )}>
@@ -72,18 +72,24 @@ export const Terminal: React.FC<TerminalProps> = ({ logs = [], logEndRef, onRetr
         ))}
         <div ref={logEndRef} />
       </div>
-      <form onSubmit={handleCommandSubmit} className="p-3 glass-dark border-t border-white/5 flex items-center gap-3 shrink-0 relative">
-        <div className="absolute inset-0 bg-primary/5 opacity-40 pointer-events-none" />
-        <ChevronRight size={16} className="text-primary glow-primary" />
-        <input 
-          type="text"
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          placeholder="Execute system command..."
-          className="flex-1 bg-transparent border-none outline-none text-[12px] font-mono text-white/90 placeholder:text-zinc-700/80 z-10"
-        />
-        <div className="flex items-center gap-2 px-2 py-1 rounded bg-white/5 border border-white/5 text-[9px] font-bold text-zinc-500 uppercase tracking-widest z-10">
-          Enter to exec
+      <form onSubmit={handleCommandSubmit} className="p-3 bg-black border-t border-border flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 px-3 py-1 bg-secondary border border-border text-[9px] font-bold text-primary uppercase tracking-widest font-mono">
+          $
+        </div>
+        <div className="relative flex-1 flex items-center">
+          <input 
+            type="text"
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            placeholder="TYPE_SYSTEM_CMD"
+            className="flex-1 bg-transparent border-none outline-none text-[12px] font-mono text-white placeholder:text-zinc-900 z-10"
+          />
+          {command.length === 0 && (
+            <div className="absolute left-0 w-2.5 h-4 bg-primary animate-pulse ml-0.5" />
+          )}
+        </div>
+        <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-secondary border border-border text-[8px] font-bold text-zinc-700 uppercase tracking-[0.3em]">
+          SYS_READY_TTY1
         </div>
       </form>
     </div>

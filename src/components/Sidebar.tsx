@@ -1,5 +1,5 @@
 import React from 'react';
-import { Terminal, Activity, Github, Settings, X, Bot } from 'lucide-react';
+import { Terminal, Activity, Github, Settings, X, Bot, Shield } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -11,8 +11,12 @@ interface SidebarProps {
   onTerminalClick?: () => void;
   onActivityClick?: () => void;
   onGithubClick?: () => void;
+  onConnectGitHubClick?: () => void;
   onAgentsClick?: () => void;
+  onManifestoClick?: () => void;
   onUserClick?: () => void;
+  isGitHubConnected?: boolean;
+  githubUser?: any;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -24,13 +28,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onActivityClick,
   onGithubClick,
   onAgentsClick,
-  onUserClick
+  onManifestoClick,
+  onUserClick,
+  onConnectGitHubClick,
+  isGitHubConnected,
+  githubUser
 }) => {
   const navItems = [
     { id: 'terminal', icon: Terminal, label: 'Terminal', onClick: onTerminalClick },
     { id: 'activity', icon: Activity, label: 'Activity', onClick: onActivityClick },
     { id: 'github', icon: Github, label: 'GitHub', onClick: onGithubClick },
     { id: 'agents', icon: Bot, label: 'Agents', onClick: onAgentsClick },
+    { id: 'manifesto', icon: Shield, label: 'Manifesto', onClick: onManifestoClick },
     { id: 'settings', icon: Settings, label: 'Settings', onClick: onSettingsClick },
   ];
 
@@ -50,12 +59,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </AnimatePresence>
 
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-[70] w-full lg:w-20 glass-dark border-r border-white/5 flex flex-col items-center py-8 gap-10 transition-transform duration-300 lg:translate-x-0 lg:static shrink-0",
+        "fixed inset-y-0 left-0 z-[70] w-full lg:w-20 bg-black border-r border-border flex flex-col items-center py-8 gap-10 transition-transform duration-300 lg:translate-x-0 lg:static shrink-0",
         isOpen ? "translate-x-0" : "-translate-x-full"
       )}>
         <div className="flex items-center justify-between w-full px-8 lg:px-0 lg:justify-center">
-          <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/30 flex items-center justify-center text-primary glow-primary animate-pulse-slow">
-            <Terminal size={24} />
+          <div className="w-12 h-12 border-2 border-primary flex items-center justify-center text-primary glow-primary">
+            <Bot size={26} strokeWidth={2.5} />
           </div>
           <button 
             onClick={onClose}
@@ -77,29 +86,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 }
               }}
               className={cn(
-                "flex items-center gap-4 lg:justify-center text-zinc-400 hover:text-white transition-all duration-300 relative group w-full lg:w-auto",
+                "flex items-center gap-4 lg:justify-center text-zinc-600 hover:text-white transition-all duration-200 relative group w-full lg:w-auto",
                 activeTab === item.id && "text-white"
               )}
             >
-              <item.icon size={22} className={cn("transition-transform duration-300 group-hover:scale-110", activeTab === item.id && "text-primary")} />
-              <span className="lg:hidden text-base font-medium">{item.label}</span>
-              <span className="hidden lg:block absolute left-full ml-4 px-3 py-1.5 glass-dark border border-white/10 text-xs text-white rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+              <item.icon size={22} strokeWidth={activeTab === item.id ? 2.5 : 2} className={cn("transition-all duration-200", activeTab === item.id && "text-primary")} />
+              <span className="lg:hidden text-[10px] font-bold uppercase tracking-[0.2em]">{item.label}</span>
+              <span className="hidden lg:block absolute left-full ml-4 px-3 py-1.5 bg-secondary border border-border text-[10px] font-bold uppercase tracking-tighter text-white opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
                 {item.label}
               </span>
               {activeTab === item.id && (
-                <div className="absolute -left-8 lg:-left-4 top-1/2 -translate-y-1/2 w-1.5 h-8 lg:h-6 bg-primary rounded-r-full glow-primary" />
+                <div className="absolute -left-8 lg:-left-4 top-1/2 -translate-y-1/2 w-1.5 h-10 lg:h-8 bg-primary glow-primary shadow-[0_0_15px_rgba(255,0,255,0.6)]" />
               )}
             </button>
           ))}
         </nav>
 
-        <div className="mt-auto w-full px-8 lg:px-0 flex justify-center pb-4">
-          <div 
-            onClick={onUserClick}
-            className="w-12 h-12 lg:w-10 lg:h-10 rounded-full border border-white/10 overflow-hidden cursor-pointer hover:border-primary/50 transition-all duration-300 hover:scale-110 glow-primary"
+        <div className="mt-auto w-full px-8 lg:px-0 flex flex-col items-center gap-6 pb-6">
+          {!isGitHubConnected ? (
+            <button 
+              onClick={onConnectGitHubClick}
+              className="w-12 h-12 lg:w-10 lg:h-10 border border-zinc-800 flex items-center justify-center text-zinc-600 hover:text-primary hover:border-primary transition-all duration-200 group"
+              title="Connect GitHub"
+            >
+              <Github size={20} />
+            </button>
+          ) : (
+            <button 
+              onClick={onUserClick}
+              className="w-12 h-12 lg:w-10 lg:h-10 border border-primary/50 overflow-hidden cursor-pointer hover:border-primary transition-all duration-200 glow-primary"
+              title={`Logged in as ${githubUser?.login}`}
+            >
+              <img src={githubUser?.avatar_url} alt="Avatar" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+            </button>
+          )}
+          
+          <button 
+            onClick={onSettingsClick}
+            className="text-zinc-600 hover:text-white transition-colors"
+            title="System Settings"
           >
-            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="Avatar" referrerPolicy="no-referrer" />
-          </div>
+            <Settings size={20} />
+          </button>
         </div>
       </aside>
     </>

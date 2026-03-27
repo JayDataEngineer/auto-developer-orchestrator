@@ -1,48 +1,80 @@
-# Development Docker Compose with Hot Reload
+# Development Docker Compose - Hot Reload Enabled
 # Integrated with shared-docker-infra via Traefik
 services:
-  # Node.js/TypeScript Server with Vite Hot Reload
-  app:
+  # ===========================================
+  # Go Backend with Hot Reload
+  # ===========================================
+  go-backend:
+    build:
+      context: ./go-backend
+      dockerfile: Dockerfile.dev
+    container_name: orchestrator-go-dev
+    environment:
+      - SERVER_PORT=3847
+      - DATABASE_URL=/data/orchestrator.db
+      - JULES_API_KEY=${JULES_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - PYTHON_SERVICE_URL=http://python-agent:8080
+      - LITELLM_PROXY_URL=${LITELLM_PROXY_URL:-http://litellm.local}
+    volumes:
+      - ./go-backend:/app
+      - ./projects:/app/projects
+      - ./data:/data
+      - ~/.ssh:/root/.ssh:ro
+      - ~/.gitconfig:/root/.gitconfig:ro
+    depends_on:
+      - python-agent
+    networks:
+      - shared-infra
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.orchestrator-api-dev.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.orchestrator-api-dev.entrypoints=http"
+      - "traefik.http.services.orchestrator-api-dev.loadbalancer.server.port=3847"
+
+  # ===========================================
+  # Python Deep Agent Service with Hot Reload
+  # ===========================================
+  python-agent:
+    build:
+      context: ./python-agent
+      dockerfile: Dockerfile.dev
+    container_name: orchestrator-python-dev
+    environment:
+      - PYTHON_SERVICE_PORT=8080
+      - DEEP_AGENT_MODEL=${DEEP_AGENT_MODEL:-gpt-4o}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+    volumes:
+      - ./python-agent:/app
+      - ./projects:/app/projects
+    networks:
+      - shared-infra
+
+  # ===========================================
+  # React Frontend (Vite Dev Server)
+  # ===========================================
+  frontend:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    container_name: auto-dev-orchestrator
-    # No ports exposed - access via Traefik
-    volumes:
-      # Mount source code for hot reload
-      - .:/app
-      # Prevent node_modules from being overwritten
-      - /app/node_modules
-      # Mount projects directory for local development
-      - ./projects:/app/projects
-      # SSH keys for Git operations (optional)
-      - ~/.ssh:/root/.ssh:ro
-      - ~/.gitconfig:/root/.gitconfig:ro
+    container_name: orchestrator-frontend-dev
     environment:
-      - NODE_ENV=development
       - VITE_HOST=0.0.0.0
       - VITE_PORT=5194
-      - SERVER_PORT=3847
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - APP_URL=${APP_URL:-http://orchestrator.local}
-      # Shared infrastructure
-      - LITELLM_PROXY_URL=${LITELLM_PROXY_URL:-http://litellm.local}
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse.local}
-      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
-      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - VITE_API_URL=/api
+    volumes:
+      - .:/app
+      - /app/node_modules
     networks:
       - shared-infra
-    restart: unless-stopped
-    # Traefik labels for development access
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.orchestrator-dev.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`)"
       - "traefik.http.routers.orchestrator-dev.entrypoints=http"
       - "traefik.http.services.orchestrator-dev.loadbalancer.server.port=5194"
-      - "traefik.http.routers.orchestrator-dev.priority=10"
+      - "traefik.http.routers.orchestrator-dev.priority=1"
 
 networks:
   shared-infra:
