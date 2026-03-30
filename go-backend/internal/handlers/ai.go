@@ -2,13 +2,14 @@ package handlers
 
 import (
 	"encoding/json"
+	"math/rand"
 	"net/http"
 	"time"
 
 	"go.uber.org/zap"
 )
 
-// AIHandler handles AI-related requests (test generation, etc.)
+// AIHandler handles AI-related requests
 type AIHandler struct {
 	logger *zap.Logger
 }
@@ -25,7 +26,8 @@ type GenerateTestsRequest struct {
 	Prompt  string `json:"prompt"`
 }
 
-// GenerateTests generates test cases using AI
+// GenerateTests generates test cases
+// TODO: migrate to Pi agent for real LLM-powered test generation
 func (h *AIHandler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 	var req GenerateTestsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -33,21 +35,12 @@ func (h *AIHandler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For Gemini, return mock tests (client-side handling)
-	// In production, this would call LiteLLM proxy
-	tests := []string{
-		"Verify that " + req.Summary + " handles null inputs correctly.",
-		"Check for race conditions in " + req.Summary + " during high concurrency.",
-		"Ensure " + req.Summary + " doesn't leak memory on repeated calls.",
-		"Validate that " + req.Summary + " respects existing security permissions.",
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":   true,
-		"engine":    req.Engine,
+		"engine":    "stub",
 		"summary":   req.Summary,
-		"tests":     tests,
+		"tests":     []string{},
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }
@@ -65,18 +58,16 @@ func (h *AIHandler) RunTests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Simulate test execution
 	results := make([]map[string]interface{}, len(req.Tests))
 	for i, test := range req.Tests {
 		status := "PASSED"
-		if rng.Float64() < 0.1 { // 10% failure rate
+		if rand.Float64() < 0.1 {
 			status = "FAILED"
 		}
-
 		results[i] = map[string]interface{}{
 			"test":     test,
 			"status":   status,
-			"duration": rng.Intn(500) + 100,
+			"duration": rand.Intn(500) + 100,
 		}
 	}
 
@@ -88,7 +79,7 @@ func (h *AIHandler) RunTests(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GenerateChecklist generates a checklist using the Python deep agent service
+// GenerateChecklist generates a checklist
 func (h *AIHandler) GenerateChecklist(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project string `json:"project"`
@@ -100,12 +91,9 @@ func (h *AIHandler) GenerateChecklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Call Python microservice via gRPC
-	// For now, return mock response
-	h.logger.Info("Generating checklist", 
+	h.logger.Info("Generating checklist",
 		zap.String("project", req.Project),
 		zap.String("prompt", req.Prompt))
 
 	w.Header().Set("Content-Type", "text/event-stream")
-	// SSE streaming handled in checklist.go
 }

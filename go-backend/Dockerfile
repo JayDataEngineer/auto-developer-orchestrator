@@ -1,5 +1,5 @@
 # Go Backend Production Dockerfile
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
@@ -30,7 +30,7 @@ WORKDIR /app
 COPY --from=builder /app/main .
 
 # Install Pi coding agent globally
-RUN npm install -g @anthropic-ai/pi-coding-agent@latest
+RUN npm install -g @mariozechner/pi-coding-agent@latest
 
 # Create data directory
 RUN mkdir -p /data /app/projects
