@@ -2,7 +2,7 @@
 # Integrated with shared-docker-infra via Traefik
 services:
   # ===========================================
-  # Go Backend with Hot Reload
+  # Go Backend with Hot Reload (Air) + Pi Agent
   # ===========================================
   go-backend:
     build:
@@ -12,45 +12,31 @@ services:
     environment:
       - SERVER_PORT=3847
       - DATABASE_URL=/data/orchestrator.db
-      - JULES_API_KEY=${JULES_API_KEY}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - PYTHON_SERVICE_URL=http://python-agent:8080
-      - LITELLM_PROXY_URL=${LITELLM_PROXY_URL:-http://litellm.local}
+      - PROJECT_ROOT=/app/projects
+      - PI_AGENT_DIR=/root/.pi
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse.local}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
     volumes:
       - ./go-backend:/app
       - ./projects:/app/projects
       - ./data:/data
+      - pi-config:/root/.pi
       - ~/.ssh:/root/.ssh:ro
       - ~/.gitconfig:/root/.gitconfig:ro
-    depends_on:
-      - python-agent
     networks:
       - shared-infra
+    command: ["air", "-c", ".air.toml"]
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.orchestrator-api-dev.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`) && PathPrefix(`/api`)"
-      - "traefik.http.routers.orchestrator-api-dev.entrypoints=http"
-      - "traefik.http.services.orchestrator-api-dev.loadbalancer.server.port=3847"
-
-  # ===========================================
-  # Python Deep Agent Service with Hot Reload
-  # ===========================================
-  python-agent:
-    build:
-      context: ./python-agent
-      dockerfile: Dockerfile.dev
-    container_name: orchestrator-python-dev
-    environment:
-      - PYTHON_SERVICE_PORT=8080
-      - DEEP_AGENT_MODEL=${DEEP_AGENT_MODEL:-gpt-4o}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
-    volumes:
-      - ./python-agent:/app
-      - ./projects:/app/projects
-    networks:
-      - shared-infra
+      - "traefik.http.routers.orchestrator-go-dev.rule=Host(`orchestrator-go.${INFRA_DOMAIN:-local}`)"
+      - "traefik.http.routers.orchestrator-go-dev.entrypoints=http"
+      - "traefik.http.services.orchestrator-go-dev.loadbalancer.server.port=3847"
+      - "traefik.http.routers.orchestrator-go-dev.priority=10"
 
   # ===========================================
   # React Frontend (Vite Dev Server)
@@ -63,18 +49,22 @@ services:
     environment:
       - VITE_HOST=0.0.0.0
       - VITE_PORT=5194
-      - VITE_API_URL=/api
+      - VITE_API_URL=http://orchestrator.local/api
     volumes:
       - .:/app
       - /app/node_modules
     networks:
       - shared-infra
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5194"]
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.orchestrator-dev.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`)"
-      - "traefik.http.routers.orchestrator-dev.entrypoints=http"
-      - "traefik.http.services.orchestrator-dev.loadbalancer.server.port=5194"
-      - "traefik.http.routers.orchestrator-dev.priority=1"
+      - "traefik.http.routers.orchestrator-frontend.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`)"
+      - "traefik.http.routers.orchestrator-frontend.entrypoints=http"
+      - "traefik.http.services.orchestrator-frontend.loadbalancer.server.port=5194"
+      - "traefik.http.routers.orchestrator-frontend.priority=5"
+
+volumes:
+  pi-config:
 
 networks:
   shared-infra:

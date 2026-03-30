@@ -11,6 +11,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
+	"github.com/auto-developer-orchestrator/backend/internal/pi"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -54,11 +55,14 @@ func main() {
 	gitOps := git.NewGitOps(logger)
 	checklistHandler := handlers.NewChecklistHandler(db, logger)
 	projectHandler := handlers.NewProjectHandler(db, logger, gitOps)
-	julesHandler := handlers.NewJulesHandler(db, logger)
 	aiHandler := handlers.NewAIHandler(logger)
-	aiCLIHandler := handlers.NewAICLIHandler(logger)
 	configHandler := handlers.NewConfigHandler(logger)
+	githubHandler := handlers.NewGitHubHandler(logger)
 	cliHandler := handlers.NewCLIHandler(logger, projectRoot)
+
+	// Pi agent pool
+	piPool := pi.NewPiPool(logger, 5*time.Minute)
+	piHandler := handlers.NewPiHandler(piPool, db, logger)
 
 	// Setup router
 	r := chi.NewRouter()
@@ -103,15 +107,6 @@ func main() {
 		r.Post("/checklist/update", checklistHandler.Update)
 		r.Post("/ai/agent-checklist", checklistHandler.GenerateChecklistStream) // SSE streaming
 
-		// Task Dispatch
-		r.Post("/dispatch", julesHandler.Dispatch)
-		r.Post("/dispatch/all", julesHandler.DispatchAll)
-
-		// Jules Session Management
-		r.Get("/jules/sessions", julesHandler.ListSessions)
-		r.Get("/jules/sessions/:id", julesHandler.GetSession)
-		r.Post("/jules/sessions/:id/approve-plan", julesHandler.ApprovePlan)
-
 		// Merge
 		r.Post("/merge", checklistHandler.Merge)
 
@@ -128,6 +123,10 @@ func main() {
 		// GitHub integration
 		r.Get("/github/user", configHandler.GetGitHubUser)
 		r.Post("/config/github", configHandler.ConnectGitHub)
+		r.Get("/github/prs", githubHandler.GetPRs)
+		r.Get("/github/stats", githubHandler.GetStats)
+		r.Get("/github/branches", githubHandler.GetBranches)
+		r.Get("/github/activity", githubHandler.GetActivity)
 
 		// Settings
 		r.Post("/settings/mode", projectHandler.SetMode)
@@ -138,8 +137,8 @@ func main() {
 		r.Get("/cli/cat", cliHandler.ReadFile)
 		r.Get("/cli/ls", cliHandler.ListDirectory)
 
-		// AI Chat via CLI tools (OpenAI, Claude, Gemini - already authenticated)
-		r.Post("/ai/chat", aiCLIHandler.Chat)
+		// Pi Coding Agent
+		r.Route("/pi", piHandler.RegisterRoutes)
 	})
 
 	// Serve static files (React frontend)
@@ -173,6 +172,10 @@ func main() {
 	<-quit
 
 	logger.Info("Shutting down server...")
+
+	// Shutdown Pi agent pool
+	piPool.Shutdown()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

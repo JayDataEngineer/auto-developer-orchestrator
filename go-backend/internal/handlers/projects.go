@@ -15,6 +15,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// extractRepoFromSource parses "sources/github/{owner}/{repo}" and returns the repo name (kept for reference)
+func extractRepoFromSource(source string) string {
+	parts := strings.Split(source, "/")
+	if len(parts) >= 4 && parts[0] == "sources" && parts[1] == "github" {
+		return parts[3]
+	}
+	return ""
+}
+
 // ProjectHandler handles project-related HTTP requests
 type ProjectHandler struct {
 	db     *storage.Database
