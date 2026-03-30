@@ -1,58 +1,44 @@
 # Production Docker Compose - High Performance Frontend + API
 # Integrated with shared-docker-infra via Traefik
-version: '3.8'
-
 services:
   # ===========================================
-  # Go Backend Production
+  # Go Backend API Server (with Pi Agent)
   # ===========================================
   go-backend:
     build:
       context: ./go-backend
       dockerfile: Dockerfile
-    container_name: orchestrator-go-prod
+    container_name: orchestrator-go
     restart: always
     environment:
       - SERVER_PORT=3847
       - DATABASE_URL=/data/orchestrator.db
-      - JULES_API_KEY=${JULES_API_KEY}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - PYTHON_SERVICE_URL=http://python-agent:8080
-      - LITELLM_PROXY_URL=${LITELLM_PROXY_URL}
+      - PROJECT_ROOT=/app/projects
+      - PI_AGENT_DIR=/root/.pi
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse.local}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
     volumes:
       - ./projects:/app/projects
       - ./data:/data
+      - pi-config:/root/.pi
       - ~/.ssh:/root/.ssh:ro
       - ~/.gitconfig:/root/.gitconfig:ro
-    depends_on:
-      - python-agent
     networks:
       - shared-infra
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3847/api/health"]
+      interval: 30s
+      timeout: 10s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.orchestrator-api.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`) && PathPrefix(`/api`)"
       - "traefik.http.routers.orchestrator-api.entrypoints=http"
       - "traefik.http.services.orchestrator-api.loadbalancer.server.port=3847"
-
-  # ===========================================
-  # Python Deep Agent Service Production
-  # ===========================================
-  python-agent:
-    build:
-      context: ./python-agent
-      dockerfile: Dockerfile
-    container_name: orchestrator-python-prod
-    restart: always
-    environment:
-      - PYTHON_SERVICE_PORT=8080
-      - DEEP_AGENT_MODEL=${DEEP_AGENT_MODEL:-gpt-4o}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
-    volumes:
-      - ./projects:/app/projects
-    networks:
-      - shared-infra
 
   # ===========================================
   # React Frontend (Nginx Production)
@@ -63,7 +49,7 @@ services:
       dockerfile: Dockerfile
       args:
         - VITE_API_URL=/api
-    container_name: orchestrator-frontend-prod
+    container_name: orchestrator-frontend
     restart: always
     networks:
       - shared-infra
@@ -73,6 +59,9 @@ services:
       - "traefik.http.routers.orchestrator.entrypoints=http"
       - "traefik.http.services.orchestrator.loadbalancer.server.port=80"
       - "traefik.http.routers.orchestrator.priority=1"
+
+volumes:
+  pi-config:
 
 networks:
   shared-infra:

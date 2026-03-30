@@ -1,28 +1,25 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Circle, Sparkles } from 'lucide-react';
+import { CheckCircle2, Circle, Sparkles, Play } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-interface Task {
-  id: string;
-  text: string;
-  completed: boolean;
-  status: 'completed' | 'in-progress' | 'pending';
-}
+import { Task } from '../lib/api';
 
 interface ChecklistProps {
   tasks: Task[];
   onGenerateAI?: (prompt?: string) => void;
   onDispatchAll?: () => void;
+  onDispatchTask?: (taskId: string) => void;
   isGenerating?: boolean;
   isDispatching?: boolean;
 }
 
-export const Checklist: React.FC<ChecklistProps> = ({ 
-  tasks, 
-  onGenerateAI, 
+export const Checklist: React.FC<ChecklistProps> = ({
+  tasks,
+  onGenerateAI,
   onDispatchAll,
-  isGenerating, 
-  isDispatching 
+  onDispatchTask,
+  isGenerating,
+  isDispatching
 }) => {
   const [guidancePrompt, setGuidancePrompt] = useState('');
 
@@ -167,6 +164,16 @@ export const Checklist: React.FC<ChecklistProps> = ({
                   </div>
                 )}
               </div>
+              {task.status === 'pending' && onDispatchTask && (
+                <button
+                  onClick={() => onDispatchTask(task.id)}
+                  disabled={isDispatching}
+                  className="shrink-0 p-2 text-zinc-700 hover:text-primary transition-colors disabled:opacity-30"
+                  title="Dispatch to Pi agent"
+                >
+                  <Play size={14} />
+                </button>
+              )}
             </div>
           ))
         )}
