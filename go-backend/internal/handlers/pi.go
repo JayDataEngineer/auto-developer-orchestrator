@@ -56,25 +56,33 @@ type promptRequest struct {
 func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	var req promptRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Invalid request body",
+		})
 		return
 	}
 
 	if req.Message == "" {
-		http.Error(w, "Message is required", http.StatusBadRequest)
+		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Message is required",
+		})
 		return
 	}
 
 	projectPath := h.resolveProjectPath(req.Project)
 	if projectPath == "" {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
 		return
 	}
 
 	client, err := h.pool.GetOrCreate(projectPath)
 	if err != nil {
 		h.log.Error("Failed to get Pi client", zap.Error(err))
-		http.Error(w, fmt.Sprintf("Failed to start Pi agent: %v", err), http.StatusInternalServerError)
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": fmt.Sprintf("Failed to start Pi agent: %v", err),
+		})
 		return
 	}
 
@@ -211,23 +219,28 @@ func (h *PiHandler) Abort(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
 		return
 	}
 
 	client := h.pool.Get(projectPath)
 	if client == nil {
-		http.Error(w, "No active Pi session for project", http.StatusNotFound)
+		h.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false, "message": "No active Pi session for project",
+		})
 		return
 	}
 
 	if err := client.Abort(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	h.writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // GetState returns the current Pi session state.
@@ -235,19 +248,19 @@ func (h *PiHandler) GetState(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
 		return
 	}
 
 	client := h.pool.Get(projectPath)
 	if client == nil {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(pi.SessionState{})
+		h.writeJSON(w, http.StatusOK, pi.SessionState{})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(client.GetState())
+	h.writeJSON(w, http.StatusOK, client.GetState())
 }
 
 // GetMessages returns the conversation history.
@@ -255,26 +268,28 @@ func (h *PiHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
 		return
 	}
 
 	client := h.pool.Get(projectPath)
 	if client == nil {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]pi.AgentMessage{})
+		h.writeJSON(w, http.StatusOK, []pi.AgentMessage{})
 		return
 	}
 
 	// Request messages from Pi - they'll come as events
 	// For now return empty, frontend subscribes to SSE for updates
 	if err := client.GetMessages(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode([]pi.AgentMessage{})
+	h.writeJSON(w, http.StatusOK, []pi.AgentMessage{})
 }
 
 // GetModels lists available models.
@@ -282,25 +297,29 @@ func (h *PiHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
 		return
 	}
 
 	client, err := h.pool.GetOrCreate(projectPath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
 		return
 	}
 
 	// Request models from Pi
 	if err := client.GetAvailableModels(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
 		return
 	}
 
-	// Return current state
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"models": []pi.ModelInfo{},
 	})
 }
@@ -316,29 +335,36 @@ type setModelRequest struct {
 func (h *PiHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 	var req setModelRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Invalid request body",
+		})
 		return
 	}
 
 	projectPath := h.resolveProjectPath(req.Project)
 	if projectPath == "" {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
 		return
 	}
 
 	client := h.pool.Get(projectPath)
 	if client == nil {
-		http.Error(w, "No active Pi session", http.StatusNotFound)
+		h.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false, "message": "No active Pi session - send a prompt first",
+		})
 		return
 	}
 
 	if err := client.SetModel(req.Provider, req.ModelId); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	h.writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // Compact triggers context compaction.
@@ -346,23 +372,28 @@ func (h *PiHandler) Compact(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
 		return
 	}
 
 	client := h.pool.Get(projectPath)
 	if client == nil {
-		http.Error(w, "No active Pi session", http.StatusNotFound)
+		h.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false, "message": "No active Pi session - send a prompt first",
+		})
 		return
 	}
 
 	if err := client.Compact(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	h.writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // ListSessions lists saved Pi sessions.
@@ -370,24 +401,26 @@ func (h *PiHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
 		return
 	}
 
 	client := h.pool.Get(projectPath)
 	if client == nil {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]pi.SessionInfo{})
+		h.writeJSON(w, http.StatusOK, []pi.SessionInfo{})
 		return
 	}
 
 	if err := client.ListSessions(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode([]pi.SessionInfo{})
+	h.writeJSON(w, http.StatusOK, []pi.SessionInfo{})
 }
 
 // switchSessionRequest is the request body for SwitchSession.
@@ -400,29 +433,36 @@ type switchSessionRequest struct {
 func (h *PiHandler) SwitchSession(w http.ResponseWriter, r *http.Request) {
 	var req switchSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Invalid request body",
+		})
 		return
 	}
 
 	projectPath := h.resolveProjectPath(req.Project)
 	if projectPath == "" {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
 		return
 	}
 
 	client := h.pool.Get(projectPath)
 	if client == nil {
-		http.Error(w, "No active Pi session", http.StatusNotFound)
+		h.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false, "message": "No active Pi session - send a prompt first",
+		})
 		return
 	}
 
 	if err := client.SwitchSession(req.SessionId); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	h.writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // resolveProjectPath resolves a project name to its filesystem path.
@@ -460,4 +500,11 @@ func (h *PiHandler) resolveProjectPath(project string) string {
 	}
 
 	return ""
+}
+
+// writeJSON writes a JSON response with the given status code.
+func (h *PiHandler) writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
 }
