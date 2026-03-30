@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.uber.org/zap"
@@ -72,6 +73,13 @@ func (c *PiClient) start() error {
 	// Pass through environment for API keys
 	c.cmd.Env = os.Environ()
 
+	// CRITICAL: Kill Pi if the Go parent process dies unexpectedly.
+	// Prevents zombie Node.js processes from consuming resources.
+	c.cmd.SysProcAttr = &syscall.SysProcAttr{
+		Pdeathsig: syscall.SIGKILL,
+		Setpgid:   true, // New process group so we can kill Pi + its children
+	}
+
 	// Create stdin/stdout pipes
 	stdin, err := c.cmd.StdinPipe()
 	if err != nil {
@@ -123,9 +131,7 @@ func (c *PiClient) readStderr() {
 
 // readEvents reads JSONL events from Pi's stdout and dispatches to subscribers.
 func (c *PiClient) readEvents() {
-	scanner := bufio.NewScanner(c.stderr)
-	// Use stdout, not stderr
-	scanner = bufio.NewScanner(c.stdout)
+	scanner := bufio.NewScanner(c.stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024) // 10MB max line
 
 	for scanner.Scan() {
@@ -308,6 +314,11 @@ func (c *PiClient) IsRunning() bool {
 func (c *PiClient) Close() error {
 	c.cancel()
 
+	// Close stdin to signal Pi to exit gracefully
+	if c.stdin != nil {
+		c.stdin.Close()
+	}
+
 	// Close all subscriber channels
 	c.subscribersMu.Lock()
 	for id, ch := range c.subscribers {
@@ -316,8 +327,11 @@ func (c *PiClient) Close() error {
 	}
 	c.subscribersMu.Unlock()
 
-	// Give process time to shut down gracefully
+	// Kill the entire process group (Pi + any child processes it spawned)
 	if c.cmd != nil && c.cmd.Process != nil {
+		// Send SIGKILL to the process group (negative PID)
+		syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+
 		done := make(chan error, 1)
 		go func() {
 			done <- c.cmd.Wait()
@@ -325,10 +339,24 @@ func (c *PiClient) Close() error {
 
 		select {
 		case <-done:
-		case <-time.After(5 * time.Second):
+		case <-time.After(3 * time.Second):
+			// Fallback: direct kill if process group kill didn't work
 			c.cmd.Process.Kill()
+			<-done
 		}
 	}
+
+	// Close pipes
+	if c.stdout != nil {
+		c.stdout.Close()
+	}
+	if c.stderr != nil {
+		c.stderr.Close()
+	}
+
+	c.mu.Lock()
+	c.running = false
+	c.mu.Unlock()
 
 	c.logger.Info("Pi subprocess closed", zap.String("projectDir", c.projectDir))
 	return nil

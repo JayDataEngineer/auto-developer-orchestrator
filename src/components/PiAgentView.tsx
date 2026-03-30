@@ -96,12 +96,19 @@ function ToolCallItem({ call }: { call: ToolCall }) {
 }
 
 export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, projects = [] }) => {
-  const { state, sendPrompt, abort, compact, switchModel, reset } = usePiAgent();
+  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState } = usePiAgent();
   const [input, setInput] = useState('');
   const [showThinking, setShowThinking] = useState(false);
   const [showTools, setShowTools] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Hydrate state from backend when project changes
+  useEffect(() => {
+    if (selectedProject) {
+      hydrateState(selectedProject);
+    }
+  }, [selectedProject, hydrateState]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
