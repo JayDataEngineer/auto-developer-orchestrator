@@ -27,21 +27,38 @@ func main() {
 	defer logger.Sync()
 
 	// Initialize database
-	db, err := storage.NewDatabase(":memory:") // TODO: Load from env
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "../data/orchestrator.db"
+	}
+	// Ensure data directory exists
+	if dbURL != ":memory:" {
+		dbDir := dbURL[:max(0, len(dbURL)-len("/orchestrator.db"))]
+		if dbDir != "" {
+			os.MkdirAll(dbDir, 0755)
+		}
+	}
+	db, err := storage.NewDatabase(dbURL)
 	if err != nil {
 		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
 	defer db.Close()
+
+	// Project root for CLI commands and file access
+	projectRoot := os.Getenv("PROJECT_ROOT")
+	if projectRoot == "" {
+		projectRoot = "../"
+	}
 
 	// Initialize handlers
 	gitOps := git.NewGitOps(logger)
 	checklistHandler := handlers.NewChecklistHandler(db, logger)
 	projectHandler := handlers.NewProjectHandler(db, logger, gitOps)
 	julesHandler := handlers.NewJulesHandler(db, logger)
-	aiHandler := handlers.NewAIHandler(logger) // Python microservice
-	aiCLIHandler := handlers.NewAICLIHandler(logger) // CLI-based AI (OpenAI, Claude, Gemini)
+	aiHandler := handlers.NewAIHandler(logger)
+	aiCLIHandler := handlers.NewAICLIHandler(logger)
 	configHandler := handlers.NewConfigHandler(logger)
-	cliHandler := handlers.NewCLIHandler(logger, "../") // CLI handler with project root
+	cliHandler := handlers.NewCLIHandler(logger, projectRoot)
 
 	// Setup router
 	r := chi.NewRouter()
@@ -50,7 +67,7 @@ func main() {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	r.Use(handlers.Recoverer(logger))
 	r.Use(middleware.Timeout(60 * time.Second))
 
 	// CORS
@@ -73,6 +90,7 @@ func main() {
 		// Projects
 		r.Get("/projects", projectHandler.List)
 		r.Post("/projects/add", projectHandler.Add)
+		r.Post("/projects/register", projectHandler.Add) // Alias: same handler for /register
 		r.Post("/clone", projectHandler.Clone)
 		r.Post("/branch/checkout", projectHandler.CheckoutBranch)
 		r.Get("/branch", projectHandler.GetBranch)
@@ -106,6 +124,10 @@ func main() {
 		r.Post("/config/ai", configHandler.SetAI)
 		r.Get("/config/system", configHandler.GetSystem)
 		r.Post("/config/system", configHandler.SetSystem)
+
+		// GitHub integration
+		r.Get("/github/user", configHandler.GetGitHubUser)
+		r.Post("/config/github", configHandler.ConnectGitHub)
 
 		// Settings
 		r.Post("/settings/mode", projectHandler.SetMode)

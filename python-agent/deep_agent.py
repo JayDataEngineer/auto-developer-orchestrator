@@ -16,7 +16,8 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-from deepagents import createDeepAgent, LocalShellBackend
+from deepagents import create_deep_agent
+from deepagents.backends import LocalShellBackend
 from langchain_openai import ChatOpenAI
 
 from prompts import (
@@ -54,7 +55,7 @@ class AgentTodo:
 
 def create_explorer_subagent(chat_model: ChatOpenAI) -> Any:
     """Create the shared explorer subagent"""
-    return createDeepAgent(
+    return create_deep_agent(
         name="explorer",
         model=chat_model,
         system_prompt=WorkflowPrompts.EXPLORER_PROMPT,
@@ -92,7 +93,7 @@ def create_agent(workflow_name: str = "todo_generator"):
     explorer_subagent = create_explorer_subagent(chat_model)
     
     # Create main agent with workflow-specific configuration
-    agent = createDeepAgent(
+    agent = create_deep_agent(
         name=workflow["name"],
         model=chat_model,
         system_prompt=workflow["prompt"],
