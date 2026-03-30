@@ -1,10 +1,14 @@
-# Go Backend Development Dockerfile with Hot Reload
+# Go Backend Development Dockerfile with Hot Reload + Pi Agent
 FROM golang:1.22-alpine
 
 WORKDIR /app
 
 # Install dependencies
 RUN apk add --no-cache git gcc musl-dev curl
+
+# Install Node.js 22 for Pi coding agent
+RUN apk add --no-cache nodejs npm && \
+    npm install -g @anthropic-ai/pi-coding-agent@latest
 
 # Install air for hot reload
 RUN go install github.com/air-verse/air@latest

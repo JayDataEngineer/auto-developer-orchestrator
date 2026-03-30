@@ -19,14 +19,18 @@ RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
 # ===========================================
 # Final runtime image
 # ===========================================
-FROM alpine:latest
+FROM node:22-alpine
 
+# Install runtime dependencies for Go binary + Pi agent
 RUN apk add --no-cache git openssh-client ca-certificates sqlite
 
 WORKDIR /app
 
-# Copy binary from builder
+# Copy Go binary from builder
 COPY --from=builder /app/main .
+
+# Install Pi coding agent globally
+RUN npm install -g @anthropic-ai/pi-coding-agent@latest
 
 # Create data directory
 RUN mkdir -p /data /app/projects
