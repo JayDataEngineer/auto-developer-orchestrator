@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
@@ -437,6 +438,10 @@ func (h *PiHandler) resolveProjectPath(project string) string {
 		if err == nil {
 			for _, p := range customProjects {
 				if p.Name == project {
+					// Skip non-filesystem paths (e.g. jules:// URLs from legacy data)
+					if strings.HasPrefix(p.Path, "jules://") || strings.Contains(p.Path, "://") {
+						break
+					}
 					return p.Path
 				}
 			}

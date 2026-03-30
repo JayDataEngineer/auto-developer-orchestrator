@@ -138,7 +138,9 @@ func main() {
 		r.Get("/cli/ls", cliHandler.ListDirectory)
 
 		// Pi Coding Agent
-		r.Route("/pi", piHandler.RegisterRoutes)
+		r.Route("/pi", func(r chi.Router) {
+			piHandler.RegisterRoutes(r)
+		})
 	})
 
 	// Serve static files (React frontend)
