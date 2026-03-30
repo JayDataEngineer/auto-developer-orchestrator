@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   PiSSEEvent,
   PiSessionState,
@@ -30,6 +30,48 @@ const initialState: PiAgentState = {
 export function usePiAgent() {
   const [state, setState] = useState<PiAgentState>(initialState);
   const abortRef = useRef<AbortController | null>(null);
+  const projectRef = useRef<string | null>(null);
+
+  // Hydrate state from backend on mount or when project changes.
+  // This handles the case where the user refreshes mid-task:
+  // the Go backend still has an active Pi subprocess streaming,
+  // so we re-attach by fetching current state + messages.
+  const hydrateState = useCallback(async (project: string) => {
+    if (!project) return;
+    projectRef.current = project;
+    try {
+      const stateRes = await fetch(`/api/pi/state?project=${encodeURIComponent(project)}`);
+      if (!stateRes.ok) return;
+      const serverState = await stateRes.json();
+
+      if (serverState.streaming) {
+        // Backend has an active Pi session - hydrate UI
+        setState(prev => ({
+          ...prev,
+          isStreaming: true,
+          model: serverState.model || prev.model,
+          tokenUsage: {
+            input: serverState.input || 0,
+            output: serverState.output || 0,
+            cache: serverState.cache || 0,
+          },
+        }));
+      } else if (serverState.model) {
+        // Session exists but idle - restore model info
+        setState(prev => ({
+          ...prev,
+          model: serverState.model,
+          tokenUsage: {
+            input: serverState.input || 0,
+            output: serverState.output || 0,
+            cache: serverState.cache || 0,
+          },
+        }));
+      }
+    } catch {
+      // Silently fail - hydration is best-effort
+    }
+  }, []);
 
   const handleEvent = useCallback((event: PiSSEEvent) => {
     setState(prev => {
@@ -236,5 +278,6 @@ export function usePiAgent() {
     switchModel,
     getModels,
     reset,
+    hydrateState,
   };
 }
