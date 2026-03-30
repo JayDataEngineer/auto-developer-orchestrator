@@ -26,6 +26,7 @@ type PiClient struct {
 	projectDir string
 	cancel     context.CancelFunc
 	ctx        context.Context
+	sandboxed  bool
 
 	// Event subscribers
 	subscribersMu sync.RWMutex
@@ -43,12 +44,12 @@ func NewPiClient(projectDir string, logger *zap.Logger) (*PiClient, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	c := &PiClient{
-		logger:       logger,
-		projectDir:   projectDir,
-		cancel:       cancel,
-		ctx:          ctx,
-		subscribers:  make(map[string]chan AgentEvent),
-		startTime:    time.Now(),
+		logger:      logger,
+		projectDir:  projectDir,
+		cancel:      cancel,
+		ctx:         ctx,
+		subscribers: make(map[string]chan AgentEvent),
+		startTime:   time.Now(),
 	}
 
 	if err := c.start(); err != nil {
@@ -59,19 +60,75 @@ func NewPiClient(projectDir string, logger *zap.Logger) (*PiClient, error) {
 	return c, nil
 }
 
-// start launches the Pi subprocess.
+// rewriteLocalhost replaces localhost/127.0.0.1 URLs with host.docker.internal
+// so that processes inside a sandbox can reach host services.
+func rewriteLocalhost(url string) string {
+	// Fast path: nothing to rewrite
+	if url == "" {
+		return url
+	}
+	imports := []string{"http://localhost:", "http://127.0.0.1:"}
+	for _, prefix := range imports {
+		if len(url) > len(prefix) && url[:len(prefix)] == prefix {
+			return "http://host.docker.internal:" + url[len(prefix):]
+		}
+	}
+	return url
+}
+
+// start launches the Pi subprocess, optionally inside an OpenShell sandbox.
+//
+// Sandbox architecture:
+//
+//	Pi (inside openshell sandbox) → OpenShell (stdout) → Go Backend → React Frontend (SSE)
+//
+// If openshell is available, Pi runs in a filesystem-jailed sandbox where:
+//   - It cannot see the host filesystem (only the project directory)
+//   - Network access is governed by OpenShell policies
+//   - A hallucinated `rm -rf /` only destroys the sandbox, not the host
+//
+// If openshell is not available, Pi runs directly (for dev/local use).
 func (c *PiClient) start() error {
-	// Look for pi binary
+	// Build the command — sandboxed if openshell is available
+	openshellPath, errSandbox := exec.LookPath("openshell")
 	piPath, err := exec.LookPath("pi")
 	if err != nil {
 		return fmt.Errorf("pi binary not found in PATH: %w", err)
 	}
 
-	c.cmd = exec.CommandContext(c.ctx, piPath, "--mode", "rpc", "--no-session")
+	if errSandbox == nil && openshellPath != "" {
+		c.logger.Info("OpenShell detected — running Pi inside sandbox")
+		c.sandboxed = true
+		c.cmd = exec.CommandContext(
+			c.ctx, openshellPath,
+			"exec", "claw", "--",
+			piPath, "--mode", "rpc", "--no-session",
+		)
+	} else {
+		c.logger.Info("OpenShell not found — running Pi directly (unsandboxed)")
+		c.sandboxed = false
+		c.cmd = exec.CommandContext(c.ctx, piPath, "--mode", "rpc", "--no-session")
+	}
+
 	c.cmd.Dir = c.projectDir
 
-	// Pass through environment for API keys
-	c.cmd.Env = os.Environ()
+	// Build environment: pass through API keys + sandbox networking fixes
+	env := os.Environ()
+
+	// Inside an OpenShell sandbox, localhost refers to the sandbox itself.
+	// To reach services on the host (e.g. LiteLLM), rewrite localhost URLs
+	// to use the host bridge address.
+	if c.sandboxed {
+		for i, e := range env {
+			// Rewrite LITELLM_PROXY_URL if it points to localhost
+			if len(e) > len("LITELLM_PROXY_URL=") && e[:len("LITELLM_PROXY_URL=")] == "LITELLM_PROXY_URL=" {
+				val := e[len("LITELLM_PROXY_URL="):]
+				env[i] = "LITELLM_PROXY_URL=" + rewriteLocalhost(val)
+			}
+		}
+	}
+
+	c.cmd.Env = env
 
 	// CRITICAL: Kill Pi if the Go parent process dies unexpectedly.
 	// Prevents zombie Node.js processes from consuming resources.
