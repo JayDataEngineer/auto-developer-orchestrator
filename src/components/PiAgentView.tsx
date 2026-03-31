@@ -293,27 +293,27 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
         </div>
       </div>
 
-      {/* Tool execution sidebar */}
-      {state.toolCalls.length > 0 && (
-        <div className="w-80 border-l border-white/5 flex flex-col bg-black shrink-0">
-          <button
-            onClick={() => setShowTools(!showTools)}
-            className="p-4 border-b border-white/5 flex items-center gap-3 text-left"
-          >
-            <Wrench size={12} className="text-muted-foreground" />
-            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-              Tool Calls ({state.toolCalls.length})
-            </span>
-            {activeTools.length > 0 && (
-              <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                <span className="text-[9px] font-mono text-primary">{activeTools.length} active</span>
-              </div>
-            )}
-            <div className="flex-1" />
-            {showTools ? <ChevronDown size={10} className="text-muted-foreground" /> : <ChevronRight size={10} className="text-muted-foreground" />}
-          </button>
-          {showTools && (
+      {/* Tool execution sidebar — always visible */}
+      <div className="w-80 border-l border-white/5 flex flex-col bg-black shrink-0">
+        <button
+          onClick={() => setShowTools(!showTools)}
+          className="p-4 border-b border-white/5 flex items-center gap-3 text-left"
+        >
+          <Wrench size={12} className="text-muted-foreground" />
+          <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+            Tool Calls ({state.toolCalls.length})
+          </span>
+          {activeTools.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              <span className="text-[9px] font-mono text-primary">{activeTools.length} active</span>
+            </div>
+          )}
+          <div className="flex-1" />
+          {showTools ? <ChevronDown size={10} className="text-muted-foreground" /> : <ChevronRight size={10} className="text-muted-foreground" />}
+        </button>
+        {showTools && (
+          state.toolCalls.length > 0 ? (
             <div className="flex-1 overflow-y-auto custom-scrollbar">
               {activeTools.map(tc => (
                 <ToolCallItem key={tc.id} call={tc} />
@@ -322,9 +322,16 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                 <ToolCallItem key={tc.id} call={tc} />
               ))}
             </div>
-          )}
-        </div>
-      )}
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-6">
+              <Wrench size={20} className="text-zinc-800 mb-3" />
+              <p className="text-[9px] font-mono text-zinc-700 uppercase tracking-widest text-center">
+                No tool calls yet
+              </p>
+            </div>
+          )
+        )}
+      </div>
     </div>
   );
 };
