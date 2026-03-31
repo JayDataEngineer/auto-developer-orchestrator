@@ -58,7 +58,7 @@ function ToolCallItem({ call }: { call: ToolCall }) {
       >
         <div className={cn(
           "shrink-0 w-6 h-6 flex items-center justify-center",
-          isActive ? "text-primary" : "text-zinc-500"
+          isActive ? "text-primary" : "text-muted"
         )}>
           {TOOL_ICONS[call.name] || <Wrench size={12} />}
         </div>
@@ -67,7 +67,7 @@ function ToolCallItem({ call }: { call: ToolCall }) {
             <span className="text-[10px] font-black uppercase tracking-widest text-white">
               {call.name}
             </span>
-            <span className="text-[9px] font-mono text-zinc-600 truncate">
+            <span className="text-[9px] font-mono text-muted-foreground truncate">
               {formatToolArgs(call.name, call.args)}
             </span>
           </div>
@@ -76,15 +76,15 @@ function ToolCallItem({ call }: { call: ToolCall }) {
           {isActive ? (
             <Loader size={10} className="text-primary animate-spin" />
           ) : (
-            <span className="text-[9px] font-mono text-zinc-600">{duration}ms</span>
+            <span className="text-[9px] font-mono text-muted-foreground">{duration}ms</span>
           )}
-          {expanded ? <ChevronDown size={10} className="text-zinc-600" /> : <ChevronRight size={10} className="text-zinc-600" />}
+          {expanded ? <ChevronDown size={10} className="text-muted-foreground" /> : <ChevronRight size={10} className="text-muted-foreground" />}
         </div>
       </button>
       {expanded && (
         <div className="px-3 pb-3 border-t border-border">
           {call.result !== undefined && (
-            <pre className="text-[10px] font-mono text-zinc-400 mt-2 whitespace-pre-wrap max-h-40 overflow-auto">
+            <pre className="text-[10px] font-mono text-muted-foreground mt-2 whitespace-pre-wrap max-h-40 overflow-auto">
               {formatResult(call.result)}
             </pre>
           )}
@@ -146,23 +146,23 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <div className="h-12 border-b border-white/5 flex items-center px-6 shrink-0 bg-black/50 backdrop-blur-md">
-          <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-zinc-500 uppercase font-bold">
+          <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-muted uppercase font-bold">
             {onBack && (
               <button
                 onClick={onBack}
-                className="flex items-center gap-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="flex items-center gap-1 text-muted hover:text-zinc-300 transition-colors"
               >
                 <ArrowLeft size={12} />
               </button>
             )}
             <Zap size={12} className="text-primary" />
             <span className="text-primary">PI</span>
-            <span className="text-zinc-700">CODING AGENT</span>
+            <span className="text-muted">CODING AGENT</span>
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-4">
             {state.model && (
-              <span className="text-[9px] font-mono text-zinc-600">{state.model}</span>
+              <span className="text-[9px] font-mono text-muted-foreground">{state.model}</span>
             )}
             {state.isStreaming && (
               <div className="flex items-center gap-2">
@@ -185,11 +185,11 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               </div>
               <div className="space-y-3 max-w-md">
                 <h3 className="text-lg font-bold text-white tracking-widest uppercase">Pi Agent Ready</h3>
-                <p className="text-xs text-zinc-600 leading-relaxed font-mono">
+                <p className="text-xs text-muted-foreground leading-relaxed font-mono">
                   Describe a coding task and Pi will implement it with real file editing, bash execution, and intelligent analysis.
                 </p>
               </div>
-              <div className="text-[9px] text-zinc-700 font-mono uppercase tracking-widest">
+              <div className="text-[9px] text-muted font-mono uppercase tracking-widest">
                 {selectedProject ? `Project: ${selectedProject}` : 'Select a project to begin'}
               </div>
             </div>
@@ -214,16 +214,16 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                 onClick={() => setShowThinking(!showThinking)}
                 className="w-full flex items-center gap-3 p-3 text-left"
               >
-                <Brain size={12} className="text-zinc-600" />
-                <span className="text-[9px] font-black uppercase tracking-widest text-zinc-600">
+                <Brain size={12} className="text-muted-foreground" />
+                <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
                   Agent Thinking
                 </span>
                 <div className="flex-1" />
-                {showThinking ? <ChevronDown size={10} className="text-zinc-600" /> : <ChevronRight size={10} className="text-zinc-600" />}
+                {showThinking ? <ChevronDown size={10} className="text-muted-foreground" /> : <ChevronRight size={10} className="text-muted-foreground" />}
               </button>
               {showThinking && (
                 <div className="px-3 pb-3 border-t border-zinc-800">
-                  <pre className="text-[10px] font-mono text-zinc-500 whitespace-pre-wrap">
+                  <pre className="text-[10px] font-mono text-muted whitespace-pre-wrap">
                     {state.thinking}
                   </pre>
                 </div>
@@ -236,7 +236,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
 
         {/* Token usage footer */}
         {(state.tokenUsage.input > 0 || state.tokenUsage.output > 0) && (
-          <div className="px-6 py-2 border-t border-white/5 flex items-center gap-6 text-[9px] font-mono text-zinc-600">
+          <div className="px-6 py-2 border-t border-white/5 flex items-center gap-6 text-[9px] font-mono text-muted-foreground">
             <span>Tokens: {state.tokenUsage.input}in / {state.tokenUsage.output}out / {state.tokenUsage.cache}cache</span>
           </div>
         )}
@@ -278,14 +278,14 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
           <div className="flex items-center gap-3 mt-2">
             <button
               onClick={reset}
-              className="text-[9px] font-mono text-zinc-700 hover:text-zinc-400 flex items-center gap-1 uppercase tracking-widest"
+              className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest"
             >
               <RotateCcw size={10} /> New Task
             </button>
             <button
               onClick={handleCompact}
               disabled={state.isStreaming}
-              className="text-[9px] font-mono text-zinc-700 hover:text-zinc-400 flex items-center gap-1 uppercase tracking-widest disabled:opacity-30"
+              className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest disabled:opacity-30"
             >
               <Trash2 size={10} /> Compact
             </button>
@@ -300,8 +300,8 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
             onClick={() => setShowTools(!showTools)}
             className="p-4 border-b border-white/5 flex items-center gap-3 text-left"
           >
-            <Wrench size={12} className="text-zinc-600" />
-            <span className="text-[9px] font-black uppercase tracking-widest text-zinc-600">
+            <Wrench size={12} className="text-muted-foreground" />
+            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
               Tool Calls ({state.toolCalls.length})
             </span>
             {activeTools.length > 0 && (
@@ -311,7 +311,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               </div>
             )}
             <div className="flex-1" />
-            {showTools ? <ChevronDown size={10} className="text-zinc-600" /> : <ChevronRight size={10} className="text-zinc-600" />}
+            {showTools ? <ChevronDown size={10} className="text-muted-foreground" /> : <ChevronRight size={10} className="text-muted-foreground" />}
           </button>
           {showTools && (
             <div className="flex-1 overflow-y-auto custom-scrollbar">

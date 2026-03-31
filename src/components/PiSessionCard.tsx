@@ -45,7 +45,7 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
       {!isDefault && onDestroy && (
         <button
           onClick={(e) => { e.stopPropagation(); onDestroy(); }}
-          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 text-zinc-600 hover:text-red-400 transition-all"
+          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-red-400 transition-all"
         >
           <X size={10} />
         </button>
@@ -57,7 +57,7 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
           <span className="text-[11px] font-black uppercase tracking-widest text-white truncate">
             {project}
           </span>
-          <span className="text-[9px] font-mono text-zinc-600">
+          <span className="text-[9px] font-mono text-muted-foreground">
             #{agentIndex}
           </span>
         </div>
@@ -75,7 +75,7 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
           ) : (
             <>
               <div className="w-1.5 h-1.5 rounded-full bg-zinc-700" />
-              <span className="text-[8px] font-mono text-zinc-600 uppercase">idle</span>
+              <span className="text-[8px] font-mono text-muted-foreground uppercase">idle</span>
             </>
           )}
         </div>
@@ -83,12 +83,12 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
 
       {/* Model name */}
       {state.model && (
-        <div className="text-[9px] font-mono text-zinc-500 truncate">{state.model}</div>
+        <div className="text-[9px] font-mono text-muted truncate">{state.model}</div>
       )}
 
       {/* Last prompt preview */}
       {state.lastPrompt && (
-        <p className="text-[10px] text-zinc-600 line-clamp-2 leading-relaxed">
+        <p className="text-[10px] text-muted-foreground line-clamp-2 leading-relaxed">
           {state.lastPrompt}
         </p>
       )}
@@ -96,7 +96,7 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
       {/* Bottom row: tokens, tools, branch */}
       <div className="flex items-center gap-3 flex-wrap">
         {totalTokens > 0 && (
-          <span className="text-[8px] font-mono text-zinc-600">
+          <span className="text-[8px] font-mono text-muted-foreground">
             <Zap size={8} className="inline mr-1" />
             {formatTokenCount(totalTokens)} tok
           </span>
@@ -108,7 +108,7 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
           </span>
         )}
         {state.branchName && (
-          <span className="text-[8px] font-mono text-zinc-500 flex items-center gap-1">
+          <span className="text-[8px] font-mono text-muted flex items-center gap-1">
             <GitBranch size={8} />
             {state.branchName}
           </span>

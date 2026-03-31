@@ -13,6 +13,8 @@
   --color-card: #000000;
   --color-card-foreground: #FFFFFF;
   --color-border: #1F1F1F; /* Subtle border */
+  --color-muted: #888888; /* Readable grey on black */
+  --color-muted-foreground: #A0A0A0; /* Secondary grey text */
   
   /* Status Colors */
   --color-success: #00FF00; /* Neon Green */

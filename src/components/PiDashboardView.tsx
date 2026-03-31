@@ -102,7 +102,7 @@ function ProjectAgentGroup({
         <button
           onClick={handleSpawn}
           disabled={spawning || agentIds.length >= 5}
-          className="flex items-center gap-1 px-2 py-1 text-[8px] font-mono text-zinc-500 hover:text-primary border border-white/5 hover:border-primary/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+          className="flex items-center gap-1 px-2 py-1 text-[8px] font-mono text-muted hover:text-primary border border-white/5 hover:border-primary/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
         >
           <Plus size={9} />
           New Agent
@@ -202,7 +202,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
           <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest uppercase font-bold">
             <Zap size={12} className="text-primary" />
             <span className="text-primary">PI</span>
-            <span className="text-zinc-700">CODING AGENT</span>
+            <span className="text-muted">CODING AGENT</span>
           </div>
           <div className="flex-1" />
           {/* Auto-branch toggle */}
@@ -212,7 +212,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
               "flex items-center gap-1.5 px-2 py-1 text-[8px] font-mono uppercase tracking-widest border transition-all",
               autoBranch
                 ? "border-primary/30 text-primary bg-primary/5"
-                : "border-white/5 text-zinc-600 hover:text-zinc-400"
+                : "border-white/5 text-muted-foreground hover:text-muted-foreground"
             )}
           >
             <GitBranch size={9} />
@@ -249,7 +249,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
             ))}
             {projects.length === 0 && (
               <div className="col-span-full flex flex-col items-center justify-center py-16 text-center">
-                <p className="text-xs text-zinc-600 font-mono">No projects registered</p>
+                <p className="text-xs text-muted-foreground font-mono">No projects registered</p>
               </div>
             )}
           </div>
@@ -305,7 +305,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
           <div className="h-12 border-b border-white/5 flex items-center px-4 shrink-0 bg-black/50 backdrop-blur-md">
             <button
               onClick={handleBack}
-              className="flex items-center gap-2 text-[9px] font-mono text-zinc-500 hover:text-zinc-300 uppercase tracking-widest transition-colors"
+              className="flex items-center gap-2 text-[9px] font-mono text-muted hover:text-zinc-300 uppercase tracking-widest transition-colors"
             >
               <ArrowLeft size={12} />
               Back to grid
