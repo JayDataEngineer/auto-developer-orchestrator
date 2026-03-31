@@ -143,7 +143,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="hidden lg:flex items-center gap-3 text-[9px] font-mono text-zinc-500 font-bold uppercase tracking-widest border-l border-border pl-6">
           <Bot size={14} className="text-primary glow-primary" />
-          <span className="text-white">JULES_CORE:</span>
+          <span className="text-white">PI_CORE:</span>
           <span className="text-emerald-400">ENCRYPTED // ONLINE</span>
         </div>
       </div>

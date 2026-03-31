@@ -3,12 +3,7 @@ import { motion } from 'motion/react';
 import { ExternalLink, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-interface Task {
-  id: string;
-  text: string;
-  completed: boolean;
-  status: 'completed' | 'in-progress' | 'pending';
-}
+import { Task } from '../lib/api';
 
 interface CurrentTaskCardProps {
   task: Task;
@@ -52,7 +47,7 @@ export const CurrentTaskCard: React.FC<CurrentTaskCardProps> = ({ task, isAutoMo
       <div className="grid grid-cols-3 gap-4 lg:gap-12 pt-10 border-t border-border">
         <div className="flex flex-col gap-2">
           <span className="block text-[9px] uppercase font-bold tracking-[0.2em] text-zinc-600">Neural Agent</span>
-          <span className="text-xs lg:text-sm font-mono text-white font-bold uppercase tracking-tight">Jules-A1-Pro</span>
+          <span className="text-xs lg:text-sm font-mono text-white font-bold uppercase tracking-tight">Pi-Agent</span>
         </div>
         <div className="flex flex-col gap-2">
           <span className="block text-[9px] uppercase font-bold tracking-[0.2em] text-zinc-600">Active Buffer</span>

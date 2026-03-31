@@ -73,7 +73,7 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, userEmail
             </div>
 
             <div className="p-4 bg-black border-t border-border text-center">
-              <p className="text-[10px] text-zinc-800 uppercase tracking-[0.4em] font-black italic">JULES_CORE_v2.1</p>
+              <p className="text-[10px] text-zinc-800 uppercase tracking-[0.4em] font-black italic">PI_CORE_v3.0</p>
             </div>
           </motion.div>
         </div>

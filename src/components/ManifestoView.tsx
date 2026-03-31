@@ -128,7 +128,7 @@ export const ManifestoView: React.FC = () => {
       {/* Footer Branding */}
       <div className="mt-32 border-t border-white/5 pt-8 text-center">
          <div className="text-[9px] font-mono text-zinc-800 uppercase tracking-[1em] font-black">
-            Auto-Developer Orchestrator // Project Jules v1.0
+            Auto-Developer Orchestrator // Pi Agent v3.0
          </div>
       </div>
     </div>

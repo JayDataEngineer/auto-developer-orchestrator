@@ -33,7 +33,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ isOpen, onClose, onMer
                 </div>
                 <div>
                   <h2 className="text-sm lg:text-lg font-bold tracking-tight">Review Changes: PR #102</h2>
-                  <p className="text-[10px] lg:text-xs text-zinc-500">Jules has finished. Tests are passing.</p>
+                  <p className="text-[10px] lg:text-xs text-zinc-500">Pi agent has finished. Tests are passing.</p>
                 </div>
               </div>
               <button 
@@ -66,15 +66,13 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ isOpen, onClose, onMer
             </div>
 
             <div className="p-4 lg:p-6 bg-zinc-950 flex flex-col lg:flex-row gap-3 shrink-0">
-              <a 
-                href="https://jules.google.com" 
-                target="_blank" 
-                rel="noopener noreferrer"
+              <button
+                onClick={onClose}
                 className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl text-[10px] lg:text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
               >
                 <ExternalLink size={14} />
-                View in Jules
-              </a>
+                View Diff
+              </button>
               <button 
                 onClick={() => {
                   onMerge?.();

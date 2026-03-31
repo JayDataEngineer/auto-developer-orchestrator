@@ -169,7 +169,7 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 		zap.String("dir", projectDir))
 
 	// Create initial checklist
-	checklistPath := filepath.Join(projectDir, "TODO_FOR_JULES.md")
+	checklistPath := filepath.Join(projectDir, "TASKS.md")
 	initialChecklist := `- [ ] Initial codebase analysis
 - [ ] Configure CI/CD pipeline
 - [ ] Audit existing test suite

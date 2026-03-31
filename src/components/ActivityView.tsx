@@ -35,7 +35,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({ logs }) => {
             color = 'text-emerald-500';
             bg = 'bg-emerald-500/5';
             border = 'border-emerald-500/10';
-          } else if (message.includes('AGENT') || message.includes('JULES') || message.includes('DISPATCH')) {
+          } else if (message.includes('AGENT') || message.includes('PI_AGENT') || message.includes('DISPATCH')) {
             icon = Zap;
             color = 'text-primary';
             bg = 'bg-primary/5';

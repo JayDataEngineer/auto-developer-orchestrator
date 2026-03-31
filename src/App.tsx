@@ -37,7 +37,7 @@ export default function App() {
   const {
     setActiveTab, setSelectedProject, setActiveModal,
     setIsSidebarOpen, setIsCLITerminalOpen,
-    handleToggleMode, handleDispatch, handleGenerateChecklist,
+    handleToggleMode, handleDispatch, handleDispatchAll, handleGenerateChecklist,
     refreshProjectData
   } = actions;
 
@@ -46,7 +46,7 @@ export default function App() {
       'gen': () => handleGenerateChecklist(),
       'generate-checklist': () => handleGenerateChecklist(),
       'retry': () => addLog('Retry sequence initiated... (Stub)', 'SYSTEM'),
-      'debug': () => addLog('JULES: Initializing debugging sequence...', 'SYSTEM'),
+      'debug': () => addLog('PI_AGENT: Initializing debugging sequence...', 'SYSTEM'),
     });
   };
 
@@ -109,7 +109,7 @@ export default function App() {
                 <Checklist
                   tasks={tasks}
                   onGenerateAI={() => handleGenerateChecklist()}
-                  onDispatchAll={() => addLog('Batch dispatch initiated...', 'SYSTEM')}
+                  onDispatchAll={handleDispatchAll}
                   onDispatchTask={(taskId) => handleDispatch(taskId)}
                   isGenerating={isGeneratingChecklist}
                   isDispatching={isDispatching}

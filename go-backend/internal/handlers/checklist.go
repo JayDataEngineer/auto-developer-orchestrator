@@ -1,17 +1,12 @@
 package handlers
 
 import (
-	"bufio"
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"go.uber.org/zap"
@@ -53,7 +48,7 @@ func (h *ChecklistHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := filepath.Join(projectDir, "TODO_FOR_JULES.md")
+	filePath := filepath.Join(projectDir, "TASKS.md")
 
 	// Return empty if file doesn't exist
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -139,7 +134,7 @@ func (h *ChecklistHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	filePath := filepath.Join(projectDir, "TODO_FOR_JULES.md")
+	filePath := filepath.Join(projectDir, "TASKS.md")
 
 	// Generate markdown content
 	var content strings.Builder
@@ -186,7 +181,7 @@ func (h *ChecklistHandler) Merge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := filepath.Join(projectDir, "TODO_FOR_JULES.md")
+	filePath := filepath.Join(projectDir, "TASKS.md")
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		http.Error(w, "Checklist not found", http.StatusNotFound)
@@ -249,7 +244,9 @@ func (h *ChecklistHandler) Merge(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GenerateChecklistStream handles SSE streaming for deep agent checklist generation
+// GenerateChecklistStream handles SSE streaming for checklist generation.
+// Scans the project for basic structure and generates a task list.
+// For full LLM-powered analysis, use the Pi agent (/api/pi/prompt).
 func (h *ChecklistHandler) GenerateChecklistStream(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project string `json:"project"`
@@ -284,135 +281,83 @@ func (h *ChecklistHandler) GenerateChecklistStream(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Create SSE channel
-	sseChan := make(chan string, 100)
-	errChan := make(chan error, 1)
+	// Generate basic tasks from project structure
+	tasks := h.generateProjectTasks(projectDir, req.Prompt)
 
-	// Get Python service URL from environment
-	pythonServiceURL := os.Getenv("PYTHON_SERVICE_URL")
-	if pythonServiceURL == "" {
-		pythonServiceURL = "http://localhost:8080"
+	// Write tasks to file
+	filePath := filepath.Join(projectDir, "TASKS.md")
+	var content strings.Builder
+	for _, task := range tasks {
+		content.WriteString(fmt.Sprintf("- [ ] %s\n", task))
+	}
+	if err := os.WriteFile(filePath, []byte(content.String()), 0644); err != nil {
+		h.logger.Error("Failed to write tasks file", zap.Error(err))
 	}
 
-	// Call Python microservice
-	go func() {
-		defer close(sseChan)
-
-		// Send initialization event
-		sseChan <- fmt.Sprintf(`data: {"event": "log", "message": "DEEP AGENT: Initializing connection to Python service..."}`)
+	// Stream events
+	sseLog := func(msg string) {
+		data, _ := json.Marshal(map[string]string{"event": "log", "message": msg})
+		fmt.Fprintf(w, "data: %s\n\n", string(data))
 		flusher.Flush()
-
-		// Prepare request to Python service
-		pythonReqBody := map[string]interface{}{
-			"project_path": projectDir,
-			"prompt":       req.Prompt,
-		}
-		pythonReqJSON, _ := json.Marshal(pythonReqBody)
-
-		// Call Python service
-		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
-		defer cancel()
-
-		pythonReq, err := http.NewRequestWithContext(
-			ctx,
-			"POST",
-			pythonServiceURL+"/api/v1/checklist/generate",
-			bytes.NewReader(pythonReqJSON),
-		)
-		if err != nil {
-			errChan <- fmt.Errorf("failed to create Python request: %w", err)
-			return
-		}
-		pythonReq.Header.Set("Content-Type", "application/json")
-
-		client := &http.Client{Timeout: 120 * time.Second}
-		resp, err := client.Do(pythonReq)
-		if err != nil {
-			errChan <- fmt.Errorf("failed to call Python service: %w", err)
-			return
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			errChan <- fmt.Errorf("Python service error: %d %s", resp.StatusCode, string(body))
-			return
-		}
-
-		// Stream events from Python service to frontend
-		sseChan <- fmt.Sprintf(`data: {"event": "log", "message": "DEEP AGENT: Connected to Python service, starting analysis..."}`)
-		flusher.Flush()
-
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "data: ") {
-				sseChan <- line
-				flusher.Flush()
-			}
-		}
-
-		sseChan <- fmt.Sprintf(`data: {"event": "log", "message": "DEEP AGENT: Analysis complete!"}`)
-		flusher.Flush()
-	}()
-
-	// Stream events to client
-	for {
-		select {
-		case event, ok := <-sseChan:
-			if !ok {
-				return
-			}
-			fmt.Fprintln(w, event)
-			flusher.Flush()
-		case err := <-errChan:
-			h.logger.Error("SSE stream error", zap.Error(err))
-			fmt.Fprintf(w, `data: {"error": "%s"}\n`, err.Error())
-			flusher.Flush()
-			return
-		case <-r.Context().Done():
-			return
-		}
 	}
+
+	sseLog("AGENT: Scanning project structure...")
+	sseLog(fmt.Sprintf("AGENT: Found project at %s", projectDir))
+
+	for i, task := range tasks {
+		sseLog(fmt.Sprintf("AGENT: Generated task %d/%d: %s", i+1, len(tasks), task))
+	}
+
+	sseLog("AGENT: Task generation complete. Refreshing...")
 }
 
-// Helper function to convert to JSON
-func toJSON(v interface{}) string {
-	data, _ := json.Marshal(v)
-	return string(data)
-}
+// generateProjectTasks creates a basic task list from project structure.
+func (h *ChecklistHandler) generateProjectTasks(projectDir, prompt string) []string {
+	tasks := []string{}
 
-// readChecklistFile reads and parses a checklist file
-func readChecklistFile(filePath string) ([]Task, error) {
-	file, err := os.Open(filePath)
+	// Walk the project directory to understand structure
+	entries, err := os.ReadDir(projectDir)
 	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	tasks := []Task{}
-	scanner := bufio.NewScanner(file)
-	taskCounter := 0
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "- [") {
-			continue
-		}
-
-		completed := strings.Contains(line, "[x]")
-		text := strings.TrimPrefix(line, "- [ ] ")
-		text = strings.TrimPrefix(text, "- [x] ")
-
-		tasks = append(tasks, Task{
-			ID:        fmt.Sprintf("task-%d", taskCounter),
-			Text:      text,
-			Completed: completed,
-			Status:    "pending",
-		})
-
-		taskCounter++
+		return []string{"Analyze project structure and create implementation plan"}
 	}
 
-	return tasks, scanner.Err()
+	hasReadme := false
+	hasTests := false
+	hasDocker := false
+	hasGitignore := false
+
+	for _, e := range entries {
+		name := strings.ToLower(e.Name())
+		if strings.HasPrefix(name, "readme") { hasReadme = true }
+		if strings.Contains(name, "test") || name == "__tests__" { hasTests = true }
+		if strings.HasPrefix(name, "dockerfile") || strings.HasPrefix(name, "docker-compose") { hasDocker = true }
+		if name == ".gitignore" { hasGitignore = true }
+	}
+
+	if !hasReadme {
+		tasks = append(tasks, "Create comprehensive README.md with setup instructions")
+	}
+	if !hasTests {
+		tasks = append(tasks, "Add unit tests for core functionality")
+	}
+	if !hasDocker {
+		tasks = append(tasks, "Add Docker configuration for containerized deployment")
+	}
+	if !hasGitignore {
+		tasks = append(tasks, "Add .gitignore file")
+	}
+
+	if prompt != "" {
+		tasks = append([]string{prompt}, tasks...)
+	}
+
+	if len(tasks) == 0 {
+		tasks = append(tasks,
+			"Review code quality and add missing documentation",
+			"Add error handling improvements",
+			"Optimize build and deployment pipeline",
+		)
+	}
+
+	return tasks
 }
