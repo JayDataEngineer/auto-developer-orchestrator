@@ -18,12 +18,14 @@ interface CommandOutput {
 export const CLITerminal: React.FC<CLITerminalProps> = ({ isOpen, onClose }) => {
   const [history, setHistory] = useState<CommandOutput[]>([]);
   const [command, setCommand] = useState('');
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyPointer, setHistoryPointer] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const outputRef = useRef<HTMLDivElement>(null);
 
   // Allowed commands
-  const allowedCommands = ['ls', 'cat', 'pwd', 'whoami', 'date', 'uname'];
+  const allowedCommands = ['ls', 'cat', 'pwd', 'whoami', 'date', 'uname', 'clear', 'cls', 'git'];
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -60,7 +62,17 @@ export const CLITerminal: React.FC<CLITerminalProps> = ({ isOpen, onClose }) => 
       return;
     }
 
+    // Handle local commands
+    if (commandName === 'clear' || commandName === 'cls') {
+      setHistory([]);
+      setCommand('');
+      return;
+    }
+
     setIsLoading(true);
+
+    setCommandHistory(prev => [trimmedCmd, ...prev].slice(0, 50));
+    setHistoryPointer(-1);
 
     try {
       const response = await fetch('/api/cli/execute', {
@@ -96,6 +108,20 @@ export const CLITerminal: React.FC<CLITerminalProps> = ({ isOpen, onClose }) => 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       executeCommand(command);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (historyPointer < commandHistory.length - 1) {
+        const nextPointer = historyPointer + 1;
+        setHistoryPointer(nextPointer);
+        setCommand(commandHistory[nextPointer]);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyPointer > -1) {
+        const nextPointer = historyPointer - 1;
+        setHistoryPointer(nextPointer);
+        setCommand(nextPointer === -1 ? '' : commandHistory[nextPointer]);
+      }
     }
   };
 
@@ -129,7 +155,7 @@ Examples:
           exit={{ y: "100%" }}
           transition={{ type: "spring", damping: 20, stiffness: 100 }}
           className={cn(
-            "fixed bottom-0 left-0 right-0 z-40 bg-black border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.8)] flex flex-col pointer-events-auto",
+            "fixed bottom-0 left-0 lg:left-20 right-0 z-40 bg-black border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.8)] flex flex-col pointer-events-auto",
             isMaximized ? "h-[80vh]" : "h-96"
           )}
         >
@@ -143,7 +169,7 @@ Examples:
                 </span>
               </div>
               <div className="text-[9px] font-mono text-zinc-600 uppercase tracking-widest hidden sm:block">
-                SYS_ID: 0x3A2B // PORT: 3848
+                SYS_ID: 0x3A2B // PORT: 3847
               </div>
             </div>
             
@@ -205,8 +231,42 @@ Examples:
               </div>
             ))}
 
+            {/* Quick Actions */}
+            <div className="flex flex-wrap gap-2 mb-6 pt-4 border-t border-white/5 opacity-60">
+              <button 
+                onClick={() => executeCommand('git status')}
+                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] uppercase tracking-wider rounded border border-white/10 text-primary"
+              >
+                git status
+              </button>
+              <button 
+                onClick={() => executeCommand('ls -la')}
+                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] uppercase tracking-wider rounded border border-white/10"
+              >
+                ls -la
+              </button>
+              <button 
+                onClick={() => executeCommand('pwd')}
+                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] uppercase tracking-wider rounded border border-white/10"
+              >
+                pwd
+              </button>
+              <button 
+                onClick={() => executeCommand('uname -a')}
+                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] uppercase tracking-wider rounded border border-white/10"
+              >
+                uname
+              </button>
+              <button 
+                onClick={() => setHistory([])}
+                className="px-2 py-1 bg-white/5 hover:bg-rose-950/30 text-[9px] uppercase tracking-wider rounded border border-white/10 text-rose-500"
+              >
+                clear
+              </button>
+            </div>
+
             {/* Input Line */}
-            <div className="flex items-center gap-3 mt-6 pt-4 border-t border-white/5 sticky bottom-0 bg-[#020202] py-2">
+            <div className="flex items-center gap-3 pt-4 border-t border-white/5 sticky bottom-0 bg-[#020202] py-2">
               <ChevronRight size={16} className="text-primary animate-pulse" />
               <input
                 ref={inputRef}

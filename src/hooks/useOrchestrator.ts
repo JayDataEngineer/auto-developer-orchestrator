@@ -93,6 +93,32 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
     }
   };
 
+  const handleDispatchAll = async () => {
+    if (!selectedProject) return;
+    const pendingTasks = tasks.filter(t => t.status === 'pending');
+    if (pendingTasks.length === 0) {
+      addLog('PI_AGENT: No pending tasks to dispatch.', 'INFO');
+      return;
+    }
+    setIsDispatching(true);
+
+    const taskList = pendingTasks.map((t, i) => `${i + 1}. ${t.text}`).join('\n');
+    addLog(`PI_AGENT: Dispatching ${pendingTasks.length} tasks to Pi agent...`, 'SYSTEM');
+
+    try {
+      const response = await api.pi.prompt(
+        `Implement the following tasks in the current project, one by one:\n\n${taskList}\n\nProject: ${selectedProject}`,
+        selectedProject
+      );
+      if (!response.ok) throw new Error('Pi prompt failed');
+      addLog(`PI_AGENT: ${pendingTasks.length} tasks dispatched to Pi agent.`, 'SUCCESS');
+    } catch (e) {
+      addLog(`PI_AGENT_ERROR: ${e instanceof Error ? e.message : String(e)}`, 'ERROR');
+    } finally {
+      setIsDispatching(false);
+    }
+  };
+
   const handleGenerateChecklist = async (prompt?: string) => {
     if (!selectedProject) return;
     setIsGeneratingChecklist(true);
@@ -155,7 +181,7 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
     actions: {
       setActiveTab, setSelectedProject, setActiveModal,
       setIsSidebarOpen, setIsCLITerminalOpen,
-      handleToggleMode, handleDispatch, handleGenerateChecklist,
+      handleToggleMode, handleDispatch, handleDispatchAll, handleGenerateChecklist,
       refreshProjectData,
       setGithubUser, setAiConfig, // For modal callbacks
     }

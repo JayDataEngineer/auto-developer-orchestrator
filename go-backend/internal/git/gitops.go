@@ -490,7 +490,6 @@ func (g *GitOps) GetRemoteURL(ctx context.Context, dir string) (string, error) {
 func ResolvePath(baseDir, projectName string) (string, error) {
 	// Clean the project name to prevent directory traversal
 	projectName = filepath.Clean(projectName)
-	projectName = filepath.Base(projectName)
 
 	// Construct the full path
 	fullPath := filepath.Join(baseDir, projectName)
@@ -506,7 +505,7 @@ func ResolvePath(baseDir, projectName string) (string, error) {
 		return "", err
 	}
 
-	if !strings.HasPrefix(absPath, absBase) {
+	if !strings.HasPrefix(absPath, absBase) || absPath == absBase {
 		return "", fmt.Errorf("invalid project path: %s", projectName)
 	}
 

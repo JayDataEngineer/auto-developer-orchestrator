@@ -1,130 +1,167 @@
-# Auto-Developer Orchestrator Makefile
-# Full Developer Experience with Hot Reload
-
-.PHONY: help dev-up dev-down dev-restart clean install build prod-up prod-down logs shell status restart-app test test-e2e
+# Auto-Developer Orchestrator - Unified Makefile
+# ==================================================
 
 # Default target
+.PHONY: help
 help:
-	@echo "Auto-Developer Orchestrator - Development Commands"
+	@echo "🚀 Auto-Developer Orchestrator - Development Interface"
 	@echo ""
-	@echo "Development:"
-	@echo "  dev-up          Start development environment with hot reload"
-	@echo "  dev-down        Stop development environment"
-	@echo "  dev-restart     Restart development environment"
-	@echo "  logs            View live logs"
+	@echo "Local Development (Native):"
+	@echo "  make install         - Install dependencies (npm, go, python/uv)"
+	@echo "  make dev             - Start all services locally (Vite + Go + Python)"
+	@echo "  make dev-frontend    - Start Vite frontend only"
+	@echo "  make dev-backend     - Start Go backend only"
+	@echo "  make docs            - Start documentation site (Port 3001)"
 	@echo ""
-	@echo "Testing:"
-	@echo "  test            Run unit tests"
-	@echo "  test-unit       Run unit tests"
-	@echo "  test-integration Run integration tests"
-	@echo "  test-e2e        Run E2E tests (requires server running)"
-	@echo "  test-all        Run unit, integration, and E2E tests"
+	@echo "Docker Development (Recommended):"
+	@echo "  make up              - Start dev environment with hot reload"
+	@echo "  make down            - Stop dev environment"
+	@echo "  make restart         - Restart dev environment"
+	@echo "  make logs            - Follow all logs"
 	@echo ""
 	@echo "Production:"
-	@echo "  prod-up         Start production environment"
-	@echo "  prod-down       Stop production environment"
+	@echo "  make prod-up         - Start production environment"
+	@echo "  make prod-down       - Stop production environment"
 	@echo ""
-	@echo "Utilities:"
-	@echo "  setup           Install dependencies and setup git hooks"
-	@echo "  install         Install Node.js dependencies locally"
-	@echo "  build           Build for production"
-	@echo "  clean           Remove containers and volumes"
-	@echo "  shell           Open shell in app container"
-	@echo "  status          Check service status"
+	@echo "Testing & Linting:"
+	@echo "  make test            - Run JS, Go, and E2E tests"
+	@echo "  make test-go         - Run Go backend tests"
+	@echo "  make test-js         - Run frontend unit tests"
+	@echo "  make test-e2e        - Run Playwright E2E tests"
+	@echo "  make lint            - Run all linters"
 	@echo ""
+	@echo "Maintenance:"
+	@echo "  make clean           - Remove build artifacts and docker resources"
+	@echo "  make db-backup       - Backup SQLite database"
+	@echo "  make db-restore      - Restore SQLite database"
+	@echo "  make infra-check     - Check health of shared-docker-infra"
 
-# Docker Compose command (v2 syntax)
-COMPOSE = docker compose -f docker-compose.dev.yml
+# ==============================================================================
+# Variables
+# ==============================================================================
+COMPOSE_DEV = docker compose -f docker-compose.dev.yml
+COMPOSE_PROD = docker compose -f docker-compose.yml
+PYTHON_PORT = 8080
+GO_PORT = 3847
+JS_PORT = 5174
 
-# Development Environment
-dev-up:
-	@echo "🚀 Starting development environment with hot reload..."
-	$(COMPOSE) up -d --build
-	@echo "✅ Services started!"
-	@echo ""
-	@echo "📍 Access points:"
-	@echo "   - App Server:   http://localhost:3847"
-	@echo ""
-	@echo "📝 View logs: make logs"
-	@echo "🛑 Stop:        make dev-down"
+# ==============================================================================
+# Installation
+# ==============================================================================
+.PHONY: install
+install:
+	@echo "📦 Installing frontend dependencies..."
+	npm install --no-audit --no-fund
+	@echo "📦 Syncing Python agent with uv..."
+	cd python-agent && uv sync
+	@echo "📦 Tidying Go modules..."
+	cd go-backend && go mod tidy
+	@echo "📦 Installing documentation dependencies..."
+	cd docs && npm install --no-audit --no-fund
+	@echo "✅ Installation complete"
 
-dev-down:
-	@echo "🛑 Stopping development environment..."
-	$(COMPOSE) down
-	@echo "✅ Services stopped"
+# ==============================================================================
+# Local Development
+# ==============================================================================
+.PHONY: dev dev-frontend dev-backend
+dev:
+	@echo "🚀 Starting all services locally..."
+	@echo "1. Starting Python agent (Port $(PYTHON_PORT))..."
+	@cd python-agent && (uv run uvicorn main:app --port $(PYTHON_PORT) &)
+	@echo "2. Starting Go backend (Port $(GO_PORT))..."
+	@cd go-backend && (go run cmd/server/main.go &)
+	@echo "3. Starting Vite frontend (Port $(JS_PORT))..."
+	@npm run dev -- --port $(JS_PORT)
 
-dev-restart: dev-down dev-up
-	@echo "🔄 Development environment restarted"
+dev-frontend:
+	npm run dev -- --port $(JS_PORT)
 
-# Production Environment
+dev-backend:
+	cd go-backend && go run cmd/server/main.go
+
+.PHONY: docs
+docs:
+	@echo "📖 Starting documentation site (Port 3001)..."
+	@cd docs && npm run dev -- -p 3001
+
+# ==============================================================================
+# Docker Development
+# ==============================================================================
+.PHONY: up down restart logs
+up:
+	@echo "🚀 Starting development environment (Docker)..."
+	$(COMPOSE_DEV) up -d --build
+	@echo "✅ Services started. Access at http://orchestrator.local"
+
+down:
+	$(COMPOSE_DEV) down --remove-orphans
+
+restart: down up
+
+logs:
+	$(COMPOSE_DEV) logs -f
+
+# ==============================================================================
+# Production
+# ==============================================================================
+.PHONY: prod-up prod-down
 prod-up:
 	@echo "🚀 Starting production environment..."
-	docker compose up -d --build
-	@echo "✅ Production services started on http://localhost:3847"
+	$(COMPOSE_PROD) up -d --build
+	@echo "✅ Production services started on http://orchestrator.local"
 
 prod-down:
-	@echo "🛑 Stopping production environment..."
-	docker compose down
+	$(COMPOSE_PROD) down
 
-# Logs
-logs:
-	$(COMPOSE) logs -f
-
-# Local Development (without Docker)
-install:
-	@echo "📦 Installing dependencies..."
-	npm install --legacy-peer-deps
-
-setup: install
-	@echo "🔧 Setting up project and git hooks..."
-	chmod +x scripts/setup-hooks.sh
-	./scripts/setup-hooks.sh
-
-build:
-	@echo "🔨 Building for production..."
-	npm run build
-
+# ==============================================================================
 # Testing
-test:
-	@echo "🧪 Running all tests..."
+# ==============================================================================
+.PHONY: test test-go test-js test-e2e
+test: test-js test-go test-e2e
+
+test-go:
+	@echo "🧪 Running Go backend tests..."
+	cd go-backend && go test -v ./...
+
+test-js:
+	@echo "🧪 Running frontend unit tests..."
 	npm run test
 
-test-unit:
-	@echo "🧪 Running unit tests..."
-	npx vitest run tests/unit
-
-test-integration:
-	@echo "🧪 Running integration tests..."
-	@echo "⚠️  Make sure server is running: make dev-up"
-	npx vitest run tests/integration
-
 test-e2e:
-	@echo "🧪 Running E2E tests..."
-	@echo "⚠️  Make sure server is running: make dev-up"
-	npm run test:e2e
+	@echo "🧪 Running Playwright E2E tests..."
+	npm run test:playwright
 
-test-all:
-	@echo "🧪 Running unit, integration, and E2E tests..."
-	@echo "⚠️  Make sure server is running: make dev-up"
-	npx vitest run tests/unit && npx vitest run tests/integration && npm run test:e2e
+# ==============================================================================
+# Maintenance & Utilities
+# ==============================================================================
+.PHONY: clean lint db-backup db-restore infra-check
 
-# Container Utilities
+lint:
+	@echo "🧹 Linting Go backend..."
+	cd go-backend && go fmt ./...
+	@echo "🧹 Linting frontend..."
+	npm run lint
+
 clean:
-	@echo "🧹 Cleaning containers and volumes..."
-	$(COMPOSE) down -v --remove-orphans
-	docker compose down -v --remove-orphans 2>/dev/null || true
+	@echo "🧹 Cleaning artifacts..."
+	rm -rf dist go-backend/bin 
+	$(COMPOSE_DEV) down -v --remove-orphans
 	@echo "✅ Clean complete"
 
-shell:
-	@echo "🔌 Opening shell in app container..."
-	$(COMPOSE) exec app sh
+db-backup:
+	@mkdir -p data/backups
+	@cp data/orchestrator.db data/backups/orchestrator.db.backup.$$(date +%Y%m%d_%H%M%S)
+	@echo "✅ Database backed up to data/backups/"
 
-# Status check
-status:
-	@echo "📊 Service Status:"
-	$(COMPOSE) ps
+db-restore:
+	@echo "Select a backup to restore:"
+	@ls -1 data/backups/
+	@read -p "Filename: " backup; \
+	cp data/backups/$$backup data/orchestrator.db
+	@echo "✅ Database restored"
 
-# Restart service
-restart-app:
-	@echo "🔄 Restarting app service..."
-	$(COMPOSE) restart app
+infra-check:
+	@echo "🔍 Checking shared infrastructure health..."
+	@echo -n "Traefik:  " && curl -s http://traefik.local/ping > /dev/null && echo "✅ OK" || echo "❌ DOWN"
+	@echo -n "LiteLLM:  " && curl -s http://litellm.local/health > /dev/null && echo "✅ OK" || echo "❌ DOWN (Optional)"
+	@echo -n "Langfuse: " && curl -s http://langfuse.local/api/health > /dev/null && echo "✅ OK" || echo "❌ DOWN (Optional)"

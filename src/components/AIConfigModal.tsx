@@ -166,7 +166,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
                       />
                     </div>
                     <p className="text-[9px] text-zinc-500 italic">
-                      Point JULES to the folder containing your local Git repositories.
+                      Point Pi agent to the folder containing your local Git repositories.
                     </p>
                   </div>
                 </div>
@@ -184,7 +184,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
                     iconBg="bg-red-500/10"
                     iconColor="text-red-500"
                     title="Full Automation Mode"
-                    description="Autonomous loop: Task → Issue → JULES → Test → Next"
+                    description="Autonomous loop: Task → Pi Agent → Test → Next"
                     checked={config.fullAutomationMode}
                     onChange={() => setConfig({...config, fullAutomationMode: !config.fullAutomationMode})}
                     activeColor="bg-red-500"
@@ -195,7 +195,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
                     iconBg="bg-emerald-500/10"
                     iconColor="text-emerald-500"
                     title="Auto-Task Generation"
-                    description="AI updates TODO_FOR_JULES.md based on context"
+                    description="AI updates TASKS.md based on context"
                     checked={config.autoTask}
                     onChange={() => setConfig({...config, autoTask: !config.autoTask})}
                   />

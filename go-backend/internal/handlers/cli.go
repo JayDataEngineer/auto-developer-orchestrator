@@ -28,8 +28,10 @@ func NewCLIHandler(logger *zap.Logger, projectRoot string) *CLIHandler {
 			"cat":  true,
 			"pwd":  true,
 			"whoami": true,
-			"date": true,
-			"uname": true,
+			"date":   true,
+			"uname":  true,
+			"git":    true,
+			"make":   true,
 		},
 	}
 }

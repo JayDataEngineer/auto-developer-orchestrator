@@ -158,7 +158,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
              <div className="w-2 h-2 rounded-full bg-primary glow-primary animate-pulse" />
           </div>
           <div className="flex flex-col">
-            <span className="text-[10px] font-black text-white uppercase tracking-widest">Jules_Service</span>
+            <span className="text-[10px] font-black text-white uppercase tracking-widest">Pi_Service</span>
             <span className="text-[8px] font-mono text-zinc-600 uppercase tracking-tighter">Heartbeat: Nominal</span>
           </div>
         </div>

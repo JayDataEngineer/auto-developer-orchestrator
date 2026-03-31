@@ -76,7 +76,7 @@ export const CloneModal: React.FC<CloneModalProps> = ({ isOpen, onClose, onClone
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-white">Repository Cloned!</h3>
-                  <p className="text-sm text-zinc-400">JULES is now analyzing the codebase.</p>
+                  <p className="text-sm text-zinc-400">Pi agent is now analyzing the codebase.</p>
                 </div>
               </div>
             ) : (
@@ -95,7 +95,7 @@ export const CloneModal: React.FC<CloneModalProps> = ({ isOpen, onClose, onClone
                 
                 <div className="p-3 bg-white/5 rounded-xl border border-white/5">
                   <p className="text-[10px] text-zinc-400 leading-relaxed">
-                    JULES will clone this repository into your configured <span className="text-primary">Projects Root Directory</span> and initialize a <span className="text-primary italic">TODO_FOR_JULES.md</span> file.
+                    Pi agent will clone this repository into your configured <span className="text-primary">Projects Root Directory</span> and initialize a <span className="text-primary italic">TASKS.md</span> file.
                   </p>
                 </div>
 
