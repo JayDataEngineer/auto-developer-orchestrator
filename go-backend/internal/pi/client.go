@@ -65,7 +65,6 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger) (*PiClie
 // rewriteLocalhost replaces localhost/127.0.0.1 URLs with host.docker.internal
 // so that processes inside a sandbox can reach host services.
 func rewriteLocalhost(url string) string {
-	// Fast path: nothing to rewrite
 	if url == "" {
 		return url
 	}
@@ -79,19 +78,7 @@ func rewriteLocalhost(url string) string {
 }
 
 // start launches the Pi subprocess, optionally inside an OpenShell sandbox.
-//
-// Sandbox architecture:
-//
-//	Pi (inside openshell sandbox) → OpenShell (stdout) → Go Backend → React Frontend (SSE)
-//
-// If openshell is available, Pi runs in a filesystem-jailed sandbox where:
-//   - It cannot see the host filesystem (only the project directory)
-//   - Network access is governed by OpenShell policies
-//   - A hallucinated `rm -rf /` only destroys the sandbox, not the host
-//
-// If openshell is not available, Pi runs directly (for dev/local use).
 func (c *PiClient) start() error {
-	// Build the command — sandboxed if openshell is available
 	openshellPath, errSandbox := exec.LookPath("openshell")
 	piPath, err := exec.LookPath("pi")
 	if err != nil {
@@ -109,20 +96,17 @@ func (c *PiClient) start() error {
 	} else {
 		c.logger.Info("OpenShell not found — running Pi directly (unsandboxed)")
 		c.sandboxed = false
-		c.cmd = exec.CommandContext(c.ctx, piPath, "--mode", "rpc", "--no-session")
+		c.cmd = exec.CommandContext(c.ctx, piPath,
+			"--mode", "rpc", "--no-session",
+		)
 	}
 
 	c.cmd.Dir = c.projectDir
 
-	// Build environment: pass through API keys + sandbox networking fixes
 	env := os.Environ()
 
-	// Inside an OpenShell sandbox, localhost refers to the sandbox itself.
-	// To reach services on the host (e.g. LiteLLM), rewrite localhost URLs
-	// to use the host bridge address.
 	if c.sandboxed {
 		for i, e := range env {
-			// Rewrite LITELLM_PROXY_URL if it points to localhost
 			if len(e) > len("LITELLM_PROXY_URL=") && e[:len("LITELLM_PROXY_URL=")] == "LITELLM_PROXY_URL=" {
 				val := e[len("LITELLM_PROXY_URL="):]
 				env[i] = "LITELLM_PROXY_URL=" + rewriteLocalhost(val)
@@ -132,14 +116,11 @@ func (c *PiClient) start() error {
 
 	c.cmd.Env = env
 
-	// CRITICAL: Kill Pi if the Go parent process dies unexpectedly.
-	// Prevents zombie Node.js processes from consuming resources.
 	c.cmd.SysProcAttr = &syscall.SysProcAttr{
 		Pdeathsig: syscall.SIGKILL,
-		Setpgid:   true, // New process group so we can kill Pi + its children
+		Setpgid:   true,
 	}
 
-	// Create stdin/stdout pipes
 	stdin, err := c.cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdin pipe: %w", err)
@@ -166,10 +147,7 @@ func (c *PiClient) start() error {
 	c.running = true
 	c.mu.Unlock()
 
-	// Read stderr for logging
 	go c.readStderr()
-
-	// Read stdout events in background
 	go c.readEvents()
 
 	c.logger.Info("Pi subprocess started",
@@ -184,8 +162,16 @@ func (c *PiClient) start() error {
 func (c *PiClient) readStderr() {
 	scanner := bufio.NewScanner(c.stderr)
 	for scanner.Scan() {
-		c.logger.Debug("Pi stderr", zap.String("line", scanner.Text()))
+		c.logger.Info("Pi stderr", zap.String("line", scanner.Text()))
 	}
+}
+
+// truncStr truncates a string to maxLen runes.
+func truncStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
 }
 
 // readEvents reads JSONL events from Pi's stdout and dispatches to subscribers.
@@ -199,26 +185,34 @@ func (c *PiClient) readEvents() {
 			continue
 		}
 
+		lineStr := truncStr(string(line), 300)
+		c.logger.Info("Pi stdout line", zap.String("line", lineStr))
+
 		var event AgentEvent
 		if err := json.Unmarshal(line, &event); err != nil {
-			c.logger.Debug("Failed to parse Pi event", zap.String("line", string(line)), zap.Error(err))
+			c.logger.Warn("Failed to parse Pi event", zap.String("line", lineStr), zap.Error(err))
 			continue
 		}
+
+		c.logger.Info("Pi parsed event", zap.String("type", event.Type))
 
 		// Update internal state based on event
 		c.updateState(event)
 
 		// Dispatch to all subscribers
 		c.subscribersMu.RLock()
-		for _, ch := range c.subscribers {
+		subCount := len(c.subscribers)
+		for id, ch := range c.subscribers {
 			select {
 			case ch <- event:
+				c.logger.Info("Event dispatched", zap.String("subscriber", id), zap.String("eventType", event.Type))
 			default:
-				// Drop event if subscriber is slow
-				c.logger.Warn("Dropping event for slow subscriber", zap.String("type", event.Type))
+				c.logger.Warn("Dropping event for slow subscriber", zap.String("subscriber", id), zap.String("type", event.Type))
 			}
 		}
 		c.subscribersMu.RUnlock()
+
+		c.logger.Info("Dispatch complete", zap.String("eventType", event.Type), zap.Int("subscriberCount", subCount))
 	}
 
 	c.mu.Lock()
@@ -292,6 +286,8 @@ func (c *PiClient) SendCommand(cmd RpcCommand) error {
 
 	data = append(data, '\n')
 
+	c.logger.Info("Sending command to Pi stdin", zap.String("command", truncStr(string(data), 200)))
+
 	_, err = c.stdin.Write(data)
 	if err != nil {
 		return fmt.Errorf("failed to write to pi stdin: %w", err)
@@ -301,12 +297,21 @@ func (c *PiClient) SendCommand(cmd RpcCommand) error {
 }
 
 // SendPrompt sends a coding prompt to Pi.
+// Per pi RPC protocol: prompt only accepts message/images/streamingBehavior.
+// If model is specified, sends set_model command first (fire-and-forget since
+// pi processes commands in order on the same stdin pipe).
 func (c *PiClient) SendPrompt(message string, model string, thinkingLevel string) error {
+	// Set model first if specified (pi processes stdin commands sequentially)
+	if model != "" {
+		if err := c.SetModel("litellm", model); err != nil {
+			c.logger.Warn("Failed to set model before prompt (non-fatal)", zap.Error(err))
+		}
+		time.Sleep(500 * time.Millisecond) // Let pi process set_model before prompt
+	}
+
 	cmd := RpcCommand{
-		Type:          CmdPrompt,
-		Message:       message,
-		Model:         model,
-		ThinkingLevel: thinkingLevel,
+		Type:    CmdPrompt,
+		Message: message,
 	}
 	return c.SendCommand(cmd)
 }
@@ -328,12 +333,13 @@ func (c *PiClient) Compact() error {
 	return c.SendCommand(RpcCommand{Type: CmdCompact})
 }
 
-// SetModel switches the active model.
+// SetModel switches the active model using pi's set_model RPC command.
+// Per pi RPC protocol: { type: "set_model", provider: "litellm", modelId: "fast" }
 func (c *PiClient) SetModel(provider string, modelId string) error {
 	return c.SendCommand(RpcCommand{
 		Type:     CmdSetModel,
 		Provider: provider,
-		Model:    modelId,
+		ModelId:  modelId,
 	})
 }
 
@@ -373,12 +379,10 @@ func (c *PiClient) IsRunning() bool {
 func (c *PiClient) Close() error {
 	c.cancel()
 
-	// Close stdin to signal Pi to exit gracefully
 	if c.stdin != nil {
 		c.stdin.Close()
 	}
 
-	// Close all subscriber channels
 	c.subscribersMu.Lock()
 	for id, ch := range c.subscribers {
 		delete(c.subscribers, id)
@@ -386,9 +390,7 @@ func (c *PiClient) Close() error {
 	}
 	c.subscribersMu.Unlock()
 
-	// Kill the entire process group (Pi + any child processes it spawned)
 	if c.cmd != nil && c.cmd.Process != nil {
-		// Send SIGKILL to the process group (negative PID)
 		syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
 
 		done := make(chan error, 1)
@@ -399,13 +401,11 @@ func (c *PiClient) Close() error {
 		select {
 		case <-done:
 		case <-time.After(3 * time.Second):
-			// Fallback: direct kill if process group kill didn't work
 			c.cmd.Process.Kill()
 			<-done
 		}
 	}
 
-	// Close pipes
 	if c.stdout != nil {
 		c.stdout.Close()
 	}

@@ -1,0 +1,24 @@
+{
+  "providers": {
+    "litellm": {
+      "baseUrl": "http://litellm-litellm-1:4000/v1",
+      "api": "openai-completions",
+      "apiKey": "sk-litellm-e2e-test-master-key",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        {"id": "econ"},
+        {"id": "fast"},
+        {"id": "qwen-local-primary"},
+        {"id": "qwen-local-fast"},
+        {"id": "or-deepseek-r1"},
+        {"id": "zai-glm-5"},
+        {"id": "qwen-cloud"},
+        {"id": "qwen-cloud-vision"},
+        {"id": "or-free"}
+      ]
+    }
+  }
+}

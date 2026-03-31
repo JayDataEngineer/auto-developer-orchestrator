@@ -1,10 +1,14 @@
 package pi
 
+import "encoding/json"
+
 // RpcCommand represents a command sent to the Pi agent subprocess.
+// See pi-mono/packages/coding-agent/src/modes/rpc/rpc-types.ts for the full protocol.
 type RpcCommand struct {
 	Type          string          `json:"type"`
 	Message       string          `json:"message,omitempty"`
 	Model         string          `json:"model,omitempty"`
+	ModelId       string          `json:"modelId,omitempty"`  // For set_model command
 	Provider      string          `json:"provider,omitempty"`
 	ThinkingLevel string          `json:"thinkingLevel,omitempty"`
 	Command       string          `json:"command,omitempty"`
@@ -25,14 +29,30 @@ type RpcResponse struct {
 }
 
 // AgentEvent represents a streaming event from the Pi agent.
+// Pi's RPC protocol puts most data at the top level (not nested under "data").
 type AgentEvent struct {
-	Type string          `json:"type"`
+	Type string `json:"type"`
+	// Top-level fields from pi RPC
+	AssistantMessageEvent *AssistantMessageEvent `json:"assistantMessageEvent,omitempty"`
+	Message               json.RawMessage        `json:"message,omitempty"`
+	Messages              json.RawMessage        `json:"messages,omitempty"`
+	ToolResults           json.RawMessage        `json:"toolResults,omitempty"`
+	// Legacy "data" field for error/state events
 	Data AgentEventData `json:"data,omitempty"`
 }
 
-// AgentEventData holds the payload of an agent event.
+// AssistantMessageEvent is the nested event inside message_update from pi RPC.
+type AssistantMessageEvent struct {
+	Type         string          `json:"type"`
+	ContentIndex int             `json:"contentIndex"`
+	Delta        string          `json:"delta,omitempty"`
+	Content      string          `json:"content,omitempty"`
+	Partial      json.RawMessage `json:"partial,omitempty"`
+}
+
+// AgentEventData holds the payload of an agent event (used for error/state events).
 type AgentEventData struct {
-	// Text delta events
+	// Text delta events (legacy)
 	Text string `json:"text,omitempty"`
 
 	// Tool execution events
@@ -134,7 +154,10 @@ const (
 const (
 	RpcEventAgentStart      = "agent_start"
 	RpcEventAgentEnd        = "agent_end"
+	RpcEventTurnEnd         = "turn_end"
+	RpcEventMessageStart    = "message_start"
 	RpcEventMessageUpdate   = "message_update"
+	RpcEventMessageEnd      = "message_end"
 	RpcEventToolStart       = "tool_execution_start"
 	RpcEventToolEnd         = "tool_execution_end"
 	RpcEventCompactionStart = "compaction_start"

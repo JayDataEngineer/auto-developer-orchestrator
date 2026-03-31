@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -53,6 +55,7 @@ func (h *PiHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/active", h.ListActive)
 	r.Post("/agent/spawn", h.SpawnAgent)
 	r.Post("/agent/destroy", h.DestroyAgent)
+	r.Get("/debug/rpc-test", h.DebugRpcTest)
 }
 
 // resolveAgent reads ?agentId= from the query string, defaulting to "default".
@@ -152,7 +155,7 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Subscribe to events
-	subId := fmt.Sprintf("sse-%d", r.Context().Value("requestID"))
+	subId := fmt.Sprintf("sse-%d", time.Now().UnixNano())
 	events := client.Subscribe(subId)
 	defer client.Unsubscribe(subId)
 
@@ -173,6 +176,7 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			h.log.Info("Pi event received", zap.String("type", event.Type))
 			sseEvent := h.mapEventToSSE(event)
 			if sseEvent == nil {
 				continue
@@ -196,14 +200,34 @@ type sseEvent struct {
 }
 
 // mapEventToSSE converts a Pi RPC event to an SSE event for the frontend.
+// Pi's RPC protocol sends message_update events with nested assistantMessageEvent
+// containing the actual text deltas in its "delta" field.
 func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 	switch event.Type {
-	case pi.RpcEventMessageUpdate:
-		// Pi sends message updates with text deltas
-		return &sseEvent{
-			Type: pi.EventTextDelta,
-			Data: map[string]string{"text": event.Data.Text},
+	case "message_update":
+		// Pi sends message updates with nested assistantMessageEvent
+		if event.AssistantMessageEvent != nil {
+			ame := event.AssistantMessageEvent
+			switch ame.Type {
+			case "text_delta":
+				return &sseEvent{
+					Type: pi.EventTextDelta,
+					Data: map[string]string{"text": ame.Delta},
+				}
+			case "text_end":
+				// Text complete — extract usage from partial if available
+				return nil // Frontend accumulates deltas, no action needed
+			}
 		}
+		return nil
+
+	case "message_start":
+		// Extract model info from assistant messages
+		return nil // Frontend doesn't need message_start
+
+	case "message_end":
+		return nil // Frontend handles via text_delta accumulation
+
 	case pi.RpcEventToolStart:
 		return &sseEvent{
 			Type: pi.EventToolStart,
@@ -229,13 +253,36 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 			Data: map[string]interface{}{},
 		}
 	case pi.RpcEventAgentEnd:
+		// Extract usage from the messages field
+		data := map[string]interface{}{}
+		if len(event.Messages) > 0 {
+			// Parse the last assistant message for usage
+			var msgs []struct {
+				Role string `json:"role"`
+				Usage struct {
+					Input     float64 `json:"input"`
+					Output    float64 `json:"output"`
+					CacheRead float64 `json:"cacheRead"`
+				} `json:"usage"`
+				API      string `json:"api"`
+				Provider string `json:"provider"`
+				Model    string `json:"model"`
+			}
+			if json.Unmarshal(event.Messages, &msgs) == nil {
+				for i := len(msgs) - 1; i >= 0; i-- {
+					if msgs[i].Role == "assistant" {
+						data["input"] = msgs[i].Usage.Input
+						data["output"] = msgs[i].Usage.Output
+						data["cache"] = msgs[i].Usage.CacheRead
+						data["model"] = msgs[i].Provider + "/" + msgs[i].Model
+						break
+					}
+				}
+			}
+		}
 		return &sseEvent{
 			Type: pi.EventAgentEnd,
-			Data: map[string]interface{}{
-				"input":  event.Data.Input,
-				"output": event.Data.Output,
-				"cache":  event.Data.Cache,
-			},
+			Data: data,
 		}
 	case pi.RpcEventCompactionStart:
 		return &sseEvent{
@@ -256,7 +303,6 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 			Data: map[string]string{"error": event.Data.Error},
 		}
 	case pi.RpcEventResponse:
-		// Response events contain state data
 		return &sseEvent{
 			Type: pi.EventStateUpdate,
 			Data: map[string]interface{}{
@@ -693,6 +739,113 @@ func (h *PiHandler) DestroyAgent(w http.ResponseWriter, r *http.Request) {
 	h.pool.RemoveAgent(projectPath, req.AgentId)
 
 	h.writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// DebugRpcTest starts a fresh pi subprocess, sends set_model + prompt, captures
+// 30s of stdout, and returns raw events. Useful for testing pi RPC independently.
+func (h *PiHandler) DebugRpcTest(w http.ResponseWriter, r *http.Request) {
+	piPath, err := exec.LookPath("pi")
+	if err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": "pi binary not found in PATH",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, piPath, "--mode", "rpc", "--no-session")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": fmt.Sprintf("stdin pipe: %v", err),
+		})
+		return
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": fmt.Sprintf("stdout pipe: %v", err),
+		})
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": fmt.Sprintf("start: %v", err),
+		})
+		return
+	}
+	defer cmd.Process.Kill()
+
+	// Send set_model
+	setModel := `{"type":"set_model","provider":"litellm","modelId":"fast","id":"1"}` + "\n"
+	if _, err := stdin.Write([]byte(setModel)); err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": fmt.Sprintf("write set_model: %v", err),
+		})
+		return
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Send prompt
+	prompt := `{"type":"prompt","message":"Say hi in one word","id":"2"}` + "\n"
+	if _, err := stdin.Write([]byte(prompt)); err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": fmt.Sprintf("write prompt: %v", err),
+		})
+		return
+	}
+
+	// Read stdout for up to 30 seconds
+	type rawEvent struct {
+		Line  string      `json:"line"`
+		Event interface{} `json:"event,omitempty"`
+	}
+
+	var events []rawEvent
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+
+	timeout := time.After(30 * time.Second)
+	done := make(chan struct{})
+	go func() {
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+			evt := rawEvent{Line: line}
+			var parsed interface{}
+			if json.Unmarshal([]byte(line), &parsed) == nil {
+				evt.Event = parsed
+			}
+			events = append(events, evt)
+
+			// Stop after agent_end
+			if strings.Contains(line, `"agent_end"`) {
+				break
+			}
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-timeout:
+	}
+
+	stdin.Close()
+	cmd.Process.Kill()
+	cmd.Wait()
+
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"events":  events,
+		"count":   len(events),
+	})
 }
 
 // resolveProjectPath resolves a project name to its filesystem path.
