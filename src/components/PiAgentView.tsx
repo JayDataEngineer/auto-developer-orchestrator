@@ -141,9 +141,11 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   const completedTools = state.toolCalls.filter(tc => tc.endTime);
 
   return (
-    <div className="flex h-full bg-black overflow-hidden">
-      {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0">
+    <div className="relative h-full bg-black overflow-hidden">
+      {/* Chat content — centered on full viewport with sidebar offset */}
+      <div className="absolute inset-0 right-80 flex flex-col">
+        <div className="flex-1 flex flex-col min-w-0 max-w-3xl mx-auto w-full">
+
         {/* Header */}
         <div className="h-12 border-b border-white/5 flex items-center px-6 shrink-0 bg-black/50 backdrop-blur-md">
           <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-muted uppercase font-bold">
@@ -178,7 +180,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
 
         {/* Response area */}
         <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <div className="mx-auto max-w-3xl px-6 py-6 space-y-6">
+          <div className="px-6 py-6 space-y-6">
             {!state.text && !state.thinking && !state.isStreaming && state.toolCalls.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-6">
                 <div className="w-16 h-16 border border-primary flex items-center justify-center text-primary">
@@ -238,14 +240,14 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
 
         {/* Token usage footer */}
         {(state.tokenUsage.input > 0 || state.tokenUsage.output > 0) && (
-          <div className="px-6 py-2 border-t border-white/5 flex items-center justify-center gap-6 text-[9px] font-mono text-muted-foreground">
+          <div className="px-6 py-2 border-t border-white/5 flex items-center gap-6 text-[9px] font-mono text-muted-foreground">
             <span>Tokens: {state.tokenUsage.input}in / {state.tokenUsage.output}out / {state.tokenUsage.cache}cache</span>
           </div>
         )}
 
         {/* Input area */}
         <div className="px-4 py-4 border-t border-white/5">
-          <div className="mx-auto max-w-3xl flex gap-2">
+          <div className="flex gap-2">
             <div className="flex-1 relative">
               <textarea
                 ref={textareaRef}
@@ -277,7 +279,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               </div>
             </div>
           </div>
-          <div className="mx-auto max-w-3xl flex items-center gap-3 mt-2">
+          <div className="flex items-center gap-3 mt-2">
             <button
               onClick={reset}
               className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest"
@@ -293,10 +295,11 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
             </button>
           </div>
         </div>
+        </div>
       </div>
 
-      {/* Tool execution sidebar — always visible */}
-      <div className="w-80 border-l border-white/5 flex flex-col bg-black shrink-0">
+      {/* Tool execution sidebar — absolute right */}
+      <div className="absolute top-0 right-0 bottom-0 w-80 border-l border-white/5 flex flex-col bg-black">
         <button
           onClick={() => setShowTools(!showTools)}
           className="p-4 border-b border-white/5 flex items-center gap-3 text-left"
