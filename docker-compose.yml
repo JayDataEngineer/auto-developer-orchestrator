@@ -34,6 +34,8 @@ services:
       - ~/.gitconfig:/root/.gitconfig:ro
     networks:
       - shared-infra
+    ports:
+      - "3847:3847"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3847/api/health"]
       interval: 30s
@@ -56,6 +58,8 @@ services:
         - VITE_API_URL=/api
     container_name: orchestrator-frontend
     restart: always
+    ports:
+      - "3456:80"
     networks:
       - shared-infra
     labels:
