@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
   FileCode, Terminal as TerminalIcon, Search, Wrench, Brain,
-  Loader, Zap, RotateCcw
+  Loader, Zap, RotateCcw, ArrowLeft
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { usePiAgent } from '../hooks/usePiAgent';
@@ -11,6 +11,7 @@ import { ToolCall } from '../lib/pi-events';
 interface PiAgentViewProps {
   selectedProject?: string;
   projects?: string[];
+  onBack?: () => void;
 }
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
@@ -95,7 +96,7 @@ function ToolCallItem({ call }: { call: ToolCall }) {
   );
 }
 
-export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, projects = [] }) => {
+export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, projects = [], onBack }) => {
   const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState } = usePiAgent();
   const [input, setInput] = useState('');
   const [showThinking, setShowThinking] = useState(false);
@@ -145,6 +146,14 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, proje
         {/* Header */}
         <div className="h-12 border-b border-white/5 flex items-center px-6 shrink-0 bg-black/50 backdrop-blur-md">
           <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-zinc-500 uppercase font-bold">
+            {onBack && (
+              <button
+                onClick={onBack}
+                className="flex items-center gap-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <ArrowLeft size={12} />
+              </button>
+            )}
             <Zap size={12} className="text-primary" />
             <span className="text-primary">PI</span>
             <span className="text-zinc-700">CODING AGENT</span>

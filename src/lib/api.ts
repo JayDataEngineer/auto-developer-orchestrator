@@ -115,7 +115,7 @@ export const api = {
       }),
   },
   pi: {
-    prompt: (message: string, project: string, opts?: { model?: string; thinkingLevel?: string }) => {
+    prompt: (message: string, project: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean }) => {
       return fetch('/api/pi/prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -138,5 +138,7 @@ export const api = {
       }).then(() => {}),
     compact: (project: string) =>
       fetch(`/api/pi/compact?project=${encodeURIComponent(project)}`, { method: 'POST' }).then(() => {}),
+    getActiveSessions: () =>
+      apiFetch<{ sessions: Array<{ project: string; model: string; streaming: boolean; input: number; output: number; cache: number }> }>('/api/pi/active'),
   },
 };

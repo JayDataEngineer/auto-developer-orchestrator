@@ -15,6 +15,8 @@ export interface PiAgentState {
   model: string | null;
   tokenUsage: { input: number; output: number; cache: number };
   error: string | null;
+  branchName: string | null;
+  lastPrompt: string;
 }
 
 const initialState: PiAgentState = {
@@ -25,6 +27,8 @@ const initialState: PiAgentState = {
   model: null,
   tokenUsage: { input: 0, output: 0, cache: 0 },
   error: null,
+  branchName: null,
+  lastPrompt: '',
 };
 
 export function usePiAgent() {
@@ -147,6 +151,9 @@ export function usePiAgent() {
           };
         }
 
+        case 'branch_created':
+          return { ...prev, branchName: (event.data as { branch: string }).branch };
+
         default:
           return prev;
       }
@@ -154,7 +161,7 @@ export function usePiAgent() {
   }, []);
 
   const sendPrompt = useCallback(
-    async (message: string, project: string, opts?: { model?: string; thinkingLevel?: string }) => {
+    async (message: string, project: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean }) => {
       // Abort any existing request
       if (abortRef.current) {
         abortRef.current.abort();
@@ -167,6 +174,7 @@ export function usePiAgent() {
         ...initialState,
         model: prev.model,
         tokenUsage: prev.tokenUsage,
+        lastPrompt: message,
       }));
 
       try {
@@ -178,6 +186,7 @@ export function usePiAgent() {
             project,
             model: opts?.model,
             thinkingLevel: opts?.thinkingLevel,
+            autoBranch: opts?.autoBranch,
           }),
           signal: controller.signal,
         });

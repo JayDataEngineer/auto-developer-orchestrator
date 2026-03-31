@@ -101,6 +101,7 @@ const (
 	EventCompactionEnd    = "compaction_end"
 	EventError            = "error"
 	EventStateUpdate      = "state_update"
+	EventBranchCreated    = "branch_created"
 )
 
 // RPC command types
