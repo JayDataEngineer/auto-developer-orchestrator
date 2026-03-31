@@ -177,73 +177,75 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
         </div>
 
         {/* Response area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-          {!state.text && !state.thinking && !state.isStreaming && state.toolCalls.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-6">
-              <div className="w-16 h-16 border border-primary flex items-center justify-center text-primary">
-                <Sparkles size={32} className="animate-pulse-slow" />
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          <div className="mx-auto max-w-3xl px-6 py-6 space-y-6">
+            {!state.text && !state.thinking && !state.isStreaming && state.toolCalls.length === 0 && (
+              <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-6">
+                <div className="w-16 h-16 border border-primary flex items-center justify-center text-primary">
+                  <Sparkles size={32} className="animate-pulse-slow" />
+                </div>
+                <div className="space-y-3 max-w-md">
+                  <h3 className="text-lg font-bold text-white tracking-widest uppercase">Pi Agent Ready</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed font-mono">
+                    Describe a coding task and Pi will implement it with real file editing, bash execution, and intelligent analysis.
+                  </p>
+                </div>
+                <div className="text-[9px] text-muted font-mono uppercase tracking-widest">
+                  {selectedProject ? `Project: ${selectedProject}` : 'Select a project to begin'}
+                </div>
               </div>
-              <div className="space-y-3 max-w-md">
-                <h3 className="text-lg font-bold text-white tracking-widest uppercase">Pi Agent Ready</h3>
-                <p className="text-xs text-muted-foreground leading-relaxed font-mono">
-                  Describe a coding task and Pi will implement it with real file editing, bash execution, and intelligent analysis.
-                </p>
-              </div>
-              <div className="text-[9px] text-muted font-mono uppercase tracking-widest">
-                {selectedProject ? `Project: ${selectedProject}` : 'Select a project to begin'}
-              </div>
-            </div>
-          )}
+            )}
 
-          {/* Streaming text */}
-          {state.text && (
-            <div className="max-w-none">
-              <div className="text-[12px] leading-relaxed text-zinc-300 whitespace-pre-wrap font-mono">
-                {state.text}
-                {state.isStreaming && (
-                  <span className="inline-block w-2 h-4 bg-primary/60 animate-pulse ml-0.5" />
+            {/* Streaming text */}
+            {state.text && (
+              <div className="max-w-none">
+                <div className="text-[12px] leading-relaxed text-zinc-300 whitespace-pre-wrap font-mono">
+                  {state.text}
+                  {state.isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-primary/60 animate-pulse ml-0.5" />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Thinking panel */}
+            {state.thinking && (
+              <div className="border border-zinc-800 bg-zinc-950">
+                <button
+                  onClick={() => setShowThinking(!showThinking)}
+                  className="w-full flex items-center gap-3 p-3 text-left"
+                >
+                  <Brain size={12} className="text-muted-foreground" />
+                  <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+                    Agent Thinking
+                  </span>
+                  <div className="flex-1" />
+                  {showThinking ? <ChevronDown size={10} className="text-muted-foreground" /> : <ChevronRight size={10} className="text-muted-foreground" />}
+                </button>
+                {showThinking && (
+                  <div className="px-3 pb-3 border-t border-zinc-800">
+                    <pre className="text-[10px] font-mono text-muted whitespace-pre-wrap">
+                      {state.thinking}
+                    </pre>
+                  </div>
                 )}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Thinking panel */}
-          {state.thinking && (
-            <div className="border border-zinc-800 bg-zinc-950">
-              <button
-                onClick={() => setShowThinking(!showThinking)}
-                className="w-full flex items-center gap-3 p-3 text-left"
-              >
-                <Brain size={12} className="text-muted-foreground" />
-                <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-                  Agent Thinking
-                </span>
-                <div className="flex-1" />
-                {showThinking ? <ChevronDown size={10} className="text-muted-foreground" /> : <ChevronRight size={10} className="text-muted-foreground" />}
-              </button>
-              {showThinking && (
-                <div className="px-3 pb-3 border-t border-zinc-800">
-                  <pre className="text-[10px] font-mono text-muted whitespace-pre-wrap">
-                    {state.thinking}
-                  </pre>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {/* Token usage footer */}
         {(state.tokenUsage.input > 0 || state.tokenUsage.output > 0) && (
-          <div className="px-6 py-2 border-t border-white/5 flex items-center gap-6 text-[9px] font-mono text-muted-foreground">
+          <div className="px-6 py-2 border-t border-white/5 flex items-center justify-center gap-6 text-[9px] font-mono text-muted-foreground">
             <span>Tokens: {state.tokenUsage.input}in / {state.tokenUsage.output}out / {state.tokenUsage.cache}cache</span>
           </div>
         )}
 
         {/* Input area */}
-        <div className="p-4 border-t border-white/5">
-          <div className="flex gap-2">
+        <div className="px-4 py-4 border-t border-white/5">
+          <div className="mx-auto max-w-3xl flex gap-2">
             <div className="flex-1 relative">
               <textarea
                 ref={textareaRef}
@@ -275,7 +277,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-3 mt-2">
+          <div className="mx-auto max-w-3xl flex items-center gap-3 mt-2">
             <button
               onClick={reset}
               className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest"

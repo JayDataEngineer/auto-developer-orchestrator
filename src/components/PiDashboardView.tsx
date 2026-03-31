@@ -4,7 +4,7 @@ import { usePiAgent } from '../hooks/usePiAgent';
 import { usePiSessionManager } from '../hooks/usePiSessionManager';
 import { PiSessionCard } from './PiSessionCard';
 import { PiAgentView } from './PiAgentView';
-import { Send, GitBranch, Zap, ArrowLeft, Plus } from 'lucide-react';
+import { Send, GitBranch, Zap, ArrowLeft, Plus, Wrench, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface PiDashboardViewProps {
   selectedProject?: string;
@@ -138,6 +138,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
   const [promptProject, setPromptProject] = useState<string>(selectedProject || projects[0] || '');
   const [promptAgentId, setPromptAgentId] = useState<string>('default');
   const [autoBranch, setAutoBranch] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
   const [activeCount, setActiveCount] = useState(0);
 
   // Derive available agents for the selected prompt project
@@ -298,6 +299,31 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Sidebar — visible in grid mode */}
+      {!isSplitMode && (
+        <div className="w-72 border-l border-white/5 flex flex-col bg-black shrink-0">
+          <button
+            onClick={() => setShowSidebar(!showSidebar)}
+            className="p-4 border-b border-white/5 flex items-center gap-3 text-left"
+          >
+            <Wrench size={12} className="text-muted-foreground" />
+            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+              Activity
+            </span>
+            <div className="flex-1" />
+            {showSidebar ? <ChevronDown size={10} className="text-muted-foreground" /> : <ChevronRight size={10} className="text-muted-foreground" />}
+          </button>
+          {showSidebar && (
+            <div className="flex-1 flex flex-col items-center justify-center p-6">
+              <Wrench size={20} className="text-zinc-800 mb-3" />
+              <p className="text-[9px] font-mono text-zinc-700 uppercase tracking-widest text-center">
+                Select an agent to view activity
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Expanded detail panel */}
       {isSplitMode && expandedProject && expandedAgentId && (
