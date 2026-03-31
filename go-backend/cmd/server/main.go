@@ -123,6 +123,7 @@ func main() {
 		// GitHub integration
 		r.Get("/github/user", configHandler.GetGitHubUser)
 		r.Post("/config/github", configHandler.ConnectGitHub)
+		r.Get("/github/repos", githubHandler.GetRepos)
 		r.Get("/github/prs", githubHandler.GetPRs)
 		r.Get("/github/stats", githubHandler.GetStats)
 		r.Get("/github/branches", githubHandler.GetBranches)
