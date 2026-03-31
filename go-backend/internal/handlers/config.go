@@ -146,7 +146,16 @@ var githubToken string
 func (h *ConfigHandler) GetGitHubUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	if githubToken == "" {
+	// Check in-memory token first, then fall back to env var
+	token := githubToken
+	if token == "" {
+		if t := os.Getenv("GITHUB_TOKEN"); t != "" {
+			githubToken = t
+			token = t
+		}
+	}
+
+	if token == "" {
 		json.NewEncoder(w).Encode(GitHubUserResponse{
 			Connected: false,
 		})
