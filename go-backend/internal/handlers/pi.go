@@ -19,19 +19,23 @@ import (
 
 // PiHandler handles Pi agent HTTP endpoints.
 type PiHandler struct {
-	pool *pi.PiPool
-	db   *storage.Database
-	git  *git.GitOps
-	log  *zap.Logger
+	pool       *pi.PiPool
+	db         *storage.Database
+	git        *git.GitOps
+	log        *zap.Logger
+	litellmURL string
+	litellmKey string
 }
 
 // NewPiHandler creates a new Pi handler.
 func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, logger *zap.Logger) *PiHandler {
 	return &PiHandler{
-		pool: pool,
-		db:   db,
-		git:  gitOps,
-		log:  logger,
+		pool:       pool,
+		db:         db,
+		git:        gitOps,
+		log:        logger,
+		litellmURL: os.Getenv("LITELLM_PROXY_URL"),
+		litellmKey: os.Getenv("LITELLM_MASTER_KEY"),
 	}
 }
 
@@ -350,28 +354,18 @@ func (h *PiHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 
 // GetModels lists available models.
 func (h *PiHandler) GetModels(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	agentId := resolveAgent(r)
-	projectPath := h.resolveProjectPath(project)
-	if projectPath == "" {
-		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
-			"success": false, "error": "Project not found",
-		})
-		return
-	}
-
-	client, err := h.pool.GetOrCreateWithID(projectPath, agentId)
-	if err != nil {
-		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
-			"success": false, "error": err.Error(),
-		})
-		return
-	}
-
-	// Request models from Pi
-	if err := client.GetAvailableModels(); err != nil {
-		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
-			"success": false, "error": err.Error(),
+	// If LiteLLM proxy is configured, fetch models directly from it
+	if h.litellmURL != "" {
+		models, err := h.fetchLiteLLMModels(r.Context())
+		if err != nil {
+			h.log.Warn("Failed to fetch models from LiteLLM", zap.Error(err))
+			h.writeJSON(w, http.StatusOK, map[string]interface{}{
+				"models": []pi.ModelInfo{},
+			})
+			return
+		}
+		h.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"models": models,
 		})
 		return
 	}
@@ -379,6 +373,49 @@ func (h *PiHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"models": []pi.ModelInfo{},
 	})
+}
+
+// fetchLiteLLMModels calls LiteLLM's /v1/models endpoint and returns the model list.
+func (h *PiHandler) fetchLiteLLMModels(ctx context.Context) ([]pi.ModelInfo, error) {
+	url := strings.TrimRight(h.litellmURL, "/") + "/v1/models"
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Traefik routes by Host header — set it so LiteLLM backend is matched
+	req.Host = "litellm.local"
+	if h.litellmKey != "" {
+		req.Header.Set("Authorization", "Bearer "+h.litellmKey)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("LiteLLM returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	models := make([]pi.ModelInfo, 0, len(result.Data))
+	for _, m := range result.Data {
+		models = append(models, pi.ModelInfo{
+			Id:   m.ID,
+			Name: m.ID,
+		})
+	}
+	return models, nil
 }
 
 // setModelRequest is the request body for SetModel.

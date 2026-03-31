@@ -22,6 +22,8 @@ services:
       - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse.local}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LITELLM_PROXY_URL=http://shared-traefik-1:80
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-e2e-test-master-key}
     volumes:
       - ./projects:/app/projects
       - ./data:/data
@@ -39,6 +41,7 @@ services:
       - "traefik.http.routers.orchestrator-api.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`) && PathPrefix(`/api`)"
       - "traefik.http.routers.orchestrator-api.entrypoints=http"
       - "traefik.http.services.orchestrator-api.loadbalancer.server.port=3847"
+      - "traefik.http.routers.orchestrator-api.priority=110"
 
   # ===========================================
   # React Frontend (Nginx Production)
@@ -58,7 +61,7 @@ services:
       - "traefik.http.routers.orchestrator.rule=Host(`orchestrator.${INFRA_DOMAIN:-local}`)"
       - "traefik.http.routers.orchestrator.entrypoints=http"
       - "traefik.http.services.orchestrator.loadbalancer.server.port=80"
-      - "traefik.http.routers.orchestrator.priority=1"
+      - "traefik.http.routers.orchestrator.priority=105"
 
 volumes:
   pi-config:

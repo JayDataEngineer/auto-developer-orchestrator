@@ -2,11 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
   FileCode, Terminal as TerminalIcon, Search, Wrench, Brain,
-  Loader, Zap, RotateCcw, ArrowLeft
+  Loader, Zap, RotateCcw, ArrowLeft, ChevronUp
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { usePiAgent } from '../hooks/usePiAgent';
-import { ToolCall } from '../lib/pi-events';
+import { ToolCall, PiModel } from '../lib/pi-events';
 
 interface PiAgentViewProps {
   selectedProject?: string;
@@ -98,12 +98,15 @@ function ToolCallItem({ call }: { call: ToolCall }) {
 }
 
 export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack }) => {
-  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState } = usePiAgent(selectedAgentId);
+  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels } = usePiAgent(selectedAgentId);
   const [input, setInput] = useState('');
   const [showThinking, setShowThinking] = useState(false);
   const [showTools, setShowTools] = useState(true);
+  const [models, setModels] = useState<PiModel[]>([]);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   // Hydrate state from backend when project changes
   useEffect(() => {
@@ -111,6 +114,24 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
       hydrateState(selectedProject, selectedAgentId);
     }
   }, [selectedProject, selectedAgentId, hydrateState]);
+
+  // Fetch available models on mount
+  useEffect(() => {
+    if (!selectedProject) return;
+    getModels(selectedProject, selectedAgentId).then(setModels);
+  }, [selectedProject, selectedAgentId, getModels]);
+
+  // Close model dropdown on outside click
+  useEffect(() => {
+    if (!modelDropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setModelDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [modelDropdownOpen]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -141,13 +162,11 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   const completedTools = state.toolCalls.filter(tc => tc.endTime);
 
   return (
-    <div className="relative h-full bg-black overflow-hidden">
-      {/* Chat content — centered on full viewport with sidebar offset */}
-      <div className="absolute inset-0 right-80 flex flex-col">
-        <div className="flex-1 flex flex-col min-w-0 max-w-3xl mx-auto w-full">
-
-        {/* Header */}
-        <div className="h-12 border-b border-white/5 flex items-center px-6 shrink-0 bg-black/50 backdrop-blur-md">
+    <div className="flex h-full bg-black overflow-hidden">
+      {/* Main content */}
+      <div className="flex-1 flex flex-col min-w-0 items-center">
+        {/* Header — full width */}
+        <div className="w-full h-12 border-b border-white/5 flex items-center px-6 shrink-0 bg-black/50 backdrop-blur-md">
           <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-muted uppercase font-bold">
             {onBack && (
               <button
@@ -179,8 +198,8 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
         </div>
 
         {/* Response area */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <div className="px-6 py-6 space-y-6">
+        <div className="flex-1 overflow-y-auto custom-scrollbar w-full">
+          <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
             {!state.text && !state.thinking && !state.isStreaming && state.toolCalls.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-6">
                 <div className="w-16 h-16 border border-primary flex items-center justify-center text-primary">
@@ -240,66 +259,100 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
 
         {/* Token usage footer */}
         {(state.tokenUsage.input > 0 || state.tokenUsage.output > 0) && (
-          <div className="px-6 py-2 border-t border-white/5 flex items-center gap-6 text-[9px] font-mono text-muted-foreground">
-            <span>Tokens: {state.tokenUsage.input}in / {state.tokenUsage.output}out / {state.tokenUsage.cache}cache</span>
+          <div className="w-full border-t border-white/5">
+            <div className="max-w-3xl mx-auto py-2 px-6 flex items-center gap-6 text-[9px] font-mono text-muted-foreground">
+              <span>Tokens: {state.tokenUsage.input}in / {state.tokenUsage.output}out / {state.tokenUsage.cache}cache</span>
+            </div>
           </div>
         )}
 
         {/* Input area */}
-        <div className="px-4 py-4 border-t border-white/5">
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={selectedProject ? "Describe a coding task..." : "Select a project first..."}
-                disabled={state.isStreaming || !selectedProject}
-                className="w-full bg-zinc-900 border border-white/5 rounded p-4 pr-14 text-[12px] text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-all font-mono resize-none"
-                rows={3}
-              />
-              <div className="absolute right-3 bottom-3 flex items-center gap-2">
-                {state.isStreaming ? (
-                  <button
-                    onClick={handleAbort}
-                    className="p-2 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all"
-                  >
-                    <Square size={16} />
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleSend}
-                    disabled={!input.trim() || !selectedProject}
-                    className="p-2 bg-primary text-black rounded hover:bg-primary/80 disabled:opacity-20 transition-all"
-                  >
-                    <Send size={16} />
-                  </button>
-                )}
+        <div className="w-full border-t border-white/5">
+          <div className="max-w-3xl mx-auto p-4">
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={selectedProject ? "Describe a coding task..." : "Select a project first..."}
+                  disabled={state.isStreaming || !selectedProject}
+                  className="w-full bg-zinc-900 border border-white/5 rounded p-4 pr-14 text-[12px] text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-all font-mono resize-none"
+                  rows={3}
+                />
+                <div className="absolute right-3 bottom-3 flex items-center gap-2">
+                  {state.isStreaming ? (
+                    <button
+                      onClick={handleAbort}
+                      className="p-2 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all"
+                    >
+                      <Square size={16} />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleSend}
+                      disabled={!input.trim() || !selectedProject}
+                      className="p-2 bg-primary text-black rounded hover:bg-primary/80 disabled:opacity-20 transition-all"
+                    >
+                      <Send size={16} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
+            <div className="flex items-center gap-3 mt-2">
+              {/* Model selector dropdown */}
+              <div className="relative" ref={modelDropdownRef}>
+                <button
+                  onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
+                  className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest"
+                >
+                  Model: {state.model || 'default'}
+                  {modelDropdownOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                </button>
+                {modelDropdownOpen && models.length > 0 && (
+                  <div className="absolute bottom-full left-0 mb-1 w-56 max-h-60 overflow-y-auto border border-white/10 bg-zinc-950 shadow-xl z-50">
+                    {models.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          if (selectedProject) switchModel(selectedProject, 'litellm', m.id, selectedAgentId);
+                          setModelDropdownOpen(false);
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 text-[9px] font-mono uppercase tracking-widest transition-colors",
+                          state.model === m.id
+                            ? "bg-primary/10 text-primary"
+                            : "text-muted hover:bg-white/5 hover:text-muted-foreground"
+                        )}
+                      >
+                        {m.name || m.id}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={reset}
+                className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest"
+              >
+                <RotateCcw size={10} /> New Task
+              </button>
+              <button
+                onClick={handleCompact}
+                disabled={state.isStreaming}
+                className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest disabled:opacity-30"
+              >
+                <Trash2 size={10} /> Compact
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-3 mt-2">
-            <button
-              onClick={reset}
-              className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest"
-            >
-              <RotateCcw size={10} /> New Task
-            </button>
-            <button
-              onClick={handleCompact}
-              disabled={state.isStreaming}
-              className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest disabled:opacity-30"
-            >
-              <Trash2 size={10} /> Compact
-            </button>
-          </div>
-        </div>
         </div>
       </div>
 
-      {/* Tool execution sidebar — absolute right */}
-      <div className="absolute top-0 right-0 bottom-0 w-80 border-l border-white/5 flex flex-col bg-black">
+      {/* Tool execution sidebar */}
+      <div className="w-80 border-l border-white/5 flex flex-col bg-black shrink-0">
         <button
           onClick={() => setShowTools(!showTools)}
           className="p-4 border-b border-white/5 flex items-center gap-3 text-left"
