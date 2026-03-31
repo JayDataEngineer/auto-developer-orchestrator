@@ -20,6 +20,25 @@ import (
 )
 
 func main() {
+	// Allow git operations on bind-mounted repos with different ownership.
+	// Host ~/.gitconfig is mounted read-only, so write to a separate config.
+	gitconfig := `[safe]
+	directory = *
+[user]
+	email = pi@orchestrator.local
+	name = Pi Agent
+`
+	// Write git-credentials file if GITHUB_TOKEN is available, so git push works.
+	if ghToken := os.Getenv("GITHUB_TOKEN"); ghToken != "" {
+		os.WriteFile("/tmp/.git-credentials", []byte("https://pi-agent:"+ghToken+"@github.com\n"), 0600)
+		gitconfig += `[credential]
+	helper = store --file /tmp/.git-credentials
+`
+	}
+	tmpConfig := "/tmp/.gitconfig"
+	os.WriteFile(tmpConfig, []byte(gitconfig), 0644)
+	os.Setenv("GIT_CONFIG_GLOBAL", tmpConfig)
+
 	// Initialize logger
 	logger, err := zap.NewProduction()
 	if err != nil {

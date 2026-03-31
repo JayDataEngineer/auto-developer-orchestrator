@@ -32,8 +32,9 @@ COPY --from=builder /app/main .
 # Install Pi coding agent globally
 RUN npm install -g @mariozechner/pi-coding-agent@latest
 
-# Create data directory
-RUN mkdir -p /data /app/projects
+# Create data directory and fix git safe.directory for bind-mounted repos
+RUN mkdir -p /data /app/projects && \
+    git config --global --add safe.directory '*'
 
 EXPOSE 3847
 

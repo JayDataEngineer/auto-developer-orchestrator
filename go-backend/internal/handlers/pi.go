@@ -909,7 +909,7 @@ func (h *PiHandler) DebugRpcTest(w http.ResponseWriter, r *http.Request) {
 	defer cmd.Process.Kill()
 
 	// Send set_model
-	setModel := `{"type":"set_model","provider":"litellm","modelId":"fast","id":"1"}` + "\n"
+	setModel := `{"type":"set_model","provider":"litellm","modelId":"qwen-cloud","id":"1"}` + "\n"
 	if _, err := stdin.Write([]byte(setModel)); err != nil {
 		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false, "error": fmt.Sprintf("write set_model: %v", err),

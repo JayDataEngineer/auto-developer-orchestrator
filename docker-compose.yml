@@ -24,6 +24,7 @@ services:
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - LITELLM_PROXY_URL=http://shared-traefik-1:80
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-e2e-test-master-key}
+      - GIT_CONFIG_GLOBAL=/tmp/.gitconfig
     volumes:
       - ./projects:/app/projects
       - ./data:/data

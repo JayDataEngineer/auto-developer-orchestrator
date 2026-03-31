@@ -275,7 +275,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
 
   const handleSend = useCallback(() => {
     if (!input.trim() || !selectedProject || state.isStreaming) return;
-    sendPrompt(input.trim(), selectedProject, { agentId: selectedAgentId, model: state.model || undefined });
+    sendPrompt(input.trim(), selectedProject, { agentId: selectedAgentId, model: state.model || 'qwen-cloud' });
     setInput('');
   }, [input, selectedProject, state.isStreaming, sendPrompt, selectedAgentId]);
 
