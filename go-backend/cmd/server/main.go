@@ -62,7 +62,7 @@ func main() {
 
 	// Pi agent pool
 	piPool := pi.NewPiPool(logger, 5*time.Minute)
-	piHandler := handlers.NewPiHandler(piPool, db, logger)
+	piHandler := handlers.NewPiHandler(piPool, db, gitOps, logger)
 
 	// Setup router
 	r := chi.NewRouter()

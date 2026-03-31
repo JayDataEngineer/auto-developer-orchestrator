@@ -14,7 +14,8 @@ export type PiEventType =
   | 'compaction_start'
   | 'compaction_end'
   | 'error'
-  | 'state_update';
+  | 'state_update'
+  | 'branch_created';
 
 // Base event data
 export interface PiTextDelta {
@@ -60,6 +61,10 @@ export interface PiStateUpdate {
   cache: number;
 }
 
+export interface PiBranchCreated {
+  branch: string;
+}
+
 // Discriminated union of all Pi events
 export type PiSSEEvent =
   | { type: 'text_delta'; data: PiTextDelta }
@@ -71,7 +76,8 @@ export type PiSSEEvent =
   | { type: 'compaction_start'; data: Record<string, never> }
   | { type: 'compaction_end'; data: PiCompactionEnd }
   | { type: 'error'; data: PiError }
-  | { type: 'state_update'; data: PiStateUpdate };
+  | { type: 'state_update'; data: PiStateUpdate }
+  | { type: 'branch_created'; data: PiBranchCreated };
 
 // Tool call tracking
 export interface ToolCall {

@@ -6,7 +6,7 @@ import { Header } from './components/Header';
 import { Checklist } from './components/Checklist';
 import { Terminal } from './components/Terminal';
 import { CLITerminal } from './components/CLITerminal';
-import { PiAgentView } from './components/PiAgentView';
+import { PiDashboardView } from './components/PiDashboardView';
 import { ReviewModal } from './components/ReviewModal';
 import { CurrentTaskCard } from './components/CurrentTaskCard';
 import { AIConfigModal } from './components/AIConfigModal';
@@ -138,7 +138,7 @@ export default function App() {
             )}
             {activeTab === 'activity' && <ActivityView logs={logs} />}
             {activeTab === 'github' && <GithubView repoOwner={githubUser?.user?.login} repoName={selectedProject} />}
-            {activeTab === 'agents' && <PiAgentView selectedProject={selectedProject} projects={projects} />}
+            {activeTab === 'agents' && <PiDashboardView selectedProject={selectedProject} projects={projects} onProjectSelect={setSelectedProject} />}
             {activeTab === 'manifesto' && <ManifestoView />}
           </div>
         </main>

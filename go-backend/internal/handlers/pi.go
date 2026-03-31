@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/go-chi/chi/v5"
@@ -19,14 +21,16 @@ import (
 type PiHandler struct {
 	pool *pi.PiPool
 	db   *storage.Database
+	git  *git.GitOps
 	log  *zap.Logger
 }
 
 // NewPiHandler creates a new Pi handler.
-func NewPiHandler(pool *pi.PiPool, db *storage.Database, logger *zap.Logger) *PiHandler {
+func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, logger *zap.Logger) *PiHandler {
 	return &PiHandler{
 		pool: pool,
 		db:   db,
+		git:  gitOps,
 		log:  logger,
 	}
 }
@@ -42,6 +46,7 @@ func (h *PiHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/compact", h.Compact)
 	r.Get("/sessions", h.ListSessions)
 	r.Put("/session", h.SwitchSession)
+	r.Get("/active", h.ListActive)
 }
 
 // promptRequest is the request body for the prompt endpoint.
@@ -50,6 +55,7 @@ type promptRequest struct {
 	Project       string `json:"project"`
 	Model         string `json:"model,omitempty"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
+	AutoBranch    bool   `json:"autoBranch,omitempty"`
 }
 
 // Prompt sends a coding task to Pi and streams events back via SSE.
@@ -86,6 +92,20 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-branch if requested
+	var autoBranchName string
+	if req.AutoBranch && h.git != nil {
+		autoBranchName = fmt.Sprintf("pi/task-%d", time.Now().Unix())
+		if err := h.git.Checkout(r.Context(), git.CheckoutOptions{
+			Dir:       projectPath,
+			Branch:    autoBranchName,
+			CreateNew: true,
+		}); err != nil {
+			h.log.Warn("Auto-branch failed (non-fatal)", zap.Error(err), zap.String("branch", autoBranchName))
+			autoBranchName = ""
+		}
+	}
+
 	// Set up SSE
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -93,6 +113,15 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	flusher, canFlush := w.(http.Flusher)
+
+	// Send branch_created event if auto-branched
+	if autoBranchName != "" {
+		data, _ := json.Marshal(map[string]string{"branch": autoBranchName})
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", pi.EventBranchCreated, string(data))
+		if canFlush {
+			flusher.Flush()
+		}
+	}
 
 	// Subscribe to events
 	subId := fmt.Sprintf("sse-%d", r.Context().Value("requestID"))
@@ -463,6 +492,42 @@ func (h *PiHandler) SwitchSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// ListActive returns all active Pi sessions with their state.
+func (h *PiHandler) ListActive(w http.ResponseWriter, r *http.Request) {
+	activePaths := h.pool.ListActive()
+	type activeSession struct {
+		Project   string        `json:"project"`
+		Model     string        `json:"model"`
+		Streaming bool          `json:"streaming"`
+		Input     float64       `json:"input"`
+		Output    float64       `json:"output"`
+		Cache     float64       `json:"cache"`
+	}
+
+	sessions := make([]activeSession, 0, len(activePaths))
+	for _, path := range activePaths {
+		client := h.pool.Get(path)
+		if client == nil {
+			continue
+		}
+		state := client.GetState()
+		// Extract project name from path
+		projectName := filepath.Base(path)
+		sessions = append(sessions, activeSession{
+			Project:   projectName,
+			Model:     state.Model,
+			Streaming: state.Streaming,
+			Input:     state.Input,
+			Output:    state.Output,
+			Cache:     state.Cache,
+		})
+	}
+
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sessions": sessions,
+	})
 }
 
 // resolveProjectPath resolves a project name to its filesystem path.
