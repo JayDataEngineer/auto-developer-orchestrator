@@ -16,7 +16,10 @@ export type PiEventType =
   | 'compaction_end'
   | 'error'
   | 'state_update'
-  | 'branch_created';
+  | 'branch_created'
+  | 'commit_created'
+  | 'push_complete'
+  | 'pr_created';
 
 // Base event data
 export interface PiTextDelta {
@@ -70,6 +73,21 @@ export interface PiAgentSpawned {
   agentId: string;
 }
 
+export interface PiCommitCreated {
+  message: string;
+  branch: string;
+}
+
+export interface PiPushComplete {
+  branch: string;
+}
+
+export interface PiPRCreated {
+  url: string;
+  number: number;
+  title: string;
+}
+
 // Discriminated union of all Pi events
 export type PiSSEEvent =
   | { type: 'text_delta'; data: PiTextDelta }
@@ -83,7 +101,10 @@ export type PiSSEEvent =
   | { type: 'compaction_end'; data: PiCompactionEnd }
   | { type: 'error'; data: PiError }
   | { type: 'state_update'; data: PiStateUpdate }
-  | { type: 'branch_created'; data: PiBranchCreated };
+  | { type: 'branch_created'; data: PiBranchCreated }
+  | { type: 'commit_created'; data: PiCommitCreated }
+  | { type: 'push_complete'; data: PiPushComplete }
+  | { type: 'pr_created'; data: PiPRCreated };
 
 // Tool call tracking
 export interface ToolCall {

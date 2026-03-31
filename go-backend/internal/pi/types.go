@@ -119,18 +119,21 @@ type SessionInfo struct {
 
 // Event types sent to the frontend via SSE
 const (
-	EventTextDelta        = "text_delta"
-	EventThinkingDelta    = "thinking_delta"
-	EventToolStart        = "tool_execution_start"
-	EventToolEnd          = "tool_execution_end"
-	EventAgentStart       = "agent_start"
-	EventAgentEnd         = "agent_end"
-	EventAgentSpawned     = "agent_spawned"
-	EventCompactionStart  = "compaction_start"
-	EventCompactionEnd    = "compaction_end"
-	EventError            = "error"
-	EventStateUpdate      = "state_update"
-	EventBranchCreated    = "branch_created"
+	EventTextDelta       = "text_delta"
+	EventThinkingDelta   = "thinking_delta"
+	EventToolStart       = "tool_execution_start"
+	EventToolEnd         = "tool_execution_end"
+	EventAgentStart      = "agent_start"
+	EventAgentEnd        = "agent_end"
+	EventAgentSpawned    = "agent_spawned"
+	EventCompactionStart = "compaction_start"
+	EventCompactionEnd   = "compaction_end"
+	EventError           = "error"
+	EventStateUpdate     = "state_update"
+	EventBranchCreated   = "branch_created"
+	EventCommitCreated   = "commit_created"
+	EventPushComplete    = "push_complete"
+	EventPRCreated       = "pr_created"
 )
 
 // RPC command types

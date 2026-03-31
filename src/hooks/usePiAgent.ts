@@ -18,6 +18,8 @@ export interface PiAgentState {
   branchName: string | null;
   lastPrompt: string;
   agentId: string;
+  prUrl: string | null;
+  prNumber: number | null;
 }
 
 const initialState: PiAgentState = {
@@ -31,6 +33,8 @@ const initialState: PiAgentState = {
   branchName: null,
   lastPrompt: '',
   agentId: 'default',
+  prUrl: null,
+  prNumber: null,
 };
 
 export function usePiAgent(initialAgentId: string = 'default') {
@@ -162,6 +166,17 @@ export function usePiAgent(initialAgentId: string = 'default') {
         case 'branch_created':
           return { ...prev, branchName: (event.data as { branch: string }).branch };
 
+        case 'commit_created':
+          return prev; // informational, no state change
+
+        case 'push_complete':
+          return prev; // informational, no state change
+
+        case 'pr_created': {
+          const prData = event.data as { url: string; number: number; title: string };
+          return { ...prev, prUrl: prData.url, prNumber: prData.number };
+        }
+
         default:
           return prev;
       }
@@ -188,6 +203,8 @@ export function usePiAgent(initialAgentId: string = 'default') {
         tokenUsage: prev.tokenUsage,
         lastPrompt: message,
         agentId: aid,
+        prUrl: null,
+        prNumber: null,
       }));
 
       try {

@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -58,6 +60,85 @@ func (h *GitHubHandler) githubGet(url string) ([]byte, int, error) {
 
 	body, _ := io.ReadAll(resp.Body)
 	return body, resp.StatusCode, nil
+}
+
+func (h *GitHubHandler) githubPost(url string, payload interface{}) ([]byte, int, error) {
+	token, err := h.getToken()
+	if err != nil {
+		return nil, 401, err
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, 500, err
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, 500, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return nil, 502, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	return respBody, resp.StatusCode, nil
+}
+
+// CreatePR creates a pull request on GitHub. Returns the parsed PR data.
+func (h *GitHubHandler) CreatePR(owner, repo, title, body, head, base string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls", owner, repo)
+	payload := map[string]string{
+		"title": title,
+		"body":  body,
+		"head":  head,
+		"base":  base,
+	}
+
+	respBody, status, err := h.githubPost(url, payload)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub PR creation request failed: %w", err)
+	}
+
+	if status != 201 {
+		// 422 means PR already exists — try to return the existing one
+		if status == 422 {
+			return nil, fmt.Errorf("PR already exists for branch %s", head)
+		}
+		return nil, fmt.Errorf("GitHub PR creation failed (status %d): %s", status, string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse PR response: %w", err)
+	}
+
+	h.logger.Info("GitHub PR created",
+		zap.String("owner", owner),
+		zap.String("repo", repo),
+		zap.String("head", head),
+		zap.Float64("number", result["number"].(float64)),
+	)
+
+	return result, nil
+}
+
+// parseOwnerRepo extracts owner and repo from a git remote URL.
+// Supports: https://github.com/owner/repo.git, git@github.com:owner/repo.git
+func parseOwnerRepo(remoteURL string) (owner, repo string, err error) {
+	// HTTPS: https://github.com/owner/repo.git
+	httpsRe := regexp.MustCompile(`github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$`)
+	matches := httpsRe.FindStringSubmatch(remoteURL)
+	if len(matches) == 3 {
+		return matches[1], matches[2], nil
+	}
+	return "", "", fmt.Errorf("cannot parse owner/repo from remote URL: %s", remoteURL)
 }
 
 // GetRepos returns the authenticated user's GitHub repositories.

@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
   FileCode, Terminal as TerminalIcon, Search, Wrench, Brain,
-  Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch, Box
+  Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch, Box,
+  ExternalLink, Check
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -376,6 +377,34 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
           <div className="w-full border-t border-white/5">
             <div className="max-w-3xl mx-auto py-2 px-6 flex items-center gap-6 text-[9px] font-mono text-muted-foreground">
               <span>Tokens: {state.tokenUsage.input}in / {state.tokenUsage.output}out / {state.tokenUsage.cache}cache</span>
+            </div>
+          </div>
+        )}
+
+        {/* PR Created Banner */}
+        {state.prUrl && !state.isStreaming && (
+          <div className="w-full border-t border-primary/20 bg-primary/5">
+            <div className="max-w-3xl mx-auto py-3 px-6 flex items-center gap-3">
+              <div className="shrink-0 w-6 h-6 flex items-center justify-center bg-primary/20 text-primary rounded-full">
+                <Check size={12} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-widest text-primary">
+                  Pull Request #{state.prNumber} Created
+                </div>
+                <div className="text-[9px] font-mono text-muted-foreground truncate mt-0.5">
+                  {state.prUrl}
+                </div>
+              </div>
+              <a
+                href={state.prUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
+              >
+                <ExternalLink size={10} />
+                Open PR
+              </a>
             </div>
           </div>
         )}
