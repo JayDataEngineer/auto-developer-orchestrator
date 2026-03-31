@@ -1,13 +1,16 @@
 import React from 'react';
 import { cn } from '../lib/utils';
 import { PiAgentState } from '../hooks/usePiAgent';
-import { GitBranch, Loader, Zap, AlertCircle } from 'lucide-react';
+import { GitBranch, Loader, Zap, AlertCircle, X } from 'lucide-react';
 
 interface PiSessionCardProps {
   project: string;
+  agentId: string;
+  agentIndex: number;
   state: PiAgentState;
   isExpanded?: boolean;
   onClick?: () => void;
+  onDestroy?: () => void;
 }
 
 function formatTokenCount(count: number): string {
@@ -17,28 +20,47 @@ function formatTokenCount(count: number): string {
 
 export const PiSessionCard: React.FC<PiSessionCardProps> = ({
   project,
+  agentId,
+  agentIndex,
   state,
   isExpanded = false,
   onClick,
+  onDestroy,
 }) => {
   const totalTokens = state.tokenUsage.input + state.tokenUsage.output;
   const activeTools = state.toolCalls.filter(tc => !tc.endTime).length;
+  const isDefault = agentId === 'default';
 
   return (
     <button
       onClick={onClick}
       className={cn(
-        "w-full text-left border transition-all p-4 space-y-3",
+        "w-full text-left border transition-all p-4 space-y-3 relative group",
         isExpanded
           ? "border-primary bg-primary/5"
           : "border-white/5 bg-black hover:border-white/10",
       )}
     >
-      {/* Project name + status */}
+      {/* Destroy button for non-default agents */}
+      {!isDefault && onDestroy && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDestroy(); }}
+          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 text-zinc-600 hover:text-red-400 transition-all"
+        >
+          <X size={10} />
+        </button>
+      )}
+
+      {/* Project name + agent index + status */}
       <div className="flex items-start justify-between gap-2">
-        <span className="text-[11px] font-black uppercase tracking-widest text-white truncate">
-          {project}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-black uppercase tracking-widest text-white truncate">
+            {project}
+          </span>
+          <span className="text-[9px] font-mono text-zinc-600">
+            #{agentIndex}
+          </span>
+        </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {state.isStreaming ? (
             <>

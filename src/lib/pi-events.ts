@@ -11,6 +11,7 @@ export type PiEventType =
   | 'tool_execution_end'
   | 'agent_start'
   | 'agent_end'
+  | 'agent_spawned'
   | 'compaction_start'
   | 'compaction_end'
   | 'error'
@@ -65,6 +66,10 @@ export interface PiBranchCreated {
   branch: string;
 }
 
+export interface PiAgentSpawned {
+  agentId: string;
+}
+
 // Discriminated union of all Pi events
 export type PiSSEEvent =
   | { type: 'text_delta'; data: PiTextDelta }
@@ -73,6 +78,7 @@ export type PiSSEEvent =
   | { type: 'tool_execution_end'; data: PiToolEnd }
   | { type: 'agent_start'; data: Record<string, never> }
   | { type: 'agent_end'; data: PiAgentEnd }
+  | { type: 'agent_spawned'; data: PiAgentSpawned }
   | { type: 'compaction_start'; data: Record<string, never> }
   | { type: 'compaction_end'; data: PiCompactionEnd }
   | { type: 'error'; data: PiError }

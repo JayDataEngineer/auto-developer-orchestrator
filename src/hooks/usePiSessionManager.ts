@@ -1,75 +1,71 @@
 import { useCallback, useRef } from 'react';
 import { usePiAgent, PiAgentState } from './usePiAgent';
+import { api } from '../lib/api';
 
 interface SessionEntry {
   hook: ReturnType<typeof usePiAgent>;
   project: string;
+  agentId: string;
+}
+
+function compositeKey(project: string, agentId: string) {
+  return `${project}::${agentId}`;
 }
 
 /**
- * Coordinates N usePiAgent hooks — one per project.
- * Must be called at the top level of a component where `projects` is stable.
+ * Coordinates N usePiAgent hooks — multiple agents per project.
  */
 export function usePiSessionManager(projects: string[]) {
-  // We maintain one usePiAgent per project via refs.
-  // Since React hooks can't be called dynamically, we pre-create a fixed
-  // pool and map projects to hooks by index.
-  const hooksRef = useRef<Map<string, ReturnType<typeof usePiAgent>>>(new Map());
-  const hooksListRef = useRef<ReturnType<typeof usePiAgent>[]>([]);
-
-  // Ensure we have a hook for each project
-  // We use a stable pool approach: create hooks once, reassign projects
-  for (const project of projects) {
-    if (!hooksRef.current.has(project)) {
-      // Create a new hook entry lazily won't work in React.
-      // Instead we use a factory pattern with pre-allocated hooks.
-    }
-  }
-
-  // Actually, React doesn't allow dynamic hook calls.
-  // The dashboard component will instantiate usePiAgent per project at the top level
-  // and pass them in. This hook just provides coordination helpers.
-
   const entriesRef = useRef<Map<string, SessionEntry>>(new Map());
 
-  const registerSession = useCallback((project: string, hook: ReturnType<typeof usePiAgent>) => {
-    entriesRef.current.set(project, { hook, project });
+  const registerSession = useCallback((project: string, agentId: string, hook: ReturnType<typeof usePiAgent>) => {
+    entriesRef.current.set(compositeKey(project, agentId), { hook, project, agentId });
   }, []);
 
-  const unregisterSession = useCallback((project: string) => {
-    entriesRef.current.delete(project);
+  const unregisterSession = useCallback((project: string, agentId: string) => {
+    entriesRef.current.delete(compositeKey(project, agentId));
   }, []);
 
-  const getSessionState = useCallback((project: string): PiAgentState | null => {
-    const entry = entriesRef.current.get(project);
+  const getSessionState = useCallback((project: string, agentId: string = 'default'): PiAgentState | null => {
+    const entry = entriesRef.current.get(compositeKey(project, agentId));
     return entry ? entry.hook.state : null;
+  }, []);
+
+  const getAgentsForProject = useCallback((project: string): Array<{ agentId: string; state: PiAgentState }> => {
+    const agents: Array<{ agentId: string; state: PiAgentState }> = [];
+    entriesRef.current.forEach((entry, key) => {
+      if (entry.project === project) {
+        agents.push({ agentId: entry.agentId, state: entry.hook.state });
+      }
+    });
+    return agents;
   }, []);
 
   const getAllSessionStates = useCallback((): Map<string, PiAgentState> => {
     const map = new Map<string, PiAgentState>();
-    entriesRef.current.forEach((entry, project) => {
-      map.set(project, entry.hook.state);
+    entriesRef.current.forEach((entry) => {
+      map.set(compositeKey(entry.project, entry.agentId), entry.hook.state);
     });
     return map;
   }, []);
 
-  const sendPrompt = useCallback((project: string, message: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean }) => {
-    const entry = entriesRef.current.get(project);
+  const sendPrompt = useCallback((project: string, agentId: string, message: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean }) => {
+    const entry = entriesRef.current.get(compositeKey(project, agentId));
     if (entry) {
-      entry.hook.sendPrompt(message, project, opts);
+      entry.hook.sendPrompt(message, project, { ...opts, agentId });
     }
   }, []);
 
-  const abort = useCallback((project: string) => {
-    const entry = entriesRef.current.get(project);
+  const abort = useCallback((project: string, agentId: string) => {
+    const entry = entriesRef.current.get(compositeKey(project, agentId));
     if (entry) {
-      entry.hook.abort(project);
+      entry.hook.abort(project, agentId);
     }
   }, []);
 
   const hydrateAll = useCallback(() => {
-    entriesRef.current.forEach((entry, project) => {
-      entry.hook.hydrateState(project);
+    entriesRef.current.forEach((entry) => {
+      entry.hook.hydrateState(entry.project, entry.agentId);
     });
   }, []);
 
@@ -81,14 +77,32 @@ export function usePiSessionManager(projects: string[]) {
     return count;
   }, []);
 
+  const spawnAgent = useCallback(async (project: string): Promise<string> => {
+    const res = await api.pi.spawnAgent(project);
+    return res.agentId;
+  }, []);
+
+  const destroyAgent = useCallback(async (project: string, agentId: string) => {
+    // Abort if streaming
+    const entry = entriesRef.current.get(compositeKey(project, agentId));
+    if (entry) {
+      entry.hook.abort(project, agentId);
+      entriesRef.current.delete(compositeKey(project, agentId));
+    }
+    await api.pi.destroyAgent(project, agentId);
+  }, []);
+
   return {
     registerSession,
     unregisterSession,
     getSessionState,
+    getAgentsForProject,
     getAllSessionStates,
     sendPrompt,
     abort,
     hydrateAll,
     activeCount,
+    spawnAgent,
+    destroyAgent,
   };
 }

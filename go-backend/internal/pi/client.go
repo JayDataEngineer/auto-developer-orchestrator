@@ -24,6 +24,7 @@ type PiClient struct {
 	stderr     io.ReadCloser
 	logger     *zap.Logger
 	projectDir string
+	agentId    string
 	cancel     context.CancelFunc
 	ctx        context.Context
 	sandboxed  bool
@@ -40,12 +41,13 @@ type PiClient struct {
 }
 
 // NewPiClient creates and starts a new Pi subprocess for the given project directory.
-func NewPiClient(projectDir string, logger *zap.Logger) (*PiClient, error) {
+func NewPiClient(projectDir string, agentId string, logger *zap.Logger) (*PiClient, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	c := &PiClient{
 		logger:      logger,
 		projectDir:  projectDir,
+		agentId:     agentId,
 		cancel:      cancel,
 		ctx:         ctx,
 		subscribers: make(map[string]chan AgentEvent),
@@ -422,4 +424,9 @@ func (c *PiClient) Close() error {
 // ProjectDir returns the project directory for this client.
 func (c *PiClient) ProjectDir() string {
 	return c.projectDir
+}
+
+// AgentId returns the agent ID for this client.
+func (c *PiClient) AgentId() string {
+	return c.agentId
 }

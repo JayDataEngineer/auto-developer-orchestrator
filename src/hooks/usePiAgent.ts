@@ -17,6 +17,7 @@ export interface PiAgentState {
   error: string | null;
   branchName: string | null;
   lastPrompt: string;
+  agentId: string;
 }
 
 const initialState: PiAgentState = {
@@ -29,27 +30,32 @@ const initialState: PiAgentState = {
   error: null,
   branchName: null,
   lastPrompt: '',
+  agentId: 'default',
 };
 
-export function usePiAgent() {
-  const [state, setState] = useState<PiAgentState>(initialState);
+export function usePiAgent(initialAgentId: string = 'default') {
+  const [state, setState] = useState<PiAgentState>({ ...initialState, agentId: initialAgentId });
   const abortRef = useRef<AbortController | null>(null);
   const projectRef = useRef<string | null>(null);
+  const agentIdRef = useRef<string>(initialAgentId);
+
+  // Keep ref in sync
+  useEffect(() => {
+    agentIdRef.current = initialAgentId;
+  }, [initialAgentId]);
 
   // Hydrate state from backend on mount or when project changes.
-  // This handles the case where the user refreshes mid-task:
-  // the Go backend still has an active Pi subprocess streaming,
-  // so we re-attach by fetching current state + messages.
-  const hydrateState = useCallback(async (project: string) => {
+  const hydrateState = useCallback(async (project: string, agentId?: string) => {
     if (!project) return;
+    const aid = agentId || agentIdRef.current;
     projectRef.current = project;
+    agentIdRef.current = aid;
     try {
-      const stateRes = await fetch(`/api/pi/state?project=${encodeURIComponent(project)}`);
+      const stateRes = await fetch(`/api/pi/state?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`);
       if (!stateRes.ok) return;
       const serverState = await stateRes.json();
 
       if (serverState.streaming) {
-        // Backend has an active Pi session - hydrate UI
         setState(prev => ({
           ...prev,
           isStreaming: true,
@@ -61,7 +67,6 @@ export function usePiAgent() {
           },
         }));
       } else if (serverState.model) {
-        // Session exists but idle - restore model info
         setState(prev => ({
           ...prev,
           model: serverState.model,
@@ -89,6 +94,9 @@ export function usePiAgent() {
             toolCalls: [],
             error: null,
           };
+
+        case 'agent_spawned':
+          return { ...prev, agentId: (event.data as { agentId: string }).agentId };
 
         case 'text_delta':
           return { ...prev, text: prev.text + (event.data as { text: string }).text };
@@ -133,7 +141,7 @@ export function usePiAgent() {
         }
 
         case 'compaction_end':
-          return prev; // UI can show a notification
+          return prev;
 
         case 'error':
           return { ...prev, error: (event.data as { error: string }).error, isStreaming: false };
@@ -161,7 +169,7 @@ export function usePiAgent() {
   }, []);
 
   const sendPrompt = useCallback(
-    async (message: string, project: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean }) => {
+    async (message: string, project: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean; agentId?: string }) => {
       // Abort any existing request
       if (abortRef.current) {
         abortRef.current.abort();
@@ -170,11 +178,16 @@ export function usePiAgent() {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      const aid = opts?.agentId || agentIdRef.current;
+      agentIdRef.current = aid;
+      projectRef.current = project;
+
       setState(prev => ({
         ...initialState,
         model: prev.model,
         tokenUsage: prev.tokenUsage,
         lastPrompt: message,
+        agentId: aid,
       }));
 
       try {
@@ -184,6 +197,7 @@ export function usePiAgent() {
           body: JSON.stringify({
             message,
             project,
+            agentId: aid,
             model: opts?.model,
             thinkingLevel: opts?.thinkingLevel,
             autoBranch: opts?.autoBranch,
@@ -235,36 +249,40 @@ export function usePiAgent() {
     [handleEvent]
   );
 
-  const abort = useCallback(async (project: string) => {
+  const abort = useCallback(async (project: string, agentId?: string) => {
     if (abortRef.current) {
       abortRef.current.abort();
     }
+    const aid = agentId || agentIdRef.current;
     try {
-      await fetch(`/api/pi/abort?project=${encodeURIComponent(project)}`, { method: 'POST' });
+      await fetch(`/api/pi/abort?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`, { method: 'POST' });
     } catch {}
     setState(prev => ({ ...prev, isStreaming: false }));
   }, []);
 
-  const compact = useCallback(async (project: string) => {
+  const compact = useCallback(async (project: string, agentId?: string) => {
+    const aid = agentId || agentIdRef.current;
     try {
-      await fetch(`/api/pi/compact?project=${encodeURIComponent(project)}`, { method: 'POST' });
+      await fetch(`/api/pi/compact?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`, { method: 'POST' });
     } catch {}
   }, []);
 
-  const switchModel = useCallback(async (project: string, provider: string, modelId: string) => {
+  const switchModel = useCallback(async (project: string, provider: string, modelId: string, agentId?: string) => {
+    const aid = agentId || agentIdRef.current;
     try {
       await fetch('/api/pi/model', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project, provider, modelId }),
+        body: JSON.stringify({ project, provider, modelId, agentId: aid }),
       });
       setState(prev => ({ ...prev, model: modelId }));
     } catch {}
   }, []);
 
-  const getModels = useCallback(async (project: string): Promise<PiModel[]> => {
+  const getModels = useCallback(async (project: string, agentId?: string): Promise<PiModel[]> => {
+    const aid = agentId || agentIdRef.current;
     try {
-      const res = await fetch(`/api/pi/models?project=${encodeURIComponent(project)}`);
+      const res = await fetch(`/api/pi/models?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`);
       const data = await res.json();
       return data.models || [];
     } catch {
@@ -276,6 +294,7 @@ export function usePiAgent() {
     setState(prev => ({
       ...initialState,
       model: prev.model,
+      agentId: prev.agentId,
     }));
   }, []);
 

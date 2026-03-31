@@ -4,7 +4,7 @@ import { usePiAgent } from '../hooks/usePiAgent';
 import { usePiSessionManager } from '../hooks/usePiSessionManager';
 import { PiSessionCard } from './PiSessionCard';
 import { PiAgentView } from './PiAgentView';
-import { Send, GitBranch, Zap, ArrowLeft } from 'lucide-react';
+import { Send, GitBranch, Zap, ArrowLeft, Plus } from 'lucide-react';
 
 interface PiDashboardViewProps {
   selectedProject?: string;
@@ -12,40 +12,118 @@ interface PiDashboardViewProps {
   onProjectSelect?: (project: string) => void;
 }
 
-// One hook per project — rendered at the top level to satisfy React's rules of hooks.
-function ProjectSessionRow({
+// One hook per agent — rendered at the top level to satisfy React's rules of hooks.
+function AgentCard({
   project,
+  agentId,
+  agentIndex,
   manager,
-  expandedProject,
+  expandedKey,
   onExpand,
+  onDestroy,
 }: {
   project: string;
+  agentId: string;
+  agentIndex: number;
   manager: ReturnType<typeof usePiSessionManager>;
-  expandedProject: string | null;
-  onExpand: (project: string | null) => void;
+  expandedKey: string | null;
+  onExpand: (key: string | null) => void;
+  onDestroy: () => void;
 }) {
-  const hook = usePiAgent();
+  const hook = usePiAgent(agentId);
 
   // Register this hook with the session manager
   useEffect(() => {
-    manager.registerSession(project, hook);
-    return () => manager.unregisterSession(project);
-  }, [project]); // eslint-disable-line react-hooks/exhaustive-deps
+    manager.registerSession(project, agentId, hook);
+    return () => manager.unregisterSession(project, agentId);
+  }, [project, agentId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Hydrate on mount
   useEffect(() => {
-    hook.hydrateState(project);
-  }, [project]); // eslint-disable-line react-hooks/exhaustive-deps
+    hook.hydrateState(project, agentId);
+  }, [project, agentId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isExpanded = expandedProject === project;
+  const key = `${project}::${agentId}`;
+  const isExpanded = expandedKey === key;
 
   return (
     <PiSessionCard
       project={project}
+      agentId={agentId}
+      agentIndex={agentIndex}
       state={hook.state}
       isExpanded={isExpanded}
-      onClick={() => onExpand(isExpanded ? null : project)}
+      onClick={() => onExpand(isExpanded ? null : key)}
+      onDestroy={agentId !== 'default' ? onDestroy : undefined}
     />
+  );
+}
+
+// Group of agents for one project
+function ProjectAgentGroup({
+  project,
+  manager,
+  expandedKey,
+  onExpand,
+}: {
+  project: string;
+  manager: ReturnType<typeof usePiSessionManager>;
+  expandedKey: string | null;
+  onExpand: (key: string | null) => void;
+}) {
+  const [agentIds, setAgentIds] = useState<string[]>(['default']);
+  const [spawning, setSpawning] = useState(false);
+
+  const handleSpawn = useCallback(async () => {
+    if (spawning) return;
+    setSpawning(true);
+    try {
+      const newAgentId = await manager.spawnAgent(project);
+      setAgentIds(prev => [...prev, newAgentId]);
+    } catch (err) {
+      console.error('Failed to spawn agent:', err);
+    } finally {
+      setSpawning(false);
+    }
+  }, [project, manager, spawning]);
+
+  const handleDestroy = useCallback((agentId: string) => {
+    manager.destroyAgent(project, agentId);
+    setAgentIds(prev => prev.filter(id => id !== agentId));
+  }, [project, manager]);
+
+  return (
+    <div className="border border-white/5">
+      {/* Project header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 bg-white/[0.02]">
+        <span className="text-[10px] font-black uppercase tracking-widest text-white">
+          {project}
+        </span>
+        <button
+          onClick={handleSpawn}
+          disabled={spawning || agentIds.length >= 5}
+          className="flex items-center gap-1 px-2 py-1 text-[8px] font-mono text-zinc-500 hover:text-primary border border-white/5 hover:border-primary/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          <Plus size={9} />
+          New Agent
+        </button>
+      </div>
+      {/* Agent cards */}
+      <div className="grid grid-cols-1 gap-0">
+        {agentIds.map((agentId, idx) => (
+          <AgentCard
+            key={`${project}::${agentId}`}
+            project={project}
+            agentId={agentId}
+            agentIndex={idx + 1}
+            manager={manager}
+            expandedKey={expandedKey}
+            onExpand={onExpand}
+            onDestroy={() => handleDestroy(agentId)}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -55,11 +133,23 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
   onProjectSelect,
 }) => {
   const manager = usePiSessionManager(projects);
-  const [expandedProject, setExpandedProject] = useState<string | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [promptText, setPromptText] = useState('');
   const [promptProject, setPromptProject] = useState<string>(selectedProject || projects[0] || '');
+  const [promptAgentId, setPromptAgentId] = useState<string>('default');
   const [autoBranch, setAutoBranch] = useState(false);
   const [activeCount, setActiveCount] = useState(0);
+
+  // Derive available agents for the selected prompt project
+  const [availableAgents, setAvailableAgents] = useState<string[]>(['default']);
+  useEffect(() => {
+    const agents = manager.getAgentsForProject(promptProject);
+    if (agents.length > 0) {
+      setAvailableAgents(agents.map(a => a.agentId));
+    } else {
+      setAvailableAgents(['default']);
+    }
+  }, [promptProject, manager, activeCount]); // re-evaluate when activeCount changes
 
   // Update prompt project when selected project changes
   useEffect(() => {
@@ -74,11 +164,15 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
     return () => clearInterval(interval);
   }, [manager]);
 
+  // Parse expanded key to get project and agentId
+  const expandedProject = expandedKey ? expandedKey.split('::')[0] : null;
+  const expandedAgentId = expandedKey ? expandedKey.split('::')[1] || 'default' : null;
+
   const handleSend = useCallback(() => {
     if (!promptText.trim() || !promptProject) return;
-    manager.sendPrompt(promptProject, promptText.trim(), { autoBranch });
+    manager.sendPrompt(promptProject, promptAgentId, promptText.trim(), { autoBranch });
     setPromptText('');
-  }, [promptText, promptProject, autoBranch, manager]);
+  }, [promptText, promptProject, promptAgentId, autoBranch, manager]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -88,15 +182,15 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
   }, [handleSend]);
 
   const handleBack = useCallback(() => {
-    setExpandedProject(null);
+    setExpandedKey(null);
   }, []);
 
   // Split mode: expanded project on right, grid on left
-  const isSplitMode = expandedProject !== null;
+  const isSplitMode = expandedKey !== null;
 
   return (
     <div className="flex h-full bg-black overflow-hidden">
-      {/* Grid panel (full width in grid mode, sidebar in split mode) */}
+      {/* Grid panel */}
       <div
         className={cn(
           "flex flex-col overflow-hidden transition-all duration-300",
@@ -145,12 +239,12 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
               : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
           )}>
             {projects.map(project => (
-              <ProjectSessionRow
+              <ProjectAgentGroup
                 key={project}
                 project={project}
                 manager={manager}
-                expandedProject={expandedProject}
-                onExpand={setExpandedProject}
+                expandedKey={expandedKey}
+                onExpand={setExpandedKey}
               />
             ))}
             {projects.length === 0 && (
@@ -167,11 +261,20 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
             <div className="flex gap-2">
               <select
                 value={promptProject}
-                onChange={(e) => setPromptProject(e.target.value)}
+                onChange={(e) => { setPromptProject(e.target.value); setPromptAgentId('default'); }}
                 className="bg-zinc-900 border border-white/5 rounded px-2 py-2 text-[10px] text-white font-mono outline-none focus:border-primary/40"
               >
                 {projects.map(p => (
                   <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <select
+                value={promptAgentId}
+                onChange={(e) => setPromptAgentId(e.target.value)}
+                className="bg-zinc-900 border border-white/5 rounded px-2 py-2 text-[10px] text-white font-mono outline-none focus:border-primary/40"
+              >
+                {availableAgents.map(aid => (
+                  <option key={aid} value={aid}>{aid === 'default' ? '#1 (default)' : `#${availableAgents.indexOf(aid) + 1}`}</option>
                 ))}
               </select>
               <div className="flex-1 relative">
@@ -197,7 +300,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
       </div>
 
       {/* Expanded detail panel */}
-      {isSplitMode && (
+      {isSplitMode && expandedProject && expandedAgentId && (
         <div className="flex-1 flex flex-col min-w-0">
           <div className="h-12 border-b border-white/5 flex items-center px-4 shrink-0 bg-black/50 backdrop-blur-md">
             <button
@@ -211,6 +314,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
           <div className="flex-1 overflow-hidden">
             <PiAgentView
               selectedProject={expandedProject}
+              selectedAgentId={expandedAgentId}
               projects={projects}
             />
           </div>
