@@ -64,6 +64,14 @@ type ModelInfo struct {
 	Name     string `json:"name"`
 }
 
+// AgentEntry represents a single agent in the pool listing.
+type AgentEntry struct {
+	AgentId     string       `json:"agentId"`
+	Project     string       `json:"project"`
+	ProjectPath string       `json:"projectPath"`
+	State       SessionState `json:"state"`
+}
+
 // SessionState represents the current state of a Pi session.
 type SessionState struct {
 	Model     string  `json:"model"`
@@ -97,6 +105,7 @@ const (
 	EventToolEnd          = "tool_execution_end"
 	EventAgentStart       = "agent_start"
 	EventAgentEnd         = "agent_end"
+	EventAgentSpawned     = "agent_spawned"
 	EventCompactionStart  = "compaction_start"
 	EventCompactionEnd    = "compaction_end"
 	EventError            = "error"

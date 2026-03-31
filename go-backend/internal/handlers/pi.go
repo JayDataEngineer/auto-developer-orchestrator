@@ -47,12 +47,24 @@ func (h *PiHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/sessions", h.ListSessions)
 	r.Put("/session", h.SwitchSession)
 	r.Get("/active", h.ListActive)
+	r.Post("/agent/spawn", h.SpawnAgent)
+	r.Post("/agent/destroy", h.DestroyAgent)
+}
+
+// resolveAgent reads ?agentId= from the query string, defaulting to "default".
+func resolveAgent(r *http.Request) string {
+	aid := r.URL.Query().Get("agentId")
+	if aid == "" {
+		return "default"
+	}
+	return aid
 }
 
 // promptRequest is the request body for the prompt endpoint.
 type promptRequest struct {
 	Message       string `json:"message"`
 	Project       string `json:"project"`
+	AgentId       string `json:"agentId,omitempty"`
 	Model         string `json:"model,omitempty"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 	AutoBranch    bool   `json:"autoBranch,omitempty"`
@@ -75,6 +87,11 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-generate agentId if not provided
+	if req.AgentId == "" {
+		req.AgentId = fmt.Sprintf("agent-%d", time.Now().UnixMilli())
+	}
+
 	projectPath := h.resolveProjectPath(req.Project)
 	if projectPath == "" {
 		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
@@ -83,7 +100,7 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := h.pool.GetOrCreate(projectPath)
+	client, err := h.pool.GetOrCreateWithID(projectPath, req.AgentId)
 	if err != nil {
 		h.log.Error("Failed to get Pi client", zap.Error(err))
 		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
@@ -113,6 +130,13 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	flusher, canFlush := w.(http.Flusher)
+
+	// Send agent_spawned event
+	spawnData, _ := json.Marshal(map[string]string{"agentId": req.AgentId})
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", pi.EventAgentSpawned, string(spawnData))
+	if canFlush {
+		flusher.Flush()
+	}
 
 	// Send branch_created event if auto-branched
 	if autoBranchName != "" {
@@ -246,6 +270,7 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 // Abort cancels the current Pi operation.
 func (h *PiHandler) Abort(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
+	agentId := resolveAgent(r)
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
 		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
@@ -254,7 +279,7 @@ func (h *PiHandler) Abort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := h.pool.Get(projectPath)
+	client := h.pool.GetWithID(projectPath, agentId)
 	if client == nil {
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false, "message": "No active Pi session for project",
@@ -275,6 +300,7 @@ func (h *PiHandler) Abort(w http.ResponseWriter, r *http.Request) {
 // GetState returns the current Pi session state.
 func (h *PiHandler) GetState(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
+	agentId := resolveAgent(r)
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
 		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
@@ -283,7 +309,7 @@ func (h *PiHandler) GetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := h.pool.Get(projectPath)
+	client := h.pool.GetWithID(projectPath, agentId)
 	if client == nil {
 		h.writeJSON(w, http.StatusOK, pi.SessionState{})
 		return
@@ -295,6 +321,7 @@ func (h *PiHandler) GetState(w http.ResponseWriter, r *http.Request) {
 // GetMessages returns the conversation history.
 func (h *PiHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
+	agentId := resolveAgent(r)
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
 		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
@@ -303,7 +330,7 @@ func (h *PiHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := h.pool.Get(projectPath)
+	client := h.pool.GetWithID(projectPath, agentId)
 	if client == nil {
 		h.writeJSON(w, http.StatusOK, []pi.AgentMessage{})
 		return
@@ -324,6 +351,7 @@ func (h *PiHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 // GetModels lists available models.
 func (h *PiHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
+	agentId := resolveAgent(r)
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
 		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
@@ -332,7 +360,7 @@ func (h *PiHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := h.pool.GetOrCreate(projectPath)
+	client, err := h.pool.GetOrCreateWithID(projectPath, agentId)
 	if err != nil {
 		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false, "error": err.Error(),
@@ -355,9 +383,10 @@ func (h *PiHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 
 // setModelRequest is the request body for SetModel.
 type setModelRequest struct {
-	Project string `json:"project"`
+	Project  string `json:"project"`
 	Provider string `json:"provider"`
 	ModelId  string `json:"modelId"`
+	AgentId  string `json:"agentId,omitempty"`
 }
 
 // SetModel switches the active model.
@@ -370,6 +399,11 @@ func (h *PiHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	agentId := req.AgentId
+	if agentId == "" {
+		agentId = "default"
+	}
+
 	projectPath := h.resolveProjectPath(req.Project)
 	if projectPath == "" {
 		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
@@ -378,7 +412,7 @@ func (h *PiHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := h.pool.Get(projectPath)
+	client := h.pool.GetWithID(projectPath, agentId)
 	if client == nil {
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false, "message": "No active Pi session - send a prompt first",
@@ -399,6 +433,7 @@ func (h *PiHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 // Compact triggers context compaction.
 func (h *PiHandler) Compact(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
+	agentId := resolveAgent(r)
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
 		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
@@ -407,7 +442,7 @@ func (h *PiHandler) Compact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := h.pool.Get(projectPath)
+	client := h.pool.GetWithID(projectPath, agentId)
 	if client == nil {
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false, "message": "No active Pi session - send a prompt first",
@@ -428,6 +463,7 @@ func (h *PiHandler) Compact(w http.ResponseWriter, r *http.Request) {
 // ListSessions lists saved Pi sessions.
 func (h *PiHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
+	agentId := resolveAgent(r)
 	projectPath := h.resolveProjectPath(project)
 	if projectPath == "" {
 		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
@@ -436,7 +472,7 @@ func (h *PiHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := h.pool.Get(projectPath)
+	client := h.pool.GetWithID(projectPath, agentId)
 	if client == nil {
 		h.writeJSON(w, http.StatusOK, []pi.SessionInfo{})
 		return
@@ -456,6 +492,7 @@ func (h *PiHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 type switchSessionRequest struct {
 	Project   string `json:"project"`
 	SessionId string `json:"sessionId"`
+	AgentId   string `json:"agentId,omitempty"`
 }
 
 // SwitchSession switches to a different Pi session.
@@ -468,6 +505,11 @@ func (h *PiHandler) SwitchSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	agentId := req.AgentId
+	if agentId == "" {
+		agentId = "default"
+	}
+
 	projectPath := h.resolveProjectPath(req.Project)
 	if projectPath == "" {
 		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
@@ -476,7 +518,7 @@ func (h *PiHandler) SwitchSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := h.pool.Get(projectPath)
+	client := h.pool.GetWithID(projectPath, agentId)
 	if client == nil {
 		h.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false, "message": "No active Pi session - send a prompt first",
@@ -494,40 +536,126 @@ func (h *PiHandler) SwitchSession(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
-// ListActive returns all active Pi sessions with their state.
+// ListActive returns all active Pi sessions grouped by project.
 func (h *PiHandler) ListActive(w http.ResponseWriter, r *http.Request) {
-	activePaths := h.pool.ListActive()
-	type activeSession struct {
-		Project   string        `json:"project"`
-		Model     string        `json:"model"`
-		Streaming bool          `json:"streaming"`
-		Input     float64       `json:"input"`
-		Output    float64       `json:"output"`
-		Cache     float64       `json:"cache"`
+	allActive := h.pool.ListAllActive()
+
+	type agentInfo struct {
+		AgentId   string          `json:"agentId"`
+		State     pi.SessionState `json:"state"`
 	}
 
-	sessions := make([]activeSession, 0, len(activePaths))
-	for _, path := range activePaths {
-		client := h.pool.Get(path)
-		if client == nil {
-			continue
+	type projectGroup struct {
+		Project string      `json:"project"`
+		Agents  []agentInfo `json:"agents"`
+	}
+
+	groups := make([]projectGroup, 0, len(allActive))
+	for projectPath, agents := range allActive {
+		agentInfos := make([]agentInfo, 0, len(agents))
+		for _, a := range agents {
+			agentInfos = append(agentInfos, agentInfo{
+				AgentId: a.AgentId,
+				State:   a.State,
+			})
 		}
-		state := client.GetState()
-		// Extract project name from path
-		projectName := filepath.Base(path)
-		sessions = append(sessions, activeSession{
-			Project:   projectName,
-			Model:     state.Model,
-			Streaming: state.Streaming,
-			Input:     state.Input,
-			Output:    state.Output,
-			Cache:     state.Cache,
+		groups = append(groups, projectGroup{
+			Project: filepath.Base(projectPath),
+			Agents:  agentInfos,
 		})
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"sessions": sessions,
+		"projects": groups,
 	})
+}
+
+// spawnAgentRequest is the request body for SpawnAgent.
+type spawnAgentRequest struct {
+	Project string `json:"project"`
+	AgentId string `json:"agentId,omitempty"`
+}
+
+// SpawnAgent starts a new Pi subprocess for a project and returns its agentId.
+func (h *PiHandler) SpawnAgent(w http.ResponseWriter, r *http.Request) {
+	var req spawnAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Invalid request body",
+		})
+		return
+	}
+
+	if req.Project == "" {
+		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Project is required",
+		})
+		return
+	}
+
+	// Auto-generate agentId if not provided
+	if req.AgentId == "" {
+		req.AgentId = fmt.Sprintf("agent-%d", time.Now().UnixMilli())
+	}
+
+	projectPath := h.resolveProjectPath(req.Project)
+	if projectPath == "" {
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
+		return
+	}
+
+	client, err := h.pool.GetOrCreateWithID(projectPath, req.AgentId)
+	if err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
+		return
+	}
+
+	_ = client // Client is started, kept alive in pool
+
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"agentId": req.AgentId,
+	})
+}
+
+// destroyAgentRequest is the request body for DestroyAgent.
+type destroyAgentRequest struct {
+	Project string `json:"project"`
+	AgentId string `json:"agentId"`
+}
+
+// DestroyAgent shuts down a specific agent.
+func (h *PiHandler) DestroyAgent(w http.ResponseWriter, r *http.Request) {
+	var req destroyAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Invalid request body",
+		})
+		return
+	}
+
+	if req.Project == "" || req.AgentId == "" {
+		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Project and agentId are required",
+		})
+		return
+	}
+
+	projectPath := h.resolveProjectPath(req.Project)
+	if projectPath == "" {
+		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
+		return
+	}
+
+	h.pool.RemoveAgent(projectPath, req.AgentId)
+
+	h.writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // resolveProjectPath resolves a project name to its filesystem path.

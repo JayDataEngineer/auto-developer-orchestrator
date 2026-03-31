@@ -49,6 +49,26 @@ export interface DispatchResult {
   results?: Array<{ issueUrl: string }>;
 }
 
+export interface ActiveAgent {
+  agentId: string;
+  state: {
+    model: string;
+    streaming: boolean;
+    input: number;
+    output: number;
+    cache: number;
+  };
+}
+
+export interface ActiveProject {
+  project: string;
+  agents: ActiveAgent[];
+}
+
+export interface ActiveSessionsResponse {
+  projects: ActiveProject[];
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -115,30 +135,40 @@ export const api = {
       }),
   },
   pi: {
-    prompt: (message: string, project: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean }) => {
+    prompt: (message: string, project: string, agentId: string = 'default', opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean }) => {
       return fetch('/api/pi/prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, project, ...opts }),
+        body: JSON.stringify({ message, project, agentId, ...opts }),
       });
     },
-    abort: (project: string) =>
-      fetch(`/api/pi/abort?project=${encodeURIComponent(project)}`, { method: 'POST' }).then(() => {}),
-    getState: (project: string) =>
-      apiFetch<any>(`/api/pi/state?project=${encodeURIComponent(project)}`),
-    getMessages: (project: string) =>
-      apiFetch<any>(`/api/pi/messages?project=${encodeURIComponent(project)}`),
-    getModels: (project: string) =>
-      apiFetch<any>(`/api/pi/models?project=${encodeURIComponent(project)}`),
-    setModel: (project: string, provider: string, modelId: string) =>
+    abort: (project: string, agentId: string = 'default') =>
+      fetch(`/api/pi/abort?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, { method: 'POST' }).then(() => {}),
+    getState: (project: string, agentId: string = 'default') =>
+      apiFetch<any>(`/api/pi/state?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`),
+    getMessages: (project: string, agentId: string = 'default') =>
+      apiFetch<any>(`/api/pi/messages?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`),
+    getModels: (project: string, agentId: string = 'default') =>
+      apiFetch<any>(`/api/pi/models?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`),
+    setModel: (project: string, provider: string, modelId: string, agentId: string = 'default') =>
       fetch('/api/pi/model', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project, provider, modelId }),
+        body: JSON.stringify({ project, provider, modelId, agentId }),
       }).then(() => {}),
-    compact: (project: string) =>
-      fetch(`/api/pi/compact?project=${encodeURIComponent(project)}`, { method: 'POST' }).then(() => {}),
+    compact: (project: string, agentId: string = 'default') =>
+      fetch(`/api/pi/compact?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, { method: 'POST' }).then(() => {}),
     getActiveSessions: () =>
-      apiFetch<{ sessions: Array<{ project: string; model: string; streaming: boolean; input: number; output: number; cache: number }> }>('/api/pi/active'),
+      apiFetch<ActiveSessionsResponse>('/api/pi/active'),
+    spawnAgent: (project: string, agentId?: string) =>
+      apiFetch<{ success: boolean; agentId: string }>('/api/pi/agent/spawn', {
+        method: 'POST',
+        body: JSON.stringify({ project, agentId }),
+      }),
+    destroyAgent: (project: string, agentId: string) =>
+      apiFetch<{ success: boolean }>('/api/pi/agent/destroy', {
+        method: 'POST',
+        body: JSON.stringify({ project, agentId }),
+      }),
   },
 };

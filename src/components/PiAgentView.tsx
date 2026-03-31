@@ -10,6 +10,7 @@ import { ToolCall } from '../lib/pi-events';
 
 interface PiAgentViewProps {
   selectedProject?: string;
+  selectedAgentId?: string;
   projects?: string[];
   onBack?: () => void;
 }
@@ -96,8 +97,8 @@ function ToolCallItem({ call }: { call: ToolCall }) {
   );
 }
 
-export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, projects = [], onBack }) => {
-  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState } = usePiAgent();
+export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack }) => {
+  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState } = usePiAgent(selectedAgentId);
   const [input, setInput] = useState('');
   const [showThinking, setShowThinking] = useState(false);
   const [showTools, setShowTools] = useState(true);
@@ -107,9 +108,9 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, proje
   // Hydrate state from backend when project changes
   useEffect(() => {
     if (selectedProject) {
-      hydrateState(selectedProject);
+      hydrateState(selectedProject, selectedAgentId);
     }
-  }, [selectedProject, hydrateState]);
+  }, [selectedProject, selectedAgentId, hydrateState]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -117,7 +118,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, proje
 
   const handleSend = () => {
     if (!input.trim() || !selectedProject || state.isStreaming) return;
-    sendPrompt(input.trim(), selectedProject);
+    sendPrompt(input.trim(), selectedProject, { agentId: selectedAgentId });
     setInput('');
   };
 
@@ -129,11 +130,11 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, proje
   };
 
   const handleAbort = () => {
-    if (selectedProject) abort(selectedProject);
+    if (selectedProject) abort(selectedProject, selectedAgentId);
   };
 
   const handleCompact = () => {
-    if (selectedProject) compact(selectedProject);
+    if (selectedProject) compact(selectedProject, selectedAgentId);
   };
 
   const activeTools = state.toolCalls.filter(tc => !tc.endTime);
