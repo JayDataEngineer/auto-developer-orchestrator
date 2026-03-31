@@ -82,11 +82,13 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Add registers a new custom project
+// Add registers a new custom project. If repoUrl is provided without a local
+// path, the repo is cloned first then registered.
 func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name string `json:"name"`
-		Path string `json:"path"`
+		Name    string `json:"name"`
+		Path    string `json:"path"`
+		RepoURL string `json:"repoUrl"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -94,8 +96,45 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == "" || req.Path == "" {
-		http.Error(w, "Name and path are required", http.StatusBadRequest)
+	if req.Name == "" {
+		http.Error(w, "Name is required", http.StatusBadRequest)
+		return
+	}
+
+	// GitHub flow: clone then register
+	if req.Path == "" && req.RepoURL != "" {
+		projectsDir := os.Getenv("PROJECT_ROOT")
+		if projectsDir == "" {
+			projectsDir = h.db.GetProjectsDir()
+		}
+		projectDir := filepath.Join(projectsDir, req.Name)
+
+		// Already cloned?
+		if _, err := os.Stat(projectDir); err == nil {
+			req.Path = projectDir
+		} else {
+			// Clone in background
+			ctx, cancel := context.WithTimeout(r.Context(), 300*time.Second)
+			defer cancel()
+
+			cloneOpts := git.CloneOptions{
+				URL:   req.RepoURL,
+				Dir:   projectDir,
+				Depth: 1,
+			}
+
+			if err := h.git.Clone(ctx, cloneOpts); err != nil {
+				h.logger.Error("Failed to clone repository", zap.Error(err))
+				http.Error(w, fmt.Sprintf("Failed to clone repository: %v", err), http.StatusInternalServerError)
+				return
+			}
+			req.Path = projectDir
+			h.logger.Info("Repository cloned", zap.String("project", req.Name), zap.String("dir", projectDir))
+		}
+	}
+
+	if req.Path == "" {
+		http.Error(w, "Path or repoUrl is required", http.StatusBadRequest)
 		return
 	}
 
@@ -115,7 +154,7 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"message": "Project " + req.Name + " added from " + req.Path,
+		"message": "Project " + req.Name + " added",
 	})
 }
 
