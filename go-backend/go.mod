@@ -1,6 +1,6 @@
 module github.com/auto-developer-orchestrator/backend
 
-go 1.24.0
+go 1.26
 
 require (
 	github.com/go-chi/chi/v5 v5.2.2
@@ -29,6 +29,6 @@ require (
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )

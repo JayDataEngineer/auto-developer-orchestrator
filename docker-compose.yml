@@ -24,6 +24,7 @@ services:
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - LITELLM_PROXY_URL=http://shared-traefik-1:80
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-e2e-test-master-key}
+      - BROWSERLESS_URL=ws://orchestrator-browser:3000
       - GIT_CONFIG_GLOBAL=/tmp/.gitconfig
     volumes:
       - ./projects:/app/projects
@@ -63,6 +64,21 @@ services:
       - "traefik.http.routers.orchestrator.entrypoints=http"
       - "traefik.http.services.orchestrator.loadbalancer.server.port=80"
       - "traefik.http.routers.orchestrator.priority=105"
+
+  # ===========================================
+  # Browserless (Headless Chrome for Web Sub-Agent)
+  # ===========================================
+  browserless:
+    image: browserless/chrome:latest
+    container_name: orchestrator-browser
+    restart: always
+    environment:
+      - MAX_CONCURRENT_SESSIONS=2
+      - SCREENSHOT_ENDPOINT=true
+      - PREBOOT_CHROME=true
+      - KEEP_ALIVE=true
+    networks:
+      - shared-infra
 
 networks:
   shared-infra:
