@@ -111,7 +111,7 @@ function ProjectAgentGroup({
         </button>
       </div>
       {/* Agent cards */}
-      <div className="grid grid-cols-1 gap-0">
+      <div className="grid grid-cols-1 gap-0 pl-4 border-l border-white/5 ml-px">
         {agentIds.map((agentId, idx) => (
           <AgentCard
             key={`${project}::${agentId}`}
