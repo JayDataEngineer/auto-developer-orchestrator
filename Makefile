@@ -41,7 +41,6 @@ help:
 # ==============================================================================
 COMPOSE_DEV = docker compose -f docker-compose.dev.yml
 COMPOSE_PROD = docker compose -f docker-compose.yml
-PYTHON_PORT = 8080
 GO_PORT = 3847
 JS_PORT = 5174
 
@@ -52,8 +51,6 @@ JS_PORT = 5174
 install:
 	@echo "📦 Installing frontend dependencies..."
 	npm install --no-audit --no-fund
-	@echo "📦 Syncing Python agent with uv..."
-	cd python-agent && uv sync
 	@echo "📦 Tidying Go modules..."
 	cd go-backend && go mod tidy
 	@echo "📦 Installing documentation dependencies..."
@@ -65,12 +62,10 @@ install:
 # ==============================================================================
 .PHONY: dev dev-frontend dev-backend
 dev:
-	@echo "🚀 Starting all services locally..."
-	@echo "1. Starting Python agent (Port $(PYTHON_PORT))..."
-	@cd python-agent && (uv run uvicorn main:app --port $(PYTHON_PORT) &)
-	@echo "2. Starting Go backend (Port $(GO_PORT))..."
+	@echo "🚀 Starting services locally..."
+	@echo "1. Starting Go backend (Port $(GO_PORT))..."
 	@cd go-backend && (go run cmd/server/main.go &)
-	@echo "3. Starting Vite frontend (Port $(JS_PORT))..."
+	@echo "2. Starting Vite frontend (Port $(JS_PORT))..."
 	@npm run dev -- --port $(JS_PORT)
 
 dev-frontend:
