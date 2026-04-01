@@ -18,12 +18,15 @@
     "test:playwright:debug": "playwright test --debug"
   },
   "dependencies": {
+    "@types/react-syntax-highlighter": "^15.5.13",
     "clsx": "^2.1.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
     "zod": "^3.24.0"
   },
