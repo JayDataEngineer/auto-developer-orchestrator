@@ -15,11 +15,38 @@ import (
 	"go.uber.org/zap"
 )
 
-// extractRepoFromSource parses "sources/github/{owner}/{repo}" and returns the repo name (kept for reference)
-func extractRepoFromSource(source string) string {
-	parts := strings.Split(source, "/")
-	if len(parts) >= 4 && parts[0] == "sources" && parts[1] == "github" {
-		return parts[3]
+// resolveProjectPath resolves a project name to its filesystem directory path.
+// Returns empty string if no valid directory is found.
+func (h *ProjectHandler) resolveProjectPath(project string) string {
+	if project == "" {
+		return ""
+	}
+	// Check custom projects from DB first
+	if h.db != nil {
+		ctx := context.Background()
+		customProjects, err := h.db.GetCustomProjects(ctx)
+		if err == nil {
+			for _, p := range customProjects {
+				if p.Name == project {
+					if strings.Contains(p.Path, "://") {
+						break // non-filesystem path, fall through
+					}
+					if info, err := os.Stat(p.Path); err == nil && info.IsDir() {
+						return p.Path
+					}
+					break
+				}
+			}
+		}
+	}
+	// Fall back to PROJECT_ROOT/<project>
+	projectsDir := os.Getenv("PROJECT_ROOT")
+	if projectsDir == "" {
+		projectsDir = h.db.GetProjectsDir()
+	}
+	candidate := filepath.Join(projectsDir, project)
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return candidate
 	}
 	return ""
 }
@@ -71,9 +98,12 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		projectSet[p.Name] = true
 	}
 
+	// Filter to only projects that resolve to an actual directory
 	projects := make([]string, 0, len(projectSet))
 	for project := range projectSet {
-		projects = append(projects, project)
+		if h.resolveProjectPath(project) != "" {
+			projects = append(projects, project)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
