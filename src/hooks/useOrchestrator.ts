@@ -16,6 +16,7 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
   const [isDispatching, setIsDispatching] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isCLITerminalOpen, setIsCLITerminalOpen] = useState(false);
+  const [isZenMode, setIsZenMode] = useState(false);
 
   // Initial data fetch
   useEffect(() => {
@@ -176,11 +177,11 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
     state: {
       activeTab, projects, selectedProject, tasks, status, aiConfig,
       githubUser, isGeneratingChecklist, isDispatching, activeModal,
-      isSidebarOpen, isCLITerminalOpen
+      isSidebarOpen, isCLITerminalOpen, isZenMode
     },
     actions: {
       setActiveTab, setSelectedProject, setActiveModal,
-      setIsSidebarOpen, setIsCLITerminalOpen,
+      setIsSidebarOpen, setIsCLITerminalOpen, setIsZenMode,
       handleToggleMode, handleDispatch, handleDispatchAll, handleGenerateChecklist,
       refreshProjectData,
       setGithubUser, setAiConfig, // For modal callbacks

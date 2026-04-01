@@ -31,14 +31,14 @@ export default function App() {
   const {
     activeTab, projects, selectedProject, tasks, status, aiConfig,
     githubUser, isGeneratingChecklist, isDispatching, activeModal,
-    isSidebarOpen, isCLITerminalOpen
+    isSidebarOpen, isCLITerminalOpen, isZenMode
   } = state;
 
   const {
     setActiveTab, setSelectedProject, setActiveModal,
     setIsSidebarOpen, setIsCLITerminalOpen,
     handleToggleMode, handleDispatch, handleDispatchAll, handleGenerateChecklist,
-    refreshProjectData
+    refreshProjectData, setIsZenMode
   } = actions;
 
   const handleTerminalCommand = (cmd: string) => {
@@ -67,21 +67,23 @@ export default function App() {
   return (
     <ErrorBoundary>
       <div className="flex h-screen bg-black text-slate-100 font-sans selection:bg-primary/20 overflow-hidden relative">
-        <Sidebar
-          activeTab={activeTab}
-          isOpen={isSidebarOpen}
-          onClose={() => setIsSidebarOpen(false)}
-          onSettingsClick={() => setActiveModal('aiConfig')}
-          onTerminalClick={() => { setActiveTab('terminal'); setIsSidebarOpen(false); }}
-          onActivityClick={() => { setActiveTab('activity'); setIsSidebarOpen(false); }}
-          onGithubClick={() => { setActiveTab('github'); setIsSidebarOpen(false); }}
-          onAgentsClick={() => { setActiveTab('agents'); setIsSidebarOpen(false); }}
-          onManifestoClick={() => { setActiveTab('manifesto'); setIsSidebarOpen(false); }}
-          onConnectGitHubClick={() => setActiveModal('githubConnect')}
-          isGitHubConnected={githubUser?.connected ?? false}
-          githubUser={githubUser?.user}
-          onUserClick={() => setActiveModal('user')}
-        />
+        {!isZenMode && (
+          <Sidebar
+            activeTab={activeTab}
+            isOpen={isSidebarOpen}
+            onClose={() => setIsSidebarOpen(false)}
+            onSettingsClick={() => setActiveModal('aiConfig')}
+            onTerminalClick={() => { setActiveTab('terminal'); setIsSidebarOpen(false); }}
+            onActivityClick={() => { setActiveTab('activity'); setIsSidebarOpen(false); }}
+            onGithubClick={() => { setActiveTab('github'); setIsSidebarOpen(false); }}
+            onAgentsClick={() => { setActiveTab('agents'); setIsSidebarOpen(false); }}
+            onManifestoClick={() => { setActiveTab('manifesto'); setIsSidebarOpen(false); }}
+            onConnectGitHubClick={() => setActiveModal('githubConnect')}
+            isGitHubConnected={githubUser?.connected ?? false}
+            githubUser={githubUser?.user}
+            onUserClick={() => setActiveModal('user')}
+          />
+        )}
 
         <main className={cn(
           "flex-1 flex flex-col overflow-hidden w-full transition-all duration-300",
@@ -138,7 +140,15 @@ export default function App() {
             )}
             {activeTab === 'activity' && <ActivityView logs={logs} />}
             {activeTab === 'github' && <GithubView repoOwner={githubUser?.user?.login} repoName={selectedProject} />}
-            {activeTab === 'agents' && <PiDashboardView selectedProject={selectedProject} projects={projects} onProjectSelect={setSelectedProject} />}
+            {activeTab === 'agents' && (
+              <PiDashboardView 
+                selectedProject={selectedProject} 
+                projects={projects} 
+                onProjectSelect={setSelectedProject}
+                isZenMode={isZenMode}
+                onZenToggle={() => setIsZenMode(!isZenMode)}
+              />
+            )}
             {activeTab === 'manifesto' && <ManifestoView />}
           </div>
         </main>

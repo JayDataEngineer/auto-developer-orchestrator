@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useMemo } from 'react';
 import { usePiAgent, PiAgentState } from './usePiAgent';
 import { api } from '../lib/api';
 
@@ -92,7 +92,7 @@ export function usePiSessionManager(projects: string[]) {
     await api.pi.destroyAgent(project, agentId);
   }, []);
 
-  return {
+  return useMemo(() => ({
     registerSession,
     unregisterSession,
     getSessionState,
@@ -104,5 +104,17 @@ export function usePiSessionManager(projects: string[]) {
     activeCount,
     spawnAgent,
     destroyAgent,
-  };
+  }), [
+    registerSession,
+    unregisterSession,
+    getSessionState,
+    getAgentsForProject,
+    getAllSessionStates,
+    sendPrompt,
+    abort,
+    hydrateAll,
+    activeCount,
+    spawnAgent,
+    destroyAgent,
+  ]);
 }

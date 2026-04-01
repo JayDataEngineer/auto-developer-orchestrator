@@ -3,7 +3,7 @@ import {
   Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
   FileCode, Terminal as TerminalIcon, Search, Wrench, Brain,
   Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch, Box,
-  ExternalLink, Check
+  ExternalLink, Check, Maximize2, Minimize2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -18,6 +18,8 @@ interface PiAgentViewProps {
   selectedAgentId?: string;
   projects?: string[];
   onBack?: () => void;
+  isZenMode?: boolean;
+  onZenToggle?: () => void;
 }
 
 // ─── Tool Helpers ───────────────────────────────────────────────
@@ -51,7 +53,6 @@ function formatResult(result: unknown): string {
 
 // ─── Block Components ───────────────────────────────────────────
 
-/** Markdown block with syntax-highlighted code fences */
 function MarkdownBlock({ content, streaming }: { content: string; streaming: boolean }) {
   return (
     <div className="prose prose-invert prose-sm max-w-none
@@ -67,7 +68,7 @@ function MarkdownBlock({ content, streaming }: { content: string; streaming: boo
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          code({ className, children, ...props }) {
+          code({ className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');
             const code = String(children).replace(/\n$/, '');
             return match ? (
@@ -100,7 +101,6 @@ function MarkdownBlock({ content, streaming }: { content: string; streaming: boo
   );
 }
 
-/** Collapsible reasoning/thinking block */
 function ReasoningBlock({ content, defaultOpen = false }: { content: string; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -130,7 +130,6 @@ function ReasoningBlock({ content, defaultOpen = false }: { content: string; def
   );
 }
 
-/** Tool accordion with auto-collapse for long output */
 const COLLAPSE_THRESHOLD = 10;
 
 function ToolCallItem({ call }: { call: ToolCall }) {
@@ -195,7 +194,6 @@ function ToolCallItem({ call }: { call: ToolCall }) {
   );
 }
 
-/** Fleet context bar: Project | Branch | Sandbox | Model */
 function FleetBar({ project, branch, model, streaming }: {
   project?: string;
   branch?: string | null;
@@ -232,9 +230,7 @@ function FleetBar({ project, branch, model, streaming }: {
   );
 }
 
-// ─── Main Component ─────────────────────────────────────────────
-
-export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack }) => {
+export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack, isZenMode = false, onZenToggle }) => {
   const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels } = usePiAgent(selectedAgentId);
   const [input, setInput] = useState('');
   const [models, setModels] = useState<PiModel[]>([]);
@@ -243,20 +239,17 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Hydrate state from backend when project changes
   useEffect(() => {
     if (selectedProject) {
       hydrateState(selectedProject, selectedAgentId);
     }
   }, [selectedProject, selectedAgentId, hydrateState]);
 
-  // Fetch available models on mount
   useEffect(() => {
     if (!selectedProject) return;
     getModels(selectedProject, selectedAgentId).then(setModels);
   }, [selectedProject, selectedAgentId, getModels]);
 
-  // Close model dropdown on outside click
   useEffect(() => {
     if (!modelDropdownOpen) return;
     const handleClick = (e: MouseEvent) => {
@@ -268,7 +261,6 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
     return () => document.removeEventListener('mousedown', handleClick);
   }, [modelDropdownOpen]);
 
-  // Auto-scroll on new content
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state.text, state.thinking, state.toolCalls.length]);
@@ -291,23 +283,37 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   const hasContent = state.text || state.thinking || state.isStreaming || state.toolCalls.length > 0;
 
   return (
-    <div className="flex h-full bg-black overflow-hidden">
+    <div className="flex h-full w-full bg-black overflow-hidden">
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0 items-center">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <div className="w-full h-12 border-b border-white/5 flex items-center px-6 shrink-0 bg-black/50 backdrop-blur-md">
-          <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-muted uppercase font-bold">
-            {onBack && (
-              <button onClick={onBack} className="flex items-center gap-1 text-muted hover:text-zinc-300 transition-colors">
-                <ArrowLeft size={12} />
+          <div className="flex items-center gap-3">
+            {onBack && !isZenMode && (
+              <button onClick={onBack} className="flex items-center gap-1.5 text-muted hover:text-zinc-300 transition-colors">
+                <ArrowLeft size={14} />
               </button>
             )}
-            <Zap size={12} className="text-primary" />
-            <span className="text-primary">PI</span>
-            <span className="text-muted">CODING AGENT</span>
+            <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-muted uppercase font-bold">
+              <Zap size={12} className="text-primary" />
+              <span className="text-primary">PI</span>
+              <span className="text-muted">CODING AGENT</span>
+            </div>
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-4">
+            {onZenToggle && (
+              <button
+                onClick={onZenToggle}
+                className="flex items-center gap-1.5 text-muted hover:text-zinc-300 transition-colors"
+                title={isZenMode ? "Exit Zen Mode" : "Zen Mode"}
+              >
+                {isZenMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                <span className="text-[9px] font-mono uppercase tracking-widest">
+                  {isZenMode ? "Exit Full" : "Full Page"}
+                </span>
+              </button>
+            )}
             {state.isStreaming && (
               <span className="text-[9px] font-black text-primary uppercase tracking-widest animate-pulse">
                 Streaming
@@ -329,11 +335,14 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
 
         {/* Activity Feed */}
         <div className="flex-1 overflow-y-auto custom-scrollbar w-full">
-          <div className="max-w-3xl mx-auto px-6 py-6 space-y-4">
+          <div className={cn(
+            "mx-auto px-6 py-6 space-y-4 transition-all duration-500",
+            isZenMode ? "max-w-7xl" : "max-w-3xl"
+          )}>
 
             {/* Empty state */}
             {!hasContent && (
-              <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-6">
+              <div className="h-full flex flex-col items-center justify-center text-center py-20 space-y-6">
                 <div className="w-16 h-16 border border-primary flex items-center justify-center text-primary">
                   <Sparkles size={32} className="animate-pulse-slow" />
                 </div>
@@ -375,7 +384,10 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
         {/* Token usage */}
         {(state.tokenUsage.input > 0 || state.tokenUsage.output > 0) && (
           <div className="w-full border-t border-white/5">
-            <div className="max-w-3xl mx-auto py-2 px-6 flex items-center gap-6 text-[9px] font-mono text-muted-foreground">
+            <div className={cn(
+              "mx-auto py-2 px-6 flex items-center gap-6 text-[9px] font-mono text-muted-foreground transition-all duration-500",
+              isZenMode ? "max-w-7xl" : "max-w-3xl"
+            )}>
               <span>Tokens: {state.tokenUsage.input}in / {state.tokenUsage.output}out / {state.tokenUsage.cache}cache</span>
             </div>
           </div>
@@ -384,7 +396,10 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
         {/* PR Created Banner */}
         {state.prUrl && !state.isStreaming && (
           <div className="w-full border-t border-primary/20 bg-primary/5">
-            <div className="max-w-3xl mx-auto py-3 px-6 flex items-center gap-3">
+            <div className={cn(
+              "mx-auto py-3 px-6 flex items-center gap-3 transition-all duration-500",
+              isZenMode ? "max-w-7xl" : "max-w-3xl"
+            )}>
               <div className="shrink-0 w-6 h-6 flex items-center justify-center bg-primary/20 text-primary rounded-full">
                 <Check size={12} />
               </div>
@@ -410,8 +425,11 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
         )}
 
         {/* Input area */}
-        <div className="w-full border-t border-white/5">
-          <div className="max-w-3xl mx-auto p-4">
+        <div className="w-full border-t border-white/5 bg-black/50 backdrop-blur-md">
+          <div className={cn(
+            "mx-auto p-4 transition-all duration-500",
+            isZenMode ? "max-w-7xl" : "max-w-3xl"
+          )}>
             <div className="flex gap-2">
               <div className="flex-1 relative">
                 <textarea
@@ -437,8 +455,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-3 mt-2">
-              {/* Model selector */}
+            <div className="flex items-center gap-4 mt-2">
               <div className="relative" ref={modelDropdownRef}>
                 <button
                   onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
@@ -481,33 +498,35 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
       </div>
 
       {/* Tool execution sidebar */}
-      <div className="w-80 border-l border-white/5 flex flex-col bg-black shrink-0">
-        <div className="p-4 border-b border-white/5 flex items-center gap-3">
-          <Wrench size={12} className="text-muted-foreground" />
-          <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-            Tool Calls ({state.toolCalls.length})
-          </span>
-          {activeTools.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              <span className="text-[9px] font-mono text-primary">{activeTools.length} active</span>
+      {!isZenMode && (
+        <div className="w-80 border-l border-white/5 flex flex-col bg-black shrink-0">
+          <div className="p-4 border-b border-white/5 flex items-center gap-3">
+            <Wrench size={12} className="text-muted-foreground" />
+            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+              Tool Calls ({state.toolCalls.length})
+            </span>
+            {activeTools.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                <span className="text-[9px] font-mono text-primary">{activeTools.length} active</span>
+              </div>
+            )}
+          </div>
+          {state.toolCalls.length > 0 ? (
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              {activeTools.map(tc => <ToolCallItem key={tc.id} call={tc} />)}
+              {completedTools.map(tc => <ToolCallItem key={tc.id} call={tc} />)}
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-6">
+              <Wrench size={20} className="text-zinc-800 mb-3" />
+              <p className="text-[9px] font-mono text-zinc-700 uppercase tracking-widest text-center">
+                No tool calls yet
+              </p>
             </div>
           )}
         </div>
-        {state.toolCalls.length > 0 ? (
-          <div className="flex-1 overflow-y-auto custom-scrollbar">
-            {activeTools.map(tc => <ToolCallItem key={tc.id} call={tc} />)}
-            {completedTools.map(tc => <ToolCallItem key={tc.id} call={tc} />)}
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center p-6">
-            <Wrench size={20} className="text-zinc-800 mb-3" />
-            <p className="text-[9px] font-mono text-zinc-700 uppercase tracking-widest text-center">
-              No tool calls yet
-            </p>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };

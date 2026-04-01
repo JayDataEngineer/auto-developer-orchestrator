@@ -10,6 +10,8 @@ interface PiDashboardViewProps {
   selectedProject?: string;
   projects: string[];
   onProjectSelect?: (project: string) => void;
+  isZenMode?: boolean;
+  onZenToggle?: () => void;
 }
 
 // One hook per agent — rendered at the top level to satisfy React's rules of hooks.
@@ -131,6 +133,8 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
   selectedProject,
   projects,
   onProjectSelect,
+  isZenMode = false,
+  onZenToggle,
 }) => {
   const manager = usePiSessionManager(projects);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -190,14 +194,15 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
   const isSplitMode = expandedKey !== null;
 
   return (
-    <div className="flex h-full bg-black overflow-hidden">
+    <div className="flex-1 flex w-full h-full bg-black overflow-hidden relative">
       {/* Grid panel */}
-      <div
-        className={cn(
-          "flex flex-col overflow-hidden transition-all duration-300",
-          isSplitMode ? "w-72 border-r border-white/5" : "flex-1"
-        )}
-      >
+      {(!isZenMode || !isSplitMode) && (
+        <div
+          className={cn(
+            "flex flex-col overflow-hidden transition-all duration-300",
+            isSplitMode ? "w-72 border-r border-white/5" : "flex-1"
+          )}
+        >
         {/* Header */}
         <div className="h-12 border-b border-white/5 flex items-center px-4 shrink-0 bg-black/50 backdrop-blur-md gap-3">
           <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest uppercase font-bold">
@@ -299,9 +304,10 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
           </div>
         )}
       </div>
+    )}
 
       {/* Sidebar — visible in grid mode */}
-      {!isSplitMode && (
+      {!isSplitMode && !isZenMode && (
         <div className="w-72 border-l border-white/5 flex flex-col bg-black shrink-0">
           <button
             onClick={() => setShowSidebar(!showSidebar)}
@@ -328,20 +334,24 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
       {/* Expanded detail panel */}
       {isSplitMode && expandedProject && expandedAgentId && (
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="h-12 border-b border-white/5 flex items-center px-4 shrink-0 bg-black/50 backdrop-blur-md">
-            <button
-              onClick={handleBack}
-              className="flex items-center gap-2 text-[9px] font-mono text-muted hover:text-zinc-300 uppercase tracking-widest transition-colors"
-            >
-              <ArrowLeft size={12} />
-              Back to grid
-            </button>
-          </div>
+          {!isZenMode && (
+            <div className="h-12 border-b border-white/5 flex items-center px-4 shrink-0 bg-black/50 backdrop-blur-md">
+              <button
+                onClick={handleBack}
+                className="flex items-center gap-2 text-[9px] font-mono text-muted hover:text-zinc-300 uppercase tracking-widest transition-colors"
+              >
+                <ArrowLeft size={12} />
+                Back to grid
+              </button>
+            </div>
+          )}
           <div className="flex-1 overflow-hidden">
             <PiAgentView
               selectedProject={expandedProject}
               selectedAgentId={expandedAgentId}
               projects={projects}
+              isZenMode={isZenMode}
+              onZenToggle={onZenToggle}
             />
           </div>
         </div>
