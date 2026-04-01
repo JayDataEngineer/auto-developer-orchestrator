@@ -3,7 +3,7 @@ import {
   Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
   FileCode, Terminal as TerminalIcon, Search, Wrench, Brain,
   Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch, Box,
-  ExternalLink, Check, Maximize2, Minimize2
+  ExternalLink, Check, Maximize2, Minimize2, File, GitPullRequest
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -130,68 +130,49 @@ function ReasoningBlock({ content, defaultOpen = false }: { content: string; def
   );
 }
 
-const COLLAPSE_THRESHOLD = 10;
-
-function ToolCallItem({ call }: { call: ToolCall }) {
-  const [expanded, setExpanded] = useState(false);
-  const isActive = !call.endTime;
-  const duration = call.endTime ? call.endTime - call.startTime : Date.now() - call.startTime;
-
-  const resultText = call.result !== undefined ? formatResult(call.result) : '';
-  const resultLines = resultText.split('\n');
-  const isLong = resultLines.length > COLLAPSE_THRESHOLD;
-
-  return (
+function ArtifactItem({ type, name, subtitle, status, onClick, href }: { 
+  type: 'file' | 'pr'; 
+  name: string; 
+  subtitle?: string; 
+  status?: 'active' | 'completed';
+  onClick?: () => void;
+  href?: string;
+}) {
+  const Icon = type === 'pr' ? GitPullRequest : File;
+  
+  const content = (
     <div className={cn(
-      "border transition-all",
-      isActive ? "border-primary/30 bg-primary/5" : "border-border bg-black"
+      "border border-white/5 bg-black hover:bg-white/5 transition-all p-3 flex items-start gap-4 h-full",
+      status === 'active' ? "border-primary/30 bg-primary/5" : ""
     )}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-3 p-3 text-left"
-      >
-        <div className={cn(
-          "shrink-0 w-6 h-6 flex items-center justify-center",
-          isActive ? "text-primary" : "text-muted"
-        )}>
-          {TOOL_ICONS[call.name] || <Wrench size={12} />}
+      <div className={cn(
+        "shrink-0 w-8 h-8 flex items-center justify-center border border-white/5",
+        status === 'active' ? "text-primary border-primary/20" : "text-muted-foreground"
+      )}>
+        <Icon size={14} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-black uppercase tracking-widest text-white truncate">
+            {name}
+          </span>
+          {status === 'active' && <Loader size={8} className="text-primary animate-spin" />}
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-white">
-              {call.name}
-            </span>
-            <span className="text-[9px] font-mono text-muted-foreground truncate">
-              {formatToolArgs(call.name, call.args)}
-            </span>
+        {subtitle && (
+          <div className="text-[9px] font-mono text-muted-foreground truncate mt-1">
+            {subtitle}
           </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {isActive ? (
-            <Loader size={10} className="text-primary animate-spin" />
-          ) : (
-            <span className="text-[9px] font-mono text-muted-foreground">{duration}ms</span>
-          )}
-          {expanded ? <ChevronDown size={10} className="text-muted-foreground" /> : <ChevronRight size={10} className="text-muted-foreground" />}
-        </div>
-      </button>
-      {expanded && (
-        <div className="px-3 pb-3 border-t border-border">
-          {resultText && (
-            <pre className="text-[10px] font-mono text-muted-foreground mt-2 whitespace-pre-wrap max-h-64 overflow-auto">
-              {isLong && !expanded
-                ? resultLines.slice(0, COLLAPSE_THRESHOLD).join('\n') + `\n... +${resultLines.length - COLLAPSE_THRESHOLD} more lines`
-                : resultText
-              }
-            </pre>
-          )}
-          {call.error && (
-            <p className="text-[10px] font-mono text-red-400 mt-2">{call.error}</p>
-          )}
-        </div>
-      )}
+        )}
+      </div>
+      {href && <ExternalLink size={10} className="text-muted-foreground shrink-0 mt-1" />}
     </div>
   );
+
+  if (href) {
+    return <a href={href} target="_blank" rel="noopener noreferrer" className="block h-full">{content}</a>;
+  }
+
+  return <button onClick={onClick} className="block w-full text-left h-full">{content}</button>;
 }
 
 function FleetBar({ project, branch, model, streaming }: {
@@ -365,18 +346,8 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               <MarkdownBlock content={state.text} streaming={state.isStreaming} />
             )}
 
-            {/* Inline tool calls in feed */}
-            {completedTools.length > 0 && (
-              <div className="space-y-2">
-                <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-                  Tool Executions ({completedTools.length})
-                </span>
-                {completedTools.map(tc => (
-                  <ToolCallItem key={tc.id} call={tc} />
-                ))}
-              </div>
-            )}
-
+            {/* Inline artifact summaries in feed (optional, keep it simple) */}
+            
             <div ref={messagesEndRef} />
           </div>
         </div>
@@ -497,34 +468,46 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
         </div>
       </div>
 
-      {/* Tool execution sidebar */}
+      {/* Artifacts sidebar */}
       {!isZenMode && (
         <div className="w-80 border-l border-white/5 flex flex-col bg-black shrink-0">
           <div className="p-4 border-b border-white/5 flex items-center gap-3">
-            <Wrench size={12} className="text-muted-foreground" />
+            <Box size={12} className="text-muted-foreground" />
             <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-              Tool Calls ({state.toolCalls.length})
+              Artifacts
             </span>
-            {activeTools.length > 0 && (
-              <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                <span className="text-[9px] font-mono text-primary">{activeTools.length} active</span>
+          </div>
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-1 space-y-1">
+            {state.prUrl && (
+              <ArtifactItem
+                type="pr"
+                name={`Pull Request #${state.prNumber}`}
+                subtitle="GitHub"
+                href={state.prUrl}
+              />
+            )}
+            
+            {state.toolCalls
+              .filter(tc => ['write', 'edit', 'bash'].includes(tc.name))
+              .map(tc => (
+                <ArtifactItem
+                  key={tc.id}
+                  type="file"
+                  name={tc.name === 'bash' ? 'Shell Output' : (tc.args.filePath as string || tc.args.path as string || 'Unknown File')}
+                  subtitle={tc.name === 'bash' ? (tc.args.command as string).slice(0, 40) : tc.name}
+                  status={!tc.endTime ? 'active' : 'completed'}
+                />
+              ))}
+
+            {state.toolCalls.length === 0 && !state.prUrl && (
+              <div className="flex-1 flex flex-col items-center justify-center p-6 mt-20 opacity-20">
+                <Box size={24} className="mb-3" />
+                <p className="text-[9px] font-mono uppercase tracking-widest text-center">
+                  No artifacts generated yet
+                </p>
               </div>
             )}
           </div>
-          {state.toolCalls.length > 0 ? (
-            <div className="flex-1 overflow-y-auto custom-scrollbar">
-              {activeTools.map(tc => <ToolCallItem key={tc.id} call={tc} />)}
-              {completedTools.map(tc => <ToolCallItem key={tc.id} call={tc} />)}
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-6">
-              <Wrench size={20} className="text-zinc-800 mb-3" />
-              <p className="text-[9px] font-mono text-zinc-700 uppercase tracking-widest text-center">
-                No tool calls yet
-              </p>
-            </div>
-          )}
         </div>
       )}
     </div>
