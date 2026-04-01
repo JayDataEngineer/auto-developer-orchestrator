@@ -248,7 +248,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
 
   const handleSend = useCallback(() => {
     if (!input.trim() || !selectedProject || state.isStreaming) return;
-    sendPrompt(input.trim(), selectedProject, { agentId: selectedAgentId, model: state.model || 'qwen-cloud' });
+    sendPrompt(input.trim(), selectedProject, { agentId: selectedAgentId, model: state.model || 'or-free' });
     setInput('');
   }, [input, selectedProject, state.isStreaming, sendPrompt, selectedAgentId]);
 
@@ -436,7 +436,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                   {modelDropdownOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                 </button>
                 {modelDropdownOpen && models.length > 0 && (
-                  <div className="absolute bottom-full left-0 mb-1 w-56 max-h-60 overflow-y-auto border border-white/10 bg-zinc-950 shadow-xl z-50">
+                  <div className="absolute bottom-full left-0 mb-1 w-64 max-h-[300px] overflow-y-auto border border-white/10 bg-zinc-950 shadow-2xl z-[100] custom-scrollbar scrollbar-gutter-stable">
                     {models.map((m) => (
                       <button
                         key={m.id}
