@@ -85,10 +85,12 @@ type ModelInfo struct {
 }
 
 // AgentEntry represents a single agent in the pool listing.
+// Each agent runs in a per-project OpenShell namespace for isolation.
 type AgentEntry struct {
 	AgentId     string       `json:"agentId"`
 	Project     string       `json:"project"`
 	ProjectPath string       `json:"projectPath"`
+	Namespace   string       `json:"namespace"` // OpenShell namespace (per-project isolation)
 	State       SessionState `json:"state"`
 }
 

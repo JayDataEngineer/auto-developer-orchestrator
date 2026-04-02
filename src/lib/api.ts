@@ -51,6 +51,7 @@ export interface DispatchResult {
 
 export interface ActiveAgent {
   agentId: string;
+  namespace: string; // OpenShell namespace for per-project isolation
   state: {
     model: string;
     streaming: boolean;

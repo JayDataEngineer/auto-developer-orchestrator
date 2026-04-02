@@ -19,6 +19,7 @@ function AgentCard({
   project,
   agentId,
   agentIndex,
+  namespace,
   manager,
   expandedKey,
   onExpand,
@@ -27,6 +28,7 @@ function AgentCard({
   project: string;
   agentId: string;
   agentIndex: number;
+  namespace?: string;
   manager: ReturnType<typeof usePiSessionManager>;
   expandedKey: string | null;
   onExpand: (key: string | null) => void;
@@ -53,6 +55,7 @@ function AgentCard({
       project={project}
       agentId={agentId}
       agentIndex={agentIndex}
+      namespace={namespace}
       state={hook.state}
       isExpanded={isExpanded}
       onClick={() => onExpand(isExpanded ? null : key)}
@@ -74,7 +77,36 @@ function ProjectAgentGroup({
   onExpand: (key: string | null) => void;
 }) {
   const [agentIds, setAgentIds] = useState<string[]>(['default']);
+  const [namespaces, setNamespaces] = useState<Map<string, string>>(new Map());
   const [spawning, setSpawning] = useState(false);
+
+  // Fetch namespace info for active agents
+  useEffect(() => {
+    const fetchAgents = async () => {
+      try {
+        const res = await fetch(`/api/pi/active?project=${encodeURIComponent(project)}`);
+        const data = await res.json();
+        if (data.projects && data.projects[0]?.agents) {
+          const nsMap = new Map<string, string>();
+          data.projects[0].agents.forEach((agent: any) => {
+            nsMap.set(agent.agentId, agent.namespace);
+          });
+          setNamespaces(nsMap);
+          // Update agent IDs if we got info from backend
+          const ids = data.projects[0].agents.map((a: any) => a.agentId);
+          if (ids.length > 0) {
+            setAgentIds(ids);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch agent info:', err);
+      }
+    };
+
+    fetchAgents();
+    const interval = setInterval(fetchAgents, 2000); // Poll every 2s
+    return () => clearInterval(interval);
+  }, [project]);
 
   const handleSpawn = useCallback(async () => {
     if (spawning) return;
@@ -118,6 +150,7 @@ function ProjectAgentGroup({
             project={project}
             agentId={agentId}
             agentIndex={idx + 1}
+            namespace={namespaces.get(agentId)}
             manager={manager}
             expandedKey={expandedKey}
             onExpand={onExpand}

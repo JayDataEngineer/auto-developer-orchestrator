@@ -195,6 +195,7 @@ func (p *PiPool) ListActiveByProject(projectPath string) []AgentEntry {
 			AgentId:     aId,
 			Project:     filepath.Base(pPath),
 			ProjectPath: pPath,
+			Namespace:   client.Namespace(), // Per-project OpenShell namespace
 			State:       client.GetState(),
 		})
 	}
@@ -216,6 +217,7 @@ func (p *PiPool) ListAllActive() map[string][]AgentEntry {
 			AgentId:     aId,
 			Project:     filepath.Base(pPath),
 			ProjectPath: pPath,
+			Namespace:   client.Namespace(), // Per-project OpenShell namespace
 			State:       client.GetState(),
 		}
 		result[pPath] = append(result[pPath], entry)

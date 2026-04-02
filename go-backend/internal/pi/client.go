@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -16,6 +17,21 @@ import (
 )
 
 // PiClient manages a single Pi agent subprocess for one project.
+//
+// Sandbox/Namespace Architecture:
+// Each project gets its own OpenShell namespace (sandbox) for isolation:
+//   - Filesystem: Landlock-enforced isolation per namespace
+//   - Network: Each namespace has its own network stack (can bind same ports)
+//   - Process: seccomp-protected, isolated process trees
+//
+// Performance characteristics per namespace:
+//   - Startup: ~100ms
+//   - Memory: ~50-100MB overhead (K3s pod)
+//   - Storage: ~500MB-1GB (container image + workspace)
+//   - CPU: Minimal when idle
+//
+// Multiple agents within the same project share the same namespace,
+// but different projects have complete kernel-level isolation.
 type PiClient struct {
 	mu         sync.Mutex
 	cmd        *exec.Cmd
@@ -28,6 +44,7 @@ type PiClient struct {
 	cancel     context.CancelFunc
 	ctx        context.Context
 	sandboxed  bool
+	namespace  string // OpenShell namespace name (per-project for isolation)
 
 	// Event subscribers
 	subscribersMu sync.RWMutex
@@ -41,8 +58,14 @@ type PiClient struct {
 }
 
 // NewPiClient creates and starts a new Pi subprocess for the given project directory.
+// The agentId uniquely identifies this agent within the project.
+// The namespace is derived from the project name for per-project isolation.
 func NewPiClient(projectDir string, agentId string, logger *zap.Logger) (*PiClient, error) {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// Derive namespace from project directory name for per-project isolation
+	// This ensures each project runs in its own OpenShell sandbox namespace
+	namespace := filepath.Base(projectDir)
 
 	c := &PiClient{
 		logger:      logger,
@@ -52,6 +75,7 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger) (*PiClie
 		ctx:         ctx,
 		subscribers: make(map[string]chan AgentEvent),
 		startTime:   time.Now(),
+		namespace:   namespace,
 	}
 
 	if err := c.start(); err != nil {
@@ -77,7 +101,17 @@ func rewriteLocalhost(url string) string {
 	return url
 }
 
-// start launches the Pi subprocess, optionally inside an OpenShell sandbox.
+// start launches the Pi subprocess, optionally inside an OpenShell sandbox namespace.
+//
+// OpenShell Namespace Isolation:
+// Each project runs in its own namespace (e.g., "my-project", "sandbox").
+// This provides:
+//   - Isolated filesystem (Landlock)
+//   - Isolated network stack (can bind localhost:8080 in multiple projects)
+//   - Isolated process tree (seccomp)
+//
+// The namespace name is derived from the project directory basename.
+// Multiple agents in the same project share the namespace (same isolation boundary).
 func (c *PiClient) start() error {
 	openshellPath, errSandbox := exec.LookPath("openshell")
 	piPath, err := exec.LookPath("pi")
@@ -86,18 +120,27 @@ func (c *PiClient) start() error {
 	}
 
 	if errSandbox == nil && openshellPath != "" {
-		c.logger.Info("OpenShell detected — running Pi inside sandbox")
+		c.logger.Info("OpenShell detected — running Pi inside per-project namespace",
+			zap.String("namespace", c.namespace),
+			zap.String("projectDir", c.projectDir),
+		)
 		c.sandboxed = true
+
+		// Use per-project namespace for isolation
+		// Command: openshell sandbox exec <namespace> -- pi --mode rpc
+		// This creates/reuses a sandbox named after the project
 		c.cmd = exec.CommandContext(
 			c.ctx, openshellPath,
-			"exec", "claw", "--",
-			piPath, "--mode", "rpc", "--no-session",
+			"sandbox", "exec", c.namespace, "--",
+			piPath, "--mode", "rpc",
 		)
 	} else {
-		c.logger.Info("OpenShell not found — running Pi directly (unsandboxed)")
+		c.logger.Info("OpenShell not found — running Pi directly (unsandboxed)",
+			zap.String("namespace", c.namespace),
+		)
 		c.sandboxed = false
 		c.cmd = exec.CommandContext(c.ctx, piPath,
-			"--mode", "rpc", "--no-session",
+			"--mode", "rpc",
 		)
 	}
 
@@ -106,6 +149,7 @@ func (c *PiClient) start() error {
 	env := os.Environ()
 
 	if c.sandboxed {
+		// Rewrite localhost URLs to reach host services from inside the sandbox
 		for i, e := range env {
 			if len(e) > len("LITELLM_PROXY_URL=") && e[:len("LITELLM_PROXY_URL=")] == "LITELLM_PROXY_URL=" {
 				val := e[len("LITELLM_PROXY_URL="):]
@@ -152,6 +196,7 @@ func (c *PiClient) start() error {
 
 	c.logger.Info("Pi subprocess started",
 		zap.String("projectDir", c.projectDir),
+		zap.String("namespace", c.namespace),
 		zap.Int("pid", c.cmd.Process.Pid),
 	)
 
@@ -376,6 +421,8 @@ func (c *PiClient) IsRunning() bool {
 }
 
 // Close shuts down the Pi subprocess cleanly.
+// When running in a sandbox, the namespace persists after the agent exits
+// (OpenShell manages namespace lifecycle separately).
 func (c *PiClient) Close() error {
 	c.cancel()
 
@@ -417,7 +464,10 @@ func (c *PiClient) Close() error {
 	c.running = false
 	c.mu.Unlock()
 
-	c.logger.Info("Pi subprocess closed", zap.String("projectDir", c.projectDir))
+	c.logger.Info("Pi subprocess closed",
+		zap.String("projectDir", c.projectDir),
+		zap.String("namespace", c.namespace),
+	)
 	return nil
 }
 
@@ -429,4 +479,10 @@ func (c *PiClient) ProjectDir() string {
 // AgentId returns the agent ID for this client.
 func (c *PiClient) AgentId() string {
 	return c.agentId
+}
+
+// Namespace returns the OpenShell namespace for this client.
+// This is used for per-project isolation.
+func (c *PiClient) Namespace() string {
+	return c.namespace
 }

@@ -1,13 +1,14 @@
 import React from 'react';
 import { cn } from '../lib/utils';
 import { PiAgentState } from '../hooks/usePiAgent';
-import { GitBranch, Loader, Zap, AlertCircle, X } from 'lucide-react';
+import { GitBranch, Loader, Zap, AlertCircle, X, Box } from 'lucide-react';
 
 interface PiSessionCardProps {
   project: string;
   agentId: string;
   agentIndex: number;
   state: PiAgentState;
+  namespace?: string; // OpenShell namespace for per-project isolation
   isExpanded?: boolean;
   onClick?: () => void;
   onDestroy?: () => void;
@@ -23,6 +24,7 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
   agentId,
   agentIndex,
   state,
+  namespace,
   isExpanded = false,
   onClick,
   onDestroy,
@@ -81,10 +83,20 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
         </div>
       </div>
 
-      {/* Model name */}
-      {state.model && (
-        <div className="text-[9px] font-mono text-muted truncate">{state.model}</div>
-      )}
+      {/* Model name + Namespace */}
+      <div className="flex items-center gap-2">
+        {state.model && (
+          <div className="text-[9px] font-mono text-muted truncate">{state.model}</div>
+        )}
+        {namespace && (
+          <div className="flex items-center gap-1 px-1.5 py-0.5 border border-white/5 rounded bg-white/[0.02]">
+            <Box size={8} className="text-muted-foreground" />
+            <span className="text-[7px] font-mono text-muted-foreground uppercase tracking-wider">
+              {namespace}
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* Last prompt preview */}
       {state.lastPrompt && (

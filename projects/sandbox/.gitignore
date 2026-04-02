@@ -1,0 +1,25 @@
+# Sandbox project - Computer Use Agent
+# This directory is for the isolated computer use agent
+
+# Downloaded files
+/downloads/**
+*.exe
+*.dmg
+*.deb
+*.rpm
+
+# Temporary files
+/tmp/**
+*.tmp
+*.cache
+
+# Agent session data (per-agent memory)
+.pi/agent/sessions/**
+
+# Logs
+*.log
+logs/
+
+# Browser data (if browser automation is used)
+.browser-data/**
+*.localstate
