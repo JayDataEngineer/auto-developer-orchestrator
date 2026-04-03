@@ -1,5 +1,6 @@
 import React from 'react';
-import { Cpu, Menu, BarChart3, FolderGit2, Plus, RefreshCw, Terminal, Bot } from 'lucide-react';
+import { Cpu, Menu, BarChart3, FolderGit2, Plus, RefreshCw, Terminal, Bot, ChevronDown } from 'lucide-react';
+
 import { cn } from '../lib/utils';
 
 interface HeaderProps {
@@ -57,18 +58,21 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="hidden lg:block h-6 w-[1px] bg-border" />
         
         {/* Project Selector */}
-        <div className="flex items-center gap-3 bg-secondary border border-border px-4 py-1.5 transition-all hover:border-primary group">
-          <FolderGit2 size={14} className="text-zinc-500 group-hover:text-primary transition-colors" />
-          <select 
-            value={selectedProject}
-            onChange={(e) => onProjectSelect(e.target.value)}
-            className="bg-transparent text-[10px] font-bold uppercase tracking-widest text-zinc-300 outline-none cursor-pointer appearance-none min-w-[120px] font-mono"
-          >
-            {projects.length === 0 && <option value="">NO PROJECTS</option>}
-            {projects.map(p => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
+        <div className="relative flex items-center bg-secondary border border-border px-4 py-1.5 transition-all hover:border-primary group">
+          <FolderGit2 size={14} className="text-zinc-500 group-hover:text-primary transition-colors shrink-0 mr-3" />
+          <div className="relative flex items-center">
+            <select 
+              value={selectedProject}
+              onChange={(e) => onProjectSelect(e.target.value)}
+              className="bg-transparent text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-300 outline-none cursor-pointer appearance-none min-w-[140px] font-mono pr-8 relative z-10"
+            >
+              {projects.length === 0 && <option value="" className="bg-black text-xs">NO_PROJECTS_LOCATED</option>}
+              {projects.map(p => (
+                <option key={p} value={p} className="bg-black text-xs">{p.toUpperCase()}</option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="absolute right-0 text-zinc-600 pointer-events-none group-hover:text-primary transition-colors z-0" />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">

@@ -171,11 +171,37 @@ func (m *SubAgentManager) runSubAgent(inst *SubAgentInstance) {
 			if event.AssistantMessageEvent != nil && event.AssistantMessageEvent.Type == "text_delta" {
 				inst.output.WriteString(event.AssistantMessageEvent.Delta)
 			}
+			inst.mu.Unlock()
+		case RpcEventTurnEnd:
+			// Some models (e.g., qwen-cloud) send full text in turn_end instead of message_update deltas.
+			// Only overwrite if turn_end has actual text content; otherwise preserve accumulated deltas.
+			text := extractTextFromMessage(event.Message)
+			if text != "" && inst.output.Len() == 0 {
+				inst.output.WriteString(text)
+			}
+			inst.mu.Unlock()
+		case RpcEventMessageEnd:
+			// Fallback: extract text from message_end if no deltas collected yet
+			// Only extract from assistant messages (user messages also trigger message_end)
+			if inst.output.Len() == 0 && isAssistantMessage(event.Message) {
+				text := extractTextFromMessage(event.Message)
+				if text != "" {
+					inst.output.WriteString(text)
+				}
+			}
+			inst.mu.Unlock()
 		case RpcEventToolStart:
 			inst.toolCount++
+			inst.mu.Unlock()
 		case RpcEventAgentEnd:
 			output := inst.output.String()
 			toolCount := inst.toolCount
+
+			// Final fallback: extract text from agent_end messages if still empty
+			if output == "" && len(event.Messages) > 0 {
+				output = extractLastAssistantText(event.Messages)
+			}
+
 			inst.mu.Unlock()
 
 			// Extract usage from agent_end messages
@@ -210,6 +236,79 @@ func (m *SubAgentManager) runSubAgent(inst *SubAgentInstance) {
 			inst.mu.Unlock()
 		}
 	}
+}
+
+// isAssistantMessage checks if a raw message JSON has role "assistant".
+func isAssistantMessage(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var msg struct {
+		Role string `json:"role"`
+	}
+	json.Unmarshal(raw, &msg)
+	return msg.Role == "assistant"
+}
+
+// extractTextFromMessage extracts text content from a single message JSON.
+// Handles both array content format: {"content":[{"type":"text","text":"..."}]}
+// and simple string format: {"content":"text here"}
+func extractTextFromMessage(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	// Try array content format (Anthropic-style)
+	var msg struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(raw, &msg) == nil && len(msg.Content) > 0 {
+		var sb strings.Builder
+		for _, c := range msg.Content {
+			if c.Type == "text" && c.Text != "" {
+				sb.WriteString(c.Text)
+			}
+		}
+		return sb.String()
+	}
+
+	// Try simple string content format
+	var msgSimple struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	if json.Unmarshal(raw, &msgSimple) == nil && msgSimple.Content != "" {
+		return msgSimple.Content
+	}
+
+	return ""
+}
+
+// extractLastAssistantText extracts text from the last assistant message in an agent_end messages array.
+func extractLastAssistantText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var msgs []struct {
+		Role    string `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(raw, &msgs) != nil {
+		return ""
+	}
+
+	// Find the last assistant message
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" {
+			return extractTextFromMessage(msgs[i].Content)
+		}
+	}
+	return ""
 }
 
 // extractUsageFromMessages parses usage data from agent_end messages.

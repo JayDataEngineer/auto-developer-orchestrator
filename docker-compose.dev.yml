@@ -30,6 +30,8 @@ services:
       - ~/.gitconfig:/root/.gitconfig:ro
     networks:
       - shared-infra
+    ports:
+      - "3847:3847"
     command: ["air", "-c", ".air.toml"]
     labels:
       - "traefik.enable=true"

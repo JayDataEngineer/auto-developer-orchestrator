@@ -27,9 +27,19 @@ export interface ChecklistResponse {
 }
 
 export interface AIConfig {
+  autoTask: boolean;
+  autoTest: boolean;
   fullAutomationMode: boolean;
+  postMergeTestGen: boolean;
   testGenPrompt: string;
-  model: string;
+  testTypes: {
+    unit: boolean;
+    e2e: boolean;
+    integration: boolean;
+    chaos: boolean;
+    security: boolean;
+    performance: boolean;
+  };
 }
 
 export interface GitHubUser {
@@ -47,6 +57,20 @@ export interface DispatchResult {
   message: string;
   issueUrl: string;
   results?: Array<{ issueUrl: string }>;
+}
+
+export interface Repo {
+  name: string;
+  full_name: string;
+  html_url: string;
+  description: string;
+  private: boolean;
+  updated_at: string;
+}
+
+export interface ReposResponse {
+  connected: boolean;
+  repos?: Repo[];
 }
 
 export interface ActiveAgent {
@@ -117,11 +141,33 @@ export const api = {
   config: {
     getAI: () => apiFetch<AIConfig>('/api/config/ai'),
     getGitHub: () => apiFetch<GitHubUser>('/api/github/user'),
+    setAI: (config: AIConfig) =>
+      apiFetch<{ success: boolean; aiConfig: AIConfig }>('/api/config/ai', {
+        method: 'POST',
+        body: JSON.stringify(config),
+      }),
     connectGitHub: (token: string) =>
       apiFetch<{ success: boolean; error?: string }>('/api/config/github', {
         method: 'POST',
         body: JSON.stringify({ token }),
       }),
+    getSystem: () => apiFetch<{ projectsDir: string }>('/api/config/system'),
+    setSystem: (projectsDir: string) =>
+      apiFetch<{ success: boolean; systemConfig: { projectsDir: string } }>('/api/config/system', {
+        method: 'POST',
+        body: JSON.stringify({ projectsDir }),
+      }),
+  },
+  github: {
+    getRepos: () => apiFetch<ReposResponse>('/api/github/repos'),
+    getPRs: (owner: string, repo: string) => 
+      apiFetch<{ prs: any[] }>(`/api/github/prs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`),
+    getStats: (owner: string, repo: string) => 
+      apiFetch<{ stats: any }>(`/api/github/stats?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`),
+    getBranches: (owner: string, repo: string) => 
+      apiFetch<{ branches: any[] }>(`/api/github/branches?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`),
+    getActivity: (owner: string, repo: string) => 
+      apiFetch<{ events: any[] }>(`/api/github/activity?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`),
   },
   git: {
     clone: (url: string) =>

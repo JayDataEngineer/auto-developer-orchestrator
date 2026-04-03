@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
+import { api } from '../lib/api';
+
 
 interface GithubViewProps {
   repoOwner?: string;
@@ -61,26 +63,20 @@ export const GithubView: React.FC<GithubViewProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const query = `owner=${repoOwner}&repo=${repoName}`;
-      const [prRes, statsRes, branchRes, activityRes] = await Promise.all([
-        fetch(`/api/github/prs?${query}`),
-        fetch(`/api/github/stats?${query}`),
-        fetch(`/api/github/branches?${query}`),
-        fetch(`/api/github/activity?${query}`)
+      const [prData, statsData, branchData, activityData] = await Promise.all([
+        api.github.getPRs(repoOwner, repoName).catch(e => ({ prs: [], error: e.message })),
+        api.github.getStats(repoOwner, repoName).catch(e => ({ stats: null, error: e.message })),
+        api.github.getBranches(repoOwner, repoName).catch(e => ({ branches: [], error: e.message })),
+        api.github.getActivity(repoOwner, repoName).catch(e => ({ events: [], error: e.message }))
       ]);
-
-      const prData = prRes.ok ? await prRes.json() : { prs: [] };
-      const statsData = statsRes.ok ? await statsRes.json() : { stats: null };
-      const branchData = branchRes.ok ? await branchRes.json() : { branches: [] };
-      const activityData = activityRes.ok ? await activityRes.json() : { events: [] };
 
       setPrs(prData.prs || []);
       setStats(statsData.stats);
       setBranches(branchData.branches || []);
       setEvents(activityData.events || []);
 
-      if (activityData.error || statsData.error) {
-         setError(activityData.error || statsData.error);
+      if ((activityData as any).error || (statsData as any).error) {
+         setError((activityData as any).error || (statsData as any).error || null);
       }
     } catch (e: any) {
       console.error("Failed to fetch GitHub data", e);
@@ -91,11 +87,9 @@ export const GithubView: React.FC<GithubViewProps> = ({
   };
 
   const fetchActivity = async () => {
+    if (!repoOwner || !repoName) return;
     try {
-      const query = `owner=${repoOwner}&repo=${repoName}`;
-      const res = await fetch(`/api/github/activity?${query}`);
-      if (!res.ok) throw new Error("Activity poll failed");
-      const data = await res.json();
+      const data = await api.github.getActivity(repoOwner, repoName);
       if (data.events) {
         setEvents(data.events);
       }

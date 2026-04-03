@@ -5,15 +5,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
+import { api, Repo } from '../lib/api';
 
-interface Repo {
-  name: string;
-  full_name: string;
-  html_url: string;
-  description: string;
-  private: boolean;
-  updated_at: string;
-}
 
 interface AddProjectModalProps {
   isOpen: boolean;
@@ -41,8 +34,7 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClos
   const fetchRepos = async () => {
     setIsLoadingRepos(true);
     try {
-      const res = await fetch('/api/github/repos');
-      const data = await res.json();
+      const data = await api.github.getRepos();
       if (data.connected) {
         setRepos(data.repos || []);
         setIsGitHubConnected(true);

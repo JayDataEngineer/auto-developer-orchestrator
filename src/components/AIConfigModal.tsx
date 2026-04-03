@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { api } from '../lib/api';
+
 import { 
   Bot, 
   X, 
@@ -75,13 +77,11 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
 
   useEffect(() => {
     if (isOpen) {
-      fetch('/api/config/ai')
-        .then(res => res.json())
-        .then(data => setConfig(data))
+      api.config.getAI()
+        .then(data => setConfig(prev => ({ ...prev, ...data })))
         .catch(err => console.error("Failed to fetch AI config", err));
 
-      fetch('/api/config/system')
-        .then(res => res.json())
+      api.config.getSystem()
         .then(data => setSystemConfig(data))
         .catch(err => console.error("Failed to fetch system config", err));
     }
@@ -89,18 +89,10 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
 
   const handleSave = async () => {
     // Save AI config
-    await fetch('/api/config/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
-    });
+    await api.config.setAI(config);
 
     // Save System config
-    await fetch('/api/config/system', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(systemConfig)
-    });
+    await api.config.setSystem(systemConfig.projectsDir);
 
     onClose();
   };

@@ -33,17 +33,11 @@ tmp_dir = "tmp"
   # Full binary path
   full_bin = ""
   
-  # Go arguments
-  go_args = []
-  
-  # Ignore files/regex
-  ignore = ["tmp/*", "vendor/*", "data/*", "projects/*"]
-  
   # Include extensions
   include_ext = ["go", "tpl", "tmpl", "html"]
-  
-  # Kill delay
-  kill_delay = "0s"
+
+  # Kill delay (nanoseconds)
+  kill_delay = 500
   
   # Log main output
   log = "main"
@@ -55,10 +49,10 @@ tmp_dir = "tmp"
   poll_interval = 0
   
   # Post build command
-  post_cmd = ""
-  
+  post_cmd = []
+
   # Pre build command
-  pre_cmd = ""
+  pre_cmd = []
   
   # Rerun when binary changes
   rerun = false
