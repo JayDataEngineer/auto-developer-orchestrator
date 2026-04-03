@@ -15,6 +15,8 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 
+	"github.com/auto-developer-orchestrator/backend/internal/browser"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -93,6 +95,23 @@ func main() {
 
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
+
+	// Browser automation (Web Sub-Agent)
+	var browserClient *browser.BrowserClient
+	var webHandler *handlers.WebHandler
+	if browserlessURL := os.Getenv("BROWSERLESS_URL"); browserlessURL != "" {
+		var err error
+		browserClient, err = browser.NewBrowserClient(browserlessURL, logger)
+		if err != nil {
+			logger.Warn("Failed to initialize browser client, web automation disabled", zap.Error(err))
+		} else {
+			litellmURL := os.Getenv("LITELLM_PROXY_URL")
+			litellmKey := os.Getenv("LITELLM_MASTER_KEY")
+			visionClient := browser.NewVisionClient(litellmURL, litellmKey)
+			webHandler = handlers.NewWebHandler(browserClient, visionClient, logger)
+			logger.Info("Browser automation enabled", zap.String("browserless_url", browserlessURL))
+		}
+	}
 
 	// Setup router
 	r := chi.NewRouter()
@@ -180,19 +199,26 @@ func main() {
 			r.Get("/{id}", sandboxHandler.GetSandbox)
 			r.Delete("/{id}", sandboxHandler.DestroySandbox)
 			r.Post("/{id}/exec", sandboxHandler.ExecCommand)
-			
+
 			// Browser Mode (lightweight, CDP only)
 			r.Post("/{id}/browser-mode", sandboxHandler.EnableBrowserMode)
-			
+
 			// Desktop Mode (heavy, VNC + Xvfb)
 			r.Post("/{id}/desktop-mode", sandboxHandler.EnableDesktopMode)
-			
+
 			// Disable any mode
 			r.Delete("/{id}/mode", sandboxHandler.DisableMode)
-			
+
 			// Get viewer URLs
 			r.Get("/{id}/viewer", sandboxHandler.GetDesktopViewer)
 		})
+
+		// Browser automation (Web Sub-Agent)
+		if webHandler != nil {
+			r.Route("/pi/web", func(r chi.Router) {
+				webHandler.RegisterRoutes(r)
+			})
+		}
 	})
 
 	// Serve static files (React frontend)
@@ -229,6 +255,11 @@ func main() {
 
 	// Shutdown Pi agent pool
 	piPool.Shutdown()
+
+	// Shutdown browser client
+	if browserClient != nil {
+		browserClient.Shutdown()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

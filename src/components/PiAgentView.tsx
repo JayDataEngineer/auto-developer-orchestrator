@@ -3,7 +3,7 @@ import {
   Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
   FileCode, Terminal as TerminalIcon, Search, Wrench, Brain,
   Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch, Box,
-  ExternalLink, Check, Maximize2, Minimize2, File, GitPullRequest, Monitor
+  ExternalLink, Check, Maximize2, Minimize2, File, GitPullRequest, Monitor, Globe
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,6 +13,7 @@ import { cn } from '../lib/utils';
 import { usePiAgent } from '../hooks/usePiAgent';
 import { ToolCall, PiModel, ConversationMessage, AssistantMessage } from '../lib/pi-events';
 import { ComputerUseModeButton, SandboxModeButton } from './ComputerUseModeButton';
+import { WebBrowserPanel } from './WebBrowserPanel';
 
 interface PiAgentViewProps {
   selectedProject?: string;
@@ -259,6 +260,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   // Computer Use Mode state
   const [isBrowserModeActive, setIsBrowserModeActive] = useState(false);
   const [isDesktopModeActive, setIsDesktopModeActive] = useState(false);
+  const [showWebPanel, setShowWebPanel] = useState(false);
   const sandboxId = selectedProject ? `sandbox-${selectedProject}-${selectedAgentId}` : '';
 
   useEffect(() => {
@@ -490,6 +492,11 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
           </div>
         )}
 
+        {/* Web Browser Panel */}
+        {showWebPanel && (
+          <WebBrowserPanel onClose={() => setShowWebPanel(false)} />
+        )}
+
         {/* Input area */}
         <div className="w-full border-t border-white/5 bg-black/50 backdrop-blur-md">
           <div className={cn(
@@ -557,6 +564,15 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               </button>
               <button onClick={() => selectedProject && compact(selectedProject, selectedAgentId)} disabled={state.isStreaming} className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest disabled:opacity-30">
                 <Trash2 size={10} /> Compact
+              </button>
+              <button
+                onClick={() => setShowWebPanel(!showWebPanel)}
+                className={cn(
+                  "text-[9px] font-mono flex items-center gap-1 uppercase tracking-widest",
+                  showWebPanel ? "text-blue-400" : "text-muted hover:text-muted-foreground"
+                )}
+              >
+                <Globe size={10} /> Web
               </button>
             </div>
           </div>

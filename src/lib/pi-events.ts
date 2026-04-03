@@ -19,7 +19,8 @@ export type PiEventType =
   | 'branch_created'
   | 'commit_created'
   | 'push_complete'
-  | 'pr_created';
+  | 'pr_created'
+  | 'web_update';
 
 // Base event data
 export interface PiTextDelta {
@@ -88,6 +89,22 @@ export interface PiPRCreated {
   title: string;
 }
 
+// Web browser automation events
+export interface LabeledElement {
+  id: number;
+  tag: string;
+  text: string;
+  role?: string;
+  selector: string;
+}
+
+export interface PiWebUpdate {
+  url: string;
+  title: string;
+  screenshot: string; // base64
+  elements: LabeledElement[];
+}
+
 // Discriminated union of all Pi events
 export type PiSSEEvent =
   | { type: 'text_delta'; data: PiTextDelta }
@@ -104,7 +121,8 @@ export type PiSSEEvent =
   | { type: 'branch_created'; data: PiBranchCreated }
   | { type: 'commit_created'; data: PiCommitCreated }
   | { type: 'push_complete'; data: PiPushComplete }
-  | { type: 'pr_created'; data: PiPRCreated };
+  | { type: 'pr_created'; data: PiPRCreated }
+  | { type: 'web_update'; data: PiWebUpdate };
 
 // Tool call tracking
 export interface ToolCall {
