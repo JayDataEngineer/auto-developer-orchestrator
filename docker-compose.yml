@@ -32,6 +32,7 @@ services:
       - ./pi-config:/root/.pi
       - ~/.ssh:/root/.ssh:ro
       - ~/.gitconfig:/root/.gitconfig:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - shared-infra
     ports:

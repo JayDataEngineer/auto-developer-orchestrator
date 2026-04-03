@@ -182,7 +182,7 @@ func (h *SandboxHandler) EnableDesktopMode(w http.ResponseWriter, r *http.Reques
 func (h *SandboxHandler) DisableMode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	if err := h.manager.DisableDesktopMode(r.Context(), id); err != nil {
+	if err := h.manager.DisableMode(r.Context(), id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -202,11 +202,12 @@ func (h *SandboxHandler) GetDesktopViewer(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	json.NewEncoder(w).Encode(map[string]any{
 		"viewer_url":  session.ViewerURL,
 		"cdp_url":     getCDPURL(session),
 		"vnc_url":     getVNCURL(session),
 		"novnc_url":   getNoVNCURL(session),
+		"mode":        string(session.Mode),
 	})
 }
 

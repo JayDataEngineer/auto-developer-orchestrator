@@ -34,12 +34,13 @@ type SandboxOptions struct {
 
 // Sandbox represents an OpenShell sandbox instance
 type Sandbox struct {
-	ID             string        `json:"id"`
-	ProjectPath    string        `json:"project_path"`
-	Policy         string        `json:"policy"`
-	Mode           SandboxMode   `json:"mode"`
-	Status         SandboxStatus `json:"status"`
-	CreatedAt      time.Time     `json:"created_at"`
+	ID             string          `json:"id"`
+	ContainerID    string          `json:"container_id,omitempty"`
+	ProjectPath    string          `json:"project_path"`
+	Policy         string          `json:"policy"`
+	Mode           SandboxMode     `json:"mode"`
+	Status         SandboxStatus   `json:"status"`
+	CreatedAt      time.Time       `json:"created_at"`
 	DesktopSession *DesktopSession `json:"desktop_session,omitempty"`
 }
 
@@ -72,6 +73,10 @@ type PortAllocator struct {
 	nextVNCPort    int
 	nextCDPPort    int
 	nextNoVNCPort  int
+	usedDisplays   map[int]bool
+	usedVNC        map[int]bool
+	usedCDP        map[int]bool
+	usedNoVNC      map[int]bool
 }
 
 // NewPortAllocator creates a new port allocator starting from base ports
@@ -81,20 +86,74 @@ func NewPortAllocator() *PortAllocator {
 		nextVNCPort:    5901,
 		nextCDPPort:    9222,
 		nextNoVNCPort:  6081,
+		usedDisplays:   make(map[int]bool),
+		usedVNC:        make(map[int]bool),
+		usedCDP:        make(map[int]bool),
+		usedNoVNC:      make(map[int]bool),
 	}
 }
 
 // AllocatePorts reserves ports for a new desktop session
 func (p *PortAllocator) AllocatePorts() (displayNum, vncPort, cdpPort, novncPort int) {
+	// Find next available display number
+	for p.usedDisplays[p.nextDisplayNum] {
+		p.nextDisplayNum++
+	}
 	displayNum = p.nextDisplayNum
-	vncPort = p.nextVNCPort
-	cdpPort = p.nextCDPPort
-	novncPort = p.nextNoVNCPort
-
+	p.usedDisplays[displayNum] = true
 	p.nextDisplayNum++
-	p.nextVNCPort++
-	p.nextCDPPort++
-	p.nextNoVNCPort++
+
+	// Find next available VNC port (range: 5901-5920)
+	for p.usedVNC[p.nextVNCPort] && p.nextVNCPort <= 5920 {
+		p.nextVNCPort++
+	}
+	vncPort = p.nextVNCPort
+	p.usedVNC[vncPort] = true
+	if p.nextVNCPort < 5920 {
+		p.nextVNCPort++
+	}
+
+	// Find next available CDP port (range: 9222-9241)
+	for p.usedCDP[p.nextCDPPort] && p.nextCDPPort <= 9241 {
+		p.nextCDPPort++
+	}
+	cdpPort = p.nextCDPPort
+	p.usedCDP[cdpPort] = true
+	if p.nextCDPPort < 9241 {
+		p.nextCDPPort++
+	}
+
+	// Find next available noVNC port (range: 6081-6100)
+	for p.usedNoVNC[p.nextNoVNCPort] && p.nextNoVNCPort <= 6100 {
+		p.nextNoVNCPort++
+	}
+	novncPort = p.nextNoVNCPort
+	p.usedNoVNC[novncPort] = true
+	if p.nextNoVNCPort < 6100 {
+		p.nextNoVNCPort++
+	}
 
 	return displayNum, vncPort, cdpPort, novncPort
+}
+
+// ReleasePorts frees ports previously allocated for a desktop session
+func (p *PortAllocator) ReleasePorts(displayNum, vncPort, cdpPort, novncPort int) {
+	delete(p.usedDisplays, displayNum)
+	delete(p.usedVNC, vncPort)
+	delete(p.usedCDP, cdpPort)
+	delete(p.usedNoVNC, novncPort)
+
+	// Reset cursors if released ports are below current position
+	if displayNum < p.nextDisplayNum {
+		p.nextDisplayNum = displayNum
+	}
+	if vncPort < p.nextVNCPort {
+		p.nextVNCPort = vncPort
+	}
+	if cdpPort < p.nextCDPPort {
+		p.nextCDPPort = cdpPort
+	}
+	if novncPort < p.nextNoVNCPort {
+		p.nextNoVNCPort = novncPort
+	}
 }

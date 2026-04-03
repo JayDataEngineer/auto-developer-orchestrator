@@ -1,8 +1,11 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -40,6 +43,63 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 	}, nil
 }
 
+// getContainerName returns the Docker container name for a sandbox.
+// Currently all sandboxes share the orchestrator-openshell container.
+func (m *Manager) getContainerName(sandboxID string) string {
+	if name := os.Getenv("OPENSHELL_CONTAINER"); name != "" {
+		return name
+	}
+	return "orchestrator-openshell"
+}
+
+// execInContainer runs a command inside a Docker container and returns the output.
+// If detach is true, the command runs in the background.
+func (m *Manager) execInContainer(ctx context.Context, containerName string, cmd []string, detach bool) (string, error) {
+	execCreate, err := m.dockerClient.ExecCreate(ctx, containerName, client.ExecCreateOptions{
+		Cmd:          cmd,
+		AttachStdout: !detach,
+		AttachStderr: !detach,
+	})
+	if err != nil {
+		return "", fmt.Errorf("exec create failed: %w", err)
+	}
+
+	if detach {
+		// Start detached — fire and forget
+		_, err = m.dockerClient.ExecStart(ctx, execCreate.ID, client.ExecStartOptions{
+			Detach: true,
+		})
+		if err != nil {
+			return "", fmt.Errorf("exec start (detached) failed: %w", err)
+		}
+		return "", nil
+	}
+
+	// Attached execution — capture stdout+stderr
+	attach, err := m.dockerClient.ExecAttach(ctx, execCreate.ID, client.ExecAttachOptions{})
+	if err != nil {
+		return "", fmt.Errorf("exec attach failed: %w", err)
+	}
+	defer attach.Close()
+
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, attach.Reader)
+	if err != nil {
+		return "", fmt.Errorf("exec read failed: %w", err)
+	}
+
+	// Check exit code
+	inspect, err := m.dockerClient.ExecInspect(ctx, execCreate.ID, client.ExecInspectOptions{})
+	if err != nil {
+		return buf.String(), nil
+	}
+	if inspect.ExitCode != 0 {
+		return buf.String(), fmt.Errorf("exec exited with code %d: %s", inspect.ExitCode, buf.String())
+	}
+
+	return buf.String(), nil
+}
+
 // CreateSandbox creates a new OpenShell sandbox
 func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sandbox, error) {
 	m.mu.Lock()
@@ -60,18 +120,21 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		CreatedAt:   time.Now(),
 	}
 
-	// TODO: Actually create Docker container with OpenShell image
-	// For now, we just track it in memory
-	// In production, this would:
-	// 1. Create container with nvidia/openshell:latest
-	// 2. Apply security policies (filesystem, network, process)
-	// 3. Mount project volume
-	// 4. Start container
+	// Verify the OpenShell container is running
+	containerName := m.getContainerName(opts.ID)
+	inspect, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("sandbox container %s not found: %w", containerName, err)
+	}
+	if !inspect.Container.State.Running {
+		return nil, fmt.Errorf("sandbox container %s is not running (state: %s)", containerName, inspect.Container.State.Status)
+	}
 
+	sandbox.ContainerID = inspect.Container.ID
 	sandbox.Status = StatusRunning
 	m.sandboxes[opts.ID] = sandbox
 
-	m.logger.Info("sandbox created", zap.String("id", opts.ID))
+	m.logger.Info("sandbox created", zap.String("id", opts.ID), zap.String("container", containerName))
 
 	return sandbox, nil
 }
@@ -88,14 +151,13 @@ func (m *Manager) DestroySandbox(ctx context.Context, id string) error {
 
 	m.logger.Info("destroying sandbox", zap.String("id", id))
 
-	// Clean up any active mode if active
+	// Clean up any active mode
 	if sandbox.Mode != ModeCLI && sandbox.DesktopSession != nil {
-		if err := m.disableModeLocked(id); err != nil {
+		if err := m.disableModeLocked(ctx, id); err != nil {
 			m.logger.Warn("failed to cleanup desktop mode", zap.Error(err))
 		}
 	}
 
-	// TODO: Actually destroy Docker container
 	delete(m.sandboxes, id)
 	sandbox.Status = StatusDestroyed
 
@@ -104,7 +166,7 @@ func (m *Manager) DestroySandbox(ctx context.Context, id string) error {
 	return nil
 }
 
-// ExecInSandbox executes a command inside a sandbox
+// ExecInSandbox executes a command inside a sandbox container
 func (m *Manager) ExecInSandbox(ctx context.Context, id string, cmd []string) (string, error) {
 	m.mu.RLock()
 	sandbox, exists := m.sandboxes[id]
@@ -118,14 +180,11 @@ func (m *Manager) ExecInSandbox(ctx context.Context, id string, cmd []string) (s
 		return "", fmt.Errorf("sandbox %s is not running (status: %s)", id, sandbox.Status)
 	}
 
-	m.logger.Debug("executing command in sandbox",
-		zap.String("id", id),
-		zap.Strings("cmd", cmd),
-	)
-
-	// TODO: Actually execute command in Docker container
-	// For now, return a placeholder
-	output := fmt.Sprintf("[sandbox %s] executed: %v", id, cmd)
+	containerName := m.getContainerName(id)
+	output, err := m.execInContainer(ctx, containerName, cmd, false)
+	if err != nil {
+		return "", fmt.Errorf("exec failed in sandbox %s: %w", id, err)
+	}
 
 	return output, nil
 }
@@ -157,7 +216,6 @@ func (m *Manager) ListSandboxes() []*Sandbox {
 }
 
 // EnableBrowserMode enables lightweight browser mode (Xvfb + Chrome + VNC) for a sandbox
-// This gives you a LIVE browser window via VNC, not just screenshots
 func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*DesktopSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -172,6 +230,13 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 		return sandbox.DesktopSession, nil
 	}
 
+	// Disable any existing mode first
+	if sandbox.Mode != ModeCLI && sandbox.DesktopSession != nil {
+		if err := m.disableModeLocked(ctx, sandboxID); err != nil {
+			m.logger.Warn("failed to disable previous mode", zap.Error(err))
+		}
+	}
+
 	m.logger.Info("enabling browser mode (live browser via VNC)", zap.String("sandbox_id", sandboxID))
 
 	// Allocate ports
@@ -179,36 +244,54 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 	displayNum, vncPort, cdpPort, novncPort := m.portAllocator.AllocatePorts()
 	m.portMutex.Unlock()
 
-	// Start minimal browser environment:
-	// 1. Xvfb - virtual display for Chrome
-	// 2. x11vnc - expose Chrome window via VNC
-	// 3. Chrome - browser with CDP enabled
-	browserCmds := [][]string{
-		// Start Xvfb virtual display (Chrome-only, no desktop environment)
-		{"Xvfb", fmt.Sprintf(":%d", displayNum), "-screen", "0", "1280x800x24", "-ac", "+extension", "RANDR"},
-		
-		// Start x11vnc VNC server (exposes Chrome window)
-		{"x11vnc", "-display", fmt.Sprintf(":%d", displayNum), "-rfbport", fmt.Sprintf("%d", vncPort), "-forever", "-shared", "-nopw"},
-		
-		// Start Google Chrome with CDP (visible in VNC)
-		{
-			"google-chrome",
-			"--no-sandbox",
-			"--disable-dev-shm-usage",
-			"--disable-gpu",
-			fmt.Sprintf("--remote-debugging-port=%d", cdpPort),
-			"--window-size=1280,800",
-			"--start-maximized",
-			"--disable-extensions",
-			"--disable-background-networking",
-			"--disable-default-apps",
-			"--disable-sync",
-			fmt.Sprintf("--display=:%d", displayNum),
-		},
+	containerName := m.getContainerName(sandboxID)
+	display := fmt.Sprintf(":%d", displayNum)
+
+	// Step 1: Start Xvfb (virtual framebuffer)
+	_, err := m.execInContainer(ctx, containerName, []string{
+		"Xvfb", display, "-screen", "0", "1280x800x24", "-ac", "+extension", "RANDR",
+	}, true)
+	if err != nil {
+		m.portMutex.Lock()
+		m.portAllocator.ReleasePorts(displayNum, vncPort, cdpPort, novncPort)
+		m.portMutex.Unlock()
+		return nil, fmt.Errorf("failed to start Xvfb: %w", err)
 	}
 
-	for _, cmd := range browserCmds {
-		m.logger.Debug("would execute in sandbox", zap.Strings("cmd", cmd))
+	// Give Xvfb a moment to initialize
+	time.Sleep(500 * time.Millisecond)
+
+	// Step 2: Start x11vnc (VNC server exposing the X display)
+	_, err = m.execInContainer(ctx, containerName, []string{
+		"x11vnc", "-display", display, "-rfbport", fmt.Sprintf("%d", vncPort),
+		"-forever", "-shared", "-nopw", "-bg",
+	}, true)
+	if err != nil {
+		m.logger.Warn("x11vnc start warning", zap.Error(err))
+	}
+
+	// Step 3: Start noVNC (web-based VNC viewer)
+	if novncErr := m.startNoVNC(ctx, containerName, novncPort, vncPort); novncErr != nil {
+		m.logger.Warn("noVNC start failed", zap.Error(novncErr))
+	}
+
+	// Step 4: Start Chrome with CDP
+	_, err = m.execInContainer(ctx, containerName, []string{
+		"google-chrome",
+		"--no-sandbox",
+		"--disable-dev-shm-usage",
+		"--disable-gpu",
+		fmt.Sprintf("--remote-debugging-port=%d", cdpPort),
+		"--window-size=1280,800",
+		"--start-maximized",
+		"--disable-extensions",
+		"--disable-background-networking",
+		"--disable-default-apps",
+		"--disable-sync",
+		fmt.Sprintf("--display=%s", display),
+	}, true)
+	if err != nil {
+		m.logger.Warn("chrome start warning", zap.Error(err))
 	}
 
 	session := &DesktopSession{
@@ -218,7 +301,7 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 		VNCPort:    vncPort,
 		CDPPort:    cdpPort,
 		NoVNCPort:  novncPort,
-		ViewerURL:  fmt.Sprintf("/sandbox/%s/browser-viewer", sandboxID),
+		ViewerURL:  fmt.Sprintf("/sandbox/%s/viewer", sandboxID),
 		IsActive:   true,
 		StartedAt:  time.Now(),
 	}
@@ -227,17 +310,18 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 	sandbox.DesktopSession = session
 	m.desktopSessions[sandboxID] = session
 
-	m.logger.Info("browser mode enabled (live browser)",
+	m.logger.Info("browser mode enabled",
 		zap.String("sandbox_id", sandboxID),
 		zap.Int("display", displayNum),
 		zap.Int("vnc_port", vncPort),
 		zap.Int("cdp_port", cdpPort),
+		zap.Int("novnc_port", novncPort),
 	)
 
 	return session, nil
 }
 
-// EnableDesktopMode enables full desktop mode (VNC + Xvfb + Chrome) for a sandbox
+// EnableDesktopMode enables full desktop mode (VNC + Xvfb + XFCE4 + Chrome) for a sandbox
 func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*DesktopSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -252,36 +336,70 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		return sandbox.DesktopSession, nil
 	}
 
+	// Disable any existing mode first
+	if sandbox.Mode != ModeCLI && sandbox.DesktopSession != nil {
+		if err := m.disableModeLocked(ctx, sandboxID); err != nil {
+			m.logger.Warn("failed to disable previous mode", zap.Error(err))
+		}
+	}
+
 	m.logger.Info("enabling desktop mode", zap.String("sandbox_id", sandboxID))
 
-	// Allocate ports (with locking to prevent race conditions)
+	// Allocate ports
 	m.portMutex.Lock()
 	displayNum, vncPort, cdpPort, novncPort := m.portAllocator.AllocatePorts()
 	m.portMutex.Unlock()
 
-	// Start desktop environment inside sandbox
-	desktopCmds := [][]string{
-		// Start Xvfb virtual display
-		{"Xvfb", fmt.Sprintf(":%d", displayNum), "-screen", "0", "1280x800x24", "-ac", "+extension", "RANDR"},
-		
-		// Start x11vnc VNC server
-		{"x11vnc", "-display", fmt.Sprintf(":%d", displayNum), "-rfbport", fmt.Sprintf("%d", vncPort), "-forever", "-shared", "-nopw"},
-		
-		// Start Google Chrome with CDP
-		{
-			"google-chrome",
-			"--no-sandbox",
-			"--disable-dev-shm-usage",
-			"--disable-gpu",
-			fmt.Sprintf("--remote-debugging-port=%d", cdpPort),
-			"--window-size=1280,800",
-			"--start-maximized",
-			fmt.Sprintf("--display=:%d", displayNum),
-		},
+	containerName := m.getContainerName(sandboxID)
+	display := fmt.Sprintf(":%d", displayNum)
+
+	// Step 1: Start Xvfb
+	_, err := m.execInContainer(ctx, containerName, []string{
+		"Xvfb", display, "-screen", "0", "1920x1080x24", "-ac", "+extension", "RANDR",
+	}, true)
+	if err != nil {
+		m.portMutex.Lock()
+		m.portAllocator.ReleasePorts(displayNum, vncPort, cdpPort, novncPort)
+		m.portMutex.Unlock()
+		return nil, fmt.Errorf("failed to start Xvfb: %w", err)
 	}
 
-	for _, cmd := range desktopCmds {
-		m.logger.Debug("would execute in sandbox", zap.Strings("cmd", cmd))
+	time.Sleep(500 * time.Millisecond)
+
+	// Step 2: Start window manager (xfwm4 or openbox as fallback)
+	_, err = m.execInContainer(ctx, containerName, []string{
+		"sh", "-c", fmt.Sprintf("DISPLAY=%s xfwm4 &>/dev/null || DISPLAY=%s openbox &>/dev/null || true", display, display),
+	}, true)
+	if err != nil {
+		m.logger.Warn("window manager start warning", zap.Error(err))
+	}
+
+	// Step 3: Start x11vnc
+	_, err = m.execInContainer(ctx, containerName, []string{
+		"x11vnc", "-display", display, "-rfbport", fmt.Sprintf("%d", vncPort),
+		"-forever", "-shared", "-nopw", "-bg",
+	}, true)
+	if err != nil {
+		m.logger.Warn("x11vnc start warning", zap.Error(err))
+	}
+
+	// Step 4: Start noVNC
+	if novncErr := m.startNoVNC(ctx, containerName, novncPort, vncPort); novncErr != nil {
+		m.logger.Warn("noVNC start failed", zap.Error(novncErr))
+	}
+
+	// Step 5: Start Chrome with CDP
+	_, err = m.execInContainer(ctx, containerName, []string{
+		"google-chrome",
+		"--no-sandbox",
+		"--disable-dev-shm-usage",
+		"--disable-gpu",
+		fmt.Sprintf("--remote-debugging-port=%d", cdpPort),
+		"--window-size=1280,800",
+		fmt.Sprintf("--display=%s", display),
+	}, true)
+	if err != nil {
+		m.logger.Warn("chrome start warning", zap.Error(err))
 	}
 
 	session := &DesktopSession{
@@ -291,7 +409,7 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		VNCPort:    vncPort,
 		CDPPort:    cdpPort,
 		NoVNCPort:  novncPort,
-		ViewerURL:  fmt.Sprintf("/sandbox/%s/desktop-viewer", sandboxID),
+		ViewerURL:  fmt.Sprintf("/sandbox/%s/viewer", sandboxID),
 		IsActive:   true,
 		StartedAt:  time.Now(),
 	}
@@ -311,32 +429,71 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	return session, nil
 }
 
+// startNoVNC launches a websockify + noVNC web viewer inside the container
+func (m *Manager) startNoVNC(ctx context.Context, containerName string, novncPort, vncPort int) error {
+	cmd := []string{
+		"sh", "-c",
+		fmt.Sprintf(
+			"websockify --web=/usr/share/novnc/ %d localhost:%d &>/tmp/novnc-%d.log || "+
+				"websockify --web=/opt/noVNC/ %d localhost:%d &>/tmp/novnc-%d.log || true",
+			novncPort, vncPort, novncPort,
+			novncPort, vncPort, novncPort,
+		),
+	}
+	_, err := m.execInContainer(ctx, containerName, cmd, true)
+	return err
+}
+
 // DisableMode disables any active mode (browser or desktop)
 func (m *Manager) DisableMode(ctx context.Context, sandboxID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.disableModeLocked(sandboxID)
+	return m.disableModeLocked(ctx, sandboxID)
 }
 
 // disableModeLocked is the internal implementation (caller must hold lock)
-func (m *Manager) disableModeLocked(sandboxID string) error {
+func (m *Manager) disableModeLocked(ctx context.Context, sandboxID string) error {
 	sandbox, exists := m.sandboxes[sandboxID]
 	if !exists {
 		return fmt.Errorf("sandbox %s not found", sandboxID)
 	}
 
 	if sandbox.Mode == ModeCLI || sandbox.DesktopSession == nil {
-		return nil // Already in CLI mode or no session
+		return nil
 	}
+
+	session := sandbox.DesktopSession
+	containerName := m.getContainerName(sandboxID)
+	display := fmt.Sprintf(":%d", session.DisplayNum)
 
 	m.logger.Info("disabling mode",
 		zap.String("sandbox_id", sandboxID),
 		zap.String("current_mode", string(sandbox.Mode)),
 	)
 
-	// TODO: Actually stop Chrome, Xvfb, x11vnc processes in sandbox
-	// This would execute kill commands or send termination signals
+	// Kill processes in reverse order: Chrome → x11vnc → Xvfb → websockify
+	killCmds := [][]string{
+		{"pkill", "-f", fmt.Sprintf("--display=%s", display)},
+		{"pkill", "-f", fmt.Sprintf("rfbport %d", session.VNCPort)},
+		{"pkill", "-f", fmt.Sprintf("Xvfb %s", display)},
+		{"pkill", "-f", fmt.Sprintf("websockify.*%d", session.NoVNCPort)},
+	}
+
+	for _, cmd := range killCmds {
+		_, err := m.execInContainer(ctx, containerName, cmd, false)
+		if err != nil {
+			m.logger.Debug("kill command (expected if process not running)",
+				zap.Strings("cmd", cmd),
+				zap.Error(err),
+			)
+		}
+	}
+
+	// Release allocated ports
+	m.portMutex.Lock()
+	m.portAllocator.ReleasePorts(session.DisplayNum, session.VNCPort, session.CDPPort, session.NoVNCPort)
+	m.portMutex.Unlock()
 
 	delete(m.desktopSessions, sandboxID)
 	sandbox.Mode = ModeCLI
@@ -350,12 +507,6 @@ func (m *Manager) disableModeLocked(sandboxID string) error {
 // Deprecated: Use DisableMode instead
 func (m *Manager) DisableDesktopMode(ctx context.Context, sandboxID string) error {
 	return m.DisableMode(ctx, sandboxID)
-}
-
-// disableDesktopModeLocked is the internal implementation (caller must hold lock)
-// Deprecated: Use disableModeLocked instead
-func (m *Manager) disableDesktopModeLocked(sandboxID string) error {
-	return m.disableModeLocked(sandboxID)
 }
 
 // GetDesktopSession returns the desktop session for a sandbox
