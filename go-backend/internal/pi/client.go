@@ -128,7 +128,13 @@ func (c *PiClient) start() error {
 		return fmt.Errorf("pi binary not found in PATH: %w", err)
 	}
 
+	// Build system prompt from project context
+	builder := NewSystemPromptBuilder(c.projectDir)
+	systemPrompt := builder.Build()
+
 	// Build command
+	args := []string{"--mode", "rpc", "--append-system-prompt", systemPrompt}
+
 	if c.sandboxed && c.sandboxObj != nil {
 		// Execute inside sandbox
 		c.logger.Info("Running Pi inside OpenShell sandbox",
@@ -137,10 +143,10 @@ func (c *PiClient) start() error {
 		// For now, we'll run Pi directly since the sandbox manager
 		// handles the actual container execution
 		// TODO: Use sandboxManager.ExecInSandbox for true isolation
-		c.cmd = exec.CommandContext(c.ctx, piPath, "--mode", "rpc")
+		c.cmd = exec.CommandContext(c.ctx, piPath, args...)
 	} else {
 		c.logger.Info("Running Pi directly (unsandboxed)")
-		c.cmd = exec.CommandContext(c.ctx, piPath, "--mode", "rpc")
+		c.cmd = exec.CommandContext(c.ctx, piPath, args...)
 	}
 
 	c.cmd.Dir = c.projectDir
