@@ -1,0 +1,22 @@
+[project]
+name = "auto-developer-e2e"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "pytest>=8.3",
+    "requests>=2.32",
+    "playwright>=1.49",
+    "pytest-playwright>=0.6",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "api: REST API tests",
+    "sse: SSE streaming tests",
+    "sandbox: Sandbox management tests",
+    "browser: Web browser sub-agent tests",
+    "playwright: Playwright frontend UI tests",
+    "slow: Slow tests (LLM-dependent)",
+]
+addopts = "-v --tb=short"
+testpaths = ["."]
