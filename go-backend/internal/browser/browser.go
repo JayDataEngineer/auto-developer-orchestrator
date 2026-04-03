@@ -23,15 +23,16 @@ type LabeledElement struct {
 
 // PageInfo contains the result of a browser action
 type PageInfo struct {
-	URL        string          `json:"url"`
-	Title      string          `json:"title"`
+	URL        string           `json:"url"`
+	Title      string           `json:"title"`
 	Elements   []LabeledElement `json:"elements"`
-	Screenshot string          `json:"screenshot,omitempty"` // base64 PNG
+	Screenshot string           `json:"screenshot,omitempty"` // base64 PNG
 }
 
 // Session holds state for one browser tab
 type Session struct {
 	ID         string
+	Ctx        context.Context // persistent chromedp tab context
 	Cancel     context.CancelFunc
 	URL        string
 	Title      string
@@ -60,7 +61,7 @@ func NewBrowserClient(wsURL string, logger *zap.Logger) (*BrowserClient, error) 
 	}, nil
 }
 
-// CreateSession opens a new browser tab
+// CreateSession opens a new browser tab that persists across actions
 func (bc *BrowserClient) CreateSession(ctx context.Context, sessionID string) error {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
@@ -70,21 +71,30 @@ func (bc *BrowserClient) CreateSession(ctx context.Context, sessionID string) er
 	}
 
 	// Create allocator pointing to remote Browserless
-	allocCtx, allocCancel := chromedp.NewRemoteAllocator(ctx, bc.wsURL)
+	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), bc.wsURL)
 
-	// Create a new tab context
+	// Create a new tab context — this persists for the session lifetime
 	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
 
-	// Set a reasonable timeout
-	tabCtx, _ = context.WithTimeout(tabCtx, 5*time.Minute)
+	combinedCancel := func() {
+		tabCancel()
+		allocCancel()
+	}
 
 	bc.sessions[sessionID] = &Session{
 		ID:     sessionID,
-		Cancel: func() { tabCancel(); allocCancel() },
+		Ctx:    tabCtx,
+		Cancel: combinedCancel,
 	}
 
 	bc.logger.Info("browser session created", zap.String("session_id", sessionID))
 	return nil
+}
+
+// actionContext derives a timeout context from the session's persistent tab context.
+// This allows each action to have its own deadline while keeping the tab alive.
+func (bc *BrowserClient) actionContext(sess *Session) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(sess.Ctx, 30*time.Second)
 }
 
 // Navigate navigates to a URL, labels elements, and takes a screenshot
@@ -94,7 +104,8 @@ func (bc *BrowserClient) Navigate(ctx context.Context, sessionID, url string) (*
 		return nil, err
 	}
 
-	tabCtx := bc.tabContext(sess, ctx)
+	actCtx, actCancel := bc.actionContext(sess)
+	defer actCancel()
 
 	var title, currentURL string
 	var screenshotBuf []byte
@@ -113,13 +124,12 @@ func (bc *BrowserClient) Navigate(ctx context.Context, sessionID, url string) (*
 		}),
 	}
 
-	if err := chromedp.Run(tabCtx, actions...); err != nil {
+	if err := chromedp.Run(actCtx, actions...); err != nil {
 		return nil, fmt.Errorf("navigate failed: %w", err)
 	}
 
 	elements := parseElements(elementsJSON)
 
-	// Update session cache
 	bc.mu.Lock()
 	sess.URL = currentURL
 	sess.Title = title
@@ -147,7 +157,8 @@ func (bc *BrowserClient) Click(ctx context.Context, sessionID string, elementID 
 		return nil, fmt.Errorf("element %d not found", elementID)
 	}
 
-	tabCtx := bc.tabContext(sess, ctx)
+	actCtx, actCancel := bc.actionContext(sess)
+	defer actCancel()
 
 	var title, currentURL string
 	var screenshotBuf []byte
@@ -166,7 +177,7 @@ func (bc *BrowserClient) Click(ctx context.Context, sessionID string, elementID 
 		}),
 	}
 
-	if err := chromedp.Run(tabCtx, actions...); err != nil {
+	if err := chromedp.Run(actCtx, actions...); err != nil {
 		return nil, fmt.Errorf("click failed: %w", err)
 	}
 
@@ -199,7 +210,8 @@ func (bc *BrowserClient) Type(ctx context.Context, sessionID string, elementID i
 		return nil, fmt.Errorf("element %d not found", elementID)
 	}
 
-	tabCtx := bc.tabContext(sess, ctx)
+	actCtx, actCancel := bc.actionContext(sess)
+	defer actCancel()
 
 	actions := []chromedp.Action{
 		chromedp.Clear(selector, chromedp.NodeVisible),
@@ -226,7 +238,7 @@ func (bc *BrowserClient) Type(ctx context.Context, sessionID string, elementID i
 		}),
 	)
 
-	if err := chromedp.Run(tabCtx, actions...); err != nil {
+	if err := chromedp.Run(actCtx, actions...); err != nil {
 		return nil, fmt.Errorf("type failed: %w", err)
 	}
 
@@ -254,7 +266,8 @@ func (bc *BrowserClient) Scroll(ctx context.Context, sessionID, direction string
 		return nil, err
 	}
 
-	tabCtx := bc.tabContext(sess, ctx)
+	actCtx, actCancel := bc.actionContext(sess)
+	defer actCancel()
 
 	scrollJS := fmt.Sprintf("window.scrollBy(0, %d)", amount)
 	if direction == "up" {
@@ -277,7 +290,7 @@ func (bc *BrowserClient) Scroll(ctx context.Context, sessionID, direction string
 		}),
 	}
 
-	if err := chromedp.Run(tabCtx, actions...); err != nil {
+	if err := chromedp.Run(actCtx, actions...); err != nil {
 		return nil, fmt.Errorf("scroll failed: %w", err)
 	}
 
@@ -382,14 +395,4 @@ func (bc *BrowserClient) selectorForElement(sess *Session, elementID int) string
 		}
 	}
 	return ""
-}
-
-// tabContext creates a new chromedp context for the session.
-// Since we store the cancel func but not the context, we need to re-derive it.
-// For simplicity, each action creates a fresh context from the session's parent.
-func (bc *BrowserClient) tabContext(sess *Session, parentCtx context.Context) context.Context {
-	// Create a new remote allocator context for each action
-	allocCtx, _ := chromedp.NewRemoteAllocator(parentCtx, bc.wsURL)
-	tabCtx, _ := chromedp.NewContext(allocCtx)
-	return tabCtx
 }

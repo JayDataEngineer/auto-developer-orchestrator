@@ -28,6 +28,12 @@ export function SandboxModeButton({
 
   const handleClick = async () => {
     if (isActive) {
+      // Call backend to disable the mode
+      try {
+        await fetch(`/api/sandbox/${sandboxId}/mode`, { method: 'DELETE' });
+      } catch (err) {
+        console.error(`Failed to disable ${mode} mode:`, err);
+      }
       onDeactivate();
       return;
     }

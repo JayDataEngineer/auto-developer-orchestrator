@@ -136,6 +136,7 @@ const (
 	EventCommitCreated   = "commit_created"
 	EventPushComplete    = "push_complete"
 	EventPRCreated       = "pr_created"
+	EventWebUpdate       = "web_update"
 )
 
 // RPC command types

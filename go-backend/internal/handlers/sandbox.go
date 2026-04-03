@@ -203,11 +203,11 @@ func (h *SandboxHandler) GetDesktopViewer(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"viewer_url":  session.ViewerURL,
-		"cdp_url":     getCDPURL(session),
-		"vnc_url":     getVNCURL(session),
-		"novnc_url":   getNoVNCURL(session),
-		"mode":        string(session.Mode),
+		"viewerUrl":  session.ViewerURL,
+		"cdpUrl":     getCDPURL(session),
+		"vncUrl":     getVNCURL(session),
+		"novncUrl":   getNoVNCURL(session),
+		"mode":       string(session.Mode),
 	})
 }
 

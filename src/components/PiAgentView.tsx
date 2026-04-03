@@ -12,7 +12,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '../lib/utils';
 import { usePiAgent } from '../hooks/usePiAgent';
 import { ToolCall, PiModel, ConversationMessage, AssistantMessage } from '../lib/pi-events';
-import { ComputerUseModeButton, SandboxModeButton } from './ComputerUseModeButton';
+import { SandboxModeButton } from './ComputerUseModeButton';
 import { WebBrowserPanel } from './WebBrowserPanel';
 
 interface PiAgentViewProps {
