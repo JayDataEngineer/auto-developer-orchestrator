@@ -99,6 +99,13 @@ func main() {
 	)
 	subAgentHandler := handlers.NewSubAgentHandler(subAgentMgr, piPool, logger)
 
+	// Task manager
+	taskMgr := pi.NewTaskManager()
+	taskHandler := handlers.NewTaskHandler(taskMgr, logger)
+
+	// Session manager (used for session persistence in PiHandler)
+	_ = pi.NewSessionManager(logger)
+
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
 
@@ -230,6 +237,11 @@ func main() {
 				webHandler.RegisterRoutes(r)
 			})
 		}
+
+		// Task management
+		r.Route("/pi/tasks", func(r chi.Router) {
+			taskHandler.RegisterRoutes(r)
+		})
 	})
 
 	// Serve static files (React frontend)
@@ -269,6 +281,9 @@ func main() {
 
 	// Shutdown sub-agent manager
 	subAgentMgr.Shutdown()
+
+	// Shutdown task manager
+	taskMgr.Shutdown()
 
 	// Shutdown browser client
 	if browserClient != nil {
