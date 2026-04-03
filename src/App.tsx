@@ -1,167 +1,147 @@
-import React from 'react';
-import { AnimatePresence } from 'motion/react';
+import React, { useState } from 'react';
 import { cn } from './lib/utils';
-import { Sidebar } from './components/Sidebar';
-import { Header } from './components/Header';
-import { Checklist } from './components/Checklist';
-import { Terminal } from './components/Terminal';
-import { CLITerminal } from './components/CLITerminal';
-import { PiDashboardView } from './components/PiDashboardView';
-import { ReviewModal } from './components/ReviewModal';
-import { CurrentTaskCard } from './components/CurrentTaskCard';
+import { HistorySidebar } from './components/HistorySidebar';
+import { RightPanel } from './components/RightPanel';
+import { PiAgentView } from './components/PiAgentView';
 import { AIConfigModal } from './components/AIConfigModal';
-import { CoverageReportModal } from './components/CoverageReportModal';
 import { CloneModal } from './components/CloneModal';
-import { UserModal } from './components/UserModal';
 import { AddProjectModal } from './components/AddProjectModal';
 import { GitHubConnectModal } from './components/GitHubConnectModal';
-import { ManifestoView } from './components/ManifestoView';
-import { ActivityView } from './components/ActivityView';
-import { GithubView } from './components/GithubView';
 import { ErrorBoundary } from './components/ErrorBoundary';
-
-import { useTerminal } from './hooks/useTerminal';
 import { useOrchestrator } from './hooks/useOrchestrator';
-import { api, Task } from './lib/api';
+import { useArtifacts } from './hooks/useArtifacts';
+import { api } from './lib/api';
+import {
+  Box, Settings, Plus, GitBranch, Github, Zap, ChevronDown, ExternalLink,
+} from 'lucide-react';
 
 export default function App() {
-  const { logs, logEndRef, addLog, processCommand } = useTerminal();
-  const { state, actions } = useOrchestrator(addLog);
+  const { state, actions } = useOrchestrator(() => {});
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeAgentId, setActiveAgentId] = useState('default');
 
-  const {
-    activeTab, projects, selectedProject, tasks, status, aiConfig,
-    githubUser, isGeneratingChecklist, isDispatching, activeModal,
-    isSidebarOpen, isCLITerminalOpen, isZenMode
-  } = state;
+  const { projects, selectedProject, githubUser, isZenMode } = state;
+  const { setSelectedProject, refreshProjectData, setIsZenMode } = actions;
 
-  const {
-    setActiveTab, setSelectedProject, setActiveModal,
-    setIsSidebarOpen, setIsCLITerminalOpen,
-    handleToggleMode, handleDispatch, handleDispatchAll, handleGenerateChecklist,
-    refreshProjectData, setIsZenMode
-  } = actions;
-
-  const handleTerminalCommand = (cmd: string) => {
-    processCommand(cmd, {
-      'gen': () => handleGenerateChecklist(),
-      'generate-checklist': () => handleGenerateChecklist(),
-      'retry': () => addLog('Retry sequence initiated... (Stub)', 'SYSTEM'),
-      'debug': () => addLog('PI_AGENT: Initializing debugging sequence...', 'SYSTEM'),
-    });
-  };
-
-  const handleMerge = async () => {
-    if (!selectedProject) return;
-    addLog(`PR #102 approved and merged for ${selectedProject}.`, 'SUCCESS');
-    try {
-      const res = await api.git.merge(selectedProject);
-      addLog(`Commit summary: "${res.summary}"`, 'INFO');
-      refreshProjectData();
-    } catch (e) {
-      addLog(`Merge failure: ${e instanceof Error ? e.message : String(e)}`, 'ERROR');
-    }
-  };
-
-  const activeTask = tasks.find(t => t.status === 'in-progress') || tasks.find(t => t.status === 'pending');
+  const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
+  const sandboxId = selectedProject ? `sandbox-${selectedProject}-${activeAgentId}` : null;
 
   return (
     <ErrorBoundary>
-      <div className="flex h-screen bg-black text-slate-100 font-sans selection:bg-primary/20 overflow-hidden relative">
+      <div className="flex h-screen bg-black text-slate-100 font-sans selection:bg-primary/20 overflow-hidden">
+        {/* Left: History Sidebar */}
         {!isZenMode && (
-          <Sidebar
-            activeTab={activeTab}
-            isOpen={isSidebarOpen}
-            onClose={() => setIsSidebarOpen(false)}
-            onSettingsClick={() => setActiveModal('aiConfig')}
-            onTerminalClick={() => { setActiveTab('terminal'); setIsSidebarOpen(false); }}
-            onActivityClick={() => { setActiveTab('activity'); setIsSidebarOpen(false); }}
-            onGithubClick={() => { setActiveTab('github'); setIsSidebarOpen(false); }}
-            onAgentsClick={() => { setActiveTab('agents'); setIsSidebarOpen(false); }}
-            onManifestoClick={() => { setActiveTab('manifesto'); setIsSidebarOpen(false); }}
-            onConnectGitHubClick={() => setActiveModal('githubConnect')}
-            isGitHubConnected={githubUser?.connected ?? false}
-            githubUser={githubUser?.user}
-            onUserClick={() => setActiveModal('user')}
+          <HistorySidebar
+            sessions={[]}
+            activeSessionId={activeAgentId}
+            onSelectSession={setActiveAgentId}
+            onNewChat={() => setActiveAgentId('default')}
           />
         )}
 
-        <main className={cn(
-          "flex-1 flex flex-col overflow-hidden w-full transition-all duration-300",
-          isCLITerminalOpen ? "pb-96" : "pb-0"
-        )}>
-          <Header
-            status={status}
-            onToggleMode={handleToggleMode}
-            onMenuToggle={() => setIsSidebarOpen(true)}
-            onCoverageClick={() => setActiveModal('coverage')}
-            onCloneClick={() => setActiveModal('clone')}
-            onAddExistingClick={() => setActiveModal('addProject')}
-            onRefreshProjects={refreshProjectData}
-            onCLIClick={() => setIsCLITerminalOpen(true)}
-            onAgentsClick={() => { setActiveTab('agents'); setIsSidebarOpen(false); }}
-            fullAutomationMode={aiConfig?.fullAutomationMode ?? false}
-            projects={projects}
-            selectedProject={selectedProject}
-            onProjectSelect={setSelectedProject}
-          />
+        {/* Center column */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          {/* Slim toolbar header */}
+          <div className="h-10 border-b border-white/5 flex items-center px-4 shrink-0 bg-black/50 backdrop-blur-md gap-3">
+            {/* Project selector */}
+            <div className="relative">
+              <select
+                value={selectedProject}
+                onChange={e => setSelectedProject(e.target.value)}
+                className="appearance-none bg-transparent text-[10px] font-mono uppercase tracking-widest text-muted-foreground pr-4 cursor-pointer focus:outline-none"
+              >
+                {projects.map(p => (
+                  <option key={p} value={p} className="bg-zinc-900 text-white">{p}</option>
+                ))}
+              </select>
+              <ChevronDown size={10} className="absolute right-0 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            </div>
 
-          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-            {activeTab === 'terminal' && (
-              <>
-                <Checklist
-                  tasks={tasks}
-                  onGenerateAI={() => handleGenerateChecklist()}
-                  onDispatchAll={handleDispatchAll}
-                  onDispatchTask={(taskId) => handleDispatch(taskId)}
-                  isGenerating={isGeneratingChecklist}
-                  isDispatching={isDispatching}
-                />
+            <div className="w-px h-4 bg-white/10" />
 
-                <section className="flex-1 lg:w-1/2 flex flex-col p-4 lg:p-6 gap-4 lg:gap-6 bg-black overflow-hidden">
-                  <AnimatePresence mode="wait">
-                    {activeTask && (
-                      <CurrentTaskCard 
-                        task={activeTask} 
-                        isAutoMode={status?.isAutoMode ?? false} 
-                        onReview={() => setActiveModal('review')} 
-                        onDispatch={() => handleDispatch(activeTask.id)}
-                      />
-                    )}
-                  </AnimatePresence>
+            <div className="flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-widest text-muted-foreground">
+              <Zap size={9} className="text-primary" />
+              <span className="text-primary">PI</span>
+            </div>
 
-                  <Terminal 
-                    logs={logs} 
-                    logEndRef={logEndRef} 
-                    onRetry={() => addLog('Retry sequence initiated...', 'SYSTEM')} 
-                    onCommand={handleTerminalCommand}
-                  />
-                </section>
-              </>
-            )}
-            {activeTab === 'activity' && <ActivityView logs={logs} />}
-            {activeTab === 'github' && <GithubView repoOwner={githubUser?.user?.login} repoName={selectedProject} />}
-            {activeTab === 'agents' && (
-              <PiDashboardView 
-                selectedProject={selectedProject} 
-                projects={projects} 
-                onProjectSelect={setSelectedProject}
-                isZenMode={isZenMode}
-                onZenToggle={() => setIsZenMode(!isZenMode)}
-              />
-            )}
-            {activeTab === 'manifesto' && <ManifestoView />}
+            <div className="flex-1" />
+
+            {/* Settings dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setSettingsOpen(!settingsOpen)}
+                className="flex items-center gap-1.5 text-muted hover:text-zinc-300 transition-colors"
+              >
+                <Settings size={14} />
+              </button>
+              {settingsOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSettingsOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 w-56 border border-white/10 bg-zinc-950 shadow-2xl z-50">
+                    <button
+                      onClick={() => { setActiveModal('aiConfig'); setSettingsOpen(false); }}
+                      className="w-full text-left px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-muted hover:bg-white/5 hover:text-zinc-300 flex items-center gap-2"
+                    >
+                      <Zap size={10} /> AI Config
+                    </button>
+                    <button
+                      onClick={() => { setActiveModal('addProject'); setSettingsOpen(false); }}
+                      className="w-full text-left px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-muted hover:bg-white/5 hover:text-zinc-300 flex items-center gap-2"
+                    >
+                      <Plus size={10} /> Add Project
+                    </button>
+                    <button
+                      onClick={() => { setActiveModal('clone'); setSettingsOpen(false); }}
+                      className="w-full text-left px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-muted hover:bg-white/5 hover:text-zinc-300 flex items-center gap-2"
+                    >
+                      <GitBranch size={10} /> Clone Repo
+                    </button>
+                    <button
+                      onClick={() => { setActiveModal('githubConnect'); setSettingsOpen(false); }}
+                      className="w-full text-left px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-muted hover:bg-white/5 hover:text-zinc-300 flex items-center gap-2"
+                    >
+                      <Github size={10} /> GitHub {githubUser?.connected ? '(Connected)' : ''}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Zen toggle */}
+            <button
+              onClick={() => setIsZenMode(!isZenMode)}
+              className="text-[9px] font-mono uppercase tracking-widest text-muted hover:text-zinc-300 transition-colors"
+            >
+              {isZenMode ? 'Exit Full' : 'Full'}
+            </button>
           </div>
-        </main>
 
-        <ReviewModal isOpen={activeModal === 'review'} onClose={() => setActiveModal(null)} onMerge={handleMerge} />
+          {/* Agent chat view (center) */}
+          <PiAgentView
+            selectedProject={selectedProject}
+            selectedAgentId={activeAgentId}
+            projects={projects}
+            isZenMode={isZenMode}
+            onZenToggle={() => setIsZenMode(!isZenMode)}
+          />
+        </div>
+
+        {/* Right: Browser / Artifacts Panel */}
+        {!isZenMode && (
+          <RightPanel
+            agentId={selectedProject ? `${selectedProject}:${activeAgentId}` : null}
+            sandboxId={sandboxId}
+            artifacts={artifactsHook.artifacts}
+            artifactsLoading={artifactsHook.loading}
+          />
+        )}
+
+        {/* Modals */}
         <AIConfigModal isOpen={activeModal === 'aiConfig'} onClose={() => { setActiveModal(null); refreshProjectData(); }} />
-        <CoverageReportModal isOpen={activeModal === 'coverage'} onClose={() => setActiveModal(null)} />
         <CloneModal isOpen={activeModal === 'clone'} onClose={() => setActiveModal(null)} onClone={(url) => api.git.clone(url).then(refreshProjectData)} />
         <AddProjectModal isOpen={activeModal === 'addProject'} onClose={() => setActiveModal(null)} onAdd={(name, path, url) => api.projects.register(name, path, url).then(refreshProjectData)} />
         <GitHubConnectModal isOpen={activeModal === 'githubConnect'} onClose={() => setActiveModal(null)} onConnect={(token) => api.config.connectGitHub(token).then(refreshProjectData)} />
-        <UserModal isOpen={activeModal === 'user'} onClose={() => setActiveModal(null)} userEmail={githubUser?.user?.email ?? "anonymous@orchestrator"} userName={githubUser?.user?.name ?? githubUser?.user?.login} avatarUrl={githubUser?.user?.avatar_url} />
-
-        <CLITerminal isOpen={isCLITerminalOpen} onClose={() => setIsCLITerminalOpen(false)} />
       </div>
     </ErrorBoundary>
   );

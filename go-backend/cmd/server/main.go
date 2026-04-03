@@ -109,6 +109,11 @@ func main() {
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
 
+	// Vision client (shared by Web Sub-Agent and Computer Use)
+	litellmURL := os.Getenv("LITELLM_PROXY_URL")
+	litellmKey := os.Getenv("LITELLM_MASTER_KEY")
+	visionClient := browser.NewVisionClient(litellmURL, litellmKey)
+
 	// Browser automation (Web Sub-Agent)
 	var browserClient *browser.BrowserClient
 	var webHandler *handlers.WebHandler
@@ -118,13 +123,16 @@ func main() {
 		if err != nil {
 			logger.Warn("Failed to initialize browser client, web automation disabled", zap.Error(err))
 		} else {
-			litellmURL := os.Getenv("LITELLM_PROXY_URL")
-			litellmKey := os.Getenv("LITELLM_MASTER_KEY")
-			visionClient := browser.NewVisionClient(litellmURL, litellmKey)
 			webHandler = handlers.NewWebHandler(browserClient, visionClient, logger)
 			logger.Info("Browser automation enabled", zap.String("browserless_url", browserlessURL))
 		}
 	}
+
+	// Computer Use handler (CDP bridge for sandbox browser automation)
+	computerUseHandler := handlers.NewComputerUseHandler(sandboxMgr, visionClient, logger)
+
+	// Artifacts handler (plans, todos, notes from agents)
+	artifactHandler := handlers.NewArtifactHandler(logger)
 
 	// Setup router
 	r := chi.NewRouter()
@@ -229,6 +237,11 @@ func main() {
 
 			// Get viewer URLs
 			r.Get("/{id}/viewer", sandboxHandler.GetDesktopViewer)
+
+			// Computer Use (CDP bridge for sandbox browser automation)
+			r.Route("/{id}/computer-use", func(r chi.Router) {
+				computerUseHandler.RegisterRoutes(r)
+			})
 		})
 
 		// Browser automation (Web Sub-Agent)
@@ -241,6 +254,11 @@ func main() {
 		// Task management
 		r.Route("/pi/tasks", func(r chi.Router) {
 			taskHandler.RegisterRoutes(r)
+		})
+
+		// Artifacts (plans, todos, notes from agents)
+		r.Route("/pi/artifacts", func(r chi.Router) {
+			artifactHandler.RegisterRoutes(r)
 		})
 	})
 
@@ -289,6 +307,9 @@ func main() {
 	if browserClient != nil {
 		browserClient.Shutdown()
 	}
+
+	// Shutdown computer use handler
+	computerUseHandler.Shutdown()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

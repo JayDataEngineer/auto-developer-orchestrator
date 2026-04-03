@@ -3,7 +3,7 @@ import {
   Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
   FileCode, Terminal as TerminalIcon, Search, Wrench, Brain,
   Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch, Box,
-  ExternalLink, Check, Maximize2, Minimize2, File, GitPullRequest, Monitor, Globe
+  ExternalLink, Check, Maximize2, Minimize2, File, GitPullRequest
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -12,8 +12,6 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '../lib/utils';
 import { usePiAgent } from '../hooks/usePiAgent';
 import { ToolCall, PiModel, ConversationMessage, AssistantMessage } from '../lib/pi-events';
-import { SandboxModeButton } from './ComputerUseModeButton';
-import { WebBrowserPanel } from './WebBrowserPanel';
 
 interface PiAgentViewProps {
   selectedProject?: string;
@@ -260,7 +258,6 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   // Computer Use Mode state
   const [isBrowserModeActive, setIsBrowserModeActive] = useState(false);
   const [isDesktopModeActive, setIsDesktopModeActive] = useState(false);
-  const [showWebPanel, setShowWebPanel] = useState(false);
   const sandboxId = selectedProject ? `sandbox-${selectedProject}-${selectedAgentId}` : '';
 
   useEffect(() => {
@@ -327,42 +324,6 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-3">
-            {/* Browser Mode Button (Lightweight) */}
-            {selectedProject && (
-              <SandboxModeButton
-                sandboxId={sandboxId}
-                mode="browser"
-                isActive={isBrowserModeActive}
-                onActivate={() => setIsBrowserModeActive(true)}
-                onDeactivate={() => setIsBrowserModeActive(false)}
-                disabled={state.isStreaming || isDesktopModeActive}
-              />
-            )}
-            
-            {/* Desktop Mode Button (Heavy) */}
-            {selectedProject && (
-              <SandboxModeButton
-                sandboxId={sandboxId}
-                mode="desktop"
-                isActive={isDesktopModeActive}
-                onActivate={() => setIsDesktopModeActive(true)}
-                onDeactivate={() => setIsDesktopModeActive(false)}
-                disabled={state.isStreaming || isBrowserModeActive}
-              />
-            )}
-            
-            {onZenToggle && (
-              <button
-                onClick={onZenToggle}
-                className="flex items-center gap-1.5 text-muted hover:text-zinc-300 transition-colors"
-                title={isZenMode ? "Exit Zen Mode" : "Zen Mode"}
-              >
-                {isZenMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                <span className="text-[9px] font-mono uppercase tracking-widest">
-                  {isZenMode ? "Exit Full" : "Full Page"}
-                </span>
-              </button>
-            )}
             {state.isStreaming && (
               <span className="text-[9px] font-black text-primary uppercase tracking-widest animate-pulse">
                 Streaming
@@ -492,11 +453,6 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
           </div>
         )}
 
-        {/* Web Browser Panel */}
-        {showWebPanel && (
-          <WebBrowserPanel onClose={() => setShowWebPanel(false)} />
-        )}
-
         {/* Input area */}
         <div className="w-full border-t border-white/5 bg-black/50 backdrop-blur-md">
           <div className={cn(
@@ -565,62 +521,10 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               <button onClick={() => selectedProject && compact(selectedProject, selectedAgentId)} disabled={state.isStreaming} className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest disabled:opacity-30">
                 <Trash2 size={10} /> Compact
               </button>
-              <button
-                onClick={() => setShowWebPanel(!showWebPanel)}
-                className={cn(
-                  "text-[9px] font-mono flex items-center gap-1 uppercase tracking-widest",
-                  showWebPanel ? "text-blue-400" : "text-muted hover:text-muted-foreground"
-                )}
-              >
-                <Globe size={10} /> Web
-              </button>
             </div>
           </div>
         </div>
       </div>
-
-      {/* Artifacts sidebar */}
-      {!isZenMode && (
-        <div className="w-80 border-l border-white/5 flex flex-col bg-black shrink-0">
-          <div className="p-4 border-b border-white/5 flex items-center gap-3">
-            <Box size={12} className="text-muted-foreground" />
-            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-              Artifacts
-            </span>
-          </div>
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-1 space-y-1">
-            {state.prUrl && (
-              <ArtifactItem
-                type="pr"
-                name={`Pull Request #${state.prNumber}`}
-                subtitle="GitHub"
-                href={state.prUrl}
-              />
-            )}
-            
-            {state.toolCalls
-              .filter(tc => ['write', 'edit', 'bash'].includes(tc.name))
-              .map(tc => (
-                <ArtifactItem
-                  key={tc.id}
-                  type="file"
-                  name={tc.name === 'bash' ? 'Shell Output' : (tc.args.filePath as string || tc.args.path as string || 'Unknown File')}
-                  subtitle={tc.name === 'bash' ? (tc.args.command as string).slice(0, 40) : tc.name}
-                  status={!tc.endTime ? 'active' : 'completed'}
-                />
-              ))}
-
-            {state.toolCalls.length === 0 && !state.prUrl && (
-              <div className="flex-1 flex flex-col items-center justify-center p-6 mt-20 opacity-20">
-                <Box size={24} className="mb-3" />
-                <p className="text-[9px] font-mono uppercase tracking-widest text-center">
-                  No artifacts generated yet
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

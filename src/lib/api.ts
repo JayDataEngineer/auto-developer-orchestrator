@@ -94,6 +94,41 @@ export interface ActiveSessionsResponse {
   projects: ActiveProject[];
 }
 
+// Computer Use types
+export interface LabeledElement {
+  id: number;
+  tag: string;
+  text: string;
+  role?: string;
+  selector: string;
+}
+
+export interface PageInfo {
+  url: string;
+  title: string;
+  elements: LabeledElement[];
+  screenshot?: string; // base64 PNG
+}
+
+export interface ComputerUseAction {
+  action: 'click' | 'type' | 'scroll' | 'navigate';
+  element?: number;
+  text?: string;
+  url?: string;
+  direction?: string;
+  amount?: number;
+  submit?: boolean;
+}
+
+export interface Artifact {
+  id: string;
+  agentId: string;
+  type: 'plan' | 'todo' | 'notes';
+  title: string;
+  content: string;
+  updatedAt: string;
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -160,13 +195,13 @@ export const api = {
   },
   github: {
     getRepos: () => apiFetch<ReposResponse>('/api/github/repos'),
-    getPRs: (owner: string, repo: string) => 
+    getPRs: (owner: string, repo: string) =>
       apiFetch<{ prs: any[] }>(`/api/github/prs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`),
-    getStats: (owner: string, repo: string) => 
+    getStats: (owner: string, repo: string) =>
       apiFetch<{ stats: any }>(`/api/github/stats?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`),
-    getBranches: (owner: string, repo: string) => 
+    getBranches: (owner: string, repo: string) =>
       apiFetch<{ branches: any[] }>(`/api/github/branches?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`),
-    getActivity: (owner: string, repo: string) => 
+    getActivity: (owner: string, repo: string) =>
       apiFetch<{ events: any[] }>(`/api/github/activity?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`),
   },
   git: {
@@ -217,5 +252,38 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ project, agentId }),
       }),
+  },
+  computerUse: {
+    enable: (sandboxId: string) =>
+      apiFetch<{ enabled: boolean; sandboxId: string; cdpPort: number }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/computer-use/enable`, {
+        method: 'POST',
+      }),
+    disable: (sandboxId: string) =>
+      apiFetch<{ disabled: boolean }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/computer-use/disable`, {
+        method: 'POST',
+      }),
+    screenshot: (sandboxId: string, describe = true) =>
+      apiFetch<{ image: string; description?: string; url?: string; title?: string }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/computer-use/screenshot?describe=${describe}`),
+    screenshotRaw: (sandboxId: string) =>
+      fetch(`/api/sandbox/${encodeURIComponent(sandboxId)}/computer-use/screenshot?format=png`).then(r => {
+        if (!r.ok) throw new Error('Screenshot failed');
+        return r.blob();
+      }),
+    snapshot: (sandboxId: string) =>
+      apiFetch<{ url: string; title: string; elements: LabeledElement[] }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/computer-use/snapshot`),
+    act: (sandboxId: string, action: ComputerUseAction) =>
+      apiFetch<PageInfo>(`/api/sandbox/${encodeURIComponent(sandboxId)}/computer-use/act`, {
+        method: 'POST',
+        body: JSON.stringify(action),
+      }),
+  },
+  artifacts: {
+    create: (agentId: string, type: 'plan' | 'todo' | 'notes', title: string, content: string) =>
+      apiFetch<Artifact>(`/api/pi/artifacts`, {
+        method: 'POST',
+        body: JSON.stringify({ agentId, type, title, content }),
+      }),
+    list: (agentId: string) =>
+      apiFetch<{ artifacts: Artifact[] }>(`/api/pi/artifacts?agentId=${encodeURIComponent(agentId)}`),
   },
 };

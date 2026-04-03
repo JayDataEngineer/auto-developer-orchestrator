@@ -20,6 +20,7 @@ type SystemPromptBuilder struct {
 	AppendSections   []string
 	SubAgentEnabled  bool   // whether sub-agents are available
 	ServerPort       string // e.g., "3847" for constructing API URLs
+	SandboxID        string // sandbox ID if running in a sandbox (enables computer use)
 }
 
 // ContextFile represents a discovered instruction file.
@@ -85,6 +86,11 @@ func (b *SystemPromptBuilder) Build() string {
 	// 8. Sub-agent availability
 	if b.SubAgentEnabled {
 		sections = append(sections, b.buildSubAgentAvailability())
+	}
+
+	// 9. Computer use mode (only if sandbox is available)
+	if b.SandboxID != "" {
+		sections = append(sections, b.buildComputerUseSection())
 	}
 
 	// 9. Appended sections — any additional context
@@ -394,4 +400,56 @@ curl "http://localhost:%s/api/pi/subagent/list?parentAgentId=YOUR_AGENT_ID"
 - You can spawn up to 3 sub-agents concurrently.
 - Always check the result before acting on it.
 - Prefer `+"`"+`explore`+"`"+` for read-only analysis and `+"`"+`code`+"`"+` for modifications.`, port, port, port, port, port)
+}
+
+// buildComputerUseSection generates a section describing how to use computer use mode
+func (b *SystemPromptBuilder) buildComputerUseSection() string {
+	port := b.ServerPort
+	if port == "" {
+		port = "3847"
+	}
+
+	return fmt.Sprintf(`# Computer Use Mode
+
+You can interact with graphical applications (browsers, desktop apps) inside your sandbox.
+Use these bash commands:
+
+1. Enable computer use mode:
+   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/enable
+
+2. Take a screenshot and get a text description:
+   curl -s "http://localhost:%s/api/sandbox/%s/computer-use/screenshot?describe=true"
+
+3. Get page elements (for finding clickable elements):
+   curl -s "http://localhost:%s/api/sandbox/%s/computer-use/snapshot"
+
+4. Click an element by ID:
+   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/act -d '{"action":"click","element":5}'
+
+5. Type text into an element:
+   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/act -d '{"action":"type","element":3,"text":"hello","submit":true}'
+
+6. Navigate to URL:
+   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/act -d '{"action":"navigate","url":"https://example.com"}'
+
+7. Scroll page:
+   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/act -d '{"action":"scroll","direction":"down","amount":500}'
+
+8. Disable computer use mode:
+   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/disable
+
+Workflow: enable → take screenshot → read description → identify elements → act → screenshot again → repeat.
+
+## Artifacts
+
+You can create artifacts (plans, todos, notes) visible in the frontend right panel:
+
+1. Create/update a plan:
+   curl -s -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"plan","title":"Implementation Plan","content":"## Step 1\n..."}'
+
+2. Create/update a todo list:
+   curl -s -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"todo","title":"Tasks","content":"- [x] Task 1\n- [ ] Task 2"}'
+
+3. Create/update notes:
+   curl -s -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"notes","title":"Research Notes","content":"..."}'`, port, b.SandboxID, port, b.SandboxID, port, b.SandboxID, port, b.SandboxID, port, b.SandboxID, port, b.SandboxID, port, b.SandboxID, port)
 }
