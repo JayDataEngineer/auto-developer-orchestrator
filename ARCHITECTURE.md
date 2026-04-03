@@ -18,15 +18,18 @@ The Auto-Developer Orchestrator is a high-performance system for autonomous code
   - Jules API dispatch and session polling
   - CLI command execution (safe/whitelisted)
   - Persistent state management (automation modes, task indices)
+  - **OpenShell Sandbox Management** (AI agent isolation)
 
 ### 2. Pi Agent (Binary)
 - **Engine**: `pi` CLI (Rust-based)
 - **Interface**: RPC mode
+- **Sandbox**: Runs inside OpenShell container (per-project isolation)
 - **Key Responsibilities**:
   - Autonomous code exploration and manipulation
   - Intelligent task execution and PR generation
   - Context-aware file editing using the "Vibe Coder" engine
   - Real-time progress updates via RPC stdout
+  - **Computer Use Mode**: On-demand desktop (VNC + Chrome) for visual tasks
 
 ### 3. Frontend (`/src`)
 - **Language**: TypeScript + React 19
@@ -36,6 +39,23 @@ The Auto-Developer Orchestrator is a high-performance system for autonomous code
   - Interactive project management
   - AI configuration and monitoring
   - Workflow visualization (Zen Mode)
+  - **Desktop Viewer Popup**: Dual-pane CDP + VNC viewer for Computer Use Mode
+
+### 4. OpenShell Sandbox Manager
+- **Image**: `nvidia/openshell:latest`
+- **Isolation Layers**:
+  - **Filesystem**: Landlock LSM (read-only /usr, /etc, /bin; read-write /sandbox/workspace)
+  - **Network**: Proxy enforcement (allowlist: GitHub, AI APIs, Docker registry)
+  - **Process**: Seccomp BPF (block ptrace, mount, privilege escalation)
+  - **Identity**: Non-root user (sandbox:sandbox)
+- **Desktop Mode** (On-Demand):
+  - Xvfb (virtual display)
+  - x11vnc (VNC server)
+  - Google Chrome (CDP-enabled)
+  - noVNC (web-based viewer)
+- **Resource Usage**:
+  - CLI mode: ~50-100MB RAM, 1-3s startup
+  - Desktop mode: ~500MB-1GB RAM, 10-30s startup
 
 ---
 

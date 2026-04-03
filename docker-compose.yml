@@ -84,6 +84,49 @@ services:
     networks:
       - shared-infra
 
+  # ===========================================
+  # OpenShell Sandbox Manager (AI Agent Isolation)
+  # ===========================================
+  openshell-manager:
+    image: nvidia/openshell:latest
+    container_name: orchestrator-openshell
+    restart: always
+    privileged: false
+    environment:
+      # Sandbox policies
+      - SANDBOX_POLICY=developer
+      - NETWORK_ALLOW=github.com,api.anthropic.com,api.openai.com,api.openrouter.com,registry.hub.docker.com
+      - FS_READONLY=/etc,/usr,/bin,/lib,/lib64
+      - FS_READWRITE=/sandbox/workspace,/sandbox/tmp
+      # Docker access for dependency caching (read-only socket)
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      # Project files
+      - ./projects:/sandbox/workspace
+      - ./openshell/policies:/etc/openshell/policies:ro
+      - ./openshell/data:/sandbox/data
+      # Docker socket for image caching (read-only, controlled via policy)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Temp directory
+      - /tmp:/sandbox/tmp
+    networks:
+      - shared-infra
+    ports:
+      # Port range for desktop mode (VNC, CDP, noVNC)
+      # Dynamically allocated by Go backend: 5901-5920 (VNC), 9222-9241 (CDP), 6081-6100 (noVNC)
+      - "5901-5920:5901-5920"
+      - "9222-9241:9222-9241"
+      - "6081-6100:6081-6100"
+    healthcheck:
+      test: ["CMD", "test", "-S", "/var/run/docker.sock"]
+      interval: 30s
+      timeout: 10s
+    # Security labels for OpenShell policy enforcement
+    labels:
+      - "openshell.policy=developer"
+      - "openshell.cpu-limit=2.0"
+      - "openshell.memory-limit=2048m"
+
 networks:
   shared-infra:
     external: true

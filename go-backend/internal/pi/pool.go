@@ -32,10 +32,16 @@ type PiPool struct {
 	clients     map[string]*PiClient // key: compositeKey(projectPath, agentId)
 	logger      *zap.Logger
 	idleTimeout time.Duration
+	sandboxMgr  interface{} // *sandbox.Manager (using interface to avoid import cycle)
 }
 
 // NewPiPool creates a new Pi process pool.
 func NewPiPool(logger *zap.Logger, idleTimeout time.Duration) *PiPool {
+	return NewPiPoolWithSandbox(logger, idleTimeout, nil)
+}
+
+// NewPiPoolWithSandbox creates a new Pi process pool with sandbox manager.
+func NewPiPoolWithSandbox(logger *zap.Logger, idleTimeout time.Duration, sandboxMgr interface{}) *PiPool {
 	if idleTimeout == 0 {
 		idleTimeout = 5 * time.Minute
 	}
@@ -44,6 +50,7 @@ func NewPiPool(logger *zap.Logger, idleTimeout time.Duration) *PiPool {
 		clients:     make(map[string]*PiClient),
 		logger:      logger,
 		idleTimeout: idleTimeout,
+		sandboxMgr:  sandboxMgr,
 	}
 
 	// Start idle cleanup goroutine
@@ -80,7 +87,13 @@ func (p *PiPool) GetOrCreateWithID(projectPath, agentId string) (*PiClient, erro
 		return nil, fmt.Errorf("max agents (%d) reached for project %s", maxAgentsPerProject, filepath.Base(projectPath))
 	}
 
-	client, err := NewPiClient(projectPath, agentId, p.logger)
+	// Type assertion for sandbox manager
+	var sandboxMgrTyped interface{}
+	if p.sandboxMgr != nil {
+		sandboxMgrTyped = p.sandboxMgr
+	}
+
+	client, err := NewPiClient(projectPath, agentId, p.logger, sandboxMgrTyped)
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn pi for %s: %w", projectPath, err)
 	}

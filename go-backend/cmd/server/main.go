@@ -12,6 +12,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
+	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 
 	"github.com/go-chi/chi/v5"
@@ -46,6 +47,12 @@ func main() {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Sync()
+
+	// Initialize sandbox manager
+	sandboxMgr, err := sandbox.NewManager(logger)
+	if err != nil {
+		logger.Warn("Failed to initialize sandbox manager, running without isolation", zap.Error(err))
+	}
 
 	// Initialize database
 	dbURL := os.Getenv("DATABASE_URL")
@@ -83,6 +90,9 @@ func main() {
 	// Pi agent pool
 	piPool := pi.NewPiPool(logger, 5*time.Minute)
 	piHandler := handlers.NewPiHandler(piPool, db, gitOps, githubHandler, logger)
+
+	// Sandbox handler
+	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
 
 	// Setup router
 	r := chi.NewRouter()
@@ -161,6 +171,27 @@ func main() {
 		// Pi Coding Agent
 		r.Route("/pi", func(r chi.Router) {
 			piHandler.RegisterRoutes(r)
+		})
+
+		// Sandbox management (OpenShell)
+		r.Route("/sandbox", func(r chi.Router) {
+			r.Post("/", sandboxHandler.CreateSandbox)
+			r.Get("/", sandboxHandler.ListSandboxes)
+			r.Get("/{id}", sandboxHandler.GetSandbox)
+			r.Delete("/{id}", sandboxHandler.DestroySandbox)
+			r.Post("/{id}/exec", sandboxHandler.ExecCommand)
+			
+			// Browser Mode (lightweight, CDP only)
+			r.Post("/{id}/browser-mode", sandboxHandler.EnableBrowserMode)
+			
+			// Desktop Mode (heavy, VNC + Xvfb)
+			r.Post("/{id}/desktop-mode", sandboxHandler.EnableDesktopMode)
+			
+			// Disable any mode
+			r.Delete("/{id}/mode", sandboxHandler.DisableMode)
+			
+			// Get viewer URLs
+			r.Get("/{id}/viewer", sandboxHandler.GetDesktopViewer)
 		})
 	})
 
