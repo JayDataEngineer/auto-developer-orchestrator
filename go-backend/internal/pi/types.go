@@ -137,6 +137,7 @@ const (
 	EventPushComplete    = "push_complete"
 	EventPRCreated       = "pr_created"
 	EventWebUpdate       = "web_update"
+	EventSubAgentResult  = "subagent_result"
 )
 
 // RPC command types

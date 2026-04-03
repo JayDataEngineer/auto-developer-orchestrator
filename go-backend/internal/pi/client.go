@@ -57,6 +57,9 @@ type PiClient struct {
 	stateMu   sync.RWMutex
 	running   bool
 	startTime time.Time
+
+	// Custom system prompt — if set, used instead of SystemPromptBuilder
+	customSystemPrompt string
 }
 
 // NewPiClient creates and starts a new Pi subprocess for the given project directory.
@@ -80,6 +83,39 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger, sandboxM
 	}
 	
 	// Type assertion for sandbox manager
+	if mgr, ok := sandboxMgr.(*sandbox.Manager); ok && mgr != nil {
+		c.sandboxManager = mgr
+	}
+
+	if err := c.start(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to start pi: %w", err)
+	}
+
+	return c, nil
+}
+
+// NewPiClientWithPrompt creates a Pi subprocess with a pre-built system prompt.
+// Used by sub-agents that need specialized prompts instead of the default
+// SystemPromptBuilder output.
+func NewPiClientWithPrompt(projectDir string, agentId string, systemPrompt string, logger *zap.Logger, sandboxMgr interface{}) (*PiClient, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	sandboxID := filepath.Base(projectDir)
+
+	c := &PiClient{
+		logger:             logger,
+		projectDir:         projectDir,
+		agentId:            agentId,
+		cancel:             cancel,
+		ctx:                ctx,
+		subscribers:        make(map[string]chan AgentEvent),
+		startTime:          time.Now(),
+		namespace:          sandboxID,
+		sandboxManager:     nil,
+		customSystemPrompt: systemPrompt,
+	}
+
 	if mgr, ok := sandboxMgr.(*sandbox.Manager); ok && mgr != nil {
 		c.sandboxManager = mgr
 	}
@@ -128,9 +164,14 @@ func (c *PiClient) start() error {
 		return fmt.Errorf("pi binary not found in PATH: %w", err)
 	}
 
-	// Build system prompt from project context
-	builder := NewSystemPromptBuilder(c.projectDir)
-	systemPrompt := builder.Build()
+	// Build system prompt — use custom prompt if provided, otherwise build from project context
+	var systemPrompt string
+	if c.customSystemPrompt != "" {
+		systemPrompt = c.customSystemPrompt
+	} else {
+		builder := NewSystemPromptBuilder(c.projectDir)
+		systemPrompt = builder.Build()
+	}
 
 	// Build command
 	args := []string{"--mode", "rpc", "--append-system-prompt", systemPrompt}

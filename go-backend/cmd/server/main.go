@@ -93,6 +93,12 @@ func main() {
 	piPool := pi.NewPiPool(logger, 5*time.Minute)
 	piHandler := handlers.NewPiHandler(piPool, db, gitOps, githubHandler, logger)
 
+	// Sub-agent manager
+	subAgentMgr := pi.NewSubAgentManager(piPool, logger,
+		pi.WithSandboxManager(sandboxMgr),
+	)
+	subAgentHandler := handlers.NewSubAgentHandler(subAgentMgr, piPool, logger)
+
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
 
@@ -190,6 +196,11 @@ func main() {
 		// Pi Coding Agent
 		r.Route("/pi", func(r chi.Router) {
 			piHandler.RegisterRoutes(r)
+
+			// Sub-agent routes
+			r.Route("/subagent", func(r chi.Router) {
+				subAgentHandler.RegisterRoutes(r)
+			})
 		})
 
 		// Sandbox management (OpenShell)
@@ -255,6 +266,9 @@ func main() {
 
 	// Shutdown Pi agent pool
 	piPool.Shutdown()
+
+	// Shutdown sub-agent manager
+	subAgentMgr.Shutdown()
 
 	// Shutdown browser client
 	if browserClient != nil {

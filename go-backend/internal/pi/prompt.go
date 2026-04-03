@@ -16,8 +16,10 @@ import (
 // from modular sections: identity, rules, environment context, git state,
 // and discovered instruction files.
 type SystemPromptBuilder struct {
-	ProjectDir     string
-	AppendSections []string
+	ProjectDir       string
+	AppendSections   []string
+	SubAgentEnabled  bool   // whether sub-agents are available
+	ServerPort       string // e.g., "3847" for constructing API URLs
 }
 
 // ContextFile represents a discovered instruction file.
@@ -80,7 +82,12 @@ func (b *SystemPromptBuilder) Build() string {
 		sections = append(sections, buildInstructionSection(instructionFiles))
 	}
 
-	// 8. Appended sections — any additional context
+	// 8. Sub-agent availability
+	if b.SubAgentEnabled {
+		sections = append(sections, b.buildSubAgentAvailability())
+	}
+
+	// 9. Appended sections — any additional context
 	for _, s := range b.AppendSections {
 		sections = append(sections, s)
 	}
@@ -322,4 +329,69 @@ func normalizeContent(content string) string {
 	content = strings.TrimSpace(content)
 	content = multiBlankLine.ReplaceAllString(content, "\n\n")
 	return content
+}
+
+// buildSubAgentAvailability generates a section describing available sub-agents
+// and the spawn API so the parent Pi agent knows how to delegate tasks.
+func (b *SystemPromptBuilder) buildSubAgentAvailability() string {
+	port := b.ServerPort
+	if port == "" {
+		port = "3847"
+	}
+
+	return fmt.Sprintf(`# Sub-Agent Delegation
+
+You have access to specialized sub-agents that can handle tasks in parallel. Each sub-agent runs in its own isolated context window.
+
+## Available Sub-Agent Types
+
+| Type | Description |
+|------|-------------|
+| code | Code implementation — writes and modifies files, runs builds/tests |
+| explore | Code exploration — searches and reads code, answers questions (read-only) |
+| web | Web research — uses a browser to navigate, search, and extract information |
+| computer_use | Desktop automation — interacts with desktop environment in a sandbox |
+
+## How to Spawn a Sub-Agent
+
+Use curl to call the spawn API:
+
+`+"```"+`bash
+curl -X POST http://localhost:%s/api/pi/subagent/spawn -d '{
+  "project": "PROJECT_NAME",
+  "parentAgentId": "YOUR_AGENT_ID",
+  "type": "explore",
+  "task": "Find all Go files that import the storage package"
+}'
+`+"```"+`
+
+This returns a `+"`"+`subAgentId`+"`"+` immediately. Poll for status:
+
+`+"```"+`bash
+curl "http://localhost:%s/api/pi/subagent/status?subAgentId=SUB_AGENT_ID"
+`+"```"+`
+
+Stream results (SSE):
+
+`+"```"+`bash
+curl "http://localhost:%s/api/pi/subagent/result?subAgentId=SUB_AGENT_ID"
+`+"```"+`
+
+Abort a sub-agent:
+
+`+"```"+`bash
+curl -X POST http://localhost:%s/api/pi/subagent/abort -d '{"subAgentId": "SUB_AGENT_ID"}'
+`+"```"+`
+
+List your sub-agents:
+
+`+"```"+`bash
+curl "http://localhost:%s/api/pi/subagent/list?parentAgentId=YOUR_AGENT_ID"
+`+"```"+`
+
+## Guidelines
+- Spawn sub-agents for tasks that benefit from isolation or parallelism.
+- You can spawn up to 3 sub-agents concurrently.
+- Always check the result before acting on it.
+- Prefer `+"`"+`explore`+"`"+` for read-only analysis and `+"`"+`code`+"`"+` for modifications.`, port, port, port, port, port)
 }
