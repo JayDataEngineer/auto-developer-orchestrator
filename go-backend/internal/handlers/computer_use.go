@@ -54,6 +54,11 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("enabling computer use", zap.String("sandbox_id", sandboxID))
 
+	if h.manager == nil {
+		http.Error(w, "sandbox manager not available", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Step 1: Enable browser mode on sandbox (starts Xvfb + Chrome + VNC)
 	session, err := h.manager.EnableBrowserMode(r.Context(), sandboxID)
 	if err != nil {
@@ -100,8 +105,10 @@ func (h *ComputerUseHandler) Disable(w http.ResponseWriter, r *http.Request) {
 	h.mu.Unlock()
 
 	// Disable the sandbox browser/desktop mode
-	if err := h.manager.DisableMode(r.Context(), sandboxID); err != nil {
-		h.logger.Warn("failed to disable sandbox mode", zap.Error(err))
+	if h.manager != nil {
+		if err := h.manager.DisableMode(r.Context(), sandboxID); err != nil {
+			h.logger.Warn("failed to disable sandbox mode", zap.Error(err))
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

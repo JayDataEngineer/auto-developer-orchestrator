@@ -451,5 +451,17 @@ You can create artifacts (plans, todos, notes) visible in the frontend right pan
    curl -s -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"todo","title":"Tasks","content":"- [x] Task 1\n- [ ] Task 2"}'
 
 3. Create/update notes:
-   curl -s -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"notes","title":"Research Notes","content":"..."}'`, port, b.SandboxID, port, b.SandboxID, port, b.SandboxID, port, b.SandboxID, port, b.SandboxID, port, b.SandboxID, port, b.SandboxID, port)
+   curl -s -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"notes","title":"Research Notes","content":"..."}'`,
+		port, b.SandboxID,  // enable
+		port, b.SandboxID,  // screenshot
+		port, b.SandboxID,  // snapshot
+		port, b.SandboxID,  // click
+		port, b.SandboxID,  // type
+		port, b.SandboxID,  // navigate
+		port, b.SandboxID,  // scroll
+		port, b.SandboxID,  // disable
+		port, // artifact plan
+		port, // artifact todo
+		port, // artifact notes
+	)
 }

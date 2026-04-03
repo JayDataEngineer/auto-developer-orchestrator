@@ -298,3 +298,112 @@ func TestNormalizeContent(t *testing.T) {
 		t.Errorf("normalizeContent() = %q, want %q", got, want)
 	}
 }
+
+func TestBuildWithComputerUse(t *testing.T) {
+	dir := t.TempDir()
+	builder := NewSystemPromptBuilder(dir)
+	builder.SandboxID = "sandbox-test-123"
+	builder.ServerPort = "3847"
+
+	prompt := builder.Build()
+
+	if !strings.Contains(prompt, "# Computer Use Mode") {
+		t.Error("expected Computer Use Mode section when SandboxID is set")
+	}
+	if !strings.Contains(prompt, "sandbox-test-123") {
+		t.Error("expected sandbox ID in computer use section")
+	}
+	if !strings.Contains(prompt, "computer-use/enable") {
+		t.Error("expected enable endpoint in computer use section")
+	}
+	if !strings.Contains(prompt, "computer-use/screenshot") {
+		t.Error("expected screenshot endpoint in computer use section")
+	}
+	if !strings.Contains(prompt, "computer-use/snapshot") {
+		t.Error("expected snapshot endpoint in computer use section")
+	}
+	if !strings.Contains(prompt, "computer-use/act") {
+		t.Error("expected act endpoint in computer use section")
+	}
+	if !strings.Contains(prompt, "computer-use/disable") {
+		t.Error("expected disable endpoint in computer use section")
+	}
+	if !strings.Contains(prompt, "## Artifacts") {
+		t.Error("expected Artifacts section in computer use section")
+	}
+	if !strings.Contains(prompt, "api/pi/artifacts") {
+		t.Error("expected artifacts endpoint in computer use section")
+	}
+}
+
+func TestBuildWithoutComputerUse(t *testing.T) {
+	dir := t.TempDir()
+	builder := NewSystemPromptBuilder(dir)
+	// No SandboxID set
+
+	prompt := builder.Build()
+
+	if strings.Contains(prompt, "# Computer Use Mode") {
+		t.Error("should not have Computer Use Mode section when SandboxID is empty")
+	}
+}
+
+func TestBuildComputerUseCustomPort(t *testing.T) {
+	dir := t.TempDir()
+	builder := NewSystemPromptBuilder(dir)
+	builder.SandboxID = "sb-1"
+	builder.ServerPort = "9999"
+
+	prompt := builder.Build()
+
+	if !strings.Contains(prompt, "localhost:9999") {
+		t.Error("expected custom port 9999 in computer use URLs")
+	}
+	if strings.Contains(prompt, "localhost:3847") {
+		t.Error("should not have default port when custom port is set")
+	}
+}
+
+func TestBuildComputerUseDefaultPort(t *testing.T) {
+	dir := t.TempDir()
+	builder := NewSystemPromptBuilder(dir)
+	builder.SandboxID = "sb-1"
+	// ServerPort intentionally empty
+
+	section := builder.buildComputerUseSection()
+
+	if !strings.Contains(section, "localhost:3847") {
+		t.Error("expected default port 3847 when ServerPort is empty")
+	}
+}
+
+func TestBuildWithSubAgentEnabled(t *testing.T) {
+	dir := t.TempDir()
+	builder := NewSystemPromptBuilder(dir)
+	builder.SubAgentEnabled = true
+	builder.ServerPort = "3847"
+
+	prompt := builder.Build()
+
+	if !strings.Contains(prompt, "# Sub-Agent Delegation") {
+		t.Error("expected Sub-Agent Delegation section when SubAgentEnabled is true")
+	}
+	if !strings.Contains(prompt, "api/pi/subagent/spawn") {
+		t.Error("expected subagent spawn endpoint")
+	}
+	if !strings.Contains(prompt, "api/pi/subagent/status") {
+		t.Error("expected subagent status endpoint")
+	}
+}
+
+func TestBuildWithoutSubAgent(t *testing.T) {
+	dir := t.TempDir()
+	builder := NewSystemPromptBuilder(dir)
+	builder.SubAgentEnabled = false
+
+	prompt := builder.Build()
+
+	if strings.Contains(prompt, "# Sub-Agent Delegation") {
+		t.Error("should not have Sub-Agent section when disabled")
+	}
+}
