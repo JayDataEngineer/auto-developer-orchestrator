@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 	"go.uber.org/zap"
 )
@@ -44,12 +46,16 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 }
 
 // getContainerName returns the Docker container name for a sandbox.
-// Currently all sandboxes share the orchestrator-openshell container.
 func (m *Manager) getContainerName(sandboxID string) string {
-	if name := os.Getenv("OPENSHELL_CONTAINER"); name != "" {
-		return name
+	return fmt.Sprintf("orchestrator-sandbox-%s", sandboxID)
+}
+
+// getEnvOrDefault returns the value of an environment variable or a default.
+func getEnvOrDefault(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
-	return "orchestrator-openshell"
+	return defaultVal
 }
 
 // execInContainer runs a command inside a Docker container and returns the output.
@@ -100,10 +106,15 @@ func (m *Manager) execInContainer(ctx context.Context, containerName string, cmd
 	return buf.String(), nil
 }
 
-// CreateSandbox creates a new OpenShell sandbox
+// CreateSandbox creates a new OpenShell sandbox by provisioning a Docker container.
 func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sandbox, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Generate ID if empty
+	if opts.ID == "" {
+		opts.ID = fmt.Sprintf("sandbox-%d", time.Now().UnixMilli())
+	}
 
 	m.logger.Info("creating sandbox",
 		zap.String("id", opts.ID),
@@ -111,35 +122,114 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		zap.String("policy", opts.Policy),
 	)
 
+	containerName := m.getContainerName(opts.ID)
+	image := getEnvOrDefault("OPENSHELL_IMAGE", "nvidia/openshell:latest")
+	policy := opts.Policy
+	if policy == "" {
+		policy = "developer"
+	}
+	networkName := getEnvOrDefault("OPENSHELL_NETWORK", "shared-infra")
+	policiesDir := getEnvOrDefault("OPENSHELL_POLICIES_DIR", "/etc/openshell/policies")
+
+	// Resolve project path — default to PROJECT_ROOT env var if not set
+	projectPath := opts.ProjectPath
+	if projectPath == "" {
+		projectPath = os.Getenv("PROJECT_ROOT")
+	}
+	if projectPath == "" {
+		projectPath = "/app/projects"
+	}
+
+	// Pull image if not present
+	m.logger.Info("pulling sandbox image", zap.String("image", image))
+	pullResp, err := m.dockerClient.ImagePull(ctx, image, client.ImagePullOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to pull image %s: %w", image, err)
+	}
+	if err := pullResp.Wait(ctx); err != nil {
+		pullResp.Close()
+		return nil, fmt.Errorf("image pull failed for %s: %w", image, err)
+	}
+	pullResp.Close()
+
+	// Build environment variables
+	networkAllow := opts.NetworkAllow
+	if networkAllow == "" {
+		networkAllow = "github.com,api.anthropic.com,api.openai.com,api.openrouter.com"
+	}
+	envVars := []string{
+		"SANDBOX_POLICY=" + policy,
+		"NETWORK_ALLOW=" + networkAllow,
+		"FS_READONLY=/etc,/usr,/bin,/lib,/lib64",
+		"FS_READWRITE=/sandbox/workspace,/sandbox/tmp",
+		"DOCKER_HOST=unix:///var/run/docker.sock",
+	}
+
+	// Build resource limits
+	resources := container.Resources{}
+	if opts.MemoryLimit > 0 {
+		resources.Memory = int64(opts.MemoryLimit) * 1024 * 1024 // MB to bytes
+	}
+	if opts.CPULimit > 0 {
+		resources.NanoCPUs = int64(opts.CPULimit * 1e9) // cores to nanocpus
+	}
+
+	// Create the container
+	createResp, err := m.dockerClient.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
+			Image:  image,
+			Env:    envVars,
+			Labels: map[string]string{"openshell.policy": policy, "openshell.sandbox-id": opts.ID},
+		},
+		HostConfig: &container.HostConfig{
+			Binds: []string{
+				projectPath + ":/sandbox/workspace",
+				policiesDir + ":/etc/openshell/policies:ro",
+				"/var/run/docker.sock:/var/run/docker.sock:ro",
+				"/tmp:/sandbox/tmp",
+			},
+			Resources: resources,
+		},
+		NetworkingConfig: &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				networkName: {},
+			},
+		},
+		Name: containerName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create container %s: %w", containerName, err)
+	}
+
+	// Start the container
+	if _, err := m.dockerClient.ContainerStart(ctx, createResp.ID, client.ContainerStartOptions{}); err != nil {
+		// Clean up the created container on start failure
+		m.dockerClient.ContainerRemove(ctx, createResp.ID, client.ContainerRemoveOptions{Force: true})
+		return nil, fmt.Errorf("failed to start container %s: %w", containerName, err)
+	}
+
 	sandbox := &Sandbox{
 		ID:          opts.ID,
+		ContainerID: createResp.ID,
 		ProjectPath: opts.ProjectPath,
-		Policy:      opts.Policy,
+		Policy:      policy,
 		Mode:        ModeCLI,
-		Status:      StatusPending,
+		Status:      StatusRunning,
 		CreatedAt:   time.Now(),
 	}
 
-	// Verify the OpenShell container is running
-	containerName := m.getContainerName(opts.ID)
-	inspect, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("sandbox container %s not found: %w", containerName, err)
-	}
-	if !inspect.Container.State.Running {
-		return nil, fmt.Errorf("sandbox container %s is not running (state: %s)", containerName, inspect.Container.State.Status)
-	}
-
-	sandbox.ContainerID = inspect.Container.ID
-	sandbox.Status = StatusRunning
 	m.sandboxes[opts.ID] = sandbox
 
-	m.logger.Info("sandbox created", zap.String("id", opts.ID), zap.String("container", containerName))
+	m.logger.Info("sandbox created",
+		zap.String("id", opts.ID),
+		zap.String("container", containerName),
+		zap.String("container_id", createResp.ID),
+	)
 
 	return sandbox, nil
 }
 
-// DestroySandbox destroys a sandbox and cleans up resources
+// DestroySandbox destroys a sandbox, stops and removes its Docker container, and cleans up resources.
 func (m *Manager) DestroySandbox(ctx context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -156,6 +246,16 @@ func (m *Manager) DestroySandbox(ctx context.Context, id string) error {
 		if err := m.disableModeLocked(ctx, id); err != nil {
 			m.logger.Warn("failed to cleanup desktop mode", zap.Error(err))
 		}
+	}
+
+	// Stop and remove the Docker container
+	containerName := m.getContainerName(id)
+	timeout := 10
+	if _, err := m.dockerClient.ContainerStop(ctx, containerName, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
+		m.logger.Warn("failed to stop container", zap.String("container", containerName), zap.Error(err))
+	}
+	if _, err := m.dockerClient.ContainerRemove(ctx, containerName, client.ContainerRemoveOptions{Force: true}); err != nil {
+		m.logger.Warn("failed to remove container", zap.String("container", containerName), zap.Error(err))
 	}
 
 	delete(m.sandboxes, id)
