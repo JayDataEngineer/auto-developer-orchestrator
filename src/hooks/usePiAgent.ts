@@ -1,13 +1,18 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   PiSSEEvent,
-  PiSessionState,
   ToolCall,
   PiModel,
+  ConversationMessage,
+  AssistantMessage,
   parseSSEEvent,
 } from '../lib/pi-events';
 
+let msgIdCounter = 0;
+function nextMsgId() { return `msg-${++msgIdCounter}-${Date.now()}`; }
+
 export interface PiAgentState {
+  messages: ConversationMessage[];
   isStreaming: boolean;
   text: string;
   thinking: string;
@@ -23,6 +28,7 @@ export interface PiAgentState {
 }
 
 const initialState: PiAgentState = {
+  messages: [],
   isStreaming: false,
   text: '',
   thinking: '',
@@ -37,18 +43,29 @@ const initialState: PiAgentState = {
   prNumber: null,
 };
 
+// Helper: update the last assistant message in the messages array
+function updateLastAssistant(
+  messages: ConversationMessage[],
+  updater: (msg: AssistantMessage) => AssistantMessage
+): ConversationMessage[] {
+  const msgs = [...messages];
+  const lastIdx = msgs.length - 1;
+  if (lastIdx >= 0 && msgs[lastIdx].role === 'assistant') {
+    msgs[lastIdx] = updater(msgs[lastIdx] as AssistantMessage);
+  }
+  return msgs;
+}
+
 export function usePiAgent(initialAgentId: string = 'default') {
   const [state, setState] = useState<PiAgentState>({ ...initialState, agentId: initialAgentId });
   const abortRef = useRef<AbortController | null>(null);
   const projectRef = useRef<string | null>(null);
   const agentIdRef = useRef<string>(initialAgentId);
 
-  // Keep ref in sync
   useEffect(() => {
     agentIdRef.current = initialAgentId;
   }, [initialAgentId]);
 
-  // Hydrate state from backend on mount or when project changes.
   const hydrateState = useCallback(async (project: string, agentId?: string) => {
     if (!project) return;
     const aid = agentId || agentIdRef.current;
@@ -97,16 +114,40 @@ export function usePiAgent(initialAgentId: string = 'default') {
             thinking: '',
             toolCalls: [],
             error: null,
+            // Add empty assistant message if not already present from sendPrompt
+            messages: prev.messages.length > 0 && prev.messages[prev.messages.length - 1].role === 'assistant' && (prev.messages[prev.messages.length - 1] as AssistantMessage).streaming
+              ? prev.messages
+              : [...prev.messages, {
+                  id: nextMsgId(),
+                  role: 'assistant' as const,
+                  text: '',
+                  thinking: '',
+                  toolCalls: [],
+                  timestamp: Date.now(),
+                  streaming: true,
+                }],
           };
 
         case 'agent_spawned':
           return { ...prev, agentId: (event.data as { agentId: string }).agentId };
 
-        case 'text_delta':
-          return { ...prev, text: prev.text + (event.data as { text: string }).text };
+        case 'text_delta': {
+          const delta = (event.data as { text: string }).text;
+          return {
+            ...prev,
+            text: prev.text + delta,
+            messages: updateLastAssistant(prev.messages, msg => ({ ...msg, text: msg.text + delta })),
+          };
+        }
 
-        case 'thinking_delta':
-          return { ...prev, thinking: prev.thinking + (event.data as { text: string }).text };
+        case 'thinking_delta': {
+          const delta = (event.data as { text: string }).text;
+          return {
+            ...prev,
+            thinking: prev.thinking + delta,
+            messages: updateLastAssistant(prev.messages, msg => ({ ...msg, thinking: msg.thinking + delta })),
+          };
+        }
 
         case 'tool_execution_start': {
           const toolData = event.data as { toolName: string; args: Record<string, unknown>; toolId: string };
@@ -116,18 +157,27 @@ export function usePiAgent(initialAgentId: string = 'default') {
             args: toolData.args,
             startTime: Date.now(),
           };
-          return { ...prev, toolCalls: [...prev.toolCalls, newCall] };
+          return {
+            ...prev,
+            toolCalls: [...prev.toolCalls, newCall],
+            messages: updateLastAssistant(prev.messages, msg => ({
+              ...msg,
+              toolCalls: [...msg.toolCalls, newCall],
+            })),
+          };
         }
 
         case 'tool_execution_end': {
           const endData = event.data as { toolId: string; result: unknown; error?: string };
+          const updatedToolCalls = prev.toolCalls.map(tc =>
+            tc.id === endData.toolId
+              ? { ...tc, result: endData.result, error: endData.error, endTime: Date.now() }
+              : tc
+          );
           return {
             ...prev,
-            toolCalls: prev.toolCalls.map(tc =>
-              tc.id === endData.toolId
-                ? { ...tc, result: endData.result, error: endData.error, endTime: Date.now() }
-                : tc
-            ),
+            toolCalls: updatedToolCalls,
+            messages: updateLastAssistant(prev.messages, msg => ({ ...msg, toolCalls: updatedToolCalls })),
           };
         }
 
@@ -141,6 +191,11 @@ export function usePiAgent(initialAgentId: string = 'default') {
               output: prev.tokenUsage.output + (endState.output || 0),
               cache: prev.tokenUsage.cache + (endState.cache || 0),
             },
+            // Finalize the last assistant message
+            messages: updateLastAssistant(prev.messages, msg => ({
+              ...msg,
+              streaming: false,
+            })),
           };
         }
 
@@ -148,7 +203,12 @@ export function usePiAgent(initialAgentId: string = 'default') {
           return prev;
 
         case 'error':
-          return { ...prev, error: (event.data as { error: string }).error, isStreaming: false };
+          return {
+            ...prev,
+            error: (event.data as { error: string }).error,
+            isStreaming: false,
+            messages: updateLastAssistant(prev.messages, msg => ({ ...msg, streaming: false })),
+          };
 
         case 'state_update': {
           const stateData = event.data as { model: string; input: number; output: number; cache: number };
@@ -167,14 +227,19 @@ export function usePiAgent(initialAgentId: string = 'default') {
           return { ...prev, branchName: (event.data as { branch: string }).branch };
 
         case 'commit_created':
-          return prev; // informational, no state change
+          return prev;
 
         case 'push_complete':
-          return prev; // informational, no state change
+          return prev;
 
         case 'pr_created': {
           const prData = event.data as { url: string; number: number; title: string };
-          return { ...prev, prUrl: prData.url, prNumber: prData.number };
+          return {
+            ...prev,
+            prUrl: prData.url,
+            prNumber: prData.number,
+            messages: updateLastAssistant(prev.messages, msg => ({ ...msg })),
+          };
         }
 
         default:
@@ -185,7 +250,6 @@ export function usePiAgent(initialAgentId: string = 'default') {
 
   const sendPrompt = useCallback(
     async (message: string, project: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean; agentId?: string }) => {
-      // Abort any existing request
       if (abortRef.current) {
         abortRef.current.abort();
       }
@@ -197,10 +261,31 @@ export function usePiAgent(initialAgentId: string = 'default') {
       agentIdRef.current = aid;
       projectRef.current = project;
 
+      // Add user message + placeholder assistant message, keep history
+      const userMsg: ConversationMessage = {
+        id: nextMsgId(),
+        role: 'user',
+        content: message,
+        timestamp: Date.now(),
+      };
+      const assistantMsg: ConversationMessage = {
+        id: nextMsgId(),
+        role: 'assistant',
+        text: '',
+        thinking: '',
+        toolCalls: [],
+        timestamp: Date.now(),
+        streaming: true,
+      };
+
       setState(prev => ({
-        ...initialState,
-        model: prev.model,
-        tokenUsage: prev.tokenUsage,
+        ...prev,
+        messages: [...prev.messages, userMsg, assistantMsg],
+        text: '',
+        thinking: '',
+        toolCalls: [],
+        error: null,
+        isStreaming: true,
         lastPrompt: message,
         agentId: aid,
         prUrl: null,
@@ -224,16 +309,25 @@ export function usePiAgent(initialAgentId: string = 'default') {
 
         if (!response.ok) {
           const err = await response.json().catch(() => ({ error: 'Request failed' }));
-          setState(prev => ({ ...prev, error: err.error || `HTTP ${response.status}`, isStreaming: false }));
+          setState(prev => ({
+            ...prev,
+            error: err.error || `HTTP ${response.status}`,
+            isStreaming: false,
+            messages: updateLastAssistant(prev.messages, msg => ({ ...msg, streaming: false })),
+          }));
           return;
         }
 
         if (!response.body) {
-          setState(prev => ({ ...prev, error: 'No response body', isStreaming: false }));
+          setState(prev => ({
+            ...prev,
+            error: 'No response body',
+            isStreaming: false,
+            messages: updateLastAssistant(prev.messages, msg => ({ ...msg, streaming: false })),
+          }));
           return;
         }
 
-        // Read SSE stream
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -253,14 +347,18 @@ export function usePiAgent(initialAgentId: string = 'default') {
           }
         }
 
-        // Process remaining buffer
         if (buffer.trim()) {
           const event = parseSSEEvent(buffer);
           if (event) handleEvent(event);
         }
       } catch (err: any) {
         if (err.name === 'AbortError') return;
-        setState(prev => ({ ...prev, error: err.message, isStreaming: false }));
+        setState(prev => ({
+          ...prev,
+          error: err.message,
+          isStreaming: false,
+          messages: updateLastAssistant(prev.messages, msg => ({ ...msg, streaming: false })),
+        }));
       }
     },
     [handleEvent]
@@ -274,7 +372,11 @@ export function usePiAgent(initialAgentId: string = 'default') {
     try {
       await fetch(`/api/pi/abort?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`, { method: 'POST' });
     } catch {}
-    setState(prev => ({ ...prev, isStreaming: false }));
+    setState(prev => ({
+      ...prev,
+      isStreaming: false,
+      messages: updateLastAssistant(prev.messages, msg => ({ ...msg, streaming: false })),
+    }));
   }, []);
 
   const compact = useCallback(async (project: string, agentId?: string) => {
@@ -315,6 +417,54 @@ export function usePiAgent(initialAgentId: string = 'default') {
     }));
   }, []);
 
+  const loadHistory = useCallback(async (project: string, agentId?: string) => {
+    const aid = agentId || agentIdRef.current;
+    try {
+      const res = await fetch(`/api/pi/messages?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`);
+      if (!res.ok) return;
+      const msgs = await res.json();
+      if (!Array.isArray(msgs) || msgs.length === 0) return;
+
+      // Convert DB messages to ConversationMessage format
+      const messages: ConversationMessage[] = msgs.map((m: any) => {
+        if (m.role === 'user') {
+          return {
+            id: `db-${m.id}`,
+            role: 'user' as const,
+            content: m.content || '',
+            timestamp: new Date(m.createdAt).getTime(),
+          };
+        }
+        let toolCalls: ToolCall[] = [];
+        try {
+          toolCalls = JSON.parse(m.toolCalls || '[]');
+        } catch {}
+        return {
+          id: `db-${m.id}`,
+          role: 'assistant' as const,
+          text: m.text || '',
+          thinking: m.thinking || '',
+          toolCalls,
+          timestamp: new Date(m.createdAt).getTime(),
+          streaming: false,
+        };
+      });
+
+      // Get last assistant message for live state
+      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant') as AssistantMessage | undefined;
+
+      setState(prev => ({
+        ...prev,
+        messages,
+        text: lastAssistant?.text || '',
+        thinking: lastAssistant?.thinking || '',
+        toolCalls: lastAssistant?.toolCalls || [],
+      }));
+    } catch {
+      // Silently fail - history loading is best-effort
+    }
+  }, []);
+
   return {
     state,
     sendPrompt,
@@ -324,5 +474,6 @@ export function usePiAgent(initialAgentId: string = 'default') {
     getModels,
     reset,
     hydrateState,
+    loadHistory,
   };
 }

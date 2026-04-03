@@ -48,6 +48,21 @@ func NewDatabase(dataSource string) (*Database, error) {
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		);
+
+		CREATE TABLE IF NOT EXISTS conversation_messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project TEXT NOT NULL,
+			agent_id TEXT NOT NULL DEFAULT 'default',
+			role TEXT NOT NULL,
+			content TEXT NOT NULL DEFAULT '',
+			text TEXT NOT NULL DEFAULT '',
+			thinking TEXT NOT NULL DEFAULT '',
+			tool_calls TEXT NOT NULL DEFAULT '[]',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_conv_msgs_project_agent
+			ON conversation_messages(project, agent_id, created_at);
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
@@ -67,9 +82,8 @@ func (d *Database) Close() error {
 	return d.db.Close()
 }
 
-// GetProjectsDir returns the projects directory
+// GetProjectsDir returns the configured projects directory.
 func (d *Database) GetProjectsDir() string {
-	// TODO: Load from database
 	return d.projectsDir
 }
 
@@ -191,9 +205,80 @@ func (d *Database) GetSystemConfig(ctx context.Context, key string) (string, err
 // SetSystemConfig sets a system configuration value
 func (d *Database) SetSystemConfig(ctx context.Context, key, value string) error {
 	_, err := d.db.ExecContext(ctx, `
-		INSERT INTO system_config (key, value) 
+		INSERT INTO system_config (key, value)
 		VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = ?`,
 		key, value, value)
+	return err
+}
+
+// StoredMessage represents a persisted conversation message.
+type StoredMessage struct {
+	ID        int64  `json:"id"`
+	Project   string `json:"project"`
+	AgentID   string `json:"agentId"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Text      string `json:"text"`
+	Thinking  string `json:"thinking"`
+	ToolCalls string `json:"toolCalls"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// SaveUserMessage persists a user message.
+func (d *Database) SaveUserMessage(ctx context.Context, project, agentID, content string) (int64, error) {
+	res, err := d.db.ExecContext(ctx,
+		`INSERT INTO conversation_messages (project, agent_id, role, content) VALUES (?, ?, 'user', ?)`,
+		project, agentID, content)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// SaveAssistantMessage persists an assistant response.
+func (d *Database) SaveAssistantMessage(ctx context.Context, project, agentID, text, thinking, toolCallsJSON string) (int64, error) {
+	res, err := d.db.ExecContext(ctx,
+		`INSERT INTO conversation_messages (project, agent_id, role, text, thinking, tool_calls) VALUES (?, ?, 'assistant', ?, ?, ?)`,
+		project, agentID, text, thinking, toolCallsJSON)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GetConversationHistory returns messages for a project+agent, ordered by creation time.
+func (d *Database) GetConversationHistory(ctx context.Context, project, agentID string, limit int) ([]StoredMessage, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT id, project, agent_id, role, content, text, thinking, tool_calls, created_at
+		 FROM conversation_messages
+		 WHERE project = ? AND agent_id = ?
+		 ORDER BY created_at ASC
+		 LIMIT ?`,
+		project, agentID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []StoredMessage
+	for rows.Next() {
+		var m StoredMessage
+		if err := rows.Scan(&m.ID, &m.Project, &m.AgentID, &m.Role, &m.Content, &m.Text, &m.Thinking, &m.ToolCalls, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// ClearConversationHistory deletes all messages for a project+agent.
+func (d *Database) ClearConversationHistory(ctx context.Context, project, agentID string) error {
+	_, err := d.db.ExecContext(ctx,
+		`DELETE FROM conversation_messages WHERE project = ? AND agent_id = ?`,
+		project, agentID)
 	return err
 }

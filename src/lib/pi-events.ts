@@ -117,6 +117,26 @@ export interface ToolCall {
   endTime?: number;
 }
 
+// Conversation message types
+export interface UserMessage {
+  id: string;
+  role: 'user';
+  content: string;
+  timestamp: number;
+}
+
+export interface AssistantMessage {
+  id: string;
+  role: 'assistant';
+  text: string;
+  thinking: string;
+  toolCalls: ToolCall[];
+  timestamp: number;
+  streaming?: boolean;
+}
+
+export type ConversationMessage = UserMessage | AssistantMessage;
+
 // Session state
 export interface PiSessionState {
   model: string | null;

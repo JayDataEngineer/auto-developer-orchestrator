@@ -3,7 +3,7 @@ import {
   Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
   FileCode, Terminal as TerminalIcon, Search, Wrench, Brain,
   Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch, Box,
-  ExternalLink, Check, Maximize2, Minimize2, File, GitPullRequest
+  ExternalLink, Check, Maximize2, Minimize2, File, GitPullRequest, Monitor
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -11,7 +11,8 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '../lib/utils';
 import { usePiAgent } from '../hooks/usePiAgent';
-import { ToolCall, PiModel } from '../lib/pi-events';
+import { ToolCall, PiModel, ConversationMessage, AssistantMessage } from '../lib/pi-events';
+import { ComputerUseModeButton, SandboxModeButton } from './ComputerUseModeButton';
 
 interface PiAgentViewProps {
   selectedProject?: string;
@@ -49,6 +50,41 @@ function formatToolArgs(name: string, args: Record<string, unknown>): string {
 function formatResult(result: unknown): string {
   if (typeof result === 'string') return result;
   return JSON.stringify(result, null, 2);
+}
+
+// ─── Tool Call Item ─────────────────────────────────────────────
+function ToolCallItem({ tc }: { tc: ToolCall }) {
+  const [open, setOpen] = useState(false);
+  const isRunning = !tc.endTime;
+  return (
+    <div className="border border-white/5 bg-zinc-950">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left"
+      >
+        {TOOL_ICONS[tc.name] || <Wrench size={11} className="text-muted-foreground" />}
+        <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">
+          {tc.name}
+        </span>
+        <span className="text-[9px] font-mono text-zinc-600 truncate">
+          {formatToolArgs(tc.name, tc.args)}
+        </span>
+        <div className="flex-1" />
+        {isRunning ? (
+          <Loader size={10} className="text-primary animate-spin" />
+        ) : (
+          <ChevronRight size={10} className={cn("text-muted-foreground transition-transform", open && "rotate-90")} />
+        )}
+      </button>
+      {open && !isRunning && (
+        <div className="px-3 pb-2 border-t border-white/5">
+          <pre className="text-[9px] font-mono text-zinc-400 whitespace-pre-wrap max-h-40 overflow-auto">
+            {formatResult(tc.result)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Block Components ───────────────────────────────────────────
@@ -212,19 +248,25 @@ function FleetBar({ project, branch, model, streaming }: {
 }
 
 export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack, isZenMode = false, onZenToggle }) => {
-  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels } = usePiAgent(selectedAgentId);
+  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels, loadHistory } = usePiAgent(selectedAgentId);
   const [input, setInput] = useState('');
   const [models, setModels] = useState<PiModel[]>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Computer Use Mode state
+  const [isBrowserModeActive, setIsBrowserModeActive] = useState(false);
+  const [isDesktopModeActive, setIsDesktopModeActive] = useState(false);
+  const sandboxId = selectedProject ? `sandbox-${selectedProject}-${selectedAgentId}` : '';
 
   useEffect(() => {
     if (selectedProject) {
       hydrateState(selectedProject, selectedAgentId);
+      loadHistory(selectedProject, selectedAgentId);
     }
-  }, [selectedProject, selectedAgentId, hydrateState]);
+  }, [selectedProject, selectedAgentId, hydrateState, loadHistory]);
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -261,7 +303,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
 
   const activeTools = state.toolCalls.filter(tc => !tc.endTime);
   const completedTools = state.toolCalls.filter(tc => tc.endTime);
-  const hasContent = state.text || state.thinking || state.isStreaming || state.toolCalls.length > 0;
+  const hasContent = state.messages.length > 0 || state.isStreaming;
 
   return (
     <div className="flex h-full w-full bg-black overflow-hidden">
@@ -282,7 +324,31 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
             </div>
           </div>
           <div className="flex-1" />
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {/* Browser Mode Button (Lightweight) */}
+            {selectedProject && (
+              <SandboxModeButton
+                sandboxId={sandboxId}
+                mode="browser"
+                isActive={isBrowserModeActive}
+                onActivate={() => setIsBrowserModeActive(true)}
+                onDeactivate={() => setIsBrowserModeActive(false)}
+                disabled={state.isStreaming || isDesktopModeActive}
+              />
+            )}
+            
+            {/* Desktop Mode Button (Heavy) */}
+            {selectedProject && (
+              <SandboxModeButton
+                sandboxId={sandboxId}
+                mode="desktop"
+                isActive={isDesktopModeActive}
+                onActivate={() => setIsDesktopModeActive(true)}
+                onDeactivate={() => setIsDesktopModeActive(false)}
+                disabled={state.isStreaming || isBrowserModeActive}
+              />
+            )}
+            
             {onZenToggle && (
               <button
                 onClick={onZenToggle}
@@ -336,15 +402,44 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               </div>
             )}
 
-            {/* Reasoning block */}
-            {state.thinking && (
-              <ReasoningBlock content={state.thinking} defaultOpen={false} />
-            )}
+            {/* Conversation Thread */}
+            {state.messages.map((msg) => {
+              if (msg.role === 'user') {
+                return (
+                  <div key={msg.id} className="flex justify-end">
+                    <div className="max-w-[80%] bg-white/5 border border-white/10 px-4 py-3 rounded-none">
+                      <p className="text-xs text-white font-mono leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                    </div>
+                  </div>
+                );
+              }
 
-            {/* Markdown response block */}
-            {state.text && (
-              <MarkdownBlock content={state.text} streaming={state.isStreaming} />
-            )}
+              // Assistant message
+              const aMsg = msg as AssistantMessage;
+              return (
+                <div key={msg.id} className="space-y-3">
+                  {aMsg.thinking && (
+                    <ReasoningBlock content={aMsg.thinking} defaultOpen={false} />
+                  )}
+                  {aMsg.text && (
+                    <MarkdownBlock content={aMsg.text} streaming={!!aMsg.streaming} />
+                  )}
+                  {aMsg.toolCalls.length > 0 && (
+                    <div className="space-y-1">
+                      {aMsg.toolCalls.map(tc => (
+                        <ToolCallItem key={tc.id} tc={tc} />
+                      ))}
+                    </div>
+                  )}
+                  {aMsg.streaming && !aMsg.text && !aMsg.thinking && aMsg.toolCalls.length === 0 && (
+                    <div className="flex items-center gap-2 py-2">
+                      <Loader size={12} className="text-primary animate-spin" />
+                      <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">Thinking...</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {/* Inline artifact summaries in feed (optional, keep it simple) */}
             

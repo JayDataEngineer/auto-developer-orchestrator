@@ -161,6 +161,13 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	events := client.Subscribe(subId)
 	defer client.Unsubscribe(subId)
 
+	// Save user message to DB
+	if h.db != nil {
+		if _, err := h.db.SaveUserMessage(r.Context(), req.Project, req.AgentId, req.Message); err != nil {
+			h.log.Warn("Failed to save user message", zap.Error(err))
+		}
+	}
+
 	// Send prompt command
 	if err := client.SendPrompt(req.Message, req.Model, req.ThinkingLevel); err != nil {
 		h.log.Error("Failed to send prompt to Pi", zap.Error(err))
@@ -168,8 +175,11 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stream events to SSE
+	// Stream events to SSE, accumulating assistant response for DB persistence
 	ctx := r.Context()
+	var assistantText, assistantThinking string
+	var assistantToolCalls []json.RawMessage
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -192,9 +202,49 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 				flusher.Flush()
 			}
 
-			// After agent_end, run post-completion (commit, push, PR)
-			if sseEvent.Type == pi.EventAgentEnd && autoBranchName != "" {
-				h.postCompletion(ctx, projectPath, autoBranchName, req.Message, w, canFlush, flusher)
+			// Accumulate assistant response for persistence
+			switch sseEvent.Type {
+			case "text_delta":
+				switch td := sseEvent.Data.(type) {
+				case map[string]string:
+					assistantText += td["text"]
+				case map[string]interface{}:
+					if t, ok := td["text"].(string); ok {
+						assistantText += t
+					}
+				}
+			case "thinking_delta":
+				switch td := sseEvent.Data.(type) {
+				case map[string]string:
+					assistantThinking += td["text"]
+				case map[string]interface{}:
+					if t, ok := td["text"].(string); ok {
+						assistantThinking += t
+					}
+				}
+			case "tool_execution_start":
+				if raw, err := json.Marshal(sseEvent.Data); err == nil {
+					assistantToolCalls = append(assistantToolCalls, raw)
+				}
+			}
+
+			// After agent_end, save assistant message and run post-completion
+			if sseEvent.Type == pi.EventAgentEnd {
+				if h.db != nil {
+					toolCallsJSON := "[]"
+					if len(assistantToolCalls) > 0 {
+						if raw, err := json.Marshal(assistantToolCalls); err == nil {
+							toolCallsJSON = string(raw)
+						}
+					}
+					if _, err := h.db.SaveAssistantMessage(ctx, req.Project, req.AgentId, assistantText, assistantThinking, toolCallsJSON); err != nil {
+						h.log.Warn("Failed to save assistant message", zap.Error(err))
+					}
+				}
+
+				if autoBranchName != "" {
+					h.postCompletion(ctx, projectPath, autoBranchName, req.Message, w, canFlush, flusher)
+				}
 				return
 			}
 		}
@@ -497,34 +547,36 @@ func (h *PiHandler) GetState(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, client.GetState())
 }
 
-// GetMessages returns the conversation history.
+// GetMessages returns the conversation history from the database.
 func (h *PiHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	agentId := resolveAgent(r)
-	projectPath := h.resolveProjectPath(project)
-	if projectPath == "" {
-		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
-			"success": false, "error": "Project not found",
+
+	if project == "" {
+		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Project name is required",
 		})
 		return
 	}
 
-	client := h.pool.GetWithID(projectPath, agentId)
-	if client == nil {
-		h.writeJSON(w, http.StatusOK, []pi.AgentMessage{})
+	if h.db == nil {
+		h.writeJSON(w, http.StatusOK, []storage.StoredMessage{})
 		return
 	}
 
-	// Request messages from Pi - they'll come as events
-	// For now return empty, frontend subscribes to SSE for updates
-	if err := client.GetMessages(); err != nil {
+	msgs, err := h.db.GetConversationHistory(r.Context(), project, agentId, 500)
+	if err != nil {
+		h.log.Error("Failed to load conversation history", zap.Error(err))
 		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	h.writeJSON(w, http.StatusOK, []pi.AgentMessage{})
+	if msgs == nil {
+		msgs = []storage.StoredMessage{}
+	}
+	h.writeJSON(w, http.StatusOK, msgs)
 }
 
 // GetModels lists available models.
