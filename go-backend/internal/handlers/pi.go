@@ -77,6 +77,7 @@ type promptRequest struct {
 	Model         string `json:"model,omitempty"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 	AutoBranch    bool   `json:"autoBranch,omitempty"`
+	AutoMerge     bool   `json:"autoMerge,omitempty"`
 }
 
 // Prompt sends a coding task to Pi and streams events back via SSE.
@@ -243,7 +244,7 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 				}
 
 				if autoBranchName != "" {
-					h.postCompletion(ctx, projectPath, autoBranchName, req.Message, w, canFlush, flusher)
+					h.postCompletion(ctx, projectPath, autoBranchName, req.Message, req.AutoMerge, w, canFlush, flusher)
 				}
 				return
 			}
@@ -264,11 +265,13 @@ func writeSSE(w http.ResponseWriter, eventType string, data interface{}, canFlus
 }
 
 // postCompletion runs after Pi finishes a task: commits changes, pushes branch, creates PR.
+// If autoMerge is true, merges the PR back to master after creation.
 func (h *PiHandler) postCompletion(
 	ctx context.Context,
 	projectPath string,
 	branchName string,
 	promptMessage string,
+	autoMerge bool,
 	w http.ResponseWriter,
 	canFlush bool,
 	flusher http.Flusher,
@@ -362,6 +365,38 @@ func (h *PiHandler) postCompletion(
 		zap.String("url", prURL),
 		zap.Int("number", prNum),
 	)
+
+	// Auto-merge if requested
+	if autoMerge && prNum > 0 && h.github != nil {
+		mergeResult, err := h.github.MergePR(owner, repo, prNum, "Pi auto-merge")
+		if err != nil {
+			h.log.Warn("postCompletion: auto-merge failed", zap.Error(err))
+			writeSSE(w, "error", map[string]string{"error": fmt.Sprintf("auto-merge failed: %v", err)}, canFlush, flusher)
+			return
+		}
+
+		mergeSHA, _ := mergeResult["sha"].(string)
+		writeSSE(w, "pr_merged", map[string]interface{}{
+			"prNumber": prNum,
+			"sha":      mergeSHA,
+		}, canFlush, flusher)
+
+		// Checkout master and pull latest
+		if err := h.git.Checkout(ctx, git.CheckoutOptions{
+			Dir:    projectPath,
+			Branch: "master",
+		}); err != nil {
+			h.log.Warn("postCompletion: checkout master failed", zap.Error(err))
+		}
+		if err := h.git.Pull(ctx, git.PullOptions{Dir: projectPath}); err != nil {
+			h.log.Warn("postCompletion: pull master failed", zap.Error(err))
+		}
+
+		h.log.Info("postCompletion: PR auto-merged",
+			zap.Int("pr", prNum),
+			zap.String("sha", mergeSHA),
+		)
+	}
 }
 
 // truncateStr truncates a string to maxLen characters.

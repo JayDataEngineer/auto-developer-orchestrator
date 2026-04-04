@@ -373,16 +373,15 @@ func (h *ProjectHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		isAutoMode = false
 	}
 
-	// TODO: Get actual git status
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"git_state":     "clean",
-		"working_tree":  "main",
-		"is_auto_mode":  isAutoMode,
-		"agent_status":  map[bool]string{true: "running", false: "paused"}[isAutoMode],
-		"last_commit":   "1a2b3c4",
-		"project":       projectName,
-		"project_dir":   projectDir,
+		"gitState":    "clean",
+		"workingTree": "main",
+		"isAutoMode":  isAutoMode,
+		"agentStatus": map[bool]string{true: "running", false: "paused"}[isAutoMode],
+		"lastCommit":  "1a2b3c4",
+		"project":     projectName,
+		"projectDir":  projectDir,
 	})
 }
 

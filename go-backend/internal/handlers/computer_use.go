@@ -278,7 +278,11 @@ func (h *ComputerUseHandler) getOrCreateClient(sandboxID string, cdpPort int) (*
 		return client, nil
 	}
 
-	client, err := browser.NewSandboxBrowserClient(cdpPort, h.logger)
+	// Use the Docker container name as hostname so the Go backend can reach
+	// Chrome via the shared Docker network (not localhost).
+	hostname := fmt.Sprintf("orchestrator-sandbox-%s", sandboxID)
+
+	client, err := browser.NewSandboxBrowserClient(cdpPort, hostname, h.logger)
 	if err != nil {
 		return nil, err
 	}

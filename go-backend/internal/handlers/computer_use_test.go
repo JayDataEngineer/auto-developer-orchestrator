@@ -11,7 +11,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// TestComputerUseHandlerWithoutSandbox tests the handler when no sandbox manager is available
+// Note: NewSandboxBrowserClient now takes (port, hostname, logger) — tests that call
+// the handler don't need to construct browser clients directly since the handler creates
+// them via getOrCreateClient, which passes the correct Docker hostname.
 func TestComputerUseHandlerWithoutSandbox(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	handler := handlers.NewComputerUseHandler(nil, nil, logger)

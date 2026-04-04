@@ -129,6 +129,68 @@ func (h *GitHubHandler) CreatePR(owner, repo, title, body, head, base string) (m
 	return result, nil
 }
 
+// MergePR merges a pull request on GitHub. Returns the merge result data.
+func (h *GitHubHandler) MergePR(owner, repo string, prNum int, commitMessage string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/merge", owner, repo, prNum)
+	payload := map[string]string{
+		"commit_message": commitMessage,
+		"merge_method":   "squash",
+	}
+
+	respBody, status, err := h.githubPut(url, payload)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub PR merge request failed: %w", err)
+	}
+
+	if status != 200 {
+		return nil, fmt.Errorf("GitHub PR merge failed (status %d): %s", status, string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		// 200 response may have non-JSON body for merge
+		return map[string]interface{}{"merged": true}, nil
+	}
+
+	h.logger.Info("GitHub PR merged",
+		zap.String("owner", owner),
+		zap.String("repo", repo),
+		zap.Int("pr", prNum),
+	)
+
+	return result, nil
+}
+
+// githubPut sends a PUT request to the GitHub API.
+func (h *GitHubHandler) githubPut(url string, payload interface{}) ([]byte, int, error) {
+	token, err := h.getToken()
+	if err != nil {
+		return nil, 401, err
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, 500, err
+	}
+
+	req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, 500, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return nil, 502, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	return respBody, resp.StatusCode, nil
+}
+
 // parseOwnerRepo extracts owner and repo from a git remote URL.
 // Supports: https://github.com/owner/repo.git, git@github.com:owner/repo.git
 func parseOwnerRepo(remoteURL string) (owner, repo string, err error) {
