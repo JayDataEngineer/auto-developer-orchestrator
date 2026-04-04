@@ -401,7 +401,7 @@ func (c *PiClient) Abort() error {
 // GetState returns the current session state.
 func (c *PiClient) GetState() SessionState {
 	c.stateMu.RLock()
-	defer c.stateMu.Unlock()
+	defer c.stateMu.RUnlock()
 	return c.state
 }
 
