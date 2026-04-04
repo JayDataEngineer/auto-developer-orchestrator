@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Globe, FileText, CheckSquare, StickyNote, Loader } from 'lucide-react';
+import { Globe, FileText, CheckSquare, StickyNote, Loader, Monitor } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Artifact } from '../lib/api';
 import { useComputerUse } from '../hooks/useComputerUse';
@@ -198,6 +198,18 @@ function BrowserTab({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeTex
           className="px-2 py-1 text-[9px] font-mono uppercase tracking-widest bg-white/5 text-muted hover:text-zinc-300 hover:bg-white/10 disabled:opacity-30 transition-colors"
         >
           Elements
+        </button>
+        <button
+          onClick={() => {
+            if (sandboxId) {
+              window.open(`/api/sandbox/vnc/${sandboxId}/vnc.html`, '_blank', 'width=1280,height=720');
+            }
+          }}
+          disabled={!sandboxId}
+          className="px-2 py-1 text-[9px] font-mono uppercase tracking-widest bg-white/5 text-muted hover:text-zinc-300 hover:bg-white/10 disabled:opacity-30 transition-colors flex items-center gap-1"
+        >
+          <Monitor size={10} />
+          Desktop
         </button>
         <div className="flex-1" />
         <button

@@ -34,9 +34,13 @@ export default function App() {
         {/* Left: History Sidebar */}
         {!isZenMode && (
           <HistorySidebar
-            sessions={[]}
-            activeSessionId={activeAgentId}
-            onSelectSession={setActiveAgentId}
+            projects={projects}
+            activeProject={selectedProject}
+            activeAgentId={activeAgentId}
+            onSelectSession={(project: string, agentId: string) => {
+              setSelectedProject(project);
+              setActiveAgentId(agentId);
+            }}
             onNewChat={() => setActiveAgentId('default')}
           />
         )}
