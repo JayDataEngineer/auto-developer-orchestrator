@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
+	"github.com/auto-developer-orchestrator/backend/internal/scheduler"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
@@ -130,6 +132,71 @@ func main() {
 
 	// Computer Use handler (CDP bridge for sandbox browser automation)
 	computerUseHandler := handlers.NewComputerUseHandler(sandboxMgr, visionClient, logger)
+
+	// Scheduler (CRON/heartbeat system)
+	schedulerStorePath := os.Getenv("SCHEDULER_STORE_PATH")
+	if schedulerStorePath == "" {
+		schedulerStorePath = "../data/scheduler/jobs.json"
+	}
+	schedulerPromptSender := func(ctx context.Context, project, agentID, message, model string) (string, error) {
+		// Resolve project path from database or default projects dir
+		var projectPath string
+		if db != nil {
+			customProjects, err := db.GetCustomProjects(ctx)
+			if err == nil {
+				for _, p := range customProjects {
+					if p.Name == project {
+						projectPath = p.Path
+						break
+					}
+				}
+			}
+		}
+		if projectPath == "" {
+			projectPath = projectRoot + "/" + project
+			if _, err := os.Stat(projectPath); err != nil {
+				return "", fmt.Errorf("project %s not found", project)
+			}
+		}
+
+		client, err := piPool.GetOrCreateWithID(projectPath, agentID)
+		if err != nil {
+			return "", fmt.Errorf("failed to get Pi client: %w", err)
+		}
+		if err := client.SendPrompt(message, model, ""); err != nil {
+			return "", fmt.Errorf("failed to send prompt: %w", err)
+		}
+		// Wait for agent_end event (with timeout)
+		subID := fmt.Sprintf("sched-%d", time.Now().UnixNano())
+		events := client.Subscribe(subID)
+		defer client.Unsubscribe(subID)
+
+		var output string
+		timeout := time.After(5 * time.Minute)
+		for {
+			select {
+			case <-ctx.Done():
+				return output, ctx.Err()
+			case <-timeout:
+				return output, fmt.Errorf("scheduled job timed out")
+			case event, ok := <-events:
+				if !ok {
+					return output, nil
+				}
+				if event.Type == pi.RpcEventAgentEnd {
+					return output, nil
+				}
+				if event.AssistantMessageEvent != nil && event.AssistantMessageEvent.Type == "text_delta" {
+					output += event.AssistantMessageEvent.Delta
+				}
+			}
+		}
+	}
+	sched := scheduler.NewScheduler(schedulerStorePath, handlers.NewSchedulerPromptSender(schedulerPromptSender), logger)
+	if err := sched.Start(context.Background()); err != nil {
+		logger.Warn("Failed to start scheduler", zap.Error(err))
+	}
+	schedulerHandler := handlers.NewSchedulerHandler(sched, logger)
 
 	// Artifacts handler (plans, todos, notes from agents)
 	artifactHandler := handlers.NewArtifactHandler(logger)
@@ -260,6 +327,11 @@ func main() {
 		r.Route("/pi/artifacts", func(r chi.Router) {
 			artifactHandler.RegisterRoutes(r)
 		})
+
+		// Scheduler (CRON/recurring jobs)
+		r.Route("/scheduler", func(r chi.Router) {
+			schedulerHandler.RegisterRoutes(r)
+		})
 	})
 
 	// Serve static files (React frontend)
@@ -310,6 +382,9 @@ func main() {
 
 	// Shutdown computer use handler
 	computerUseHandler.Shutdown()
+
+	// Shutdown scheduler
+	sched.Stop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

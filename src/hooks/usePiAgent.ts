@@ -242,6 +242,15 @@ export function usePiAgent(initialAgentId: string = 'default') {
           };
         }
 
+        case 'pr_merged': {
+          const mergeData = event.data as { prNumber: number; sha: string };
+          return {
+            ...prev,
+            branchName: null,
+            messages: updateLastAssistant(prev.messages, msg => ({ ...msg })),
+          };
+        }
+
         default:
           return prev;
       }
@@ -249,7 +258,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
   }, []);
 
   const sendPrompt = useCallback(
-    async (message: string, project: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean; agentId?: string }) => {
+    async (message: string, project: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean; autoMerge?: boolean; agentId?: string }) => {
       if (abortRef.current) {
         abortRef.current.abort();
       }
@@ -303,6 +312,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
             model: opts?.model,
             thinkingLevel: opts?.thinkingLevel,
             autoBranch: opts?.autoBranch,
+            autoMerge: opts?.autoMerge,
           }),
           signal: controller.signal,
         });

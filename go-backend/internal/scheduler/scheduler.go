@@ -1,0 +1,634 @@
+package scheduler
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/robfig/cron/v3"
+	"go.uber.org/zap"
+)
+
+// ScheduleType defines how a job is scheduled.
+type ScheduleType string
+
+const (
+	ScheduleCron   ScheduleType = "cron"
+	ScheduleEvery  ScheduleType = "every"
+	ScheduleAt     ScheduleType = "at"
+)
+
+// JobStatus tracks the runtime state of a job.
+type JobStatus string
+
+const (
+	StatusIdle    JobStatus = "idle"
+	StatusRunning JobStatus = "running"
+	StatusError   JobStatus = "error"
+	StatusDisabled JobStatus = "disabled"
+)
+
+// Job represents a scheduled job that sends prompts to Pi agents.
+type Job struct {
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description,omitempty"`
+	Project     string       `json:"project"`
+	AgentID     string       `json:"agentId,omitempty"`
+	Message     string       `json:"message"`
+	Model       string       `json:"model,omitempty"`
+	Schedule    ScheduleType `json:"scheduleType"`
+	// Cron expression (e.g. "0 9 * * *" for daily at 9am)
+	CronExpr string `json:"cronExpr,omitempty"`
+	// Fixed interval in seconds
+	EverySeconds int64 `json:"everySeconds,omitempty"`
+	// One-shot time (RFC3339)
+	AtTime string `json:"atTime,omitempty"`
+	// Execution settings
+	AutoBranch bool `json:"autoBranch,omitempty"`
+	AutoMerge  bool `json:"autoMerge,omitempty"`
+	Enabled    bool `json:"enabled"`
+	// Runtime state
+	Status           JobStatus `json:"status"`
+	LastRunAt        time.Time `json:"lastRunAt,omitempty"`
+	LastRunStatus    string    `json:"lastRunStatus,omitempty"`
+	LastError        string    `json:"lastError,omitempty"`
+	NextRunAt        time.Time `json:"nextRunAt,omitempty"`
+	ConsecutiveErrors int      `json:"consecutiveErrors"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+
+	// Internal: cron entry ID
+	cronEntryID cron.EntryID
+}
+
+// JobExecution records a single run of a job.
+type JobExecution struct {
+	ID        string    `json:"id"`
+	JobID     string    `json:"jobId"`
+	StartedAt time.Time `json:"startedAt"`
+	EndedAt   time.Time `json:"endedAt,omitempty"`
+	Status    string    `json:"status"` // "running", "success", "error"
+	Error     string    `json:"error,omitempty"`
+	Output    string    `json:"output,omitempty"`
+}
+
+// PromptSender is a function that sends a prompt to a Pi agent and returns the response text.
+type PromptSender func(ctx context.Context, project, agentID, message, model string, autoBranch, autoMerge bool) (string, error)
+
+// Scheduler manages scheduled jobs.
+type Scheduler struct {
+	jobs          map[string]*Job
+	executions    []*JobExecution
+	cronScheduler *cron.Cron
+	promptSender  PromptSender
+	logger        *zap.Logger
+	storePath     string
+	mu            sync.RWMutex
+	stopCh        chan struct{}
+}
+
+// NewScheduler creates a new scheduler.
+func NewScheduler(storePath string, sender PromptSender, logger *zap.Logger) *Scheduler {
+	return &Scheduler{
+		jobs:          make(map[string]*Job),
+		executions:    make([]*JobExecution, 0),
+		cronScheduler: cron.New(cron.WithSeconds()),
+		promptSender:  sender,
+		logger:        logger,
+		storePath:     storePath,
+		stopCh:        make(chan struct{}),
+	}
+}
+
+// Start loads persisted jobs and starts the scheduler.
+func (s *Scheduler) Start(ctx context.Context) error {
+	if err := s.load(); err != nil {
+		s.logger.Warn("failed to load scheduler state, starting fresh", zap.Error(err))
+	}
+
+	s.cronScheduler.Start()
+
+	// Start interval/at timers
+	go s.runIntervalLoop(ctx)
+
+	s.logger.Info("scheduler started", zap.Int("jobs", len(s.jobs)))
+	return nil
+}
+
+// Stop gracefully stops the scheduler and persists state.
+func (s *Scheduler) Stop() {
+	close(s.stopCh)
+	s.cronScheduler.Stop()
+	s.save()
+	s.logger.Info("scheduler stopped")
+}
+
+// CreateJob creates and schedules a new job.
+func (s *Scheduler) CreateJob(job *Job) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if job.ID == "" {
+		job.ID = fmt.Sprintf("job-%d", time.Now().UnixMilli())
+	}
+	if job.CreatedAt.IsZero() {
+		job.CreatedAt = time.Now()
+	}
+	job.UpdatedAt = time.Now()
+	if job.Enabled {
+		job.Status = StatusIdle
+	} else {
+		job.Status = StatusDisabled
+	}
+
+	// Validate schedule
+	if err := s.validateJob(job); err != nil {
+		return err
+	}
+
+	// Compute next run
+	s.computeNextRun(job)
+
+	// Schedule cron jobs
+	if job.Schedule == ScheduleCron && job.Enabled {
+		entryID, err := s.cronScheduler.AddFunc(job.CronExpr, func() {
+			s.executeJob(job.ID)
+		})
+		if err != nil {
+			return fmt.Errorf("invalid cron expression: %w", err)
+		}
+		job.cronEntryID = entryID
+	}
+
+	s.jobs[job.ID] = job
+	s.save()
+
+	s.logger.Info("job created",
+		zap.String("id", job.ID),
+		zap.String("name", job.Name),
+		zap.String("schedule", string(job.Schedule)),
+	)
+	return nil
+}
+
+// UpdateJob updates an existing job.
+func (s *Scheduler) UpdateJob(jobID string, updates *Job) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.jobs[jobID]
+	if !ok {
+		return fmt.Errorf("job %s not found", jobID)
+	}
+
+	// Remove existing cron entry if present
+	if existing.cronEntryID != 0 {
+		s.cronScheduler.Remove(existing.cronEntryID)
+		existing.cronEntryID = 0
+	}
+
+	// Apply updates
+	if updates.Name != "" {
+		existing.Name = updates.Name
+	}
+	if updates.Description != "" {
+		existing.Description = updates.Description
+	}
+	if updates.Message != "" {
+		existing.Message = updates.Message
+	}
+	if updates.Model != "" {
+		existing.Model = updates.Model
+	}
+	if updates.Project != "" {
+		existing.Project = updates.Project
+	}
+	if updates.AgentID != "" {
+		existing.AgentID = updates.AgentID
+	}
+	if updates.Schedule != "" {
+		existing.Schedule = updates.Schedule
+	}
+	if updates.CronExpr != "" {
+		existing.CronExpr = updates.CronExpr
+	}
+	if updates.EverySeconds > 0 {
+		existing.EverySeconds = updates.EverySeconds
+	}
+	if updates.AtTime != "" {
+		existing.AtTime = updates.AtTime
+	}
+	existing.AutoBranch = updates.AutoBranch
+	existing.AutoMerge = updates.AutoMerge
+	existing.UpdatedAt = time.Now()
+
+	// Validate
+	if err := s.validateJob(existing); err != nil {
+		return err
+	}
+
+	// Re-schedule if enabled
+	if updates.Enabled || existing.Enabled {
+		existing.Enabled = updates.Enabled
+		if existing.Enabled {
+			existing.Status = StatusIdle
+			s.computeNextRun(existing)
+			if existing.Schedule == ScheduleCron {
+				entryID, err := s.cronScheduler.AddFunc(existing.CronExpr, func() {
+					s.executeJob(existing.ID)
+				})
+				if err != nil {
+					return fmt.Errorf("invalid cron expression: %w", err)
+				}
+				existing.cronEntryID = entryID
+			}
+		} else {
+			existing.Status = StatusDisabled
+		}
+	}
+
+	s.save()
+	return nil
+}
+
+// DeleteJob removes a job.
+func (s *Scheduler) DeleteJob(jobID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	job, ok := s.jobs[jobID]
+	if !ok {
+		return fmt.Errorf("job %s not found", jobID)
+	}
+
+	if job.cronEntryID != 0 {
+		s.cronScheduler.Remove(job.cronEntryID)
+	}
+
+	delete(s.jobs, jobID)
+	s.save()
+
+	s.logger.Info("job deleted", zap.String("id", jobID))
+	return nil
+}
+
+// GetJob returns a single job.
+func (s *Scheduler) GetJob(jobID string) (*Job, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	job, ok := s.jobs[jobID]
+	if !ok {
+		return nil, fmt.Errorf("job %s not found", jobID)
+	}
+	return job, nil
+}
+
+// ListJobs returns all jobs.
+func (s *Scheduler) ListJobs() []*Job {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]*Job, 0, len(s.jobs))
+	for _, j := range s.jobs {
+		result = append(result, j)
+	}
+	return result
+}
+
+// ListExecutions returns recent executions, optionally filtered by jobID.
+func (s *Scheduler) ListExecutions(jobID string, limit int) []*JobExecution {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 50
+	}
+
+	result := make([]*JobExecution, 0, limit)
+	for i := len(s.executions) - 1; i >= 0 && len(result) < limit; i-- {
+		if jobID == "" || s.executions[i].JobID == jobID {
+			result = append(result, s.executions[i])
+		}
+	}
+	return result
+}
+
+// TriggerJob manually triggers a job execution.
+func (s *Scheduler) TriggerJob(jobID string) error {
+	s.mu.RLock()
+	_, ok := s.jobs[jobID]
+	s.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("job %s not found", jobID)
+	}
+
+	go s.executeJob(jobID)
+	return nil
+}
+
+// executeJob runs a single job execution.
+func (s *Scheduler) executeJob(jobID string) {
+	s.mu.Lock()
+	job, ok := s.jobs[jobID]
+	if !ok || !job.Enabled {
+		s.mu.Unlock()
+		return
+	}
+
+	// Skip if already running
+	if job.Status == StatusRunning {
+		s.mu.Unlock()
+		s.logger.Debug("job already running, skipping", zap.String("id", jobID))
+		return
+	}
+
+	job.Status = StatusRunning
+	s.mu.Unlock()
+
+	execution := &JobExecution{
+		ID:        fmt.Sprintf("exec-%d", time.Now().UnixMilli()),
+		JobID:     jobID,
+		StartedAt: time.Now(),
+		Status:    "running",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	s.logger.Info("executing job",
+		zap.String("id", jobID),
+		zap.String("name", job.Name),
+		zap.String("project", job.Project),
+	)
+
+	output, err := s.promptSender(ctx, job.Project, job.AgentID, job.Message, job.Model, job.AutoBranch, job.AutoMerge)
+
+	execution.EndedAt = time.Now()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Re-fetch job (may have been modified)
+	job, ok = s.jobs[jobID]
+	if !ok {
+		return
+	}
+
+	if err != nil {
+		execution.Status = "error"
+		execution.Error = err.Error()
+		job.LastRunStatus = "error"
+		job.LastError = err.Error()
+		job.ConsecutiveErrors++
+		if job.ConsecutiveErrors >= 5 {
+			job.Status = StatusError
+			job.Enabled = false
+			s.logger.Error("job disabled after 5 consecutive errors",
+				zap.String("id", jobID),
+				zap.Int("errors", job.ConsecutiveErrors),
+			)
+		} else {
+			job.Status = StatusIdle
+		}
+	} else {
+		execution.Status = "success"
+		execution.Output = truncateStr(output, 5000)
+		job.LastRunStatus = "success"
+		job.LastError = ""
+		job.ConsecutiveErrors = 0
+		job.Status = StatusIdle
+	}
+
+	job.LastRunAt = time.Now()
+	s.computeNextRun(job)
+
+	// Keep last 200 executions
+	s.executions = append(s.executions, execution)
+	if len(s.executions) > 200 {
+		s.executions = s.executions[len(s.executions)-200:]
+	}
+
+	s.save()
+}
+
+// runIntervalLoop handles "every" and "at" schedule types.
+func (s *Scheduler) runIntervalLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.checkIntervalJobs()
+		}
+	}
+}
+
+// checkIntervalJobs checks and executes "every" and "at" jobs that are due.
+func (s *Scheduler) checkIntervalJobs() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+
+	for _, job := range s.jobs {
+		if !job.Enabled || job.Status == StatusRunning {
+			continue
+		}
+
+		switch job.Schedule {
+		case ScheduleEvery:
+			if job.EverySeconds > 0 && !job.NextRunAt.IsZero() && now.After(job.NextRunAt) {
+				go s.executeJob(job.ID)
+				// Compute next run immediately
+				job.NextRunAt = now.Add(time.Duration(job.EverySeconds) * time.Second)
+			}
+		case ScheduleAt:
+			if !job.NextRunAt.IsZero() && now.After(job.NextRunAt) {
+				go s.executeJob(job.ID)
+				// One-shot: disable after execution
+				job.Enabled = false
+				job.Status = StatusDisabled
+			}
+		}
+	}
+}
+
+// computeNextRun sets the NextRunAt field based on schedule type.
+func (s *Scheduler) computeNextRun(job *Job) {
+	now := time.Now()
+
+	switch job.Schedule {
+	case ScheduleCron:
+		schedule, err := cron.ParseStandard(job.CronExpr)
+		if err == nil {
+			job.NextRunAt = schedule.Next(now)
+		}
+	case ScheduleEvery:
+		if job.EverySeconds > 0 {
+			if job.LastRunAt.IsZero() {
+				job.NextRunAt = now.Add(time.Duration(job.EverySeconds) * time.Second)
+			} else {
+				job.NextRunAt = job.LastRunAt.Add(time.Duration(job.EverySeconds) * time.Second)
+				if job.NextRunAt.Before(now) {
+					job.NextRunAt = now.Add(time.Duration(job.EverySeconds) * time.Second)
+				}
+			}
+		}
+	case ScheduleAt:
+		if t, err := time.Parse(time.RFC3339, job.AtTime); err == nil {
+			job.NextRunAt = t
+		}
+	}
+}
+
+// validateJob checks that a job has all required fields.
+func (s *Scheduler) validateJob(job *Job) error {
+	if job.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if job.Project == "" {
+		return fmt.Errorf("project is required")
+	}
+	if job.Message == "" {
+		return fmt.Errorf("message is required")
+	}
+	switch job.Schedule {
+	case ScheduleCron:
+		if job.CronExpr == "" {
+			return fmt.Errorf("cronExpr is required for cron schedule")
+		}
+		if _, err := cron.ParseStandard(job.CronExpr); err != nil {
+			return fmt.Errorf("invalid cron expression: %w", err)
+		}
+	case ScheduleEvery:
+		if job.EverySeconds <= 0 {
+			return fmt.Errorf("everySeconds must be positive")
+		}
+	case ScheduleAt:
+		if job.AtTime == "" {
+			return fmt.Errorf("atTime is required for at schedule")
+		}
+		if _, err := time.Parse(time.RFC3339, job.AtTime); err != nil {
+			return fmt.Errorf("invalid atTime format (use RFC3339): %w", err)
+		}
+	default:
+		return fmt.Errorf("invalid schedule type: %s", job.Schedule)
+	}
+	return nil
+}
+
+// load reads jobs from the store file.
+func (s *Scheduler) load() error {
+	if s.storePath == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(s.storePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var store struct {
+		Jobs       []*Job         `json:"jobs"`
+		Executions []*JobExecution `json:"executions"`
+	}
+	if err := json.Unmarshal(data, &store); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	for _, job := range store.Jobs {
+		job.cronEntryID = 0 // Reset on load
+		s.jobs[job.ID] = job
+
+		// Re-schedule enabled cron jobs
+		if job.Enabled && job.Schedule == ScheduleCron {
+			entryID, err := s.cronScheduler.AddFunc(job.CronExpr, func() {
+				s.executeJob(job.ID)
+			})
+			if err != nil {
+				s.logger.Warn("failed to reschedule cron job",
+					zap.String("id", job.ID),
+					zap.Error(err),
+				)
+				continue
+			}
+			job.cronEntryID = entryID
+		}
+
+		// Compute next run for interval/at jobs if not already set
+		if job.Enabled && !job.NextRunAt.After(now) {
+			s.computeNextRun(job)
+		}
+	}
+	s.executions = store.Executions
+	if s.executions == nil {
+		s.executions = make([]*JobExecution, 0)
+	}
+
+	return nil
+}
+
+// save writes jobs to the store file.
+func (s *Scheduler) save() {
+	if s.storePath == "" {
+		return
+	}
+
+	store := struct {
+		Jobs       []*Job         `json:"jobs"`
+		Executions []*JobExecution `json:"executions"`
+	}{
+		Jobs:       make([]*Job, 0, len(s.jobs)),
+		Executions: s.executions,
+	}
+	for _, j := range s.jobs {
+		store.Jobs = append(store.Jobs, j)
+	}
+
+	data, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		s.logger.Error("failed to marshal scheduler state", zap.Error(err))
+		return
+	}
+
+	// Ensure directory exists
+	dir := filepath.Dir(s.storePath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		s.logger.Error("failed to create scheduler dir", zap.Error(err))
+		return
+	}
+
+	// Atomic write: write to temp file then rename
+	tmpPath := s.storePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		s.logger.Error("failed to write scheduler state", zap.Error(err))
+		return
+	}
+	if err := os.Rename(tmpPath, s.storePath); err != nil {
+		s.logger.Error("failed to rename scheduler state", zap.Error(err))
+		return
+	}
+}
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
+}

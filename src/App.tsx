@@ -10,9 +10,10 @@ import { GitHubConnectModal } from './components/GitHubConnectModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useOrchestrator } from './hooks/useOrchestrator';
 import { useArtifacts } from './hooks/useArtifacts';
+import { SchedulerView } from './components/SchedulerView';
 import { api } from './lib/api';
 import {
-  Box, Settings, Plus, GitBranch, Github, Zap, ChevronDown, ExternalLink,
+  Box, Settings, Plus, GitBranch, Github, Zap, ChevronDown, ExternalLink, Clock,
 } from 'lucide-react';
 
 export default function App() {
@@ -103,6 +104,12 @@ export default function App() {
                     >
                       <Github size={10} /> GitHub {githubUser?.connected ? '(Connected)' : ''}
                     </button>
+                    <button
+                      onClick={() => { setActiveModal('scheduler'); setSettingsOpen(false); }}
+                      className="w-full text-left px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-muted hover:bg-white/5 hover:text-zinc-300 flex items-center gap-2"
+                    >
+                      <Clock size={10} /> Scheduled Jobs
+                    </button>
                   </div>
                 </>
               )}
@@ -142,6 +149,13 @@ export default function App() {
         <CloneModal isOpen={activeModal === 'clone'} onClose={() => setActiveModal(null)} onClone={(url) => api.git.clone(url).then(refreshProjectData)} />
         <AddProjectModal isOpen={activeModal === 'addProject'} onClose={() => setActiveModal(null)} onAdd={(name, path, url) => api.projects.register(name, path, url).then(refreshProjectData)} />
         <GitHubConnectModal isOpen={activeModal === 'githubConnect'} onClose={() => setActiveModal(null)} onConnect={(token) => api.config.connectGitHub(token).then(refreshProjectData)} />
+        {activeModal === 'scheduler' && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="w-[700px] max-h-[80vh] border border-white/10 bg-zinc-950 shadow-2xl flex flex-col">
+              <SchedulerView projects={projects} onClose={() => setActiveModal(null)} />
+            </div>
+          </div>
+        )}
       </div>
     </ErrorBoundary>
   );

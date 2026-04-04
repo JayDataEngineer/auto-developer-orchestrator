@@ -129,6 +129,57 @@ export interface Artifact {
   updatedAt: string;
 }
 
+export interface SchedulerJob {
+  id: string;
+  name: string;
+  description?: string;
+  project: string;
+  agentId?: string;
+  message: string;
+  model?: string;
+  scheduleType: 'cron' | 'every' | 'at';
+  cronExpr?: string;
+  everySeconds?: number;
+  atTime?: string;
+  autoBranch?: boolean;
+  autoMerge?: boolean;
+  enabled: boolean;
+  status: 'idle' | 'running' | 'error' | 'disabled';
+  lastRunAt?: string;
+  lastRunStatus?: string;
+  lastError?: string;
+  nextRunAt?: string;
+  consecutiveErrors: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchedulerExecution {
+  id: string;
+  jobId: string;
+  startedAt: string;
+  endedAt?: string;
+  status: 'running' | 'success' | 'error';
+  error?: string;
+  output?: string;
+}
+
+export interface CreateJobRequest {
+  name: string;
+  description?: string;
+  project: string;
+  agentId?: string;
+  message: string;
+  model?: string;
+  scheduleType: 'cron' | 'every' | 'at';
+  cronExpr?: string;
+  everySeconds?: number;
+  atTime?: string;
+  autoBranch?: boolean;
+  autoMerge?: boolean;
+  enabled?: boolean;
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -285,5 +336,31 @@ export const api = {
       }),
     list: (agentId: string) =>
       apiFetch<{ artifacts: Artifact[] }>(`/api/pi/artifacts?agentId=${encodeURIComponent(agentId)}`),
+  },
+  scheduler: {
+    list: () =>
+      apiFetch<{ jobs: SchedulerJob[] }>('/api/scheduler'),
+    get: (id: string) =>
+      apiFetch<SchedulerJob>(`/api/scheduler/${encodeURIComponent(id)}`),
+    create: (job: CreateJobRequest) =>
+      apiFetch<{ success: boolean; job: SchedulerJob }>('/api/scheduler', {
+        method: 'POST',
+        body: JSON.stringify(job),
+      }),
+    update: (id: string, job: Partial<CreateJobRequest>) =>
+      apiFetch<{ success: boolean; job: SchedulerJob }>(`/api/scheduler/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(job),
+      }),
+    delete: (id: string) =>
+      apiFetch<{ success: boolean }>(`/api/scheduler/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    trigger: (id: string) =>
+      apiFetch<{ success: boolean; message: string }>(`/api/scheduler/${encodeURIComponent(id)}/trigger`, {
+        method: 'POST',
+      }),
+    executions: (id: string) =>
+      apiFetch<{ executions: SchedulerExecution[] }>(`/api/scheduler/${encodeURIComponent(id)}/executions`),
   },
 };

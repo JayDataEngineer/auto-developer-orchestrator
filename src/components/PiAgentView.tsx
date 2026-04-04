@@ -258,6 +258,8 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   // Computer Use Mode state
   const [isBrowserModeActive, setIsBrowserModeActive] = useState(false);
   const [isDesktopModeActive, setIsDesktopModeActive] = useState(false);
+  const [autoBranch, setAutoBranch] = useState(false);
+  const [autoMerge, setAutoMerge] = useState(false);
   const sandboxId = selectedProject ? `sandbox-${selectedProject}-${selectedAgentId}` : '';
 
   useEffect(() => {
@@ -289,7 +291,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
 
   const handleSend = useCallback(() => {
     if (!input.trim() || !selectedProject || state.isStreaming) return;
-    sendPrompt(input.trim(), selectedProject, { agentId: selectedAgentId, model: state.model || 'or-free' });
+    sendPrompt(input.trim(), selectedProject, { agentId: selectedAgentId, model: state.model || 'or-free', autoBranch, autoMerge });
     setInput('');
   }, [input, selectedProject, state.isStreaming, sendPrompt, selectedAgentId]);
 
@@ -518,6 +520,26 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               <button onClick={reset} className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest">
                 <RotateCcw size={10} /> New Task
               </button>
+              <button
+                onClick={() => { setAutoBranch(!autoBranch); if (!autoBranch) setAutoMerge(false); }}
+                className={cn(
+                  "text-[9px] font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
+                  autoBranch ? "text-primary" : "text-muted hover:text-muted-foreground"
+                )}
+              >
+                <GitBranch size={10} /> Auto-Branch
+              </button>
+              {autoBranch && (
+                <button
+                  onClick={() => setAutoMerge(!autoMerge)}
+                  className={cn(
+                    "text-[9px] font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
+                    autoMerge ? "text-primary" : "text-muted hover:text-muted-foreground"
+                  )}
+                >
+                  <GitPullRequest size={10} /> Auto-Merge
+                </button>
+              )}
               <button onClick={() => selectedProject && compact(selectedProject, selectedAgentId)} disabled={state.isStreaming} className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest disabled:opacity-30">
                 <Trash2 size={10} /> Compact
               </button>
