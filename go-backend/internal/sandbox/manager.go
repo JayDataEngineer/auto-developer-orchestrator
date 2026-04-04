@@ -140,17 +140,23 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		projectPath = "/app/projects"
 	}
 
-	// Pull image if not present
-	m.logger.Info("pulling sandbox image", zap.String("image", image))
-	pullResp, err := m.dockerClient.ImagePull(ctx, image, client.ImagePullOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to pull image %s: %w", image, err)
-	}
-	if err := pullResp.Wait(ctx); err != nil {
+	// Pull image if not present locally
+	_, inspectErr := m.dockerClient.ImageInspect(ctx, image)
+	if inspectErr != nil {
+		// Image not found locally, pull it
+		m.logger.Info("pulling sandbox image", zap.String("image", image))
+		pullResp, pullErr := m.dockerClient.ImagePull(ctx, image, client.ImagePullOptions{})
+		if pullErr != nil {
+			return nil, fmt.Errorf("failed to pull image %s: %w", image, pullErr)
+		}
+		if err := pullResp.Wait(ctx); err != nil {
+			pullResp.Close()
+			return nil, fmt.Errorf("image pull failed for %s: %w", image, err)
+		}
 		pullResp.Close()
-		return nil, fmt.Errorf("image pull failed for %s: %w", image, err)
+	} else {
+		m.logger.Info("using local sandbox image", zap.String("image", image))
 	}
-	pullResp.Close()
 
 	// Build environment variables
 	networkAllow := opts.NetworkAllow
