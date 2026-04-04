@@ -321,7 +321,9 @@ func (m *Manager) ListSandboxes() []*Sandbox {
 	return result
 }
 
-// EnableBrowserMode enables lightweight browser mode (Xvfb + Chrome + VNC) for a sandbox
+// EnableBrowserMode enables lightweight browser mode for a sandbox.
+// The sandbox container image already runs Xvfb + Chrome + VNC + socat via supervisord.
+// This method verifies Chrome is up and returns the session info.
 func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*DesktopSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -336,68 +338,29 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 		return sandbox.DesktopSession, nil
 	}
 
-	// Disable any existing mode first
-	if sandbox.Mode != ModeCLI && sandbox.DesktopSession != nil {
-		if err := m.disableModeLocked(ctx, sandboxID); err != nil {
-			m.logger.Warn("failed to disable previous mode", zap.Error(err))
-		}
-	}
+	m.logger.Info("enabling browser mode", zap.String("sandbox_id", sandboxID))
 
-	m.logger.Info("enabling browser mode (live browser via VNC)", zap.String("sandbox_id", sandboxID))
-
-	// Allocate ports
-	m.portMutex.Lock()
-	displayNum, vncPort, cdpPort, novncPort := m.portAllocator.AllocatePorts()
-	m.portMutex.Unlock()
+	// The sandbox container runs Chrome on internal port 9222 (127.0.0.1).
+	// Supervisord runs socat to forward 0.0.0.0:19222 -> 127.0.0.1:9222
+	// so other containers can reach CDP via the Docker network.
+	displayNum := 99
+	vncPort := 5900
+	cdpPort := 19222  // External port (socat-forwarded)
+	novncPort := 6080
 
 	containerName := m.getContainerName(sandboxID)
-	display := fmt.Sprintf(":%d", displayNum)
 
-	// Step 1: Start Xvfb (virtual framebuffer)
-	_, err := m.execInContainer(ctx, containerName, []string{
-		"Xvfb", display, "-screen", "0", "1280x800x24", "-ac", "+extension", "RANDR",
-	}, true)
-	if err != nil {
-		m.portMutex.Lock()
-		m.portAllocator.ReleasePorts(displayNum, vncPort, cdpPort, novncPort)
-		m.portMutex.Unlock()
-		return nil, fmt.Errorf("failed to start Xvfb: %w", err)
-	}
-
-	// Give Xvfb a moment to initialize
-	time.Sleep(500 * time.Millisecond)
-
-	// Step 2: Start x11vnc (VNC server exposing the X display)
-	_, err = m.execInContainer(ctx, containerName, []string{
-		"x11vnc", "-display", display, "-rfbport", fmt.Sprintf("%d", vncPort),
-		"-forever", "-shared", "-nopw", "-bg",
-	}, true)
-	if err != nil {
-		m.logger.Warn("x11vnc start warning", zap.Error(err))
-	}
-
-	// Step 3: Start noVNC (web-based VNC viewer)
-	if novncErr := m.startNoVNC(ctx, containerName, novncPort, vncPort); novncErr != nil {
-		m.logger.Warn("noVNC start failed", zap.Error(novncErr))
-	}
-
-	// Step 4: Start Chrome with CDP
-	_, err = m.execInContainer(ctx, containerName, []string{
-		"google-chrome",
-		"--no-sandbox",
-		"--disable-dev-shm-usage",
-		"--disable-gpu",
-		fmt.Sprintf("--remote-debugging-port=%d", cdpPort),
-		"--window-size=1280,800",
-		"--start-maximized",
-		"--disable-extensions",
-		"--disable-background-networking",
-		"--disable-default-apps",
-		"--disable-sync",
-		fmt.Sprintf("--display=%s", display),
-	}, true)
-	if err != nil {
-		m.logger.Warn("chrome start warning", zap.Error(err))
+	// Wait for Chrome to be ready (supervisord starts it at container boot)
+	for i := 0; i < 10; i++ {
+		output, err := m.execInContainer(ctx, containerName, []string{
+			"wget", "-qO-", "http://127.0.0.1:9222/json/version",
+		}, false)
+		if err == nil && output != "" {
+			m.logger.Info("Chrome CDP ready", zap.String("output", output[:min(len(output), 100)]))
+			break
+		}
+		m.logger.Info("waiting for Chrome CDP", zap.Int("attempt", i+1))
+		time.Sleep(1 * time.Second)
 	}
 
 	session := &DesktopSession{
@@ -418,10 +381,7 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 
 	m.logger.Info("browser mode enabled",
 		zap.String("sandbox_id", sandboxID),
-		zap.Int("display", displayNum),
-		zap.Int("vnc_port", vncPort),
 		zap.Int("cdp_port", cdpPort),
-		zap.Int("novnc_port", novncPort),
 	)
 
 	return session, nil
@@ -506,6 +466,15 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	}, true)
 	if err != nil {
 		m.logger.Warn("chrome start warning", zap.Error(err))
+	}
+
+	// Step 5b: Forward CDP port to 0.0.0.0 via socat
+	_, socatErr := m.execInContainer(ctx, containerName, []string{
+		"socat", fmt.Sprintf("TCP-LISTEN:%d,fork,bind=0.0.0.0", cdpPort),
+		fmt.Sprintf("TCP:127.0.0.1:%d", cdpPort),
+	}, true)
+	if socatErr != nil {
+		m.logger.Warn("socat forward warning", zap.Error(socatErr))
 	}
 
 	session := &DesktopSession{
