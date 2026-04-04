@@ -282,3 +282,50 @@ func (d *Database) ClearConversationHistory(ctx context.Context, project, agentI
 		project, agentID)
 	return err
 }
+
+// ConversationSummary is a summary of a single conversation session.
+type ConversationSummary struct {
+	Project      string `json:"project"`
+	AgentID      string `json:"agentId"`
+	LastMessage  string `json:"lastMessage"`
+	LastAt       string `json:"lastAt"`
+	MessageCount int    `json:"messageCount"`
+}
+
+// GetConversationSummaries returns the latest conversation for each project+agent pair.
+func (d *Database) GetConversationSummaries(ctx context.Context) ([]ConversationSummary, error) {
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT
+			project,
+			agent_id,
+			COALESCE(
+				(SELECT content FROM conversation_messages sub
+				 WHERE sub.project = cm.project AND sub.agent_id = cm.agent_id AND sub.role = 'user'
+				 ORDER BY sub.created_at DESC LIMIT 1),
+				''
+			) AS last_message,
+			MAX(created_at) AS last_at,
+			COUNT(*) AS message_count
+		FROM conversation_messages cm
+		GROUP BY project, agent_id
+		ORDER BY last_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summaries []ConversationSummary
+	for rows.Next() {
+		var s ConversationSummary
+		if err := rows.Scan(&s.Project, &s.AgentID, &s.LastMessage, &s.LastAt, &s.MessageCount); err != nil {
+			return nil, err
+		}
+		// Truncate last message for display
+		if len(s.LastMessage) > 80 {
+			s.LastMessage = s.LastMessage[:80]
+		}
+		summaries = append(summaries, s)
+	}
+	return summaries, rows.Err()
+}

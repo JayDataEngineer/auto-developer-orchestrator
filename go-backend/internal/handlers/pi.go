@@ -57,6 +57,7 @@ func (h *PiHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/active", h.ListActive)
 	r.Post("/agent/spawn", h.SpawnAgent)
 	r.Post("/agent/destroy", h.DestroyAgent)
+	r.Get("/history", h.GetHistory)
 	r.Get("/debug/rpc-test", h.DebugRpcTest)
 }
 
@@ -612,6 +613,30 @@ func (h *PiHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 		msgs = []storage.StoredMessage{}
 	}
 	h.writeJSON(w, http.StatusOK, msgs)
+}
+
+// GetHistory returns conversation summaries grouped by project.
+func (h *PiHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		h.writeJSON(w, http.StatusOK, []storage.ConversationSummary{})
+		return
+	}
+
+	summaries, err := h.db.GetConversationSummaries(r.Context())
+	if err != nil {
+		h.log.Error("Failed to get conversation summaries", zap.Error(err))
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
+		return
+	}
+
+	if summaries == nil {
+		summaries = []storage.ConversationSummary{}
+	}
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"conversations": summaries,
+	})
 }
 
 // GetModels lists available models.

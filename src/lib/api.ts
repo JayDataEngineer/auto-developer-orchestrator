@@ -94,6 +94,14 @@ export interface ActiveSessionsResponse {
   projects: ActiveProject[];
 }
 
+export interface ConversationSummary {
+  project: string;
+  agentId: string;
+  lastMessage: string;
+  lastAt: string;
+  messageCount: number;
+}
+
 // Computer Use types
 export interface LabeledElement {
   id: number;
@@ -293,6 +301,8 @@ export const api = {
       fetch(`/api/pi/compact?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, { method: 'POST' }).then(() => {}),
     getActiveSessions: () =>
       apiFetch<ActiveSessionsResponse>('/api/pi/active'),
+    getHistory: () =>
+      apiFetch<{ conversations: ConversationSummary[] }>('/api/pi/history'),
     spawnAgent: (project: string, agentId?: string) =>
       apiFetch<{ success: boolean; agentId: string }>('/api/pi/agent/spawn', {
         method: 'POST',

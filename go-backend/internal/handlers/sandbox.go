@@ -3,9 +3,14 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
+	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
 
@@ -221,4 +226,76 @@ func getVNCURL(session *sandbox.DesktopSession) string {
 
 func getNoVNCURL(session *sandbox.DesktopSession) string {
 	return fmt.Sprintf("http://localhost:%d/vnc.html", session.NoVNCPort)
+}
+
+// VNCProxy proxies requests to the sandbox's noVNC web server.
+// This allows the frontend to display the sandbox desktop in an iframe.
+func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	_, err := h.manager.GetSandbox(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// The sandbox container runs noVNC on port 6080 (supervisord-managed).
+	// Access via Docker network using container hostname.
+	containerName := fmt.Sprintf("orchestrator-sandbox-%s", id)
+	targetURL := fmt.Sprintf("http://%s:6080", containerName)
+
+	// Build the proxy request path
+	proxyPath := r.URL.Path
+	// Strip the /api/sandbox/{id}/vnc prefix
+	prefix := fmt.Sprintf("/api/sandbox/%s/vnc", id)
+	if strings.HasPrefix(proxyPath, prefix) {
+		proxyPath = strings.TrimPrefix(proxyPath, prefix)
+		if proxyPath == "" {
+			proxyPath = "/vnc.html"
+		}
+	} else {
+		proxyPath = "/vnc.html"
+	}
+
+	target := targetURL + proxyPath
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+
+	h.logger.Debug("VNC proxy", zap.String("target", target))
+
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
+	if err != nil {
+		http.Error(w, "proxy request failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Copy headers (but change Host)
+	for k, vv := range r.Header {
+		for _, v := range vv {
+			proxyReq.Header.Add(k, v)
+		}
+	}
+	proxyReq.Host = containerName
+
+	// Use a short-timeout transport for container network
+	transport := &http.Transport{
+		DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+	}
+	resp, err := transport.RoundTrip(proxyReq)
+	if err != nil {
+		h.logger.Warn("VNC proxy upstream error", zap.Error(err))
+		http.Error(w, fmt.Sprintf("sandbox desktop not reachable: %v", err), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy response headers
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }

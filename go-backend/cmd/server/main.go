@@ -309,6 +309,9 @@ func main() {
 			r.Route("/{id}/computer-use", func(r chi.Router) {
 				computerUseHandler.RegisterRoutes(r)
 			})
+
+			// VNC proxy — serves the sandbox desktop via noVNC
+			r.HandleFunc("/vnc/{id}/*", sandboxHandler.VNCProxy)
 		})
 
 		// Browser automation (Web Sub-Agent)
