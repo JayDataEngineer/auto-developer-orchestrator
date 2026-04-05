@@ -67,8 +67,8 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
   }, [sandboxId]);
 
   // Proxy the noVNC URL through the backend so the browser can reach the container
-  // Pass path so noVNC knows to connect its WebSocket back through the same proxy path
-  const novncProxyUrl = sandboxId ? `/api/sandbox/vnc/${sandboxId}/vnc.html?path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true` : null;
+  // noVNC reads host/port/path from URL params; we route everything through our proxy
+  const novncProxyUrl = sandboxId ? `/api/sandbox/vnc/${sandboxId}/vnc.html?path=/api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&resize=scale` : null;
 
   return (
     <div className="flex h-full bg-black text-slate-100 overflow-hidden">

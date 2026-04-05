@@ -46,9 +46,8 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
   }, [sandboxId]);
 
   // Proxy noVNC through backend since the container isn't directly reachable
-  // Pass path so noVNC connects its WebSocket back through the same proxy
   const novncProxyUrl = (sandboxId: string) =>
-    `/api/sandbox/vnc/${sandboxId}/vnc.html?path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true`;
+    `/api/sandbox/vnc/${sandboxId}/vnc.html?path=/api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&resize=scale`;
 
   const openInNewWindow = (url: string) => {
     window.open(url, '_blank');

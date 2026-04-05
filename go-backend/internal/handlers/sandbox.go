@@ -246,8 +246,8 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Build the proxy request path
 	proxyPath := r.URL.Path
-	// Strip the /api/sandbox/{id}/vnc prefix
-	prefix := fmt.Sprintf("/api/sandbox/%s/vnc", id)
+	// Strip the /api/sandbox/vnc/{id} prefix (matching the chi route)
+	prefix := fmt.Sprintf("/api/sandbox/vnc/%s", id)
 	if strings.HasPrefix(proxyPath, prefix) {
 		proxyPath = strings.TrimPrefix(proxyPath, prefix)
 		if proxyPath == "" {
