@@ -21,12 +21,16 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'notes', label: 'Notes', icon: <StickyNote size={11} /> },
 ];
 
-export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading }: RightPanelProps) {
+export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, artifactsLoading }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('browser');
   const cu = useComputerUse();
   const [urlInput, setUrlInput] = useState('https://');
   const [typeText, setTypeText] = useState('');
   const [selectedElement, setSelectedElement] = useState<number | null>(null);
+
+  // Derive sandboxId from agentId if not passed (e.g. "sandbox-project:agent" or "project:agent")
+  const sandboxId = passedSandboxId
+    || (agentId ? `sandbox-${agentId.replace(':', '-')}` : null);
 
   // Auto-select browser tab when computer use is enabled
   useEffect(() => {

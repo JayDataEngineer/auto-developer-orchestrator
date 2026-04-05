@@ -59,7 +59,30 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 1: Enable browser mode on sandbox (starts Xvfb + Chrome + VNC)
+	// Step 1: Ensure sandbox exists (create if not found)
+	_, err := h.manager.EnableBrowserMode(r.Context(), sandboxID)
+	if err != nil {
+		// Sandbox doesn't exist yet — create it first
+		h.logger.Info("sandbox not found, creating it", zap.String("sandbox_id", sandboxID))
+
+		_, createErr := h.manager.CreateSandbox(r.Context(), sandbox.SandboxOptions{
+			ID: sandboxID,
+		})
+		if createErr != nil {
+			h.logger.Error("failed to create sandbox for computer use", zap.Error(createErr))
+			http.Error(w, fmt.Sprintf("failed to create sandbox: %v", createErr), http.StatusInternalServerError)
+			return
+		}
+
+		// Now enable browser mode
+		_, err = h.manager.EnableBrowserMode(r.Context(), sandboxID)
+		if err != nil {
+			h.logger.Error("failed to enable browser mode after sandbox creation", zap.Error(err))
+			http.Error(w, fmt.Sprintf("failed to enable browser mode: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	session, err := h.manager.EnableBrowserMode(r.Context(), sandboxID)
 	if err != nil {
 		h.logger.Error("failed to enable browser mode for computer use", zap.Error(err))
