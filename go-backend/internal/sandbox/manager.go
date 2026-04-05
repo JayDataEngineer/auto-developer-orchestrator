@@ -596,3 +596,20 @@ func (m *Manager) GetDesktopSession(sandboxID string) (*DesktopSession, error) {
 
 	return session, nil
 }
+
+// GetContainerIP returns the IP address of a sandbox container on the shared network.
+func (m *Manager) GetContainerIP(ctx context.Context, sandboxID string) (string, error) {
+	containerName := m.getContainerName(sandboxID)
+	result, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect container %s: %w", containerName, err)
+	}
+
+	// Get IP from the first non-empty network
+	for _, net := range result.Container.NetworkSettings.Networks {
+		if net.IPAddress.String() != "" {
+			return net.IPAddress.String(), nil
+		}
+	}
+	return "", fmt.Errorf("no IP address found for container %s", containerName)
+}

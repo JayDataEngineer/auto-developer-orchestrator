@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
@@ -98,10 +100,19 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3: Connect via CDP
-	if err := client.Connect(r.Context()); err != nil {
-		h.logger.Error("failed to connect to sandbox Chrome", zap.Error(err))
-		http.Error(w, fmt.Sprintf("failed to connect to Chrome: %v", err), http.StatusInternalServerError)
+	// Step 3: Connect via CDP (with retry — Chrome may need extra seconds)
+	var connectErr error
+	for i := 0; i < 10; i++ {
+		connectErr = client.Connect(r.Context())
+		if connectErr == nil {
+			break
+		}
+		h.logger.Info("waiting for Chrome CDP to be ready", zap.Int("attempt", i+1), zap.Error(connectErr))
+		time.Sleep(1 * time.Second)
+	}
+	if connectErr != nil {
+		h.logger.Error("failed to connect to sandbox Chrome after retries", zap.Error(connectErr))
+		http.Error(w, fmt.Sprintf("failed to connect to Chrome: %v", connectErr), http.StatusInternalServerError)
 		return
 	}
 
@@ -301,11 +312,13 @@ func (h *ComputerUseHandler) getOrCreateClient(sandboxID string, cdpPort int) (*
 		return client, nil
 	}
 
-	// Use the Docker container name as hostname so the Go backend can reach
-	// Chrome via the shared Docker network (not localhost).
-	hostname := fmt.Sprintf("orchestrator-sandbox-%s", sandboxID)
+	// Resolve container IP directly to avoid Docker DNS failures
+	containerIP, err := h.manager.GetContainerIP(context.TODO(), sandboxID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container IP for %s: %w", sandboxID, err)
+	}
 
-	client, err := browser.NewSandboxBrowserClient(cdpPort, hostname, h.logger)
+	client, err := browser.NewSandboxBrowserClient(cdpPort, containerIP, h.logger)
 	if err != nil {
 		return nil, err
 	}

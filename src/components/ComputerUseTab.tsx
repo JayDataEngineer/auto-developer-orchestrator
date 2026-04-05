@@ -66,6 +66,10 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
     }
   }, [sandboxId]);
 
+  // Proxy the noVNC URL through the backend so the browser can reach the container
+  // Pass path so noVNC knows to connect its WebSocket back through the same proxy path
+  const novncProxyUrl = sandboxId ? `/api/sandbox/vnc/${sandboxId}/vnc.html?path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true` : null;
+
   return (
     <div className="flex h-full bg-black text-slate-100 overflow-hidden">
       {/* Left: Narrow agent chat (collapsible) */}
@@ -187,9 +191,9 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
               </div>
             </div>
           )}
-          {sandboxId && session?.novncUrl && (
+          {sandboxId && session && novncProxyUrl && (
             <iframe
-              src={session.novncUrl}
+              src={novncProxyUrl}
               className="w-full h-full border-0"
               title="Desktop VNC Viewer"
             />

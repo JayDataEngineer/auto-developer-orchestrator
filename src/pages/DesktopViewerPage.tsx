@@ -45,6 +45,11 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
       });
   }, [sandboxId]);
 
+  // Proxy noVNC through backend since the container isn't directly reachable
+  // Pass path so noVNC connects its WebSocket back through the same proxy
+  const novncProxyUrl = (sandboxId: string) =>
+    `/api/sandbox/vnc/${sandboxId}/vnc.html?path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true`;
+
   const openInNewWindow = (url: string) => {
     window.open(url, '_blank');
   };
@@ -118,9 +123,9 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
             </div>
           </div>
           <div className="flex-1 bg-zinc-950">
-            {session.novncUrl ? (
+            {session?.novncUrl ? (
               <iframe
-                src={session.novncUrl}
+                src={novncProxyUrl(sandboxId)}
                 className="w-full h-full border-0"
                 title="Browser VNC Viewer"
               />
@@ -195,7 +200,7 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
             </div>
           </div>
           <div className="flex-1 bg-zinc-950">
-            {session.cdpUrl ? (
+            {session?.cdpUrl ? (
               <iframe
                 src={session.cdpUrl}
                 className="w-full h-full border-0"
@@ -241,9 +246,9 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
             </div>
           </div>
           <div className="flex-1 bg-zinc-950">
-            {session.novncUrl ? (
+            {session?.novncUrl ? (
               <iframe
-                src={session.novncUrl}
+                src={novncProxyUrl(sandboxId)}
                 className="w-full h-full border-0"
                 title="VNC Desktop Viewer"
               />

@@ -230,6 +230,7 @@ func getNoVNCURL(session *sandbox.DesktopSession) string {
 
 // VNCProxy proxies requests to the sandbox's noVNC web server.
 // This allows the frontend to display the sandbox desktop in an iframe.
+// Handles both HTTP (for vnc.html page) and WebSocket (for screen streaming).
 func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
@@ -239,10 +240,9 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The sandbox container runs noVNC on port 6080 (supervisord-managed).
+	// The sandbox container runs noVNC/websockify on port 6080.
 	// Access via Docker network using container hostname.
 	containerName := fmt.Sprintf("orchestrator-sandbox-%s", id)
-	targetURL := fmt.Sprintf("http://%s:6080", containerName)
 
 	// Build the proxy request path
 	proxyPath := r.URL.Path
@@ -257,13 +257,20 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 		proxyPath = "/vnc.html"
 	}
 
-	target := targetURL + proxyPath
+	target := fmt.Sprintf("http://%s:6080%s", containerName, proxyPath)
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
 
 	h.logger.Debug("VNC proxy", zap.String("target", target))
 
+	// Check for WebSocket upgrade
+	if r.Header.Get("Upgrade") == "websocket" {
+		h.handleWebSocket(w, r, containerName, proxyPath)
+		return
+	}
+
+	// Regular HTTP proxy
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
 	if err != nil {
 		http.Error(w, "proxy request failed", http.StatusInternalServerError)
@@ -298,4 +305,63 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+}
+
+// handleWebSocket takes over the HTTP connection and proxies raw TCP to websockify.
+// This is needed because noVNC uses WebSocket for the actual VNC screen stream.
+func (h *SandboxHandler) handleWebSocket(w http.ResponseWriter, r *http.Request, containerName string, path string) {
+	// Hijack the connection
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+		return
+	}
+	conn, _, err := hijacker.Hijack()
+	if err != nil {
+		h.logger.Error("failed to hijack connection", zap.Error(err))
+		http.Error(w, "hijack failed", http.StatusInternalServerError)
+		return
+	}
+	defer conn.Close()
+
+	// Connect to the sandbox container's websockify
+	targetAddr := fmt.Sprintf("%s:6080", containerName)
+	targetConn, err := net.DialTimeout("tcp", targetAddr, 5*time.Second)
+	if err != nil {
+		h.logger.Error("failed to connect to websockify", zap.Error(err))
+		return
+	}
+	defer targetConn.Close()
+
+	// Rebuild the original request and send it to websockify
+	// We need to reconstruct the HTTP request that the client was trying to make
+	reqPath := path
+	if r.URL.RawQuery != "" {
+		reqPath = reqPath + "?" + r.URL.RawQuery
+	}
+	requestLine := fmt.Sprintf("%s %s %s\r\n", r.Method, reqPath, r.Proto)
+	targetConn.Write([]byte(requestLine))
+	targetConn.Write([]byte(fmt.Sprintf("Host: %s\r\n", containerName)))
+	// Forward all original headers
+	for k, vv := range r.Header {
+		for _, v := range vv {
+			targetConn.Write([]byte(fmt.Sprintf("%s: %s\r\n", k, v)))
+		}
+	}
+	targetConn.Write([]byte("\r\n"))
+
+	// Bidirectional pipe — proxy data between client and target
+	done := make(chan struct{}, 2)
+	go func() {
+		io.Copy(conn, targetConn)
+		done <- struct{}{}
+	}()
+	go func() {
+		io.Copy(targetConn, conn)
+		done <- struct{}{}
+	}()
+
+	// Wait for one side to close, then cleanup
+	<-done
+	h.logger.Debug("VNC WebSocket proxy connection closed", zap.String("sandbox_id", chi.URLParam(r, "id")))
 }
