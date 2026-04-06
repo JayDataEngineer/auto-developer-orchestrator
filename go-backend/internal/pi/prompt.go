@@ -88,12 +88,21 @@ func (b *SystemPromptBuilder) Build() string {
 		sections = append(sections, b.buildSubAgentAvailability())
 	}
 
-	// 9. Computer use mode (only if sandbox is available)
+	// 8. Hooks and self-correction
+	sections = append(sections, buildHooksSection())
+
+	// 9. MCP tools (if available)
+	mcpTools := b.buildMCPToolsSection()
+	if mcpTools != "" {
+		sections = append(sections, mcpTools)
+	}
+
+	// 10. Computer use mode (only if sandbox is available)
 	if b.SandboxID != "" {
 		sections = append(sections, b.buildComputerUseSection())
 	}
 
-	// 9. Appended sections — any additional context
+	// 11. Appended sections — any additional context
 	for _, s := range b.AppendSections {
 		sections = append(sections, s)
 	}
@@ -400,6 +409,47 @@ curl "http://localhost:%s/api/pi/subagent/list?parentAgentId=YOUR_AGENT_ID"
 - You can spawn up to 3 sub-agents concurrently.
 - Always check the result before acting on it.
 - Prefer `+"`"+`explore`+"`"+` for read-only analysis and `+"`"+`code`+"`"+` for modifications.`, port, port, port, port, port)
+}
+
+// buildHooksSection describes the hook system to the agent
+func buildHooksSection() string {
+	return `# Hooks and Self-Correction
+
+Hooks are scripts that run before, after, or on failure of tool execution. They enable self-correction and validation.
+
+- **Pre-tool-use hooks** can validate your tool input before it runs. They may modify your input, deny the tool, or allow it unchanged.
+- **Post-tool-use hooks** run after successful execution. They may add feedback about the result.
+- **On-tool-failure hooks** run when a tool fails. They may suggest retrying with different parameters.
+
+If a hook denies a tool, you will receive feedback explaining why. Adjust your approach and try again.
+If a hook provides feedback after execution, incorporate it into your next step.
+If a tool fails and a failure hook suggests a retry, use the suggested parameters.`
+}
+
+// buildMCPToolsSection adds MCP tools to the system prompt
+func (b *SystemPromptBuilder) buildMCPToolsSection() string {
+	port := b.ServerPort
+	if port == "" {
+		port = "3847"
+	}
+
+	return fmt.Sprintf(`# MCP Tools
+
+You have access to MCP (Model Context Protocol) servers that provide additional tools.
+These servers are configured in `+"`.pi/mcp-servers.json`"+`.
+
+To list available MCP tools, check the MCP server status via the orchestrator API:
+`+"```"+`bash
+curl http://localhost:%s/api/pi/mcp/tools
+`+"```"+`
+
+To call an MCP tool:
+`+"```"+`bash
+curl -X POST http://localhost:%s/api/pi/mcp/call -d '{"server":"server-name","tool":"tool-name","args":{"key":"value"}}'
+`+"```"+`
+
+MCP tools appear alongside your regular tools. Use them when their capabilities match the task.`,
+		port, port)
 }
 
 // buildComputerUseSection generates instructions for the main agent to delegate

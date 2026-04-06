@@ -60,6 +60,21 @@ type PiClient struct {
 
 	// Custom system prompt — if set, used instead of SystemPromptBuilder
 	customSystemPrompt string
+
+	// Hook system for self-healing
+	hookManager *HookManager
+
+	// Turn tracker for multi-tool orchestration
+	turnTracker *TurnTracker
+
+	// Structured output retry
+	retry *StructuredOutputRetry
+
+	// MCP client for external tool servers
+	mcpClient *MCPClient
+
+	// Allowed tools (for sub-agent restrictions)
+	allowedTools map[string]bool
 }
 
 // NewPiClient creates and starts a new Pi subprocess for the given project directory.
@@ -91,6 +106,8 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger, sandboxM
 		cancel()
 		return nil, fmt.Errorf("failed to start pi: %w", err)
 	}
+
+	c.initComponents()
 
 	return c, nil
 }
@@ -125,7 +142,43 @@ func NewPiClientWithPrompt(projectDir string, agentId string, systemPrompt strin
 		return nil, fmt.Errorf("failed to start pi: %w", err)
 	}
 
+	c.initComponents()
+
 	return c, nil
+}
+
+// initComponents sets up hooks, turn tracking, retry, and MCP
+func (c *PiClient) initComponents() {
+	hooksDir := filepath.Join(c.projectDir, ".pi", "hooks")
+	c.hookManager = NewHookManager(hooksDir, c.logger)
+	c.turnTracker = NewTurnTracker(c.logger.With(zap.String("component", "turn_tracker")))
+	c.retry = NewStructuredOutputRetry(2, c.logger.With(zap.String("component", "retry")))
+	c.mcpClient = NewMCPClient(c.logger.With(zap.String("component", "mcp")))
+
+	// Start MCP servers from .pi/mcp-servers.json
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := c.mcpClient.StartMCPServers(ctx, c.projectDir); err != nil {
+			c.logger.Warn("MCP servers init failed", zap.Error(err))
+		}
+	}()
+}
+
+// SetAllowedTools restricts which tools this client can execute
+func (c *PiClient) SetAllowedTools(tools []string) {
+	c.allowedTools = make(map[string]bool, len(tools))
+	for _, t := range tools {
+		c.allowedTools[t] = true
+	}
+}
+
+// IsToolAllowed returns true if the tool is allowed (or no restrictions set)
+func (c *PiClient) IsToolAllowed(toolName string) bool {
+	if c.allowedTools == nil {
+		return true
+	}
+	return c.allowedTools[toolName]
 }
 
 // start launches the Pi subprocess inside an OpenShell sandbox.
@@ -492,6 +545,11 @@ func (c *PiClient) Close() error {
 	c.mu.Lock()
 	c.running = false
 	c.mu.Unlock()
+
+	// Close MCP servers
+	if c.mcpClient != nil {
+		c.mcpClient.CloseAll()
+	}
 
 	// Destroy sandbox if it exists
 	if c.sandboxManager != nil && c.sandboxObj != nil {
