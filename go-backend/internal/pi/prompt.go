@@ -88,24 +88,18 @@ func (b *SystemPromptBuilder) Build() string {
 		sections = append(sections, b.buildSubAgentAvailability())
 	}
 
-	// 8. Hooks and self-correction
-	sections = append(sections, buildHooksSection())
-
-	// 9. Todo list and scratch pad
-	sections = append(sections, b.buildTodosSection())
-
-	// 10. MCP tools (if available)
+	// 8. MCP tools (if available)
 	mcpTools := b.buildMCPToolsSection()
 	if mcpTools != "" {
 		sections = append(sections, mcpTools)
 	}
 
-	// 11. Computer use mode (only if sandbox is available)
+	// 9. Computer use mode (only if sandbox is available)
 	if b.SandboxID != "" {
 		sections = append(sections, b.buildComputerUseSection())
 	}
 
-	// 12. Appended sections — any additional context
+	// 10. Appended sections — any additional context
 	for _, s := range b.AppendSections {
 		sections = append(sections, s)
 	}

@@ -61,15 +61,6 @@ type PiClient struct {
 	// Custom system prompt — if set, used instead of SystemPromptBuilder
 	customSystemPrompt string
 
-	// Hook system for self-healing
-	hookManager *HookManager
-
-	// Turn tracker for multi-tool orchestration
-	turnTracker *TurnTracker
-
-	// Structured output retry
-	retry *StructuredOutputRetry
-
 	// MCP client for external tool servers
 	mcpClient *MCPClient
 
@@ -108,6 +99,7 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger, sandboxM
 	}
 
 	c.initComponents()
+	c.installExtensions()
 
 	return c, nil
 }
@@ -143,16 +135,13 @@ func NewPiClientWithPrompt(projectDir string, agentId string, systemPrompt strin
 	}
 
 	c.initComponents()
+	c.installExtensions()
 
 	return c, nil
 }
 
 // initComponents sets up hooks, turn tracking, retry, and MCP
 func (c *PiClient) initComponents() {
-	hooksDir := filepath.Join(c.projectDir, ".pi", "hooks")
-	c.hookManager = NewHookManager(hooksDir, c.logger)
-	c.turnTracker = NewTurnTracker(c.logger.With(zap.String("component", "turn_tracker")))
-	c.retry = NewStructuredOutputRetry(2, c.logger.With(zap.String("component", "retry")))
 	c.mcpClient = NewMCPClient(c.logger.With(zap.String("component", "mcp")))
 
 	// Start MCP servers from .pi/mcp-servers.json
@@ -163,6 +152,83 @@ func (c *PiClient) initComponents() {
 			c.logger.Warn("MCP servers init failed", zap.Error(err))
 		}
 	}()
+}
+
+// installExtensions copies built-in extensions to the project's .pi/extensions/ directory
+func (c *PiClient) installExtensions() error {
+	extensionsDir := filepath.Join(c.projectDir, ".pi", "extensions")
+	if err := os.MkdirAll(extensionsDir, 0755); err != nil {
+		return fmt.Errorf("create extensions dir: %w", err)
+	}
+
+	// Extension files to install (source is embedded in the binary at build time)
+	// For now, extensions are loaded from the orchestrator's own extensions directory
+	orchestratorExtDir := filepath.Join(c.findOrchestratorRoot(), "go-backend", "internal", "pi", "extensions")
+
+	extFiles := []string{
+		"computer-use.ts",
+		"todos.ts",
+		"hooks.ts",
+		"mcp-bridge.ts",
+	}
+
+	for _, name := range extFiles {
+		srcPath := filepath.Join(orchestratorExtDir, name)
+		dstPath := filepath.Join(extensionsDir, name)
+
+		// Skip if destination already exists and is newer
+		dstStat, err := os.Stat(dstPath)
+		if err == nil {
+			srcStat, err := os.Stat(srcPath)
+			if err == nil && !srcStat.ModTime().After(dstStat.ModTime()) {
+				continue // destination is up to date
+			}
+		}
+
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			c.logger.Warn("Extension source not found, skipping",
+				zap.String("file", srcPath),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		if err := os.WriteFile(dstPath, data, 0644); err != nil {
+			c.logger.Warn("Failed to install extension",
+				zap.String("file", name),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		c.logger.Info("Installed Pi extension", zap.String("file", name))
+	}
+
+	return nil
+}
+
+// findOrchestratorRoot finds the root of the orchestrator project
+// by walking up from the current working directory looking for go.mod
+func (c *PiClient) findOrchestratorRoot() string {
+	// Try common locations
+	candidates := []string{
+		".",
+		"..",
+		"../..",
+		filepath.Dir(os.Args[0]),
+	}
+
+	for _, candidate := range candidates {
+		if _, err := os.Stat(filepath.Join(candidate, "go.mod")); err == nil {
+			abs, _ := filepath.Abs(candidate)
+			return abs
+		}
+	}
+
+	// Fallback: current directory
+	abs, _ := filepath.Abs(".")
+	return abs
 }
 
 // SetAllowedTools restricts which tools this client can execute

@@ -513,8 +513,3 @@ func (mc *MCPClient) StartMCPServers(ctx context.Context, projectDir string) err
 func (c *PiClient) GetMCPClient() *MCPClient {
 	return c.mcpClient
 }
-
-// GetHookManager returns the hook manager for direct access
-func (c *PiClient) GetHookManager() *HookManager {
-	return c.hookManager
-}
