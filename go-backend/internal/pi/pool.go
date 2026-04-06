@@ -174,6 +174,35 @@ func (p *PiPool) cleanupIdle() {
 	}
 }
 
+// RegisterIfAbsent registers an existing PiClient in the pool if not already present.
+// This allows sub-agents (created outside the pool) to be reachable via /api/pi/prompt
+// for multi-turn conversations.
+func (p *PiPool) RegisterIfAbsent(projectPath, agentId string, client *PiClient) (*PiClient, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	key := compositeKey(projectPath, agentId)
+
+	if existing, ok := p.clients[key]; ok {
+		if existing.IsRunning() {
+			return existing, nil
+		}
+		existing.Close()
+		delete(p.clients, key)
+	}
+
+	if p.countForProjectLocked(projectPath) >= maxAgentsPerProject {
+		return nil, fmt.Errorf("max agents (%d) reached for project %s", maxAgentsPerProject, filepath.Base(projectPath))
+	}
+
+	p.clients[key] = client
+	p.logger.Info("Registered external PiClient in pool",
+		zap.String("project", projectPath),
+		zap.String("agentId", agentId),
+	)
+	return client, nil
+}
+
 // ListActive returns paths of all projects with active Pi processes.
 func (p *PiPool) ListActive() []string {
 	p.mu.Lock()

@@ -121,6 +121,16 @@ func (m *SubAgentManager) Spawn(ctx context.Context, cfg SubAgentConfig) (string
 	m.agents[cfg.AgentID] = inst
 	m.children[cfg.ParentID] = append(m.children[cfg.ParentID], cfg.AgentID)
 
+	// Register the sub-agent's PiClient in the pool so follow-up prompts
+	// via /api/pi/prompt (with the sub-agent's agentId) reuse the same client
+	// instead of spawning a new one. This enables multi-turn sub-agent conversations.
+	if _, err := m.pool.RegisterIfAbsent(cfg.ProjectDir, cfg.AgentID, client); err != nil {
+		m.logger.Warn("Failed to register sub-agent in pool (non-fatal)",
+			zap.String("subAgentId", cfg.AgentID),
+			zap.Error(err),
+		)
+	}
+
 	m.logger.Info("Sub-agent spawned",
 		zap.String("subAgentId", cfg.AgentID),
 		zap.String("type", string(cfg.Type)),
