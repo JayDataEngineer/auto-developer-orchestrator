@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Globe, FileText, CheckSquare, StickyNote, Loader, Monitor } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Globe, FileText, CheckSquare, StickyNote, Loader, Monitor,
+  ChevronLeft, ChevronRight, ExternalLink
+} from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Artifact } from '../lib/api';
 import { useComputerUse } from '../hooks/useComputerUse';
@@ -12,38 +15,108 @@ interface RightPanelProps {
   artifactsLoading: boolean;
 }
 
-type Tab = 'browser' | 'plan' | 'todo' | 'notes';
+// Artifact section with navigation
+interface ArtifactSectionProps {
+  title: string;
+  icon: React.ReactNode;
+  items: Artifact[];
+  currentIndex: number;
+  onNavigate: (dir: -1 | 1) => void;
+  loading: boolean;
+  emptyMessage: string;
+}
 
-const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'browser', label: 'Browser', icon: <Globe size={11} /> },
-  { id: 'plan', label: 'Plan', icon: <FileText size={11} /> },
-  { id: 'todo', label: 'Todo', icon: <CheckSquare size={11} /> },
-  { id: 'notes', label: 'Notes', icon: <StickyNote size={11} /> },
-];
+function ArtifactSection({ title, icon, items, currentIndex, onNavigate, loading, emptyMessage }: ArtifactSectionProps) {
+  const current = items[currentIndex];
+
+  return (
+    <div className="border-b border-white/5">
+      {/* Section header with navigation */}
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950/30">
+        <span className="text-muted-foreground">{icon}</span>
+        <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+          {title}
+        </span>
+        {items.length > 1 && (
+          <>
+            <div className="flex-1" />
+            <button
+              onClick={() => onNavigate(-1)}
+              disabled={currentIndex === 0}
+              className="p-0.5 text-zinc-500 hover:text-zinc-300 disabled:opacity-20 disabled:hover:text-zinc-500 transition-colors"
+            >
+              <ChevronLeft size={12} />
+            </button>
+            <span className="text-[9px] font-mono text-muted-foreground min-w-[24px] text-center">
+              {currentIndex + 1}/{items.length}
+            </span>
+            <button
+              onClick={() => onNavigate(1)}
+              disabled={currentIndex === items.length - 1}
+              className="p-0.5 text-zinc-500 hover:text-zinc-300 disabled:opacity-20 disabled:hover:text-zinc-500 transition-colors"
+            >
+              <ChevronRight size={12} />
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Content */}
+      <div className="max-h-72 overflow-y-auto">
+        {loading && !current ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader size={14} className="animate-spin text-muted-foreground" />
+          </div>
+        ) : current ? (
+          <div className="p-3">
+            <h4 className="text-[10px] font-medium text-zinc-300 mb-2">{current.title}</h4>
+            <ArtifactView artifact={current} />
+          </div>
+        ) : (
+          <div className="p-6 text-center">
+            <p className="text-[10px] font-mono text-muted-foreground opacity-50">{emptyMessage}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, artifactsLoading }: RightPanelProps) {
-  const [activeTab, setActiveTab] = useState<Tab>('browser');
   const cu = useComputerUse();
   const [urlInput, setUrlInput] = useState('https://');
   const [typeText, setTypeText] = useState('');
   const [selectedElement, setSelectedElement] = useState<number | null>(null);
 
-  // Derive sandboxId from agentId if not passed (e.g. "sandbox-project:agent" or "project:agent")
+  // Artifact navigation indices
+  const [artifactIdx, setArtifactIdx] = useState({ plan: 0, todo: 0, notes: 0 });
+
   const sandboxId = passedSandboxId
     || (agentId ? `sandbox-${agentId.replace(':', '-')}` : null);
 
-  // Auto-select browser tab when computer use is enabled
+  // Group artifacts by type (in order of creation)
+  const plans = artifacts.filter(a => a.type === 'plan');
+  const todos = artifacts.filter(a => a.type === 'todo');
+  const notes = artifacts.filter(a => a.type === 'notes');
+
+  // Clamp indices when artifacts change
   useEffect(() => {
-    if (cu.enabled) setActiveTab('browser');
-  }, [cu.enabled]);
+    setArtifactIdx(prev => ({
+      plan: Math.min(prev.plan, Math.max(0, plans.length - 1)),
+      todo: Math.min(prev.todo, Math.max(0, todos.length - 1)),
+      notes: Math.min(prev.notes, Math.max(0, notes.length - 1)),
+    }));
+  }, [plans.length, todos.length, notes.length]);
 
-  const hasPlan = artifacts.some(a => a.type === 'plan');
-  const hasTodo = artifacts.some(a => a.type === 'todo');
-  const hasNotes = artifacts.some(a => a.type === 'notes');
-
-  const latestPlan = artifacts.filter(a => a.type === 'plan').pop();
-  const latestTodo = artifacts.filter(a => a.type === 'todo').pop();
-  const latestNotes = artifacts.filter(a => a.type === 'notes').pop();
+  const navigateArtifact = useCallback((type: 'plan' | 'todo' | 'notes', dir: -1 | 1) => {
+    setArtifactIdx(prev => {
+      const items = type === 'plan' ? plans : type === 'todo' ? todos : notes;
+      return {
+        ...prev,
+        [type]: Math.max(0, Math.min(items.length - 1, prev[type] + dir)),
+      };
+    });
+  }, [plans.length, todos.length, notes.length]);
 
   const handleEnableCU = () => {
     if (sandboxId) cu.enableComputerUse(sandboxId);
@@ -76,82 +149,84 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
 
   return (
     <div className="w-96 border-l border-white/5 flex flex-col bg-black shrink-0">
-      {/* Tab bar */}
-      <div className="flex border-b border-white/5">
-        {TABS.map(tab => {
-          const hasContent = tab.id === 'browser'
-            ? cu.enabled
-            : tab.id === 'plan' ? hasPlan
-            : tab.id === 'todo' ? hasTodo
-            : hasNotes;
-
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[9px] font-mono uppercase tracking-widest transition-colors relative',
-                activeTab === tab.id
-                  ? 'text-primary bg-primary/5'
-                  : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-              )}
-            >
-              {tab.icon}
-              {tab.label}
-              {hasContent && (
-                <div className="absolute top-1.5 right-[calc(50%-16px)] w-1 h-1 rounded-full bg-primary" />
-              )}
-            </button>
-          );
-        })}
+      {/* Header */}
+      <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
+        <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground">
+          Artifacts
+        </span>
+        <div className="flex-1" />
+        {cu.enabled && (
+          <button
+            onClick={() => {
+              if (sandboxId) {
+                window.open(`/api/sandbox/vnc/${sandboxId}/vnc.html`, '_blank', 'width=1280,height=720');
+              }
+            }}
+            disabled={!sandboxId}
+            className="flex items-center gap-1 text-[8px] font-mono text-muted hover:text-zinc-300 transition-colors"
+          >
+            <Monitor size={9} /> Desktop
+          </button>
+        )}
       </div>
 
-      {/* Tab content */}
+      {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {activeTab === 'browser' && (
-          <BrowserTab
-            cu={cu}
-            sandboxId={sandboxId}
-            urlInput={urlInput}
-            setUrlInput={setUrlInput}
-            typeText={typeText}
-            setTypeText={setTypeText}
-            selectedElement={selectedElement}
-            setSelectedElement={setSelectedElement}
-            onNavigate={handleNavigate}
-            onElementClick={handleElementClick}
-            onType={handleType}
-            onEnable={handleEnableCU}
-          />
-        )}
-        {activeTab === 'plan' && (
-          <ArtifactTab
-            artifact={latestPlan}
-            loading={artifactsLoading}
-            emptyMessage="No plan yet. The agent will create one when planning implementation."
-          />
-        )}
-        {activeTab === 'todo' && (
-          <ArtifactTab
-            artifact={latestTodo}
-            loading={artifactsLoading}
-            emptyMessage="No todo list yet. The agent will create one when breaking down tasks."
-          />
-        )}
-        {activeTab === 'notes' && (
-          <ArtifactTab
-            artifact={latestNotes}
-            loading={artifactsLoading}
-            emptyMessage="No notes yet. The agent will create notes for research findings."
-          />
-        )}
+        {/* Plans */}
+        <ArtifactSection
+          title="Plans"
+          icon={<FileText size={11} />}
+          items={plans}
+          currentIndex={artifactIdx.plan}
+          onNavigate={(dir) => navigateArtifact('plan', dir)}
+          loading={artifactsLoading && plans.length === 0}
+          emptyMessage="No plan yet. The agent will create one when planning implementation."
+        />
+
+        {/* Todos */}
+        <ArtifactSection
+          title="Todos"
+          icon={<CheckSquare size={11} />}
+          items={todos}
+          currentIndex={artifactIdx.todo}
+          onNavigate={(dir) => navigateArtifact('todo', dir)}
+          loading={artifactsLoading && todos.length === 0}
+          emptyMessage="No todo list yet. The agent will create one when breaking down tasks."
+        />
+
+        {/* Notes */}
+        <ArtifactSection
+          title="Notes"
+          icon={<StickyNote size={11} />}
+          items={notes}
+          currentIndex={artifactIdx.notes}
+          onNavigate={(dir) => navigateArtifact('notes', dir)}
+          loading={artifactsLoading && notes.length === 0}
+          emptyMessage="No notes yet. The agent will create notes for research findings."
+        />
+
+        {/* Browser / Computer Use tools */}
+        <BrowserTools
+          cu={cu}
+          sandboxId={sandboxId}
+          urlInput={urlInput}
+          setUrlInput={setUrlInput}
+          typeText={typeText}
+          setTypeText={setTypeText}
+          selectedElement={selectedElement}
+          setSelectedElement={setSelectedElement}
+          onNavigate={handleNavigate}
+          onElementClick={handleElementClick}
+          onType={handleType}
+          onEnable={handleEnableCU}
+        />
       </div>
     </div>
   );
 }
 
-// Browser tab content
-function BrowserTab({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeText, selectedElement, setSelectedElement, onNavigate, onElementClick, onType, onEnable }: {
+// Browser tools section (always visible at bottom)
+function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeText, selectedElement, setSelectedElement, onNavigate, onElementClick, onType, onEnable }: {
   cu: ReturnType<typeof useComputerUse>;
   sandboxId: string | null;
   urlInput: string;
@@ -167,60 +242,56 @@ function BrowserTab({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeTex
 }) {
   if (!cu.enabled) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-4">
-        <Globe size={32} className="text-muted-foreground opacity-20" />
-        <div className="space-y-2">
-          <p className="text-[10px] font-mono text-muted-foreground">
-            Computer Use is not enabled
-          </p>
-          <button
-            onClick={onEnable}
-            disabled={!sandboxId || cu.loading}
-            className="px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
-          >
-            {cu.loading ? 'Starting...' : 'Enable Computer Use'}
-          </button>
+      <div className="border-b border-white/5 p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Globe size={11} className="text-muted-foreground" />
+          <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+            Computer Use
+          </span>
         </div>
+        <button
+          onClick={onEnable}
+          disabled={!sandboxId || cu.loading}
+          className="px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
+        >
+          {cu.loading ? 'Starting...' : 'Enable Computer Use'}
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="border-b border-white/5">
+      {/* Section header */}
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950/30">
+        <Globe size={11} className="text-muted-foreground" />
+        <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+          Browser
+        </span>
+      </div>
+
       {/* Toolbar */}
-      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-black/50">
+      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-black/30">
         <button
           onClick={cu.takeScreenshot}
           disabled={cu.loading}
-          className="px-2 py-1 text-[9px] font-mono uppercase tracking-widest bg-white/5 text-muted hover:text-zinc-300 hover:bg-white/10 disabled:opacity-30 transition-colors"
+          className="px-2 py-1 text-[8px] font-mono uppercase tracking-widest bg-white/5 text-muted hover:text-zinc-300 hover:bg-white/10 disabled:opacity-30 transition-colors"
         >
-          {cu.loading ? <Loader size={10} className="animate-spin" /> : 'Screenshot'}
+          {cu.loading ? <Loader size={9} className="animate-spin" /> : 'Screenshot'}
         </button>
         <button
           onClick={cu.getSnapshot}
           disabled={cu.loading}
-          className="px-2 py-1 text-[9px] font-mono uppercase tracking-widest bg-white/5 text-muted hover:text-zinc-300 hover:bg-white/10 disabled:opacity-30 transition-colors"
+          className="px-2 py-1 text-[8px] font-mono uppercase tracking-widest bg-white/5 text-muted hover:text-zinc-300 hover:bg-white/10 disabled:opacity-30 transition-colors"
         >
           Elements
-        </button>
-        <button
-          onClick={() => {
-            if (sandboxId) {
-              window.open(`/api/sandbox/vnc/${sandboxId}/vnc.html`, '_blank', 'width=1280,height=720');
-            }
-          }}
-          disabled={!sandboxId}
-          className="px-2 py-1 text-[9px] font-mono uppercase tracking-widest bg-white/5 text-muted hover:text-zinc-300 hover:bg-white/10 disabled:opacity-30 transition-colors flex items-center gap-1"
-        >
-          <Monitor size={10} />
-          Desktop
         </button>
         <div className="flex-1" />
         <button
           onClick={cu.disableComputerUse}
-          className="px-2 py-1 text-[9px] font-mono uppercase tracking-widest text-red-400/50 hover:text-red-400 hover:bg-red-400/5 transition-colors"
+          className="px-2 py-1 text-[8px] font-mono uppercase tracking-widest text-red-400/50 hover:text-red-400 hover:bg-red-400/5 transition-colors"
         >
-          Disable
+          Off
         </button>
       </div>
 
@@ -231,15 +302,15 @@ function BrowserTab({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeTex
           value={urlInput}
           onChange={e => setUrlInput(e.target.value)}
           placeholder="URL..."
-          className="flex-1 bg-zinc-900 border border-white/5 px-2 py-1 text-[10px] font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-primary/40"
+          className="flex-1 bg-zinc-900 border border-white/5 px-2 py-0.5 text-[9px] font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-primary/40"
         />
-        <button type="submit" className="px-2 py-1 bg-primary/20 text-primary text-[9px] font-mono uppercase tracking-widest hover:bg-primary/30 transition-colors">
+        <button type="submit" className="px-2 py-0.5 bg-primary/20 text-primary text-[8px] font-mono uppercase tracking-widest hover:bg-primary/30 transition-colors">
           Go
         </button>
       </form>
 
       {/* Screenshot */}
-      <div className="flex-1 min-h-0 overflow-auto bg-zinc-950 flex items-center justify-center">
+      <div className="min-h-[100px] max-h-[280px] overflow-auto bg-zinc-950 flex items-center justify-center">
         {cu.screenshot ? (
           <img
             src={`data:image/png;base64,${cu.screenshot}`}
@@ -247,24 +318,24 @@ function BrowserTab({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeTex
             className="max-w-full max-h-full object-contain"
           />
         ) : (
-          <div className="text-center text-zinc-600">
-            <Globe size={24} className="mx-auto mb-2 opacity-20" />
-            <p className="text-[10px] font-mono">Click Screenshot to capture</p>
+          <div className="text-center text-zinc-700 py-6">
+            <Globe size={18} className="mx-auto mb-1 opacity-20" />
+            <p className="text-[9px] font-mono">Screenshot to capture</p>
           </div>
         )}
       </div>
 
       {/* Vision description */}
       {cu.description && (
-        <div className="px-2 py-1.5 border-t border-white/5 bg-zinc-950 max-h-20 overflow-y-auto">
-          <p className="text-[9px] font-mono text-muted-foreground leading-relaxed">{cu.description}</p>
+        <div className="px-2 py-1 border-t border-white/5 bg-zinc-950/50 max-h-16 overflow-y-auto">
+          <p className="text-[8px] font-mono text-muted-foreground leading-relaxed">{cu.description}</p>
         </div>
       )}
 
       {/* Element list */}
       {cu.elements.length > 0 && (
-        <div className="border-t border-white/5 max-h-40 overflow-y-auto">
-          <div className="px-2 py-1 text-[8px] font-black uppercase tracking-[0.2em] text-muted-foreground border-b border-white/5">
+        <div className="border-t border-white/5 max-h-36 overflow-y-auto">
+          <div className="px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.2em] text-muted-foreground border-b border-white/5">
             Elements ({cu.elements.length})
           </div>
           {cu.elements.map(el => (
@@ -276,12 +347,12 @@ function BrowserTab({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeTex
                 selectedElement === el.id && 'bg-primary/10'
               )}
             >
-              <span className="text-[8px] bg-red-600/80 text-white px-0.5 font-mono min-w-[14px] text-center">
+              <span className="text-[7px] bg-red-600/80 text-white px-0.5 font-mono min-w-[12px] text-center">
                 {el.id}
               </span>
-              <span className="text-[9px] font-mono text-zinc-500">{el.tag}</span>
+              <span className="text-[8px] font-mono text-zinc-500">{el.tag}</span>
               {el.text && (
-                <span className="text-[9px] font-mono text-zinc-400 truncate">{el.text}</span>
+                <span className="text-[8px] font-mono text-zinc-400 truncate">{el.text}</span>
               )}
             </button>
           ))}
@@ -291,7 +362,7 @@ function BrowserTab({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeTex
       {/* Type input */}
       {selectedElement !== null && (
         <div className="flex items-center gap-1 px-2 py-1 border-t border-white/5 bg-black/50">
-          <span className="text-[9px] font-mono text-muted-foreground">
+          <span className="text-[8px] font-mono text-muted-foreground">
             [{selectedElement}]
           </span>
           <input
@@ -300,16 +371,16 @@ function BrowserTab({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeTex
             onChange={e => setTypeText(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && onType()}
             placeholder="Type text..."
-            className="flex-1 bg-zinc-900 border border-white/5 px-2 py-0.5 text-[10px] font-mono text-white focus:outline-none focus:border-primary/40"
+            className="flex-1 bg-zinc-900 border border-white/5 px-2 py-0.5 text-[9px] font-mono text-white focus:outline-none focus:border-primary/40"
             autoFocus
           />
-          <button onClick={onType} className="px-2 py-0.5 bg-primary/20 text-primary text-[9px]">Send</button>
+          <button onClick={onType} className="px-2 py-0.5 bg-primary/20 text-primary text-[8px]">Send</button>
         </div>
       )}
 
       {/* Error */}
       {cu.error && (
-        <div className="px-2 py-1 border-t border-red-900/30 text-[9px] font-mono text-red-400">
+        <div className="px-2 py-1 border-t border-red-900/30 text-[8px] font-mono text-red-400">
           {cu.error}
         </div>
       )}
@@ -317,34 +388,3 @@ function BrowserTab({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeTex
   );
 }
 
-// Artifact tab content
-function ArtifactTab({ artifact, loading, emptyMessage }: {
-  artifact?: Artifact;
-  loading: boolean;
-  emptyMessage: string;
-}) {
-  if (loading && !artifact) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader size={14} className="animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (!artifact) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full p-6 text-center">
-        <p className="text-[10px] font-mono text-muted-foreground opacity-50">{emptyMessage}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-4">
-      <div className="mb-3">
-        <h3 className="text-[10px] font-black uppercase tracking-widest text-white">{artifact.title}</h3>
-      </div>
-      <ArtifactView artifact={artifact} />
-    </div>
-  );
-}
