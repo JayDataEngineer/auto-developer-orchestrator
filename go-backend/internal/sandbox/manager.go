@@ -171,6 +171,21 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		"DOCKER_HOST=unix:///var/run/docker.sock",
 	}
 
+	// Create a persistent Docker volume for this sandbox
+	volumeName := fmt.Sprintf("sandbox-%s-persist", opts.ID)
+	if _, volErr := m.dockerClient.VolumeInspect(ctx, volumeName, client.VolumeInspectOptions{}); volErr != nil {
+		// Volume doesn't exist — create it
+		_, volErr = m.dockerClient.VolumeCreate(ctx, client.VolumeCreateOptions{
+			Name:   volumeName,
+			Driver: "local",
+		})
+		if volErr != nil {
+			m.logger.Warn("Failed to create persist volume", zap.Error(volErr))
+		} else {
+			m.logger.Info("Created persistent volume", zap.String("volume", volumeName))
+		}
+	}
+
 	// Build resource limits
 	resources := container.Resources{}
 	if opts.MemoryLimit > 0 {
@@ -193,6 +208,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 				policiesDir + ":/etc/openshell/policies:ro",
 				"/var/run/docker.sock:/var/run/docker.sock:ro",
 				"/tmp:/sandbox/tmp",
+				volumeName + ":/sandbox/persist",
 			},
 			Resources: resources,
 		},
@@ -213,6 +229,12 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		m.dockerClient.ContainerRemove(ctx, createResp.ID, client.ContainerRemoveOptions{Force: true})
 		return nil, fmt.Errorf("failed to start container %s: %w", containerName, err)
 	}
+
+	// Wait for supervisord to start, then restore persisted state in background
+	go func() {
+		time.Sleep(5 * time.Second)
+		m.restorePersistedState(context.Background(), containerName)
+	}()
 
 	sandbox := &Sandbox{
 		ID:          opts.ID,
@@ -254,8 +276,11 @@ func (m *Manager) DestroySandbox(ctx context.Context, id string) error {
 		}
 	}
 
-	// Stop and remove the Docker container
+	// Save persisted state before destroying
 	containerName := m.getContainerName(id)
+	m.savePersistedState(ctx, containerName)
+
+	// Stop and remove the Docker container
 	timeout := 10
 	if _, err := m.dockerClient.ContainerStop(ctx, containerName, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 		m.logger.Warn("failed to stop container", zap.String("container", containerName), zap.Error(err))
@@ -270,6 +295,60 @@ func (m *Manager) DestroySandbox(ctx context.Context, id string) error {
 	m.logger.Info("sandbox destroyed", zap.String("id", id))
 
 	return nil
+}
+
+// restorePersistedState restores saved state from the persistent volume after container start.
+func (m *Manager) restorePersistedState(ctx context.Context, containerName string) {
+	cmds := []string{
+		"sh", "-c",
+		`# Restore Chrome profile
+if [ -d /tmp/chrome-profile ] && [ -z "$(ls -A /tmp/chrome-profile 2>/dev/null)" ] && [ -d /sandbox/persist/chrome-profile ] && [ -n "$(ls -A /sandbox/persist/chrome-profile 2>/dev/null)" ]; then
+  cp -a /sandbox/persist/chrome-profile/. /tmp/chrome-profile/
+  echo "Restored Chrome profile"
+fi
+# Restore home dotfiles
+if [ -d /sandbox/persist/home ] && [ -n "$(ls -A /sandbox/persist/home 2>/dev/null)" ]; then
+  cp -a /sandbox/persist/home/. /root/ 2>/dev/null
+  echo "Restored home dotfiles"
+fi
+# Reinstall previously installed packages (only those not in base image)
+if [ -f /sandbox/persist/installed-packages.txt ] && [ -s /sandbox/persist/installed-packages.txt ]; then
+  # Get list of packages from base image
+  dpkg-query -W -f='${Package}\n' 2>/dev/null | sort > /tmp/base-packages.txt
+  # Find packages not in base image
+  comm -23 /sandbox/persist/installed-packages.txt /tmp/base-packages.txt > /tmp/extra-packages.txt
+  if [ -s /tmp/extra-packages.txt ]; then
+    EXTRA=$(cat /tmp/extra-packages.txt | tr '\n' ' ')
+    apt-get update -qq 2>/dev/null
+    apt-get install -y $EXTRA 2>/dev/null
+    echo "Restored $(wc -w < /tmp/extra-packages.txt) extra packages"
+  fi
+fi`,
+	}
+	_, _ = m.execInContainer(ctx, containerName, cmds, false)
+}
+
+// savePersistedState saves important state to the persistent volume before container stop.
+func (m *Manager) savePersistedState(ctx context.Context, containerName string) {
+	cmds := []string{
+		"sh", "-c",
+		`# Save Chrome profile
+if [ -d /tmp/chrome-profile ]; then
+  mkdir -p /sandbox/persist/chrome-profile
+  cp -a /tmp/chrome-profile/. /sandbox/persist/chrome-profile/
+  echo "Saved Chrome profile"
+fi
+# Save home dotfiles
+if [ -d /root ]; then
+  mkdir -p /sandbox/persist/home
+  cp -a /root/.bashrc /root/.profile /root/.wget-hsts /root/.config /sandbox/persist/home/ 2>/dev/null
+  echo "Saved home dotfiles"
+fi
+# Save list of installed packages (for reinstallation on next start)
+dpkg-query -W -f='${Package}\n' 2>/dev/null | sort > /sandbox/persist/installed-packages.txt
+echo "Saved $(wc -l < /sandbox/persist/installed-packages.txt) packages list"`,
+	}
+	_, _ = m.execInContainer(ctx, containerName, cmds, false)
 }
 
 // ExecInSandbox executes a command inside a sandbox container

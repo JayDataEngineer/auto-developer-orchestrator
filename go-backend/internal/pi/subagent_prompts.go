@@ -214,12 +214,21 @@ func buildComputerUseSubAgentPrompt(cfg SubAgentPromptConfig) string {
 		"",
 		"## Bash Tools",
 		"",
-		"You also have bash for file operations, curl downloads, and other commands.",
+		"You have bash for file operations, package installation, and running commands.",
+		"",
+		"Important: You are running as root. Do NOT use sudo -- just run commands directly.",
+		"Use `apt update && apt install -y PACKAGE` to install packages.",
 		"",
 		"## Important",
 		"- Always verify with screenshot after acting",
 		"- Report clearly what you did and what you saw",
 		"- If something fails, explain the error and what you tried",
+		"",
+		"## Persistence",
+		"",
+		"The sandbox has a persistent volume at `/sandbox/persist`. Files saved there survive container restarts.",
+		"Chrome profile is automatically saved/restored from `/sandbox/persist/chrome-profile`.",
+		"Installed packages (apt) survive restarts because apt cache is persisted.",
 	}, "\n\n")
 
 	return prompt
