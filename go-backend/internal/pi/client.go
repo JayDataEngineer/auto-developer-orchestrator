@@ -154,17 +154,16 @@ func (c *PiClient) initComponents() {
 	}()
 }
 
-// installExtensions copies built-in extensions to the project's .pi/extensions/ directory
+// installExtensions copies built-in extensions and skills to the project's .pi/ directory
 func (c *PiClient) installExtensions() error {
+	// Extensions
 	extensionsDir := filepath.Join(c.projectDir, ".pi", "extensions")
 	if err := os.MkdirAll(extensionsDir, 0755); err != nil {
 		return fmt.Errorf("create extensions dir: %w", err)
 	}
 
-	// Extension files to install (source is embedded in the binary at build time)
-	// For now, extensions are loaded from the orchestrator's own extensions directory
-	orchestratorExtDir := filepath.Join(c.findOrchestratorRoot(), "go-backend", "internal", "pi", "extensions")
-
+	orchestratorRoot := c.findOrchestratorRoot()
+	extDir := filepath.Join(orchestratorRoot, "go-backend", "internal", "pi", "extensions")
 	extFiles := []string{
 		"computer-use.ts",
 		"todos.ts",
@@ -173,36 +172,78 @@ func (c *PiClient) installExtensions() error {
 	}
 
 	for _, name := range extFiles {
-		srcPath := filepath.Join(orchestratorExtDir, name)
-		dstPath := filepath.Join(extensionsDir, name)
-
-		// Skip if destination already exists and is newer
-		dstStat, err := os.Stat(dstPath)
-		if err == nil {
-			srcStat, err := os.Stat(srcPath)
-			if err == nil && !srcStat.ModTime().After(dstStat.ModTime()) {
-				continue // destination is up to date
-			}
-		}
-
-		data, err := os.ReadFile(srcPath)
-		if err != nil {
-			c.logger.Warn("Extension source not found, skipping",
-				zap.String("file", srcPath),
-				zap.Error(err),
-			)
-			continue
-		}
-
-		if err := os.WriteFile(dstPath, data, 0644); err != nil {
-			c.logger.Warn("Failed to install extension",
+		src := filepath.Join(extDir, name)
+		dst := filepath.Join(extensionsDir, name)
+		if err := c.copyIfNewer(src, dst); err != nil {
+			c.logger.Warn("Extension install skipped",
 				zap.String("file", name),
 				zap.Error(err),
 			)
+		}
+	}
+
+	// Skills
+	skillsDir := filepath.Join(c.projectDir, ".pi", "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		return fmt.Errorf("create skills dir: %w", err)
+	}
+
+	skillsSrcDir := filepath.Join(orchestratorRoot, "go-backend", "internal", "pi", "skills")
+	entries, err := os.ReadDir(skillsSrcDir)
+	if err != nil {
+		c.logger.Debug("No built-in skills found", zap.Error(err))
+		return nil
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		skillName := entry.Name()
+		dstSkillDir := filepath.Join(skillsDir, skillName)
+		if err := os.MkdirAll(dstSkillDir, 0755); err != nil {
 			continue
 		}
 
-		c.logger.Info("Installed Pi extension", zap.String("file", name))
+		skillFiles, err := os.ReadDir(filepath.Join(skillsSrcDir, skillName))
+		if err != nil {
+			continue
+		}
+		for _, sf := range skillFiles {
+			src := filepath.Join(skillsSrcDir, skillName, sf.Name())
+			dst := filepath.Join(dstSkillDir, sf.Name())
+			if err := c.copyIfNewer(src, dst); err != nil {
+				c.logger.Warn("Skill install skipped",
+					zap.String("skill", skillName),
+					zap.String("file", sf.Name()),
+					zap.Error(err),
+				)
+			} else {
+				c.logger.Info("Installed skill", zap.String("skill", skillName))
+			}
+		}
+	}
+
+	return nil
+}
+
+// copyIfNewer copies a file if the source is newer or destination doesn't exist
+func (c *PiClient) copyIfNewer(src, dst string) error {
+	dstStat, err := os.Stat(dst)
+	if err == nil {
+		srcStat, err := os.Stat(src)
+		if err == nil && !srcStat.ModTime().After(dstStat.ModTime()) {
+			return nil // destination is up to date
+		}
+	}
+
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("read source: %w", err)
+	}
+
+	if err := os.WriteFile(dst, data, 0644); err != nil {
+		return fmt.Errorf("write destination: %w", err)
 	}
 
 	return nil
