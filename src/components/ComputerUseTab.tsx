@@ -58,7 +58,21 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
         setSessionError(err.message);
         setSessionLoading(false);
       });
-  }, [sandboxId]);
+  }, [sandboxId, cu.enabled]); // refetch when computer use becomes enabled
+
+  // Try to enable computer use if no session exists
+  useEffect(() => {
+    if (!sandboxId || cu.enabled || sessionLoading) return;
+    if (session) return; // already have session
+    if (sessionError && sessionError !== 'Desktop session not found') return; // real error
+    // Session doesn't exist yet (no error or "not found") — create it
+    if (!sessionError || sessionError === 'Desktop session not found') {
+      console.log('[ComputerUseTab] No session found, enabling computer use for:', sandboxId);
+      cu.enableComputerUse(sandboxId).catch(err => {
+        console.error('[ComputerUseTab] enableComputerUse failed:', err);
+      });
+    }
+  }, [sandboxId, session, sessionError, sessionLoading, cu.enabled]);
 
   const openDesktop = useCallback(() => {
     if (sandboxId) {
@@ -121,6 +135,10 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
             {sandboxId ? sandboxId : 'Select a project to start'}
           </span>
           <div className="flex-1" />
+          {/* Debug info */}
+          <span className="text-[8px] font-mono text-zinc-700">
+            sid={sandboxId} loaded={sessionLoading} session={!!session} err={!!sessionError} cu={cu.enabled}
+          </span>
           {sessionLoading && (
             <span className="text-[8px] font-mono text-zinc-500 flex items-center gap-1">
               <Loader size={8} className="animate-spin" /> Starting desktop...
