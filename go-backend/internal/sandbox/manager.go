@@ -626,9 +626,9 @@ func (m *Manager) GetContainerIP(ctx context.Context, sandboxID string) (string,
 		return "", fmt.Errorf("failed to inspect container %s: %w", containerName, err)
 	}
 
-	// Get IP from the first non-empty network
+	// Get IP from the first valid network address
 	for _, net := range result.Container.NetworkSettings.Networks {
-		if net.IPAddress.String() != "" {
+		if net.IPAddress.IsValid() {
 			return net.IPAddress.String(), nil
 		}
 	}

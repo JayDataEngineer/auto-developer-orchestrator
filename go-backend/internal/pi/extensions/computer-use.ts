@@ -10,7 +10,7 @@
  *   - computer_use_navigate: Navigate to a URL
  *   - computer_use_scroll: Scroll the page
  *
- * All tools call the orchestrator's computer use API at localhost:3847.
+ * All tools call the orchestrator's computer use API at 172.17.0.1:3847.
  */
 
 import { StringEnum } from "@mariozechner/pi-ai";
@@ -25,8 +25,8 @@ function callApi(endpoint: string, method = "GET", body?: Record<string, unknown
 	const args: string[] = ["-s"];
 	if (method !== "GET") args.push("-X", method);
 	if (body) args.push("-d", JSON.stringify(body));
-	args.push(`http://localhost:3847${endpoint}`);
-	return execSync("curl", args, { encoding: "utf-8", timeout: 30000 });
+	args.push(`http://172.17.0.1:3847${endpoint}`);
+	const result = require("child_process").spawnSync("curl", args, { encoding: "utf-8", timeout: 30000 }); if (result.error) throw result.error; if (result.status !== 0) throw new Error(result.stderr); return result.stdout;
 }
 
 // ─── Types ─────────────────────────────────────────────────────
@@ -118,7 +118,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			try {
-				const raw = callApi(`/api/sandbox/sandbox-${ctx.cwd.split("/").pop()}-default/computer-use/enable`, "POST");
+				const raw = callApi(`/api/sandbox/sandbox-${ctx.cwd.split("/").pop()}/computer-use/enable`, "POST");
 				const result: ComputerUseResult = JSON.parse(raw);
 				return {
 					content: [{ type: "text", text: `Desktop enabled. Sandbox: ${result.sandboxId}, CDP port: ${result.cdpPort}, VNC port: ${result.novncPort}` }],
@@ -154,7 +154,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}-default`;
+			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}`;
 			const describe = params.describe !== false;
 			try {
 				const raw = callApi(`/api/sandbox/${sandboxId}/computer-use/screenshot?describe=${describe}`);
@@ -203,7 +203,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({}),
 
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}-default`;
+			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}`;
 			try {
 				const raw = callApi(`/api/sandbox/${sandboxId}/computer-use/snapshot`);
 				const result: PageInfo = JSON.parse(raw);
@@ -257,7 +257,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}-default`;
+			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}`;
 			try {
 				const raw = callApi(`/api/sandbox/${sandboxId}/computer-use/act`, "POST", {
 					action: "click",
@@ -304,7 +304,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}-default`;
+			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}`;
 			try {
 				const raw = callApi(`/api/sandbox/${sandboxId}/computer-use/act`, "POST", {
 					action: "type",
@@ -352,7 +352,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}-default`;
+			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}`;
 			try {
 				const raw = callApi(`/api/sandbox/${sandboxId}/computer-use/act`, "POST", {
 					action: "navigate",
@@ -398,7 +398,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}-default`;
+			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}`;
 			try {
 				const raw = callApi(`/api/sandbox/${sandboxId}/computer-use/act`, "POST", {
 					action: "scroll",
@@ -443,7 +443,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({}),
 
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}-default`;
+			const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}`;
 			try {
 				callApi(`/api/sandbox/${sandboxId}/computer-use/disable`, "POST");
 				return {

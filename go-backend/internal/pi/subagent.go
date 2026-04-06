@@ -97,9 +97,10 @@ func (m *SubAgentManager) Spawn(ctx context.Context, cfg SubAgentConfig) (string
 
 	// Build specialized prompt
 	promptCfg := SubAgentPromptConfig{
-		ProjectDir:     cfg.ProjectDir,
-		Type:           cfg.Type,
+		ProjectDir:    cfg.ProjectDir,
+		Type:          cfg.Type,
 		BrowserBaseURL: m.browserBaseURL,
+		ServerBaseURL: "http://172.17.0.1:3847",
 	}
 	systemPrompt := BuildSubAgentPrompt(promptCfg)
 

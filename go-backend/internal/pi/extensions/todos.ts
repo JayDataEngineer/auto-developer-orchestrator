@@ -21,7 +21,7 @@ function callApi(endpoint: string, method = "GET", body?: Record<string, unknown
 	const args: string[] = ["-s"];
 	if (method !== "GET") args.push("-X", method);
 	if (body) args.push("-d", JSON.stringify(body));
-	args.push(`http://localhost:3847${endpoint}`);
+	args.push(`http://172.17.0.1:3847${endpoint}`);
 	return execSync("curl", args, { encoding: "utf-8", timeout: 10000 });
 }
 

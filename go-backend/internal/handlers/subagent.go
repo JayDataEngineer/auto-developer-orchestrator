@@ -81,6 +81,18 @@ func (h *SubAgentHandler) Spawn(w http.ResponseWriter, r *http.Request) {
 		Model:      req.Model,
 	}
 
+	// Default model per type if not specified
+	if cfg.Model == "" {
+		switch cfg.Type {
+		case pi.SubAgentComputerUse:
+			cfg.Model = "google/gemma-3-27b-it" // vision-capable with tool calling
+		case pi.SubAgentCode:
+			cfg.Model = "econ"
+		default:
+			cfg.Model = "econ"
+		}
+	}
+
 	subAgentID, err := h.manager.Spawn(r.Context(), cfg)
 	if err != nil {
 		h.logger.Error("Failed to spawn sub-agent", zap.Error(err))
