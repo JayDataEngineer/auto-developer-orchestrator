@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -115,6 +116,9 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("failed to connect to Chrome: %v", connectErr), http.StatusInternalServerError)
 		return
 	}
+
+	// Step 4: Write landing page and navigate Chrome to it
+	h.writeLandingPage(r.Context(), sandboxID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
@@ -335,5 +339,20 @@ func (h *ComputerUseHandler) Shutdown() {
 	for id, client := range h.clients {
 		client.Close()
 		delete(h.clients, id)
+	}
+}
+
+// writeLandingPage creates a landing page in the sandbox container and navigates Chrome to it.
+func (h *ComputerUseHandler) writeLandingPage(ctx context.Context, sandboxID string) {
+	landingHTML := `<!DOCTYPE html><html><head><title>Sandbox Desktop</title><style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%)}.container{text-align:center;background:#fff;padding:48px 56px;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.15)}.ready{color:#4CAF50;font-size:28px;margin:0 0 12px}.hint{color:#888;font-size:16px;margin:0}</style></head><body><div class="container"><p class="ready">Desktop Ready</p><p class="hint">Use computer_use tools to navigate and interact</p></div></body></html>`
+
+	// Write landing page file
+	escaped := strings.ReplaceAll(landingHTML, "'", "'\\''")
+	cmd := fmt.Sprintf("echo '%s' > /tmp/landing.html", escaped)
+	_, _ = h.manager.ExecInSandbox(ctx, sandboxID, []string{"sh", "-c", cmd})
+
+	// Navigate Chrome to the landing page
+	if client, ok := h.clients[sandboxID]; ok {
+		_, _ = client.Navigate(ctx, "file:///tmp/landing.html")
 	}
 }
