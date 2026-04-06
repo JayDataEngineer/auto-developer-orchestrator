@@ -240,9 +240,15 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve container IP directly (avoids Docker DNS which isn't available from host)
+	containerIP, err := h.manager.GetContainerIP(r.Context(), id)
+	if err != nil {
+		// Fallback to container name for hostname resolution
+		containerIP = fmt.Sprintf("orchestrator-sandbox-%s", id)
+	}
+
 	// The sandbox container runs noVNC/websockify on port 6080.
-	// Access via Docker network using container hostname.
-	containerName := fmt.Sprintf("orchestrator-sandbox-%s", id)
+	containerName := containerIP
 
 	// Build the proxy request path
 	proxyPath := r.URL.Path

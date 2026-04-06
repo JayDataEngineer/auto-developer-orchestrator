@@ -42,19 +42,23 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
 
   // Fetch session info for embedding noVNC
   useEffect(() => {
+    console.log('[ComputerUseTab] Session fetch effect triggered', { sandboxId, cuEnabled: cu.enabled });
     if (!sandboxId) return;
     setSessionLoading(true);
     setSessionError(null);
     fetch(`/api/sandbox/${sandboxId}/viewer`)
       .then(res => {
+        console.log('[ComputerUseTab] Fetch response status:', res.status);
         if (!res.ok) throw new Error('Desktop session not found');
         return res.json();
       })
       .then(data => {
+        console.log('[ComputerUseTab] Session data received:', data);
         setSession(data);
         setSessionLoading(false);
       })
       .catch(err => {
+        console.log('[ComputerUseTab] Fetch error:', err.message);
         setSessionError(err.message);
         setSessionLoading(false);
       });
@@ -62,13 +66,25 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
 
   // Try to enable computer use if no session exists
   useEffect(() => {
-    if (!sandboxId || cu.enabled || sessionLoading) return;
-    if (session) return; // already have session
-    if (sessionError && sessionError !== 'Desktop session not found') return; // real error
+    console.log('[ComputerUseTab] Enable effect check', { sandboxId, cuEnabled: cu.enabled, sessionLoading, hasSession: !!session, hasError: !!sessionError, error: sessionError });
+    if (!sandboxId || cu.enabled || sessionLoading) {
+      console.log('[ComputerUseTab] Enable effect skipped - early return');
+      return;
+    }
+    if (session) {
+      console.log('[ComputerUseTab] Enable effect skipped - has session');
+      return;
+    }
+    if (sessionError && sessionError !== 'Desktop session not found') {
+      console.log('[ComputerUseTab] Enable effect skipped - real error:', sessionError);
+      return;
+    }
     // Session doesn't exist yet (no error or "not found") — create it
     if (!sessionError || sessionError === 'Desktop session not found') {
-      console.log('[ComputerUseTab] No session found, enabling computer use for:', sandboxId);
-      cu.enableComputerUse(sandboxId).catch(err => {
+      console.log('[ComputerUseTab] Enabling computer use for:', sandboxId);
+      cu.enableComputerUse(sandboxId).then(() => {
+        console.log('[ComputerUseTab] Computer use enabled successfully');
+      }).catch(err => {
         console.error('[ComputerUseTab] enableComputerUse failed:', err);
       });
     }
@@ -81,8 +97,8 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
   }, [sandboxId]);
 
   // Proxy the noVNC URL through the backend so the browser can reach the container
-  // noVNC reads host/port/path from URL params; we route everything through our proxy
-  const novncProxyUrl = sandboxId ? `/api/sandbox/vnc/${sandboxId}/vnc.html?path=/api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&resize=scale` : null;
+  // noVNC reads path from URL params; we route everything through our proxy
+  const novncProxyUrl = sandboxId ? `/api/sandbox/vnc/${sandboxId}/vnc.html?path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&resize=scale` : null;
 
   return (
     <div className="flex h-full bg-black text-slate-100 overflow-hidden">
