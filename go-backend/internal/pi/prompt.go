@@ -402,66 +402,35 @@ curl "http://localhost:%s/api/pi/subagent/list?parentAgentId=YOUR_AGENT_ID"
 - Prefer `+"`"+`explore`+"`"+` for read-only analysis and `+"`"+`code`+"`"+` for modifications.`, port, port, port, port, port)
 }
 
-// buildComputerUseSection generates a section describing how to use computer use mode
+// buildComputerUseSection generates instructions for the main agent to delegate
+// desktop tasks to a computer_use sub-agent.
 func (b *SystemPromptBuilder) buildComputerUseSection() string {
 	port := b.ServerPort
 	if port == "" {
 		port = "3847"
 	}
 
-	return fmt.Sprintf(`# Computer Use Mode
+	return fmt.Sprintf(`# Computer Use
 
-You can interact with graphical applications (browsers, desktop apps) inside your sandbox.
-Use these bash commands:
+You have a sandbox with a full virtual desktop (Xvfb + Chrome + VNC). For any desktop task (open apps, install software, use GUIs, browse the web visually), delegate it to a computer_use sub-agent.
 
-1. Enable computer use mode:
-   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/enable
+## How to Delegate a Desktop Task
 
-2. Take a screenshot and get a text description:
-   curl -s "http://localhost:%s/api/sandbox/%s/computer-use/screenshot?describe=true"
+`+"```"+`bash
+curl -X POST http://localhost:%s/api/pi/subagent/spawn -d '{
+  "project": "PROJECT_NAME",
+  "parentAgentId": "YOUR_AGENT_ID",
+  "type": "computer_use",
+  "task": "Open the terminal and run: sudo apt install telegram-desktop"
+}'
+`+"```"+`
 
-3. Get page elements (for finding clickable elements):
-   curl -s "http://localhost:%s/api/sandbox/%s/computer-use/snapshot"
+Then poll for completion:
 
-4. Click an element by ID:
-   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/act -d '{"action":"click","element":5}'
+`+"```"+`bash
+curl "http://localhost:%s/api/pi/subagent/result?subAgentId=SUB_AGENT_ID"
+`+"```"+`
 
-5. Type text into an element:
-   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/act -d '{"action":"type","element":3,"text":"hello","submit":true}'
-
-6. Navigate to URL:
-   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/act -d '{"action":"navigate","url":"https://example.com"}'
-
-7. Scroll page:
-   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/act -d '{"action":"scroll","direction":"down","amount":500}'
-
-8. Disable computer use mode:
-   curl -s -X POST http://localhost:%s/api/sandbox/%s/computer-use/disable
-
-Workflow: enable → take screenshot → read description → identify elements → act → screenshot again → repeat.
-
-## Artifacts
-
-You can create artifacts (plans, todos, notes) visible in the frontend right panel:
-
-1. Create/update a plan:
-   curl -s -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"plan","title":"Implementation Plan","content":"## Step 1\n..."}'
-
-2. Create/update a todo list:
-   curl -s -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"todo","title":"Tasks","content":"- [x] Task 1\n- [ ] Task 2"}'
-
-3. Create/update notes:
-   curl -s -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"notes","title":"Research Notes","content":"..."}'`,
-		port, b.SandboxID,  // enable
-		port, b.SandboxID,  // screenshot
-		port, b.SandboxID,  // snapshot
-		port, b.SandboxID,  // click
-		port, b.SandboxID,  // type
-		port, b.SandboxID,  // navigate
-		port, b.SandboxID,  // scroll
-		port, b.SandboxID,  // disable
-		port, // artifact plan
-		port, // artifact todo
-		port, // artifact notes
-	)
+Keep the task description clear and specific — the sub-agent has direct access to the desktop and knows how to take screenshots, click elements, type text, and navigate URLs.`,
+		port, port)
 }

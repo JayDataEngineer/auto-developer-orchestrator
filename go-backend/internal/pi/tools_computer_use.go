@@ -6,20 +6,16 @@ package pi
 // ComputerUseModeTool is the tool definition for enabling desktop mode
 const ComputerUseModeTool = `{
   "name": "enter_computer_use_mode",
-  "description": "Enable visual desktop access for browser automation or GUI applications. This launches a desktop environment with Chrome browser and VNC access, allowing you to interact with graphical applications. Use this when you need to:\n- Use a web browser with visual feedback\n- Access Telegram Desktop or other GUI apps\n- Perform tasks that require visual monitoring\n- Show the user what you're doing in real-time",
+  "description": "Enable visual desktop access for GUI tasks (open apps, install software, use browsers, interact with desktop applications). This launches a desktop environment and spawns a computer_use sub-agent to handle the task.",
   "parameters": {
     "type": "object",
     "properties": {
-      "reason": {
+      "task": {
         "type": "string",
-        "description": "Explanation of why visual mode is needed (e.g., 'need to use browser to test web app', 'need to access Telegram Desktop to reply to messages', 'need to download files from web interface')"
-      },
-      "estimated_duration": {
-        "type": "string",
-        "description": "Estimated time needed in desktop mode (e.g., '5 minutes', '30 minutes')"
+        "description": "What the sub-agent should do on the desktop (e.g., 'install telegram-desktop', 'open browser and navigate to example.com')"
       }
     },
-    "required": ["reason"]
+    "required": ["task"]
   }
 }`
 
