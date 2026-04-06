@@ -353,59 +353,79 @@ func (b *SystemPromptBuilder) buildSubAgentAvailability() string {
 
 	return fmt.Sprintf(`# Sub-Agent Delegation
 
-You have access to specialized sub-agents that can handle tasks in parallel. Each sub-agent runs in its own isolated context window.
+You have access to specialized sub-agents. Each sub-agent runs as a separate Pi process with its own isolated context window and tool access. Delegate tasks to sub-agents when the task is complex, requires a different skill set, or would benefit from isolation.
 
 ## Available Sub-Agent Types
 
-| Type | Description |
-|------|-------------|
-| code | Code implementation — writes and modifies files, runs builds/tests |
-| explore | Code exploration — searches and reads code, answers questions (read-only) |
-| web | Web research — uses a browser to navigate, search, and extract information |
-| computer_use | Desktop automation — interacts with desktop environment in a sandbox |
+### `+"`"+`computer_use`+"`"+` — Desktop Automation
+Spawns an agent with full access to the sandbox desktop environment.
+- Downloads files, runs GUI apps, interacts with web pages
+- Has all bash tools plus computer-use capabilities
+- Use for: downloading files, installing software, desktop tasks, browser automation
+
+### `+"`"+`code`+"`"+` — Code Implementation
+Writes and modifies code, runs builds and tests.
+- Has read, write, edit, bash, grep, find, ls tools
+- Use for: implementing features, fixing bugs, refactoring code
+
+### `+"`"+`explore`+"`"+` — Code Exploration
+Read-only code analysis. Cannot modify files.
+- Has read, grep, find, ls, bash (read-only) tools
+- Use for: understanding codebases, finding patterns, answering questions
+
+### `+"`"+`web`+"`"+` — Web Research
+Research and information extraction from the web.
+- Has bash, read, write tools for web scraping and data extraction
+- Use for: research, data gathering, web scraping
 
 ## How to Spawn a Sub-Agent
 
-Use curl to call the spawn API:
+Spawn a sub-agent by calling the spawn API:
 
 `+"```"+`bash
-curl -X POST http://localhost:%s/api/pi/subagent/spawn -d '{
-  "project": "PROJECT_NAME",
+curl -s -X POST http://localhost:%s/api/pi/subagent/spawn -d '{
+  "project": "YOUR_PROJECT",
   "parentAgentId": "YOUR_AGENT_ID",
-  "type": "explore",
-  "task": "Find all Go files that import the storage package"
+  "type": "computer_use",
+  "task": "Download the image from https://httpbin.org/image/jpeg to /sandbox/tmp/photo.jpg, then verify it exists with ls -la"
 }'
 `+"```"+`
 
-This returns a `+"`"+`subAgentId`+"`"+` immediately. Poll for status:
+The response includes a `+"`"+`subAgentId`+"`"+`. Use it to stream results:
 
 `+"```"+`bash
-curl "http://localhost:%s/api/pi/subagent/status?subAgentId=SUB_AGENT_ID"
+curl "http://localhost:%s/api/pi/subagent/result?subAgentId=THE_RETURNED_ID"
 `+"```"+`
 
-Stream results (SSE):
+The result stream (SSE) includes the sub-agent's full text output and tool usage. Wait until it finishes, then summarize the result for the user.
 
+## Example: Delegating a Download Task
+
+User asks: "Download a cat image and verify it exists"
+
+You respond: "I'll delegate this to a computer_use sub-agent."
+
+You spawn:
 `+"```"+`bash
-curl "http://localhost:%s/api/pi/subagent/result?subAgentId=SUB_AGENT_ID"
+curl -s -X POST http://localhost:%s/api/pi/subagent/spawn -d '{
+  "project": "test-repo",
+  "parentAgentId": "default",
+  "type": "computer_use",
+  "task": "Download https://httpbin.org/image/jpeg to /sandbox/tmp/cat.jpg using curl. Then verify the file exists with ls -la and check the first 4 bytes are ff d8 ff (JPEG header). Report the file size."
+}'
 `+"```"+`
 
-Abort a sub-agent:
-
+Then stream results:
 `+"```"+`bash
-curl -X POST http://localhost:%s/api/pi/subagent/abort -d '{"subAgentId": "SUB_AGENT_ID"}'
+curl "http://localhost:%s/api/pi/subagent/result?subAgentId=sub-computer_use-123456"
 `+"```"+`
 
-List your sub-agents:
-
-`+"```"+`bash
-curl "http://localhost:%s/api/pi/subagent/list?parentAgentId=YOUR_AGENT_ID"
-`+"```"+`
-
-## Guidelines
-- Spawn sub-agents for tasks that benefit from isolation or parallelism.
-- You can spawn up to 3 sub-agents concurrently.
-- Always check the result before acting on it.
-- Prefer `+"`"+`explore`+"`"+` for read-only analysis and `+"`"+`code`+"`"+` for modifications.`, port, port, port, port, port)
+## Rules
+- ALWAYS use sub-agents for tasks that match a specialized type above
+- The `+"`"+`computer_use`+"`"+` type is your go-to for file downloads, web downloads, and sandbox tasks
+- Wait for the sub-agent to complete before responding to the user
+- Summarize the sub-agent's result clearly
+- You can spawn up to 3 sub-agents concurrently`, port, port, port, port)
 }
 
 // buildHooksSection describes the hook system to the agent

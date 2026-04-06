@@ -377,6 +377,7 @@ func (c *PiClient) start() error {
 		systemPrompt = c.customSystemPrompt
 	} else {
 		builder := NewSystemPromptBuilder(c.projectDir)
+		builder.SubAgentEnabled = true
 		systemPrompt = builder.Build()
 	}
 
