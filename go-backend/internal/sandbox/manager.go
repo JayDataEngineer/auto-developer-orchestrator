@@ -330,7 +330,28 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 
 	sandbox, exists := m.sandboxes[sandboxID]
 	if !exists {
-		return nil, fmt.Errorf("sandbox %s not found", sandboxID)
+		// Sandbox not in memory — check if container exists and recover it
+		containerName := m.getContainerName(sandboxID)
+		_, inspectErr := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
+		if inspectErr != nil {
+			return nil, fmt.Errorf("sandbox %s not found", sandboxID)
+		}
+
+		// Container exists — recover it into the in-memory map
+		m.logger.Info("recovering existing sandbox container",
+			zap.String("sandbox_id", sandboxID),
+			zap.String("container", containerName),
+		)
+		sandbox = &Sandbox{
+			ID:          sandboxID,
+			ContainerID: containerName,
+			ProjectPath: "",
+			Policy:      "developer",
+			Mode:        ModeCLI,
+			Status:      StatusRunning,
+			CreatedAt:   time.Now(),
+		}
+		m.sandboxes[sandboxID] = sandbox
 	}
 
 	// Idempotent: return existing session if already in browser mode
