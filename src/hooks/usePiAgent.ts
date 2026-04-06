@@ -11,6 +11,16 @@ import {
 let msgIdCounter = 0;
 function nextMsgId() { return `msg-${++msgIdCounter}-${Date.now()}`; }
 
+export interface SubAgentInfo {
+  id: string;
+  type: string;
+  status: 'spawning' | 'running' | 'complete' | 'failed';
+  output?: string;
+  toolCalls?: number;
+  parentId: string;
+  spawnedAt: number;
+}
+
 export interface PiAgentState {
   messages: ConversationMessage[];
   isStreaming: boolean;
@@ -25,6 +35,7 @@ export interface PiAgentState {
   agentId: string;
   prUrl: string | null;
   prNumber: number | null;
+  subAgents: SubAgentInfo[];
 }
 
 const initialState: PiAgentState = {
@@ -41,6 +52,7 @@ const initialState: PiAgentState = {
   agentId: 'default',
   prUrl: null,
   prNumber: null,
+  subAgents: [],
 };
 
 // Helper: update the last assistant message in the messages array
@@ -174,9 +186,42 @@ export function usePiAgent(initialAgentId: string = 'default') {
               ? { ...tc, result: endData.result, error: endData.error, endTime: Date.now() }
               : tc
           );
+
+          // Detect sub-agent spawning from bash tool result
+          let newSubAgents = prev.subAgents;
+          const endedTool = updatedToolCalls.find(tc => tc.id === endData.toolId);
+          if (endedTool?.name === 'bash' && typeof endedTool.args?.command === 'string') {
+            const cmd = endedTool.args.command;
+            if (cmd.includes('/subagent/spawn') && typeof endData.result === 'string') {
+              try {
+                // Try to parse the spawn response from the command output
+                const lines = (endData.result as string).split('\n');
+                const jsonLine = lines.find(l => l.includes('"subAgentId"'));
+                if (jsonLine) {
+                  const parsed = JSON.parse(jsonLine);
+                  if (parsed.subAgentId && !prev.subAgents.find(sa => sa.id === parsed.subAgentId)) {
+                    // Extract type from the subAgentId (format: sub-{type}-{timestamp})
+                    const typeMatch = parsed.subAgentId.match(/sub-(\w+)-/);
+                    const subAgentType = typeMatch ? typeMatch[1] : 'unknown';
+                    newSubAgents = [...prev.subAgents, {
+                      id: parsed.subAgentId,
+                      type: subAgentType,
+                      status: 'running',
+                      parentId: prev.agentId,
+                      spawnedAt: Date.now(),
+                    }];
+                  }
+                }
+              } catch {
+                // Not valid JSON, skip
+              }
+            }
+          }
+
           return {
             ...prev,
             toolCalls: updatedToolCalls,
+            subAgents: newSubAgents,
             messages: updateLastAssistant(prev.messages, msg => ({ ...msg, toolCalls: updatedToolCalls })),
           };
         }

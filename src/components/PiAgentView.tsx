@@ -10,7 +10,7 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '../lib/utils';
-import { usePiAgent } from '../hooks/usePiAgent';
+import { usePiAgent, SubAgentInfo } from '../hooks/usePiAgent';
 import { ToolCall, PiModel, ConversationMessage, AssistantMessage } from '../lib/pi-events';
 
 interface PiAgentViewProps {
@@ -79,6 +79,50 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
         <div className="px-3 pb-2 border-t border-white/5">
           <pre className="text-[9px] font-mono text-zinc-400 whitespace-pre-wrap max-h-40 overflow-auto">
             {formatResult(tc.result)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Sub-Agent Status ──────────────────────────────────────────
+function SubAgentCard({ agent }: { agent: SubAgentInfo }) {
+  const [open, setOpen] = useState(false);
+  const statusColor = agent.status === 'running' ? 'text-blue-400' :
+    agent.status === 'complete' ? 'text-green-400' :
+    agent.status === 'failed' ? 'text-red-400' : 'text-zinc-400';
+  const statusIcon = agent.status === 'running' ? <Loader size={10} className="animate-spin text-blue-400" /> :
+    agent.status === 'complete' ? <Check size={10} className="text-green-400" /> :
+    <span className="text-[9px] text-zinc-500">{agent.status}</span>;
+
+  return (
+    <div className="border border-blue-900/30 bg-blue-950/20">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left"
+      >
+        <Box size={11} className="text-blue-400" />
+        <span className="text-[9px] font-mono uppercase tracking-widest text-blue-300">
+          {agent.type} sub-agent
+        </span>
+        <span className="text-[9px] font-mono text-zinc-500 truncate">
+          {agent.id.slice(0, 30)}...
+        </span>
+        <div className="flex-1" />
+        {statusIcon}
+        {agent.status === 'running' && (
+          <span className="text-[8px] text-blue-400 font-mono">running</span>
+        )}
+        {agent.status === 'complete' && (
+          <span className="text-[8px] text-green-400 font-mono">done</span>
+        )}
+        <ChevronRight size={10} className={cn("text-muted-foreground transition-transform", open && "rotate-90")} />
+      </button>
+      {open && agent.output && (
+        <div className="px-3 pb-2 border-t border-blue-900/20">
+          <pre className="text-[9px] font-mono text-blue-200/60 whitespace-pre-wrap max-h-40 overflow-auto">
+            {agent.output}
           </pre>
         </div>
       )}
@@ -364,6 +408,18 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                     Describe a coding task and Pi will implement it with real file editing, bash execution, and intelligent analysis.
                   </p>
                 </div>
+              </div>
+            )}
+
+            {/* Sub-Agent Status Cards */}
+            {state.subAgents.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest px-1">
+                  Sub-Agents ({state.subAgents.length})
+                </div>
+                {state.subAgents.map(sa => (
+                  <SubAgentCard key={sa.id} agent={sa} />
+                ))}
               </div>
             )}
 
