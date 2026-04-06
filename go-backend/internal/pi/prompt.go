@@ -91,18 +91,21 @@ func (b *SystemPromptBuilder) Build() string {
 	// 8. Hooks and self-correction
 	sections = append(sections, buildHooksSection())
 
-	// 9. MCP tools (if available)
+	// 9. Todo list and scratch pad
+	sections = append(sections, b.buildTodosSection())
+
+	// 10. MCP tools (if available)
 	mcpTools := b.buildMCPToolsSection()
 	if mcpTools != "" {
 		sections = append(sections, mcpTools)
 	}
 
-	// 10. Computer use mode (only if sandbox is available)
+	// 11. Computer use mode (only if sandbox is available)
 	if b.SandboxID != "" {
 		sections = append(sections, b.buildComputerUseSection())
 	}
 
-	// 11. Appended sections — any additional context
+	// 12. Appended sections — any additional context
 	for _, s := range b.AppendSections {
 		sections = append(sections, s)
 	}
@@ -483,4 +486,56 @@ curl "http://localhost:%s/api/pi/subagent/result?subAgentId=SUB_AGENT_ID"
 
 Keep the task description clear and specific — the sub-agent has direct access to the desktop and knows how to take screenshots, click elements, type text, and navigate URLs.`,
 		port, port)
+}
+
+// buildTodosSection adds todo list and scratch pad instructions
+func (b *SystemPromptBuilder) buildTodosSection() string {
+	port := b.ServerPort
+	if port == "" {
+		port = "3847"
+	}
+
+	return fmt.Sprintf(`# Todo List and Scratch Pad
+
+## Todo List
+
+Track complex tasks with a structured todo list. Save it as an artifact:
+
+`+"```"+`bash
+curl -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"todo","title":"Tasks","content":"- [ ] Task 1\\n- [ ] Task 2\\n- [x] Task 3"}'
+`+"```"+`
+
+Load todos:
+`+"```"+`bash
+curl "http://localhost:%s/api/pi/artifacts?agentId=YOUR_AGENT_ID"
+`+"```"+`
+
+**Checkbox format:**
+- `+"`- [ ]`"+` = pending
+- `+"`- [>]`"+` = in progress
+- `+"`- [x]`"+` = completed
+
+## Scratch Pad
+
+Use a scratch pad for temporary notes, observations, and decisions:
+
+`+"```"+`bash
+curl -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"notes","title":"Scratch Pad","content":"## Observations\\n- ..."}'
+`+"```"+`
+
+Load scratch pad:
+`+"```"+`bash
+curl "http://localhost:%s/api/pi/artifacts?agentId=YOUR_AGENT_ID"
+`+"```"+`
+
+Use the scratch pad to:
+- Store discoveries about the codebase
+- Track decisions and reasoning
+- Note patterns and conventions
+- Record errors and their solutions
+
+## Guidelines
+- Create a todo list before starting complex multi-step tasks
+- Update todos as you progress (mark in-progress and done)
+- Review the scratch pad at the start of each session for context`, port, port, port, port)
 }
