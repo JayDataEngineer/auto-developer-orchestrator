@@ -422,7 +422,9 @@ curl "http://localhost:%s/api/pi/subagent/result?subAgentId=sub-computer_use-123
 
 ## Rules
 - ALWAYS use sub-agents for tasks that match a specialized type above
-- The `+"`"+`computer_use`+"`"+` type is your go-to for file downloads, web downloads, and sandbox tasks
+- The `+"`"+`computer_use`+"`"+` type is your go-to for file downloads, web downloads, sandbox tasks, AND logging into websites (Gmail, GitHub, etc.)
+- For website logins: the sub-agent reads /sandbox/workspace/passwords.txt for credentials
+- If passwords.txt has placeholders, tell the user to fill it in
 - Wait for the sub-agent to complete before responding to the user
 - Summarize the sub-agent's result clearly
 - You can spawn up to 3 sub-agents concurrently`, port, port, port, port)
