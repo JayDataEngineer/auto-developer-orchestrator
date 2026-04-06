@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -144,6 +145,9 @@ func NewPiClientWithPrompt(projectDir string, agentId string, systemPrompt strin
 func (c *PiClient) initComponents() {
 	c.mcpClient = NewMCPClient(c.logger.With(zap.String("component", "mcp")))
 
+	// Fix Pi's models.json if LiteLLM env vars are set
+	c.fixPiModelsConfig()
+
 	// Start MCP servers from .pi/mcp-servers.json
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -152,6 +156,48 @@ func (c *PiClient) initComponents() {
 			c.logger.Warn("MCP servers init failed", zap.Error(err))
 		}
 	}()
+}
+
+// fixPiModelsConfig updates the baseUrl in ~/.pi/agent/models.json to match
+// the LITELLM_PROXY_URL env var, fixing Docker hostname resolution issues.
+func (c *PiClient) fixPiModelsConfig() {
+	litellmURL := os.Getenv("LITELLM_PROXY_URL")
+	if litellmURL == "" {
+		return
+	}
+
+	// Find Pi's agent config directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	modelsPath := filepath.Join(homeDir, ".pi", "agent", "models.json")
+
+	data, err := os.ReadFile(modelsPath)
+	if err != nil {
+		return
+	}
+
+	// Replace any Docker-internal hostnames with the correct URL
+	correctBase := strings.TrimRight(litellmURL, "/") + "/v1"
+	oldPatterns := []string{
+		"litellm-litellm-1:4000",
+		"litellm.local:4000",
+		"localhost:4000",
+	}
+	content := string(data)
+	for _, pattern := range oldPatterns {
+		content = strings.ReplaceAll(content, "http://"+pattern+"/v1", correctBase)
+		content = strings.ReplaceAll(content, "http://"+pattern, correctBase)
+	}
+
+	if content != string(data) {
+		if err := os.WriteFile(modelsPath, []byte(content), 0644); err != nil {
+			c.logger.Warn("Failed to update Pi models config", zap.Error(err))
+		} else {
+			c.logger.Info("Updated Pi models.json baseUrl", zap.String("url", correctBase))
+		}
+	}
 }
 
 // installExtensions copies built-in extensions and skills to the project's .pi/ directory
@@ -169,6 +215,7 @@ func (c *PiClient) installExtensions() error {
 		"todos.ts",
 		"hooks.ts",
 		"mcp-bridge.ts",
+		"litellm-provider.ts",
 	}
 
 	for _, name := range extFiles {

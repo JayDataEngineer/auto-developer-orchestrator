@@ -1,7 +1,7 @@
 {
   "providers": {
     "litellm": {
-      "baseUrl": "http://litellm-litellm-1:4000/v1",
+      "baseUrl": "http://172.17.0.16:4000/v1",
       "api": "openai-completions",
       "apiKey": "sk-litellm-e2e-test-master-key",
       "compat": {
