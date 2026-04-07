@@ -41,19 +41,25 @@ func (h *SchedulerHandler) RegisterRoutes(r chi.Router) {
 
 // createJobRequest is the request body for creating a job.
 type createJobRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Project     string `json:"project"`
-	AgentID     string `json:"agentId,omitempty"`
-	Message     string `json:"message"`
-	Model       string `json:"model,omitempty"`
-	ScheduleType string `json:"scheduleType"` // "cron", "every", "at"
-	CronExpr    string `json:"cronExpr,omitempty"`
-	EverySeconds int64 `json:"everySeconds,omitempty"`
-	AtTime      string `json:"atTime,omitempty"`
-	AutoBranch  bool   `json:"autoBranch,omitempty"`
-	AutoMerge   bool   `json:"autoMerge,omitempty"`
-	Enabled     *bool  `json:"enabled,omitempty"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	Project      string `json:"project"`
+	AgentID      string `json:"agentId,omitempty"`
+	Message      string `json:"message"`
+	Model        string `json:"model,omitempty"`
+	ScheduleType string `json:"scheduleType"`
+	CronExpr     string `json:"cronExpr,omitempty"`
+	EverySeconds int64  `json:"everySeconds,omitempty"`
+	AtTime       string `json:"atTime,omitempty"`
+	AutoBranch   bool   `json:"autoBranch,omitempty"`
+	AutoMerge    bool   `json:"autoMerge,omitempty"`
+	Enabled      *bool  `json:"enabled,omitempty"`
+	// Phase 4: Delivery
+	DeliveryMode       string `json:"deliveryMode,omitempty"`
+	DeliveryWebhookURL string `json:"deliveryWebhookUrl,omitempty"`
+	// Phase 3/4: Failure alerts
+	FailureAlertAfter      int    `json:"failureAlertAfter,omitempty"`
+	FailureAlertWebhookURL string `json:"failureAlertWebhookUrl,omitempty"`
 }
 
 // CreateJob creates a new scheduled job.
@@ -72,19 +78,23 @@ func (h *SchedulerHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job := &scheduler.Job{
-		Name:         req.Name,
-		Description:  req.Description,
-		Project:      req.Project,
-		AgentID:      req.AgentID,
-		Message:      req.Message,
-		Model:        req.Model,
-		Schedule:     scheduler.ScheduleType(req.ScheduleType),
-		CronExpr:     req.CronExpr,
-		EverySeconds: req.EverySeconds,
-		AtTime:       req.AtTime,
-		AutoBranch:   req.AutoBranch,
-		AutoMerge:    req.AutoMerge,
-		Enabled:      enabled,
+		Name:                   req.Name,
+		Description:            req.Description,
+		Project:                req.Project,
+		AgentID:                req.AgentID,
+		Message:                req.Message,
+		Model:                  req.Model,
+		Schedule:               scheduler.ScheduleType(req.ScheduleType),
+		CronExpr:               req.CronExpr,
+		EverySeconds:           req.EverySeconds,
+		AtTime:                 req.AtTime,
+		AutoBranch:             req.AutoBranch,
+		AutoMerge:              req.AutoMerge,
+		Enabled:                enabled,
+		DeliveryMode:           scheduler.DeliveryMode(req.DeliveryMode),
+		DeliveryWebhookURL:     req.DeliveryWebhookURL,
+		FailureAlertAfter:      req.FailureAlertAfter,
+		FailureAlertWebhookURL: req.FailureAlertWebhookURL,
 	}
 
 	if err := h.scheduler.CreateJob(job); err != nil {

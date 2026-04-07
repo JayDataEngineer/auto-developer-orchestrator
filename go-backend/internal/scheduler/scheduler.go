@@ -1,9 +1,11 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -20,6 +22,31 @@ const (
 	ScheduleCron   ScheduleType = "cron"
 	ScheduleEvery  ScheduleType = "every"
 	ScheduleAt     ScheduleType = "at"
+)
+
+// DeliveryMode defines how job output is delivered.
+type DeliveryMode string
+
+const (
+	DeliveryStore   DeliveryMode = "store"    // Save to run log only (default)
+	DeliveryWebhook DeliveryMode = "webhook"  // POST JSON to URL
+	DeliverySession DeliveryMode = "session"  // Inject into main agent session
+)
+
+// DefaultBackoffSchedule is the exponential backoff schedule for consecutive errors.
+var DefaultBackoffSchedule = []time.Duration{
+	30 * time.Second,
+	1 * time.Minute,
+	5 * time.Minute,
+	15 * time.Minute,
+	60 * time.Minute,
+}
+
+const (
+	maxConsecutiveErrors = 5
+	maxMissedOnStartup  = 5
+	missedJobStaggerMs  = 5000
+	stuckRunThreshold    = 2 * time.Hour
 )
 
 // JobStatus tracks the runtime state of a job.
@@ -52,6 +79,13 @@ type Job struct {
 	AutoBranch bool `json:"autoBranch,omitempty"`
 	AutoMerge  bool `json:"autoMerge,omitempty"`
 	Enabled    bool `json:"enabled"`
+	// Delivery
+	DeliveryMode     DeliveryMode `json:"deliveryMode,omitempty"`
+	DeliveryWebhookURL string     `json:"deliveryWebhookUrl,omitempty"`
+	DeliveryBestEffort bool       `json:"deliveryBestEffort,omitempty"`
+	// Failure alerts
+	FailureAlertAfter      int    `json:"failureAlertAfter,omitempty"`
+	FailureAlertWebhookURL string `json:"failureAlertWebhookUrl,omitempty"`
 	// Runtime state
 	Status           JobStatus `json:"status"`
 	LastRunAt        time.Time `json:"lastRunAt,omitempty"`
@@ -80,6 +114,9 @@ type JobExecution struct {
 // PromptSender is a function that sends a prompt to a Pi agent and returns the response text.
 type PromptSender func(ctx context.Context, project, agentID, message, model string, autoBranch, autoMerge bool) (string, error)
 
+// SessionInjector injects text into the main agent session.
+type SessionInjector func(project, agentID, text string) error
+
 // Scheduler manages scheduled jobs.
 type Scheduler struct {
 	jobs          map[string]*Job
@@ -95,6 +132,9 @@ type Scheduler struct {
 	isolated    *IsolatedExecutor
 	runLogMgr   *RunLogManager
 	projectRoot string
+
+	// Phase 4: Session delivery
+	sessionInjector SessionInjector
 }
 
 // NewScheduler creates a new scheduler.
@@ -116,6 +156,12 @@ func (s *Scheduler) SetIsolatedExecutor(executor *IsolatedExecutor, runLogMgr *R
 	s.isolated = executor
 	s.runLogMgr = runLogMgr
 	s.projectRoot = projectRoot
+}
+
+// SetSessionInjector configures the scheduler to inject job output into the
+// main agent session (delivery mode "session").
+func (s *Scheduler) SetSessionInjector(injector SessionInjector) {
+	s.sessionInjector = injector
 }
 
 // Start loads persisted jobs and starts the scheduler.
@@ -436,13 +482,29 @@ func (s *Scheduler) executeJob(jobID string) {
 		job.LastRunStatus = "error"
 		job.LastError = truncateStr(err.Error(), 500)
 		job.ConsecutiveErrors++
-		if job.ConsecutiveErrors >= 5 {
+
+		// Error backoff
+		endedAt := time.Now()
+		if backoff := s.errorBackoff(job.ConsecutiveErrors); backoff > 0 {
+			nextRun := endedAt.Add(backoff)
+			s.logger.Info("applying error backoff",
+				zap.String("id", jobID),
+				zap.Int("errors", job.ConsecutiveErrors),
+				zap.Duration("backoff", backoff),
+			)
+			if job.NextRunAt.Before(nextRun) {
+				job.NextRunAt = nextRun
+			}
+		}
+
+		if job.ConsecutiveErrors >= maxConsecutiveErrors {
 			job.Status = StatusError
 			job.Enabled = false
-			s.logger.Error("job disabled after 5 consecutive errors",
+			s.logger.Error("job disabled after consecutive errors",
 				zap.String("id", jobID),
 				zap.Int("errors", job.ConsecutiveErrors),
 			)
+			s.sendFailureAlert(job, execution.Error)
 		} else {
 			job.Status = StatusIdle
 		}
@@ -453,6 +515,9 @@ func (s *Scheduler) executeJob(jobID string) {
 		job.LastError = ""
 		job.ConsecutiveErrors = 0
 		job.Status = StatusIdle
+
+		// Deliver output
+		s.deliverOutput(job, output)
 	}
 
 	job.LastRunAt = time.Now()
@@ -619,61 +684,6 @@ func (s *Scheduler) validateJob(job *Job) error {
 	return nil
 }
 
-// load reads jobs from the store file.
-func (s *Scheduler) load() error {
-	if s.storePath == "" {
-		return nil
-	}
-
-	data, err := os.ReadFile(s.storePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	var store struct {
-		Jobs       []*Job         `json:"jobs"`
-		Executions []*JobExecution `json:"executions"`
-	}
-	if err := json.Unmarshal(data, &store); err != nil {
-		return err
-	}
-
-	now := time.Now()
-	for _, job := range store.Jobs {
-		job.cronEntryID = 0 // Reset on load
-		s.jobs[job.ID] = job
-
-		// Re-schedule enabled cron jobs
-		if job.Enabled && job.Schedule == ScheduleCron {
-			entryID, err := s.cronScheduler.AddFunc(job.CronExpr, func() {
-				s.executeJob(job.ID)
-			})
-			if err != nil {
-				s.logger.Warn("failed to reschedule cron job",
-					zap.String("id", job.ID),
-					zap.Error(err),
-				)
-				continue
-			}
-			job.cronEntryID = entryID
-		}
-
-		// Compute next run for interval/at jobs if not already set
-		if job.Enabled && !job.NextRunAt.After(now) {
-			s.computeNextRun(job)
-		}
-	}
-	s.executions = store.Executions
-	if s.executions == nil {
-		s.executions = make([]*JobExecution, 0)
-	}
-
-	return nil
-}
-
 // save writes jobs to the store file.
 func (s *Scheduler) save() {
 	if s.storePath == "" {
@@ -721,4 +731,204 @@ func truncateStr(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen]
+}
+
+// errorBackoff returns the backoff duration for a given error count.
+func (s *Scheduler) errorBackoff(consecutiveErrors int) time.Duration {
+	idx := consecutiveErrors - 1
+	if idx < 0 {
+		return 0
+	}
+	if idx >= len(DefaultBackoffSchedule) {
+		return DefaultBackoffSchedule[len(DefaultBackoffSchedule)-1]
+	}
+	return DefaultBackoffSchedule[idx]
+}
+
+// deliverOutput delivers job output based on the configured delivery mode.
+func (s *Scheduler) deliverOutput(job *Job, output string) {
+	if output == "" {
+		return
+	}
+	switch job.DeliveryMode {
+	case DeliveryStore:
+		// Already saved to run log
+	case DeliveryWebhook:
+		if job.DeliveryWebhookURL != "" {
+			s.deliverWebhook(job, output)
+		}
+	case DeliverySession:
+		if s.sessionInjector != nil {
+			s.sessionInjector(job.Project, job.AgentID,
+				fmt.Sprintf("📅 %s: %s", job.Name, truncateStr(output, 1000)))
+		}
+	}
+}
+
+// deliverWebhook POSTs job output to a webhook URL.
+func (s *Scheduler) deliverWebhook(job *Job, output string) {
+	payload := map[string]interface{}{
+		"jobId":      job.ID,
+		"jobName":    job.Name,
+		"status":     "ok",
+		"output":     truncateStr(output, 5000),
+		"runAt":      time.Now().Format(time.RFC3339),
+	}
+	data, _ := json.Marshal(payload)
+	client := httpClient()
+	resp, err := client.Post(job.DeliveryWebhookURL, "application/json", bytes.NewReader(data))
+	if err != nil {
+		s.logger.Warn("webhook delivery failed",
+			zap.String("job", job.ID),
+			zap.Error(err),
+		)
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// sendFailureAlert sends a failure alert if configured.
+func (s *Scheduler) sendFailureAlert(job *Job, errMsg string) {
+	if job.FailureAlertAfter <= 0 {
+		job.FailureAlertAfter = maxConsecutiveErrors
+	}
+	if job.ConsecutiveErrors < job.FailureAlertAfter {
+		return
+	}
+	if job.FailureAlertWebhookURL == "" {
+		return
+	}
+	payload := map[string]interface{}{
+		"jobId":      job.ID,
+		"jobName":    job.Name,
+		"status":     "error",
+		"error":      errMsg,
+		"consecutiveErrors": job.ConsecutiveErrors,
+		"alertAt":    time.Now().Format(time.RFC3339),
+	}
+	data, _ := json.Marshal(payload)
+	client := httpClient()
+	resp, err := client.Post(job.FailureAlertWebhookURL, "application/json", bytes.NewReader(data))
+	if err != nil {
+		s.logger.Error("failure alert webhook failed",
+			zap.String("job", job.ID),
+			zap.Error(err),
+		)
+		return
+	}
+	defer resp.Body.Close()
+	s.logger.Info("failure alert sent",
+		zap.String("job", job.ID),
+		zap.Int("errors", job.ConsecutiveErrors),
+	)
+}
+
+// load reads jobs from the store file, clears stuck runs, and catches up missed jobs.
+func (s *Scheduler) load() error {
+	if s.storePath == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(s.storePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var store struct {
+		Jobs       []*Job          `json:"jobs"`
+		Executions []*JobExecution `json:"executions"`
+	}
+	if err := json.Unmarshal(data, &store); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	var missedJobs []*Job
+
+	for _, job := range store.Jobs {
+		job.cronEntryID = 0 // Reset on load
+
+		// Clear stuck runs (older than 2h)
+		if job.Status == StatusRunning && !job.LastRunAt.IsZero() {
+			if now.Sub(job.LastRunAt) > stuckRunThreshold {
+				s.logger.Info("clearing stuck run",
+					zap.String("id", job.ID),
+					zap.Duration("age", now.Sub(job.LastRunAt)),
+				)
+				job.Status = StatusIdle
+				job.ConsecutiveErrors++
+			}
+		}
+
+		s.jobs[job.ID] = job
+
+		// Re-schedule enabled cron jobs
+		if job.Enabled && job.Schedule == ScheduleCron {
+			entryID, err := s.cronScheduler.AddFunc(job.CronExpr, func() {
+				s.executeJob(job.ID)
+			})
+			if err != nil {
+				s.logger.Warn("failed to reschedule cron job",
+					zap.String("id", job.ID),
+					zap.Error(err),
+				)
+				continue
+			}
+			job.cronEntryID = entryID
+		}
+
+		// Compute next run and collect missed jobs
+		if job.Enabled && job.Status != StatusError {
+			s.computeNextRun(job)
+			if job.NextRunAt.Before(now) {
+				missedJobs = append(missedJobs, job)
+			}
+		}
+	}
+	s.executions = store.Executions
+	if s.executions == nil {
+		s.executions = make([]*JobExecution, 0)
+	}
+
+	// Startup catch-up: run max N missed jobs immediately, stagger the rest
+	if len(missedJobs) > 0 {
+		s.logger.Info("startup catch-up",
+			zap.Int("missed", len(missedJobs)),
+			zap.Int("maxImmediate", maxMissedOnStartup),
+		)
+		// Sort by nextRunAt (earliest first)
+		for i := 0; i < len(missedJobs); i++ {
+			job := missedJobs[i]
+			if i < maxMissedOnStartup {
+				s.logger.Info("running missed job immediately",
+					zap.String("id", job.ID),
+					zap.String("name", job.Name),
+				)
+				go s.executeJob(job.ID)
+			} else {
+				stagger := time.Duration(i-maxMissedOnStartup+1) * time.Duration(missedJobStaggerMs) * time.Millisecond
+				job.NextRunAt = now.Add(stagger)
+				s.logger.Info("staggering missed job",
+					zap.String("id", job.ID),
+					zap.Duration("delay", stagger),
+				)
+			}
+		}
+	}
+
+	return nil
+}
+
+var defaultHTTPClient *http.Client
+
+func httpClient() *http.Client {
+	if defaultHTTPClient == nil {
+		defaultHTTPClient = &http.Client{
+			Timeout: 30 * time.Second,
+		}
+	}
+	return defaultHTTPClient
 }

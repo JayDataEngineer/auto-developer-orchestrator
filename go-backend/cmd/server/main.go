@@ -204,6 +204,20 @@ func main() {
 			logger.Warn("Failed to create run log manager", zap.Error(err))
 		}
 		sched.SetIsolatedExecutor(isolatedExec, runLogMgr, projectRoot)
+
+		// Phase 4: Set up session delivery (inject job output into main agent)
+		sched.SetSessionInjector(func(project, agentID, text string) error {
+			client := piPool.GetWithID(projectRoot+"/"+project, agentID)
+			if client == nil {
+				// No active session — log it
+				logger.Info("no active session for delivery",
+					zap.String("project", project),
+					zap.String("agentId", agentID),
+				)
+				return nil
+			}
+			return client.SendPrompt(text, "", "")
+		})
 	}
 
 	if err := sched.Start(context.Background()); err != nil {
