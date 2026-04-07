@@ -104,8 +104,14 @@ func (m *SubAgentManager) Spawn(ctx context.Context, cfg SubAgentConfig) (string
 	}
 	systemPrompt := BuildSubAgentPrompt(promptCfg)
 
+	// Build model string for CLI --model flag
+	modelArg := ""
+	if cfg.Model != "" {
+		modelArg = "litellm/" + cfg.Model
+	}
+
 	// Create PiClient with custom prompt
-	client, err := NewPiClientWithPrompt(cfg.ProjectDir, cfg.AgentID, systemPrompt, m.logger, m.sandboxMgr)
+	client, err := NewPiClientWithPrompt(cfg.ProjectDir, cfg.AgentID, systemPrompt, m.logger, m.sandboxMgr, modelArg)
 	if err != nil {
 		return "", fmt.Errorf("failed to create pi client for sub-agent: %w", err)
 	}
@@ -150,15 +156,7 @@ func (m *SubAgentManager) runSubAgent(inst *SubAgentInstance) {
 	events := inst.Client.Subscribe(subID)
 	defer inst.Client.Unsubscribe(subID)
 
-	// Set model if specified
-	if inst.Config.Model != "" {
-		if err := inst.Client.SetModel("litellm", inst.Config.Model); err != nil {
-			m.logger.Warn("Failed to set sub-agent model (non-fatal)", zap.Error(err))
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-
-	// Send the task prompt
+	// Send the task prompt (model is already set via --model CLI flag)
 	inst.mu.Lock()
 	inst.Status = StatusRunning
 	inst.mu.Unlock()

@@ -85,7 +85,7 @@ func (h *SubAgentHandler) Spawn(w http.ResponseWriter, r *http.Request) {
 	if cfg.Model == "" {
 		switch cfg.Type {
 		case pi.SubAgentComputerUse:
-			cfg.Model = "google/gemma-3-27b-it" // vision-capable with tool calling
+			cfg.Model = "qwen-35-27-vision-thinking" // vision + tool calling
 		case pi.SubAgentCode:
 			cfg.Model = "econ"
 		default:

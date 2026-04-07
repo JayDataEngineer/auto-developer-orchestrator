@@ -62,6 +62,9 @@ type PiClient struct {
 	// Custom system prompt — if set, used instead of SystemPromptBuilder
 	customSystemPrompt string
 
+	// Model to use via --model CLI flag (e.g., "litellm/econ")
+	model string
+
 	// MCP client for external tool servers
 	mcpClient *MCPClient
 
@@ -108,7 +111,7 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger, sandboxM
 // NewPiClientWithPrompt creates a Pi subprocess with a pre-built system prompt.
 // Used by sub-agents that need specialized prompts instead of the default
 // SystemPromptBuilder output.
-func NewPiClientWithPrompt(projectDir string, agentId string, systemPrompt string, logger *zap.Logger, sandboxMgr interface{}) (*PiClient, error) {
+func NewPiClientWithPrompt(projectDir string, agentId string, systemPrompt string, logger *zap.Logger, sandboxMgr interface{}, model string) (*PiClient, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	sandboxID := filepath.Base(projectDir)
@@ -124,6 +127,7 @@ func NewPiClientWithPrompt(projectDir string, agentId string, systemPrompt strin
 		namespace:          sandboxID,
 		sandboxManager:     nil,
 		customSystemPrompt: systemPrompt,
+		model:              model,
 	}
 
 	if mgr, ok := sandboxMgr.(*sandbox.Manager); ok && mgr != nil {
@@ -383,6 +387,9 @@ func (c *PiClient) start() error {
 
 	// Build command
 	args := []string{"--mode", "rpc", "--append-system-prompt", systemPrompt}
+	if c.model != "" {
+		args = append(args, "--model", c.model)
+	}
 
 	if c.sandboxed && c.sandboxObj != nil {
 		// Execute inside sandbox
