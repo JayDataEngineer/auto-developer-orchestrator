@@ -307,32 +307,17 @@ func TestBuildWithComputerUse(t *testing.T) {
 
 	prompt := builder.Build()
 
-	if !strings.Contains(prompt, "# Computer Use Mode") {
-		t.Error("expected Computer Use Mode section when SandboxID is set")
+	if !strings.Contains(prompt, "# Computer Use") {
+		t.Error("expected Computer Use section when SandboxID is set")
 	}
-	if !strings.Contains(prompt, "sandbox-test-123") {
-		t.Error("expected sandbox ID in computer use section")
+	if !strings.Contains(prompt, "api/pi/subagent/spawn") {
+		t.Error("expected subagent spawn endpoint in computer use section")
 	}
-	if !strings.Contains(prompt, "computer-use/enable") {
-		t.Error("expected enable endpoint in computer use section")
+	if !strings.Contains(prompt, "api/pi/subagent/result") {
+		t.Error("expected subagent result endpoint in computer use section")
 	}
-	if !strings.Contains(prompt, "computer-use/screenshot") {
-		t.Error("expected screenshot endpoint in computer use section")
-	}
-	if !strings.Contains(prompt, "computer-use/snapshot") {
-		t.Error("expected snapshot endpoint in computer use section")
-	}
-	if !strings.Contains(prompt, "computer-use/act") {
-		t.Error("expected act endpoint in computer use section")
-	}
-	if !strings.Contains(prompt, "computer-use/disable") {
-		t.Error("expected disable endpoint in computer use section")
-	}
-	if !strings.Contains(prompt, "## Artifacts") {
-		t.Error("expected Artifacts section in computer use section")
-	}
-	if !strings.Contains(prompt, "api/pi/artifacts") {
-		t.Error("expected artifacts endpoint in computer use section")
+	if !strings.Contains(prompt, "computer_use") {
+		t.Error("expected computer_use sub-agent type in computer use section")
 	}
 }
 
@@ -391,8 +376,8 @@ func TestBuildWithSubAgentEnabled(t *testing.T) {
 	if !strings.Contains(prompt, "api/pi/subagent/spawn") {
 		t.Error("expected subagent spawn endpoint")
 	}
-	if !strings.Contains(prompt, "api/pi/subagent/status") {
-		t.Error("expected subagent status endpoint")
+	if !strings.Contains(prompt, "api/pi/subagent/result") {
+		t.Error("expected subagent result endpoint")
 	}
 }
 

@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import fetch from 'node-fetch';
 
 const BASE_URL = 'http://localhost:3847';
 
