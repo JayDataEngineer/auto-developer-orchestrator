@@ -471,7 +471,9 @@ func (s *Scheduler) computeNextRun(job *Job) {
 
 	switch job.Schedule {
 	case ScheduleCron:
-		schedule, err := cron.ParseStandard(job.CronExpr)
+		// Use parser with seconds support (matches cron.WithSeconds() used above)
+		parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+		schedule, err := parser.Parse(job.CronExpr)
 		if err == nil {
 			job.NextRunAt = schedule.Next(now)
 		}
@@ -509,7 +511,7 @@ func (s *Scheduler) validateJob(job *Job) error {
 		if job.CronExpr == "" {
 			return fmt.Errorf("cronExpr is required for cron schedule")
 		}
-		if _, err := cron.ParseStandard(job.CronExpr); err != nil {
+		if _, err := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(job.CronExpr); err != nil {
 			return fmt.Errorf("invalid cron expression: %w", err)
 		}
 	case ScheduleEvery:
