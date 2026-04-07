@@ -193,6 +193,19 @@ func main() {
 		}
 	}
 	sched := scheduler.NewScheduler(schedulerStorePath, handlers.NewSchedulerPromptSender(schedulerPromptSender), logger)
+
+	// Phase 1: Set up isolated executor for job execution
+	isolatedExec, err := scheduler.NewIsolatedExecutor(projectRoot, logger)
+	if err != nil {
+		logger.Warn("Failed to create isolated executor, falling back to main agent", zap.Error(err))
+	} else {
+		runLogMgr, err := scheduler.NewRunLogManager("")
+		if err != nil {
+			logger.Warn("Failed to create run log manager", zap.Error(err))
+		}
+		sched.SetIsolatedExecutor(isolatedExec, runLogMgr, projectRoot)
+	}
+
 	if err := sched.Start(context.Background()); err != nil {
 		logger.Warn("Failed to start scheduler", zap.Error(err))
 	}

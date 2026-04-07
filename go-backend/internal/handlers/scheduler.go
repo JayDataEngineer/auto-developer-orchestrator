@@ -35,6 +35,8 @@ func (h *SchedulerHandler) RegisterRoutes(r chi.Router) {
 	r.Delete("/{id}", h.DeleteJob)
 	r.Post("/{id}/trigger", h.TriggerJob)
 	r.Get("/{id}/executions", h.ListExecutions)
+	r.Get("/{id}/runs", h.ListRuns)
+	r.Get("/runs", h.ListAllRuns)
 }
 
 // createJobRequest is the request body for creating a job.
@@ -204,6 +206,54 @@ func (h *SchedulerHandler) ListExecutions(w http.ResponseWriter, r *http.Request
 	}
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"executions": executions,
+	})
+}
+
+// ListRuns returns persistent run log entries for a job.
+func (h *SchedulerHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+	statusFilter := r.URL.Query().Get("status")
+
+	entries, err := h.scheduler.ListRuns(jobID, limit, statusFilter)
+	if err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
+		return
+	}
+	if entries == nil {
+		entries = []scheduler.RunLogEntry{}
+	}
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"runs": entries,
+	})
+}
+
+// ListAllRuns returns run log entries across all jobs.
+func (h *SchedulerHandler) ListAllRuns(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+	statusFilter := r.URL.Query().Get("status")
+	jobIDFilter := r.URL.Query().Get("jobId")
+
+	entries, err := h.scheduler.ListAllRuns(limit, statusFilter, jobIDFilter)
+	if err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
+		return
+	}
+	if entries == nil {
+		entries = []scheduler.RunLogEntry{}
+	}
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"runs": entries,
 	})
 }
 

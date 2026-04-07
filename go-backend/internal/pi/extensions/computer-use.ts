@@ -466,46 +466,47 @@ export default function (pi: ExtensionAPI) {
 			return new Text(theme.fg("warning", "⊘ ") + theme.fg("muted", text?.type === "text" ? text.text : ""), 0, 0);
 		},
 	});
+
+	// ── Execute in Sandbox ──
+
+	pi.registerTool({
+		name: "computer_use_exec",
+		label: "Execute in Sandbox",
+		description: "Execute a bash command inside the sandbox container. Use this for apt install, file operations, etc. inside the sandbox environment.",
+		parameters: Type.Object({
+			command: Type.String({ description: "The bash command to execute inside the sandbox container" }),
+			timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds (default 30000)" })),
+		}),
+
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			try {
+				const sandboxId = `sandbox-${ctx.cwd.split("/").pop()}`;
+				const raw = callApi(`/api/sandbox/${sandboxId}/exec`, "POST", {
+					cmd: params.command.split(" "),
+					timeout: params.timeout || 30000,
+				});
+				const result: { output: string; exitCode: number } = JSON.parse(raw);
+				const display = result.exitCode === 0 ? result.output : `Exit code: ${result.exitCode}\n${result.output}`;
+				return {
+					content: [{ type: "text", text: display.slice(0, 2000) }],
+					details: result,
+				};
+			} catch (e: any) {
+				return {
+					content: [{ type: "text", text: `Failed to execute command: ${e.message}` }],
+					isError: true,
+				};
+			}
+		},
+
+		renderCall(args, theme) {
+			return new Text(theme.fg("muted", "$ ") + theme.fg("toolArgs", String(args.command || "").slice(0, 60)), 0, 0);
+		},
+
+		renderResult(result, _opts, theme) {
+			const text = result.content[0];
+			const msg = text?.type === "text" ? text.text : "";
+			return new Text(theme.fg("muted", msg.slice(0, 100)), 0, 0);
+		},
+	});
 }
-
-// ─── computer_use_exec ────────────────────────────────────────────────────
-
-pi.registerTool({
-        name: "computer_use_exec",
-        label: "Execute in Sandbox",
-        description: "Execute a bash command inside the sandbox container. Use this for apt install, file operations, etc. inside the sandbox environment.",
-        parameters: Type.Object({
-                command: Type.String({ description: "The bash command to execute inside the sandbox container" }),
-                timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds (default 30000)" })),
-        }),
-
-        async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-                try {
-                        const raw = callApi(`/api/sandbox/sandbox-${ctx.cwd.split("/").pop()}/exec`, "POST", {
-                                cmd: params.command.split(" "),
-                                timeout: params.timeout || 30000,
-                        });
-                        const result: { output: string; exitCode: number } = JSON.parse(raw);
-                        const display = result.exitCode === 0 ? result.output : `Exit code: ${result.exitCode}\n${result.output}`;
-                        return {
-                                content: [{ type: "text", text: display.slice(0, 2000) }],
-                                details: result,
-                        };
-                } catch (e: any) {
-                        return {
-                                content: [{ type: "text", text: `Failed to execute command: ${e.message}` }],
-                                isError: true,
-                        };
-                }
-        },
-
-        renderCall(args, theme) {
-                return new Text(theme.fg("muted", "$ ") + theme.fg("toolArgs", String(args.command || "").slice(0, 60)), 0, 0);
-        },
-
-        renderResult(result, _opts, theme) {
-                const text = result.content[0];
-                const msg = text?.type === "text" ? text.text : "";
-                return new Text(theme.fg("muted", msg.slice(0, 100)), 0, 0);
-        },
-});

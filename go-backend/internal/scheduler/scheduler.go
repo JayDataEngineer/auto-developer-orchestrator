@@ -90,6 +90,11 @@ type Scheduler struct {
 	storePath     string
 	mu            sync.RWMutex
 	stopCh        chan struct{}
+
+	// Phase 1: Isolated execution + run logs
+	isolated    *IsolatedExecutor
+	runLogMgr   *RunLogManager
+	projectRoot string
 }
 
 // NewScheduler creates a new scheduler.
@@ -103,6 +108,14 @@ func NewScheduler(storePath string, sender PromptSender, logger *zap.Logger) *Sc
 		storePath:     storePath,
 		stopCh:        make(chan struct{}),
 	}
+}
+
+// SetIsolatedExecutor configures the scheduler to use isolated Pi subprocesses
+// for job execution instead of the main agent pool.
+func (s *Scheduler) SetIsolatedExecutor(executor *IsolatedExecutor, runLogMgr *RunLogManager, projectRoot string) {
+	s.isolated = executor
+	s.runLogMgr = runLogMgr
+	s.projectRoot = projectRoot
 }
 
 // Start loads persisted jobs and starts the scheduler.
@@ -319,6 +332,22 @@ func (s *Scheduler) ListExecutions(jobID string, limit int) []*JobExecution {
 	return result
 }
 
+// ListRuns returns persistent run log entries for a job.
+func (s *Scheduler) ListRuns(jobID string, limit int, statusFilter string) ([]RunLogEntry, error) {
+	if s.runLogMgr == nil {
+		return nil, nil
+	}
+	return s.runLogMgr.Read(jobID, limit)
+}
+
+// ListAllRuns returns run log entries across all jobs.
+func (s *Scheduler) ListAllRuns(limit int, statusFilter, jobIDFilter string) ([]RunLogEntry, error) {
+	if s.runLogMgr == nil {
+		return nil, nil
+	}
+	return s.runLogMgr.ReadAll(limit, statusFilter, jobIDFilter)
+}
+
 // TriggerJob manually triggers a job execution.
 func (s *Scheduler) TriggerJob(jobID string) error {
 	s.mu.RLock()
@@ -359,8 +388,7 @@ func (s *Scheduler) executeJob(jobID string) {
 		Status:    "running",
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
+	ctx := context.Background()
 
 	s.logger.Info("executing job",
 		zap.String("id", jobID),
@@ -368,7 +396,28 @@ func (s *Scheduler) executeJob(jobID string) {
 		zap.String("project", job.Project),
 	)
 
-	output, err := s.promptSender(ctx, job.Project, job.AgentID, job.Message, job.Model, job.AutoBranch, job.AutoMerge)
+	// Use isolated execution if configured
+	var output string
+	var err error
+	var result *JobResult
+	if s.isolated != nil {
+		projectPath := s.resolveProjectPath(job.Project)
+		if projectPath == "" {
+			err = fmt.Errorf("project %s not found", job.Project)
+		} else {
+			result = s.isolated.Execute(ctx, jobID, job.Name, projectPath, job.Message, job.Model, 0)
+			if result.Error != "" {
+				err = fmt.Errorf("%s", result.Error)
+			}
+			output = result.Output
+		}
+	} else {
+		// Fallback to main agent pool
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		output, err = s.promptSender(ctx, job.Project, job.AgentID, job.Message, job.Model, job.AutoBranch, job.AutoMerge)
+	}
 
 	execution.EndedAt = time.Now()
 
@@ -383,9 +432,9 @@ func (s *Scheduler) executeJob(jobID string) {
 
 	if err != nil {
 		execution.Status = "error"
-		execution.Error = err.Error()
+		execution.Error = truncateStr(err.Error(), 2000)
 		job.LastRunStatus = "error"
-		job.LastError = err.Error()
+		job.LastError = truncateStr(err.Error(), 500)
 		job.ConsecutiveErrors++
 		if job.ConsecutiveErrors >= 5 {
 			job.Status = StatusError
@@ -415,7 +464,46 @@ func (s *Scheduler) executeJob(jobID string) {
 		s.executions = s.executions[len(s.executions)-200:]
 	}
 
+	// Write to persistent run log (Phase 1)
+	if s.runLogMgr != nil {
+		status := execution.Status
+		if status == "running" {
+			status = "ok"
+		}
+		nextRunMs := int64(0)
+		if !job.NextRunAt.IsZero() {
+			nextRunMs = job.NextRunAt.UnixMilli()
+		}
+		s.runLogMgr.Append(RunLogEntry{
+			JobID:       jobID,
+			Status:      status,
+			Error:       execution.Error,
+			Summary:     truncateStr(output, 500),
+			RunAtMs:     execution.StartedAt.UnixMilli(),
+			DurationMs:  execution.EndedAt.Sub(execution.StartedAt).Milliseconds(),
+			NextRunAtMs: nextRunMs,
+			Model:       job.Model,
+		})
+	}
+
 	s.save()
+}
+
+// resolveProjectPath resolves a project name to its filesystem path.
+func (s *Scheduler) resolveProjectPath(project string) string {
+	if project == "" {
+		return ""
+	}
+	// Try relative to project root
+	candidate := filepath.Join(s.projectRoot, project)
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return candidate
+	}
+	// Try as absolute path
+	if info, err := os.Stat(project); err == nil && info.IsDir() {
+		return project
+	}
+	return ""
 }
 
 // runIntervalLoop handles "every" and "at" schedule types.
