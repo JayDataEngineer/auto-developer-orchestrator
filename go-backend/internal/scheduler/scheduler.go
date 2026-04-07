@@ -71,6 +71,8 @@ type Job struct {
 	Schedule    ScheduleType `json:"scheduleType"`
 	// Cron expression (e.g. "0 9 * * *" for daily at 9am)
 	CronExpr string `json:"cronExpr,omitempty"`
+	// Timezone for cron expression (e.g. "America/New_York", default: UTC)
+	Timezone string `json:"timezone,omitempty"`
 	// Fixed interval in seconds
 	EverySeconds int64 `json:"everySeconds,omitempty"`
 	// One-shot time (RFC3339)

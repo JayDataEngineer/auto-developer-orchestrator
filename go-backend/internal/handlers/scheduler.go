@@ -49,6 +49,7 @@ type createJobRequest struct {
 	Model        string `json:"model,omitempty"`
 	ScheduleType string `json:"scheduleType"`
 	CronExpr     string `json:"cronExpr,omitempty"`
+	Timezone     string `json:"timezone,omitempty"`
 	EverySeconds int64  `json:"everySeconds,omitempty"`
 	AtTime       string `json:"atTime,omitempty"`
 	AutoBranch   bool   `json:"autoBranch,omitempty"`
@@ -86,6 +87,7 @@ func (h *SchedulerHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		Model:                  req.Model,
 		Schedule:               scheduler.ScheduleType(req.ScheduleType),
 		CronExpr:               req.CronExpr,
+		Timezone:               req.Timezone,
 		EverySeconds:           req.EverySeconds,
 		AtTime:                 req.AtTime,
 		AutoBranch:             req.AutoBranch,
@@ -147,18 +149,23 @@ func (h *SchedulerHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updates := &scheduler.Job{
-		Name:         req.Name,
-		Description:  req.Description,
-		Project:      req.Project,
-		AgentID:      req.AgentID,
-		Message:      req.Message,
-		Model:        req.Model,
-		Schedule:     scheduler.ScheduleType(req.ScheduleType),
-		CronExpr:     req.CronExpr,
-		EverySeconds: req.EverySeconds,
-		AtTime:       req.AtTime,
-		AutoBranch:   req.AutoBranch,
-		AutoMerge:    req.AutoMerge,
+		Name:                   req.Name,
+		Description:            req.Description,
+		Project:                req.Project,
+		AgentID:                req.AgentID,
+		Message:                req.Message,
+		Model:                  req.Model,
+		Schedule:               scheduler.ScheduleType(req.ScheduleType),
+		CronExpr:               req.CronExpr,
+		Timezone:               req.Timezone,
+		EverySeconds:           req.EverySeconds,
+		AtTime:                 req.AtTime,
+		AutoBranch:             req.AutoBranch,
+		AutoMerge:              req.AutoMerge,
+		DeliveryMode:           scheduler.DeliveryMode(req.DeliveryMode),
+		DeliveryWebhookURL:     req.DeliveryWebhookURL,
+		FailureAlertAfter:      req.FailureAlertAfter,
+		FailureAlertWebhookURL: req.FailureAlertWebhookURL,
 	}
 	if req.Enabled != nil {
 		updates.Enabled = *req.Enabled
