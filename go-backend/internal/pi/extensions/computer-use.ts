@@ -470,7 +470,7 @@ export default function (pi: ExtensionAPI) {
 
 // ─── computer_use_exec ────────────────────────────────────────────────────
 
-registerTool({
+pi.registerTool({
         name: "computer_use_exec",
         label: "Execute in Sandbox",
         description: "Execute a bash command inside the sandbox container. Use this for apt install, file operations, etc. inside the sandbox environment.",

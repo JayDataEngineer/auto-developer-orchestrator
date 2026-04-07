@@ -1,97 +1,43 @@
 /**
  * LiteLLM Provider Extension
- *
- * Registers a "litellm" provider that routes all model calls through
- * the LiteLLM proxy. This allows the Go orchestrator to set models
- * via SetModel("litellm", "modelId") and have them actually work.
  */
-
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-
-// Read LiteLLM config from environment (set by the Go orchestrator)
-const LITELLM_URL = process.env.LITELLM_PROXY_URL || "http://localhost:4000";
-const LITELLM_KEY = process.env.LITELLM_MASTER_KEY || "";
+import type { ExtensionAPI, ProviderModelConfig } from "@mariozechner/pi-coding-agent";
+import * as fs from "fs";
+import * as path from "path";
 
 export default function (pi: ExtensionAPI) {
-	pi.registerProvider("litellm", {
-		baseUrl: LITELLM_URL.replace(/\/+$/, ""), // strip trailing slashes
-		apiKey: LITELLM_KEY,
-		api: "openai-completions",
-		models: [
-			// Fast / cheap models for coding
-			{
-				id: "econ",
-				name: "Econ (GLM-4.5-Air)",
-				reasoning: true,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 32000,
-				maxTokens: 8000,
-			},
-			{
-				id: "fast",
-				name: "Fast",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 32000,
-				maxTokens: 8000,
-			},
-			{
-				id: "or-free",
-				name: "OpenRouter Free",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 32000,
-				maxTokens: 8000,
-			},
-			// Qwen models
-			{
-				id: "qwen-35-27",
-				name: "Qwen 35 27B",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 32000,
-				maxTokens: 8000,
-			},
-			{
-				id: "qwen-35-27-code",
-				name: "Qwen 35 27B Code",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 32000,
-				maxTokens: 8000,
-			},
-			{
-				id: "qwen-cloud",
-				name: "Qwen Cloud",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 32000,
-				maxTokens: 8000,
-			},
-			{
-				id: "qwen-35-35b",
-				name: "Qwen 35 35B",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 32000,
-				maxTokens: 8000,
-			},
-			{
-				id: "qwen-35-35b-code",
-				name: "Qwen 35 35B Code",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 32000,
-				maxTokens: 8000,
-			},
-		],
-	});
+  try {
+    const modelsPath = path.join(process.env.HOME || "/home/ubuntu", ".pi/agent/models.json");
+    const modelsConfig = JSON.parse(fs.readFileSync(modelsPath, "utf-8"));
+    const providers = modelsConfig.providers || {};
+    for (const [name, cfg] of Object.entries(providers)) {
+      const provider = cfg as any;
+      if (provider.baseUrl && provider.apiKey) {
+        const apiType = provider.api || "openai-completions";
+        
+        const modelConfigs: ProviderModelConfig[] = provider.models?.map((m: any) => ({
+          id: m.id,
+          name: m.name || m.id,
+          api: (m.api || apiType) as any,
+          reasoning: m.reasoning ?? false,
+          input: m.input ?? ["text"],
+          cost: m.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: m.contextWindow ?? 32768,
+          maxTokens: m.maxTokens ?? 8192,
+        })) || [];
+        
+        pi.registerProvider(name, {
+          baseUrl: provider.baseUrl,
+          apiKey: provider.apiKey,
+          api: apiType,
+          models: modelConfigs,
+          compat: provider.compat || {},
+        });
+        const ids = modelConfigs.map(m => m.id).join(', ');
+        console.error(`[litellm-provider] Registered provider: ${name} (${apiType}) with ${modelConfigs.length} models: ${ids}`);
+      }
+    }
+  } catch (e: any) {
+    console.error(`[litellm-provider] Failed to load models.json: ${e.message}`);
+  }
 }

@@ -85,11 +85,11 @@ func (h *SubAgentHandler) Spawn(w http.ResponseWriter, r *http.Request) {
 	if cfg.Model == "" {
 		switch cfg.Type {
 		case pi.SubAgentComputerUse:
-			cfg.Model = "zai-glm-5"
+			cfg.Model = "google/gemini-2.0-flash-001" // vision + tools
 		case pi.SubAgentCode:
-			cfg.Model = "zai-glm-5"
+			cfg.Model = "google/gemini-2.0-flash-001"
 		default:
-			cfg.Model = "zai-glm-5"
+			cfg.Model = "google/gemini-2.0-flash-001"
 		}
 	}
 
