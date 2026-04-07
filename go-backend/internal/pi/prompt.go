@@ -427,7 +427,38 @@ curl "http://localhost:%s/api/pi/subagent/result?subAgentId=sub-computer_use-123
 - If passwords.txt has placeholders, tell the user to fill it in
 - Wait for the sub-agent to complete before responding to the user
 - Summarize the sub-agent's result clearly
-- You can spawn up to 3 sub-agents concurrently`, port, port, port, port)
+- You can spawn up to 3 sub-agents concurrently
+
+## Scheduled Jobs
+
+You can create and manage scheduled jobs via the scheduler API. This lets you schedule recurring tasks.
+
+Create a recurring job:
+`+"```"+`bash
+curl -s -X POST http://localhost:%s/api/scheduler/ -d '{"name":"Weather Check","message":"Check the weather forecast.","project":"test-repo","scheduleType":"every","everySeconds":300,"model":"google/gemini-2.0-flash-001","enabled":true}'
+`+"```"+`
+
+List all jobs:
+`+"```"+`bash
+curl -s http://localhost:%s/api/scheduler/
+`+"```"+`
+
+Trigger a job immediately:
+`+"```"+`bash
+curl -s -X POST http://localhost:%s/api/scheduler/JOB_ID/trigger
+`+"```"+`
+
+Delete a job:
+`+"```"+`bash
+curl -s -X DELETE http://localhost:%s/api/scheduler/JOB_ID
+`+"```"+`
+
+View run history:
+`+"```"+`bash
+curl -s "http://localhost:%s/api/scheduler/JOB_ID/runs?limit=10"
+`+"```"+`
+
+Schedule types: "cron" (6-field cron expression), "every" (N seconds), "at" (RFC3339 timestamp)`, port, port, port, port, port, port, port, port, port)
 }
 
 // buildHooksSection describes the hook system to the agent
