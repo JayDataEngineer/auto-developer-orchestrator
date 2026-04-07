@@ -45,14 +45,14 @@ func TestModelFlag(t *testing.T) {
 	}
 }
 
-func TestTruncate(t *testing.T) {
-	if got := truncate("hello", 10); got != "hello" {
+func TestTruncateEllipsis(t *testing.T) {
+	if got := truncateEllipsis("hello", 10); got != "hello" {
 		t.Errorf("truncate short = %q", got)
 	}
-	if got := truncate("hello world", 5); got != "hello..." {
+	if got := truncateEllipsis("hello world", 5); got != "hello..." {
 		t.Errorf("truncate long = %q", got)
 	}
-	if got := truncate("", 5); got != "" {
+	if got := truncateEllipsis("", 5); got != "" {
 		t.Errorf("truncate empty = %q", got)
 	}
 }

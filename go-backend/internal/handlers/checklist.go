@@ -52,8 +52,7 @@ func (h *ChecklistHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	// Return empty if file doesn't exist
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"tasks": []Task{},
 		})
 		return
@@ -100,8 +99,7 @@ func (h *ChecklistHandler) Get(w http.ResponseWriter, r *http.Request) {
 		taskCounter++
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"tasks": tasks,
 	})
 }
@@ -152,8 +150,7 @@ func (h *ChecklistHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "Checklist updated successfully",
 	})
@@ -236,8 +233,7 @@ func (h *ChecklistHandler) Merge(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("Failed to reset task index", zap.Error(err))
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "PR merged and task marked as completed.",
 		"summary": mergedTaskText,

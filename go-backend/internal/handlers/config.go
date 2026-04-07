@@ -63,8 +63,7 @@ func (h *ConfigHandler) GetAI(w http.ResponseWriter, r *http.Request) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(h.config)
+	writeJSON(w, http.StatusOK, h.config)
 }
 
 // SetAI updates the AI configuration
@@ -82,8 +81,7 @@ func (h *ConfigHandler) SetAI(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("AI Config updated", zap.Any("config", h.config))
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":  true,
 		"aiConfig": h.config,
 	})
@@ -96,8 +94,7 @@ func (h *ConfigHandler) GetSystem(w http.ResponseWriter, r *http.Request) {
 		"projectsDir": "/app/projects",
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(systemConfig)
+	writeJSON(w, http.StatusOK, systemConfig)
 }
 
 // SetSystem updates the system configuration
@@ -118,8 +115,7 @@ func (h *ConfigHandler) SetSystem(w http.ResponseWriter, r *http.Request) {
 		"projectsDir": req.ProjectsDir,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":      true,
 		"systemConfig": systemConfig,
 	})
@@ -144,8 +140,6 @@ var githubToken string
 
 // GetGitHubUser returns the current GitHub user info
 func (h *ConfigHandler) GetGitHubUser(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	// Check in-memory token first, then fall back to env var
 	token := githubToken
 	if token == "" {
@@ -156,7 +150,7 @@ func (h *ConfigHandler) GetGitHubUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if token == "" {
-		json.NewEncoder(w).Encode(GitHubUserResponse{
+		writeJSON(w, http.StatusOK, GitHubUserResponse{
 			Connected: false,
 		})
 		return
@@ -165,7 +159,7 @@ func (h *ConfigHandler) GetGitHubUser(w http.ResponseWriter, r *http.Request) {
 	// Call GitHub API to get user info
 	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
 	if err != nil {
-		json.NewEncoder(w).Encode(GitHubUserResponse{Connected: false})
+		writeJSON(w, http.StatusOK, GitHubUserResponse{Connected: false})
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+githubToken)
@@ -174,13 +168,13 @@ func (h *ConfigHandler) GetGitHubUser(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		json.NewEncoder(w).Encode(GitHubUserResponse{Connected: false})
+		writeJSON(w, http.StatusOK, GitHubUserResponse{Connected: false})
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		json.NewEncoder(w).Encode(GitHubUserResponse{Connected: false})
+		writeJSON(w, http.StatusOK, GitHubUserResponse{Connected: false})
 		return
 	}
 
@@ -191,11 +185,11 @@ func (h *ConfigHandler) GetGitHubUser(w http.ResponseWriter, r *http.Request) {
 		AvatarURL string `json:"avatar_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		json.NewEncoder(w).Encode(GitHubUserResponse{Connected: false})
+		writeJSON(w, http.StatusOK, GitHubUserResponse{Connected: false})
 		return
 	}
 
-	json.NewEncoder(w).Encode(GitHubUserResponse{
+	writeJSON(w, http.StatusOK, GitHubUserResponse{
 		Connected: true,
 		User: &GitHubUserInfo{
 			Login:     user.Login,
@@ -240,8 +234,7 @@ func (h *ConfigHandler) ConnectGitHub(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false,
 			"error":   "Invalid GitHub token",
 		})
@@ -254,8 +247,7 @@ func (h *ConfigHandler) ConnectGitHub(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("GitHub account connected")
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 	})
 }

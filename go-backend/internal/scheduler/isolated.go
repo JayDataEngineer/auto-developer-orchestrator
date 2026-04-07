@@ -214,7 +214,7 @@ Execute the task using your available tools. Report results as plain text.`, job
 		if ctx.Err() == context.DeadlineExceeded {
 			return &JobResult{
 				Output:     out,
-				Error:      fmt.Sprintf("job execution timed out after %ds. stderr: %s", timeoutSec, truncate(errStr, 200)),
+				Error:      fmt.Sprintf("job execution timed out after %ds. stderr: %s", timeoutSec, truncateEllipsis(errStr, 200)),
 				DurationMs: time.Since(start).Milliseconds(),
 				Model:      model,
 			}
@@ -244,7 +244,7 @@ Execute the task using your available tools. Report results as plain text.`, job
 			}
 			return &JobResult{
 				Output:     out,
-				Error:      fmt.Sprintf("pi process exited: %v. stderr: %s", err, truncate(errStr, 200)),
+				Error:      fmt.Sprintf("pi process exited: %v. stderr: %s", err, truncateEllipsis(errStr, 200)),
 				DurationMs: time.Since(start).Milliseconds(),
 				Model:      model,
 			}
@@ -263,7 +263,7 @@ Execute the task using your available tools. Report results as plain text.`, job
 			if errStr != "" {
 				return &JobResult{
 					Output:     "",
-					Error:      fmt.Sprintf("pi produced no output. stderr: %s", truncate(errStr, 500)),
+					Error:      fmt.Sprintf("pi produced no output. stderr: %s", truncateEllipsis(errStr, 500)),
 					DurationMs: time.Since(start).Milliseconds(),
 					Model:      model,
 				}
@@ -292,13 +292,6 @@ func modelFlag(model string) string {
 		return ""
 	}
 	return "--model litellm/" + model
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
 
 func (e *IsolatedExecutor) resolveProjectPath(project string) string {

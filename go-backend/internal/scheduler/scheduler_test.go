@@ -386,10 +386,10 @@ func TestComputeNextRunAt(t *testing.T) {
 // --- TruncateStr ---
 
 func TestTruncateStr(t *testing.T) {
-	if s := truncateStr("hello", 10); s != "hello" {
+	if s := truncateClip("hello", 10); s != "hello" {
 		t.Errorf("expected hello, got %s", s)
 	}
-	if s := truncateStr("hello world", 5); s != "hello" {
+	if s := truncateClip("hello world", 5); s != "hello" {
 		t.Errorf("expected hello, got %s", s)
 	}
 }

@@ -480,9 +480,9 @@ func (s *Scheduler) executeJob(jobID string) {
 
 	if err != nil {
 		execution.Status = "error"
-		execution.Error = truncateStr(err.Error(), 2000)
+		execution.Error = truncateClip(err.Error(), 2000)
 		job.LastRunStatus = "error"
-		job.LastError = truncateStr(err.Error(), 500)
+		job.LastError = truncateClip(err.Error(), 500)
 		job.ConsecutiveErrors++
 
 		// Error backoff
@@ -512,7 +512,7 @@ func (s *Scheduler) executeJob(jobID string) {
 		}
 	} else {
 		execution.Status = "success"
-		execution.Output = truncateStr(output, 5000)
+		execution.Output = truncateClip(output, 5000)
 		job.LastRunStatus = "success"
 		job.LastError = ""
 		job.ConsecutiveErrors = 0
@@ -545,7 +545,7 @@ func (s *Scheduler) executeJob(jobID string) {
 			JobID:       jobID,
 			Status:      status,
 			Error:       execution.Error,
-			Summary:     truncateStr(output, 500),
+			Summary:     truncateClip(output, 500),
 			RunAtMs:     execution.StartedAt.UnixMilli(),
 			DurationMs:  execution.EndedAt.Sub(execution.StartedAt).Milliseconds(),
 			NextRunAtMs: nextRunMs,
@@ -728,11 +728,20 @@ func (s *Scheduler) save() {
 	}
 }
 
-func truncateStr(s string, maxLen int) string {
+// truncateClip clips s to maxLen without any suffix.
+func truncateClip(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
 	return s[:maxLen]
+}
+
+// truncateEllipsis clips s to maxLen and appends "...".
+func truncateEllipsis(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // errorBackoff returns the backoff duration for a given error count.
@@ -762,7 +771,7 @@ func (s *Scheduler) deliverOutput(job *Job, output string) {
 	case DeliverySession:
 		if s.sessionInjector != nil {
 			s.sessionInjector(job.Project, job.AgentID,
-				fmt.Sprintf("📅 %s: %s", job.Name, truncateStr(output, 1000)))
+				fmt.Sprintf("📅 %s: %s", job.Name, truncateClip(output, 1000)))
 		}
 	}
 }
@@ -773,7 +782,7 @@ func (s *Scheduler) deliverWebhook(job *Job, output string) {
 		"jobId":      job.ID,
 		"jobName":    job.Name,
 		"status":     "ok",
-		"output":     truncateStr(output, 5000),
+		"output":     truncateClip(output, 5000),
 		"runAt":      time.Now().Format(time.RFC3339),
 	}
 	data, _ := json.Marshal(payload)

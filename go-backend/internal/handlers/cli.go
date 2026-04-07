@@ -105,17 +105,15 @@ func (h *CLIHandler) ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 		response.Success = false
 		response.Error = err.Error()
 		response.Output = string(output)
-		w.WriteHeader(http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, &response)
 	} else {
 		h.logger.Info("Command succeeded",
 			zap.String("command", req.Command),
 			zap.String("output", string(output)))
 		response.Success = true
 		response.Output = string(output)
+		writeJSON(w, http.StatusOK, &response)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(&response)
 }
 
 // ListAllowedCommands returns list of allowed commands
@@ -125,8 +123,7 @@ func (h *CLIHandler) ListAllowedCommands(w http.ResponseWriter, r *http.Request)
 		commands = append(commands, cmd)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":    true,
 		"commands":   commands,
 		"projectDir": h.projectRoot,
@@ -180,8 +177,7 @@ func (h *CLIHandler) ReadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"path":    cleanPath,
 		"content": string(content),
@@ -236,8 +232,7 @@ func (h *CLIHandler) ListDirectory(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"path":    cleanPath,
 		"entries": result,

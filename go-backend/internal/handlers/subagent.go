@@ -52,14 +52,14 @@ type spawnRequest struct {
 func (h *SubAgentHandler) Spawn(w http.ResponseWriter, r *http.Request) {
 	var req spawnRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeSubJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "Invalid request body",
 		})
 		return
 	}
 
 	if req.Project == "" || req.ParentAgentId == "" || req.Task == "" {
-		h.writeSubJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "project, parentAgentId, and task are required",
 		})
 		return
@@ -67,7 +67,7 @@ func (h *SubAgentHandler) Spawn(w http.ResponseWriter, r *http.Request) {
 
 	projectPath := h.resolveProjectPath(req.Project)
 	if projectPath == "" {
-		h.writeSubJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": "Project not found",
 		})
 		return
@@ -96,13 +96,13 @@ func (h *SubAgentHandler) Spawn(w http.ResponseWriter, r *http.Request) {
 	subAgentID, err := h.manager.Spawn(r.Context(), cfg)
 	if err != nil {
 		h.logger.Error("Failed to spawn sub-agent", zap.Error(err))
-		h.writeSubJSON(w, http.StatusInternalServerError, map[string]interface{}{
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	h.writeSubJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":    true,
 		"subAgentId": subAgentID,
 	})
@@ -113,7 +113,7 @@ func (h *SubAgentHandler) Spawn(w http.ResponseWriter, r *http.Request) {
 func (h *SubAgentHandler) Status(w http.ResponseWriter, r *http.Request) {
 	subAgentID := r.URL.Query().Get("subAgentId")
 	if subAgentID == "" {
-		h.writeSubJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "subAgentId is required",
 		})
 		return
@@ -121,13 +121,13 @@ func (h *SubAgentHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	status, err := h.manager.GetStatus(subAgentID)
 	if err != nil {
-		h.writeSubJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	h.writeSubJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":    true,
 		"subAgentId": subAgentID,
 		"status":     string(status),
@@ -139,7 +139,7 @@ func (h *SubAgentHandler) Status(w http.ResponseWriter, r *http.Request) {
 func (h *SubAgentHandler) Result(w http.ResponseWriter, r *http.Request) {
 	subAgentID := r.URL.Query().Get("subAgentId")
 	if subAgentID == "" {
-		h.writeSubJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "subAgentId is required",
 		})
 		return
@@ -147,7 +147,7 @@ func (h *SubAgentHandler) Result(w http.ResponseWriter, r *http.Request) {
 
 	inst, err := h.manager.GetInstance(subAgentID)
 	if err != nil {
-		h.writeSubJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
@@ -226,27 +226,27 @@ type abortSubAgentRequest struct {
 func (h *SubAgentHandler) Abort(w http.ResponseWriter, r *http.Request) {
 	var req abortSubAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeSubJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "Invalid request body",
 		})
 		return
 	}
 
 	if req.SubAgentId == "" {
-		h.writeSubJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "subAgentId is required",
 		})
 		return
 	}
 
 	if err := h.manager.Abort(req.SubAgentId); err != nil {
-		h.writeSubJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	h.writeSubJSON(w, http.StatusOK, map[string]bool{"success": true})
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // ListByParent lists all sub-agents for a parent agent.
@@ -254,7 +254,7 @@ func (h *SubAgentHandler) Abort(w http.ResponseWriter, r *http.Request) {
 func (h *SubAgentHandler) ListByParent(w http.ResponseWriter, r *http.Request) {
 	parentAgentId := r.URL.Query().Get("parentAgentId")
 	if parentAgentId == "" {
-		h.writeSubJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "parentAgentId is required",
 		})
 		return
@@ -265,7 +265,7 @@ func (h *SubAgentHandler) ListByParent(w http.ResponseWriter, r *http.Request) {
 		results = []pi.SubAgentResult{}
 	}
 
-	h.writeSubJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":    true,
 		"subAgents":  results,
 	})
@@ -290,9 +290,3 @@ func (h *SubAgentHandler) resolveProjectPath(project string) string {
 	return ""
 }
 
-// writeSubJSON writes a JSON response.
-func (h *SubAgentHandler) writeSubJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}

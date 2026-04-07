@@ -35,8 +35,7 @@ func (h *AIHandler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":   true,
 		"engine":    "stub",
 		"summary":   req.Summary,
@@ -71,8 +70,7 @@ func (h *AIHandler) RunTests(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":   true,
 		"results":   results,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),

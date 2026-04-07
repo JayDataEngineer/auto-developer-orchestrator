@@ -67,7 +67,7 @@ type createJobRequest struct {
 func (h *SchedulerHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	var req createJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "Invalid request body",
 		})
 		return
@@ -100,13 +100,13 @@ func (h *SchedulerHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.scheduler.CreateJob(job); err != nil {
-		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	h.writeJSON(w, http.StatusCreated, map[string]interface{}{
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"success": true,
 		"job":     job,
 	})
@@ -118,7 +118,7 @@ func (h *SchedulerHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	if jobs == nil {
 		jobs = []*scheduler.Job{}
 	}
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"jobs": jobs,
 	})
 }
@@ -128,12 +128,12 @@ func (h *SchedulerHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	job, err := h.scheduler.GetJob(jobID)
 	if err != nil {
-		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
-	h.writeJSON(w, http.StatusOK, job)
+	writeJSON(w, http.StatusOK, job)
 }
 
 // UpdateJob updates an existing job.
@@ -142,7 +142,7 @@ func (h *SchedulerHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 
 	var req createJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "Invalid request body",
 		})
 		return
@@ -174,14 +174,14 @@ func (h *SchedulerHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.scheduler.UpdateJob(jobID, updates); err != nil {
-		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
 	job, _ := h.scheduler.GetJob(jobID)
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"job":     job,
 	})
@@ -191,24 +191,24 @@ func (h *SchedulerHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 func (h *SchedulerHandler) DeleteJob(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if err := h.scheduler.DeleteJob(jobID); err != nil {
-		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
-	h.writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // TriggerJob manually triggers a job execution.
 func (h *SchedulerHandler) TriggerJob(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if err := h.scheduler.TriggerJob(jobID); err != nil {
-		h.writeJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "Job triggered",
 	})
@@ -221,7 +221,7 @@ func (h *SchedulerHandler) ListExecutions(w http.ResponseWriter, r *http.Request
 	if executions == nil {
 		executions = []*scheduler.JobExecution{}
 	}
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"executions": executions,
 	})
 }
@@ -237,7 +237,7 @@ func (h *SchedulerHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := h.scheduler.ListRuns(jobID, limit, statusFilter)
 	if err != nil {
-		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
@@ -245,7 +245,7 @@ func (h *SchedulerHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []scheduler.RunLogEntry{}
 	}
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"runs": entries,
 	})
 }
@@ -261,7 +261,7 @@ func (h *SchedulerHandler) ListAllRuns(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := h.scheduler.ListAllRuns(limit, statusFilter, jobIDFilter)
 	if err != nil {
-		h.writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
@@ -269,17 +269,11 @@ func (h *SchedulerHandler) ListAllRuns(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []scheduler.RunLogEntry{}
 	}
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"runs": entries,
 	})
 }
 
-// writeJSON writes a JSON response.
-func (h *SchedulerHandler) writeJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
 
 // NewSchedulerPromptSender creates a PromptSender that sends prompts through the Pi system.
 // This is the bridge between the scheduler and the Pi agent pool.

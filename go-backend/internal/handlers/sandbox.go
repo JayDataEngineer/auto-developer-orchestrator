@@ -55,9 +55,7 @@ func (h *SandboxHandler) CreateSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(sandbox)
+	writeJSON(w, http.StatusCreated, sandbox)
 }
 
 // GetSandbox returns a sandbox by ID
@@ -71,8 +69,7 @@ func (h *SandboxHandler) GetSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s)
+	writeJSON(w, http.StatusOK, s)
 }
 
 // ListSandboxes returns all active sandboxes
@@ -80,8 +77,7 @@ func (h *SandboxHandler) GetSandbox(w http.ResponseWriter, r *http.Request) {
 func (h *SandboxHandler) ListSandboxes(w http.ResponseWriter, r *http.Request) {
 	sandboxes := h.manager.ListSandboxes()
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sandboxes)
+	writeJSON(w, http.StatusOK, sandboxes)
 }
 
 // DestroySandbox destroys a sandbox
@@ -116,8 +112,7 @@ func (h *SandboxHandler) ExecCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"output": output})
+	writeJSON(w, http.StatusOK, map[string]string{"output": output})
 }
 
 // EnableBrowserModeRequest is the request body for enabling browser mode
@@ -147,8 +142,7 @@ func (h *SandboxHandler) EnableBrowserMode(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(session)
+	writeJSON(w, http.StatusOK, session)
 }
 
 // EnableDesktopModeRequest is the request body for enabling desktop mode
@@ -178,8 +172,7 @@ func (h *SandboxHandler) EnableDesktopMode(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(session)
+	writeJSON(w, http.StatusOK, session)
 }
 
 // DisableMode disables any active mode (browser or desktop)
@@ -206,8 +199,7 @@ func (h *SandboxHandler) GetDesktopViewer(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"viewerUrl":  session.ViewerURL,
 		"cdpUrl":     getCDPURL(session),
 		"vncUrl":     getVNCURL(session),

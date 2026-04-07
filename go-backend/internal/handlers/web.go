@@ -63,8 +63,7 @@ func (h *WebHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"sessionId": req.SessionID})
+	writeJSON(w, http.StatusOK, map[string]string{"sessionId": req.SessionID})
 }
 
 // CloseSession closes a browser session
@@ -83,8 +82,7 @@ func (h *WebHandler) CloseSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // Navigate navigates to a URL
@@ -106,8 +104,7 @@ func (h *WebHandler) Navigate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	writeJSON(w, http.StatusOK, info)
 }
 
 // Click clicks an element
@@ -128,8 +125,7 @@ func (h *WebHandler) Click(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	writeJSON(w, http.StatusOK, info)
 }
 
 // Type types text into an element
@@ -152,8 +148,7 @@ func (h *WebHandler) Type(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	writeJSON(w, http.StatusOK, info)
 }
 
 // Scroll scrolls the page
@@ -179,8 +174,7 @@ func (h *WebHandler) Scroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	writeJSON(w, http.StatusOK, info)
 }
 
 // GetScreenshot returns the current screenshot as raw PNG
@@ -217,8 +211,7 @@ func (h *WebHandler) GetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	writeJSON(w, http.StatusOK, info)
 }
 
 // DescribePage sends the current screenshot to the vision model
@@ -245,8 +238,7 @@ func (h *WebHandler) DescribePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"description": description})
+	writeJSON(w, http.StatusOK, map[string]string{"description": description})
 }
 
 // generateID returns a simple unique ID for session names

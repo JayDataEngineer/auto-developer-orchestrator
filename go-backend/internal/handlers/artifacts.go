@@ -89,8 +89,7 @@ func (h *ArtifactHandler) CreateOrUpdate(w http.ResponseWriter, r *http.Request)
 		zap.String("title", req.Title),
 	)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(artifact)
+	writeJSON(w, http.StatusOK, artifact)
 }
 
 // List returns all artifacts for an agent
@@ -117,8 +116,7 @@ func (h *ArtifactHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = []*Artifact{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"artifacts": result,
 	})
 }

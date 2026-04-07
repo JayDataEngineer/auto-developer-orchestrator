@@ -106,8 +106,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"projects": projects,
 	})
 }
@@ -181,8 +180,7 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "Project " + req.Name + " added",
 	})
@@ -249,8 +247,7 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 		// Don't fail the request, just log the error
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":      true,
 		"message":      "Repository '" + projectName + "' cloned successfully to " + projectDir,
 		"project_name": projectName,
@@ -304,8 +301,7 @@ func (h *ProjectHandler) CheckoutBranch(w http.ResponseWriter, r *http.Request) 
 		zap.String("project", req.Project),
 		zap.String("branch", req.Branch))
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":  true,
 		"message":  fmt.Sprintf("Switched to branch '%s' in project '%s'", req.Branch, req.Project),
 		"project":  req.Project,
@@ -345,8 +341,7 @@ func (h *ProjectHandler) GetBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"project": projectName,
 		"branch":  currentBranch,
@@ -373,8 +368,7 @@ func (h *ProjectHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		isAutoMode = false
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"gitState":    "clean",
 		"workingTree": "main",
 		"isAutoMode":  isAutoMode,
@@ -409,8 +403,7 @@ func (h *ProjectHandler) SetMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":      true,
 		"is_auto_mode": isAutoMode,
 	})

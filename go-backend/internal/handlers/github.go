@@ -209,8 +209,7 @@ func (h *GitHubHandler) GetRepos(w http.ResponseWriter, r *http.Request) {
 	body, status, err := h.githubGet("https://api.github.com/user/repos?sort=updated&per_page=100&type=all")
 	if err != nil || status != 200 {
 		h.logger.Error("GitHub repos fetch failed", zap.Error(err), zap.Int("status", status))
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"connected": false,
 		})
 		return
@@ -243,8 +242,7 @@ func (h *GitHubHandler) GetRepos(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"connected": true,
 		"repos":     repos,
 	})
@@ -281,8 +279,7 @@ func (h *GitHubHandler) GetPRs(w http.ResponseWriter, r *http.Request) {
 		prs = []interface{}{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"prs": prs,
 	})
 }
@@ -307,8 +304,7 @@ func (h *GitHubHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	var data map[string]interface{}
 	json.Unmarshal(body, &data)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"stats": map[string]interface{}{
 			"stars":    data["stargazers_count"],
 			"issues":   data["open_issues_count"],
@@ -342,8 +338,7 @@ func (h *GitHubHandler) GetBranches(w http.ResponseWriter, r *http.Request) {
 		branches = []interface{}{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"branches": branches,
 	})
 }
@@ -372,8 +367,7 @@ func (h *GitHubHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 		events = []interface{}{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"events": events,
 	})
 }
@@ -429,8 +423,7 @@ func (h *GitHubHandler) GetAllRepoActivity(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"events": filtered})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"events": filtered})
 		return
 	}
 

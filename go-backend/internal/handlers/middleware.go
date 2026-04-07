@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"runtime/debug"
 
@@ -30,9 +29,7 @@ func Recoverer(logger *zap.Logger) func(http.Handler) http.Handler {
 						zap.String("stack", string(debug.Stack())),
 					)
 
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusInternalServerError)
-					json.NewEncoder(w).Encode(ErrorResponse{
+					writeJSON(w, http.StatusInternalServerError, ErrorResponse{
 						Success: false,
 						Error:   "Internal Server Error",
 						Message: "A critical error occurred and has been logged.",
@@ -47,9 +44,7 @@ func Recoverer(logger *zap.Logger) func(http.Handler) http.Handler {
 
 // JSONError sends a standardized JSON error response
 func JSONError(w http.ResponseWriter, message string, code int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(ErrorResponse{
+	writeJSON(w, code, ErrorResponse{
 		Success: false,
 		Error:   http.StatusText(code),
 		Message: message,

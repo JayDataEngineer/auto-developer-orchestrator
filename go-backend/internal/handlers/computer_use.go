@@ -120,8 +120,7 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 	// Step 4: Write landing page and navigate Chrome to it
 	h.writeLandingPage(r.Context(), sandboxID)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled":   true,
 		"sandboxId": sandboxID,
 		"cdpPort":   session.CDPPort,
@@ -149,8 +148,7 @@ func (h *ComputerUseHandler) Disable(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"disabled": true})
+	writeJSON(w, http.StatusOK, map[string]bool{"disabled": true})
 }
 
 // ScreenshotResponse is the JSON response for the screenshot endpoint
@@ -212,8 +210,7 @@ func (h *ComputerUseHandler) Screenshot(w http.ResponseWriter, r *http.Request) 
 		resp.Title = snapshot.Title
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // Snapshot returns accessibility snapshot (elements list + URL + title)
@@ -233,8 +230,7 @@ func (h *ComputerUseHandler) Snapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	writeJSON(w, http.StatusOK, info)
 }
 
 // ActRequest is the request body for the act endpoint
@@ -291,8 +287,7 @@ func (h *ComputerUseHandler) Act(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	writeJSON(w, http.StatusOK, info)
 }
 
 // getClient returns the SandboxBrowserClient for a sandbox

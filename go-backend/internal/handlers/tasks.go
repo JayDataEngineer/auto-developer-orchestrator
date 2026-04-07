@@ -55,14 +55,14 @@ type createTaskRequest struct {
 func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "Invalid request body",
 		})
 		return
 	}
 
 	if req.Title == "" {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "title is required",
 		})
 		return
@@ -77,13 +77,13 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Model:       req.Model,
 	})
 	if err != nil {
-		writeTaskJSON(w, http.StatusInternalServerError, map[string]interface{}{
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	writeTaskJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"task":    task,
 	})
@@ -94,7 +94,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) Get(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 	if taskID == "" {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "taskId is required",
 		})
 		return
@@ -102,13 +102,13 @@ func (h *TaskHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.taskMgr.Get(taskID)
 	if err != nil {
-		writeTaskJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	writeTaskJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"task":    task,
 	})
@@ -128,7 +128,7 @@ type updateTaskRequest struct {
 func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 	if taskID == "" {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "taskId is required",
 		})
 		return
@@ -136,7 +136,7 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var req updateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "Invalid request body",
 		})
 		return
@@ -155,13 +155,13 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.taskMgr.Update(taskID, updates)
 	if err != nil {
-		writeTaskJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	writeTaskJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"task":    task,
 	})
@@ -172,7 +172,7 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 	if taskID == "" {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "taskId is required",
 		})
 		return
@@ -185,13 +185,13 @@ func (h *TaskHandler) Stop(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.taskMgr.Stop(taskID, req.Reason)
 	if err != nil {
-		writeTaskJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	writeTaskJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"task":    task,
 	})
@@ -202,20 +202,20 @@ func (h *TaskHandler) Stop(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 	if taskID == "" {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "taskId is required",
 		})
 		return
 	}
 
 	if err := h.taskMgr.Delete(taskID); err != nil {
-		writeTaskJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	writeTaskJSON(w, http.StatusOK, map[string]bool{"success": true})
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // List returns tasks filtered by project or agent.
@@ -235,7 +235,7 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 		tasks = []pi.Task{}
 	}
 
-	writeTaskJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"tasks":   tasks,
 	})
@@ -246,7 +246,7 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) CanStart(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 	if taskID == "" {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "taskId is required",
 		})
 		return
@@ -254,13 +254,13 @@ func (h *TaskHandler) CanStart(w http.ResponseWriter, r *http.Request) {
 
 	canStart, err := h.taskMgr.CanStart(taskID)
 	if err != nil {
-		writeTaskJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	writeTaskJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":   true,
 		"canStart":  canStart,
 	})
@@ -277,7 +277,7 @@ type setDepsRequest struct {
 func (h *TaskHandler) SetDependencies(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 	if taskID == "" {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "taskId is required",
 		})
 		return
@@ -285,25 +285,19 @@ func (h *TaskHandler) SetDependencies(w http.ResponseWriter, r *http.Request) {
 
 	var req setDepsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "Invalid request body",
 		})
 		return
 	}
 
 	if err := h.taskMgr.SetDependencies(taskID, req.Blocks, req.BlockedBy); err != nil {
-		writeTaskJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": err.Error(),
 		})
 		return
 	}
 
-	writeTaskJSON(w, http.StatusOK, map[string]bool{"success": true})
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
-// writeTaskJSON writes a JSON response.
-func writeTaskJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
