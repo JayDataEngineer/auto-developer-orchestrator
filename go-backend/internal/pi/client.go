@@ -65,6 +65,9 @@ type PiClient struct {
 	// Model to use via --model CLI flag (e.g., "litellm/econ")
 	model string
 
+	// Session path to continue (--continue flag)
+	sessionPath string
+
 	// MCP client for external tool servers
 	mcpClient *MCPClient
 
@@ -112,6 +115,11 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger, sandboxM
 // Used by sub-agents that need specialized prompts instead of the default
 // SystemPromptBuilder output.
 func NewPiClientWithPrompt(projectDir string, agentId string, systemPrompt string, logger *zap.Logger, sandboxMgr interface{}, model string) (*PiClient, error) {
+	return NewPiClientWithSession(projectDir, agentId, logger, sandboxMgr, "", model, systemPrompt)
+}
+
+// NewPiClientWithSession creates a Pi subprocess that continues an existing session.
+func NewPiClientWithSession(projectDir string, agentId string, logger *zap.Logger, sandboxMgr interface{}, sessionPath string, model string, systemPrompt string) (*PiClient, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	sandboxID := filepath.Base(projectDir)
@@ -128,6 +136,7 @@ func NewPiClientWithPrompt(projectDir string, agentId string, systemPrompt strin
 		sandboxManager:     nil,
 		customSystemPrompt: systemPrompt,
 		model:              model,
+		sessionPath:        sessionPath,
 	}
 
 	if mgr, ok := sandboxMgr.(*sandbox.Manager); ok && mgr != nil {
@@ -387,6 +396,10 @@ func (c *PiClient) start() error {
 
 	// Build command
 	args := []string{"--mode", "rpc", "--append-system-prompt", systemPrompt}
+	if c.sessionPath != "" {
+		// Resume the specific session file
+		args = append(args, "--session", c.sessionPath)
+	}
 	if c.model != "" {
 		args = append(args, "--model", c.model)
 	}

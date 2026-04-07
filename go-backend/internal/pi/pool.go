@@ -2,6 +2,7 @@ package pi
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -59,6 +60,32 @@ func NewPiPoolWithSandbox(logger *zap.Logger, idleTimeout time.Duration, sandbox
 	return p
 }
 
+// findLatestSession returns the path to the most recent session file for a project directory.
+// Returns empty string if no session exists.
+func findLatestSession(projectPath string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	// Convert project path to session dir name (Pi encodes / as -)
+	dirName := "--" + strings.ReplaceAll(strings.Trim(projectPath, "/"), "/", "-") + "--"
+	sessionDir := filepath.Join(homeDir, ".pi", "agent", "sessions", dirName)
+	entries, err := os.ReadDir(sessionDir)
+	if err != nil {
+		return ""
+	}
+	// Find the most recent .jsonl file by filename (timestamps sort lexicographically)
+	var latest string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			if e.Name() > latest {
+				latest = filepath.Join(sessionDir, e.Name())
+			}
+		}
+	}
+	return latest
+}
+
 // GetOrCreate returns a PiClient for the given project path with agentId "default".
 // Backward-compatible wrapper.
 func (p *PiPool) GetOrCreate(projectPath string) (*PiClient, error) {
@@ -93,7 +120,16 @@ func (p *PiPool) GetOrCreateWithID(projectPath, agentId string) (*PiClient, erro
 		sandboxMgrTyped = p.sandboxMgr
 	}
 
-	client, err := NewPiClient(projectPath, agentId, p.logger, sandboxMgrTyped)
+	// Find latest session to continue
+	sessionPath := findLatestSession(projectPath)
+	if sessionPath != "" {
+		p.logger.Info("Found existing session, will resume",
+			zap.String("project", projectPath),
+			zap.String("session", sessionPath),
+		)
+	}
+
+	client, err := NewPiClientWithSession(projectPath, agentId, p.logger, sandboxMgrTyped, sessionPath, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn pi for %s: %w", projectPath, err)
 	}
