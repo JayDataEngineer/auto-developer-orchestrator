@@ -177,8 +177,11 @@ func (m *SubAgentManager) runSubAgent(inst *SubAgentInstance) {
 		inst.mu.Lock()
 		switch event.Type {
 		case RpcEventMessageUpdate:
-			if event.AssistantMessageEvent != nil && event.AssistantMessageEvent.Type == "text_delta" {
-				inst.output.WriteString(event.AssistantMessageEvent.Delta)
+			if event.AssistantMessageEvent != nil {
+				et := event.AssistantMessageEvent.Type
+				if et == "text_delta" || et == "thinking_delta" {
+					inst.output.WriteString(event.AssistantMessageEvent.Delta)
+				}
 			}
 			inst.mu.Unlock()
 		case RpcEventTurnEnd:
