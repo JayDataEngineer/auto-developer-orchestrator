@@ -147,11 +147,18 @@ export interface SchedulerJob {
   model?: string;
   scheduleType: 'cron' | 'every' | 'at';
   cronExpr?: string;
+  timezone?: string;
   everySeconds?: number;
   atTime?: string;
   autoBranch?: boolean;
   autoMerge?: boolean;
   enabled: boolean;
+  // Delivery (Phase 4)
+  deliveryMode?: 'store' | 'webhook' | 'session';
+  deliveryWebhookUrl?: string;
+  // Failure alerts (Phase 3/4)
+  failureAlertAfter?: number;
+  failureAlertWebhookUrl?: string;
   status: 'idle' | 'running' | 'error' | 'disabled';
   lastRunAt?: string;
   lastRunStatus?: string;
@@ -172,6 +179,20 @@ export interface SchedulerExecution {
   output?: string;
 }
 
+export interface RunLogEntry {
+  ts: number;
+  jobId: string;
+  action: string;
+  status?: string;
+  error?: string;
+  summary?: string;
+  runAtMs?: number;
+  durationMs?: number;
+  nextRunAtMs?: number;
+  model?: string;
+  provider?: string;
+}
+
 export interface CreateJobRequest {
   name: string;
   description?: string;
@@ -181,11 +202,18 @@ export interface CreateJobRequest {
   model?: string;
   scheduleType: 'cron' | 'every' | 'at';
   cronExpr?: string;
+  timezone?: string;
   everySeconds?: number;
   atTime?: string;
   autoBranch?: boolean;
   autoMerge?: boolean;
   enabled?: boolean;
+  // Phase 4: Delivery
+  deliveryMode?: 'store' | 'webhook' | 'session';
+  deliveryWebhookUrl?: string;
+  // Phase 3/4: Failure alerts
+  failureAlertAfter?: number;
+  failureAlertWebhookUrl?: string;
 }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -372,5 +400,7 @@ export const api = {
       }),
     executions: (id: string) =>
       apiFetch<{ executions: SchedulerExecution[] }>(`/api/scheduler/${encodeURIComponent(id)}/executions`),
+    runs: (id: string, limit = 50) =>
+      apiFetch<{ runs: RunLogEntry[] }>(`/api/scheduler/${encodeURIComponent(id)}/runs?limit=${limit}`),
   },
 };

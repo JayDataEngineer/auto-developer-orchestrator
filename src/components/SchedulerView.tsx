@@ -4,7 +4,7 @@ import {
   Timer, Zap, ChevronDown, ChevronUp, AlertCircle, Check, X
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { api, SchedulerJob, CreateJobRequest, SchedulerExecution } from '../lib/api';
+import { api, SchedulerJob, CreateJobRequest, SchedulerExecution, RunLogEntry } from '../lib/api';
 
 interface SchedulerViewProps {
   projects: string[];
@@ -62,6 +62,7 @@ export function SchedulerView({ projects, onClose }: SchedulerViewProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [executions, setExecutions] = useState<SchedulerExecution[]>([]);
+  const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -80,8 +81,12 @@ export function SchedulerView({ projects, onClose }: SchedulerViewProps) {
 
   const fetchExecutions = useCallback(async (jobId: string) => {
     try {
-      const data = await api.scheduler.executions(jobId);
-      setExecutions(data.executions || []);
+      const [execData, runData] = await Promise.all([
+        api.scheduler.executions(jobId),
+        api.scheduler.runs(jobId, 50),
+      ]);
+      setExecutions(execData.executions || []);
+      setRunLogs(runData.runs || []);
     } catch {}
   }, []);
 
@@ -269,6 +274,13 @@ export function SchedulerView({ projects, onClose }: SchedulerViewProps) {
                       </p>
                     )}
 
+                    {/* Delivery info */}
+                    {job.deliveryMode && job.deliveryMode !== 'store' && (
+                      <p className="text-[9px] font-mono text-zinc-500">
+                        Delivery: {job.deliveryMode}{job.deliveryWebhookUrl ? ` → ${job.deliveryWebhookUrl.slice(0, 40)}...` : ''}
+                      </p>
+                    )}
+
                     {/* Executions */}
                     {executions.length > 0 && (
                       <div className="mt-2 space-y-1">
@@ -287,6 +299,38 @@ export function SchedulerView({ projects, onClose }: SchedulerViewProps) {
                               exec.status === 'error' ? "text-red-400" : "text-yellow-400"
                             )}>{exec.status}</span>
                             {exec.error && <span className="text-red-400/70 truncate max-w-[200px]">{exec.error}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Run logs (persistent) */}
+                    {runLogs.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Run log</span>
+                        {runLogs.slice(0, 20).map((run, i) => (
+                          <div key={i} className="flex items-start gap-2 text-[9px] font-mono p-1 bg-white/5 rounded">
+                            <div className={cn(
+                              "w-1.5 h-1.5 rounded-full mt-0.5 shrink-0",
+                              run.status === 'ok' ? "bg-emerald-400" :
+                              run.status === 'error' ? "bg-red-400" : "bg-yellow-400"
+                            )} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-zinc-500">{run.runAtMs ? new Date(run.runAtMs).toLocaleString() : '—'}</span>
+                                <span className={cn(
+                                  "uppercase",
+                                  run.status === 'ok' ? "text-emerald-400" : "text-red-400"
+                                )}>{run.status}</span>
+                                <span className="text-zinc-600">{run.durationMs}ms</span>
+                              </div>
+                              {run.summary && (
+                                <p className="text-zinc-400 mt-0.5 truncate">{run.summary}</p>
+                              )}
+                              {run.error && (
+                                <p className="text-red-400/70 mt-0.5">{run.error.slice(0, 200)}</p>
+                              )}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -323,6 +367,9 @@ function CreateJobForm({ projects, onSubmit, onCancel }: CreateJobFormProps) {
   const [enabled, setEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Phase 4: Delivery
+  const [deliveryMode, setDeliveryMode] = useState<'store' | 'webhook' | 'session'>('store');
+  const [webhookUrl, setWebhookUrl] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -344,6 +391,8 @@ function CreateJobForm({ projects, onSubmit, onCancel }: CreateJobFormProps) {
         autoBranch,
         autoMerge,
         enabled,
+        deliveryMode,
+        deliveryWebhookUrl: deliveryMode === 'webhook' ? webhookUrl : undefined,
       });
     } catch (err: any) {
       setError(err.message);
@@ -455,6 +504,35 @@ function CreateJobForm({ projects, onSubmit, onCancel }: CreateJobFormProps) {
         </div>
       </div>
 
+      <div>
+        <label className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Delivery Mode</label>
+        <div className="flex gap-2 mt-1">
+          {(['store', 'session', 'webhook'] as const).map(mode => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setDeliveryMode(mode)}
+              className={cn(
+                "px-2 py-1 text-[9px] font-mono uppercase border rounded transition-colors",
+                deliveryMode === mode
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-white/5 text-zinc-500 hover:text-zinc-300"
+              )}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+        {deliveryMode === 'webhook' && (
+          <input
+            value={webhookUrl}
+            onChange={e => setWebhookUrl(e.target.value)}
+            placeholder="https://example.com/webhook"
+            className="w-full mt-1 bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-[10px] outline-none focus:border-primary/40"
+          />
+        )}
+      </div>
+
       <div className="flex items-center gap-4">
         <label className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-500 cursor-pointer">
           <input type="checkbox" checked={autoBranch} onChange={e => setAutoBranch(e.target.checked)} className="accent-primary" />
@@ -468,6 +546,30 @@ function CreateJobForm({ projects, onSubmit, onCancel }: CreateJobFormProps) {
           <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} className="accent-primary" />
           Enabled
         </label>
+      </div>
+
+      {/* Phase 4: Delivery config */}
+      <div>
+        <label className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Delivery</label>
+        <div className="flex gap-2 mt-1">
+          <select
+            value={deliveryMode}
+            onChange={e => setDeliveryMode(e.target.value as any)}
+            className="bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-[10px] outline-none"
+          >
+            <option value="store">Store only</option>
+            <option value="session">Inject into session</option>
+            <option value="webhook">Webhook</option>
+          </select>
+          {deliveryMode === 'webhook' && (
+            <input
+              value={webhookUrl}
+              onChange={e => setWebhookUrl(e.target.value)}
+              placeholder="https://example.com/webhook"
+              className="bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-[10px] outline-none flex-1"
+            />
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-2 pt-1">
