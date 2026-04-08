@@ -283,15 +283,49 @@ func (h *ComputerUseHandler) Act(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, info)
 }
 
-// getClient returns the SandboxBrowserClient for a sandbox
+// getClient returns the SandboxBrowserClient for a sandbox, auto-reconnecting if needed.
 func (h *ComputerUseHandler) getClient(sandboxID string) (*browser.SandboxBrowserClient, error) {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-
 	client, ok := h.clients[sandboxID]
-	if !ok {
+	h.mu.RUnlock()
+
+	if ok {
+		return client, nil
+	}
+
+	// Client not in memory (server restart or first call) — attempt auto-reconnect.
+	// The sandbox container is still running with Chrome listening on its CDP port.
+	if h.manager == nil {
 		return nil, fmt.Errorf("computer use not enabled for sandbox %s", sandboxID)
 	}
+
+	sandbox, err := h.manager.GetSandbox(sandboxID)
+	if err != nil {
+		return nil, fmt.Errorf("computer use not enabled for sandbox %s: %w", sandboxID, err)
+	}
+	if sandbox.DesktopSession == nil {
+		return nil, fmt.Errorf("sandbox %s has no browser session", sandboxID)
+	}
+
+	// Reconnect: create a new CDP client and connect
+	cdpPort := sandbox.DesktopSession.CDPPort
+	client, err = h.getOrCreateClient(sandboxID, cdpPort)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconnect CDP client for %s: %w", sandboxID, err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := client.Connect(ctx); err != nil {
+		// Connection failed — remove stale client
+		h.mu.Lock()
+		delete(h.clients, sandboxID)
+		h.mu.Unlock()
+		return nil, fmt.Errorf("failed to reconnect to Chrome for %s: %w", sandboxID, err)
+	}
+
+	h.logger.Info("auto-reconnected CDP client", zap.String("sandbox_id", sandboxID), zap.Int("cdp_port", cdpPort))
 	return client, nil
 }
 
@@ -338,6 +372,11 @@ func (h *ComputerUseHandler) writeLandingPage(ctx context.Context, sandboxID str
 	escaped := strings.ReplaceAll(landingHTML, "'", "'\\''")
 	cmd := fmt.Sprintf("echo '%s' > /tmp/landing.html", escaped)
 	_, _ = h.manager.ExecInSandbox(ctx, sandboxID, []string{"sh", "-c", cmd})
+
+	// Raise Chrome to the foreground so it's visible in VNC
+	_, _ = h.manager.ExecInSandbox(ctx, sandboxID, []string{
+		"sh", "-c", "DISPLAY=:99 wmctrl -a 'Google Chrome' 2>/dev/null || true",
+	})
 
 	// Navigate Chrome to the landing page
 	if client, ok := h.clients[sandboxID]; ok {

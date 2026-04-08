@@ -41,6 +41,11 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 					Type: pi.EventTextDelta,
 					Data: map[string]string{"text": ame.Delta},
 				}
+			case "thinking_delta":
+				return &sseEvent{
+					Type: pi.EventThinkingDelta,
+					Data: map[string]string{"text": ame.Delta},
+				}
 			case "text_end":
 				// Text complete — extract usage from partial if available
 				return nil // Frontend accumulates deltas, no action needed

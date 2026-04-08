@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { cn } from '../lib/utils';
 import { useComputerUse } from '../hooks/useComputerUse';
 import { PiAgentView } from './PiAgentView';
@@ -6,7 +6,7 @@ import { RightPanel } from './RightPanel';
 import { useArtifacts } from '../hooks/useArtifacts';
 import {
   Monitor, Globe, ChevronLeft, ChevronRight, Maximize2, Minimize2,
-  ExternalLink, Loader, AlertCircle
+  ExternalLink, Loader, AlertCircle, RefreshCw
 } from 'lucide-react';
 
 interface ComputerUseTabProps {
@@ -29,6 +29,12 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [desktopFull, setDesktopFull] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+
+  // Live screenshot state
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [screenshotInfo, setScreenshotInfo] = useState<{ url: string; title: string } | null>(null);
+  const [screenshotPolling, setScreenshotPolling] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const sandboxId = selectedProject ? `sandbox-${selectedProject}` : null;
   const cu = useComputerUse();
@@ -57,7 +63,7 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
         }
       }
 
-      // Step 2: Fetch viewer session info (noVNC URL, CDP URL)
+      // Step 2: Fetch viewer session info
       try {
         const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
         if (!res.ok) throw new Error('Desktop session not found');
@@ -78,15 +84,62 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
     return () => { cancelled = true; };
   }, [sandboxId, retryKey]);
 
-  const openDesktop = useCallback(() => {
-    if (sandboxId) {
-      window.open(`/api/sandbox/vnc/${sandboxId}/vnc.html`, '_blank', 'width=1280,height=720');
+  // Live screenshot polling
+  const captureScreenshot = useCallback(async () => {
+    if (!sandboxId) return;
+    try {
+      const res = await fetch(`/api/sandbox/${sandboxId}/computer-use/screenshot?describe=false&format=json`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.image) {
+        // Revoke previous blob URL
+        if (screenshotUrl && screenshotUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(screenshotUrl);
+        }
+        const blob = await (await fetch(`data:image/png;base64,${data.image}`)).blob();
+        const url = URL.createObjectURL(blob);
+        setScreenshotUrl(url);
+        setScreenshotInfo({ url: data.url || '', title: data.title || '' });
+      }
+    } catch {
+      // Ignore polling errors
     }
   }, [sandboxId]);
 
-  // Proxy the noVNC URL through the backend so the browser can reach the container
-  // noVNC reads path from URL params; we route everything through our proxy
-  const novncProxyUrl = sandboxId ? `/api/sandbox/vnc/${sandboxId}/vnc.html?path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&resize=scale` : null;
+  // Start/stop polling based on session state
+  useEffect(() => {
+    if (session && sandboxId && screenshotPolling) {
+      captureScreenshot(); // Initial capture
+      pollRef.current = setInterval(captureScreenshot, 2000);
+      return () => {
+        if (pollRef.current) clearInterval(pollRef.current);
+      };
+    } else {
+      if (pollRef.current) clearInterval(pollRef.current);
+    }
+  }, [session, sandboxId, screenshotPolling, captureScreenshot]);
+
+  // Auto-start polling when session is ready
+  useEffect(() => {
+    if (session && sandboxId && !screenshotPolling) {
+      setScreenshotPolling(true);
+    }
+  }, [session, sandboxId]);
+
+  // Cleanup blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      if (screenshotUrl && screenshotUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(screenshotUrl);
+      }
+    };
+  }, []);
+
+  const openDesktop = useCallback(() => {
+    if (sandboxId) {
+      window.open(`/api/sandbox/vnc/${sandboxId}/vnc.html?host=${window.location.hostname}&port=${window.location.port}&path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&resize=scale`, '_blank', 'width=1280,height=720');
+    }
+  }, [sandboxId]);
 
   return (
     <div className="flex h-full bg-black text-slate-100 overflow-hidden">
@@ -154,6 +207,18 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
               <span className="text-[8px] font-mono text-zinc-600">
                 {session.mode === 'browser' ? 'Browser Mode' : 'Desktop Mode'}
               </span>
+              {screenshotPolling && (
+                <>
+                  <div className="w-px h-3 bg-white/10" />
+                  <button
+                    onClick={captureScreenshot}
+                    className="p-1 hover:bg-white/5 text-zinc-500 hover:text-zinc-300"
+                    title="Refresh screenshot"
+                  >
+                    <RefreshCw size={10} />
+                  </button>
+                </>
+              )}
               <div className="w-px h-3 bg-white/10" />
               <button
                 onClick={() => setDesktopFull(!desktopFull)}
@@ -207,14 +272,42 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
               </div>
             </div>
           )}
-          {sandboxId && session && novncProxyUrl && (
-            <iframe
-              src={novncProxyUrl}
-              className="w-full h-full border-0"
-              title="Desktop VNC Viewer"
-            />
+          {sandboxId && session && screenshotUrl && (
+            <div className="absolute inset-0 flex flex-col">
+              {/* Browser info bar */}
+              {screenshotInfo && (screenshotInfo.url || screenshotInfo.title) && (
+                <div className="h-7 bg-zinc-900 border-b border-white/5 flex items-center px-3 gap-2 shrink-0">
+                  <Globe size={10} className="text-zinc-500 shrink-0" />
+                  <span className="text-[9px] font-mono text-zinc-400 truncate">
+                    {screenshotInfo.title || screenshotInfo.url}
+                  </span>
+                  {screenshotInfo.url && (
+                    <span className="text-[8px] font-mono text-zinc-600 truncate">
+                      {screenshotInfo.url}
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* Live screenshot */}
+              <div className="flex-1 flex items-center justify-center p-2">
+                <img
+                  src={screenshotUrl}
+                  alt="Desktop"
+                  className="max-w-full max-h-full object-contain rounded shadow-lg"
+                  style={{ imageRendering: 'auto' }}
+                />
+              </div>
+            </div>
           )}
-          {sandboxId && !session?.novncUrl && !sessionLoading && (
+          {sandboxId && session && !screenshotUrl && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-center">
+                <Loader size={24} className="mx-auto mb-3 text-zinc-600 animate-spin" />
+                <p className="text-xs font-mono text-zinc-500">Capturing desktop...</p>
+              </div>
+            </div>
+          )}
+          {sandboxId && !session?.novncUrl && !sessionLoading && !session && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center">
                 <Globe size={32} className="mx-auto mb-3 text-zinc-600" />
