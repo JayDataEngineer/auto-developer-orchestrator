@@ -74,6 +74,64 @@ export function usePiAgent(initialAgentId: string = 'default') {
   const projectRef = useRef<string | null>(null);
   const agentIdRef = useRef<string>(initialAgentId);
 
+  // Throttled delta accumulation — avoids re-renders per token
+  const pendingTextRef = useRef('');
+  const pendingThinkingRef = useRef('');
+  const flushRafRef = useRef<number | null>(null);
+
+  // Flush accumulated text/thinking deltas to state (called via RAF)
+  const flushPendingDeltas = useCallback(() => {
+    flushRafRef.current = null;
+    const textDelta = pendingTextRef.current;
+    const thinkingDelta = pendingThinkingRef.current;
+    if (!textDelta && !thinkingDelta) return;
+
+    pendingTextRef.current = '';
+    pendingThinkingRef.current = '';
+
+    setState(prev => {
+      let text = prev.text;
+      let thinking = prev.thinking;
+      if (textDelta) text = prev.text + textDelta;
+      if (thinkingDelta) thinking = prev.thinking + thinkingDelta;
+      return {
+        ...prev,
+        text,
+        thinking,
+        messages: updateLastAssistant(prev.messages, msg => ({
+          ...msg,
+          ...(textDelta ? { text: msg.text + textDelta } : {}),
+          ...(thinkingDelta ? { thinking: msg.thinking + thinkingDelta } : {}),
+        })),
+      };
+    });
+  }, []);
+
+  // Flush pending deltas synchronously (for non-delta events that need up-to-date state)
+  const syncFlush = useCallback(() => {
+    if (flushRafRef.current !== null) {
+      cancelAnimationFrame(flushRafRef.current);
+      flushRafRef.current = null;
+    }
+    flushPendingDeltas();
+  }, [flushPendingDeltas]);
+
+  // Schedule a RAF flush
+  const scheduleFlush = useCallback(() => {
+    if (flushRafRef.current === null) {
+      flushRafRef.current = requestAnimationFrame(flushPendingDeltas);
+    }
+  }, [flushPendingDeltas]);
+
+  // Clean up RAF on unmount
+  useEffect(() => {
+    return () => {
+      if (flushRafRef.current !== null) {
+        cancelAnimationFrame(flushRafRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     agentIdRef.current = initialAgentId;
   }, [initialAgentId]);
@@ -116,6 +174,21 @@ export function usePiAgent(initialAgentId: string = 'default') {
   }, []);
 
   const handleEvent = useCallback((event: PiSSEEvent) => {
+    // Fast path: accumulate text/thinking deltas in refs, flush via RAF
+    if (event.type === 'text_delta') {
+      pendingTextRef.current += (event.data as { text: string }).text;
+      scheduleFlush();
+      return;
+    }
+    if (event.type === 'thinking_delta') {
+      pendingThinkingRef.current += (event.data as { text: string }).text;
+      scheduleFlush();
+      return;
+    }
+
+    // All other events: flush pending deltas first, then process
+    syncFlush();
+
     setState(prev => {
       switch (event.type) {
         case 'agent_start':
@@ -142,24 +215,6 @@ export function usePiAgent(initialAgentId: string = 'default') {
 
         case 'agent_spawned':
           return { ...prev, agentId: (event.data as { agentId: string }).agentId };
-
-        case 'text_delta': {
-          const delta = (event.data as { text: string }).text;
-          return {
-            ...prev,
-            text: prev.text + delta,
-            messages: updateLastAssistant(prev.messages, msg => ({ ...msg, text: msg.text + delta })),
-          };
-        }
-
-        case 'thinking_delta': {
-          const delta = (event.data as { text: string }).text;
-          return {
-            ...prev,
-            thinking: prev.thinking + delta,
-            messages: updateLastAssistant(prev.messages, msg => ({ ...msg, thinking: msg.thinking + delta })),
-          };
-        }
 
         case 'tool_execution_start': {
           const toolData = event.data as { toolName: string; args: Record<string, unknown>; toolId: string };
@@ -287,20 +342,11 @@ export function usePiAgent(initialAgentId: string = 'default') {
           };
         }
 
-        case 'pr_merged': {
-          const mergeData = event.data as { prNumber: number; sha: string };
-          return {
-            ...prev,
-            branchName: null,
-            messages: updateLastAssistant(prev.messages, msg => ({ ...msg })),
-          };
-        }
-
         default:
           return prev;
       }
     });
-  }, []);
+  }, [syncFlush, scheduleFlush]);
 
   const sendPrompt = useCallback(
     async (message: string, project: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean; autoMerge?: boolean; agentId?: string }) => {
@@ -406,6 +452,9 @@ export function usePiAgent(initialAgentId: string = 'default') {
           const event = parseSSEEvent(buffer);
           if (event) handleEvent(event);
         }
+
+        // Ensure any remaining pending deltas are flushed
+        syncFlush();
       } catch (err: any) {
         if (err.name === 'AbortError') return;
         setState(prev => ({
@@ -416,7 +465,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
         }));
       }
     },
-    [handleEvent]
+    [handleEvent, syncFlush]
   );
 
   const abort = useCallback(async (project: string, agentId?: string) => {

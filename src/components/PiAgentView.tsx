@@ -329,8 +329,16 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
     return () => document.removeEventListener('mousedown', handleClick);
   }, [modelDropdownOpen]);
 
+  // Auto-scroll: use RAF to debounce during streaming
+  const scrollRafRef = useRef<number | null>(null);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
+    scrollRafRef.current = requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
+    return () => {
+      if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
+    };
   }, [state.text, state.thinking, state.toolCalls.length]);
 
   const handleSend = useCallback(() => {

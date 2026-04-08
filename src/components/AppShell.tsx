@@ -16,7 +16,8 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 export function AppShell() {
-  const { state, actions } = useOrchestrator(() => {});
+  const addLog = useCallback((_msg: string, _type?: any) => {}, []);
+  const { state, actions } = useOrchestrator(addLog);
   const [activeTab, setActiveTab] = useState<TabId>('agent');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeModal, setActiveModal] = useState<string | null>(null);
