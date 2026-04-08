@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -28,10 +29,7 @@ type Manager struct {
 
 // NewManager creates a new sandbox manager
 func NewManager(logger *zap.Logger) (*Manager, error) {
-	dockerClient, err := client.NewClientWithOpts(
-		client.FromEnv,
-		client.WithAPIVersionNegotiation(),
-	)
+	dockerClient, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
 	}
@@ -138,6 +136,10 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	}
 	if projectPath == "" {
 		projectPath = "/app/projects"
+	}
+	// Docker requires absolute paths for bind mounts
+	if absPath, err := filepath.Abs(projectPath); err == nil {
+		projectPath = absPath
 	}
 
 	// Pull image if not present locally
@@ -451,7 +453,7 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 	containerName := m.getContainerName(sandboxID)
 
 	// Wait for Chrome to be ready (supervisord starts it at container boot)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		output, err := m.execInContainer(ctx, containerName, []string{
 			"wget", "-qO-", "http://127.0.0.1:9222/json/version",
 		}, false)
