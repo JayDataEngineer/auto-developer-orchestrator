@@ -344,16 +344,16 @@ export function TaskBoardTab({ selectedProject }: TaskBoardTabProps) {
             action={{ label: '+ New Task', onClick: () => setShowCreate(true) }}
           />
         ) : (
-          <div className="flex-1 flex gap-2 p-3 overflow-x-auto">
+          <div className="flex-1 flex gap-2 p-3 min-h-0">
             {COLUMNS.map(col => (
-              <div key={col.status} className="flex-1 min-w-[200px] flex flex-col">
+              <div key={col.status} className="flex-1 min-w-[200px] flex flex-col bg-zinc-950/50 border border-white/5 rounded">
                 {/* Column header */}
-                <div className="flex items-center gap-2 px-2 py-1.5 mb-2">
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 shrink-0">
                   <StatusBadge status={col.status} label={col.label} size="md" />
                   <span className="text-[8px] font-mono text-zinc-700">{groupedByStatus[col.status].length}</span>
                 </div>
                 {/* Cards */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5">
+                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5 p-2 min-h-0">
                   {groupedByStatus[col.status].map(task => (
                     <TaskCard
                       key={task.id}
