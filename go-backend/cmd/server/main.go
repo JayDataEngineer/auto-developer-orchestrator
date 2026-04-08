@@ -187,7 +187,7 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(handlers.Recoverer(logger))
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(middleware.Timeout(10 * time.Minute)) // Long timeout for SSE streaming (agent conversations can take minutes)
 
 	// CORS
 	r.Use(cors.Handler(cors.Options{
@@ -324,8 +324,8 @@ func main() {
 		Addr:         ":" + port,
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 60 * time.Second, // Longer for SSE
-		IdleTimeout:  60 * time.Second,
+		WriteTimeout: 0, // No write timeout — SSE streams can run for minutes
+		IdleTimeout:  120 * time.Second,
 	}
 
 	// Graceful shutdown
