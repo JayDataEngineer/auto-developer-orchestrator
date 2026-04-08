@@ -1,33 +1,41 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { cn } from '../lib/utils';
 import { useOrchestrator } from '../hooks/useOrchestrator';
 import { AgentTab } from './AgentTab';
 import { ComputerUseTab } from './ComputerUseTab';
-import { Zap, Settings, ChevronDown } from 'lucide-react';
-import { GitHubConnectModal } from './GitHubConnectModal';
+import { TaskBoardTab } from './TaskBoardTab';
+import { FileBrowserPanel } from './FileBrowserPanel';
+import { SubAgentPanel } from './SubAgentPanel';
 import { SchedulerView } from './SchedulerView';
+import { ToastProvider, useToastContext } from './ui/Toast';
+import {
+  Zap, Settings, ChevronDown, LayoutGrid, Monitor, Clock,
+  FolderTree, Cpu
+} from 'lucide-react';
+import { GitHubConnectModal } from './GitHubConnectModal';
 import { api } from '../lib/api';
 
-type TabId = 'agent' | 'computer-use';
+type TabId = 'agent' | 'tasks' | 'desktop' | 'scheduler';
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'agent', label: 'Agent' },
-  { id: 'computer-use', label: 'Computer Use' },
+const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: 'agent', label: 'Agent', icon: <Zap size={10} /> },
+  { id: 'tasks', label: 'Tasks', icon: <LayoutGrid size={10} /> },
+  { id: 'desktop', label: 'Desktop', icon: <Monitor size={10} /> },
+  { id: 'scheduler', label: 'Scheduler', icon: <Clock size={10} /> },
 ];
 
-export function AppShell() {
+function AppShellInner() {
   const addLog = useCallback((_msg: string, _type?: any) => {}, []);
   const { state, actions } = useOrchestrator(addLog);
   const [activeTab, setActiveTab] = useState<TabId>('agent');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [showGitHubModal, setShowGitHubModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
   const { projects, githubUser } = state;
   const { refreshProjectData } = actions;
 
-  // Auto-select first project if none selected
-  React.useEffect(() => {
+  // Auto-select first project
+  useEffect(() => {
     if (!selectedProject && projects.length > 0) {
       setSelectedProject(projects[0]);
     }
@@ -37,23 +45,49 @@ export function AppShell() {
     setSelectedProject(project);
   }, []);
 
+  // Keyboard shortcuts: Ctrl+1-4 switch tabs, Ctrl+K focuses agent prompt
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case '1': e.preventDefault(); setActiveTab('agent'); break;
+          case '2': e.preventDefault(); setActiveTab('tasks'); break;
+          case '3': e.preventDefault(); setActiveTab('desktop'); break;
+          case '4': e.preventDefault(); setActiveTab('scheduler'); break;
+          case 'k':
+            e.preventDefault();
+            setActiveTab('agent');
+            // Focus the prompt input after a tick
+            setTimeout(() => {
+              const input = document.querySelector<HTMLInputElement>('[data-prompt-input]');
+              input?.focus();
+            }, 50);
+            break;
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   return (
     <div className="flex flex-col h-screen bg-black text-slate-100 font-sans selection:bg-primary/20 overflow-hidden">
       {/* Top bar */}
       <div className="h-10 border-b border-white/5 flex items-center px-4 shrink-0 bg-black/50 backdrop-blur-md gap-3">
-        {/* Tab switcher */}
+        {/* Tab switcher with icons */}
         <div className="flex items-center gap-1">
           {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                'px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest transition-colors rounded',
+                'flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest transition-colors rounded',
                 activeTab === tab.id
                   ? 'text-primary bg-primary/10'
                   : 'text-muted hover:text-muted-foreground hover:bg-white/5'
               )}
             >
+              {tab.icon}
               {tab.label}
             </button>
           ))}
@@ -85,34 +119,17 @@ export function AppShell() {
 
         <div className="flex-1" />
 
-        {/* Settings dropdown */}
-        <div className="relative">
-          <button
-            onClick={() => setSettingsOpen(!settingsOpen)}
-            className="flex items-center gap-1.5 text-muted hover:text-zinc-300 transition-colors"
-          >
-            <Settings size={14} />
-          </button>
-          {settingsOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setSettingsOpen(false)} />
-              <div className="absolute right-0 top-full mt-1 w-56 border border-white/10 bg-zinc-950 shadow-2xl z-50">
-                <button
-                  onClick={() => { setActiveModal('githubConnect'); setSettingsOpen(false); }}
-                  className="w-full text-left px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-muted hover:bg-white/5 hover:text-zinc-300 flex items-center gap-2"
-                >
-                  <Zap size={10} /> GitHub {githubUser?.connected ? '(Connected)' : '(Connect)'}
-                </button>
-                <button
-                  onClick={() => { setActiveModal('scheduler'); setSettingsOpen(false); }}
-                  className="w-full text-left px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-muted hover:bg-white/5 hover:text-zinc-300 flex items-center gap-2"
-                >
-                  <Zap size={10} /> Scheduled Jobs
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        {/* GitHub connect button */}
+        <button
+          onClick={() => setShowGitHubModal(true)}
+          className="flex items-center gap-1.5 text-muted hover:text-zinc-300 transition-colors"
+          title="GitHub Settings"
+        >
+          <Settings size={14} />
+          <span className="text-[8px] font-mono uppercase tracking-widest hidden md:inline">
+            {githubUser?.connected ? 'Connected' : 'GitHub'}
+          </span>
+        </button>
       </div>
 
       {/* Tab content */}
@@ -124,26 +141,37 @@ export function AppShell() {
             refreshProjectData={refreshProjectData}
           />
         )}
-        {activeTab === 'computer-use' && (
+        {activeTab === 'tasks' && (
+          <TaskBoardTab selectedProject={selectedProject} />
+        )}
+        {activeTab === 'desktop' && (
           <ComputerUseTab
             selectedProject={selectedProject}
             projects={projects}
             refreshProjectData={refreshProjectData}
           />
         )}
+        {activeTab === 'scheduler' && (
+          <SchedulerView projects={projects} />
+        )}
       </div>
 
-      {/* Modals */}
-      {activeModal === 'githubConnect' && (
-        <GitHubConnectModal isOpen onClose={() => setActiveModal(null)} onConnect={(token) => api.config.connectGitHub(token).then(refreshProjectData)} />
-      )}
-      {activeModal === 'scheduler' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-[700px] max-h-[80vh] border border-white/10 bg-zinc-950 shadow-2xl flex flex-col">
-            <SchedulerView projects={projects} onClose={() => setActiveModal(null)} />
-          </div>
-        </div>
+      {/* GitHub modal */}
+      {showGitHubModal && (
+        <GitHubConnectModal
+          isOpen
+          onClose={() => setShowGitHubModal(false)}
+          onConnect={(token) => api.config.connectGitHub(token).then(refreshProjectData)}
+        />
       )}
     </div>
+  );
+}
+
+export function AppShell() {
+  return (
+    <ToastProvider>
+      <AppShellInner />
+    </ToastProvider>
   );
 }

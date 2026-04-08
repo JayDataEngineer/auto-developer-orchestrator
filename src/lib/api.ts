@@ -179,6 +179,46 @@ export interface SchedulerExecution {
   output?: string;
 }
 
+// Pi Task Management types
+export interface PiTask {
+  id: string;
+  title: string;
+  description?: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  projectDir: string;
+  parentAgent: string;
+  subAgentId?: string;
+  model?: string;
+  blocks?: string[];
+  blockedBy?: string[];
+  output?: string;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  durationMs?: number;
+}
+
+export interface SubAgentInfo {
+  subAgentId: string;
+  type: 'code' | 'explore' | 'web' | 'computer_use';
+  status: 'pending' | 'running' | 'complete' | 'failed' | 'aborted';
+  output: string;
+  error?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
+  durationMs: number;
+  toolCalls: number;
+}
+
+export interface FileEntry {
+  name: string;
+  is_dir: boolean;
+  size?: number;
+}
+
 export interface RunLogEntry {
   ts: number;
   jobId: string;
@@ -402,5 +442,65 @@ export const api = {
       apiFetch<{ executions: SchedulerExecution[] }>(`/api/scheduler/${encodeURIComponent(id)}/executions`),
     runs: (id: string, limit = 50) =>
       apiFetch<{ runs: RunLogEntry[] }>(`/api/scheduler/${encodeURIComponent(id)}/runs?limit=${limit}`),
+  },
+  tasks: {
+    list: (projectDir: string, parentAgent?: string) => {
+      const params = new URLSearchParams({ projectDir });
+      if (parentAgent) params.set('parentAgent', parentAgent);
+      return apiFetch<{ tasks: PiTask[] }>(`/api/pi/tasks/list?${params}`);
+    },
+    get: (taskId: string) =>
+      apiFetch<PiTask>(`/api/pi/tasks/${encodeURIComponent(taskId)}`),
+    create: (task: { title: string; description?: string; projectDir: string; parentAgent: string; model?: string; blocks?: string[]; blockedBy?: string[] }) =>
+      apiFetch<PiTask>('/api/pi/tasks/', {
+        method: 'POST',
+        body: JSON.stringify(task),
+      }),
+    update: (taskId: string, task: Partial<Pick<PiTask, 'title' | 'description' | 'status' | 'model'>>) =>
+      apiFetch<PiTask>(`/api/pi/tasks/${encodeURIComponent(taskId)}`, {
+        method: 'PUT',
+        body: JSON.stringify(task),
+      }),
+    delete: (taskId: string) =>
+      apiFetch<{ success: boolean }>(`/api/pi/tasks/${encodeURIComponent(taskId)}`, {
+        method: 'DELETE',
+      }),
+    stop: (taskId: string) =>
+      apiFetch<{ success: boolean }>(`/api/pi/tasks/${encodeURIComponent(taskId)}/stop`, {
+        method: 'POST',
+      }),
+    canStart: (taskId: string) =>
+      apiFetch<{ canStart: boolean }>(`/api/pi/tasks/${encodeURIComponent(taskId)}/canStart`),
+    setDeps: (taskId: string, blocks?: string[], blockedBy?: string[]) =>
+      apiFetch<{ success: boolean }>(`/api/pi/tasks/${encodeURIComponent(taskId)}/deps`, {
+        method: 'POST',
+        body: JSON.stringify({ blocks, blockedBy }),
+      }),
+  },
+  subAgents: {
+    spawn: (parentAgentId: string, type: SubAgentInfo['type'] = 'code', projectDir?: string, message?: string) =>
+      apiFetch<SubAgentInfo>('/api/pi/subagent/spawn', {
+        method: 'POST',
+        body: JSON.stringify({ parentAgentId, type, projectDir, message }),
+      }),
+    status: (subAgentId: string) =>
+      apiFetch<SubAgentInfo>(`/api/pi/subagent/status?subAgentId=${encodeURIComponent(subAgentId)}`),
+    result: (subAgentId: string) =>
+      apiFetch<SubAgentInfo>(`/api/pi/subagent/result?subAgentId=${encodeURIComponent(subAgentId)}`),
+    abort: (subAgentId: string) =>
+      apiFetch<{ success: boolean }>('/api/pi/subagent/abort', {
+        method: 'POST',
+        body: JSON.stringify({ subAgentId }),
+      }),
+    list: (parentAgentId: string) =>
+      apiFetch<{ subAgents: SubAgentInfo[] }>(`/api/pi/subagent/list?parentAgentId=${encodeURIComponent(parentAgentId)}`),
+  },
+  cli: {
+    ls: (path: string) =>
+      apiFetch<{ entries: FileEntry[] }>(`/api/cli/ls?path=${encodeURIComponent(path)}`),
+    read: (path: string) =>
+      apiFetch<{ content: string }>(`/api/cli/cat?path=${encodeURIComponent(path)}`),
+    commands: () =>
+      apiFetch<{ commands: string[] }>('/api/cli/commands'),
   },
 };
