@@ -63,7 +63,8 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 1: Ensure sandbox exists — create if not found
-	session, err := h.manager.EnableBrowserMode(r.Context(), sandboxID)
+	// Use desktop mode so Chrome runs on Xvfb visible via VNC
+	session, err := h.manager.EnableDesktopMode(r.Context(), sandboxID)
 	if err != nil {
 		// Sandbox doesn't exist yet — create it first
 		h.logger.Info("sandbox not found, creating it", zap.String("sandbox_id", sandboxID))
@@ -77,11 +78,11 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Now enable browser mode
-		session, err = h.manager.EnableBrowserMode(r.Context(), sandboxID)
+		// Now enable desktop mode
+		session, err = h.manager.EnableDesktopMode(r.Context(), sandboxID)
 		if err != nil {
-			h.logger.Error("failed to enable browser mode after sandbox creation", zap.Error(err))
-			JSONError(w, fmt.Sprintf("failed to enable browser mode: %v", err), http.StatusInternalServerError)
+			h.logger.Error("failed to enable desktop mode after sandbox creation", zap.Error(err))
+			JSONError(w, fmt.Sprintf("failed to enable desktop mode: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -111,7 +112,7 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 4: Write landing page and navigate Chrome to it
-	h.writeLandingPage(r.Context(), sandboxID)
+	h.writeLandingPage(r.Context(), sandboxID, session.DisplayNum)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled":   true,
@@ -365,7 +366,7 @@ func (h *ComputerUseHandler) Shutdown() {
 }
 
 // writeLandingPage creates a landing page in the sandbox container and navigates Chrome to it.
-func (h *ComputerUseHandler) writeLandingPage(ctx context.Context, sandboxID string) {
+func (h *ComputerUseHandler) writeLandingPage(ctx context.Context, sandboxID string, displayNum int) {
 	landingHTML := `<!DOCTYPE html><html><head><title>Sandbox Desktop</title><style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%)}.container{text-align:center;background:#fff;padding:48px 56px;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.15)}.ready{color:#4CAF50;font-size:28px;margin:0 0 12px}.hint{color:#888;font-size:16px;margin:0}</style></head><body><div class="container"><p class="ready">Desktop Ready</p><p class="hint">Use computer_use tools to navigate and interact</p></div></body></html>`
 
 	// Write landing page file
@@ -375,7 +376,7 @@ func (h *ComputerUseHandler) writeLandingPage(ctx context.Context, sandboxID str
 
 	// Raise Chrome to the foreground so it's visible in VNC
 	_, _ = h.manager.ExecInSandbox(ctx, sandboxID, []string{
-		"sh", "-c", "DISPLAY=:99 wmctrl -a 'Google Chrome' 2>/dev/null || true",
+		"sh", "-c", fmt.Sprintf("DISPLAY=:%d wmctrl -a 'Google Chrome' 2>/dev/null || true", displayNum),
 	})
 
 	// Navigate Chrome to the landing page

@@ -34,6 +34,7 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
 };
 
 function formatToolArgs(name: string, args: Record<string, unknown>): string {
+  if (!args) return '';
   if (name === 'read' || name === 'write' || name === 'edit') {
     return String(args.filePath || args.path || '');
   }
