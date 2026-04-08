@@ -59,7 +59,7 @@ func (h *WebHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.browserClient.CreateSession(r.Context(), req.SessionID); err != nil {
 		h.logger.Error("failed to create browser session", zap.Error(err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -73,12 +73,12 @@ func (h *WebHandler) CloseSession(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"sessionId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		JSONError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if err := h.browserClient.CloseSession(req.SessionID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -93,14 +93,14 @@ func (h *WebHandler) Navigate(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"sessionId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		JSONError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	info, err := h.browserClient.Navigate(r.Context(), req.SessionID, req.URL)
 	if err != nil {
 		h.logger.Error("navigate failed", zap.Error(err), zap.String("url", req.URL))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -115,13 +115,13 @@ func (h *WebHandler) Click(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"sessionId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		JSONError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	info, err := h.browserClient.Click(r.Context(), req.SessionID, req.ElementID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -138,13 +138,13 @@ func (h *WebHandler) Type(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"sessionId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		JSONError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	info, err := h.browserClient.Type(r.Context(), req.SessionID, req.ElementID, req.Text, req.Submit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -160,7 +160,7 @@ func (h *WebHandler) Scroll(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"sessionId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		JSONError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -170,7 +170,7 @@ func (h *WebHandler) Scroll(w http.ResponseWriter, r *http.Request) {
 
 	info, err := h.browserClient.Scroll(r.Context(), req.SessionID, req.Direction, req.Amount)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -182,13 +182,13 @@ func (h *WebHandler) Scroll(w http.ResponseWriter, r *http.Request) {
 func (h *WebHandler) GetScreenshot(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("sessionId")
 	if sessionID == "" {
-		http.Error(w, "sessionId required", http.StatusBadRequest)
+		JSONError(w, "sessionId required", http.StatusBadRequest)
 		return
 	}
 
 	png, err := h.browserClient.GetScreenshot(sessionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		JSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -201,13 +201,13 @@ func (h *WebHandler) GetScreenshot(w http.ResponseWriter, r *http.Request) {
 func (h *WebHandler) GetState(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("sessionId")
 	if sessionID == "" {
-		http.Error(w, "sessionId required", http.StatusBadRequest)
+		JSONError(w, "sessionId required", http.StatusBadRequest)
 		return
 	}
 
 	info, err := h.browserClient.GetState(sessionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		JSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -221,27 +221,23 @@ func (h *WebHandler) DescribePage(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"sessionId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		JSONError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	screenshot, err := h.browserClient.GetScreenshot(req.SessionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		JSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
 	description, err := h.visionClient.DescribePage(r.Context(), screenshot)
 	if err != nil {
 		h.logger.Error("vision describe failed", zap.Error(err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"description": description})
 }
 
-// generateID returns a simple unique ID for session names
-func generateID() int64 {
-	return rng.Int63()
-}

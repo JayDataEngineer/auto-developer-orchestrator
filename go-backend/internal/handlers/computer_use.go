@@ -51,19 +51,19 @@ func (h *ComputerUseHandler) RegisterRoutes(r interface {
 func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
 	if sandboxID == "" {
-		http.Error(w, "sandbox id required", http.StatusBadRequest)
+		JSONError(w, "sandbox id required", http.StatusBadRequest)
 		return
 	}
 
 	h.logger.Info("enabling computer use", zap.String("sandbox_id", sandboxID))
 
 	if h.manager == nil {
-		http.Error(w, "sandbox manager not available", http.StatusServiceUnavailable)
+		JSONError(w, "sandbox manager not available", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Step 1: Ensure sandbox exists (create if not found)
-	_, err := h.manager.EnableBrowserMode(r.Context(), sandboxID)
+	// Step 1: Ensure sandbox exists — create if not found
+	session, err := h.manager.EnableBrowserMode(r.Context(), sandboxID)
 	if err != nil {
 		// Sandbox doesn't exist yet — create it first
 		h.logger.Info("sandbox not found, creating it", zap.String("sandbox_id", sandboxID))
@@ -73,37 +73,30 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 		})
 		if createErr != nil {
 			h.logger.Error("failed to create sandbox for computer use", zap.Error(createErr))
-			http.Error(w, fmt.Sprintf("failed to create sandbox: %v", createErr), http.StatusInternalServerError)
+			JSONError(w, fmt.Sprintf("failed to create sandbox: %v", createErr), http.StatusInternalServerError)
 			return
 		}
 
 		// Now enable browser mode
-		_, err = h.manager.EnableBrowserMode(r.Context(), sandboxID)
+		session, err = h.manager.EnableBrowserMode(r.Context(), sandboxID)
 		if err != nil {
 			h.logger.Error("failed to enable browser mode after sandbox creation", zap.Error(err))
-			http.Error(w, fmt.Sprintf("failed to enable browser mode: %v", err), http.StatusInternalServerError)
+			JSONError(w, fmt.Sprintf("failed to enable browser mode: %v", err), http.StatusInternalServerError)
 			return
 		}
-	}
-
-	session, err := h.manager.EnableBrowserMode(r.Context(), sandboxID)
-	if err != nil {
-		h.logger.Error("failed to enable browser mode for computer use", zap.Error(err))
-		http.Error(w, fmt.Sprintf("failed to enable browser mode: %v", err), http.StatusInternalServerError)
-		return
 	}
 
 	// Step 2: Create SandboxBrowserClient connected to the CDP port
 	client, err := h.getOrCreateClient(sandboxID, session.CDPPort)
 	if err != nil {
 		h.logger.Error("failed to create sandbox browser client", zap.Error(err))
-		http.Error(w, fmt.Sprintf("failed to create browser client: %v", err), http.StatusInternalServerError)
+		JSONError(w, fmt.Sprintf("failed to create browser client: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// Step 3: Connect via CDP (with retry — Chrome may need extra seconds)
 	var connectErr error
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		connectErr = client.Connect(r.Context())
 		if connectErr == nil {
 			break
@@ -113,7 +106,7 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 	}
 	if connectErr != nil {
 		h.logger.Error("failed to connect to sandbox Chrome after retries", zap.Error(connectErr))
-		http.Error(w, fmt.Sprintf("failed to connect to Chrome: %v", connectErr), http.StatusInternalServerError)
+		JSONError(w, fmt.Sprintf("failed to connect to Chrome: %v", connectErr), http.StatusInternalServerError)
 		return
 	}
 
@@ -171,14 +164,14 @@ func (h *ComputerUseHandler) Screenshot(w http.ResponseWriter, r *http.Request) 
 
 	client, err := h.getClient(sandboxID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		JSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
 	pngBytes, err := client.Screenshot(r.Context())
 	if err != nil {
 		h.logger.Error("screenshot failed", zap.Error(err))
-		http.Error(w, fmt.Sprintf("screenshot failed: %v", err), http.StatusInternalServerError)
+		JSONError(w, fmt.Sprintf("screenshot failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -220,13 +213,13 @@ func (h *ComputerUseHandler) Snapshot(w http.ResponseWriter, r *http.Request) {
 
 	client, err := h.getClient(sandboxID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		JSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
 	info, err := client.GetSnapshot()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -251,13 +244,13 @@ func (h *ComputerUseHandler) Act(w http.ResponseWriter, r *http.Request) {
 
 	var req ActRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		JSONError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	client, err := h.getClient(sandboxID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		JSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -277,13 +270,13 @@ func (h *ComputerUseHandler) Act(w http.ResponseWriter, r *http.Request) {
 	case "navigate":
 		info, err = client.Navigate(r.Context(), req.URL)
 	default:
-		http.Error(w, fmt.Sprintf("unknown action: %s", req.Action), http.StatusBadRequest)
+		JSONError(w, fmt.Sprintf("unknown action: %s", req.Action), http.StatusBadRequest)
 		return
 	}
 
 	if err != nil {
 		h.logger.Error("action failed", zap.String("action", req.Action), zap.Error(err))
-		http.Error(w, fmt.Sprintf("%s failed: %v", req.Action, err), http.StatusInternalServerError)
+		JSONError(w, fmt.Sprintf("%s failed: %v", req.Action, err), http.StatusInternalServerError)
 		return
 	}
 

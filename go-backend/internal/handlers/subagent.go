@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
@@ -65,7 +63,7 @@ func (h *SubAgentHandler) Spawn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectPath := h.resolveProjectPath(req.Project)
+	projectPath := resolveProjectPath(req.Project, nil)
 	if projectPath == "" {
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": "Project not found",
@@ -271,22 +269,4 @@ func (h *SubAgentHandler) ListByParent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// resolveProjectPath resolves a project name to its filesystem path.
-func (h *SubAgentHandler) resolveProjectPath(project string) string {
-	if project == "" {
-		return ""
-	}
-
-	projectsDir := os.Getenv("PROJECT_ROOT")
-	if projectsDir == "" {
-		projectsDir = "/app/projects"
-	}
-
-	candidate := filepath.Join(projectsDir, project)
-	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-		return candidate
-	}
-
-	return ""
-}
 

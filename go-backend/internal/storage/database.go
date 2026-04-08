@@ -63,6 +63,18 @@ func NewDatabase(dataSource string) (*Database, error) {
 
 		CREATE INDEX IF NOT EXISTS idx_conv_msgs_project_agent
 			ON conversation_messages(project, agent_id, created_at);
+
+		CREATE TABLE IF NOT EXISTS artifacts (
+			id TEXT PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			type TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_artifacts_agent
+			ON artifacts(agent_id);
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
@@ -328,4 +340,44 @@ func (d *Database) GetConversationSummaries(ctx context.Context) ([]Conversation
 		summaries = append(summaries, s)
 	}
 	return summaries, rows.Err()
+}
+
+// DBArtifact represents a persisted agent artifact.
+type DBArtifact struct {
+	ID        string `json:"id"`
+	AgentID   string `json:"agentId"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+// SaveArtifact persists an artifact, inserting or replacing by ID.
+func (d *Database) SaveArtifact(ctx context.Context, a *DBArtifact) error {
+	_, err := d.db.ExecContext(ctx, `
+		INSERT OR REPLACE INTO artifacts (id, agent_id, type, title, content, updated_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		a.ID, a.AgentID, a.Type, a.Title, a.Content)
+	return err
+}
+
+// GetArtifactsByAgent returns all artifacts for a given agent.
+func (d *Database) GetArtifactsByAgent(ctx context.Context, agentID string) ([]*DBArtifact, error) {
+	rows, err := d.db.QueryContext(ctx,
+		"SELECT id, agent_id, type, title, content, updated_at FROM artifacts WHERE agent_id = ?",
+		agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var artifacts []*DBArtifact
+	for rows.Next() {
+		var a DBArtifact
+		if err := rows.Scan(&a.ID, &a.AgentID, &a.Type, &a.Title, &a.Content, &a.UpdatedAt); err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, &a)
+	}
+	return artifacts, rows.Err()
 }

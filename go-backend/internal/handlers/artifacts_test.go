@@ -13,7 +13,7 @@ import (
 
 func TestArtifactHandler(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	handler := handlers.NewArtifactHandler(logger)
+	handler := handlers.NewArtifactHandler(nil, logger)
 
 	t.Run("CreateOrUpdate - creates artifact", func(t *testing.T) {
 		body := handlers.CreateOrUpdateArtifactRequest{

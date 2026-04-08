@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -79,16 +79,23 @@ func main() {
 	// Project root for CLI commands and file access
 	projectRoot := os.Getenv("PROJECT_ROOT")
 	if projectRoot == "" {
-		projectRoot = "../"
+		projectRoot, _ = os.Getwd()
+		// Default to parent of the go-backend directory
+		projectRoot = projectRoot + "/.."
 	}
+	// Ensure absolute path (Docker bind mounts and other consumers require it)
+	if absRoot, err := filepath.Abs(projectRoot); err == nil {
+		projectRoot = absRoot
+	}
+	os.Setenv("PROJECT_ROOT", projectRoot)
 
 	// Initialize handlers
 	gitOps := git.NewGitOps(logger)
 	checklistHandler := handlers.NewChecklistHandler(db, logger)
 	projectHandler := handlers.NewProjectHandler(db, logger, gitOps)
-	aiHandler := handlers.NewAIHandler(logger)
-	configHandler := handlers.NewConfigHandler(logger)
-	githubHandler := handlers.NewGitHubHandler(logger)
+	githubTokenStore := handlers.NewGitHubTokenStore()
+	configHandler := handlers.NewConfigHandler(logger, githubTokenStore)
+	githubHandler := handlers.NewGitHubHandler(logger, githubTokenStore)
 	cliHandler := handlers.NewCLIHandler(logger, projectRoot)
 
 	// Pi agent pool
@@ -104,9 +111,6 @@ func main() {
 	// Task manager
 	taskMgr := pi.NewTaskManager()
 	taskHandler := handlers.NewTaskHandler(taskMgr, logger)
-
-	// Session manager (used for session persistence in PiHandler)
-	_ = pi.NewSessionManager(logger)
 
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
@@ -138,61 +142,8 @@ func main() {
 	if schedulerStorePath == "" {
 		schedulerStorePath = "../data/scheduler/jobs.json"
 	}
-	schedulerPromptSender := func(ctx context.Context, project, agentID, message, model string) (string, error) {
-		// Resolve project path from database or default projects dir
-		var projectPath string
-		if db != nil {
-			customProjects, err := db.GetCustomProjects(ctx)
-			if err == nil {
-				for _, p := range customProjects {
-					if p.Name == project {
-						projectPath = p.Path
-						break
-					}
-				}
-			}
-		}
-		if projectPath == "" {
-			projectPath = projectRoot + "/" + project
-			if _, err := os.Stat(projectPath); err != nil {
-				return "", fmt.Errorf("project %s not found", project)
-			}
-		}
-
-		client, err := piPool.GetOrCreateWithID(projectPath, agentID)
-		if err != nil {
-			return "", fmt.Errorf("failed to get Pi client: %w", err)
-		}
-		if err := client.SendPrompt(message, model, ""); err != nil {
-			return "", fmt.Errorf("failed to send prompt: %w", err)
-		}
-		// Wait for agent_end event (with timeout)
-		subID := fmt.Sprintf("sched-%d", time.Now().UnixNano())
-		events := client.Subscribe(subID)
-		defer client.Unsubscribe(subID)
-
-		var output string
-		timeout := time.After(5 * time.Minute)
-		for {
-			select {
-			case <-ctx.Done():
-				return output, ctx.Err()
-			case <-timeout:
-				return output, fmt.Errorf("scheduled job timed out")
-			case event, ok := <-events:
-				if !ok {
-					return output, nil
-				}
-				if event.Type == pi.RpcEventAgentEnd {
-					return output, nil
-				}
-				if event.AssistantMessageEvent != nil && event.AssistantMessageEvent.Type == "text_delta" {
-					output += event.AssistantMessageEvent.Delta
-				}
-			}
-		}
-	}
-	sched := scheduler.NewScheduler(schedulerStorePath, handlers.NewSchedulerPromptSender(schedulerPromptSender), logger)
+	schedSender := handlers.NewSchedulerPromptSenderAdapter(piPool, db, projectRoot)
+	sched := scheduler.NewScheduler(schedulerStorePath, schedSender, logger)
 
 	// Phase 1: Set up isolated executor for job execution
 	isolatedExec, err := scheduler.NewIsolatedExecutor(projectRoot, logger)
@@ -226,7 +177,7 @@ func main() {
 	schedulerHandler := handlers.NewSchedulerHandler(sched, logger)
 
 	// Artifacts handler (plans, todos, notes from agents)
-	artifactHandler := handlers.NewArtifactHandler(logger)
+	artifactHandler := handlers.NewArtifactHandler(db, logger)
 
 	// Setup router
 	r := chi.NewRouter()
@@ -273,10 +224,6 @@ func main() {
 
 		// Merge
 		r.Post("/merge", checklistHandler.Merge)
-
-		// Test Generation (proxied to Python or handled via LiteLLM)
-		r.Post("/generate-tests", aiHandler.GenerateTests)
-		r.Post("/run-tests", aiHandler.RunTests)
 
 		// Configuration
 		r.Get("/config/ai", configHandler.GetAI)

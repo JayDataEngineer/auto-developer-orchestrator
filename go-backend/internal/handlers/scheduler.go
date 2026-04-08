@@ -1,11 +1,9 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/scheduler"
 	"github.com/go-chi/chi/v5"
@@ -275,20 +273,5 @@ func (h *SchedulerHandler) ListAllRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 
-// NewSchedulerPromptSender creates a PromptSender that sends prompts through the Pi system.
-// This is the bridge between the scheduler and the Pi agent pool.
-func NewSchedulerPromptSender(sendFn func(ctx context.Context, project, agentID, message, model string) (string, error)) scheduler.PromptSender {
-	return func(ctx context.Context, project, agentID, message, model string, autoBranch, autoMerge bool) (string, error) {
-		if sendFn == nil {
-			return "", fmt.Errorf("prompt sender not configured")
-		}
-		output, err := sendFn(ctx, project, agentID, message, model)
-		if err != nil {
-			return "", err
-		}
-		return output, nil
-	}
-}
 
-// Keep the import for time
-var _ = time.Second
+

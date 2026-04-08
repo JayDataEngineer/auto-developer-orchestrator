@@ -15,42 +15,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// resolveProjectPath resolves a project name to its filesystem directory path.
-// Returns empty string if no valid directory is found.
-func (h *ProjectHandler) resolveProjectPath(project string) string {
-	if project == "" {
-		return ""
-	}
-	// Check custom projects from DB first
-	if h.db != nil {
-		ctx := context.Background()
-		customProjects, err := h.db.GetCustomProjects(ctx)
-		if err == nil {
-			for _, p := range customProjects {
-				if p.Name == project {
-					if strings.Contains(p.Path, "://") {
-						break // non-filesystem path, fall through
-					}
-					if info, err := os.Stat(p.Path); err == nil && info.IsDir() {
-						return p.Path
-					}
-					break
-				}
-			}
-		}
-	}
-	// Fall back to PROJECT_ROOT/<project>
-	projectsDir := os.Getenv("PROJECT_ROOT")
-	if projectsDir == "" {
-		projectsDir = h.db.GetProjectsDir()
-	}
-	candidate := filepath.Join(projectsDir, project)
-	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-		return candidate
-	}
-	return ""
-}
-
 // ProjectHandler handles project-related HTTP requests
 type ProjectHandler struct {
 	db     *storage.Database
@@ -85,7 +49,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	customProjects, err := h.db.GetCustomProjects(r.Context())
 	if err != nil {
 		h.logger.Error("Failed to get custom projects", zap.Error(err))
-		http.Error(w, "Failed to list projects", http.StatusInternalServerError)
+		JSONError(w, "Failed to list projects", http.StatusInternalServerError)
 		return
 	}
 
@@ -101,7 +65,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Filter to only projects that resolve to an actual directory
 	projects := make([]string, 0, len(projectSet))
 	for project := range projectSet {
-		if h.resolveProjectPath(project) != "" {
+		if resolveProjectPath(project, h.db) != "" {
 			projects = append(projects, project)
 		}
 	}
@@ -121,12 +85,12 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		JSONError(w, "Name is required", http.StatusBadRequest)
 		return
 	}
 
@@ -154,7 +118,7 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 
 			if err := h.git.Clone(ctx, cloneOpts); err != nil {
 				h.logger.Error("Failed to clone repository", zap.Error(err))
-				http.Error(w, fmt.Sprintf("Failed to clone repository: %v", err), http.StatusInternalServerError)
+				JSONError(w, fmt.Sprintf("Failed to clone repository: %v", err), http.StatusInternalServerError)
 				return
 			}
 			req.Path = projectDir
@@ -163,20 +127,20 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Path == "" {
-		http.Error(w, "Path or repoUrl is required", http.StatusBadRequest)
+		JSONError(w, "Path or repoUrl is required", http.StatusBadRequest)
 		return
 	}
 
 	// Verify directory exists
 	if _, err := os.Stat(req.Path); os.IsNotExist(err) {
-		http.Error(w, "Directory does not exist", http.StatusBadRequest)
+		JSONError(w, "Directory does not exist", http.StatusBadRequest)
 		return
 	}
 
 	// Store in database
 	if err := h.db.AddCustomProject(r.Context(), req.Name, req.Path); err != nil {
 		h.logger.Error("Failed to add custom project", zap.Error(err))
-		http.Error(w, "Failed to add project", http.StatusInternalServerError)
+		JSONError(w, "Failed to add project", http.StatusInternalServerError)
 		return
 	}
 
@@ -193,12 +157,12 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.URL == "" {
-		http.Error(w, "URL is required", http.StatusBadRequest)
+		JSONError(w, "URL is required", http.StatusBadRequest)
 		return
 	}
 
@@ -211,7 +175,7 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 
 	// Check if already exists
 	if _, err := os.Stat(projectDir); err == nil {
-		http.Error(w, "Project already exists locally", http.StatusBadRequest)
+		JSONError(w, "Project already exists locally", http.StatusBadRequest)
 		return
 	}
 
@@ -227,7 +191,7 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.git.Clone(ctx, cloneOpts); err != nil {
 		h.logger.Error("Failed to clone repository", zap.Error(err))
-		http.Error(w, fmt.Sprintf("Failed to clone repository: %v", err), http.StatusInternalServerError)
+		JSONError(w, fmt.Sprintf("Failed to clone repository: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -265,18 +229,18 @@ type CheckoutBranchRequest struct {
 func (h *ProjectHandler) CheckoutBranch(w http.ResponseWriter, r *http.Request) {
 	var req CheckoutBranchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Project == "" || req.Branch == "" {
-		http.Error(w, "Project and branch are required", http.StatusBadRequest)
+		JSONError(w, "Project and branch are required", http.StatusBadRequest)
 		return
 	}
 
 	projectDir, err := h.db.GetProjectDir(r.Context(), req.Project)
 	if err != nil {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		JSONError(w, "Project not found", http.StatusNotFound)
 		return
 	}
 
@@ -293,7 +257,7 @@ func (h *ProjectHandler) CheckoutBranch(w http.ResponseWriter, r *http.Request) 
 			zap.String("project", req.Project),
 			zap.String("branch", req.Branch),
 			zap.Error(err))
-		http.Error(w, fmt.Sprintf("Failed to checkout branch: %v", err), http.StatusInternalServerError)
+		JSONError(w, fmt.Sprintf("Failed to checkout branch: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -319,13 +283,13 @@ type GetBranchRequest struct {
 func (h *ProjectHandler) GetBranch(w http.ResponseWriter, r *http.Request) {
 	projectName := r.URL.Query().Get("project")
 	if projectName == "" {
-		http.Error(w, "Project name is required", http.StatusBadRequest)
+		JSONError(w, "Project name is required", http.StatusBadRequest)
 		return
 	}
 
 	projectDir, err := h.db.GetProjectDir(r.Context(), projectName)
 	if err != nil {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		JSONError(w, "Project not found", http.StatusNotFound)
 		return
 	}
 
@@ -337,7 +301,7 @@ func (h *ProjectHandler) GetBranch(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("Failed to get current branch",
 			zap.String("project", projectName),
 			zap.Error(err))
-		http.Error(w, fmt.Sprintf("Failed to get branch: %v", err), http.StatusInternalServerError)
+		JSONError(w, fmt.Sprintf("Failed to get branch: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -352,13 +316,13 @@ func (h *ProjectHandler) GetBranch(w http.ResponseWriter, r *http.Request) {
 func (h *ProjectHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	projectName := r.URL.Query().Get("project")
 	if projectName == "" {
-		http.Error(w, "Project name is required", http.StatusBadRequest)
+		JSONError(w, "Project name is required", http.StatusBadRequest)
 		return
 	}
 
 	projectDir, err := h.db.GetProjectDir(r.Context(), projectName)
 	if err != nil {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		JSONError(w, "Project not found", http.StatusNotFound)
 		return
 	}
 
@@ -387,19 +351,19 @@ func (h *ProjectHandler) SetMode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Project == "" {
-		http.Error(w, "Project name is required", http.StatusBadRequest)
+		JSONError(w, "Project name is required", http.StatusBadRequest)
 		return
 	}
 
 	isAutoMode := req.Mode == "auto"
 	if err := h.db.SetAutomationMode(r.Context(), req.Project, isAutoMode); err != nil {
 		h.logger.Error("Failed to set automation mode", zap.Error(err))
-		http.Error(w, "Failed to update mode", http.StatusInternalServerError)
+		JSONError(w, "Failed to update mode", http.StatusInternalServerError)
 		return
 	}
 

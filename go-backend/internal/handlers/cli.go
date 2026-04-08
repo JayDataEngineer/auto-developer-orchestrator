@@ -56,14 +56,14 @@ type CLIResponse struct {
 func (h *CLIHandler) ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 	var req CLIRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	// Validate command is allowed
 	if !h.allowedCmds[req.Command] {
 		h.logger.Warn("Blocked disallowed command", zap.String("command", req.Command))
-		http.Error(w, "Command not allowed", http.StatusForbidden)
+		JSONError(w, "Command not allowed", http.StatusForbidden)
 		return
 	}
 
@@ -76,7 +76,7 @@ func (h *CLIHandler) ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 		// Prevent directory traversal attacks
 		cleanDir := filepath.Clean(req.Dir)
 		if strings.HasPrefix(cleanDir, "..") {
-			http.Error(w, "Invalid directory", http.StatusBadRequest)
+			JSONError(w, "Invalid directory", http.StatusBadRequest)
 			return
 		}
 		workDir = cleanDir
@@ -152,14 +152,14 @@ func (h *CLIHandler) sanitizeArgs(args []string) []string {
 func (h *CLIHandler) ReadFile(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
-		http.Error(w, "Missing 'path' parameter", http.StatusBadRequest)
+		JSONError(w, "Missing 'path' parameter", http.StatusBadRequest)
 		return
 	}
 
 	// Prevent directory traversal
 	cleanPath := filepath.Clean(filePath)
 	if strings.HasPrefix(cleanPath, "..") || strings.HasPrefix(cleanPath, "/") {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
+		JSONError(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
 
@@ -167,13 +167,13 @@ func (h *CLIHandler) ReadFile(w http.ResponseWriter, r *http.Request) {
 
 	// Check file exists and is within project root
 	if !strings.HasPrefix(fullPath, h.projectRoot) {
-		http.Error(w, "Access denied", http.StatusForbidden)
+		JSONError(w, "Access denied", http.StatusForbidden)
 		return
 	}
 
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
-		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		JSONError(w, "Failed to read file", http.StatusInternalServerError)
 		return
 	}
 
@@ -194,7 +194,7 @@ func (h *CLIHandler) ListDirectory(w http.ResponseWriter, r *http.Request) {
 	// Prevent directory traversal
 	cleanPath := filepath.Clean(dirPath)
 	if strings.HasPrefix(cleanPath, "..") {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
+		JSONError(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
 
@@ -202,13 +202,13 @@ func (h *CLIHandler) ListDirectory(w http.ResponseWriter, r *http.Request) {
 
 	// Check directory is within project root
 	if !strings.HasPrefix(fullPath, h.projectRoot) {
-		http.Error(w, "Access denied", http.StatusForbidden)
+		JSONError(w, "Access denied", http.StatusForbidden)
 		return
 	}
 
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
-		http.Error(w, "Failed to list directory", http.StatusInternalServerError)
+		JSONError(w, "Failed to list directory", http.StatusInternalServerError)
 		return
 	}
 

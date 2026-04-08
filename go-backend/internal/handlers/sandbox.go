@@ -40,7 +40,7 @@ type CreateSandboxRequest struct {
 func (h *SandboxHandler) CreateSandbox(w http.ResponseWriter, r *http.Request) {
 	var req CreateSandboxRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		JSONError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -51,7 +51,7 @@ func (h *SandboxHandler) CreateSandbox(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Error("failed to create sandbox", zap.Error(err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -65,7 +65,7 @@ func (h *SandboxHandler) GetSandbox(w http.ResponseWriter, r *http.Request) {
 
 	s, err := h.manager.GetSandbox(id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		JSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -86,7 +86,7 @@ func (h *SandboxHandler) DestroySandbox(w http.ResponseWriter, r *http.Request) 
 	id := r.PathValue("id")
 
 	if err := h.manager.DestroySandbox(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -102,13 +102,13 @@ func (h *SandboxHandler) ExecCommand(w http.ResponseWriter, r *http.Request) {
 		Cmd []string `json:"cmd"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		JSONError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	output, err := h.manager.ExecInSandbox(r.Context(), id, req.Cmd)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -138,7 +138,7 @@ func (h *SandboxHandler) EnableBrowserMode(w http.ResponseWriter, r *http.Reques
 	session, err := h.manager.EnableBrowserMode(r.Context(), id)
 	if err != nil {
 		h.logger.Error("failed to enable browser mode", zap.Error(err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -168,7 +168,7 @@ func (h *SandboxHandler) EnableDesktopMode(w http.ResponseWriter, r *http.Reques
 	session, err := h.manager.EnableDesktopMode(r.Context(), id)
 	if err != nil {
 		h.logger.Error("failed to enable desktop mode", zap.Error(err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -181,7 +181,7 @@ func (h *SandboxHandler) DisableMode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if err := h.manager.DisableMode(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -195,7 +195,7 @@ func (h *SandboxHandler) GetDesktopViewer(w http.ResponseWriter, r *http.Request
 
 	session, err := h.manager.GetDesktopSession(id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		JSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -228,7 +228,7 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 
 	_, err := h.manager.GetSandbox(id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		JSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -271,7 +271,7 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 	// Regular HTTP proxy
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
 	if err != nil {
-		http.Error(w, "proxy request failed", http.StatusInternalServerError)
+		JSONError(w, "proxy request failed", http.StatusInternalServerError)
 		return
 	}
 
@@ -290,7 +290,7 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 	resp, err := transport.RoundTrip(proxyReq)
 	if err != nil {
 		h.logger.Warn("VNC proxy upstream error", zap.Error(err))
-		http.Error(w, fmt.Sprintf("sandbox desktop not reachable: %v", err), http.StatusBadGateway)
+		JSONError(w, fmt.Sprintf("sandbox desktop not reachable: %v", err), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
@@ -311,13 +311,13 @@ func (h *SandboxHandler) handleWebSocket(w http.ResponseWriter, r *http.Request,
 	// Hijack the connection
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+		JSONError(w, "hijacking not supported", http.StatusInternalServerError)
 		return
 	}
 	conn, _, err := hijacker.Hijack()
 	if err != nil {
 		h.logger.Error("failed to hijack connection", zap.Error(err))
-		http.Error(w, "hijack failed", http.StatusInternalServerError)
+		JSONError(w, "hijack failed", http.StatusInternalServerError)
 		return
 	}
 	defer conn.Close()

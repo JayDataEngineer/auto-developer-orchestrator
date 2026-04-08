@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"sync"
 
 	"go.uber.org/zap"
@@ -11,9 +10,10 @@ import (
 
 // ConfigHandler handles configuration requests
 type ConfigHandler struct {
-	logger *zap.Logger
-	config *Config
-	mu     sync.RWMutex
+	logger     *zap.Logger
+	config     *Config
+	mu         sync.RWMutex
+	tokenStore *GitHubTokenStore
 }
 
 // Config represents the AI configuration
@@ -37,9 +37,10 @@ type TestTypes struct {
 }
 
 // NewConfigHandler creates a new ConfigHandler
-func NewConfigHandler(logger *zap.Logger) *ConfigHandler {
+func NewConfigHandler(logger *zap.Logger, tokenStore *GitHubTokenStore) *ConfigHandler {
 	return &ConfigHandler{
-		logger: logger,
+		logger:     logger,
+		tokenStore: tokenStore,
 		config: &Config{
 			AutoTask:           true,
 			AutoTest:           true,
@@ -73,7 +74,7 @@ func (h *ConfigHandler) SetAI(w http.ResponseWriter, r *http.Request) {
 
 	var newConfig Config
 	if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -104,7 +105,7 @@ func (h *ConfigHandler) SetSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -135,20 +136,9 @@ type GitHubUserInfo struct {
 	AvatarURL string `json:"avatar_url"`
 }
 
-// githubToken stores the GitHub token in memory
-var githubToken string
-
 // GetGitHubUser returns the current GitHub user info
 func (h *ConfigHandler) GetGitHubUser(w http.ResponseWriter, r *http.Request) {
-	// Check in-memory token first, then fall back to env var
-	token := githubToken
-	if token == "" {
-		if t := os.Getenv("GITHUB_TOKEN"); t != "" {
-			githubToken = t
-			token = t
-		}
-	}
-
+	token := h.tokenStore.Get()
 	if token == "" {
 		writeJSON(w, http.StatusOK, GitHubUserResponse{
 			Connected: false,
@@ -162,7 +152,7 @@ func (h *ConfigHandler) GetGitHubUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, GitHubUserResponse{Connected: false})
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+githubToken)
+	req.Header.Set("Authorization", "Bearer "+h.tokenStore.Get())
 	req.Header.Set("Accept", "application/json")
 
 	client := &http.Client{}
@@ -207,19 +197,19 @@ func (h *ConfigHandler) ConnectGitHub(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Token == "" {
-		http.Error(w, "Token is required", http.StatusBadRequest)
+		JSONError(w, "Token is required", http.StatusBadRequest)
 		return
 	}
 
 	// Verify token by calling GitHub API
 	gitReq, err := http.NewRequest("GET", "https://api.github.com/user", nil)
 	if err != nil {
-		http.Error(w, "Failed to verify token", http.StatusInternalServerError)
+		JSONError(w, "Failed to verify token", http.StatusInternalServerError)
 		return
 	}
 	gitReq.Header.Set("Authorization", "Bearer "+req.Token)
@@ -228,7 +218,7 @@ func (h *ConfigHandler) ConnectGitHub(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{}
 	resp, err := client.Do(gitReq)
 	if err != nil {
-		http.Error(w, "Failed to verify token", http.StatusInternalServerError)
+		JSONError(w, "Failed to verify token", http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
@@ -242,8 +232,7 @@ func (h *ConfigHandler) ConnectGitHub(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store token
-	githubToken = req.Token
-	os.Setenv("GITHUB_TOKEN", req.Token)
+	h.tokenStore.Set(req.Token)
 
 	h.logger.Info("GitHub account connected")
 

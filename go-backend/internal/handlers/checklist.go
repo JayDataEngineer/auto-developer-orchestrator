@@ -38,13 +38,13 @@ type Task struct {
 func (h *ChecklistHandler) Get(w http.ResponseWriter, r *http.Request) {
 	projectName := r.URL.Query().Get("project")
 	if projectName == "" {
-		http.Error(w, "Project name is required", http.StatusBadRequest)
+		JSONError(w, "Project name is required", http.StatusBadRequest)
 		return
 	}
 
 	projectDir, err := h.db.GetProjectDir(r.Context(), projectName)
 	if err != nil {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		JSONError(w, "Project not found", http.StatusNotFound)
 		return
 	}
 
@@ -61,7 +61,7 @@ func (h *ChecklistHandler) Get(w http.ResponseWriter, r *http.Request) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		h.logger.Error("Failed to read checklist", zap.Error(err))
-		http.Error(w, "Failed to read checklist", http.StatusInternalServerError)
+		JSONError(w, "Failed to read checklist", http.StatusInternalServerError)
 		return
 	}
 
@@ -112,12 +112,12 @@ func (h *ChecklistHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Project == "" {
-		http.Error(w, "Project name is required", http.StatusBadRequest)
+		JSONError(w, "Project name is required", http.StatusBadRequest)
 		return
 	}
 
@@ -127,7 +127,7 @@ func (h *ChecklistHandler) Update(w http.ResponseWriter, r *http.Request) {
 		projectDir = filepath.Join(h.db.GetProjectsDir(), req.Project)
 		if err := os.MkdirAll(projectDir, 0755); err != nil {
 			h.logger.Error("Failed to create project directory", zap.Error(err))
-			http.Error(w, "Project directory not found", http.StatusNotFound)
+			JSONError(w, "Project directory not found", http.StatusNotFound)
 			return
 		}
 	}
@@ -146,7 +146,7 @@ func (h *ChecklistHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	if err := os.WriteFile(filePath, []byte(content.String()), 0644); err != nil {
 		h.logger.Error("Failed to write checklist", zap.Error(err))
-		http.Error(w, "Failed to update checklist", http.StatusInternalServerError)
+		JSONError(w, "Failed to update checklist", http.StatusInternalServerError)
 		return
 	}
 
@@ -163,32 +163,32 @@ func (h *ChecklistHandler) Merge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Project == "" {
-		http.Error(w, "Project name is required", http.StatusBadRequest)
+		JSONError(w, "Project name is required", http.StatusBadRequest)
 		return
 	}
 
 	projectDir, err := h.db.GetProjectDir(r.Context(), req.Project)
 	if err != nil {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		JSONError(w, "Project not found", http.StatusNotFound)
 		return
 	}
 
 	filePath := filepath.Join(projectDir, "TASKS.md")
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		http.Error(w, "Checklist not found", http.StatusNotFound)
+		JSONError(w, "Checklist not found", http.StatusNotFound)
 		return
 	}
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		h.logger.Error("Failed to read checklist", zap.Error(err))
-		http.Error(w, "Failed to merge", http.StatusInternalServerError)
+		JSONError(w, "Failed to merge", http.StatusInternalServerError)
 		return
 	}
 
@@ -224,7 +224,7 @@ func (h *ChecklistHandler) Merge(w http.ResponseWriter, r *http.Request) {
 	// Write updated content
 	if err := os.WriteFile(filePath, []byte(strings.Join(updatedLines, "\n")), 0644); err != nil {
 		h.logger.Error("Failed to write checklist", zap.Error(err))
-		http.Error(w, "Failed to merge", http.StatusInternalServerError)
+		JSONError(w, "Failed to merge", http.StatusInternalServerError)
 		return
 	}
 
@@ -250,18 +250,18 @@ func (h *ChecklistHandler) GenerateChecklistStream(w http.ResponseWriter, r *htt
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Project == "" {
-		http.Error(w, "Project name is required", http.StatusBadRequest)
+		JSONError(w, "Project name is required", http.StatusBadRequest)
 		return
 	}
 
 	projectDir, err := h.db.GetProjectDir(r.Context(), req.Project)
 	if err != nil {
-		http.Error(w, "Project not found", http.StatusNotFound)
+		JSONError(w, "Project not found", http.StatusNotFound)
 		return
 	}
 
@@ -273,7 +273,7 @@ func (h *ChecklistHandler) GenerateChecklistStream(w http.ResponseWriter, r *htt
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		JSONError(w, "Streaming unsupported", http.StatusInternalServerError)
 		return
 	}
 

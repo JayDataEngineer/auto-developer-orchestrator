@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -16,24 +14,22 @@ import (
 
 // GitHubHandler proxies requests to the GitHub API
 type GitHubHandler struct {
-	logger *zap.Logger
-	client *http.Client
+	logger     *zap.Logger
+	client     *http.Client
+	tokenStore *GitHubTokenStore
 }
 
 // NewGitHubHandler creates a new GitHub proxy handler
-func NewGitHubHandler(logger *zap.Logger) *GitHubHandler {
+func NewGitHubHandler(logger *zap.Logger, tokenStore *GitHubTokenStore) *GitHubHandler {
 	return &GitHubHandler{
-		logger: logger,
-		client: &http.Client{Timeout: 30 * time.Second},
+		logger:     logger,
+		client:     &http.Client{Timeout: 30 * time.Second},
+		tokenStore: tokenStore,
 	}
 }
 
 func (h *GitHubHandler) getToken() (string, error) {
-	if githubToken != "" {
-		return githubToken, nil
-	}
-	if t := os.Getenv("GITHUB_TOKEN"); t != "" {
-		githubToken = t
+	if t := h.tokenStore.Get(); t != "" {
 		return t, nil
 	}
 	return "", fmt.Errorf("GitHub not connected")
@@ -191,18 +187,6 @@ func (h *GitHubHandler) githubPut(url string, payload interface{}) ([]byte, int,
 	return respBody, resp.StatusCode, nil
 }
 
-// parseOwnerRepo extracts owner and repo from a git remote URL.
-// Supports: https://github.com/owner/repo.git, git@github.com:owner/repo.git
-func parseOwnerRepo(remoteURL string) (owner, repo string, err error) {
-	// HTTPS: https://github.com/owner/repo.git
-	httpsRe := regexp.MustCompile(`github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$`)
-	matches := httpsRe.FindStringSubmatch(remoteURL)
-	if len(matches) == 3 {
-		return matches[1], matches[2], nil
-	}
-	return "", "", fmt.Errorf("cannot parse owner/repo from remote URL: %s", remoteURL)
-}
-
 // GetRepos returns the authenticated user's GitHub repositories.
 func (h *GitHubHandler) GetRepos(w http.ResponseWriter, r *http.Request) {
 	// Fetch repos sorted by recently updated
@@ -260,7 +244,7 @@ func (h *GitHubHandler) GetPRs(w http.ResponseWriter, r *http.Request) {
 	owner := r.URL.Query().Get("owner")
 	repo := r.URL.Query().Get("repo")
 	if owner == "" || repo == "" {
-		http.Error(w, "owner and repo required", http.StatusBadRequest)
+		JSONError(w, "owner and repo required", http.StatusBadRequest)
 		return
 	}
 
@@ -269,7 +253,7 @@ func (h *GitHubHandler) GetPRs(w http.ResponseWriter, r *http.Request) {
 		owner, repo))
 	if err != nil {
 		h.logger.Error("GitHub PRs fetch failed", zap.Error(err))
-		http.Error(w, err.Error(), status)
+		JSONError(w, err.Error(), status)
 		return
 	}
 
@@ -289,7 +273,7 @@ func (h *GitHubHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	owner := r.URL.Query().Get("owner")
 	repo := r.URL.Query().Get("repo")
 	if owner == "" || repo == "" {
-		http.Error(w, "owner and repo required", http.StatusBadRequest)
+		JSONError(w, "owner and repo required", http.StatusBadRequest)
 		return
 	}
 
@@ -297,7 +281,7 @@ func (h *GitHubHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 		"https://api.github.com/repos/%s/%s", owner, repo))
 	if err != nil {
 		h.logger.Error("GitHub stats fetch failed", zap.Error(err))
-		http.Error(w, err.Error(), status)
+		JSONError(w, err.Error(), status)
 		return
 	}
 
@@ -319,7 +303,7 @@ func (h *GitHubHandler) GetBranches(w http.ResponseWriter, r *http.Request) {
 	owner := r.URL.Query().Get("owner")
 	repo := r.URL.Query().Get("repo")
 	if owner == "" || repo == "" {
-		http.Error(w, "owner and repo required", http.StatusBadRequest)
+		JSONError(w, "owner and repo required", http.StatusBadRequest)
 		return
 	}
 
@@ -328,7 +312,7 @@ func (h *GitHubHandler) GetBranches(w http.ResponseWriter, r *http.Request) {
 		owner, repo))
 	if err != nil {
 		h.logger.Error("GitHub branches fetch failed", zap.Error(err))
-		http.Error(w, err.Error(), status)
+		JSONError(w, err.Error(), status)
 		return
 	}
 
@@ -348,7 +332,7 @@ func (h *GitHubHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	owner := r.URL.Query().Get("owner")
 	repo := r.URL.Query().Get("repo")
 	if owner == "" || repo == "" {
-		http.Error(w, "owner and repo required", http.StatusBadRequest)
+		JSONError(w, "owner and repo required", http.StatusBadRequest)
 		return
 	}
 
@@ -357,7 +341,7 @@ func (h *GitHubHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 		owner, repo))
 	if err != nil {
 		h.logger.Error("GitHub activity fetch failed", zap.Error(err))
-		http.Error(w, err.Error(), status)
+		JSONError(w, err.Error(), status)
 		return
 	}
 
@@ -376,14 +360,14 @@ func (h *GitHubHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 func (h *GitHubHandler) GetAllRepoActivity(w http.ResponseWriter, r *http.Request) {
 	token, err := h.getToken()
 	if err != nil {
-		http.Error(w, "GitHub not connected", http.StatusUnauthorized)
+		JSONError(w, "GitHub not connected", http.StatusUnauthorized)
 		return
 	}
 
 	// Get user's received events
 	req, err := http.NewRequest("GET", "https://api.github.com/users/"+r.URL.Query().Get("owner")+"/events?per_page=30", nil)
 	if err != nil {
-		http.Error(w, "Failed to create request", http.StatusInternalServerError)
+		JSONError(w, "Failed to create request", http.StatusInternalServerError)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -392,7 +376,7 @@ func (h *GitHubHandler) GetAllRepoActivity(w http.ResponseWriter, r *http.Reques
 	resp, err := h.client.Do(req)
 	if err != nil {
 		h.logger.Error("GitHub user events fetch failed", zap.Error(err))
-		http.Error(w, "Failed to fetch events", http.StatusBadGateway)
+		JSONError(w, "Failed to fetch events", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
