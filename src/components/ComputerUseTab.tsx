@@ -28,67 +28,55 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [desktopFull, setDesktopFull] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   const sandboxId = selectedProject ? `sandbox-${selectedProject}-${activeAgentId}` : null;
   const cu = useComputerUse();
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
 
-  // Enable computer use when a project is selected
+  // Single initialization flow: enable sandbox → fetch viewer info
   useEffect(() => {
-    if (sandboxId && !cu.enabled) {
-      cu.enableComputerUse(sandboxId);
-    }
-  }, [sandboxId]);
-
-  // Fetch session info for embedding noVNC
-  useEffect(() => {
-    console.log('[ComputerUseTab] Session fetch effect triggered', { sandboxId, cuEnabled: cu.enabled });
     if (!sandboxId) return;
+
+    let cancelled = false;
     setSessionLoading(true);
     setSessionError(null);
-    fetch(`/api/sandbox/${sandboxId}/viewer`)
-      .then(res => {
-        console.log('[ComputerUseTab] Fetch response status:', res.status);
-        if (!res.ok) throw new Error('Desktop session not found');
-        return res.json();
-      })
-      .then(data => {
-        console.log('[ComputerUseTab] Session data received:', data);
-        setSession(data);
-        setSessionLoading(false);
-      })
-      .catch(err => {
-        console.log('[ComputerUseTab] Fetch error:', err.message);
-        setSessionError(err.message);
-        setSessionLoading(false);
-      });
-  }, [sandboxId, cu.enabled]); // refetch when computer use becomes enabled
+    setSession(null);
 
-  // Try to enable computer use if no session exists
-  useEffect(() => {
-    console.log('[ComputerUseTab] Enable effect check', { sandboxId, cuEnabled: cu.enabled, sessionLoading, hasSession: !!session, hasError: !!sessionError, error: sessionError });
-    if (!sandboxId || cu.enabled || sessionLoading) {
-      console.log('[ComputerUseTab] Enable effect skipped - early return');
-      return;
-    }
-    if (session) {
-      console.log('[ComputerUseTab] Enable effect skipped - has session');
-      return;
-    }
-    if (sessionError && sessionError !== 'Desktop session not found') {
-      console.log('[ComputerUseTab] Enable effect skipped - real error:', sessionError);
-      return;
-    }
-    // Session doesn't exist yet (no error or "not found") — create it
-    if (!sessionError || sessionError === 'Desktop session not found') {
-      console.log('[ComputerUseTab] Enabling computer use for:', sandboxId);
-      cu.enableComputerUse(sandboxId).then(() => {
-        console.log('[ComputerUseTab] Computer use enabled successfully');
-      }).catch(err => {
-        console.error('[ComputerUseTab] enableComputerUse failed:', err);
-      });
-    }
-  }, [sandboxId, session, sessionError, sessionLoading, cu.enabled]);
+    const init = async () => {
+      // Step 1: Ensure sandbox + browser mode is enabled
+      if (!cu.enabled || cu.sandboxId !== sandboxId) {
+        try {
+          await cu.enableComputerUse(sandboxId);
+        } catch (err) {
+          if (!cancelled) {
+            setSessionError(String(err));
+            setSessionLoading(false);
+          }
+          return;
+        }
+      }
+
+      // Step 2: Fetch viewer session info (noVNC URL, CDP URL)
+      try {
+        const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
+        if (!res.ok) throw new Error('Desktop session not found');
+        const data = await res.json();
+        if (!cancelled) {
+          setSession(data);
+          setSessionLoading(false);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setSessionError(err.message);
+          setSessionLoading(false);
+        }
+      }
+    };
+
+    init();
+    return () => { cancelled = true; };
+  }, [sandboxId, retryKey]);
 
   const openDesktop = useCallback(() => {
     if (sandboxId) {
@@ -151,10 +139,6 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
             {sandboxId ? sandboxId : 'Select a project to start'}
           </span>
           <div className="flex-1" />
-          {/* Debug info */}
-          <span className="text-[8px] font-mono text-zinc-700">
-            sid={sandboxId} loaded={sessionLoading} session={!!session} err={!!sessionError} cu={cu.enabled}
-          </span>
           {sessionLoading && (
             <span className="text-[8px] font-mono text-zinc-500 flex items-center gap-1">
               <Loader size={8} className="animate-spin" /> Starting desktop...
@@ -215,9 +199,7 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
                 <p className="text-sm font-mono text-zinc-400 mb-2">Desktop not available</p>
                 <p className="text-xs font-mono text-zinc-600">{sessionError}</p>
                 <button
-                  onClick={() => {
-                    if (sandboxId) cu.enableComputerUse(sandboxId);
-                  }}
+                  onClick={() => setRetryKey(k => k + 1)}
                   className="mt-4 px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
                 >
                   Start Desktop
