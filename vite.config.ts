@@ -21,6 +21,7 @@ export default defineConfig(() => {
           target: 'http://localhost:3847', // Pointing to Go backend
           changeOrigin: true,
           secure: false,
+          ws: true, // Proxy WebSocket (needed for noVNC/desktop streaming)
           // Support SSE streaming
           rewrite: (path) => path,
           configure: (proxy, _options) => {

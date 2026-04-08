@@ -308,13 +308,9 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 // handleWebSocket takes over the HTTP connection and proxies raw TCP to websockify.
 // This is needed because noVNC uses WebSocket for the actual VNC screen stream.
 func (h *SandboxHandler) handleWebSocket(w http.ResponseWriter, r *http.Request, containerName string, path string) {
-	// Hijack the connection
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		JSONError(w, "hijacking not supported", http.StatusInternalServerError)
-		return
-	}
-	conn, _, err := hijacker.Hijack()
+	// Use ResponseController to hijack through middleware wrappers (chi Timeout, etc.)
+	rc := http.NewResponseController(w)
+	conn, _, err := rc.Hijack()
 	if err != nil {
 		h.logger.Error("failed to hijack connection", zap.Error(err))
 		JSONError(w, "hijack failed", http.StatusInternalServerError)
