@@ -47,6 +47,7 @@ function formatToolArgs(name: string, args: Record<string, unknown>): string {
 }
 
 function formatResult(result: unknown): string {
+  if (result === undefined || result === null) return '';
   if (typeof result === 'string') return result;
   return JSON.stringify(result, null, 2);
 }
@@ -75,7 +76,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
           <ChevronRight size={10} className={cn("text-muted-foreground transition-transform", open && "rotate-90")} />
         )}
       </button>
-      {open && !isRunning && (
+      {open && !isRunning && formatResult(tc.result) && (
         <div className="px-3 pb-2 border-t border-white/5">
           <pre className="text-[9px] font-mono text-zinc-400 whitespace-pre-wrap max-h-40 overflow-auto">
             {formatResult(tc.result)}

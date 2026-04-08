@@ -147,16 +147,32 @@ export function usePiAgent(initialAgentId: string = 'default') {
       const serverState = await stateRes.json();
 
       if (serverState.streaming) {
-        setState(prev => ({
-          ...prev,
-          isStreaming: true,
-          model: serverState.model || prev.model,
-          tokenUsage: {
-            input: serverState.input || 0,
-            output: serverState.output || 0,
-            cache: serverState.cache || 0,
-          },
-        }));
+        setState(prev => {
+          // Check if there's already a streaming assistant message
+          const hasStreamingMsg = prev.messages.length > 0 &&
+            prev.messages[prev.messages.length - 1].role === 'assistant' &&
+            (prev.messages[prev.messages.length - 1] as AssistantMessage).streaming;
+          return {
+            ...prev,
+            isStreaming: true,
+            model: serverState.model || prev.model,
+            tokenUsage: {
+              input: serverState.input || 0,
+              output: serverState.output || 0,
+              cache: serverState.cache || 0,
+            },
+            // Add a streaming placeholder if none exists
+            messages: hasStreamingMsg ? prev.messages : [...prev.messages, {
+              id: nextMsgId(),
+              role: 'assistant' as const,
+              text: '',
+              thinking: '',
+              toolCalls: [],
+              timestamp: Date.now(),
+              streaming: true,
+            }],
+          };
+        });
       } else if (serverState.model) {
         setState(prev => ({
           ...prev,
