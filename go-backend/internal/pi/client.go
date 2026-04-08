@@ -419,9 +419,14 @@ func (c *PiClient) start() error {
 	}
 
 	c.cmd.Dir = c.projectDir
-	c.cmd.Env = append(os.Environ(),
+	env := append(os.Environ(),
 		fmt.Sprintf("PROJECT_DIR=%s", c.projectDir),
 	)
+	// Pass orchestrator API host so extensions can reach the backend
+	if os.Getenv("ORCHESTRATOR_API_HOST") == "" {
+		env = append(env, "ORCHESTRATOR_API_HOST=localhost:3847")
+	}
+	c.cmd.Env = env
 
 	c.cmd.SysProcAttr = &syscall.SysProcAttr{
 		Pdeathsig: syscall.SIGKILL,

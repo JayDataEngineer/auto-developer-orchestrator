@@ -18,7 +18,7 @@ export function AgentTab({ selectedProject, projects, refreshProjectData }: Agen
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
-  const sandboxId = selectedProject ? `sandbox-${selectedProject}-${activeAgentId}` : null;
+  const sandboxId = selectedProject ? `sandbox-${selectedProject}` : null;
 
   return (
     <div className="flex h-full bg-black text-slate-100 overflow-hidden">

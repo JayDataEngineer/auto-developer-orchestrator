@@ -1,19 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import type { LabeledElement, PageInfo } from '../lib/api';
 
-export interface LabeledElement {
-  id: number;
-  tag: string;
-  text: string;
-  role?: string;
-  selector: string;
-}
-
-export interface PageInfo {
-  url: string;
-  title: string;
-  elements: LabeledElement[];
-  screenshot?: string; // base64 PNG
-}
+export type { LabeledElement, PageInfo };
 
 interface WebBrowserState {
   sessionId: string | null;
@@ -37,6 +25,15 @@ const initialState: WebBrowserState = {
   description: null,
 };
 
+function pageInfoToState(info: PageInfo): Partial<WebBrowserState> {
+  return {
+    url: info.url,
+    title: info.title,
+    elements: info.elements,
+    screenshot: info.screenshot || null,
+  };
+}
+
 export function useWebBrowser() {
   const [state, setState] = useState<WebBrowserState>(initialState);
   const mountedRef = useRef(true);
@@ -49,7 +46,6 @@ export function useWebBrowser() {
     return () => {
       mountedRef.current = false;
       if (state.sessionId) {
-        // Fire-and-forget close
         fetch('/api/pi/web/session', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
@@ -78,27 +74,30 @@ export function useWebBrowser() {
     }
   }, []);
 
-  const navigate = useCallback(async (url: string) => {
+  const webFetch = useCallback(async <T>(
+    endpoint: string,
+    body: Record<string, unknown>,
+    mapResult: (data: T) => Partial<WebBrowserState>,
+    clearDescription = true,
+  ) => {
     if (!state.sessionId) return;
-    setState(prev => ({ ...prev, loading: true, error: null, description: null }));
+    setState(prev => ({
+      ...prev,
+      loading: true,
+      error: null,
+      ...(clearDescription ? { description: null } : {}),
+    }));
 
     try {
-      const res = await fetch('/api/pi/web/navigate', {
+      const res = await fetch(`/api/pi/web/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, sessionId: state.sessionId }),
+        body: JSON.stringify({ ...body, sessionId: state.sessionId }),
       });
-      if (!res.ok) throw new Error(`Navigate failed: ${res.statusText}`);
-      const info: PageInfo = await res.json();
+      if (!res.ok) throw new Error(`${endpoint} failed: ${res.statusText}`);
+      const data: T = await res.json();
       if (mountedRef.current) {
-        setState(prev => ({
-          ...prev,
-          url: info.url,
-          title: info.title,
-          elements: info.elements,
-          screenshot: info.screenshot || null,
-          loading: false,
-        }));
+        setState(prev => ({ ...prev, ...mapResult(data), loading: false }));
       }
     } catch (err) {
       if (mountedRef.current) {
@@ -107,118 +106,22 @@ export function useWebBrowser() {
     }
   }, [state.sessionId]);
 
-  const click = useCallback(async (elementId: number) => {
-    if (!state.sessionId) return;
-    setState(prev => ({ ...prev, loading: true, error: null, description: null }));
+  const navigate = useCallback((url: string) =>
+    webFetch<PageInfo>('navigate', { url }, pageInfoToState), [webFetch]);
 
-    try {
-      const res = await fetch('/api/pi/web/click', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ elementId, sessionId: state.sessionId }),
-      });
-      if (!res.ok) throw new Error(`Click failed: ${res.statusText}`);
-      const info: PageInfo = await res.json();
-      if (mountedRef.current) {
-        setState(prev => ({
-          ...prev,
-          url: info.url,
-          title: info.title,
-          elements: info.elements,
-          screenshot: info.screenshot || null,
-          loading: false,
-        }));
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, loading: false, error: String(err) }));
-      }
-    }
-  }, [state.sessionId]);
+  const click = useCallback((elementId: number) =>
+    webFetch<PageInfo>('click', { elementId }, pageInfoToState), [webFetch]);
 
-  const type = useCallback(async (elementId: number, text: string, submit = false) => {
-    if (!state.sessionId) return;
-    setState(prev => ({ ...prev, loading: true, error: null, description: null }));
+  const type = useCallback((elementId: number, text: string, submit = false) =>
+    webFetch<PageInfo>('type', { elementId, text, submit }, pageInfoToState), [webFetch]);
 
-    try {
-      const res = await fetch('/api/pi/web/type', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ elementId, text, submit, sessionId: state.sessionId }),
-      });
-      if (!res.ok) throw new Error(`Type failed: ${res.statusText}`);
-      const info: PageInfo = await res.json();
-      if (mountedRef.current) {
-        setState(prev => ({
-          ...prev,
-          url: info.url,
-          title: info.title,
-          elements: info.elements,
-          screenshot: info.screenshot || null,
-          loading: false,
-        }));
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, loading: false, error: String(err) }));
-      }
-    }
-  }, [state.sessionId]);
+  const scroll = useCallback((direction: 'up' | 'down', amount = 300) =>
+    webFetch<PageInfo>('scroll', { direction, amount }, pageInfoToState, false), [webFetch]);
 
-  const scroll = useCallback(async (direction: 'up' | 'down', amount = 300) => {
-    if (!state.sessionId) return;
-    setState(prev => ({ ...prev, loading: true, error: null }));
-
-    try {
-      const res = await fetch('/api/pi/web/scroll', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ direction, amount, sessionId: state.sessionId }),
-      });
-      if (!res.ok) throw new Error(`Scroll failed: ${res.statusText}`);
-      const info: PageInfo = await res.json();
-      if (mountedRef.current) {
-        setState(prev => ({
-          ...prev,
-          url: info.url,
-          title: info.title,
-          elements: info.elements,
-          screenshot: info.screenshot || null,
-          loading: false,
-        }));
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, loading: false, error: String(err) }));
-      }
-    }
-  }, [state.sessionId]);
-
-  const describe = useCallback(async () => {
-    if (!state.sessionId) return;
-    setState(prev => ({ ...prev, loading: true, error: null }));
-
-    try {
-      const res = await fetch('/api/pi/web/describe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: state.sessionId }),
-      });
-      if (!res.ok) throw new Error(`Describe failed: ${res.statusText}`);
-      const data = await res.json();
-      if (mountedRef.current) {
-        setState(prev => ({
-          ...prev,
-          description: data.description,
-          loading: false,
-        }));
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, loading: false, error: String(err) }));
-      }
-    }
-  }, [state.sessionId]);
+  const describe = useCallback(() =>
+    webFetch<{ description: string }>('describe', {}, data => ({
+      description: data.description,
+    }), false), [webFetch]);
 
   return {
     ...state,

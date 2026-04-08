@@ -3,6 +3,8 @@
  * Mirrors the Go handler's SSE output for the frontend.
  */
 
+import type { LabeledElement } from './api';
+
 // SSE event types sent from the Go backend
 export type PiEventType =
   | 'text_delta'
@@ -90,13 +92,7 @@ export interface PiPRCreated {
 }
 
 // Web browser automation events
-export interface LabeledElement {
-  id: number;
-  tag: string;
-  text: string;
-  role?: string;
-  selector: string;
-}
+export type { LabeledElement };
 
 export interface PiWebUpdate {
   url: string;

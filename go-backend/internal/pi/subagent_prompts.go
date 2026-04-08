@@ -155,7 +155,7 @@ func buildComputerUseSubAgentPrompt(cfg SubAgentPromptConfig) string {
 	// Determine API base URL
 	apiBase := cfg.ServerBaseURL
 	if apiBase == "" {
-		apiBase = "http://172.17.0.1:3847"
+		apiBase = "http://localhost:3847"
 	}
 
 	api := apiBase + "/api/sandbox/" + sandboxID
@@ -217,11 +217,11 @@ func buildComputerUseSubAgentPrompt(cfg SubAgentPromptConfig) string {
 		"You have bash for file operations on the HOST machine.",
 		"",
 		"To run commands INSIDE the sandbox container, use curl to call the exec API:",
-		"curl -s -X POST http://172.17.0.1:3847/api/sandbox/SANDBOX_ID/exec -d '{\"cmd\": [\"bash\", \"-c\", \"YOUR COMMAND\"]}'",
+		"curl -s -X POST " + apiBase + "/api/sandbox/SANDBOX_ID/exec -d '{\"cmd\": [\"bash\", \"-c\", \"YOUR COMMAND\"]}'",
 		"Examples:",
-		"Install package: curl -s -X POST http://172.17.0.1:3847/api/sandbox/SANDBOX_ID/exec -d '{\"cmd\": [\"bash\", \"-c\", \"apt update && apt install -y cowsay\"]}'",
-		"Download file: curl -s -X POST http://172.17.0.1:3847/api/sandbox/SANDBOX_ID/exec -d '{\"cmd\": [\"bash\", \"-c\", \"curl -sL -o /sandbox/workspace/cat.png URL\"]}'",
-		"Verify: curl -s -X POST http://172.17.0.1:3847/api/sandbox/SANDBOX_ID/exec -d '{\"cmd\": [\"bash\", \"-c\", \"ls -la /sandbox/workspace/cat.png\"]}'",
+		"Install package: curl -s -X POST " + apiBase + "/api/sandbox/SANDBOX_ID/exec -d '{\"cmd\": [\"bash\", \"-c\", \"apt update && apt install -y cowsay\"]}'",
+		"Download file: curl -s -X POST " + apiBase + "/api/sandbox/SANDBOX_ID/exec -d '{\"cmd\": [\"bash\", \"-c\", \"curl -sL -o /sandbox/workspace/cat.png URL\"]}'",
+		"Verify: curl -s -X POST " + apiBase + "/api/sandbox/SANDBOX_ID/exec -d '{\"cmd\": [\"bash\", \"-c\", \"ls -la /sandbox/workspace/cat.png\"]}'",
 		"The SANDBOX_ID is the project name. For test-repo, use: sandbox-test-repo",
 		"Commands inside the sandbox run as root. Do NOT use sudo.",
 		"",
@@ -229,15 +229,15 @@ func buildComputerUseSubAgentPrompt(cfg SubAgentPromptConfig) string {
 		"",
 		"You can create and manage scheduled jobs using curl to call the scheduler API.",
 		"Create a job:",
-		"curl -s -X POST http://172.17.0.1:3847/api/scheduler/ -d '{\"name\":\"Weather Check\",\"message\":\"Check the weather.\",\"project\":\"test-repo\",\"scheduleType\":\"every\",\"everySeconds\":300,\"model\":\"google/gemini-2.0-flash-001\",\"enabled\":true}'",
+		"curl -s -X POST " + apiBase + "/api/scheduler/ -d '{\"name\":\"Weather Check\",\"message\":\"Check the weather.\",\"project\":\"test-repo\",\"scheduleType\":\"every\",\"everySeconds\":300,\"model\":\"google/gemini-2.0-flash-001\",\"enabled\":true}'",
 		"List jobs:",
-		"curl -s http://172.17.0.1:3847/api/scheduler/",
+		"curl -s " + apiBase + "/api/scheduler/",
 		"Run a job:",
-		"curl -s -X POST http://172.17.0.1:3847/api/scheduler/JOB_ID/trigger",
+		"curl -s -X POST " + apiBase + "/api/scheduler/JOB_ID/trigger",
 		"Delete a job:",
-		"curl -s -X DELETE http://172.17.0.1:3847/api/scheduler/JOB_ID",
+		"curl -s -X DELETE " + apiBase + "/api/scheduler/JOB_ID",
 		"View runs:",
-		"curl -s \"http://172.17.0.1:3847/api/scheduler/JOB_ID/runs?limit=10\"",
+		"curl -s \"" + apiBase + "/api/scheduler/JOB_ID/runs?limit=10\"",
 		"",
 		"## Credentials",
 		"",

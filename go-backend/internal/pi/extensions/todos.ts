@@ -17,11 +17,13 @@ import { execSync } from "node:child_process";
 
 // ─── API Helper ────────────────────────────────────────────────
 
+const API_HOST = process.env.ORCHESTRATOR_API_HOST || "localhost:3847";
+
 function callApi(endpoint: string, method = "GET", body?: Record<string, unknown>): string {
 	const args: string[] = ["-s"];
 	if (method !== "GET") args.push("-X", method);
 	if (body) args.push("-d", JSON.stringify(body));
-	args.push(`http://172.17.0.1:3847${endpoint}`);
+	args.push(`http://${API_HOST}${endpoint}`);
 	return execSync("curl", args, { encoding: "utf-8", timeout: 10000 });
 }
 

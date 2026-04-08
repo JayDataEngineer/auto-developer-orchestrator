@@ -304,7 +304,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   const [isDesktopModeActive, setIsDesktopModeActive] = useState(false);
   const [autoBranch, setAutoBranch] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
-  const sandboxId = selectedProject ? `sandbox-${selectedProject}-${selectedAgentId}` : '';
+  const sandboxId = selectedProject ? `sandbox-${selectedProject}` : '';
 
   useEffect(() => {
     if (selectedProject) {

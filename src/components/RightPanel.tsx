@@ -92,7 +92,7 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
   const [artifactIdx, setArtifactIdx] = useState({ plan: 0, todo: 0, notes: 0 });
 
   const sandboxId = passedSandboxId
-    || (agentId ? `sandbox-${agentId.replace(':', '-')}` : null);
+    || (agentId ? `sandbox-${agentId.split(':')[0]}` : null);
 
   // Group artifacts by type (in order of creation)
   const plans = artifacts.filter(a => a.type === 'plan');

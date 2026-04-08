@@ -30,7 +30,7 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
   const [desktopFull, setDesktopFull] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
 
-  const sandboxId = selectedProject ? `sandbox-${selectedProject}-${activeAgentId}` : null;
+  const sandboxId = selectedProject ? `sandbox-${selectedProject}` : null;
   const cu = useComputerUse();
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
 

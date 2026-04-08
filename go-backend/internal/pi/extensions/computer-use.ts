@@ -10,7 +10,7 @@
  *   - computer_use_navigate: Navigate to a URL
  *   - computer_use_scroll: Scroll the page
  *
- * All tools call the orchestrator's computer use API at 172.17.0.1:3847.
+ * All tools call the orchestrator's computer use API (via ORCHESTRATOR_API_HOST env, default localhost:3847).
  */
 
 import { StringEnum } from "@mariozechner/pi-ai";
@@ -21,11 +21,13 @@ import { execSync } from "node:child_process";
 
 // ─── API Helper ────────────────────────────────────────────────
 
+const API_HOST = process.env.ORCHESTRATOR_API_HOST || "localhost:3847";
+
 function callApi(endpoint: string, method = "GET", body?: Record<string, unknown>): string {
 	const args: string[] = ["-s"];
 	if (method !== "GET") args.push("-X", method);
 	if (body) args.push("-d", JSON.stringify(body));
-	args.push(`http://172.17.0.1:3847${endpoint}`);
+	args.push(`http://${API_HOST}${endpoint}`);
 	const result = require("child_process").spawnSync("curl", args, { encoding: "utf-8", timeout: 30000 }); if (result.error) throw result.error; if (result.status !== 0) throw new Error(result.stderr); return result.stdout;
 }
 
