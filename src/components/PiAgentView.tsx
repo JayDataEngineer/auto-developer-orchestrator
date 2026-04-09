@@ -536,6 +536,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                   onKeyDown={handleKeyDown}
                   placeholder={selectedProject ? "Describe a coding task..." : "Select a project first..."}
                   disabled={state.isStreaming || !selectedProject}
+                  data-prompt-input
                   className="w-full bg-zinc-900 border border-white/5 rounded p-4 pr-14 text-[12px] text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-all font-mono resize-none"
                   rows={3}
                 />

@@ -1,7 +1,44 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, ProjectResponse, Task, StatusResponse, AIConfig, GitHubUser } from '../lib/api';
+import { parseSSEEvent } from '../lib/pi-events';
 
 export type ModalType = 'review' | 'aiConfig' | 'coverage' | 'clone' | 'addProject' | 'user' | 'githubConnect' | null;
+
+/**
+ * Drain an SSE response stream, logging tool calls and errors.
+ * Prevents response body leaks when the orchestrator dispatches tasks.
+ */
+async function drainSSEResponse(response: Response, addLog: (msg: string, type?: any) => void) {
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || '';
+      for (const part of parts) {
+        if (!part.trim()) continue;
+        const event = parseSSEEvent(part);
+        if (!event) continue;
+        if (event.type === 'tool_execution_start') {
+          addLog(`PI_AGENT: Running tool ${(event.data as any).toolName}...`, 'INFO');
+        } else if (event.type === 'error') {
+          addLog(`PI_AGENT_ERROR: ${(event.data as any).error}`, 'ERROR');
+        } else if (event.type === 'pr_created') {
+          addLog(`PI_AGENT: PR #${(event.data as any).number} created - ${(event.data as any).url}`, 'SUCCESS');
+        } else if (event.type === 'commit_created') {
+          addLog(`PI_AGENT: Committed "${(event.data as any).message}" to ${(event.data as any).branch}`, 'INFO');
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
   const [activeTab, setActiveTab] = useState<'terminal' | 'activity' | 'github' | 'agents' | 'manifesto'>('terminal');
@@ -85,7 +122,10 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
         selectedProject
       );
       if (!response.ok) throw new Error('Pi prompt failed');
-      addLog(`PI_AGENT: Task dispatched successfully`, 'SUCCESS');
+      addLog(`PI_AGENT: Task dispatched, streaming response...`, 'INFO');
+      // Consume the SSE stream so it isn't leaked
+      await drainSSEResponse(response, addLog);
+      addLog(`PI_AGENT: Task completed successfully`, 'SUCCESS');
       refreshProjectData();
     } catch (e) {
       addLog(`PI_AGENT_ERROR: ${e instanceof Error ? e.message : String(e)}`, 'ERROR');
@@ -112,7 +152,9 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
         selectedProject
       );
       if (!response.ok) throw new Error('Pi prompt failed');
-      addLog(`PI_AGENT: ${pendingTasks.length} tasks dispatched to Pi agent.`, 'SUCCESS');
+      addLog(`PI_AGENT: ${pendingTasks.length} tasks dispatched, streaming response...`, 'INFO');
+      await drainSSEResponse(response, addLog);
+      addLog(`PI_AGENT: All tasks completed.`, 'SUCCESS');
     } catch (e) {
       addLog(`PI_AGENT_ERROR: ${e instanceof Error ? e.message : String(e)}`, 'ERROR');
     } finally {

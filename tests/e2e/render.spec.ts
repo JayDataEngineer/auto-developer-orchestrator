@@ -1,116 +1,89 @@
+/**
+ * Render E2E Tests
+ *
+ * Tests that key components render without crashing and
+ * produces screenshot artifacts for visual confirmation.
+ */
 import { test, expect } from '@playwright/test';
+import { mockApiRoutes } from './fixtures';
 
 test.describe('Frontend Render Tests', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockApiRoutes(page);
+  });
+
   test('should render main page without crashing', async ({ page }) => {
-    // Navigate to the app
     await page.goto('/');
-    
-    // Wait for network to be idle (page loaded)
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(3000); // Wait for React to hydrate
-    
-    // Take a screenshot for visual confirmation
-    await page.screenshot({ 
-      path: 'tests/e2e/screenshots/render-test.png',
-      fullPage: true 
-    });
-    
-    // Basic sanity checks - page should have content
-    const body = await page.locator('body');
-    await expect(body).toBeVisible();
-    
-    // Should not have any error text
+    await page.waitForTimeout(2000);
+
+    // No uncaught errors visible on the page
     const errorText = page.getByText(/Uncaught TypeError|cannot access property|Error:/i);
     await expect(errorText).not.toBeVisible({ timeout: 5000 });
-    
-    console.log('✓ Frontend rendered successfully');
+
+    // Root container should be visible
+    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
+    await expect(rootDiv).toBeVisible();
   });
 
-  test('should render Terminal component', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(3000);
-    
-    // Terminal component should exist and be visible
-    const terminal = page.locator('[class*="Terminal"]').first();
-    await expect(terminal).toBeVisible();
-    
-    // Take screenshot
-    await terminal.screenshot({ 
-      path: 'tests/e2e/screenshots/terminal-render-test.png'
-    });
-    
-    console.log('✓ Terminal component rendered');
-  });
-
-  test('should render Sidebar component', async ({ page }) => {
+  test('should render Agent tab content', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
-    
-    // Sidebar should exist
-    const sidebar = page.locator('[class*="Sidebar"]').first();
-    await expect(sidebar).toBeVisible();
-    
-    // Take screenshot
-    await sidebar.screenshot({ 
-      path: 'tests/e2e/screenshots/sidebar-render-test.png'
-    });
-    
-    console.log('✓ Sidebar component rendered');
+
+    // Agent tab is default — should show textarea or empty state
+    const textarea = page.locator('textarea');
+    const emptyState = page.getByText('Pi Agent Ready');
+    const textareaVisible = await textarea.isVisible().catch(() => false);
+    const emptyVisible = await emptyState.isVisible().catch(() => false);
+    expect(textareaVisible || emptyVisible).toBe(true);
   });
 
-  test('should render Header component', async ({ page }) => {
+  test('should render top bar with tabs', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
-    
-    // Header should exist
-    const header = page.locator('[class*="Header"]').first();
-    await expect(header).toBeVisible();
-    
-    // Take screenshot
-    await header.screenshot({ 
-      path: 'tests/e2e/screenshots/header-render-test.png'
-    });
-    
-    console.log('✓ Header component rendered');
+
+    // Top bar
+    const topBar = page.locator('.h-10.border-b');
+    await expect(topBar).toBeVisible();
+
+    // All tab buttons
+    await expect(page.getByRole('button', { name: 'Agent' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Tasks' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Desktop' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Scheduler' })).toBeVisible();
   });
 
-  test('should not have console errors', async ({ page }) => {
+  test('should render project selector', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000);
+
+    const select = page.locator('select').first();
+    await expect(select).toBeVisible();
+  });
+
+  test('should not have critical console errors', async ({ page }) => {
     const errors: string[] = [];
-    
+
     page.on('console', msg => {
-      if (msg.type() === 'error') {
-        errors.push(msg.text());
-      }
+      if (msg.type() === 'error') errors.push(msg.text());
     });
-    
-    page.on('pageerror', error => {
-      errors.push(error.message);
-    });
-    
+    page.on('pageerror', err => errors.push(err.message));
+
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(3000);
-    
-    // Filter out expected/benign errors
-    const realErrors = errors.filter(err => 
+
+    const realErrors = errors.filter(err =>
       !err.includes('Download the React DevTools') &&
-      !err.includes('font')
+      !err.includes('font') &&
+      !err.includes('favicon') &&
+      !err.includes('net::ERR') &&
+      !err.includes('ResizeObserver')
     );
-    
-    if (realErrors.length > 0) {
-      console.error('Console errors found:', realErrors);
-      // Don't fail - just log for now
-    }
-    
-    // Take final screenshot
-    await page.screenshot({ 
-      path: 'tests/e2e/screenshots/no-errors-test.png',
-      fullPage: true 
-    });
-    
-    console.log(`✓ Console check complete (${realErrors.length} errors)`);
+
+    expect(realErrors.length, `Critical errors: ${realErrors.join('; ')}`).toBe(0);
   });
 });

@@ -5,6 +5,7 @@ import {
   PiModel,
   ConversationMessage,
   AssistantMessage,
+  PiWebUpdate,
   parseSSEEvent,
 } from '../lib/pi-events';
 
@@ -36,6 +37,9 @@ export interface PiAgentState {
   prUrl: string | null;
   prNumber: number | null;
   subAgents: SubAgentInfo[];
+  webUpdate: PiWebUpdate | null;
+  lastCommit: { message: string; branch: string } | null;
+  lastPush: { branch: string } | null;
 }
 
 const initialState: PiAgentState = {
@@ -53,6 +57,9 @@ const initialState: PiAgentState = {
   prUrl: null,
   prNumber: null,
   subAgents: [],
+  webUpdate: null,
+  lastCommit: null,
+  lastPush: null,
 };
 
 // Helper: update the last assistant message in the messages array
@@ -326,11 +333,22 @@ export function usePiAgent(initialAgentId: string = 'default') {
         case 'branch_created':
           return { ...prev, branchName: (event.data as { branch: string }).branch };
 
-        case 'commit_created':
-          return prev;
+        case 'commit_created': {
+          const commitData = event.data as { message: string; branch: string };
+          return {
+            ...prev,
+            lastCommit: { message: commitData.message, branch: commitData.branch },
+            branchName: commitData.branch || prev.branchName,
+          };
+        }
 
-        case 'push_complete':
-          return prev;
+        case 'push_complete': {
+          const pushData = event.data as { branch: string };
+          return {
+            ...prev,
+            lastPush: { branch: pushData.branch },
+          };
+        }
 
         case 'pr_created': {
           const prData = event.data as { url: string; number: number; title: string };
@@ -340,6 +358,11 @@ export function usePiAgent(initialAgentId: string = 'default') {
             prNumber: prData.number,
             messages: updateLastAssistant(prev.messages, msg => ({ ...msg })),
           };
+        }
+
+        case 'web_update': {
+          const webData = event.data as PiWebUpdate;
+          return { ...prev, webUpdate: webData };
         }
 
         default:
