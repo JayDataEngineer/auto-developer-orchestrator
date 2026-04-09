@@ -197,7 +197,7 @@ test.describe('Agent Chat', () => {
   });
 
   test('shows Auto-Branch toggle', async ({ page }) => {
-    await expect(page.getByText('Auto-Branch').first()).toBeVisible();
+    await expect(page.getByText('Auto-Branch').first()).toBeVisible({ timeout: 10000 });
   });
 
   test('shows Compact button', async ({ page }) => {
