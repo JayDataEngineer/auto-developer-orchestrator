@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, ProjectResponse, Task, StatusResponse, AIConfig, GitHubUser } from '../lib/api';
-import { parseSSEEvent } from '../lib/pi-events';
+import { PiSSEEvent } from '../lib/pi-events';
+import { readSSEStream } from './useSSEStream';
 
 export type ModalType = 'review' | 'aiConfig' | 'coverage' | 'clone' | 'addProject' | 'user' | 'githubConnect' | null;
 
@@ -10,34 +11,17 @@ export type ModalType = 'review' | 'aiConfig' | 'coverage' | 'clone' | 'addProje
  */
 async function drainSSEResponse(response: Response, addLog: (msg: string, type?: any) => void) {
   if (!response.body) return;
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() || '';
-      for (const part of parts) {
-        if (!part.trim()) continue;
-        const event = parseSSEEvent(part);
-        if (!event) continue;
-        if (event.type === 'tool_execution_start') {
-          addLog(`PI_AGENT: Running tool ${(event.data as any).toolName}...`, 'INFO');
-        } else if (event.type === 'error') {
-          addLog(`PI_AGENT_ERROR: ${(event.data as any).error}`, 'ERROR');
-        } else if (event.type === 'pr_created') {
-          addLog(`PI_AGENT: PR #${(event.data as any).number} created - ${(event.data as any).url}`, 'SUCCESS');
-        } else if (event.type === 'commit_created') {
-          addLog(`PI_AGENT: Committed "${(event.data as any).message}" to ${(event.data as any).branch}`, 'INFO');
-        }
-      }
+  await readSSEStream(response, (event: PiSSEEvent) => {
+    if (event.type === 'tool_execution_start') {
+      addLog(`PI_AGENT: Running tool ${(event.data as any).toolName}...`, 'INFO');
+    } else if (event.type === 'error') {
+      addLog(`PI_AGENT_ERROR: ${(event.data as any).error}`, 'ERROR');
+    } else if (event.type === 'pr_created') {
+      addLog(`PI_AGENT: PR #${(event.data as any).number} created - ${(event.data as any).url}`, 'SUCCESS');
+    } else if (event.type === 'commit_created') {
+      addLog(`PI_AGENT: Committed "${(event.data as any).message}" to ${(event.data as any).branch}`, 'INFO');
     }
-  } finally {
-    reader.releaseLock();
-  }
+  });
 }
 
 export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {

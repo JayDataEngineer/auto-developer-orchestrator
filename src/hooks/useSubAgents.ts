@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { api, SubAgentInfo } from '../lib/api';
+import { usePolling } from './usePolling';
+import { readSSEStream } from './useSSEStream';
 
 interface UseSubAgentsReturn {
   subAgents: SubAgentInfo[];
@@ -17,35 +19,23 @@ interface UseSubAgentsReturn {
 
 export function useSubAgents(parentAgentId: string | null): UseSubAgentsReturn {
   const [subAgents, setSubAgents] = useState<SubAgentInfo[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [watchedOutput, setWatchedOutput] = useState<string | null>(null);
   const [watchedId, setWatchedId] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const abortCtrlRef = useRef<AbortController | null>(null);
 
   const fetchList = useCallback(async () => {
     if (!parentAgentId) return;
     try {
-      setLoading(true);
       const res = await api.subAgents.list(parentAgentId);
       setSubAgents(res.subAgents || []);
       setError(null);
     } catch (err) {
       setError(String(err));
-    } finally {
-      setLoading(false);
     }
   }, [parentAgentId]);
 
-  useEffect(() => {
-    if (!parentAgentId) return;
-    fetchList();
-    intervalRef.current = setInterval(fetchList, 3000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [parentAgentId, fetchList]);
+  const { loading } = usePolling(fetchList, 3000, !!parentAgentId);
 
   const spawn = useCallback(async (type: SubAgentInfo['type'] = 'code', projectDir?: string, message?: string) => {
     if (!parentAgentId) throw new Error('No parent agent');

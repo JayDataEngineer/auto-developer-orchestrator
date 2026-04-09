@@ -1,17 +1,18 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
-  FileCode, Terminal as TerminalIcon, Search, Wrench, Brain,
-  Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch, Box,
-  ExternalLink, Check, Maximize2, Minimize2, File, GitPullRequest
+  Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch,
+  ExternalLink, Check, GitPullRequest
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '../lib/utils';
-import { usePiAgent, SubAgentInfo } from '../hooks/usePiAgent';
-import { ToolCall, PiModel, ConversationMessage, AssistantMessage } from '../lib/pi-events';
+import { usePiAgent } from '../hooks/usePiAgent';
+import { SubAgentInfo } from '../lib/api';
+import { PiModel, AssistantMessage } from '../lib/pi-events';
+import { ToolCallItem } from './agent/ToolCallItem';
+import { SubAgentCard } from './agent/SubAgentCard';
+import { MarkdownBlock } from './agent/MarkdownBlock';
+import { ReasoningBlock } from './agent/ReasoningBlock';
+import { FleetBar } from './agent/FleetBar';
 
 interface PiAgentViewProps {
   selectedProject?: string;
@@ -22,276 +23,6 @@ interface PiAgentViewProps {
   onZenToggle?: () => void;
 }
 
-// ─── Tool Helpers ───────────────────────────────────────────────
-
-const TOOL_ICONS: Record<string, React.ReactNode> = {
-  read: <FileCode size={12} />,
-  write: <FileCode size={12} />,
-  edit: <FileCode size={12} />,
-  bash: <TerminalIcon size={12} />,
-  grep: <Search size={12} />,
-  find: <Search size={12} />,
-};
-
-function formatToolArgs(name: string, args: Record<string, unknown>): string {
-  if (!args) return '';
-  if (name === 'read' || name === 'write' || name === 'edit') {
-    return String(args.filePath || args.path || '');
-  }
-  if (name === 'bash') {
-    return String(args.command || '').slice(0, 80);
-  }
-  if (name === 'grep') {
-    return `${args.pattern} in ${args.path || '.'}`;
-  }
-  return JSON.stringify(args).slice(0, 80);
-}
-
-function formatResult(result: unknown): string {
-  if (result === undefined || result === null) return '';
-  if (typeof result === 'string') return result;
-  return JSON.stringify(result, null, 2);
-}
-
-// ─── Tool Call Item ─────────────────────────────────────────────
-function ToolCallItem({ tc }: { tc: ToolCall }) {
-  const [open, setOpen] = useState(false);
-  const isRunning = !tc.endTime;
-  return (
-    <div className="border border-white/5 bg-zinc-950">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left"
-      >
-        {TOOL_ICONS[tc.name] || <Wrench size={11} className="text-muted-foreground" />}
-        <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">
-          {tc.name}
-        </span>
-        <span className="text-[9px] font-mono text-zinc-600 truncate">
-          {formatToolArgs(tc.name, tc.args)}
-        </span>
-        <div className="flex-1" />
-        {isRunning ? (
-          <Loader size={10} className="text-primary animate-spin" />
-        ) : (
-          <ChevronRight size={10} className={cn("text-muted-foreground transition-transform", open && "rotate-90")} />
-        )}
-      </button>
-      {open && !isRunning && formatResult(tc.result) && (
-        <div className="px-3 pb-2 border-t border-white/5">
-          <pre className="text-[9px] font-mono text-zinc-400 whitespace-pre-wrap max-h-40 overflow-auto">
-            {formatResult(tc.result)}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Sub-Agent Status ──────────────────────────────────────────
-function SubAgentCard({ agent }: { agent: SubAgentInfo }) {
-  const [open, setOpen] = useState(false);
-  const statusColor = agent.status === 'running' ? 'text-blue-400' :
-    agent.status === 'complete' ? 'text-green-400' :
-    agent.status === 'failed' ? 'text-red-400' : 'text-zinc-400';
-  const statusIcon = agent.status === 'running' ? <Loader size={10} className="animate-spin text-blue-400" /> :
-    agent.status === 'complete' ? <Check size={10} className="text-green-400" /> :
-    <span className="text-[9px] text-zinc-500">{agent.status}</span>;
-
-  return (
-    <div className="border border-blue-900/30 bg-blue-950/20">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left"
-      >
-        <Box size={11} className="text-blue-400" />
-        <span className="text-[9px] font-mono uppercase tracking-widest text-blue-300">
-          {agent.type} sub-agent
-        </span>
-        <span className="text-[9px] font-mono text-zinc-500 truncate">
-          {agent.id.slice(0, 30)}...
-        </span>
-        <div className="flex-1" />
-        {statusIcon}
-        {agent.status === 'running' && (
-          <span className="text-[8px] text-blue-400 font-mono">running</span>
-        )}
-        {agent.status === 'complete' && (
-          <span className="text-[8px] text-green-400 font-mono">done</span>
-        )}
-        <ChevronRight size={10} className={cn("text-muted-foreground transition-transform", open && "rotate-90")} />
-      </button>
-      {open && agent.output && (
-        <div className="px-3 pb-2 border-t border-blue-900/20">
-          <pre className="text-[9px] font-mono text-blue-200/60 whitespace-pre-wrap max-h-40 overflow-auto">
-            {agent.output}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Block Components ───────────────────────────────────────────
-
-function MarkdownBlock({ content, streaming }: { content: string; streaming: boolean }) {
-  return (
-    <div className="prose prose-invert prose-sm max-w-none
-      prose-headings:text-white prose-headings:font-bold prose-headings:tracking-widest prose-headings:uppercase
-      prose-p:text-zinc-300 prose-p:text-[12px] prose-p:leading-relaxed prose-p:font-mono
-      prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:rounded
-      prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-white/5 prose-pre:rounded-none
-      prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-      prose-strong:text-white
-      prose-ul:text-zinc-300 prose-ol:text-zinc-300
-      prose-li:text-[12px] prose-li:font-mono
-    ">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          code({ className, children, ...props }: any) {
-            const match = /language-(\w+)/.exec(className || '');
-            const code = String(children).replace(/\n$/, '');
-            return match ? (
-              <SyntaxHighlighter
-                style={oneDark}
-                language={match[1]}
-                PreTag="div"
-                customStyle={{
-                  margin: 0,
-                  padding: '12px',
-                  fontSize: '11px',
-                  background: '#09090b',
-                  border: '1px solid rgba(255,255,255,0.05)',
-                }}
-              >
-                {code}
-              </SyntaxHighlighter>
-            ) : (
-              <code className={className} {...props}>{children}</code>
-            );
-          },
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-      {streaming && (
-        <span className="inline-block w-2 h-4 bg-primary/60 animate-pulse ml-0.5 align-text-bottom" />
-      )}
-    </div>
-  );
-}
-
-function ReasoningBlock({ content, defaultOpen = false }: { content: string; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="border border-zinc-800 bg-zinc-950">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 p-3 text-left"
-      >
-        <Brain size={12} className="text-muted-foreground" />
-        <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-          Reasoning
-        </span>
-        <span className="text-[9px] font-mono text-zinc-700">
-          {content.length} chars
-        </span>
-        <div className="flex-1" />
-        {open ? <ChevronDown size={10} className="text-muted-foreground" /> : <ChevronRight size={10} className="text-muted-foreground" />}
-      </button>
-      {open && (
-        <div className="px-3 pb-3 border-t border-zinc-800">
-          <pre className="text-[10px] font-mono text-muted whitespace-pre-wrap max-h-64 overflow-auto">
-            {content}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ArtifactItem({ type, name, subtitle, status, onClick, href }: { 
-  type: 'file' | 'pr'; 
-  name: string; 
-  subtitle?: string; 
-  status?: 'active' | 'completed';
-  onClick?: () => void;
-  href?: string;
-}) {
-  const Icon = type === 'pr' ? GitPullRequest : File;
-  
-  const content = (
-    <div className={cn(
-      "border border-white/5 bg-black hover:bg-white/5 transition-all p-3 flex items-start gap-4 h-full",
-      status === 'active' ? "border-primary/30 bg-primary/5" : ""
-    )}>
-      <div className={cn(
-        "shrink-0 w-8 h-8 flex items-center justify-center border border-white/5",
-        status === 'active' ? "text-primary border-primary/20" : "text-muted-foreground"
-      )}>
-        <Icon size={14} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black uppercase tracking-widest text-white truncate">
-            {name}
-          </span>
-          {status === 'active' && <Loader size={8} className="text-primary animate-spin" />}
-        </div>
-        {subtitle && (
-          <div className="text-[9px] font-mono text-muted-foreground truncate mt-1">
-            {subtitle}
-          </div>
-        )}
-      </div>
-      {href && <ExternalLink size={10} className="text-muted-foreground shrink-0 mt-1" />}
-    </div>
-  );
-
-  if (href) {
-    return <a href={href} target="_blank" rel="noopener noreferrer" className="block h-full">{content}</a>;
-  }
-
-  return <button onClick={onClick} className="block w-full text-left h-full">{content}</button>;
-}
-
-function FleetBar({ project, branch, model, streaming }: {
-  project?: string;
-  branch?: string | null;
-  model?: string | null;
-  streaming?: boolean;
-}) {
-  return (
-    <div className="w-full border-b border-white/5 flex items-center gap-4 px-6 py-1.5 bg-black/30 text-[9px] font-mono uppercase tracking-widest shrink-0">
-      {project && (
-        <span className="flex items-center gap-1.5 text-muted-foreground">
-          <Box size={9} />
-          {project}
-        </span>
-      )}
-      {branch && (
-        <span className="flex items-center gap-1.5 text-muted-foreground">
-          <GitBranch size={9} />
-          {branch}
-        </span>
-      )}
-      {model && (
-        <span className="flex items-center gap-1.5 text-muted-foreground">
-          <Zap size={9} />
-          {model}
-        </span>
-      )}
-      {streaming && (
-        <span className="flex items-center gap-1.5 text-primary">
-          <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-          Live
-        </span>
-      )}
-    </div>
-  );
-}
-
 export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack, isZenMode = false, onZenToggle }) => {
   const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels, loadHistory } = usePiAgent(selectedAgentId);
   const [input, setInput] = useState('');
@@ -300,10 +31,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
-  
-  // Computer Use Mode state
-  const [isBrowserModeActive, setIsBrowserModeActive] = useState(false);
-  const [isDesktopModeActive, setIsDesktopModeActive] = useState(false);
+
   const [autoBranch, setAutoBranch] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
   const sandboxId = selectedProject ? `sandbox-${selectedProject}` : '';
@@ -356,8 +84,6 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
     }
   }, [handleSend]);
 
-  const activeTools = state.toolCalls.filter(tc => !tc.endTime);
-  const completedTools = state.toolCalls.filter(tc => tc.endTime);
   const hasContent = state.messages.length > 0 || state.isStreaming;
 
   return (
@@ -428,7 +154,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                   Sub-Agents ({state.subAgents.length})
                 </div>
                 {state.subAgents.map(sa => (
-                  <SubAgentCard key={sa.id} agent={sa} />
+                  <SubAgentCard key={sa.subAgentId} agent={sa} />
                 ))}
               </div>
             )}
@@ -472,8 +198,6 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               );
             })}
 
-            {/* Inline artifact summaries in feed (optional, keep it simple) */}
-            
             <div ref={messagesEndRef} />
           </div>
         </div>

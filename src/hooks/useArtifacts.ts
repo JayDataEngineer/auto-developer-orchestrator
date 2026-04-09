@@ -1,39 +1,29 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { api, Artifact } from '../lib/api';
+import { usePolling } from './usePolling';
 
 interface ArtifactsState {
   artifacts: Artifact[];
-  loading: boolean;
   error: string | null;
 }
 
 export function useArtifacts(agentId: string | null) {
   const [state, setState] = useState<ArtifactsState>({
     artifacts: [],
-    loading: false,
     error: null,
   });
-  const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const fetchArtifacts = useCallback(async () => {
     if (!agentId) return;
     try {
       const res = await api.artifacts.list(agentId);
-      setState(prev => ({ ...prev, artifacts: res.artifacts, loading: false, error: null }));
+      setState(prev => ({ ...prev, artifacts: res.artifacts, error: null }));
     } catch (err) {
-      setState(prev => ({ ...prev, loading: false, error: String(err) }));
+      setState(prev => ({ ...prev, error: String(err) }));
     }
   }, [agentId]);
 
-  // Poll for artifact updates every 5 seconds when agentId is set
-  useEffect(() => {
-    if (!agentId) return;
-    fetchArtifacts();
-    intervalRef.current = setInterval(fetchArtifacts, 5000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [agentId, fetchArtifacts]);
+  const { loading } = usePolling(fetchArtifacts, 5000, !!agentId);
 
   const getArtifactsByType = useCallback((type: Artifact['type']) => {
     return state.artifacts.filter(a => a.type === type);

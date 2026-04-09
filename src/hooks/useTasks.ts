@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { api, PiTask } from '../lib/api';
+import { usePolling } from './usePolling';
 
 interface UseTasksReturn {
   tasks: PiTask[];
@@ -16,32 +17,20 @@ interface UseTasksReturn {
 
 export function useTasks(projectDir: string | null, parentAgent?: string): UseTasksReturn {
   const [tasks, setTasks] = useState<PiTask[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const fetchTasks = useCallback(async () => {
     if (!projectDir) return;
     try {
-      setLoading(true);
       const res = await api.tasks.list(projectDir, parentAgent);
       setTasks(res.tasks || []);
       setError(null);
     } catch (err) {
       setError(String(err));
-    } finally {
-      setLoading(false);
     }
   }, [projectDir, parentAgent]);
 
-  useEffect(() => {
-    if (!projectDir) return;
-    fetchTasks();
-    intervalRef.current = setInterval(fetchTasks, 5000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [projectDir, fetchTasks]);
+  const { loading } = usePolling(fetchTasks, 5000, !!projectDir);
 
   const createTask = useCallback(async (task: { title: string; description?: string; model?: string; blocks?: string[]; blockedBy?: string[] }) => {
     if (!projectDir) throw new Error('No project selected');

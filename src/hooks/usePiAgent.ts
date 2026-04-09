@@ -6,21 +6,16 @@ import {
   ConversationMessage,
   AssistantMessage,
   PiWebUpdate,
-  parseSSEEvent,
 } from '../lib/pi-events';
+import { SubAgentInfo } from '../lib/api';
+import { readSSEStream } from './useSSEStream';
+import { api } from '../lib/api';
+
+// Re-export SubAgentInfo for consumers that imported from usePiAgent
+export type { SubAgentInfo } from '../lib/api';
 
 let msgIdCounter = 0;
 function nextMsgId() { return `msg-${++msgIdCounter}-${Date.now()}`; }
-
-export interface SubAgentInfo {
-  id: string;
-  type: string;
-  status: 'spawning' | 'running' | 'complete' | 'failed';
-  output?: string;
-  toolCalls?: number;
-  parentId: string;
-  spawnedAt: number;
-}
 
 export interface PiAgentState {
   messages: ConversationMessage[];
@@ -149,9 +144,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
     projectRef.current = project;
     agentIdRef.current = aid;
     try {
-      const stateRes = await fetch(`/api/pi/state?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`);
-      if (!stateRes.ok) return;
-      const serverState = await stateRes.json();
+      const serverState = await api.pi.getState(project, aid);
 
       if (serverState.streaming) {
         setState(prev => ({
@@ -261,16 +254,20 @@ export function usePiAgent(initialAgentId: string = 'default') {
                 const jsonLine = lines.find(l => l.includes('"subAgentId"'));
                 if (jsonLine) {
                   const parsed = JSON.parse(jsonLine);
-                  if (parsed.subAgentId && !prev.subAgents.find(sa => sa.id === parsed.subAgentId)) {
+                  if (parsed.subAgentId && !prev.subAgents.find(sa => sa.subAgentId === parsed.subAgentId)) {
                     // Extract type from the subAgentId (format: sub-{type}-{timestamp})
                     const typeMatch = parsed.subAgentId.match(/sub-(\w+)-/);
-                    const subAgentType = typeMatch ? typeMatch[1] : 'unknown';
+                    const subAgentType = typeMatch ? typeMatch[1] : 'code';
                     newSubAgents = [...prev.subAgents, {
-                      id: parsed.subAgentId,
-                      type: subAgentType,
-                      status: 'running',
-                      parentId: prev.agentId,
-                      spawnedAt: Date.now(),
+                      subAgentId: parsed.subAgentId,
+                      type: subAgentType as SubAgentInfo['type'],
+                      status: 'running' as const,
+                      output: '',
+                      inputTokens: 0,
+                      outputTokens: 0,
+                      cacheTokens: 0,
+                      durationMs: 0,
+                      toolCalls: 0,
                     }];
                   }
                 }
@@ -416,19 +413,10 @@ export function usePiAgent(initialAgentId: string = 'default') {
       }));
 
       try {
-        const response = await fetch('/api/pi/prompt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message,
-            project,
-            agentId: aid,
-            model: opts?.model,
-            thinkingLevel: opts?.thinkingLevel,
-            autoBranch: opts?.autoBranch,
-            autoMerge: opts?.autoMerge,
-          }),
-          signal: controller.signal,
+        const response = await api.pi.prompt(message, project, aid, {
+          model: opts?.model,
+          thinkingLevel: opts?.thinkingLevel,
+          autoBranch: opts?.autoBranch,
         });
 
         if (!response.ok) {
@@ -452,29 +440,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
           return;
         }
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split('\n\n');
-          buffer = parts.pop() || '';
-
-          for (const part of parts) {
-            if (!part.trim()) continue;
-            const event = parseSSEEvent(part);
-            if (event) handleEvent(event);
-          }
-        }
-
-        if (buffer.trim()) {
-          const event = parseSSEEvent(buffer);
-          if (event) handleEvent(event);
-        }
+        await readSSEStream(response, handleEvent);
 
         // Ensure any remaining pending deltas are flushed
         syncFlush();
@@ -497,7 +463,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
     }
     const aid = agentId || agentIdRef.current;
     try {
-      await fetch(`/api/pi/abort?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`, { method: 'POST' });
+      await api.pi.abort(project, aid);
     } catch {}
     setState(prev => ({
       ...prev,
@@ -509,18 +475,14 @@ export function usePiAgent(initialAgentId: string = 'default') {
   const compact = useCallback(async (project: string, agentId?: string) => {
     const aid = agentId || agentIdRef.current;
     try {
-      await fetch(`/api/pi/compact?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`, { method: 'POST' });
+      await api.pi.compact(project, aid);
     } catch {}
   }, []);
 
   const switchModel = useCallback(async (project: string, provider: string, modelId: string, agentId?: string) => {
     const aid = agentId || agentIdRef.current;
     try {
-      await fetch('/api/pi/model', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project, provider, modelId, agentId: aid }),
-      });
+      await api.pi.setModel(project, provider, modelId, aid);
       setState(prev => ({ ...prev, model: modelId }));
     } catch {}
   }, []);
@@ -528,8 +490,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
   const getModels = useCallback(async (project: string, agentId?: string): Promise<PiModel[]> => {
     const aid = agentId || agentIdRef.current;
     try {
-      const res = await fetch(`/api/pi/models?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`);
-      const data = await res.json();
+      const data = await api.pi.getModels(project, aid);
       return data.models || [];
     } catch {
       return [];
@@ -547,9 +508,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
   const loadHistory = useCallback(async (project: string, agentId?: string) => {
     const aid = agentId || agentIdRef.current;
     try {
-      const res = await fetch(`/api/pi/messages?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(aid)}`);
-      if (!res.ok) return;
-      const msgs = await res.json();
+      const msgs = await api.pi.getMessages(project, aid);
       if (!Array.isArray(msgs) || msgs.length === 0) return;
 
       // Convert DB messages to ConversationMessage format
