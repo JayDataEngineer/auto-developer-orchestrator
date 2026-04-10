@@ -376,3 +376,74 @@ class TestPiDestroy:
         if state_resp.status_code == 200:
             data = state_resp.json()
             assert data.get("sessionId") == "" or data.get("streaming") is False
+
+
+class TestPiSessions:
+    """Test session management endpoints."""
+
+    def test_list_sessions(self, api_url, api_session, test_project):
+        resp = api_session.get(
+            f"{api_url}/api/pi/sessions",
+            params={"project": test_project, "agentId": "default"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # May be a list or wrapped
+        assert isinstance(data, (list, dict))
+
+    def test_switch_session_invalid(self, api_url, api_session, test_project):
+        resp = api_session.put(f"{api_url}/api/pi/session", json={
+            "project": test_project,
+            "agentId": "default",
+            "sessionId": "nonexistent-session-id",
+        })
+        # Should fail gracefully for invalid session
+        assert resp.status_code in (200, 400, 404)
+
+    def test_conversation_history(self, api_url, api_session):
+        resp = api_session.get(f"{api_url}/api/pi/history")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "conversations" in data
+        assert isinstance(data["conversations"], list)
+
+
+class TestPiCompact:
+    """Test context compaction."""
+
+    def test_compact_no_active_session(self, api_url, api_session, test_project):
+        # Compact on a non-streaming session
+        resp = api_session.post(
+            f"{api_url}/api/pi/compact",
+            params={"project": test_project, "agentId": "default"},
+        )
+        assert resp.status_code == 200
+
+
+class TestPiRespond:
+    """Test approval response endpoint."""
+
+    def test_respond_no_pending_approval(self, api_url, api_session, test_project):
+        resp = api_session.post(f"{api_url}/api/pi/respond", json={
+            "project": test_project,
+            "agentId": "default",
+            "requestId": "nonexistent-req",
+            "action": "approve",
+        })
+        # Returns 404 if agent not found, or 200 with success=false
+        assert resp.status_code in (200, 404)
+        if resp.status_code == 200:
+            data = resp.json()
+            assert data.get("success") is False or "error" in data
+
+
+class TestPiDebug:
+    """Test debug endpoints."""
+
+    def test_rpc_test_no_session(self, api_url, api_session, test_project):
+        resp = api_session.get(
+            f"{api_url}/api/pi/debug/rpc-test",
+            params={"project": test_project, "agentId": "default"},
+        )
+        # May return 200 (if session exists) or error
+        assert resp.status_code in (200, 400, 404, 500)

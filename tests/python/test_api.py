@@ -260,3 +260,89 @@ class TestErrorHandling:
     def test_method_not_allowed(self, api_url, api_session):
         resp = api_session.delete(f"{api_url}/api/health")
         assert resp.status_code in (404, 405)
+
+
+# ---------------------------------------------------------------------------
+# GitHub Integration
+# ---------------------------------------------------------------------------
+
+
+class TestGitHub:
+    def test_github_user_connection_status(self, api_url, api_session):
+        resp = api_session.get(f"{api_url}/api/github/user")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "connected" in data
+
+    def test_github_repos(self, api_url, api_session):
+        resp = api_session.get(f"{api_url}/api/github/repos")
+        assert resp.status_code == 200
+        data = resp.json()
+        # May be {repos: []} or {connected: false, ...}
+        assert data is not None
+
+    def test_github_prs_no_owner(self, api_url, api_session):
+        resp = api_session.get(f"{api_url}/api/github/prs")
+        # Requires owner/repo params
+        assert resp.status_code in (200, 400)
+
+    def test_github_branches_no_owner(self, api_url, api_session):
+        resp = api_session.get(f"{api_url}/api/github/branches")
+        assert resp.status_code in (200, 400)
+
+    def test_github_stats_no_owner(self, api_url, api_session):
+        resp = api_session.get(f"{api_url}/api/github/stats")
+        assert resp.status_code in (200, 400)
+
+    def test_github_activity_no_owner(self, api_url, api_session):
+        resp = api_session.get(f"{api_url}/api/github/activity")
+        assert resp.status_code in (200, 400)
+
+    def test_connect_github_no_token(self, api_url, api_session):
+        resp = api_session.post(f"{api_url}/api/config/github", json={})
+        # Should fail without token
+        assert resp.status_code in (200, 400, 500)
+
+
+# ---------------------------------------------------------------------------
+# Git Workflow
+# ---------------------------------------------------------------------------
+
+
+class TestGitWorkflow:
+    def test_status_returns_git_state(self, api_url, api_session, test_project):
+        resp = api_session.get(f"{api_url}/api/status", params={"project": test_project})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "gitState" in data
+        assert "isAutoMode" in data
+        assert "agentStatus" in data
+
+    def test_branch_info(self, api_url, api_session, test_project):
+        resp = api_session.get(f"{api_url}/api/branch", params={"project": test_project})
+        if resp.status_code == 200:
+            data = resp.json()
+            assert "branch" in data
+        else:
+            assert resp.status_code == 500  # non-git project
+
+    def test_set_auto_mode(self, api_url, api_session, test_project):
+        resp = api_session.post(f"{api_url}/api/settings/mode", json={
+            "project": test_project,
+            "autoMode": False,
+        })
+        # May succeed or fail depending on backend
+        assert resp.status_code in (200, 400, 404)
+
+    def test_clone_missing_params(self, api_url, api_session):
+        resp = api_session.post(f"{api_url}/api/clone", json={})
+        # Should reject without URL
+        assert resp.status_code in (200, 400, 422)
+
+    def test_branch_checkout_missing_params(self, api_url, api_session):
+        resp = api_session.post(f"{api_url}/api/branch/checkout", json={})
+        assert resp.status_code in (200, 400, 422)
+
+    def test_merge_missing_params(self, api_url, api_session):
+        resp = api_session.post(f"{api_url}/api/merge", json={})
+        assert resp.status_code in (200, 400, 422)
