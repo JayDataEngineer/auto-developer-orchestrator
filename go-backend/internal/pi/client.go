@@ -554,6 +554,38 @@ func (c *PiClient) updateState(event AgentEvent) {
 		if event.Data.Model != "" {
 			c.state.Model = event.Data.Model
 		}
+		// Extract usage from the messages array (same parsing as mapEventToSSE)
+		if len(event.Messages) > 0 {
+			var msgs []struct {
+				Role    string `json:"role"`
+				Usage   struct {
+					Input     float64 `json:"input"`
+					Output    float64 `json:"output"`
+					CacheRead float64 `json:"cacheRead"`
+				} `json:"usage"`
+				Model    string `json:"model"`
+				Provider string `json:"provider"`
+			}
+			if json.Unmarshal(event.Messages, &msgs) == nil {
+				for i := len(msgs) - 1; i >= 0; i-- {
+					if msgs[i].Role == "assistant" {
+						if msgs[i].Usage.Input > 0 {
+							c.state.Input = msgs[i].Usage.Input
+						}
+						if msgs[i].Usage.Output > 0 {
+							c.state.Output = msgs[i].Usage.Output
+						}
+						if msgs[i].Usage.CacheRead > 0 {
+							c.state.Cache = msgs[i].Usage.CacheRead
+						}
+						if msgs[i].Provider != "" && msgs[i].Model != "" {
+							c.state.Model = msgs[i].Provider + "/" + msgs[i].Model
+						}
+						break
+					}
+				}
+			}
+		}
 	case RpcEventStateUpdate, RpcEventResponse:
 		if event.Data.Model != "" {
 			c.state.Model = event.Data.Model
@@ -650,11 +682,18 @@ func (c *PiClient) Compact() error {
 
 // SetModel switches the active model.
 func (c *PiClient) SetModel(provider string, modelId string) error {
-	return c.SendCommand(RpcCommand{
+	err := c.SendCommand(RpcCommand{
 		Type:     CmdSetModel,
 		Provider: provider,
 		ModelId:  modelId,
 	})
+	if err == nil {
+		// Update local state immediately so GET /state returns the new model
+		c.stateMu.Lock()
+		c.state.Model = provider + "/" + modelId
+		c.stateMu.Unlock()
+	}
+	return err
 }
 
 // GetAvailableModels requests model list from Pi.

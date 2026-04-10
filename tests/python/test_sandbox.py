@@ -186,5 +186,6 @@ class TestSandboxDesktopMode:
         resp = api_session.get(f"{api_url}/api/sandbox/{self.sandbox_id}/viewer")
         assert resp.status_code == 200
         data = resp.json()
-        # API uses snake_case: vnc_url, novnc_url, viewer_url, cdp_url
-        assert data.get("vnc_url") is not None or data.get("novnc_url") is not None
+        # API returns camelCase: vncUrl, novncUrl, viewerUrl, cdpUrl
+        assert data.get("vncUrl") is not None or data.get("novncUrl") is not None, \
+            f"No viewer URLs in response: {data}"

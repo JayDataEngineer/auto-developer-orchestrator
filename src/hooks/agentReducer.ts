@@ -1,0 +1,331 @@
+/**
+ * Pure state transitions for Pi agent events.
+ * No React, no hooks, no side effects — fully testable.
+ */
+
+import type {
+  PiSSEEvent,
+  ToolCall,
+  ConversationMessage,
+  AssistantMessage,
+  PiWebUpdate,
+  PiApprovalRequest,
+} from '../lib/pi-events';
+import type { SubAgentInfo } from '../lib/api';
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+export interface PiAgentState {
+  messages: ConversationMessage[];
+  isStreaming: boolean;
+  text: string;
+  thinking: string;
+  toolCalls: ToolCall[];
+  model: string | null;
+  tokenUsage: { input: number; output: number; cache: number };
+  error: string | null;
+  branchName: string | null;
+  lastPrompt: string;
+  agentId: string;
+  prUrl: string | null;
+  prNumber: number | null;
+  subAgents: SubAgentInfo[];
+  webUpdate: PiWebUpdate | null;
+  lastCommit: { message: string; branch: string } | null;
+  lastPush: { branch: string } | null;
+  pendingApproval: PiApprovalRequest | null;
+}
+
+export const initialAgentState: PiAgentState = {
+  messages: [],
+  isStreaming: false,
+  text: '',
+  thinking: '',
+  toolCalls: [],
+  model: null,
+  tokenUsage: { input: 0, output: 0, cache: 0 },
+  error: null,
+  branchName: null,
+  lastPrompt: '',
+  agentId: 'default',
+  prUrl: null,
+  prNumber: null,
+  subAgents: [],
+  webUpdate: null,
+  lastCommit: null,
+  lastPush: null,
+  pendingApproval: null,
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Update the last assistant message in the messages array. */
+export function updateLastAssistant(
+  messages: ConversationMessage[],
+  updater: (msg: AssistantMessage) => AssistantMessage,
+): ConversationMessage[] {
+  const msgs = [...messages];
+  const lastIdx = msgs.length - 1;
+  if (lastIdx >= 0 && msgs[lastIdx].role === 'assistant') {
+    msgs[lastIdx] = updater(msgs[lastIdx] as AssistantMessage);
+  }
+  return msgs;
+}
+
+// ---------------------------------------------------------------------------
+// Reducer
+// ---------------------------------------------------------------------------
+
+/**
+ * Pure state transition for a single SSE event.
+ *
+ * `genMsgId` and `genToolId` are injected so the function stays pure and
+ * testable — callers pass module-level counters or test stubs.
+ */
+export function agentReducer(
+  state: PiAgentState,
+  event: PiSSEEvent,
+  genMsgId: () => string,
+  genToolId: () => string,
+): PiAgentState {
+  switch (event.type) {
+    // Delta types are handled upstream by the throttler; listed for exhaustiveness.
+    case 'text_delta':
+    case 'thinking_delta':
+      return state;
+
+    case 'agent_start':
+      return {
+        ...state,
+        isStreaming: true,
+        text: '',
+        thinking: '',
+        toolCalls: [],
+        error: null,
+        messages:
+          state.messages.length > 0 &&
+          state.messages[state.messages.length - 1].role === 'assistant' &&
+          (state.messages[state.messages.length - 1] as AssistantMessage).streaming
+            ? state.messages
+            : [
+                ...state.messages,
+                {
+                  id: genMsgId(),
+                  role: 'assistant' as const,
+                  text: '',
+                  thinking: '',
+                  toolCalls: [],
+                  timestamp: Date.now(),
+                  streaming: true,
+                },
+              ],
+      };
+
+    case 'agent_spawned':
+      return { ...state, agentId: (event.data as { agentId: string }).agentId };
+
+    case 'tool_execution_start': {
+      const toolData = event.data as {
+        toolName: string;
+        args: Record<string, unknown>;
+        toolId: string;
+      };
+      const newCall: ToolCall = {
+        id: toolData.toolId || genToolId(),
+        name: toolData.toolName,
+        args: toolData.args,
+        startTime: Date.now(),
+      };
+      return {
+        ...state,
+        toolCalls: [...state.toolCalls, newCall],
+        messages: updateLastAssistant(state.messages, msg => ({
+          ...msg,
+          toolCalls: [...msg.toolCalls, newCall],
+        })),
+      };
+    }
+
+    case 'tool_execution_end': {
+      const endData = event.data as {
+        toolId: string;
+        result: unknown;
+        error?: string;
+      };
+      const updatedToolCalls = state.toolCalls.map(tc =>
+        tc.id === endData.toolId
+          ? { ...tc, result: endData.result, error: endData.error, endTime: Date.now() }
+          : tc,
+      );
+
+      // Detect sub-agent spawning from bash tool result
+      let newSubAgents = state.subAgents;
+      const endedTool = updatedToolCalls.find(tc => tc.id === endData.toolId);
+      if (
+        endedTool?.name === 'bash' &&
+        typeof endedTool.args?.command === 'string'
+      ) {
+        const cmd = endedTool.args.command;
+        if (
+          cmd.includes('/subagent/spawn') &&
+          typeof endData.result === 'string'
+        ) {
+          try {
+            const lines = (endData.result as string).split('\n');
+            const jsonLine = lines.find(l => l.includes('"subAgentId"'));
+            if (jsonLine) {
+              const parsed = JSON.parse(jsonLine);
+              if (
+                parsed.subAgentId &&
+                !state.subAgents.find(
+                  sa => sa.subAgentId === parsed.subAgentId,
+                )
+              ) {
+                const typeMatch = parsed.subAgentId.match(/sub-(\w+)-/);
+                const subAgentType = typeMatch ? typeMatch[1] : 'code';
+                newSubAgents = [
+                  ...state.subAgents,
+                  {
+                    subAgentId: parsed.subAgentId,
+                    type: subAgentType as SubAgentInfo['type'],
+                    status: 'running' as const,
+                    output: '',
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheTokens: 0,
+                    durationMs: 0,
+                    toolCalls: 0,
+                  },
+                ];
+              }
+            }
+          } catch {
+            // Not valid JSON, skip
+          }
+        }
+      }
+
+      return {
+        ...state,
+        toolCalls: updatedToolCalls,
+        subAgents: newSubAgents,
+        messages: updateLastAssistant(state.messages, msg => ({
+          ...msg,
+          toolCalls: updatedToolCalls,
+        })),
+      };
+    }
+
+    case 'agent_end': {
+      const endState = event.data as {
+        input: number;
+        output: number;
+        cache: number;
+      };
+      return {
+        ...state,
+        isStreaming: false,
+        tokenUsage: {
+          input: state.tokenUsage.input + (endState.input || 0),
+          output: state.tokenUsage.output + (endState.output || 0),
+          cache: state.tokenUsage.cache + (endState.cache || 0),
+        },
+        messages: updateLastAssistant(state.messages, msg => ({
+          ...msg,
+          streaming: false,
+        })),
+      };
+    }
+
+    case 'compaction_start':
+    case 'compaction_end':
+      return state;
+
+    case 'error':
+      return {
+        ...state,
+        error: (event.data as { error: string }).error,
+        isStreaming: false,
+        messages: updateLastAssistant(state.messages, msg => ({
+          ...msg,
+          streaming: false,
+        })),
+      };
+
+    case 'state_update': {
+      const stateData = event.data as {
+        model: string;
+        input: number;
+        output: number;
+        cache: number;
+      };
+      return {
+        ...state,
+        model: stateData.model || state.model,
+        tokenUsage: {
+          input: stateData.input || state.tokenUsage.input,
+          output: stateData.output || state.tokenUsage.output,
+          cache: stateData.cache || state.tokenUsage.cache,
+        },
+      };
+    }
+
+    case 'branch_created':
+      return {
+        ...state,
+        branchName: (event.data as { branch: string }).branch,
+      };
+
+    case 'commit_created': {
+      const commitData = event.data as { message: string; branch: string };
+      return {
+        ...state,
+        lastCommit: {
+          message: commitData.message,
+          branch: commitData.branch,
+        },
+        branchName: commitData.branch || state.branchName,
+      };
+    }
+
+    case 'push_complete': {
+      const pushData = event.data as { branch: string };
+      return {
+        ...state,
+        lastPush: { branch: pushData.branch },
+      };
+    }
+
+    case 'pr_created': {
+      const prData = event.data as {
+        url: string;
+        number: number;
+        title: string;
+      };
+      return {
+        ...state,
+        prUrl: prData.url,
+        prNumber: prData.number,
+        messages: updateLastAssistant(state.messages, msg => ({ ...msg })),
+      };
+    }
+
+    case 'web_update': {
+      const webData = event.data as PiWebUpdate;
+      return { ...state, webUpdate: webData };
+    }
+
+    case 'approval_request':
+    case 'question_asked': {
+      const approvalData = event.data as PiApprovalRequest;
+      return { ...state, pendingApproval: approvalData };
+    }
+
+    default:
+      return state;
+  }
+}

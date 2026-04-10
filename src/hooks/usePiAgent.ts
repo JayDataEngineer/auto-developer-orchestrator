@@ -5,139 +5,61 @@ import {
   PiModel,
   ConversationMessage,
   AssistantMessage,
-  PiWebUpdate,
-  PiApprovalRequest,
 } from '../lib/pi-events';
 import { SubAgentInfo } from '../lib/api';
 import { readSSEStream } from './useSSEStream';
 import { api } from '../lib/api';
+import {
+  PiAgentState,
+  initialAgentState,
+  updateLastAssistant,
+  agentReducer,
+} from './agentReducer';
+import { useThrottledDeltas } from './useThrottledDeltas';
 
-// Re-export SubAgentInfo for consumers that imported from usePiAgent
+// Re-exports for backward compatibility
 export type { SubAgentInfo } from '../lib/api';
+export type { PiAgentState } from './agentReducer';
 
+// Module-level ID generators
 let msgIdCounter = 0;
 let toolIdCounter = 0;
 function nextMsgId() { return `msg-${++msgIdCounter}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
 function nextToolFallbackId() { return `tool-${++toolIdCounter}-${Date.now()}`; }
 
-export interface PiAgentState {
-  messages: ConversationMessage[];
-  isStreaming: boolean;
-  text: string;
-  thinking: string;
-  toolCalls: ToolCall[];
-  model: string | null;
-  tokenUsage: { input: number; output: number; cache: number };
-  error: string | null;
-  branchName: string | null;
-  lastPrompt: string;
-  agentId: string;
-  prUrl: string | null;
-  prNumber: number | null;
-  subAgents: SubAgentInfo[];
-  webUpdate: PiWebUpdate | null;
-  lastCommit: { message: string; branch: string } | null;
-  lastPush: { branch: string } | null;
-  pendingApproval: PiApprovalRequest | null;
-}
-
-const initialState: PiAgentState = {
-  messages: [],
-  isStreaming: false,
-  text: '',
-  thinking: '',
-  toolCalls: [],
-  model: null,
-  tokenUsage: { input: 0, output: 0, cache: 0 },
-  error: null,
-  branchName: null,
-  lastPrompt: '',
-  agentId: 'default',
-  prUrl: null,
-  prNumber: null,
-  subAgents: [],
-  webUpdate: null,
-  lastCommit: null,
-  lastPush: null,
-  pendingApproval: null,
-};
-
-// Helper: update the last assistant message in the messages array
-function updateLastAssistant(
-  messages: ConversationMessage[],
-  updater: (msg: AssistantMessage) => AssistantMessage
-): ConversationMessage[] {
-  const msgs = [...messages];
-  const lastIdx = msgs.length - 1;
-  if (lastIdx >= 0 && msgs[lastIdx].role === 'assistant') {
-    msgs[lastIdx] = updater(msgs[lastIdx] as AssistantMessage);
-  }
-  return msgs;
-}
-
 export function usePiAgent(initialAgentId: string = 'default') {
-  const [state, setState] = useState<PiAgentState>({ ...initialState, agentId: initialAgentId });
+  const [state, setState] = useState<PiAgentState>({ ...initialAgentState, agentId: initialAgentId });
   const abortRef = useRef<AbortController | null>(null);
   const projectRef = useRef<string | null>(null);
   const agentIdRef = useRef<string>(initialAgentId);
 
-  // Throttled delta accumulation — avoids re-renders per token
-  const pendingTextRef = useRef('');
-  const pendingThinkingRef = useRef('');
-  const flushRafRef = useRef<number | null>(null);
+  // Throttled delta accumulation
+  const { accumulate, syncFlush } = useThrottledDeltas(
+    useCallback((textDelta: string, thinkingDelta: string) => {
+      setState(prev => {
+        let text = prev.text;
+        let thinking = prev.thinking;
+        if (textDelta) text = prev.text + textDelta;
+        if (thinkingDelta) thinking = prev.thinking + thinkingDelta;
+        return {
+          ...prev,
+          text,
+          thinking,
+          messages: updateLastAssistant(prev.messages, msg => ({
+            ...msg,
+            ...(textDelta ? { text: msg.text + textDelta } : {}),
+            ...(thinkingDelta ? { thinking: msg.thinking + thinkingDelta } : {}),
+          })),
+        };
+      });
+    }, []),
+  );
 
-  // Flush accumulated text/thinking deltas to state (called via RAF)
-  const flushPendingDeltas = useCallback(() => {
-    flushRafRef.current = null;
-    const textDelta = pendingTextRef.current;
-    const thinkingDelta = pendingThinkingRef.current;
-    if (!textDelta && !thinkingDelta) return;
-
-    pendingTextRef.current = '';
-    pendingThinkingRef.current = '';
-
-    setState(prev => {
-      let text = prev.text;
-      let thinking = prev.thinking;
-      if (textDelta) text = prev.text + textDelta;
-      if (thinkingDelta) thinking = prev.thinking + thinkingDelta;
-      return {
-        ...prev,
-        text,
-        thinking,
-        messages: updateLastAssistant(prev.messages, msg => ({
-          ...msg,
-          ...(textDelta ? { text: msg.text + textDelta } : {}),
-          ...(thinkingDelta ? { thinking: msg.thinking + thinkingDelta } : {}),
-        })),
-      };
-    });
-  }, []);
-
-  // Flush pending deltas synchronously (for non-delta events that need up-to-date state)
-  const syncFlush = useCallback(() => {
-    if (flushRafRef.current !== null) {
-      cancelAnimationFrame(flushRafRef.current);
-      flushRafRef.current = null;
-    }
-    flushPendingDeltas();
-  }, [flushPendingDeltas]);
-
-  // Schedule a RAF flush
-  const scheduleFlush = useCallback(() => {
-    if (flushRafRef.current === null) {
-      flushRafRef.current = requestAnimationFrame(flushPendingDeltas);
-    }
-  }, [flushPendingDeltas]);
-
-  // Clean up RAF on unmount
-  useEffect(() => {
-    return () => {
-      if (flushRafRef.current !== null) {
-        cancelAnimationFrame(flushRafRef.current);
-      }
-    };
-  }, []);
+  const handleEvent = useCallback((event: PiSSEEvent) => {
+    if (accumulate(event)) return;
+    syncFlush();
+    setState(prev => agentReducer(prev, event, nextMsgId, nextToolFallbackId));
+  }, [accumulate, syncFlush]);
 
   useEffect(() => {
     agentIdRef.current = initialAgentId;
@@ -177,207 +99,6 @@ export function usePiAgent(initialAgentId: string = 'default') {
       // Silently fail - hydration is best-effort
     }
   }, []);
-
-  const handleEvent = useCallback((event: PiSSEEvent) => {
-    // Fast path: accumulate text/thinking deltas in refs, flush via RAF
-    if (event.type === 'text_delta') {
-      pendingTextRef.current += (event.data as { text: string }).text;
-      scheduleFlush();
-      return;
-    }
-    if (event.type === 'thinking_delta') {
-      pendingThinkingRef.current += (event.data as { text: string }).text;
-      scheduleFlush();
-      return;
-    }
-
-    // All other events: flush pending deltas first, then process
-    syncFlush();
-
-    setState(prev => {
-      switch (event.type) {
-        case 'agent_start':
-          return {
-            ...prev,
-            isStreaming: true,
-            text: '',
-            thinking: '',
-            toolCalls: [],
-            error: null,
-            // Add empty assistant message if not already present from sendPrompt
-            messages: prev.messages.length > 0 && prev.messages[prev.messages.length - 1].role === 'assistant' && (prev.messages[prev.messages.length - 1] as AssistantMessage).streaming
-              ? prev.messages
-              : [...prev.messages, {
-                  id: nextMsgId(),
-                  role: 'assistant' as const,
-                  text: '',
-                  thinking: '',
-                  toolCalls: [],
-                  timestamp: Date.now(),
-                  streaming: true,
-                }],
-          };
-
-        case 'agent_spawned':
-          return { ...prev, agentId: (event.data as { agentId: string }).agentId };
-
-        case 'tool_execution_start': {
-          const toolData = event.data as { toolName: string; args: Record<string, unknown>; toolId: string };
-          const newCall: ToolCall = {
-            id: toolData.toolId || nextToolFallbackId(),
-            name: toolData.toolName,
-            args: toolData.args,
-            startTime: Date.now(),
-          };
-          return {
-            ...prev,
-            toolCalls: [...prev.toolCalls, newCall],
-            messages: updateLastAssistant(prev.messages, msg => ({
-              ...msg,
-              toolCalls: [...msg.toolCalls, newCall],
-            })),
-          };
-        }
-
-        case 'tool_execution_end': {
-          const endData = event.data as { toolId: string; result: unknown; error?: string };
-          const updatedToolCalls = prev.toolCalls.map(tc =>
-            tc.id === endData.toolId
-              ? { ...tc, result: endData.result, error: endData.error, endTime: Date.now() }
-              : tc
-          );
-
-          // Detect sub-agent spawning from bash tool result
-          let newSubAgents = prev.subAgents;
-          const endedTool = updatedToolCalls.find(tc => tc.id === endData.toolId);
-          if (endedTool?.name === 'bash' && typeof endedTool.args?.command === 'string') {
-            const cmd = endedTool.args.command;
-            if (cmd.includes('/subagent/spawn') && typeof endData.result === 'string') {
-              try {
-                // Try to parse the spawn response from the command output
-                const lines = (endData.result as string).split('\n');
-                const jsonLine = lines.find(l => l.includes('"subAgentId"'));
-                if (jsonLine) {
-                  const parsed = JSON.parse(jsonLine);
-                  if (parsed.subAgentId && !prev.subAgents.find(sa => sa.subAgentId === parsed.subAgentId)) {
-                    // Extract type from the subAgentId (format: sub-{type}-{timestamp})
-                    const typeMatch = parsed.subAgentId.match(/sub-(\w+)-/);
-                    const subAgentType = typeMatch ? typeMatch[1] : 'code';
-                    newSubAgents = [...prev.subAgents, {
-                      subAgentId: parsed.subAgentId,
-                      type: subAgentType as SubAgentInfo['type'],
-                      status: 'running' as const,
-                      output: '',
-                      inputTokens: 0,
-                      outputTokens: 0,
-                      cacheTokens: 0,
-                      durationMs: 0,
-                      toolCalls: 0,
-                    }];
-                  }
-                }
-              } catch {
-                // Not valid JSON, skip
-              }
-            }
-          }
-
-          return {
-            ...prev,
-            toolCalls: updatedToolCalls,
-            subAgents: newSubAgents,
-            messages: updateLastAssistant(prev.messages, msg => ({ ...msg, toolCalls: updatedToolCalls })),
-          };
-        }
-
-        case 'agent_end': {
-          const endState = event.data as { input: number; output: number; cache: number };
-          return {
-            ...prev,
-            isStreaming: false,
-            tokenUsage: {
-              input: prev.tokenUsage.input + (endState.input || 0),
-              output: prev.tokenUsage.output + (endState.output || 0),
-              cache: prev.tokenUsage.cache + (endState.cache || 0),
-            },
-            // Finalize the last assistant message
-            messages: updateLastAssistant(prev.messages, msg => ({
-              ...msg,
-              streaming: false,
-            })),
-          };
-        }
-
-        case 'compaction_end':
-          return prev;
-
-        case 'error':
-          return {
-            ...prev,
-            error: (event.data as { error: string }).error,
-            isStreaming: false,
-            messages: updateLastAssistant(prev.messages, msg => ({ ...msg, streaming: false })),
-          };
-
-        case 'state_update': {
-          const stateData = event.data as { model: string; input: number; output: number; cache: number };
-          return {
-            ...prev,
-            model: stateData.model || prev.model,
-            tokenUsage: {
-              input: stateData.input || prev.tokenUsage.input,
-              output: stateData.output || prev.tokenUsage.output,
-              cache: stateData.cache || prev.tokenUsage.cache,
-            },
-          };
-        }
-
-        case 'branch_created':
-          return { ...prev, branchName: (event.data as { branch: string }).branch };
-
-        case 'commit_created': {
-          const commitData = event.data as { message: string; branch: string };
-          return {
-            ...prev,
-            lastCommit: { message: commitData.message, branch: commitData.branch },
-            branchName: commitData.branch || prev.branchName,
-          };
-        }
-
-        case 'push_complete': {
-          const pushData = event.data as { branch: string };
-          return {
-            ...prev,
-            lastPush: { branch: pushData.branch },
-          };
-        }
-
-        case 'pr_created': {
-          const prData = event.data as { url: string; number: number; title: string };
-          return {
-            ...prev,
-            prUrl: prData.url,
-            prNumber: prData.number,
-            messages: updateLastAssistant(prev.messages, msg => ({ ...msg })),
-          };
-        }
-
-        case 'web_update': {
-          const webData = event.data as PiWebUpdate;
-          return { ...prev, webUpdate: webData };
-        }
-
-        case 'approval_request':
-        case 'question_asked': {
-          const approvalData = event.data as PiApprovalRequest;
-          return { ...prev, pendingApproval: approvalData };
-        }
-
-        default:
-          return prev;
-      }
-    });
-  }, [syncFlush, scheduleFlush]);
 
   const sendPrompt = useCallback(
     async (message: string, project: string, opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean; autoMerge?: boolean; agentId?: string }) => {
@@ -510,7 +231,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
 
   const reset = useCallback(() => {
     setState(prev => ({
-      ...initialState,
+      ...initialAgentState,
       model: prev.model,
       agentId: prev.agentId,
     }));
