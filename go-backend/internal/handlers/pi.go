@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/git"
@@ -42,6 +43,7 @@ func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, gh 
 func (h *PiHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/prompt", h.Prompt)
 	r.Post("/abort", h.Abort)
+	r.Post("/respond", h.Respond)
 	r.Get("/state", h.GetState)
 	r.Get("/messages", h.GetMessages)
 	r.Get("/models", h.GetModels)
@@ -63,6 +65,65 @@ func resolveAgent(r *http.Request) string {
 		return "default"
 	}
 	return aid
+}
+
+// respondRequest is the request body for the approval response endpoint.
+type respondRequest struct {
+	Project   string `json:"project"`
+	AgentId   string `json:"agentId"`
+	RequestID string `json:"requestId"`
+	Action    string `json:"action"`  // "approve", "deny", "answer"
+	Message   string `json:"message,omitempty"`
+}
+
+// Respond handles user approval/denial responses for pending agent approvals.
+func (h *PiHandler) Respond(w http.ResponseWriter, r *http.Request) {
+	var req respondRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Invalid request body",
+		})
+		return
+	}
+
+	if req.RequestID == "" || req.Action == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "requestId and action are required",
+		})
+		return
+	}
+
+	projectPath := resolveProjectPath(req.Project, h.db)
+	if projectPath == "" {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Project not found",
+		})
+		return
+	}
+
+	client := h.pool.GetWithID(projectPath, req.AgentId)
+	if client == nil {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Agent not found",
+		})
+		return
+	}
+
+	resp := pi.ApprovalResponse{
+		Action:  req.Action,
+		Message: req.Message,
+	}
+
+	if ok := client.ResolveApproval(req.RequestID, resp); !ok {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "No pending approval found for this request",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+	})
 }
 
 // promptRequest is the request body for the prompt endpoint.
@@ -173,6 +234,7 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var assistantText, assistantThinking string
 	var assistantToolCalls []json.RawMessage
+	var approvalTriggered bool
 
 	for {
 		select {
@@ -187,6 +249,51 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 			if sseEvent == nil {
 				continue
 			}
+
+			// Intercept risky bash commands for approval before forwarding to SSE
+			if sseEvent.Type == pi.EventToolStart && !approvalTriggered {
+				if dataMap, ok := sseEvent.Data.(map[string]interface{}); ok {
+					if toolName, _ := dataMap["toolName"].(string); toolName == "bash" {
+						if args, ok := dataMap["args"].(map[string]interface{}); ok {
+							if cmd, _ := args["command"].(string); cmd != "" {
+								if risky, reason := pi.IsRiskyBashCommand(cmd); risky {
+									requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
+									approvalTriggered = true
+
+									writeSSE(w, pi.EventApprovalRequest, pi.ApprovalRequestData{
+										RequestID: requestID,
+										Type:      "tool_confirm",
+										ToolName:  "bash",
+										ToolArgs:  map[string]interface{}{"command": cmd},
+										Message:   reason + ": " + cmd,
+										Risk:      "high",
+									}, canFlush, flusher)
+
+									ch := client.RegisterApproval(requestID)
+									select {
+									case resp, ok := <-ch:
+										if !ok {
+											return
+										}
+										if resp.Action == "approve" {
+											client.Steer("APPROVED: " + resp.Message)
+										} else {
+											client.Steer("DENIED: do NOT execute: " + cmd + ". Reason: " + resp.Message)
+											continue // skip forwarding the tool event
+										}
+									case <-ctx.Done():
+										return
+									case <-time.After(5 * time.Minute):
+										client.Steer("APPROVAL_TIMEOUT: do NOT execute: " + cmd)
+										continue
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
 			data, err := json.Marshal(sseEvent.Data)
 			if err != nil {
 				continue
@@ -219,6 +326,63 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 			case "tool_execution_start":
 				if raw, err := json.Marshal(sseEvent.Data); err == nil {
 					assistantToolCalls = append(assistantToolCalls, raw)
+				}
+			}
+
+			// Check for approval/question markers in accumulated text
+			if !approvalTriggered {
+				if idx := strings.Index(assistantText, "??APPROVAL:"); idx >= 0 {
+					approvalTriggered = true
+					msg := strings.TrimSpace(assistantText[idx+len("??APPROVAL:"):])
+					requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
+
+					writeSSE(w, pi.EventApprovalRequest, pi.ApprovalRequestData{
+						RequestID: requestID,
+						Type:      "plan",
+						Message:   msg,
+						Risk:      "high",
+					}, canFlush, flusher)
+
+					ch := client.RegisterApproval(requestID)
+					select {
+					case resp, ok := <-ch:
+						if !ok {
+							return
+						}
+						if resp.Action == "approve" {
+							client.Steer(fmt.Sprintf("APPROVED by user: %s. Proceed with the planned action.", resp.Message))
+						} else {
+							client.Steer(fmt.Sprintf("DENIED by user: %s. Do NOT proceed with this action.", resp.Message))
+						}
+					case <-ctx.Done():
+						return
+					case <-time.After(5 * time.Minute):
+						client.Steer("APPROVAL_TIMEOUT: No response. Do NOT proceed.")
+					}
+				} else if idx := strings.Index(assistantText, "??QUESTION:"); idx >= 0 {
+					approvalTriggered = true
+					question := strings.TrimSpace(assistantText[idx+len("??QUESTION:"):])
+					requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
+
+					writeSSE(w, pi.EventQuestionAsked, pi.ApprovalRequestData{
+						RequestID: requestID,
+						Type:      "question",
+						Message:   question,
+						Risk:      "low",
+					}, canFlush, flusher)
+
+					ch := client.RegisterApproval(requestID)
+					select {
+					case resp, ok := <-ch:
+						if !ok {
+							return
+						}
+						client.Steer(fmt.Sprintf("USER ANSWER: %s", resp.Message))
+					case <-ctx.Done():
+						return
+					case <-time.After(5 * time.Minute):
+						client.Steer("QUESTION_TIMEOUT: No response. Use your best judgment.")
+					}
 				}
 			}
 

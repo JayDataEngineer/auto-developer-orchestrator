@@ -4,10 +4,12 @@ import { cn } from '../../lib/utils';
 import { SubAgentInfo } from '../../lib/api';
 
 export function SubAgentCard({ agent }: { agent: SubAgentInfo }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(agent.status === 'running');
   const statusIcon = agent.status === 'running' ? <Loader size={10} className="animate-spin text-blue-400" /> :
     agent.status === 'complete' ? <Check size={10} className="text-green-400" /> :
     <span className="text-[9px] text-zinc-500">{agent.status}</span>;
+
+  const toolCount = agent.toolCalls ?? 0;
 
   return (
     <div className="border border-blue-900/30 bg-blue-950/20">
@@ -22,6 +24,11 @@ export function SubAgentCard({ agent }: { agent: SubAgentInfo }) {
         <span className="text-[9px] font-mono text-zinc-500 truncate">
           {agent.subAgentId.slice(0, 30)}...
         </span>
+        {toolCount > 0 && (
+          <span className="text-[8px] font-mono text-zinc-600">
+            {toolCount} tools
+          </span>
+        )}
         <div className="flex-1" />
         {statusIcon}
         {agent.status === 'running' && (

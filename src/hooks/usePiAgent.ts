@@ -6,6 +6,7 @@ import {
   ConversationMessage,
   AssistantMessage,
   PiWebUpdate,
+  PiApprovalRequest,
 } from '../lib/pi-events';
 import { SubAgentInfo } from '../lib/api';
 import { readSSEStream } from './useSSEStream';
@@ -15,7 +16,9 @@ import { api } from '../lib/api';
 export type { SubAgentInfo } from '../lib/api';
 
 let msgIdCounter = 0;
-function nextMsgId() { return `msg-${++msgIdCounter}-${Date.now()}`; }
+let toolIdCounter = 0;
+function nextMsgId() { return `msg-${++msgIdCounter}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
+function nextToolFallbackId() { return `tool-${++toolIdCounter}-${Date.now()}`; }
 
 export interface PiAgentState {
   messages: ConversationMessage[];
@@ -35,6 +38,7 @@ export interface PiAgentState {
   webUpdate: PiWebUpdate | null;
   lastCommit: { message: string; branch: string } | null;
   lastPush: { branch: string } | null;
+  pendingApproval: PiApprovalRequest | null;
 }
 
 const initialState: PiAgentState = {
@@ -55,6 +59,7 @@ const initialState: PiAgentState = {
   webUpdate: null,
   lastCommit: null,
   lastPush: null,
+  pendingApproval: null,
 };
 
 // Helper: update the last assistant message in the messages array
@@ -219,7 +224,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
         case 'tool_execution_start': {
           const toolData = event.data as { toolName: string; args: Record<string, unknown>; toolId: string };
           const newCall: ToolCall = {
-            id: toolData.toolId || `tool-${Date.now()}`,
+            id: toolData.toolId || nextToolFallbackId(),
             name: toolData.toolName,
             args: toolData.args,
             startTime: Date.now(),
@@ -360,6 +365,12 @@ export function usePiAgent(initialAgentId: string = 'default') {
         case 'web_update': {
           const webData = event.data as PiWebUpdate;
           return { ...prev, webUpdate: webData };
+        }
+
+        case 'approval_request':
+        case 'question_asked': {
+          const approvalData = event.data as PiApprovalRequest;
+          return { ...prev, pendingApproval: approvalData };
         }
 
         default:
@@ -512,10 +523,10 @@ export function usePiAgent(initialAgentId: string = 'default') {
       if (!Array.isArray(msgs) || msgs.length === 0) return;
 
       // Convert DB messages to ConversationMessage format
-      const messages: ConversationMessage[] = msgs.map((m: any) => {
+      const messages: ConversationMessage[] = msgs.map((m: any, idx: number) => {
         if (m.role === 'user') {
           return {
-            id: `db-${m.id}`,
+            id: `db-${idx}-${m.id}`,
             role: 'user' as const,
             content: m.content || '',
             timestamp: new Date(m.createdAt).getTime(),
@@ -526,7 +537,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
           toolCalls = JSON.parse(m.toolCalls || '[]');
         } catch {}
         return {
-          id: `db-${m.id}`,
+          id: `db-${idx}-${m.id}`,
           role: 'assistant' as const,
           text: m.text || '',
           thinking: m.thinking || '',
@@ -551,6 +562,19 @@ export function usePiAgent(initialAgentId: string = 'default') {
     }
   }, []);
 
+  const respondToApproval = useCallback(async (
+    project: string,
+    agentId: string,
+    requestId: string,
+    action: 'approve' | 'deny' | 'answer',
+    message?: string,
+  ) => {
+    try {
+      await api.pi.respond(project, agentId, requestId, action, message);
+    } catch {}
+    setState(prev => ({ ...prev, pendingApproval: null }));
+  }, []);
+
   return {
     state,
     sendPrompt,
@@ -561,5 +585,6 @@ export function usePiAgent(initialAgentId: string = 'default') {
     reset,
     hydrateState,
     loadHistory,
+    respondToApproval,
   };
 }

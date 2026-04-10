@@ -73,6 +73,10 @@ type PiClient struct {
 
 	// Allowed tools (for sub-agent restrictions)
 	allowedTools map[string]bool
+
+	// Pending approvals for human-in-the-loop
+	pendingMu        sync.Mutex
+	pendingApprovals map[string]chan ApprovalResponse
 }
 
 // NewPiClient creates and starts a new Pi subprocess for the given project directory.
@@ -84,15 +88,16 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger, sandboxM
 	sandboxID := filepath.Base(projectDir)
 
 	c := &PiClient{
-		logger:         logger,
-		projectDir:     projectDir,
-		agentId:        agentId,
-		cancel:         cancel,
-		ctx:            ctx,
-		subscribers:    make(map[string]chan AgentEvent),
-		startTime:      time.Now(),
-		namespace:      sandboxID,
-		sandboxManager: nil,
+		logger:           logger,
+		projectDir:       projectDir,
+		agentId:          agentId,
+		cancel:           cancel,
+		ctx:              ctx,
+		subscribers:      make(map[string]chan AgentEvent),
+		pendingApprovals: make(map[string]chan ApprovalResponse),
+		startTime:        time.Now(),
+		namespace:        sandboxID,
+		sandboxManager:   nil,
 	}
 	
 	// Type assertion for sandbox manager
@@ -780,4 +785,29 @@ func (c *PiClient) EnableDesktopMode(reason string) (*sandbox.DesktopSession, er
 // IsSandboxed returns whether this agent is running inside a sandbox.
 func (c *PiClient) IsSandboxed() bool {
 	return c.sandboxed
+}
+
+// RegisterApproval creates a pending approval channel and returns it.
+// The caller should emit an approval_request SSE event and then wait on the returned channel.
+func (c *PiClient) RegisterApproval(requestID string) chan ApprovalResponse {
+	ch := make(chan ApprovalResponse, 1)
+	c.pendingMu.Lock()
+	c.pendingApprovals[requestID] = ch
+	c.pendingMu.Unlock()
+	return ch
+}
+
+// ResolveApproval writes a response to the pending approval channel and removes it.
+func (c *PiClient) ResolveApproval(requestID string, resp ApprovalResponse) bool {
+	c.pendingMu.Lock()
+	ch, ok := c.pendingApprovals[requestID]
+	if ok {
+		delete(c.pendingApprovals, requestID)
+	}
+	c.pendingMu.Unlock()
+	if !ok {
+		return false
+	}
+	ch <- resp
+	return true
 }

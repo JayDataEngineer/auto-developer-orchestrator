@@ -2,17 +2,18 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
   Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch,
-  ExternalLink, Check, GitPullRequest
+  ExternalLink, Check, GitPullRequest, Wrench
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { usePiAgent } from '../hooks/usePiAgent';
 import { SubAgentInfo } from '../lib/api';
-import { PiModel, AssistantMessage } from '../lib/pi-events';
+import { PiModel, AssistantMessage, ToolCall } from '../lib/pi-events';
 import { ToolCallItem } from './agent/ToolCallItem';
 import { SubAgentCard } from './agent/SubAgentCard';
 import { MarkdownBlock } from './agent/MarkdownBlock';
 import { ReasoningBlock } from './agent/ReasoningBlock';
 import { FleetBar } from './agent/FleetBar';
+import { ApprovalBanner } from './agent/ApprovalBanner';
 
 interface PiAgentViewProps {
   selectedProject?: string;
@@ -21,10 +22,11 @@ interface PiAgentViewProps {
   onBack?: () => void;
   isZenMode?: boolean;
   onZenToggle?: () => void;
+  onStreamingStateChange?: (state: { isStreaming: boolean; runningTool: ToolCall | undefined; thinking: string }) => void;
 }
 
-export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack, isZenMode = false, onZenToggle }) => {
-  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels, loadHistory } = usePiAgent(selectedAgentId);
+export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack, isZenMode = false, onZenToggle, onStreamingStateChange }) => {
+  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels, loadHistory, respondToApproval } = usePiAgent(selectedAgentId);
   const [input, setInput] = useState('');
   const [models, setModels] = useState<PiModel[]>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
@@ -85,6 +87,12 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   }, [handleSend]);
 
   const hasContent = state.messages.length > 0 || state.isStreaming;
+  const runningTool = state.toolCalls.find(tc => !tc.endTime);
+
+  // Notify parent of streaming state changes
+  useEffect(() => {
+    onStreamingStateChange?.({ isStreaming: state.isStreaming, runningTool, thinking: state.thinking });
+  }, [state.isStreaming, runningTool?.id, state.thinking, onStreamingStateChange]);
 
   return (
     <div className="flex h-full w-full bg-black overflow-hidden">
@@ -109,6 +117,12 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
             {state.isStreaming && (
               <span className="text-[9px] font-black text-primary uppercase tracking-widest animate-pulse">
                 Streaming
+              </span>
+            )}
+            {runningTool && (
+              <span className="flex items-center gap-1.5 text-[9px] font-mono text-primary/80 uppercase tracking-widest">
+                <Wrench size={9} className="text-primary" />
+                Running: {runningTool.name}
               </span>
             )}
             {state.error && (
@@ -243,6 +257,16 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               </a>
             </div>
           </div>
+        )}
+
+        {/* Approval/Question Banner */}
+        {state.pendingApproval && selectedProject && (
+          <ApprovalBanner
+            approval={state.pendingApproval}
+            onRespond={(requestId, action, message) =>
+              respondToApproval(selectedProject, selectedAgentId, requestId, action, message)
+            }
+          />
         )}
 
         {/* Input area */}

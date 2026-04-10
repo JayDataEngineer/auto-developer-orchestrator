@@ -126,4 +126,49 @@ test.describe('Navigation', () => {
       await expect(svg).toBeAttached();
     }
   });
+
+  // ── Dynamic Sidebar Layout ──
+
+  test('Agent tab shows both left history sidebar and right artifacts panel', async ({ page }) => {
+    // Agent tab is default - check left sidebar (History) and right panel (Artifacts)
+    await expect(page.getByText('Artifacts')).toBeVisible({ timeout: 5000 });
+    // History sidebar should have the collapse toggle
+    const sidebarToggle = page.locator('.absolute.z-20 button, button:has(.lucide-chevrons-left), .lucide-chevron-left').first();
+    await expect(sidebarToggle).toBeVisible({ timeout: 5000 });
+  });
+
+  test('Tasks tab shows no sidebars, full-width kanban', async ({ page }) => {
+    await page.getByRole('button', { name: 'Tasks' }).click();
+    await page.waitForTimeout(1000);
+
+    // Artifacts panel should NOT be visible
+    const artifactsPanel = page.getByText('Artifacts');
+    const visible = await artifactsPanel.isVisible().catch(() => false);
+    expect(visible).toBe(false);
+
+    // Kanban columns should be visible
+    await expect(page.getByText('Pending').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Completed').first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('Desktop tab shows its own 3-panel layout', async ({ page }) => {
+    await page.getByRole('button', { name: 'Desktop' }).click();
+    await page.waitForTimeout(1000);
+
+    // Should show "Agent Chat" header in narrow left panel
+    await expect(page.getByText('Agent Chat')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('Scheduler tab shows full-width scheduler', async ({ page }) => {
+    await page.getByRole('button', { name: 'Scheduler' }).click();
+    await page.waitForTimeout(1500);
+
+    // Should show scheduler content without sidebars
+    await expect(page.getByText('Scheduled Jobs')).toBeVisible({ timeout: 10000 });
+
+    // Artifacts panel should NOT be visible
+    const artifactsPanel = page.getByText('Artifacts');
+    const visible = await artifactsPanel.isVisible().catch(() => false);
+    expect(visible).toBe(false);
+  });
 });

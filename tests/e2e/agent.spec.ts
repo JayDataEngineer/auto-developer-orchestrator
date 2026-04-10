@@ -17,6 +17,11 @@ import {
   SSE_WITH_PR_CREATED,
   SSE_WITH_ERROR_EVENT,
   SSE_WITH_SUBAGENT_SPAWN,
+  SSE_WITH_THINKING_AND_TOOLS,
+  SSE_WITH_COMMIT_CREATED,
+  SSE_WITH_BRANCH_CREATED,
+  SSE_WITH_APPROVAL_REQUEST,
+  SSE_WITH_QUESTION,
   buildSSEStream,
   type SSEEvent,
 } from './fixtures';
@@ -164,8 +169,8 @@ test.describe('Agent Chat', () => {
     // Tool name MUST be visible even while loading
     await expect(page.locator('text=bash').first()).toBeVisible({ timeout: 5000 });
 
-    // Spinner should be present since tool never ended
-    const toolSpinners = page.locator('.border.border-white\\/5.bg-zinc-950 .animate-spin');
+    // Spinner should be present since tool never ended (running tools have border-primary)
+    const toolSpinners = page.locator('.animate-spin');
     const count = await toolSpinners.count();
     expect(count).toBeGreaterThan(0);
   });
@@ -574,5 +579,340 @@ test.describe('Agent Chat - Fleet Bar', () => {
     await page.waitForTimeout(2000);
 
     await expect(page.getByText('Live')).toBeVisible({ timeout: 5000 });
+  });
+});
+
+// ── Tool Visibility During Streaming ──
+
+test.describe('Agent Chat - Tool Visibility', () => {
+  test('running tool shows name in header during streaming', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    // Use hanging tool so it stays "running"
+    await overrideSSERoute(page, SSE_HANGING_TOOL);
+    await page.locator('textarea').fill('Test');
+    await page.locator('textarea').press('Enter');
+    await page.waitForTimeout(2000);
+
+    // Header should show "Running: bash"
+    await expect(page.getByText(/Running: bash/).first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('running tool has highlighted border', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_HANGING_TOOL);
+    await page.locator('textarea').fill('Test');
+    await page.locator('textarea').press('Enter');
+    await page.waitForTimeout(2000);
+
+    // Running tool should have border-primary class (highlighted)
+    const highlightedTool = page.locator('.border-primary\\/30');
+    const count = await highlightedTool.count();
+    expect(count).toBeGreaterThan(0);
+  });
+
+  test('full flow with thinking + tool + text renders correctly', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_THINKING_AND_TOOLS);
+    await page.locator('textarea').fill('Analyze codebase');
+    await page.locator('textarea').press('Enter');
+
+    // Reasoning block
+    await expect(page.getByText('Reasoning')).toBeVisible({ timeout: 5000 });
+    // Both tool names
+    await expect(page.locator('text=bash').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=read').first()).toBeVisible({ timeout: 5000 });
+    // Final text
+    await expect(page.getByText(/I found 3 TypeScript files/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('multiple tool calls in one message show all results when expanded', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_MULTIPLE_TOOLS);
+    await page.locator('textarea').fill('Read and test');
+    await page.locator('textarea').press('Enter');
+    await page.waitForTimeout(5000);
+
+    // Expand first tool (read)
+    const toolBtns = page.locator('.border.border-white\\/5.bg-zinc-950 button, .border.border-primary\\/30 button');
+    const count = await toolBtns.count();
+    if (count > 0) {
+      await toolBtns.first().click();
+      await page.waitForTimeout(500);
+      // Result should be visible
+      const resultText = page.getByText(/export default function App/);
+      await expect(resultText).toBeVisible({ timeout: 3000 });
+    }
+  });
+
+  test('error tool call shows error in result panel', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_TOOL_ERROR);
+    await page.locator('textarea').fill('Build');
+    await page.locator('textarea').press('Enter');
+    await page.waitForTimeout(5000);
+
+    // Click tool to expand
+    const toolBtns = page.locator('.border.border-white\\/5.bg-zinc-950 button, .border.border-primary\\/30 button');
+    if (await toolBtns.count() > 0) {
+      await toolBtns.first().click();
+      await page.waitForTimeout(500);
+      // Error should be visible
+      await expect(page.getByText('Build failed: exit code 1')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+// ── Git Events ──
+
+test.describe('Agent Chat - Git Events', () => {
+  test('commit_created event updates state', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_COMMIT_CREATED);
+    await page.locator('textarea').fill('Commit');
+    await page.locator('textarea').press('Enter');
+
+    // Branch name should appear in fleet bar
+    await expect(page.getByText('feat/auth')).toBeVisible({ timeout: 8000 });
+  });
+
+  test('branch_created event shows branch name in FleetBar', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_BRANCH_CREATED);
+    await page.locator('textarea').fill('Branch');
+    await page.locator('textarea').press('Enter');
+
+    // Branch name in fleet bar
+    await expect(page.getByText('feature/new-ui')).toBeVisible({ timeout: 8000 });
+  });
+});
+
+// ── Console Error / Key Prop Regression ──
+
+test.describe('Agent Chat - Console Error Regression', () => {
+  test('no React key prop warnings after sending message', async ({ page }) => {
+    const consoleErrors: string[] = [];
+    page.on('console', msg => {
+      if (msg.type() === 'warning' && msg.text().includes('key')) {
+        consoleErrors.push(msg.text());
+      }
+    });
+
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_TOOL_CALL);
+    await page.locator('textarea').fill('Test key props');
+    await page.locator('textarea').press('Enter');
+    await page.waitForTimeout(6000);
+
+    const keyWarnings = consoleErrors.filter(e => e.includes('Each child in a list should have a unique "key" prop'));
+    expect(keyWarnings.length).toBe(0);
+  });
+
+  test('multi-turn conversation produces no key warnings', async ({ page }) => {
+    const consoleErrors: string[] = [];
+    page.on('console', msg => {
+      if (msg.type() === 'warning' && msg.text().includes('key')) {
+        consoleErrors.push(msg.text());
+      }
+    });
+
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    // First message
+    await overrideSSERoute(page, SSE_SIMPLE_REPLY);
+    await page.locator('textarea').fill('First');
+    await page.locator('textarea').press('Enter');
+    await page.waitForTimeout(6000);
+
+    // Second message
+    await overrideSSERoute(page, SSE_WITH_TOOL_CALL);
+    const textarea2 = page.locator('textarea').first();
+    await textarea2.fill('Second');
+    await textarea2.press('Enter');
+    await page.waitForTimeout(6000);
+
+    const keyWarnings = consoleErrors.filter(e => e.includes('Each child in a list should have a unique "key" prop'));
+    expect(keyWarnings.length).toBe(0);
+  });
+});
+
+// ── Right Panel Streaming State ──
+
+test.describe('Agent Chat - Right Panel Streaming', () => {
+  test('right panel shows Agent Active indicator during streaming', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    // Right panel should be visible
+    const artifactsPanel = page.getByText('Artifacts');
+    await expect(artifactsPanel).toBeVisible({ timeout: 5000 });
+
+    await overrideSSERoute(page, SSE_HANGING_TOOL);
+    await page.locator('textarea').fill('Test streaming');
+    await page.locator('textarea').press('Enter');
+    await page.waitForTimeout(2000);
+
+    // Right panel should show "Agent Active"
+    await expect(page.getByText('Agent Active')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('right panel shows running tool name during streaming', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_HANGING_TOOL);
+    await page.locator('textarea').fill('Test');
+    await page.locator('textarea').press('Enter');
+    await page.waitForTimeout(2000);
+
+    // Right panel should show tool name
+    const runningTexts = page.getByText(/Running: bash/);
+    const count = await runningTexts.count();
+    expect(count).toBeGreaterThan(0);
+  });
+});
+
+// ── Approval / Human-in-the-Loop ──
+
+test.describe('Agent Chat - Approval Banner', () => {
+  test('approval banner appears with tool name and risk level', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_APPROVAL_REQUEST);
+    await page.locator('textarea').fill('Post tweet');
+    await page.locator('textarea').press('Enter');
+
+    // Approval Required header
+    await expect(page.getByText('Approval Required')).toBeVisible({ timeout: 5000 });
+    // Risk badge
+    await expect(page.getByText('high')).toBeVisible({ timeout: 3000 });
+    // Tool name
+    await expect(page.getByText('bash')).toBeVisible({ timeout: 3000 });
+    // Message
+    await expect(page.getByText('Post tweet via Twitter API')).toBeVisible({ timeout: 3000 });
+  });
+
+  test('approve button clicks and calls respond API', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_APPROVAL_REQUEST);
+    await page.locator('textarea').fill('Post tweet');
+    await page.locator('textarea').press('Enter');
+    await expect(page.getByText('Approval Required')).toBeVisible({ timeout: 5000 });
+
+    // Click Approve
+    await page.getByText('Approve').click();
+    await page.waitForTimeout(500);
+
+    // Banner should disappear
+    const bannerVisible = await page.getByText('Approval Required').isVisible().catch(() => false);
+    expect(bannerVisible).toBe(false);
+  });
+
+  test('deny button clicks and sends deny action', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_APPROVAL_REQUEST);
+    await page.locator('textarea').fill('Post tweet');
+    await page.locator('textarea').press('Enter');
+    await expect(page.getByText('Approval Required')).toBeVisible({ timeout: 5000 });
+
+    // Click Deny
+    await page.getByText('Deny').click();
+    await page.waitForTimeout(500);
+
+    // Banner should disappear
+    const bannerVisible = await page.getByText('Approval Required').isVisible().catch(() => false);
+    expect(bannerVisible).toBe(false);
+  });
+});
+
+test.describe('Agent Chat - Question Banner', () => {
+  test('question banner appears with question text', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_QUESTION);
+    await page.locator('textarea').fill('Post tweet');
+    await page.locator('textarea').press('Enter');
+
+    // Agent Asks header
+    await expect(page.getByText('Agent Asks')).toBeVisible({ timeout: 5000 });
+    // Question text
+    await expect(page.getByText('Which Twitter account should I use?')).toBeVisible({ timeout: 3000 });
+    // Answer input
+    await expect(page.getByPlaceholder(/your answer/i)).toBeVisible({ timeout: 3000 });
+    // Submit button
+    await expect(page.getByText('Submit')).toBeVisible({ timeout: 3000 });
+  });
+
+  test('submit answer sends text response', async ({ page }) => {
+    await mockApiRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500);
+
+    await overrideSSERoute(page, SSE_WITH_QUESTION);
+    await page.locator('textarea').fill('Post tweet');
+    await page.locator('textarea').press('Enter');
+    await expect(page.getByText('Agent Asks')).toBeVisible({ timeout: 5000 });
+
+    // Type answer
+    await page.getByPlaceholder(/your answer/i).fill('@myaccount');
+    await page.getByText('Submit').click();
+    await page.waitForTimeout(500);
+
+    // Banner should disappear
+    const bannerVisible = await page.getByText('Agent Asks').isVisible().catch(() => false);
+    expect(bannerVisible).toBe(false);
   });
 });

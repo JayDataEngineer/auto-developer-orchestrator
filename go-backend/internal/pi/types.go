@@ -138,6 +138,10 @@ const (
 	EventPRCreated       = "pr_created"
 	EventWebUpdate       = "web_update"
 	EventSubAgentResult  = "subagent_result"
+
+	// Human-in-the-loop events
+	EventApprovalRequest = "approval_request"
+	EventQuestionAsked   = "question_asked"
 )
 
 // RPC command types
@@ -173,3 +177,47 @@ const (
 	RpcEventStateUpdate     = "state_update"
 	RpcEventError           = "error"
 )
+
+// ApprovalRequestData is sent to the frontend when the agent needs approval.
+type ApprovalRequestData struct {
+	RequestID string                 `json:"requestId"`
+	Type      string                 `json:"type"` // "tool_confirm", "plan", "question"
+	ToolName  string                 `json:"toolName,omitempty"`
+	ToolArgs  map[string]interface{} `json:"toolArgs,omitempty"`
+	Message   string                 `json:"message"`
+	Risk      string                 `json:"risk"` // "low", "medium", "high"
+}
+
+// ApprovalResponse is sent from the frontend when the user responds to an approval.
+type ApprovalResponse struct {
+	Action  string `json:"action"` // "approve", "deny", "answer"
+	Message string `json:"message,omitempty"`
+}
+
+// IsRiskyBashCommand checks if a bash command needs human approval.
+func IsRiskyBashCommand(cmd string) (bool, string) {
+	riskyPatterns := []struct {
+		pattern string
+		reason  string
+	}{
+		{"git push", "Pushing to remote repository"},
+		{"git push-f", "Force pushing to remote"},
+		{"rm -rf", "Recursive file deletion"},
+		{"rm -r", "Recursive file deletion"},
+		{"drop table", "Dropping database table"},
+		{"curl -X DELETE", "HTTP DELETE request"},
+		{"curl -X POST", "HTTP POST request to external service"},
+		{"curl -X PUT", "HTTP PUT request to external service"},
+		{":(){ :|:&", "Fork bomb pattern"},
+	}
+	for _, p := range riskyPatterns {
+		if len(cmd) >= len(p.pattern) {
+			for i := 0; i <= len(cmd)-len(p.pattern); i++ {
+				if cmd[i:i+len(p.pattern)] == p.pattern {
+					return true, p.reason
+				}
+			}
+		}
+	}
+	return false, ""
+}

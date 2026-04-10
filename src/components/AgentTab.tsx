@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { cn } from '../lib/utils';
 import { HistorySidebar } from './HistorySidebar';
 import { RightPanel } from './RightPanel';
 import { PiAgentView } from './PiAgentView';
 import { useArtifacts } from '../hooks/useArtifacts';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ToolCall } from '../lib/pi-events';
 
 interface AgentTabProps {
   selectedProject: string | null;
@@ -16,6 +17,15 @@ export function AgentTab({ selectedProject, projects, refreshProjectData }: Agen
   const [activeAgentId, setActiveAgentId] = useState('default');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [streamingState, setStreamingState] = useState<{
+    isStreaming: boolean;
+    runningTool: ToolCall | undefined;
+    thinking: string;
+  }>({ isStreaming: false, runningTool: undefined, thinking: '' });
+
+  const handleStreamingStateChange = useCallback((state: { isStreaming: boolean; runningTool: ToolCall | undefined; thinking: string }) => {
+    setStreamingState(state);
+  }, []);
 
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
   const sandboxId = selectedProject ? `sandbox-${selectedProject}` : null;
@@ -55,6 +65,7 @@ export function AgentTab({ selectedProject, projects, refreshProjectData }: Agen
           projects={projects}
           isZenMode={false}
           onZenToggle={() => {}}
+          onStreamingStateChange={handleStreamingStateChange}
         />
       </div>
 
@@ -65,6 +76,7 @@ export function AgentTab({ selectedProject, projects, refreshProjectData }: Agen
           sandboxId={sandboxId}
           artifacts={artifactsHook.artifacts}
           artifactsLoading={artifactsHook.loading}
+          streamingState={streamingState}
         />
       )}
 

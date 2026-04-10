@@ -1,20 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   FileText, CheckSquare, StickyNote, Loader, Monitor,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Wrench, Brain
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Artifact } from '../lib/api';
+import { ToolCall } from '../lib/pi-events';
 import { useComputerUse } from '../hooks/useComputerUse';
 import { ArtifactView } from './ArtifactView';
 import { BrowserTools } from './BrowserTools';
 import { SectionHeader } from './ui/SectionHeader';
+
+interface StreamingState {
+  isStreaming: boolean;
+  runningTool: ToolCall | undefined;
+  thinking: string;
+}
 
 interface RightPanelProps {
   agentId: string | null;
   sandboxId: string | null;
   artifacts: Artifact[];
   artifactsLoading: boolean;
+  streamingState?: StreamingState;
 }
 
 // Artifact section with navigation
@@ -84,7 +92,7 @@ function ArtifactSection({ title, icon, items, currentIndex, onNavigate, loading
   );
 }
 
-export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, artifactsLoading }: RightPanelProps) {
+export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, artifactsLoading, streamingState }: RightPanelProps) {
   const cu = useComputerUse();
   const [urlInput, setUrlInput] = useState('https://');
   const [typeText, setTypeText] = useState('');
@@ -170,6 +178,41 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
           ) : undefined
         }
       />
+
+      {/* Live streaming status */}
+      {streamingState?.isStreaming && (
+        <div className="border-b border-primary/20 bg-primary/5 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+            <span className="text-[9px] font-black text-primary uppercase tracking-widest">
+              Agent Active
+            </span>
+          </div>
+          {streamingState.runningTool && (
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <Wrench size={9} className="text-primary/70" />
+              <span className="text-[9px] font-mono text-primary/80">
+                Running: {streamingState.runningTool.name}
+              </span>
+              <span className="text-[8px] font-mono text-zinc-600 truncate">
+                {streamingState.runningTool.name === 'bash' && typeof streamingState.runningTool.args?.command === 'string'
+                  ? String(streamingState.runningTool.args.command).slice(0, 40)
+                  : streamingState.runningTool.name === 'read' || streamingState.runningTool.name === 'write' || streamingState.runningTool.name === 'edit'
+                    ? String(streamingState.runningTool.args?.filePath || streamingState.runningTool.args?.path || '')
+                    : ''}
+              </span>
+            </div>
+          )}
+          {streamingState.thinking && (
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <Brain size={9} className="text-zinc-500" />
+              <span className="text-[9px] font-mono text-zinc-500 truncate">
+                Thinking... ({streamingState.thinking.length} chars)
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">

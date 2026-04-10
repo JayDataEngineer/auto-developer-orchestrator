@@ -22,7 +22,9 @@ export type PiEventType =
   | 'commit_created'
   | 'push_complete'
   | 'pr_created'
-  | 'web_update';
+  | 'web_update'
+  | 'approval_request'
+  | 'question_asked';
 
 // Base event data
 export interface PiTextDelta {
@@ -101,6 +103,16 @@ export interface PiWebUpdate {
   elements: LabeledElement[];
 }
 
+// Approval/question events (human-in-the-loop)
+export interface PiApprovalRequest {
+  requestId: string;
+  type: 'tool_confirm' | 'plan' | 'question';
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  message: string;
+  risk: 'low' | 'medium' | 'high';
+}
+
 // Discriminated union of all Pi events
 export type PiSSEEvent =
   | { type: 'text_delta'; data: PiTextDelta }
@@ -118,7 +130,9 @@ export type PiSSEEvent =
   | { type: 'commit_created'; data: PiCommitCreated }
   | { type: 'push_complete'; data: PiPushComplete }
   | { type: 'pr_created'; data: PiPRCreated }
-  | { type: 'web_update'; data: PiWebUpdate };
+  | { type: 'web_update'; data: PiWebUpdate }
+  | { type: 'approval_request'; data: PiApprovalRequest }
+  | { type: 'question_asked'; data: PiApprovalRequest };
 
 // Tool call tracking
 export interface ToolCall {

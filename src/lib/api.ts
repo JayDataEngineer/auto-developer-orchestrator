@@ -381,6 +381,11 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ project, agentId }),
       }),
+    respond: (project: string, agentId: string, requestId: string, action: 'approve' | 'deny' | 'answer', message?: string) =>
+      apiFetch<{ success: boolean }>('/api/pi/respond', {
+        method: 'POST',
+        body: JSON.stringify({ project, agentId, requestId, action, message }),
+      }),
   },
   computerUse: {
     enable: (sandboxId: string) =>

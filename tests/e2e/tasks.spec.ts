@@ -218,6 +218,18 @@ test.describe('Task Board Tab', () => {
     await expect(page.getByPlaceholder(/model/i)).toHaveValue('smart');
   });
 
+  test('create form submit calls API and shows new task', async ({ page }) => {
+    await page.getByText('New Task').first().click();
+
+    await page.getByPlaceholder(/title/i).fill('Submit Test Task');
+    await page.getByPlaceholder(/description/i).fill('Testing submit');
+    await page.getByText('Create').click();
+    await page.waitForTimeout(1000);
+
+    // The task should appear in the board (API was called) — use .first() as toast may also match
+    await expect(page.getByText('Submit Test Task').first()).toBeVisible({ timeout: 5000 });
+  });
+
   // ── Card Hover Actions ──
 
   test('pending task card shows Start on hover', async ({ page }) => {

@@ -33,16 +33,22 @@ function formatResult(result: unknown): string {
 }
 
 export function ToolCallItem({ tc }: { tc: ToolCall }) {
-  const [open, setOpen] = useState(false);
   const isRunning = !tc.endTime;
+  const [open, setOpen] = useState(isRunning);
   return (
-    <div className="border border-white/5 bg-zinc-950">
+    <div className={cn(
+      "border bg-zinc-950",
+      isRunning ? "border-primary/30 bg-primary/5" : "border-white/5"
+    )}>
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-2 px-3 py-2 text-left"
       >
         {TOOL_ICONS[tc.name] || <Wrench size={11} className="text-muted-foreground" />}
-        <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">
+        <span className={cn(
+          "text-[9px] font-mono uppercase tracking-widest",
+          isRunning ? "text-primary" : "text-muted-foreground"
+        )}>
           {tc.name}
         </span>
         <span className="text-[9px] font-mono text-zinc-600 truncate">
@@ -55,10 +61,17 @@ export function ToolCallItem({ tc }: { tc: ToolCall }) {
           <ChevronRight size={10} className={cn("text-muted-foreground transition-transform", open && "rotate-90")} />
         )}
       </button>
-      {open && !isRunning && formatResult(tc.result) && (
+      {open && formatResult(tc.result) && (
         <div className="px-3 pb-2 border-t border-white/5">
           <pre className="text-[9px] font-mono text-zinc-400 whitespace-pre-wrap max-h-40 overflow-auto">
             {formatResult(tc.result)}
+          </pre>
+        </div>
+      )}
+      {open && tc.error && (
+        <div className="px-3 pb-2 border-t border-white/5">
+          <pre className="text-[9px] font-mono text-red-400 whitespace-pre-wrap max-h-40 overflow-auto">
+            {tc.error}
           </pre>
         </div>
       )}

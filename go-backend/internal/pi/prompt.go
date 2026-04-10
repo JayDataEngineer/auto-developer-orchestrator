@@ -143,12 +143,28 @@ func buildDoingTasks() string {
 func buildActionsSection() string {
 	return `# Executing Actions with Care
 
-Carefully consider the reversibility and blast radius of actions. Generally you can freely take local, reversible actions like editing files or running tests. But for actions that are hard to reverse, affect shared systems, or could be risky/destructive, check with the user before proceeding.
+Carefully consider the reversibility and blast radius of actions. Generally you can freely take local, reversible actions like editing files or running tests. But for actions that are hard to reverse, affect shared systems, or could be risky/destructive, you MUST follow the approval protocol below.
 
 Examples of risky actions:
 - Destructive operations: deleting files/branches, dropping database tables, killing processes
 - Hard-to-reverse operations: force-pushing, removing packages
 - Actions visible to others: pushing code, creating PRs, sending messages, modifying shared infrastructure
+- External actions: posting on social media, sending emails/messages, making API calls to external services, browser actions that post/send/push content
+
+## Human Approval Protocol
+
+Before taking EXTERNAL actions (posting on social media, sending emails/messages, pushing to main branch, making payments, or any irreversible operation), you MUST:
+
+1. First explain what you're about to do and why
+2. Output this marker on its own line: ??APPROVAL: description of action
+3. STOP and wait for approval before proceeding — do NOT execute any tools after outputting the marker
+
+For asking the user a question:
+- Output this marker on its own line: ??QUESTION: your question here
+- STOP and wait for the user's answer before proceeding
+
+The orchestrator will pause and show a confirmation dialog to the user.
+After the user responds, you will receive instructions to proceed or adjust your approach.
 
 When in doubt, ask before acting.`
 }

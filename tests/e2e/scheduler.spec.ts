@@ -174,6 +174,20 @@ test.describe('Scheduler - Create Job Form', () => {
     await expect(createBtn).not.toBeDisabled();
   });
 
+  test('create form submit calls API and closes form', async ({ page }) => {
+    await page.getByText('New Job').click();
+    await page.waitForTimeout(500);
+
+    await page.getByPlaceholder(/daily status check/i).fill('E2E Test Job');
+    await page.getByPlaceholder(/what should the agent do/i).fill('Run e2e tests');
+    await page.getByText('Create Job').click();
+    await page.waitForTimeout(1000);
+
+    // Form should close after submit (API was called)
+    const formVisible = await page.getByText('New Scheduled Job').isVisible().catch(() => false);
+    expect(formVisible).toBe(false);
+  });
+
   test('create form cancel closes form', async ({ page }) => {
     await page.getByText('New Job').click();
     await page.waitForTimeout(500);

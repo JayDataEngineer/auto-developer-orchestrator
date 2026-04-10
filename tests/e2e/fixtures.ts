@@ -174,6 +174,49 @@ export const SSE_WITH_SUBAGENT_SPAWN: SSEEvent[] = [
   { type: 'agent_end', data: { input: 300, output: 150, cache: 0 } },
 ];
 
+/** Pre-built SSE stream: full flow with thinking + tool call + text */
+export const SSE_WITH_THINKING_AND_TOOLS: SSEEvent[] = [
+  { type: 'agent_start', data: {} },
+  { type: 'thinking_delta', data: { text: 'I need to analyze the codebase structure first...' } },
+  { type: 'tool_execution_start', data: { toolName: 'bash', toolId: 'tool-full-1', args: { command: 'find src -type f -name "*.ts"' } } },
+  { type: 'tool_execution_end', data: { toolId: 'tool-full-1', toolName: 'bash', result: 'src/index.ts\nsrc/App.tsx\nsrc/utils.ts', error: '' } },
+  { type: 'tool_execution_start', data: { toolName: 'read', toolId: 'tool-full-2', args: { filePath: '/src/App.tsx' } } },
+  { type: 'tool_execution_end', data: { toolId: 'tool-full-2', toolName: 'read', result: 'export default function App() { return <div>Hello</div> }', error: '' } },
+  { type: 'text_delta', data: { text: 'I found 3 TypeScript files in the project. The main App component renders a simple div.' } },
+  { type: 'agent_end', data: { input: 400, output: 250, cache: 20 } },
+];
+
+/** Pre-built SSE stream: agent creates a commit */
+export const SSE_WITH_COMMIT_CREATED: SSEEvent[] = [
+  { type: 'agent_start', data: {} },
+  { type: 'text_delta', data: { text: 'I have committed the changes.' } },
+  { type: 'commit_created', data: { message: 'feat: add user authentication', branch: 'feat/auth' } },
+  { type: 'agent_end', data: { input: 150, output: 80, cache: 0 } },
+];
+
+/** Pre-built SSE stream: agent creates a branch */
+export const SSE_WITH_BRANCH_CREATED: SSEEvent[] = [
+  { type: 'agent_start', data: {} },
+  { type: 'branch_created', data: { branch: 'feature/new-ui' } },
+  { type: 'text_delta', data: { text: 'Created new branch for the UI work.' } },
+  { type: 'agent_end', data: { input: 100, output: 60, cache: 0 } },
+];
+
+/** Pre-built SSE stream: agent requests approval before a risky action */
+export const SSE_WITH_APPROVAL_REQUEST: SSEEvent[] = [
+  { type: 'agent_start', data: {} },
+  { type: 'text_delta', data: { text: 'I will post this tweet now.' } },
+  { type: 'approval_request', data: { requestId: 'req-1', type: 'tool_confirm', toolName: 'bash', message: 'Post tweet via Twitter API', risk: 'high' } },
+  // No agent_end — stream stays open waiting for approval
+];
+
+/** Pre-built SSE stream: agent asks the user a question */
+export const SSE_WITH_QUESTION: SSEEvent[] = [
+  { type: 'agent_start', data: {} },
+  { type: 'text_delta', data: { text: 'I need some information.' } },
+  { type: 'question_asked', data: { requestId: 'req-2', type: 'question', message: 'Which Twitter account should I use?', risk: 'low' } },
+];
+
 // ─── Route Mocking Helpers ────────────────────────────────────────
 
 interface MockConfig {
@@ -488,6 +531,16 @@ export async function mockApiRoutes(page: Page, config: MockConfig = {}) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ subAgents: [] }),
+    });
+  });
+
+  // ── Approval response endpoint ──
+
+  await page.route('**/api/pi/respond', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true }),
     });
   });
 
