@@ -28,10 +28,52 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [desktopFull, setDesktopFull] = useState(false);
+  const [resolvedSandboxId, setResolvedSandboxId] = useState<string | null>(null);
 
-  const sandboxId = selectedProject ? `sandbox-${selectedProject}` : null;
   const cu = useComputerUse();
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
+
+  // Resolve the real sandbox ID from the API
+  useEffect(() => {
+    if (!selectedProject) {
+      setResolvedSandboxId(null);
+      return;
+    }
+
+    let cancelled = false;
+    const resolveSandboxId = async () => {
+      try {
+        const res = await fetch('/api/sandbox/');
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const sandboxes = Array.isArray(data) ? data : (data.sandboxes || []);
+
+        if (sandboxes.length === 0 || cancelled) return;
+
+        // Try to find a sandbox matching the project name
+        const projectName = selectedProject;
+        const match = sandboxes.find((s: any) =>
+          s.id === projectName ||
+          s.id === `sandbox-${projectName}` ||
+          s.projectPath?.includes(projectName)
+        );
+
+        if (!cancelled) {
+          setResolvedSandboxId(match ? match.id : sandboxes[0].id);
+        }
+      } catch {
+        // API not available — fall back to hardcoded ID
+        if (!cancelled) {
+          setResolvedSandboxId(`sandbox-${selectedProject}`);
+        }
+      }
+    };
+
+    resolveSandboxId();
+    return () => { cancelled = true; };
+  }, [selectedProject]);
+
+  const sandboxId = resolvedSandboxId;
 
   // Auto-enable computer use and fetch viewer info on mount
   useEffect(() => {

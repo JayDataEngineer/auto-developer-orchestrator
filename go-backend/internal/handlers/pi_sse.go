@@ -61,22 +61,51 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 		return nil // Frontend handles via text_delta accumulation
 
 	case pi.RpcEventToolStart:
+		// Tool fields may appear at top level OR nested under "data"
+		toolName := event.Data.ToolName
+		if toolName == "" {
+			toolName = event.ToolName
+		}
+		toolArgs := event.Data.ToolArgs
+		if toolArgs == nil {
+			toolArgs = event.ToolArgs
+		}
+		toolId := event.Data.ToolId
+		if toolId == "" {
+			toolId = event.ToolId
+		}
 		return &sseEvent{
 			Type: pi.EventToolStart,
 			Data: map[string]interface{}{
-				"toolName": event.Data.ToolName,
-				"args":     event.Data.ToolArgs,
-				"toolId":   event.Data.ToolId,
+				"toolName": toolName,
+				"args":     toolArgs,
+				"toolId":   toolId,
 			},
 		}
 	case pi.RpcEventToolEnd:
+		toolName := event.Data.ToolName
+		if toolName == "" {
+			toolName = event.ToolName
+		}
+		toolId := event.Data.ToolId
+		if toolId == "" {
+			toolId = event.ToolId
+		}
+		result := event.Data.Result
+		if result == nil {
+			result = event.Result
+		}
+		errMsg := event.Data.Error
+		if errMsg == "" {
+			errMsg = event.Error
+		}
 		return &sseEvent{
 			Type: pi.EventToolEnd,
 			Data: map[string]interface{}{
-				"toolName": event.Data.ToolName,
-				"toolId":   event.Data.ToolId,
-				"result":   event.Data.Result,
-				"error":    event.Data.Error,
+				"toolName": toolName,
+				"toolId":   toolId,
+				"result":   result,
+				"error":    errMsg,
 			},
 		}
 	case pi.RpcEventAgentStart:

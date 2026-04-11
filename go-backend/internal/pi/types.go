@@ -30,6 +30,8 @@ type RpcResponse struct {
 
 // AgentEvent represents a streaming event from the Pi agent.
 // Pi's RPC protocol puts most data at the top level (not nested under "data").
+// Tool fields (toolName, args, toolId) can appear either at the top level
+// OR nested under "data" depending on the Pi version.
 type AgentEvent struct {
 	Type string `json:"type"`
 	// Top-level fields from pi RPC
@@ -37,6 +39,12 @@ type AgentEvent struct {
 	Message               json.RawMessage        `json:"message,omitempty"`
 	Messages              json.RawMessage        `json:"messages,omitempty"`
 	ToolResults           json.RawMessage        `json:"toolResults,omitempty"`
+	// Top-level tool fields (Pi sends these directly, not nested under "data")
+	ToolName string                 `json:"toolName,omitempty"`
+	ToolArgs map[string]interface{} `json:"args,omitempty"`
+	ToolId   string                 `json:"toolId,omitempty"`
+	Result   interface{}            `json:"result,omitempty"`
+	Error    string                 `json:"error,omitempty"`
 	// Legacy "data" field for error/state events
 	Data AgentEventData `json:"data,omitempty"`
 }

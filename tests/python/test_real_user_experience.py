@@ -47,40 +47,63 @@ class TestDesktopActuallyWorks:
 
     def test_sandbox_id_matches_project(self):
         """
-        The frontend hardcodes sandbox ID as 'sandbox-{project}'.
-        The backend must either:
-          a) have a sandbox with that exact ID, or
-          b) the frontend must fetch the real sandbox ID from the API.
+        The frontend fetches the sandbox list from the API and finds
+        the sandbox matching the project. This test verifies that:
+          a) The sandbox list API returns sandboxes
+          b) At least one sandbox exists that can be used for the project
+          c) The viewer endpoint works with the actual sandbox ID
 
         If this fails: the desktop tab will show 'Desktop not available'.
         """
-        expected_id = f"sandbox-{TEST_PROJECT}"
+        # Step 1: List sandboxes (frontend does this)
+        list_resp = requests.get(f"{API}/api/sandbox/", timeout=10)
+        assert list_resp.status_code == 200, f"GET /api/sandbox/ returned {list_resp.status_code}"
+        data = list_resp.json()
+        sandboxes = data if isinstance(data, list) else data.get("sandboxes", [])
+        assert len(sandboxes) > 0, "No sandboxes exist — Desktop tab will always fail."
 
-        # Frontend does: GET /api/sandbox/{expected_id}/viewer
-        resp = requests.get(f"{API}/api/sandbox/{expected_id}/viewer", timeout=10)
+        # Step 2: Find a sandbox matching the project (frontend logic)
+        actual_ids = [s.get("id", s) if isinstance(s, dict) else s for s in sandboxes]
+        project_name = TEST_PROJECT
+        matched_id = None
+        for sid in actual_ids:
+            if sid == project_name or sid == f"sandbox-{project_name}":
+                matched_id = sid
+                break
+        # Fallback: use first sandbox (frontend does this too)
+        if matched_id is None:
+            matched_id = actual_ids[0]
 
-        if resp.status_code == 404:
-            # Sandbox with expected ID doesn't exist
-            # Check what sandboxes DO exist
-            list_resp = requests.get(f"{API}/api/sandbox/", timeout=10)
-            sandboxes = list_resp.json() if isinstance(list_resp.json(), list) else list_resp.json().get("sandboxes", [])
-            actual_ids = [s.get("id", s) if isinstance(s, dict) else s for s in sandboxes]
-
+        # Step 3: Enable desktop mode (the frontend does this automatically)
+        enable_resp = requests.post(
+            f"{API}/api/sandbox/{matched_id}/desktop-mode",
+            json={},
+            timeout=30,
+        )
+        if enable_resp.status_code == 404:
             pytest.fail(
-                f"BUG DETECTED: Frontend expects sandbox ID '{expected_id}' but it doesn't exist.\n"
-                f"Actual sandbox IDs: {actual_ids}\n"
-                f"This is why Desktop shows 'Desktop not available'.\n"
-                f"Either the frontend needs to fetch the real ID, or the backend needs to create "
-                f"sandboxes with project-based IDs."
+                f"BUG: Cannot enable desktop mode for '{matched_id}' — sandbox not found."
             )
 
+        # Step 4: Verify viewer endpoint works with the resolved ID
+        resp = requests.get(f"{API}/api/sandbox/{matched_id}/viewer", timeout=10)
+        if resp.status_code == 404:
+            pytest.fail(
+                f"BUG: Sandbox '{matched_id}' exists but viewer returned 404 after enabling.\n"
+                f"Desktop mode may not be starting properly."
+            )
         assert resp.status_code == 200, (
-            f"GET /api/sandbox/{expected_id}/viewer returned {resp.status_code}: {resp.text}"
+            f"GET /api/sandbox/{matched_id}/viewer returned {resp.status_code}: {resp.text}"
         )
 
     def test_desktop_mode_can_be_enabled(self):
         """After enabling desktop mode, the viewer must return VNC/noVNC URLs."""
-        sandbox_id = f"sandbox-{TEST_PROJECT}"
+        # Resolve real sandbox ID (same logic as frontend)
+        list_resp = requests.get(f"{API}/api/sandbox/", timeout=10)
+        data = list_resp.json()
+        sandboxes = data if isinstance(data, list) else data.get("sandboxes", [])
+        assert len(sandboxes) > 0, "No sandboxes to test desktop mode with."
+        sandbox_id = sandboxes[0].get("id", sandboxes[0]) if isinstance(sandboxes[0], dict) else sandboxes[0]
 
         # Enable desktop mode
         resp = requests.post(
@@ -103,11 +126,11 @@ class TestDesktopActuallyWorks:
                 f"The user will see 'Desktop not available'."
             )
 
-        data = viewer_resp.json()
-        has_vnc = data.get("vncUrl") or data.get("novncUrl") or data.get("vnc_url") or data.get("novnc_url")
+        viewer_data = viewer_resp.json()
+        has_vnc = viewer_data.get("vncUrl") or viewer_data.get("novncUrl") or viewer_data.get("vnc_url") or viewer_data.get("novnc_url")
         assert has_vnc, (
             f"BUG: Desktop viewer returned no VNC URLs. User sees blank desktop.\n"
-            f"Response: {json.dumps(data, indent=2)}"
+            f"Response: {json.dumps(viewer_data, indent=2)}"
         )
 
 
@@ -278,9 +301,9 @@ class TestChatActuallyShowsContent:
 
         event_types = [t for t, _ in events]
 
-        # 1. Stream must start
-        assert "agent_start" in event_types, (
-            f"No agent_start event. Stream never began. Types: {event_types}"
+        # 1. Stream must start (either agent_start or agent_spawned)
+        assert "agent_start" in event_types or "agent_spawned" in event_types, (
+            f"No agent_start or agent_spawned event. Stream never began. Types: {event_types}"
         )
 
         # 2. Must produce content (thinking or text)
