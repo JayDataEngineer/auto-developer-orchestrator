@@ -202,13 +202,6 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	// Send agent_start event so the frontend resets streaming state
-	startData, _ := json.Marshal(map[string]interface{}{})
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", pi.EventAgentStart, string(startData))
-	if canFlush {
-		flusher.Flush()
-	}
-
 	// Send branch_created event if auto-branched
 	if autoBranchName != "" {
 		data, _ := json.Marshal(map[string]string{"branch": autoBranchName})
@@ -242,6 +235,7 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	var assistantText, assistantThinking string
 	var assistantToolCalls []json.RawMessage
 	var approvalTriggered bool
+	var lastToolStartID string // Track tool start ID for matching with end events
 
 	// Keepalive ticker — sends a comment every 15s to prevent client/proxy timeouts
 	keepalive := time.NewTicker(15 * time.Second)
@@ -267,6 +261,26 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 			sseEvent := h.mapEventToSSE(event)
 			if sseEvent == nil {
 				continue
+			}
+
+			// Track tool start IDs so end events can be matched when Pi doesn't provide IDs
+			if sseEvent.Type == pi.EventToolStart {
+				if dataMap, ok := sseEvent.Data.(map[string]interface{}); ok {
+					tid, _ := dataMap["toolId"].(string)
+					if tid == "" {
+						tid = nextToolFallbackId()
+						dataMap["toolId"] = tid
+					}
+					lastToolStartID = tid
+				}
+			}
+			if sseEvent.Type == pi.EventToolEnd {
+				if dataMap, ok := sseEvent.Data.(map[string]interface{}); ok {
+					tid, _ := dataMap["toolId"].(string)
+					if tid == "" && lastToolStartID != "" {
+						dataMap["toolId"] = lastToolStartID
+					}
+				}
 			}
 
 			// Intercept risky bash commands for approval before forwarding to SSE

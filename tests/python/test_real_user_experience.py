@@ -19,7 +19,7 @@ pytestmark = [pytest.mark.api, pytest.mark.slow]
 
 API = API_BASE_URL
 TEST_PROJECT = "test-repo"
-TEST_MODEL = "google/gemini-2.0-flash-001"
+TEST_MODEL = "qwen-35-27-vision"
 
 
 # ---------------------------------------------------------------------------

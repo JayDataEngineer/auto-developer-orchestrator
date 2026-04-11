@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
 )
@@ -12,6 +13,14 @@ import (
 type sseEvent struct {
 	Type string      `json:"type"`
 	Data interface{} `json:"data"`
+}
+
+// toolIdCounter generates unique IDs for tool calls when Pi doesn't provide one.
+var toolIdCounter int64
+
+func nextToolFallbackId() string {
+	n := atomic.AddInt64(&toolIdCounter, 1)
+	return fmt.Sprintf("tool-%d", n)
 }
 
 // writeSSE sends a single SSE event to the response writer.
@@ -74,6 +83,7 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 		if toolId == "" {
 			toolId = event.ToolId
 		}
+		// Note: if toolId is still empty, the stream loop will assign a fallback ID
 		return &sseEvent{
 			Type: pi.EventToolStart,
 			Data: map[string]interface{}{
@@ -91,6 +101,7 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 		if toolId == "" {
 			toolId = event.ToolId
 		}
+		// Note: if toolId is still empty, the stream loop will match with lastToolStartID
 		result := event.Data.Result
 		if result == nil {
 			result = event.Result

@@ -198,7 +198,7 @@ class TestPiPromptSSE:
 class TestPiToolUse:
     """Test that the model can use tools (bash, file read/write) via SSE."""
 
-    def _stream_prompt(self, api_url, api_session, test_project, message, model="google/gemini-2.0-flash-001"):
+    def _stream_prompt(self, api_url, api_session, test_project, message, model="qwen-35-27-vision"):
         """Helper: send a prompt and collect all SSE events."""
         return list(post_and_stream(
             api_session,
