@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileText, CheckSquare, StickyNote, Loader, Monitor,
-  Settings, Wrench, Brain, X, Github, Globe
+  Settings, Wrench, Brain, Github, Globe
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Artifact } from '../lib/api';
 import { ToolCall } from '../lib/pi-events';
-import { useComputerUse } from '../hooks/useComputerUse';
 import { ArtifactView } from './ArtifactView';
 import { BrowserTools } from './BrowserTools';
 
@@ -16,12 +15,36 @@ interface StreamingState {
   thinking: string;
 }
 
+// Match the shape returned by useComputerUse
+interface CUState {
+  enabled: boolean;
+  loading: boolean;
+  error: string | null;
+  sandboxId: string | null;
+  screenshot: string | null;
+  description: string | null;
+  elements: any[];
+  url: string;
+  title: string;
+  cdpPort: number | null;
+  enableComputerUse: (sandboxId: string) => Promise<void>;
+  disableComputerUse: () => Promise<void>;
+  takeScreenshot: () => Promise<void>;
+  getSnapshot: () => Promise<void>;
+  act: (action: any) => Promise<void>;
+  navigate: (url: string) => void;
+  clickElement: (element: number) => void;
+  typeText: (element: number, text: string, submit?: boolean) => void;
+  scroll: (direction: string, amount?: number) => void;
+}
+
 interface RightPanelProps {
   agentId: string | null;
   sandboxId: string | null;
   artifacts: Artifact[];
   artifactsLoading: boolean;
   streamingState?: StreamingState;
+  cu: CUState;
   showSettings?: boolean;
   onShowSettingsChange?: (show: boolean) => void;
 }
@@ -39,8 +62,7 @@ const typeLabels: Record<Artifact['type'], string> = {
   notes: 'Notes',
 };
 
-export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, artifactsLoading, streamingState, showSettings: showSettingsProp, onShowSettingsChange }: RightPanelProps) {
-  const cu = useComputerUse();
+export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, streamingState, cu, showSettings: showSettingsProp, onShowSettingsChange }: RightPanelProps) {
   const [urlInput, setUrlInput] = useState('https://');
   const [typeText, setTypeText] = useState('');
   const [selectedElement, setSelectedElement] = useState<number | null>(null);
@@ -53,9 +75,6 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
   const showSettings = showSettingsProp ?? false;
   const setShowSettings = onShowSettingsChange ?? (() => {});
 
-  const sandboxId = passedSandboxId
-    || (agentId ? `sandbox-${agentId.split(':')[0]}` : null);
-
   const selectedArtifact = artifacts.find(a => a.id === selectedArtifactId) || null;
 
   // Auto-select first artifact when list changes
@@ -64,10 +83,6 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
       setSelectedArtifactId(artifacts[0].id);
     }
   }, [artifacts, selectedArtifactId]);
-
-  const handleEnableCU = () => {
-    if (sandboxId) cu.enableComputerUse(sandboxId);
-  };
 
   const handleNavigate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -284,7 +299,7 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
             onNavigate={handleNavigate}
             onElementClick={handleElementClick}
             onType={handleType}
-            onEnable={handleEnableCU}
+            onEnable={() => { if (sandboxId) cu.enableComputerUse(sandboxId); }}
           />
         )}
 

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { cn } from '../lib/utils';
-import { useComputerUse } from '../hooks/useComputerUse';
 import {
   Monitor, Maximize2, Minimize2,
   ExternalLink, Loader, AlertCircle
@@ -8,9 +7,16 @@ import {
 
 interface ComputerUseTabProps {
   selectedProject: string | null;
+  sandboxId: string | null;
+  cu: {
+    enabled: boolean;
+    loading: boolean;
+    error: string | null;
+    sandboxId: string | null;
+  };
 }
 
-export function ComputerUseTab({ selectedProject }: ComputerUseTabProps) {
+export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTabProps) {
   const [session, setSession] = useState<{
     mode?: string;
     cdpUrl?: string;
@@ -20,71 +26,16 @@ export function ComputerUseTab({ selectedProject }: ComputerUseTabProps) {
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [desktopFull, setDesktopFull] = useState(false);
-  const [resolvedSandboxId, setResolvedSandboxId] = useState<string | null>(null);
 
-  const cu = useComputerUse();
-
-  // Resolve the real sandbox ID from the API
+  // Fetch viewer info once computer use is enabled
   useEffect(() => {
-    if (!selectedProject) {
-      setResolvedSandboxId(null);
-      return;
-    }
-
-    let cancelled = false;
-    const resolveSandboxId = async () => {
-      try {
-        const res = await fetch('/api/sandbox/');
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        const sandboxes = Array.isArray(data) ? data : (data.sandboxes || []);
-
-        if (sandboxes.length === 0 || cancelled) return;
-
-        const projectName = selectedProject;
-        const match = sandboxes.find((s: any) =>
-          s.id === projectName ||
-          s.id === `sandbox-${projectName}` ||
-          s.projectPath?.includes(projectName)
-        );
-
-        if (!cancelled) {
-          setResolvedSandboxId(match ? match.id : sandboxes[0].id);
-        }
-      } catch {
-        if (!cancelled) {
-          setResolvedSandboxId(`sandbox-${selectedProject}`);
-        }
-      }
-    };
-
-    resolveSandboxId();
-    return () => { cancelled = true; };
-  }, [selectedProject]);
-
-  const sandboxId = resolvedSandboxId;
-
-  // Auto-enable computer use and fetch viewer info on mount
-  useEffect(() => {
-    if (!sandboxId) return;
+    if (!sandboxId || !cu.enabled) return;
 
     let cancelled = false;
     setSessionLoading(true);
     setSessionError(null);
 
-    const init = async () => {
-      if (!cu.enabled || cu.sandboxId !== sandboxId) {
-        try {
-          await cu.enableComputerUse(sandboxId);
-        } catch (err) {
-          if (!cancelled) {
-            setSessionError(String(err));
-            setSessionLoading(false);
-          }
-          return;
-        }
-      }
-
+    const fetchViewer = async () => {
       try {
         const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
         if (!res.ok) throw new Error('Desktop session not found');
@@ -101,9 +52,9 @@ export function ComputerUseTab({ selectedProject }: ComputerUseTabProps) {
       }
     };
 
-    init();
+    fetchViewer();
     return () => { cancelled = true; };
-  }, [sandboxId]);
+  }, [sandboxId, cu.enabled]);
 
   // Retry / explicit start
   const startDesktop = useCallback(async () => {
@@ -111,7 +62,6 @@ export function ComputerUseTab({ selectedProject }: ComputerUseTabProps) {
     setSessionLoading(true);
     setSessionError(null);
     try {
-      await cu.enableComputerUse(sandboxId);
       const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
       if (!res.ok) throw new Error('Failed to start desktop');
       const data = await res.json();
@@ -122,7 +72,7 @@ export function ComputerUseTab({ selectedProject }: ComputerUseTabProps) {
     } finally {
       setSessionLoading(false);
     }
-  }, [sandboxId, cu]);
+  }, [sandboxId]);
 
   // Build noVNC iframe URL
   const novncUrl = sandboxId
@@ -147,9 +97,19 @@ export function ComputerUseTab({ selectedProject }: ComputerUseTabProps) {
           {sandboxId ? sandboxId : 'Select a project to start'}
         </span>
         <div className="flex-1" />
+        {cu.loading && !sessionLoading && (
+          <span className="text-[8px] font-mono text-zinc-500 flex items-center gap-1">
+            <Loader size={8} className="animate-spin" /> Enabling...
+          </span>
+        )}
         {sessionLoading && (
           <span className="text-[8px] font-mono text-zinc-500 flex items-center gap-1">
             <Loader size={8} className="animate-spin" /> Starting desktop...
+          </span>
+        )}
+        {cu.error && (
+          <span className="text-[8px] font-mono text-red-400 flex items-center gap-1">
+            <AlertCircle size={8} /> {cu.error}
           </span>
         )}
         {sessionError && (
@@ -191,24 +151,26 @@ export function ComputerUseTab({ selectedProject }: ComputerUseTabProps) {
               <p className="text-xs font-mono text-zinc-700 mt-2">Your agent will control this environment</p>
             </div>
           </div>
-        ) : sessionLoading ? (
+        ) : cu.loading || sessionLoading ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-              <p className="text-sm font-mono text-zinc-500">Starting desktop...</p>
+              <p className="text-sm font-mono text-zinc-500">
+                {cu.loading ? 'Enabling computer use...' : 'Starting desktop...'}
+              </p>
             </div>
           </div>
-        ) : sessionError ? (
+        ) : cu.error || sessionError ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center max-w-md">
               <AlertCircle size={48} className="mx-auto mb-4 text-red-400/50" />
               <p className="text-sm font-mono text-zinc-400 mb-2">Desktop not available</p>
-              <p className="text-xs font-mono text-zinc-600">{sessionError}</p>
+              <p className="text-xs font-mono text-zinc-600">{cu.error || sessionError}</p>
               <button
                 onClick={startDesktop}
                 className="mt-4 px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
               >
-                Start Desktop
+                Retry
               </button>
             </div>
           </div>
@@ -219,7 +181,7 @@ export function ComputerUseTab({ selectedProject }: ComputerUseTabProps) {
             title="Desktop"
             allow="clipboard-read; clipboard-write"
           />
-        ) : session ? (
+        ) : cu.enabled && !session ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
               <Loader size={24} className="mx-auto mb-3 text-zinc-600 animate-spin" />
@@ -230,14 +192,7 @@ export function ComputerUseTab({ selectedProject }: ComputerUseTabProps) {
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
               <Monitor size={32} className="mx-auto mb-3 text-zinc-600" />
-              <p className="text-sm font-mono text-zinc-500">Desktop not available</p>
-              <p className="text-xs font-mono text-zinc-700 mt-1">The sandbox may not be running</p>
-              <button
-                onClick={startDesktop}
-                className="mt-4 px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
-              >
-                Start Desktop
-              </button>
+              <p className="text-sm font-mono text-zinc-500">Initializing...</p>
             </div>
           </div>
         )}

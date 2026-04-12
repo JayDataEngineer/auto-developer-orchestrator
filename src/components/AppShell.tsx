@@ -1,30 +1,29 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { cn } from '../lib/utils';
 import { useOrchestrator } from '../hooks/useOrchestrator';
+import { useComputerUse } from '../hooks/useComputerUse';
 import { HistorySidebar } from './HistorySidebar';
 import { RightPanel } from './RightPanel';
 import { AgentTab } from './AgentTab';
 import { ComputerUseTab } from './ComputerUseTab';
 import { TaskBoardTab } from './TaskBoardTab';
-import { SchedulerView } from './SchedulerView';
 import { ToastProvider } from './ui/Toast';
 import { useResizable } from '../hooks/useResizable';
 import { useArtifacts } from '../hooks/useArtifacts';
 import {
-  Zap, Settings, ChevronDown, LayoutGrid, Monitor, Clock,
+  Zap, Settings, ChevronDown, LayoutGrid, Monitor,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
 import { api } from '../lib/api';
 import { ToolCall } from '../lib/pi-events';
 
-type TabId = 'agent' | 'tasks' | 'desktop' | 'scheduler';
+type TabId = 'agent' | 'tasks' | 'desktop';
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'agent', label: 'Agent', icon: <Zap size={10} /> },
   { id: 'tasks', label: 'Tasks', icon: <LayoutGrid size={10} /> },
   { id: 'desktop', label: 'Desktop', icon: <Monitor size={10} /> },
-  { id: 'scheduler', label: 'Scheduler', icon: <Clock size={10} /> },
 ];
 
 function AppShellInner() {
@@ -48,9 +47,55 @@ function AppShellInner() {
   const { projects, githubUser } = state;
   const { refreshProjectData } = actions;
 
+  // Single shared computer use instance — one state, one sandbox
+  const cu = useComputerUse();
+
+  // Resolve the real sandbox ID from the API (shared across all tabs)
+  const [resolvedSandboxId, setResolvedSandboxId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!selectedProject) {
+      setResolvedSandboxId(null);
+      return;
+    }
+
+    let cancelled = false;
+    const resolve = async () => {
+      try {
+        const res = await fetch('/api/sandbox/');
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const sandboxes = Array.isArray(data) ? data : (data.sandboxes || []);
+        if (sandboxes.length === 0 || cancelled) return;
+        const match = sandboxes.find((s: any) =>
+          s.id === selectedProject ||
+          s.id === `sandbox-${selectedProject}` ||
+          s.projectPath?.includes(selectedProject)
+        );
+        if (!cancelled) {
+          setResolvedSandboxId(match ? match.id : sandboxes[0].id);
+        }
+      } catch {
+        if (!cancelled) {
+          setResolvedSandboxId(`sandbox-${selectedProject}`);
+        }
+      }
+    };
+
+    resolve();
+    return () => { cancelled = true; };
+  }, [selectedProject]);
+
+  // Auto-enable computer use when sandbox is resolved
+  const enableRef = useRef(cu.enableComputerUse);
+  enableRef.current = cu.enableComputerUse;
+  useEffect(() => {
+    if (!resolvedSandboxId) return;
+    if (cu.enabled && cu.sandboxId === resolvedSandboxId) return;
+    enableRef.current(resolvedSandboxId);
+  }, [resolvedSandboxId, cu.enabled, cu.sandboxId]);
+
   // Artifacts hook — shared across all tabs
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
-  const sandboxId = selectedProject ? `sandbox-${selectedProject}` : null;
 
   // Resizable left sidebar
   const {
@@ -96,7 +141,6 @@ function AppShellInner() {
           case '1': e.preventDefault(); setActiveTab('agent'); break;
           case '2': e.preventDefault(); setActiveTab('tasks'); break;
           case '3': e.preventDefault(); setActiveTab('desktop'); break;
-          case '4': e.preventDefault(); setActiveTab('scheduler'); break;
           case 'k':
             e.preventDefault();
             setActiveTab('agent');
@@ -206,9 +250,7 @@ function AppShellInner() {
           title="Settings"
         >
           <Settings size={12} />
-          <span className="hidden md:inline">
-            {showSettings ? 'Settings' : 'Settings'}
-          </span>
+          <span className="hidden md:inline">Settings</span>
         </button>
       </div>
 
@@ -252,10 +294,11 @@ function AppShellInner() {
             <TaskBoardTab selectedProject={selectedProject} />
           )}
           {activeTab === 'desktop' && (
-            <ComputerUseTab selectedProject={selectedProject} />
-          )}
-          {activeTab === 'scheduler' && (
-            <SchedulerView projects={projects} />
+            <ComputerUseTab
+              selectedProject={selectedProject}
+              sandboxId={resolvedSandboxId}
+              cu={cu}
+            />
           )}
         </div>
 
@@ -272,10 +315,11 @@ function AppShellInner() {
             />
             <RightPanel
               agentId={selectedProject ? `${selectedProject}:${activeAgentId}` : null}
-              sandboxId={sandboxId}
+              sandboxId={resolvedSandboxId}
               artifacts={artifactsHook.artifacts}
               artifactsLoading={artifactsHook.loading}
               streamingState={streamingState}
+              cu={cu}
               showSettings={showSettings}
               onShowSettingsChange={setShowSettings}
             />
