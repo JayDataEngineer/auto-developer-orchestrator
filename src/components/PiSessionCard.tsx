@@ -56,10 +56,10 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
       {/* Project name + agent index + status */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-[11px] font-black uppercase tracking-widest text-white truncate">
+          <span className="text-xs font-black uppercase tracking-widest text-white truncate">
             {project}
           </span>
-          <span className="text-[9px] font-mono text-muted-foreground">
+          <span className="text-xs font-mono text-muted-foreground">
             #{agentIndex}
           </span>
         </div>
@@ -67,17 +67,17 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
           {state.isStreaming ? (
             <>
               <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              <span className="text-[8px] font-black text-primary uppercase tracking-widest">stream</span>
+              <span className="text-xs font-black text-primary uppercase tracking-widest">stream</span>
             </>
           ) : state.error ? (
             <>
               <AlertCircle size={10} className="text-red-400" />
-              <span className="text-[8px] font-mono text-red-400 uppercase">error</span>
+              <span className="text-xs font-mono text-red-400 uppercase">error</span>
             </>
           ) : (
             <>
               <div className="w-1.5 h-1.5 rounded-full bg-zinc-700" />
-              <span className="text-[8px] font-mono text-muted-foreground uppercase">idle</span>
+              <span className="text-xs font-mono text-muted-foreground uppercase">idle</span>
             </>
           )}
         </div>
@@ -86,12 +86,12 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
       {/* Model name + Namespace */}
       <div className="flex items-center gap-2">
         {state.model && (
-          <div className="text-[9px] font-mono text-muted truncate">{state.model}</div>
+          <div className="text-xs font-mono text-muted truncate">{state.model}</div>
         )}
         {namespace && (
           <div className="flex items-center gap-1 px-1.5 py-0.5 border border-white/5 rounded bg-white/[0.02]">
             <Box size={8} className="text-muted-foreground" />
-            <span className="text-[7px] font-mono text-muted-foreground uppercase tracking-wider">
+            <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
               {namespace}
             </span>
           </div>
@@ -100,7 +100,7 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
 
       {/* Last prompt preview */}
       {state.lastPrompt && (
-        <p className="text-[10px] text-muted-foreground line-clamp-2 leading-relaxed">
+        <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
           {state.lastPrompt}
         </p>
       )}
@@ -108,19 +108,19 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
       {/* Bottom row: tokens, tools, branch */}
       <div className="flex items-center gap-3 flex-wrap">
         {totalTokens > 0 && (
-          <span className="text-[8px] font-mono text-muted-foreground">
+          <span className="text-xs font-mono text-muted-foreground">
             <Zap size={8} className="inline mr-1" />
             {formatTokenCount(totalTokens)} tok
           </span>
         )}
         {activeTools > 0 && (
-          <span className="text-[8px] font-mono text-primary flex items-center gap-1">
+          <span className="text-xs font-mono text-primary flex items-center gap-1">
             <Loader size={8} className="animate-spin" />
             {activeTools} tool{activeTools !== 1 ? 's' : ''}
           </span>
         )}
         {state.branchName && (
-          <span className="text-[8px] font-mono text-muted flex items-center gap-1">
+          <span className="text-xs font-mono text-muted flex items-center gap-1">
             <GitBranch size={8} />
             {state.branchName}
           </span>
@@ -129,7 +129,7 @@ export const PiSessionCard: React.FC<PiSessionCardProps> = ({
 
       {/* Error message */}
       {state.error && (
-        <p className="text-[9px] font-mono text-red-400 truncate">{state.error}</p>
+        <p className="text-xs font-mono text-red-400 truncate">{state.error}</p>
       )}
     </button>
   );

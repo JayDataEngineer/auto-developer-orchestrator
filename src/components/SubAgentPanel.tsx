@@ -37,12 +37,12 @@ function SubAgentRow({ agent, isWatching, onAbort, onWatch }: SubAgentRowProps) 
   return (
     <div className="flex items-center gap-3 px-3 py-2 border-b border-white/5 hover:bg-white/[0.02] transition-colors">
       <StatusBadge status={agent.status} size="sm" />
-      <span className="text-[10px] font-mono text-zinc-400 w-24 truncate" title={agent.subAgentId}>
+      <span className="text-sm font-mono text-zinc-400 w-24 truncate" title={agent.subAgentId}>
         {truncateId(agent.subAgentId)}
       </span>
-      <span className="text-[9px] font-mono text-zinc-500 uppercase w-20">{agent.type}</span>
-      <span className="text-[9px] font-mono text-zinc-600 w-16">{agent.durationMs ? formatDuration(agent.durationMs) : '—'}</span>
-      <span className="text-[9px] font-mono text-zinc-600 w-16">{agent.toolCalls} calls</span>
+      <span className="text-xs font-mono text-zinc-500 uppercase w-20">{agent.type}</span>
+      <span className="text-xs font-mono text-zinc-600 w-16">{agent.durationMs ? formatDuration(agent.durationMs) : '—'}</span>
+      <span className="text-xs font-mono text-zinc-600 w-16">{agent.toolCalls} calls</span>
       <div className="flex-1" />
       <div className="flex items-center gap-1">
         <button
@@ -99,10 +99,10 @@ export function SubAgentPanel({ parentAgentId, className }: SubAgentPanelProps) 
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 shrink-0">
         <Cpu size={12} className="text-primary" />
-        <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-500 flex-1">
+        <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 flex-1">
           Sub-Agents
         </span>
-        <span className="text-[8px] font-mono text-zinc-700">{subAgents.length}</span>
+        <span className="text-xs font-mono text-zinc-700">{subAgents.length}</span>
         <button onClick={fetchList} className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors">
           <RefreshCw size={10} />
         </button>
@@ -115,7 +115,7 @@ export function SubAgentPanel({ parentAgentId, className }: SubAgentPanelProps) 
       {expanded && (
         <>
           {/* Column headers */}
-          <div className="flex items-center gap-3 px-3 py-1 border-b border-white/5 text-[8px] font-mono uppercase text-zinc-700 tracking-widest">
+          <div className="flex items-center gap-3 px-3 py-1 border-b border-white/5 text-xs font-mono uppercase text-zinc-700 tracking-widest">
             <span className="w-4" />
             <span className="w-24">ID</span>
             <span className="w-20">Type</span>
@@ -150,7 +150,7 @@ export function SubAgentPanel({ parentAgentId, className }: SubAgentPanelProps) 
 
           {/* Metrics bar */}
           {subAgents.length > 0 && (
-            <div className="flex items-center gap-4 px-3 py-1.5 border-t border-white/5 text-[8px] font-mono text-zinc-600">
+            <div className="flex items-center gap-4 px-3 py-1.5 border-t border-white/5 text-xs font-mono text-zinc-600">
               <span>Total: {subAgents.length}</span>
               <span>In: {formatTokens(subAgents.reduce((s, a) => s + a.inputTokens, 0))}</span>
               <span>Out: {formatTokens(subAgents.reduce((s, a) => s + a.outputTokens, 0))}</span>
@@ -163,13 +163,13 @@ export function SubAgentPanel({ parentAgentId, className }: SubAgentPanelProps) 
             <div className="border-t border-white/5 flex flex-col max-h-[40%]">
               <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5 shrink-0">
                 <Eye size={10} className="text-primary" />
-                <span className="text-[9px] font-mono text-zinc-400 truncate">{truncateId(watchedId)}</span>
+                <span className="text-xs font-mono text-zinc-400 truncate">{truncateId(watchedId)}</span>
                 <div className="flex-1" />
                 <button onClick={clearWatch} className="p-1 text-zinc-500 hover:text-zinc-300">
                   <X size={10} />
                 </button>
               </div>
-              <pre className="flex-1 p-3 text-[9px] font-mono text-zinc-300 overflow-auto custom-scrollbar whitespace-pre-wrap bg-zinc-950/50">
+              <pre className="flex-1 p-3 text-xs font-mono text-zinc-300 overflow-auto custom-scrollbar whitespace-pre-wrap bg-zinc-950/50">
                 {watchedOutput || 'Waiting for output...'}
               </pre>
             </div>

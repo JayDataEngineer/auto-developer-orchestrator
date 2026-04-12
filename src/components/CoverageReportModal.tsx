@@ -81,24 +81,24 @@ export const CoverageReportModal: React.FC<CoverageReportModalProps> = ({ isOpen
 
               <div className="grid grid-cols-3 gap-4">
                 <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                  <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Total Coverage</p>
+                  <p className="text-sm uppercase tracking-wider text-zinc-500 mb-1">Total Coverage</p>
                   <p className="text-2xl font-bold text-white">91.2%</p>
                   <div className="mt-2 h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
                     <div className="h-full bg-primary w-[91.2%]" />
                   </div>
                 </div>
                 <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                  <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Total Tests</p>
+                  <p className="text-sm uppercase tracking-wider text-zinc-500 mb-1">Total Tests</p>
                   <p className="text-2xl font-bold text-white">59</p>
-                  <div className="mt-2 flex items-center gap-1 text-[10px] text-emerald-400">
+                  <div className="mt-2 flex items-center gap-1 text-sm text-emerald-400">
                     <CheckCircle2 size={10} />
                     <span>All passing</span>
                   </div>
                 </div>
                 <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                  <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Avg. Duration</p>
+                  <p className="text-sm uppercase tracking-wider text-zinc-500 mb-1">Avg. Duration</p>
                   <p className="text-2xl font-bold text-white">248ms</p>
-                  <div className="mt-2 flex items-center gap-1 text-[10px] text-primary">
+                  <div className="mt-2 flex items-center gap-1 text-sm text-primary">
                     <Zap size={10} />
                     <span>Optimized</span>
                   </div>
@@ -169,7 +169,7 @@ export const CoverageReportModal: React.FC<CoverageReportModalProps> = ({ isOpen
                                 <p className="text-sm font-mono text-white">{item.coverage}%</p>
                               </div>
                               <div className={cn(
-                                "flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold",
+                                "flex items-center gap-1 px-2 py-0.5 rounded text-sm font-bold",
                                 item.trend === 'up' ? "bg-emerald-500/10 text-emerald-400" : 
                                 item.trend === 'down' ? "bg-rose-500/10 text-rose-400" : 
                                 "bg-zinc-500/10 text-zinc-400"

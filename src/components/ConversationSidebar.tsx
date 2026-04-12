@@ -33,7 +33,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
         <div className="flex items-center justify-between">
           <button 
             onClick={() => setShowProjectSelector(!showProjectSelector)}
-            className="flex-1 mr-2 flex items-center justify-center space-x-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded py-2.5 px-3 text-[10px] font-black uppercase tracking-widest transition-all duration-300 glow-primary-sm"
+            className="flex-1 mr-2 flex items-center justify-center space-x-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded py-2.5 px-3 text-sm font-black uppercase tracking-widest transition-all duration-300 glow-primary-sm"
           >
             <Plus size={14} strokeWidth={3} />
             <span>New Chat</span>
@@ -52,7 +52,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
               exit={{ opacity: 0, y: -10 }}
               className="absolute left-4 right-4 top-[70px] z-50 bg-zinc-950 border border-primary/30 shadow-2xl rounded p-2 space-y-1"
             >
-              <div className="px-3 py-2 text-[9px] font-mono text-zinc-600 uppercase tracking-widest border-b border-white/5 mb-1">
+              <div className="px-3 py-2 text-xs font-mono text-zinc-600 uppercase tracking-widest border-b border-white/5 mb-1">
                 Select Context // Sync Engine
               </div>
               {projects.map(project => (
@@ -62,7 +62,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                     onNewConversation(project);
                     setShowProjectSelector(false);
                   }}
-                  className="w-full text-left p-3 hover:bg-white/5 rounded text-[10px] text-zinc-400 hover:text-primary flex items-center justify-between group transition-all"
+                  className="w-full text-left p-3 hover:bg-white/5 rounded text-sm text-zinc-400 hover:text-primary flex items-center justify-between group transition-all"
                 >
                   <span className="uppercase tracking-widest font-bold">{project}</span>
                   <Plus size={12} className="opacity-0 group-hover:opacity-100" />
@@ -77,13 +77,13 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
           <input 
             type="text" 
             placeholder="Search syncs..."
-            className="w-full bg-zinc-900/50 border border-white/5 rounded py-2 pl-9 pr-4 text-[10px] text-white placeholder-zinc-800 focus:outline-none focus:border-white/10 transition-all font-mono"
+            className="w-full bg-zinc-900/50 border border-white/5 rounded py-2 pl-9 pr-4 text-sm text-white placeholder-zinc-800 focus:outline-none focus:border-white/10 transition-all font-mono"
           />
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
-        <div className="text-[10px] font-mono text-zinc-800 uppercase tracking-[0.4em] font-black mb-6 mt-2">
+        <div className="text-sm font-mono text-zinc-800 uppercase tracking-[0.4em] font-black mb-6 mt-2">
           Workspaces
         </div>
 
@@ -94,10 +94,10 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
             <div key={project} className="mb-6">
               <div className="flex items-center justify-between text-zinc-500 group cursor-pointer mb-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-widest font-black group-hover:text-primary transition-colors">
+                  <span className="text-sm uppercase tracking-widest font-black group-hover:text-primary transition-colors">
                     {project}
                   </span>
-                  <span className="text-[9px] text-zinc-800 font-mono">[{projectConvs.length}]</span>
+                  <span className="text-xs text-zinc-800 font-mono">[{projectConvs.length}]</span>
                 </div>
                 <div className="flex items-center gap-2">
                    <button 
@@ -117,14 +117,14 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                     key={conv.id}
                     onClick={() => onSelectConversation(conv.id)}
                     className={cn(
-                      "w-full text-left p-3 rounded text-[11px] transition-all group relative",
+                      "w-full text-left p-3 rounded text-xs transition-all group relative",
                       activeConversationId === conv.id 
                         ? 'bg-primary/5 text-primary border border-primary/20' 
                         : 'text-zinc-500 hover:text-white hover:bg-white/5 border border-transparent'
                     )}
                   >
                     <div className="truncate font-bold tracking-tight mb-1">{conv.title}</div>
-                    <div className="flex items-center space-x-2 text-[9px] opacity-40 font-mono">
+                    <div className="flex items-center space-x-2 text-xs opacity-40 font-mono">
                       <Clock size={10} />
                       <span className="uppercase">{new Date(conv.lastActive).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
@@ -140,7 +140,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                 {projectConvs.length === 0 && (
                   <button 
                     onClick={() => onNewConversation(project)}
-                    className="w-full text-left p-3 text-[10px] text-zinc-800 italic hover:text-zinc-600 transition-colors flex items-center gap-2 group"
+                    className="w-full text-left p-3 text-sm text-zinc-800 italic hover:text-zinc-600 transition-colors flex items-center gap-2 group"
                   >
                     <FolderSync size={10} className="group-hover:text-primary" />
                     Initialize deep context...
@@ -158,8 +158,8 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
              <div className="w-2 h-2 rounded-full bg-primary glow-primary animate-pulse" />
           </div>
           <div className="flex flex-col">
-            <span className="text-[10px] font-black text-white uppercase tracking-widest">Pi_Service</span>
-            <span className="text-[8px] font-mono text-zinc-600 uppercase tracking-tighter">Heartbeat: Nominal</span>
+            <span className="text-sm font-black text-white uppercase tracking-widest">Pi_Service</span>
+            <span className="text-xs font-mono text-zinc-600 uppercase tracking-tighter">Heartbeat: Nominal</span>
           </div>
         </div>
       </div>

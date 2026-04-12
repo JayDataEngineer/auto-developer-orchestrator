@@ -30,12 +30,12 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <div className="text-red-400 text-sm font-mono uppercase tracking-widest">
               Something went wrong
             </div>
-            <pre className="text-[11px] font-mono text-zinc-400 bg-zinc-900 border border-white/5 p-4 overflow-auto max-h-48 text-left">
+            <pre className="text-xs font-mono text-zinc-400 bg-zinc-900 border border-white/5 p-4 overflow-auto max-h-48 text-left">
               {this.state.error?.message || 'Unknown error'}
             </pre>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}
-              className="px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
+              className="px-4 py-2 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
             >
               Try Again
             </button>

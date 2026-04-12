@@ -41,7 +41,7 @@ const STATUS_TEXT_COLORS: Record<string, string> = {
 
 export function StatusBadge({ status, label, size = 'sm' }: StatusBadgeProps) {
   const dotSize = size === 'sm' ? 'w-1.5 h-1.5' : 'w-2 h-2';
-  const textSize = size === 'sm' ? 'text-[8px]' : 'text-[9px]';
+  const textSize = size === 'sm' ? 'text-xs' : 'text-xs';
 
   return (
     <div className="flex items-center gap-1.5">

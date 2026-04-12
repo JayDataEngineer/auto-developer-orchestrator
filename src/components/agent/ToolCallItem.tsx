@@ -46,12 +46,12 @@ export function ToolCallItem({ tc }: { tc: ToolCall }) {
       >
         {TOOL_ICONS[tc.name] || <Wrench size={11} className="text-muted-foreground" />}
         <span className={cn(
-          "text-[9px] font-mono uppercase tracking-widest",
+          "text-xs font-mono uppercase tracking-widest",
           isRunning ? "text-primary" : "text-muted-foreground"
         )}>
           {tc.name}
         </span>
-        <span className="text-[9px] font-mono text-zinc-600 truncate">
+        <span className="text-xs font-mono text-zinc-600 truncate">
           {formatToolArgs(tc.name, tc.args)}
         </span>
         <div className="flex-1" />
@@ -63,14 +63,14 @@ export function ToolCallItem({ tc }: { tc: ToolCall }) {
       </button>
       {open && formatResult(tc.result) && (
         <div className="px-3 pb-2 border-t border-white/5">
-          <pre className="text-[9px] font-mono text-zinc-400 whitespace-pre-wrap max-h-40 overflow-auto">
+          <pre className="text-xs font-mono text-zinc-400 whitespace-pre-wrap max-h-40 overflow-auto">
             {formatResult(tc.result)}
           </pre>
         </div>
       )}
       {open && tc.error && (
         <div className="px-3 pb-2 border-t border-white/5">
-          <pre className="text-[9px] font-mono text-red-400 whitespace-pre-wrap max-h-40 overflow-auto">
+          <pre className="text-xs font-mono text-red-400 whitespace-pre-wrap max-h-40 overflow-auto">
             {tc.error}
           </pre>
         </div>

@@ -13,7 +13,7 @@ export function SectionHeader({ icon, label, action, className }: SectionHeaderP
     <>
       <div className={cn('flex items-center gap-2 px-3 py-1.5 bg-zinc-950/30', className)}>
         {icon && <span className="text-muted-foreground">{icon}</span>}
-        <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+        <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">
           {label}
         </span>
         <div className="flex-1" />

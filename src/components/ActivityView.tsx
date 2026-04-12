@@ -70,7 +70,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({ logs }) => {
         {/* Header Telemetry */}
         <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 border-b border-white/5 pb-12">
           <div className="space-y-4">
-            <div className="flex items-center gap-3 text-primary font-mono text-[10px] font-black uppercase tracking-[0.4em]">
+            <div className="flex items-center gap-3 text-primary font-mono text-sm font-black uppercase tracking-[0.4em]">
               <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
               Live Telemetry Stream
             </div>
@@ -86,7 +86,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({ logs }) => {
               { label: "Active Procs", value: activities.length + 8, icon: <Cpu size={14} /> }
             ].map(stat => (
               <div key={stat.label} className="p-4 border border-white/5 bg-zinc-900/20 rounded">
-                <div className="flex items-center gap-2 text-[8px] font-mono text-zinc-600 uppercase tracking-widest mb-1">
+                <div className="flex items-center gap-2 text-xs font-mono text-zinc-600 uppercase tracking-widest mb-1">
                   {stat.icon} {stat.label}
                 </div>
                 <div className="text-lg font-black text-white glow-white">{stat.value}</div>
@@ -127,7 +127,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({ logs }) => {
                         <act.icon size={16} />
                       </div>
                       <div>
-                        <div className={cn("text-[11px] font-bold uppercase tracking-tight", act.color)}>
+                        <div className={cn("text-xs font-bold uppercase tracking-tight", act.color)}>
                           {act.message.includes(':') ? act.message.split(':')[0] : 'PROCESS_MONITOR'}
                         </div>
                         <div className="text-xs text-zinc-300 font-mono mt-0.5 max-w-2xl leading-relaxed">
@@ -136,7 +136,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({ logs }) => {
                       </div>
                     </div>
                     
-                    <div className="text-[9px] font-mono text-zinc-700 uppercase tracking-widest bg-black/40 px-2 py-1 rounded border border-white/5 shrink-0 self-start md:self-center">
+                    <div className="text-xs font-mono text-zinc-700 uppercase tracking-widest bg-black/40 px-2 py-1 rounded border border-white/5 shrink-0 self-start md:self-center">
                       {act.time}
                     </div>
                   </div>
@@ -148,7 +148,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({ logs }) => {
           {activities.length === 0 && (
             <div className="flex flex-col items-center justify-center py-24 text-center">
               <ActivityIcon className="text-zinc-900 mb-6 animate-pulse" size={64} />
-              <div className="text-[10px] font-mono text-zinc-700 uppercase tracking-[0.4em]">
+              <div className="text-sm font-mono text-zinc-700 uppercase tracking-[0.4em]">
                 Awaiting System Heartbeat...
               </div>
             </div>

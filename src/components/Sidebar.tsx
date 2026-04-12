@@ -91,8 +91,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             >
               <item.icon size={22} strokeWidth={activeTab === item.id ? 2.5 : 2} className={cn("transition-all duration-200", activeTab === item.id && "text-primary")} />
-              <span className="lg:hidden text-[10px] font-bold uppercase tracking-[0.2em]">{item.label}</span>
-              <span className="hidden lg:block absolute left-full ml-4 px-3 py-1.5 bg-secondary border border-border text-[10px] font-bold uppercase tracking-tighter text-white opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+              <span className="lg:hidden text-sm font-bold uppercase tracking-[0.2em]">{item.label}</span>
+              <span className="hidden lg:block absolute left-full ml-4 px-3 py-1.5 bg-secondary border border-border text-sm font-bold uppercase tracking-tighter text-white opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
                 {item.label}
               </span>
               {activeTab === item.id && (

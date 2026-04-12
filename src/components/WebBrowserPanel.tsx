@@ -49,14 +49,14 @@ export function WebBrowserPanel({ onClose }: WebBrowserPanelProps) {
         <div className="flex items-center gap-1">
           <button
             onClick={browser.describe}
-            className="px-2 py-0.5 text-[10px] bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300 flex items-center gap-1"
+            className="px-2 py-0.5 text-sm bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300 flex items-center gap-1"
             title="Describe page with vision model"
           >
             <Eye size={10} /> Describe
           </button>
           <button
             onClick={onClose}
-            className="px-2 py-0.5 text-[10px] bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300"
+            className="px-2 py-0.5 text-sm bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300"
           >
             Close
           </button>
@@ -100,12 +100,12 @@ export function WebBrowserPanel({ onClose }: WebBrowserPanelProps) {
 
         {/* Element List Sidebar */}
         <div className="w-64 border-l border-zinc-700 flex flex-col bg-zinc-900">
-          <div className="px-2 py-1.5 border-b border-zinc-700 text-[10px] text-zinc-400 font-medium">
+          <div className="px-2 py-1.5 border-b border-zinc-700 text-sm text-zinc-400 font-medium">
             Elements ({browser.elements.length})
           </div>
           <div className="flex-1 overflow-y-auto">
             {browser.elements.length === 0 ? (
-              <div className="p-3 text-[10px] text-zinc-500 text-center">
+              <div className="p-3 text-sm text-zinc-500 text-center">
                 Navigate to a page to see elements
               </div>
             ) : (
@@ -118,16 +118,16 @@ export function WebBrowserPanel({ onClose }: WebBrowserPanelProps) {
                   }`}
                 >
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[9px] bg-red-600 text-white px-1 rounded font-mono min-w-[16px] text-center">
+                    <span className="text-xs bg-red-600 text-white px-1 rounded font-mono min-w-[16px] text-center">
                       {el.id}
                     </span>
-                    <span className="text-[10px] text-zinc-400 font-mono">{el.tag}</span>
+                    <span className="text-sm text-zinc-400 font-mono">{el.tag}</span>
                     {el.role && (
-                      <span className="text-[9px] text-zinc-500">[{el.role}]</span>
+                      <span className="text-xs text-zinc-500">[{el.role}]</span>
                     )}
                   </div>
                   {el.text && (
-                    <div className="text-[10px] text-zinc-300 mt-0.5 truncate pl-5">
+                    <div className="text-sm text-zinc-300 mt-0.5 truncate pl-5">
                       {el.text}
                     </div>
                   )}
@@ -161,7 +161,7 @@ export function WebBrowserPanel({ onClose }: WebBrowserPanelProps) {
       {/* Type Input Bar (shown when input element is selected) */}
       {selectedElement && (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 border-t border-zinc-700">
-          <span className="text-[10px] text-zinc-400">
+          <span className="text-sm text-zinc-400">
             Type into <span className="text-red-400">[{selectedElement.id}]</span> {selectedElement.tag}:
           </span>
           <input
@@ -173,7 +173,7 @@ export function WebBrowserPanel({ onClose }: WebBrowserPanelProps) {
             className="flex-1 bg-zinc-900 border border-zinc-600 rounded px-2 py-0.5 text-xs text-white focus:outline-none focus:border-blue-500"
             autoFocus
           />
-          <label className="flex items-center gap-1 text-[10px] text-zinc-400">
+          <label className="flex items-center gap-1 text-sm text-zinc-400">
             <input
               type="checkbox"
               checked={autoSubmit}
@@ -194,10 +194,10 @@ export function WebBrowserPanel({ onClose }: WebBrowserPanelProps) {
       {/* Vision Description */}
       {browser.description && (
         <div className="px-3 py-2 bg-zinc-800 border-t border-zinc-700 max-h-24 overflow-y-auto">
-          <div className="text-[10px] text-zinc-400 font-medium mb-1 flex items-center gap-1">
+          <div className="text-sm text-zinc-400 font-medium mb-1 flex items-center gap-1">
             <Eye size={10} /> Vision Description
           </div>
-          <p className="text-[10px] text-zinc-300 leading-relaxed">
+          <p className="text-sm text-zinc-300 leading-relaxed">
             {browser.description}
           </p>
         </div>
@@ -205,7 +205,7 @@ export function WebBrowserPanel({ onClose }: WebBrowserPanelProps) {
 
       {/* Error */}
       {browser.error && (
-        <div className="px-3 py-1 bg-red-900/30 border-t border-red-700/50 text-[10px] text-red-400">
+        <div className="px-3 py-1 bg-red-900/30 border-t border-red-700/50 text-sm text-red-400">
           {browser.error}
         </div>
       )}

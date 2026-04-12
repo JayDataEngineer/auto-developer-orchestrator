@@ -32,27 +32,27 @@ export const ApprovalBanner: React.FC<ApprovalBannerProps> = ({ approval, onResp
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className={`text-[10px] font-black uppercase tracking-widest ${
+            <span className={`text-sm font-black uppercase tracking-widest ${
               isQuestion ? 'text-blue-400' : 'text-amber-400'
             }`}>
               {isQuestion ? 'Agent Asks' : 'Approval Required'}
             </span>
             {!isQuestion && (
-              <span className={`text-[8px] font-mono font-bold uppercase px-1.5 py-0.5 ${riskColors[approval.risk]}`}>
+              <span className={`text-xs font-mono font-bold uppercase px-1.5 py-0.5 ${riskColors[approval.risk]}`}>
                 {approval.risk}
               </span>
             )}
             {approval.toolName && (
-              <span className="text-[8px] font-mono text-muted-foreground bg-white/5 px-1.5 py-0.5">
+              <span className="text-xs font-mono text-muted-foreground bg-white/5 px-1.5 py-0.5">
                 {approval.toolName}
               </span>
             )}
           </div>
-          <p className="text-[11px] text-white/90 font-mono leading-relaxed">
+          <p className="text-xs text-white/90 font-mono leading-relaxed">
             {approval.message}
           </p>
           {approval.toolArgs && approval.toolArgs.command && (
-            <code className="block mt-1.5 text-[10px] font-mono text-muted-foreground bg-black/30 px-2 py-1 border border-white/5 break-all">
+            <code className="block mt-1.5 text-sm font-mono text-muted-foreground bg-black/30 px-2 py-1 border border-white/5 break-all">
               {String(approval.toolArgs.command)}
             </code>
           )}
@@ -67,7 +67,7 @@ export const ApprovalBanner: React.FC<ApprovalBannerProps> = ({ approval, onResp
                 value={answer}
                 onChange={(e) => setAnswer(e.target.value)}
                 placeholder="Your answer..."
-                className="w-48 bg-zinc-900 border border-white/10 px-3 py-1.5 text-[10px] text-white font-mono placeholder-zinc-600 outline-none focus:border-blue-500/40"
+                className="w-48 bg-zinc-900 border border-white/10 px-3 py-1.5 text-sm text-white font-mono placeholder-zinc-600 outline-none focus:border-blue-500/40"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && answer.trim()) {
                     onRespond(approval.requestId, 'answer', answer.trim());
@@ -78,7 +78,7 @@ export const ApprovalBanner: React.FC<ApprovalBannerProps> = ({ approval, onResp
               <button
                 onClick={() => { onRespond(approval.requestId, 'answer', answer.trim() || 'No answer provided'); setAnswer(''); }}
                 disabled={!answer.trim()}
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-black text-[9px] font-black uppercase tracking-widest hover:bg-blue-400 disabled:opacity-30 transition-colors"
+                className="flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-black text-xs font-black uppercase tracking-widest hover:bg-blue-400 disabled:opacity-30 transition-colors"
               >
                 <Send size={9} /> Submit
               </button>
@@ -87,13 +87,13 @@ export const ApprovalBanner: React.FC<ApprovalBannerProps> = ({ approval, onResp
             <>
               <button
                 onClick={() => onRespond(approval.requestId, 'approve')}
-                className="flex items-center gap-1 px-3 py-1.5 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
+                className="flex items-center gap-1 px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
               >
                 <Check size={9} /> Approve
               </button>
               <button
                 onClick={() => onRespond(approval.requestId, 'deny', 'User denied this action')}
-                className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest hover:bg-red-500/30 transition-colors border border-red-500/30"
+                className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-400 text-xs font-black uppercase tracking-widest hover:bg-red-500/30 transition-colors border border-red-500/30"
               >
                 <X size={9} /> Deny
               </button>

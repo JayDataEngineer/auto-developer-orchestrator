@@ -50,9 +50,9 @@ export const Header: React.FC<HeaderProps> = ({
           <Menu size={24} />
         </button>
         <div className="flex flex-col">
-          <h1 className="text-[12px] font-bold tracking-[0.3em] uppercase text-white leading-none mb-1.5">Orchestrator <span className="text-primary opacity-80">v0.2.5</span></h1>
+          <h1 className="text-sm font-bold tracking-[0.3em] uppercase text-white leading-none mb-1.5">Orchestrator <span className="text-primary opacity-80">v0.2.5</span></h1>
           <div className="flex items-center gap-2">
-            <span className="text-[9px] font-bold text-primary tracking-[0.2em] uppercase font-mono px-2 py-0.5 border border-primary/40 bg-primary/5">Deep Research Architect</span>
+            <span className="text-xs font-bold text-primary tracking-[0.2em] uppercase font-mono px-2 py-0.5 border border-primary/40 bg-primary/5">Deep Research Architect</span>
           </div>
         </div>
         <div className="hidden lg:block h-6 w-[1px] bg-border" />
@@ -64,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
             <select 
               value={selectedProject}
               onChange={(e) => onProjectSelect(e.target.value)}
-              className="bg-transparent text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-300 outline-none cursor-pointer appearance-none min-w-[140px] font-mono pr-8 relative z-10"
+              className="bg-transparent text-sm font-bold uppercase tracking-[0.2em] text-zinc-300 outline-none cursor-pointer appearance-none min-w-[140px] font-mono pr-8 relative z-10"
             >
               {projects.length === 0 && <option value="" className="bg-black text-xs">NO_PROJECTS_LOCATED</option>}
               {projects.map(p => (
@@ -86,7 +86,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button 
             onClick={onAddExistingClick}
-            className="flex items-center gap-2 px-4 py-2 bg-secondary border border-border text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-400 hover:text-white hover:border-primary transition-all group"
+            className="flex items-center gap-2 px-4 py-2 bg-secondary border border-border text-xs font-bold uppercase tracking-[0.2em] text-zinc-400 hover:text-white hover:border-primary transition-all group"
             title="Add Existing Local Repository"
           >
             <FolderGit2 size={16} className="group-hover:text-primary transition-colors" />
@@ -103,7 +103,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={onCLIClick}
-            className="flex items-center gap-2 px-3 py-2 bg-secondary border border-border text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white hover:border-primary transition-all"
+            className="flex items-center gap-2 px-3 py-2 bg-secondary border border-border text-sm font-bold uppercase tracking-widest text-zinc-400 hover:text-white hover:border-primary transition-all"
             title="Open CLI Terminal"
           >
             <Terminal size={14} />
@@ -112,7 +112,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={onAgentsClick}
-            className="flex items-center gap-2 px-3 py-2 bg-secondary border border-border text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-white hover:border-primary transition-all"
+            className="flex items-center gap-2 px-3 py-2 bg-secondary border border-border text-sm font-bold uppercase tracking-widest text-zinc-400 hover:text-white hover:border-primary transition-all"
             title="Open AI Agents"
           >
             <Bot size={14} />
@@ -122,20 +122,20 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="hidden lg:block h-6 w-[1px] bg-border" />
         {fullAutomationMode && (
-          <div className="flex items-center gap-2 px-4 py-1.5 bg-red-500/10 border border-red-500/30 text-[10px] font-bold text-red-500 glow-primary">
+          <div className="flex items-center gap-2 px-4 py-1.5 bg-red-500/10 border border-red-500/30 text-sm font-bold text-red-500 glow-primary">
             <Cpu size={14} />
             AUTONOMOUS_LOOP_ACTIVE
           </div>
         )}
         <button 
           onClick={onCoverageClick}
-          className="flex items-center gap-2 px-4 py-2 bg-primary/5 border border-primary/30 text-[9px] font-bold text-primary hover:bg-primary/15 transition-all font-mono tracking-widest"
+          className="flex items-center gap-2 px-4 py-2 bg-primary/5 border border-primary/30 text-xs font-bold text-primary hover:bg-primary/15 transition-all font-mono tracking-widest"
         >
           <BarChart3 size={14} />
           STAT_COVERAGE::91.2%
         </button>
         
-        <div className="hidden lg:flex items-center gap-3 text-[9px] font-mono text-zinc-500 font-bold uppercase tracking-widest">
+        <div className="hidden lg:flex items-center gap-3 text-xs font-mono text-zinc-500 font-bold uppercase tracking-widest">
           <span className={cn(
             "w-2.5 h-2.5 rounded-none", 
             status?.agentStatus === 'running' ? 'bg-success shadow-[0_0_10px_rgba(0,255,0,0.5)]' : 'bg-amber-500/50'
@@ -145,7 +145,7 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </div>
 
-        <div className="hidden lg:flex items-center gap-3 text-[9px] font-mono text-zinc-500 font-bold uppercase tracking-widest border-l border-border pl-6">
+        <div className="hidden lg:flex items-center gap-3 text-xs font-mono text-zinc-500 font-bold uppercase tracking-widest border-l border-border pl-6">
           <Bot size={14} className="text-primary glow-primary" />
           <span className="text-white">PI_CORE:</span>
           <span className="text-emerald-400">ENCRYPTED // ONLINE</span>
@@ -158,7 +158,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button 
             onClick={onToggleMode}
             className={cn(
-              "px-5 py-2 text-[10px] font-bold uppercase tracking-widest transition-all duration-200",
+              "px-5 py-2 text-sm font-bold uppercase tracking-widest transition-all duration-200",
               !status?.isAutoMode ? "bg-white text-black" : "text-zinc-500 hover:text-white"
             )}
           >
@@ -167,7 +167,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button 
             onClick={onToggleMode}
             className={cn(
-              "px-5 py-2 text-[10px] font-bold uppercase tracking-widest transition-all duration-200",
+              "px-5 py-2 text-sm font-bold uppercase tracking-widest transition-all duration-200",
               status?.isAutoMode ? "bg-primary text-white glow-primary" : "text-zinc-500 hover:text-white"
             )}
           >
@@ -175,7 +175,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        <div className="hidden lg:flex items-center gap-2 text-[10px] font-mono text-zinc-500 bg-secondary px-3 py-1.5 border border-border">
+        <div className="hidden lg:flex items-center gap-2 text-sm font-mono text-zinc-500 bg-secondary px-3 py-1.5 border border-border">
           <Cpu size={14} className="text-primary" />
           <span className="text-white font-bold tracking-tighter">14.2%</span>
         </div>

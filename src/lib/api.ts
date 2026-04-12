@@ -384,9 +384,10 @@ export const api = {
       }),
   },
   computerUse: {
-    enable: (sandboxId: string) =>
+    enable: (sandboxId: string, opts?: { signal?: AbortSignal }) =>
       apiFetch<{ enabled: boolean; sandboxId: string; cdpPort: number }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/computer-use/enable`, {
         method: 'POST',
+        signal: opts?.signal,
       }),
     disable: (sandboxId: string) =>
       apiFetch<{ disabled: boolean }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/computer-use/disable`, {

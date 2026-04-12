@@ -130,13 +130,13 @@ function ProjectAgentGroup({
     <div className="border border-white/5">
       {/* Project header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 bg-white/[0.02]">
-        <span className="text-[10px] font-black uppercase tracking-widest text-white">
+        <span className="text-sm font-black uppercase tracking-widest text-white">
           {project}
         </span>
         <button
           onClick={handleSpawn}
           disabled={spawning || agentIds.length >= 5}
-          className="flex items-center gap-1 px-2 py-1 text-[8px] font-mono text-muted hover:text-primary border border-white/5 hover:border-primary/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+          className="flex items-center gap-1 px-2 py-1 text-xs font-mono text-muted hover:text-primary border border-white/5 hover:border-primary/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
         >
           <Plus size={9} />
           New Agent
@@ -208,7 +208,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
 
   const handleSend = useCallback(() => {
     if (!promptText.trim() || !promptProject) return;
-    manager.sendPrompt(promptProject, promptAgentId, promptText.trim(), { autoBranch });
+    manager.sendPrompt(promptProject, promptAgentId, promptText.trim(), { thinkingLevel: 'medium', autoBranch });
     setPromptText('');
   }, [promptText, promptProject, promptAgentId, autoBranch, manager]);
 
@@ -238,7 +238,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
         >
         {/* Header */}
         <div className="h-12 border-b border-white/5 flex items-center px-4 shrink-0 bg-black/50 backdrop-blur-md gap-3">
-          <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest uppercase font-bold">
+          <div className="flex items-center gap-2 text-sm font-mono tracking-widest uppercase font-bold">
             <Zap size={12} className="text-primary" />
             <span className="text-primary">PI</span>
             <span className="text-muted">CODING AGENT</span>
@@ -248,7 +248,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
           <button
             onClick={() => setAutoBranch(!autoBranch)}
             className={cn(
-              "flex items-center gap-1.5 px-2 py-1 text-[8px] font-mono uppercase tracking-widest border transition-all",
+              "flex items-center gap-1.5 px-2 py-1 text-xs font-mono uppercase tracking-widest border transition-all",
               autoBranch
                 ? "border-primary/30 text-primary bg-primary/5"
                 : "border-white/5 text-muted-foreground hover:text-muted-foreground"
@@ -261,7 +261,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
           {activeCount > 0 && (
             <div className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              <span className="text-[8px] font-mono text-primary">{activeCount} active</span>
+              <span className="text-xs font-mono text-primary">{activeCount} active</span>
             </div>
           )}
         </div>
@@ -301,7 +301,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
               <select
                 value={promptProject}
                 onChange={(e) => { setPromptProject(e.target.value); setPromptAgentId('default'); }}
-                className="bg-zinc-900 border border-white/5 rounded px-2 py-2 text-[10px] text-white font-mono outline-none focus:border-primary/40"
+                className="bg-zinc-900 border border-white/5 rounded px-2 py-2 text-sm text-white font-mono outline-none focus:border-primary/40"
               >
                 {projects.map(p => (
                   <option key={p} value={p}>{p}</option>
@@ -310,7 +310,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
               <select
                 value={promptAgentId}
                 onChange={(e) => setPromptAgentId(e.target.value)}
-                className="bg-zinc-900 border border-white/5 rounded px-2 py-2 text-[10px] text-white font-mono outline-none focus:border-primary/40"
+                className="bg-zinc-900 border border-white/5 rounded px-2 py-2 text-sm text-white font-mono outline-none focus:border-primary/40"
               >
                 {availableAgents.map(aid => (
                   <option key={aid} value={aid}>{aid === 'default' ? '#1 (default)' : `#${availableAgents.indexOf(aid) + 1}`}</option>
@@ -323,7 +323,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
                   onChange={(e) => setPromptText(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Describe a task..."
-                  className="w-full bg-zinc-900 border border-white/5 rounded px-3 py-2 text-[11px] text-white placeholder-zinc-700 outline-none focus:border-primary/40 font-mono"
+                  className="w-full bg-zinc-900 border border-white/5 rounded px-3 py-2 text-xs text-white placeholder-zinc-700 outline-none focus:border-primary/40 font-mono"
                 />
               </div>
               <button
@@ -347,7 +347,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
             className="p-4 border-b border-white/5 flex items-center gap-3 text-left"
           >
             <Wrench size={12} className="text-muted-foreground" />
-            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+            <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">
               Activity
             </span>
             <div className="flex-1" />
@@ -356,7 +356,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
           {showSidebar && (
             <div className="flex-1 flex flex-col items-center justify-center p-6">
               <Wrench size={20} className="text-zinc-800 mb-3" />
-              <p className="text-[9px] font-mono text-zinc-700 uppercase tracking-widest text-center">
+              <p className="text-xs font-mono text-zinc-700 uppercase tracking-widest text-center">
                 Select an agent to view activity
               </p>
             </div>
@@ -371,7 +371,7 @@ export const PiDashboardView: React.FC<PiDashboardViewProps> = ({
             <div className="h-12 border-b border-white/5 flex items-center px-4 shrink-0 bg-black/50 backdrop-blur-md">
               <button
                 onClick={handleBack}
-                className="flex items-center gap-2 text-[9px] font-mono text-muted hover:text-zinc-300 uppercase tracking-widest transition-colors"
+                className="flex items-center gap-2 text-xs font-mono text-muted hover:text-zinc-300 uppercase tracking-widest transition-colors"
               >
                 <ArrowLeft size={12} />
                 Back to grid

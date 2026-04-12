@@ -75,7 +75,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
 
   const handleSend = useCallback(() => {
     if (!input.trim() || !selectedProject || state.isStreaming) return;
-    sendPrompt(input.trim(), selectedProject, { agentId: selectedAgentId, model: state.model || 'or-free', autoBranch, autoMerge });
+    sendPrompt(input.trim(), selectedProject, { agentId: selectedAgentId, model: state.model || 'or-free', thinkingLevel: 'medium', autoBranch, autoMerge });
     setInput('');
   }, [input, selectedProject, state.isStreaming, sendPrompt, selectedAgentId, autoBranch, autoMerge]);
 
@@ -106,7 +106,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                 <ArrowLeft size={14} />
               </button>
             )}
-            <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-muted uppercase font-bold">
+            <div className="flex items-center gap-2 text-sm font-mono tracking-widest text-muted uppercase font-bold">
               <Zap size={12} className="text-primary" />
               <span className="text-primary">PI</span>
               <span className="text-muted">CODING AGENT</span>
@@ -115,18 +115,18 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
           <div className="flex-1" />
           <div className="flex items-center gap-3">
             {state.isStreaming && (
-              <span className="text-[9px] font-black text-primary uppercase tracking-widest animate-pulse">
+              <span className="text-xs font-black text-primary uppercase tracking-widest animate-pulse">
                 Streaming
               </span>
             )}
             {runningTool && (
-              <span className="flex items-center gap-1.5 text-[9px] font-mono text-primary/80 uppercase tracking-widest">
+              <span className="flex items-center gap-1.5 text-xs font-mono text-primary/80 uppercase tracking-widest">
                 <Wrench size={9} className="text-primary" />
                 Running: {runningTool.name}
               </span>
             )}
             {state.error && (
-              <span className="text-[9px] font-mono text-red-400">{state.error}</span>
+              <span className="text-xs font-mono text-red-400">{state.error}</span>
             )}
           </div>
         </div>
@@ -164,7 +164,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
             {/* Sub-Agent Status Cards */}
             {state.subAgents.length > 0 && (
               <div className="space-y-1">
-                <div className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest px-1">
+                <div className="text-xs font-mono text-muted-foreground uppercase tracking-widest px-1">
                   Sub-Agents ({state.subAgents.length})
                 </div>
                 {state.subAgents.map(sa => (
@@ -205,7 +205,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                   {aMsg.streaming && !aMsg.text && !aMsg.thinking && aMsg.toolCalls.length === 0 && (
                     <div className="flex items-center gap-2 py-2">
                       <Loader size={12} className="text-primary animate-spin" />
-                      <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">Thinking...</span>
+                      <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Thinking...</span>
                     </div>
                   )}
                 </div>
@@ -220,7 +220,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
         {(state.tokenUsage.input > 0 || state.tokenUsage.output > 0) && (
           <div className="w-full border-t border-white/5">
             <div className={cn(
-              "mx-auto py-2 px-6 flex items-center gap-6 text-[9px] font-mono text-muted-foreground transition-all duration-500",
+              "mx-auto py-2 px-6 flex items-center gap-6 text-xs font-mono text-muted-foreground transition-all duration-500",
               isZenMode ? "max-w-7xl" : "max-w-3xl"
             )}>
               <span>Tokens: {state.tokenUsage.input}in / {state.tokenUsage.output}out / {state.tokenUsage.cache}cache</span>
@@ -239,10 +239,10 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                 <Check size={12} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-black uppercase tracking-widest text-primary">
+                <div className="text-sm font-black uppercase tracking-widest text-primary">
                   Pull Request #{state.prNumber} Created
                 </div>
-                <div className="text-[9px] font-mono text-muted-foreground truncate mt-0.5">
+                <div className="text-xs font-mono text-muted-foreground truncate mt-0.5">
                   {state.prUrl}
                 </div>
               </div>
@@ -250,7 +250,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                 href={state.prUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
               >
                 <ExternalLink size={10} />
                 Open PR
@@ -285,7 +285,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                   placeholder={selectedProject ? "Describe a coding task..." : "Select a project first..."}
                   disabled={state.isStreaming || !selectedProject}
                   data-prompt-input
-                  className="w-full bg-zinc-900 border border-white/5 rounded p-4 pr-14 text-[12px] text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-all font-mono resize-none"
+                  className="w-full bg-zinc-900 border border-white/5 rounded p-4 pr-14 text-sm text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-all font-mono resize-none"
                   rows={3}
                 />
                 <div className="absolute right-3 bottom-3 flex items-center gap-2">
@@ -305,7 +305,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               <div className="relative" ref={modelDropdownRef}>
                 <button
                   onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-                  className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest"
+                  className="text-xs font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest"
                 >
                   Model: {state.model || 'default'}
                   {modelDropdownOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
@@ -313,7 +313,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                 {modelDropdownOpen && (
                   <div className="absolute bottom-full left-0 mb-1 w-64 max-h-[300px] overflow-y-auto border border-white/10 bg-zinc-950 shadow-2xl z-[100] custom-scrollbar scrollbar-gutter-stable">
                     {models.length === 0 && (
-                      <div className="px-3 py-2 text-[9px] font-mono text-muted uppercase tracking-widest">Loading models...</div>
+                      <div className="px-3 py-2 text-xs font-mono text-muted uppercase tracking-widest">Loading models...</div>
                     )}
                     {models.map((m) => (
                       <button
@@ -323,7 +323,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                           setModelDropdownOpen(false);
                         }}
                         className={cn(
-                          "w-full text-left px-3 py-2 text-[9px] font-mono uppercase tracking-widest transition-colors",
+                          "w-full text-left px-3 py-2 text-xs font-mono uppercase tracking-widest transition-colors",
                           state.model === m.id
                             ? "bg-primary/10 text-primary"
                             : "text-muted hover:bg-white/5 hover:text-muted-foreground"
@@ -335,13 +335,13 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                   </div>
                 )}
               </div>
-              <button onClick={reset} className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest">
+              <button onClick={reset} className="text-xs font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest">
                 <RotateCcw size={10} /> New Task
               </button>
               <button
                 onClick={() => { setAutoBranch(!autoBranch); if (!autoBranch) setAutoMerge(false); }}
                 className={cn(
-                  "text-[9px] font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
+                  "text-xs font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
                   autoBranch ? "text-primary" : "text-muted hover:text-muted-foreground"
                 )}
               >
@@ -351,14 +351,14 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                 <button
                   onClick={() => setAutoMerge(!autoMerge)}
                   className={cn(
-                    "text-[9px] font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
+                    "text-xs font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
                     autoMerge ? "text-primary" : "text-muted hover:text-muted-foreground"
                   )}
                 >
                   <GitPullRequest size={10} /> Auto-Merge
                 </button>
               )}
-              <button onClick={() => selectedProject && compact(selectedProject, selectedAgentId)} disabled={state.isStreaming} className="text-[9px] font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest disabled:opacity-30">
+              <button onClick={() => selectedProject && compact(selectedProject, selectedAgentId)} disabled={state.isStreaming} className="text-xs font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest disabled:opacity-30">
                 <Trash2 size={10} /> Compact
               </button>
             </div>

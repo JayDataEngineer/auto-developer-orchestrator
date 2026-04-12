@@ -86,13 +86,13 @@ function TaskCard({ task, isSelected, onSelect, onTrigger, onDelete }: TaskCardP
       <div className="flex items-start gap-2">
         <StatusBadge status={jobBadgeStatus(task) as any} size="sm" />
         <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-medium truncate">{task.name}</p>
+          <p className="text-sm font-medium truncate">{task.name}</p>
           {task.description && (
-            <p className="text-[9px] font-mono text-zinc-600 truncate mt-0.5">{task.description}</p>
+            <p className="text-xs font-mono text-zinc-600 truncate mt-0.5">{task.description}</p>
           )}
         </div>
       </div>
-      <div className="flex items-center gap-3 mt-1.5 text-[8px] font-mono text-zinc-600">
+      <div className="flex items-center gap-3 mt-1.5 text-xs font-mono text-zinc-600">
         {task.durationMs ? (
           <span className="flex items-center gap-0.5"><Clock size={7} />{formatDuration(task.durationMs)}</span>
         ) : null}
@@ -138,15 +138,15 @@ function TaskDetailPanel({ task, executions, runLogs, onClose, onTrigger, onDele
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5 shrink-0">
         <StatusBadge status={jobBadgeStatus(task) as any} size="md" />
-        <span className="text-[11px] font-medium flex-1 truncate">{task.name}</span>
+        <span className="text-xs font-medium flex-1 truncate">{task.name}</span>
         <div className="flex items-center gap-1">
           {!isRunning && (
-            <button onClick={onTrigger} className="flex items-center gap-1 px-2 py-1 text-[9px] font-mono uppercase tracking-widest bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors">
+            <button onClick={onTrigger} className="flex items-center gap-1 px-2 py-1 text-xs font-mono uppercase tracking-widest bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors">
               <Play size={10} /> Run
             </button>
           )}
           {isRunning && (
-            <span className="flex items-center gap-1 px-2 py-1 text-[9px] font-mono uppercase tracking-widest text-yellow-400">
+            <span className="flex items-center gap-1 px-2 py-1 text-xs font-mono uppercase tracking-widest text-yellow-400">
               <Loader size={10} className="animate-spin" /> Running
             </span>
           )}
@@ -163,32 +163,32 @@ function TaskDetailPanel({ task, executions, runLogs, onClose, onTrigger, onDele
       <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
         {task.description && (
           <div>
-            <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Description</span>
-            <p className="text-[10px] font-mono text-zinc-400 mt-1">{task.description}</p>
+            <span className="text-xs font-mono uppercase text-zinc-600 tracking-widest">Description</span>
+            <p className="text-sm font-mono text-zinc-400 mt-1">{task.description}</p>
           </div>
         )}
 
         {task.message && (
           <div>
-            <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Prompt</span>
-            <p className="text-[10px] font-mono text-zinc-400 mt-1">{task.message}</p>
+            <span className="text-xs font-mono uppercase text-zinc-600 tracking-widest">Prompt</span>
+            <p className="text-sm font-mono text-zinc-400 mt-1">{task.message}</p>
           </div>
         )}
 
         {/* Metrics */}
         <div className="flex items-center gap-4">
           <div>
-            <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Duration</span>
-            <p className="text-[10px] font-mono text-zinc-300">{formatDuration(task.durationMs)}</p>
+            <span className="text-xs font-mono uppercase text-zinc-600 tracking-widest">Duration</span>
+            <p className="text-sm font-mono text-zinc-300">{formatDuration(task.durationMs)}</p>
           </div>
           <div>
-            <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Tokens</span>
-            <p className="text-[10px] font-mono text-zinc-300">{formatTokens(task.inputTokens)} in / {formatTokens(task.outputTokens)} out</p>
+            <span className="text-xs font-mono uppercase text-zinc-600 tracking-widest">Tokens</span>
+            <p className="text-sm font-mono text-zinc-300">{formatTokens(task.inputTokens)} in / {formatTokens(task.outputTokens)} out</p>
           </div>
           {task.model && (
             <div>
-              <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Model</span>
-              <p className="text-[10px] font-mono text-zinc-300">{task.model}</p>
+              <span className="text-xs font-mono uppercase text-zinc-600 tracking-widest">Model</span>
+              <p className="text-sm font-mono text-zinc-300">{task.model}</p>
             </div>
           )}
         </div>
@@ -196,12 +196,12 @@ function TaskDetailPanel({ task, executions, runLogs, onClose, onTrigger, onDele
         {/* Dependencies */}
         {(task.blocks && task.blocks.length > 0) || (task.blockedBy && task.blockedBy.length > 0) ? (
           <div>
-            <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Dependencies</span>
+            <span className="text-xs font-mono uppercase text-zinc-600 tracking-widest">Dependencies</span>
             {task.blockedBy && task.blockedBy.length > 0 && (
-              <p className="text-[9px] font-mono text-yellow-400/70 mt-1">Blocked by: {task.blockedBy.join(', ')}</p>
+              <p className="text-xs font-mono text-yellow-400/70 mt-1">Blocked by: {task.blockedBy.join(', ')}</p>
             )}
             {task.blocks && task.blocks.length > 0 && (
-              <p className="text-[9px] font-mono text-zinc-500 mt-0.5">Blocks: {task.blocks.join(', ')}</p>
+              <p className="text-xs font-mono text-zinc-500 mt-0.5">Blocks: {task.blocks.join(', ')}</p>
             )}
           </div>
         ) : null}
@@ -209,10 +209,10 @@ function TaskDetailPanel({ task, executions, runLogs, onClose, onTrigger, onDele
         {/* Error */}
         {task.lastError && (
           <div>
-            <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Error</span>
+            <span className="text-xs font-mono uppercase text-zinc-600 tracking-widest">Error</span>
             <div className="mt-1 p-2 bg-red-500/5 border border-red-500/20 flex items-start gap-2">
               <AlertCircle size={12} className="text-red-400 shrink-0 mt-0.5" />
-              <pre className="text-[9px] font-mono text-red-400 whitespace-pre-wrap">{task.lastError}</pre>
+              <pre className="text-xs font-mono text-red-400 whitespace-pre-wrap">{task.lastError}</pre>
             </div>
           </div>
         )}
@@ -220,10 +220,10 @@ function TaskDetailPanel({ task, executions, runLogs, onClose, onTrigger, onDele
         {/* Recent runs */}
         {executions.length > 0 && (
           <div>
-            <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Recent runs</span>
+            <span className="text-xs font-mono uppercase text-zinc-600 tracking-widest">Recent runs</span>
             <div className="space-y-1 mt-1">
               {executions.slice(0, 10).map(exec => (
-                <div key={exec.id} className="flex items-center gap-2 text-[9px] font-mono">
+                <div key={exec.id} className="flex items-center gap-2 text-xs font-mono">
                   <div className={cn(
                     "w-1.5 h-1.5 rounded-full",
                     exec.status === 'success' ? "bg-emerald-400" :
@@ -244,10 +244,10 @@ function TaskDetailPanel({ task, executions, runLogs, onClose, onTrigger, onDele
         {/* Run logs (persistent) */}
         {runLogs.length > 0 && (
           <div>
-            <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Run log</span>
+            <span className="text-xs font-mono uppercase text-zinc-600 tracking-widest">Run log</span>
             <div className="space-y-1 mt-1">
               {runLogs.slice(0, 20).map((run, i) => (
-                <div key={i} className="flex items-start gap-2 text-[9px] font-mono p-1 bg-white/5 rounded">
+                <div key={i} className="flex items-start gap-2 text-xs font-mono p-1 bg-white/5 rounded">
                   <div className={cn(
                     "w-1.5 h-1.5 rounded-full mt-0.5 shrink-0",
                     run.status === 'ok' ? "bg-emerald-400" :
@@ -305,20 +305,20 @@ function JobRow({ job, expanded, executions, runLogs, onToggleExpand, onTrigger,
         )} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-medium truncate">{job.name}</span>
-            {!job.enabled && <span className="text-[7px] font-mono uppercase bg-zinc-800 px-1 py-0.5 text-zinc-500">off</span>}
+            <span className="text-sm font-medium truncate">{job.name}</span>
+            {!job.enabled && <span className="text-[10px] font-mono uppercase bg-zinc-800 px-1 py-0.5 text-zinc-500">off</span>}
           </div>
           <div className="flex items-center gap-3 mt-0.5">
-            <span className="text-[9px] font-mono text-zinc-500">{job.project}</span>
-            <span className="text-[9px] font-mono text-zinc-600">{formatSchedule(job)}</span>
-            <span className="text-[9px] font-mono text-zinc-600">{formatNextRun(job.nextRunAt)}</span>
+            <span className="text-xs font-mono text-zinc-500">{job.project}</span>
+            <span className="text-xs font-mono text-zinc-600">{formatSchedule(job)}</span>
+            <span className="text-xs font-mono text-zinc-600">{formatNextRun(job.nextRunAt)}</span>
           </div>
         </div>
         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
           <button onClick={onTrigger} disabled={job.status === 'running'} className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors disabled:opacity-30" title="Run now">
             <Play size={11} />
           </button>
-          <button onClick={onToggle} className={cn("p-1 transition-colors text-[9px] font-mono", job.enabled ? "text-emerald-400 hover:text-yellow-400" : "text-zinc-600 hover:text-emerald-400")} title={job.enabled ? "Pause schedule" : "Enable schedule"}>
+          <button onClick={onToggle} className={cn("p-1 transition-colors text-xs font-mono", job.enabled ? "text-emerald-400 hover:text-yellow-400" : "text-zinc-600 hover:text-emerald-400")} title={job.enabled ? "Pause schedule" : "Enable schedule"}>
             {job.enabled ? 'ON' : 'OFF'}
           </button>
           <button onClick={onDelete} className="p-1 text-zinc-500 hover:text-red-400 transition-colors" title="Delete">
@@ -329,17 +329,17 @@ function JobRow({ job, expanded, executions, runLogs, onToggleExpand, onTrigger,
       </div>
       {expanded && (
         <div className="px-4 pb-2 space-y-1.5 border-t border-white/5 pt-2 bg-black/20">
-          <p className="text-[9px] font-mono text-zinc-400"><span className="text-zinc-600">Prompt: </span>{job.message}</p>
-          {job.lastError && <p className="text-[9px] font-mono text-red-400"><span className="text-zinc-600">Error: </span>{job.lastError}</p>}
-          {job.lastRunAt && <p className="text-[9px] font-mono text-zinc-600">Last run: {new Date(job.lastRunAt).toLocaleString()} ({job.lastRunStatus})</p>}
+          <p className="text-xs font-mono text-zinc-400"><span className="text-zinc-600">Prompt: </span>{job.message}</p>
+          {job.lastError && <p className="text-xs font-mono text-red-400"><span className="text-zinc-600">Error: </span>{job.lastError}</p>}
+          {job.lastRunAt && <p className="text-xs font-mono text-zinc-600">Last run: {new Date(job.lastRunAt).toLocaleString()} ({job.lastRunStatus})</p>}
           {job.deliveryMode && job.deliveryMode !== 'store' && (
-            <p className="text-[9px] font-mono text-zinc-500">Delivery: {job.deliveryMode}{job.deliveryWebhookUrl ? ` → ${job.deliveryWebhookUrl.slice(0, 40)}...` : ''}</p>
+            <p className="text-xs font-mono text-zinc-500">Delivery: {job.deliveryMode}{job.deliveryWebhookUrl ? ` → ${job.deliveryWebhookUrl.slice(0, 40)}...` : ''}</p>
           )}
           {executions.length > 0 && (
             <div className="mt-1 space-y-0.5">
-              <span className="text-[8px] font-mono uppercase text-zinc-600 tracking-widest">Recent</span>
+              <span className="text-xs font-mono uppercase text-zinc-600 tracking-widest">Recent</span>
               {executions.slice(0, 5).map(exec => (
-                <div key={exec.id} className="flex items-center gap-2 text-[8px] font-mono">
+                <div key={exec.id} className="flex items-center gap-2 text-xs font-mono">
                   <div className={cn("w-1.5 h-1.5 rounded-full", exec.status === 'success' ? "bg-emerald-400" : exec.status === 'error' ? "bg-red-400" : "bg-yellow-400")} />
                   <span className="text-zinc-500">{new Date(exec.startedAt).toLocaleString()}</span>
                   <span className={cn("uppercase", exec.status === 'success' ? "text-emerald-400" : "text-red-400")}>{exec.status}</span>
@@ -398,28 +398,28 @@ function CreateForm({ projectDir, onSubmit, onCancel }: CreateFormProps) {
   return (
     <form onSubmit={handleSubmit} className="p-3 border-b border-white/5 bg-zinc-950/50 space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-[9px] font-mono uppercase tracking-widest text-primary">New Task</span>
+        <span className="text-xs font-mono uppercase tracking-widest text-primary">New Task</span>
         <button type="button" onClick={onCancel} className="text-zinc-500 hover:text-zinc-300"><X size={12} /></button>
       </div>
-      {error && <div className="p-1.5 bg-red-500/10 border border-red-500/20 text-[9px] text-red-400">{error}</div>}
+      {error && <div className="p-1.5 bg-red-500/10 border border-red-500/20 text-xs text-red-400">{error}</div>}
       <div className="flex gap-2">
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Task name" className="flex-1 bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-[10px] outline-none focus:border-primary/40" autoFocus />
-        <select value={scheduleType} onChange={e => setScheduleType(e.target.value as any)} className="bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-[10px] outline-none focus:border-primary/40">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Task name" className="flex-1 bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" autoFocus />
+        <select value={scheduleType} onChange={e => setScheduleType(e.target.value as any)} className="bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40">
           <option value="manual">Manual</option>
           <option value="cron">Cron</option>
           <option value="every">Interval</option>
         </select>
       </div>
       {scheduleType === 'cron' && (
-        <input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="Cron expression (e.g. 0 9 * * *)" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-[10px] outline-none focus:border-primary/40" />
+        <input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="Cron expression (e.g. 0 9 * * *)" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" />
       )}
       {scheduleType === 'every' && (
-        <input type="number" value={everySeconds} onChange={e => setEverySeconds(e.target.value)} placeholder="Interval (seconds)" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-[10px] outline-none focus:border-primary/40" />
+        <input type="number" value={everySeconds} onChange={e => setEverySeconds(e.target.value)} placeholder="Interval (seconds)" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" />
       )}
-      <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Prompt message" rows={2} className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-[10px] outline-none focus:border-primary/40 resize-none" />
+      <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Prompt message" rows={2} className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40 resize-none" />
       <div className="flex items-center gap-2">
-        <input value={model} onChange={e => setModel(e.target.value)} placeholder="Model (optional)" className="flex-1 bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-[10px] outline-none focus:border-primary/40" />
-        <button type="submit" disabled={submitting || !name || !message} className="px-3 py-1.5 bg-primary text-black text-[9px] font-mono uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors">
+        <input value={model} onChange={e => setModel(e.target.value)} placeholder="Model (optional)" className="flex-1 bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" />
+        <button type="submit" disabled={submitting || !name || !message} className="px-3 py-1.5 bg-primary text-black text-xs font-mono uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors">
           {submitting ? 'Creating...' : 'Create'}
         </button>
       </div>
@@ -549,7 +549,7 @@ export function TaskBoardTab({ selectedProject }: TaskBoardTabProps) {
 
       {/* Error banner */}
       {error && (
-        <div className="mx-3 mt-2 p-2 bg-red-500/10 border border-red-500/20 flex items-center gap-2 text-[9px] text-red-400">
+        <div className="mx-3 mt-2 p-2 bg-red-500/10 border border-red-500/20 flex items-center gap-2 text-xs text-red-400">
           <AlertCircle size={10} /> {error}
         </div>
       )}
@@ -574,8 +574,8 @@ export function TaskBoardTab({ selectedProject }: TaskBoardTabProps) {
               <div>
                 <div className="flex items-center gap-2 mb-2 px-1">
                   <Layers size={10} className="text-primary" />
-                  <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-500 font-bold">Manual Tasks</span>
-                  <span className="text-[8px] font-mono text-zinc-700">{manualTasks.length}</span>
+                  <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 font-bold">Manual Tasks</span>
+                  <span className="text-xs font-mono text-zinc-700">{manualTasks.length}</span>
                 </div>
                 <div className="space-y-1">
                   {manualTasks.map(task => (
@@ -600,8 +600,8 @@ export function TaskBoardTab({ selectedProject }: TaskBoardTabProps) {
               <div>
                 <div className="flex items-center gap-2 mb-2 px-1">
                   <Clock size={10} className="text-primary" />
-                  <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-500 font-bold">Scheduled Jobs</span>
-                  <span className="text-[8px] font-mono text-zinc-700">{scheduledJobs.length}</span>
+                  <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 font-bold">Scheduled Jobs</span>
+                  <span className="text-xs font-mono text-zinc-700">{scheduledJobs.length}</span>
                 </div>
                 <div className="border border-white/5 divide-y divide-white/5">
                   {scheduledJobs.map(job => (
@@ -637,14 +637,14 @@ export function TaskBoardTab({ selectedProject }: TaskBoardTabProps) {
         <div className="px-3 py-2 border-t border-white/5 shrink-0 flex items-center gap-2">
           <button
             onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[9px] font-mono uppercase tracking-widest bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase tracking-widest bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
           >
             <Plus size={10} /> New Task
           </button>
           <button onClick={fetchJobs} className="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors" title="Refresh">
             <RefreshCw size={12} />
           </button>
-          <span className="ml-auto text-[8px] font-mono text-zinc-700">{projectJobs.length} total</span>
+          <span className="ml-auto text-xs font-mono text-zinc-700">{projectJobs.length} total</span>
         </div>
       )}
 

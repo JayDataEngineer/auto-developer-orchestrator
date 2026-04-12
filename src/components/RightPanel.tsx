@@ -121,7 +121,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
               onClick={() => { setSelectedArtifactId(a.id); setShowSettings(false); setShowBrowser(false); }}
               title={`${typeLabels[a.type]}: ${a.title}`}
               className={cn(
-                'flex items-center gap-1 px-2 py-1 text-[9px] font-mono uppercase tracking-widest transition-colors rounded shrink-0',
+                'flex items-center gap-1 px-2 py-1 text-xs font-mono uppercase tracking-widest transition-colors rounded shrink-0',
                 selectedArtifact?.id === a.id && !showSettings && !showBrowser
                   ? 'text-primary bg-primary/10'
                   : 'text-muted hover:text-muted-foreground hover:bg-white/5'
@@ -132,7 +132,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
             </button>
           ))}
           {artifacts.length === 0 && !artifactsLoading && (
-            <span className="text-[9px] font-mono text-zinc-700 px-2">No artifacts yet</span>
+            <span className="text-xs font-mono text-zinc-700 px-2">No artifacts yet</span>
           )}
           {artifactsLoading && (
             <Loader size={10} className="text-muted-foreground animate-spin mx-2" />
@@ -175,17 +175,17 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
         <div className="border-b border-primary/20 bg-primary/5 px-3 py-2">
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            <span className="text-[9px] font-black text-primary uppercase tracking-widest">
+            <span className="text-xs font-black text-primary uppercase tracking-widest">
               Agent Active
             </span>
           </div>
           {streamingState.runningTool && (
             <div className="flex items-center gap-1.5 mt-1.5">
               <Wrench size={9} className="text-primary/70" />
-              <span className="text-[9px] font-mono text-primary/80">
+              <span className="text-xs font-mono text-primary/80">
                 Running: {streamingState.runningTool.name}
               </span>
-              <span className="text-[8px] font-mono text-zinc-600 truncate">
+              <span className="text-xs font-mono text-zinc-600 truncate">
                 {streamingState.runningTool.name === 'bash' && typeof streamingState.runningTool.args?.command === 'string'
                   ? String(streamingState.runningTool.args.command).slice(0, 40)
                   : streamingState.runningTool.name === 'read' || streamingState.runningTool.name === 'write' || streamingState.runningTool.name === 'edit'
@@ -197,7 +197,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
           {streamingState.thinking && (
             <div className="flex items-center gap-1.5 mt-1.5">
               <Brain size={9} className="text-zinc-500" />
-              <span className="text-[9px] font-mono text-zinc-500 truncate">
+              <span className="text-xs font-mono text-zinc-500 truncate">
                 Thinking... ({streamingState.thinking.length} chars)
               </span>
             </div>
@@ -210,7 +210,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
         {/* Settings panel */}
         {showSettings && (
           <div className="p-4 space-y-4">
-            <div className="text-[9px] font-black uppercase tracking-widest text-muted-foreground mb-3">
+            <div className="text-xs font-black uppercase tracking-widest text-muted-foreground mb-3">
               Settings
             </div>
 
@@ -218,21 +218,21 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
             <div className="border border-white/5 p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Monitor size={12} className="text-muted-foreground" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-300">
+                <span className="text-sm font-bold uppercase tracking-widest text-zinc-300">
                   Computer Use
                 </span>
               </div>
-              <p className="text-[9px] font-mono text-muted-foreground leading-relaxed">
+              <p className="text-xs font-mono text-muted-foreground leading-relaxed">
                 Enable browser automation for the sandbox. Allows the agent to take screenshots, click elements, and navigate pages.
               </p>
               {cu.enabled ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-[9px] font-mono text-primary">Enabled</span>
+                  <span className="text-xs font-mono text-primary">Enabled</span>
                   <button
                     onClick={() => {
                       cu.disableComputerUse();
                     }}
-                    className="px-3 py-1 text-[8px] font-mono uppercase tracking-widest text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 transition-colors"
+                    className="px-3 py-1 text-xs font-mono uppercase tracking-widest text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 transition-colors"
                   >
                     Disable
                   </button>
@@ -241,7 +241,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
                       onClick={() => {
                         window.open(`/api/sandbox/vnc/${sandboxId}/vnc.html`, '_blank', 'width=1280,height=720');
                       }}
-                      className="px-3 py-1 text-[8px] font-mono uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 transition-colors"
+                      className="px-3 py-1 text-xs font-mono uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 transition-colors"
                     >
                       Open Desktop
                     </button>
@@ -251,13 +251,13 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
                 <button
                   onClick={handleEnableCU}
                   disabled={!sandboxId || cu.loading}
-                  className="px-3 py-1.5 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
+                  className="px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
                 >
                   {cu.loading ? 'Starting...' : 'Enable Computer Use'}
                 </button>
               )}
               {cu.error && (
-                <p className="text-[8px] font-mono text-red-400">{cu.error}</p>
+                <p className="text-xs font-mono text-red-400">{cu.error}</p>
               )}
             </div>
 
@@ -265,11 +265,11 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
             <div className="border border-white/5 p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Github size={12} className="text-muted-foreground" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-300">
+                <span className="text-sm font-bold uppercase tracking-widest text-zinc-300">
                   GitHub
                 </span>
               </div>
-              <p className="text-[9px] font-mono text-muted-foreground leading-relaxed">
+              <p className="text-xs font-mono text-muted-foreground leading-relaxed">
                 Connect your GitHub account to enable PR creation, branch management, and repository cloning.
               </p>
               <button
@@ -277,7 +277,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
                   // Trigger the GitHub modal in AppShell via custom event
                   window.dispatchEvent(new CustomEvent('open-github-settings'));
                 }}
-                className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                className="px-3 py-1.5 text-xs font-black uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 transition-colors"
               >
                 Configure GitHub
               </button>
@@ -309,10 +309,10 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
             <div className="p-3">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-muted-foreground">{typeIcons[selectedArtifact.type]}</span>
-                <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">
+                <span className="text-sm font-bold text-zinc-300 uppercase tracking-widest">
                   {typeLabels[selectedArtifact.type]}
                 </span>
-                <span className="text-[9px] font-mono text-zinc-600">
+                <span className="text-xs font-mono text-zinc-600">
                   {selectedArtifact.title}
                 </span>
               </div>
@@ -321,10 +321,10 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
           ) : (
             <div className="flex flex-col items-center justify-center h-40 text-zinc-700">
               <FileText size={20} className="mb-2 opacity-20" />
-              <p className="text-[9px] font-mono uppercase tracking-widest">
+              <p className="text-xs font-mono uppercase tracking-widest">
                 {artifactsLoading ? 'Loading...' : 'No artifacts yet'}
               </p>
-              <p className="text-[8px] font-mono text-zinc-800 mt-1">
+              <p className="text-xs font-mono text-zinc-800 mt-1">
                 Artifacts appear here as the agent works
               </p>
             </div>

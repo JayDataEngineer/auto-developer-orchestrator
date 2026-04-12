@@ -109,7 +109,7 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
             <div className="flex items-center gap-2">
               <Globe size={14} className="text-blue-400" />
               <span className="text-xs font-medium text-zinc-300">Live Browser (VNC)</span>
-              <span className="text-[10px] text-zinc-500">- Watch and interact with Chrome</span>
+              <span className="text-sm text-zinc-500">- Watch and interact with Chrome</span>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -137,7 +137,7 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
         </div>
 
         {/* Footer Status */}
-        <footer className="h-6 bg-zinc-900 border-t border-zinc-800 flex items-center px-4 text-[10px] text-zinc-500">
+        <footer className="h-6 bg-zinc-900 border-t border-zinc-800 flex items-center px-4 text-sm text-zinc-500">
           <span>Browser Mode Active (Live Chrome via VNC)</span>
           <span className="mx-2">•</span>
           <span>Sandbox: {sandboxId}</span>
@@ -225,7 +225,7 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
             <div className="flex items-center gap-2">
               <Terminal size={14} className="text-green-400" />
               <span className="text-xs font-medium text-zinc-300">Full Desktop (VNC)</span>
-              <span className="text-[10px] text-zinc-500">(Telegram, etc.)</span>
+              <span className="text-sm text-zinc-500">(Telegram, etc.)</span>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -261,7 +261,7 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
       </div>
 
       {/* Footer Status */}
-      <footer className="h-6 bg-zinc-900 border-t border-zinc-800 flex items-center px-4 text-[10px] text-zinc-500">
+      <footer className="h-6 bg-zinc-900 border-t border-zinc-800 flex items-center px-4 text-sm text-zinc-500">
         <span>Desktop Mode Active (Full XFCE4 Environment)</span>
         <span className="mx-2">•</span>
         <span>Sandbox: {sandboxId}</span>

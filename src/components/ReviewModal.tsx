@@ -33,7 +33,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ isOpen, onClose, onMer
                 </div>
                 <div>
                   <h2 className="text-sm lg:text-lg font-bold tracking-tight">Review Changes: PR #102</h2>
-                  <p className="text-[10px] lg:text-xs text-zinc-500">Pi agent has finished. Tests are passing.</p>
+                  <p className="text-sm lg:text-xs text-zinc-500">Pi agent has finished. Tests are passing.</p>
                 </div>
               </div>
               <button 
@@ -45,7 +45,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ isOpen, onClose, onMer
             </div>
             
             <div className="p-4 lg:p-6 space-y-4 lg:space-y-6 overflow-y-auto flex-1 terminal-scrollbar">
-              <div className="bg-black rounded-xl p-4 font-mono text-[10px] lg:text-xs leading-relaxed border border-white/5 shadow-inner overflow-x-auto">
+              <div className="bg-black rounded-xl p-4 font-mono text-sm lg:text-xs leading-relaxed border border-white/5 shadow-inner overflow-x-auto">
                 <div className="text-zinc-500 mb-2">@@ -45,8 +45,12 @@</div>
                 <div className="text-red-400/80">- if (!token) return res.status(401).send('Unauthorized');</div>
                 <div className="text-emerald-400">+ if (!token) &#123;</div>
@@ -68,7 +68,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ isOpen, onClose, onMer
             <div className="p-4 lg:p-6 bg-zinc-950 flex flex-col lg:flex-row gap-3 shrink-0">
               <button
                 onClick={onClose}
-                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl text-[10px] lg:text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl text-sm lg:text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
               >
                 <ExternalLink size={14} />
                 View Diff
@@ -78,7 +78,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({ isOpen, onClose, onMer
                   onMerge?.();
                   onClose();
                 }}
-                className="flex-1 bg-primary text-black font-bold py-3 rounded-xl text-[10px] lg:text-xs uppercase tracking-widest hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
+                className="flex-1 bg-primary text-black font-bold py-3 rounded-xl text-sm lg:text-xs uppercase tracking-widest hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
               >
                 <CheckCircle2 size={14} />
                 Approve & Merge

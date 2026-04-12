@@ -8,7 +8,7 @@ export function FleetBar({ project, branch, model, streaming }: {
   streaming?: boolean;
 }) {
   return (
-    <div className="w-full border-b border-white/5 flex items-center gap-4 px-6 py-1.5 bg-black/30 text-[9px] font-mono uppercase tracking-widest shrink-0">
+    <div className="w-full border-b border-white/5 flex items-center gap-4 px-6 py-1.5 bg-black/30 text-xs font-mono uppercase tracking-widest shrink-0">
       {project && (
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <Box size={9} />

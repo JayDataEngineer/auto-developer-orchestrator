@@ -10,10 +10,10 @@ export function ReasoningBlock({ content, defaultOpen = false }: { content: stri
         className="w-full flex items-center gap-3 p-3 text-left"
       >
         <Brain size={12} className="text-muted-foreground" />
-        <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+        <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">
           Reasoning
         </span>
-        <span className="text-[9px] font-mono text-zinc-700">
+        <span className="text-xs font-mono text-zinc-700">
           {content.length} chars
         </span>
         <div className="flex-1" />
@@ -21,7 +21,7 @@ export function ReasoningBlock({ content, defaultOpen = false }: { content: stri
       </button>
       {open && (
         <div className="px-3 pb-3 border-t border-zinc-800">
-          <pre className="text-[10px] font-mono text-muted whitespace-pre-wrap max-h-64 overflow-auto">
+          <pre className="text-sm font-mono text-muted whitespace-pre-wrap max-h-64 overflow-auto">
             {content}
           </pre>
         </div>

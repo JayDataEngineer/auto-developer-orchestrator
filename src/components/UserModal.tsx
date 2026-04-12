@@ -42,7 +42,7 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, userEmail
                 </button>
               </div>
               <h2 className="text-xl font-black text-white tracking-[0.2em] uppercase italic">{userName || "Felix Agent"}</h2>
-              <p className="text-[10px] text-primary mt-1 font-bold uppercase tracking-widest flex items-center gap-1.5 opacity-80">
+              <p className="text-sm text-primary mt-1 font-bold uppercase tracking-widest flex items-center gap-1.5 opacity-80">
                 <Mail size={12} /> {userEmail || "anonymous@orchestrator"}
               </p>
             </div>
@@ -73,7 +73,7 @@ export const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, userEmail
             </div>
 
             <div className="p-4 bg-black border-t border-border text-center">
-              <p className="text-[10px] text-zinc-800 uppercase tracking-[0.4em] font-black italic">PI_CORE_v3.0</p>
+              <p className="text-sm text-zinc-800 uppercase tracking-[0.4em] font-black italic">PI_CORE_v3.0</p>
             </div>
           </motion.div>
         </div>

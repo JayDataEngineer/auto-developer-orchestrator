@@ -52,7 +52,7 @@ function TreeNode({ node, depth, selectedPath, onExpand, onSelect }: TreeNodeRen
         )}
         {/* Name */}
         <span className={cn(
-          'text-[10px] font-mono truncate',
+          'text-sm font-mono truncate',
           node.isDir ? 'text-zinc-300' : isSelected ? 'text-primary' : 'text-zinc-400'
         )}>
           {node.name}
@@ -103,7 +103,7 @@ export function FileBrowserPanel({ rootPath, className }: FileBrowserPanelProps)
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 shrink-0">
         <FolderTree size={12} className="text-primary" />
-        <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-500 flex-1">Files</span>
+        <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 flex-1">Files</span>
         <button onClick={refresh} className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors">
           <RefreshCw size={10} />
         </button>
@@ -111,7 +111,7 @@ export function FileBrowserPanel({ rootPath, className }: FileBrowserPanelProps)
 
       {/* Error */}
       {error && (
-        <div className="px-3 py-1.5 text-[9px] text-red-400 font-mono">{error}</div>
+        <div className="px-3 py-1.5 text-xs text-red-400 font-mono">{error}</div>
       )}
 
       {/* Tree */}
@@ -139,9 +139,9 @@ export function FileBrowserPanel({ rootPath, className }: FileBrowserPanelProps)
         <div className="border-t border-white/5 flex flex-col max-h-[50%]">
           <div className="px-3 py-1.5 border-b border-white/5 flex items-center gap-2 shrink-0">
             <File size={10} className="text-zinc-500" />
-            <span className="text-[9px] font-mono text-zinc-400 truncate">{selectedFile.path}</span>
+            <span className="text-xs font-mono text-zinc-400 truncate">{selectedFile.path}</span>
           </div>
-          <pre className="flex-1 p-3 text-[9px] font-mono text-zinc-300 overflow-auto custom-scrollbar whitespace-pre-wrap bg-zinc-950/50">
+          <pre className="flex-1 p-3 text-xs font-mono text-zinc-300 overflow-auto custom-scrollbar whitespace-pre-wrap bg-zinc-950/50">
             {selectedFile.content}
           </pre>
         </div>

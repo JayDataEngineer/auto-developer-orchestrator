@@ -82,7 +82,7 @@ export const CloneModal: React.FC<CloneModalProps> = ({ isOpen, onClose, onClone
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">GitHub Repository URL</label>
+                  <label className="text-sm font-bold uppercase tracking-widest text-zinc-500">GitHub Repository URL</label>
                   <input 
                     type="text"
                     value={url}
@@ -94,7 +94,7 @@ export const CloneModal: React.FC<CloneModalProps> = ({ isOpen, onClose, onClone
                 </div>
                 
                 <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-                  <p className="text-[10px] text-zinc-400 leading-relaxed">
+                  <p className="text-sm text-zinc-400 leading-relaxed">
                     Pi agent will clone this repository into your configured <span className="text-primary">Projects Root Directory</span> and initialize a <span className="text-primary italic">TASKS.md</span> file.
                   </p>
                 </div>

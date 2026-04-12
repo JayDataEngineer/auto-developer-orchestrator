@@ -154,7 +154,7 @@ export const GithubView: React.FC<GithubViewProps> = ({
         <p className="text-zinc-500 text-xs uppercase tracking-widest max-w-md leading-relaxed mb-8">
           The GitHub real-time stream requires an active PAT connection to verify repository ownership and fetch live requests.
         </p>
-        <div className="text-[10px] font-mono text-zinc-700 uppercase tracking-[0.5em] font-bold">
+        <div className="text-sm font-mono text-zinc-700 uppercase tracking-[0.5em] font-bold">
           STATUS: UNAUTHORIZED // SESSION_IDLE
         </div>
       </div>
@@ -168,7 +168,7 @@ export const GithubView: React.FC<GithubViewProps> = ({
         <div className="flex items-center gap-4">
           <TerminalIcon size={16} className="text-primary" />
           <div className="flex flex-col">
-            <span className="text-[9px] font-black uppercase tracking-[0.4em] text-zinc-600">Unified Repository Stream</span>
+            <span className="text-xs font-black uppercase tracking-[0.4em] text-zinc-600">Unified Repository Stream</span>
             <span className="text-xs font-mono font-bold text-white tracking-widest">
               {repoOwner}/<span className="text-primary">{repoName}</span>
             </span>
@@ -176,17 +176,17 @@ export const GithubView: React.FC<GithubViewProps> = ({
         </div>
         <div className="flex items-center gap-6">
           {error && (
-             <div className="flex items-center gap-2 text-red-500 text-[10px] font-mono uppercase font-bold animate-pulse">
+             <div className="flex items-center gap-2 text-red-500 text-sm font-mono uppercase font-bold animate-pulse">
                <AlertCircle size={12} /> {error}
              </div>
           )}
           <div className="flex items-center gap-2">
             <div className={cn("w-1.5 h-1.5 rounded-full", isLive ? "bg-emerald-500 animate-pulse glow-emerald" : "bg-zinc-700")} />
-            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{isLive ? 'Live_Sync_Active' : 'Sync_Paused'}</span>
+            <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{isLive ? 'Live_Sync_Active' : 'Sync_Paused'}</span>
           </div>
           <button 
             onClick={() => setIsLive(!isLive)}
-            className="text-[9px] font-black uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+            className="text-xs font-black uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
           >
             {isLive ? '[Pause]' : '[Resume]'}
           </button>
@@ -207,7 +207,7 @@ export const GithubView: React.FC<GithubViewProps> = ({
                 { label: 'Activity', value: events.length || '0', color: 'text-emerald-500' },
               ].map((s, i) => (
                 <div key={i} className="bg-zinc-900/30 border border-white/5 p-4 rounded-sm flex flex-col gap-1">
-                  <span className="text-[8px] font-black uppercase tracking-widest text-zinc-600">{s.label}</span>
+                  <span className="text-xs font-black uppercase tracking-widest text-zinc-600">{s.label}</span>
                   <span className={cn("text-2xl font-black italic", s.color)}>{s.value}</span>
                 </div>
               ))}
@@ -215,7 +215,7 @@ export const GithubView: React.FC<GithubViewProps> = ({
 
             {/* Live Event Stream */}
             <div className="space-y-6">
-              <h3 className="text-[10px] font-black italic uppercase tracking-[0.4em] text-zinc-500 flex items-center gap-3">
+              <h3 className="text-sm font-black italic uppercase tracking-[0.4em] text-zinc-500 flex items-center gap-3">
                 <Activity size={14} className="text-primary" /> Logistical Heartbeat
               </h3>
               
@@ -242,12 +242,12 @@ export const GithubView: React.FC<GithubViewProps> = ({
                             onError={(e) => (e.currentTarget.src = 'https://github.com/identicons/jason.png')}
                           />
                         </div>
-                        <div className="text-[11px] font-mono text-zinc-400 group-hover:text-zinc-200 transition-colors">
+                        <div className="text-xs font-mono text-zinc-400 group-hover:text-zinc-200 transition-colors">
                           {renderEventDescription(event)}
                         </div>
                       </div>
 
-                      <div className="shrink-0 text-[9px] font-mono text-zinc-700 group-hover:text-zinc-500 flex items-center gap-2">
+                      <div className="shrink-0 text-xs font-mono text-zinc-700 group-hover:text-zinc-500 flex items-center gap-2">
                          <span>{new Date(event.created_at).toLocaleTimeString()}</span>
                          <ArrowRight size={10} className="opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all" />
                       </div>
@@ -258,7 +258,7 @@ export const GithubView: React.FC<GithubViewProps> = ({
                 {events.length === 0 && !isLoading && (
                   <div className="p-20 border border-dashed border-white/5 flex flex-col items-center gap-4">
                     <Github size={32} className="text-zinc-900" />
-                    <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-widest">
+                    <span className="text-xs font-bold text-zinc-700 uppercase tracking-widest">
                        {error ? 'TELEMETRY_LINK_BROKEN' : 'Awaiting system telemetry...'}
                     </span>
                   </div>
@@ -274,32 +274,32 @@ export const GithubView: React.FC<GithubViewProps> = ({
             {/* PR Section */}
             <section className="space-y-6">
               <div className="flex items-center justify-between">
-                <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Execution Phase</h4>
-                <span className="text-[8px] font-mono text-zinc-700">{prs.length} Open</span>
+                <h4 className="text-sm font-black uppercase tracking-[0.3em] text-zinc-500">Execution Phase</h4>
+                <span className="text-xs font-mono text-zinc-700">{prs.length} Open</span>
               </div>
               <div className="space-y-4">
                 {prs.map(pr => (
                   <div key={pr.id} className="p-4 bg-zinc-900/50 border border-white/5 hover:border-primary/30 transition-all cursor-pointer group">
-                    <div className="text-[11px] font-bold text-white mb-2 line-clamp-2 leading-tight group-hover:text-primary transition-colors">{pr.title}</div>
-                    <div className="flex items-center justify-between text-[9px] font-mono text-zinc-600">
+                    <div className="text-xs font-bold text-white mb-2 line-clamp-2 leading-tight group-hover:text-primary transition-colors">{pr.title}</div>
+                    <div className="flex items-center justify-between text-xs font-mono text-zinc-600">
                       <span>#{pr.number}</span>
                       <span className="bg-purple-950/30 text-purple-500 px-1.5 py-0.5 border border-purple-500/20 uppercase tracking-tighter">Pull_Authored</span>
                     </div>
                   </div>
                 ))}
                 {prs.length === 0 && !isLoading && (
-                   <div className="text-[10px] text-zinc-800 italic uppercase">No active pull requests.</div>
+                   <div className="text-sm text-zinc-800 italic uppercase">No active pull requests.</div>
                 )}
               </div>
             </section>
 
             {/* Branch Section */}
             <section className="space-y-6">
-              <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Logical Branches</h4>
+              <h4 className="text-sm font-black uppercase tracking-[0.3em] text-zinc-500">Logical Branches</h4>
               <div className="space-y-2 font-mono">
                 {branches.map(branch => (
                   <div key={branch.name} className="flex items-center justify-between p-2 hover:bg-white/5 transition-colors group">
-                    <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300">{branch.name}</span>
+                    <span className="text-sm text-zinc-500 group-hover:text-zinc-300">{branch.name}</span>
                     {branch.name === 'main' && <div className="w-1.5 h-1.5 rounded-full bg-primary glow-primary" />}
                   </div>
                 ))}
@@ -310,7 +310,7 @@ export const GithubView: React.FC<GithubViewProps> = ({
       </div>
 
       {/* Industrial Footer */}
-      <div className="h-8 bg-zinc-950 border-t border-white/5 flex items-center justify-between px-8 text-[8px] font-mono text-zinc-700 uppercase tracking-[0.5em] font-bold">
+      <div className="h-8 bg-zinc-950 border-t border-white/5 flex items-center justify-between px-8 text-xs font-mono text-zinc-700 uppercase tracking-[0.5em] font-bold">
         <div className="flex gap-6">
           <span>GITHUB_HANDSHAKE: {error ? 'FAIL' : 'OK'}</span>
           <span>STREAM_BUFFER: {events.length > 0 ? 'ACTIVE' : 'IDLE'}</span>

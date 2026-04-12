@@ -164,11 +164,11 @@ Examples:
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
                 <TerminalIcon size={14} className="text-primary" />
-                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white">
+                <span className="text-sm font-black uppercase tracking-[0.3em] text-white">
                   CLI Terminal // DOCKED
                 </span>
               </div>
-              <div className="text-[9px] font-mono text-zinc-600 uppercase tracking-widest hidden sm:block">
+              <div className="text-xs font-mono text-zinc-600 uppercase tracking-widest hidden sm:block">
                 SYS_ID: 0x3A2B // PORT: 3847
               </div>
             </div>
@@ -201,7 +201,7 @@ Examples:
           {/* Output Area */}
           <div 
             ref={outputRef}
-            className="flex-1 overflow-y-auto p-6 font-mono text-[11px] leading-relaxed text-zinc-400 custom-scrollbar select-text bg-[#020202]"
+            className="flex-1 overflow-y-auto p-6 font-mono text-xs leading-relaxed text-zinc-400 custom-scrollbar select-text bg-[#020202]"
           >
             {/* Welcome */}
             <div className="mb-6 opacity-40">
@@ -216,7 +216,7 @@ Examples:
                 <div className="flex items-center gap-3 mb-1">
                   <ChevronRight size={12} className="text-primary opacity-0 group-hover:opacity-100 transition-opacity" />
                   <span className="text-white font-bold">{item.command}</span>
-                  <span className="text-[8px] text-zinc-700 uppercase">{item.timestamp}</span>
+                  <span className="text-xs text-zinc-700 uppercase">{item.timestamp}</span>
                 </div>
                 {item.output && (
                   <pre className="text-zinc-400 whitespace-pre-wrap ml-6 border-l border-white/5 pl-4 py-1">
@@ -235,31 +235,31 @@ Examples:
             <div className="flex flex-wrap gap-2 mb-6 pt-4 border-t border-white/5 opacity-60">
               <button 
                 onClick={() => executeCommand('git status')}
-                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] uppercase tracking-wider rounded border border-white/10 text-primary"
+                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-xs uppercase tracking-wider rounded border border-white/10 text-primary"
               >
                 git status
               </button>
               <button 
                 onClick={() => executeCommand('ls -la')}
-                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] uppercase tracking-wider rounded border border-white/10"
+                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-xs uppercase tracking-wider rounded border border-white/10"
               >
                 ls -la
               </button>
               <button 
                 onClick={() => executeCommand('pwd')}
-                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] uppercase tracking-wider rounded border border-white/10"
+                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-xs uppercase tracking-wider rounded border border-white/10"
               >
                 pwd
               </button>
               <button 
                 onClick={() => executeCommand('uname -a')}
-                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] uppercase tracking-wider rounded border border-white/10"
+                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-xs uppercase tracking-wider rounded border border-white/10"
               >
                 uname
               </button>
               <button 
                 onClick={() => setHistory([])}
-                className="px-2 py-1 bg-white/5 hover:bg-rose-950/30 text-[9px] uppercase tracking-wider rounded border border-white/10 text-rose-500"
+                className="px-2 py-1 bg-white/5 hover:bg-rose-950/30 text-xs uppercase tracking-wider rounded border border-white/10 text-rose-500"
               >
                 clear
               </button>
@@ -275,7 +275,7 @@ Examples:
                 onChange={(e) => setCommand(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Enter command..."
-                className="flex-1 bg-transparent border-none outline-none text-white font-mono text-[11px] placeholder-zinc-800"
+                className="flex-1 bg-transparent border-none outline-none text-white font-mono text-xs placeholder-zinc-800"
                 disabled={isLoading}
                 autoFocus
               />
@@ -283,7 +283,7 @@ Examples:
           </div>
 
           {/* Industrial Status Bar */}
-          <div className="h-6 bg-zinc-950 border-t border-white/5 flex items-center justify-between px-6 text-[8px] font-mono text-zinc-600 uppercase tracking-widest">
+          <div className="h-6 bg-zinc-950 border-t border-white/5 flex items-center justify-between px-6 text-xs font-mono text-zinc-600 uppercase tracking-widest">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5">
                 <div className={cn("w-1.5 h-1.5 rounded-full", isLoading ? "bg-amber-500 animate-pulse glow-amber" : "bg-emerald-500 glow-emerald")} />

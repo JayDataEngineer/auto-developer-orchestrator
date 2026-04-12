@@ -88,14 +88,15 @@ function AppShellInner() {
     return () => { cancelled = true; };
   }, [selectedProject]);
 
-  // Auto-enable computer use when sandbox is resolved
+  // Auto-enable computer use only when the Desktop tab is active
   const enableRef = useRef(cu.enableComputerUse);
   enableRef.current = cu.enableComputerUse;
   useEffect(() => {
+    if (activeTab !== 'desktop') return;
     if (!resolvedSandboxId) return;
     if (cu.enabled && cu.sandboxId === resolvedSandboxId) return;
     enableRef.current(resolvedSandboxId);
-  }, [resolvedSandboxId, cu.enabled, cu.sandboxId]);
+  }, [activeTab, resolvedSandboxId, cu.enabled, cu.sandboxId]);
 
   // Artifacts hook — shared across all tabs
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
@@ -167,7 +168,7 @@ function AppShellInner() {
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className={cn(
-            'flex items-center gap-1 px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest transition-colors rounded',
+            'flex items-center gap-1 px-2 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors rounded',
             !sidebarCollapsed
               ? 'text-primary bg-primary/10'
               : 'text-muted hover:text-muted-foreground hover:bg-white/5'
@@ -185,7 +186,7 @@ function AppShellInner() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest transition-colors rounded',
+                'flex items-center gap-1.5 px-3 py-1.5 text-sm font-mono uppercase tracking-widest transition-colors rounded',
                 activeTab === tab.id
                   ? 'text-primary bg-primary/10'
                   : 'text-muted hover:text-muted-foreground hover:bg-white/5'
@@ -204,7 +205,7 @@ function AppShellInner() {
           <select
             value={selectedProject || ''}
             onChange={e => handleProjectChange(e.target.value)}
-            className="appearance-none bg-transparent text-[10px] font-mono uppercase tracking-widest text-muted-foreground pr-4 cursor-pointer focus:outline-none"
+            className="appearance-none bg-transparent text-sm font-mono uppercase tracking-widest text-muted-foreground pr-4 cursor-pointer focus:outline-none"
           >
             {projects.length === 0 && <option value="">No projects</option>}
             {projects.map(p => (
@@ -216,7 +217,7 @@ function AppShellInner() {
 
         <div className="flex-1" />
 
-        <div className="flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-widest text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-xs font-mono uppercase tracking-widest text-muted-foreground">
           <Zap size={9} className="text-primary" />
           <span className="text-primary">PI</span>
         </div>
@@ -227,7 +228,7 @@ function AppShellInner() {
         <button
           onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
           className={cn(
-            'flex items-center gap-1 px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest transition-colors rounded',
+            'flex items-center gap-1 px-2 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors rounded',
             !rightPanelCollapsed
               ? 'text-primary bg-primary/10'
               : 'text-muted hover:text-muted-foreground hover:bg-white/5'
@@ -245,7 +246,7 @@ function AppShellInner() {
             setShowSettings(!showSettings);
           }}
           className={cn(
-            'flex items-center gap-1.5 px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest transition-colors rounded',
+            'flex items-center gap-1.5 px-2 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors rounded',
             showSettings
               ? 'text-primary bg-primary/10'
               : 'text-muted hover:text-muted-foreground hover:bg-white/5'

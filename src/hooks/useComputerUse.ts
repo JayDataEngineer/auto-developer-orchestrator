@@ -38,7 +38,11 @@ export function useComputerUse() {
   const enableComputerUse = useCallback(async (sandboxId: string) => {
     setState(prev => ({ ...prev, loading: true, error: null }));
     try {
-      const res = await api.computerUse.enable(sandboxId);
+      // 30s timeout — sandbox creation + Chrome startup can be slow but shouldn't hang forever
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      const res = await api.computerUse.enable(sandboxId, { signal: controller.signal });
+      clearTimeout(timeout);
       if (mountedRef.current) {
         setState(prev => ({
           ...prev,
@@ -50,7 +54,10 @@ export function useComputerUse() {
       }
     } catch (err) {
       if (mountedRef.current) {
-        setState(prev => ({ ...prev, loading: false, error: String(err) }));
+        const msg = err instanceof DOMException && err.name === 'AbortError'
+          ? 'Computer use enable timed out (30s). The sandbox may still be starting — try again.'
+          : String(err);
+        setState(prev => ({ ...prev, loading: false, error: msg }));
       }
     }
   }, []);

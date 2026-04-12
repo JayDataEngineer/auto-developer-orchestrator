@@ -45,7 +45,7 @@ export function CollapsePanel({
         )}>
           {label && (
             <div className="p-2 border-b border-white/5 flex items-center justify-between">
-              <span className="text-[8px] font-black uppercase tracking-[0.2em] text-muted-foreground">
+              <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
                 {label}
               </span>
               <button onClick={onToggle} className="p-1 hover:bg-white/5 text-zinc-500">

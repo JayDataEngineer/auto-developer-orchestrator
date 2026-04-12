@@ -13,14 +13,14 @@ export function EmptyState({ icon, title, description, action, className }: Empt
   return (
     <div className={cn('flex flex-col items-center justify-center h-full text-center space-y-2 p-8', className)}>
       <div className="text-zinc-700 opacity-50">{icon}</div>
-      <p className="text-[10px] font-mono text-zinc-600">{title}</p>
+      <p className="text-sm font-mono text-zinc-600">{title}</p>
       {description && (
-        <p className="text-[9px] font-mono text-zinc-700 max-w-xs">{description}</p>
+        <p className="text-xs font-mono text-zinc-700 max-w-xs">{description}</p>
       )}
       {action && (
         <button
           onClick={action.onClick}
-          className="mt-2 px-3 py-1.5 text-[9px] font-mono uppercase tracking-widest bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+          className="mt-2 px-3 py-1.5 text-xs font-mono uppercase tracking-widest bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
         >
           {action.label}
         </button>

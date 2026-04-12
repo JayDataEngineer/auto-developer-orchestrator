@@ -93,33 +93,33 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
       {/* Desktop header */}
       <div className="h-8 bg-zinc-900/50 border-b border-white/5 flex items-center px-3 gap-2 shrink-0">
         <Monitor size={12} className="text-green-400" />
-        <span className="text-[10px] font-mono text-zinc-400 truncate">
+        <span className="text-sm font-mono text-zinc-400 truncate">
           {sandboxId ? sandboxId : 'Select a project to start'}
         </span>
         <div className="flex-1" />
         {cu.loading && !sessionLoading && (
-          <span className="text-[8px] font-mono text-zinc-500 flex items-center gap-1">
+          <span className="text-xs font-mono text-zinc-500 flex items-center gap-1">
             <Loader size={8} className="animate-spin" /> Enabling...
           </span>
         )}
         {sessionLoading && (
-          <span className="text-[8px] font-mono text-zinc-500 flex items-center gap-1">
+          <span className="text-xs font-mono text-zinc-500 flex items-center gap-1">
             <Loader size={8} className="animate-spin" /> Starting desktop...
           </span>
         )}
         {cu.error && (
-          <span className="text-[8px] font-mono text-red-400 flex items-center gap-1">
+          <span className="text-xs font-mono text-red-400 flex items-center gap-1">
             <AlertCircle size={8} /> {cu.error}
           </span>
         )}
         {sessionError && (
-          <span className="text-[8px] font-mono text-red-400 flex items-center gap-1">
+          <span className="text-xs font-mono text-red-400 flex items-center gap-1">
             <AlertCircle size={8} /> {sessionError}
           </span>
         )}
         {session && (
           <>
-            <span className="text-[8px] font-mono text-zinc-600">
+            <span className="text-xs font-mono text-zinc-600">
               Desktop
             </span>
             <div className="w-px h-3 bg-white/10" />
@@ -168,7 +168,7 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
               <p className="text-xs font-mono text-zinc-600">{cu.error || sessionError}</p>
               <button
                 onClick={startDesktop}
-                className="mt-4 px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
+                className="mt-4 px-4 py-2 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
               >
                 Retry
               </button>

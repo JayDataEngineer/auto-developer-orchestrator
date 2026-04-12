@@ -8,13 +8,13 @@ export function MarkdownBlock({ content, streaming }: { content: string; streami
   return (
     <div className="prose prose-invert prose-sm max-w-none
       prose-headings:text-white prose-headings:font-bold prose-headings:tracking-widest prose-headings:uppercase
-      prose-p:text-zinc-300 prose-p:text-[12px] prose-p:leading-relaxed prose-p:font-mono
+      prose-p:text-zinc-300 prose-p:text-sm prose-p:leading-relaxed prose-p:font-mono
       prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:rounded
       prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-white/5 prose-pre:rounded-none
       prose-a:text-primary prose-a:no-underline hover:prose-a:underline
       prose-strong:text-white
       prose-ul:text-zinc-300 prose-ol:text-zinc-300
-      prose-li:text-[12px] prose-li:font-mono
+      prose-li:text-sm prose-li:font-mono
     ">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}

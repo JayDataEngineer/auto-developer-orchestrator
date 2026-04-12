@@ -94,9 +94,9 @@ export const ManifestoView: React.FC = () => {
               { label: "Throughput", value: "4.8PB", sub: "Project Context" }
             ].map((stat, i) => (
               <div key={stat.label} className="space-y-2">
-                <div className="text-[10px] font-mono text-zinc-700 uppercase tracking-widest">{stat.label}</div>
+                <div className="text-sm font-mono text-zinc-700 uppercase tracking-widest">{stat.label}</div>
                 <div className="text-2xl font-black text-white glow-white">{stat.value}</div>
-                <div className="text-[8px] font-mono text-primary uppercase font-bold tracking-tighter italic">{stat.sub}</div>
+                <div className="text-xs font-mono text-primary uppercase font-bold tracking-tighter italic">{stat.sub}</div>
               </div>
             ))}
           </div>
@@ -117,7 +117,7 @@ export const ManifestoView: React.FC = () => {
              </h2>
           </div>
           
-          <div className="flex flex-wrap items-center justify-center gap-6 text-[10px] font-mono text-zinc-700 uppercase tracking-widest font-black">
+          <div className="flex flex-wrap items-center justify-center gap-6 text-sm font-mono text-zinc-700 uppercase tracking-widest font-black">
              <span className="flex items-center gap-2"><Globe size={12} /> Edge Network</span>
              <span className="flex items-center gap-2"><Database size={12} /> Persistent Core</span>
              <span className="flex items-center gap-2"><Lock size={12} /> Quantum Guard</span>
@@ -127,7 +127,7 @@ export const ManifestoView: React.FC = () => {
       
       {/* Footer Branding */}
       <div className="mt-32 border-t border-white/5 pt-8 text-center">
-         <div className="text-[9px] font-mono text-zinc-800 uppercase tracking-[1em] font-black">
+         <div className="text-xs font-mono text-zinc-800 uppercase tracking-[1em] font-black">
             Auto-Developer Orchestrator // Pi Agent v3.0
          </div>
       </div>

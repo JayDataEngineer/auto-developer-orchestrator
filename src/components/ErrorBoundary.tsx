@@ -38,7 +38,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </p>
             
             <div className="bg-black/50 p-4 border border-border/50 overflow-x-auto mb-6">
-              <pre className="text-[10px] text-error font-mono">
+              <pre className="text-sm text-error font-mono">
                 {this.state.error?.message || 'Unknown Exception'}
                 {this.state.error?.stack && `\n\n${this.state.error.stack.slice(0, 200)}...`}
               </pre>
@@ -46,7 +46,7 @@ export class ErrorBoundary extends Component<Props, State> {
             
             <button 
               onClick={() => window.location.reload()}
-              className="w-full py-2 bg-primary border border-primary/50 text-black text-[10px] font-bold hover:bg-primary/80 transition-all uppercase tracking-widest"
+              className="w-full py-2 bg-primary border border-primary/50 text-black text-sm font-bold hover:bg-primary/80 transition-all uppercase tracking-widest"
             >
               REBOOT_INTERFACE
             </button>

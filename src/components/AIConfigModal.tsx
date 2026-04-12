@@ -40,7 +40,7 @@ const ToggleRow: React.FC<ToggleRowProps> = ({ icon, iconBg, iconColor, title, d
       </div>
       <div>
         <p className="text-xs font-bold">{title}</p>
-        <p className="text-[10px] text-zinc-500">{description}</p>
+        <p className="text-sm text-zinc-500">{description}</p>
       </div>
     </div>
     <button 
@@ -123,7 +123,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
                 </div>
                 <div>
                   <h2 className="text-sm lg:text-lg font-bold tracking-tight">Agent Intelligence</h2>
-                  <p className="text-[10px] lg:text-xs text-zinc-500">Configure OpenAI-compatible LLMs & Auto-Testing</p>
+                  <p className="text-sm lg:text-xs text-zinc-500">Configure OpenAI-compatible LLMs & Auto-Testing</p>
                 </div>
               </div>
               <button 
@@ -138,7 +138,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
             <div className="p-4 lg:p-6 space-y-6 overflow-y-auto flex-1 terminal-scrollbar">
               {/* System Configuration */}
               <section className="space-y-4 pt-4 border-t border-white/5">
-                <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
                   <HardDrive size={12} />
                   Local System Environment
                 </h3>
@@ -146,7 +146,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
                   <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
                     <div className="flex items-center gap-2 text-zinc-400 mb-1">
                       <FolderOpen size={14} />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">Projects Root Directory</span>
+                      <span className="text-sm font-bold uppercase tracking-widest">Projects Root Directory</span>
                     </div>
                     <div className="flex gap-2">
                       <input 
@@ -157,7 +157,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
                         placeholder="/path/to/your/github/repos"
                       />
                     </div>
-                    <p className="text-[9px] text-zinc-500 italic">
+                    <p className="text-xs text-zinc-500 italic">
                       Point Pi agent to the folder containing your local Git repositories.
                     </p>
                   </div>
@@ -166,7 +166,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
 
               {/* Automation Toggles */}
               <section className="space-y-4 pt-4 border-t border-white/5">
-                <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
                   <Zap size={12} />
                   Automation Behaviors
                 </h3>
@@ -221,7 +221,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
                         className="overflow-hidden"
                       >
                         <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-2">
-                          <label className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Generation Prompt</label>
+                          <label className="text-sm text-zinc-500 uppercase tracking-widest font-bold">Generation Prompt</label>
                           <textarea 
                             value={config.testGenPrompt}
                             onChange={(e) => setConfig({...config, testGenPrompt: e.target.value})}
@@ -237,7 +237,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
 
               {/* Test Suite Configuration */}
               <section className={`space-y-4 pt-4 border-t border-white/5 transition-opacity ${config.autoTest ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
                   <FlaskConical size={12} />
                   Test Suite Selection
                 </h3>
@@ -253,7 +253,7 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
                         value ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-black border-white/5 text-zinc-500'
                       }`}
                     >
-                      <span className="text-[10px] font-bold uppercase tracking-wider">{key} Tests</span>
+                      <span className="text-sm font-bold uppercase tracking-wider">{key} Tests</span>
                       <div className={`w-2 h-2 rounded-full ${value ? 'bg-primary shadow-[0_0_8px_rgba(0,255,157,0.5)]' : 'bg-zinc-800'}`} />
                     </button>
                   ))}
@@ -269,14 +269,14 @@ export const AIConfigModal: React.FC<AIConfigModalProps> = ({ isOpen, onClose })
                   setTimeout(() => setIsTesting(false), 2000);
                 }}
                 disabled={isTesting}
-                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl text-[10px] lg:text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl text-sm lg:text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
               >
                 {isTesting ? <RefreshCw size={14} className="animate-spin" /> : <Activity size={14} />}
                 Test Connection
               </button>
               <button 
                 onClick={handleSave}
-                className="flex-1 bg-primary text-black font-bold py-3 rounded-xl text-[10px] lg:text-xs uppercase tracking-widest hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
+                className="flex-1 bg-primary text-black font-bold py-3 rounded-xl text-sm lg:text-xs uppercase tracking-widest hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
               >
                 <Save size={14} />
                 Save Configuration

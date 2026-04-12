@@ -9,7 +9,7 @@ export function Input({ monospace = true, className, ...props }: InputProps) {
   return (
     <input
       className={cn(
-        'w-full bg-zinc-900 border border-white/5 px-2 py-1.5 text-[11px] text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-colors',
+        'w-full bg-zinc-900 border border-white/5 px-2 py-1.5 text-xs text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-colors',
         monospace && 'font-mono',
         className,
       )}
@@ -26,7 +26,7 @@ export function Textarea({ monospace = true, className, ...props }: TextareaProp
   return (
     <textarea
       className={cn(
-        'w-full bg-zinc-900 border border-white/5 px-2 py-1.5 text-[11px] text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-colors resize-none',
+        'w-full bg-zinc-900 border border-white/5 px-2 py-1.5 text-xs text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-colors resize-none',
         monospace && 'font-mono',
         className,
       )}
