@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
@@ -18,19 +20,18 @@ func (h *PiHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 		models, err := h.fetchLiteLLMModels(r.Context())
 		if err != nil {
 			h.log.Warn("Failed to fetch models from LiteLLM", zap.Error(err))
+		} else {
 			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"models": []pi.ModelInfo{},
+				"models": models,
 			})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"models": models,
-		})
-		return
 	}
 
+	// Fallback: read models from ~/.pi/agent/models.json
+	models := h.readLocalModels()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"models": []pi.ModelInfo{},
+		"models": models,
 	})
 }
 
@@ -75,6 +76,52 @@ func (h *PiHandler) fetchLiteLLMModels(ctx context.Context) ([]pi.ModelInfo, err
 		})
 	}
 	return models, nil
+}
+
+// readLocalModels reads model definitions from ~/.pi/agent/models.json.
+func (h *PiHandler) readLocalModels() []pi.ModelInfo {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	modelsPath := filepath.Join(homeDir, ".pi", "agent", "models.json")
+	data, err := os.ReadFile(modelsPath)
+	if err != nil {
+		return nil
+	}
+
+	var config struct {
+		Providers map[string]struct {
+			Models []struct {
+				Id   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil
+	}
+
+	var models []pi.ModelInfo
+	seen := make(map[string]bool)
+	for providerName, provider := range config.Providers {
+		for _, m := range provider.Models {
+			if m.Id == "" || seen[m.Id] {
+				continue
+			}
+			seen[m.Id] = true
+			name := m.Name
+			if name == "" {
+				name = m.Id
+			}
+			models = append(models, pi.ModelInfo{
+				Provider: providerName,
+				Id:       m.Id,
+				Name:     name,
+			})
+		}
+	}
+	return models
 }
 
 // setModelRequest is the request body for SetModel.
