@@ -173,17 +173,13 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
         </div>
       )}
 
-      {/* Chat collapse toggle */}
-      {!desktopFull && (
+      {/* Chat reopen strip (when collapsed) */}
+      {chatCollapsed && !desktopFull && (
         <button
-          onClick={() => setChatCollapsed(!chatCollapsed)}
-          className={cn(
-            'absolute z-20 flex items-center justify-center w-4 h-12 bg-zinc-900 border border-white/5 text-zinc-500 hover:text-zinc-300 transition-colors',
-            chatCollapsed ? 'left-0' : 'left-80'
-          )}
-          style={{ top: 'calc(2.5rem + 0.5rem)' }}
+          onClick={() => setChatCollapsed(false)}
+          className="w-6 border-r border-white/5 bg-black flex items-center justify-center text-zinc-600 hover:text-zinc-300 hover:bg-white/5 transition-colors shrink-0"
         >
-          {chatCollapsed ? <ChevronRight size={10} /> : <ChevronLeft size={10} />}
+          <ChevronRight size={10} />
         </button>
       )}
 
@@ -304,7 +300,7 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
               Controls
             </span>
             <button onClick={() => setRightPanelCollapsed(true)} className="p-1 hover:bg-white/5 text-zinc-500">
-              <ChevronLeft size={10} />
+              <ChevronRight size={10} />
             </button>
           </div>
           <div className="flex-1 overflow-hidden">
@@ -318,17 +314,13 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
         </div>
       )}
 
-      {/* Right panel collapse toggle */}
-      {!desktopFull && (
+      {/* Controls reopen strip (when collapsed) */}
+      {rightPanelCollapsed && !desktopFull && (
         <button
-          onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-          className={cn(
-            'absolute z-20 flex items-center justify-center w-4 h-12 bg-zinc-900 border border-white/5 text-zinc-500 hover:text-zinc-300 transition-colors',
-            rightPanelCollapsed ? 'right-0' : 'right-80'
-          )}
-          style={{ top: 'calc(2.5rem + 0.5rem)' }}
+          onClick={() => setRightPanelCollapsed(false)}
+          className="w-6 border-l border-white/5 bg-black flex items-center justify-center text-zinc-600 hover:text-zinc-300 hover:bg-white/5 transition-colors shrink-0"
         >
-          {rightPanelCollapsed ? <ChevronLeft size={10} /> : <ChevronRight size={10} />}
+          <ChevronLeft size={10} />
         </button>
       )}
     </div>
