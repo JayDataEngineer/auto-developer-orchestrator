@@ -31,7 +31,7 @@ pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow]
 
 API = API_BASE_URL
 TEST_PROJECT = "test-repo"
-TEST_MODEL = "qwen-35-27-vision"
+TEST_MODEL = "gemma-4-26b"
 
 
 _mod_session = None

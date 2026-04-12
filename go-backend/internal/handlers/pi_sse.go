@@ -175,11 +175,15 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 			Data: map[string]string{"error": event.Data.Error},
 		}
 	case pi.RpcEventResponse:
+		inputVal := 0.0
+		if v, ok := pi.ToFloat64(event.Data.Input); ok {
+			inputVal = v
+		}
 		return &sseEvent{
 			Type: pi.EventStateUpdate,
 			Data: map[string]interface{}{
 				"model":  event.Data.Model,
-				"input":  event.Data.Input,
+				"input":  inputVal,
 				"output": event.Data.Output,
 				"cache":  event.Data.Cache,
 			},

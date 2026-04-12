@@ -71,11 +71,11 @@ type AgentEventData struct {
 	Error    string                 `json:"error,omitempty"`
 
 	// Session state
-	Model     string  `json:"model,omitempty"`
-	Streaming bool    `json:"streaming,omitempty"`
-	Input     float64 `json:"input,omitempty"`
-	Output    float64 `json:"output,omitempty"`
-	Cache     float64 `json:"cache,omitempty"`
+	Model     string         `json:"model,omitempty"`
+	Streaming bool           `json:"streaming,omitempty"`
+	Input     interface{}    `json:"input,omitempty"` // float64 for usage stats, []string for model capabilities
+	Output    float64        `json:"output,omitempty"`
+	Cache     float64        `json:"cache,omitempty"`
 
 	// Compaction
 	CompactedMessages int `json:"compactedMessages,omitempty"`

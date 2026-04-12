@@ -493,6 +493,24 @@ func truncStr(s string, maxLen int) string {
 	return s[:maxLen]
 }
 
+// ToFloat64 converts interface{} to float64 (handles float64, int, json.Number).
+// Exported for use by handlers.
+func ToFloat64(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	default:
+		return 0, false
+	}
+}
+
 // readEvents reads JSONL events from Pi's stdout and dispatches to subscribers.
 func (c *PiClient) readEvents() {
 	scanner := bufio.NewScanner(c.stdout)
@@ -590,8 +608,8 @@ func (c *PiClient) updateState(event AgentEvent) {
 		if event.Data.Model != "" {
 			c.state.Model = event.Data.Model
 		}
-		if event.Data.Input > 0 {
-			c.state.Input = event.Data.Input
+		if v, ok := ToFloat64(event.Data.Input); ok && v > 0 {
+			c.state.Input = v
 		}
 		if event.Data.Output > 0 {
 			c.state.Output = event.Data.Output
@@ -647,10 +665,26 @@ func (c *PiClient) SendCommand(cmd RpcCommand) error {
 	return nil
 }
 
+// providerForModel returns the provider name for a given model ID.
+// Models with a direct llamacpp backend bypass LiteLLM to avoid proxy overhead.
+func providerForModel(modelId string) string {
+	directModels := map[string]string{
+		"gemma-4-26b":       "llamacpp",
+		"gemma-4-26b-fast":  "llamacpp",
+		"gemma-4-e4b":       "llamacpp",
+		"gemma-4-e4b-fast":  "llamacpp",
+	}
+	if p, ok := directModels[modelId]; ok {
+		return p
+	}
+	return "litellm"
+}
+
 // SendPrompt sends a coding prompt to Pi.
 func (c *PiClient) SendPrompt(message string, model string, thinkingLevel string) error {
 	if model != "" {
-		if err := c.SetModel("litellm", model); err != nil {
+		provider := providerForModel(model)
+		if err := c.SetModel(provider, model); err != nil {
 			c.logger.Warn("Failed to set model before prompt (non-fatal)", zap.Error(err))
 		}
 		time.Sleep(500 * time.Millisecond)

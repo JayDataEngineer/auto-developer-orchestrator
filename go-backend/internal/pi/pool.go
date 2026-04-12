@@ -94,6 +94,7 @@ func (p *PiPool) GetOrCreate(projectPath string) (*PiClient, error) {
 
 // GetOrCreateWithID returns a PiClient for the given project path and agentId.
 // If no client exists, a new Pi subprocess is spawned.
+// Session resume is NOT used for new agents to avoid loading stale 90K+ token contexts.
 func (p *PiPool) GetOrCreateWithID(projectPath, agentId string) (*PiClient, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -105,13 +106,24 @@ func (p *PiPool) GetOrCreateWithID(projectPath, agentId string) (*PiClient, erro
 			return client, nil
 		}
 		// Stale client, clean it up
+		p.logger.Warn("Evicting stale Pi client",
+			zap.String("project", projectPath),
+			zap.String("agentId", agentId),
+		)
 		client.Close()
 		delete(p.clients, key)
 	}
 
-	// Enforce max agents per project
+	// Enforce max agents per project — evict oldest idle agent if at limit
 	if p.countForProjectLocked(projectPath) >= maxAgentsPerProject {
-		return nil, fmt.Errorf("max agents (%d) reached for project %s", maxAgentsPerProject, filepath.Base(projectPath))
+		evicted := p.evictOldestLocked(projectPath)
+		if !evicted {
+			return nil, fmt.Errorf("max agents (%d) reached for project %s (all active, cannot evict)", maxAgentsPerProject, filepath.Base(projectPath))
+		}
+		p.logger.Warn("Evicted oldest agent to make room",
+			zap.String("project", projectPath),
+			zap.String("newAgentId", agentId),
+		)
 	}
 
 	// Type assertion for sandbox manager
@@ -120,16 +132,9 @@ func (p *PiPool) GetOrCreateWithID(projectPath, agentId string) (*PiClient, erro
 		sandboxMgrTyped = p.sandboxMgr
 	}
 
-	// Find latest session to continue
-	sessionPath := findLatestSession(projectPath)
-	if sessionPath != "" {
-		p.logger.Info("Found existing session, will resume",
-			zap.String("project", projectPath),
-			zap.String("session", sessionPath),
-		)
-	}
-
-	client, err := NewPiClientWithSession(projectPath, agentId, p.logger, sandboxMgrTyped, sessionPath, "", "")
+	// Start FRESH — no session resume. Old sessions accumulate 90K+ tokens
+	// of stale context that makes every request hang for 30+ seconds.
+	client, err := NewPiClientWithSession(projectPath, agentId, p.logger, sandboxMgrTyped, "", "", "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn pi for %s: %w", projectPath, err)
 	}
@@ -191,9 +196,10 @@ func (p *PiPool) Shutdown() {
 	p.logger.Info("PiPool shutdown complete")
 }
 
-// cleanupIdle periodically removes idle Pi processes.
+// cleanupIdle periodically removes dead and idle Pi processes.
+// Dead: process not running. Idle: running but no activity for idleTimeout.
 func (p *PiPool) cleanupIdle() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -202,12 +208,66 @@ func (p *PiPool) cleanupIdle() {
 			if !client.IsRunning() {
 				client.Close()
 				delete(p.clients, key)
-				p.logger.Info("Cleaned up dead Pi client", zap.String("key", key))
+				pPath, aId := splitCompositeKey(key)
+				p.logger.Warn("GC: evicted dead Pi client",
+					zap.String("project", filepath.Base(pPath)),
+					zap.String("agentId", aId),
+				)
 				continue
+			}
+			// Evict idle agents that haven't been used
+			age := time.Since(client.startTime)
+			state := client.GetState()
+			if age > p.idleTimeout && !state.Streaming {
+				client.Close()
+				delete(p.clients, key)
+				pPath, aId := splitCompositeKey(key)
+				p.logger.Warn("GC: evicted idle Pi client",
+					zap.String("project", filepath.Base(pPath)),
+					zap.String("agentId", aId),
+					zap.Duration("age", age),
+				)
 			}
 		}
 		p.mu.Unlock()
 	}
+}
+
+// evictOldestLocked evicts the oldest non-streaming agent for the given project.
+// Must be called with p.mu held. Returns true if an agent was evicted.
+func (p *PiPool) evictOldestLocked(projectPath string) bool {
+	var oldestKey string
+	var oldestTime time.Time
+
+	for key, client := range p.clients {
+		pPath, _ := splitCompositeKey(key)
+		if pPath != projectPath {
+			continue
+		}
+		// Don't evict agents that are actively streaming
+		if client.GetState().Streaming {
+			continue
+		}
+		if oldestKey == "" || client.startTime.Before(oldestTime) {
+			oldestKey = key
+			oldestTime = client.startTime
+		}
+	}
+
+	if oldestKey == "" {
+		return false
+	}
+
+	client := p.clients[oldestKey]
+	client.Close()
+	delete(p.clients, oldestKey)
+	pPath, aId := splitCompositeKey(oldestKey)
+	p.logger.Warn("Evicted oldest agent",
+		zap.String("project", filepath.Base(pPath)),
+		zap.String("agentId", aId),
+		zap.Duration("age", time.Since(oldestTime)),
+	)
+	return true
 }
 
 // RegisterIfAbsent registers an existing PiClient in the pool if not already present.
