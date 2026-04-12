@@ -3,6 +3,8 @@ package scheduler
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -106,6 +108,9 @@ type Job struct {
 	Blocks   []string `json:"blocks,omitempty"`   // job IDs this blocks
 	BlockedBy []string `json:"blockedBy,omitempty"` // job IDs blocking this
 
+	// Inbound webhook token — POST /api/scheduler/webhook/{token} triggers this job
+	WebhookToken string `json:"webhookToken,omitempty"`
+
 	// Internal: cron entry ID
 	cronEntryID cron.EntryID
 }
@@ -204,6 +209,11 @@ func (s *Scheduler) CreateJob(job *Job) error {
 
 	if job.ID == "" {
 		job.ID = fmt.Sprintf("job-%d", time.Now().UnixMilli())
+	}
+	if job.WebhookToken == "" {
+		b := make([]byte, 16)
+		rand.Read(b)
+		job.WebhookToken = hex.EncodeToString(b)
 	}
 	if job.CreatedAt.IsZero() {
 		job.CreatedAt = time.Now()
@@ -368,6 +378,18 @@ func (s *Scheduler) ListJobs() []*Job {
 		result = append(result, j)
 	}
 	return result
+}
+
+// FindJobByWebhookToken looks up a job by its webhook token.
+func (s *Scheduler) FindJobByWebhookToken(token string) (*Job, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, j := range s.jobs {
+		if j.WebhookToken == token {
+			return j, nil
+		}
+	}
+	return nil, fmt.Errorf("no job found for webhook token")
 }
 
 // ListExecutions returns recent executions, optionally filtered by jobID.

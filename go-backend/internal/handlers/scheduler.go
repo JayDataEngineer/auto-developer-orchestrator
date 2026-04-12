@@ -28,6 +28,8 @@ func NewSchedulerHandler(s *scheduler.Scheduler, logger *zap.Logger) *SchedulerH
 func (h *SchedulerHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/", h.CreateJob)
 	r.Get("/", h.ListJobs)
+	// Webhook route must come before /{id} routes so chi doesn't treat "webhook" as an ID
+	r.Post("/webhook/{token}", h.WebhookTrigger)
 	r.Get("/{id}", h.GetJob)
 	r.Put("/{id}", h.UpdateJob)
 	r.Delete("/{id}", h.DeleteJob)
@@ -316,4 +318,61 @@ func (h *SchedulerHandler) SetDependencies(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// WebhookTrigger triggers a job via its webhook token.
+// POST /api/scheduler/webhook/{token}
+// Optional JSON body: { "message": "override prompt for this run" }
+func (h *SchedulerHandler) WebhookTrigger(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	if token == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Missing webhook token",
+		})
+		return
+	}
+
+	job, err := h.scheduler.FindJobByWebhookToken(token)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "Invalid webhook token",
+		})
+		return
+	}
+
+	// Optionally override the message for this run
+	var body struct {
+		Message string `json:"message"`
+	}
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.Message != "" {
+			h.log.Info("webhook trigger with message override",
+				zap.String("jobId", job.ID),
+				zap.String("jobName", job.Name),
+			)
+			// Temporarily override message for this execution
+			origMessage := job.Message
+			job.Message = body.Message
+			defer func() { job.Message = origMessage }()
+		}
+	}
+
+	if err := h.scheduler.TriggerJob(job.ID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
+		return
+	}
+
+	h.log.Info("job triggered via webhook",
+		zap.String("jobId", job.ID),
+		zap.String("jobName", job.Name),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Job %q triggered", job.Name),
+		"jobId":   job.ID,
+		"jobName": job.Name,
+	})
 }

@@ -175,6 +175,8 @@ export interface SchedulerJob {
   // Dependencies
   blocks?: string[];
   blockedBy?: string[];
+  // Inbound webhook
+  webhookToken?: string;
 }
 
 export interface SchedulerExecution {

@@ -7,7 +7,7 @@ import { StatusBadge } from './ui/StatusBadge';
 import { EmptyState } from './ui/EmptyState';
 import {
   LayoutGrid, Plus, Play, Trash2, Clock,
-  Loader, AlertCircle, X, Layers, RefreshCw, Save
+  Loader, AlertCircle, X, Layers, RefreshCw, Save, Copy, Link
 } from 'lucide-react';
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -131,6 +131,7 @@ interface EditTaskModalProps {
 }
 
 function EditTaskModal({ task, onClose, onSave, onTrigger, onDelete }: EditTaskModalProps) {
+  const { addToast } = useToastContext();
   const [name, setName] = useState(task.name);
   const [description, setDescription] = useState(task.description || '');
   const [message, setMessage] = useState(task.message);
@@ -275,6 +276,31 @@ function EditTaskModal({ task, onClose, onSave, onTrigger, onDelete }: EditTaskM
                 <p className="text-xs font-mono text-zinc-400">{task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : '—'}</p>
               </div>
             </div>
+
+            {/* Webhook URL */}
+            {task.webhookToken && (
+              <div className="pt-2 border-t border-white/5">
+                <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Webhook URL</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <Link size={10} className="text-zinc-600 shrink-0" />
+                  <code className="flex-1 text-xs font-mono text-zinc-400 bg-black/50 rounded-lg px-2 py-1.5 truncate border border-white/5">
+                    {window.location.origin}/api/scheduler/webhook/{task.webhookToken}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/api/scheduler/webhook/${task.webhookToken}`);
+                      addToast('success', 'Webhook URL copied');
+                    }}
+                    className="p-1.5 text-zinc-500 hover:text-primary transition-colors shrink-0"
+                    title="Copy webhook URL"
+                  >
+                    <Copy size={12} />
+                  </button>
+                </div>
+                <p className="text-[10px] text-zinc-700 mt-1 ml-4">POST to this URL to trigger the job. Optional body: {"{"}"message": "override prompt"{"}"}</p>
+              </div>
+            )}
 
             {/* Save button */}
             <button
@@ -451,7 +477,9 @@ export function TaskBoardTab() {
     try {
       setLoading(true);
       const data = await api.scheduler.list();
-      setAllJobs(data.jobs || []);
+      const jobs = data.jobs || [];
+      jobs.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      setAllJobs(jobs);
       setError(null);
     } catch (err: any) {
       setError(err.message);
