@@ -316,6 +316,7 @@ func (c *PiClient) copyIfNewer(src, dst string) error {
 
 // findOrchestratorRoot finds the root of the orchestrator project
 // by walking up from the current working directory looking for go.mod
+// inside a go-backend/ subdirectory (the repo root is the parent).
 func (c *PiClient) findOrchestratorRoot() string {
 	// Try common locations
 	candidates := []string{
@@ -326,7 +327,17 @@ func (c *PiClient) findOrchestratorRoot() string {
 	}
 
 	for _, candidate := range candidates {
+		// Check if candidate is the go-backend dir (has go.mod)
 		if _, err := os.Stat(filepath.Join(candidate, "go.mod")); err == nil {
+			abs, _ := filepath.Abs(candidate)
+			// If the directory is named "go-backend", the repo root is its parent
+			if filepath.Base(abs) == "go-backend" {
+				return filepath.Dir(abs)
+			}
+			return abs
+		}
+		// Check if candidate is the repo root (has go-backend/go.mod)
+		if _, err := os.Stat(filepath.Join(candidate, "go-backend", "go.mod")); err == nil {
 			abs, _ := filepath.Abs(candidate)
 			return abs
 		}

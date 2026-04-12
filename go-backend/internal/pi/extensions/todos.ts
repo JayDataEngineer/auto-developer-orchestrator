@@ -14,7 +14,7 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
 import { Text, truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 // ─── API Helper ────────────────────────────────────────────────
 
@@ -24,9 +24,16 @@ const ARTIFACT_AGENT_ID = process.env.ARTIFACT_AGENT_ID || process.env.AGENT_ID 
 function callApi(endpoint: string, method = "GET", body?: Record<string, unknown>): string {
 	const args: string[] = ["-s"];
 	if (method !== "GET") args.push("-X", method);
-	if (body) args.push("-d", JSON.stringify(body));
+	if (body) {
+		args.push("-H", "Content-Type: application/json");
+		args.push("-d", JSON.stringify(body));
+	}
 	args.push(`http://${API_HOST}${endpoint}`);
-	return execSync("curl", args, { encoding: "utf-8", timeout: 10000 });
+	try {
+		return execFileSync("curl", args, { encoding: "utf-8", timeout: 10000 });
+	} catch (e: any) {
+		throw new Error(`curl ${args.join(" ")}: ${e.stderr || e.message}`);
+	}
 }
 
 // ─── Types ─────────────────────────────────────────────────────
