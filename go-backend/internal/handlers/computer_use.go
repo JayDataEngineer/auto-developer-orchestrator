@@ -62,28 +62,39 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 1: Ensure sandbox exists — create if not found
-	// Use desktop mode so Chrome runs on Xvfb visible via VNC
+	// Step 1: Ensure sandbox exists — try desktop mode, then create, then recover
 	session, err := h.manager.EnableDesktopMode(r.Context(), sandboxID)
 	if err != nil {
-		// Sandbox doesn't exist yet — create it first
-		h.logger.Info("sandbox not found, creating it", zap.String("sandbox_id", sandboxID))
+		h.logger.Info("desktop mode failed, trying to create sandbox", zap.String("sandbox_id", sandboxID), zap.Error(err))
 
 		_, createErr := h.manager.CreateSandbox(r.Context(), sandbox.SandboxOptions{
 			ID: sandboxID,
 		})
 		if createErr != nil {
-			h.logger.Error("failed to create sandbox for computer use", zap.Error(createErr))
-			JSONError(w, fmt.Sprintf("failed to create sandbox: %v", createErr), http.StatusInternalServerError)
-			return
-		}
+			// Container may already exist but not tracked — recover it
+			h.logger.Info("create failed, attempting to recover existing container", zap.String("sandbox_id", sandboxID), zap.Error(createErr))
+			recoverErr := h.manager.RecoverSandbox(r.Context(), sandboxID)
+			if recoverErr != nil {
+				h.logger.Error("failed to create or recover sandbox", zap.Error(createErr), zap.Error(recoverErr))
+				JSONError(w, fmt.Sprintf("failed to create sandbox: %v", createErr), http.StatusInternalServerError)
+				return
+			}
 
-		// Now enable desktop mode
-		session, err = h.manager.EnableDesktopMode(r.Context(), sandboxID)
-		if err != nil {
-			h.logger.Error("failed to enable desktop mode after sandbox creation", zap.Error(err))
-			JSONError(w, fmt.Sprintf("failed to enable desktop mode: %v", err), http.StatusInternalServerError)
-			return
+			// Now try browser mode on the recovered sandbox (uses existing Chrome)
+			session, err = h.manager.EnableBrowserMode(r.Context(), sandboxID)
+			if err != nil {
+				h.logger.Error("failed to enable browser mode after recovery", zap.Error(err))
+				JSONError(w, fmt.Sprintf("failed to enable browser mode: %v", err), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			// Fresh sandbox — enable desktop mode
+			session, err = h.manager.EnableDesktopMode(r.Context(), sandboxID)
+			if err != nil {
+				h.logger.Error("failed to enable desktop mode after sandbox creation", zap.Error(err))
+				JSONError(w, fmt.Sprintf("failed to enable desktop mode: %v", err), http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 

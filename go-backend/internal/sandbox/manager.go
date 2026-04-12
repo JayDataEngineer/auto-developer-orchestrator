@@ -389,6 +389,36 @@ func (m *Manager) GetSandbox(id string) (*Sandbox, error) {
 	return sandbox, nil
 }
 
+// RecoverSandbox recovers an existing Docker container into the in-memory map
+// without creating a new one. Used when the backend restarts but containers are still running.
+func (m *Manager) RecoverSandbox(ctx context.Context, sandboxID string) error {
+	containerName := m.getContainerName(sandboxID)
+	result, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
+	if err != nil {
+		return fmt.Errorf("container %s not found: %w", containerName, err)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sandbox := &Sandbox{
+		ID:          sandboxID,
+		ContainerID: result.Container.ID,
+		ProjectPath: "",
+		Policy:      "developer",
+		Mode:        ModeCLI,
+		Status:      StatusRunning,
+		CreatedAt:   time.Now(),
+	}
+	m.sandboxes[sandboxID] = sandbox
+
+	m.logger.Info("recovered existing sandbox container",
+		zap.String("sandbox_id", sandboxID),
+		zap.String("container_id", result.Container.ID),
+	)
+	return nil
+}
+
 // ListSandboxes returns all active sandboxes
 func (m *Manager) ListSandboxes() []*Sandbox {
 	m.mu.RLock()
