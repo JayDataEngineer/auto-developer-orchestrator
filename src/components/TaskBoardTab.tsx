@@ -375,6 +375,12 @@ function CreateForm({ projectDir, onSubmit, onCancel }: CreateFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !message) { setError('Name and prompt are required'); return; }
+    if (scheduleType === 'cron' && !cronExpr.trim()) { setError('Cron expression is required'); return; }
+    if (scheduleType === 'cron') {
+      const parts = cronExpr.trim().split(/\s+/);
+      if (parts.length !== 6) { setError('Cron must have 6 fields (sec min hour day month dow). Example: 0 0 9 * * *'); return; }
+    }
+    if (scheduleType === 'every' && (!everySeconds || parseInt(everySeconds) < 10)) { setError('Interval must be at least 10 seconds'); return; }
     setSubmitting(true);
     setError(null);
     try {
@@ -387,7 +393,7 @@ function CreateForm({ projectDir, onSubmit, onCancel }: CreateFormProps) {
         cronExpr: scheduleType === 'cron' ? cronExpr : undefined,
         everySeconds: scheduleType === 'every' ? parseInt(everySeconds) || 3600 : undefined,
       });
-      setName(''); setDescription(''); setMessage(''); setModel('');
+      setName(''); setDescription(''); setMessage(''); setModel(''); setCronExpr(''); setEverySeconds('3600');
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -411,10 +417,21 @@ function CreateForm({ projectDir, onSubmit, onCancel }: CreateFormProps) {
         </select>
       </div>
       {scheduleType === 'cron' && (
-        <input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="Cron expression (e.g. 0 9 * * *)" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" />
+        <div>
+          <input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="0 0 9 * * *" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40 font-mono" />
+          <p className="text-[10px] text-zinc-600 mt-0.5">6 fields: sec min hour day month dow — e.g. "0 0 9 * * *" = daily at 9am</p>
+        </div>
       )}
       {scheduleType === 'every' && (
-        <input type="number" value={everySeconds} onChange={e => setEverySeconds(e.target.value)} placeholder="Interval (seconds)" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" />
+        <select value={everySeconds} onChange={e => setEverySeconds(e.target.value)} className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40">
+          <option value="300">Every 5 minutes</option>
+          <option value="900">Every 15 minutes</option>
+          <option value="1800">Every 30 minutes</option>
+          <option value="3600">Every hour</option>
+          <option value="21600">Every 6 hours</option>
+          <option value="43200">Every 12 hours</option>
+          <option value="86400">Every 24 hours</option>
+        </select>
       )}
       <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Prompt message" rows={2} className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40 resize-none" />
       <div className="flex items-center gap-2">
