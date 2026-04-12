@@ -108,10 +108,6 @@ func main() {
 	)
 	subAgentHandler := handlers.NewSubAgentHandler(subAgentMgr, piPool, logger)
 
-	// Task manager
-	taskMgr := pi.NewTaskManager()
-	taskHandler := handlers.NewTaskHandler(taskMgr, logger)
-
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
 
@@ -295,11 +291,6 @@ func main() {
 			})
 		}
 
-		// Task management
-		r.Route("/pi/tasks", func(r chi.Router) {
-			taskHandler.RegisterRoutes(r)
-		})
-
 		// Artifacts (plans, todos, notes from agents)
 		r.Route("/pi/artifacts", func(r chi.Router) {
 			artifactHandler.RegisterRoutes(r)
@@ -348,9 +339,6 @@ func main() {
 
 	// Shutdown sub-agent manager
 	subAgentMgr.Shutdown()
-
-	// Shutdown task manager
-	taskMgr.Shutdown()
 
 	// Shutdown browser client
 	if browserClient != nil {

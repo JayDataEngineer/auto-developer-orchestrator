@@ -145,7 +145,7 @@ export interface SchedulerJob {
   agentId?: string;
   message: string;
   model?: string;
-  scheduleType: 'cron' | 'every' | 'at';
+  scheduleType: 'cron' | 'every' | 'at' | 'manual';
   cronExpr?: string;
   timezone?: string;
   everySeconds?: number;
@@ -167,6 +167,13 @@ export interface SchedulerJob {
   consecutiveErrors: number;
   createdAt: string;
   updatedAt: string;
+  // Metrics
+  inputTokens?: number;
+  outputTokens?: number;
+  durationMs?: number;
+  // Dependencies
+  blocks?: string[];
+  blockedBy?: string[];
 }
 
 export interface SchedulerExecution {
@@ -177,27 +184,6 @@ export interface SchedulerExecution {
   status: 'running' | 'success' | 'error';
   error?: string;
   output?: string;
-}
-
-// Pi Task Management types
-export interface PiTask {
-  id: string;
-  title: string;
-  description?: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
-  projectDir: string;
-  parentAgent: string;
-  subAgentId?: string;
-  model?: string;
-  blocks?: string[];
-  blockedBy?: string[];
-  output?: string;
-  error?: string;
-  createdAt: number;
-  updatedAt: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  durationMs?: number;
 }
 
 export interface SubAgentInfo {
@@ -240,7 +226,7 @@ export interface CreateJobRequest {
   agentId?: string;
   message: string;
   model?: string;
-  scheduleType: 'cron' | 'every' | 'at';
+  scheduleType: 'cron' | 'every' | 'at' | 'manual';
   cronExpr?: string;
   timezone?: string;
   everySeconds?: number;
@@ -447,37 +433,10 @@ export const api = {
       apiFetch<{ executions: SchedulerExecution[] }>(`/api/scheduler/${encodeURIComponent(id)}/executions`),
     runs: (id: string, limit = 50) =>
       apiFetch<{ runs: RunLogEntry[] }>(`/api/scheduler/${encodeURIComponent(id)}/runs?limit=${limit}`),
-  },
-  tasks: {
-    list: (projectDir: string, parentAgent?: string) => {
-      const params = new URLSearchParams({ projectDir });
-      if (parentAgent) params.set('parentAgent', parentAgent);
-      return apiFetch<{ tasks: PiTask[] }>(`/api/pi/tasks/list?${params}`);
-    },
-    get: (taskId: string) =>
-      apiFetch<PiTask>(`/api/pi/tasks/${encodeURIComponent(taskId)}`),
-    create: (task: { title: string; description?: string; projectDir: string; parentAgent: string; model?: string; blocks?: string[]; blockedBy?: string[] }) =>
-      apiFetch<PiTask>('/api/pi/tasks/', {
-        method: 'POST',
-        body: JSON.stringify(task),
-      }),
-    update: (taskId: string, task: Partial<Pick<PiTask, 'title' | 'description' | 'status' | 'model'>>) =>
-      apiFetch<PiTask>(`/api/pi/tasks/${encodeURIComponent(taskId)}`, {
-        method: 'PUT',
-        body: JSON.stringify(task),
-      }),
-    delete: (taskId: string) =>
-      apiFetch<{ success: boolean }>(`/api/pi/tasks/${encodeURIComponent(taskId)}`, {
-        method: 'DELETE',
-      }),
-    stop: (taskId: string) =>
-      apiFetch<{ success: boolean }>(`/api/pi/tasks/${encodeURIComponent(taskId)}/stop`, {
-        method: 'POST',
-      }),
-    canStart: (taskId: string) =>
-      apiFetch<{ canStart: boolean }>(`/api/pi/tasks/${encodeURIComponent(taskId)}/canStart`),
-    setDeps: (taskId: string, blocks?: string[], blockedBy?: string[]) =>
-      apiFetch<{ success: boolean }>(`/api/pi/tasks/${encodeURIComponent(taskId)}/deps`, {
+    canStart: (id: string) =>
+      apiFetch<{ canStart: boolean }>(`/api/scheduler/${encodeURIComponent(id)}/canStart`),
+    setDeps: (id: string, blocks?: string[], blockedBy?: string[]) =>
+      apiFetch<{ success: boolean }>(`/api/scheduler/${encodeURIComponent(id)}/deps`, {
         method: 'POST',
         body: JSON.stringify({ blocks, blockedBy }),
       }),

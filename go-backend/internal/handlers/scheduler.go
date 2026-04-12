@@ -34,6 +34,8 @@ func (h *SchedulerHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/{id}/trigger", h.TriggerJob)
 	r.Get("/{id}/executions", h.ListExecutions)
 	r.Get("/{id}/runs", h.ListRuns)
+	r.Get("/{id}/canStart", h.CanStart)
+	r.Post("/{id}/deps", h.SetDependencies)
 	r.Get("/runs", h.ListAllRuns)
 }
 
@@ -272,6 +274,46 @@ func (h *SchedulerHandler) ListAllRuns(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// CanStart checks if a job's dependencies are all completed.
+func (h *SchedulerHandler) CanStart(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
+	canStart, err := h.scheduler.CanStart(jobID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":  true,
+		"canStart": canStart,
+	})
+}
 
+// setDepsRequest is the body for setting dependencies.
+type setDepsRequest struct {
+	Blocks    []string `json:"blocks"`
+	BlockedBy []string `json:"blockedBy"`
+}
 
+// SetDependencies configures job dependencies.
+func (h *SchedulerHandler) SetDependencies(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
 
+	var req setDepsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Invalid request body",
+		})
+		return
+	}
+
+	if err := h.scheduler.SetDependencies(jobID, req.Blocks, req.BlockedBy); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}

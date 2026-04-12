@@ -22,6 +22,7 @@ const (
 	ScheduleCron   ScheduleType = "cron"
 	ScheduleEvery  ScheduleType = "every"
 	ScheduleAt     ScheduleType = "at"
+	ScheduleManual ScheduleType = "manual" // No schedule, runs on trigger only
 )
 
 // DeliveryMode defines how job output is delivered.
@@ -97,6 +98,13 @@ type Job struct {
 	ConsecutiveErrors int      `json:"consecutiveErrors"`
 	CreatedAt        time.Time `json:"createdAt"`
 	UpdatedAt        time.Time `json:"updatedAt"`
+	// Metrics (from execution results)
+	InputTokens  int   `json:"inputTokens,omitempty"`
+	OutputTokens int   `json:"outputTokens,omitempty"`
+	DurationMs   int64 `json:"durationMs,omitempty"`
+	// Dependencies (task-like)
+	Blocks   []string `json:"blocks,omitempty"`   // job IDs this blocks
+	BlockedBy []string `json:"blockedBy,omitempty"` // job IDs blocking this
 
 	// Internal: cron entry ID
 	cronEntryID cron.EntryID
@@ -397,13 +405,23 @@ func (s *Scheduler) ListAllRuns(limit int, statusFilter, jobIDFilter string) ([]
 }
 
 // TriggerJob manually triggers a job execution.
+// For manual tasks (scheduleType "manual"), the job is temporarily enabled
+// so executeJob will run it.
 func (s *Scheduler) TriggerJob(jobID string) error {
 	s.mu.RLock()
-	_, ok := s.jobs[jobID]
+	job, ok := s.jobs[jobID]
 	s.mu.RUnlock()
 
 	if !ok {
 		return fmt.Errorf("job %s not found", jobID)
+	}
+
+	// For manual tasks, temporarily enable so executeJob proceeds
+	if job.Schedule == ScheduleManual && !job.Enabled {
+		s.mu.Lock()
+		job.Enabled = true
+		job.Status = StatusIdle
+		s.mu.Unlock()
 	}
 
 	go s.executeJob(jobID)
@@ -458,6 +476,8 @@ func (s *Scheduler) executeJob(jobID string) {
 				err = fmt.Errorf("%s", result.Error)
 			}
 			output = result.Output
+			job.InputTokens = result.InputTokens
+			job.OutputTokens = result.OutputTokens
 		}
 	} else {
 		// Fallback to main agent pool
@@ -484,6 +504,7 @@ func (s *Scheduler) executeJob(jobID string) {
 		job.LastRunStatus = "error"
 		job.LastError = truncateClip(err.Error(), 500)
 		job.ConsecutiveErrors++
+		job.DurationMs = execution.EndedAt.Sub(execution.StartedAt).Milliseconds()
 
 		// Error backoff
 		endedAt := time.Now()
@@ -507,6 +528,10 @@ func (s *Scheduler) executeJob(jobID string) {
 				zap.Int("errors", job.ConsecutiveErrors),
 			)
 			s.sendFailureAlert(job, execution.Error)
+		} else if job.Schedule == ScheduleManual {
+			// Manual tasks return to disabled after failure
+			job.Status = StatusDisabled
+			job.Enabled = false
 		} else {
 			job.Status = StatusIdle
 		}
@@ -516,10 +541,18 @@ func (s *Scheduler) executeJob(jobID string) {
 		job.LastRunStatus = "success"
 		job.LastError = ""
 		job.ConsecutiveErrors = 0
-		job.Status = StatusIdle
+		job.DurationMs = execution.EndedAt.Sub(execution.StartedAt).Milliseconds()
 
 		// Deliver output
 		s.deliverOutput(job, output)
+
+		if job.Schedule == ScheduleManual {
+			// Manual tasks return to disabled after successful run
+			job.Status = StatusDisabled
+			job.Enabled = false
+		} else {
+			job.Status = StatusIdle
+		}
 	}
 
 	job.LastRunAt = time.Now()
@@ -554,6 +587,85 @@ func (s *Scheduler) executeJob(jobID string) {
 	}
 
 	s.save()
+}
+
+// CanStart returns true if a job's dependencies are all completed.
+func (s *Scheduler) CanStart(jobID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	job, ok := s.jobs[jobID]
+	if !ok {
+		return false, fmt.Errorf("job %s not found", jobID)
+	}
+
+	for _, depID := range job.BlockedBy {
+		dep, ok := s.jobs[depID]
+		if !ok {
+			return false, nil // dependency doesn't exist yet
+		}
+		if dep.LastRunStatus != "success" {
+			return false, nil // dependency not completed successfully
+		}
+	}
+	return true, nil
+}
+
+// SetDependencies configures job dependencies.
+func (s *Scheduler) SetDependencies(jobID string, blocks, blockedBy []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	job, ok := s.jobs[jobID]
+	if !ok {
+		return fmt.Errorf("job %s not found", jobID)
+	}
+
+	job.Blocks = blocks
+	job.BlockedBy = blockedBy
+	job.UpdatedAt = time.Now()
+
+	// Validate: check for cycles
+	if err := s.validateNoCycleLocked(jobID); err != nil {
+		job.Blocks = nil
+		job.BlockedBy = nil
+		return err
+	}
+
+	s.save()
+	return nil
+}
+
+// validateNoCycleLocked checks for dependency cycles using DFS.
+func (s *Scheduler) validateNoCycleLocked(startID string) error {
+	visited := make(map[string]bool)
+	inStack := make(map[string]bool)
+
+	var dfs func(id string) error
+	dfs = func(id string) error {
+		visited[id] = true
+		inStack[id] = true
+
+		job, ok := s.jobs[id]
+		if !ok {
+			return nil
+		}
+		for _, depID := range job.BlockedBy {
+			if inStack[depID] {
+				return fmt.Errorf("dependency cycle detected: %s → %s", id, depID)
+			}
+			if !visited[depID] {
+				if err := dfs(depID); err != nil {
+					return err
+				}
+			}
+		}
+
+		inStack[id] = false
+		return nil
+	}
+
+	return dfs(startID)
 }
 
 // resolveProjectPath resolves a project name to its filesystem path.
@@ -647,6 +759,8 @@ func (s *Scheduler) computeNextRun(job *Job) {
 		if t, err := time.Parse(time.RFC3339, job.AtTime); err == nil {
 			job.NextRunAt = t
 		}
+	case ScheduleManual:
+		// No next run for manual tasks
 	}
 }
 
@@ -680,6 +794,8 @@ func (s *Scheduler) validateJob(job *Job) error {
 		if _, err := time.Parse(time.RFC3339, job.AtTime); err != nil {
 			return fmt.Errorf("invalid atTime format (use RFC3339): %w", err)
 		}
+	case ScheduleManual:
+		// No schedule fields required — manual tasks run on trigger only
 	default:
 		return fmt.Errorf("invalid schedule type: %s", job.Schedule)
 	}
@@ -891,8 +1007,8 @@ func (s *Scheduler) load() error {
 			job.cronEntryID = entryID
 		}
 
-		// Compute next run and collect missed jobs
-		if job.Enabled && job.Status != StatusError {
+		// Compute next run and collect missed jobs (skip manual tasks)
+		if job.Enabled && job.Status != StatusError && job.Schedule != ScheduleManual {
 			s.computeNextRun(job)
 			if job.NextRunAt.Before(now) {
 				missedJobs = append(missedJobs, job)
