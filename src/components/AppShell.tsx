@@ -65,15 +65,18 @@ function AppShellInner() {
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const sandboxes = Array.isArray(data) ? data : (data.sandboxes || []);
-        if (sandboxes.length === 0 || cancelled) return;
+        if (cancelled) return;
+        if (sandboxes.length === 0) {
+          // No sandboxes exist yet — use fallback ID, backend will create it
+          setResolvedSandboxId(`sandbox-${selectedProject}`);
+          return;
+        }
         const match = sandboxes.find((s: any) =>
           s.id === selectedProject ||
           s.id === `sandbox-${selectedProject}` ||
           s.projectPath?.includes(selectedProject)
         );
-        if (!cancelled) {
-          setResolvedSandboxId(match ? match.id : sandboxes[0].id);
-        }
+        setResolvedSandboxId(match ? match.id : sandboxes[0].id);
       } catch {
         if (!cancelled) {
           setResolvedSandboxId(`sandbox-${selectedProject}`);
