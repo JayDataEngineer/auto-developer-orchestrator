@@ -706,8 +706,9 @@ func (c *PiClient) SendPrompt(message string, model string, thinkingLevel string
 	}
 
 	cmd := RpcCommand{
-		Type:    CmdPrompt,
-		Message: message,
+		Type:          CmdPrompt,
+		Message:       message,
+		ThinkingLevel: thinkingLevel,
 	}
 	return c.SendCommand(cmd)
 }
