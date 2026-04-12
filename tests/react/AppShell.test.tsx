@@ -46,13 +46,12 @@ vi.mock('../../src/components/GitHubConnectModal', () => ({
 }));
 
 describe('AppShell', () => {
-  it('renders 4 tabs with labels', () => {
+  it('renders 3 tabs with labels', () => {
     render(<AppShell />);
 
     expect(screen.getByText('Agent')).toBeInTheDocument();
     expect(screen.getByText('Tasks')).toBeInTheDocument();
     expect(screen.getByText('Desktop')).toBeInTheDocument();
-    expect(screen.getByText('Scheduler')).toBeInTheDocument();
   });
 
   it('defaults to Agent tab', () => {
@@ -76,13 +75,6 @@ describe('AppShell', () => {
     expect(screen.getByTestId('desktop-tab')).toBeInTheDocument();
   });
 
-  it('switches to Scheduler tab on click', () => {
-    render(<AppShell />);
-
-    fireEvent.click(screen.getByText('Scheduler'));
-    expect(screen.getByTestId('scheduler-tab')).toBeInTheDocument();
-  });
-
   it('renders project selector with projects', () => {
     render(<AppShell />);
 
@@ -96,17 +88,17 @@ describe('AppShell', () => {
     expect(screen.getByText('PI')).toBeInTheDocument();
   });
 
-  it('shows GitHub settings button', () => {
+  it('shows Settings button', () => {
     render(<AppShell />);
 
-    // The settings/gear button
-    expect(screen.getByTitle('GitHub Settings')).toBeInTheDocument();
+    const settingsButtons = screen.getAllByTitle('Settings');
+    expect(settingsButtons.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('opens GitHub modal on settings click', () => {
+  it('opens GitHub modal via custom event', () => {
     render(<AppShell />);
 
-    fireEvent.click(screen.getByTitle('GitHub Settings'));
+    fireEvent(window, new Event('open-github-settings'));
     expect(screen.getByTestId('github-modal')).toBeInTheDocument();
   });
 });

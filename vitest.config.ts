@@ -3,8 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     globals: true,
-    environment: 'node',
-    include: ['tests/unit/**/*.test.ts', 'tests/integration/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.ts', 'tests/integration/**/*.test.ts', 'tests/react/**/*.test.tsx'],
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
@@ -15,6 +14,8 @@ export default defineConfig({
       '**/openshell/**',
       '**/go-backend/**',
     ],
+    environment: 'jsdom',
     testTimeout: 10000,
+    setupFiles: ['tests/react/setup.ts'],
   },
 });

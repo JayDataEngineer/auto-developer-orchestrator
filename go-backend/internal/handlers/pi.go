@@ -369,6 +369,9 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 				if idx := strings.Index(assistantText, "??APPROVAL:"); idx >= 0 {
 					approvalTriggered = true
 					msg := strings.TrimSpace(assistantText[idx+len("??APPROVAL:"):])
+					if msg == "" {
+						msg = "Plan approval requested"
+					}
 					requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
 
 					writeSSE(w, pi.EventApprovalRequest, pi.ApprovalRequestData{
@@ -397,6 +400,9 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 				} else if idx := strings.Index(assistantText, "??QUESTION:"); idx >= 0 {
 					approvalTriggered = true
 					question := strings.TrimSpace(assistantText[idx+len("??QUESTION:"):])
+					if question == "" {
+						question = "Question asked"
+					}
 					requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
 
 					writeSSE(w, pi.EventQuestionAsked, pi.ApprovalRequestData{

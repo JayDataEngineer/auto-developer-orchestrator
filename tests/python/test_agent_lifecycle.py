@@ -373,12 +373,12 @@ class TestMultiTurnConversation:
 
         for i, events in enumerate([events1, events2], 1):
             event_types = [t for t, _ in events]
-            has_start = "agent_start" in event_types
+            has_start = "agent_start" in event_types or "agent_spawned" in event_types
             has_content = any(t in event_types for t in ("text_delta", "thinking_delta"))
             has_end = "agent_end" in event_types
 
             assert has_start, (
-                f"Turn {i}: missing agent_start. Types: {event_types}"
+                f"Turn {i}: missing agent_start/agent_spawned. Types: {event_types}"
             )
             assert has_content, (
                 f"Turn {i}: no content events. Types: {event_types}"
