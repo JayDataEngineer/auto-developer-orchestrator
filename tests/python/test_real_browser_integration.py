@@ -64,19 +64,41 @@ class TestAppLoads:
 
 
 class TestAgentTabSidebar:
-    def test_left_sidebar_shows_conversations(self, page):
-        """The Chats sidebar on the Agent tab should list conversations."""
+    def _open_chats_sidebar(self, page):
+        """Ensure the Chats sidebar is open on the Agent tab, with test-repo expanded."""
         _goto(page)
         _click_tab(page, "Agent")
 
-        # The "Chats" toggle should exist
-        chats_btn = page.locator("button", has_text="Chats")
-        if chats_btn.count() == 0:
-            # Sidebar is collapsed — click to open
-            panel_btn = page.locator("button[title*='Chats'], button[title*='History']")
-            if panel_btn.count() > 0:
-                panel_btn.first.click()
-                page.wait_for_timeout(500)
+        # Wait for sidebar to load
+        page.wait_for_timeout(2000)
+
+        # Check if sidebar is visible — if not, click the Chats toggle
+        sidebar = page.locator(".border-r.border-white\\/5")
+        if sidebar.count() == 0:
+            # Sidebar is collapsed — click the Chats toggle
+            top_bar = _get_top_bar(page)
+            toggle_btn = top_bar.locator("button").first
+            toggle_btn.click()
+            page.wait_for_timeout(1000)
+
+        # Wait for history to load
+        try:
+            page.wait_for_selector("text=History", timeout=5000)
+        except Exception:
+            pass
+
+        # Expand test-repo project group (it starts collapsed)
+        test_repo_btn = page.locator("button", has_text="test-repo")
+        if test_repo_btn.count() > 0:
+            # Check if it's collapsed by looking for conversation items inside it
+            msgs = page.locator("text=msgs")
+            if msgs.count() == 0:
+                test_repo_btn.first.click()
+                page.wait_for_timeout(1000)
+
+    def test_left_sidebar_shows_conversations(self, page):
+        """The Chats sidebar on the Agent tab should list conversations."""
+        self._open_chats_sidebar(page)
 
         # Sidebar should show conversation items (font-mono text with "msgs")
         conv_items = page.locator("text=msgs")
@@ -85,16 +107,7 @@ class TestAgentTabSidebar:
 
     def test_context_menu_on_right_click(self, page):
         """Right-clicking a conversation should show Rename/Delete menu."""
-        _goto(page)
-        _click_tab(page, "Agent")
-
-        # Open sidebar if needed
-        chats_btn = page.locator("button", has_text="Chats")
-        if chats_btn.count() == 0:
-            panel_btn = page.locator("button[title*='Chats'], button[title*='History']")
-            if panel_btn.count() > 0:
-                panel_btn.first.click()
-                page.wait_for_timeout(500)
+        self._open_chats_sidebar(page)
 
         # Find a conversation item (contains "msgs" text)
         conv = page.locator("text=msgs").first
@@ -123,17 +136,8 @@ class TestAgentTabSidebar:
         except Exception:
             pass
 
-        _goto(page)
-        _click_tab(page, "Agent")
+        self._open_chats_sidebar(page)
         page.wait_for_timeout(1000)
-
-        # Open sidebar if needed
-        chats_btn = page.locator("button", has_text="Chats")
-        if chats_btn.count() == 0:
-            panel_btn = page.locator("button[title*='Chats'], button[title*='History']")
-            if panel_btn.count() > 0:
-                panel_btn.first.click()
-                page.wait_for_timeout(500)
 
         # Reload to get fresh history
         page.reload(wait_until="networkidle")
@@ -180,17 +184,8 @@ class TestAgentTabSidebar:
         except Exception:
             pass
 
-        _goto(page)
-        _click_tab(page, "Agent")
+        self._open_chats_sidebar(page)
         page.wait_for_timeout(1000)
-
-        # Open sidebar
-        chats_btn = page.locator("button", has_text="Chats")
-        if chats_btn.count() == 0:
-            panel_btn = page.locator("button[title*='Chats'], button[title*='History']")
-            if panel_btn.count() > 0:
-                panel_btn.first.click()
-                page.wait_for_timeout(500)
 
         page.reload(wait_until="networkidle")
         page.wait_for_timeout(1000)
@@ -237,7 +232,7 @@ class TestDesktopTabSidebar:
         assert conv_header.count() > 0, "Desktop left sidebar should have 'Conversation' header"
 
     def test_right_sidebar_shows_browser_tools(self, page):
-        """Desktop tab right sidebar should show Browser tools, not Artifacts."""
+        """Desktop tab right sidebar should show Browser header and Chats section."""
         _goto(page)
         _click_tab(page, "Desktop")
         page.wait_for_timeout(500)
@@ -253,6 +248,34 @@ class TestDesktopTabSidebar:
         # Right sidebar should show "Browser" header
         browser_header = page.locator("text=Browser")
         assert browser_header.count() > 0, "Desktop right sidebar should show 'Browser'"
+
+    def test_right_sidebar_has_chat_section(self, page):
+        """Desktop tab right sidebar should show Chats section with project selector."""
+        _goto(page)
+        _click_tab(page, "Desktop")
+        page.wait_for_timeout(500)
+
+        # Open right sidebar if needed
+        browser_btn = page.locator("button", has_text="Browser")
+        if browser_btn.count() == 0:
+            panel_btn = page.locator("button[title*='Browser']")
+            if panel_btn.count() > 0:
+                panel_btn.first.click()
+                page.wait_for_timeout(500)
+
+        # Should have a "Chats" section in the right sidebar
+        chats_header = page.locator("text=Chats")
+        assert chats_header.count() > 0, "Desktop right sidebar should have 'Chats' section"
+
+        # Should have a project selector dropdown
+        project_select = page.locator("select").last
+        assert project_select.is_visible(), "Project selector should be visible"
+
+        # Should have sandbox name input
+        sandbox_input = page.locator("input[placeholder*='sandbox']", has_text="")
+        # Placeholder-based search may not work, try by placeholder attr
+        sandbox_inputs = page.locator("input[placeholder*='sandbox' i]")
+        assert sandbox_inputs.count() > 0, "Should have sandbox name input"
 
     def test_computer_use_does_not_hang(self, page):
         """Clicking Enable Computer Use should not hang forever."""

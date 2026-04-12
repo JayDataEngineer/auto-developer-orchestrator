@@ -12,10 +12,11 @@ import { useResizable } from '../hooks/useResizable';
 import { useArtifacts } from '../hooks/useArtifacts';
 import {
   Zap, Settings, ChevronDown, LayoutGrid, Monitor, MessageSquare,
-  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Globe
+  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Globe,
+  FolderOpen, Plus
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
-import { api } from '../lib/api';
+import { api, ConversationSummary } from '../lib/api';
 import { ToolCall } from '../lib/pi-events';
 
 type TabId = 'agent' | 'tasks' | 'desktop';
@@ -37,6 +38,159 @@ const RIGHT_LABELS: Record<TabId, string> = {
   tasks: '',
   desktop: 'Browser',
 };
+
+function DesktopChatSection({
+  projects,
+  selectedProject,
+  activeAgentId,
+  onSelectProject,
+  onSelectConversation,
+  onNewConversation,
+}: {
+  projects: string[];
+  selectedProject: string | null;
+  activeAgentId: string;
+  onSelectProject: (p: string) => void;
+  onSelectConversation: (project: string, agentId: string) => void;
+  onNewConversation: () => void;
+}) {
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [sandboxName, setSandboxName] = useState('');
+  const [sandboxCreating, setSandboxCreating] = useState(false);
+
+  // Fetch conversations for selected project
+  useEffect(() => {
+    if (!selectedProject) {
+      setConversations([]);
+      return;
+    }
+    let cancelled = false;
+    const fetchConvos = async () => {
+      try {
+        const data = await api.pi.getHistory();
+        if (!cancelled) {
+          const filtered = (data.conversations || []).filter(
+            (c: ConversationSummary) => c.project === selectedProject
+          );
+          setConversations(filtered);
+        }
+      } catch {
+        if (!cancelled) setConversations([]);
+      }
+    };
+    fetchConvos();
+    const interval = setInterval(fetchConvos, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [selectedProject]);
+
+  const createSandbox = useCallback(async () => {
+    if (!sandboxName.trim()) return;
+    setSandboxCreating(true);
+    try {
+      // Register as a local project via the API
+      const res = await fetch('/api/projects/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: sandboxName.trim(), path: `/tmp/sandbox-${sandboxName.trim()}` }),
+      });
+      if (res.ok) {
+        onSelectProject(sandboxName.trim());
+        setSandboxName('');
+      }
+    } catch {
+      // ignore
+    } finally {
+      setSandboxCreating(false);
+    }
+  }, [sandboxName, onSelectProject]);
+
+  return (
+    <div>
+      {/* Section header */}
+      <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
+        <MessageSquare size={10} className="text-muted-foreground" />
+        <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
+          Chats
+        </span>
+        <div className="flex-1" />
+        <button
+          onClick={onNewConversation}
+          className="p-1 hover:bg-white/5 text-muted hover:text-zinc-300 transition-colors"
+          title="New conversation"
+        >
+          <Plus size={10} />
+        </button>
+      </div>
+
+      {/* Project selector */}
+      <div className="px-3 py-2 border-b border-white/5">
+        <div className="flex items-center gap-1 mb-1.5">
+          <FolderOpen size={9} className="text-zinc-500" />
+          <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Project</span>
+        </div>
+        <select
+          value={selectedProject || ''}
+          onChange={e => onSelectProject(e.target.value)}
+          className="w-full bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 outline-none focus:border-primary/40"
+        >
+          <option value="">Select project...</option>
+          {projects.map(p => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+
+        {/* Create sandbox project */}
+        <div className="mt-2 flex gap-1">
+          <input
+            value={sandboxName}
+            onChange={e => setSandboxName(e.target.value)}
+            placeholder="New sandbox name..."
+            className="flex-1 bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 outline-none focus:border-primary/40"
+            onKeyDown={e => { if (e.key === 'Enter') createSandbox(); }}
+          />
+          <button
+            onClick={createSandbox}
+            disabled={!sandboxName.trim() || sandboxCreating}
+            className="px-2 py-1 text-xs font-mono bg-primary text-black rounded hover:bg-primary/80 disabled:opacity-30"
+          >
+            {sandboxCreating ? '...' : '+'}
+          </button>
+        </div>
+      </div>
+
+      {/* Conversation list */}
+      <div className="max-h-48 overflow-y-auto">
+        {conversations.length === 0 ? (
+          <div className="px-3 py-3 text-xs font-mono text-zinc-700 text-center">
+            {selectedProject ? 'No conversations yet' : 'Select a project'}
+          </div>
+        ) : (
+          conversations.map(conv => {
+            const isActive = conv.project === selectedProject && conv.agentId === activeAgentId;
+            const title = conv.title || conv.lastMessage?.slice(0, 40) || conv.agentId;
+            return (
+              <button
+                key={`${conv.project}-${conv.agentId}`}
+                onClick={() => onSelectConversation(conv.project, conv.agentId)}
+                className={cn(
+                  "w-full text-left px-3 py-1.5 flex flex-col gap-0.5 transition-colors border-l-2",
+                  isActive
+                    ? "bg-primary/10 text-primary border-primary"
+                    : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300 border-transparent"
+                )}
+              >
+                <span className="text-xs font-mono truncate">{title}</span>
+                <span className="text-[10px] font-mono text-zinc-600">
+                  {conv.messageCount} msgs
+                </span>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AppShellInner() {
   const addLog = useCallback((_msg: string, _type?: any) => {}, []);
@@ -378,7 +532,7 @@ function AppShellInner() {
             />
           )}
           {activeTab === 'tasks' && (
-            <TaskBoardTab selectedProject={selectedProject} />
+            <TaskBoardTab />
           )}
           {activeTab === 'desktop' && (
             <ComputerUseTab
@@ -414,6 +568,7 @@ function AppShellInner() {
             )}
             {activeTab === 'desktop' && (
               <div className="h-full flex flex-col bg-black">
+                {/* Browser header */}
                 <div className="h-10 border-b border-white/5 flex items-center px-3 gap-2 shrink-0 bg-black/50">
                   <Globe size={12} className="text-primary" />
                   <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
@@ -426,88 +581,103 @@ function AppShellInner() {
                     <span className="text-xs font-mono text-zinc-600">Inactive</span>
                   )}
                 </div>
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
-                  {/* Enable/disable */}
-                  {!cu.enabled && (
-                    <div className="border border-white/5 p-3 space-y-2">
-                      <p className="text-xs font-mono text-muted-foreground">
-                        Enable browser automation for the sandbox.
-                      </p>
-                      <button
-                        onClick={() => resolvedSandboxId && cu.enableComputerUse(resolvedSandboxId)}
-                        disabled={!resolvedSandboxId || cu.loading}
-                        className="px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
-                      >
-                        {cu.loading ? 'Starting...' : 'Enable Computer Use'}
-                      </button>
-                      {cu.error && (
-                        <p className="text-xs font-mono text-red-400">{cu.error}</p>
-                      )}
-                    </div>
-                  )}
 
-                  {/* URL navigate */}
-                  {cu.enabled && (
-                    <>
-                      <div className="border border-white/5 p-3 space-y-2">
-                        <span className="text-xs font-mono text-zinc-400">Navigate</span>
-                        <form
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            const url = (e.target as any).url.value;
-                            if (url) cu.navigate(url);
-                          }}
-                          className="flex gap-1"
-                        >
-                          <input
-                            name="url"
-                            placeholder="https://"
-                            className="flex-1 bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 outline-none focus:border-primary/40"
-                          />
-                          <button type="submit" className="px-2 py-1 text-xs font-mono bg-primary text-black rounded hover:bg-primary/80">
-                            Go
-                          </button>
-                        </form>
-                      </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                  {/* Chat selection section */}
+                  <DesktopChatSection
+                    projects={projects}
+                    selectedProject={selectedProject}
+                    activeAgentId={activeAgentId}
+                    onSelectProject={handleProjectChange}
+                    onSelectConversation={(project, agentId) => {
+                      setSelectedProject(project);
+                      setActiveAgentId(agentId);
+                    }}
+                    onNewConversation={() => setActiveAgentId('default')}
+                  />
 
-                      {/* Screenshot */}
+                  {/* Divider */}
+                  <div className="border-t border-white/5" />
+
+                  {/* Browser tools section */}
+                  <div className="p-3 space-y-3">
+                    {!cu.enabled && (
                       <div className="border border-white/5 p-3 space-y-2">
-                        <span className="text-xs font-mono text-zinc-400">Screenshot</span>
+                        <p className="text-xs font-mono text-muted-foreground">
+                          Enable browser automation for the sandbox.
+                        </p>
                         <button
-                          onClick={() => cu.takeScreenshot()}
-                          className="w-full px-3 py-1.5 text-xs font-mono uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                          onClick={() => resolvedSandboxId && cu.enableComputerUse(resolvedSandboxId)}
+                          disabled={!resolvedSandboxId || cu.loading}
+                          className="px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
                         >
-                          Capture
+                          {cu.loading ? 'Starting...' : 'Enable Computer Use'}
                         </button>
-                        {cu.screenshot && (
-                          <img
-                            src={`data:image/png;base64,${cu.screenshot}`}
-                            alt="Desktop"
-                            className="w-full border border-white/10 rounded"
-                          />
+                        {cu.error && (
+                          <p className="text-xs font-mono text-red-400">{cu.error}</p>
                         )}
                       </div>
+                    )}
 
-                      {/* Page info */}
-                      {cu.url && (
-                        <div className="border border-white/5 p-3 space-y-1">
-                          <span className="text-xs font-mono text-zinc-400">Current page</span>
-                          <p className="text-xs font-mono text-primary break-all">{cu.url}</p>
-                          {cu.title && (
-                            <p className="text-xs font-mono text-zinc-500">{cu.title}</p>
+                    {cu.enabled && (
+                      <>
+                        <div className="border border-white/5 p-3 space-y-2">
+                          <span className="text-xs font-mono text-zinc-400">Navigate</span>
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              const url = (e.target as any).url.value;
+                              if (url) cu.navigate(url);
+                            }}
+                            className="flex gap-1"
+                          >
+                            <input
+                              name="url"
+                              placeholder="https://"
+                              className="flex-1 bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 outline-none focus:border-primary/40"
+                            />
+                            <button type="submit" className="px-2 py-1 text-xs font-mono bg-primary text-black rounded hover:bg-primary/80">
+                              Go
+                            </button>
+                          </form>
+                        </div>
+
+                        <div className="border border-white/5 p-3 space-y-2">
+                          <span className="text-xs font-mono text-zinc-400">Screenshot</span>
+                          <button
+                            onClick={() => cu.takeScreenshot()}
+                            className="w-full px-3 py-1.5 text-xs font-mono uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                          >
+                            Capture
+                          </button>
+                          {cu.screenshot && (
+                            <img
+                              src={`data:image/png;base64,${cu.screenshot}`}
+                              alt="Desktop"
+                              className="w-full border border-white/10 rounded"
+                            />
                           )}
                         </div>
-                      )}
 
-                      {/* Disable */}
-                      <button
-                        onClick={() => cu.disableComputerUse()}
-                        className="w-full px-3 py-1.5 text-xs font-mono uppercase tracking-widest text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 transition-colors"
-                      >
-                        Disable Computer Use
-                      </button>
-                    </>
-                  )}
+                        {cu.url && (
+                          <div className="border border-white/5 p-3 space-y-1">
+                            <span className="text-xs font-mono text-zinc-400">Current page</span>
+                            <p className="text-xs font-mono text-primary break-all">{cu.url}</p>
+                            {cu.title && (
+                              <p className="text-xs font-mono text-zinc-500">{cu.title}</p>
+                            )}
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() => cu.disableComputerUse()}
+                          className="w-full px-3 py-1.5 text-xs font-mono uppercase tracking-widest text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 transition-colors"
+                        >
+                          Disable Computer Use
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
