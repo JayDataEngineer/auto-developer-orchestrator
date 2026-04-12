@@ -79,12 +79,31 @@ export function useSubAgents(parentAgentId: string | null): UseSubAgentsReturn {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let accumulated = '';
+        let buffer = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          // Parse SSE data lines
-          for (const line of chunk.split('\n')) {
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop() || '';
+          for (const part of parts) {
+            for (const line of part.split('\n')) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.output) accumulated += data.output;
+                  if (data.delta) accumulated += data.delta;
+                } catch {
+                  accumulated += line.slice(6);
+                }
+              }
+            }
+          }
+          setWatchedOutput(accumulated);
+        }
+        // Flush remaining buffer
+        if (buffer.trim()) {
+          for (const line of buffer.split('\n')) {
             if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));

@@ -21,17 +21,24 @@ import { useThrottledDeltas } from './useThrottledDeltas';
 export type { SubAgentInfo } from '../lib/api';
 export type { PiAgentState } from './agentReducer';
 
-// Module-level ID generators
-let msgIdCounter = 0;
-let toolIdCounter = 0;
-function nextMsgId() { return `msg-${++msgIdCounter}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
-function nextToolFallbackId() { return `tool-${++toolIdCounter}-${Date.now()}`; }
+// Instance-scoped ID generators via refs
+let instanceCounter = 0;
 
 export function usePiAgent(initialAgentId: string = 'default') {
   const [state, setState] = useState<PiAgentState>({ ...initialAgentState, agentId: initialAgentId });
   const abortRef = useRef<AbortController | null>(null);
   const projectRef = useRef<string | null>(null);
   const agentIdRef = useRef<string>(initialAgentId);
+  const idPrefixRef = useRef<string>(`i${++instanceCounter}`);
+  const msgCounterRef = useRef(0);
+  const toolCounterRef = useRef(0);
+
+  const nextMsgId = useCallback(() =>
+    `msg-${idPrefixRef.current}-${++msgCounterRef.current}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  []);
+  const nextToolFallbackId = useCallback(() =>
+    `tool-${idPrefixRef.current}-${++toolCounterRef.current}-${Date.now()}`,
+  []);
 
   // Throttled delta accumulation
   const { accumulate, syncFlush } = useThrottledDeltas(
@@ -59,7 +66,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
     if (accumulate(event)) return;
     syncFlush();
     setState(prev => agentReducer(prev, event, nextMsgId, nextToolFallbackId));
-  }, [accumulate, syncFlush]);
+  }, [accumulate, syncFlush, nextMsgId, nextToolFallbackId]);
 
   useEffect(() => {
     agentIdRef.current = initialAgentId;
@@ -186,7 +193,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
         }));
       }
     },
-    [handleEvent, syncFlush]
+    [handleEvent, syncFlush, nextMsgId]
   );
 
   const abort = useCallback(async (project: string, agentId?: string) => {

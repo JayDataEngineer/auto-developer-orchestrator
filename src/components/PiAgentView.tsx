@@ -77,7 +77,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
     if (!input.trim() || !selectedProject || state.isStreaming) return;
     sendPrompt(input.trim(), selectedProject, { agentId: selectedAgentId, model: state.model || 'or-free', autoBranch, autoMerge });
     setInput('');
-  }, [input, selectedProject, state.isStreaming, sendPrompt, selectedAgentId]);
+  }, [input, selectedProject, state.isStreaming, sendPrompt, selectedAgentId, autoBranch, autoMerge]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

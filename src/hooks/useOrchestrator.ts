@@ -164,16 +164,19 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let done = false;
+      let buffer = '';
 
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n\n');
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
 
-          for (const line of lines) {
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          for (const line of part.split('\n')) {
             if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));
@@ -186,6 +189,24 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
                 }
               } catch (e) { console.error("Error parsing SSE chunk", e); }
             }
+          }
+        }
+      }
+
+      // Flush remaining buffer
+      if (buffer.trim()) {
+        for (const line of buffer.split('\n')) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.event === "on_tool_start") {
+                addLog(`DEEP AGENT: Running tool ${data.name}...`, 'INFO');
+              } else if (data.event === "log") {
+                 addLog(data.message, 'INFO');
+              } else if (data.event === "error") {
+                 addLog(data.message, 'ERROR');
+              }
+            } catch (e) { console.error("Error parsing SSE chunk", e); }
           }
         }
       }

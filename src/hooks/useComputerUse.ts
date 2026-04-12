@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { api, LabeledElement } from '../lib/api';
 
 interface ComputerUseState {
@@ -30,6 +30,10 @@ const initialState: ComputerUseState = {
 export function useComputerUse() {
   const [state, setState] = useState<ComputerUseState>(initialState);
   const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const enableComputerUse = useCallback(async (sandboxId: string) => {
     setState(prev => ({ ...prev, loading: true, error: null }));
