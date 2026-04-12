@@ -33,6 +33,9 @@ export function usePiAgent(initialAgentId: string = 'default') {
   const msgCounterRef = useRef(0);
   const toolCounterRef = useRef(0);
 
+  // Generation counter to prevent loadHistory from overwriting active messages
+  const promptGenRef = useRef(0);
+
   const nextMsgId = useCallback(() =>
     `msg-${idPrefixRef.current}-${++msgCounterRef.current}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   []);
@@ -119,6 +122,9 @@ export function usePiAgent(initialAgentId: string = 'default') {
       const aid = opts?.agentId || agentIdRef.current;
       agentIdRef.current = aid;
       projectRef.current = project;
+
+      // Bump generation so late-arriving loadHistory won't overwrite our messages
+      promptGenRef.current++;
 
       // Add user message + placeholder assistant message, keep history
       const userMsg: ConversationMessage = {
@@ -246,9 +252,15 @@ export function usePiAgent(initialAgentId: string = 'default') {
 
   const loadHistory = useCallback(async (project: string, agentId?: string) => {
     const aid = agentId || agentIdRef.current;
+    // Capture generation before async fetch — if sendPrompt was called while
+    // we were waiting, discard the stale history to avoid overwriting active messages
+    const genAtCall = promptGenRef.current;
     try {
       const msgs = await api.pi.getMessages(project, aid);
       if (!Array.isArray(msgs) || msgs.length === 0) return;
+
+      // If the user sent a prompt while we were fetching, don't overwrite their messages
+      if (promptGenRef.current !== genAtCall) return;
 
       // Convert DB messages to ConversationMessage format
       const messages: ConversationMessage[] = msgs.map((m: any, idx: number) => {

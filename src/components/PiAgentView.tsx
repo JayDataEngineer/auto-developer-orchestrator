@@ -66,7 +66,11 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   useEffect(() => {
     if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
     scrollRafRef.current = requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      try {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      } catch {
+        // scrollIntoView can throw in some environments (jsdom, iframes)
+      }
     });
     return () => {
       if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
