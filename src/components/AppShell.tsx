@@ -11,8 +11,8 @@ import { ToastProvider } from './ui/Toast';
 import { useResizable } from '../hooks/useResizable';
 import { useArtifacts } from '../hooks/useArtifacts';
 import {
-  Zap, Settings, ChevronDown, LayoutGrid, Monitor,
-  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen
+  Zap, Settings, ChevronDown, LayoutGrid, Monitor, MessageSquare,
+  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Globe
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
 import { api } from '../lib/api';
@@ -26,6 +26,18 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'desktop', label: 'Desktop', icon: <Monitor size={10} /> },
 ];
 
+// Per-tab labels for the sidebar toggle buttons
+const LEFT_LABELS: Record<TabId, string> = {
+  agent: 'Chats',
+  tasks: '',
+  desktop: 'Agent',
+};
+const RIGHT_LABELS: Record<TabId, string> = {
+  agent: 'Artifacts',
+  tasks: '',
+  desktop: 'Browser',
+};
+
 function AppShellInner() {
   const addLog = useCallback((_msg: string, _type?: any) => {}, []);
   const { state, actions } = useOrchestrator(addLog);
@@ -33,7 +45,7 @@ function AppShellInner() {
   const [showGitHubModal, setShowGitHubModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
-  // Shared sidebar state — works on ALL tabs
+  // Shared sidebar collapse state — toggle buttons work on ALL tabs
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -44,13 +56,16 @@ function AppShellInner() {
     thinking: string;
   }>({ isStreaming: false, runningTool: undefined, thinking: '' });
 
+  // Agent messages for the Desktop tab's left sidebar
+  const [agentMessages, setAgentMessages] = useState<any[]>([]);
+
   const { projects, githubUser } = state;
   const { refreshProjectData } = actions;
 
-  // Single shared computer use instance — one state, one sandbox
+  // Single shared computer use instance
   const cu = useComputerUse();
 
-  // Resolve the real sandbox ID from the API (shared across all tabs)
+  // Resolve the real sandbox ID from the API
   const [resolvedSandboxId, setResolvedSandboxId] = useState<string | null>(null);
   useEffect(() => {
     if (!selectedProject) {
@@ -67,7 +82,6 @@ function AppShellInner() {
         const sandboxes = Array.isArray(data) ? data : (data.sandboxes || []);
         if (cancelled) return;
         if (sandboxes.length === 0) {
-          // No sandboxes exist yet — use fallback ID, backend will create it
           setResolvedSandboxId(`sandbox-${selectedProject}`);
           return;
         }
@@ -98,7 +112,22 @@ function AppShellInner() {
     enableRef.current(resolvedSandboxId);
   }, [activeTab, resolvedSandboxId, cu.enabled, cu.sandboxId]);
 
-  // Artifacts hook — shared across all tabs
+  // Fetch agent messages when on Desktop tab
+  useEffect(() => {
+    if (activeTab !== 'desktop' || !selectedProject) return;
+    let cancelled = false;
+    const fetchMsgs = async () => {
+      try {
+        const msgs = await api.pi.getMessages(selectedProject, activeAgentId);
+        if (!cancelled) setAgentMessages(Array.isArray(msgs) ? msgs : []);
+      } catch {}
+    };
+    fetchMsgs();
+    const interval = setInterval(fetchMsgs, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [activeTab, selectedProject, activeAgentId]);
+
+  // Artifacts hook
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
 
   // Resizable left sidebar
@@ -160,24 +189,29 @@ function AppShellInner() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  const leftLabel = LEFT_LABELS[activeTab];
+  const rightLabel = RIGHT_LABELS[activeTab];
+
   return (
     <div className="flex flex-col h-screen bg-black text-slate-100 font-sans selection:bg-primary/20 overflow-hidden">
       {/* Top bar */}
       <div className="h-10 border-b border-white/5 flex items-center px-2 shrink-0 bg-black/50 backdrop-blur-md gap-1">
-        {/* History panel toggle — always visible */}
-        <button
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className={cn(
-            'flex items-center gap-1 px-2 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors rounded',
-            !sidebarCollapsed
-              ? 'text-primary bg-primary/10'
-              : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-          )}
-          title={sidebarCollapsed ? 'Show History' : 'Hide History'}
-        >
-          {sidebarCollapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
-          {!sidebarCollapsed && <span>History</span>}
-        </button>
+        {/* Left sidebar toggle — label changes per tab */}
+        {leftLabel && (
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className={cn(
+              'flex items-center gap-1 px-2 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors rounded',
+              !sidebarCollapsed
+                ? 'text-primary bg-primary/10'
+                : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+            )}
+            title={sidebarCollapsed ? `Show ${leftLabel}` : `Hide ${leftLabel}`}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
+            {!sidebarCollapsed && <span>{leftLabel}</span>}
+          </button>
+        )}
 
         {/* Tab switcher */}
         <div className="flex items-center gap-1">
@@ -224,22 +258,24 @@ function AppShellInner() {
 
         <div className="flex-1" />
 
-        {/* Artifacts panel toggle — always visible */}
-        <button
-          onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-          className={cn(
-            'flex items-center gap-1 px-2 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors rounded',
-            !rightPanelCollapsed
-              ? 'text-primary bg-primary/10'
-              : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-          )}
-          title={rightPanelCollapsed ? 'Show Artifacts' : 'Hide Artifacts'}
-        >
-          {!rightPanelCollapsed && <span>Artifacts</span>}
-          {rightPanelCollapsed ? <PanelRightOpen size={12} /> : <PanelRightClose size={12} />}
-        </button>
+        {/* Right sidebar toggle — label changes per tab */}
+        {rightLabel && (
+          <button
+            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+            className={cn(
+              'flex items-center gap-1 px-2 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors rounded',
+              !rightPanelCollapsed
+                ? 'text-primary bg-primary/10'
+                : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+            )}
+            title={rightPanelCollapsed ? `Show ${rightLabel}` : `Hide ${rightLabel}`}
+          >
+            {!rightPanelCollapsed && <span>{rightLabel}</span>}
+            {rightPanelCollapsed ? <PanelRightOpen size={12} /> : <PanelRightClose size={12} />}
+          </button>
+        )}
 
-        {/* Settings — opens right panel settings view */}
+        {/* Settings */}
         <button
           onClick={() => {
             if (rightPanelCollapsed) setRightPanelCollapsed(false);
@@ -258,26 +294,68 @@ function AppShellInner() {
         </button>
       </div>
 
-      {/* Main content: History sidebar | center tab | Artifacts panel */}
+      {/* Main content: left sidebar | center tab | right sidebar */}
       <div className="flex-1 overflow-hidden flex">
-        {/* Left: History Sidebar (resizable) */}
-        {!sidebarCollapsed && (
+        {/* Left sidebar — content changes per tab */}
+        {!sidebarCollapsed && leftLabel && (
           <div style={{ width: sidebarWidth }} className="relative shrink-0 border-r border-white/5">
-            <HistorySidebar
-              projects={projects}
-              activeProject={selectedProject || undefined}
-              activeAgentId={activeAgentId}
-              onSelectSession={(project: string, agentId: string) => {
-                setSelectedProject(project);
-                setActiveAgentId(agentId);
-                setActiveTab('agent');
-              }}
-              onNewChat={() => {
-                setActiveAgentId('default');
-                setActiveTab('agent');
-              }}
-            />
-            {/* Drag handle on right edge */}
+            {activeTab === 'agent' && (
+              <HistorySidebar
+                projects={projects}
+                activeProject={selectedProject || undefined}
+                activeAgentId={activeAgentId}
+                onSelectSession={(project: string, agentId: string) => {
+                  setSelectedProject(project);
+                  setActiveAgentId(agentId);
+                  setActiveTab('agent');
+                }}
+                onNewChat={() => {
+                  setActiveAgentId('default');
+                  setActiveTab('agent');
+                }}
+              />
+            )}
+            {activeTab === 'desktop' && (
+              <div className="h-full flex flex-col bg-black">
+                <div className="p-3 border-b border-white/5 flex items-center gap-2">
+                  <MessageSquare size={10} className="text-muted-foreground" />
+                  <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
+                    Conversation
+                  </span>
+                  <span className="text-xs font-mono text-zinc-700 ml-auto">
+                    {agentMessages.length} msgs
+                  </span>
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                  {agentMessages.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center p-6 opacity-20">
+                      <MessageSquare size={20} className="mb-2" />
+                      <p className="text-xs font-mono uppercase tracking-widest text-center">
+                        No messages yet
+                      </p>
+                    </div>
+                  ) : (
+                    agentMessages.map((msg: any, i: number) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          "px-3 py-2 border-b border-white/[0.02]",
+                          msg.role === 'user' ? "bg-primary/5" : ""
+                        )}
+                      >
+                        <div className="text-[10px] font-mono uppercase tracking-widest text-zinc-600 mb-1">
+                          {msg.role}
+                        </div>
+                        <p className="text-xs font-mono text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+                          {(msg.content || '').slice(0, 200)}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+            {/* Drag handle */}
             <div
               {...sidebarHandleProps}
               className={cn(
@@ -311,10 +389,10 @@ function AppShellInner() {
           )}
         </div>
 
-        {/* Right: Artifacts Panel (resizable) */}
-        {!rightPanelCollapsed && (
+        {/* Right sidebar — content changes per tab */}
+        {!rightPanelCollapsed && rightLabel && (
           <div style={{ width: rightPanelWidth }} className="relative shrink-0 border-l border-white/5">
-            {/* Drag handle on left edge */}
+            {/* Drag handle */}
             <div
               {...rightPanelHandleProps}
               className={cn(
@@ -322,16 +400,117 @@ function AppShellInner() {
                 rightPanelDragging ? 'bg-primary/30' : 'hover:bg-white/10'
               )}
             />
-            <RightPanel
-              agentId={selectedProject ? `${selectedProject}:${activeAgentId}` : null}
-              sandboxId={resolvedSandboxId}
-              artifacts={artifactsHook.artifacts}
-              artifactsLoading={artifactsHook.loading}
-              streamingState={streamingState}
-              cu={cu}
-              showSettings={showSettings}
-              onShowSettingsChange={setShowSettings}
-            />
+            {activeTab === 'agent' && (
+              <RightPanel
+                agentId={selectedProject ? `${selectedProject}:${activeAgentId}` : null}
+                sandboxId={resolvedSandboxId}
+                artifacts={artifactsHook.artifacts}
+                artifactsLoading={artifactsHook.loading}
+                streamingState={streamingState}
+                cu={cu}
+                showSettings={showSettings}
+                onShowSettingsChange={setShowSettings}
+              />
+            )}
+            {activeTab === 'desktop' && (
+              <div className="h-full flex flex-col bg-black">
+                <div className="h-10 border-b border-white/5 flex items-center px-3 gap-2 shrink-0 bg-black/50">
+                  <Globe size={12} className="text-primary" />
+                  <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
+                    Browser
+                  </span>
+                  <div className="flex-1" />
+                  {cu.enabled ? (
+                    <span className="text-xs font-mono text-primary">Active</span>
+                  ) : (
+                    <span className="text-xs font-mono text-zinc-600">Inactive</span>
+                  )}
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
+                  {/* Enable/disable */}
+                  {!cu.enabled && (
+                    <div className="border border-white/5 p-3 space-y-2">
+                      <p className="text-xs font-mono text-muted-foreground">
+                        Enable browser automation for the sandbox.
+                      </p>
+                      <button
+                        onClick={() => resolvedSandboxId && cu.enableComputerUse(resolvedSandboxId)}
+                        disabled={!resolvedSandboxId || cu.loading}
+                        className="px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
+                      >
+                        {cu.loading ? 'Starting...' : 'Enable Computer Use'}
+                      </button>
+                      {cu.error && (
+                        <p className="text-xs font-mono text-red-400">{cu.error}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* URL navigate */}
+                  {cu.enabled && (
+                    <>
+                      <div className="border border-white/5 p-3 space-y-2">
+                        <span className="text-xs font-mono text-zinc-400">Navigate</span>
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const url = (e.target as any).url.value;
+                            if (url) cu.navigate(url);
+                          }}
+                          className="flex gap-1"
+                        >
+                          <input
+                            name="url"
+                            placeholder="https://"
+                            className="flex-1 bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 outline-none focus:border-primary/40"
+                          />
+                          <button type="submit" className="px-2 py-1 text-xs font-mono bg-primary text-black rounded hover:bg-primary/80">
+                            Go
+                          </button>
+                        </form>
+                      </div>
+
+                      {/* Screenshot */}
+                      <div className="border border-white/5 p-3 space-y-2">
+                        <span className="text-xs font-mono text-zinc-400">Screenshot</span>
+                        <button
+                          onClick={() => cu.takeScreenshot()}
+                          className="w-full px-3 py-1.5 text-xs font-mono uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                        >
+                          Capture
+                        </button>
+                        {cu.screenshot && (
+                          <img
+                            src={`data:image/png;base64,${cu.screenshot}`}
+                            alt="Desktop"
+                            className="w-full border border-white/10 rounded"
+                          />
+                        )}
+                      </div>
+
+                      {/* Page info */}
+                      {cu.url && (
+                        <div className="border border-white/5 p-3 space-y-1">
+                          <span className="text-xs font-mono text-zinc-400">Current page</span>
+                          <p className="text-xs font-mono text-primary break-all">{cu.url}</p>
+                          {cu.title && (
+                            <p className="text-xs font-mono text-zinc-500">{cu.title}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Disable */}
+                      <button
+                        onClick={() => cu.disableComputerUse()}
+                        className="w-full px-3 py-1.5 text-xs font-mono uppercase tracking-widest text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 transition-colors"
+                      >
+                        Disable Computer Use
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
