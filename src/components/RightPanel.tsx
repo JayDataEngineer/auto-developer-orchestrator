@@ -22,6 +22,8 @@ interface RightPanelProps {
   artifacts: Artifact[];
   artifactsLoading: boolean;
   streamingState?: StreamingState;
+  showSettings?: boolean;
+  onShowSettingsChange?: (show: boolean) => void;
 }
 
 // Icon map for artifact types
@@ -37,7 +39,7 @@ const typeLabels: Record<Artifact['type'], string> = {
   notes: 'Notes',
 };
 
-export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, artifactsLoading, streamingState }: RightPanelProps) {
+export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, artifactsLoading, streamingState, showSettings: showSettingsProp, onShowSettingsChange }: RightPanelProps) {
   const cu = useComputerUse();
   const [urlInput, setUrlInput] = useState('https://');
   const [typeText, setTypeText] = useState('');
@@ -45,8 +47,11 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
 
   // Selected artifact for detail view (null = nothing selected)
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
+
+  // Use prop-controlled settings state (from AppShell) or internal fallback
+  const showSettings = showSettingsProp ?? false;
+  const setShowSettings = onShowSettingsChange ?? (() => {});
 
   const sandboxId = passedSandboxId
     || (agentId ? `sandbox-${agentId.split(':')[0]}` : null);

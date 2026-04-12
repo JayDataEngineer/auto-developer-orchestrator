@@ -37,6 +37,7 @@ function AppShellInner() {
   // Shared sidebar state — works on ALL tabs
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [activeAgentId, setActiveAgentId] = useState('default');
   const [streamingState, setStreamingState] = useState<{
     isStreaming: boolean;
@@ -190,15 +191,23 @@ function AppShellInner() {
           {rightPanelCollapsed ? <PanelRightOpen size={12} /> : <PanelRightClose size={12} />}
         </button>
 
-        {/* GitHub / Settings */}
+        {/* Settings — opens right panel settings view */}
         <button
-          onClick={() => setShowGitHubModal(true)}
-          className="flex items-center gap-1.5 text-muted hover:text-zinc-300 transition-colors"
-          title="GitHub Settings"
+          onClick={() => {
+            if (rightPanelCollapsed) setRightPanelCollapsed(false);
+            setShowSettings(!showSettings);
+          }}
+          className={cn(
+            'flex items-center gap-1.5 px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest transition-colors rounded',
+            showSettings
+              ? 'text-primary bg-primary/10'
+              : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+          )}
+          title="Settings"
         >
-          <Settings size={14} />
-          <span className="text-[8px] font-mono uppercase tracking-widest hidden md:inline">
-            {githubUser?.connected ? 'Connected' : 'GitHub'}
+          <Settings size={12} />
+          <span className="hidden md:inline">
+            {showSettings ? 'Settings' : 'Settings'}
           </span>
         </button>
       </div>
@@ -267,6 +276,8 @@ function AppShellInner() {
               artifacts={artifactsHook.artifacts}
               artifactsLoading={artifactsHook.loading}
               streamingState={streamingState}
+              showSettings={showSettings}
+              onShowSettingsChange={setShowSettings}
             />
           </div>
         )}
