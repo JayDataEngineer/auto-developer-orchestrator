@@ -416,6 +416,7 @@ function CreateForm({ projectDir, onSubmit, onCancel }: CreateFormProps) {
           <option value="every">Interval</option>
         </select>
       </div>
+      <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Description (optional)" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" />
       {scheduleType === 'cron' && (
         <div>
           <input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="0 0 9 * * *" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40 font-mono" />
@@ -433,7 +434,7 @@ function CreateForm({ projectDir, onSubmit, onCancel }: CreateFormProps) {
           <option value="86400">Every 24 hours</option>
         </select>
       )}
-      <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Prompt message" rows={2} className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40 resize-none" />
+      <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Prompt — what should the agent do?" rows={3} className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40 resize-none" />
       <div className="flex items-center gap-2">
         <input value={model} onChange={e => setModel(e.target.value)} placeholder="Model (optional)" className="flex-1 bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" />
         <button type="submit" disabled={submitting || !name || !message} className="px-3 py-1.5 bg-primary text-black text-xs font-mono uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors">

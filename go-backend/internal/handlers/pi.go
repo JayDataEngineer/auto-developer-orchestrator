@@ -423,6 +423,33 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 
 			// After agent_end, save assistant message and run post-completion
 			if sseEvent.Type == pi.EventAgentEnd {
+				// Extract thinking from agent_end messages if streaming didn't capture it
+				if assistantThinking == "" && len(event.Messages) > 0 {
+					var msgs []struct {
+						Role    string `json:"role"`
+						Content []struct {
+							Type     string `json:"type"`
+							Thinking string `json:"thinking"`
+							Text     string `json:"text"`
+						} `json:"content"`
+					}
+					if json.Unmarshal(event.Messages, &msgs) == nil {
+						for i := len(msgs) - 1; i >= 0; i-- {
+							if msgs[i].Role == "assistant" {
+								for _, block := range msgs[i].Content {
+									if block.Type == "thinking" && block.Thinking != "" {
+										assistantThinking += block.Thinking
+									}
+									// Also grab text from content blocks if streaming missed it
+									if block.Type == "text" && block.Text != "" && assistantText == "" {
+										assistantText += block.Text
+									}
+								}
+								break
+							}
+						}
+					}
+				}
 				if h.db != nil {
 					toolCallsJSON := "[]"
 					if len(assistantToolCalls) > 0 {

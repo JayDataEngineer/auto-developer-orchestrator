@@ -225,10 +225,12 @@ export function agentReducer(
         input: number;
         output: number;
         cache: number;
+        thinking?: string;
       };
       return {
         ...state,
         isStreaming: false,
+        thinking: endState.thinking || state.thinking,
         tokenUsage: {
           input: state.tokenUsage.input + (endState.input || 0),
           output: state.tokenUsage.output + (endState.output || 0),
@@ -237,6 +239,8 @@ export function agentReducer(
         messages: updateLastAssistant(state.messages, msg => ({
           ...msg,
           streaming: false,
+          // Ensure thinking is set from agent_end if streaming deltas didn't capture it
+          thinking: endState.thinking || msg.thinking,
         })),
       };
     }

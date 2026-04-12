@@ -125,13 +125,13 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 			Data: map[string]interface{}{},
 		}
 	case pi.RpcEventAgentEnd:
-		// Extract usage from the messages field
+		// Extract usage and thinking from the messages field
 		data := map[string]interface{}{}
 		if len(event.Messages) > 0 {
-			// Parse the last assistant message for usage
+			// Parse the last assistant message for usage + thinking
 			var msgs []struct {
-				Role string `json:"role"`
-				Usage struct {
+				Role    string `json:"role"`
+				Usage   struct {
 					Input     float64 `json:"input"`
 					Output    float64 `json:"output"`
 					CacheRead float64 `json:"cacheRead"`
@@ -139,6 +139,11 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 				API      string `json:"api"`
 				Provider string `json:"provider"`
 				Model    string `json:"model"`
+				Content  []struct {
+					Type     string `json:"type"`
+					Thinking string `json:"thinking"`
+					Text     string `json:"text"`
+				} `json:"content"`
 			}
 			if json.Unmarshal(event.Messages, &msgs) == nil {
 				for i := len(msgs) - 1; i >= 0; i-- {
@@ -147,6 +152,16 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 						data["output"] = msgs[i].Usage.Output
 						data["cache"] = msgs[i].Usage.CacheRead
 						data["model"] = msgs[i].Provider + "/" + msgs[i].Model
+						// Extract thinking from content blocks
+						var thinking string
+						for _, block := range msgs[i].Content {
+							if block.Type == "thinking" && block.Thinking != "" {
+								thinking += block.Thinking
+							}
+						}
+						if thinking != "" {
+							data["thinking"] = thinking
+						}
 						break
 					}
 				}
