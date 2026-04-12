@@ -310,13 +310,16 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                   Model: {state.model || 'default'}
                   {modelDropdownOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                 </button>
-                {modelDropdownOpen && models.length > 0 && (
+                {modelDropdownOpen && (
                   <div className="absolute bottom-full left-0 mb-1 w-64 max-h-[300px] overflow-y-auto border border-white/10 bg-zinc-950 shadow-2xl z-[100] custom-scrollbar scrollbar-gutter-stable">
+                    {models.length === 0 && (
+                      <div className="px-3 py-2 text-[9px] font-mono text-muted uppercase tracking-widest">Loading models...</div>
+                    )}
                     {models.map((m) => (
                       <button
                         key={m.id}
                         onClick={() => {
-                          if (selectedProject) switchModel(selectedProject, 'litellm', m.id, selectedAgentId);
+                          if (selectedProject) switchModel(selectedProject, m.provider || 'litellm', m.id, selectedAgentId);
                           setModelDropdownOpen(false);
                         }}
                         className={cn(

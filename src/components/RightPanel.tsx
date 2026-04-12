@@ -158,7 +158,7 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
   };
 
   return (
-    <div className="w-96 border-l border-white/5 flex flex-col bg-black shrink-0">
+    <div className="h-full flex flex-col bg-black">
       {/* Header */}
       <SectionHeader
         label="Artifacts"

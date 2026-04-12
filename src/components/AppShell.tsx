@@ -4,13 +4,11 @@ import { useOrchestrator } from '../hooks/useOrchestrator';
 import { AgentTab } from './AgentTab';
 import { ComputerUseTab } from './ComputerUseTab';
 import { TaskBoardTab } from './TaskBoardTab';
-import { FileBrowserPanel } from './FileBrowserPanel';
-import { SubAgentPanel } from './SubAgentPanel';
 import { SchedulerView } from './SchedulerView';
 import { ToastProvider, useToastContext } from './ui/Toast';
 import {
   Zap, Settings, ChevronDown, LayoutGrid, Monitor, Clock,
-  FolderTree, Cpu
+  FileText, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
 import { api } from '../lib/api';
@@ -30,6 +28,10 @@ function AppShellInner() {
   const [activeTab, setActiveTab] = useState<TabId>('agent');
   const [showGitHubModal, setShowGitHubModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+
+  // Panel collapse state (lifted here so top bar buttons can control it)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
   const { projects, githubUser } = state;
   const { refreshProjectData } = actions;
@@ -70,10 +72,29 @@ function AppShellInner() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  const isAgentTab = activeTab === 'agent';
+
   return (
     <div className="flex flex-col h-screen bg-black text-slate-100 font-sans selection:bg-primary/20 overflow-hidden">
       {/* Top bar */}
-      <div className="h-10 border-b border-white/5 flex items-center px-4 shrink-0 bg-black/50 backdrop-blur-md gap-3">
+      <div className="h-10 border-b border-white/5 flex items-center px-2 shrink-0 bg-black/50 backdrop-blur-md gap-1">
+        {/* History panel toggle (far left, agent tab only) */}
+        {isAgentTab && (
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className={cn(
+              'flex items-center gap-1 px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest transition-colors rounded',
+              !sidebarCollapsed
+                ? 'text-primary bg-primary/10'
+                : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+            )}
+            title={sidebarCollapsed ? 'Show History' : 'Hide History'}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
+            {!sidebarCollapsed && <span>History</span>}
+          </button>
+        )}
+
         {/* Tab switcher with icons */}
         <div className="flex items-center gap-1">
           {TABS.map(tab => (
@@ -119,6 +140,23 @@ function AppShellInner() {
 
         <div className="flex-1" />
 
+        {/* Artifacts panel toggle (far right, agent tab only) */}
+        {isAgentTab && (
+          <button
+            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+            className={cn(
+              'flex items-center gap-1 px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest transition-colors rounded',
+              !rightPanelCollapsed
+                ? 'text-primary bg-primary/10'
+                : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+            )}
+            title={rightPanelCollapsed ? 'Show Artifacts' : 'Hide Artifacts'}
+          >
+            {!rightPanelCollapsed && <span>Artifacts</span>}
+            {rightPanelCollapsed ? <PanelRightOpen size={12} /> : <PanelRightClose size={12} />}
+          </button>
+        )}
+
         {/* GitHub connect button */}
         <button
           onClick={() => setShowGitHubModal(true)}
@@ -139,6 +177,10 @@ function AppShellInner() {
             selectedProject={selectedProject}
             projects={projects}
             refreshProjectData={refreshProjectData}
+            sidebarCollapsed={sidebarCollapsed}
+            onSidebarToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+            rightPanelCollapsed={rightPanelCollapsed}
+            onRightPanelToggle={() => setRightPanelCollapsed(!rightPanelCollapsed)}
           />
         )}
         {activeTab === 'tasks' && (

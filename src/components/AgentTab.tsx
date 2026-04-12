@@ -4,19 +4,29 @@ import { HistorySidebar } from './HistorySidebar';
 import { RightPanel } from './RightPanel';
 import { PiAgentView } from './PiAgentView';
 import { useArtifacts } from '../hooks/useArtifacts';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useResizable } from '../hooks/useResizable';
 import { ToolCall } from '../lib/pi-events';
 
 interface AgentTabProps {
   selectedProject: string | null;
   projects: string[];
   refreshProjectData: () => void;
+  sidebarCollapsed: boolean;
+  onSidebarToggle: () => void;
+  rightPanelCollapsed: boolean;
+  onRightPanelToggle: () => void;
 }
 
-export function AgentTab({ selectedProject, projects, refreshProjectData }: AgentTabProps) {
+export function AgentTab({
+  selectedProject,
+  projects,
+  refreshProjectData,
+  sidebarCollapsed,
+  onSidebarToggle,
+  rightPanelCollapsed,
+  onRightPanelToggle,
+}: AgentTabProps) {
   const [activeAgentId, setActiveAgentId] = useState('default');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [streamingState, setStreamingState] = useState<{
     isStreaming: boolean;
     runningTool: ToolCall | undefined;
@@ -30,32 +40,42 @@ export function AgentTab({ selectedProject, projects, refreshProjectData }: Agen
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
   const sandboxId = selectedProject ? `sandbox-${selectedProject}` : null;
 
+  const {
+    width: sidebarWidth,
+    isDragging: sidebarDragging,
+    handleProps: sidebarHandleProps,
+  } = useResizable({ defaultWidth: 224, minWidth: 180, maxWidth: 400, side: 'right' });
+
+  const {
+    width: rightPanelWidth,
+    isDragging: rightPanelDragging,
+    handleProps: rightPanelHandleProps,
+  } = useResizable({ defaultWidth: 384, minWidth: 280, maxWidth: 600, side: 'left' });
+
   return (
     <div className="flex h-full bg-black text-slate-100 overflow-hidden">
-      {/* Left: History Sidebar (collapsible) */}
+      {/* Left: History Sidebar (resizable) */}
       {!sidebarCollapsed && (
-        <HistorySidebar
-          projects={projects}
-          activeProject={selectedProject || undefined}
-          activeAgentId={activeAgentId}
-          onSelectSession={(project: string, agentId: string) => {
-            setActiveAgentId(agentId);
-          }}
-          onNewChat={() => setActiveAgentId('default')}
-        />
+        <div style={{ width: sidebarWidth }} className="relative shrink-0 border-r border-white/5">
+          <HistorySidebar
+            projects={projects}
+            activeProject={selectedProject || undefined}
+            activeAgentId={activeAgentId}
+            onSelectSession={(project: string, agentId: string) => {
+              setActiveAgentId(agentId);
+            }}
+            onNewChat={() => setActiveAgentId('default')}
+          />
+          {/* Drag handle on right edge */}
+          <div
+            {...sidebarHandleProps}
+            className={cn(
+              'absolute top-0 right-0 bottom-0 w-1 cursor-col-resize z-10 transition-colors',
+              sidebarDragging ? 'bg-primary/30' : 'hover:bg-white/10'
+            )}
+          />
+        </div>
       )}
-
-      {/* Collapse toggle */}
-      <button
-        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-        className={cn(
-          'absolute z-20 flex items-center justify-center w-4 h-12 bg-zinc-900 border border-white/5 text-zinc-500 hover:text-zinc-300 transition-colors',
-          sidebarCollapsed ? 'left-0' : 'left-56'
-        )}
-        style={{ top: 'calc(2.5rem + 0.5rem)' }}
-      >
-        {sidebarCollapsed ? <ChevronRight size={10} /> : <ChevronLeft size={10} />}
-      </button>
 
       {/* Center: Agent chat */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -69,28 +89,26 @@ export function AgentTab({ selectedProject, projects, refreshProjectData }: Agen
         />
       </div>
 
-      {/* Right: Browser / Artifacts Panel (collapsible) */}
+      {/* Right: Artifacts Panel (resizable) */}
       {!rightPanelCollapsed && (
-        <RightPanel
-          agentId={selectedProject ? `${selectedProject}:${activeAgentId}` : null}
-          sandboxId={sandboxId}
-          artifacts={artifactsHook.artifacts}
-          artifactsLoading={artifactsHook.loading}
-          streamingState={streamingState}
-        />
+        <div style={{ width: rightPanelWidth }} className="relative shrink-0 border-l border-white/5">
+          {/* Drag handle on left edge */}
+          <div
+            {...rightPanelHandleProps}
+            className={cn(
+              'absolute top-0 left-0 bottom-0 w-1 cursor-col-resize z-10 transition-colors',
+              rightPanelDragging ? 'bg-primary/30' : 'hover:bg-white/10'
+            )}
+          />
+          <RightPanel
+            agentId={selectedProject ? `${selectedProject}:${activeAgentId}` : null}
+            sandboxId={sandboxId}
+            artifacts={artifactsHook.artifacts}
+            artifactsLoading={artifactsHook.loading}
+            streamingState={streamingState}
+          />
+        </div>
       )}
-
-      {/* Right panel collapse toggle */}
-      <button
-        onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-        className={cn(
-          'absolute z-20 flex items-center justify-center w-4 h-12 bg-zinc-900 border border-white/5 text-zinc-500 hover:text-zinc-300 transition-colors',
-          rightPanelCollapsed ? 'right-0' : 'right-96'
-        )}
-        style={{ top: 'calc(2.5rem + 0.5rem)' }}
-      >
-        {rightPanelCollapsed ? <ChevronLeft size={10} /> : <ChevronRight size={10} />}
-      </button>
     </div>
   );
 }

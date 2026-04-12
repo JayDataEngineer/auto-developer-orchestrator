@@ -115,7 +115,7 @@ export function HistorySidebar({
   );
 
   return (
-    <div className="w-56 border-r border-white/5 flex flex-col bg-black shrink-0">
+    <div className="h-full flex flex-col bg-black">
       {/* Header */}
       <div className="p-3 border-b border-white/5 flex items-center justify-between">
         <div className="flex items-center gap-2">
