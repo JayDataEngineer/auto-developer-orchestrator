@@ -1,14 +1,14 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { cn } from '../lib/utils';
 import { useOrchestrator } from '../hooks/useOrchestrator';
 import { AgentTab } from './AgentTab';
 import { ComputerUseTab } from './ComputerUseTab';
 import { TaskBoardTab } from './TaskBoardTab';
 import { SchedulerView } from './SchedulerView';
-import { ToastProvider, useToastContext } from './ui/Toast';
+import { ToastProvider } from './ui/Toast';
 import {
   Zap, Settings, ChevronDown, LayoutGrid, Monitor, Clock,
-  FileText, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen
+  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
 import { api } from '../lib/api';
@@ -29,7 +29,7 @@ function AppShellInner() {
   const [showGitHubModal, setShowGitHubModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
-  // Panel collapse state (lifted here so top bar buttons can control it)
+  // Panel collapse state — only used by Agent tab
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
@@ -47,7 +47,14 @@ function AppShellInner() {
     setSelectedProject(project);
   }, []);
 
-  // Keyboard shortcuts: Ctrl+1-4 switch tabs, Ctrl+K focuses agent prompt
+  // Listen for GitHub settings open event from child components
+  useEffect(() => {
+    const handler = () => setShowGitHubModal(true);
+    window.addEventListener('open-github-settings', handler);
+    return () => window.removeEventListener('open-github-settings', handler);
+  }, []);
+
+  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey) {
@@ -59,7 +66,6 @@ function AppShellInner() {
           case 'k':
             e.preventDefault();
             setActiveTab('agent');
-            // Focus the prompt input after a tick
             setTimeout(() => {
               const input = document.querySelector<HTMLInputElement>('[data-prompt-input]');
               input?.focus();
@@ -78,7 +84,7 @@ function AppShellInner() {
     <div className="flex flex-col h-screen bg-black text-slate-100 font-sans selection:bg-primary/20 overflow-hidden">
       {/* Top bar */}
       <div className="h-10 border-b border-white/5 flex items-center px-2 shrink-0 bg-black/50 backdrop-blur-md gap-1">
-        {/* History panel toggle (far left, agent tab only) */}
+        {/* History panel toggle — only on Agent tab */}
         {isAgentTab && (
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -95,7 +101,7 @@ function AppShellInner() {
           </button>
         )}
 
-        {/* Tab switcher with icons */}
+        {/* Tab switcher */}
         <div className="flex items-center gap-1">
           {TABS.map(tab => (
             <button
@@ -140,7 +146,7 @@ function AppShellInner() {
 
         <div className="flex-1" />
 
-        {/* Artifacts panel toggle (far right, agent tab only) */}
+        {/* Artifacts panel toggle — only on Agent tab */}
         {isAgentTab && (
           <button
             onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
@@ -157,7 +163,7 @@ function AppShellInner() {
           </button>
         )}
 
-        {/* GitHub connect button */}
+        {/* GitHub / Settings */}
         <button
           onClick={() => setShowGitHubModal(true)}
           className="flex items-center gap-1.5 text-muted hover:text-zinc-300 transition-colors"

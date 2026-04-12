@@ -61,7 +61,7 @@ export function AgentTab({
             projects={projects}
             activeProject={selectedProject || undefined}
             activeAgentId={activeAgentId}
-            onSelectSession={(project: string, agentId: string) => {
+            onSelectSession={(_project: string, agentId: string) => {
               setActiveAgentId(agentId);
             }}
             onNewChat={() => setActiveAgentId('default')}

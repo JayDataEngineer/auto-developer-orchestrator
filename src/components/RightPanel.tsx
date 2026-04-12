@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   FileText, CheckSquare, StickyNote, Loader, Monitor,
-  ChevronLeft, ChevronRight, Wrench, Brain
+  Settings, Wrench, Brain, X, Github, Globe
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Artifact } from '../lib/api';
@@ -9,7 +9,6 @@ import { ToolCall } from '../lib/pi-events';
 import { useComputerUse } from '../hooks/useComputerUse';
 import { ArtifactView } from './ArtifactView';
 import { BrowserTools } from './BrowserTools';
-import { SectionHeader } from './ui/SectionHeader';
 
 interface StreamingState {
   isStreaming: boolean;
@@ -25,72 +24,18 @@ interface RightPanelProps {
   streamingState?: StreamingState;
 }
 
-// Artifact section with navigation
-interface ArtifactSectionProps {
-  title: string;
-  icon: React.ReactNode;
-  items: Artifact[];
-  currentIndex: number;
-  onNavigate: (dir: -1 | 1) => void;
-  loading: boolean;
-  emptyMessage: string;
-}
+// Icon map for artifact types
+const typeIcons: Record<Artifact['type'], React.ReactNode> = {
+  plan: <FileText size={11} />,
+  todo: <CheckSquare size={11} />,
+  notes: <StickyNote size={11} />,
+};
 
-function ArtifactSection({ title, icon, items, currentIndex, onNavigate, loading, emptyMessage }: ArtifactSectionProps) {
-  const current = items[currentIndex];
-
-  return (
-    <div className="border-b border-white/5">
-      {/* Section header with navigation */}
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950/30">
-        <span className="text-muted-foreground">{icon}</span>
-        <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-          {title}
-        </span>
-        {items.length > 1 && (
-          <>
-            <div className="flex-1" />
-            <button
-              onClick={() => onNavigate(-1)}
-              disabled={currentIndex === 0}
-              className="p-0.5 text-zinc-500 hover:text-zinc-300 disabled:opacity-20 disabled:hover:text-zinc-500 transition-colors"
-            >
-              <ChevronLeft size={12} />
-            </button>
-            <span className="text-[9px] font-mono text-muted-foreground min-w-[24px] text-center">
-              {currentIndex + 1}/{items.length}
-            </span>
-            <button
-              onClick={() => onNavigate(1)}
-              disabled={currentIndex === items.length - 1}
-              className="p-0.5 text-zinc-500 hover:text-zinc-300 disabled:opacity-20 disabled:hover:text-zinc-500 transition-colors"
-            >
-              <ChevronRight size={12} />
-            </button>
-          </>
-        )}
-      </div>
-
-      {/* Content */}
-      <div className="max-h-72 overflow-y-auto">
-        {loading && !current ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader size={14} className="animate-spin text-muted-foreground" />
-          </div>
-        ) : current ? (
-          <div className="p-3">
-            <h4 className="text-[10px] font-medium text-zinc-300 mb-2">{current.title}</h4>
-            <ArtifactView artifact={current} />
-          </div>
-        ) : (
-          <div className="p-6 text-center">
-            <p className="text-[10px] font-mono text-muted-foreground opacity-50">{emptyMessage}</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+const typeLabels: Record<Artifact['type'], string> = {
+  plan: 'Plan',
+  todo: 'Todo',
+  notes: 'Notes',
+};
 
 export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, artifactsLoading, streamingState }: RightPanelProps) {
   const cu = useComputerUse();
@@ -98,35 +43,22 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
   const [typeText, setTypeText] = useState('');
   const [selectedElement, setSelectedElement] = useState<number | null>(null);
 
-  // Artifact navigation indices
-  const [artifactIdx, setArtifactIdx] = useState({ plan: 0, todo: 0, notes: 0 });
+  // Selected artifact for detail view (null = nothing selected)
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
 
   const sandboxId = passedSandboxId
     || (agentId ? `sandbox-${agentId.split(':')[0]}` : null);
 
-  // Group artifacts by type (in order of creation)
-  const plans = artifacts.filter(a => a.type === 'plan');
-  const todos = artifacts.filter(a => a.type === 'todo');
-  const notes = artifacts.filter(a => a.type === 'notes');
+  const selectedArtifact = artifacts.find(a => a.id === selectedArtifactId) || null;
 
-  // Clamp indices when artifacts change
+  // Auto-select first artifact when list changes
   useEffect(() => {
-    setArtifactIdx(prev => ({
-      plan: Math.min(prev.plan, Math.max(0, plans.length - 1)),
-      todo: Math.min(prev.todo, Math.max(0, todos.length - 1)),
-      notes: Math.min(prev.notes, Math.max(0, notes.length - 1)),
-    }));
-  }, [plans.length, todos.length, notes.length]);
-
-  const navigateArtifact = useCallback((type: 'plan' | 'todo' | 'notes', dir: -1 | 1) => {
-    setArtifactIdx(prev => {
-      const items = type === 'plan' ? plans : type === 'todo' ? todos : notes;
-      return {
-        ...prev,
-        [type]: Math.max(0, Math.min(items.length - 1, prev[type] + dir)),
-      };
-    });
-  }, [plans.length, todos.length, notes.length]);
+    if (artifacts.length > 0 && !selectedArtifactId) {
+      setSelectedArtifactId(artifacts[0].id);
+    }
+  }, [artifacts, selectedArtifactId]);
 
   const handleEnableCU = () => {
     if (sandboxId) cu.enableComputerUse(sandboxId);
@@ -159,25 +91,64 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
 
   return (
     <div className="h-full flex flex-col bg-black">
-      {/* Header */}
-      <SectionHeader
-        label="Artifacts"
-        action={
-          cu.enabled ? (
+      {/* Top bar: artifact tabs + action buttons */}
+      <div className="h-10 border-b border-white/5 flex items-center px-1 shrink-0 bg-black/50 gap-0.5">
+        {/* Artifact icon tabs — horizontal, dynamic */}
+        <div className="flex items-center gap-0.5 overflow-x-auto custom-scrollbar">
+          {artifacts.map(a => (
             <button
-              onClick={() => {
-                if (sandboxId) {
-                  window.open(`/api/sandbox/vnc/${sandboxId}/vnc.html`, '_blank', 'width=1280,height=720');
-                }
-              }}
-              disabled={!sandboxId}
-              className="flex items-center gap-1 text-[8px] font-mono text-muted hover:text-zinc-300 transition-colors"
+              key={a.id}
+              onClick={() => { setSelectedArtifactId(a.id); setShowSettings(false); setShowBrowser(false); }}
+              title={`${typeLabels[a.type]}: ${a.title}`}
+              className={cn(
+                'flex items-center gap-1 px-2 py-1 text-[9px] font-mono uppercase tracking-widest transition-colors rounded shrink-0',
+                selectedArtifact?.id === a.id && !showSettings && !showBrowser
+                  ? 'text-primary bg-primary/10'
+                  : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+              )}
             >
-              <Monitor size={9} /> Desktop
+              {typeIcons[a.type]}
+              <span className="truncate max-w-[80px]">{a.title}</span>
             </button>
-          ) : undefined
-        }
-      />
+          ))}
+          {artifacts.length === 0 && !artifactsLoading && (
+            <span className="text-[9px] font-mono text-zinc-700 px-2">No artifacts yet</span>
+          )}
+          {artifactsLoading && (
+            <Loader size={10} className="text-muted-foreground animate-spin mx-2" />
+          )}
+        </div>
+
+        <div className="flex-1" />
+
+        {/* Browser toggle */}
+        <button
+          onClick={() => { setShowBrowser(!showBrowser); setShowSettings(false); }}
+          className={cn(
+            'p-1.5 transition-colors rounded',
+            showBrowser
+              ? 'text-primary bg-primary/10'
+              : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+          )}
+          title="Browser / Computer Use"
+        >
+          <Globe size={12} />
+        </button>
+
+        {/* Settings toggle */}
+        <button
+          onClick={() => { setShowSettings(!showSettings); setShowBrowser(false); }}
+          className={cn(
+            'p-1.5 transition-colors rounded',
+            showSettings
+              ? 'text-primary bg-primary/10'
+              : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+          )}
+          title="Settings"
+        >
+          <Settings size={12} />
+        </button>
+      </div>
 
       {/* Live streaming status */}
       {streamingState?.isStreaming && (
@@ -214,58 +185,132 @@ export function RightPanel({ agentId, sandboxId: passedSandboxId, artifacts, art
         </div>
       )}
 
-      {/* Scrollable content */}
+      {/* Content area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {/* Plans */}
-        <ArtifactSection
-          title="Plans"
-          icon={<FileText size={11} />}
-          items={plans}
-          currentIndex={artifactIdx.plan}
-          onNavigate={(dir) => navigateArtifact('plan', dir)}
-          loading={artifactsLoading && plans.length === 0}
-          emptyMessage="No plan yet. The agent will create one when planning implementation."
-        />
+        {/* Settings panel */}
+        {showSettings && (
+          <div className="p-4 space-y-4">
+            <div className="text-[9px] font-black uppercase tracking-widest text-muted-foreground mb-3">
+              Settings
+            </div>
 
-        {/* Todos */}
-        <ArtifactSection
-          title="Todos"
-          icon={<CheckSquare size={11} />}
-          items={todos}
-          currentIndex={artifactIdx.todo}
-          onNavigate={(dir) => navigateArtifact('todo', dir)}
-          loading={artifactsLoading && todos.length === 0}
-          emptyMessage="No todo list yet. The agent will create one when breaking down tasks."
-        />
+            {/* Computer Use */}
+            <div className="border border-white/5 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <Monitor size={12} className="text-muted-foreground" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-300">
+                  Computer Use
+                </span>
+              </div>
+              <p className="text-[9px] font-mono text-muted-foreground leading-relaxed">
+                Enable browser automation for the sandbox. Allows the agent to take screenshots, click elements, and navigate pages.
+              </p>
+              {cu.enabled ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-mono text-primary">Enabled</span>
+                  <button
+                    onClick={() => {
+                      cu.disableComputerUse();
+                    }}
+                    className="px-3 py-1 text-[8px] font-mono uppercase tracking-widest text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 transition-colors"
+                  >
+                    Disable
+                  </button>
+                  {sandboxId && (
+                    <button
+                      onClick={() => {
+                        window.open(`/api/sandbox/vnc/${sandboxId}/vnc.html`, '_blank', 'width=1280,height=720');
+                      }}
+                      className="px-3 py-1 text-[8px] font-mono uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 transition-colors"
+                    >
+                      Open Desktop
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={handleEnableCU}
+                  disabled={!sandboxId || cu.loading}
+                  className="px-3 py-1.5 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
+                >
+                  {cu.loading ? 'Starting...' : 'Enable Computer Use'}
+                </button>
+              )}
+              {cu.error && (
+                <p className="text-[8px] font-mono text-red-400">{cu.error}</p>
+              )}
+            </div>
 
-        {/* Notes */}
-        <ArtifactSection
-          title="Notes"
-          icon={<StickyNote size={11} />}
-          items={notes}
-          currentIndex={artifactIdx.notes}
-          onNavigate={(dir) => navigateArtifact('notes', dir)}
-          loading={artifactsLoading && notes.length === 0}
-          emptyMessage="No notes yet. The agent will create notes for research findings."
-        />
+            {/* GitHub connection link */}
+            <div className="border border-white/5 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <Github size={12} className="text-muted-foreground" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-300">
+                  GitHub
+                </span>
+              </div>
+              <p className="text-[9px] font-mono text-muted-foreground leading-relaxed">
+                Connect your GitHub account to enable PR creation, branch management, and repository cloning.
+              </p>
+              <button
+                onClick={() => {
+                  // Trigger the GitHub modal in AppShell via custom event
+                  window.dispatchEvent(new CustomEvent('open-github-settings'));
+                }}
+                className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 transition-colors"
+              >
+                Configure GitHub
+              </button>
+            </div>
+          </div>
+        )}
 
-        {/* Browser / Computer Use tools */}
-        <BrowserTools
-          cu={cu}
-          sandboxId={sandboxId}
-          urlInput={urlInput}
-          setUrlInput={setUrlInput}
-          typeText={typeText}
-          setTypeText={setTypeText}
-          selectedElement={selectedElement}
-          setSelectedElement={setSelectedElement}
-          onNavigate={handleNavigate}
-          onElementClick={handleElementClick}
-          onType={handleType}
-          onEnable={handleEnableCU}
-        />
+        {/* Browser panel */}
+        {showBrowser && !showSettings && (
+          <BrowserTools
+            cu={cu}
+            sandboxId={sandboxId}
+            urlInput={urlInput}
+            setUrlInput={setUrlInput}
+            typeText={typeText}
+            setTypeText={setTypeText}
+            selectedElement={selectedElement}
+            setSelectedElement={setSelectedElement}
+            onNavigate={handleNavigate}
+            onElementClick={handleElementClick}
+            onType={handleType}
+            onEnable={handleEnableCU}
+          />
+        )}
+
+        {/* Artifact detail view */}
+        {!showSettings && !showBrowser && (
+          selectedArtifact ? (
+            <div className="p-3">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-muted-foreground">{typeIcons[selectedArtifact.type]}</span>
+                <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">
+                  {typeLabels[selectedArtifact.type]}
+                </span>
+                <span className="text-[9px] font-mono text-zinc-600">
+                  {selectedArtifact.title}
+                </span>
+              </div>
+              <ArtifactView artifact={selectedArtifact} />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-40 text-zinc-700">
+              <FileText size={20} className="mb-2 opacity-20" />
+              <p className="text-[9px] font-mono uppercase tracking-widest">
+                {artifactsLoading ? 'Loading...' : 'No artifacts yet'}
+              </p>
+              <p className="text-[8px] font-mono text-zinc-800 mt-1">
+                Artifacts appear here as the agent works
+              </p>
+            </div>
+          )
+        )}
       </div>
     </div>
   );
 }
-
