@@ -100,6 +100,7 @@ export interface ConversationSummary {
   lastMessage: string;
   lastAt: string;
   messageCount: number;
+  title: string;
 }
 
 // Computer Use types
@@ -357,6 +358,15 @@ export const api = {
       apiFetch<ActiveSessionsResponse>('/api/pi/active'),
     getHistory: () =>
       apiFetch<{ conversations: ConversationSummary[] }>('/api/pi/history'),
+    deleteConversation: (project: string, agentId: string) =>
+      apiFetch<{ deleted: boolean }>(`/api/pi/conversation?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, {
+        method: 'DELETE',
+      }),
+    renameConversation: (project: string, agentId: string, title: string) =>
+      apiFetch<{ renamed: boolean }>(`/api/pi/conversation/rename?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ title }),
+      }),
     spawnAgent: (project: string, agentId?: string) =>
       apiFetch<{ success: boolean; agentId: string }>('/api/pi/agent/spawn', {
         method: 'POST',

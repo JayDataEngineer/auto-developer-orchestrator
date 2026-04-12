@@ -55,6 +55,8 @@ func (h *PiHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/agent/spawn", h.SpawnAgent)
 	r.Post("/agent/destroy", h.DestroyAgent)
 	r.Get("/history", h.GetHistory)
+	r.Delete("/conversation", h.DeleteConversation)
+	r.Put("/conversation/rename", h.RenameConversation)
 	r.Get("/debug/rpc-test", h.DebugRpcTest)
 }
 

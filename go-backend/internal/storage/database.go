@@ -64,6 +64,13 @@ func NewDatabase(dataSource string) (*Database, error) {
 		CREATE INDEX IF NOT EXISTS idx_conv_msgs_project_agent
 			ON conversation_messages(project, agent_id, created_at);
 
+		CREATE TABLE IF NOT EXISTS conversation_titles (
+			project TEXT NOT NULL,
+			agent_id TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (project, agent_id)
+		);
+
 		CREATE TABLE IF NOT EXISTS artifacts (
 			id TEXT PRIMARY KEY,
 			agent_id TEXT NOT NULL,
@@ -292,6 +299,23 @@ func (d *Database) ClearConversationHistory(ctx context.Context, project, agentI
 	_, err := d.db.ExecContext(ctx,
 		`DELETE FROM conversation_messages WHERE project = ? AND agent_id = ?`,
 		project, agentID)
+	if err != nil {
+		return err
+	}
+	// Also remove any custom title
+	_, _ = d.db.ExecContext(ctx,
+		`DELETE FROM conversation_titles WHERE project = ? AND agent_id = ?`,
+		project, agentID)
+	return nil
+}
+
+// SetConversationTitle sets a custom title for a conversation.
+func (d *Database) SetConversationTitle(ctx context.Context, project, agentID, title string) error {
+	_, err := d.db.ExecContext(ctx, `
+		INSERT INTO conversation_titles (project, agent_id, title)
+		VALUES (?, ?, ?)
+		ON CONFLICT(project, agent_id) DO UPDATE SET title = excluded.title`,
+		project, agentID, title)
 	return err
 }
 
@@ -302,24 +326,27 @@ type ConversationSummary struct {
 	LastMessage  string `json:"lastMessage"`
 	LastAt       string `json:"lastAt"`
 	MessageCount int    `json:"messageCount"`
+	Title        string `json:"title"`
 }
 
 // GetConversationSummaries returns the latest conversation for each project+agent pair.
 func (d *Database) GetConversationSummaries(ctx context.Context) ([]ConversationSummary, error) {
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT
-			project,
-			agent_id,
+			cm.project,
+			cm.agent_id,
 			COALESCE(
 				(SELECT content FROM conversation_messages sub
 				 WHERE sub.project = cm.project AND sub.agent_id = cm.agent_id AND sub.role = 'user'
 				 ORDER BY sub.created_at DESC LIMIT 1),
 				''
 			) AS last_message,
-			MAX(created_at) AS last_at,
-			COUNT(*) AS message_count
+			MAX(cm.created_at) AS last_at,
+			COUNT(*) AS message_count,
+			COALESCE(ct.title, '') AS title
 		FROM conversation_messages cm
-		GROUP BY project, agent_id
+		LEFT JOIN conversation_titles ct ON ct.project = cm.project AND ct.agent_id = cm.agent_id
+		GROUP BY cm.project, cm.agent_id
 		ORDER BY last_at DESC
 	`)
 	if err != nil {
@@ -330,7 +357,7 @@ func (d *Database) GetConversationSummaries(ctx context.Context) ([]Conversation
 	var summaries []ConversationSummary
 	for rows.Next() {
 		var s ConversationSummary
-		if err := rows.Scan(&s.Project, &s.AgentID, &s.LastMessage, &s.LastAt, &s.MessageCount); err != nil {
+		if err := rows.Scan(&s.Project, &s.AgentID, &s.LastMessage, &s.LastAt, &s.MessageCount, &s.Title); err != nil {
 			return nil, err
 		}
 		// Truncate last message for display

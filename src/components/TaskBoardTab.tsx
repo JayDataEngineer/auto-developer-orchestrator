@@ -5,9 +5,8 @@ import { useToastContext } from './ui/Toast';
 import { StatusBadge } from './ui/StatusBadge';
 import { EmptyState } from './ui/EmptyState';
 import {
-  LayoutGrid, Plus, Play, Square, Trash2, Clock,
-  Loader, ChevronRight, ChevronDown, AlertCircle, X, Layers, RefreshCw,
-  Pause, Calendar, Timer, Zap
+  LayoutGrid, Plus, Play, Trash2, Clock,
+  Loader, ChevronRight, ChevronDown, AlertCircle, X, Layers, RefreshCw
 } from 'lucide-react';
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -104,7 +103,7 @@ function TaskCard({ task, isSelected, onSelect, onTrigger, onDelete }: TaskCardP
       </div>
       {/* Actions on hover */}
       <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        {!isRunning && !hasRun && (
+        {!isRunning && (
           <button onClick={e => { e.stopPropagation(); onTrigger(); }} className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors" title="Run">
             <Play size={10} />
           </button>
@@ -316,11 +315,11 @@ function JobRow({ job, expanded, executions, runLogs, onToggleExpand, onTrigger,
           </div>
         </div>
         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-          <button onClick={onTrigger} disabled={job.status === 'running'} className="p-1 text-zinc-500 hover:text-primary transition-colors disabled:opacity-30" title="Run now">
+          <button onClick={onTrigger} disabled={job.status === 'running'} className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors disabled:opacity-30" title="Run now">
             <Play size={11} />
           </button>
-          <button onClick={onToggle} className={cn("p-1 transition-colors", job.enabled ? "text-zinc-400 hover:text-yellow-400" : "text-zinc-600 hover:text-emerald-400")} title={job.enabled ? "Disable" : "Enable"}>
-            {job.enabled ? <Pause size={11} /> : <Play size={11} />}
+          <button onClick={onToggle} className={cn("p-1 transition-colors text-[9px] font-mono", job.enabled ? "text-emerald-400 hover:text-yellow-400" : "text-zinc-600 hover:text-emerald-400")} title={job.enabled ? "Pause schedule" : "Enable schedule"}>
+            {job.enabled ? 'ON' : 'OFF'}
           </button>
           <button onClick={onDelete} className="p-1 text-zinc-500 hover:text-red-400 transition-colors" title="Delete">
             <Trash2 size={11} />
@@ -445,8 +444,10 @@ export function TaskBoardTab({ selectedProject }: TaskBoardTabProps) {
   const [executions, setExecutions] = useState<SchedulerExecution[]>([]);
   const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
 
-  const manualTasks = allJobs.filter(j => j.scheduleType === 'manual');
-  const scheduledJobs = allJobs.filter(j => j.scheduleType !== 'manual');
+  // Only show jobs for the selected project
+  const projectJobs = allJobs.filter(j => j.project === selectedProject);
+  const manualTasks = projectJobs.filter(j => j.scheduleType === 'manual');
+  const scheduledJobs = projectJobs.filter(j => j.scheduleType !== 'manual');
 
   const selectedTask = allJobs.find(j => j.id === selectedId) || null;
 
@@ -555,11 +556,11 @@ export function TaskBoardTab({ selectedProject }: TaskBoardTabProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {loading && allJobs.length === 0 ? (
+        {loading && projectJobs.length === 0 ? (
           <div className="flex-1 flex items-center justify-center h-32">
             <Loader size={16} className="animate-spin text-zinc-600" />
           </div>
-        ) : allJobs.length === 0 ? (
+        ) : projectJobs.length === 0 ? (
           <EmptyState
             icon={<LayoutGrid size={32} />}
             title="No tasks yet"
@@ -643,7 +644,7 @@ export function TaskBoardTab({ selectedProject }: TaskBoardTabProps) {
           <button onClick={fetchJobs} className="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors" title="Refresh">
             <RefreshCw size={12} />
           </button>
-          <span className="ml-auto text-[8px] font-mono text-zinc-700">{allJobs.length} total</span>
+          <span className="ml-auto text-[8px] font-mono text-zinc-700">{projectJobs.length} total</span>
         </div>
       )}
 

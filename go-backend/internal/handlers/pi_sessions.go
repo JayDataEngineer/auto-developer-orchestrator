@@ -119,6 +119,60 @@ func (h *PiHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// DeleteConversation deletes all messages for a project+agent conversation.
+func (h *PiHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	agentId := r.URL.Query().Get("agentId")
+	if project == "" || agentId == "" {
+		JSONError(w, "project and agentId required", http.StatusBadRequest)
+		return
+	}
+
+	if h.db == nil {
+		JSONError(w, "database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := h.db.ClearConversationHistory(r.Context(), project, agentId); err != nil {
+		h.log.Error("Failed to delete conversation", zap.Error(err))
+		JSONError(w, "failed to delete conversation", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+// RenameConversation sets a custom title for a conversation.
+func (h *PiHandler) RenameConversation(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	agentId := r.URL.Query().Get("agentId")
+	if project == "" || agentId == "" {
+		JSONError(w, "project and agentId required", http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		JSONError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if h.db == nil {
+		JSONError(w, "database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := h.db.SetConversationTitle(r.Context(), project, agentId, body.Title); err != nil {
+		h.log.Error("Failed to rename conversation", zap.Error(err))
+		JSONError(w, "failed to rename conversation", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"renamed": true})
+}
+
 // ListSessions lists saved Pi sessions.
 func (h *PiHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")

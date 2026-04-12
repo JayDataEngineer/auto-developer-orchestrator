@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { MessageSquare, Plus, Clock, FolderOpen, ChevronDown, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { MessageSquare, Plus, Clock, FolderOpen, ChevronDown, ChevronRight, Trash2, Pencil, Check, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { api, ConversationSummary } from '../lib/api';
 
@@ -38,13 +38,16 @@ export function HistorySidebar({
 }: HistorySidebarProps) {
   const [groups, setGroups] = useState<ProjectGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [contextMenu, setContextMenu] = useState<{ project: string; agentId: string; x: number; y: number } | null>(null);
+  const [renaming, setRenaming] = useState<{ project: string; agentId: string } | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   const fetchHistory = useCallback(async () => {
     try {
       const data = await api.pi.getHistory();
       const summaries: ConversationSummary[] = data.conversations || [];
 
-      // Group by project
       const projectMap = new Map<string, ConversationSummary[]>();
       for (const s of summaries) {
         const list = projectMap.get(s.project) || [];
@@ -52,14 +55,12 @@ export function HistorySidebar({
         projectMap.set(s.project, list);
       }
 
-      // Ensure all known projects appear (even if no history)
       for (const p of projects) {
         if (!projectMap.has(p)) {
           projectMap.set(p, []);
         }
       }
 
-      // Build groups, sorted: projects with history first, then empty
       const built: ProjectGroup[] = [];
       const sortedProjects = [...projectMap.entries()].sort((a, b) => {
         const aLast = a[1][0]?.lastAt || '';
@@ -77,7 +78,6 @@ export function HistorySidebar({
 
       setGroups(built);
     } catch {
-      // Build groups from project list as fallback
       const built: ProjectGroup[] = projects.map(p => ({
         project: p,
         conversations: [],
@@ -93,11 +93,23 @@ export function HistorySidebar({
     fetchHistory();
   }, [fetchHistory]);
 
-  // Refetch when projects change or a new message might have been sent
   useEffect(() => {
     const interval = setInterval(fetchHistory, 15000);
     return () => clearInterval(interval);
   }, [fetchHistory]);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    window.addEventListener('click', handler);
+    return () => window.removeEventListener('click', handler);
+  }, [contextMenu]);
+
+  // Focus rename input
+  useEffect(() => {
+    if (renaming) renameInputRef.current?.focus();
+  }, [renaming]);
 
   const toggleGroup = (project: string) => {
     setGroups(prev =>
@@ -113,6 +125,41 @@ export function HistorySidebar({
   const totalConversations = groups.reduce(
     (sum, g) => sum + g.conversations.length, 0
   );
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, project: string, agentId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ project, agentId, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const handleDelete = useCallback(async (project: string, agentId: string) => {
+    setContextMenu(null);
+    try {
+      await api.pi.deleteConversation(project, agentId);
+      fetchHistory();
+    } catch {}
+  }, [fetchHistory]);
+
+  const handleRenameStart = useCallback((project: string, agentId: string, currentTitle: string) => {
+    setContextMenu(null);
+    setRenaming({ project, agentId });
+    setRenameValue(currentTitle);
+  }, []);
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renaming || !renameValue.trim()) return;
+    try {
+      await api.pi.renameConversation(renaming.project, renaming.agentId, renameValue.trim());
+      fetchHistory();
+    } catch {}
+    setRenaming(null);
+  }, [renaming, renameValue, fetchHistory]);
+
+  const getConvDisplayTitle = useCallback((conv: ConversationSummary) => {
+    if (conv.title) return conv.title;
+    if (conv.agentId === 'default') return conv.lastMessage || 'New conversation';
+    return conv.agentId;
+  }, []);
 
   return (
     <div className="h-full flex flex-col bg-black">
@@ -179,33 +226,58 @@ export function HistorySidebar({
               {/* Conversations */}
               {!group.collapsed && (
                 <div>
-                  {group.conversations.map(conv => (
-                    <button
-                      key={`${conv.project}-${conv.agentId}`}
-                      onClick={() => onSelectSession(conv.project, conv.agentId)}
-                      className={cn(
-                        "w-full text-left px-3 py-1.5 pl-8 flex flex-col gap-0.5 transition-colors",
-                        isActive(conv.project, conv.agentId)
-                          ? "bg-primary/10 text-primary border-l-2 border-primary"
-                          : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300 border-l-2 border-transparent"
-                      )}
-                    >
-                      <span className="text-[9px] font-mono truncate">
-                        {conv.agentId === 'default'
-                          ? conv.lastMessage || 'New conversation'
-                          : conv.agentId
-                        }
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[8px] font-mono text-zinc-600">
-                          {formatTimeAgo(conv.lastAt)}
-                        </span>
-                        <span className="text-[8px] font-mono text-zinc-700">
-                          {conv.messageCount} msgs
-                        </span>
+                  {group.conversations.map(conv => {
+                    const isRenaming = renaming?.project === conv.project && renaming?.agentId === conv.agentId;
+
+                    return (
+                      <div
+                        key={`${conv.project}-${conv.agentId}`}
+                        onClick={() => {
+                          if (!isRenaming) onSelectSession(conv.project, conv.agentId);
+                        }}
+                        onContextMenu={(e) => handleContextMenu(e, conv.project, conv.agentId)}
+                        className={cn(
+                          "px-3 py-1.5 pl-8 flex flex-col gap-0.5 transition-colors cursor-pointer",
+                          isActive(conv.project, conv.agentId)
+                            ? "bg-primary/10 text-primary border-l-2 border-primary"
+                            : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300 border-l-2 border-transparent"
+                        )}
+                      >
+                        {isRenaming ? (
+                          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                            <input
+                              ref={renameInputRef}
+                              value={renameValue}
+                              onChange={e => setRenameValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleRenameSubmit();
+                                if (e.key === 'Escape') setRenaming(null);
+                              }}
+                              className="flex-1 bg-zinc-900 border border-white/10 rounded px-1.5 py-0.5 text-[9px] font-mono text-zinc-200 outline-none focus:border-primary/40"
+                            />
+                            <button onClick={handleRenameSubmit} className="p-0.5 hover:text-primary">
+                              <Check size={9} />
+                            </button>
+                            <button onClick={() => setRenaming(null)} className="p-0.5 hover:text-red-400">
+                              <X size={9} />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[9px] font-mono truncate">
+                            {getConvDisplayTitle(conv)}
+                          </span>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[8px] font-mono text-zinc-600">
+                            {formatTimeAgo(conv.lastAt)}
+                          </span>
+                          <span className="text-[8px] font-mono text-zinc-700">
+                            {conv.messageCount} msgs
+                          </span>
+                        </div>
                       </div>
-                    </button>
-                  ))}
+                    );
+                  })}
                   {group.conversations.length === 0 && (
                     <div className="px-8 py-2 text-[8px] font-mono text-zinc-700">
                       No conversations yet
@@ -217,6 +289,33 @@ export function HistorySidebar({
           ))
         )}
       </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 bg-zinc-900 border border-white/10 shadow-xl rounded py-1 min-w-[120px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              const conv = groups
+                .flatMap(g => g.conversations)
+                .find(c => c.project === contextMenu.project && c.agentId === contextMenu.agentId);
+              handleRenameStart(contextMenu.project, contextMenu.agentId, conv?.title || '');
+            }}
+            className="w-full text-left px-3 py-1.5 text-[9px] font-mono text-zinc-300 hover:bg-white/5 flex items-center gap-2"
+          >
+            <Pencil size={9} /> Rename
+          </button>
+          <button
+            onClick={() => handleDelete(contextMenu.project, contextMenu.agentId)}
+            className="w-full text-left px-3 py-1.5 text-[9px] font-mono text-red-400 hover:bg-red-400/10 flex items-center gap-2"
+          >
+            <Trash2 size={9} /> Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 }

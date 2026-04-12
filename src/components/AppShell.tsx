@@ -266,10 +266,15 @@ function AppShellInner() {
               projects={projects}
               activeProject={selectedProject || undefined}
               activeAgentId={activeAgentId}
-              onSelectSession={(_project: string, agentId: string) => {
+              onSelectSession={(project: string, agentId: string) => {
+                setSelectedProject(project);
                 setActiveAgentId(agentId);
+                setActiveTab('agent');
               }}
-              onNewChat={() => setActiveAgentId('default')}
+              onNewChat={() => {
+                setActiveAgentId('default');
+                setActiveTab('agent');
+              }}
             />
             {/* Drag handle on right edge */}
             <div
