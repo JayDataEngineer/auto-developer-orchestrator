@@ -424,8 +424,12 @@ func (c *PiClient) start() error {
 	}
 
 	c.cmd.Dir = c.projectDir
+	projectName := filepath.Base(c.projectDir)
 	env := append(os.Environ(),
 		fmt.Sprintf("PROJECT_DIR=%s", c.projectDir),
+		fmt.Sprintf("PROJECT_NAME=%s", projectName),
+		fmt.Sprintf("AGENT_ID=%s", c.agentId),
+		fmt.Sprintf("ARTIFACT_AGENT_ID=%s:%s", projectName, c.agentId),
 	)
 	// Pass orchestrator API host so extensions can reach the backend
 	if os.Getenv("ORCHESTRATOR_API_HOST") == "" {

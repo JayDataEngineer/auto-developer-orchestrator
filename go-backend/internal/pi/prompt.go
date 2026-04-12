@@ -99,7 +99,10 @@ func (b *SystemPromptBuilder) Build() string {
 		sections = append(sections, b.buildComputerUseSection())
 	}
 
-	// 10. Appended sections — any additional context
+	// 10. Artifacts — plans, todos, scratch pad tools
+	sections = append(sections, b.buildArtifactsSection())
+
+	// 11. Appended sections — any additional context
 	for _, s := range b.AppendSections {
 		sections = append(sections, s)
 	}
@@ -551,54 +554,35 @@ Keep the task description clear and specific — the sub-agent has direct access
 		port, port)
 }
 
-// buildTodosSection adds todo list and scratch pad instructions
-func (b *SystemPromptBuilder) buildTodosSection() string {
-	port := b.ServerPort
-	if port == "" {
-		port = "3847"
-	}
+// buildArtifactsSection adds plan, todo, and scratch pad tool instructions
+func (b *SystemPromptBuilder) buildArtifactsSection() string {
+	return `# Plans, Todos & Scratch Pad
 
-	return fmt.Sprintf(`# Todo List and Scratch Pad
+You have built-in tools for tracking your work. The user can see these in real-time in the right panel.
 
-## Todo List
+## Planning — ` + "`write_plan` / `read_plan`" + `
+Before implementing a complex feature, create a plan:
+- Use ` + "`write_plan`" + ` with a title and markdown content describing your approach
+- Plans appear in the "Plans" section of the right panel
+- Update the plan as your understanding evolves
 
-Track complex tasks with a structured todo list. Save it as an artifact:
+## Task Tracking — ` + "`write_todos` / `read_todos`" + `
+Break work into tracked tasks using checkbox format:
+- ` + "`- [ ]`" + ` = pending
+- ` + "`- [>]`" + ` = in progress
+- ` + "`- [x]`" + ` = completed
+- Todos appear in the "Todos" section with a progress bar
+- Update as you complete each step
 
-`+"```"+`bash
-curl -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"todo","title":"Tasks","content":"- [ ] Task 1\\n- [ ] Task 2\\n- [x] Task 3"}'
-`+"```"+`
-
-Load todos:
-`+"```"+`bash
-curl "http://localhost:%s/api/pi/artifacts?agentId=YOUR_AGENT_ID"
-`+"```"+`
-
-**Checkbox format:**
-- `+"`- [ ]`"+` = pending
-- `+"`- [>]`"+` = in progress
-- `+"`- [x]`"+` = completed
-
-## Scratch Pad
-
-Use a scratch pad for temporary notes, observations, and decisions:
-
-`+"```"+`bash
-curl -X POST http://localhost:%s/api/pi/artifacts -d '{"agentId":"YOUR_AGENT_ID","type":"notes","title":"Scratch Pad","content":"## Observations\\n- ..."}'
-`+"```"+`
-
-Load scratch pad:
-`+"```"+`bash
-curl "http://localhost:%s/api/pi/artifacts?agentId=YOUR_AGENT_ID"
-`+"```"+`
-
-Use the scratch pad to:
-- Store discoveries about the codebase
-- Track decisions and reasoning
-- Note patterns and conventions
-- Record errors and their solutions
+## Notes — ` + "`write_scratch_pad` / `read_scratch_pad`" + `
+Store research findings, codebase discoveries, and decisions:
+- Use for observations that don't fit in a todo
+- Notes appear in the "Notes" section of the right panel
+- Review at the start of a session for context
 
 ## Guidelines
-- Create a todo list before starting complex multi-step tasks
+- ALWAYS create a plan before starting complex multi-step tasks
+- Break plans into todos before implementing
 - Update todos as you progress (mark in-progress and done)
-- Review the scratch pad at the start of each session for context`, port, port, port, port)
+- Use the scratch pad for research findings and decisions`
 }

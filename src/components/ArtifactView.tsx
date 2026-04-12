@@ -38,15 +38,19 @@ function TodoArtifact({ content }: { content: string }) {
   const lines = content.split('\n');
   const items = lines.map((line, i) => {
     const checkedMatch = line.match(/^- \[x\]\s*(.*)/i);
+    const inProgressMatch = line.match(/^- \[>\]\s*(.*)/);
     const uncheckedMatch = line.match(/^- \[ \]\s*(.*)/);
     if (checkedMatch) {
-      return { checked: true, text: checkedMatch[1], key: i };
+      return { checked: true, inProgress: false, text: checkedMatch[1], key: i };
+    }
+    if (inProgressMatch) {
+      return { checked: false, inProgress: true, text: inProgressMatch[1], key: i };
     }
     if (uncheckedMatch) {
-      return { checked: false, text: uncheckedMatch[1], key: i };
+      return { checked: false, inProgress: false, text: uncheckedMatch[1], key: i };
     }
     return null;
-  }).filter(Boolean) as Array<{ checked: boolean; text: string; key: number }>;
+  }).filter(Boolean) as Array<{ checked: boolean; inProgress: boolean; text: string; key: number }>;
 
   if (items.length === 0) {
     // Not a todo list, render as markdown
@@ -54,6 +58,7 @@ function TodoArtifact({ content }: { content: string }) {
   }
 
   const completed = items.filter(i => i.checked).length;
+  const inProgress = items.filter(i => i.inProgress).length;
 
   return (
     <div className="space-y-1">
@@ -67,6 +72,7 @@ function TodoArtifact({ content }: { content: string }) {
         </div>
         <span className="text-[9px] font-mono text-muted-foreground">
           {completed}/{items.length}
+          {inProgress > 0 && <span className="text-primary ml-1">({inProgress} active)</span>}
         </span>
       </div>
 
@@ -77,16 +83,19 @@ function TodoArtifact({ content }: { content: string }) {
           className="flex items-start gap-2 px-2 py-1"
         >
           <div className={`w-3.5 h-3.5 mt-0.5 border flex items-center justify-center shrink-0 ${
-            item.checked ? 'bg-primary border-primary' : 'border-zinc-600'
+            item.checked ? 'bg-primary border-primary' : item.inProgress ? 'border-primary bg-primary/20' : 'border-zinc-600'
           }`}>
             {item.checked && (
               <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
                 <path d="M1 4L3 6L7 2" stroke="black" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             )}
+            {item.inProgress && (
+              <div className="w-1.5 h-1.5 bg-primary rounded-full" />
+            )}
           </div>
           <span className={`text-[11px] font-mono leading-relaxed ${
-            item.checked ? 'text-muted-foreground line-through' : 'text-zinc-300'
+            item.checked ? 'text-muted-foreground line-through' : item.inProgress ? 'text-primary' : 'text-zinc-300'
           }`}>
             {item.text}
           </span>
