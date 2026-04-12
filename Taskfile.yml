@@ -1,0 +1,155 @@
+# Auto-Developer Orchestrator — Taskfile
+# https://taskfile.dev
+#
+# Usage:
+#   task --list              show all tasks
+#   task <name>              run a task
+#   task up                  start dev environment
+#   task test                run all tests
+
+version: "3"
+
+vars:
+  GO_PORT: 3847
+  JS_PORT: 5174
+
+dotenv: [".env"]
+
+tasks:
+  # ── Installation ────────────────────────────────────────────────────────
+  install:
+    desc: Install dependencies (npm, Go, docs)
+    cmds:
+      - npm install --no-audit --no-fund
+      - cmd: go mod tidy
+        dir: go-backend
+      - cmd: npm install --no-audit --no-fund
+        dir: docs
+      - echo "Done — all dependencies installed."
+
+  # ── Local Development ───────────────────────────────────────────────────
+  dev:
+    desc: Start all services locally (Go + Vite)
+    cmds:
+      - cmd: go run cmd/server/main.go
+        dir: go-backend
+        ignore_error: true
+      - npm run dev -- --port {{.JS_PORT}}
+
+  dev-frontend:
+    desc: Start Vite frontend only
+    cmds:
+      - npm run dev -- --port {{.JS_PORT}}
+
+  dev-backend:
+    desc: Start Go backend only
+    dir: go-backend
+    cmds:
+      - go run cmd/server/main.go
+
+  docs:
+    desc: Start documentation site (port 3001)
+    dir: docs
+    cmds:
+      - npm run dev -- -p 3001
+
+  # ── Docker Development ──────────────────────────────────────────────────
+  up:
+    desc: Start dev environment with hot reload (Docker)
+    cmds:
+      - docker compose -f docker-compose.dev.yml up -d --build
+      - echo "Dev services started → http://orchestrator.local"
+
+  down:
+    desc: Stop dev environment
+    cmds:
+      - docker compose -f docker-compose.dev.yml down --remove-orphans
+
+  restart:
+    desc: Restart dev environment
+    cmds:
+      - task: down
+      - task: up
+
+  logs:
+    desc: Follow all logs
+    cmds:
+      - docker compose -f docker-compose.dev.yml logs -f
+
+  # ── Production ──────────────────────────────────────────────────────────
+  prod-up:
+    desc: Start production environment
+    cmds:
+      - docker compose -f docker-compose.yml up -d --build
+      - echo "Production services started → http://orchestrator.local"
+
+  prod-down:
+    desc: Stop production environment
+    cmds:
+      - docker compose -f docker-compose.yml down
+
+  # ── Testing ─────────────────────────────────────────────────────────────
+  test:
+    desc: Run all tests (JS + Go + E2E)
+    cmds:
+      - task: test-js
+      - task: test-go
+      - task: test-e2e
+
+  test-go:
+    desc: Run Go backend tests
+    dir: go-backend
+    cmds:
+      - go test -v ./...
+
+  test-js:
+    desc: Run frontend unit tests
+    cmds:
+      - npm run test
+
+  test-e2e:
+    desc: Run Playwright E2E tests
+    cmds:
+      - npm run test:playwright
+
+  # ── Linting ─────────────────────────────────────────────────────────────
+  lint:
+    desc: Run all linters
+    cmds:
+      - cmd: go fmt ./...
+        dir: go-backend
+      - npm run lint
+
+  # ── Maintenance ─────────────────────────────────────────────────────────
+  clean:
+    desc: Remove build artifacts and docker resources
+    cmds:
+      - rm -rf dist go-backend/bin
+      - docker compose -f docker-compose.dev.yml down -v --remove-orphans
+      - echo "Clean complete."
+
+  db-backup:
+    desc: Backup SQLite database
+    cmds:
+      - mkdir -p data/backups
+      - cp data/orchestrator.db "data/backups/orchestrator.db.backup_$(date +%Y%m%d_%H%M%S)"
+      - echo "Database backed up → data/backups/"
+
+  db-restore:
+    desc: Restore SQLite database from backup
+    cmds:
+      - ls -1 data/backups/
+      - prompt="Filename: " default="" backup
+      - cp "data/backups/{{.backup}}" data/orchestrator.db
+      - echo "Database restored."
+    interactive: true
+
+  infra-check:
+    desc: Check health of shared infrastructure
+    cmds:
+      - cmd: echo -n "Traefik:  " && (curl -sf http://traefik.local/ping > /dev/null && echo "OK" || echo "DOWN")
+        ignore_error: true
+      - cmd: echo -n "LiteLLM:  " && (curl -sf http://litellm.local/health > /dev/null && echo "OK" || echo "DOWN (optional)")
+        ignore_error: true
+      - cmd: echo -n "Langfuse: " && (curl -sf http://langfuse.local/api/health > /dev/null && echo "OK" || echo "DOWN (optional)")
+        ignore_error: true
