@@ -140,12 +140,10 @@ const (
 	EventCompactionEnd   = "compaction_end"
 	EventError           = "error"
 	EventStateUpdate     = "state_update"
-	EventBranchCreated   = "branch_created"
-	EventCommitCreated   = "commit_created"
-	EventPushComplete    = "push_complete"
-	EventPRCreated       = "pr_created"
-	EventWebUpdate       = "web_update"
-	EventSubAgentResult  = "subagent_result"
+	EventBranchCreated = "branch_created"
+	EventCommitCreated = "commit_created"
+	EventPushComplete  = "push_complete"
+	EventPRCreated     = "pr_created"
 
 	// Human-in-the-loop events
 	EventApprovalRequest = "approval_request"

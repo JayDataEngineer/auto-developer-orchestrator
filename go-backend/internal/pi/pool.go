@@ -2,7 +2,6 @@ package pi
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -58,32 +57,6 @@ func NewPiPoolWithSandbox(logger *zap.Logger, idleTimeout time.Duration, sandbox
 	go p.cleanupIdle()
 
 	return p
-}
-
-// findLatestSession returns the path to the most recent session file for a project directory.
-// Returns empty string if no session exists.
-func findLatestSession(projectPath string) string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	// Convert project path to session dir name (Pi encodes / as -)
-	dirName := "--" + strings.ReplaceAll(strings.Trim(projectPath, "/"), "/", "-") + "--"
-	sessionDir := filepath.Join(homeDir, ".pi", "agent", "sessions", dirName)
-	entries, err := os.ReadDir(sessionDir)
-	if err != nil {
-		return ""
-	}
-	// Find the most recent .jsonl file by filename (timestamps sort lexicographically)
-	var latest string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
-			if e.Name() > latest {
-				latest = filepath.Join(sessionDir, e.Name())
-			}
-		}
-	}
-	return latest
 }
 
 // GetOrCreate returns a PiClient for the given project path with agentId "default".
