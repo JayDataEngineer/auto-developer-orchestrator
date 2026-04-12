@@ -27,7 +27,7 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [desktopFull, setDesktopFull] = useState(false);
 
-  // Fetch viewer info once computer use is enabled
+  // Fetch viewer info once computer use is enabled — polls until background setup completes
   useEffect(() => {
     if (!sandboxId || !cu.enabled) return;
 
@@ -35,43 +35,56 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
     setSessionLoading(true);
     setSessionError(null);
 
-    const fetchViewer = async () => {
-      try {
-        const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
-        if (!res.ok) throw new Error('Desktop session not found');
-        const data = await res.json();
-        if (!cancelled) {
-          setSession(data);
-          setSessionLoading(false);
+    const pollViewer = async () => {
+      const deadline = Date.now() + 60_000; // 60s — Docker pull + container start can be slow
+      while (Date.now() < deadline && !cancelled) {
+        try {
+          const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
+          if (res.ok) {
+            const data = await res.json();
+            if (!cancelled) {
+              setSession(data);
+              setSessionLoading(false);
+            }
+            return;
+          }
+          // 404 = background setup not done yet — keep polling
+        } catch {
+          // Network error — keep polling
         }
-      } catch (err: any) {
-        if (!cancelled) {
-          setSessionError(err.message);
-          setSessionLoading(false);
-        }
+        await new Promise(r => setTimeout(r, 2000)); // 2s between attempts
+      }
+      if (!cancelled) {
+        setSessionError('Desktop session not found — background setup did not complete');
+        setSessionLoading(false);
       }
     };
 
-    fetchViewer();
+    pollViewer();
     return () => { cancelled = true; };
   }, [sandboxId, cu.enabled]);
 
-  // Retry / explicit start
+  // Retry / explicit start — polls until background setup completes
   const startDesktop = useCallback(async () => {
     if (!sandboxId) return;
     setSessionLoading(true);
     setSessionError(null);
-    try {
-      const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
-      if (!res.ok) throw new Error('Failed to start desktop');
-      const data = await res.json();
-      setSession(data);
-    } catch (err: any) {
-      setSessionError(err.message);
-      setSession(null);
-    } finally {
-      setSessionLoading(false);
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
+        if (res.ok) {
+          const data = await res.json();
+          setSession(data);
+          setSessionLoading(false);
+          return;
+        }
+      } catch { /* keep polling */ }
+      await new Promise(r => setTimeout(r, 2000));
     }
+    setSessionError('Failed to start desktop — timed out');
+    setSession(null);
+    setSessionLoading(false);
   }, [sandboxId]);
 
   // Build noVNC iframe URL
