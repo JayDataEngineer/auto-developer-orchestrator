@@ -77,6 +77,10 @@ type PiClient struct {
 	// Pending approvals for human-in-the-loop
 	pendingMu        sync.Mutex
 	pendingApprovals map[string]chan ApprovalResponse
+
+	// Pending RPC response waiters (keyed by command type)
+	respMu     sync.Mutex
+	respWaiters map[string]chan *RpcResponse
 }
 
 // NewPiClient creates and starts a new Pi subprocess for the given project directory.
@@ -95,6 +99,7 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger, sandboxM
 		ctx:              ctx,
 		subscribers:      make(map[string]chan AgentEvent),
 		pendingApprovals: make(map[string]chan ApprovalResponse),
+		respWaiters:      make(map[string]chan *RpcResponse),
 		startTime:        time.Now(),
 		namespace:        sandboxID,
 		sandboxManager:   nil,
@@ -130,18 +135,20 @@ func NewPiClientWithSession(projectDir string, agentId string, logger *zap.Logge
 	sandboxID := filepath.Base(projectDir)
 
 	c := &PiClient{
-		logger:             logger,
-		projectDir:         projectDir,
-		agentId:            agentId,
-		cancel:             cancel,
-		ctx:                ctx,
-		subscribers:        make(map[string]chan AgentEvent),
-		startTime:          time.Now(),
-		namespace:          sandboxID,
-		sandboxManager:     nil,
+		logger:           logger,
+		projectDir:       projectDir,
+		agentId:          agentId,
+		cancel:           cancel,
+		ctx:              ctx,
+		subscribers:      make(map[string]chan AgentEvent),
+		pendingApprovals: make(map[string]chan ApprovalResponse),
+		respWaiters:      make(map[string]chan *RpcResponse),
+		startTime:        time.Now(),
+		namespace:        sandboxID,
+		sandboxManager:   nil,
 		customSystemPrompt: systemPrompt,
-		model:              model,
-		sessionPath:        sessionPath,
+		model:            model,
+		sessionPath:      sessionPath,
 	}
 
 	if mgr, ok := sandboxMgr.(*sandbox.Manager); ok && mgr != nil {
@@ -548,6 +555,21 @@ func (c *PiClient) readEvents() {
 
 		c.logger.Info("Pi parsed event", zap.String("type", event.Type))
 
+		// Handle RPC responses — dispatch to waiters
+		if event.Type == "response" {
+			var resp RpcResponse
+			if err := json.Unmarshal(line, &resp); err == nil && resp.Command != "" {
+				c.respMu.Lock()
+				if ch, ok := c.respWaiters[resp.Command]; ok {
+					select {
+					case ch <- &resp:
+					default:
+					}
+				}
+				c.respMu.Unlock()
+			}
+		}
+
 		// Update internal state based on event
 		c.updateState(event)
 
@@ -681,7 +703,7 @@ func (c *PiClient) SendCommand(cmd RpcCommand) error {
 }
 
 // providerForModel returns the provider name for a given model ID.
-// Models with a direct llamacpp backend bypass LiteLLM to avoid proxy overhead.
+// Models on llama.cpp bypass LiteLLM for speed.
 func providerForModel(modelId string) string {
 	directModels := map[string]string{
 		"gemma-4-26b":       "llamacpp",
@@ -702,7 +724,6 @@ func (c *PiClient) SendPrompt(message string, model string, thinkingLevel string
 		if err := c.SetModel(provider, model); err != nil {
 			c.logger.Warn("Failed to set model before prompt (non-fatal)", zap.Error(err))
 		}
-		time.Sleep(500 * time.Millisecond)
 	}
 
 	cmd := RpcCommand{
@@ -730,20 +751,43 @@ func (c *PiClient) Compact() error {
 	return c.SendCommand(RpcCommand{Type: CmdCompact})
 }
 
-// SetModel switches the active model.
+// SetModel switches the active model. Waits for Pi to confirm before returning.
 func (c *PiClient) SetModel(provider string, modelId string) error {
+	// Register a waiter for the set_model response
+	ch := make(chan *RpcResponse, 1)
+	c.respMu.Lock()
+	c.respWaiters["set_model"] = ch
+	c.respMu.Unlock()
+	defer func() {
+		c.respMu.Lock()
+		delete(c.respWaiters, "set_model")
+		c.respMu.Unlock()
+	}()
+
 	err := c.SendCommand(RpcCommand{
 		Type:     CmdSetModel,
 		Provider: provider,
 		ModelId:  modelId,
 	})
-	if err == nil {
-		// Update local state immediately so GET /state returns the new model
-		c.stateMu.Lock()
-		c.state.Model = provider + "/" + modelId
-		c.stateMu.Unlock()
+	if err != nil {
+		return err
 	}
-	return err
+
+	// Wait for Pi to confirm the model switch
+	select {
+	case resp := <-ch:
+		if !resp.Success {
+			return fmt.Errorf("set_model failed: %s", resp.Error)
+		}
+	case <-time.After(5 * time.Second):
+		c.logger.Warn("set_model response timeout")
+	}
+
+	// Update local state so GET /state returns the new model
+	c.stateMu.Lock()
+	c.state.Model = provider + "/" + modelId
+	c.stateMu.Unlock()
+	return nil
 }
 
 // GetAvailableModels requests model list from Pi.

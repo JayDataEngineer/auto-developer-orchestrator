@@ -1,7 +1,23 @@
 {
   "providers": {
+    "llamacpp": {
+      "baseUrl": "http://shared-llama-cpp:8001/v1",
+      "api": "openai-completions",
+      "apiKey": "sk-no-key-required",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "thinkingFormat": "qwen-chat-template"
+      },
+      "models": [
+        {"id": "gemma-4-26b", "reasoning": true},
+        {"id": "gemma-4-26b-fast"},
+        {"id": "gemma-4-e4b", "reasoning": true},
+        {"id": "gemma-4-e4b-fast"}
+      ]
+    },
     "litellm": {
-      "baseUrl": "http://172.17.0.16:4000/v1",
+      "baseUrl": "http://shared-litellm:4000/v1",
       "api": "openai-completions",
       "apiKey": "sk-litellm-e2e-test-master-key",
       "compat": {
@@ -9,15 +25,11 @@
         "supportsReasoningEffort": false
       },
       "models": [
-        {"id": "econ"},
         {"id": "fast"},
-        {"id": "qwen-local-primary"},
-        {"id": "qwen-local-fast"},
-        {"id": "or-deepseek-r1"},
+        {"id": "econ"},
+        {"id": "or-free"},
         {"id": "zai-glm-5"},
-        {"id": "qwen-cloud"},
-        {"id": "qwen-cloud-vision"},
-        {"id": "or-free"}
+        {"id": "qwen-cloud"}
       ]
     }
   }

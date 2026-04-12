@@ -1,72 +1,50 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { TaskBoardTab } from '../../src/components/TaskBoardTab';
 import { ToastProvider } from '../../src/components/ui/Toast';
-import type { PiTask } from '../../src/lib/api';
 
-// Mock the useTasks hook
-const mockTasks: PiTask[] = [
+// Mock scheduler API
+const mockJobs = [
   {
     id: 'task-1',
-    title: 'Fix login bug',
+    name: 'Fix login bug',
     description: 'Login fails on mobile',
-    status: 'pending',
-    projectDir: 'test-project',
-    parentAgent: 'default',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    project: '',
+    message: 'Fix the login bug on mobile',
+    status: 'idle' as const,
+    scheduleType: 'manual' as const,
+    enabled: false,
+    consecutiveErrors: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   },
   {
     id: 'task-2',
-    title: 'Add dark mode',
-    status: 'in_progress',
-    projectDir: 'test-project',
-    parentAgent: 'default',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    durationMs: 120000,
-    inputTokens: 5000,
-    outputTokens: 2000,
-  },
-  {
-    id: 'task-3',
-    title: 'Write tests',
-    status: 'completed',
-    projectDir: 'test-project',
-    parentAgent: 'default',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  },
-  {
-    id: 'task-4',
-    title: 'Deploy to prod',
-    status: 'failed',
-    projectDir: 'test-project',
-    parentAgent: 'default',
-    error: 'Build failed',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    name: 'Daily sync',
+    project: '',
+    message: 'Sync data',
+    status: 'idle' as const,
+    scheduleType: 'cron' as const,
+    cronExpr: '0 0 9 * * *',
+    enabled: true,
+    consecutiveErrors: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   },
 ];
 
-vi.mock('../../src/hooks/useTasks', () => ({
-  useTasks: () => ({
-    tasks: mockTasks,
-    loading: false,
-    error: null,
-    fetchTasks: vi.fn(),
-    createTask: vi.fn(async (data) => ({ ...data, id: 'new-task', status: 'pending', projectDir: 'test-project', parentAgent: 'default', createdAt: Date.now(), updatedAt: Date.now() })),
-    updateTask: vi.fn(),
-    stopTask: vi.fn(),
-    deleteTask: vi.fn(),
-    setDependencies: vi.fn(),
-    groupedByStatus: {
-      pending: mockTasks.filter(t => t.status === 'pending'),
-      in_progress: mockTasks.filter(t => t.status === 'in_progress'),
-      completed: mockTasks.filter(t => t.status === 'completed'),
-      failed: mockTasks.filter(t => t.status === 'failed'),
+vi.mock('../../src/lib/api', () => ({
+  api: {
+    scheduler: {
+      list: vi.fn(async () => ({ jobs: mockJobs })),
+      create: vi.fn(async () => ({ success: true, job: mockJobs[0] })),
+      update: vi.fn(async () => ({ success: true, job: mockJobs[0] })),
+      delete: vi.fn(async () => ({ success: true })),
+      trigger: vi.fn(async () => ({ success: true, message: 'Triggered' })),
+      executions: vi.fn(async () => ({ executions: [] })),
+      runs: vi.fn(async () => ({ runs: [] })),
     },
-  }),
+  },
 }));
 
 function renderWithToast(ui: React.ReactElement) {
@@ -74,64 +52,52 @@ function renderWithToast(ui: React.ReactElement) {
 }
 
 describe('TaskBoardTab', () => {
-  it('shows empty state when no project selected', () => {
-    renderWithToast(<TaskBoardTab selectedProject={null} />);
-    expect(screen.getByText('Select a project to view tasks')).toBeInTheDocument();
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('renders all 4 kanban columns', () => {
-    renderWithToast(<TaskBoardTab selectedProject="test-project" />);
+  it('renders tasks from scheduler API', async () => {
+    renderWithToast(<TaskBoardTab />);
 
-    expect(screen.getByText('Pending')).toBeInTheDocument();
-    expect(screen.getByText('In Progress')).toBeInTheDocument();
-    expect(screen.getByText('Completed')).toBeInTheDocument();
-    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(await screen.findByText('Fix login bug')).toBeInTheDocument();
+    expect(screen.getByText('Daily sync')).toBeInTheDocument();
   });
 
-  it('renders task titles in the board', () => {
-    renderWithToast(<TaskBoardTab selectedProject="test-project" />);
+  it('shows Manual Tasks and Scheduled Jobs sections', async () => {
+    renderWithToast(<TaskBoardTab />);
 
-    expect(screen.getByText('Fix login bug')).toBeInTheDocument();
-    expect(screen.getByText('Add dark mode')).toBeInTheDocument();
-    expect(screen.getByText('Write tests')).toBeInTheDocument();
-    expect(screen.getByText('Deploy to prod')).toBeInTheDocument();
+    expect(await screen.findByText('Manual Tasks')).toBeInTheDocument();
+    expect(screen.getByText('Scheduled Jobs')).toBeInTheDocument();
   });
 
-  it('shows task counts per column', () => {
-    renderWithToast(<TaskBoardTab selectedProject="test-project" />);
+  it('opens create form on New Task button click', async () => {
+    renderWithToast(<TaskBoardTab />);
 
-    // Each column shows a count
-    const counts = screen.getAllByText('1');
-    expect(counts.length).toBeGreaterThanOrEqual(4); // 4 columns, each with 1 task
+    await screen.findByText('Fix login bug');
+
+    const newTaskBtns = screen.getAllByText('New Task');
+    fireEvent.click(newTaskBtns[0]);
+
+    expect(screen.getByPlaceholderText('Task name')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Prompt — what should the agent do?')).toBeInTheDocument();
   });
 
-  it('opens create form on New Task button click', () => {
-    renderWithToast(<TaskBoardTab selectedProject="test-project" />);
+  it('opens edit modal on manual task click', async () => {
+    renderWithToast(<TaskBoardTab />);
 
-    const newTaskBtn = screen.getByText('New Task');
-    fireEvent.click(newTaskBtn);
+    fireEvent.click(await screen.findByText('Fix login bug'));
 
-    expect(screen.getByText('New Task')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Task title')).toBeInTheDocument();
+    expect(screen.getByText('Edit Task')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Fix login bug')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Fix the login bug on mobile')).toBeInTheDocument();
   });
 
-  it('selects task on card click and shows detail panel', () => {
-    renderWithToast(<TaskBoardTab selectedProject="test-project" />);
+  it('opens edit modal on scheduled job click', async () => {
+    renderWithToast(<TaskBoardTab />);
 
-    // Click on a task card
-    fireEvent.click(screen.getByText('Fix login bug'));
+    fireEvent.click(await screen.findByText('Daily sync'));
 
-    // Detail panel should appear with description (appears in both card and detail)
-    const descriptions = screen.getAllByText('Login fails on mobile');
-    expect(descriptions.length).toBeGreaterThanOrEqual(2); // card + detail panel
-  });
-
-  it('shows error in failed task detail', () => {
-    renderWithToast(<TaskBoardTab selectedProject="test-project" />);
-
-    // Click on the failed task
-    fireEvent.click(screen.getByText('Deploy to prod'));
-
-    expect(screen.getByText('Build failed')).toBeInTheDocument();
+    expect(screen.getByText('Edit Task')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Daily sync')).toBeInTheDocument();
   });
 });

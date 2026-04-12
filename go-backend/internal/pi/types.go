@@ -22,6 +22,7 @@ type RpcCommand struct {
 // RpcResponse represents a response from the Pi agent subprocess.
 type RpcResponse struct {
 	Type    string      `json:"type"`
+	Command string      `json:"command,omitempty"`
 	Id      string      `json:"id,omitempty"`
 	Success bool        `json:"success,omitempty"`
 	Data    interface{} `json:"data,omitempty"`

@@ -29,8 +29,8 @@ vi.mock('../../src/components/ComputerUseTab', () => ({
 }));
 
 vi.mock('../../src/components/TaskBoardTab', () => ({
-  TaskBoardTab: ({ selectedProject }: any) => (
-    <div data-testid="tasks-tab">Tasks Tab - {selectedProject}</div>
+  TaskBoardTab: () => (
+    <div data-testid="tasks-tab">Tasks Tab</div>
   ),
 }));
 
