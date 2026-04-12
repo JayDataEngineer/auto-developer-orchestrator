@@ -1,24 +1,16 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { cn } from '../lib/utils';
 import { useComputerUse } from '../hooks/useComputerUse';
-import { PiAgentView } from './PiAgentView';
-import { RightPanel } from './RightPanel';
-import { useArtifacts } from '../hooks/useArtifacts';
 import {
-  Monitor, ChevronLeft, ChevronRight, Maximize2, Minimize2,
+  Monitor, Maximize2, Minimize2,
   ExternalLink, Loader, AlertCircle
 } from 'lucide-react';
 
 interface ComputerUseTabProps {
   selectedProject: string | null;
-  projects: string[];
-  refreshProjectData: () => void;
 }
 
-export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProps) {
-  const [activeAgentId, setActiveAgentId] = useState('default');
-  const [chatCollapsed, setChatCollapsed] = useState(false);
-  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+export function ComputerUseTab({ selectedProject }: ComputerUseTabProps) {
   const [session, setSession] = useState<{
     mode?: string;
     cdpUrl?: string;
@@ -31,7 +23,6 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
   const [resolvedSandboxId, setResolvedSandboxId] = useState<string | null>(null);
 
   const cu = useComputerUse();
-  const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
 
   // Resolve the real sandbox ID from the API
   useEffect(() => {
@@ -50,7 +41,6 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
 
         if (sandboxes.length === 0 || cancelled) return;
 
-        // Try to find a sandbox matching the project name
         const projectName = selectedProject;
         const match = sandboxes.find((s: any) =>
           s.id === projectName ||
@@ -62,7 +52,6 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
           setResolvedSandboxId(match ? match.id : sandboxes[0].id);
         }
       } catch {
-        // API not available — fall back to hardcoded ID
         if (!cancelled) {
           setResolvedSandboxId(`sandbox-${selectedProject}`);
         }
@@ -84,7 +73,6 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
     setSessionError(null);
 
     const init = async () => {
-      // Step 1: Enable computer use for this sandbox
       if (!cu.enabled || cu.sandboxId !== sandboxId) {
         try {
           await cu.enableComputerUse(sandboxId);
@@ -97,7 +85,6 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
         }
       }
 
-      // Step 2: Fetch viewer session info
       try {
         const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
         if (!res.ok) throw new Error('Desktop session not found');
@@ -149,180 +136,112 @@ export function ComputerUseTab({ selectedProject, projects }: ComputerUseTabProp
   }, [novncUrl]);
 
   return (
-    <div className="flex h-full bg-black text-slate-100 overflow-hidden">
-      {/* Left: Narrow agent chat (collapsible) */}
-      {!chatCollapsed && !desktopFull && (
-        <div className="w-80 border-r border-white/5 flex flex-col shrink-0">
-          <div className="p-2 border-b border-white/5 flex items-center justify-between">
-            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-              Agent Chat
-            </span>
-            <button onClick={() => setChatCollapsed(true)} className="p-1 hover:bg-white/5 text-zinc-500">
-              <ChevronLeft size={10} />
-            </button>
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <PiAgentView
-              selectedProject={selectedProject || undefined}
-              selectedAgentId={activeAgentId}
-              projects={projects}
-              isZenMode={false}
-              onZenToggle={() => {}}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Chat reopen strip (when collapsed) */}
-      {chatCollapsed && !desktopFull && (
-        <button
-          onClick={() => setChatCollapsed(false)}
-          className="w-6 border-r border-white/5 bg-black flex items-center justify-center text-zinc-600 hover:text-zinc-300 hover:bg-white/5 transition-colors shrink-0"
-        >
-          <ChevronRight size={10} />
-        </button>
-      )}
-
-      {/* Center: Full desktop / noVNC */}
-      <div className={cn(
-        'flex-1 flex flex-col min-w-0',
-        desktopFull && 'absolute inset-0 z-10 bg-black'
-      )}>
-        {/* Desktop header */}
-        <div className="h-8 bg-zinc-900/50 border-b border-white/5 flex items-center px-3 gap-2 shrink-0">
-          <Monitor size={12} className="text-green-400" />
-          <span className="text-[10px] font-mono text-zinc-400 truncate">
-            {sandboxId ? sandboxId : 'Select a project to start'}
+    <div className={cn(
+      'flex flex-col h-full',
+      desktopFull && 'fixed inset-0 z-50 bg-black'
+    )}>
+      {/* Desktop header */}
+      <div className="h-8 bg-zinc-900/50 border-b border-white/5 flex items-center px-3 gap-2 shrink-0">
+        <Monitor size={12} className="text-green-400" />
+        <span className="text-[10px] font-mono text-zinc-400 truncate">
+          {sandboxId ? sandboxId : 'Select a project to start'}
+        </span>
+        <div className="flex-1" />
+        {sessionLoading && (
+          <span className="text-[8px] font-mono text-zinc-500 flex items-center gap-1">
+            <Loader size={8} className="animate-spin" /> Starting desktop...
           </span>
-          <div className="flex-1" />
-          {sessionLoading && (
-            <span className="text-[8px] font-mono text-zinc-500 flex items-center gap-1">
-              <Loader size={8} className="animate-spin" /> Starting desktop...
+        )}
+        {sessionError && (
+          <span className="text-[8px] font-mono text-red-400 flex items-center gap-1">
+            <AlertCircle size={8} /> {sessionError}
+          </span>
+        )}
+        {session && (
+          <>
+            <span className="text-[8px] font-mono text-zinc-600">
+              Desktop
             </span>
-          )}
-          {sessionError && (
-            <span className="text-[8px] font-mono text-red-400 flex items-center gap-1">
-              <AlertCircle size={8} /> {sessionError}
-            </span>
-          )}
-          {session && (
-            <>
-              <span className="text-[8px] font-mono text-zinc-600">
-                Desktop
-              </span>
-              <div className="w-px h-3 bg-white/10" />
-              <button
-                onClick={() => setDesktopFull(!desktopFull)}
-                className="p-1 hover:bg-white/5 text-zinc-500 hover:text-zinc-300"
-                title={desktopFull ? 'Exit full screen' : 'Full screen'}
-              >
-                {desktopFull ? <Minimize2 size={10} /> : <Maximize2 size={10} />}
-              </button>
-              <button
-                onClick={openDesktop}
-                className="p-1 hover:bg-white/5 text-zinc-500 hover:text-zinc-300"
-                title="Open in new window"
-              >
-                <ExternalLink size={10} />
-              </button>
-            </>
-          )}
-        </div>
-
-        {/* Desktop content */}
-        <div className="flex-1 bg-zinc-950 relative">
-          {!sandboxId ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <Monitor size={48} className="mx-auto mb-4 text-zinc-700" />
-                <p className="text-sm font-mono text-zinc-500">Select a project above to start your desktop</p>
-                <p className="text-xs font-mono text-zinc-700 mt-2">Your agent will control this environment</p>
-              </div>
-            </div>
-          ) : sessionLoading ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-                <p className="text-sm font-mono text-zinc-500">Starting desktop...</p>
-              </div>
-            </div>
-          ) : sessionError ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center max-w-md">
-                <AlertCircle size={48} className="mx-auto mb-4 text-red-400/50" />
-                <p className="text-sm font-mono text-zinc-400 mb-2">Desktop not available</p>
-                <p className="text-xs font-mono text-zinc-600">{sessionError}</p>
-                <button
-                  onClick={startDesktop}
-                  className="mt-4 px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
-                >
-                  Start Desktop
-                </button>
-              </div>
-            </div>
-          ) : session && novncUrl ? (
-            <iframe
-              src={novncUrl}
-              className="absolute inset-0 w-full h-full border-0"
-              title="Desktop"
-              allow="clipboard-read; clipboard-write"
-            />
-          ) : session ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <Loader size={24} className="mx-auto mb-3 text-zinc-600 animate-spin" />
-                <p className="text-xs font-mono text-zinc-500">Connecting to desktop...</p>
-              </div>
-            </div>
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <Monitor size={32} className="mx-auto mb-3 text-zinc-600" />
-                <p className="text-sm font-mono text-zinc-500">Desktop not available</p>
-                <p className="text-xs font-mono text-zinc-700 mt-1">The sandbox may not be running</p>
-                <button
-                  onClick={startDesktop}
-                  className="mt-4 px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
-                >
-                  Start Desktop
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+            <div className="w-px h-3 bg-white/10" />
+            <button
+              onClick={() => setDesktopFull(!desktopFull)}
+              className="p-1 hover:bg-white/5 text-zinc-500 hover:text-zinc-300"
+              title={desktopFull ? 'Exit full screen' : 'Full screen'}
+            >
+              {desktopFull ? <Minimize2 size={10} /> : <Maximize2 size={10} />}
+            </button>
+            <button
+              onClick={openDesktop}
+              className="p-1 hover:bg-white/5 text-zinc-500 hover:text-zinc-300"
+              title="Open in new window"
+            >
+              <ExternalLink size={10} />
+            </button>
+          </>
+        )}
       </div>
 
-      {/* Right: Browser / Artifacts Panel (collapsible) */}
-      {!rightPanelCollapsed && !desktopFull && (
-        <div className="w-80 border-l border-white/5 flex flex-col shrink-0">
-          <div className="p-2 border-b border-white/5 flex items-center justify-between">
-            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-              Controls
-            </span>
-            <button onClick={() => setRightPanelCollapsed(true)} className="p-1 hover:bg-white/5 text-zinc-500">
-              <ChevronRight size={10} />
-            </button>
+      {/* Desktop content */}
+      <div className="flex-1 bg-zinc-950 relative">
+        {!sandboxId ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center">
+              <Monitor size={48} className="mx-auto mb-4 text-zinc-700" />
+              <p className="text-sm font-mono text-zinc-500">Select a project above to start your desktop</p>
+              <p className="text-xs font-mono text-zinc-700 mt-2">Your agent will control this environment</p>
+            </div>
           </div>
-          <div className="flex-1 overflow-hidden">
-            <RightPanel
-              agentId={selectedProject ? `${selectedProject}:${activeAgentId}` : null}
-              sandboxId={sandboxId}
-              artifacts={artifactsHook.artifacts}
-              artifactsLoading={artifactsHook.loading}
-            />
+        ) : sessionLoading ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center">
+              <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+              <p className="text-sm font-mono text-zinc-500">Starting desktop...</p>
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* Controls reopen strip (when collapsed) */}
-      {rightPanelCollapsed && !desktopFull && (
-        <button
-          onClick={() => setRightPanelCollapsed(false)}
-          className="w-6 border-l border-white/5 bg-black flex items-center justify-center text-zinc-600 hover:text-zinc-300 hover:bg-white/5 transition-colors shrink-0"
-        >
-          <ChevronLeft size={10} />
-        </button>
-      )}
+        ) : sessionError ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center max-w-md">
+              <AlertCircle size={48} className="mx-auto mb-4 text-red-400/50" />
+              <p className="text-sm font-mono text-zinc-400 mb-2">Desktop not available</p>
+              <p className="text-xs font-mono text-zinc-600">{sessionError}</p>
+              <button
+                onClick={startDesktop}
+                className="mt-4 px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
+              >
+                Start Desktop
+              </button>
+            </div>
+          </div>
+        ) : session && novncUrl ? (
+          <iframe
+            src={novncUrl}
+            className="absolute inset-0 w-full h-full border-0"
+            title="Desktop"
+            allow="clipboard-read; clipboard-write"
+          />
+        ) : session ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center">
+              <Loader size={24} className="mx-auto mb-3 text-zinc-600 animate-spin" />
+              <p className="text-xs font-mono text-zinc-500">Connecting to desktop...</p>
+            </div>
+          </div>
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center">
+              <Monitor size={32} className="mx-auto mb-3 text-zinc-600" />
+              <p className="text-sm font-mono text-zinc-500">Desktop not available</p>
+              <p className="text-xs font-mono text-zinc-700 mt-1">The sandbox may not be running</p>
+              <button
+                onClick={startDesktop}
+                className="mt-4 px-4 py-2 bg-primary text-black text-[9px] font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
+              >
+                Start Desktop
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

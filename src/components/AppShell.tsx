@@ -1,17 +1,22 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { cn } from '../lib/utils';
 import { useOrchestrator } from '../hooks/useOrchestrator';
+import { HistorySidebar } from './HistorySidebar';
+import { RightPanel } from './RightPanel';
 import { AgentTab } from './AgentTab';
 import { ComputerUseTab } from './ComputerUseTab';
 import { TaskBoardTab } from './TaskBoardTab';
 import { SchedulerView } from './SchedulerView';
 import { ToastProvider } from './ui/Toast';
+import { useResizable } from '../hooks/useResizable';
+import { useArtifacts } from '../hooks/useArtifacts';
 import {
   Zap, Settings, ChevronDown, LayoutGrid, Monitor, Clock,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
 import { api } from '../lib/api';
+import { ToolCall } from '../lib/pi-events';
 
 type TabId = 'agent' | 'tasks' | 'desktop' | 'scheduler';
 
@@ -29,12 +34,36 @@ function AppShellInner() {
   const [showGitHubModal, setShowGitHubModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
-  // Panel collapse state — only used by Agent tab
+  // Shared sidebar state — works on ALL tabs
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [activeAgentId, setActiveAgentId] = useState('default');
+  const [streamingState, setStreamingState] = useState<{
+    isStreaming: boolean;
+    runningTool: ToolCall | undefined;
+    thinking: string;
+  }>({ isStreaming: false, runningTool: undefined, thinking: '' });
 
   const { projects, githubUser } = state;
   const { refreshProjectData } = actions;
+
+  // Artifacts hook — shared across all tabs
+  const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
+  const sandboxId = selectedProject ? `sandbox-${selectedProject}` : null;
+
+  // Resizable left sidebar
+  const {
+    width: sidebarWidth,
+    isDragging: sidebarDragging,
+    handleProps: sidebarHandleProps,
+  } = useResizable({ defaultWidth: 224, minWidth: 180, maxWidth: 400, side: 'right' });
+
+  // Resizable right panel
+  const {
+    width: rightPanelWidth,
+    isDragging: rightPanelDragging,
+    handleProps: rightPanelHandleProps,
+  } = useResizable({ defaultWidth: 384, minWidth: 280, maxWidth: 600, side: 'left' });
 
   // Auto-select first project
   useEffect(() => {
@@ -45,6 +74,10 @@ function AppShellInner() {
 
   const handleProjectChange = useCallback((project: string) => {
     setSelectedProject(project);
+  }, []);
+
+  const handleStreamingStateChange = useCallback((state: { isStreaming: boolean; runningTool: ToolCall | undefined; thinking: string }) => {
+    setStreamingState(state);
   }, []);
 
   // Listen for GitHub settings open event from child components
@@ -78,28 +111,24 @@ function AppShellInner() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const isAgentTab = activeTab === 'agent';
-
   return (
     <div className="flex flex-col h-screen bg-black text-slate-100 font-sans selection:bg-primary/20 overflow-hidden">
       {/* Top bar */}
       <div className="h-10 border-b border-white/5 flex items-center px-2 shrink-0 bg-black/50 backdrop-blur-md gap-1">
-        {/* History panel toggle — only on Agent tab */}
-        {isAgentTab && (
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className={cn(
-              'flex items-center gap-1 px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest transition-colors rounded',
-              !sidebarCollapsed
-                ? 'text-primary bg-primary/10'
-                : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-            )}
-            title={sidebarCollapsed ? 'Show History' : 'Hide History'}
-          >
-            {sidebarCollapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
-            {!sidebarCollapsed && <span>History</span>}
-          </button>
-        )}
+        {/* History panel toggle — always visible */}
+        <button
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          className={cn(
+            'flex items-center gap-1 px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest transition-colors rounded',
+            !sidebarCollapsed
+              ? 'text-primary bg-primary/10'
+              : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+          )}
+          title={sidebarCollapsed ? 'Show History' : 'Hide History'}
+        >
+          {sidebarCollapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
+          {!sidebarCollapsed && <span>History</span>}
+        </button>
 
         {/* Tab switcher */}
         <div className="flex items-center gap-1">
@@ -146,22 +175,20 @@ function AppShellInner() {
 
         <div className="flex-1" />
 
-        {/* Artifacts panel toggle — only on Agent tab */}
-        {isAgentTab && (
-          <button
-            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-            className={cn(
-              'flex items-center gap-1 px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest transition-colors rounded',
-              !rightPanelCollapsed
-                ? 'text-primary bg-primary/10'
-                : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-            )}
-            title={rightPanelCollapsed ? 'Show Artifacts' : 'Hide Artifacts'}
-          >
-            {!rightPanelCollapsed && <span>Artifacts</span>}
-            {rightPanelCollapsed ? <PanelRightOpen size={12} /> : <PanelRightClose size={12} />}
-          </button>
-        )}
+        {/* Artifacts panel toggle — always visible */}
+        <button
+          onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+          className={cn(
+            'flex items-center gap-1 px-2 py-1.5 text-[9px] font-mono uppercase tracking-widest transition-colors rounded',
+            !rightPanelCollapsed
+              ? 'text-primary bg-primary/10'
+              : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+          )}
+          title={rightPanelCollapsed ? 'Show Artifacts' : 'Hide Artifacts'}
+        >
+          {!rightPanelCollapsed && <span>Artifacts</span>}
+          {rightPanelCollapsed ? <PanelRightOpen size={12} /> : <PanelRightClose size={12} />}
+        </button>
 
         {/* GitHub / Settings */}
         <button
@@ -176,31 +203,72 @@ function AppShellInner() {
         </button>
       </div>
 
-      {/* Tab content */}
-      <div className="flex-1 overflow-hidden">
-        {activeTab === 'agent' && (
-          <AgentTab
-            selectedProject={selectedProject}
-            projects={projects}
-            refreshProjectData={refreshProjectData}
-            sidebarCollapsed={sidebarCollapsed}
-            onSidebarToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-            rightPanelCollapsed={rightPanelCollapsed}
-            onRightPanelToggle={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-          />
+      {/* Main content: History sidebar | center tab | Artifacts panel */}
+      <div className="flex-1 overflow-hidden flex">
+        {/* Left: History Sidebar (resizable) */}
+        {!sidebarCollapsed && (
+          <div style={{ width: sidebarWidth }} className="relative shrink-0 border-r border-white/5">
+            <HistorySidebar
+              projects={projects}
+              activeProject={selectedProject || undefined}
+              activeAgentId={activeAgentId}
+              onSelectSession={(_project: string, agentId: string) => {
+                setActiveAgentId(agentId);
+              }}
+              onNewChat={() => setActiveAgentId('default')}
+            />
+            {/* Drag handle on right edge */}
+            <div
+              {...sidebarHandleProps}
+              className={cn(
+                'absolute top-0 right-0 bottom-0 w-1 cursor-col-resize z-10 transition-colors',
+                sidebarDragging ? 'bg-primary/30' : 'hover:bg-white/10'
+              )}
+            />
+          </div>
         )}
-        {activeTab === 'tasks' && (
-          <TaskBoardTab selectedProject={selectedProject} />
-        )}
-        {activeTab === 'desktop' && (
-          <ComputerUseTab
-            selectedProject={selectedProject}
-            projects={projects}
-            refreshProjectData={refreshProjectData}
-          />
-        )}
-        {activeTab === 'scheduler' && (
-          <SchedulerView projects={projects} />
+
+        {/* Center: tab content */}
+        <div className="flex-1 min-w-0 overflow-hidden">
+          {activeTab === 'agent' && (
+            <AgentTab
+              selectedProject={selectedProject}
+              projects={projects}
+              activeAgentId={activeAgentId}
+              onActiveAgentIdChange={setActiveAgentId}
+              onStreamingStateChange={handleStreamingStateChange}
+            />
+          )}
+          {activeTab === 'tasks' && (
+            <TaskBoardTab selectedProject={selectedProject} />
+          )}
+          {activeTab === 'desktop' && (
+            <ComputerUseTab selectedProject={selectedProject} />
+          )}
+          {activeTab === 'scheduler' && (
+            <SchedulerView projects={projects} />
+          )}
+        </div>
+
+        {/* Right: Artifacts Panel (resizable) */}
+        {!rightPanelCollapsed && (
+          <div style={{ width: rightPanelWidth }} className="relative shrink-0 border-l border-white/5">
+            {/* Drag handle on left edge */}
+            <div
+              {...rightPanelHandleProps}
+              className={cn(
+                'absolute top-0 left-0 bottom-0 w-1 cursor-col-resize z-10 transition-colors',
+                rightPanelDragging ? 'bg-primary/30' : 'hover:bg-white/10'
+              )}
+            />
+            <RightPanel
+              agentId={selectedProject ? `${selectedProject}:${activeAgentId}` : null}
+              sandboxId={sandboxId}
+              artifacts={artifactsHook.artifacts}
+              artifactsLoading={artifactsHook.loading}
+              streamingState={streamingState}
+            />
+          </div>
         )}
       </div>
 
