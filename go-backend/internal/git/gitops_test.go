@@ -98,7 +98,7 @@ func TestGitOps_Basic(t *testing.T) {
 
 func TestResolvePath(t *testing.T) {
 	baseDir := "/tmp/projects"
-	
+
 	// Valid path
 	path, err := ResolvePath(baseDir, "my-project")
 	if err != nil {

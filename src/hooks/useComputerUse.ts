@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { api, LabeledElement } from '../lib/api';
 
 interface ComputerUseState {
@@ -29,21 +29,30 @@ const initialState: ComputerUseState = {
 
 export function useComputerUse() {
   const [state, setState] = useState<ComputerUseState>(initialState);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    return () => { mountedRef.current = false; };
-  }, []);
 
   const enableComputerUse = useCallback(async (sandboxId: string) => {
     setState(prev => ({ ...prev, loading: true, error: null }));
     try {
-      // 30s timeout — sandbox creation + Chrome startup can be slow but shouldn't hang forever
+      // 30s timeout — the backend responds immediately (sends JSON before Docker ops).
+      // If this still fails, retry once (the fast path kicks in on second attempt).
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const timeout = setTimeout(() => controller.abort(), 30_000);
       const res = await api.computerUse.enable(sandboxId, { signal: controller.signal });
       clearTimeout(timeout);
-      if (mountedRef.current) {
+      setState(prev => ({
+        ...prev,
+        enabled: true,
+        sandboxId,
+        cdpPort: res.cdpPort,
+        loading: false,
+      }));
+    } catch (err) {
+      // Retry once — backend may have created the container, second attempt is fast
+      try {
+        const controller2 = new AbortController();
+        const timeout2 = setTimeout(() => controller2.abort(), 15_000);
+        const res = await api.computerUse.enable(sandboxId, { signal: controller2.signal });
+        clearTimeout(timeout2);
         setState(prev => ({
           ...prev,
           enabled: true,
@@ -51,14 +60,13 @@ export function useComputerUse() {
           cdpPort: res.cdpPort,
           loading: false,
         }));
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        const msg = err instanceof DOMException && err.name === 'AbortError'
-          ? 'Computer use enable timed out (30s). The sandbox may still be starting — try again.'
-          : String(err);
-        setState(prev => ({ ...prev, loading: false, error: msg }));
-      }
+        return;
+      } catch { /* fall through to error */ }
+
+      const msg = err instanceof DOMException && err.name === 'AbortError'
+        ? 'Computer use enable timed out. The sandbox may still be starting — try again.'
+        : String(err);
+      setState(prev => ({ ...prev, loading: false, error: msg }));
     }
   }, []);
 
@@ -66,13 +74,9 @@ export function useComputerUse() {
     if (!state.sandboxId) return;
     try {
       await api.computerUse.disable(state.sandboxId);
-      if (mountedRef.current) {
-        setState({ ...initialState });
-      }
+      setState({ ...initialState });
     } catch (err) {
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, error: String(err) }));
-      }
+      setState(prev => ({ ...prev, error: String(err) }));
     }
   }, [state.sandboxId]);
 
@@ -81,20 +85,16 @@ export function useComputerUse() {
     setState(prev => ({ ...prev, loading: true, error: null }));
     try {
       const res = await api.computerUse.screenshot(state.sandboxId, true);
-      if (mountedRef.current) {
-        setState(prev => ({
-          ...prev,
-          screenshot: res.image,
-          description: res.description || null,
-          url: res.url || prev.url,
-          title: res.title || prev.title,
-          loading: false,
-        }));
-      }
+      setState(prev => ({
+        ...prev,
+        screenshot: res.image,
+        description: res.description || null,
+        url: res.url || prev.url,
+        title: res.title || prev.title,
+        loading: false,
+      }));
     } catch (err) {
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, loading: false, error: String(err) }));
-      }
+      setState(prev => ({ ...prev, loading: false, error: String(err) }));
     }
   }, [state.sandboxId]);
 
@@ -102,18 +102,14 @@ export function useComputerUse() {
     if (!state.sandboxId) return;
     try {
       const res = await api.computerUse.snapshot(state.sandboxId);
-      if (mountedRef.current) {
-        setState(prev => ({
-          ...prev,
-          elements: res.elements,
-          url: res.url,
-          title: res.title,
-        }));
-      }
+      setState(prev => ({
+        ...prev,
+        elements: res.elements,
+        url: res.url,
+        title: res.title,
+      }));
     } catch (err) {
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, error: String(err) }));
-      }
+      setState(prev => ({ ...prev, error: String(err) }));
     }
   }, [state.sandboxId]);
 
@@ -122,21 +118,17 @@ export function useComputerUse() {
     setState(prev => ({ ...prev, loading: true, error: null }));
     try {
       const pageInfo = await api.computerUse.act(state.sandboxId, action);
-      if (mountedRef.current) {
-        setState(prev => ({
-          ...prev,
-          elements: pageInfo.elements,
-          url: pageInfo.url,
-          title: pageInfo.title,
-          loading: false,
-        }));
-        // Auto-take screenshot after action
-        takeScreenshot();
-      }
+      setState(prev => ({
+        ...prev,
+        elements: pageInfo.elements,
+        url: pageInfo.url,
+        title: pageInfo.title,
+        loading: false,
+      }));
+      // Auto-take screenshot after action
+      takeScreenshot();
     } catch (err) {
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, loading: false, error: String(err) }));
-      }
+      setState(prev => ({ ...prev, loading: false, error: String(err) }));
     }
   }, [state.sandboxId, takeScreenshot]);
 

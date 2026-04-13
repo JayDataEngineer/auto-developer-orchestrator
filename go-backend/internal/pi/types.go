@@ -5,18 +5,18 @@ import "encoding/json"
 // RpcCommand represents a command sent to the Pi agent subprocess.
 // See pi-mono/packages/coding-agent/src/modes/rpc/rpc-types.ts for the full protocol.
 type RpcCommand struct {
-	Type          string          `json:"type"`
-	Message       string          `json:"message,omitempty"`
-	Model         string          `json:"model,omitempty"`
-	ModelId       string          `json:"modelId,omitempty"`  // For set_model command
-	Provider      string          `json:"provider,omitempty"`
-	ThinkingLevel string          `json:"thinkingLevel,omitempty"`
-	Command       string          `json:"command,omitempty"`
-	Timeout       int             `json:"timeout,omitempty"`
-	WorkingDir    string          `json:"workingDir,omitempty"`
-	SessionId     string          `json:"sessionId,omitempty"`
-	Id            string          `json:"id,omitempty"`
-	Data          interface{}     `json:"data,omitempty"`
+	Type          string      `json:"type"`
+	Message       string      `json:"message,omitempty"`
+	Model         string      `json:"model,omitempty"`
+	ModelId       string      `json:"modelId,omitempty"` // For set_model command
+	Provider      string      `json:"provider,omitempty"`
+	ThinkingLevel string      `json:"thinkingLevel,omitempty"`
+	Command       string      `json:"command,omitempty"`
+	Timeout       int         `json:"timeout,omitempty"`
+	WorkingDir    string      `json:"workingDir,omitempty"`
+	SessionId     string      `json:"sessionId,omitempty"`
+	Id            string      `json:"id,omitempty"`
+	Data          interface{} `json:"data,omitempty"`
 }
 
 // RpcResponse represents a response from the Pi agent subprocess.
@@ -72,11 +72,11 @@ type AgentEventData struct {
 	Error    string                 `json:"error,omitempty"`
 
 	// Session state
-	Model     string         `json:"model,omitempty"`
-	Streaming bool           `json:"streaming,omitempty"`
-	Input     interface{}    `json:"input,omitempty"` // float64 for usage stats, []string for model capabilities
-	Output    float64        `json:"output,omitempty"`
-	Cache     float64        `json:"cache,omitempty"`
+	Model     string      `json:"model,omitempty"`
+	Streaming bool        `json:"streaming,omitempty"`
+	Input     interface{} `json:"input,omitempty"` // float64 for usage stats, []string for model capabilities
+	Output    float64     `json:"output,omitempty"`
+	Cache     float64     `json:"cache,omitempty"`
 
 	// Compaction
 	CompactedMessages int `json:"compactedMessages,omitempty"`
@@ -141,10 +141,10 @@ const (
 	EventCompactionEnd   = "compaction_end"
 	EventError           = "error"
 	EventStateUpdate     = "state_update"
-	EventBranchCreated = "branch_created"
-	EventCommitCreated = "commit_created"
-	EventPushComplete  = "push_complete"
-	EventPRCreated     = "pr_created"
+	EventBranchCreated   = "branch_created"
+	EventCommitCreated   = "commit_created"
+	EventPushComplete    = "push_complete"
+	EventPRCreated       = "pr_created"
 
 	// Human-in-the-loop events
 	EventApprovalRequest = "approval_request"
@@ -153,19 +153,19 @@ const (
 
 // RPC command types
 const (
-	CmdPrompt           = "prompt"
-	CmdSteer            = "steer"
-	CmdFollowUp         = "follow_up"
-	CmdAbort            = "abort"
-	CmdGetState         = "get_state"
-	CmdGetMessages      = "get_messages"
-	CmdCompact          = "compact"
-	CmdSetModel         = "set_model"
-	CmdGetModels        = "get_available_models"
-	CmdBash             = "bash"
-	CmdAbortBash        = "abort_bash"
-	CmdListSessions     = "list_sessions"
-	CmdSwitchSession    = "switch_session"
+	CmdPrompt        = "prompt"
+	CmdSteer         = "steer"
+	CmdFollowUp      = "follow_up"
+	CmdAbort         = "abort"
+	CmdGetState      = "get_state"
+	CmdGetMessages   = "get_messages"
+	CmdCompact       = "compact"
+	CmdSetModel      = "set_model"
+	CmdGetModels     = "get_available_models"
+	CmdBash          = "bash"
+	CmdAbortBash     = "abort_bash"
+	CmdListSessions  = "list_sessions"
+	CmdSwitchSession = "switch_session"
 )
 
 // Pi RPC event types (from Pi subprocess stdout)

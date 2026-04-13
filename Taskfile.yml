@@ -21,20 +21,17 @@ tasks:
     desc: Install dependencies (npm, Go, docs)
     cmds:
       - npm install --no-audit --no-fund
-      - cmd: go mod tidy
-        dir: go-backend
-      - cmd: npm install --no-audit --no-fund
-        dir: docs
+      - cmd: cd go-backend && go mod tidy
+        ignore_error: true
+      - cmd: cd docs && npm install --no-audit --no-fund
+        ignore_error: true
       - echo "Done — all dependencies installed."
 
   # ── Local Development ───────────────────────────────────────────────────
   dev:
     desc: Start all services locally (Go + Vite)
     cmds:
-      - cmd: go run cmd/server/main.go
-        dir: go-backend
-        ignore_error: true
-      - npm run dev -- --port {{.JS_PORT}}
+      - bash scripts/dev.sh {{.JS_PORT}}
 
   dev-frontend:
     desc: Start Vite frontend only
@@ -51,19 +48,30 @@ tasks:
     desc: Start documentation site (port 3001)
     dir: docs
     cmds:
-      - npm run dev -- -p 3001
+      - npx next dev -p 3001 --webpack
 
   # ── Docker Development ──────────────────────────────────────────────────
   up:
     desc: Start dev environment with hot reload (Docker)
     cmds:
+      - task: down
       - docker compose -f docker-compose.dev.yml up -d --build
       - echo "Dev services started → http://orchestrator.local"
 
   down:
-    desc: Stop dev environment
+    desc: Stop everything — local dev, dev compose, prod compose, sandboxes
     cmds:
-      - docker compose -f docker-compose.dev.yml down --remove-orphans
+      - cmd: fuser -k 3847/tcp 2>/dev/null; fuser -k 5174/tcp 2>/dev/null; true
+        ignore_error: true
+        silent: true
+      - cmd: docker compose -f docker-compose.dev.yml down --remove-orphans 2>/dev/null; true
+        ignore_error: true
+        silent: true
+      - cmd: docker compose -f docker-compose.yml down --remove-orphans 2>/dev/null; true
+        ignore_error: true
+        silent: true
+      - cmd: docker ps -q --filter "name=orchestrator-" | xargs -r docker rm -f
+        ignore_error: true
 
   restart:
     desc: Restart dev environment
@@ -84,13 +92,15 @@ tasks:
       - echo "Production services started → http://orchestrator.local"
 
   prod-down:
-    desc: Stop production environment
+    desc: Stop production environment (compose + dynamic sandboxes)
     cmds:
       - docker compose -f docker-compose.yml down
+      - cmd: docker ps -q --filter "name=orchestrator-sandbox-" | xargs -r docker rm -f
+        ignore_error: true
 
   # ── Testing ─────────────────────────────────────────────────────────────
   test:
-    desc: Run all tests (JS + Go + E2E)
+    desc: Run all unit tests (JS + Go) and E2E
     cmds:
       - task: test-js
       - task: test-go
@@ -103,9 +113,14 @@ tasks:
       - go test -v ./...
 
   test-js:
-    desc: Run frontend unit tests
+    desc: Run frontend unit + component tests (no backend required)
     cmds:
-      - npm run test
+      - npx vitest run --exclude 'tests/integration/**'
+
+  test-integration:
+    desc: Run integration tests (requires running backend on :3847)
+    cmds:
+      - npx vitest run tests/integration/
 
   test-e2e:
     desc: Run Playwright E2E tests
@@ -116,16 +131,19 @@ tasks:
   lint:
     desc: Run all linters
     cmds:
-      - cmd: go fmt ./...
-        dir: go-backend
+      - cmd: cd go-backend && go fmt ./...
       - npm run lint
 
   # ── Maintenance ─────────────────────────────────────────────────────────
   clean:
-    desc: Remove build artifacts and docker resources
+    desc: Remove build artifacts and all docker resources
     cmds:
       - rm -rf dist go-backend/bin
       - docker compose -f docker-compose.dev.yml down -v --remove-orphans
+      - cmd: docker compose -f docker-compose.yml down -v
+        ignore_error: true
+      - cmd: docker ps -aq --filter "name=orchestrator-sandbox-" | xargs -r docker rm -f
+        ignore_error: true
       - echo "Clean complete."
 
   db-backup:
@@ -136,20 +154,20 @@ tasks:
       - echo "Database backed up → data/backups/"
 
   db-restore:
-    desc: Restore SQLite database from backup
+    desc: Restore SQLite database from backup (task db-restore BACKUP=<filename>)
     cmds:
       - ls -1 data/backups/
-      - prompt="Filename: " default="" backup
-      - cp "data/backups/{{.backup}}" data/orchestrator.db
+      - cp "data/backups/{{.BACKUP}}" data/orchestrator.db
       - echo "Database restored."
-    interactive: true
+    requires:
+      vars: [BACKUP]
 
   infra-check:
     desc: Check health of shared infrastructure
     cmds:
-      - cmd: echo -n "Traefik:  " && (curl -sf http://traefik.local/ping > /dev/null && echo "OK" || echo "DOWN")
+      - cmd: 'echo -n "Traefik:  " && (curl -sf http://traefik.local/ping > /dev/null && echo "OK" || echo "DOWN")'
         ignore_error: true
-      - cmd: echo -n "LiteLLM:  " && (curl -sf http://litellm.local/health > /dev/null && echo "OK" || echo "DOWN (optional)")
+      - cmd: 'echo -n "LiteLLM:  " && (curl -sf http://litellm.local/health > /dev/null && echo "OK" || echo "DOWN (optional)")'
         ignore_error: true
-      - cmd: echo -n "Langfuse: " && (curl -sf http://langfuse.local/api/health > /dev/null && echo "OK" || echo "DOWN (optional)")
+      - cmd: 'echo -n "Langfuse: " && (curl -sf http://langfuse.local/api/health > /dev/null && echo "OK" || echo "DOWN (optional)")'
         ignore_error: true

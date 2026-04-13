@@ -48,6 +48,11 @@ func (h *ComputerUseHandler) RegisterRoutes(r interface {
 
 // Enable enables computer use mode on a sandbox: creates browser mode + SandboxBrowserClient
 // POST /api/sandbox/{id}/computer-use/enable
+//
+// The JSON response is sent IMMEDIATELY — before any Docker operations.
+// Docker container creation triggers ERR_NETWORK_CHANGED in Chromium, which aborts
+// the browser's in-flight fetch response body stream. By sending the response first,
+// we avoid this entirely. Docker/CDP operations run in a background goroutine.
 func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
 	if sandboxID == "" {
@@ -62,76 +67,121 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 1: Ensure sandbox exists — try desktop mode, then create, then recover
-	session, err := h.manager.EnableDesktopMode(r.Context(), sandboxID)
-	if err != nil {
-		h.logger.Info("desktop mode failed, trying to create sandbox", zap.String("sandbox_id", sandboxID), zap.Error(err))
-
-		_, createErr := h.manager.CreateSandbox(r.Context(), sandbox.SandboxOptions{
-			ID: sandboxID,
+	// Fast path: already have a connected CDP client — pure in-memory check (~1ms).
+	h.mu.RLock()
+	existingClient, clientExists := h.clients[sandboxID]
+	h.mu.RUnlock()
+	if clientExists && existingClient.IsConnected() {
+		sandbox, _ := h.manager.GetSandbox(sandboxID)
+		cdpPort := 19222
+		viewerURL := fmt.Sprintf("/sandbox/%s/viewer", sandboxID)
+		novncPort := 6080
+		if sandbox != nil && sandbox.DesktopSession != nil {
+			cdpPort = sandbox.DesktopSession.CDPPort
+			viewerURL = sandbox.DesktopSession.ViewerURL
+			novncPort = sandbox.DesktopSession.NoVNCPort
+		}
+		h.logger.Info("computer use already enabled (fast path)", zap.String("sandbox_id", sandboxID))
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled":   true,
+			"sandboxId": sandboxID,
+			"cdpPort":   cdpPort,
+			"viewerUrl": viewerURL,
+			"novncPort": novncPort,
 		})
-		if createErr != nil {
-			// Container may already exist but not tracked — recover it
-			h.logger.Info("create failed, attempting to recover existing container", zap.String("sandbox_id", sandboxID), zap.Error(createErr))
-			recoverErr := h.manager.RecoverSandbox(r.Context(), sandboxID)
-			if recoverErr != nil {
-				h.logger.Error("failed to create or recover sandbox", zap.Error(createErr), zap.Error(recoverErr))
-				JSONError(w, fmt.Sprintf("failed to create sandbox: %v", createErr), http.StatusInternalServerError)
-				return
-			}
-
-			// Now try browser mode on the recovered sandbox (uses existing Chrome)
-			session, err = h.manager.EnableBrowserMode(r.Context(), sandboxID)
-			if err != nil {
-				h.logger.Error("failed to enable browser mode after recovery", zap.Error(err))
-				JSONError(w, fmt.Sprintf("failed to enable browser mode: %v", err), http.StatusInternalServerError)
-				return
-			}
-		} else {
-			// Fresh sandbox — enable desktop mode
-			session, err = h.manager.EnableDesktopMode(r.Context(), sandboxID)
-			if err != nil {
-				h.logger.Error("failed to enable desktop mode after sandbox creation", zap.Error(err))
-				JSONError(w, fmt.Sprintf("failed to enable desktop mode: %v", err), http.StatusInternalServerError)
-				return
-			}
-		}
-	}
-
-	// Step 2: Create SandboxBrowserClient connected to the CDP port
-	client, err := h.getOrCreateClient(sandboxID, session.CDPPort)
-	if err != nil {
-		h.logger.Error("failed to create sandbox browser client", zap.Error(err))
-		JSONError(w, fmt.Sprintf("failed to create browser client: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Step 3: Connect via CDP (with retry — Chrome may need extra seconds)
-	var connectErr error
-	for i := range 10 {
-		connectErr = client.Connect(r.Context())
-		if connectErr == nil {
-			break
-		}
-		h.logger.Info("waiting for Chrome CDP to be ready", zap.Int("attempt", i+1), zap.Error(connectErr))
-		time.Sleep(1 * time.Second)
-	}
-	if connectErr != nil {
-		h.logger.Error("failed to connect to sandbox Chrome after retries", zap.Error(connectErr))
-		JSONError(w, fmt.Sprintf("failed to connect to Chrome: %v", connectErr), http.StatusInternalServerError)
-		return
-	}
-
-	// Step 4: Write landing page and navigate Chrome to it
-	h.writeLandingPage(r.Context(), sandboxID, session.DisplayNum)
-
+	// Send the JSON response IMMEDIATELY — no Docker API calls above this line.
+	// The frontend considers the sandbox "enabled". Docker/CDP setup happens in
+	// the background and completes before the frontend tries to interact.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled":   true,
 		"sandboxId": sandboxID,
-		"cdpPort":   session.CDPPort,
-		"viewerUrl": session.ViewerURL,
-		"novncPort": session.NoVNCPort,
+		"cdpPort":   19222,
+		"viewerUrl": fmt.Sprintf("/sandbox/%s/viewer", sandboxID),
+		"novncPort": 6080,
 	})
+
+	// All Docker operations run after the response is sent.
+	go h.backgroundSetup(context.Background(), sandboxID)
+}
+
+// backgroundSetup runs all Docker/CDP operations after the HTTP response has been sent.
+// Errors are logged, not returned to the client.
+func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID string) {
+	h.logger.Info("background: setting up computer use", zap.String("sandbox_id", sandboxID))
+
+	// Step 1: Enable browser mode (creates/recovers container if needed)
+	session, err := h.manager.EnableBrowserMode(ctx, sandboxID)
+	if err != nil {
+		h.logger.Info("background: browser mode failed, creating sandbox", zap.String("sandbox_id", sandboxID), zap.Error(err))
+
+		// Try creating a fresh sandbox
+		_, createErr := h.manager.CreateSandbox(ctx, sandbox.SandboxOptions{ID: sandboxID})
+		if createErr != nil {
+			// Container may already exist but not tracked — recover it
+			h.logger.Info("background: create failed, recovering", zap.String("sandbox_id", sandboxID), zap.Error(createErr))
+			recoverErr := h.manager.RecoverSandbox(ctx, sandboxID)
+			if recoverErr != nil {
+				h.logger.Error("background: failed to create or recover sandbox", zap.Error(createErr), zap.Error(recoverErr))
+				return
+			}
+		}
+
+		// Enable browser mode on the new/recovered container
+		session, err = h.manager.EnableBrowserMode(ctx, sandboxID)
+		if err != nil {
+			h.logger.Error("background: failed to enable browser mode", zap.Error(err))
+			return
+		}
+	}
+
+	// Step 2: Create SandboxBrowserClient
+	client, err := h.getOrCreateClient(sandboxID, session.CDPPort)
+	if err != nil {
+		// Stale container — destroy and retry
+		h.logger.Warn("background: client creation failed, retrying with fresh sandbox",
+			zap.String("sandbox_id", sandboxID), zap.Error(err))
+		_ = h.manager.DestroySandbox(ctx, sandboxID)
+
+		_, createErr := h.manager.CreateSandbox(ctx, sandbox.SandboxOptions{ID: sandboxID})
+		if createErr != nil {
+			h.logger.Error("background: fresh sandbox creation failed", zap.Error(createErr))
+			return
+		}
+
+		session, sessionErr := h.manager.EnableBrowserMode(ctx, sandboxID)
+		if sessionErr != nil {
+			h.logger.Error("background: browser mode on fresh sandbox failed", zap.Error(sessionErr))
+			return
+		}
+
+		client, err = h.getOrCreateClient(sandboxID, session.CDPPort)
+		if err != nil {
+			h.logger.Error("background: client creation on fresh sandbox failed", zap.Error(err))
+			return
+		}
+	}
+
+	// Step 3: Connect via CDP (with retry)
+	for i := range 10 {
+		connectErr := client.Connect(ctx)
+		if connectErr == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			h.logger.Warn("background: CDP connect timed out", zap.String("sandbox_id", sandboxID))
+			return
+		}
+		h.logger.Info("background: waiting for Chrome CDP", zap.Int("attempt", i+1), zap.Error(connectErr))
+		time.Sleep(2 * time.Second)
+	}
+
+	// Step 4: Write landing page
+	h.writeLandingPage(ctx, sandboxID, session.DisplayNum)
+
+	h.logger.Info("background: computer use setup complete", zap.String("sandbox_id", sandboxID))
 }
 
 // Disable closes the SandboxBrowserClient and disables browser mode
@@ -243,10 +293,10 @@ type ActRequest struct {
 	Action    string `json:"action"`              // click, type, scroll, navigate
 	Element   int    `json:"element,omitempty"`   // element ID for click/type
 	Text      string `json:"text,omitempty"`      // text for type
-	URL       string `json:"url,omitempty"`        // URL for navigate
-	Direction string `json:"direction,omitempty"`  // up/down for scroll
-	Amount    int    `json:"amount,omitempty"`     // scroll amount
-	Submit    bool   `json:"submit,omitempty"`     // submit after typing
+	URL       string `json:"url,omitempty"`       // URL for navigate
+	Direction string `json:"direction,omitempty"` // up/down for scroll
+	Amount    int    `json:"amount,omitempty"`    // scroll amount
+	Submit    bool   `json:"submit,omitempty"`    // submit after typing
 }
 
 // Act executes a browser action

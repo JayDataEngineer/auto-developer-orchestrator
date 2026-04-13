@@ -31,9 +31,9 @@ const (
 type DeliveryMode string
 
 const (
-	DeliveryStore   DeliveryMode = "store"    // Save to run log only (default)
-	DeliveryWebhook DeliveryMode = "webhook"  // POST JSON to URL
-	DeliverySession DeliveryMode = "session"  // Inject into main agent session
+	DeliveryStore   DeliveryMode = "store"   // Save to run log only (default)
+	DeliveryWebhook DeliveryMode = "webhook" // POST JSON to URL
+	DeliverySession DeliveryMode = "session" // Inject into main agent session
 )
 
 // DefaultBackoffSchedule is the exponential backoff schedule for consecutive errors.
@@ -47,8 +47,8 @@ var DefaultBackoffSchedule = []time.Duration{
 
 const (
 	maxConsecutiveErrors = 5
-	maxMissedOnStartup  = 5
-	missedJobStaggerMs  = 5000
+	maxMissedOnStartup   = 5
+	missedJobStaggerMs   = 5000
 	stuckRunThreshold    = 2 * time.Hour
 )
 
@@ -56,9 +56,9 @@ const (
 type JobStatus string
 
 const (
-	StatusIdle    JobStatus = "idle"
-	StatusRunning JobStatus = "running"
-	StatusError   JobStatus = "error"
+	StatusIdle     JobStatus = "idle"
+	StatusRunning  JobStatus = "running"
+	StatusError    JobStatus = "error"
 	StatusDisabled JobStatus = "disabled"
 )
 
@@ -85,27 +85,27 @@ type Job struct {
 	AutoMerge  bool `json:"autoMerge,omitempty"`
 	Enabled    bool `json:"enabled"`
 	// Delivery
-	DeliveryMode     DeliveryMode `json:"deliveryMode,omitempty"`
-	DeliveryWebhookURL string     `json:"deliveryWebhookUrl,omitempty"`
-	DeliveryBestEffort bool       `json:"deliveryBestEffort,omitempty"`
+	DeliveryMode       DeliveryMode `json:"deliveryMode,omitempty"`
+	DeliveryWebhookURL string       `json:"deliveryWebhookUrl,omitempty"`
+	DeliveryBestEffort bool         `json:"deliveryBestEffort,omitempty"`
 	// Failure alerts
 	FailureAlertAfter      int    `json:"failureAlertAfter,omitempty"`
 	FailureAlertWebhookURL string `json:"failureAlertWebhookUrl,omitempty"`
 	// Runtime state
-	Status           JobStatus `json:"status"`
-	LastRunAt        time.Time `json:"lastRunAt,omitempty"`
-	LastRunStatus    string    `json:"lastRunStatus,omitempty"`
-	LastError        string    `json:"lastError,omitempty"`
-	NextRunAt        time.Time `json:"nextRunAt,omitempty"`
-	ConsecutiveErrors int      `json:"consecutiveErrors"`
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
+	Status            JobStatus `json:"status"`
+	LastRunAt         time.Time `json:"lastRunAt,omitempty"`
+	LastRunStatus     string    `json:"lastRunStatus,omitempty"`
+	LastError         string    `json:"lastError,omitempty"`
+	NextRunAt         time.Time `json:"nextRunAt,omitempty"`
+	ConsecutiveErrors int       `json:"consecutiveErrors"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 	// Metrics (from execution results)
 	InputTokens  int   `json:"inputTokens,omitempty"`
 	OutputTokens int   `json:"outputTokens,omitempty"`
 	DurationMs   int64 `json:"durationMs,omitempty"`
 	// Dependencies (task-like)
-	Blocks   []string `json:"blocks,omitempty"`   // job IDs this blocks
+	Blocks    []string `json:"blocks,omitempty"`    // job IDs this blocks
 	BlockedBy []string `json:"blockedBy,omitempty"` // job IDs blocking this
 
 	// Inbound webhook token — POST /api/scheduler/webhook/{token} triggers this job
@@ -831,7 +831,7 @@ func (s *Scheduler) save() {
 	}
 
 	store := struct {
-		Jobs       []*Job         `json:"jobs"`
+		Jobs       []*Job          `json:"jobs"`
 		Executions []*JobExecution `json:"executions"`
 	}{
 		Jobs:       make([]*Job, 0, len(s.jobs)),
@@ -917,11 +917,11 @@ func (s *Scheduler) deliverOutput(job *Job, output string) {
 // deliverWebhook POSTs job output to a webhook URL.
 func (s *Scheduler) deliverWebhook(job *Job, output string) {
 	payload := map[string]interface{}{
-		"jobId":      job.ID,
-		"jobName":    job.Name,
-		"status":     "ok",
-		"output":     truncateClip(output, 5000),
-		"runAt":      time.Now().Format(time.RFC3339),
+		"jobId":   job.ID,
+		"jobName": job.Name,
+		"status":  "ok",
+		"output":  truncateClip(output, 5000),
+		"runAt":   time.Now().Format(time.RFC3339),
 	}
 	data, _ := json.Marshal(payload)
 	client := httpClient()
@@ -948,12 +948,12 @@ func (s *Scheduler) sendFailureAlert(job *Job, errMsg string) {
 		return
 	}
 	payload := map[string]interface{}{
-		"jobId":      job.ID,
-		"jobName":    job.Name,
-		"status":     "error",
-		"error":      errMsg,
+		"jobId":             job.ID,
+		"jobName":           job.Name,
+		"status":            "error",
+		"error":             errMsg,
 		"consecutiveErrors": job.ConsecutiveErrors,
-		"alertAt":    time.Now().Format(time.RFC3339),
+		"alertAt":           time.Now().Format(time.RFC3339),
 	}
 	data, _ := json.Marshal(payload)
 	client := httpClient()

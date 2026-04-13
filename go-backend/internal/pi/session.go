@@ -14,12 +14,12 @@ import (
 )
 
 const (
-	sessionVersion      = 1
-	sessionFilePattern  = "session-%s.json"
-	sessionDirName      = ".pi_sessions"
-	maxRotatedFiles     = 3
-	rotateAfterBytes    = 256 * 1024 // 256KB
-	maxSessionChars     = 50000      // max chars to replay per session
+	sessionVersion     = 1
+	sessionFilePattern = "session-%s.json"
+	sessionDirName     = ".pi_sessions"
+	maxRotatedFiles    = 3
+	rotateAfterBytes   = 256 * 1024 // 256KB
+	maxSessionChars    = 50000      // max chars to replay per session
 )
 
 // PersistedSession represents a persistable session snapshot.
@@ -32,9 +32,9 @@ type PersistedSession struct {
 	UpdatedAtMs  int64  `json:"updatedAtMs"`
 	MessageCount int    `json:"messageCount"`
 	// Compaction tracking
-	CompactionCount    int    `json:"compactionCount"`
-	RemovedMessages    int    `json:"removedMessages"`
-	CompactionSummary  string `json:"compactionSummary,omitempty"`
+	CompactionCount   int    `json:"compactionCount"`
+	RemovedMessages   int    `json:"removedMessages"`
+	CompactionSummary string `json:"compactionSummary,omitempty"`
 	// Sub-agent tracking
 	SubAgents []SubAgentResult `json:"subAgents,omitempty"`
 	// Fork tracking

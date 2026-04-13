@@ -264,9 +264,7 @@ func (h *SubAgentHandler) ListByParent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success":    true,
-		"subAgents":  results,
+		"success":   true,
+		"subAgents": results,
 	})
 }
-
-

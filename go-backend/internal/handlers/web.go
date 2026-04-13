@@ -240,4 +240,3 @@ func (h *WebHandler) DescribePage(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"description": description})
 }
-

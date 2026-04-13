@@ -79,7 +79,7 @@ type PiClient struct {
 	pendingApprovals map[string]chan ApprovalResponse
 
 	// Pending RPC response waiters (keyed by command type)
-	respMu     sync.Mutex
+	respMu      sync.Mutex
 	respWaiters map[string]chan *RpcResponse
 }
 
@@ -104,7 +104,7 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger, sandboxM
 		namespace:        sandboxID,
 		sandboxManager:   nil,
 	}
-	
+
 	// Type assertion for sandbox manager
 	if mgr, ok := sandboxMgr.(*sandbox.Manager); ok && mgr != nil {
 		c.sandboxManager = mgr
@@ -135,20 +135,20 @@ func NewPiClientWithSession(projectDir string, agentId string, logger *zap.Logge
 	sandboxID := filepath.Base(projectDir)
 
 	c := &PiClient{
-		logger:           logger,
-		projectDir:       projectDir,
-		agentId:          agentId,
-		cancel:           cancel,
-		ctx:              ctx,
-		subscribers:      make(map[string]chan AgentEvent),
-		pendingApprovals: make(map[string]chan ApprovalResponse),
-		respWaiters:      make(map[string]chan *RpcResponse),
-		startTime:        time.Now(),
-		namespace:        sandboxID,
-		sandboxManager:   nil,
+		logger:             logger,
+		projectDir:         projectDir,
+		agentId:            agentId,
+		cancel:             cancel,
+		ctx:                ctx,
+		subscribers:        make(map[string]chan AgentEvent),
+		pendingApprovals:   make(map[string]chan ApprovalResponse),
+		respWaiters:        make(map[string]chan *RpcResponse),
+		startTime:          time.Now(),
+		namespace:          sandboxID,
+		sandboxManager:     nil,
 		customSystemPrompt: systemPrompt,
-		model:            model,
-		sessionPath:      sessionPath,
+		model:              model,
+		sessionPath:        sessionPath,
 	}
 
 	if mgr, ok := sandboxMgr.(*sandbox.Manager); ok && mgr != nil {
@@ -612,8 +612,8 @@ func (c *PiClient) updateState(event AgentEvent) {
 		// Extract usage from the messages array (same parsing as mapEventToSSE)
 		if len(event.Messages) > 0 {
 			var msgs []struct {
-				Role    string `json:"role"`
-				Usage   struct {
+				Role  string `json:"role"`
+				Usage struct {
 					Input     float64 `json:"input"`
 					Output    float64 `json:"output"`
 					CacheRead float64 `json:"cacheRead"`
@@ -706,10 +706,10 @@ func (c *PiClient) SendCommand(cmd RpcCommand) error {
 // Models on llama.cpp bypass LiteLLM for speed.
 func providerForModel(modelId string) string {
 	directModels := map[string]string{
-		"gemma-4-26b":       "llamacpp",
-		"gemma-4-26b-fast":  "llamacpp",
-		"gemma-4-e4b":       "llamacpp",
-		"gemma-4-e4b-fast":  "llamacpp",
+		"gemma-4-26b":      "llamacpp",
+		"gemma-4-26b-fast": "llamacpp",
+		"gemma-4-e4b":      "llamacpp",
+		"gemma-4-e4b-fast": "llamacpp",
 	}
 	if p, ok := directModels[modelId]; ok {
 		return p

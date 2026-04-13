@@ -13,9 +13,9 @@ import (
 
 // CLIHandler handles safe CLI command execution
 type CLIHandler struct {
-	logger       *zap.Logger
-	allowedCmds  map[string]bool
-	projectRoot  string
+	logger      *zap.Logger
+	allowedCmds map[string]bool
+	projectRoot string
 }
 
 // NewCLIHandler creates a new CLIHandler
@@ -24,9 +24,9 @@ func NewCLIHandler(logger *zap.Logger, projectRoot string) *CLIHandler {
 		logger:      logger,
 		projectRoot: projectRoot,
 		allowedCmds: map[string]bool{
-			"ls":   true,
-			"cat":  true,
-			"pwd":  true,
+			"ls":     true,
+			"cat":    true,
+			"pwd":    true,
 			"whoami": true,
 			"date":   true,
 			"uname":  true,

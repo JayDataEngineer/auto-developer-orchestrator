@@ -42,28 +42,28 @@ type MCPServerConfig struct {
 
 // MCPClient manages connections to MCP servers
 type MCPClient struct {
-	mu       sync.Mutex
-	servers  map[string]*MCPServerInstance
-	logger   *zap.Logger
-	nextID   int
+	mu      sync.Mutex
+	servers map[string]*MCPServerInstance
+	logger  *zap.Logger
+	nextID  int
 }
 
 // MCPServerInstance holds a running MCP server connection
 type MCPServerInstance struct {
-	Name     string
-	Config   MCPServerConfig
-	Stdin    io.WriteCloser
-	Stdout   io.ReadCloser
-	Stderr   io.ReadCloser
-	Cmd      *exec.Cmd
-	HTTPClient *http.Client
-	BaseURL  string
-	Tools    []MCPTool
+	Name        string
+	Config      MCPServerConfig
+	Stdin       io.WriteCloser
+	Stdout      io.ReadCloser
+	Stderr      io.ReadCloser
+	Cmd         *exec.Cmd
+	HTTPClient  *http.Client
+	BaseURL     string
+	Tools       []MCPTool
 	initialized bool
-	responses map[int]chan json.RawMessage
+	responses   map[int]chan json.RawMessage
 	responsesMu sync.Mutex
-	idGen    int
-	logger   *zap.Logger
+	idGen       int
+	logger      *zap.Logger
 }
 
 // MCPTool represents a tool exposed by an MCP server

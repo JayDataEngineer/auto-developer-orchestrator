@@ -97,10 +97,10 @@ func (m *SubAgentManager) Spawn(ctx context.Context, cfg SubAgentConfig) (string
 
 	// Build specialized prompt
 	promptCfg := SubAgentPromptConfig{
-		ProjectDir:    cfg.ProjectDir,
-		Type:          cfg.Type,
+		ProjectDir:     cfg.ProjectDir,
+		Type:           cfg.Type,
 		BrowserBaseURL: m.browserBaseURL,
-		ServerBaseURL: "http://localhost:3847",
+		ServerBaseURL:  "http://localhost:3847",
 	}
 	systemPrompt := BuildSubAgentPrompt(promptCfg)
 
@@ -307,7 +307,7 @@ func extractLastAssistantText(raw json.RawMessage) string {
 	}
 
 	var msgs []struct {
-		Role    string `json:"role"`
+		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	}
 	if json.Unmarshal(raw, &msgs) != nil {
@@ -326,7 +326,7 @@ func extractLastAssistantText(raw json.RawMessage) string {
 // extractUsageFromMessages parses usage data from agent_end messages.
 func extractUsageFromMessages(raw json.RawMessage) (input, output, cache float64) {
 	var msgs []struct {
-		Role string `json:"role"`
+		Role  string `json:"role"`
 		Usage struct {
 			Input     float64 `json:"input"`
 			Output    float64 `json:"output"`

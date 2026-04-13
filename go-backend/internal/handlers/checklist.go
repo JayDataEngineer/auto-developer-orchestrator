@@ -324,10 +324,18 @@ func (h *ChecklistHandler) generateProjectTasks(projectDir, prompt string) []str
 
 	for _, e := range entries {
 		name := strings.ToLower(e.Name())
-		if strings.HasPrefix(name, "readme") { hasReadme = true }
-		if strings.Contains(name, "test") || name == "__tests__" { hasTests = true }
-		if strings.HasPrefix(name, "dockerfile") || strings.HasPrefix(name, "docker-compose") { hasDocker = true }
-		if name == ".gitignore" { hasGitignore = true }
+		if strings.HasPrefix(name, "readme") {
+			hasReadme = true
+		}
+		if strings.Contains(name, "test") || name == "__tests__" {
+			hasTests = true
+		}
+		if strings.HasPrefix(name, "dockerfile") || strings.HasPrefix(name, "docker-compose") {
+			hasDocker = true
+		}
+		if name == ".gitignore" {
+			hasGitignore = true
+		}
 	}
 
 	if !hasReadme {

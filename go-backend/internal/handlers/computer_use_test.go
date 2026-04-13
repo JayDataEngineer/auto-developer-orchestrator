@@ -56,7 +56,7 @@ func TestComputerUseHandlerWithoutSandbox(t *testing.T) {
 
 	t.Run("Act - not enabled", func(t *testing.T) {
 		body := handlers.ActRequest{
-			Action: "click",
+			Action:  "click",
 			Element: 5,
 		}
 		jsonBody, _ := json.Marshal(body)

@@ -13,7 +13,7 @@ import { useArtifacts } from '../hooks/useArtifacts';
 import {
   Zap, Settings, ChevronDown, LayoutGrid, Monitor, MessageSquare,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Globe,
-  FolderOpen, Plus
+  FolderOpen, Plus, Send, Square
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
 import { api, ConversationSummary } from '../lib/api';
@@ -212,6 +212,8 @@ function AppShellInner() {
 
   // Agent messages for the Desktop tab's left sidebar
   const [agentMessages, setAgentMessages] = useState<any[]>([]);
+  const [desktopInput, setDesktopInput] = useState('');
+  const [desktopSending, setDesktopSending] = useState(false);
 
   const { projects, githubUser } = state;
   const { refreshProjectData } = actions;
@@ -263,8 +265,9 @@ function AppShellInner() {
     if (activeTab !== 'desktop') return;
     if (!resolvedSandboxId) return;
     if (cu.enabled && cu.sandboxId === resolvedSandboxId) return;
+    if (cu.loading) return; // Don't retry while already enabling
     enableRef.current(resolvedSandboxId);
-  }, [activeTab, resolvedSandboxId, cu.enabled, cu.sandboxId]);
+  }, [activeTab, resolvedSandboxId, cu.enabled, cu.sandboxId, cu.loading]);
 
   // Fetch agent messages when on Desktop tab
   useEffect(() => {
@@ -280,6 +283,18 @@ function AppShellInner() {
     const interval = setInterval(fetchMsgs, 5000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [activeTab, selectedProject, activeAgentId]);
+
+  // Send prompt from Desktop tab
+  const handleDesktopSend = useCallback(async () => {
+    if (!desktopInput.trim() || !selectedProject || desktopSending) return;
+    const msg = desktopInput.trim();
+    setDesktopInput('');
+    setDesktopSending(true);
+    try {
+      await api.pi.prompt(msg, selectedProject, activeAgentId);
+    } catch {}
+    setDesktopSending(false);
+  }, [desktopInput, selectedProject, activeAgentId, desktopSending]);
 
   // Artifacts hook
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
@@ -471,7 +486,7 @@ function AppShellInner() {
             )}
             {activeTab === 'desktop' && (
               <div className="h-full flex flex-col bg-black">
-                <div className="p-3 border-b border-white/5 flex items-center gap-2">
+                <div className="p-3 border-b border-white/5 flex items-center gap-2 shrink-0">
                   <MessageSquare size={10} className="text-muted-foreground" />
                   <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
                     Conversation
@@ -506,6 +521,32 @@ function AppShellInner() {
                       </div>
                     ))
                   )}
+                </div>
+                {/* Prompt input pinned to bottom */}
+                <div className="shrink-0 border-t border-white/5 p-2">
+                  <div className="flex gap-1">
+                    <textarea
+                      value={desktopInput}
+                      onChange={e => setDesktopInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleDesktopSend();
+                        }
+                      }}
+                      placeholder={selectedProject ? "Message agent..." : "Select a project..."}
+                      disabled={!selectedProject || desktopSending}
+                      rows={2}
+                      className="flex-1 bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 placeholder-zinc-700 outline-none focus:border-primary/40 resize-none disabled:opacity-30"
+                    />
+                    <button
+                      onClick={handleDesktopSend}
+                      disabled={!desktopInput.trim() || !selectedProject || desktopSending}
+                      className="self-end p-2 bg-primary text-black rounded hover:bg-primary/80 disabled:opacity-20 transition-colors"
+                    >
+                      {desktopSending ? <Square size={12} /> : <Send size={12} />}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

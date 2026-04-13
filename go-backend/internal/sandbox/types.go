@@ -56,15 +56,15 @@ const (
 
 // DesktopSession represents an active desktop/browser mode session
 type DesktopSession struct {
-	SandboxID   string      `json:"sandbox_id"`
-	Mode        SandboxMode `json:"mode"`  // "browser" or "desktop"
-	DisplayNum  int         `json:"display_num"`  // :1, :2, etc. (desktop only)
-	VNCPort     int         `json:"vnc_port"`     // 5901, 5902, etc. (desktop only)
-	CDPPort     int         `json:"cdp_port"`     // 9222, 9223, etc.
-	NoVNCPort   int         `json:"novnc_port"`   // 6081, 6082, etc. (desktop only)
-	ViewerURL   string      `json:"viewer_url"`   // URL for the desktop viewer popup
-	IsActive    bool        `json:"is_active"`
-	StartedAt   time.Time   `json:"started_at"`
+	SandboxID  string      `json:"sandbox_id"`
+	Mode       SandboxMode `json:"mode"`        // "browser" or "desktop"
+	DisplayNum int         `json:"display_num"` // :1, :2, etc. (desktop only)
+	VNCPort    int         `json:"vnc_port"`    // 5901, 5902, etc. (desktop only)
+	CDPPort    int         `json:"cdp_port"`    // 9222, 9223, etc.
+	NoVNCPort  int         `json:"novnc_port"`  // 6081, 6082, etc. (desktop only)
+	ViewerURL  string      `json:"viewer_url"`  // URL for the desktop viewer popup
+	IsActive   bool        `json:"is_active"`
+	StartedAt  time.Time   `json:"started_at"`
 }
 
 // PortAllocator manages dynamic port allocation for desktop sessions

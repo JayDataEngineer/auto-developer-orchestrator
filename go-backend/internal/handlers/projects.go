@@ -195,7 +195,7 @@ func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info("Repository cloned successfully", 
+	h.logger.Info("Repository cloned successfully",
 		zap.String("project", projectName),
 		zap.String("dir", projectDir))
 
@@ -253,7 +253,7 @@ func (h *ProjectHandler) CheckoutBranch(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.git.Checkout(ctx, checkoutOpts); err != nil {
-		h.logger.Error("Failed to checkout branch", 
+		h.logger.Error("Failed to checkout branch",
 			zap.String("project", req.Project),
 			zap.String("branch", req.Branch),
 			zap.Error(err))
@@ -266,10 +266,10 @@ func (h *ProjectHandler) CheckoutBranch(w http.ResponseWriter, r *http.Request) 
 		zap.String("branch", req.Branch))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success":  true,
-		"message":  fmt.Sprintf("Switched to branch '%s' in project '%s'", req.Branch, req.Project),
-		"project":  req.Project,
-		"branch":   req.Branch,
+		"success":     true,
+		"message":     fmt.Sprintf("Switched to branch '%s' in project '%s'", req.Branch, req.Project),
+		"project":     req.Project,
+		"branch":      req.Branch,
 		"project_dir": projectDir,
 	})
 }

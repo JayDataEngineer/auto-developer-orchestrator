@@ -200,11 +200,11 @@ func (h *SandboxHandler) GetDesktopViewer(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"viewerUrl":  session.ViewerURL,
-		"cdpUrl":     getCDPURL(session),
-		"vncUrl":     getVNCURL(session),
-		"novncUrl":   getNoVNCURL(session),
-		"mode":       string(session.Mode),
+		"viewerUrl": session.ViewerURL,
+		"cdpUrl":    getCDPURL(session),
+		"vncUrl":    getVNCURL(session),
+		"novncUrl":  getNoVNCURL(session),
+		"mode":      string(session.Mode),
 	})
 }
 

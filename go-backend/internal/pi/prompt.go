@@ -16,11 +16,11 @@ import (
 // from modular sections: identity, rules, environment context, git state,
 // and discovered instruction files.
 type SystemPromptBuilder struct {
-	ProjectDir       string
-	AppendSections   []string
-	SubAgentEnabled  bool   // whether sub-agents are available
-	ServerPort       string // e.g., "3847" for constructing API URLs
-	SandboxID        string // sandbox ID if running in a sandbox (enables computer use)
+	ProjectDir      string
+	AppendSections  []string
+	SubAgentEnabled bool   // whether sub-agents are available
+	ServerPort      string // e.g., "3847" for constructing API URLs
+	SandboxID       string // sandbox ID if running in a sandbox (enables computer use)
 }
 
 // ContextFile represents a discovered instruction file.
@@ -31,7 +31,7 @@ type ContextFile struct {
 
 // Budgets for instruction file content.
 const (
-	maxInstructionFileChars = 4000
+	maxInstructionFileChars  = 4000
 	maxTotalInstructionChars = 12000
 	maxGitDiffChars          = 8000
 	maxGitStatusChars        = 4000
@@ -273,7 +273,7 @@ func (b *SystemPromptBuilder) discoverInstructionFiles() []ContextFile {
 	dir := b.ProjectDir
 	for {
 		for _, name := range instructionFileNames {
-		 fullPath := filepath.Join(dir, name)
+			fullPath := filepath.Join(dir, name)
 			content, err := os.ReadFile(fullPath)
 			if err != nil {
 				continue

@@ -79,11 +79,11 @@ services:
   # OpenShell Sandbox Base (Dev)
   # ===========================================
   # Note: Individual sandbox containers are created dynamically by the Go backend.
-  # This service is kept as a reference/template for dev testing.
+  # Start with: docker compose -f docker-compose.dev.yml --profile sandbox up -d
   openshell-manager:
     image: nvidia/openshell:latest
     container_name: orchestrator-openshell
-    restart: unless-stopped
+    profiles: ["sandbox"]
     privileged: false
     environment:
       - SANDBOX_POLICY=developer
@@ -99,10 +99,6 @@ services:
       - /tmp:/sandbox/tmp
     networks:
       - shared-infra
-    ports:
-      - "5901-5920:5901-5920"
-      - "9222-9241:9222-9241"
-      - "6081-6100:6081-6100"
     labels:
       - "openshell.policy=developer"
 

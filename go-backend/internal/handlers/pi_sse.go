@@ -130,8 +130,8 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 		if len(event.Messages) > 0 {
 			// Parse the last assistant message for usage + thinking
 			var msgs []struct {
-				Role    string `json:"role"`
-				Usage   struct {
+				Role  string `json:"role"`
+				Usage struct {
 					Input     float64 `json:"input"`
 					Output    float64 `json:"output"`
 					CacheRead float64 `json:"cacheRead"`

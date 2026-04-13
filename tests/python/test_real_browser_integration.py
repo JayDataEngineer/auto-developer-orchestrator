@@ -277,44 +277,84 @@ class TestDesktopTabSidebar:
         sandbox_inputs = page.locator("input[placeholder*='sandbox' i]")
         assert sandbox_inputs.count() > 0, "Should have sandbox name input"
 
-    def test_computer_use_does_not_hang(self, page):
-        """Clicking Enable Computer Use should not hang forever."""
-        _goto(page)
-        _click_tab(page, "Desktop")
-        page.wait_for_timeout(500)
+    def test_computer_use_enable_via_api(self, api_url, api_session):
+        """Enable computer use via API and verify it responds within 10 seconds."""
+        import time
+        sandbox_id = "test-integration-browser"
 
-        # Open right sidebar
-        browser_btn = page.locator("button", has_text="Browser")
-        if browser_btn.count() == 0:
-            panel_btn = page.locator("button[title*='Browser']")
-            if panel_btn.count() > 0:
-                panel_btn.first.click()
-                page.wait_for_timeout(500)
-
-        # If already enabled, skip
-        active_badge = page.locator("text=Active")
-        if active_badge.count() > 0:
-            pytest.skip("Computer use already enabled")
-
-        # Find and click Enable button
-        enable_btn = page.locator("button", has_text="Enable Computer Use")
-        if enable_btn.count() == 0:
-            pytest.skip("Enable Computer Use button not found")
-
-        enable_btn.first.click()
-
-        # Wait up to 35 seconds — should either succeed or show error, not hang
+        # Clean up any existing container
         try:
-            # Look for either success (Active badge) or error message
-            page.wait_for_selector("text=Active", timeout=35000)
+            api_session.post(
+                f"{api_url}/api/sandbox/{sandbox_id}/computer-use/disable",
+                timeout=5,
+            )
         except Exception:
-            # Check if error appeared instead
-            error = page.locator("[class*='red']")
-            if error.count() > 0:
-                # Error is acceptable (e.g., Docker not available)
-                pass
-            else:
-                pytest.fail("Computer use enable hung — no success or error after 35s")
+            pass
+
+        # Enable computer use — should NOT hang
+        start = time.time()
+        resp = api_session.post(
+            f"{api_url}/api/sandbox/{sandbox_id}/computer-use/enable",
+            timeout=50,
+        )
+        elapsed = time.time() - start
+
+        assert resp.status_code == 200, f"Enable failed ({resp.status_code}): {resp.text[:200]}"
+        data = resp.json()
+        assert data.get("enabled") is True, f"Expected enabled=true, got: {data}"
+        assert "cdpPort" in data, f"Missing cdpPort in response: {data}"
+        assert elapsed < 15, f"Enable took {elapsed:.1f}s — too slow, will feel like a hang"
+
+        # Verify sandbox is tracked
+        list_resp = api_session.get(f"{api_url}/api/sandbox/", timeout=5)
+        assert list_resp.status_code == 200
+        sandboxes = list_resp.json()
+        if isinstance(sandboxes, list):
+            ids = [s["id"] for s in sandboxes]
+        else:
+            ids = [s["id"] for s in sandboxes.get("sandboxes", [])]
+        assert sandbox_id in ids, f"Sandbox {sandbox_id} not tracked after enable: {ids}"
+
+        # Cleanup
+        api_session.post(
+            f"{api_url}/api/sandbox/{sandbox_id}/computer-use/disable",
+            timeout=10,
+        )
+
+    def test_computer_use_enable_shows_in_browser(self, page, api_url, api_session):
+        """After enabling via API, the Desktop tab should show Active status."""
+        sandbox_id = "test-browser-active"
+
+        # Enable via API first
+        resp = api_session.post(
+            f"{api_url}/api/sandbox/{sandbox_id}/computer-use/enable",
+            timeout=50,
+        )
+        if resp.status_code != 200:
+            pytest.skip(f"Could not enable computer use: {resp.status_code}")
+
+        try:
+            _goto(page)
+            _click_tab(page, "Desktop")
+            page.wait_for_timeout(2000)
+
+            # Open right sidebar
+            browser_btn = page.locator("button", has_text="Browser")
+            if browser_btn.count() == 0:
+                panel_btn = page.locator("button[title*='Browser']")
+                if panel_btn.count() > 0:
+                    panel_btn.first.click()
+                    page.wait_for_timeout(500)
+
+            # Should show "Active" badge (not "Inactive")
+            active_badge = page.locator("text=Active")
+            assert active_badge.count() > 0, "Should show 'Active' badge after enabling computer use"
+        finally:
+            # Cleanup
+            api_session.post(
+                f"{api_url}/api/sandbox/{sandbox_id}/computer-use/disable",
+                timeout=10,
+            )
 
 
 class TestSidebarLabels:

@@ -249,7 +249,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
                 </div>
               ) : (
                 <button
-                  onClick={handleEnableCU}
+                  onClick={() => { if (sandboxId) cu.enableComputerUse(sandboxId); }}
                   disabled={!sandboxId || cu.loading}
                   className="px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
                 >

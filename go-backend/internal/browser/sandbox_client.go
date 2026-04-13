@@ -23,9 +23,9 @@ type SandboxBrowserClient struct {
 	allocCancel context.CancelFunc
 
 	// Cached state from last action
-	lastURL      string
-	lastTitle    string
-	lastElements []LabeledElement
+	lastURL        string
+	lastTitle      string
+	lastElements   []LabeledElement
 	lastScreenshot []byte
 
 	mu sync.RWMutex

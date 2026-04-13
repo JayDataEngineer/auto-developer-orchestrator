@@ -371,10 +371,10 @@ func TestNewPersistedSession(t *testing.T) {
 
 func TestSessionSerialization(t *testing.T) {
 	s := PersistedSession{
-		Version:     1,
-		SessionID:   "sess-123",
-		ProjectDir:  "/project",
-		AgentID:     "agent-1",
+		Version:    1,
+		SessionID:  "sess-123",
+		ProjectDir: "/project",
+		AgentID:    "agent-1",
 		SubAgents: []SubAgentResult{
 			{SubAgentID: "sub-1", Type: SubAgentExplore, Status: StatusComplete},
 		},

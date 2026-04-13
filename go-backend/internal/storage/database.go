@@ -152,7 +152,7 @@ func (d *Database) EnsureCustomProject(ctx context.Context, name, path string) e
 func (d *Database) GetProjectDir(ctx context.Context, projectName string) (string, error) {
 	// Check custom projects first
 	var path string
-	err := d.db.QueryRowContext(ctx, 
+	err := d.db.QueryRowContext(ctx,
 		"SELECT path FROM custom_projects WHERE name = ?", projectName).Scan(&path)
 	if err == nil {
 		return path, nil

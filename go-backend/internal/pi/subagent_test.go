@@ -331,7 +331,7 @@ func TestBuildSubAgentPromptIncludesBaseSections(t *testing.T) {
 
 func TestExtractUsageFromMessages(t *testing.T) {
 	msgs := []struct {
-		Role string `json:"role"`
+		Role  string `json:"role"`
 		Usage struct {
 			Input     float64 `json:"input"`
 			Output    float64 `json:"output"`

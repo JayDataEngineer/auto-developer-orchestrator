@@ -64,9 +64,9 @@ func DefaultPermissionForSubAgent(t SubAgentType) PermissionMode {
 
 // PermissionContext holds the runtime permission state for an agent.
 type PermissionContext struct {
-	Mode        PermissionMode
-	ProjectDir  string
-	DenyNames   []string // exact tool names to deny
+	Mode         PermissionMode
+	ProjectDir   string
+	DenyNames    []string // exact tool names to deny
 	DenyPrefixes []string // tool name prefixes to deny
 }
 

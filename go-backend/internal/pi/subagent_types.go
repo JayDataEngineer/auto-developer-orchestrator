@@ -81,16 +81,16 @@ func (c *SubAgentConfig) Validate() error {
 
 // SubAgentResult holds the output of a completed sub-agent.
 type SubAgentResult struct {
-	SubAgentID   string        `json:"subAgentId"`
-	Type         SubAgentType  `json:"type"`
+	SubAgentID   string         `json:"subAgentId"`
+	Type         SubAgentType   `json:"type"`
 	Status       SubAgentStatus `json:"status"`
-	Output       string        `json:"output"`
-	Error        string        `json:"error,omitempty"`
-	InputTokens  float64       `json:"inputTokens"`
-	OutputTokens float64       `json:"outputTokens"`
-	CacheTokens  float64       `json:"cacheTokens"`
-	DurationMs   int64         `json:"durationMs"`
-	ToolCalls    int           `json:"toolCalls"`
+	Output       string         `json:"output"`
+	Error        string         `json:"error,omitempty"`
+	InputTokens  float64        `json:"inputTokens"`
+	OutputTokens float64        `json:"outputTokens"`
+	CacheTokens  float64        `json:"cacheTokens"`
+	DurationMs   int64          `json:"durationMs"`
+	ToolCalls    int            `json:"toolCalls"`
 }
 
 // SubAgentInstance tracks a running sub-agent.

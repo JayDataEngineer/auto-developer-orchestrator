@@ -36,6 +36,7 @@ export function useArtifacts(agentId: string | null) {
 
   return {
     ...state,
+    loading,
     fetchArtifacts,
     getArtifactsByType,
     getLatestArtifact,

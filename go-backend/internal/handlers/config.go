@@ -18,12 +18,12 @@ type ConfigHandler struct {
 
 // Config represents the AI configuration
 type Config struct {
-	AutoTask            bool     `json:"autoTask"`
-	AutoTest            bool     `json:"autoTest"`
-	FullAutomationMode  bool     `json:"fullAutomationMode"`
-	PostMergeTestGen    bool     `json:"postMergeTestGen"`
-	TestGenPrompt       string   `json:"testGenPrompt"`
-	TestTypes           TestTypes `json:"testTypes"`
+	AutoTask           bool      `json:"autoTask"`
+	AutoTest           bool      `json:"autoTest"`
+	FullAutomationMode bool      `json:"fullAutomationMode"`
+	PostMergeTestGen   bool      `json:"postMergeTestGen"`
+	TestGenPrompt      string    `json:"testGenPrompt"`
+	TestTypes          TestTypes `json:"testTypes"`
 }
 
 // TestTypes represents test type configuration
@@ -124,7 +124,7 @@ func (h *ConfigHandler) SetSystem(w http.ResponseWriter, r *http.Request) {
 
 // GitHubUserResponse represents the GitHub user info response
 type GitHubUserResponse struct {
-	Connected bool          `json:"connected"`
+	Connected bool            `json:"connected"`
 	User      *GitHubUserInfo `json:"user,omitempty"`
 }
 

@@ -18,13 +18,13 @@ import (
 
 // Manager handles OpenShell sandbox lifecycle
 type Manager struct {
-	dockerClient   *client.Client
-	sandboxes      map[string]*Sandbox
+	dockerClient    *client.Client
+	sandboxes       map[string]*Sandbox
 	desktopSessions map[string]*DesktopSession
-	portAllocator  *PortAllocator
-	mu             sync.RWMutex
-	portMutex      sync.Mutex
-	logger         *zap.Logger
+	portAllocator   *PortAllocator
+	mu              sync.RWMutex
+	portMutex       sync.Mutex
+	logger          *zap.Logger
 }
 
 // NewManager creates a new sandbox manager
@@ -477,13 +477,16 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 	// so other containers can reach CDP via the Docker network.
 	displayNum := 99
 	vncPort := 5900
-	cdpPort := 19222  // External port (socat-forwarded)
+	cdpPort := 19222 // External port (socat-forwarded)
 	novncPort := 6080
 
 	containerName := m.getContainerName(sandboxID)
 
 	// Wait for Chrome to be ready (supervisord starts it at container boot)
 	for i := range 10 {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("context cancelled while waiting for Chrome: %w", ctx.Err())
+		}
 		output, err := m.execInContainer(ctx, containerName, []string{
 			"wget", "-qO-", "http://127.0.0.1:9222/json/version",
 		}, false)
@@ -737,11 +740,19 @@ func (m *Manager) GetContainerIP(ctx context.Context, sandboxID string) (string,
 		return "", fmt.Errorf("failed to inspect container %s: %w", containerName, err)
 	}
 
-	// Get IP from the first valid network address
+	// Try the shared-infra network first (our primary network)
+	networkName := getEnvOrDefault("OPENSHELL_NETWORK", "shared-infra")
+	if net, ok := result.Container.NetworkSettings.Networks[networkName]; ok {
+		if net.IPAddress.IsValid() {
+			return net.IPAddress.String(), nil
+		}
+	}
+
+	// Fall back to any network with a valid IP
 	for _, net := range result.Container.NetworkSettings.Networks {
 		if net.IPAddress.IsValid() {
 			return net.IPAddress.String(), nil
 		}
 	}
-	return "", fmt.Errorf("no IP address found for container %s", containerName)
+	return "", fmt.Errorf("no IP address found for container %s (networks: %d)", containerName, len(result.Container.NetworkSettings.Networks))
 }

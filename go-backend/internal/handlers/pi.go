@@ -74,7 +74,7 @@ type respondRequest struct {
 	Project   string `json:"project"`
 	AgentId   string `json:"agentId"`
 	RequestID string `json:"requestId"`
-	Action    string `json:"action"`  // "approve", "deny", "answer"
+	Action    string `json:"action"` // "approve", "deny", "answer"
 	Message   string `json:"message,omitempty"`
 }
 
