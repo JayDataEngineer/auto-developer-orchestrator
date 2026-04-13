@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -354,63 +353,4 @@ func (h *GitHubHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"events": events,
 	})
-}
-
-// GetAllRepoActivity returns events across all the user's repos
-func (h *GitHubHandler) GetAllRepoActivity(w http.ResponseWriter, r *http.Request) {
-	token, err := h.getToken()
-	if err != nil {
-		JSONError(w, "GitHub not connected", http.StatusUnauthorized)
-		return
-	}
-
-	// Get user's received events
-	req, err := http.NewRequest("GET", "https://api.github.com/users/"+r.URL.Query().Get("owner")+"/events?per_page=30", nil)
-	if err != nil {
-		JSONError(w, "Failed to create request", http.StatusInternalServerError)
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		h.logger.Error("GitHub user events fetch failed", zap.Error(err))
-		JSONError(w, "Failed to fetch events", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	// Filter to only repos we care about if repos param is provided
-	reposParam := r.URL.Query().Get("repos")
-	if reposParam != "" {
-		repoSet := map[string]bool{}
-		for _, r := range strings.Split(reposParam, ",") {
-			repoSet[strings.TrimSpace(r)] = true
-		}
-
-		var allEvents []interface{}
-		json.Unmarshal(body, &allEvents)
-
-		var filtered []interface{}
-		for _, ev := range allEvents {
-			if m, ok := ev.(map[string]interface{}); ok {
-				if repo, ok := m["repo"].(map[string]interface{}); ok {
-					if name, ok := repo["name"].(string); ok {
-						if repoSet[name] {
-							filtered = append(filtered, ev)
-						}
-					}
-				}
-			}
-		}
-
-		writeJSON(w, http.StatusOK, map[string]interface{}{"events": filtered})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(body)
 }
