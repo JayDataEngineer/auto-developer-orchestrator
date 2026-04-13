@@ -5,6 +5,7 @@ import { useComputerUse } from '../hooks/useComputerUse';
 import { HistorySidebar } from './HistorySidebar';
 import { RightPanel } from './RightPanel';
 import { AgentTab } from './AgentTab';
+import { PiAgentView } from './PiAgentView';
 import { ComputerUseTab } from './ComputerUseTab';
 import { TaskBoardTab } from './TaskBoardTab';
 import { ToastProvider } from './ui/Toast';
@@ -13,7 +14,7 @@ import { useArtifacts } from '../hooks/useArtifacts';
 import {
   Zap, Settings, ChevronDown, LayoutGrid, Monitor, MessageSquare,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Globe,
-  FolderOpen, Plus, Send, Square
+  FolderOpen, Plus
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
 import { api, ConversationSummary } from '../lib/api';
@@ -210,11 +211,6 @@ function AppShellInner() {
     thinking: string;
   }>({ isStreaming: false, runningTool: undefined, thinking: '' });
 
-  // Agent messages for the Desktop tab's left sidebar
-  const [agentMessages, setAgentMessages] = useState<any[]>([]);
-  const [desktopInput, setDesktopInput] = useState('');
-  const [desktopSending, setDesktopSending] = useState(false);
-
   const { projects, githubUser } = state;
   const { refreshProjectData } = actions;
 
@@ -269,32 +265,7 @@ function AppShellInner() {
     enableRef.current(resolvedSandboxId);
   }, [activeTab, resolvedSandboxId, cu.enabled, cu.sandboxId, cu.loading]);
 
-  // Fetch agent messages when on Desktop tab
-  useEffect(() => {
-    if (activeTab !== 'desktop' || !selectedProject) return;
-    let cancelled = false;
-    const fetchMsgs = async () => {
-      try {
-        const msgs = await api.pi.getMessages(selectedProject, activeAgentId);
-        if (!cancelled) setAgentMessages(Array.isArray(msgs) ? msgs : []);
-      } catch {}
-    };
-    fetchMsgs();
-    const interval = setInterval(fetchMsgs, 5000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [activeTab, selectedProject, activeAgentId]);
 
-  // Send prompt from Desktop tab
-  const handleDesktopSend = useCallback(async () => {
-    if (!desktopInput.trim() || !selectedProject || desktopSending) return;
-    const msg = desktopInput.trim();
-    setDesktopInput('');
-    setDesktopSending(true);
-    try {
-      await api.pi.prompt(msg, selectedProject, activeAgentId);
-    } catch {}
-    setDesktopSending(false);
-  }, [desktopInput, selectedProject, activeAgentId, desktopSending]);
 
   // Artifacts hook
   const artifactsHook = useArtifacts(selectedProject ? `${selectedProject}:${activeAgentId}` : null);
@@ -467,7 +438,7 @@ function AppShellInner() {
       <div className="flex-1 overflow-hidden flex">
         {/* Left sidebar — content changes per tab */}
         {!sidebarCollapsed && leftLabel && (
-          <div style={{ width: sidebarWidth }} className="relative shrink-0 border-r border-white/5">
+          <div style={{ width: sidebarWidth }} className="relative shrink-0 border-r border-white/5 overflow-hidden">
             {activeTab === 'agent' && (
               <HistorySidebar
                 projects={projects}
@@ -485,69 +456,13 @@ function AppShellInner() {
               />
             )}
             {activeTab === 'desktop' && (
-              <div className="h-full flex flex-col bg-black">
-                <div className="p-3 border-b border-white/5 flex items-center gap-2 shrink-0">
-                  <MessageSquare size={10} className="text-muted-foreground" />
-                  <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
-                    Conversation
-                  </span>
-                  <span className="text-xs font-mono text-zinc-700 ml-auto">
-                    {agentMessages.length} msgs
-                  </span>
-                </div>
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                  {agentMessages.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center p-6 opacity-20">
-                      <MessageSquare size={20} className="mb-2" />
-                      <p className="text-xs font-mono uppercase tracking-widest text-center">
-                        No messages yet
-                      </p>
-                    </div>
-                  ) : (
-                    agentMessages.map((msg: any, i: number) => (
-                      <div
-                        key={i}
-                        className={cn(
-                          "px-3 py-2 border-b border-white/[0.02]",
-                          msg.role === 'user' ? "bg-primary/5" : ""
-                        )}
-                      >
-                        <div className="text-[10px] font-mono uppercase tracking-widest text-zinc-600 mb-1">
-                          {msg.role}
-                        </div>
-                        <p className="text-xs font-mono text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
-                          {(msg.content || '').slice(0, 200)}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
-                {/* Prompt input pinned to bottom */}
-                <div className="shrink-0 border-t border-white/5 p-2">
-                  <div className="flex gap-1">
-                    <textarea
-                      value={desktopInput}
-                      onChange={e => setDesktopInput(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleDesktopSend();
-                        }
-                      }}
-                      placeholder={selectedProject ? "Message agent..." : "Select a project..."}
-                      disabled={!selectedProject || desktopSending}
-                      rows={2}
-                      className="flex-1 bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 placeholder-zinc-700 outline-none focus:border-primary/40 resize-none disabled:opacity-30"
-                    />
-                    <button
-                      onClick={handleDesktopSend}
-                      disabled={!desktopInput.trim() || !selectedProject || desktopSending}
-                      className="self-end p-2 bg-primary text-black rounded hover:bg-primary/80 disabled:opacity-20 transition-colors"
-                    >
-                      {desktopSending ? <Square size={12} /> : <Send size={12} />}
-                    </button>
-                  </div>
-                </div>
+              <div className="absolute inset-0 bg-black">
+                <PiAgentView
+                  selectedProject={selectedProject || undefined}
+                  selectedAgentId={activeAgentId}
+                  projects={projects}
+                  isZenMode={false}
+                />
               </div>
             )}
             {/* Drag handle */}
