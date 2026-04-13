@@ -80,21 +80,6 @@ test.describe('Auto-Developer Orchestrator - Visual Tests', () => {
     await expect(rootDiv).toBeVisible();
   });
 
-  test('should switch to Scheduler tab and take screenshot', async ({ page }) => {
-    await mockApiRoutes(page);
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
-
-    await page.getByRole('button', { name: 'Scheduler' }).click();
-    await page.waitForTimeout(2000);
-
-    await page.screenshot({
-      path: path.join(__dirname, 'screenshots', '05-scheduler-tab.png'),
-      fullPage: true,
-    });
-  });
-
   test('should show project selector and take screenshot', async ({ page }) => {
     await mockApiRoutes(page);
     await page.goto('/');

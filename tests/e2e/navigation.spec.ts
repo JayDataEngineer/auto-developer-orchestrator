@@ -18,11 +18,10 @@ test.describe('Navigation', () => {
     await page.waitForSelector('button:has-text("Agent")', { timeout: 10000 });
   });
 
-  test('renders all 4 tab buttons', async ({ page }) => {
+  test('renders all 3 tab buttons', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Agent' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Tasks' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Desktop' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Scheduler' })).toBeVisible();
   });
 
   test('defaults to Agent tab on load', async ({ page }) => {
@@ -39,12 +38,6 @@ test.describe('Navigation', () => {
   test('switches to Desktop tab on click', async ({ page }) => {
     await page.getByRole('button', { name: 'Desktop' }).click();
     await expect(page.getByRole('button', { name: 'Desktop' })).toHaveClass(/bg-primary/);
-  });
-
-  test('switches to Scheduler tab on click', async ({ page }) => {
-    await page.getByRole('button', { name: 'Scheduler' }).click();
-    await page.waitForTimeout(500);
-    await expect(page.getByRole('button', { name: 'Scheduler' })).toHaveClass(/bg-primary/);
   });
 
   test('renders project selector with projects', async ({ page }) => {
@@ -94,16 +87,8 @@ test.describe('Navigation', () => {
     await expect(page.getByRole('button', { name: 'Desktop' })).toHaveClass(/bg-primary/);
   });
 
-  test('keyboard shortcut Ctrl+4 switches to Scheduler tab', async ({ page }) => {
-    await page.evaluate(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: '4', ctrlKey: true, bubbles: true }));
-    });
-    await page.waitForTimeout(300);
-    await expect(page.getByRole('button', { name: 'Scheduler' })).toHaveClass(/bg-primary/);
-  });
-
   test('no white screen on any tab', async ({ page }) => {
-    const tabs = ['Tasks', 'Desktop', 'Scheduler'];
+    const tabs = ['Tasks', 'Desktop'];
     for (const tab of tabs) {
       await page.getByRole('button', { name: tab }).click();
       await page.waitForTimeout(1000);
@@ -119,7 +104,7 @@ test.describe('Navigation', () => {
   });
 
   test('tab buttons have SVG icons', async ({ page }) => {
-    const tabs = ['Agent', 'Tasks', 'Desktop', 'Scheduler'];
+    const tabs = ['Agent', 'Tasks', 'Desktop'];
     for (const tab of tabs) {
       const button = page.getByRole('button', { name: tab });
       const svg = button.locator('svg');
@@ -159,16 +144,4 @@ test.describe('Navigation', () => {
     await expect(page.getByText('Agent Chat')).toBeVisible({ timeout: 5000 });
   });
 
-  test('Scheduler tab shows full-width scheduler', async ({ page }) => {
-    await page.getByRole('button', { name: 'Scheduler' }).click();
-    await page.waitForTimeout(1500);
-
-    // Should show scheduler content without sidebars
-    await expect(page.getByText('Scheduled Jobs')).toBeVisible({ timeout: 10000 });
-
-    // Artifacts panel should NOT be visible
-    const artifactsPanel = page.getByText('Artifacts');
-    const visible = await artifactsPanel.isVisible().catch(() => false);
-    expect(visible).toBe(false);
-  });
 });

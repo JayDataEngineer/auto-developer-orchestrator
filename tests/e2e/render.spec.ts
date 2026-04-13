@@ -52,7 +52,6 @@ test.describe('Frontend Render Tests', () => {
     await expect(page.getByRole('button', { name: 'Agent' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Tasks' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Desktop' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Scheduler' })).toBeVisible();
   });
 
   test('should render project selector', async ({ page }) => {

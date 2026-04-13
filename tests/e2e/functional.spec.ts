@@ -43,11 +43,6 @@ test.describe('Auto-Developer Orchestrator - Functional Tests', () => {
     await page.waitForTimeout(500);
     await expect(page.getByRole('button', { name: 'Desktop' })).toHaveClass(/bg-primary/);
 
-    // Switch to Scheduler tab
-    await page.getByRole('button', { name: 'Scheduler' }).click();
-    await page.waitForTimeout(500);
-    await expect(page.getByRole('button', { name: 'Scheduler' })).toHaveClass(/bg-primary/);
-
     // Back to Agent
     await page.getByRole('button', { name: 'Agent' }).click();
     await page.waitForTimeout(500);

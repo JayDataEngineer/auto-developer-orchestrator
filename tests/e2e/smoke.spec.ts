@@ -62,13 +62,7 @@ test.describe('Smoke Test - Full App Health', () => {
     const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
     await expect(rootDiv).toBeVisible();
 
-    // ── Step 6: Scheduler tab ──
-    await page.locator('.h-10.border-b button:has-text("Scheduler")').click();
-    await page.waitForTimeout(1000);
-
-    await expect(page.getByText('Daily tests')).toBeVisible({ timeout: 5000 });
-
-    // ── Step 7: Back to Agent ──
+    // ── Step 6: Back to Agent ──
     await page.locator('.h-10.border-b button:has-text("Agent")').click();
     await page.waitForTimeout(500);
 
