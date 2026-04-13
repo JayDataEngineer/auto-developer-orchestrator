@@ -664,10 +664,12 @@ test.describe('Agent Chat - Tool Visibility', () => {
     await mockApiRoutes(page);
     await page.goto('/');
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
 
     await overrideSSERoute(page, SSE_WITH_TOOL_ERROR);
-    await page.locator('textarea').fill('Build');
+    const textarea = page.locator('textarea').first();
+    await expect(textarea).toBeVisible({ timeout: 10000 });
+    await textarea.fill('Build');
     await page.locator('textarea').press('Enter');
     await page.waitForTimeout(5000);
 
@@ -779,8 +781,8 @@ test.describe('Agent Chat - Right Panel Streaming', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500);
 
-    // Right panel should be visible
-    const artifactsPanel = page.getByText('Artifacts');
+    // Right panel should be visible — use the Artifacts toggle button in the top bar
+    const artifactsPanel = page.getByRole('button', { name: 'Artifacts' });
     await expect(artifactsPanel).toBeVisible({ timeout: 5000 });
 
     await overrideSSERoute(page, SSE_HANGING_TOOL);

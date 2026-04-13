@@ -5,7 +5,7 @@ import {
   ExternalLink, Check, GitPullRequest, Wrench
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { usePiAgent } from '../hooks/usePiAgent';
+import { usePiAgentContext } from '../contexts/PiAgentContext';
 import { SubAgentInfo } from '../lib/api';
 import { PiModel, AssistantMessage, ToolCall } from '../lib/pi-events';
 import { ToolCallItem } from './agent/ToolCallItem';
@@ -180,7 +180,7 @@ const InputBar = memo(function InputBar({
 // ─── Main component ────────────────────────────────────────────────────────
 
 export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack, isZenMode = false, onZenToggle, onStreamingStateChange }) => {
-  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels, loadHistory, respondToApproval } = usePiAgent(selectedAgentId);
+  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels, loadHistory, respondToApproval } = usePiAgentContext();
   const [models, setModels] = useState<PiModel[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 

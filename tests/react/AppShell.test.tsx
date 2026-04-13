@@ -1,3 +1,4 @@
+import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { AppShell } from '../../src/components/AppShell';
@@ -12,6 +13,38 @@ vi.mock('../../src/hooks/useOrchestrator', () => ({
     actions: {
       refreshProjectData: vi.fn(),
     },
+  }),
+}));
+
+// Mock PiAgentContext — PiAgentView uses usePiAgentContext
+vi.mock('../../src/contexts/PiAgentContext', () => ({
+  PiAgentProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  usePiAgentContext: () => ({
+    state: {
+      messages: [],
+      isStreaming: false,
+      text: '',
+      thinking: '',
+      toolCalls: [],
+      model: 'test-model',
+      tokenUsage: { input: 0, output: 0, cache: 0 },
+      error: null,
+      branchName: null,
+      lastPrompt: '',
+      agentId: 'default',
+      prUrl: null,
+      prNumber: null,
+      subAgents: [],
+    },
+    sendPrompt: vi.fn(),
+    abort: vi.fn(),
+    compact: vi.fn(),
+    switchModel: vi.fn(),
+    reset: vi.fn(),
+    hydrateState: vi.fn(),
+    getModels: vi.fn(async () => []),
+    loadHistory: vi.fn(),
+    respondToApproval: vi.fn(),
   }),
 }));
 
@@ -31,12 +64,6 @@ vi.mock('../../src/components/ComputerUseTab', () => ({
 vi.mock('../../src/components/TaskBoardTab', () => ({
   TaskBoardTab: () => (
     <div data-testid="tasks-tab">Tasks Tab</div>
-  ),
-}));
-
-vi.mock('../../src/components/SchedulerView', () => ({
-  SchedulerView: ({ projects }: any) => (
-    <div data-testid="scheduler-tab">Scheduler - {projects?.join(',')}</div>
   ),
 }));
 

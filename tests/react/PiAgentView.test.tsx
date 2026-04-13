@@ -1,10 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import React from 'react';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { PiAgentView } from '../../src/components/PiAgentView';
 
-// Mock the usePiAgent hook
-vi.mock('../../src/hooks/usePiAgent', () => ({
-  usePiAgent: () => ({
+// Mock the PiAgentContext
+vi.mock('../../src/contexts/PiAgentContext', () => {
+  const context = {
     state: {
       messages: [],
       isStreaming: false,
@@ -29,8 +30,13 @@ vi.mock('../../src/hooks/usePiAgent', () => ({
     hydrateState: vi.fn(),
     getModels: vi.fn(async () => []),
     loadHistory: vi.fn(),
-  }),
-}));
+    respondToApproval: vi.fn(),
+  };
+  return {
+    PiAgentProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    usePiAgentContext: () => context,
+  };
+});
 
 // Mock react-syntax-highlighter
 vi.mock('react-syntax-highlighter', () => ({

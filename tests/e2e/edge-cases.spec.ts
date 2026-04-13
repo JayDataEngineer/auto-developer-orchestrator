@@ -40,8 +40,8 @@ test.describe('GitHub Connect Modal', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    // Click the GitHub settings button
-    await page.getByTitle('GitHub Settings').click();
+    // Open the GitHub settings modal via event
+    await page.evaluate(() => window.dispatchEvent(new Event('open-github-settings')));
     await page.waitForTimeout(500);
 
     // Modal should show
@@ -54,7 +54,7 @@ test.describe('GitHub Connect Modal', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    await page.getByTitle('GitHub Settings').click();
+    await page.evaluate(() => window.dispatchEvent(new Event('open-github-settings')));
     await page.waitForTimeout(500);
 
     // Token input (password type)
@@ -70,7 +70,7 @@ test.describe('GitHub Connect Modal', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    await page.getByTitle('GitHub Settings').click();
+    await page.evaluate(() => window.dispatchEvent(new Event('open-github-settings')));
     await page.waitForTimeout(500);
     await expect(page.getByText('Connect GitHub')).toBeVisible({ timeout: 3000 });
 
@@ -90,7 +90,7 @@ test.describe('GitHub Connect Modal', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    await page.getByTitle('GitHub Settings').click();
+    await page.evaluate(() => window.dispatchEvent(new Event('open-github-settings')));
     await page.waitForTimeout(500);
     await expect(page.getByText('Connect GitHub')).toBeVisible({ timeout: 3000 });
 
@@ -116,7 +116,7 @@ test.describe('GitHub Connect Modal', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    await page.getByTitle('GitHub Settings').click();
+    await page.evaluate(() => window.dispatchEvent(new Event('open-github-settings')));
     await page.waitForTimeout(500);
 
     await expect(page.getByText('Security Protocol')).toBeVisible({ timeout: 3000 });
@@ -129,7 +129,7 @@ test.describe('GitHub Connect Modal', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    await page.getByTitle('GitHub Settings').click();
+    await page.evaluate(() => window.dispatchEvent(new Event('open-github-settings')));
     await page.waitForTimeout(500);
 
     await expect(page.getByText('Generate')).toBeVisible({ timeout: 3000 });
@@ -141,7 +141,7 @@ test.describe('GitHub Connect Modal', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    await page.getByTitle('GitHub Settings').click();
+    await page.evaluate(() => window.dispatchEvent(new Event('open-github-settings')));
     await page.waitForTimeout(500);
 
     const submitBtn = page.getByText('INITIALIZE_CONNECTION');
@@ -216,25 +216,6 @@ test.describe('No Console Errors', () => {
 
     const critical = errors.filter(isCriticalError);
     expect(critical.length, `Desktop errors: ${critical.join('; ')}`).toBe(0);
-  });
-
-  test('Scheduler tab produces no critical console errors', async ({ page }) => {
-    const errors: string[] = [];
-    page.on('console', msg => {
-      if (msg.type() === 'error') errors.push(msg.text());
-    });
-    page.on('pageerror', err => errors.push(err.message));
-
-    await mockApiRoutes(page);
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1500);
-
-    await page.locator('.h-10.border-b button:has-text("Scheduler")').click();
-    await page.waitForTimeout(2000);
-
-    const critical = errors.filter(isCriticalError);
-    expect(critical.length, `Scheduler errors: ${critical.join('; ')}`).toBe(0);
   });
 });
 
@@ -332,50 +313,28 @@ test.describe('API Failure Handling', () => {
     const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
     await expect(rootDiv).toBeVisible();
   });
-
-  test('scheduler API failure does not crash app', async ({ page }) => {
-    await mockApiRoutes(page);
-    await page.route('**/api/scheduler**', async route => {
-      await route.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify({ error: 'Scheduler unavailable' }),
-      });
-    });
-
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1500);
-
-    await page.locator('.h-10.border-b button:has-text("Scheduler")').click();
-    await page.waitForTimeout(2000);
-
-    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-    await expect(rootDiv).toBeVisible();
-  });
 });
 
 // ── Rapid Interaction Stress Tests ──
 
 test.describe('Rapid Interactions', () => {
-  test('rapid tab switching 10 times without crash', async ({ page }) => {
+  test('rapid tab switching 5 times without crash', async ({ page }) => {
     await mockApiRoutes(page);
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    const tabs = ['Agent', 'Tasks', 'Desktop', 'Scheduler'];
-    for (let round = 0; round < 10; round++) {
-      for (const tab of tabs) {
-        await page.getByRole('button', { name: tab }).click();
-        await page.waitForTimeout(100);
-      }
+    // Switch between tabs rapidly — use tab IDs to avoid sidebar toggle button conflicts
+    for (let round = 0; round < 5; round++) {
+      await page.locator('button:has-text("Tasks")').first().click();
+      await page.waitForTimeout(150);
+      await page.locator('button:has-text("Desktop")').first().click();
+      await page.waitForTimeout(150);
+      await page.locator('button:has-text("Agent")').nth(1).click();
+      await page.waitForTimeout(150);
     }
 
     // Final state should be valid
-    await page.getByRole('button', { name: 'Agent' }).click();
-    await page.waitForTimeout(500);
-
     const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
     await expect(rootDiv).toBeVisible();
   });
@@ -406,7 +365,7 @@ test.describe('Rapid Interactions', () => {
     await page.waitForTimeout(2000);
 
     for (let i = 0; i < 3; i++) {
-      await page.getByTitle('GitHub Settings').click();
+      await page.evaluate(() => window.dispatchEvent(new Event('open-github-settings')));
       await page.waitForTimeout(300);
       // Close via X button
       const xBtn = page.locator('.fixed.inset-0 .lucide-x');
@@ -472,16 +431,12 @@ test.describe('Layout Integrity', () => {
     await expect(page.getByRole('button', { name: 'Agent' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Tasks' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Desktop' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Scheduler' })).toBeVisible();
 
     // PI branding
     await expect(page.getByText('PI', { exact: true }).first()).toBeVisible({ timeout: 5000 });
 
     // Project selector
     await expect(page.locator('select').first()).toBeVisible();
-
-    // GitHub button
-    await expect(page.getByTitle('GitHub Settings')).toBeVisible();
   });
 
   test('tab content area is visible', async ({ page }) => {

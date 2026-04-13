@@ -12,9 +12,11 @@
  * The ONLY thing replaced is globalThis.fetch.
  * All components, hooks, reducers, and parsers are REAL production code.
  */
+import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { AppShell } from '../../src/components/AppShell';
+import { PiAgentProvider } from '../../src/contexts/PiAgentContext';
 
 // ─── SSE helpers ────────────────────────────────────────────────
 
@@ -86,6 +88,12 @@ globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
   return originalFetch(input, init);
 }) as any;
 
+// ─── Test helper ────────────────────────────────────────────────
+
+function renderWithProvider(ui: React.ReactElement) {
+  return render(<PiAgentProvider>{ui}</PiAgentProvider>);
+}
+
 // ─── Tests ──────────────────────────────────────────────────────
 
 describe('Desktop tab — full AppShell integration (zero mocks)', () => {
@@ -116,7 +124,7 @@ describe('Desktop tab — full AppShell integration (zero mocks)', () => {
   });
 
   it('switches to Desktop tab and shows PiAgentView with input', async () => {
-    render(<AppShell />);
+    renderWithProvider(<AppShell />);
 
     // Wait for projects to load and be selected
     await waitFor(() => {
@@ -159,7 +167,7 @@ describe('Desktop tab — full AppShell integration (zero mocks)', () => {
       return jsonResponse({});
     });
 
-    render(<AppShell />);
+    renderWithProvider(<AppShell />);
 
     // Wait for project auto-select
     await waitFor(() => {
@@ -212,7 +220,7 @@ describe('Desktop tab — full AppShell integration (zero mocks)', () => {
       return jsonResponse({});
     });
 
-    render(<AppShell />);
+    renderWithProvider(<AppShell />);
 
     await waitFor(() => {
       expect(screen.getByDisplayValue('test-project')).toBeInTheDocument();
@@ -253,7 +261,7 @@ describe('Desktop tab — full AppShell integration (zero mocks)', () => {
       return jsonResponse({});
     });
 
-    render(<AppShell />);
+    renderWithProvider(<AppShell />);
 
     await waitFor(() => {
       expect(screen.getByDisplayValue('test-project')).toBeInTheDocument();
@@ -296,7 +304,7 @@ describe('Desktop tab — full AppShell integration (zero mocks)', () => {
       return jsonResponse({});
     });
 
-    render(<AppShell />);
+    renderWithProvider(<AppShell />);
 
     await waitFor(() => {
       expect(screen.getByDisplayValue('test-project')).toBeInTheDocument();
@@ -345,7 +353,7 @@ describe('Desktop tab — full AppShell integration (zero mocks)', () => {
       return jsonResponse({});
     });
 
-    render(<AppShell />);
+    renderWithProvider(<AppShell />);
 
     await waitFor(() => {
       expect(screen.getByDisplayValue('test-project')).toBeInTheDocument();

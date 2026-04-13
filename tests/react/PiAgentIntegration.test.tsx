@@ -13,9 +13,11 @@
  * with a ReadableStream body that produces real SSE-formatted text.
  * Every component, hook, reducer, parser, and utility is the REAL production code.
  */
+import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { PiAgentView } from '../../src/components/PiAgentView';
+import { PiAgentProvider } from '../../src/contexts/PiAgentContext';
 
 // ─── SSE helpers ────────────────────────────────────────────────
 
@@ -89,6 +91,13 @@ globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
   return originalFetch(input, init);
 }) as any;
 
+// ─── Test helper ────────────────────────────────────────────────
+
+// Wrap renders with PiAgentProvider since PiAgentView now uses context
+function renderWithProvider(ui: React.ReactElement) {
+  return render(<PiAgentProvider>{ui}</PiAgentProvider>);
+}
+
 // ─── Tests ──────────────────────────────────────────────────────
 
 describe('PiAgentView — real integration (zero mocks)', () => {
@@ -118,7 +127,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
   });
 
   it('renders without crashing when no project is selected', () => {
-    const { container } = render(<PiAgentView />);
+    const { container } = renderWithProvider(<PiAgentView />);
     // Should show the "Pi Agent Ready" empty state
     expect(screen.getByText('Pi Agent Ready')).toBeInTheDocument();
     // No crash, no error boundary
@@ -126,12 +135,12 @@ describe('PiAgentView — real integration (zero mocks)', () => {
   });
 
   it('renders without crashing with a project selected', () => {
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
     expect(screen.getByText('Pi Agent Ready')).toBeInTheDocument();
   });
 
   it('does NOT crash when user sends a message (the page-reset bug)', async () => {
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     expect(textarea).toBeInTheDocument();
@@ -159,7 +168,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
   });
 
   it('shows the user message after sending', async () => {
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -192,7 +201,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -227,7 +236,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -260,7 +269,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -307,7 +316,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -363,7 +372,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -402,7 +411,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -447,7 +456,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -479,7 +488,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -509,7 +518,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -554,7 +563,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -591,7 +600,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
 
@@ -647,7 +656,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -682,7 +691,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -710,7 +719,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -776,7 +785,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     // Wait a tick for mount effects to fire (loadHistory is now pending)
     await act(async () => {
@@ -850,7 +859,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
     await act(async () => { await new Promise(r => setTimeout(r, 50)); });
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
@@ -923,7 +932,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
     await act(async () => { await new Promise(r => setTimeout(r, 50)); });
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
@@ -970,7 +979,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -1005,7 +1014,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -1037,7 +1046,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
     });
 
-    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    renderWithProvider(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
 
     const textarea = screen.getByPlaceholderText('Describe a coding task...');
     await act(async () => {
@@ -1074,7 +1083,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
       });
 
       // Render PiAgentView inside a container exactly like AppShell desktop sidebar does
-      const { container } = render(
+      const { container } = renderWithProvider(
         <div className="absolute inset-0 bg-black">
           <PiAgentView
             selectedProject="test-project"
@@ -1129,7 +1138,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
         });
       });
 
-      render(
+      renderWithProvider(
         <div className="absolute inset-0 bg-black">
           <PiAgentView
             selectedProject="test-project"
@@ -1167,7 +1176,7 @@ describe('PiAgentView — real integration (zero mocks)', () => {
         });
       });
 
-      render(
+      renderWithProvider(
         <div className="absolute inset-0 bg-black">
           <PiAgentView
             selectedProject="test-project"
