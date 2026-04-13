@@ -20,12 +20,15 @@ export function useResizable({ defaultWidth, minWidth, maxWidth, side }: UseResi
   const [width, setWidth] = useState(defaultWidth);
   const [isDragging, setIsDragging] = useState(false);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
+  // Track live width in a ref so we don't re-render on every mousemove
+  const liveWidth = useRef(defaultWidth);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = width;
     dragState.current = { startX, startWidth };
+    liveWidth.current = startWidth;
     setIsDragging(true);
 
     document.body.style.cursor = 'col-resize';
@@ -37,7 +40,11 @@ export function useResizable({ defaultWidth, minWidth, maxWidth, side }: UseResi
       const newWidth = side === 'right'
         ? dragState.current.startWidth + delta
         : dragState.current.startWidth - delta;
-      setWidth(Math.min(maxWidth, Math.max(minWidth, newWidth)));
+      const clamped = Math.min(maxWidth, Math.max(minWidth, newWidth));
+      liveWidth.current = clamped;
+      // Apply width directly to the DOM — no React re-render
+      const el = (e.target as HTMLElement).parentElement;
+      if (el) el.style.width = `${clamped}px`;
     };
 
     const handleMouseUp = () => {
@@ -45,6 +52,8 @@ export function useResizable({ defaultWidth, minWidth, maxWidth, side }: UseResi
       setIsDragging(false);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      // Commit the final width to React state (single re-render)
+      setWidth(liveWidth.current);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };

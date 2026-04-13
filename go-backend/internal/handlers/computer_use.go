@@ -46,7 +46,7 @@ func (h *ComputerUseHandler) RegisterRoutes(r interface {
 	r.Post("/act", h.Act)
 }
 
-// Enable enables computer use mode on a sandbox: creates browser mode + SandboxBrowserClient
+// Enable enables computer use mode on a sandbox: creates desktop mode (VNC + Chrome) + SandboxBrowserClient
 // POST /api/sandbox/{id}/computer-use/enable
 //
 // The JSON response is sent IMMEDIATELY — before any Docker operations.
@@ -112,15 +112,13 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID string) {
 	h.logger.Info("background: setting up computer use", zap.String("sandbox_id", sandboxID))
 
-	// Step 1: Enable browser mode (creates/recovers container if needed)
-	session, err := h.manager.EnableBrowserMode(ctx, sandboxID)
-	if err != nil {
-		h.logger.Info("background: browser mode failed, creating sandbox", zap.String("sandbox_id", sandboxID), zap.Error(err))
-
-		// Try creating a fresh sandbox
+	// Step 1: Enable desktop mode (Xvfb + VNC + Chrome on display) so the user
+	// can SEE the agent's actions in the center panel VNC viewer.
+	// First ensure the sandbox exists (create/recover if needed).
+	if _, err := h.manager.GetSandbox(sandboxID); err != nil {
+		h.logger.Info("background: sandbox not found, creating", zap.String("sandbox_id", sandboxID), zap.Error(err))
 		_, createErr := h.manager.CreateSandbox(ctx, sandbox.SandboxOptions{ID: sandboxID})
 		if createErr != nil {
-			// Container may already exist but not tracked — recover it
 			h.logger.Info("background: create failed, recovering", zap.String("sandbox_id", sandboxID), zap.Error(createErr))
 			recoverErr := h.manager.RecoverSandbox(ctx, sandboxID)
 			if recoverErr != nil {
@@ -128,11 +126,15 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 				return
 			}
 		}
+	}
 
-		// Enable browser mode on the new/recovered container
+	session, err := h.manager.EnableDesktopMode(ctx, sandboxID)
+	if err != nil {
+		h.logger.Error("background: desktop mode failed, trying browser mode as fallback", zap.String("sandbox_id", sandboxID), zap.Error(err))
+		// Fallback to browser mode if desktop mode fails (e.g. no Xvfb installed)
 		session, err = h.manager.EnableBrowserMode(ctx, sandboxID)
 		if err != nil {
-			h.logger.Error("background: failed to enable browser mode", zap.Error(err))
+			h.logger.Error("background: browser mode also failed", zap.Error(err))
 			return
 		}
 	}
@@ -151,10 +153,14 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 			return
 		}
 
-		session, sessionErr := h.manager.EnableBrowserMode(ctx, sandboxID)
+		session, sessionErr := h.manager.EnableDesktopMode(ctx, sandboxID)
 		if sessionErr != nil {
-			h.logger.Error("background: browser mode on fresh sandbox failed", zap.Error(sessionErr))
-			return
+			h.logger.Warn("background: desktop mode on fresh sandbox failed, trying browser mode", zap.Error(sessionErr))
+			session, sessionErr = h.manager.EnableBrowserMode(ctx, sandboxID)
+			if sessionErr != nil {
+				h.logger.Error("background: browser mode on fresh sandbox also failed", zap.Error(sessionErr))
+				return
+			}
 		}
 
 		client, err = h.getOrCreateClient(sandboxID, session.CDPPort)
