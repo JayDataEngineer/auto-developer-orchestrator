@@ -232,6 +232,14 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the actual noVNC port from the desktop session.
+	// EnableDesktopMode dynamically allocates ports (6081, 6082, ...),
+	// while EnableBrowserMode uses the fixed port 6080 (supervisord).
+	novncPort := 6080
+	if session, sessErr := h.manager.GetDesktopSession(id); sessErr == nil {
+		novncPort = session.NoVNCPort
+	}
+
 	// Resolve container IP directly (avoids Docker DNS which isn't available from host)
 	containerIP, err := h.manager.GetContainerIP(r.Context(), id)
 	if err != nil {
@@ -239,7 +247,6 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 		containerIP = fmt.Sprintf("orchestrator-sandbox-%s", id)
 	}
 
-	// The sandbox container runs noVNC/websockify on port 6080.
 	containerName := containerIP
 
 	// Build the proxy request path
@@ -255,7 +262,7 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 		proxyPath = "/vnc.html"
 	}
 
-	target := fmt.Sprintf("http://%s:6080%s", containerName, proxyPath)
+	target := fmt.Sprintf("http://%s:%d%s", containerName, novncPort, proxyPath)
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
@@ -264,7 +271,7 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Check for WebSocket upgrade
 	if r.Header.Get("Upgrade") == "websocket" {
-		h.handleWebSocket(w, r, containerName, proxyPath)
+		h.handleWebSocket(w, r, containerName, novncPort, proxyPath)
 		return
 	}
 
@@ -307,7 +314,7 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 
 // handleWebSocket takes over the HTTP connection and proxies raw TCP to websockify.
 // This is needed because noVNC uses WebSocket for the actual VNC screen stream.
-func (h *SandboxHandler) handleWebSocket(w http.ResponseWriter, r *http.Request, containerName string, path string) {
+func (h *SandboxHandler) handleWebSocket(w http.ResponseWriter, r *http.Request, containerName string, novncPort int, path string) {
 	// Use ResponseController to hijack through middleware wrappers (chi Timeout, etc.)
 	rc := http.NewResponseController(w)
 	conn, _, err := rc.Hijack()
@@ -318,8 +325,8 @@ func (h *SandboxHandler) handleWebSocket(w http.ResponseWriter, r *http.Request,
 	}
 	defer conn.Close()
 
-	// Connect to the sandbox container's websockify
-	targetAddr := fmt.Sprintf("%s:6080", containerName)
+	// Connect to the sandbox container's websockify on the allocated noVNC port
+	targetAddr := fmt.Sprintf("%s:%d", containerName, novncPort)
 	targetConn, err := net.DialTimeout("tcp", targetAddr, 5*time.Second)
 	if err != nil {
 		h.logger.Error("failed to connect to websockify", zap.Error(err))
