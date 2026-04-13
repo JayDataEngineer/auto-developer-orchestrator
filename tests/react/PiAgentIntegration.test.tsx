@@ -812,6 +812,215 @@ describe('PiAgentView — real integration (zero mocks)', () => {
     expect(screen.getByText(/I fixed the bug/)).toBeInTheDocument();
   });
 
+  it('hydrateState arriving after sendPrompt does NOT overwrite streaming state', async () => {
+    let resolveState: (() => void) | null = null;
+
+    mockFetch((input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+
+      // /api/pi/state — DELAYED response
+      if (url.includes('/api/pi/state')) {
+        return new Promise<Response>((resolve) => {
+          resolveState = () => {
+            resolve(new Response(JSON.stringify({
+              streaming: true,
+              model: 'some-old-model',
+              input: 999,
+              output: 888,
+              cache: 777,
+            }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }));
+          };
+        });
+      }
+
+      if (url === '/api/pi/prompt' && init?.method === 'POST') {
+        return sseResponse([
+          { type: 'agent_start', data: {} },
+          { type: 'text_delta', data: { text: 'Response text here.' } },
+          { type: 'agent_end', data: { input: 100, output: 50, cache: 0 } },
+        ]);
+      }
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+
+    const textarea = screen.getByPlaceholderText('Describe a coding task...');
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'Test hydrate race' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      await new Promise(r => setTimeout(r, 200));
+    });
+
+    // User message and response are visible
+    expect(screen.getByText('Test hydrate race')).toBeInTheDocument();
+    expect(screen.getByText(/Response text here/)).toBeInTheDocument();
+
+    // NOW: hydrateState resolves late with stale data
+    await act(async () => {
+      resolveState!();
+      await new Promise(r => setTimeout(r, 100));
+    });
+
+    // Messages must still be visible — hydrate should NOT have wiped them
+    expect(screen.getByText('Test hydrate race')).toBeInTheDocument();
+    expect(screen.getByText(/Response text here/)).toBeInTheDocument();
+  });
+
+  it('hydrateState AND loadHistory both arriving late after sendPrompt', async () => {
+    let resolveState: (() => void) | null = null;
+    let resolveMessages: (() => void) | null = null;
+
+    mockFetch((input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+
+      if (url.includes('/api/pi/state')) {
+        return new Promise<Response>((resolve) => {
+          resolveState = () => {
+            resolve(new Response(JSON.stringify({
+              streaming: false,
+              model: 'old-model',
+              input: 1000,
+              output: 500,
+              cache: 200,
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+          };
+        });
+      }
+
+      if (url.includes('/api/pi/messages')) {
+        return new Promise<Response>((resolve) => {
+          resolveMessages = () => {
+            resolve(new Response(JSON.stringify([
+              { id: 'stale-1', role: 'user', content: 'Stale question', createdAt: new Date().toISOString() },
+              { id: 'stale-2', role: 'assistant', text: 'Stale answer', thinking: '', toolCalls: '[]', createdAt: new Date().toISOString() },
+            ]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+          };
+        });
+      }
+
+      if (url === '/api/pi/prompt' && init?.method === 'POST') {
+        return sseResponse([
+          { type: 'agent_start', data: {} },
+          { type: 'text_delta', data: { text: 'Fresh response.' } },
+          { type: 'agent_end', data: { input: 50, output: 25, cache: 0 } },
+        ]);
+      }
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+
+    const textarea = screen.getByPlaceholderText('Describe a coding task...');
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'Fresh prompt' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      await new Promise(r => setTimeout(r, 200));
+    });
+
+    expect(screen.getByText('Fresh prompt')).toBeInTheDocument();
+    expect(screen.getByText(/Fresh response/)).toBeInTheDocument();
+
+    // Resolve BOTH late — this was the exact scenario causing page reset
+    await act(async () => {
+      resolveState!();
+      resolveMessages!();
+      await new Promise(r => setTimeout(r, 100));
+    });
+
+    // The fresh conversation must survive both late resolves
+    expect(screen.getByText('Fresh prompt')).toBeInTheDocument();
+    expect(screen.getByText(/Fresh response/)).toBeInTheDocument();
+    // Stale data must NOT appear
+    expect(screen.queryByText('Stale question')).not.toBeInTheDocument();
+    expect(screen.queryByText('Stale answer')).not.toBeInTheDocument();
+  });
+
+  it('real backend event order: agent_spawned → agent_start → text_delta → agent_end', async () => {
+    mockFetch((input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      if (url === '/api/pi/prompt' && init?.method === 'POST') {
+        return sseResponse([
+          { type: 'agent_spawned', data: { agentId: 'agent-123' } },
+          { type: 'agent_start', data: {} },
+          { type: 'text_delta', data: { text: 'I analyzed the code.' } },
+          { type: 'agent_end', data: { input: 500, output: 200, cache: 100, thinking: 'Let me check the files.' } },
+        ]);
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+
+    const textarea = screen.getByPlaceholderText('Describe a coding task...');
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'Check code' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      await new Promise(r => setTimeout(r, 250));
+    });
+
+    expect(screen.getByText('Check code')).toBeInTheDocument();
+    expect(screen.getByText(/I analyzed the code/)).toBeInTheDocument();
+    expect(screen.getByText('Reasoning')).toBeInTheDocument();
+    expect(screen.getByText(/Tokens:/)).toBeInTheDocument();
+  });
+
+  it('state_update during streaming does NOT reset messages', async () => {
+    mockFetch((input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      if (url === '/api/pi/prompt' && init?.method === 'POST') {
+        return sseResponse([
+          { type: 'agent_start', data: {} },
+          { type: 'state_update', data: { model: 'llamacpp/gemma-4-26b', input: 1000, output: 50, cache: 500 } },
+          { type: 'text_delta', data: { text: 'Working on it.' } },
+          { type: 'state_update', data: { model: 'llamacpp/gemma-4-26b', input: 2000, output: 100, cache: 1000 } },
+          { type: 'agent_end', data: { input: 2000, output: 100, cache: 1000 } },
+        ]);
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    render(<PiAgentView selectedProject="test-project" projects={['test-project']} />);
+
+    const textarea = screen.getByPlaceholderText('Describe a coding task...');
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'Stream test' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      await new Promise(r => setTimeout(r, 250));
+    });
+
+    // Messages must survive state_update events during streaming
+    expect(screen.getByText('Stream test')).toBeInTheDocument();
+    expect(screen.getByText(/Working on it/)).toBeInTheDocument();
+  });
+
   it('handles state_update event from SSE', async () => {
     mockFetch((input, init) => {
       const url = typeof input === 'string' ? input : (input as URL).toString();

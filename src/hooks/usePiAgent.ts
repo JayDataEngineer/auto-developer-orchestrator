@@ -80,8 +80,12 @@ export function usePiAgent(initialAgentId: string = 'default') {
     const aid = agentId || agentIdRef.current;
     projectRef.current = project;
     agentIdRef.current = aid;
+    const genAtCall = promptGenRef.current;
     try {
       const serverState = await api.pi.getState(project, aid);
+
+      // If the user sent a prompt while we were fetching, don't overwrite their state
+      if (promptGenRef.current !== genAtCall) return;
 
       if (serverState.streaming) {
         setState(prev => ({
