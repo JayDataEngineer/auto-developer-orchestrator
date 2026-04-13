@@ -201,11 +201,28 @@ func (h *SubAgentHandler) Result(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			// Map and forward events (reuse the same mapping pattern as PiHandler)
-			sseData, _ := json.Marshal(map[string]interface{}{
+			// Map and forward events (match the pattern expected by the parent's curl integration)
+			payload := map[string]interface{}{
 				"subAgentId": subAgentID,
-				"event":      event.Type,
-			})
+				"type":       event.Type,
+				"data":       event.Data,
+			}
+			if event.ToolName != "" {
+				payload["toolName"] = event.ToolName
+				payload["args"] = event.ToolArgs
+				payload["toolId"] = event.ToolId
+			}
+			if event.Message != nil {
+				payload["message"] = event.Message
+			}
+			if event.Messages != nil {
+				payload["messages"] = event.Messages
+			}
+			if event.ToolResults != nil {
+				payload["toolResults"] = event.ToolResults
+			}
+
+			sseData, _ := json.Marshal(payload)
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, string(sseData))
 			if canFlush {
 				flusher.Flush()

@@ -212,6 +212,7 @@ function AppShellInner() {
   }>({ isStreaming: false, runningTool: undefined, thinking: '' });
 
   const { projects, githubUser } = state;
+  const safeProjects = projects ?? [];
   const { refreshProjectData } = actions;
 
   // Single shared computer use instance
@@ -286,10 +287,10 @@ function AppShellInner() {
 
   // Auto-select first project
   useEffect(() => {
-    if (!selectedProject && projects.length > 0) {
-      setSelectedProject(projects[0]);
+    if (!selectedProject && safeProjects.length > 0) {
+      setSelectedProject(safeProjects[0]);
     }
-  }, [projects, selectedProject]);
+  }, [safeProjects, selectedProject]);
 
   const handleProjectChange = useCallback((project: string) => {
     setSelectedProject(project);
@@ -381,8 +382,8 @@ function AppShellInner() {
             onChange={e => handleProjectChange(e.target.value)}
             className="appearance-none bg-transparent text-sm font-mono uppercase tracking-widest text-muted-foreground pr-4 cursor-pointer focus:outline-none"
           >
-            {projects.length === 0 && <option value="">No projects</option>}
-            {projects.map(p => (
+            {safeProjects.length === 0 && <option value="">No projects</option>}
+            {safeProjects.map(p => (
               <option key={p} value={p} className="bg-zinc-900 text-white">{p}</option>
             ))}
           </select>
@@ -441,7 +442,7 @@ function AppShellInner() {
           <div style={{ width: sidebarWidth }} className="relative shrink-0 border-r border-white/5 overflow-hidden">
             {activeTab === 'agent' && (
               <HistorySidebar
-                projects={projects}
+                projects={safeProjects}
                 activeProject={selectedProject || undefined}
                 activeAgentId={activeAgentId}
                 onSelectSession={(project: string, agentId: string) => {
@@ -460,8 +461,9 @@ function AppShellInner() {
                 <PiAgentView
                   selectedProject={selectedProject || undefined}
                   selectedAgentId={activeAgentId}
-                  projects={projects}
+                  projects={safeProjects}
                   isZenMode={false}
+                  onStreamingStateChange={handleStreamingStateChange}
                 />
               </div>
             )}
@@ -481,7 +483,7 @@ function AppShellInner() {
           {activeTab === 'agent' && (
             <AgentTab
               selectedProject={selectedProject}
-              projects={projects}
+              projects={safeProjects}
               activeAgentId={activeAgentId}
               onActiveAgentIdChange={setActiveAgentId}
               onStreamingStateChange={handleStreamingStateChange}
@@ -541,7 +543,7 @@ function AppShellInner() {
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                   {/* Chat selection section */}
                   <DesktopChatSection
-                    projects={projects}
+                    projects={safeProjects}
                     selectedProject={selectedProject}
                     activeAgentId={activeAgentId}
                     onSelectProject={handleProjectChange}

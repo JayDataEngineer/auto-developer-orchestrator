@@ -414,11 +414,31 @@ func (c *PiClient) start() error {
 	} else {
 		builder := NewSystemPromptBuilder(c.projectDir)
 		builder.SubAgentEnabled = true
+		if c.sandboxed {
+			builder.SandboxID = c.namespace
+		}
 		systemPrompt = builder.Build()
 	}
 
 	// Build command
 	args := []string{"--mode", "rpc", "--append-system-prompt", systemPrompt}
+	
+	// Add extensions
+	extensionsDir := filepath.Join(c.projectDir, ".pi", "extensions")
+	args = append(args, "--extensions-dir", extensionsDir)
+	
+	// Always load core extensions
+	extFiles := []string{
+		"computer-use.ts",
+		"todos.ts",
+		"hooks.ts",
+		"mcp-bridge.ts",
+		"litellm-provider.ts",
+	}
+	for _, ext := range extFiles {
+		args = append(args, "--extension", ext)
+	}
+
 	if c.sessionPath != "" {
 		// Resume the specific session file
 		args = append(args, "--session", c.sessionPath)

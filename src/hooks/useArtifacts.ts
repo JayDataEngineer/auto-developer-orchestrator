@@ -40,8 +40,8 @@ export function useArtifacts(agentId: string | null) {
     fetchArtifacts,
     getArtifactsByType,
     getLatestArtifact,
-    hasPlan: state.artifacts.some(a => a.type === 'plan'),
-    hasTodo: state.artifacts.some(a => a.type === 'todo'),
-    hasNotes: state.artifacts.some(a => a.type === 'notes'),
+    hasPlan: (state.artifacts ?? []).some(a => a.type === 'plan'),
+    hasTodo: (state.artifacts ?? []).some(a => a.type === 'todo'),
+    hasNotes: (state.artifacts ?? []).some(a => a.type === 'notes'),
   };
 }
