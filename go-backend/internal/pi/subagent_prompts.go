@@ -12,6 +12,7 @@ type SubAgentPromptConfig struct {
 	Type           SubAgentType
 	BrowserBaseURL string // e.g., "http://localhost:3847/api/pi/web"
 	ServerBaseURL  string // e.g., "http://localhost:3847"
+	ToolModel      string // model ID for tool/cron examples (e.g., "gemma-4-26b")
 }
 
 // BuildSubAgentPrompt builds a full system prompt for a sub-agent.
@@ -160,6 +161,10 @@ func buildComputerUseSubAgentPrompt(cfg SubAgentPromptConfig) string {
 
 	api := apiBase + "/api/sandbox/" + sandboxID
 
+	toolModel := cfg.ToolModel
+	if toolModel == "" {
+		toolModel = "gemma-4-26b"
+	}
 	prompt := strings.Join([]string{
 		"# Sub-Agent Role: Desktop Automation",
 		"",
@@ -229,7 +234,7 @@ func buildComputerUseSubAgentPrompt(cfg SubAgentPromptConfig) string {
 		"",
 		"You can create and manage scheduled jobs using curl to call the scheduler API.",
 		"Create a job:",
-		"curl -s -X POST " + apiBase + "/api/scheduler/ -d '{\"name\":\"Weather Check\",\"message\":\"Check the weather.\",\"project\":\"test-repo\",\"scheduleType\":\"every\",\"everySeconds\":300,\"model\":\"gemma-4-26b\",\"enabled\":true}'",
+		fmt.Sprintf("curl -s -X POST %s/api/scheduler/ -d '{\"name\":\"Weather Check\",\"message\":\"Check the weather.\",\"project\":\"test-repo\",\"scheduleType\":\"every\",\"everySeconds\":300,\"model\":\"%s\",\"enabled\":true}'", apiBase, toolModel),
 		"List jobs:",
 		"curl -s " + apiBase + "/api/scheduler/",
 		"Run a job:",

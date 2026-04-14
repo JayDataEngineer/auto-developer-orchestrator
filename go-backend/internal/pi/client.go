@@ -541,6 +541,10 @@ func (c *PiClient) start() error {
 	if os.Getenv("ORCHESTRATOR_API_HOST") == "" {
 		env = append(env, "ORCHESTRATOR_API_HOST=localhost:3847")
 	}
+	// Pass tool model so extensions (cron-tool, etc.) know the configured tool model
+	if os.Getenv("TOOL_MODEL") != "" {
+		env = append(env, "TOOL_MODEL="+os.Getenv("TOOL_MODEL"))
+	}
 	c.cmd.Env = env
 
 	c.cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -790,11 +794,15 @@ func (c *PiClient) SendCommand(cmd RpcCommand) error {
 	return nil
 }
 
+// ModelConfigProvider is a package-level hook that resolves the provider
+// for a given model ID. Set once in main.go from the centralized ModelConfig.
+// Defaults to "llamacpp" when not configured.
+var ModelConfigProvider func(modelId string) string = func(_ string) string { return "llamacpp" }
+
 // providerForModel returns the provider name for a given model ID.
-// All known local models go through llamacpp (llama.cpp direct).
-// Unknown models also default to llamacpp — no LiteLLM proxy needed.
-func providerForModel(_ string) string {
-	return "llamacpp"
+// Delegates to ModelConfigProvider which is wired to the centralized config.
+func providerForModel(modelId string) string {
+	return ModelConfigProvider(modelId)
 }
 
 // SendPrompt sends a coding prompt to Pi.

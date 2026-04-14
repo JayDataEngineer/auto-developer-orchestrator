@@ -21,6 +21,7 @@ type SystemPromptBuilder struct {
 	SubAgentEnabled bool   // whether sub-agents are available
 	ServerPort      string // e.g., "3847" for constructing API URLs
 	SandboxID       string // sandbox ID if running in a sandbox (enables computer use)
+	ToolModel       string // tool model ID for prompt examples (e.g., "gemma-4-26b")
 }
 
 // ContextFile represents a discovered instruction file.
@@ -369,6 +370,10 @@ func (b *SystemPromptBuilder) buildSubAgentAvailability() string {
 	if port == "" {
 		port = "3847"
 	}
+	tm := b.ToolModel
+	if tm == "" {
+		tm = "gemma-4-26b"
+	}
 
 	return fmt.Sprintf(`# Sub-Agent Delegation
 
@@ -454,7 +459,7 @@ You can create and manage scheduled jobs via the scheduler API. This lets you sc
 
 Create a recurring job:
 `+"```"+`bash
-curl -s -X POST http://localhost:%s/api/scheduler/ -d '{"name":"Weather Check","message":"Check the weather forecast.","project":"test-repo","scheduleType":"every","everySeconds":300,"model":"gemma-4-26b","enabled":true}'
+curl -s -X POST http://localhost:%s/api/scheduler/ -d '{"name":"Weather Check","message":"Check the weather forecast.","project":"test-repo","scheduleType":"every","everySeconds":300,"model":"%s","enabled":true}'
 `+"```"+`
 
 List all jobs:
@@ -477,7 +482,7 @@ View run history:
 curl -s "http://localhost:%s/api/scheduler/JOB_ID/runs?limit=10"
 `+"```"+`
 
-Schedule types: "cron" (6-field cron expression), "every" (N seconds), "at" (RFC3339 timestamp)`, port, port, port, port, port, port, port, port, port)
+Schedule types: "cron" (6-field cron expression), "every" (N seconds), "at" (RFC3339 timestamp)`, port, tm, port, port, port, port, port, port, port, port)
 }
 
 // buildHooksSection describes the hook system to the agent

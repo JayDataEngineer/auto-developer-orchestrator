@@ -3,8 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"sync"
 
+	"github.com/auto-developer-orchestrator/backend/internal/models"
 	"go.uber.org/zap"
 )
 
@@ -14,6 +16,7 @@ type ConfigHandler struct {
 	config     *Config
 	mu         sync.RWMutex
 	tokenStore *GitHubTokenStore
+	modelCfg   *models.ModelConfig
 }
 
 // Config represents the AI configuration
@@ -37,10 +40,11 @@ type TestTypes struct {
 }
 
 // NewConfigHandler creates a new ConfigHandler
-func NewConfigHandler(logger *zap.Logger, tokenStore *GitHubTokenStore) *ConfigHandler {
+func NewConfigHandler(logger *zap.Logger, tokenStore *GitHubTokenStore, modelCfg *models.ModelConfig) *ConfigHandler {
 	return &ConfigHandler{
 		logger:     logger,
 		tokenStore: tokenStore,
+		modelCfg:   modelCfg,
 		config: &Config{
 			AutoTask:           true,
 			AutoTest:           true,
@@ -238,5 +242,69 @@ func (h *ConfigHandler) ConnectGitHub(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
+	})
+}
+
+// GetModels returns the current main and tool model configuration.
+// GET /api/config/models
+func (h *ConfigHandler) GetModels(w http.ResponseWriter, r *http.Request) {
+	if h.modelCfg == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"mainModel": nil,
+			"toolModel": nil,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"mainModel": h.modelCfg.MainModel(),
+		"toolModel": h.modelCfg.ToolModel(),
+	})
+}
+
+// SetModels updates the main and/or tool model configuration.
+// PUT /api/config/models
+func (h *ConfigHandler) SetModels(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MainModel *models.ModelEntry `json:"mainModel,omitempty"`
+		ToolModel *models.ModelEntry `json:"toolModel,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if h.modelCfg == nil {
+		JSONError(w, "Model config not available", http.StatusInternalServerError)
+		return
+	}
+
+	if req.MainModel != nil && req.MainModel.Provider != "" && req.MainModel.ModelId != "" {
+		if err := h.modelCfg.SetMainModel(req.MainModel.Provider, req.MainModel.ModelId); err != nil {
+			h.logger.Error("Failed to set main model", zap.Error(err))
+			JSONError(w, "Failed to persist main model", http.StatusInternalServerError)
+			return
+		}
+		// Update TOOL_MODEL env var for new Pi processes
+		os.Setenv("TOOL_MODEL", h.modelCfg.ToolModel().ModelId)
+	}
+
+	if req.ToolModel != nil && req.ToolModel.Provider != "" && req.ToolModel.ModelId != "" {
+		if err := h.modelCfg.SetToolModel(req.ToolModel.Provider, req.ToolModel.ModelId); err != nil {
+			h.logger.Error("Failed to set tool model", zap.Error(err))
+			JSONError(w, "Failed to persist tool model", http.StatusInternalServerError)
+			return
+		}
+		os.Setenv("TOOL_MODEL", h.modelCfg.ToolModel().ModelId)
+	}
+
+	h.logger.Info("Model config updated",
+		zap.Any("mainModel", h.modelCfg.MainModel()),
+		zap.Any("toolModel", h.modelCfg.ToolModel()),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"mainModel": h.modelCfg.MainModel(),
+		"toolModel": h.modelCfg.ToolModel(),
 	})
 }

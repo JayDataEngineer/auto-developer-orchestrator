@@ -242,7 +242,7 @@ func TestSandboxBrowserClientTypeNoElement(t *testing.T) {
 // ── VisionClient ──────────────────────────────────────────────
 
 func TestNewVisionClient(t *testing.T) {
-	client := NewVisionClient("http://litellm:4000", "key123")
+	client := NewVisionClient("http://litellm:4000", "key123", nil)
 	if client == nil {
 		t.Fatal("expected non-nil client")
 	}
@@ -255,14 +255,14 @@ func TestNewVisionClient(t *testing.T) {
 }
 
 func TestNewVisionClientDefaultURL(t *testing.T) {
-	client := NewVisionClient("", "")
+	client := NewVisionClient("", "", nil)
 	if client.baseURL != "http://localhost:8001" {
 		t.Errorf("expected default localhost:8001, got %q", client.baseURL)
 	}
 }
 
 func TestVisionClientDescribePageNoServer(t *testing.T) {
-	client := NewVisionClient("", "")
+	client := NewVisionClient("", "", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, err := client.DescribePage(ctx, []byte("fake-png"))

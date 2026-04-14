@@ -12,6 +12,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
+	"github.com/auto-developer-orchestrator/backend/internal/models"
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/scheduler"
@@ -51,6 +52,18 @@ func main() {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Sync()
+
+	// Load two-model configuration (main model + tool model)
+	modelCfg, err := models.LoadModelConfig(logger)
+	if err != nil {
+		logger.Warn("Failed to load model config, using defaults", zap.Error(err))
+	}
+
+	// Wire model config into pi package for provider resolution
+	pi.ModelConfigProvider = modelCfg.ProviderForModel
+
+	// Set TOOL_MODEL env var so Pi extensions (cron-tool, etc.) can read it
+	os.Setenv("TOOL_MODEL", modelCfg.ToolModel().ModelId)
 
 	// Initialize sandbox manager
 	sandboxMgr, err := sandbox.NewManager(logger)
@@ -94,7 +107,7 @@ func main() {
 	checklistHandler := handlers.NewChecklistHandler(db, logger)
 	projectHandler := handlers.NewProjectHandler(db, logger, gitOps)
 	githubTokenStore := handlers.NewGitHubTokenStore()
-	configHandler := handlers.NewConfigHandler(logger, githubTokenStore)
+	configHandler := handlers.NewConfigHandler(logger, githubTokenStore, modelCfg)
 	githubHandler := handlers.NewGitHubHandler(logger, githubTokenStore)
 	cliHandler := handlers.NewCLIHandler(logger, projectRoot)
 
@@ -106,7 +119,7 @@ func main() {
 	subAgentMgr := pi.NewSubAgentManager(piPool, logger,
 		pi.WithSandboxManager(sandboxMgr),
 	)
-	subAgentHandler := handlers.NewSubAgentHandler(subAgentMgr, piPool, logger)
+	subAgentHandler := handlers.NewSubAgentHandler(subAgentMgr, piPool, logger, modelCfg)
 
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
@@ -114,7 +127,7 @@ func main() {
 	// Vision client — defaults to llama.cpp at localhost:8001
 	visionURL := os.Getenv("LITELLM_PROXY_URL") // optional override
 	visionKey := os.Getenv("LITELLM_MASTER_KEY")
-	visionClient := browser.NewVisionClient(visionURL, visionKey)
+	visionClient := browser.NewVisionClient(visionURL, visionKey, modelCfg)
 
 	// Browser automation (Web Sub-Agent)
 	var browserClient *browser.BrowserClient
@@ -226,6 +239,8 @@ func main() {
 		r.Post("/config/ai", configHandler.SetAI)
 		r.Get("/config/system", configHandler.GetSystem)
 		r.Post("/config/system", configHandler.SetSystem)
+		r.Get("/config/models", configHandler.GetModels)
+		r.Put("/config/models", configHandler.SetModels)
 
 		// GitHub integration
 		r.Get("/github/user", configHandler.GetGitHubUser)

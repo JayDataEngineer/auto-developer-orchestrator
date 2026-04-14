@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/models"
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -13,17 +14,19 @@ import (
 
 // SubAgentHandler handles HTTP endpoints for sub-agent operations.
 type SubAgentHandler struct {
-	manager *pi.SubAgentManager
-	pool    *pi.PiPool
-	logger  *zap.Logger
+	manager   *pi.SubAgentManager
+	pool      *pi.PiPool
+	logger    *zap.Logger
+	modelCfg  *models.ModelConfig
 }
 
 // NewSubAgentHandler creates a new sub-agent handler.
-func NewSubAgentHandler(manager *pi.SubAgentManager, pool *pi.PiPool, logger *zap.Logger) *SubAgentHandler {
+func NewSubAgentHandler(manager *pi.SubAgentManager, pool *pi.PiPool, logger *zap.Logger, modelCfg *models.ModelConfig) *SubAgentHandler {
 	return &SubAgentHandler{
-		manager: manager,
-		pool:    pool,
-		logger:  logger,
+		manager:  manager,
+		pool:     pool,
+		logger:   logger,
+		modelCfg: modelCfg,
 	}
 }
 
@@ -79,16 +82,9 @@ func (h *SubAgentHandler) Spawn(w http.ResponseWriter, r *http.Request) {
 		Model:      req.Model,
 	}
 
-	// Default model per type if not specified
+	// Default model: always use tool model from config
 	if cfg.Model == "" {
-		switch cfg.Type {
-		case pi.SubAgentComputerUse:
-			cfg.Model = "gemma-4-26b" // local vision model via llama.cpp
-		case pi.SubAgentCode:
-			cfg.Model = "gemma-4-26b"
-		default:
-			cfg.Model = "gemma-4-26b"
-		}
+		cfg.Model = h.modelCfg.ToolModel().ModelId
 	}
 
 	subAgentID, err := h.manager.Spawn(r.Context(), cfg)

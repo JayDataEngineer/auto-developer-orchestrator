@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/auto-developer-orchestrator/backend/internal/models"
 )
 
 // VisionClient sends screenshots to a vision model for page description.
@@ -23,11 +25,18 @@ type VisionClient struct {
 
 // NewVisionClient creates a new vision client.
 // Falls back to localhost:8001 (llama.cpp) when no explicit URL is provided.
-func NewVisionClient(url, apiKey string) *VisionClient {
+// Uses toolModel from config when available, otherwise VISION_MODEL env or hardcoded default.
+func NewVisionClient(url, apiKey string, modelCfg *models.ModelConfig) *VisionClient {
 	if url == "" {
 		url = "http://localhost:8001"
 	}
-	model := os.Getenv("VISION_MODEL")
+	var model string
+	if modelCfg != nil {
+		model = modelCfg.ToolModel().ModelId
+	}
+	if model == "" {
+		model = os.Getenv("VISION_MODEL")
+	}
 	if model == "" {
 		model = "gemma-4-26b"
 	}

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { usePiAgentContext } from '../contexts/PiAgentContext';
-import { SubAgentInfo } from '../lib/api';
+import { SubAgentInfo, api } from '../lib/api';
 import { PiModel, AssistantMessage, ToolCall } from '../lib/pi-events';
 import { ToolCallItem } from './agent/ToolCallItem';
 import { SubAgentCard } from './agent/SubAgentCard';
@@ -37,6 +37,7 @@ interface InputBarProps {
   isZenMode: boolean;
   autoBranch: boolean;
   autoMerge: boolean;
+  toolModel: string | null;
   onSend: (text: string) => void;
   onAbort: () => void;
   onReset: () => void;
@@ -44,23 +45,24 @@ interface InputBarProps {
   onCompact: () => void;
   onAutoBranchChange: (v: boolean) => void;
   onAutoMergeChange: (v: boolean) => void;
+  onSetToolModel: (provider: string, modelId: string) => void;
 }
 
 const InputBar = memo(function InputBar({
   isStreaming, disabled, model, models, selectedProject, selectedAgentId,
-  isZenMode, autoBranch, autoMerge,
+  isZenMode, autoBranch, autoMerge, toolModel,
   onSend, onAbort, onReset, onSwitchModel, onCompact,
-  onAutoBranchChange, onAutoMergeChange,
+  onAutoBranchChange, onAutoMergeChange, onSetToolModel,
 }: InputBarProps) {
   const [input, setInput] = useState('');
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState<'main' | 'tool' | null>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!modelDropdownOpen) return;
     const handleClick = (e: MouseEvent) => {
       if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
-        setModelDropdownOpen(false);
+        setModelDropdownOpen(null);
       }
     };
     document.addEventListener('mousedown', handleClick);
@@ -113,35 +115,60 @@ const InputBar = memo(function InputBar({
         </div>
         <div className="flex items-center gap-4 mt-2">
           <div className="relative" ref={modelDropdownRef}>
-            <button
-              onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-              className="text-xs font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest"
-            >
-              Model: {model || 'default'}
-              {modelDropdownOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setModelDropdownOpen(modelDropdownOpen === 'main' ? null : 'main')}
+                className={cn(
+                  "text-xs font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
+                  modelDropdownOpen === 'main' ? "text-primary" : "text-muted hover:text-muted-foreground"
+                )}
+              >
+                Main: {model || 'default'}
+                {modelDropdownOpen === 'main' ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+              </button>
+              <button
+                onClick={() => setModelDropdownOpen(modelDropdownOpen === 'tool' ? null : 'tool')}
+                className={cn(
+                  "text-xs font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
+                  modelDropdownOpen === 'tool' ? "text-primary" : "text-muted hover:text-muted-foreground"
+                )}
+              >
+                Tool: {toolModel || 'default'}
+                {modelDropdownOpen === 'tool' ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+              </button>
+            </div>
             {modelDropdownOpen && (
               <div className="absolute bottom-full left-0 mb-1 w-64 max-h-[300px] overflow-y-auto border border-white/10 bg-zinc-950 shadow-2xl z-[100] custom-scrollbar scrollbar-gutter-stable">
+                <div className="px-3 py-1 text-[10px] font-mono text-muted/60 uppercase tracking-widest border-b border-white/5">
+                  {modelDropdownOpen === 'main' ? 'Main Model (conversation)' : 'Tool Model (sub-agents/vision)'}
+                </div>
                 {models.length === 0 && (
                   <div className="px-3 py-2 text-xs font-mono text-muted uppercase tracking-widest">Loading models...</div>
                 )}
-                {models.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => {
-                      onSwitchModel(m.provider || 'litellm', m.id);
-                      setModelDropdownOpen(false);
-                    }}
-                    className={cn(
-                      "w-full text-left px-3 py-2 text-xs font-mono uppercase tracking-widest transition-colors",
-                      model === m.id
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted hover:bg-white/5 hover:text-muted-foreground"
-                    )}
-                  >
-                    {m.name || m.id}
-                  </button>
-                ))}
+                {models.map((m) => {
+                  const isSelected = modelDropdownOpen === 'main' ? model === m.id : toolModel === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        if (modelDropdownOpen === 'main') {
+                          onSwitchModel(m.provider || 'llamacpp', m.id);
+                        } else {
+                          onSetToolModel(m.provider || 'llamacpp', m.id);
+                        }
+                        setModelDropdownOpen(null);
+                      }}
+                      className={cn(
+                        "w-full text-left px-3 py-2 text-xs font-mono uppercase tracking-widest transition-colors",
+                        isSelected
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted hover:bg-white/5 hover:text-muted-foreground"
+                      )}
+                    >
+                      {m.name || m.id}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -182,10 +209,18 @@ const InputBar = memo(function InputBar({
 export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack, isZenMode = false, onZenToggle, onStreamingStateChange }) => {
   const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels, loadHistory, respondToApproval } = usePiAgentContext();
   const [models, setModels] = useState<PiModel[]>([]);
+  const [toolModel, setToolModel] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [autoBranch, setAutoBranch] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
+
+  // Load model config on mount
+  useEffect(() => {
+    api.config.getModels().then((cfg) => {
+      if (cfg.toolModel?.modelId) setToolModel(cfg.toolModel.modelId);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (selectedProject) {
@@ -227,6 +262,13 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   const handleSwitchModel = useCallback((provider: string, modelId: string) => {
     if (selectedProject) switchModel(selectedProject, provider, modelId, selectedAgentId);
   }, [selectedProject, selectedAgentId, switchModel]);
+
+  const handleSetToolModel = useCallback(async (provider: string, modelId: string) => {
+    try {
+      await api.config.setModels({ toolModel: { provider, modelId } });
+      setToolModel(modelId);
+    } catch {}
+  }, []);
 
   const handleCompact = useCallback(() => {
     if (selectedProject) compact(selectedProject, selectedAgentId);
@@ -433,6 +475,8 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
           onCompact={handleCompact}
           onAutoBranchChange={setAutoBranch}
           onAutoMergeChange={setAutoMerge}
+          toolModel={toolModel}
+          onSetToolModel={handleSetToolModel}
         />
       </div>
     </div>

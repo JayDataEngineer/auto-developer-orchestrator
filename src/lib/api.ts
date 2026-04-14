@@ -308,6 +308,18 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ projectsDir }),
       }),
+    getModels: () => apiFetch<{
+      mainModel: { provider: string; modelId: string } | null;
+      toolModel: { provider: string; modelId: string } | null;
+    }>('/api/config/models'),
+    setModels: (models: {
+      mainModel?: { provider: string; modelId: string };
+      toolModel?: { provider: string; modelId: string };
+    }) =>
+      apiFetch<{ success: boolean; mainModel: { provider: string; modelId: string }; toolModel: { provider: string; modelId: string } }>('/api/config/models', {
+        method: 'PUT',
+        body: JSON.stringify(models),
+      }),
   },
   github: {
     getRepos: () => apiFetch<ReposResponse>('/api/github/repos'),
