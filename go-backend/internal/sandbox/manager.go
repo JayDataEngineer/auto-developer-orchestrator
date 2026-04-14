@@ -59,6 +59,9 @@ func getEnvOrDefault(key, defaultVal string) string {
 // execInContainer runs a command inside a Docker container and returns the output.
 // If detach is true, the command runs in the background.
 func (m *Manager) execInContainer(ctx context.Context, containerName string, cmd []string, detach bool) (string, error) {
+	if m.dockerClient == nil {
+		return "", fmt.Errorf("docker client not available")
+	}
 	execCreate, err := m.dockerClient.ExecCreate(ctx, containerName, client.ExecCreateOptions{
 		Cmd:          cmd,
 		AttachStdout: !detach,
@@ -143,6 +146,9 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	}
 
 	// Pull image if not present locally
+	if m.dockerClient == nil {
+		return nil, fmt.Errorf("docker client not available")
+	}
 	_, inspectErr := m.dockerClient.ImageInspect(ctx, image)
 	if inspectErr != nil {
 		// Image not found locally, pull it
@@ -269,6 +275,13 @@ func (m *Manager) DestroySandbox(ctx context.Context, id string) error {
 		return fmt.Errorf("sandbox %s not found", id)
 	}
 
+	if m.dockerClient == nil {
+		// In-memory only (testing) — just remove from map
+		delete(m.sandboxes, id)
+		delete(m.desktopSessions, id)
+		return nil
+	}
+
 	m.logger.Info("destroying sandbox", zap.String("id", id))
 
 	// Clean up any active mode
@@ -392,6 +405,9 @@ func (m *Manager) GetSandbox(id string) (*Sandbox, error) {
 // RecoverSandbox recovers an existing Docker container into the in-memory map
 // without creating a new one. Used when the backend restarts but containers are still running.
 func (m *Manager) RecoverSandbox(ctx context.Context, sandboxID string) error {
+	if m.dockerClient == nil {
+		return fmt.Errorf("docker client not available")
+	}
 	containerName := m.getContainerName(sandboxID)
 	result, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
 	if err != nil {
@@ -734,6 +750,9 @@ func (m *Manager) GetDesktopSession(sandboxID string) (*DesktopSession, error) {
 
 // GetContainerIP returns the IP address of a sandbox container on the shared network.
 func (m *Manager) GetContainerIP(ctx context.Context, sandboxID string) (string, error) {
+	if m.dockerClient == nil {
+		return "", fmt.Errorf("docker client not available")
+	}
 	containerName := m.getContainerName(sandboxID)
 	result, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
 	if err != nil {
