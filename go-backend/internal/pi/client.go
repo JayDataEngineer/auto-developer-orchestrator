@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -184,13 +185,8 @@ func (c *PiClient) initComponents() {
 }
 
 // fixPiModelsConfig updates the baseUrl in ~/.pi/agent/models.json to match
-// the LITELLM_PROXY_URL env var, fixing Docker hostname resolution issues.
+// the LITELLM_PROXY_URL env var or dynamically resolve Docker container IPs.
 func (c *PiClient) fixPiModelsConfig() {
-	litellmURL := os.Getenv("LITELLM_PROXY_URL")
-	if litellmURL == "" {
-		return
-	}
-
 	// Find Pi's agent config directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -203,26 +199,73 @@ func (c *PiClient) fixPiModelsConfig() {
 		return
 	}
 
-	// Replace any Docker-internal hostnames with the correct URL
-	correctBase := strings.TrimRight(litellmURL, "/") + "/v1"
-	oldPatterns := []string{
-		"litellm-litellm-1:4000",
-		"litellm.local:4000",
-		"localhost:4000",
-	}
 	content := string(data)
-	for _, pattern := range oldPatterns {
-		content = strings.ReplaceAll(content, "http://"+pattern+"/v1", correctBase)
-		content = strings.ReplaceAll(content, "http://"+pattern, correctBase)
+	changed := false
+
+	// Strategy 1: If LITELLM_PROXY_URL is set, rewrite to use the proxy
+	if litellmURL := os.Getenv("LITELLM_PROXY_URL"); litellmURL != "" {
+		correctBase := strings.TrimRight(litellmURL, "/") + "/v1"
+		oldPatterns := []string{
+			"litellm-litellm-1:4000",
+			"litellm.local:4000",
+			"localhost:4000",
+		}
+		for _, pattern := range oldPatterns {
+			content = strings.ReplaceAll(content, "http://"+pattern+"/v1", correctBase)
+			content = strings.ReplaceAll(content, "http://"+pattern, correctBase)
+		}
+		if content != string(data) {
+			changed = true
+		}
 	}
 
-	if content != string(data) {
+	// Strategy 2: Dynamically resolve Docker container IPs
+	// When running on the host, Docker bridge IPs change on restart.
+	// Resolve the current IP from the container and update models.json.
+	llamaIP := resolveDockerContainerIP("shared-llama-cpp")
+	if llamaIP != "" {
+		correctURL := "http://" + llamaIP + ":8001/v1"
+		// regex: match any http://172.x.x.x:port/v1 pattern
+		re := regexp.MustCompile(`http://172\.\d+\.\d+\.\d+:\d+/v1`)
+		newContent := re.ReplaceAllString(content, correctURL)
+		if newContent != content {
+			content = newContent
+			changed = true
+		}
+	}
+
+	if changed {
 		if err := os.WriteFile(modelsPath, []byte(content), 0644); err != nil {
 			c.logger.Warn("Failed to update Pi models config", zap.Error(err))
 		} else {
-			c.logger.Info("Updated Pi models.json baseUrl", zap.String("url", correctBase))
+			c.logger.Info("Updated Pi models.json with resolved IPs")
 		}
 	}
+}
+
+// resolveDockerContainerIP returns the IP address of a Docker container by name.
+// Uses `docker inspect` to dynamically resolve the IP, avoiding hardcoded Docker bridge IPs.
+func resolveDockerContainerIP(containerName string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "inspect",
+		"-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+		containerName,
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	// Output may contain multiple IPs (one per network) — take the first non-empty one
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		ip := strings.TrimSpace(line)
+		if ip != "" {
+			return ip
+		}
+	}
+	return ""
 }
 
 // installExtensions copies built-in extensions and skills to the project's .pi/ directory

@@ -128,13 +128,15 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 		}
 	}
 
-	session, err := h.manager.EnableDesktopMode(ctx, sandboxID)
+	// Try browser mode first — the OpenShell image already provides a full
+	// desktop via supervisord (Xvfb + fluxbox + Chrome + websockify on 6080).
+	// Only fall back to desktop mode for bare containers that need everything started.
+	session, err := h.manager.EnableBrowserMode(ctx, sandboxID)
 	if err != nil {
-		h.logger.Error("background: desktop mode failed, trying browser mode as fallback", zap.String("sandbox_id", sandboxID), zap.Error(err))
-		// Fallback to browser mode if desktop mode fails (e.g. no Xvfb installed)
-		session, err = h.manager.EnableBrowserMode(ctx, sandboxID)
+		h.logger.Info("background: browser mode not available, starting desktop mode", zap.String("sandbox_id", sandboxID), zap.Error(err))
+		session, err = h.manager.EnableDesktopMode(ctx, sandboxID)
 		if err != nil {
-			h.logger.Error("background: browser mode also failed", zap.Error(err))
+			h.logger.Error("background: desktop mode also failed", zap.Error(err))
 			return
 		}
 	}
@@ -153,12 +155,12 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 			return
 		}
 
-		session, sessionErr := h.manager.EnableDesktopMode(ctx, sandboxID)
+		session, sessionErr := h.manager.EnableBrowserMode(ctx, sandboxID)
 		if sessionErr != nil {
-			h.logger.Warn("background: desktop mode on fresh sandbox failed, trying browser mode", zap.Error(sessionErr))
-			session, sessionErr = h.manager.EnableBrowserMode(ctx, sandboxID)
+			h.logger.Warn("background: browser mode on fresh sandbox failed, trying desktop mode", zap.Error(sessionErr))
+			session, sessionErr = h.manager.EnableDesktopMode(ctx, sandboxID)
 			if sessionErr != nil {
-				h.logger.Error("background: browser mode on fresh sandbox also failed", zap.Error(sessionErr))
+				h.logger.Error("background: desktop mode on fresh sandbox also failed", zap.Error(sessionErr))
 				return
 			}
 		}
