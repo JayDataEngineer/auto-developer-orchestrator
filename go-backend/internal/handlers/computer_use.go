@@ -189,7 +189,28 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 	// Step 4: Write landing page
 	h.writeLandingPage(ctx, sandboxID, session.DisplayNum)
 
+	// Step 5: Install X11 automation tools (xdotool, imagemagick) for native desktop control
+	h.installX11Tools(ctx, sandboxID)
+
 	h.logger.Info("background: computer use setup complete", zap.String("sandbox_id", sandboxID))
+}
+
+// installX11Tools installs xdotool and imagemagick in the sandbox container
+// for X11-based desktop automation (coordinate clicks, keyboard, screenshots).
+func (h *ComputerUseHandler) installX11Tools(ctx context.Context, sandboxID string) {
+	h.logger.Info("background: installing X11 automation tools", zap.String("sandbox_id", sandboxID))
+
+	// Run apt-get install quietly; best-effort — don't fail if packages are already present.
+	output, err := h.manager.ExecInSandbox(ctx, sandboxID, []string{
+		"bash", "-c",
+		"apt-get update -qq && apt-get install -y -qq xdotool imagemagick scrot 2>/dev/null || true",
+	})
+	if err != nil {
+		h.logger.Warn("background: X11 tools install failed (non-fatal)", zap.Error(err))
+		return
+	}
+
+	h.logger.Info("background: X11 tools installed", zap.String("sandbox_id", sandboxID), zap.String("output", output))
 }
 
 // Disable closes the SandboxBrowserClient and disables browser mode

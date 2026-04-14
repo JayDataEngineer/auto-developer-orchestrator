@@ -397,6 +397,29 @@ export const api = {
         body: JSON.stringify({ project, agentId, requestId, action, message }),
       }),
   },
+  x11: {
+    mouse: (sandboxId: string, action: 'click' | 'move', x: number, y: number, button?: number) =>
+      apiFetch<{ success: boolean }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/x11/mouse`, {
+        method: 'POST',
+        body: JSON.stringify({ action, x, y, button }),
+      }),
+    keyboard: (sandboxId: string, action: 'type' | 'key', params: { text?: string; key?: string }) =>
+      apiFetch<{ success: boolean }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/x11/keyboard`, {
+        method: 'POST',
+        body: JSON.stringify({ action, ...params }),
+      }),
+    screenshot: (sandboxId: string, format: 'json' | 'png' = 'json') =>
+      format === 'png'
+        ? fetch(`/api/sandbox/${encodeURIComponent(sandboxId)}/x11/screenshot?format=png`).then(r => {
+            if (!r.ok) throw new Error('X11 screenshot failed');
+            return r.blob();
+          })
+        : apiFetch<{ image: string }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/x11/screenshot`),
+    resolution: (sandboxId: string) =>
+      apiFetch<{ width: string; height: string }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/x11/resolution`),
+    activeWindow: (sandboxId: string) =>
+      apiFetch<{ windowId: string; windowName: string }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/x11/active-window`),
+  },
   computerUse: {
     enable: (sandboxId: string, opts?: { signal?: AbortSignal }) =>
       apiFetch<{ enabled: boolean; sandboxId: string; cdpPort: number }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/computer-use/enable`, {

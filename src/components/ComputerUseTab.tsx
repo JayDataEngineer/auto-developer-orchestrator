@@ -4,6 +4,8 @@ import {
   Monitor, Maximize2, Minimize2,
   ExternalLink, Loader, AlertCircle
 } from 'lucide-react';
+import { usePiAgentContext } from '../contexts/PiAgentContext';
+import { DesktopConsolePanel } from './DesktopConsolePanel';
 
 interface ComputerUseTabProps {
   selectedProject: string | null;
@@ -17,6 +19,7 @@ interface ComputerUseTabProps {
 }
 
 export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTabProps) {
+  const { state: piState } = usePiAgentContext();
   const [session, setSession] = useState<{
     mode?: string;
     cdpUrl?: string;
@@ -212,6 +215,9 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
           </div>
         )}
       </div>
+
+      {/* Console panel showing desktop tool call history */}
+      <DesktopConsolePanel toolCalls={piState.toolCalls} />
     </div>
   );
 }

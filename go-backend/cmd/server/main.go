@@ -146,6 +146,9 @@ func main() {
 	// Computer Use handler (CDP bridge for sandbox browser automation)
 	computerUseHandler := handlers.NewComputerUseHandler(sandboxMgr, visionClient, logger)
 
+	// X11 handler (xdotool-based desktop automation for native apps)
+	x11Handler := handlers.NewX11Handler(sandboxMgr, logger)
+
 	// Scheduler (CRON/heartbeat system)
 	schedulerStorePath := os.Getenv("SCHEDULER_STORE_PATH")
 	if schedulerStorePath == "" {
@@ -293,6 +296,11 @@ func main() {
 			// Computer Use (CDP bridge for sandbox browser automation)
 			r.Route("/{id}/computer-use", func(r chi.Router) {
 				computerUseHandler.RegisterRoutes(r)
+			})
+
+			// X11 Desktop Automation (xdotool for native apps)
+			r.Route("/{id}/x11", func(r chi.Router) {
+				x11Handler.RegisterRoutes(r)
 			})
 
 			// VNC proxy — serves the sandbox desktop via noVNC

@@ -12,6 +12,12 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultTimeout     = 30 * time.Second
+	navigationTimeout  = 60 * time.Second
+	settleDelay        = 1 * time.Second // pause after navigation for dynamic content
+)
+
 // SandboxBrowserClient manages a browser connection to a sandbox Chrome instance
 // via Chrome DevTools Protocol (CDP). A persistent tab is created on Connect()
 // and reused for all actions so the user can see agent activity in the VNC viewer.
@@ -102,7 +108,7 @@ func (sbc *SandboxBrowserClient) runInTab(timeout time.Duration, fn func(ctx con
 // Screenshot takes a screenshot via CDP and returns raw PNG bytes.
 func (sbc *SandboxBrowserClient) Screenshot(ctx context.Context) ([]byte, error) {
 	var screenshotBuf []byte
-	err := sbc.runInTab(30*time.Second, func(actCtx context.Context) error {
+	err := sbc.runInTab(defaultTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 			var err error
 			screenshotBuf, err = page.CaptureScreenshot().Do(ctx)
@@ -126,10 +132,11 @@ func (sbc *SandboxBrowserClient) Navigate(ctx context.Context, url string) (*Pag
 	var screenshotBuf []byte
 	var elementsJSON string
 
-	err := sbc.runInTab(30*time.Second, func(actCtx context.Context) error {
+	err := sbc.runInTab(navigationTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx,
 			chromedp.Navigate(url),
 			chromedp.WaitReady("body"),
+			chromedp.Sleep(settleDelay),
 			chromedp.Title(&title),
 			chromedp.Location(&currentURL),
 			chromedp.Evaluate(labelerJS, &elementsJSON),
@@ -175,10 +182,11 @@ func (sbc *SandboxBrowserClient) Click(ctx context.Context, elementID int) (*Pag
 	var screenshotBuf []byte
 	var elementsJSON string
 
-	err := sbc.runInTab(30*time.Second, func(actCtx context.Context) error {
+	err := sbc.runInTab(navigationTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx,
 			chromedp.Click(selector, chromedp.NodeVisible),
 			chromedp.WaitReady("body"),
+			chromedp.Sleep(settleDelay),
 			chromedp.Title(&title),
 			chromedp.Location(&currentURL),
 			chromedp.Evaluate(labelerJS, &elementsJSON),
@@ -218,7 +226,11 @@ func (sbc *SandboxBrowserClient) Type(ctx context.Context, elementID int, text s
 	var screenshotBuf []byte
 	var elementsJSON string
 
-	err := sbc.runInTab(30*time.Second, func(actCtx context.Context) error {
+	timeout := defaultTimeout
+	if submit {
+		timeout = navigationTimeout
+	}
+	err := sbc.runInTab(timeout, func(actCtx context.Context) error {
 		actions := []chromedp.Action{
 			chromedp.Clear(selector, chromedp.NodeVisible),
 			chromedp.SendKeys(selector, text, chromedp.NodeVisible),
@@ -228,6 +240,11 @@ func (sbc *SandboxBrowserClient) Type(ctx context.Context, elementID int, text s
 		}
 		actions = append(actions,
 			chromedp.WaitReady("body"),
+		)
+		if submit {
+			actions = append(actions, chromedp.Sleep(settleDelay))
+		}
+		actions = append(actions,
 			chromedp.Title(&title),
 			chromedp.Location(&currentURL),
 			chromedp.Evaluate(labelerJS, &elementsJSON),
@@ -265,7 +282,7 @@ func (sbc *SandboxBrowserClient) Scroll(ctx context.Context, direction string, a
 	var screenshotBuf []byte
 	var elementsJSON string
 
-	err := sbc.runInTab(30*time.Second, func(actCtx context.Context) error {
+	err := sbc.runInTab(defaultTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx,
 			chromedp.Evaluate(fmt.Sprintf("window.scrollBy(0, %d)", scrollBy), nil),
 			chromedp.Title(&title),
