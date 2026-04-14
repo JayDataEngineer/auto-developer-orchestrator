@@ -13,14 +13,16 @@ import (
 )
 
 // SandboxBrowserClient manages a browser connection to a sandbox Chrome instance
-// via Chrome DevTools Protocol (CDP). Each action creates a fresh tab context
-// from a persistent allocator, avoiding context lifecycle issues.
+// via Chrome DevTools Protocol (CDP). A persistent tab is created on Connect()
+// and reused for all actions so the user can see agent activity in the VNC viewer.
 type SandboxBrowserClient struct {
 	cdpPort     int
 	wsURL       string
 	logger      *zap.Logger
 	allocator   context.Context
 	allocCancel context.CancelFunc
+	tabCtx      context.Context  // persistent tab — reused across actions
+	tabCancel   context.CancelFunc
 
 	// Cached state from last action
 	lastURL        string
@@ -51,45 +53,45 @@ func NewSandboxBrowserClient(cdpPort int, hostname string, logger *zap.Logger) (
 	}, nil
 }
 
-// Connect verifies Chrome CDP is reachable and stores the allocator.
+// Connect verifies Chrome CDP is reachable, stores the allocator, and creates
+// a persistent tab that will be reused for all subsequent actions.
 func (sbc *SandboxBrowserClient) Connect(ctx context.Context) error {
 	sbc.mu.Lock()
 	defer sbc.mu.Unlock()
 
-	if sbc.allocator != nil {
+	if sbc.tabCtx != nil {
 		return nil
 	}
 
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), sbc.wsURL)
 
-	// Quick connectivity test
-	testCtx, testCancel := chromedp.NewContext(allocCtx)
-	if err := chromedp.Run(testCtx, chromedp.Navigate("about:blank")); err != nil {
-		testCancel()
+	// Create the persistent tab — this is the tab the user sees in VNC.
+	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
+	if err := chromedp.Run(tabCtx, chromedp.Navigate("about:blank")); err != nil {
+		tabCancel()
 		allocCancel()
 		return fmt.Errorf("CDP connection test failed: %w", err)
 	}
-	testCancel()
 
 	sbc.allocator = allocCtx
 	sbc.allocCancel = allocCancel
+	sbc.tabCtx = tabCtx
+	sbc.tabCancel = tabCancel
 
 	sbc.logger.Info("sandbox browser client connected", zap.Int("cdp_port", sbc.cdpPort))
 	return nil
 }
 
-// runInTab creates a fresh tab with a timeout, runs fn, and cleans up.
+// runInTab runs fn in the persistent tab with a timeout. The same tab is reused
+// across all actions so the user sees agent activity in the VNC viewer.
 func (sbc *SandboxBrowserClient) runInTab(timeout time.Duration, fn func(ctx context.Context) error) error {
 	sbc.mu.RLock()
-	allocCtx := sbc.allocator
+	tabCtx := sbc.tabCtx
 	sbc.mu.RUnlock()
 
-	if allocCtx == nil {
+	if tabCtx == nil {
 		return fmt.Errorf("not connected — call Connect() first")
 	}
-
-	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
-	defer tabCancel()
 
 	timeoutCtx, timeoutCancel := context.WithTimeout(tabCtx, timeout)
 	defer timeoutCancel()
@@ -303,24 +305,29 @@ func (sbc *SandboxBrowserClient) GetSnapshot() (*PageInfo, error) {
 	}, nil
 }
 
-// Close closes the allocator.
+// Close closes the persistent tab and the allocator.
 func (sbc *SandboxBrowserClient) Close() {
 	sbc.mu.Lock()
 	defer sbc.mu.Unlock()
 
+	if sbc.tabCancel != nil {
+		sbc.tabCancel()
+		sbc.tabCtx = nil
+		sbc.tabCancel = nil
+	}
 	if sbc.allocCancel != nil {
 		sbc.allocCancel()
 		sbc.allocator = nil
 		sbc.allocCancel = nil
-		sbc.logger.Info("sandbox browser client closed", zap.Int("cdp_port", sbc.cdpPort))
 	}
+	sbc.logger.Info("sandbox browser client closed", zap.Int("cdp_port", sbc.cdpPort))
 }
 
-// IsConnected returns whether the client has an active allocator.
+// IsConnected returns whether the client has an active tab.
 func (sbc *SandboxBrowserClient) IsConnected() bool {
 	sbc.mu.RLock()
 	defer sbc.mu.RUnlock()
-	return sbc.allocator != nil
+	return sbc.tabCtx != nil
 }
 
 // updateState caches the current page state.
