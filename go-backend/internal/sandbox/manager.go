@@ -66,6 +66,7 @@ func (m *Manager) execInContainer(ctx context.Context, containerName string, cmd
 		Cmd:          cmd,
 		AttachStdout: !detach,
 		AttachStderr: !detach,
+		TTY:          !detach, // TTY avoids Docker multiplexed stream framing
 	})
 	if err != nil {
 		return "", fmt.Errorf("exec create failed: %w", err)
@@ -82,8 +83,12 @@ func (m *Manager) execInContainer(ctx context.Context, containerName string, cmd
 		return "", nil
 	}
 
-	// Attached execution — capture stdout+stderr
-	attach, err := m.dockerClient.ExecAttach(ctx, execCreate.ID, client.ExecAttachOptions{})
+	// Attached execution — use TTY mode to get a clean, non-multiplexed stream.
+	// Without TTY, Docker sends a multiplexed stream with 8-byte headers per frame
+	// that corrupt binary data (like base64-encoded screenshots).
+	attach, err := m.dockerClient.ExecAttach(ctx, execCreate.ID, client.ExecAttachOptions{
+		TTY: true,
+	})
 	if err != nil {
 		return "", fmt.Errorf("exec attach failed: %w", err)
 	}

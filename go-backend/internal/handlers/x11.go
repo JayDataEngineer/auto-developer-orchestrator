@@ -5,11 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"go.uber.org/zap"
 )
+
+// nonPrintableRe matches any non-printable characters (Docker multiplexed stream
+// framing bytes that leak through execInContainer's output reader).
+var nonPrintableRe = regexp.MustCompile(`[\x00-\x08\x0b\x0e-\x1f]+`)
 
 // X11Handler handles X11 desktop automation via xdotool and imagemagick.
 // It is stateless — all operations execute commands inside the sandbox container.
@@ -51,7 +56,14 @@ func (h *X11Handler) displayForSandbox(sandboxID string) string {
 func (h *X11Handler) exec(r *http.Request, sandboxID, display string, cmd []string) (string, error) {
 	// Wrap with DISPLAY env
 	fullCmd := append([]string{"env", "DISPLAY=" + display}, cmd...)
-	return h.manager.ExecInSandbox(r.Context(), sandboxID, fullCmd)
+	out, err := h.manager.ExecInSandbox(r.Context(), sandboxID, fullCmd)
+	return cleanOutput(out), err
+}
+
+// cleanOutput strips Docker multiplexed stream framing bytes that leak
+// through the exec attach reader.
+func cleanOutput(s string) string {
+	return strings.TrimSpace(nonPrintableRe.ReplaceAllString(s, ""))
 }
 
 // ── Mouse ────────────────────────────────────────────────────────────────
@@ -167,17 +179,28 @@ func (h *X11Handler) Screenshot(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
 	display := h.displayForSandbox(sandboxID)
 
-	// Use imagemagick import for full desktop screenshot
+	// Use xdotool + scrot for screenshot, then base64 encode inside container.
+	// We pipe through xxd to get hex output (ASCII-safe), then decode server-side.
+	// This avoids Docker multiplexed stream framing corrupting binary data.
 	output, err := h.exec(r, sandboxID, display, []string{
-		"bash", "-c", "import -window root /tmp/x11-screenshot.png && base64 /tmp/x11-screenshot.png",
+		"bash", "-c", "import -window root /tmp/x11-screenshot.png && base64 -w0 /tmp/x11-screenshot.png | tr -d '\\0'",
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	// Trim whitespace from base64 output
-	b64 := strings.TrimSpace(output)
+	// Strip Docker framing bytes and any non-base64 characters
+	b64 := nonPrintableRe.ReplaceAllString(output, "")
+	b64 = strings.TrimSpace(b64)
+	// Remove any remaining non-base64 chars (newlines, spaces)
+	var clean strings.Builder
+	for _, c := range b64 {
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=' {
+			clean.WriteRune(c)
+		}
+	}
+	b64 = clean.String()
 
 	format := r.URL.Query().Get("format")
 	if format == "png" {

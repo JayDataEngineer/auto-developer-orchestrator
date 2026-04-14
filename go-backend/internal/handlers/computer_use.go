@@ -186,11 +186,12 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 		time.Sleep(2 * time.Second)
 	}
 
-	// Step 4: Write landing page
-	h.writeLandingPage(ctx, sandboxID, session.DisplayNum)
-
-	// Step 5: Install X11 automation tools (xdotool, imagemagick) for native desktop control
+	// Step 4: Install X11 automation tools (xdotool, imagemagick) BEFORE writing
+	// the landing page so the sandbox is fully ready when /viewer returns 200.
 	h.installX11Tools(ctx, sandboxID)
+
+	// Step 5: Write landing page — signals "ready" to polling clients
+	h.writeLandingPage(ctx, sandboxID, session.DisplayNum)
 
 	h.logger.Info("background: computer use setup complete", zap.String("sandbox_id", sandboxID))
 }

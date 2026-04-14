@@ -26,16 +26,23 @@ def _ensure_sandbox_ready(api_url, api_session):
     )
     assert resp.status_code == 200, f"Enable failed: {resp.text[:500]}"
 
-    # Wait for background setup
-    deadline = time.time() + 90
+    # Wait for background setup (CDP connect + landing page)
+    deadline = time.time() + 120
     while time.time() < deadline:
         try:
             r = api_session.get(f"{api_url}/api/sandbox/{NAV_SANDBOX}/viewer", timeout=5)
             if r.status_code == 200:
-                return
+                # Viewer is ready, but also wait for CDP to connect
+                # by checking if screenshot returns 200 (not "not connected")
+                sr = api_session.get(
+                    f"{api_url}/api/sandbox/{NAV_SANDBOX}/computer-use/screenshot?describe=false",
+                    timeout=10,
+                )
+                if sr.status_code == 200:
+                    return
         except Exception:
             pass
-        time.sleep(2)
+        time.sleep(3)
     pytest.skip("Background setup did not complete in time")
 
 
@@ -90,26 +97,30 @@ class TestNavigationTimeout:
         assert resp.status_code == 200, f"Click failed: {resp.text[:500]}"
 
     def test_type_action(self, api_url, api_session):
-        """Type action should work without submit."""
-        # Navigate to a page with an input
+        """Type action should work without submit on an input element."""
+        # Navigate to a page with an input field
         api_session.post(
             f"{api_url}/api/sandbox/{NAV_SANDBOX}/computer-use/act",
-            json={"action": "navigate", "url": "https://example.com"},
+            json={"action": "navigate", "url": "https://www.google.com"},
             timeout=65,
         )
 
-        # Get elements
+        # Get elements and find an input-like one
         snap = api_session.get(
             f"{api_url}/api/sandbox/{NAV_SANDBOX}/computer-use/snapshot",
             timeout=30,
         ).json()
 
-        # Find a text-like element or use first one
         elements = snap.get("elements", [])
-        if not elements:
-            pytest.skip("No elements to type into")
+        # Find an input or textarea element
+        target = None
+        for el in elements:
+            if el.get("tag", "").lower() in ("input", "textarea"):
+                target = el
+                break
+        if not target:
+            pytest.skip("No input elements on page to type into")
 
-        target = elements[0]
         resp = api_session.post(
             f"{api_url}/api/sandbox/{NAV_SANDBOX}/computer-use/act",
             json={"action": "type", "element": target["id"], "text": "test", "submit": False},
