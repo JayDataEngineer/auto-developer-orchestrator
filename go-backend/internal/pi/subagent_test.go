@@ -505,6 +505,34 @@ func TestSubAgentManagerOptions(t *testing.T) {
 	}
 }
 
+func TestSubAgentModelArgUsesProviderForModel(t *testing.T) {
+	// Verify that the model prefix for sub-agents uses providerForModel()
+	// instead of hardcoding "litellm/". This test catches the bug where
+	// model was always prefixed with "litellm/" even though the only
+	// provider is "llamacpp".
+	tests := []struct {
+		model    string
+		expected string
+	}{
+		{"gemma-4-26b", "llamacpp/gemma-4-26b"},
+		{"qwen-cloud-vision", "llamacpp/qwen-cloud-vision"},
+		{"custom-model", "llamacpp/custom-model"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			modelArg := providerForModel(tt.model) + "/" + tt.model
+			if modelArg != tt.expected {
+				t.Errorf("model arg for %q = %q, want %q", tt.model, modelArg, tt.expected)
+			}
+			// Must NOT contain "litellm"
+			if strings.Contains(modelArg, "litellm") {
+				t.Errorf("model arg %q must not contain 'litellm'", modelArg)
+			}
+		})
+	}
+}
+
 func TestSubAgentManagerDefaults(t *testing.T) {
 	mgr := NewSubAgentManager(nil, nil)
 

@@ -83,11 +83,11 @@ func (h *SubAgentHandler) Spawn(w http.ResponseWriter, r *http.Request) {
 	if cfg.Model == "" {
 		switch cfg.Type {
 		case pi.SubAgentComputerUse:
-			cfg.Model = "google/gemini-2.0-flash-001" // vision + tools
+			cfg.Model = "gemma-4-26b" // local vision model via llama.cpp
 		case pi.SubAgentCode:
-			cfg.Model = "google/gemini-2.0-flash-001"
+			cfg.Model = "gemma-4-26b"
 		default:
-			cfg.Model = "google/gemini-2.0-flash-001"
+			cfg.Model = "gemma-4-26b"
 		}
 	}
 

@@ -229,7 +229,7 @@ func buildComputerUseSubAgentPrompt(cfg SubAgentPromptConfig) string {
 		"",
 		"You can create and manage scheduled jobs using curl to call the scheduler API.",
 		"Create a job:",
-		"curl -s -X POST " + apiBase + "/api/scheduler/ -d '{\"name\":\"Weather Check\",\"message\":\"Check the weather.\",\"project\":\"test-repo\",\"scheduleType\":\"every\",\"everySeconds\":300,\"model\":\"google/gemini-2.0-flash-001\",\"enabled\":true}'",
+		"curl -s -X POST " + apiBase + "/api/scheduler/ -d '{\"name\":\"Weather Check\",\"message\":\"Check the weather.\",\"project\":\"test-repo\",\"scheduleType\":\"every\",\"everySeconds\":300,\"model\":\"gemma-4-26b\",\"enabled\":true}'",
 		"List jobs:",
 		"curl -s " + apiBase + "/api/scheduler/",
 		"Run a job:",

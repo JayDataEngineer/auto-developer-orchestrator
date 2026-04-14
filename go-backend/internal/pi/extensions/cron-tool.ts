@@ -48,7 +48,7 @@ export default function (pi: ExtensionAPI) {
 			name: Type.Optional(Type.String({ description: "Job name (for add)" })),
 			schedule: Type.Optional(Type.String({ description: "Schedule: 'every N seconds', 'at YYYY-MM-DDTHH:MM:SSZ', or cron expression 'sec min hour day month weekday'" })),
 			message: Type.Optional(Type.String({ description: "The prompt message for the job to execute" })),
-			model: Type.Optional(Type.String({ description: "Model to use (default: google/gemini-2.0-flash-001)" })),
+			model: Type.Optional(Type.String({ description: "Model to use (default: gemma-4-26b)" })),
 			jobId: Type.Optional(Type.String({ description: "Job ID (for update, remove, run, runs)" })),
 			// For "update"
 			patch: Type.Optional(Type.Object({
@@ -96,7 +96,7 @@ export default function (pi: ExtensionAPI) {
 							message: params.message,
 							project: ctx.cwd.split("/").pop() || "test-repo",
 							enabled: true,
-							model: params.model || "google/gemini-2.0-flash-001",
+							model: params.model || "gemma-4-26b",
 						};
 						// Parse schedule
 						const sched = params.schedule.toLowerCase();

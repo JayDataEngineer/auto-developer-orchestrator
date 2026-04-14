@@ -107,7 +107,7 @@ func (m *SubAgentManager) Spawn(ctx context.Context, cfg SubAgentConfig) (string
 	// Build model string for CLI --model flag
 	modelArg := ""
 	if cfg.Model != "" {
-		modelArg = "litellm/" + cfg.Model
+		modelArg = providerForModel(cfg.Model) + "/" + cfg.Model
 	}
 
 	// Create PiClient with custom prompt
