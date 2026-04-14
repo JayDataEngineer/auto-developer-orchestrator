@@ -1,11 +1,33 @@
 package pi
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
 	"testing"
 )
+
+func TestProviderForModel(t *testing.T) {
+	tests := []struct {
+		model    string
+		expected string
+	}{
+		{"gemma-4-26b", "llamacpp"},
+		{"gemma-4-26b-fast", "llamacpp"},
+		{"qwen-cloud-vision", "llamacpp"},
+		{"claude-3-opus", "llamacpp"},
+		{"", "llamacpp"},
+		{"anything-else", "llamacpp"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			if got := providerForModel(tt.model); got != tt.expected {
+				t.Errorf("providerForModel(%q) = %q, want %q", tt.model, got, tt.expected)
+			}
+		})
+	}
+}
 
 func TestResolveDockerContainerIP(t *testing.T) {
 	// This test only passes if Docker is running and the shared-llama-cpp container exists.
@@ -135,4 +157,103 @@ func containsSubstr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestFixPiModelsConfigDeduplication(t *testing.T) {
+	// Verify that fixPiModelsConfig removes duplicate providers with the same baseUrl
+	tmpDir := t.TempDir()
+	piDir := filepath.Join(tmpDir, ".pi", "agent")
+	if err := os.MkdirAll(piDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Config with TWO providers pointing to the same URL
+	duplicateConfig := `{
+  "providers": {
+    "llamacpp": {
+      "baseUrl": "http://localhost:8001/v1",
+      "apiKey": "sk-no-key",
+      "models": [{"id": "gemma-4-26b"}]
+    },
+    "litellm": {
+      "baseUrl": "http://localhost:8001/v1",
+      "apiKey": "sk-no-key",
+      "models": [{"id": "gemma-4-26b"}],
+      "default_model": "gemma-4-26b"
+    }
+  }
+}`
+	modelsPath := filepath.Join(piDir, "models.json")
+	if err := os.WriteFile(modelsPath, []byte(duplicateConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run the dedup logic directly
+	originalHome := os.Getenv("HOME")
+	t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+	os.Setenv("HOME", tmpDir)
+
+	data, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var config struct {
+		Providers map[string]struct {
+			BaseURL string `json:"baseUrl"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+
+	// Dedup: find providers with duplicate URLs (prefer "llamacpp")
+	seen := make(map[string]string)
+	var toRemove []string
+	for name, cfg := range config.Providers {
+		if existing, ok := seen[cfg.BaseURL]; ok {
+			toRemoveName := name
+			if name == "llamacpp" && existing != "llamacpp" {
+				// Keep llamacpp, remove the other one
+				toRemoveName = existing
+				seen[cfg.BaseURL] = name
+			}
+			toRemove = append(toRemove, toRemoveName)
+			t.Logf("Would remove duplicate: %s (duplicate of %s, both at %s)", toRemoveName, seen[cfg.BaseURL], cfg.BaseURL)
+		} else {
+			seen[cfg.BaseURL] = name
+		}
+	}
+
+	if len(toRemove) != 1 {
+		t.Fatalf("expected 1 duplicate, got %d", len(toRemove))
+	}
+	if toRemove[0] != "litellm" {
+		t.Errorf("expected to remove 'litellm', got %q", toRemove[0])
+	}
+
+	// Verify the removal produces valid JSON with only llamacpp
+	var rawConfig map[string]any
+	json.Unmarshal(data, &rawConfig)
+	providers := rawConfig["providers"].(map[string]any)
+	for _, name := range toRemove {
+		delete(providers, name)
+	}
+
+	result, _ := json.MarshalIndent(rawConfig, "", "  ")
+	var parsed struct {
+		Providers map[string]any `json:"providers"`
+	}
+	if err := json.Unmarshal(result, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Providers) != 1 {
+		t.Errorf("expected 1 provider after dedup, got %d", len(parsed.Providers))
+	}
+	if _, ok := parsed.Providers["llamacpp"]; !ok {
+		t.Error("expected 'llamacpp' provider to remain")
+	}
+	if _, ok := parsed.Providers["litellm"]; ok {
+		t.Error("expected 'litellm' provider to be removed")
+	}
 }

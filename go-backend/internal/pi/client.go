@@ -184,10 +184,10 @@ func (c *PiClient) initComponents() {
 	}()
 }
 
-// fixPiModelsConfig updates the baseUrl in ~/.pi/agent/models.json to match
-// the LITELLM_PROXY_URL env var or dynamically resolve Docker container IPs.
+// fixPiModelsConfig sanitizes ~/.pi/agent/models.json:
+// 1. Replaces stale Docker bridge IPs with localhost:8001
+// 2. Deduplicates providers (removes litellm if it points to the same URL as llamacpp)
 func (c *PiClient) fixPiModelsConfig() {
-	// Find Pi's agent config directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return
@@ -199,29 +199,19 @@ func (c *PiClient) fixPiModelsConfig() {
 		return
 	}
 
-	content := string(data)
-	changed := false
-
-	// Strategy 1: If LITELLM_PROXY_URL is set, rewrite to use the proxy
-	if litellmURL := os.Getenv("LITELLM_PROXY_URL"); litellmURL != "" {
-		correctBase := strings.TrimRight(litellmURL, "/") + "/v1"
-		oldPatterns := []string{
-			"litellm-litellm-1:4000",
-			"litellm.local:4000",
-			"localhost:4000",
-		}
-		for _, pattern := range oldPatterns {
-			content = strings.ReplaceAll(content, "http://"+pattern+"/v1", correctBase)
-			content = strings.ReplaceAll(content, "http://"+pattern, correctBase)
-		}
-		if content != string(data) {
-			changed = true
-		}
+	var config struct {
+		Providers map[string]struct {
+			BaseURL string `json:"baseUrl"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return
 	}
 
-	// Strategy 2: Replace any stale Docker bridge IPs with localhost.
-	// The llama.cpp container exposes port 8001 on the host via port mapping,
-	// so http://localhost:8001/v1 is stable across Docker restarts.
+	changed := false
+	content := string(data)
+
+	// Step 1: Replace stale Docker bridge IPs with localhost:8001
 	re := regexp.MustCompile(`http://172\.\d+\.\d+\.\d+:\d+/v1`)
 	newContent := re.ReplaceAllString(content, "http://localhost:8001/v1")
 	if newContent != content {
@@ -229,11 +219,51 @@ func (c *PiClient) fixPiModelsConfig() {
 		changed = true
 	}
 
+	// Step 2: Deduplicate — if multiple providers share the same baseUrl,
+	// keep "llamacpp" (preferred) and remove the others.
+	seen := make(map[string]string) // baseUrl → provider name
+	var providersToRemove []string
+	for name, cfg := range config.Providers {
+		if existing, ok := seen[cfg.BaseURL]; ok {
+			// Duplicate URL — prefer "llamacpp" over anything else
+			toRemove := name
+			if name == "llamacpp" && existing != "llamacpp" {
+				// Keep llamacpp, remove the other one
+				toRemove = existing
+				seen[cfg.BaseURL] = name
+			}
+			c.logger.Info("Deduplicating models.json provider",
+				zap.String("remove", toRemove),
+				zap.String("keep", seen[cfg.BaseURL]),
+				zap.String("url", cfg.BaseURL),
+			)
+			providersToRemove = append(providersToRemove, toRemove)
+		} else {
+			seen[cfg.BaseURL] = name
+		}
+	}
+
+	if len(providersToRemove) > 0 {
+		// Re-parse, remove duplicates, re-serialize
+		var rawConfig map[string]any
+		if json.Unmarshal([]byte(content), &rawConfig) == nil {
+			if providers, ok := rawConfig["providers"].(map[string]any); ok {
+				for _, name := range providersToRemove {
+					delete(providers, name)
+				}
+				if serialized, err := json.MarshalIndent(rawConfig, "", "  "); err == nil {
+					content = string(serialized) + "\n"
+					changed = true
+				}
+			}
+		}
+	}
+
 	if changed {
 		if err := os.WriteFile(modelsPath, []byte(content), 0644); err != nil {
 			c.logger.Warn("Failed to update Pi models config", zap.Error(err))
 		} else {
-			c.logger.Info("Updated Pi models.json with resolved IPs")
+			c.logger.Info("Cleaned up Pi models.json")
 		}
 	}
 }
@@ -278,7 +308,7 @@ func (c *PiClient) installExtensions() error {
 		"todos.ts",
 		"hooks.ts",
 		"mcp-bridge.ts",
-		"litellm-provider.ts",
+		"model-provider.ts",
 	}
 
 	for _, name := range extFiles {
@@ -471,7 +501,7 @@ func (c *PiClient) start() error {
 		"todos.ts",
 		"hooks.ts",
 		"mcp-bridge.ts",
-		"litellm-provider.ts",
+		"model-provider.ts",
 	}
 	for _, ext := range extFiles {
 		args = append(args, "--extension", ext)
@@ -761,18 +791,10 @@ func (c *PiClient) SendCommand(cmd RpcCommand) error {
 }
 
 // providerForModel returns the provider name for a given model ID.
-// Models on llama.cpp bypass LiteLLM for speed.
-func providerForModel(modelId string) string {
-	directModels := map[string]string{
-		"gemma-4-26b":      "llamacpp",
-		"gemma-4-26b-fast": "llamacpp",
-		"gemma-4-e4b":      "llamacpp",
-		"gemma-4-e4b-fast": "llamacpp",
-	}
-	if p, ok := directModels[modelId]; ok {
-		return p
-	}
-	return "litellm"
+// All known local models go through llamacpp (llama.cpp direct).
+// Unknown models also default to llamacpp — no LiteLLM proxy needed.
+func providerForModel(_ string) string {
+	return "llamacpp"
 }
 
 // SendPrompt sends a coding prompt to Pi.
