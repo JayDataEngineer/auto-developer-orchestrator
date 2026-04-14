@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { api, LabeledElement } from '../lib/api';
+import { showToast } from '../lib/toast';
 
 interface ComputerUseState {
   enabled: boolean;
@@ -67,6 +68,7 @@ export function useComputerUse() {
         ? 'Computer use enable timed out. The sandbox may still be starting — try again.'
         : String(err);
       setState(prev => ({ ...prev, loading: false, error: msg }));
+      showToast('error', msg);
     }
   }, []);
 
@@ -76,7 +78,9 @@ export function useComputerUse() {
       await api.computerUse.disable(state.sandboxId);
       setState({ ...initialState });
     } catch (err) {
-      setState(prev => ({ ...prev, error: String(err) }));
+      const msg = String(err);
+      setState(prev => ({ ...prev, error: msg }));
+      showToast('error', msg);
     }
   }, [state.sandboxId]);
 
@@ -94,7 +98,9 @@ export function useComputerUse() {
         loading: false,
       }));
     } catch (err) {
-      setState(prev => ({ ...prev, loading: false, error: String(err) }));
+      const msg = String(err);
+      setState(prev => ({ ...prev, loading: false, error: msg }));
+      showToast('error', msg);
     }
   }, [state.sandboxId]);
 
@@ -109,7 +115,9 @@ export function useComputerUse() {
         title: res.title,
       }));
     } catch (err) {
-      setState(prev => ({ ...prev, error: String(err) }));
+      const msg = String(err);
+      setState(prev => ({ ...prev, error: msg }));
+      showToast('error', msg);
     }
   }, [state.sandboxId]);
 
@@ -128,7 +136,9 @@ export function useComputerUse() {
       // Auto-take screenshot after action
       takeScreenshot();
     } catch (err) {
-      setState(prev => ({ ...prev, loading: false, error: String(err) }));
+      const msg = String(err);
+      setState(prev => ({ ...prev, loading: false, error: msg }));
+      showToast('error', msg);
     }
   }, [state.sandboxId, takeScreenshot]);
 

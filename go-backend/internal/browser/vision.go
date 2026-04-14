@@ -8,35 +8,43 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 )
 
-// VisionClient sends screenshots to a vision model via LiteLLM
+// VisionClient sends screenshots to a vision model for page description.
+// Routes directly to llama.cpp at localhost:8001 — no LiteLLM dependency.
 type VisionClient struct {
-	litellmURL string
-	litellmKey string
+	baseURL    string
+	apiKey     string
+	model      string
 	httpClient *http.Client
 }
 
-// NewVisionClient creates a new vision client
-func NewVisionClient(litellmURL, litellmKey string) *VisionClient {
+// NewVisionClient creates a new vision client.
+// Falls back to localhost:8001 (llama.cpp) when no explicit URL is provided.
+func NewVisionClient(url, apiKey string) *VisionClient {
+	if url == "" {
+		url = "http://localhost:8001"
+	}
+	model := os.Getenv("VISION_MODEL")
+	if model == "" {
+		model = "gemma-4-26b"
+	}
 	return &VisionClient{
-		litellmURL: litellmURL,
-		litellmKey: litellmKey,
+		baseURL:    url,
+		apiKey:     apiKey,
+		model:      model,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
-// DescribePage sends a screenshot to the vision model and returns a text description
+// DescribePage sends a screenshot to the vision model and returns a text description.
 func (vc *VisionClient) DescribePage(ctx context.Context, screenshot []byte) (string, error) {
-	if vc.litellmURL == "" {
-		return "", fmt.Errorf("LITELLM_PROXY_URL not configured")
-	}
-
 	b64 := base64.StdEncoding.EncodeToString(screenshot)
 
 	payload := map[string]any{
-		"model": "qwen-cloud-vision",
+		"model": vc.model,
 		"messages": []map[string]any{
 			{
 				"role": "user",
@@ -62,15 +70,15 @@ func (vc *VisionClient) DescribePage(ctx context.Context, screenshot []byte) (st
 		return "", fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	url := vc.litellmURL + "/v1/chat/completions"
+	url := vc.baseURL + "/v1/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	if vc.litellmKey != "" {
-		req.Header.Set("Authorization", "Bearer "+vc.litellmKey)
+	if vc.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+vc.apiKey)
 	}
 
 	resp, err := vc.httpClient.Do(req)

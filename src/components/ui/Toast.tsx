@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { cn } from '../../lib/utils';
 import { CheckCircle, XCircle, Info, X } from 'lucide-react';
+import { registerToastHandler, unregisterToastHandler } from '../../lib/toast';
 
 interface Toast {
   id: string;
@@ -43,6 +44,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts(prev => [...prev, { id, type, message }]);
     setTimeout(() => removeToast(id), 4000);
   }, [removeToast]);
+
+  // Register global handler so hooks can call showToast() without context
+  useEffect(() => {
+    registerToastHandler(addToast);
+    return () => unregisterToastHandler();
+  }, [addToast]);
 
   return (
     <ToastContext.Provider value={{ addToast }}>

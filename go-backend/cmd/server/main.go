@@ -111,10 +111,10 @@ func main() {
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
 
-	// Vision client (shared by Web Sub-Agent and Computer Use)
-	litellmURL := os.Getenv("LITELLM_PROXY_URL")
-	litellmKey := os.Getenv("LITELLM_MASTER_KEY")
-	visionClient := browser.NewVisionClient(litellmURL, litellmKey)
+	// Vision client — defaults to llama.cpp at localhost:8001
+	visionURL := os.Getenv("LITELLM_PROXY_URL") // optional override
+	visionKey := os.Getenv("LITELLM_MASTER_KEY")
+	visionClient := browser.NewVisionClient(visionURL, visionKey)
 
 	// Browser automation (Web Sub-Agent)
 	var browserClient *browser.BrowserClient

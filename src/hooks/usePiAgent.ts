@@ -9,6 +9,7 @@ import {
 import { SubAgentInfo } from '../lib/api';
 import { readSSEStream } from './useSSEStream';
 import { api } from '../lib/api';
+import { showToast } from '../lib/toast';
 import {
   PiAgentState,
   initialAgentState,
@@ -170,12 +171,14 @@ export function usePiAgent(initialAgentId: string = 'default') {
 
         if (!response.ok) {
           const err = await response.json().catch(() => ({ error: 'Request failed' }));
+          const msg = err.error || `HTTP ${response.status}`;
           setState(prev => ({
             ...prev,
-            error: err.error || `HTTP ${response.status}`,
+            error: msg,
             isStreaming: false,
             messages: updateLastAssistant(prev.messages, msg => ({ ...msg, streaming: false })),
           }));
+          showToast('error', msg);
           return;
         }
 
@@ -201,6 +204,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
           isStreaming: false,
           messages: updateLastAssistant(prev.messages, msg => ({ ...msg, streaming: false })),
         }));
+        showToast('error', err.message || 'Prompt failed');
       }
     },
     [handleEvent, syncFlush, nextMsgId]
@@ -233,7 +237,9 @@ export function usePiAgent(initialAgentId: string = 'default') {
     try {
       await api.pi.setModel(project, provider, modelId, aid);
       setState(prev => ({ ...prev, model: modelId }));
-    } catch {}
+    } catch {
+      showToast('error', `Failed to switch model to ${modelId}`);
+    }
   }, []);
 
   const getModels = useCallback(async (project: string, agentId?: string): Promise<PiModel[]> => {
@@ -315,7 +321,9 @@ export function usePiAgent(initialAgentId: string = 'default') {
   ) => {
     try {
       await api.pi.respond(project, agentId, requestId, action, message);
-    } catch {}
+    } catch {
+      showToast('error', 'Failed to send approval response');
+    }
     setState(prev => ({ ...prev, pendingApproval: null }));
   }, []);
 
