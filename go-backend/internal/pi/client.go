@@ -219,19 +219,14 @@ func (c *PiClient) fixPiModelsConfig() {
 		}
 	}
 
-	// Strategy 2: Dynamically resolve Docker container IPs
-	// When running on the host, Docker bridge IPs change on restart.
-	// Resolve the current IP from the container and update models.json.
-	llamaIP := resolveDockerContainerIP("shared-llama-cpp")
-	if llamaIP != "" {
-		correctURL := "http://" + llamaIP + ":8001/v1"
-		// regex: match any http://172.x.x.x:port/v1 pattern
-		re := regexp.MustCompile(`http://172\.\d+\.\d+\.\d+:\d+/v1`)
-		newContent := re.ReplaceAllString(content, correctURL)
-		if newContent != content {
-			content = newContent
-			changed = true
-		}
+	// Strategy 2: Replace any stale Docker bridge IPs with localhost.
+	// The llama.cpp container exposes port 8001 on the host via port mapping,
+	// so http://localhost:8001/v1 is stable across Docker restarts.
+	re := regexp.MustCompile(`http://172\.\d+\.\d+\.\d+:\d+/v1`)
+	newContent := re.ReplaceAllString(content, "http://localhost:8001/v1")
+	if newContent != content {
+		content = newContent
+		changed = true
 	}
 
 	if changed {
