@@ -420,6 +420,35 @@ export const api = {
     activeWindow: (sandboxId: string) =>
       apiFetch<{ windowId: string; windowName: string }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/x11/active-window`),
   },
+  files: {
+    /** Upload a file into the sandbox container */
+    upload: (sandboxId: string, path: string, content: string, base64 = false) =>
+      apiFetch<{ path: string; size: number }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/files/upload`, {
+        method: 'POST',
+        body: JSON.stringify({ path, content, base64 }),
+      }),
+    /** Download a file from the sandbox container (returns base64-encoded content) */
+    download: (sandboxId: string, path: string) =>
+      apiFetch<{ path: string; content: string; encoding: 'base64' }>(
+        `/api/sandbox/${encodeURIComponent(sandboxId)}/files/download?path=${encodeURIComponent(path)}`,
+      ),
+    /** Download a file from the sandbox as raw bytes */
+    downloadRaw: (sandboxId: string, path: string) =>
+      fetch(`/api/sandbox/${encodeURIComponent(sandboxId)}/files/download?path=${encodeURIComponent(path)}&format=raw`).then(r => {
+        if (!r.ok) throw new Error('Download failed');
+        return r.blob();
+      }),
+    /** List files in a directory inside the sandbox */
+    list: (sandboxId: string, path = '/sandbox/workspace') =>
+      apiFetch<{ path: string; entries: Array<{ name: string; size: number; isDir: boolean }> }>(
+        `/api/sandbox/${encodeURIComponent(sandboxId)}/files/list?path=${encodeURIComponent(path)}`,
+      ),
+    /** Get file metadata */
+    stat: (sandboxId: string, path: string) =>
+      apiFetch<{ path: string; size: number; modTime: number; type: string; exists: boolean }>(
+        `/api/sandbox/${encodeURIComponent(sandboxId)}/files/stat?path=${encodeURIComponent(path)}`,
+      ),
+  },
   computerUse: {
     enable: (sandboxId: string, opts?: { signal?: AbortSignal }) =>
       apiFetch<{ enabled: boolean; sandboxId: string; cdpPort: number }>(`/api/sandbox/${encodeURIComponent(sandboxId)}/computer-use/enable`, {

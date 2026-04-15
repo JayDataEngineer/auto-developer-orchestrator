@@ -149,6 +149,9 @@ func main() {
 	// X11 handler (xdotool-based desktop automation for native apps)
 	x11Handler := handlers.NewX11Handler(sandboxMgr, logger)
 
+	// File transfer handler (upload/download files to/from sandbox)
+	fileHandler := handlers.NewFileHandler(sandboxMgr, logger)
+
 	// Scheduler (CRON/heartbeat system)
 	schedulerStorePath := os.Getenv("SCHEDULER_STORE_PATH")
 	if schedulerStorePath == "" {
@@ -301,6 +304,11 @@ func main() {
 			// X11 Desktop Automation (xdotool for native apps)
 			r.Route("/{id}/x11", func(r chi.Router) {
 				x11Handler.RegisterRoutes(r)
+			})
+
+			// File Transfer (upload/download files to/from sandbox)
+			r.Route("/{id}/files", func(r chi.Router) {
+				fileHandler.RegisterRoutes(r)
 			})
 
 			// VNC proxy — serves the sandbox desktop via noVNC
