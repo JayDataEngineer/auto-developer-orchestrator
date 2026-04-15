@@ -16,7 +16,7 @@ func newConfigRouter(t *testing.T) (*chi.Mux, *handlers.GitHubTokenStore) {
 	t.Helper()
 	logger := zap.NewNop()
 	tokenStore := handlers.NewGitHubTokenStore()
-	h := handlers.NewConfigHandler(logger, tokenStore, nil)
+	h := handlers.NewConfigHandler(logger, tokenStore, nil, nil)
 
 	r := chi.NewRouter()
 	r.Get("/api/config/ai", h.GetAI)

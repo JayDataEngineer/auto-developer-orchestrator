@@ -66,9 +66,16 @@ func (p *PiPool) GetOrCreate(projectPath string) (*PiClient, error) {
 }
 
 // GetOrCreateWithID returns a PiClient for the given project path and agentId.
-// If no client exists, a new Pi subprocess is spawned.
-// Session resume is NOT used for new agents to avoid loading stale 90K+ token contexts.
+// If an existing client's settings fingerprint matches expectedFP, it is reused.
+// If the fingerprint differs (model/provider changed), the client is evicted and recreated.
+// Pass empty expectedFP to always reuse running clients (backward compatible).
 func (p *PiPool) GetOrCreateWithID(projectPath, agentId string) (*PiClient, error) {
+	return p.GetOrCreateWithFingerprint(projectPath, agentId, "")
+}
+
+// GetOrCreateWithFingerprint is like GetOrCreateWithID but accepts a fingerprint
+// to validate that the existing client's settings haven't changed.
+func (p *PiPool) GetOrCreateWithFingerprint(projectPath, agentId, expectedFP string) (*PiClient, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -76,15 +83,28 @@ func (p *PiPool) GetOrCreateWithID(projectPath, agentId string) (*PiClient, erro
 
 	if client, ok := p.clients[key]; ok {
 		if client.IsRunning() {
-			return client, nil
+			// If no fingerprint check requested, reuse the client
+			if expectedFP == "" || client.Fingerprint() == expectedFP {
+				return client, nil
+			}
+			// Fingerprint mismatch — settings changed since this client was created
+			p.logger.Warn("Evicting client due to fingerprint mismatch",
+				zap.String("project", projectPath),
+				zap.String("agentId", agentId),
+				zap.String("oldFP", client.Fingerprint()),
+				zap.String("newFP", expectedFP),
+			)
+			client.Close()
+			delete(p.clients, key)
+		} else {
+			// Stale client, clean it up
+			p.logger.Warn("Evicting stale Pi client",
+				zap.String("project", projectPath),
+				zap.String("agentId", agentId),
+			)
+			client.Close()
+			delete(p.clients, key)
 		}
-		// Stale client, clean it up
-		p.logger.Warn("Evicting stale Pi client",
-			zap.String("project", projectPath),
-			zap.String("agentId", agentId),
-		)
-		client.Close()
-		delete(p.clients, key)
 	}
 
 	// Enforce max agents per project — evict oldest idle agent if at limit
@@ -116,6 +136,7 @@ func (p *PiPool) GetOrCreateWithID(projectPath, agentId string) (*PiClient, erro
 	p.logger.Info("Spawned new Pi client",
 		zap.String("project", projectPath),
 		zap.String("agentId", agentId),
+		zap.String("fingerprint", client.Fingerprint()),
 	)
 
 	return client, nil

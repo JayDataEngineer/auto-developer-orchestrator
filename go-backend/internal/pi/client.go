@@ -82,6 +82,11 @@ type PiClient struct {
 	// Pending RPC response waiters (keyed by command type)
 	respMu      sync.Mutex
 	respWaiters map[string]chan *RpcResponse
+
+	// Settings fingerprint — captures model/provider config at creation time.
+	// When the pool retrieves an existing client, it compares fingerprints.
+	// If they differ, the client is evicted and recreated.
+	settingsFingerprint string
 }
 
 // NewPiClient creates and starts a new Pi subprocess for the given project directory.
@@ -93,17 +98,18 @@ func NewPiClient(projectDir string, agentId string, logger *zap.Logger, sandboxM
 	sandboxID := filepath.Base(projectDir)
 
 	c := &PiClient{
-		logger:           logger,
-		projectDir:       projectDir,
-		agentId:          agentId,
-		cancel:           cancel,
-		ctx:              ctx,
-		subscribers:      make(map[string]chan AgentEvent),
-		pendingApprovals: make(map[string]chan ApprovalResponse),
-		respWaiters:      make(map[string]chan *RpcResponse),
-		startTime:        time.Now(),
-		namespace:        sandboxID,
-		sandboxManager:   nil,
+		logger:              logger,
+		projectDir:          projectDir,
+		agentId:             agentId,
+		cancel:              cancel,
+		ctx:                 ctx,
+		subscribers:         make(map[string]chan AgentEvent),
+		pendingApprovals:    make(map[string]chan ApprovalResponse),
+		respWaiters:         make(map[string]chan *RpcResponse),
+		startTime:           time.Now(),
+		namespace:           sandboxID,
+		sandboxManager:      nil,
+		settingsFingerprint: ComputeFingerprint("", ""),
 	}
 
 	// Type assertion for sandbox manager
@@ -136,20 +142,21 @@ func NewPiClientWithSession(projectDir string, agentId string, logger *zap.Logge
 	sandboxID := filepath.Base(projectDir)
 
 	c := &PiClient{
-		logger:             logger,
-		projectDir:         projectDir,
-		agentId:            agentId,
-		cancel:             cancel,
-		ctx:                ctx,
-		subscribers:        make(map[string]chan AgentEvent),
-		pendingApprovals:   make(map[string]chan ApprovalResponse),
-		respWaiters:        make(map[string]chan *RpcResponse),
-		startTime:          time.Now(),
-		namespace:          sandboxID,
-		sandboxManager:     nil,
-		customSystemPrompt: systemPrompt,
-		model:              model,
-		sessionPath:        sessionPath,
+		logger:              logger,
+		projectDir:          projectDir,
+		agentId:             agentId,
+		cancel:              cancel,
+		ctx:                 ctx,
+		subscribers:         make(map[string]chan AgentEvent),
+		pendingApprovals:    make(map[string]chan ApprovalResponse),
+		respWaiters:         make(map[string]chan *RpcResponse),
+		startTime:           time.Now(),
+		namespace:           sandboxID,
+		sandboxManager:      nil,
+		customSystemPrompt:  systemPrompt,
+		model:               model,
+		sessionPath:         sessionPath,
+		settingsFingerprint: ComputeFingerprint(model, systemPrompt),
 	}
 
 	if mgr, ok := sandboxMgr.(*sandbox.Manager); ok && mgr != nil {
@@ -1031,4 +1038,27 @@ func (c *PiClient) ResolveApproval(requestID string, resp ApprovalResponse) bool
 	}
 	ch <- resp
 	return true
+}
+
+// Fingerprint returns the settings fingerprint for this client.
+// The pool uses this to decide whether to reuse or evict an existing agent.
+func (c *PiClient) Fingerprint() string {
+	return c.settingsFingerprint
+}
+
+// ComputeFingerprint generates a stable hash from the model and system prompt.
+// Exported so handlers can compute expected fingerprints for validation.
+func ComputeFingerprint(model string, systemPrompt string) string {
+	// Simple XOR-based fingerprint — fast, no crypto needed
+	const prime = 1099511628211
+	var hash uint64 = 14695981039346656037 // FNV offset basis
+	for _, b := range []byte(model) {
+		hash ^= uint64(b)
+		hash *= prime
+	}
+	for _, b := range []byte(systemPrompt) {
+		hash ^= uint64(b)
+		hash *= prime
+	}
+	return fmt.Sprintf("%016x", hash)
 }

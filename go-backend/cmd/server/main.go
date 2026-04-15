@@ -107,7 +107,7 @@ func main() {
 	checklistHandler := handlers.NewChecklistHandler(db, logger)
 	projectHandler := handlers.NewProjectHandler(db, logger, gitOps)
 	githubTokenStore := handlers.NewGitHubTokenStore()
-	configHandler := handlers.NewConfigHandler(logger, githubTokenStore, modelCfg)
+	configHandler := handlers.NewConfigHandler(logger, githubTokenStore, modelCfg, db)
 	githubHandler := handlers.NewGitHubHandler(logger, githubTokenStore)
 	cliHandler := handlers.NewCLIHandler(logger, projectRoot)
 
@@ -259,6 +259,8 @@ func main() {
 
 		// Settings
 		r.Post("/settings/mode", projectHandler.SetMode)
+		r.Get("/config/project", configHandler.GetProjectSettings)
+		r.Put("/config/project", configHandler.SetProjectSettings)
 
 		// CLI Commands (safe, sandboxed)
 		r.Get("/cli/commands", cliHandler.ListAllowedCommands)

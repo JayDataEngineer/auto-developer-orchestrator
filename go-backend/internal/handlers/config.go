@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/auto-developer-orchestrator/backend/internal/models"
+	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -17,6 +18,7 @@ type ConfigHandler struct {
 	mu         sync.RWMutex
 	tokenStore *GitHubTokenStore
 	modelCfg   *models.ModelConfig
+	db         *storage.Database
 }
 
 // Config represents the AI configuration
@@ -40,11 +42,12 @@ type TestTypes struct {
 }
 
 // NewConfigHandler creates a new ConfigHandler
-func NewConfigHandler(logger *zap.Logger, tokenStore *GitHubTokenStore, modelCfg *models.ModelConfig) *ConfigHandler {
+func NewConfigHandler(logger *zap.Logger, tokenStore *GitHubTokenStore, modelCfg *models.ModelConfig, db *storage.Database) *ConfigHandler {
 	return &ConfigHandler{
 		logger:     logger,
 		tokenStore: tokenStore,
 		modelCfg:   modelCfg,
+		db:         db,
 		config: &Config{
 			AutoTask:           true,
 			AutoTest:           true,
@@ -306,5 +309,58 @@ func (h *ConfigHandler) SetModels(w http.ResponseWriter, r *http.Request) {
 		"success":   true,
 		"mainModel": h.modelCfg.MainModel(),
 		"toolModel": h.modelCfg.ToolModel(),
+	})
+}
+
+// GetProjectSettings returns per-project settings overrides.
+// GET /api/config/project?project=<name>
+func (h *ConfigHandler) GetProjectSettings(w http.ResponseWriter, r *http.Request) {
+	projectName := r.URL.Query().Get("project")
+	if projectName == "" {
+		JSONError(w, "project query param required", http.StatusBadRequest)
+		return
+	}
+
+	projectPath := resolveProjectPath(projectName, h.db)
+	if projectPath == "" {
+		JSONError(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	ps := models.LoadProjectSettings(projectPath, h.logger)
+	writeJSON(w, http.StatusOK, ps)
+}
+
+// SetProjectSettings updates per-project settings overrides.
+// PUT /api/config/project?project=<name>
+func (h *ConfigHandler) SetProjectSettings(w http.ResponseWriter, r *http.Request) {
+	projectName := r.URL.Query().Get("project")
+	if projectName == "" {
+		JSONError(w, "project query param required", http.StatusBadRequest)
+		return
+	}
+
+	projectPath := resolveProjectPath(projectName, h.db)
+	if projectPath == "" {
+		JSONError(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	var updates map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	ps := models.LoadProjectSettings(projectPath, h.logger)
+	if err := ps.Update(updates); err != nil {
+		h.logger.Error("Failed to save project settings", zap.Error(err))
+		JSONError(w, "Failed to save settings", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":  true,
+		"settings": ps,
 	})
 }

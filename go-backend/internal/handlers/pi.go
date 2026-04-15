@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,6 +25,7 @@ type PiHandler struct {
 	log        *zap.Logger
 	litellmURL string
 	litellmKey string
+	toolPerms  *pi.ToolPermissionConfig
 }
 
 // NewPiHandler creates a new Pi handler.
@@ -36,6 +38,35 @@ func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, gh 
 		log:        logger,
 		litellmURL: os.Getenv("LITELLM_PROXY_URL"),
 		litellmKey: os.Getenv("LITELLM_MASTER_KEY"),
+		toolPerms:  pi.NewToolPermissionConfig(logger),
+	}
+}
+
+// waitForApproval sends an approval SSE event and blocks until the user responds,
+// the context is cancelled, or the timeout expires.
+// Returns the approval response, or nil if the context timed out.
+func (h *PiHandler) waitForApproval(
+	ctx context.Context,
+	w http.ResponseWriter,
+	client *pi.PiClient,
+	approvalData pi.ApprovalRequestData,
+	canFlush bool,
+	flusher http.Flusher,
+) (*pi.ApprovalResponse, string) {
+	writeSSE(w, pi.EventApprovalRequest, approvalData, canFlush, flusher)
+
+	ch := client.RegisterApproval(approvalData.RequestID)
+	select {
+	case resp, ok := <-ch:
+		if !ok {
+			return nil, "channel closed"
+		}
+		return &resp, ""
+	case <-ctx.Done():
+		return nil, "context cancelled"
+	case <-time.After(5 * time.Minute):
+		client.Steer("APPROVAL_TIMEOUT: do NOT proceed. No response received.")
+		return nil, "timeout"
 	}
 }
 
@@ -57,6 +88,8 @@ func (h *PiHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/history", h.GetHistory)
 	r.Delete("/conversation", h.DeleteConversation)
 	r.Put("/conversation/rename", h.RenameConversation)
+	r.Get("/tool-permissions", h.GetToolPermissions)
+	r.Put("/tool-permissions", h.SetToolPermission)
 	r.Get("/debug/rpc-test", h.DebugRpcTest)
 }
 
@@ -170,6 +203,11 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client, err := h.pool.GetOrCreateWithID(projectPath, req.AgentId)
+	if req.Model != "" {
+		// Re-fetch with fingerprint to validate settings haven't changed
+		fp := pi.ComputeFingerprint(req.Model, "")
+		client, err = h.pool.GetOrCreateWithFingerprint(projectPath, req.AgentId, fp)
+	}
 	if err != nil {
 		h.log.Error("Failed to get Pi client", zap.Error(err))
 		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
@@ -285,45 +323,40 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Intercept risky bash commands for approval before forwarding to SSE
+			// Intercept tool invocations that need approval before forwarding to SSE
 			if sseEvent.Type == pi.EventToolStart && !approvalTriggered {
 				if dataMap, ok := sseEvent.Data.(map[string]interface{}); ok {
-					if toolName, _ := dataMap["toolName"].(string); toolName == "bash" {
-						if args, ok := dataMap["args"].(map[string]interface{}); ok {
-							if cmd, _ := args["command"].(string); cmd != "" {
-								if risky, reason := pi.IsRiskyBashCommand(cmd); risky {
-									requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
-									approvalTriggered = true
+					toolName, _ := dataMap["toolName"].(string)
+					args, _ := dataMap["args"].(map[string]interface{})
+					if args == nil {
+						args = map[string]interface{}{}
+					}
 
-									writeSSE(w, pi.EventApprovalRequest, pi.ApprovalRequestData{
-										RequestID: requestID,
-										Type:      "tool_confirm",
-										ToolName:  "bash",
-										ToolArgs:  map[string]interface{}{"command": cmd},
-										Message:   reason + ": " + cmd,
-										Risk:      "high",
-									}, canFlush, flusher)
+					needsApproval, riskLevel, reason := h.toolPerms.ShouldApprove(toolName, args)
+					if needsApproval {
+						requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
+						approvalTriggered = true
 
-									ch := client.RegisterApproval(requestID)
-									select {
-									case resp, ok := <-ch:
-										if !ok {
-											return
-										}
-										if resp.Action == "approve" {
-											client.Steer("APPROVED: " + resp.Message)
-										} else {
-											client.Steer("DENIED: do NOT execute: " + cmd + ". Reason: " + resp.Message)
-											continue // skip forwarding the tool event
-										}
-									case <-ctx.Done():
-										return
-									case <-time.After(5 * time.Minute):
-										client.Steer("APPROVAL_TIMEOUT: do NOT execute: " + cmd)
-										continue
-									}
-								}
-							}
+						resp, status := h.waitForApproval(ctx, w, client, pi.ApprovalRequestData{
+							RequestID: requestID,
+							Type:      "tool_confirm",
+							ToolName:  toolName,
+							ToolArgs:  args,
+							Message:   reason + ": " + toolName,
+							Risk:      riskLevel,
+						}, canFlush, flusher)
+
+						if status == "context cancelled" {
+							return
+						}
+						if resp == nil {
+							continue // timeout
+						}
+						if resp.Action == "approve" {
+							client.Steer("APPROVED: " + resp.Message)
+						} else {
+							client.Steer("DENIED: do NOT execute " + toolName + ". Reason: " + resp.Message)
+							continue
 						}
 					}
 				}
@@ -374,28 +407,21 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 					}
 					requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
 
-					writeSSE(w, pi.EventApprovalRequest, pi.ApprovalRequestData{
+					resp, status := h.waitForApproval(ctx, w, client, pi.ApprovalRequestData{
 						RequestID: requestID,
 						Type:      "plan",
 						Message:   msg,
 						Risk:      "high",
 					}, canFlush, flusher)
-
-					ch := client.RegisterApproval(requestID)
-					select {
-					case resp, ok := <-ch:
-						if !ok {
-							return
-						}
+					if status == "context cancelled" {
+						return
+					}
+					if resp != nil {
 						if resp.Action == "approve" {
 							client.Steer(fmt.Sprintf("APPROVED by user: %s. Proceed with the planned action.", resp.Message))
 						} else {
 							client.Steer(fmt.Sprintf("DENIED by user: %s. Do NOT proceed with this action.", resp.Message))
 						}
-					case <-ctx.Done():
-						return
-					case <-time.After(5 * time.Minute):
-						client.Steer("APPROVAL_TIMEOUT: No response. Do NOT proceed.")
 					}
 				} else if idx := strings.Index(assistantText, "??QUESTION:"); idx >= 0 {
 					approvalTriggered = true
@@ -405,24 +431,17 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 					}
 					requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
 
-					writeSSE(w, pi.EventQuestionAsked, pi.ApprovalRequestData{
+					resp, status := h.waitForApproval(ctx, w, client, pi.ApprovalRequestData{
 						RequestID: requestID,
 						Type:      "question",
 						Message:   question,
 						Risk:      "low",
 					}, canFlush, flusher)
-
-					ch := client.RegisterApproval(requestID)
-					select {
-					case resp, ok := <-ch:
-						if !ok {
-							return
-						}
-						client.Steer(fmt.Sprintf("USER ANSWER: %s", resp.Message))
-					case <-ctx.Done():
+					if status == "context cancelled" {
 						return
-					case <-time.After(5 * time.Minute):
-						client.Steer("QUESTION_TIMEOUT: No response. Use your best judgment.")
+					}
+					if resp != nil {
+						client.Steer(fmt.Sprintf("USER ANSWER: %s", resp.Message))
 					}
 				}
 			}
@@ -475,4 +494,40 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// GetToolPermissions returns all configured tool permissions.
+// GET /api/pi/tool-permissions
+func (h *PiHandler) GetToolPermissions(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.toolPerms.AllPermissions())
+}
+
+// SetToolPermission updates a single tool's permission level.
+// PUT /api/pi/tool-permissions
+func (h *PiHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Tool   string `json:"tool"`
+		Level  string `json:"level"` // "auto", "confirm", "deny"
+		Reason string `json:"reason,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Tool == "" || req.Level == "" {
+		JSONError(w, "tool and level are required", http.StatusBadRequest)
+		return
+	}
+
+	h.toolPerms.SetPermission(req.Tool, pi.PermissionLevel(req.Level), req.Reason)
+	h.log.Info("Tool permission updated",
+		zap.String("tool", req.Tool),
+		zap.String("level", req.Level),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"tool":    req.Tool,
+		"level":   req.Level,
+	})
 }

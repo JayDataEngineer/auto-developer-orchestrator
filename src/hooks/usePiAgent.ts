@@ -17,6 +17,7 @@ import {
   agentReducer,
 } from './agentReducer';
 import { useThrottledDeltas } from './useThrottledDeltas';
+import { useMessageQueue, QueuedMessage } from './useMessageQueue';
 
 // Re-exports for backward compatibility
 export type { SubAgentInfo } from '../lib/api';
@@ -210,6 +211,33 @@ export function usePiAgent(initialAgentId: string = 'default') {
     [handleEvent, syncFlush, nextMsgId]
   );
 
+  // Message queue — lets users queue prompts while the agent is streaming.
+  // When streaming finishes, the next queued message auto-dispatches.
+  const handleDequeue = useCallback(
+    async (msg: QueuedMessage) => {
+      const project = projectRef.current;
+      if (!project) return;
+      // Use sendPrompt directly — the queue handles ordering
+      sendPrompt(msg.text, project, {
+        model: msg.model,
+        thinkingLevel: msg.thinkingLevel,
+        autoBranch: msg.autoBranch,
+        autoMerge: msg.autoMerge,
+        agentId: agentIdRef.current,
+      });
+    },
+    [sendPrompt],
+  );
+
+  const messageQueue = useMessageQueue(handleDequeue, state.isStreaming);
+
+  // Auto-process queue when streaming finishes
+  useEffect(() => {
+    if (!state.isStreaming) {
+      messageQueue.tryProcessNext();
+    }
+  }, [state.isStreaming, messageQueue.tryProcessNext]);
+
   const abort = useCallback(async (project: string, agentId?: string) => {
     if (abortRef.current) {
       abortRef.current.abort();
@@ -338,5 +366,6 @@ export function usePiAgent(initialAgentId: string = 'default') {
     hydrateState,
     loadHistory,
     respondToApproval,
+    messageQueue,
   };
 }
