@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/git"
+	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
+	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -26,20 +30,34 @@ type PiHandler struct {
 	litellmURL string
 	litellmKey string
 	toolPerms  *pi.ToolPermissionConfig
+
+	// Library mode (optional — set when LLAMA_LIBRARY_MODE=1)
+	llamaEngine    *llamaeng.Engine
+	sandboxMgr     *sandbox.Manager
+	llamaLoops     map[string]*llamaeng.AgentLoop // key: compositeKey(projectPath, agentId)
+	llamaLoopsMu   sync.Mutex
 }
 
 // NewPiHandler creates a new Pi handler.
 func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, logger *zap.Logger) *PiHandler {
 	return &PiHandler{
-		pool:       pool,
-		db:         db,
-		git:        gitOps,
-		github:     gh,
-		log:        logger,
-		litellmURL: os.Getenv("LITELLM_PROXY_URL"),
-		litellmKey: os.Getenv("LITELLM_MASTER_KEY"),
-		toolPerms:  pi.NewToolPermissionConfig(logger),
+		pool:        pool,
+		db:          db,
+		git:         gitOps,
+		github:      gh,
+		log:         logger,
+		litellmURL:  os.Getenv("LITELLM_PROXY_URL"),
+		litellmKey:  os.Getenv("LITELLM_MASTER_KEY"),
+		toolPerms:   pi.NewToolPermissionConfig(logger),
+		llamaLoops:  make(map[string]*llamaeng.AgentLoop),
 	}
+}
+
+// SetLlamaEngine configures the handler for library-mode inference.
+// When set, Prompt() routes through llama-go instead of Pi subprocess.
+func (h *PiHandler) SetLlamaEngine(engine *llamaeng.Engine, sandboxMgr *sandbox.Manager) {
+	h.llamaEngine = engine
+	h.sandboxMgr = sandboxMgr
 }
 
 // waitForApproval sends an approval SSE event and blocks until the user responds,
@@ -199,6 +217,12 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": "Project not found",
 		})
+		return
+	}
+
+	// Library-mode path: use llama-go engine directly instead of Pi subprocess
+	if h.llamaEngine != nil && h.llamaEngine.IsLoaded() {
+		h.promptWithLlamaEngine(w, r, req, projectPath)
 		return
 	}
 
@@ -494,6 +518,173 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// promptWithLlamaEngine handles prompt requests using the llama-go engine
+// instead of the Pi subprocess. Streams the same SSE event format.
+func (h *PiHandler) promptWithLlamaEngine(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
+	key := compositeAgentKey(projectPath, req.AgentId)
+	sandboxID := filepath.Base(projectPath)
+
+	// Get or create the agent loop (persists KV cache across prompts)
+	loop := h.getOrCreateLlamaLoop(key, sandboxID)
+
+	// Set up SSE
+	setSSEHeaders(w)
+	flusher, canFlush := w.(http.Flusher)
+
+	// Send agent_spawned event
+	spawnData, _ := json.Marshal(map[string]string{"agentId": req.AgentId})
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", pi.EventAgentSpawned, string(spawnData))
+	if canFlush {
+		flusher.Flush()
+	}
+
+	// Save user message to DB
+	if h.db != nil {
+		if _, err := h.db.SaveUserMessage(r.Context(), req.Project, req.AgentId, req.Message); err != nil {
+			h.log.Warn("Failed to save user message", zap.Error(err))
+		}
+	}
+
+	// Create event channel for the agent loop
+	events := make(chan llamaeng.AgentEvent, 256)
+
+	// Run the agent loop in a goroutine
+	ctx := r.Context()
+	var loopErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer close(events) // Close events channel so drain loop terminates
+		if loop.Session().History() == nil || len(loop.Session().History()) == 0 {
+			cfg := llamaeng.DefaultAgentLoopConfig()
+			cfg.SystemPrompt = fmt.Sprintf(
+				"You are a coding assistant with access to tools. Project: %s. Sandbox: %s. Read files, run commands, and help with coding tasks.",
+				filepath.Base(projectPath), sandboxID,
+			)
+			loopErr = loop.Run(ctx, req.Message, events)
+		} else {
+			loopErr = loop.Continue(ctx, req.Message, events)
+		}
+	}()
+
+	// Stream events to SSE
+	var assistantText, assistantThinking string
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			loop.Abort()
+			return
+		case <-done:
+			// Loop finished — drain any remaining events
+			for evt := range events {
+				h.writeLlamaSSE(w, evt, canFlush, flusher)
+				h.accumulateLlamaText(evt, &assistantText, &assistantThinking)
+			}
+			// Save to DB
+			if h.db != nil {
+				if _, err := h.db.SaveAssistantMessage(ctx, req.Project, req.AgentId, assistantText, assistantThinking, "[]"); err != nil {
+					h.log.Warn("Failed to save assistant message", zap.Error(err))
+				}
+			}
+			if loopErr != nil {
+				h.log.Error("Agent loop error", zap.Error(loopErr))
+			}
+			return
+		case <-keepalive.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			if canFlush {
+				flusher.Flush()
+			}
+		case evt, ok := <-events:
+			if !ok {
+				return
+			}
+			keepalive.Reset(15 * time.Second)
+			h.writeLlamaSSE(w, evt, canFlush, flusher)
+			h.accumulateLlamaText(evt, &assistantText, &assistantThinking)
+		}
+	}
+}
+
+// writeLlamaSSE converts a llama engine event to SSE and writes it.
+func (h *PiHandler) writeLlamaSSE(w http.ResponseWriter, evt llamaeng.AgentEvent, canFlush bool, flusher http.Flusher) {
+	piEvent := llamaeng.ConvertEvent(evt)
+	sseEvt := h.mapEventToSSE(piEvent)
+	if sseEvt == nil {
+		return
+	}
+
+	// Ensure tool events have IDs
+	if sseEvt.Type == pi.EventToolStart {
+		if dataMap, ok := sseEvt.Data.(map[string]interface{}); ok {
+			tid, _ := dataMap["toolId"].(string)
+			if tid == "" {
+				dataMap["toolId"] = nextToolFallbackId()
+			}
+		}
+	}
+
+	data, err := json.Marshal(sseEvt.Data)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", sseEvt.Type, string(data))
+	if canFlush {
+		flusher.Flush()
+	}
+}
+
+// accumulateLlamaText accumulates text/thinking from llama events for DB persistence.
+func (h *PiHandler) accumulateLlamaText(evt llamaeng.AgentEvent, text, thinking *string) {
+	switch evt.Type {
+	case llamaeng.EventTypeTextDelta:
+		*text += evt.Data.Text
+	case llamaeng.EventTypeThinkingDelta:
+		*thinking += evt.Data.Text
+	}
+}
+
+// getOrCreateLlamaLoop returns an existing agent loop or creates a new one.
+func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID string) *llamaeng.AgentLoop {
+	h.llamaLoopsMu.Lock()
+	defer h.llamaLoopsMu.Unlock()
+
+	if loop, ok := h.llamaLoops[key]; ok {
+		return loop
+	}
+
+	var executor llamaeng.ToolExecutor
+	if h.sandboxMgr != nil {
+		executor = &llamaeng.SandboxToolExecutor{
+			SandboxID: sandboxID,
+			Manager:   h.sandboxMgr,
+			Logger:    h.log,
+		}
+	}
+
+	cfg := llamaeng.DefaultAgentLoopConfig()
+	loop, err := llamaeng.NewAgentLoop(h.llamaEngine, executor, cfg, h.log)
+	if err != nil {
+		h.log.Error("Failed to create agent loop", zap.Error(err))
+		return nil
+	}
+
+	h.llamaLoops[key] = loop
+	h.log.Info("Created new llama agent loop",
+		zap.String("key", key),
+		zap.String("sandbox", sandboxID),
+	)
+	return loop
+}
+
+// compositeAgentKey builds a key from projectPath and agentId for the llama loops map.
+func compositeAgentKey(projectPath, agentId string) string {
+	return projectPath + "\x00" + agentId
 }
 
 // GetToolPermissions returns all configured tool permissions.

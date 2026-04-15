@@ -12,6 +12,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
+	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/models"
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
@@ -65,6 +66,29 @@ func main() {
 	// Set TOOL_MODEL env var so Pi extensions (cron-tool, etc.) can read it
 	os.Setenv("TOOL_MODEL", modelCfg.ToolModel().ModelId)
 
+	// Load llama-go engine in library mode (opt-in via LLAMA_LIBRARY_MODE=1).
+	// This bypasses the HTTP llama.cpp server and uses CGO for direct GPU access,
+	// providing persistent KV cache across tool calls (~2x faster agent loops).
+	var llamaEngine *llamaeng.Engine
+	if os.Getenv("LLAMA_LIBRARY_MODE") == "1" {
+		modelPath := os.Getenv("LLAMA_MODEL_PATH")
+		if modelPath == "" {
+			modelPath = "/home/ubuntu/Documents/programs/shared-docker-infra/models/llm/gemma-4-26B-A4B-it-UD-IQ4_NL.gguf"
+		}
+		llamaEngine = llamaeng.NewEngine(llamaeng.EngineConfig{
+			ModelPath: modelPath,
+			Logger:    logger,
+		})
+		if err := llamaEngine.LoadModel(); err != nil {
+			logger.Fatal("Failed to load model in library mode", zap.Error(err))
+		}
+		defer llamaEngine.Close()
+		logger.Info("llama-go engine loaded (library mode)",
+			zap.String("model", modelPath),
+			zap.Duration("loadTime", llamaEngine.LoadDuration()),
+		)
+	}
+
 	// Initialize sandbox manager
 	sandboxMgr, err := sandbox.NewManager(logger)
 	if err != nil {
@@ -114,6 +138,12 @@ func main() {
 	// Pi agent pool
 	piPool := pi.NewPiPool(logger, 5*time.Minute)
 	piHandler := handlers.NewPiHandler(piPool, db, gitOps, githubHandler, logger)
+
+	// Wire llama-go engine into handler when library mode is enabled
+	if llamaEngine != nil {
+		piHandler.SetLlamaEngine(llamaEngine, sandboxMgr)
+		logger.Info("PiHandler configured for llama-go library mode")
+	}
 
 	// Sub-agent manager
 	subAgentMgr := pi.NewSubAgentManager(piPool, logger,
