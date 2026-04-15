@@ -12,6 +12,15 @@ version: "3"
 vars:
   GO_PORT: 3847
   JS_PORT: 5174
+  # ── llama.cpp Model Paths ─────────────────────────────────────────────
+  # Models live in shared-docker-infra (not this repo).
+  # Override with: task model -- MODELS=/other/path
+  MODELS_DIR:
+    sh: echo "${MODELS_DIR:-/home/ubuntu/Documents/programs/shared-docker-infra/models/llm}"
+  VISION_DIR:
+    sh: echo "${VISION_DIR:-/home/ubuntu/Documents/programs/shared-docker-infra/models/vision}"
+  LLAMA_IMAGE: "ghcr.io/ggml-org/llama.cpp:server-cuda"
+  LLAMA_PORT: "8001"
 
 dotenv: [".env"]
 
@@ -171,3 +180,29 @@ tasks:
         ignore_error: true
       - cmd: 'echo -n "Langfuse: " && (curl -sf http://langfuse.local/api/health > /dev/null && echo "OK" || echo "DOWN (optional)")'
         ignore_error: true
+
+  # ── llama.cpp Model Server ────────────────────────────────────────────
+  model:
+    desc: |
+      Start optimized llama.cpp server for agent workloads (~118 tok/s on RTX 4090).
+      Modes:
+        task model              vision + thinking (default, for screenshots/OCR)
+        task model FLAGS=fast   vision, no thinking
+        task model FLAGS=text   text-only + thinking (more VRAM for context)
+        task model FLAGS=bare   text-only, no thinking (minimal)
+    deps: [model-down]
+    cmds:
+      - bash scripts/model.sh {{.FLAGS}}
+
+  model-down:
+    desc: Stop the llama.cpp model server
+    cmds:
+      - cmd: docker rm -f orchestrator-llama 2>/dev/null; true
+        silent: true
+
+  model-status:
+    desc: Check model server health and stats
+    cmds:
+      - cmd: curl -sf http://localhost:{{.LLAMA_PORT}}/health | python3 -m json.tool || echo "Model server not running"
+      - cmd: curl -sf http://localhost:{{.LLAMA_PORT}}/props | python3 -m json.tool || true
+        silent: true
