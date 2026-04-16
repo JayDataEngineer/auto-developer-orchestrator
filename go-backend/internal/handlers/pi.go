@@ -36,6 +36,7 @@ type PiHandler struct {
 	sandboxMgr     *sandbox.Manager
 	llamaLoops     map[string]*llamaeng.AgentLoop // key: compositeKey(projectPath, agentId)
 	llamaLoopsMu   sync.Mutex
+	cuBridge       *ComputerUseBridge // bridges llama executor to CU/X11 handlers
 }
 
 // NewPiHandler creates a new Pi handler.
@@ -55,9 +56,12 @@ func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, gh 
 
 // SetLlamaEngine configures the handler for library-mode inference.
 // When set, Prompt() routes through llama-go instead of Pi subprocess.
-func (h *PiHandler) SetLlamaEngine(engine *llamaeng.Engine, sandboxMgr *sandbox.Manager) {
+func (h *PiHandler) SetLlamaEngine(engine *llamaeng.Engine, sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
 	h.llamaEngine = engine
 	h.sandboxMgr = sandboxMgr
+	if cu != nil {
+		h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
+	}
 }
 
 // waitForApproval sends an approval SSE event and blocks until the user responds,
@@ -527,7 +531,7 @@ func (h *PiHandler) promptWithLlamaEngine(w http.ResponseWriter, r *http.Request
 	sandboxID := filepath.Base(projectPath)
 
 	// Get or create the agent loop (persists KV cache across prompts)
-	loop := h.getOrCreateLlamaLoop(key, sandboxID)
+	loop := h.getOrCreateLlamaLoop(key, sandboxID, projectPath)
 
 	// Set up SSE
 	setSSEHeaders(w)
@@ -558,11 +562,6 @@ func (h *PiHandler) promptWithLlamaEngine(w http.ResponseWriter, r *http.Request
 		defer close(done)
 		defer close(events) // Close events channel so drain loop terminates
 		if loop.Session().History() == nil || len(loop.Session().History()) == 0 {
-			cfg := llamaeng.DefaultAgentLoopConfig()
-			cfg.SystemPrompt = fmt.Sprintf(
-				"You are a coding assistant with access to tools. Project: %s. Sandbox: %s. Read files, run commands, and help with coding tasks.",
-				filepath.Base(projectPath), sandboxID,
-			)
 			loopErr = loop.Run(ctx, req.Message, events)
 		} else {
 			loopErr = loop.Continue(ctx, req.Message, events)
@@ -650,7 +649,7 @@ func (h *PiHandler) accumulateLlamaText(evt llamaeng.AgentEvent, text, thinking 
 }
 
 // getOrCreateLlamaLoop returns an existing agent loop or creates a new one.
-func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID string) *llamaeng.AgentLoop {
+func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID, projectPath string) *llamaeng.AgentLoop {
 	h.llamaLoopsMu.Lock()
 	defer h.llamaLoopsMu.Unlock()
 
@@ -663,11 +662,17 @@ func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID string) *llamaeng.AgentL
 		executor = &llamaeng.SandboxToolExecutor{
 			SandboxID: sandboxID,
 			Manager:   h.sandboxMgr,
+			CU:        h.cuBridge,
 			Logger:    h.log,
 		}
 	}
 
 	cfg := llamaeng.DefaultAgentLoopConfig()
+	cfg.MaxToolRounds = 30 // Browser automation needs many rounds
+	cfg.SystemPrompt = llamaeng.BuildLibraryModeSystemPrompt(llamaeng.LibraryPromptConfig{
+		ProjectDir: projectPath,
+		SandboxID:  sandboxID,
+	})
 	loop, err := llamaeng.NewAgentLoop(h.llamaEngine, executor, cfg, h.log)
 	if err != nil {
 		h.log.Error("Failed to create agent loop", zap.Error(err))

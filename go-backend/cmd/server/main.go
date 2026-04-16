@@ -139,12 +139,6 @@ func main() {
 	piPool := pi.NewPiPool(logger, 5*time.Minute)
 	piHandler := handlers.NewPiHandler(piPool, db, gitOps, githubHandler, logger)
 
-	// Wire llama-go engine into handler when library mode is enabled
-	if llamaEngine != nil {
-		piHandler.SetLlamaEngine(llamaEngine, sandboxMgr)
-		logger.Info("PiHandler configured for llama-go library mode")
-	}
-
 	// Sub-agent manager
 	subAgentMgr := pi.NewSubAgentManager(piPool, logger,
 		pi.WithSandboxManager(sandboxMgr),
@@ -178,6 +172,12 @@ func main() {
 
 	// X11 handler (xdotool-based desktop automation for native apps)
 	x11Handler := handlers.NewX11Handler(sandboxMgr, logger)
+
+	// Wire llama-go engine into PiHandler when library mode is enabled
+	if llamaEngine != nil {
+		piHandler.SetLlamaEngine(llamaEngine, sandboxMgr, computerUseHandler, x11Handler)
+		logger.Info("PiHandler configured for llama-go library mode with computer use")
+	}
 
 	// File transfer handler (upload/download files to/from sandbox)
 	fileHandler := handlers.NewFileHandler(sandboxMgr, logger)

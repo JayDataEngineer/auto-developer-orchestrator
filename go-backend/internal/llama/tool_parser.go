@@ -21,8 +21,9 @@ type ToolCall struct {
 //   <|tool_call>call:TOOL_NAME{json_args}<tool_call|>
 // or the simpler form:
 //   <|tool_call>TOOL_NAME{json_args}<tool_call|>
+// Note: the closing tag may be either <tool_call|> or <|tool_call|>.
 var toolCallRe = regexp.MustCompile(
-	`<\|tool_call\>(\w+:)?(\w+)\s*(\{[^}]*\})\s*<\|tool_call\|>`,
+	`<\|tool_call\>(\w+:)?(\w+)\s*(\{[^}]*\})\s*<?\|?tool_call\|>`,
 )
 
 // toolCallStartRe matches the opening of a tool call (for streaming detection).
@@ -79,7 +80,8 @@ func ParseToolCalls(output string) ([]ToolCall, string) {
 // Used during streaming to buffer until the complete tool call is received.
 func HasPartialToolCall(output string) bool {
 	startCount := strings.Count(output, "<|tool_call>")
-	endCount := strings.Count(output, "<|tool_call|>")
+	// Count both closing tag variants
+	endCount := strings.Count(output, "<tool_call|>") + strings.Count(output, "<|tool_call|>")
 	return startCount > endCount
 }
 
@@ -88,6 +90,7 @@ func HasPartialToolCall(output string) bool {
 func StripToolCallTags(output string) string {
 	output = strings.ReplaceAll(output, "<|tool_call>", "")
 	output = strings.ReplaceAll(output, "<|tool_call|>", "")
+	output = strings.ReplaceAll(output, "<tool_call|>", "")
 	return strings.TrimSpace(output)
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -52,18 +53,76 @@ type ToolExecutor interface {
 	Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error)
 }
 
-// SandboxToolExecutor executes tools via the sandbox manager.
+// ComputerUseProvider provides computer use / desktop automation capabilities.
+// Implemented by handlers via ComputerUseBridge.
+type ComputerUseProvider interface {
+	// Browser automation (CDP)
+	Enable(ctx context.Context, sandboxID string) (map[string]interface{}, error)
+	Screenshot(ctx context.Context, sandboxID string, describe bool) (map[string]interface{}, error)
+	Snapshot(ctx context.Context, sandboxID string) (map[string]interface{}, error)
+	Act(ctx context.Context, sandboxID string, action string, args map[string]interface{}) (map[string]interface{}, error)
+
+	// Desktop automation (X11)
+	DesktopScreenshot(ctx context.Context, sandboxID string) (map[string]interface{}, error)
+	DesktopClick(ctx context.Context, sandboxID string, x, y float64, button int) (map[string]interface{}, error)
+	DesktopType(ctx context.Context, sandboxID string, text string) (map[string]interface{}, error)
+	DesktopKey(ctx context.Context, sandboxID string, key string) (map[string]interface{}, error)
+}
+
+// SandboxToolExecutor executes tools via the sandbox manager and computer use provider.
 type SandboxToolExecutor struct {
 	SandboxID string
 	Manager   *sandbox.Manager
+	CU        ComputerUseProvider
 	Logger    *zap.Logger
 }
 
 // Execute runs a tool in the sandbox and returns the result.
 func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
+	// Normalize common tool name aliases
 	switch toolName {
-	case "bash", "computer_use_exec":
+	case "bash_execute", "execute_bash", "run_command", "shell", "execute":
+		toolName = "bash"
+	case "computer_use_exec", "exec":
+		toolName = "bash"
+	case "navigate", "browser_navigate", "go_to":
+		toolName = "computer_use_act"
+		if _, ok := args["action"]; !ok {
+			args["action"] = "navigate"
+		}
+	case "click", "browser_click":
+		toolName = "computer_use_act"
+		if _, ok := args["action"]; !ok {
+			args["action"] = "click"
+		}
+	case "type", "browser_type", "fill":
+		toolName = "computer_use_act"
+		if _, ok := args["action"]; !ok {
+			args["action"] = "type"
+		}
+	case "scroll", "browser_scroll":
+		toolName = "computer_use_act"
+		if _, ok := args["action"]; !ok {
+			args["action"] = "scroll"
+		}
+	case "screenshot", "take_screenshot", "browser_screenshot":
+		toolName = "computer_use_screenshot"
+	case "snapshot", "get_snapshot", "get_elements", "browser_snapshot":
+		toolName = "computer_use_snapshot"
+	case "enable", "enable_desktop", "start_browser":
+		toolName = "computer_use_enable"
+	}
+
+	// Bash: run command inside sandbox container
+	if toolName == "bash" {
 		cmd, _ := args["command"].(string)
+		// If JSON parse failed and we got a raw string, try to extract the command
+		if cmd == "" {
+			if raw, ok := args["raw"].(string); ok {
+				// Try to extract command value from raw string like {command: "ls"}
+				cmd = extractJSONStringValue(raw, "command")
+			}
+		}
 		if cmd == "" {
 			return nil, fmt.Errorf("missing 'command' argument")
 		}
@@ -72,6 +131,63 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 			return nil, err
 		}
 		return map[string]interface{}{"output": output}, nil
+	}
+
+	// Computer use tools — require ComputerUseProvider
+	if e.CU == nil {
+		return nil, fmt.Errorf("computer use not available: %s", toolName)
+	}
+
+	switch toolName {
+	case "computer_use_enable":
+		return e.CU.Enable(ctx, e.SandboxID)
+
+	case "computer_use_screenshot":
+		describe := true
+		if d, ok := args["describe"]; ok {
+			if b, ok := d.(bool); ok {
+				describe = b
+			}
+		}
+		return e.CU.Screenshot(ctx, e.SandboxID, describe)
+
+	case "computer_use_snapshot":
+		return e.CU.Snapshot(ctx, e.SandboxID)
+
+	case "computer_use_act":
+		action, _ := args["action"].(string)
+		if action == "" {
+			return nil, fmt.Errorf("missing 'action' argument")
+		}
+		return e.CU.Act(ctx, e.SandboxID, action, args)
+
+	case "desktop_screenshot":
+		return e.CU.DesktopScreenshot(ctx, e.SandboxID)
+
+	case "desktop_click":
+		x, _ := args["x"].(float64)
+		y, _ := args["y"].(float64)
+		button := 1
+		if b, ok := args["button"]; ok {
+			if f, ok := b.(float64); ok {
+				button = int(f)
+			}
+		}
+		return e.CU.DesktopClick(ctx, e.SandboxID, x, y, button)
+
+	case "desktop_type":
+		text, _ := args["text"].(string)
+		if text == "" {
+			return nil, fmt.Errorf("missing 'text' argument")
+		}
+		return e.CU.DesktopType(ctx, e.SandboxID, text)
+
+	case "desktop_key":
+		key, _ := args["key"].(string)
+		if key == "" {
+			return nil, fmt.Errorf("missing 'key' argument")
+		}
+		return e.CU.DesktopKey(ctx, e.SandboxID, key)
 
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", toolName)
@@ -418,6 +534,24 @@ func (loop *AgentLoop) IsRunning() bool {
 	loop.mu.Lock()
 	defer loop.mu.Unlock()
 	return loop.running
+}
+
+// extractJSONStringValue extracts a value from a loosely-formatted JSON string.
+// Handles cases like {command: "ls -la"} where keys aren't quoted.
+func extractJSONStringValue(raw, key string) string {
+	// Try quoted key: "key": "value"
+	patterns := []string{
+		fmt.Sprintf(`"%s"\s*:\s*"((?:[^"\\]|\\.)*)"`, key),
+		fmt.Sprintf(`%s\s*:\s*"((?:[^"\\]|\\.)*)"`, key),
+	}
+	for _, p := range patterns {
+		re := regexp.MustCompile(p)
+		m := re.FindStringSubmatch(raw)
+		if len(m) >= 2 {
+			return strings.ReplaceAll(m[1], `\"`, `"`)
+		}
+	}
+	return ""
 }
 
 // Session returns the underlying session for inspection.
