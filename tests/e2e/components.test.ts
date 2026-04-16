@@ -1,6 +1,6 @@
 /**
  * Component E2E Tests
- * Tests React component rendering and interaction.
+ * Tests React component rendering and module imports.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -9,7 +9,6 @@ describe('Frontend Components - E2E', () => {
   describe('Component Imports', () => {
     it('should import App component', async () => {
       const AppModule = await import('../../src/App');
-      // App might be exported as default or named
       expect(AppModule.App || AppModule.default).toBeDefined();
     });
 
@@ -18,35 +17,19 @@ describe('Frontend Components - E2E', () => {
       expect(Header).toBeDefined();
     });
 
-    it('should import Sidebar component', async () => {
-      const { Sidebar } = await import('../../src/components/Sidebar');
-      expect(Sidebar).toBeDefined();
-    });
-
     it('should import Checklist component', async () => {
       const { Checklist } = await import('../../src/components/Checklist');
       expect(Checklist).toBeDefined();
-    });
-
-    it('should import ActivityView component', async () => {
-      const { ActivityView } = await import('../../src/components/ActivityView');
-      expect(ActivityView).toBeDefined();
     });
 
     it('should import AIConfigModal component', async () => {
       const { AIConfigModal } = await import('../../src/components/AIConfigModal');
       expect(AIConfigModal).toBeDefined();
     });
-  });
 
-  describe('Deep Agent Module', () => {
-    it('should have deepAgent file', async () => {
-      // Note: We can't import the module directly because it instantiates
-      // ChatAnthropic which throws without API keys. Instead, we verify the file exists.
-      const fs = await import('fs');
-      const path = await import('path');
-      const deepAgentPath = path.join(process.cwd(), 'src', 'deepAgent.ts');
-      expect(fs.existsSync(deepAgentPath)).toBe(true);
+    it('should import PiAgentView component', async () => {
+      const { PiAgentView } = await import('../../src/components/PiAgentView');
+      expect(PiAgentView).toBeDefined();
     });
   });
 
@@ -57,12 +40,10 @@ describe('Frontend Components - E2E', () => {
     });
   });
 
-  describe('Server Module', () => {
-    it('should have server.ts file', async () => {
-      const fs = await import('fs');
-      const path = await import('path');
-      const serverPath = path.join(process.cwd(), 'server.ts');
-      expect(fs.existsSync(serverPath)).toBe(true);
+  describe('Pages', () => {
+    it('should have AppShell component', async () => {
+      const { AppShell } = await import('../../src/components/AppShell');
+      expect(AppShell).toBeDefined();
     });
   });
 });
