@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -395,6 +396,33 @@ func (m *Manager) ExecInSandbox(ctx context.Context, id string, cmd []string) (s
 }
 
 // GetSandbox returns a sandbox by ID
+// FindSandboxByProject finds a sandbox by project path basename or project path.
+// Returns the first running sandbox whose ProjectPath ends with name, or whose ID matches name.
+func (m *Manager) FindSandboxByProject(name string) *Sandbox {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// First try exact ID match
+	if sb, ok := m.sandboxes[name]; ok {
+		return sb
+	}
+
+	// Then match by project path basename or suffix
+	for _, sb := range m.sandboxes {
+		if sb.Status != StatusRunning {
+			continue
+		}
+		if filepath.Base(sb.ProjectPath) == name || sb.ProjectPath == name {
+			return sb
+		}
+		// Also match if project path ends with /name
+		if strings.HasSuffix(sb.ProjectPath, "/"+name) {
+			return sb
+		}
+	}
+	return nil
+}
+
 func (m *Manager) GetSandbox(id string) (*Sandbox, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

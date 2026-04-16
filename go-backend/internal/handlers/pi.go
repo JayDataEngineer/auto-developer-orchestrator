@@ -532,6 +532,13 @@ func (h *PiHandler) promptWithLlamaEngine(w http.ResponseWriter, r *http.Request
 
 	// Get or create the agent loop (persists KV cache across prompts)
 	loop := h.getOrCreateLlamaLoop(key, sandboxID, projectPath)
+	if loop == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to create agent loop (VRAM full or model not loaded). Try again later.",
+		})
+		return
+	}
 
 	// Set up SSE
 	setSSEHeaders(w)
@@ -655,6 +662,30 @@ func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID, projectPath string) *ll
 
 	if loop, ok := h.llamaLoops[key]; ok {
 		return loop
+	}
+
+	// VRAM constraint: evict oldest non-running loops if we have too many.
+	// With 24GB VRAM: 12.8GB model + ~85MB per 8K context = ~3 max concurrent agents.
+	const maxLlamaLoops = 3
+	if len(h.llamaLoops) >= maxLlamaLoops {
+		// Find oldest non-running loop to evict
+		var evictKey string
+		for k, l := range h.llamaLoops {
+			if !l.IsRunning() {
+				evictKey = k
+				break // evict first non-running one
+			}
+		}
+		if evictKey != "" {
+			h.log.Info("Evicting llama agent loop (VRAM budget)",
+				zap.String("evictKey", evictKey),
+				zap.Int("currentLoops", len(h.llamaLoops)),
+			)
+			if old := h.llamaLoops[evictKey]; old != nil {
+				old.Close()
+			}
+			delete(h.llamaLoops, evictKey)
+		}
 	}
 
 	var executor llamaeng.ToolExecutor

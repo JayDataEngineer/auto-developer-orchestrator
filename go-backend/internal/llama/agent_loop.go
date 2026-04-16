@@ -79,38 +79,90 @@ type SandboxToolExecutor struct {
 
 // Execute runs a tool in the sandbox and returns the result.
 func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
+	// Resolve actual sandbox ID from project name
+	sandboxID := e.SandboxID
+	if e.Manager != nil {
+		if sb := e.Manager.FindSandboxByProject(sandboxID); sb != nil {
+			sandboxID = sb.ID
+		}
+	}
+
 	// Normalize common tool name aliases
 	switch toolName {
-	case "bash_execute", "execute_bash", "run_command", "shell", "execute":
+	case "bash_execute", "execute_bash", "run_command", "shell", "execute",
+		"terminal_use", "terminal", "run", "command", "run_bash", "run_shell",
+		"execute_command", "execute_command_in_terminal", "terminal_command":
 		toolName = "bash"
 	case "computer_use_exec", "exec":
 		toolName = "bash"
-	case "navigate", "browser_navigate", "go_to":
+	case "navigate", "browser_navigate", "go_to", "open_url", "goto",
+		"open", "browse", "visit", "visit_url", "open_page", "go_to_url":
 		toolName = "computer_use_act"
 		if _, ok := args["action"]; !ok {
 			args["action"] = "navigate"
 		}
-	case "click", "browser_click":
+		// Copy url/URL to the expected field
+		if _, ok := args["url"]; !ok {
+			if u, ok := args["URL"]; ok {
+				args["url"] = u
+			}
+		}
+	case "click", "browser_click", "click_element", "click_button",
+		"click_at", "mouse_click":
 		toolName = "computer_use_act"
 		if _, ok := args["action"]; !ok {
 			args["action"] = "click"
 		}
-	case "type", "browser_type", "fill":
+	case "type", "browser_type", "fill", "type_text", "enter_text",
+		"input_text", "keyboard_type", "type_into":
 		toolName = "computer_use_act"
 		if _, ok := args["action"]; !ok {
 			args["action"] = "type"
 		}
-	case "scroll", "browser_scroll":
+	case "scroll", "browser_scroll", "scroll_page", "scroll_down", "scroll_up":
 		toolName = "computer_use_act"
 		if _, ok := args["action"]; !ok {
 			args["action"] = "scroll"
 		}
-	case "screenshot", "take_screenshot", "browser_screenshot":
+	case "screenshot", "take_screenshot", "browser_screenshot",
+		"capture_screenshot", "screen_capture", "capture_screen":
 		toolName = "computer_use_screenshot"
-	case "snapshot", "get_snapshot", "get_elements", "browser_snapshot":
+	case "snapshot", "get_snapshot", "get_elements", "browser_snapshot",
+		"get_page_elements", "page_snapshot", "inspect_page", "get_page_structure":
 		toolName = "computer_use_snapshot"
-	case "enable", "enable_desktop", "start_browser":
+	case "enable", "enable_desktop", "start_browser", "enable_browser",
+		"enable_computer_use", "setup_browser", "init_browser":
 		toolName = "computer_use_enable"
+	default:
+		// Fuzzy matching for common patterns
+		lower := strings.ToLower(toolName)
+		if strings.Contains(lower, "bash") || strings.Contains(lower, "shell") ||
+			strings.Contains(lower, "terminal") || strings.Contains(lower, "command") {
+			toolName = "bash"
+		} else if strings.Contains(lower, "navigat") || strings.Contains(lower, "go_to") ||
+			strings.Contains(lower, "open_url") || strings.Contains(lower, "visit") {
+			toolName = "computer_use_act"
+			if _, ok := args["action"]; !ok {
+				args["action"] = "navigate"
+			}
+		} else if strings.Contains(lower, "screenshot") || strings.Contains(lower, "capture") {
+			toolName = "computer_use_screenshot"
+		} else if strings.Contains(lower, "snapshot") || strings.Contains(lower, "element") {
+			toolName = "computer_use_snapshot"
+		} else if strings.Contains(lower, "click") {
+			toolName = "computer_use_act"
+			if _, ok := args["action"]; !ok {
+				args["action"] = "click"
+			}
+		} else if strings.Contains(lower, "type") || strings.Contains(lower, "input") ||
+			strings.Contains(lower, "fill") || strings.Contains(lower, "enter") {
+			toolName = "computer_use_act"
+			if _, ok := args["action"]; !ok {
+				args["action"] = "type"
+			}
+		} else if strings.Contains(lower, "enable") || strings.Contains(lower, "start_browser") {
+			toolName = "computer_use_enable"
+		}
 	}
 
 	// Bash: run command inside sandbox container
@@ -126,7 +178,7 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		if cmd == "" {
 			return nil, fmt.Errorf("missing 'command' argument")
 		}
-		output, err := e.Manager.ExecInSandbox(ctx, e.SandboxID, []string{"bash", "-c", cmd})
+		output, err := e.Manager.ExecInSandbox(ctx, sandboxID, []string{"bash", "-c", cmd})
 		if err != nil {
 			return nil, err
 		}
@@ -140,7 +192,7 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 
 	switch toolName {
 	case "computer_use_enable":
-		return e.CU.Enable(ctx, e.SandboxID)
+		return e.CU.Enable(ctx, sandboxID)
 
 	case "computer_use_screenshot":
 		describe := true
@@ -149,20 +201,35 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 				describe = b
 			}
 		}
-		return e.CU.Screenshot(ctx, e.SandboxID, describe)
+		return e.CU.Screenshot(ctx, sandboxID, describe)
 
 	case "computer_use_snapshot":
-		return e.CU.Snapshot(ctx, e.SandboxID)
+		return e.CU.Snapshot(ctx, sandboxID)
 
 	case "computer_use_act":
 		action, _ := args["action"].(string)
+		// Extract action from raw args if JSON parse failed
+		if action == "" {
+			if raw, ok := args["raw"].(string); ok {
+				action = extractJSONStringValue(raw, "action")
+			}
+		}
 		if action == "" {
 			return nil, fmt.Errorf("missing 'action' argument")
 		}
-		return e.CU.Act(ctx, e.SandboxID, action, args)
+		// Extract url from raw args if not already set
+		if _, ok := args["url"]; !ok {
+			if raw, ok := args["raw"].(string); ok {
+				url := extractJSONStringValue(raw, "url")
+				if url != "" {
+					args["url"] = url
+				}
+			}
+		}
+		return e.CU.Act(ctx, sandboxID, action, args)
 
 	case "desktop_screenshot":
-		return e.CU.DesktopScreenshot(ctx, e.SandboxID)
+		return e.CU.DesktopScreenshot(ctx, sandboxID)
 
 	case "desktop_click":
 		x, _ := args["x"].(float64)
@@ -173,21 +240,21 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 				button = int(f)
 			}
 		}
-		return e.CU.DesktopClick(ctx, e.SandboxID, x, y, button)
+		return e.CU.DesktopClick(ctx, sandboxID, x, y, button)
 
 	case "desktop_type":
 		text, _ := args["text"].(string)
 		if text == "" {
 			return nil, fmt.Errorf("missing 'text' argument")
 		}
-		return e.CU.DesktopType(ctx, e.SandboxID, text)
+		return e.CU.DesktopType(ctx, sandboxID, text)
 
 	case "desktop_key":
 		key, _ := args["key"].(string)
 		if key == "" {
 			return nil, fmt.Errorf("missing 'key' argument")
 		}
-		return e.CU.DesktopKey(ctx, e.SandboxID, key)
+		return e.CU.DesktopKey(ctx, sandboxID, key)
 
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", toolName)

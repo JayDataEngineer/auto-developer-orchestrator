@@ -19,11 +19,13 @@ type ToolCall struct {
 
 // toolCallRe matches Gemma 4's native tool call format:
 //   <|tool_call>call:TOOL_NAME{json_args}<tool_call|>
+// or with extra prefixes:
+//   <|tool_call>call:prefix:TOOL_NAME{json_args}<tool_call|>
 // or the simpler form:
 //   <|tool_call>TOOL_NAME{json_args}<tool_call|>
 // Note: the closing tag may be either <tool_call|> or <|tool_call|>.
 var toolCallRe = regexp.MustCompile(
-	`<\|tool_call\>(\w+:)?(\w+)\s*(\{[^}]*\})\s*<?\|?tool_call\|>`,
+	`<\|tool_call\>(?:\w+:)*(\w+)\s*(\{[^}]*\})\s*<?\|?tool_call\|>`,
 )
 
 // toolCallStartRe matches the opening of a tool call (for streaming detection).
@@ -41,11 +43,10 @@ func ParseToolCalls(output string) ([]ToolCall, string) {
 		// Append text before this match
 		cleanText.WriteString(output[lastEnd:match[0]])
 
-		// match[2]/match[3] = optional prefix group (e.g., "call:")
-		// match[4]/match[5] = tool name group
-		// match[6]/match[7] = JSON args group
-		toolName := output[match[4]:match[5]]
-		argsStr := output[match[6]:match[7]]
+		// match[2]/match[3] = tool name group
+		// match[4]/match[5] = JSON args group
+		toolName := output[match[2]:match[3]]
+		argsStr := output[match[4]:match[5]]
 		rawMatch := output[match[0]:match[1]]
 
 		var args map[string]interface{}
