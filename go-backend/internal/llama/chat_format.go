@@ -30,12 +30,18 @@ func formatUserTurn(content string) string {
 	return sb.String()
 }
 
-// formatUserTurnWithResult wraps a tool result + next user message in a single user turn.
-// The tool result and next message are concatenated in the same turn.
+// formatUserTurnWithResult wraps a tool result + continuation nudge in a user turn.
+// The nudge tells the model to call the next DIFFERENT tool (avoids runaway loops
+// where the model repeats the same tool endlessly).
 func formatUserTurnWithResult(toolResult string, nextUserMsg string) string {
 	var sb strings.Builder
 	sb.WriteString(startUserTurn)
+	sb.WriteString("[tool_result]\n")
 	sb.WriteString(toolResult)
+	sb.WriteString("\n[/tool_result]\n\n")
+	sb.WriteString("Based on the output above, decide the next step toward the user's goal. ")
+	sb.WriteString("Call the next DIFFERENT tool. Do NOT repeat the same tool that just ran. ")
+	sb.WriteString("If the original task is complete, respond with your final answer instead of calling a tool.")
 	if nextUserMsg != "" {
 		sb.WriteString("\n")
 		sb.WriteString(nextUserMsg)

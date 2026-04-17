@@ -507,6 +507,12 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 		toolCalls, _ := ParseToolCalls(output)
 
 		if len(toolCalls) == 0 || round >= loop.config.MaxToolRounds {
+			if round >= loop.config.MaxToolRounds {
+				loop.logger.Warn("Max tool rounds reached, stopping agent loop",
+					zap.Int("round", round),
+					zap.Int("maxRounds", loop.config.MaxToolRounds),
+				)
+			}
 			// No tool calls — the model is done (or we hit the round limit)
 			// Track the model response in session history for multi-turn
 			loop.session.TrackModelResponse(output)
@@ -579,8 +585,26 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 		}
 
 		// Phase 4: Feed tool results back into the session (incremental — KV cache persists!)
+		// Strip any text AFTER tool calls to prevent the model from "remembering"
+		// its own post-tool explanation and continuing in explanatory mode.
+		cleanOutput := output
+		if len(toolCalls) > 0 {
+			// Only keep text up to and including the last tool call
+			lastEnd := 0
+			for _, tc := range toolCalls {
+				if tc.End > lastEnd {
+					lastEnd = tc.End
+				}
+			}
+			if lastEnd < len(output) {
+				cleanOutput = output[:lastEnd]
+			}
+		}
 		combinedResult := strings.Join(toolResults, "\n")
-		nextCh, err := loop.session.FeedResult(output, combinedResult, "", opts)
+		// Re-inject the user's original goal as a reminder so the model
+		// doesn't lose track of what it's doing after seeing tool results.
+		goalReminder := "\nReminder: Continue working toward the user's original request. Call the next tool now."
+		nextCh, err := loop.session.FeedResult(cleanOutput, combinedResult, goalReminder, opts)
 		if err != nil {
 			subscriber <- AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}}
 			subscriber <- AgentEvent{Type: EventTypeAgentEnd}
