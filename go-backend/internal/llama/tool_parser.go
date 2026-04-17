@@ -19,13 +19,14 @@ type ToolCall struct {
 
 // toolCallRe matches Gemma 4's native tool call format:
 //   <|tool_call>call:TOOL_NAME{json_args}<tool_call|>
-// or with extra prefixes:
-//   <|tool_call>call:prefix:TOOL_NAME{json_args}<tool_call|>
+// or with extra prefixes (including hyphenated names like test-repo):
+//   <|tool_call>call:test-repo:bash{json_args}<tool_call|>
 // or the simpler form:
 //   <|tool_call>TOOL_NAME{json_args}<tool_call|>
 // Note: the closing tag may be either <tool_call|> or <|tool_call|>.
+// Prefixes allow hyphens ([\w-]+); the final tool name is word-only (\w+).
 var toolCallRe = regexp.MustCompile(
-	`<\|tool_call\>(?:\w+:)*(\w+)\s*(\{[^}]*\})\s*<?\|?tool_call\|>`,
+	`<\|tool_call\>(?:[\w-]+:)*(\w+)\s*(\{[^}]*\})\s*<?\|?tool_call\|>`,
 )
 
 // toolCallStartRe matches the opening of a tool call (for streaming detection).

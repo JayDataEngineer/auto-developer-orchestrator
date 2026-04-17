@@ -700,6 +700,7 @@ func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID, projectPath string) *ll
 
 	cfg := llamaeng.DefaultAgentLoopConfig()
 	cfg.MaxToolRounds = 30 // Browser automation needs many rounds
+	cfg.MaxTokens = 2048   // Leave more room for context (was 4096, too greedy for 8K context)
 	cfg.SystemPrompt = llamaeng.BuildLibraryModeSystemPrompt(llamaeng.LibraryPromptConfig{
 		ProjectDir: projectPath,
 		SandboxID:  sandboxID,

@@ -168,11 +168,22 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 	// Bash: run command inside sandbox container
 	if toolName == "bash" {
 		cmd, _ := args["command"].(string)
-		// If JSON parse failed and we got a raw string, try to extract the command
+		// Also try common aliases: "code", "cmd", "script"
+		if cmd == "" {
+			cmd, _ = args["code"].(string)
+		}
+		if cmd == "" {
+			cmd, _ = args["cmd"].(string)
+		}
+		// If still empty, try extracting from raw malformed JSON
 		if cmd == "" {
 			if raw, ok := args["raw"].(string); ok {
-				// Try to extract command value from raw string like {command: "ls"}
-				cmd = extractJSONStringValue(raw, "command")
+				for _, key := range []string{"command", "code", "cmd", "script"} {
+					cmd = extractJSONStringValue(raw, key)
+					if cmd != "" {
+						break
+					}
+				}
 			}
 		}
 		if cmd == "" {
@@ -343,9 +354,7 @@ func (loop *AgentLoop) Run(ctx context.Context, userMsg string, subscriber chan<
 
 	// First generation: system prompt + user message
 	opts := loop.config.Opts
-	if opts.MaxTokens == 0 {
-		opts.MaxTokens = loop.config.MaxTokens
-	}
+	opts.MaxTokens = loop.config.MaxTokens // Always use config's value
 
 	tokenCh, err := loop.session.ChatWithSystem(loop.config.SystemPrompt, userMsg, opts)
 	if err != nil {
@@ -379,9 +388,7 @@ func (loop *AgentLoop) Continue(ctx context.Context, userMsg string, subscriber 
 	subscriber <- AgentEvent{Type: EventTypeAgentStart}
 
 	opts := loop.config.Opts
-	if opts.MaxTokens == 0 {
-		opts.MaxTokens = loop.config.MaxTokens
-	}
+	opts.MaxTokens = loop.config.MaxTokens // Always use config's value
 
 	// Get the last model response from history to close the turn properly
 	var lastModelResponse string
@@ -551,6 +558,10 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			} else {
 				resultBytes, _ := json.Marshal(result)
 				resultStr = string(resultBytes)
+				// Truncate large results to save context space
+				if len(resultStr) > 2000 {
+					resultStr = resultStr[:2000] + "...[truncated]"
+				}
 			}
 
 			// Emit tool_execution_end
