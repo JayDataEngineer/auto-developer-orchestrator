@@ -148,15 +148,56 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 	var elementsJSON string
 
 	err := sbc.runInTab(navigationTimeout, func(actCtx context.Context) error {
-		// Use raw CDP Page.navigate to avoid chromedp's built-in wait-for-load
-		// which hangs on heavy JS pages like google.com.
-		// We just send the navigation command and wait for the page to settle.
 		return chromedp.Run(actCtx,
+			// Navigate to the URL
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				_, _, _, _, err := page.Navigate(url).Do(ctx)
 				return err
 			}),
-			chromedp.Sleep(3*time.Second), // Wait for page to partially render
+			// Wait for the URL to actually change (proves navigation happened)
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				deadline := time.After(8 * time.Second)
+				ticker := time.NewTicker(300 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-deadline:
+						return nil // proceed with whatever we have
+					case <-ticker.C:
+						var loc string
+						if err := chromedp.Evaluate(`window.location.href`, &loc).Do(ctx); err != nil {
+							return nil
+						}
+						// Any non-blank URL means navigation started
+						if loc != "" && loc != "about:blank" {
+							return nil
+						}
+					}
+				}
+			}),
+			// Wait for body to be ready
+			chromedp.WaitReady("body", chromedp.ByQuery),
+			// Poll readyState until "interactive" or "complete"
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				deadline := time.After(5 * time.Second)
+				ticker := time.NewTicker(200 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-deadline:
+						return nil
+					case <-ticker.C:
+						var state string
+						if err := chromedp.Evaluate(`document.readyState`, &state).Do(ctx); err != nil {
+							return nil
+						}
+						if state == "complete" || state == "interactive" {
+							return nil
+						}
+					}
+				}
+			}),
+			chromedp.Sleep(500*time.Millisecond),
 			chromedp.Title(&title),
 			chromedp.Location(&currentURL),
 			chromedp.Evaluate(labelerJS, &elementsJSON),

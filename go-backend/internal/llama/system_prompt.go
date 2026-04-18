@@ -3,7 +3,6 @@ package llama
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 )
 
 // LibraryPromptConfig holds parameters for building the library mode system prompt.
@@ -12,59 +11,73 @@ type LibraryPromptConfig struct {
 	SandboxID  string
 }
 
-// BuildLibraryModeSystemPrompt assembles the system prompt for the llama-go
-// library mode agent. Uses the Macro-Tool pattern: only high-level tools are
-// exposed to the model. Infrastructure complexity (browser enable, navigate,
-// screenshot) is hidden inside the macro implementations.
+// BuildLibraryModeSystemPrompt returns the system prompt for the llama-go agent.
+// SINGLE SOURCE OF TRUTH — edit this function to tune agent behavior.
 func BuildLibraryModeSystemPrompt(cfg LibraryPromptConfig) string {
 	sandboxID := cfg.SandboxID
 	if sandboxID == "" {
 		sandboxID = "sandbox-" + filepath.Base(cfg.ProjectDir)
 	}
 
-	var b strings.Builder
+	// ── Tool Reference ──────────────────────────────────────────────
+	// Each tool is documented with its JSON schema and a one-line description.
+	// The model learns from these examples. Keep them short and consistent.
+	toolRef := fmt.Sprintf(`# Tools
 
-	// Identity + autonomy
-	b.WriteString("You are Pi, an autonomous AI agent with bash and browser tools.\n")
-	b.WriteString("You are AUTONOMOUS: when a tool returns a result, you MUST immediately analyze it and call the next tool. ")
-	b.WriteString("Do NOT stop and wait for the user. Keep calling tools until the task is complete.\n")
-	b.WriteString("Only stop when the task is fully done or you need user input (ask with ??QUESTION:).\n\n")
+## bash — run a shell command
+{"command": "ls -la"}
+Runs in sandbox %s as root. Working dir: /sandbox/workspace
 
-	// Tools — only macro tools exposed
-	b.WriteString("# Tools\n\n")
-	b.WriteString(fmt.Sprintf("## bash — run commands in sandbox (ID: %s)\n", sandboxID))
-	b.WriteString(`{"command": "YOUR COMMAND"}` + "\n")
-	b.WriteString("Working dir: /sandbox/workspace. Runs as root.\n\n")
+## search_web — search Google and return results (ONE step)
+{"query": "cats"}
+Returns search results. Use this for any search task.
 
-	b.WriteString("## browse_to — open a URL and read the page\n")
-	b.WriteString(`{"url": "https://example.com"}` + "\n")
-	b.WriteString("Automatically starts browser if needed. Returns page description.\n\n")
+## browse_to — open a URL
+{"url": "https://example.com"}
+Returns page with clickable elements.
 
-	b.WriteString("## click_element — click an element on the page by its ID number\n")
-	b.WriteString(`{"element": 5}` + "\n")
-	b.WriteString("Clicks element then shows updated page.\n\n")
+## click_element — click element by ID number
+{"element": 5}
 
-	b.WriteString("## type_text — type text into an element\n")
-	b.WriteString(`{"element": 1, "text": "hello", "submit": true}` + "\n")
-	b.WriteString("Set submit:true to press Enter after typing.\n\n")
+## type_text — type text into an element
+{"element": 1, "text": "hello", "submit": true}
+submit:true presses Enter after typing.
 
-	b.WriteString("## read_page — read the current page content\n")
-	b.WriteString("{}" + "\n")
-	b.WriteString("Returns description of what's currently visible in the browser.\n\n")
+## read_page — re-read current page content
+{}
+Use when you need to see the page again.`, sandboxID)
 
-	// Workflow
-	b.WriteString("# Workflow\n")
-	b.WriteString("1. browse_to(url) to open a website\n")
-	b.WriteString("2. Click/type to interact with the page\n")
-	b.WriteString("3. read_page to verify results\n")
-	b.WriteString("4. Repeat until task is done\n\n")
+	// ── Identity + Rules ─────────────────────────────────────────────
+	identity := `You are Pi. You call tools to accomplish tasks.
 
-	// Rules
-	b.WriteString("# Rules\n")
-	b.WriteString("- Before irreversible actions (posting, emailing, payments), output: ??APPROVAL: description — then STOP\n")
-	b.WriteString("- For questions, output: ??QUESTION: your question — then STOP\n")
-	b.WriteString("- Credentials are in /sandbox/workspace/passwords.txt\n")
-	b.WriteString("- Files in /sandbox/persist survive container restarts\n")
+RULES:
+- Always call a tool. Never respond with only text.
+- Use search_web for any search. Use browse_to for URLs.
+- When task is done, output the result as text (no tool call).
+- Before risky actions (posting, emailing, payments), output: ??APPROVAL: <description>
+- For questions, output: ??QUESTION: <your question>
+- Credentials: /sandbox/workspace/passwords.txt
+- Persistent files: /sandbox/persist`
 
-	return b.String()
+	// ── Examples ──────────────────────────────────────────────────────
+	// Critical for the 26B model — it learns tool format from these.
+	examples := `# Examples
+
+## Search for something:
+search_web{"query":"weather in Tokyo"}
+→ Returns search results with links
+
+## Browse and interact:
+browse_to{"url":"https://www.google.com"}
+→ Returns elements like [6] <textarea> "q"
+type_text{"element":6, "text":"cats", "submit":true}
+→ Types "cats" and presses Enter
+read_page{}
+→ Returns updated page with results
+
+## Click a link:
+read_page{} → see [3] <a> "Click here"
+click_element{"element":3}`
+
+	return identity + "\n\n" + toolRef + "\n\n" + examples
 }

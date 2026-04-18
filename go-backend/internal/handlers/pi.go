@@ -665,8 +665,8 @@ func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID, projectPath string) *ll
 	}
 
 	// VRAM constraint: evict oldest non-running loops if we have too many.
-	// With 24GB VRAM: 12.8GB model + ~85MB per 8K context = ~3 max concurrent agents.
-	const maxLlamaLoops = 3
+	// With 24GB VRAM: 12.8GB model + ~3.7GB per 32K context = 1-2 concurrent agents.
+	const maxLlamaLoops = 2
 	if len(h.llamaLoops) >= maxLlamaLoops {
 		// Find oldest non-running loop to evict
 		var evictKey string
@@ -700,7 +700,7 @@ func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID, projectPath string) *ll
 
 	cfg := llamaeng.DefaultAgentLoopConfig()
 	cfg.MaxToolRounds = 30 // Browser automation needs many rounds
-	cfg.MaxTokens = 4096 // Model needs room for thinking + tool call after macro results
+	cfg.MaxTokens = 2048 // Model needs room for tool calls; cap text to prevent repetition loops
 	cfg.SystemPrompt = llamaeng.BuildLibraryModeSystemPrompt(llamaeng.LibraryPromptConfig{
 		ProjectDir: projectPath,
 		SandboxID:  sandboxID,

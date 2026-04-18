@@ -12,13 +12,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// LabeledElement represents an interactive element on the page
+// LabeledElement represents an interactive element on the page with its position.
 type LabeledElement struct {
 	ID       int    `json:"id"`
 	Tag      string `json:"tag"`
 	Text     string `json:"text"`
 	Role     string `json:"role,omitempty"`
 	Selector string `json:"selector"`
+	X        int    `json:"x,omitempty"` // bounding box left
+	Y        int    `json:"y,omitempty"` // bounding box top
+	W        int    `json:"w,omitempty"` // bounding box width
+	H        int    `json:"h,omitempty"` // bounding box height
+	Parent   string `json:"parent,omitempty"` // nearest container tag (form, nav, main, etc.)
 }
 
 // PageInfo contains the result of a browser action

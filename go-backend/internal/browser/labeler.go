@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 )
 
-// labelerJS is injected into every page to label interactive elements
+// labelerJS is injected into every page to label interactive elements.
+// Uses the Set-of-Mark (SoM) pattern: labels elements with numbered boxes,
+// captures bounding box coordinates, and filters noise (nav, footer, etc.)
+// so the agent model gets a clean, spatial representation of the page.
 const labelerJS = `
 (() => {
 	// Remove any existing label overlay
@@ -12,24 +15,31 @@ const labelerJS = `
 	if (existingOverlay) existingOverlay.remove();
 
 	const elements = [];
-	const interactiveSelectors = 'a, button, input, select, textarea, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [onclick], [type="submit"]';
+	// Only truly interactive elements — no divs, spans, imgs
+	const interactiveSelectors = 'a, button, input, select, textarea, [role="button"], [role="link"], [type="submit"]';
 	const nodes = document.querySelectorAll(interactiveSelectors);
 
-	// Create overlay for visual labels
+	// Create overlay for visual labels (SoM annotations)
 	const overlay = document.createElement('div');
 	overlay.id = '__browser_label_overlay__';
 	overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999999;';
 
 	let id = 1;
 	const seen = new Set();
+	const vw = window.innerWidth;
+	const vh = window.innerHeight;
 
 	for (const el of nodes) {
-		// Skip hidden/invisible elements
-		const rect = el.getBoundingClientRect();
-		if (rect.width === 0 || rect.height === 0) continue;
+		// Hard cap at 25 elements — prevents overwhelming the model
+		if (id > 25) break;
 
-		// Skip elements outside viewport (with some margin)
-		if (rect.bottom < -100 || rect.top > window.innerHeight + 100) continue;
+		const rect = el.getBoundingClientRect();
+		// Skip invisible elements
+		if (rect.width === 0 || rect.height === 0) continue;
+		// Skip tiny elements (likely hidden or decorative)
+		if (rect.width < 10 && rect.height < 10) continue;
+		// Skip elements outside viewport
+		if (rect.bottom < 0 || rect.top > vh) continue;
 
 		// Build unique selector
 		let selector = '';
@@ -38,32 +48,53 @@ const labelerJS = `
 		} else {
 			selector = buildSelector(el);
 		}
-
 		// Skip duplicate selectors
 		if (seen.has(selector)) continue;
 		seen.add(selector);
 
-		// Get element text
-		let text = (el.textContent || '').trim().substring(0, 50);
+		// Get element text (short)
+		let text = '';
 		if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
 			text = el.placeholder || el.value || el.name || el.type || '';
-			text = text.substring(0, 50);
+		} else {
+			text = (el.textContent || '').trim();
 		}
+		text = text.substring(0, 60).replace(/\s+/g, ' ');
 
-		// Add visual label
+		// Skip elements with no visible text AND not an input
+		if (!text && el.tagName !== 'INPUT' && el.tagName !== 'SELECT') continue;
+
+		// Add visual label (SoM annotation — red numbered box)
 		const label = document.createElement('div');
-		label.style.cssText = 'position:absolute;pointer-events:none;background:rgba(255,0,0,0.85);color:white;font-size:10px;font-family:monospace;padding:1px 3px;border-radius:2px;z-index:1000000;line-height:1.2;white-space:nowrap;';
+		label.style.cssText = 'position:fixed;pointer-events:none;background:rgba(220,38,38,0.9);color:white;font-size:11px;font-family:monospace;padding:1px 4px;border-radius:2px;z-index:1000000;line-height:1.3;white-space:nowrap;font-weight:bold;';
 		label.textContent = '' + id;
-		label.style.left = (rect.left + window.scrollX) + 'px';
-		label.style.top = (rect.top + window.scrollY) + 'px';
+		label.style.left = rect.left + 'px';
+		label.style.top = rect.top + 'px';
 		overlay.appendChild(label);
+
+		// Find nearest semantic parent (form, nav, main, header, footer, section)
+		let parent = '';
+		const containerTags = ['FORM', 'NAV', 'MAIN', 'HEADER', 'FOOTER', 'SECTION', 'ARTICLE', 'ASIDE', 'DIALOG'];
+		let p = el.parentElement;
+		while (p && p !== document.body) {
+			if (containerTags.includes(p.tagName)) {
+				parent = p.tagName.toLowerCase();
+				break;
+			}
+			p = p.parentElement;
+		}
 
 		elements.push({
 			id: id,
 			tag: el.tagName.toLowerCase(),
 			text: text,
 			role: el.getAttribute('role') || '',
-			selector: selector
+			selector: selector,
+			x: Math.round(rect.left),
+			y: Math.round(rect.top),
+			w: Math.round(rect.width),
+			h: Math.round(rect.height),
+			parent: parent
 		});
 		id++;
 	}

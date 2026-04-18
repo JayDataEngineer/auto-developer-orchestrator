@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -76,6 +77,28 @@ type SandboxToolExecutor struct {
 	Manager   *sandbox.Manager
 	CU        ComputerUseProvider
 	Logger    *zap.Logger
+
+	// Change detection: caches last seen element signatures per sandbox
+	lastElements map[string]map[string]bool // sandboxID → set of "tag:text" signatures
+}
+
+// normalizeElementArg finds the element ID in args using any key that contains
+// "element" (element, element_id, target_element_id, etc.) and normalizes it to args["element"].
+func normalizeElementArg(args map[string]interface{}) {
+	// Explicit aliases first
+	for _, k := range []string{"element", "element_id", "id", "ref"} {
+		if v, ok := args[k]; ok {
+			args["element"] = v
+			return
+		}
+	}
+	// Fuzzy: any key containing "element"
+	for k, v := range args {
+		if strings.Contains(strings.ToLower(k), "element") {
+			args["element"] = v
+			return
+		}
+	}
 }
 
 // Execute runs a tool in the sandbox and returns the result.
@@ -118,23 +141,11 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		}
 	case "click", "browser_click", "click_button", "click_at", "mouse_click":
 		toolName = "click_element"
-		// Copy element ID from various arg names
-		for _, k := range []string{"element", "element_id", "id", "ref"} {
-			if v, ok := args[k]; ok {
-				args["element"] = v
-				break
-			}
-		}
+		normalizeElementArg(args)
 	case "type", "browser_type", "fill", "enter_text",
 		"input_text", "keyboard_type", "type_into":
 		toolName = "type_text"
-		// Copy element ID and text from various arg names
-		for _, k := range []string{"element", "element_id", "id", "ref"} {
-			if v, ok := args[k]; ok {
-				args["element"] = v
-				break
-			}
-		}
+		normalizeElementArg(args)
 		for _, k := range []string{"text", "value", "content", "input"} {
 			if v, ok := args[k]; ok {
 				args["text"] = v
@@ -167,6 +178,10 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 			if _, ok := args["action"]; !ok {
 				args["action"] = "navigate"
 			}
+		} else if strings.Contains(lower, "search") || strings.Contains(lower, "google") ||
+			strings.Contains(lower, "query") || strings.Contains(lower, "look_up") ||
+			strings.Contains(lower, "find_info") {
+			toolName = "search_web"
 		} else if strings.Contains(lower, "screenshot") || strings.Contains(lower, "capture") {
 			toolName = "computer_use_screenshot"
 		} else if strings.Contains(lower, "snapshot") || strings.Contains(lower, "element") {
@@ -241,6 +256,10 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 	case "type_text":
 		// Macro: type text into element, optionally submit
 		return e.macroTypeText(ctx, sandboxID, args)
+
+	case "search_web":
+		// Macro: browse to search engine → type query → return results (all-in-one)
+		return e.macroSearchWeb(ctx, sandboxID, args)
 
 	// ── Low-level tools (exposed for advanced use) ──
 
@@ -329,7 +348,7 @@ func DefaultAgentLoopConfig() AgentLoopConfig {
 		SystemPrompt:  "You are a coding assistant with access to tools.",
 		MaxToolRounds: 20,
 		MaxTokens:     4096,
-		ContextSize:   8192,
+		ContextSize:   32768,
 		Opts:          DefaultGenerateOptions(),
 	}
 }
@@ -465,17 +484,19 @@ func (loop *AgentLoop) Continue(ctx context.Context, userMsg string, subscriber 
 func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, subscriber chan<- AgentEvent, opts GenerateOptions) error {
 	round := 0
 	var modelResponse strings.Builder
+	// Track consecutive failures per tool to prevent infinite retry loops
+	failCounts := make(map[string]int)
+	const maxRetriesPerTool = 3
 
 	for {
 		modelResponse.Reset()
 
 		// Phase 1: Stream tokens until generation completes
-		// Gemma 4 thinking: output starts with <|channel|>thought\n...<|channel|>answer
-		// The tokenizer may split this as: ["<|channel>", "thought", "\n", ...]
-		// or: ["thought", "\n", "<channel|>", ...]
-		// We track state via a simple buffer approach.
 		var thinkingActive bool
 		var pendingStart bool // true if we saw "<|channel>" but not "thought" yet
+		// Repetition detection: track recent output to break loops
+		var recentOutput string
+		const maxRepeatLen = 100 // check last 100 chars for repetition
 		for evt := range tokenCh {
 			if ctx.Err() != nil {
 				subscriber <- AgentEvent{Type: EventTypeAgentEnd}
@@ -492,6 +513,21 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			}
 			// Accumulate raw output for tool call parsing
 			modelResponse.WriteString(evt.Token)
+
+			// Repetition detection: if the last 100 chars repeat 4+ times, force-stop
+			recentOutput += evt.Token
+			if len(recentOutput) > maxRepeatLen*4 {
+				tail := recentOutput[len(recentOutput)-maxRepeatLen*4:]
+				chunk := tail[len(tail)-maxRepeatLen:]
+				if strings.Count(tail, chunk) >= 4 {
+					loop.logger.Warn("Repetition loop detected, forcing stop",
+						zap.Int("round", round),
+					)
+					break
+				}
+				// Keep buffer bounded
+				recentOutput = recentOutput[len(recentOutput)-maxRepeatLen*4:]
+			}
 
 			token := evt.Token
 
@@ -593,23 +629,57 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				},
 			}
 
+			// Log the tool call
+			argsJSON, _ := json.Marshal(tc.Args)
+			loop.logger.Info("AGENT TOOL CALL",
+				zap.Int("round", round),
+				zap.String("tool", tc.Name),
+				zap.String("args", string(argsJSON)),
+			)
+
+			// Check retry limit — if this tool has failed 3 times, skip it
+			if failCounts[tc.Name] >= maxRetriesPerTool {
+				resultStr := fmt.Sprintf("[SYSTEM: Tool '%s' has failed %d times. Do NOT retry it. Use a completely different approach.]", tc.Name, maxRetriesPerTool)
+				loop.logger.Warn("Tool retry limit reached, forcing strategy change",
+					zap.String("tool", tc.Name),
+					zap.Int("failCount", failCounts[tc.Name]),
+				)
+				toolResults = append(toolResults, resultStr)
+				subscriber <- AgentEvent{
+					Type: EventTypeToolEnd,
+					Data: AgentEventData{ToolName: tc.Name, ToolID: tc.ID, Error: resultStr},
+				}
+				continue
+			}
+
 			// Execute the tool
+			startTime := time.Now()
 			result, err := loop.executor.Execute(ctx, tc.Name, tc.Args)
+			elapsed := time.Since(startTime)
 
 			var resultStr string
 			if err != nil {
-				resultStr = fmt.Sprintf("Error: %v", err)
-				loop.logger.Error("Tool execution failed",
+				failCounts[tc.Name]++
+				resultStr = fmt.Sprintf("Error (attempt %d/%d): %v", failCounts[tc.Name], maxRetriesPerTool, err)
+				loop.logger.Error("AGENT TOOL ERROR",
 					zap.String("tool", tc.Name),
+					zap.Duration("elapsed", elapsed),
+					zap.Int("failCount", failCounts[tc.Name]),
 					zap.Error(err),
 				)
 			} else {
+				// Success — reset fail count for this tool
+				delete(failCounts, tc.Name)
 				resultBytes, _ := json.Marshal(result)
 				resultStr = string(resultBytes)
-				// Truncate large results to save context space
-				if len(resultStr) > 2000 {
-					resultStr = resultStr[:2000] + "...[truncated]"
+				if len(resultStr) > 6000 {
+					resultStr = resultStr[:6000] + "...[truncated]"
 				}
+				loop.logger.Info("AGENT TOOL RESULT",
+					zap.String("tool", tc.Name),
+					zap.Duration("elapsed", elapsed),
+					zap.Int("resultLen", len(resultStr)),
+				)
 			}
 
 			// Emit tool_execution_end
@@ -645,7 +715,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 		combinedResult := strings.Join(toolResults, "\n")
 		// Re-inject the user's original goal as a reminder so the model
 		// doesn't lose track of what it's doing after seeing tool results.
-		goalReminder := "\nReminder: Continue working toward the user's original request. Call the next tool now."
+		goalReminder := "\nIMPORTANT: The user's task is NOT done yet. You MUST call another tool RIGHT NOW. Do NOT explain. Just call the next tool."
 		nextCh, err := loop.session.FeedResult(cleanOutput, combinedResult, goalReminder, opts)
 		if err != nil {
 			subscriber <- AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}}
@@ -706,13 +776,35 @@ func (e *SandboxToolExecutor) macroBrowseTo(ctx context.Context, sandboxID strin
 	return map[string]interface{}{
 		"success":      true,
 		"navigated_to": url,
-		"page_summary": extractPageSummary(navResult),
+		"page_summary": e.extractPageSummary(navResult),
 	}, nil
 }
 
-// extractPageSummary extracts useful text from a page action result,
-// stripping base64 image data and summarizing interactive elements.
-func extractPageSummary(result map[string]interface{}) string {
+// interactiveTags are tags the model can meaningfully interact with.
+var interactiveTags = map[string]bool{
+	"a": true, "button": true, "input": true, "textarea": true,
+	"select": true, "option": true, "details": true, "summary": true,
+}
+
+// spatialZone returns a human-readable position label for an element based on its Y coordinate.
+// Divides the page into top/middle/bottom zones.
+func spatialZone(y, h int) string {
+	if y < 100 {
+		return "top"
+	}
+	if y < 400 {
+		return "mid-top"
+	}
+	if y < 700 {
+		return "center"
+	}
+	return "bottom"
+}
+
+// extractPageSummary extracts useful text from a page action result.
+// Uses XML tree-style formatting grouped by parent containers (form, nav, etc.)
+// for better spatial understanding by the 26B model. Marks NEW elements with [*NEW].
+func (e *SandboxToolExecutor) extractPageSummary(result map[string]interface{}) string {
 	if result == nil {
 		return ""
 	}
@@ -723,44 +815,96 @@ func extractPageSummary(result map[string]interface{}) string {
 	if title, ok := result["title"].(string); ok && title != "" {
 		parts = append(parts, "Title: "+title)
 	}
-	if desc, ok := result["description"].(string); ok && desc != "" {
-		parts = append(parts, "Description: "+desc)
-	}
-	// Summarize interactive elements (buttons, links, inputs)
 	if elements, ok := result["elements"].([]interface{}); ok && len(elements) > 0 {
-		var elemLines []string
+		// Build current element signatures for change detection
+		newSigs := make(map[string]bool)
+
+		// Parse elements into structured data
+		type elemInfo struct {
+			id    int
+			tag   string
+			text  string
+			zone  string
+			isNew bool
+		}
+		// Group by parent container
+		grouped := make(map[string][]elemInfo) // parent → elements
+		var ungrouped []elemInfo
+
 		for _, el := range elements {
-			if m, ok := el.(map[string]interface{}); ok {
-				id, _ := m["id"].(float64)
-				tag, _ := m["tag"].(string)
-				text, _ := m["text"].(string)
-				role, _ := m["role"].(string)
-				if text != "" {
-					text = truncate(text, 60)
+			m, ok := el.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			tag, _ := m["tag"].(string)
+			if !interactiveTags[tag] {
+				continue
+			}
+			id, _ := m["id"].(float64)
+			text, _ := m["text"].(string)
+			text = truncate(text, 50)
+			if text == "" {
+				continue
+			}
+			sig := fmt.Sprintf("%s:%s", tag, text)
+			newSigs[sig] = true
+
+			isNew := false
+			if e.lastElements != nil {
+				if prev, ok := e.lastElements[e.SandboxID]; ok {
+					if !prev[sig] {
+						isNew = true
+					}
 				}
-				line := fmt.Sprintf("[%d] <%s>", int(id), tag)
-				if role != "" {
-					line += fmt.Sprintf(" role=%s", role)
-				}
-				if text != "" {
-					line += fmt.Sprintf(" \"%s\"", text)
-				}
-				elemLines = append(elemLines, line)
+			}
+
+			y, _ := m["y"].(float64)
+			parent, _ := m["parent"].(string)
+			ei := elemInfo{id: int(id), tag: tag, text: text, zone: spatialZone(int(y), 0), isNew: isNew}
+
+			if parent != "" {
+				grouped[parent] = append(grouped[parent], ei)
+			} else {
+				ungrouped = append(ungrouped, ei)
 			}
 		}
-		if len(elemLines) > 0 {
-			parts = append(parts, fmt.Sprintf("Elements (%d):", len(elemLines)))
-			// Limit to first 30 elements to save context
-			max := len(elemLines)
-			if max > 30 {
-				max = 30
+
+		// Cache current signatures
+		if e.lastElements == nil {
+			e.lastElements = make(map[string]map[string]bool)
+		}
+		e.lastElements[e.SandboxID] = newSigs
+
+		// Output as XML tree
+		totalCount := len(ungrouped)
+		for _, elems := range grouped {
+			totalCount += len(elems)
+		}
+		parts = append(parts, fmt.Sprintf("Page elements (%d):", totalCount))
+
+		// Output grouped elements with XML container tags
+		for parent, elems := range grouped {
+			parts = append(parts, fmt.Sprintf("<%s>", parent))
+			for _, ei := range elems {
+				newMarker := ""
+				if ei.isNew {
+					newMarker = " *NEW*"
+				}
+				parts = append(parts, fmt.Sprintf("  [%d] <%s> %s \"%s\"%s", ei.id, ei.tag, ei.zone, ei.text, newMarker))
 			}
-			for _, l := range elemLines[:max] {
-				parts = append(parts, "  "+l)
+			parts = append(parts, fmt.Sprintf("</%s>", parent))
+		}
+		// Output ungrouped elements
+		if len(ungrouped) > 0 {
+			parts = append(parts, "<page>")
+			for _, ei := range ungrouped {
+				newMarker := ""
+				if ei.isNew {
+					newMarker = " *NEW*"
+				}
+				parts = append(parts, fmt.Sprintf("  [%d] <%s> %s \"%s\"%s", ei.id, ei.tag, ei.zone, ei.text, newMarker))
 			}
-			if len(elemLines) > max {
-				parts = append(parts, fmt.Sprintf("  ... and %d more", len(elemLines)-max))
-			}
+			parts = append(parts, "</page>")
 		}
 	}
 	if len(parts) == 0 {
@@ -799,8 +943,9 @@ func (e *SandboxToolExecutor) ensureBrowserReady(ctx context.Context, sandboxID 
 	}
 
 	// Wait for background setup to complete (sandbox + CDP connect + X11 tools + landing page).
-	// Total: ~10-15 seconds. Poll with Screenshot every 2 seconds.
-	for i := 0; i < 15; i++ {
+	// Total: ~30-40 seconds for fresh sandbox, ~5s for already-running.
+	// Poll with Screenshot every 2 seconds.
+	for i := 0; i < 30; i++ {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -813,7 +958,7 @@ func (e *SandboxToolExecutor) ensureBrowserReady(ctx context.Context, sandboxID 
 		}
 	}
 
-	return fmt.Errorf("browser did not become ready after 30 seconds")
+	return fmt.Errorf("browser did not become ready after 60 seconds")
 }
 
 // macroReadPage is a macro tool: returns the current page elements and info.
@@ -824,7 +969,7 @@ func (e *SandboxToolExecutor) macroReadPage(ctx context.Context, sandboxID strin
 	}
 	return map[string]interface{}{
 		"success":      true,
-		"page_summary": extractPageSummary(result),
+		"page_summary": e.extractPageSummary(result),
 	}, nil
 }
 
@@ -852,7 +997,7 @@ func (e *SandboxToolExecutor) macroClickElement(ctx context.Context, sandboxID s
 	return map[string]interface{}{
 		"success":         true,
 		"clicked_element": int(elementID),
-		"page_after_click": extractPageSummary(result),
+		"page_after_click": e.extractPageSummary(result),
 	}, nil
 }
 
@@ -887,9 +1032,46 @@ func (e *SandboxToolExecutor) macroTypeText(ctx context.Context, sandboxID strin
 		"submitted":    submit,
 	}
 	if submit {
-		resp["page_after_submit"] = extractPageSummary(result)
+		resp["page_after_submit"] = e.extractPageSummary(result)
 	}
 	return resp, nil
+}
+
+// macroSearchWeb is an all-in-one macro: browse to Google → type query → submit → return results.
+// The model only needs ONE tool call to complete a search task.
+func (e *SandboxToolExecutor) macroSearchWeb(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	query, _ := args["query"].(string)
+	if query == "" {
+		query, _ = args["text"].(string)
+	}
+	if query == "" {
+		query, _ = args["q"].(string)
+	}
+	if query == "" {
+		query, _ = args["search"].(string)
+	}
+	if query == "" {
+		return nil, fmt.Errorf("missing 'query' argument for search_web")
+	}
+
+	// Step 1: Navigate directly to Google search URL
+	searchURL := fmt.Sprintf("https://www.google.com/search?q=%s", url.QueryEscape(query))
+	if err := e.ensureBrowserReady(ctx, sandboxID); err != nil {
+		return nil, fmt.Errorf("failed to start browser: %w", err)
+	}
+
+	navArgs := map[string]interface{}{"action": "navigate", "url": searchURL}
+	navResult, err := e.CU.Act(ctx, sandboxID, "navigate", navArgs)
+	if err != nil {
+		return nil, fmt.Errorf("search failed: %w", err)
+	}
+
+	return map[string]interface{}{
+		"success":       true,
+		"query":         query,
+		"search_url":    searchURL,
+		"page_summary":  e.extractPageSummary(navResult),
+	}, nil
 }
 
 // extractJSONStringValue extracts a value from a loosely-formatted JSON string.
