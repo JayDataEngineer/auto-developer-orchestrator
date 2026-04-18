@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"go.uber.org/zap"
@@ -96,28 +97,49 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 	case "computer_use_exec", "exec":
 		toolName = "bash"
 	case "navigate", "browser_navigate", "go_to", "open_url", "goto",
-		"open", "browse", "visit", "visit_url", "open_page", "go_to_url":
-		toolName = "computer_use_act"
-		if _, ok := args["action"]; !ok {
-			args["action"] = "navigate"
-		}
-		// Copy url/URL to the expected field
+		"open", "browse", "visit", "visit_url", "open_page", "go_to_url",
+		"browse_to_and_read", "go_to_page", "load_page":
+		toolName = "browse_to"
+		// Extract URL from various arg formats
 		if _, ok := args["url"]; !ok {
 			if u, ok := args["URL"]; ok {
 				args["url"] = u
 			}
 		}
-	case "click", "browser_click", "click_element", "click_button",
-		"click_at", "mouse_click":
-		toolName = "computer_use_act"
-		if _, ok := args["action"]; !ok {
-			args["action"] = "click"
+		if _, ok := args["url"]; !ok {
+			if raw, ok := args["raw"].(string); ok {
+				for _, key := range []string{"url", "URL", "link", "website", "address"} {
+					if v := extractJSONStringValue(raw, key); v != "" {
+						args["url"] = v
+						break
+					}
+				}
+			}
 		}
-	case "type", "browser_type", "fill", "type_text", "enter_text",
+	case "click", "browser_click", "click_button", "click_at", "mouse_click":
+		toolName = "click_element"
+		// Copy element ID from various arg names
+		for _, k := range []string{"element", "element_id", "id", "ref"} {
+			if v, ok := args[k]; ok {
+				args["element"] = v
+				break
+			}
+		}
+	case "type", "browser_type", "fill", "enter_text",
 		"input_text", "keyboard_type", "type_into":
-		toolName = "computer_use_act"
-		if _, ok := args["action"]; !ok {
-			args["action"] = "type"
+		toolName = "type_text"
+		// Copy element ID and text from various arg names
+		for _, k := range []string{"element", "element_id", "id", "ref"} {
+			if v, ok := args[k]; ok {
+				args["element"] = v
+				break
+			}
+		}
+		for _, k := range []string{"text", "value", "content", "input"} {
+			if v, ok := args[k]; ok {
+				args["text"] = v
+				break
+			}
 		}
 	case "scroll", "browser_scroll", "scroll_page", "scroll_down", "scroll_up":
 		toolName = "computer_use_act"
@@ -202,6 +224,26 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 	}
 
 	switch toolName {
+	// ── Macro Tools (high-level, combine multiple steps) ──
+
+	case "browse_to":
+		// Macro: ensure browser running → navigate → return page description
+		return e.macroBrowseTo(ctx, sandboxID, args)
+
+	case "read_page":
+		// Macro: screenshot + describe current page
+		return e.macroReadPage(ctx, sandboxID)
+
+	case "click_element":
+		// Macro: snapshot → click element by ID
+		return e.macroClickElement(ctx, sandboxID, args)
+
+	case "type_text":
+		// Macro: type text into element, optionally submit
+		return e.macroTypeText(ctx, sandboxID, args)
+
+	// ── Low-level tools (exposed for advanced use) ──
+
 	case "computer_use_enable":
 		return e.CU.Enable(ctx, sandboxID)
 
@@ -636,6 +678,199 @@ func (loop *AgentLoop) IsRunning() bool {
 	loop.mu.Lock()
 	defer loop.mu.Unlock()
 	return loop.running
+}
+
+// macroBrowseTo is a macro tool: ensures browser is running → navigates to URL → returns page description.
+// Hides the complexity of enable/navigate/screenshot from the model.
+func (e *SandboxToolExecutor) macroBrowseTo(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	url, _ := args["url"].(string)
+	if url == "" {
+		return nil, fmt.Errorf("missing 'url' argument for browse_to")
+	}
+
+	// Step 1: Ensure browser is enabled. Try a lightweight check first.
+	// If it fails, enable and wait for readiness.
+	if err := e.ensureBrowserReady(ctx, sandboxID); err != nil {
+		return nil, fmt.Errorf("failed to start browser: %w", err)
+	}
+
+	// Step 2: Navigate to the URL
+	navArgs := map[string]interface{}{
+		"action": "navigate",
+		"url":    url,
+	}
+	_, err := e.CU.Act(ctx, sandboxID, "navigate", navArgs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to navigate to %s: %w", url, err)
+	}
+
+	// Step 3: Take a screenshot with description to get page content
+	screenshotResult, err := e.CU.Screenshot(ctx, sandboxID, true)
+	if err != nil {
+		return map[string]interface{}{
+			"success": true,
+			"message": fmt.Sprintf("Navigated to %s but failed to get page description: %v", url, err),
+		}, nil
+	}
+
+	// Strip image data — it's huge base64 and useless to the model
+	desc := extractPageSummary(screenshotResult)
+
+	return map[string]interface{}{
+		"success":      true,
+		"navigated_to": url,
+		"page_summary": desc,
+	}, nil
+}
+
+// extractPageSummary extracts the useful text from a screenshot/action result,
+// stripping out massive base64 image data that would overwhelm the model's context.
+func extractPageSummary(result map[string]interface{}) string {
+	if result == nil {
+		return ""
+	}
+	var parts []string
+	if url, ok := result["url"].(string); ok && url != "" {
+		parts = append(parts, "URL: "+url)
+	}
+	if title, ok := result["title"].(string); ok && title != "" {
+		parts = append(parts, "Title: "+title)
+	}
+	if desc, ok := result["description"].(string); ok && desc != "" {
+		parts = append(parts, "Description: "+desc)
+	}
+	if len(parts) == 0 {
+		// Fallback: return JSON without the image field
+		delete(result, "image")
+		b, _ := json.Marshal(result)
+		return string(b)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// ensureBrowserReady ensures the browser CDP client is connected and responsive.
+// It tries a screenshot first. If that fails, it enables the browser and waits
+// for the background CDP setup to complete by polling screenshots.
+func (e *SandboxToolExecutor) ensureBrowserReady(ctx context.Context, sandboxID string) error {
+	// Fast path: try screenshot — if it works, browser is already running
+	_, err := e.CU.Screenshot(ctx, sandboxID, true)
+	if err == nil {
+		return nil // Browser ready
+	}
+
+	// Browser not running — enable it (returns immediately, sets up CDP in background)
+	_, err = e.CU.Enable(ctx, sandboxID)
+	if err != nil {
+		return fmt.Errorf("enable failed: %w", err)
+	}
+
+	// Poll until the CDP setup completes and screenshot works.
+	// The background setup creates the CDP client and connects it.
+	// Wait up to 20 seconds.
+	for i := 0; i < 40; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		// Small delay to let background setup progress
+		time.Sleep(500 * time.Millisecond)
+		_, err := e.CU.Screenshot(ctx, sandboxID, true)
+		if err == nil {
+			return nil // Browser ready
+		}
+	}
+
+	return fmt.Errorf("browser did not become ready after 20 seconds")
+}
+
+// macroReadPage is a macro tool: takes a screenshot and returns the page description.
+func (e *SandboxToolExecutor) macroReadPage(ctx context.Context, sandboxID string) (interface{}, error) {
+	result, err := e.CU.Screenshot(ctx, sandboxID, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read page: %w", err)
+	}
+	return map[string]interface{}{
+		"success":      true,
+		"page_summary": extractPageSummary(result),
+	}, nil
+}
+
+// macroClickElement is a macro tool: takes a snapshot first, then clicks the element.
+func (e *SandboxToolExecutor) macroClickElement(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	elementID, _ := args["element"].(float64) // JSON numbers are float64
+	if elementID == 0 {
+		// Try int
+		if v, ok := args["element"].(int); ok {
+			elementID = float64(v)
+		}
+	}
+	if elementID == 0 {
+		return nil, fmt.Errorf("missing 'element' argument for click_element")
+	}
+
+	clickArgs := map[string]interface{}{
+		"action":  "click",
+		"element": int(elementID),
+	}
+	result, err := e.CU.Act(ctx, sandboxID, "click", clickArgs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to click element %d: %w", int(elementID), err)
+	}
+
+	// Take a screenshot after clicking to show the result
+	screenshotResult, _ := e.CU.Screenshot(ctx, sandboxID, true)
+
+	return map[string]interface{}{
+		"success":         true,
+		"clicked_element": int(elementID),
+		"action_result":   extractPageSummary(result),
+		"page_after_click": extractPageSummary(screenshotResult),
+	}, nil
+}
+
+// macroTypeText is a macro tool: types text into an element, optionally submitting.
+func (e *SandboxToolExecutor) macroTypeText(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	text, _ := args["text"].(string)
+	if text == "" {
+		return nil, fmt.Errorf("missing 'text' argument for type_text")
+	}
+
+	elementID, _ := args["element"].(float64)
+	submit := false
+	if s, ok := args["submit"].(bool); ok {
+		submit = s
+	}
+
+	typeArgs := map[string]interface{}{
+		"action":  "type",
+		"text":    text,
+		"element": int(elementID),
+		"submit":  submit,
+	}
+	_, err := e.CU.Act(ctx, sandboxID, "type", typeArgs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to type text: %w", err)
+	}
+
+	// If submit was pressed, screenshot the result
+	var pageSummary string
+	if submit {
+		if ss, _ := e.CU.Screenshot(ctx, sandboxID, true); ss != nil {
+			pageSummary = extractPageSummary(ss)
+		}
+	}
+
+	resp := map[string]interface{}{
+		"success":      true,
+		"typed_text":   text,
+		"into_element": int(elementID),
+		"submitted":    submit,
+	}
+	if pageSummary != "" {
+		resp["page_after_submit"] = pageSummary
+	}
+	return resp, nil
 }
 
 // extractJSONStringValue extracts a value from a loosely-formatted JSON string.

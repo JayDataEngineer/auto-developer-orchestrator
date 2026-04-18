@@ -70,8 +70,10 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 	// Fast path: already have a connected CDP client — pure in-memory check (~1ms).
 	h.mu.RLock()
 	existingClient, clientExists := h.clients[sandboxID]
+	isConnected := clientExists && existingClient.IsConnected()
 	h.mu.RUnlock()
-	if clientExists && existingClient.IsConnected() {
+
+	if isConnected {
 		sandbox, _ := h.manager.GetSandbox(sandboxID)
 		cdpPort := 19222
 		viewerURL := fmt.Sprintf("/sandbox/%s/viewer", sandboxID)
@@ -382,7 +384,15 @@ func (h *ComputerUseHandler) getClient(sandboxID string) (*browser.SandboxBrowse
 	h.mu.RUnlock()
 
 	if ok {
-		return client, nil
+		if client.IsConnected() {
+			return client, nil
+		}
+		// Stale client — remove and fall through to auto-reconnect
+		h.logger.Info("removing stale CDP client", zap.String("sandbox_id", sandboxID))
+		client.Close()
+		h.mu.Lock()
+		delete(h.clients, sandboxID)
+		h.mu.Unlock()
 	}
 
 	// Client not in memory (server restart or first call) — attempt auto-reconnect.

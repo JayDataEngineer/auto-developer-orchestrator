@@ -51,10 +51,16 @@ func ParseToolCalls(output string) ([]ToolCall, string) {
 		rawMatch := output[match[0]:match[1]]
 
 		var args map[string]interface{}
-		if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
-			// If JSON parse fails, store raw args string
-			args = map[string]interface{}{
-				"raw": argsStr,
+		// Sanitize Gemma 4 special tokens: <|"|> → ", <|'|> → '
+		sanitized := sanitizeGemmaTokens(argsStr)
+		if err := json.Unmarshal([]byte(sanitized), &args); err != nil {
+			// Try fixing unquoted keys: {url: "x"} → {"url": "x"}
+			fixed := fixUnquotedKeys(sanitized)
+			if err2 := json.Unmarshal([]byte(fixed), &args); err2 != nil {
+				// If JSON parse still fails, store sanitized args for fallback extraction
+				args = map[string]interface{}{
+					"raw": sanitized,
+				}
 			}
 		}
 
@@ -99,4 +105,21 @@ func StripToolCallTags(output string) string {
 // generateToolCallID creates a simple unique ID for a tool call.
 func generateToolCallID(idx int) string {
 	return fmt.Sprintf("tc_%d", idx)
+}
+
+// sanitizeGemmaTokens replaces Gemma 4 special quote/apostrophe tokens
+// with their literal equivalents so JSON parsing can succeed.
+// Gemma 4 outputs <|"|> instead of " and <|'|> instead of '.
+func sanitizeGemmaTokens(s string) string {
+	s = strings.ReplaceAll(s, `<|"|>`, `"`)
+	s = strings.ReplaceAll(s, `<|'|>`, `'`)
+	return s
+}
+
+// fixUnquotedKeys quotes unquoted JSON object keys.
+// Handles patterns like {url: "x"} → {"url": "x"}
+var unquotedKeyRe = regexp.MustCompile(`([{,]\s*)(\w+)\s*:`)
+
+func fixUnquotedKeys(s string) string {
+	return unquotedKeyRe.ReplaceAllString(s, `$1"$2":`)
 }
