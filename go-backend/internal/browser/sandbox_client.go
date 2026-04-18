@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -189,6 +190,18 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 
 // Click clicks an element by its label ID.
 func (sbc *SandboxBrowserClient) Click(ctx context.Context, elementID int) (*PageInfo, error) {
+	info, err := sbc.clickInner(ctx, elementID)
+	if err != nil {
+		sbc.logger.Warn("click failed, recreating tab and retrying", zap.Error(err))
+		if recErr := sbc.reconnectTab(ctx); recErr != nil {
+			return nil, fmt.Errorf("click failed and tab recovery also failed: %w (recovery: %v)", err, recErr)
+		}
+		info, err = sbc.clickInner(ctx, elementID)
+	}
+	return info, err
+}
+
+func (sbc *SandboxBrowserClient) clickInner(ctx context.Context, elementID int) (*PageInfo, error) {
 	sbc.mu.RLock()
 	selector := sbc.selectorForElement(elementID)
 	sbc.mu.RUnlock()
@@ -201,10 +214,13 @@ func (sbc *SandboxBrowserClient) Click(ctx context.Context, elementID int) (*Pag
 	var screenshotBuf []byte
 	var elementsJSON string
 
+	// Use JavaScript click instead of chromedp.Click — avoids NodeVisible
+	// hang on pages loaded via raw CDP that haven't completed full load cycle.
+	clickJS := fmt.Sprintf(`document.querySelector('%s') && document.querySelector('%s').click()`, selector, selector)
+
 	err := sbc.runInTab(navigationTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx,
-			chromedp.Click(selector, chromedp.NodeVisible),
-			chromedp.WaitReady("body"),
+			chromedp.Evaluate(clickJS, nil),
 			chromedp.Sleep(settleDelay),
 			chromedp.Title(&title),
 			chromedp.Location(&currentURL),
@@ -233,6 +249,18 @@ func (sbc *SandboxBrowserClient) Click(ctx context.Context, elementID int) (*Pag
 
 // Type types text into an element by its label ID.
 func (sbc *SandboxBrowserClient) Type(ctx context.Context, elementID int, text string, submit bool) (*PageInfo, error) {
+	info, err := sbc.typeInner(ctx, elementID, text, submit)
+	if err != nil {
+		sbc.logger.Warn("type failed, recreating tab and retrying", zap.Error(err))
+		if recErr := sbc.reconnectTab(ctx); recErr != nil {
+			return nil, fmt.Errorf("type failed and tab recovery also failed: %w (recovery: %v)", err, recErr)
+		}
+		info, err = sbc.typeInner(ctx, elementID, text, submit)
+	}
+	return info, err
+}
+
+func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, text string, submit bool) (*PageInfo, error) {
 	sbc.mu.RLock()
 	selector := sbc.selectorForElement(elementID)
 	sbc.mu.RUnlock()
@@ -245,25 +273,29 @@ func (sbc *SandboxBrowserClient) Type(ctx context.Context, elementID int, text s
 	var screenshotBuf []byte
 	var elementsJSON string
 
+	// Use JavaScript to set value and optionally submit — avoids chromedp.SendKeys
+	// NodeVisible hang on pages loaded via raw CDP.
+	escaped := strings.ReplaceAll(text, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
+	escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+	typeJS := fmt.Sprintf(`(function(){ var el = document.querySelector('%s'); if(el){el.value='%s'; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); %s} })()`,
+		selector, escaped,
+		func() string {
+			if submit {
+				return `if(el.form){el.form.submit();}else{el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'}));}`
+			}
+			return ""
+		}(),
+	)
+
 	timeout := defaultTimeout
 	if submit {
 		timeout = navigationTimeout
 	}
 	err := sbc.runInTab(timeout, func(actCtx context.Context) error {
-		actions := []chromedp.Action{
-			chromedp.Clear(selector, chromedp.NodeVisible),
-			chromedp.SendKeys(selector, text, chromedp.NodeVisible),
-		}
-		if submit {
-			actions = append(actions, chromedp.Submit(selector))
-		}
-		actions = append(actions,
-			chromedp.WaitReady("body"),
-		)
-		if submit {
-			actions = append(actions, chromedp.Sleep(settleDelay))
-		}
-		actions = append(actions,
+		return chromedp.Run(actCtx,
+			chromedp.Evaluate(typeJS, nil),
+			chromedp.Sleep(settleDelay),
 			chromedp.Title(&title),
 			chromedp.Location(&currentURL),
 			chromedp.Evaluate(labelerJS, &elementsJSON),
@@ -273,7 +305,6 @@ func (sbc *SandboxBrowserClient) Type(ctx context.Context, elementID int, text s
 				return err
 			}),
 		)
-		return chromedp.Run(actCtx, actions...)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("type failed: %w", err)
@@ -292,6 +323,18 @@ func (sbc *SandboxBrowserClient) Type(ctx context.Context, elementID int, text s
 
 // Scroll scrolls the page in a direction.
 func (sbc *SandboxBrowserClient) Scroll(ctx context.Context, direction string, amount int) (*PageInfo, error) {
+	info, err := sbc.scrollInner(ctx, direction, amount)
+	if err != nil {
+		sbc.logger.Warn("scroll failed, recreating tab and retrying", zap.Error(err))
+		if recErr := sbc.reconnectTab(ctx); recErr != nil {
+			return nil, fmt.Errorf("scroll failed and tab recovery also failed: %w (recovery: %v)", err, recErr)
+		}
+		info, err = sbc.scrollInner(ctx, direction, amount)
+	}
+	return info, err
+}
+
+func (sbc *SandboxBrowserClient) scrollInner(ctx context.Context, direction string, amount int) (*PageInfo, error) {
 	scrollBy := amount
 	if direction == "up" {
 		scrollBy = -amount

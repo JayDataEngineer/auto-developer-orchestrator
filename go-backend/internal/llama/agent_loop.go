@@ -680,51 +680,38 @@ func (loop *AgentLoop) IsRunning() bool {
 	return loop.running
 }
 
-// macroBrowseTo is a macro tool: ensures browser is running → navigates to URL → returns page description.
-// Hides the complexity of enable/navigate/screenshot from the model.
+// macroBrowseTo is a macro tool: ensures browser is running → navigates to URL → returns page info.
+// Hides the complexity of enable/navigate from the model.
 func (e *SandboxToolExecutor) macroBrowseTo(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
 	url, _ := args["url"].(string)
 	if url == "" {
 		return nil, fmt.Errorf("missing 'url' argument for browse_to")
 	}
 
-	// Step 1: Ensure browser is enabled. Try a lightweight check first.
-	// If it fails, enable and wait for readiness.
+	// Step 1: Ensure browser is enabled
 	if err := e.ensureBrowserReady(ctx, sandboxID); err != nil {
 		return nil, fmt.Errorf("failed to start browser: %w", err)
 	}
 
-	// Step 2: Navigate to the URL
+	// Step 2: Navigate to the URL — returns PageInfo with URL, Title, Elements
 	navArgs := map[string]interface{}{
 		"action": "navigate",
 		"url":    url,
 	}
-	_, err := e.CU.Act(ctx, sandboxID, "navigate", navArgs)
+	navResult, err := e.CU.Act(ctx, sandboxID, "navigate", navArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to navigate to %s: %w", url, err)
 	}
 
-	// Step 3: Take a screenshot with description to get page content
-	screenshotResult, err := e.CU.Screenshot(ctx, sandboxID, true)
-	if err != nil {
-		return map[string]interface{}{
-			"success": true,
-			"message": fmt.Sprintf("Navigated to %s but failed to get page description: %v", url, err),
-		}, nil
-	}
-
-	// Strip image data — it's huge base64 and useless to the model
-	desc := extractPageSummary(screenshotResult)
-
 	return map[string]interface{}{
 		"success":      true,
 		"navigated_to": url,
-		"page_summary": desc,
+		"page_summary": extractPageSummary(navResult),
 	}, nil
 }
 
-// extractPageSummary extracts the useful text from a screenshot/action result,
-// stripping out massive base64 image data that would overwhelm the model's context.
+// extractPageSummary extracts useful text from a page action result,
+// stripping base64 image data and summarizing interactive elements.
 func extractPageSummary(result map[string]interface{}) string {
 	if result == nil {
 		return ""
@@ -739,21 +726,68 @@ func extractPageSummary(result map[string]interface{}) string {
 	if desc, ok := result["description"].(string); ok && desc != "" {
 		parts = append(parts, "Description: "+desc)
 	}
+	// Summarize interactive elements (buttons, links, inputs)
+	if elements, ok := result["elements"].([]interface{}); ok && len(elements) > 0 {
+		var elemLines []string
+		for _, el := range elements {
+			if m, ok := el.(map[string]interface{}); ok {
+				id, _ := m["id"].(float64)
+				tag, _ := m["tag"].(string)
+				text, _ := m["text"].(string)
+				role, _ := m["role"].(string)
+				if text != "" {
+					text = truncate(text, 60)
+				}
+				line := fmt.Sprintf("[%d] <%s>", int(id), tag)
+				if role != "" {
+					line += fmt.Sprintf(" role=%s", role)
+				}
+				if text != "" {
+					line += fmt.Sprintf(" \"%s\"", text)
+				}
+				elemLines = append(elemLines, line)
+			}
+		}
+		if len(elemLines) > 0 {
+			parts = append(parts, fmt.Sprintf("Elements (%d):", len(elemLines)))
+			// Limit to first 30 elements to save context
+			max := len(elemLines)
+			if max > 30 {
+				max = 30
+			}
+			for _, l := range elemLines[:max] {
+				parts = append(parts, "  "+l)
+			}
+			if len(elemLines) > max {
+				parts = append(parts, fmt.Sprintf("  ... and %d more", len(elemLines)-max))
+			}
+		}
+	}
 	if len(parts) == 0 {
-		// Fallback: return JSON without the image field
 		delete(result, "image")
+		delete(result, "screenshot")
 		b, _ := json.Marshal(result)
 		return string(b)
 	}
 	return strings.Join(parts, "\n")
 }
 
-// ensureBrowserReady ensures the browser CDP client is connected and responsive.
-// It tries a screenshot first. If that fails, it enables the browser and waits
-// for the background CDP setup to complete by polling screenshots.
+// truncate shortens a string to maxLen characters.
+func truncate(s string, maxLen int) string {
+	s = strings.TrimSpace(s)
+	// Collapse whitespace
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
+// ensureBrowserReady ensures the browser CDP client is connected and ready.
+// Uses Screenshot (simple CDP command, no page load) for readiness checking.
 func (e *SandboxToolExecutor) ensureBrowserReady(ctx context.Context, sandboxID string) error {
-	// Fast path: try screenshot — if it works, browser is already running
-	_, err := e.CU.Screenshot(ctx, sandboxID, true)
+	// Fast path: try Screenshot — if it works, CDP is connected
+	_, err := e.CU.Screenshot(ctx, sandboxID, false)
 	if err == nil {
 		return nil // Browser ready
 	}
@@ -764,29 +798,27 @@ func (e *SandboxToolExecutor) ensureBrowserReady(ctx context.Context, sandboxID 
 		return fmt.Errorf("enable failed: %w", err)
 	}
 
-	// Poll until the CDP setup completes and screenshot works.
-	// The background setup creates the CDP client and connects it.
-	// Wait up to 20 seconds.
-	for i := 0; i < 40; i++ {
+	// Wait for background setup to complete (sandbox + CDP connect + X11 tools + landing page).
+	// Total: ~10-15 seconds. Poll with Screenshot every 2 seconds.
+	for i := 0; i < 15; i++ {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		// Small delay to let background setup progress
-		time.Sleep(500 * time.Millisecond)
-		_, err := e.CU.Screenshot(ctx, sandboxID, true)
+		time.Sleep(2 * time.Second)
+		_, err := e.CU.Screenshot(ctx, sandboxID, false)
 		if err == nil {
-			return nil // Browser ready
+			return nil // CDP connected and responsive
 		}
 	}
 
-	return fmt.Errorf("browser did not become ready after 20 seconds")
+	return fmt.Errorf("browser did not become ready after 30 seconds")
 }
 
-// macroReadPage is a macro tool: takes a screenshot and returns the page description.
+// macroReadPage is a macro tool: returns the current page elements and info.
 func (e *SandboxToolExecutor) macroReadPage(ctx context.Context, sandboxID string) (interface{}, error) {
-	result, err := e.CU.Screenshot(ctx, sandboxID, true)
+	result, err := e.CU.Snapshot(ctx, sandboxID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read page: %w", err)
 	}
@@ -796,11 +828,10 @@ func (e *SandboxToolExecutor) macroReadPage(ctx context.Context, sandboxID strin
 	}, nil
 }
 
-// macroClickElement is a macro tool: takes a snapshot first, then clicks the element.
+// macroClickElement is a macro tool: clicks an element and returns updated page info.
 func (e *SandboxToolExecutor) macroClickElement(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
 	elementID, _ := args["element"].(float64) // JSON numbers are float64
 	if elementID == 0 {
-		// Try int
 		if v, ok := args["element"].(int); ok {
 			elementID = float64(v)
 		}
@@ -818,14 +849,10 @@ func (e *SandboxToolExecutor) macroClickElement(ctx context.Context, sandboxID s
 		return nil, fmt.Errorf("failed to click element %d: %w", int(elementID), err)
 	}
 
-	// Take a screenshot after clicking to show the result
-	screenshotResult, _ := e.CU.Screenshot(ctx, sandboxID, true)
-
 	return map[string]interface{}{
 		"success":         true,
 		"clicked_element": int(elementID),
-		"action_result":   extractPageSummary(result),
-		"page_after_click": extractPageSummary(screenshotResult),
+		"page_after_click": extractPageSummary(result),
 	}, nil
 }
 
@@ -848,17 +875,9 @@ func (e *SandboxToolExecutor) macroTypeText(ctx context.Context, sandboxID strin
 		"element": int(elementID),
 		"submit":  submit,
 	}
-	_, err := e.CU.Act(ctx, sandboxID, "type", typeArgs)
+	result, err := e.CU.Act(ctx, sandboxID, "type", typeArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to type text: %w", err)
-	}
-
-	// If submit was pressed, screenshot the result
-	var pageSummary string
-	if submit {
-		if ss, _ := e.CU.Screenshot(ctx, sandboxID, true); ss != nil {
-			pageSummary = extractPageSummary(ss)
-		}
 	}
 
 	resp := map[string]interface{}{
@@ -867,8 +886,8 @@ func (e *SandboxToolExecutor) macroTypeText(ctx context.Context, sandboxID strin
 		"into_element": int(elementID),
 		"submitted":    submit,
 	}
-	if pageSummary != "" {
-		resp["page_after_submit"] = pageSummary
+	if submit {
+		resp["page_after_submit"] = extractPageSummary(result)
 	}
 	return resp, nil
 }
