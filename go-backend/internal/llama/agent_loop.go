@@ -89,6 +89,93 @@ type SandboxToolExecutor struct {
 	lastElements map[string]map[string]bool // sandboxID → set of "tag:text" signatures
 }
 
+// normalizeToolName normalizes common tool name aliases to canonical names.
+// Shared by SandboxToolExecutor and PersonaAwareExecutor.
+func normalizeToolName(name string, args map[string]interface{}) string {
+	switch name {
+	case "bash_execute", "execute_bash", "run_command", "shell", "execute",
+		"terminal_use", "terminal", "run", "command", "run_bash", "run_shell",
+		"execute_command", "execute_command_in_terminal", "terminal_command",
+		"computer_use_exec", "exec":
+		return "bash"
+	case "navigate", "browser_navigate", "go_to", "open_url", "goto",
+		"open", "browse", "visit", "visit_url", "open_page", "go_to_url",
+		"browse_to_and_read", "go_to_page", "load_page":
+		if _, ok := args["url"]; !ok {
+			if u, ok := args["URL"]; ok {
+				args["url"] = u
+			}
+		}
+		return "browse_to"
+	case "click", "browser_click", "click_button", "click_at", "mouse_click":
+		normalizeElementArg(args)
+		return "click_element"
+	case "type", "browser_type", "fill", "enter_text",
+		"input_text", "keyboard_type", "type_into":
+		normalizeElementArg(args)
+		for _, k := range []string{"text", "value", "content", "input"} {
+			if v, ok := args[k]; ok {
+				args["text"] = v
+				break
+			}
+		}
+		return "type_text"
+	case "scroll", "browser_scroll", "scroll_page", "scroll_down", "scroll_up":
+		if _, ok := args["action"]; !ok {
+			args["action"] = "scroll"
+		}
+		return "computer_use_act"
+	case "screenshot", "take_screenshot", "browser_screenshot",
+		"capture_screenshot", "screen_capture", "capture_screen":
+		return "computer_use_screenshot"
+	case "snapshot", "get_snapshot", "get_elements", "browser_snapshot",
+		"get_page_elements", "page_snapshot", "inspect_page", "get_page_structure":
+		return "computer_use_snapshot"
+	case "enable", "enable_desktop", "start_browser", "enable_browser",
+		"enable_computer_use", "setup_browser", "init_browser":
+		return "computer_use_enable"
+	}
+
+	// Fuzzy matching for common patterns
+	lower := strings.ToLower(name)
+	if strings.Contains(lower, "bash") || strings.Contains(lower, "shell") ||
+		strings.Contains(lower, "terminal") || strings.Contains(lower, "command") {
+		return "bash"
+	}
+	if strings.Contains(lower, "navigat") || strings.Contains(lower, "go_to") ||
+		strings.Contains(lower, "open_url") || strings.Contains(lower, "visit") {
+		if _, ok := args["action"]; !ok {
+			args["action"] = "navigate"
+		}
+		return "browse_to"
+	}
+	if strings.Contains(lower, "search") || strings.Contains(lower, "google") ||
+		strings.Contains(lower, "query") || strings.Contains(lower, "look_up") {
+		return "search_web"
+	}
+	if strings.Contains(lower, "screenshot") || strings.Contains(lower, "capture") {
+		return "computer_use_screenshot"
+	}
+	if strings.Contains(lower, "snapshot") || strings.Contains(lower, "element") {
+		return "computer_use_snapshot"
+	}
+	if strings.Contains(lower, "click") {
+		if _, ok := args["action"]; !ok {
+			args["action"] = "click"
+		}
+		return "click_element"
+	}
+	if strings.Contains(lower, "type") || strings.Contains(lower, "input") ||
+		strings.Contains(lower, "fill") || strings.Contains(lower, "enter") {
+		return "type_text"
+	}
+	if strings.Contains(lower, "enable") || strings.Contains(lower, "start_browser") {
+		return "computer_use_enable"
+	}
+
+	return name
+}
+
 // normalizeElementArg finds the element ID in args using any key that contains
 // "element" (element, element_id, target_element_id, etc.) and normalizes it to args["element"].
 func normalizeElementArg(args map[string]interface{}) {
@@ -123,96 +210,8 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		args = e.Creds.Resolve(args)
 	}
 
-	// Normalize common tool name aliases
-	switch toolName {
-	case "bash_execute", "execute_bash", "run_command", "shell", "execute",
-		"terminal_use", "terminal", "run", "command", "run_bash", "run_shell",
-		"execute_command", "execute_command_in_terminal", "terminal_command":
-		toolName = "bash"
-	case "computer_use_exec", "exec":
-		toolName = "bash"
-	case "navigate", "browser_navigate", "go_to", "open_url", "goto",
-		"open", "browse", "visit", "visit_url", "open_page", "go_to_url",
-		"browse_to_and_read", "go_to_page", "load_page":
-		toolName = "browse_to"
-		// Extract URL from various arg formats
-		if _, ok := args["url"]; !ok {
-			if u, ok := args["URL"]; ok {
-				args["url"] = u
-			}
-		}
-		if _, ok := args["url"]; !ok {
-			if raw, ok := args["raw"].(string); ok {
-				for _, key := range []string{"url", "URL", "link", "website", "address"} {
-					if v := extractJSONStringValue(raw, key); v != "" {
-						args["url"] = v
-						break
-					}
-				}
-			}
-		}
-	case "click", "browser_click", "click_button", "click_at", "mouse_click":
-		toolName = "click_element"
-		normalizeElementArg(args)
-	case "type", "browser_type", "fill", "enter_text",
-		"input_text", "keyboard_type", "type_into":
-		toolName = "type_text"
-		normalizeElementArg(args)
-		for _, k := range []string{"text", "value", "content", "input"} {
-			if v, ok := args[k]; ok {
-				args["text"] = v
-				break
-			}
-		}
-	case "scroll", "browser_scroll", "scroll_page", "scroll_down", "scroll_up":
-		toolName = "computer_use_act"
-		if _, ok := args["action"]; !ok {
-			args["action"] = "scroll"
-		}
-	case "screenshot", "take_screenshot", "browser_screenshot",
-		"capture_screenshot", "screen_capture", "capture_screen":
-		toolName = "computer_use_screenshot"
-	case "snapshot", "get_snapshot", "get_elements", "browser_snapshot",
-		"get_page_elements", "page_snapshot", "inspect_page", "get_page_structure":
-		toolName = "computer_use_snapshot"
-	case "enable", "enable_desktop", "start_browser", "enable_browser",
-		"enable_computer_use", "setup_browser", "init_browser":
-		toolName = "computer_use_enable"
-	default:
-		// Fuzzy matching for common patterns
-		lower := strings.ToLower(toolName)
-		if strings.Contains(lower, "bash") || strings.Contains(lower, "shell") ||
-			strings.Contains(lower, "terminal") || strings.Contains(lower, "command") {
-			toolName = "bash"
-		} else if strings.Contains(lower, "navigat") || strings.Contains(lower, "go_to") ||
-			strings.Contains(lower, "open_url") || strings.Contains(lower, "visit") {
-			toolName = "computer_use_act"
-			if _, ok := args["action"]; !ok {
-				args["action"] = "navigate"
-			}
-		} else if strings.Contains(lower, "search") || strings.Contains(lower, "google") ||
-			strings.Contains(lower, "query") || strings.Contains(lower, "look_up") ||
-			strings.Contains(lower, "find_info") {
-			toolName = "search_web"
-		} else if strings.Contains(lower, "screenshot") || strings.Contains(lower, "capture") {
-			toolName = "computer_use_screenshot"
-		} else if strings.Contains(lower, "snapshot") || strings.Contains(lower, "element") {
-			toolName = "computer_use_snapshot"
-		} else if strings.Contains(lower, "click") {
-			toolName = "computer_use_act"
-			if _, ok := args["action"]; !ok {
-				args["action"] = "click"
-			}
-		} else if strings.Contains(lower, "type") || strings.Contains(lower, "input") ||
-			strings.Contains(lower, "fill") || strings.Contains(lower, "enter") {
-			toolName = "computer_use_act"
-			if _, ok := args["action"]; !ok {
-				args["action"] = "type"
-			}
-		} else if strings.Contains(lower, "enable") || strings.Contains(lower, "start_browser") {
-			toolName = "computer_use_enable"
-		}
-	}
+	// Normalize common tool name aliases (shared with PersonaAwareExecutor)
+	toolName = normalizeToolName(toolName, args)
 
 	// Bash: run command inside sandbox container
 	if toolName == "bash" {
