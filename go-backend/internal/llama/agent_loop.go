@@ -901,6 +901,10 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			if lastEnd < len(output) {
 				cleanOutput = output[:lastEnd]
 			}
+			// Strip hallucinated [tool_result] tags from model output
+			// to prevent double-wrapping when formatUserTurnWithResult adds its own
+			cleanOutput = strings.ReplaceAll(cleanOutput, "[tool_result]", "")
+			cleanOutput = strings.ReplaceAll(cleanOutput, "[/tool_result]", "")
 		}
 		combinedResult := strings.Join(toolResults, "\n")
 
