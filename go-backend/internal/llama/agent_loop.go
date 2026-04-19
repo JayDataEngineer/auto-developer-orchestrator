@@ -89,6 +89,7 @@ type SandboxToolExecutor struct {
 	// Change detection: caches last seen element signatures per sandbox
 	lastElements map[string]map[string]bool       // sandboxID → set of "tag:text" signatures (for change detection)
 	elemIndex    map[string][]indexedElement       // sandboxID → ordered list of elements (for description→ID lookup)
+	credsLoaded  bool                             // true after first attempt to load credentials
 }
 
 // normalizeToolName normalizes common tool name aliases to canonical names.
@@ -304,6 +305,17 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 	if e.Manager != nil {
 		if sb := e.Manager.FindSandboxByProject(sandboxID); sb != nil {
 			sandboxID = sb.ID
+		}
+	}
+
+	// Lazy-load credentials from sandbox on first execution
+	if !e.credsLoaded && e.Manager != nil {
+		e.credsLoaded = true
+		if output, err := e.Manager.ExecInSandbox(ctx, sandboxID, []string{"cat", "/sandbox/workspace/passwords.txt"}); err == nil {
+			if creds := LoadFromText(output); !creds.IsEmpty() {
+				e.Creds = creds
+				e.Logger.Info("Loaded credentials from sandbox", zap.String("sandbox", sandboxID))
+			}
 		}
 	}
 

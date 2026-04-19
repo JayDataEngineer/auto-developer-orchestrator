@@ -148,7 +148,7 @@ func (s *Session) generateStream(prompt string, opts GenerateOptions) <-chan Tok
 		defer close(ch)
 
 		if opts.MaxTokens == 0 {
-			opts.MaxTokens = 4096
+			opts.MaxTokens = cfg.MaxTokens
 		}
 
 		var output strings.Builder

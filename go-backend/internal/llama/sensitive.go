@@ -228,3 +228,42 @@ func (c *CredentialStore) IsEmpty() bool {
 	defer c.mu.RUnlock()
 	return len(c.creds) == 0
 }
+
+// LoadFromText parses credentials from a text string (same format as secrets file).
+func LoadFromText(text string) *CredentialStore {
+	store := NewCredentialStore()
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.SplitN(line, " ", 3)
+		var domain, kv string
+		if len(parts) == 1 {
+			domain = "default"
+			kv = parts[0]
+		} else if len(parts) >= 2 {
+			if strings.Contains(parts[0], "=") {
+				domain = "default"
+				kv = parts[0]
+			} else {
+				domain = parts[0]
+				kv = parts[1]
+			}
+		}
+
+		kvParts := strings.SplitN(kv, "=", 2)
+		if len(kvParts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(kvParts[0])
+		value := strings.TrimSpace(kvParts[1])
+		if key == "" || value == "" {
+			continue
+		}
+
+		store.Set(domain, key, value)
+	}
+	return store
+}
