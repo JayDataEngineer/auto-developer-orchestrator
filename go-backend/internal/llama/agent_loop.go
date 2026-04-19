@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -86,7 +87,8 @@ type SandboxToolExecutor struct {
 	Creds     *CredentialStore // optional: resolve/redact sensitive data
 
 	// Change detection: caches last seen element signatures per sandbox
-	lastElements map[string]map[string]bool // sandboxID → set of "tag:text" signatures
+	lastElements map[string]map[string]bool       // sandboxID → set of "tag:text" signatures (for change detection)
+	elemIndex    map[string][]indexedElement       // sandboxID → ordered list of elements (for description→ID lookup)
 }
 
 // normalizeToolName normalizes common tool name aliases to canonical names.
@@ -180,7 +182,7 @@ func normalizeToolName(name string, args map[string]interface{}) string {
 // "element" (element, element_id, target_element_id, etc.) and normalizes it to args["element"].
 func normalizeElementArg(args map[string]interface{}) {
 	// Explicit aliases first
-	for _, k := range []string{"element", "element_id", "id", "ref"} {
+	for _, k := range []string{"element", "element_id", "id", "ref", "target"} {
 		if v, ok := args[k]; ok {
 			args["element"] = v
 			return
@@ -193,6 +195,106 @@ func normalizeElementArg(args map[string]interface{}) {
 			return
 		}
 	}
+}
+
+// indexedElement stores a page element for description-based ID lookup.
+type indexedElement struct {
+	ID   int
+	Tag  string
+	Text string
+	Zone string
+}
+
+// resolveElement resolves an element ID from the model's args.
+// Handles both numeric element IDs and description-based lookups.
+// When the model sends a description string like "top \"custname\"", this finds
+// the matching element by text/zone/tag and returns its numeric ID.
+func (e *SandboxToolExecutor) resolveElement(args map[string]interface{}) (int, error) {
+	// Check if element is already a numeric ID
+	if id, ok := args["element"].(float64); ok && id > 0 {
+		return int(id), nil
+	}
+	if id, ok := args["element"].(int); ok && id > 0 {
+		return id, nil
+	}
+
+	// Build the description string from various keys the model might use
+	var desc string
+	for _, k := range []string{
+		"element", "element_id", "element_description", "element_desc",
+		"text_element_description", "target_element",
+		"target", "selector",
+	} {
+		if v, ok := args[k].(string); ok && v != "" {
+			desc = v
+			break
+		}
+	}
+
+	if desc == "" {
+		return 0, fmt.Errorf("no element ID or description provided")
+	}
+
+	// Try to parse as a numeric string
+	if id, err := strconv.Atoi(strings.TrimSpace(desc)); err == nil && id > 0 {
+		return id, nil
+	}
+
+	// Look up by description in the element index
+	elems, ok := e.elemIndex[e.SandboxID]
+	if !ok || len(elems) == 0 {
+		return 0, fmt.Errorf("no page elements indexed yet — navigate to a page first")
+	}
+
+	descLower := strings.ToLower(desc)
+
+	// Score each element by how well it matches
+	bestID := 0
+	bestScore := 0
+	for _, el := range elems {
+		score := 0
+		elLower := strings.ToLower(el.Text)
+
+		// Exact text match (strongest signal)
+		if elLower == descLower {
+			score = 100
+		} else if strings.Contains(descLower, elLower) || strings.Contains(elLower, descLower) {
+			// Partial text match
+			score = 50
+		}
+
+		// Zone match (e.g. "top" in description matches element zone "top")
+		if el.Zone != "" && strings.Contains(descLower, el.Zone) {
+			score += 20
+		}
+
+		// Tag match (e.g. "input" in description)
+		if strings.Contains(descLower, el.Tag) {
+			score += 10
+		}
+
+		// Quoted text match: desc like `top "custname"` — extract quoted part
+		if idx := strings.Index(desc, "\""); idx >= 0 {
+			quoted := strings.ToLower(desc[idx+1:])
+			if end := strings.Index(quoted, "\""); end >= 0 {
+				quoted = quoted[:end]
+			}
+			if quoted != "" && strings.Contains(elLower, quoted) {
+				score += 40
+			}
+		}
+
+		if score > bestScore {
+			bestScore = score
+			bestID = el.ID
+		}
+	}
+
+	if bestID > 0 && bestScore >= 30 {
+		return bestID, nil
+	}
+
+	return 0, fmt.Errorf("could not resolve element description %q to an ID (best match score: %d)", desc, bestScore)
 }
 
 // Execute runs a tool in the sandbox and returns the result.
@@ -542,6 +644,14 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 
 			token := evt.Token
 
+			// Filter Gemma 4 control tokens from SSE output
+			if token == "<end_of_turn>" || token == "<turn|>" {
+				continue
+			}
+			if strings.HasPrefix(token, "<start_of_turn>") {
+				continue
+			}
+
 			// Detect thinking start patterns
 			// Pattern 1: <|channel|>thought (combined in one token)
 			if strings.Contains(token, "<|channel") && strings.Contains(token, "thought") {
@@ -591,6 +701,23 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 		}
 
 		output := modelResponse.String()
+
+		// Strip Gemma 4 special tokens that leak through with IgnoreEOS
+		output = strings.ReplaceAll(output, "<end_of_turn>", "")
+		output = strings.ReplaceAll(output, "<turn|>", "")
+		output = strings.ReplaceAll(output, "<start_of_turn>", "")
+		output = strings.ReplaceAll(output, "<|file_separator|>", "")
+
+		// Debug: log accumulated output (first 500 chars) for parsing diagnostics
+		logOutput := output
+		if len(logOutput) > 500 {
+			logOutput = logOutput[:500] + "..."
+		}
+		loop.logger.Debug("Accumulated model response",
+			zap.Int("len", len(output)),
+			zap.Int("round", round),
+			zap.String("preview", logOutput),
+		)
 
 		// Phase 2: Parse tool calls from the accumulated output
 		toolCalls, _ := ParseToolCalls(output)
@@ -1007,6 +1134,21 @@ func (e *SandboxToolExecutor) extractPageSummary(result map[string]interface{}) 
 		}
 		e.lastElements[e.SandboxID] = newSigs
 
+		// Build element index for description→ID resolution
+		var idx []indexedElement
+		for _, elems := range grouped {
+			for _, ei := range elems {
+				idx = append(idx, indexedElement{ID: ei.id, Tag: ei.tag, Text: ei.text, Zone: ei.zone})
+			}
+		}
+		for _, ei := range ungrouped {
+			idx = append(idx, indexedElement{ID: ei.id, Tag: ei.tag, Text: ei.text, Zone: ei.zone})
+		}
+		if e.elemIndex == nil {
+			e.elemIndex = make(map[string][]indexedElement)
+		}
+		e.elemIndex[e.SandboxID] = idx
+
 		// Output as XML tree
 		totalCount := len(ungrouped)
 		for _, elems := range grouped {
@@ -1107,28 +1249,24 @@ func (e *SandboxToolExecutor) macroReadPage(ctx context.Context, sandboxID strin
 
 // macroClickElement is a macro tool: clicks an element and returns updated page info.
 func (e *SandboxToolExecutor) macroClickElement(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
-	elementID, _ := args["element"].(float64) // JSON numbers are float64
-	if elementID == 0 {
-		if v, ok := args["element"].(int); ok {
-			elementID = float64(v)
-		}
-	}
-	if elementID == 0 {
-		return nil, fmt.Errorf("missing 'element' argument for click_element")
+	normalizeElementArg(args)
+	elementID, err := e.resolveElement(args)
+	if err != nil {
+		return nil, fmt.Errorf("click_element: %w", err)
 	}
 
 	clickArgs := map[string]interface{}{
 		"action":  "click",
-		"element": int(elementID),
+		"element": elementID,
 	}
 	result, err := e.CU.Act(ctx, sandboxID, "click", clickArgs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to click element %d: %w", int(elementID), err)
+		return nil, fmt.Errorf("failed to click element %d: %w", elementID, err)
 	}
 
 	return map[string]interface{}{
-		"success":         true,
-		"clicked_element": int(elementID),
+		"success":          true,
+		"clicked_element":  elementID,
 		"page_after_click": e.extractPageSummary(result),
 	}, nil
 }
@@ -1140,7 +1278,12 @@ func (e *SandboxToolExecutor) macroTypeText(ctx context.Context, sandboxID strin
 		return nil, fmt.Errorf("missing 'text' argument for type_text")
 	}
 
-	elementID, _ := args["element"].(float64)
+	normalizeElementArg(args)
+	elementID, err := e.resolveElement(args)
+	if err != nil {
+		return nil, fmt.Errorf("type_text: %w", err)
+	}
+
 	submit := false
 	if s, ok := args["submit"].(bool); ok {
 		submit = s
@@ -1149,7 +1292,7 @@ func (e *SandboxToolExecutor) macroTypeText(ctx context.Context, sandboxID strin
 	typeArgs := map[string]interface{}{
 		"action":  "type",
 		"text":    text,
-		"element": int(elementID),
+		"element": elementID,
 		"submit":  submit,
 	}
 	result, err := e.CU.Act(ctx, sandboxID, "type", typeArgs)
@@ -1160,7 +1303,7 @@ func (e *SandboxToolExecutor) macroTypeText(ctx context.Context, sandboxID strin
 	resp := map[string]interface{}{
 		"success":      true,
 		"typed_text":   text,
-		"into_element": int(elementID),
+		"into_element": elementID,
 		"submitted":    submit,
 	}
 	if submit {
