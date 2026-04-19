@@ -529,6 +529,16 @@ func (e *PersonaAwareExecutor) Execute(ctx context.Context, toolName string, arg
 	// Normalize tool name (handle common aliases)
 	normalized := normalizeToolName(toolName, args)
 
+	// yield_artifact is handled by the agent loop (terminal signal)
+	// but we need to accept it here so the whitelist check passes.
+	if normalized == "yield_artifact" {
+		output, _ := args["output"].(string)
+		return map[string]interface{}{
+			"yielded": true,
+			"output":  output,
+		}, nil
+	}
+
 	// Check whitelist
 	if !e.persona.HasTool(normalized) {
 		return nil, fmt.Errorf(

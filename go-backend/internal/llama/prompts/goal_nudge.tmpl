@@ -1,0 +1,4 @@
+IMPORTANT: The user's task is NOT done yet. You MUST call another tool RIGHT NOW. Do NOT explain. Just call the next tool.
+{{- if .BudgetWarning }}
+
+[SYSTEM: BUDGET WARNING — {{ .Round }}/{{ .MaxRounds }} tool rounds used. {{ .StepsLeft }} remaining. Consolidate results now.]{{- end }}

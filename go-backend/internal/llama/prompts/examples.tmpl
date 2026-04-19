@@ -1,0 +1,10 @@
+{{- define "examples" -}}
+{{- if .Examples -}}
+# Examples
+
+{{ range .Examples }}
+## {{ .Title }}
+{{ .Content }}
+{{ end }}
+{{- end -}}
+{{- end -}}

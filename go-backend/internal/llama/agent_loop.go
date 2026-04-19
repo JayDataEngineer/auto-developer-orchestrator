@@ -864,6 +864,26 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			}
 
 			toolResults = append(toolResults, resultStr)
+
+			// yield_artifact is a terminal signal — sub-agent is done
+			if normalized := normalizeToolName(tc.Name, tc.Args); normalized == "yield_artifact" {
+				loop.logger.Info("Sub-agent yielded artifact, terminating loop",
+					zap.String("tool", tc.Name),
+					zap.Int("round", round),
+				)
+				loop.session.TrackModelResponse(output)
+
+				inputTokens, outputTokens := loop.session.TokenCounts()
+				subscriber <- AgentEvent{
+					Type: EventTypeAgentEnd,
+					Data: AgentEventData{
+						Input:  float64(inputTokens),
+						Output: float64(outputTokens),
+						Model:  "llama-go/gemma-4-26b",
+					},
+				}
+				return nil
+			}
 		}
 
 		// Phase 4: Feed tool results back into the session (incremental — KV cache persists!)
@@ -891,16 +911,13 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 
 		// Re-inject the user's original goal as a reminder so the model
 		// doesn't lose track of what it's doing after seeing tool results.
-		goalReminder := "\nIMPORTANT: The user's task is NOT done yet. You MUST call another tool RIGHT NOW. Do NOT explain. Just call the next tool."
-
-		// Step budget warning at 75% of MaxToolRounds
-		if round >= int(float64(loop.config.MaxToolRounds)*0.75) && round < loop.config.MaxToolRounds {
-			stepsLeft := loop.config.MaxToolRounds - round
-			goalReminder += fmt.Sprintf(
-				"\n[SYSTEM: BUDGET WARNING — %d/%d tool rounds used. %d remaining. Consolidate results now.]",
-				round, loop.config.MaxToolRounds, stepsLeft,
-			)
-		}
+		budgetWarning := round >= int(float64(loop.config.MaxToolRounds)*0.75) && round < loop.config.MaxToolRounds
+		goalReminder, _ := RenderTemplate("goal_nudge", GoalNudgeData{
+			Round:         round,
+			MaxRounds:     loop.config.MaxToolRounds,
+			StepsLeft:     loop.config.MaxToolRounds - round,
+			BudgetWarning: budgetWarning,
+		})
 
 		// Context compaction — check after each tool round
 		if loop.config.Compaction.TriggerAfterTurns > 0 && ShouldCompact(loop.session.History(), loop.config.Compaction) {

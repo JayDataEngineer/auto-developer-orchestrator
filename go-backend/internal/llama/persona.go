@@ -31,45 +31,18 @@ type PersonaConfig struct {
 // NewPersona creates a persona of the given type with the provided config.
 func NewPersona(t PersonaType, pcfg PersonaConfig) *Persona {
 	defaults := cfg.PersonaConfig(t)
-	switch t {
-	case PersonaOrchestrator:
-		return &Persona{
-			Type:          PersonaOrchestrator,
-			SystemPrompt:  buildOrchestratorPrompt(pcfg),
-			Tools:         []string{"delegate_to", "create_plan", "update_plan", "synthesize"},
-			MaxToolRounds: defaults.MaxToolRounds,
-			MaxTokens:     defaults.MaxTokens,
-			Temperature:   defaults.Temperature,
-		}
-	case PersonaWeb:
-		return &Persona{
-			Type:          PersonaWeb,
-			SystemPrompt:  buildWebPersonaPrompt(pcfg),
-			Tools:         []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "bash"},
-			MaxToolRounds: defaults.MaxToolRounds,
-			MaxTokens:     defaults.MaxTokens,
-			Temperature:   defaults.Temperature,
-		}
-	case PersonaCode:
-		return &Persona{
-			Type:          PersonaCode,
-			SystemPrompt:  buildCodePersonaPrompt(pcfg),
-			Tools:         []string{"bash"},
-			MaxToolRounds: defaults.MaxToolRounds,
-			MaxTokens:     defaults.MaxTokens,
-			Temperature:   defaults.Temperature,
-		}
-	case PersonaDesktop:
-		return &Persona{
-			Type:          PersonaDesktop,
-			SystemPrompt:  buildDesktopPersonaPrompt(pcfg),
-			Tools:         []string{"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act", "desktop_screenshot", "desktop_click", "desktop_type", "desktop_key", "bash"},
-			MaxToolRounds: defaults.MaxToolRounds,
-			MaxTokens:     defaults.MaxTokens,
-			Temperature:   defaults.Temperature,
-		}
-	default:
+	tools := PersonaToolNames(t)
+	if tools == nil {
 		return nil
+	}
+
+	return &Persona{
+		Type:          t,
+		SystemPrompt:  buildPersonaPrompt(t, pcfg),
+		Tools:         tools,
+		MaxToolRounds: defaults.MaxToolRounds,
+		MaxTokens:     defaults.MaxTokens,
+		Temperature:   defaults.Temperature,
 	}
 }
 
