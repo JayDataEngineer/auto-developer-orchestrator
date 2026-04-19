@@ -6,29 +6,21 @@ import (
 	"sync"
 	"time"
 
-	llamago "github.com/tcpipuk/llama-go"
 	"go.uber.org/zap"
 )
 
-// Turn represents a single conversation turn.
-type Turn struct {
-	Role    string // "user", "model", "system", "tool"
-	Content string
-}
-
-// TokenEvent represents a streaming token from generation.
-type TokenEvent struct {
-	Token string
-	Err   error
-	Done  bool
-}
-
-// Session wraps a llama.Context with chat history and streaming generation.
-// Each agent gets its own Session with a persistent KV cache in VRAM.
-// Session is NOT thread-safe — use from a single goroutine.
+// Session manages an inference session via the HTTP engine.
+// It tracks conversation history and maintains a session_id for KV cache
+// persistence on the llama-server side.
+//
+// Each agent gets its own Session with a unique session_id.
+// llama-server maps session_id → slot, keeping the KV cache warm between calls.
 type Session struct {
-	ctx     *llamago.Context
-	engine  *Engine
+	engine    *HTTPEngine
+	sessionID string
+	ctxSize   int
+	grammar   string // GBNF grammar for constrained generation (per-session)
+
 	history []Turn
 	mu      sync.Mutex
 	closed  bool
@@ -40,16 +32,12 @@ type Session struct {
 
 // Chat sends a user message and streams the model's response.
 // Returns a channel of TokenEvent for streaming. The channel closes when done.
-// The KV cache persists — subsequent calls only process new tokens.
 func (s *Session) Chat(userMsg string, opts GenerateOptions) (<-chan TokenEvent, error) {
 	if s.closed {
 		return nil, fmt.Errorf("session is closed")
 	}
 
-	// Format the new tokens to append to the context
 	prompt := formatUserTurn(userMsg)
-
-	// Track in history
 	s.history = append(s.history, Turn{Role: "user", Content: userMsg})
 
 	ch := s.generateStream(prompt, opts)
@@ -74,13 +62,11 @@ func (s *Session) ChatWithSystem(system string, userMsg string, opts GenerateOpt
 }
 
 // FeedResult appends a tool result and continues generation.
-// The KV cache from the previous turn is still warm — only new tokens are processed.
 func (s *Session) FeedResult(modelResponse string, toolResult string, nextUserMsg string, opts GenerateOptions) (<-chan TokenEvent, error) {
 	if s.closed {
 		return nil, fmt.Errorf("session is closed")
 	}
 
-	// Append: model response end tag + user turn with tool result
 	var prompt strings.Builder
 	prompt.WriteString(modelResponse)
 	prompt.WriteString(endModelTurn)
@@ -96,9 +82,6 @@ func (s *Session) FeedResult(modelResponse string, toolResult string, nextUserMs
 }
 
 // FeedContinue appends the model response end tag + a new user message.
-// Used when the model finishes generating and the user sends another message.
-// NOTE: This adds both the model response and user message to history.
-// If the model response was already tracked in history, use AppendUserTurn instead.
 func (s *Session) FeedContinue(modelResponse string, userMsg string, opts GenerateOptions) (<-chan TokenEvent, error) {
 	if s.closed {
 		return nil, fmt.Errorf("session is closed")
@@ -119,8 +102,6 @@ func (s *Session) FeedContinue(modelResponse string, userMsg string, opts Genera
 }
 
 // AppendUserTurn closes the previous model turn and appends a new user message.
-// Unlike FeedContinue, this does NOT add the model response to history again —
-// it assumes the model response was already tracked during generation.
 func (s *Session) AppendUserTurn(modelResponse string, userMsg string, opts GenerateOptions) (<-chan TokenEvent, error) {
 	if s.closed {
 		return nil, fmt.Errorf("session is closed")
@@ -131,7 +112,6 @@ func (s *Session) AppendUserTurn(modelResponse string, userMsg string, opts Gene
 	prompt.WriteString(endModelTurn)
 	prompt.WriteString(formatUserTurn(userMsg))
 
-	// Only add the user turn to history — model response was already tracked
 	s.history = append(s.history,
 		Turn{Role: "user", Content: userMsg},
 	)
@@ -155,17 +135,25 @@ func (s *Session) generateStream(prompt string, opts GenerateOptions) <-chan Tok
 		tokenCount := 0
 		t0 := time.Now()
 
-		err := s.ctx.GenerateStream(prompt, func(token string) bool {
+		req := CompletionRequest{
+			Prompt:       prompt,
+			MaxTokens:    opts.MaxTokens,
+			Temperature:  opts.Temperature,
+			TopP:         opts.TopP,
+			TopK:         opts.TopK,
+			RepeatPenalty: 1.1,
+			CachePrompt:  true,
+			SessionID:    s.sessionID,
+			Grammar:      s.grammar,
+			Stream:       true,
+		}
+
+		err := s.engine.completeStream(req, func(token string) bool {
 			output.WriteString(token)
 			tokenCount++
 			ch <- TokenEvent{Token: token}
 			return true // continue generating
-		},
-			llamago.WithMaxTokens(opts.MaxTokens),
-			llamago.WithTemperature(opts.Temperature),
-			llamago.WithTopP(opts.TopP),
-			llamago.WithTopK(opts.TopK),
-		)
+		})
 
 		elapsed := time.Since(t0)
 		s.totalOutputTokens += tokenCount
@@ -188,8 +176,6 @@ func (s *Session) generateStream(prompt string, opts GenerateOptions) <-chan Tok
 }
 
 // TrackModelResponse adds a model response to history.
-// Called after generation completes (no tool calls) so that Continue() can
-// properly close the model turn before appending the next user message.
 func (s *Session) TrackModelResponse(content string) {
 	s.history = append(s.history, Turn{Role: "model", Content: content})
 }
@@ -209,7 +195,7 @@ func (s *Session) TokenCounts() (input, output int) {
 	return s.totalInputTokens, s.totalOutputTokens
 }
 
-// Close releases the context and frees VRAM.
+// Close releases the session slot on llama-server.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -219,27 +205,28 @@ func (s *Session) Close() error {
 	}
 	s.closed = true
 
-	if s.ctx != nil {
-		s.ctx.Close()
-	}
-	s.engine.logger.Debug("Session closed, KV cache freed")
+	// Best-effort cleanup — free the slot's KV cache
+	_ = s.freeSlot()
+
+	s.engine.logger.Debug("Session closed, KV cache freed",
+		zap.String("sessionId", s.sessionID),
+	)
 	return nil
 }
 
-// GenerateOptions controls generation parameters.
-type GenerateOptions struct {
-	MaxTokens   int
-	Temperature float32
-	TopP        float32
-	TopK        int
+// freeSlot sends a minimal request to free the slot's KV cache.
+func (s *Session) freeSlot() error {
+	req := CompletionRequest{
+		Prompt:      "",
+		MaxTokens:   0,
+		CachePrompt: false,
+		SessionID:   s.sessionID,
+	}
+	_, err := s.engine.complete(req)
+	return err
 }
 
-// DefaultGenerateOptions returns sensible defaults for Gemma 4.
-func DefaultGenerateOptions() GenerateOptions {
-	return GenerateOptions{
-		MaxTokens:   cfg.MaxTokens,
-		Temperature: cfg.Temperature,
-		TopP:        cfg.TopP,
-		TopK:        cfg.TopK,
-	}
+// SetGrammar sets the GBNF grammar for this session.
+func (s *Session) SetGrammar(grammar string) {
+	s.grammar = grammar
 }

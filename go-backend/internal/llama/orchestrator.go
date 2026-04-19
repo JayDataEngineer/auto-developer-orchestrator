@@ -15,7 +15,7 @@ import (
 // It owns the orchestrator's AgentLoop (KV session) and the ArtifactRegistry.
 // Sub-agents are created on demand, run synchronously, and freed after yielding.
 type OrchestratorLoop struct {
-	engine    *Engine
+	engine    *HTTPEngine
 	artifacts *ArtifactRegistry
 	executor  *OrchestratorExecutor
 	loop      *AgentLoop
@@ -37,7 +37,7 @@ type OrchestratorConfig struct {
 
 // NewOrchestratorLoop creates a new orchestrator with a fresh KV session.
 func NewOrchestratorLoop(
-	engine *Engine,
+	engine *HTTPEngine,
 	baseExecutor ToolExecutor, // SandboxToolExecutor for sub-agent tool dispatch
 	ocfg OrchestratorConfig,
 	logger *zap.Logger,
@@ -76,6 +76,7 @@ func NewOrchestratorLoop(
 		MaxToolRounds: persona.MaxToolRounds,
 		MaxTokens:     persona.MaxTokens,
 		ContextSize:   ctxSize,
+		Grammar:       PersonaGrammar(PersonaOrchestrator),
 		Compaction:    DefaultCompactionConfig(),
 		Opts: GenerateOptions{
 			MaxTokens:   persona.MaxTokens,
@@ -176,7 +177,7 @@ func (o *OrchestratorLoop) IsRunning() bool {
 // It handles delegate_to, create_plan, update_plan, and synthesize.
 // All other tool calls are rejected — the orchestrator should delegate, not execute.
 type OrchestratorExecutor struct {
-	engine       *Engine
+	engine       *HTTPEngine
 	artifacts    *ArtifactRegistry
 	personaCfg   PersonaConfig
 	baseExecutor ToolExecutor // SandboxToolExecutor for sub-agent tool dispatch
@@ -207,14 +208,34 @@ func (e *OrchestratorExecutor) Execute(ctx context.Context, toolName string, arg
 }
 
 // delegate runs a sub-agent synchronously:
-// 1. Create a new AgentLoop with the target persona's prompt and tool whitelist
+// 1. Create a new AgentLoop with the target persona's prompt and tool whitelist (minimal KV cache)
 // 2. Run it with the task prompt
 // 3. Collect the final output as an Artifact
-// 4. Close the sub-agent session (free VRAM)
+// 4. Close the sub-agent session (free VRAM immediately)
 // 5. Return the artifact summary to the orchestrator
 func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	personaName, _ := args["persona"].(string)
+	// Accept "task" or common aliases "step", "step_description"
 	task, _ := args["task"].(string)
+	if task == "" {
+		task, _ = args["step"].(string)
+	}
+	if task == "" {
+		task, _ = args["step_description"].(string)
+	}
+	// If "step" was sent as a number, look up the plan step text at that index
+	if task == "" {
+		if stepNum, ok := args["step"].(float64); ok {
+			e.mu.Lock()
+			if e.plan != nil {
+				idx := int(stepNum)
+				if idx >= 0 && idx < len(e.plan.Steps) {
+					task = e.plan.Steps[idx].Desc
+				}
+			}
+			e.mu.Unlock()
+		}
+	}
 	if personaName == "" {
 		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'persona'. Valid options: web, code, desktop. Example: delegate_to{\"persona\":\"web\",\"task\":\"your task\"}</tool_use_error>")
 	}
@@ -238,7 +259,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 
 	// Emit subagent_start event
 	if e.subscriber != nil {
-		e.subscriber <- AgentEvent{
+		sendEvent(e.subscriber, AgentEvent{
 			Type: EventTypeSubAgentStart,
 			Data: AgentEventData{
 				ToolName: "delegate_to",
@@ -250,7 +271,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 					"task":       task,
 				},
 			},
-		}
+		})
 	}
 
 	// Create PersonaAwareExecutor wrapping the base SandboxToolExecutor
@@ -260,13 +281,14 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 		logger:       e.logger,
 	}
 
-	// Create sub-agent AgentLoop (fresh KV cache)
+	// Create sub-agent AgentLoop (minimal KV cache — ephemeral, not persistent)
 	loopCfg := AgentLoopConfig{
 		SystemPrompt:  persona.SystemPrompt,
 		MaxToolRounds: persona.MaxToolRounds,
 		MaxTokens:     persona.MaxTokens,
-		ContextSize:   cfg.DefaultContextSize,
-		Compaction:    DefaultCompactionConfig(),
+		ContextSize:   cfg.SubAgentContextSize, // 8K — much smaller than orchestrator's 32K
+		Grammar:       PersonaGrammar(personaType),
+		Compaction:    SubAgentCompactionConfig(),
 		Opts: GenerateOptions{
 			MaxTokens:   persona.MaxTokens,
 			Temperature: persona.Temperature,
@@ -290,7 +312,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 		for evt := range subEvents {
 			// Forward to orchestrator's subscriber (which goes to SSE)
 			if e.subscriber != nil {
-				e.subscriber <- evt
+				sendEvent(e.subscriber, evt)
 			}
 			// Accumulate text output
 			if evt.Type == EventTypeTextDelta {
@@ -308,7 +330,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 
 	// Emit subagent_end event
 	if e.subscriber != nil {
-		e.subscriber <- AgentEvent{
+		sendEvent(e.subscriber, AgentEvent{
 			Type: EventTypeSubAgentEnd,
 			Data: AgentEventData{
 				ToolID: subAgentID,
@@ -319,7 +341,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 					"outputLen":  len(output),
 				},
 			},
-		}
+		})
 	}
 
 	if err != nil {
@@ -352,14 +374,14 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 
 	// Emit artifact_created event
 	if e.subscriber != nil {
-		e.subscriber <- AgentEvent{
+		sendEvent(e.subscriber, AgentEvent{
 			Type: EventTypeArtifactCreated,
 			Data: AgentEventData{
 				ToolName: "delegate_to",
 				ToolID:   subAgentID,
 				Result:   artifact,
 			},
-		}
+		})
 	}
 
 	e.logger.Info("ORCHESTRATOR: sub-agent completed",
@@ -423,7 +445,7 @@ func (e *OrchestratorExecutor) createPlan(args map[string]interface{}) (interfac
 
 	// Emit plan_created SSE event
 	if e.subscriber != nil {
-		e.subscriber <- AgentEvent{
+		sendEvent(e.subscriber, AgentEvent{
 			Type: EventTypePlanCreated,
 			Data: AgentEventData{
 				Result: map[string]interface{}{
@@ -431,7 +453,7 @@ func (e *OrchestratorExecutor) createPlan(args map[string]interface{}) (interfac
 					"steps":      steps,
 				},
 			},
-		}
+		})
 	}
 
 	return map[string]interface{}{
@@ -472,7 +494,7 @@ func (e *OrchestratorExecutor) updatePlan(args map[string]interface{}) (interfac
 
 	// Emit plan_updated SSE event
 	if e.subscriber != nil {
-		e.subscriber <- AgentEvent{
+		sendEvent(e.subscriber, AgentEvent{
 			Type: EventTypePlanUpdated,
 			Data: AgentEventData{
 				Result: map[string]interface{}{
@@ -481,7 +503,7 @@ func (e *OrchestratorExecutor) updatePlan(args map[string]interface{}) (interfac
 					"note":      note,
 				},
 			},
-		}
+		})
 	}
 
 	result := map[string]interface{}{"updated": true, "step": idx}

@@ -12,7 +12,6 @@ require (
 	github.com/moby/moby/api v1.54.0
 	github.com/moby/moby/client v0.3.0
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/tcpipuk/llama-go v0.0.0-20260409130703-53d622fc7cd8
 	go.uber.org/zap v1.27.0
 )
 
@@ -59,5 +58,3 @@ require (
 	golang.org/x/sys v0.43.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
-
-replace github.com/tcpipuk/llama-go => /home/ubuntu/Documents/programs/llama-go

@@ -22,6 +22,16 @@ func DefaultCompactionConfig() CompactionConfig {
 	}
 }
 
+// SubAgentCompactionConfig returns compaction settings for ephemeral sub-agents.
+// More aggressive compaction since sub-agents have smaller context (8K).
+func SubAgentCompactionConfig() CompactionConfig {
+	return CompactionConfig{
+		TriggerAfterTurns: 4,  // compact early
+		KeepLastTurns:     2,  // keep fewer turns
+		MaxCompactChars:   1500,
+	}
+}
+
 // ShouldCompact returns true if the history is long enough to warrant compaction.
 // A "turn pair" is a model response followed by a user/tool result.
 func ShouldCompact(history []Turn, cfg CompactionConfig) bool {

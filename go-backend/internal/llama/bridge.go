@@ -84,7 +84,7 @@ func ConvertEvent(evt AgentEvent) pi.AgentEvent {
 				Input  float64 `json:"input"`
 				Output float64 `json:"output"`
 			}{Input: evt.Data.Input, Output: evt.Data.Output},
-			Provider: "llama-go",
+			Provider: "llama-server",
 			Model:    "gemma-4-26b",
 		}})
 		return pi.AgentEvent{

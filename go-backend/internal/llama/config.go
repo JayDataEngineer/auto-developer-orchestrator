@@ -13,7 +13,8 @@ package llama
 // Do NOT scatter hardcoded numbers — reference these constants everywhere.
 type ModelConfig struct {
 	// Context window
-	DefaultContextSize int // KV cache context size for new sessions (32K recommended)
+	DefaultContextSize int // KV cache context size for orchestrator/persistent sessions (32K recommended)
+	SubAgentContextSize int // KV cache context size for ephemeral sub-agents (4K — smaller = less VRAM)
 	MaxContextSize     int // Hard upper limit (256K for Gemma 4 26B-A4B)
 	BatchSize          int // Processing batch size for llama-go context
 
@@ -45,6 +46,7 @@ func DefaultModelConfig() ModelConfig {
 	return ModelConfig{
 		// Context window — 32K is the sweet spot for responsiveness + capacity
 		DefaultContextSize: 32768,
+		SubAgentContextSize: 8192, // 8K — enough for system prompt + 10 tool rounds
 		MaxContextSize:     262144, // 256K — Gemma 4 26B-A4B max
 		BatchSize:          512,
 
@@ -67,8 +69,8 @@ func DefaultModelConfig() ModelConfig {
 		CompactionKeepTurns:    4,
 		CompactionMaxChars:     3000,
 
-		// VRAM — 24GB RTX 4090: 12.5GB model + 32K KV ≈ 3-4GB per agent
-		MaxConcurrentAgents: 2,
+		// VRAM — 24GB RTX 4090: 12.5GB model + 32K orchestrator KV ≈ 3-4GB + 4K sub-agent KV ≈ 0.5GB
+		MaxConcurrentAgents: 3, // orchestrator + 1 sub-agent comfortably, 2 sub-agents possible
 	}
 }
 

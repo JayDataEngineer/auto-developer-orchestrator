@@ -62,6 +62,17 @@ type ToolExecutor interface {
 	Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error)
 }
 
+// sendEvent sends an event to the subscriber channel without blocking.
+// If the channel is full (subscriber not reading fast enough), the event is dropped.
+// This prevents the agent loop from hanging if the SSE handler disconnects.
+func sendEvent(ch chan<- AgentEvent, evt AgentEvent) {
+	select {
+	case ch <- evt:
+	default:
+		// Channel full — drop event to prevent deadlock
+	}
+}
+
 // ComputerUseProvider provides computer use / desktop automation capabilities.
 // Implemented by handlers via ComputerUseBridge.
 type ComputerUseProvider interface {
@@ -464,6 +475,7 @@ type AgentLoopConfig struct {
 	MaxToolRounds int           // Maximum tool call rounds before forcing end (default: 20)
 	MaxTokens     int           // Max tokens per generation (default: 4096)
 	ContextSize   int           // KV cache context size (default from ModelConfig: 32K)
+	Grammar       string        // GBNF grammar for constrained tool call generation
 	Opts          GenerateOptions
 	Compaction    CompactionConfig // zero-value disables compaction
 }
@@ -483,7 +495,7 @@ func DefaultAgentLoopConfig() AgentLoopConfig {
 // It emits events to the subscriber channel in the same format as Pi's RPC events,
 // so the SSE handler can stream them to the frontend without modification.
 type AgentLoop struct {
-	engine   *Engine
+	engine   *HTTPEngine
 	session  *Session
 	executor ToolExecutor
 	config   AgentLoopConfig
@@ -494,7 +506,7 @@ type AgentLoop struct {
 }
 
 // NewAgentLoop creates a new agent loop bound to an engine.
-func NewAgentLoop(engine *Engine, executor ToolExecutor, cfg AgentLoopConfig, logger *zap.Logger) (*AgentLoop, error) {
+func NewAgentLoop(engine *HTTPEngine, executor ToolExecutor, cfg AgentLoopConfig, logger *zap.Logger) (*AgentLoop, error) {
 	if !engine.IsLoaded() {
 		return nil, fmt.Errorf("engine model not loaded")
 	}
@@ -502,6 +514,12 @@ func NewAgentLoop(engine *Engine, executor ToolExecutor, cfg AgentLoopConfig, lo
 	session, err := engine.NewSession(cfg.ContextSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
+	}
+
+	// Apply grammar for constrained tool call generation
+	if cfg.Grammar != "" {
+		session.SetGrammar(cfg.Grammar)
+		logger.Info("Grammar applied to session", zap.Int("grammarLen", len(cfg.Grammar)))
 	}
 
 	if logger == nil {
@@ -537,7 +555,7 @@ func (loop *AgentLoop) Run(ctx context.Context, userMsg string, subscriber chan<
 	}()
 
 	// Emit agent_start
-	subscriber <- AgentEvent{Type: EventTypeAgentStart}
+	sendEvent(subscriber, AgentEvent{Type: EventTypeAgentStart})
 
 	// First generation: system prompt + user message
 	opts := loop.config.Opts
@@ -545,8 +563,8 @@ func (loop *AgentLoop) Run(ctx context.Context, userMsg string, subscriber chan<
 
 	tokenCh, err := loop.session.ChatWithSystem(loop.config.SystemPrompt, userMsg, opts)
 	if err != nil {
-		subscriber <- AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}}
-		subscriber <- AgentEvent{Type: EventTypeAgentEnd}
+		sendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
+		sendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 		return err
 	}
 
@@ -572,7 +590,7 @@ func (loop *AgentLoop) Continue(ctx context.Context, userMsg string, subscriber 
 		loop.mu.Unlock()
 	}()
 
-	subscriber <- AgentEvent{Type: EventTypeAgentStart}
+	sendEvent(subscriber, AgentEvent{Type: EventTypeAgentStart})
 
 	opts := loop.config.Opts
 	opts.MaxTokens = loop.config.MaxTokens // Always use config's value
@@ -598,8 +616,8 @@ func (loop *AgentLoop) Continue(ctx context.Context, userMsg string, subscriber 
 		tokenCh, err = loop.session.Chat(userMsg, opts)
 	}
 	if err != nil {
-		subscriber <- AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}}
-		subscriber <- AgentEvent{Type: EventTypeAgentEnd}
+		sendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
+		sendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 		return err
 	}
 
@@ -627,13 +645,13 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 		maxRepeatLen := cfg.RepetitionWindow
 		for evt := range tokenCh {
 			if ctx.Err() != nil {
-				subscriber <- AgentEvent{Type: EventTypeAgentEnd}
+				sendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 				return ctx.Err()
 			}
 			if evt.Err != nil {
 				loop.logger.Error("Generation error", zap.Error(evt.Err))
-				subscriber <- AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: evt.Err.Error()}}
-				subscriber <- AgentEvent{Type: EventTypeAgentEnd}
+				sendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: evt.Err.Error()}})
+				sendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 				return evt.Err
 			}
 			if evt.Done {
@@ -675,7 +693,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				cleaned = strings.ReplaceAll(cleaned, "<|channel>thought", "")
 				cleaned = strings.TrimSpace(cleaned)
 				if cleaned != "" {
-					subscriber <- AgentEvent{Type: EventTypeThinkingDelta, Data: AgentEventData{Text: cleaned}}
+					sendEvent(subscriber, AgentEvent{Type: EventTypeThinkingDelta, Data: AgentEventData{Text: cleaned}})
 				}
 				continue
 			}
@@ -695,7 +713,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				cleaned = strings.ReplaceAll(cleaned, "<channel|>", "")
 				cleaned = strings.TrimSpace(cleaned)
 				if cleaned != "" && !thinkingActive {
-					subscriber <- AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: cleaned}}
+					sendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: cleaned}})
 				}
 				continue
 			}
@@ -709,9 +727,9 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			pendingStart = false
 
 			if thinkingActive {
-				subscriber <- AgentEvent{Type: EventTypeThinkingDelta, Data: AgentEventData{Text: token}}
+				sendEvent(subscriber, AgentEvent{Type: EventTypeThinkingDelta, Data: AgentEventData{Text: token}})
 			} else {
-				subscriber <- AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: token}}
+				sendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: token}})
 			}
 		}
 
@@ -752,14 +770,14 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 
 			// Emit agent_end with token counts
 			inputTokens, outputTokens := loop.session.TokenCounts()
-			subscriber <- AgentEvent{
+			sendEvent(subscriber, AgentEvent{
 				Type: EventTypeAgentEnd,
 				Data: AgentEventData{
 					Input:  float64(inputTokens),
 					Output: float64(outputTokens),
-					Model:  "llama-go/gemma-4-26b",
+					Model:  "llama-server/gemma-4-26b",
 				},
-			}
+			})
 			return nil
 		}
 
@@ -773,14 +791,14 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 		var toolResults []string
 		for _, tc := range toolCalls {
 			// Emit tool_execution_start
-			subscriber <- AgentEvent{
+			sendEvent(subscriber, AgentEvent{
 				Type: EventTypeToolStart,
 				Data: AgentEventData{
 					ToolName: tc.Name,
 					ToolArgs: tc.Args,
 					ToolID:   tc.ID,
 				},
-			}
+			})
 
 			// Log the tool call
 			argsJSON, _ := json.Marshal(tc.Args)
@@ -801,10 +819,10 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 					zap.Int("failCount", failCounts[tc.Name]),
 				)
 				toolResults = append(toolResults, resultStr)
-				subscriber <- AgentEvent{
+				sendEvent(subscriber, AgentEvent{
 					Type: EventTypeToolEnd,
 					Data: AgentEventData{ToolName: tc.Name, ToolID: tc.ID, Error: resultStr},
-				}
+				})
 				continue
 			}
 
@@ -864,7 +882,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			}
 
 			// Emit tool_execution_end
-			subscriber <- AgentEvent{
+			sendEvent(subscriber, AgentEvent{
 				Type: EventTypeToolEnd,
 				Data: AgentEventData{
 					ToolName: tc.Name,
@@ -872,7 +890,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 					Result:   result,
 					Error:    func() string { if err != nil { return err.Error() }; return "" }(),
 				},
-			}
+			})
 
 			toolResults = append(toolResults, resultStr)
 
@@ -885,14 +903,14 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				loop.session.TrackModelResponse(output)
 
 				inputTokens, outputTokens := loop.session.TokenCounts()
-				subscriber <- AgentEvent{
+				sendEvent(subscriber, AgentEvent{
 					Type: EventTypeAgentEnd,
 					Data: AgentEventData{
 						Input:  float64(inputTokens),
 						Output: float64(outputTokens),
-						Model:  "llama-go/gemma-4-26b",
+						Model:  "llama-server/gemma-4-26b",
 					},
-				}
+				})
 				return nil
 			}
 		}
@@ -943,8 +961,8 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 
 		nextCh, err := loop.session.FeedResult(cleanOutput, combinedResult, goalReminder, opts)
 		if err != nil {
-			subscriber <- AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}}
-			subscriber <- AgentEvent{Type: EventTypeAgentEnd}
+			sendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
+			sendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 			return err
 		}
 		tokenCh = nextCh
@@ -1041,13 +1059,13 @@ func (loop *AgentLoop) compactSession(subscriber chan<- AgentEvent) error {
 
 	// Notify frontend
 	if subscriber != nil {
-		subscriber <- AgentEvent{
+		sendEvent(subscriber, AgentEvent{
 			Type: EventTypeAgentEnd,
 			Data: AgentEventData{Model: "compacted"},
-		}
-		subscriber <- AgentEvent{
+		})
+		sendEvent(subscriber, AgentEvent{
 			Type: EventTypeAgentStart,
-		}
+		})
 	}
 
 	return nil

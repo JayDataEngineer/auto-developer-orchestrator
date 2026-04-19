@@ -31,7 +31,7 @@ type PiHandler struct {
 	toolPerms  *pi.ToolPermissionConfig
 
 	// Library mode — always uses orchestrator + ephemeral sub-agents
-	llamaEngine *llamaeng.Engine
+	llamaEngine *llamaeng.HTTPEngine
 	sandboxMgr  *sandbox.Manager
 	cuBridge    *ComputerUseBridge // bridges llama executor to CU/X11 handlers
 
@@ -56,7 +56,7 @@ func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, gh 
 // SetLlamaEngine configures the handler for library-mode inference.
 // When set, Prompt() routes through llama-go instead of Pi subprocess.
 // If LLAMA_ORCHESTRATOR_MODE=1 is set, Prompt() uses the orchestrator path.
-func (h *PiHandler) SetLlamaEngine(engine *llamaeng.Engine, sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
+func (h *PiHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
 	h.llamaEngine = engine
 	h.sandboxMgr = sandboxMgr
 	if cu != nil {
@@ -598,17 +598,20 @@ func (h *PiHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reques
 	// Create event channel
 	events := make(chan llamaeng.AgentEvent, 256)
 
-	// Run orchestrator in a goroutine
-	ctx := r.Context()
+	// Run orchestrator in a goroutine with a 3-minute timeout
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
 	var loopErr error
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		defer close(events)
+		// Format message to keep the task front and center for the 26B model
+		orchMsg := fmt.Sprintf("User request: %s\n\nCreate a plan and delegate each step.", req.Message)
 		if orch.Plan() == nil {
-			loopErr = orch.Run(ctx, req.Message, events)
+			loopErr = orch.Run(ctx, orchMsg, events)
 		} else {
-			loopErr = orch.Continue(ctx, req.Message, events)
+			loopErr = orch.Continue(ctx, orchMsg, events)
 		}
 	}()
 
@@ -653,19 +656,17 @@ func (h *PiHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reques
 }
 
 // getOrCreateOrchestrator returns an existing orchestrator or creates a new one.
-// Max 1 orchestrator at a time (orchestrator KV + 1 sub-agent KV = 2 sessions in VRAM).
+// Evicts ALL previous orchestrators (even running ones) to free VRAM.
 func (h *PiHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) *llamaeng.OrchestratorLoop {
 	if orch, ok := h.orchestrators[key]; ok {
 		return orch
 	}
 
-	// Evict existing idle orchestrators
+	// Evict ALL previous orchestrators (running or idle) to free VRAM
 	for k, orch := range h.orchestrators {
-		if !orch.IsRunning() {
-			h.log.Info("Evicting orchestrator (VRAM budget)", zap.String("evictKey", k))
-			orch.Close()
-			delete(h.orchestrators, k)
-		}
+		h.log.Info("Evicting orchestrator", zap.String("evictKey", k), zap.Bool("wasRunning", orch.IsRunning()))
+		orch.Close()
+		delete(h.orchestrators, k)
 	}
 
 	// Build base executor for sub-agents

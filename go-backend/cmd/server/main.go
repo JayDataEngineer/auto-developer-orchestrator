@@ -66,26 +66,31 @@ func main() {
 	// Set TOOL_MODEL env var so Pi extensions (cron-tool, etc.) can read it
 	os.Setenv("TOOL_MODEL", modelCfg.ToolModel().ModelId)
 
-	// Load llama-go engine in library mode (opt-in via LLAMA_LIBRARY_MODE=1).
-	// This bypasses the HTTP llama.cpp server and uses CGO for direct GPU access,
-	// providing persistent KV cache across tool calls (~2x faster agent loops).
-	var llamaEngine *llamaeng.Engine
-	if os.Getenv("LLAMA_LIBRARY_MODE") == "1" {
-		modelPath := os.Getenv("LLAMA_MODEL_PATH")
-		if modelPath == "" {
-			modelPath = "/home/ubuntu/Documents/programs/shared-docker-infra/models/llm/gemma-4-26B-A4B-it-UD-IQ4_NL.gguf"
-		}
-		llamaEngine = llamaeng.NewEngine(llamaeng.EngineConfig{
-			ModelPath: modelPath,
+	// Connect to llama-server HTTP engine.
+	// llama-server manages the model and KV cache — the Go backend sends HTTP requests.
+	// This replaces the in-process CGo engine, gaining GBNF grammar support for
+	// constrained tool call generation (model physically cannot hallucinate tool names).
+	llamaServerURL := os.Getenv("LLAMA_SERVER_URL")
+	if llamaServerURL == "" {
+		llamaServerURL = "http://localhost:8001"
+	}
+	var llamaEngine *llamaeng.HTTPEngine
+	if os.Getenv("LLAMA_LIBRARY_MODE") == "1" || os.Getenv("LLAMA_HTTP_MODE") == "1" || true {
+		llamaEngine = llamaeng.NewHTTPEngine(llamaeng.HTTPEngineConfig{
+			BaseURL:   llamaServerURL,
+			ModelName: "gemma-4-26b",
 			Logger:    logger,
 		})
 		if err := llamaEngine.LoadModel(); err != nil {
-			logger.Fatal("Failed to load model in library mode", zap.Error(err))
+			logger.Fatal("Failed to connect to llama-server", zap.Error(err), zap.String("url", llamaServerURL))
 		}
 		defer llamaEngine.Close()
-		logger.Info("llama-go engine loaded (library mode)",
-			zap.String("model", modelPath),
-			zap.Duration("loadTime", llamaEngine.LoadDuration()),
+		// Warm up CUDA kernels on the server side
+		if err := llamaEngine.WarmUp(); err != nil {
+			logger.Warn("Warm-up request failed (first prompt may be slow)", zap.Error(err))
+		}
+		logger.Info("llama-server HTTP engine connected",
+			zap.String("url", llamaServerURL),
 		)
 	}
 
@@ -173,10 +178,10 @@ func main() {
 	// X11 handler (xdotool-based desktop automation for native apps)
 	x11Handler := handlers.NewX11Handler(sandboxMgr, logger)
 
-	// Wire llama-go engine into PiHandler when library mode is enabled
+	// Wire llama-server HTTP engine into PiHandler
 	if llamaEngine != nil {
 		piHandler.SetLlamaEngine(llamaEngine, sandboxMgr, computerUseHandler, x11Handler)
-		logger.Info("PiHandler configured for llama-go library mode with computer use")
+		logger.Info("PiHandler configured for llama-server HTTP mode with computer use")
 	}
 
 	// File transfer handler (upload/download files to/from sandbox)
