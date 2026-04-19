@@ -219,7 +219,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 		return nil, fmt.Errorf("missing 'persona' argument. Use: web, code, or desktop")
 	}
 	if task == "" {
-		return nil, fmt.Errorf("missing 'task' argument")
+		return nil, fmt.Errorf("missing 'task' argument. Example: delegate_to{\"persona\":\"web\",\"task\":\"Go to URL and fill form\"}")
 	}
 
 	personaType := PersonaType(personaName)
@@ -435,9 +435,8 @@ func (e *OrchestratorExecutor) createPlan(args map[string]interface{}) (interfac
 	}
 
 	return map[string]interface{}{
-		"planId":    artID,
 		"stepCount": len(steps),
-		"next":      "Call delegate_to for each step. Example: delegate_to{\"persona\":\"code\",\"task\":\"<step description>\"}",
+		"next":      "Now call delegate_to for step 1. Pick the right persona: web, code, or desktop.",
 	}, nil
 }
 
