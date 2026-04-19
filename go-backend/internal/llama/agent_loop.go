@@ -612,6 +612,9 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 	var modelResponse strings.Builder
 	// Track consecutive failures per tool to prevent infinite retry loops
 	failCounts := make(map[string]int)
+	// Track total consecutive failures across all tools — death spiral prevention
+	consecutiveTotalFails := 0
+	const maxConsecutiveTotalFails = 5
 
 	for {
 		modelResponse.Reset()
@@ -826,20 +829,28 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			var resultStr string
 			if err != nil {
 				failCounts[tc.Name]++
-				errClass := classifyError(err)
-				resultStr = fmt.Sprintf("Error (attempt %d/%d): %v", failCounts[tc.Name], cfg.MaxRetriesPerTool, err)
-				if errClass == ErrorPermanent {
-					resultStr += "\n[This is a permanent error — the tool or arguments are invalid. Try a different tool or approach.]"
+				consecutiveTotalFails++
+
+				// Format error in OpenClaude style: clear, actionable, with example
+				errMsg := err.Error()
+				resultStr = fmt.Sprintf("<tool_use_error>%s</tool_use_error>", errMsg)
+
+				// Death spiral prevention: too many consecutive failures
+				if consecutiveTotalFails >= maxConsecutiveTotalFails {
+					resultStr += "\n\n[SYSTEM: Too many consecutive failures. Call yield_artifact{\"output\":\"Failed: ...\"} to end.]"
 				}
+
 				loop.logger.Error("AGENT TOOL ERROR",
 					zap.String("tool", tc.Name),
 					zap.Duration("elapsed", elapsed),
 					zap.Int("failCount", failCounts[tc.Name]),
+					zap.Int("totalConsecFails", consecutiveTotalFails),
 					zap.Error(err),
 				)
 			} else {
-				// Success — reset fail count for this tool
+				// Success — reset fail counts
 				delete(failCounts, tc.Name)
+				consecutiveTotalFails = 0
 				resultBytes, _ := json.Marshal(result)
 				resultStr = string(resultBytes)
 				if len(resultStr) > cfg.ToolResultMaxChars {

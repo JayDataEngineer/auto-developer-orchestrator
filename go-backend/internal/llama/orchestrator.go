@@ -200,7 +200,7 @@ func (e *OrchestratorExecutor) Execute(ctx context.Context, toolName string, arg
 		return e.synthesize(args)
 	default:
 		return nil, fmt.Errorf(
-			"[SYSTEM: Tool %q is not available to the orchestrator. Use delegate_to to assign this task to a sub-agent. Available: delegate_to, create_plan, update_plan, synthesize]",
+			"<tool_use_error>Unknown tool %q. Available tools: delegate_to, create_plan, update_plan, synthesize. Example: delegate_to{\"persona\":\"web\",\"task\":\"description\"}</tool_use_error>",
 			toolName,
 		)
 	}
@@ -216,16 +216,16 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 	personaName, _ := args["persona"].(string)
 	task, _ := args["task"].(string)
 	if personaName == "" {
-		return nil, fmt.Errorf("missing 'persona' argument. Use: web, code, or desktop")
+		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'persona'. Valid options: web, code, desktop. Example: delegate_to{\"persona\":\"web\",\"task\":\"your task\"}</tool_use_error>")
 	}
 	if task == "" {
-		return nil, fmt.Errorf("missing 'task' argument. Example: delegate_to{\"persona\":\"web\",\"task\":\"Go to URL and fill form\"}")
+		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'task'. Example: delegate_to{\"persona\":\"web\",\"task\":\"Go to URL and fill form\"}</tool_use_error>")
 	}
 
 	personaType := PersonaType(personaName)
 	persona := NewPersona(personaType, e.personaCfg)
 	if persona == nil {
-		return nil, fmt.Errorf("unknown persona: %s (valid: web, code, desktop)", personaName)
+		return nil, fmt.Errorf("<tool_use_error>Unknown persona %q. Valid options: web, code, desktop. Example: delegate_to{\"persona\":\"web\",\"task\":\"your task\"}</tool_use_error>", personaName)
 	}
 
 	subAgentID := fmt.Sprintf("sub-%s-%d", personaType, time.Now().UnixMilli())
