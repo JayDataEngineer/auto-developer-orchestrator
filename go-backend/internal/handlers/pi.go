@@ -860,7 +860,8 @@ func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID, projectPath string) *ll
 
 	cfg := llamaeng.DefaultAgentLoopConfig()
 	cfg.MaxToolRounds = 30 // Browser automation needs many rounds
-	cfg.MaxTokens = 2048 // Model needs room for tool calls; cap text to prevent repetition loops
+	cfg.MaxTokens = 2048  // Model needs room for tool calls; cap text to prevent repetition loops
+	cfg.Compaction = llamaeng.DefaultCompactionConfig()
 	cfg.SystemPrompt = llamaeng.BuildLibraryModeSystemPrompt(llamaeng.LibraryPromptConfig{
 		ProjectDir: projectPath,
 		SandboxID:  sandboxID,

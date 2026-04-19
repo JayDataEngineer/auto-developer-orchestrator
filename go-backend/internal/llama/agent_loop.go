@@ -83,6 +83,7 @@ type SandboxToolExecutor struct {
 	Manager   *sandbox.Manager
 	CU        ComputerUseProvider
 	Logger    *zap.Logger
+	Creds     *CredentialStore // optional: resolve/redact sensitive data
 
 	// Change detection: caches last seen element signatures per sandbox
 	lastElements map[string]map[string]bool // sandboxID → set of "tag:text" signatures
@@ -115,6 +116,11 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		if sb := e.Manager.FindSandboxByProject(sandboxID); sb != nil {
 			sandboxID = sb.ID
 		}
+	}
+
+	// Resolve credential placeholders before execution
+	if e.Creds != nil && !e.Creds.IsEmpty() {
+		args = e.Creds.Resolve(args)
 	}
 
 	// Normalize common tool name aliases
@@ -346,6 +352,7 @@ type AgentLoopConfig struct {
 	MaxTokens     int           // Max tokens per generation (default: 4096)
 	ContextSize   int           // KV cache context size (default: 8192)
 	Opts          GenerateOptions
+	Compaction    CompactionConfig // zero-value disables compaction
 }
 
 // DefaultAgentLoopConfig returns sensible defaults.
@@ -645,7 +652,10 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 
 			// Check retry limit — if this tool has failed 3 times, skip it
 			if failCounts[tc.Name] >= maxRetriesPerTool {
-				resultStr := fmt.Sprintf("[SYSTEM: Tool '%s' has failed %d times. Do NOT retry it. Use a completely different approach.]", tc.Name, maxRetriesPerTool)
+				resultStr := fmt.Sprintf(
+					"[SYSTEM: Tool '%s' has failed %d times. Do NOT retry it. Use a COMPLETELY DIFFERENT approach or tool.]",
+					tc.Name, maxRetriesPerTool,
+				)
 				loop.logger.Warn("Tool retry limit reached, forcing strategy change",
 					zap.String("tool", tc.Name),
 					zap.Int("failCount", failCounts[tc.Name]),
@@ -658,15 +668,32 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				continue
 			}
 
-			// Execute the tool
+			// Execute the tool (with retry for transient errors)
 			startTime := time.Now()
 			result, err := loop.executor.Execute(ctx, tc.Name, tc.Args)
 			elapsed := time.Since(startTime)
 
+			// Auto-retry transient errors once with backoff
+			if err != nil && classifyError(err) == ErrorTransient {
+				backoff := time.Duration(min(500*time.Millisecond*time.Duration(1<<min(failCounts[tc.Name], 4)), 10*time.Second))
+				loop.logger.Warn("Transient error, retrying with backoff",
+					zap.String("tool", tc.Name),
+					zap.Duration("backoff", backoff),
+					zap.Error(err),
+				)
+				time.Sleep(backoff)
+				result, err = loop.executor.Execute(ctx, tc.Name, tc.Args)
+				elapsed = time.Since(startTime)
+			}
+
 			var resultStr string
 			if err != nil {
 				failCounts[tc.Name]++
+				errClass := classifyError(err)
 				resultStr = fmt.Sprintf("Error (attempt %d/%d): %v", failCounts[tc.Name], maxRetriesPerTool, err)
+				if errClass == ErrorPermanent {
+					resultStr += "\n[This is a permanent error — the tool or arguments are invalid. Try a different tool or approach.]"
+				}
 				loop.logger.Error("AGENT TOOL ERROR",
 					zap.String("tool", tc.Name),
 					zap.Duration("elapsed", elapsed),
@@ -719,9 +746,32 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			}
 		}
 		combinedResult := strings.Join(toolResults, "\n")
+
+		// Redact sensitive data from tool results before feeding to model
+		if ste, ok := loop.executor.(*SandboxToolExecutor); ok && ste.Creds != nil {
+			combinedResult = ste.Creds.Redact(combinedResult)
+		}
+
 		// Re-inject the user's original goal as a reminder so the model
 		// doesn't lose track of what it's doing after seeing tool results.
 		goalReminder := "\nIMPORTANT: The user's task is NOT done yet. You MUST call another tool RIGHT NOW. Do NOT explain. Just call the next tool."
+
+		// Step budget warning at 75% of MaxToolRounds
+		if round >= int(float64(loop.config.MaxToolRounds)*0.75) && round < loop.config.MaxToolRounds {
+			stepsLeft := loop.config.MaxToolRounds - round
+			goalReminder += fmt.Sprintf(
+				"\n[SYSTEM: BUDGET WARNING — %d/%d tool rounds used. %d remaining. Consolidate results now.]",
+				round, loop.config.MaxToolRounds, stepsLeft,
+			)
+		}
+
+		// Context compaction — check after each tool round
+		if loop.config.Compaction.TriggerAfterTurns > 0 && ShouldCompact(loop.session.History(), loop.config.Compaction) {
+			if err := loop.compactSession(subscriber); err != nil {
+				loop.logger.Warn("Compaction failed, continuing with full history", zap.Error(err))
+			}
+		}
+
 		nextCh, err := loop.session.FeedResult(cleanOutput, combinedResult, goalReminder, opts)
 		if err != nil {
 			subscriber <- AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}}
@@ -754,6 +804,84 @@ func (loop *AgentLoop) IsRunning() bool {
 	loop.mu.Lock()
 	defer loop.mu.Unlock()
 	return loop.running
+}
+
+// compactSession performs extractive compaction by creating a new session
+// with compacted history, freeing the old KV cache.
+func (loop *AgentLoop) compactSession(subscriber chan<- AgentEvent) error {
+	history := loop.session.History()
+	systemPrompt := loop.config.SystemPrompt
+	cfg := loop.config.Compaction
+
+	newHistory := CompactHistory(history, systemPrompt, cfg)
+
+	loop.logger.Info("Compacting session",
+		zap.Int("oldTurns", len(history)),
+		zap.Int("newTurns", len(newHistory)),
+	)
+
+	// Close old session (free VRAM)
+	if err := loop.session.Close(); err != nil {
+		return fmt.Errorf("failed to close old session: %w", err)
+	}
+
+	// Create fresh session
+	newSession, err := loop.engine.NewSession(loop.config.ContextSize)
+	if err != nil {
+		return fmt.Errorf("failed to create new session: %w", err)
+	}
+
+	// Replay compacted history into new session
+	// The first two turns are system + user(original task) — use ChatWithSystem
+	if len(newHistory) >= 2 {
+		systemTurn := newHistory[0]
+		userTurn := newHistory[1]
+		ch, err := newSession.ChatWithSystem(systemTurn.Content, userTurn.Content, loop.config.Opts)
+		if err != nil {
+			newSession.Close()
+			return fmt.Errorf("failed to replay system+user: %w", err)
+		}
+		// Drain the generation (we don't need its output — we're just populating the KV cache)
+		for evt := range ch {
+			if evt.Err != nil {
+				newSession.Close()
+				return fmt.Errorf("error during replay: %w", evt.Err)
+			}
+		}
+
+		// Replay remaining turns as model+user pairs via FeedResult
+		for i := 2; i < len(newHistory)-1; i += 2 {
+			modelContent := newHistory[i].Content
+			userContent := newHistory[i+1].Content
+			ch, err := newSession.FeedResult(modelContent, userContent, "", loop.config.Opts)
+			if err != nil {
+				newSession.Close()
+				return fmt.Errorf("failed to replay turn %d: %w", i, err)
+			}
+			for evt := range ch {
+				if evt.Err != nil {
+					newSession.Close()
+					return fmt.Errorf("error during replay turn %d: %w", i, evt.Err)
+				}
+			}
+		}
+	}
+
+	loop.session = newSession
+	loop.logger.Info("Session compaction complete")
+
+	// Notify frontend
+	if subscriber != nil {
+		subscriber <- AgentEvent{
+			Type: EventTypeAgentEnd,
+			Data: AgentEventData{Model: "compacted"},
+		}
+		subscriber <- AgentEvent{
+			Type: EventTypeAgentStart,
+		}
+	}
+
+	return nil
 }
 
 // macroBrowseTo is a macro tool: ensures browser is running → navigates to URL → returns page info.
@@ -1078,6 +1206,34 @@ func (e *SandboxToolExecutor) macroSearchWeb(ctx context.Context, sandboxID stri
 		"search_url":    searchURL,
 		"page_summary":  e.extractPageSummary(navResult),
 	}, nil
+}
+
+// ErrorClass categorizes tool execution errors for appropriate retry behavior.
+type ErrorClass int
+
+const (
+	ErrorTransient ErrorClass = iota // network timeout, CDP disconnect, rate limit
+	ErrorPermanent                    // invalid tool, bad args, permission denied
+	ErrorUnknown
+)
+
+// classifyError categorizes an error for retry decisions.
+func classifyError(err error) ErrorClass {
+	msg := strings.ToLower(err.Error())
+	// Transient: things that might succeed on retry
+	if strings.Contains(msg, "timeout") || strings.Contains(msg, "connection") ||
+		strings.Contains(msg, "reset") || strings.Contains(msg, "temporarily") ||
+		strings.Contains(msg, "refused") || strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "context canceled") {
+		return ErrorTransient
+	}
+	// Permanent: things that won't succeed on retry
+	if strings.Contains(msg, "not found") || strings.Contains(msg, "denied") ||
+		strings.Contains(msg, "invalid") || strings.Contains(msg, "unknown persona") ||
+		strings.Contains(msg, "missing") || strings.Contains(msg, "not available") {
+		return ErrorPermanent
+	}
+	return ErrorUnknown
 }
 
 // extractJSONStringValue extracts a value from a loosely-formatted JSON string.

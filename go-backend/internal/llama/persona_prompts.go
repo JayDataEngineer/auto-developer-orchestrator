@@ -34,7 +34,8 @@ Personas: "web" (search/browse), "code" (bash/coding), "desktop" (browser automa
 - Do NOT use bash, browse_to, search_web, or any execution tools directly.
 - Keep delegations focused: one clear task per delegate_to call.
 - If a delegation fails, try a different approach or persona.
-- Credentials: /sandbox/workspace/passwords.txt`
+- Credentials: Use <secret>domain.key</secret> placeholders. Example: <secret>gmail.username</secret>
+- Read /sandbox/workspace/passwords.txt ONLY to discover available domains/keys, then use placeholders.`
 }
 
 // ── Web Persona Prompt ───────────────────────────────────────────────
@@ -76,7 +77,8 @@ submit:true presses Enter after typing.
 - Use search_web for searches. Use browse_to for specific URLs.
 - When done, output a concise summary of what you found.
 - Do NOT explain your reasoning. Just do the task and report results.
-- Credentials: /sandbox/workspace/passwords.txt
+- Credentials: Use <secret>domain.key</secret> placeholders. Example: <secret>gmail.username</secret>
+- Read /sandbox/workspace/passwords.txt ONLY to discover available domains/keys, then use placeholders.
 - Sandbox ID: %s`, sandboxID)
 }
 
@@ -103,6 +105,8 @@ Runs in sandbox %s as root. Working dir: /sandbox/workspace
 - Verify your work (run tests, check files exist, etc.).
 - When done, output a concise summary of what you did.
 - Do NOT explain your reasoning. Just do the task and report results.
+- Credentials: Use <secret>domain.key</secret> placeholders. Example: <secret>gmail.username</secret>
+- Read /sandbox/workspace/passwords.txt ONLY to discover available domains/keys, then use placeholders.
 - Persistent files: /sandbox/persist`, sandboxID)
 }
 
@@ -156,7 +160,8 @@ For file operations inside the sandbox.
 - Always verify actions with a screenshot.
 - Handle popups and cookie banners before continuing.
 - If a page loads slowly, wait and retry.
-- Credentials: /sandbox/workspace/passwords.txt
+- Credentials: Use <secret>domain.key</secret> placeholders. Example: <secret>gmail.username</secret>
+- Read /sandbox/workspace/passwords.txt ONLY to discover available domains/keys, then use placeholders.
 - Sandbox ID: %s
 - Persistent files: /sandbox/persist`, sandboxID)
 }

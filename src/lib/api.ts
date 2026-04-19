@@ -107,8 +107,10 @@ export interface ConversationSummary {
 export interface LabeledElement {
   id: number;
   tag: string;
+  displayTag?: string; // annotated tag with |SCROLL| and + markers
   text: string;
   role?: string;
+  aria?: string; // ARIA annotations (role=, label=, labelledby=)
   selector: string;
 }
 

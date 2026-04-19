@@ -199,6 +199,11 @@ func (s *Session) History() []Turn {
 	return s.history
 }
 
+// HistoryLen returns the number of turns in history.
+func (s *Session) HistoryLen() int {
+	return len(s.history)
+}
+
 // TokenCounts returns total input and output token counts.
 func (s *Session) TokenCounts() (input, output int) {
 	return s.totalInputTokens, s.totalOutputTokens

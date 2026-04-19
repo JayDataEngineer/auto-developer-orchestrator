@@ -76,6 +76,7 @@ func NewOrchestratorLoop(
 		MaxToolRounds: persona.MaxToolRounds,
 		MaxTokens:     persona.MaxTokens,
 		ContextSize:   ctxSize,
+		Compaction:    DefaultCompactionConfig(),
 		Opts: GenerateOptions{
 			MaxTokens:   persona.MaxTokens,
 			Temperature: persona.Temperature,
@@ -265,6 +266,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 		MaxToolRounds: persona.MaxToolRounds,
 		MaxTokens:     persona.MaxTokens,
 		ContextSize:   8192,
+		Compaction:    DefaultCompactionConfig(),
 		Opts: GenerateOptions{
 			MaxTokens:   persona.MaxTokens,
 			Temperature: persona.Temperature,
@@ -330,6 +332,10 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 			"persona":    string(personaType),
 			"status":     "failed",
 			"error":      err.Error(),
+			"suggestion": fmt.Sprintf(
+				"Consider: trying %s instead, simplifying the task, or breaking it into smaller steps.",
+				alternativePersona(personaType),
+			),
 		}, nil // Return as result, not error — orchestrator can retry or adapt
 	}
 
@@ -478,7 +484,11 @@ func (e *OrchestratorExecutor) updatePlan(args map[string]interface{}) (interfac
 		}
 	}
 
-	return map[string]interface{}{"updated": true, "step": idx}, nil
+	result := map[string]interface{}{"updated": true, "step": idx}
+	if status == "failed" {
+		result["hint"] = "Step failed. Consider delegating to a different persona, simplifying the task, or splitting into smaller steps."
+	}
+	return result, nil
 }
 
 // synthesize returns the final summary. The orchestrator's text output
@@ -489,6 +499,19 @@ func (e *OrchestratorExecutor) synthesize(args map[string]interface{}) (interfac
 		"synthesized": true,
 		"conclusion":  conclusion,
 	}, nil
+}
+
+// alternativePersona suggests a different persona when one fails.
+func alternativePersona(failed PersonaType) string {
+	alternatives := map[PersonaType]string{
+		PersonaWeb:     "desktop (for browser automation) or code (for API/scripting)",
+		PersonaCode:    "desktop (for GUI-based tools) or web (for web-based solutions)",
+		PersonaDesktop: "code (for CLI-based approach) or web (for web-based approach)",
+	}
+	if alt, ok := alternatives[failed]; ok {
+		return alt
+	}
+	return "a different persona"
 }
 
 // ── PersonaAwareExecutor ─────────────────────────────────────────────
