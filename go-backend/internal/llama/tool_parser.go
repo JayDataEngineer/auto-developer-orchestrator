@@ -50,19 +50,7 @@ func ParseToolCalls(output string) ([]ToolCall, string) {
 		argsStr := output[match[4]:match[5]]
 		rawMatch := output[match[0]:match[1]]
 
-		var args map[string]interface{}
-		// Sanitize Gemma 4 special tokens: <|"|> → ", <|'|> → '
-		sanitized := sanitizeGemmaTokens(argsStr)
-		if err := json.Unmarshal([]byte(sanitized), &args); err != nil {
-			// Try fixing unquoted keys: {url: "x"} → {"url": "x"}
-			fixed := fixUnquotedKeys(sanitized)
-			if err2 := json.Unmarshal([]byte(fixed), &args); err2 != nil {
-				// If JSON parse still fails, store sanitized args for fallback extraction
-				args = map[string]interface{}{
-					"raw": sanitized,
-				}
-			}
-		}
+		args := parseToolArgs(argsStr)
 
 		calls = append(calls, ToolCall{
 			ID:    generateToolCallID(len(calls)),
@@ -79,6 +67,12 @@ func ParseToolCalls(output string) ([]ToolCall, string) {
 	// Append remaining text after last match
 	if lastEnd < len(output) {
 		cleanText.WriteString(output[lastEnd:])
+	}
+
+	// Fallback: if no tagged tool calls found, try plain-text format
+	// The 26B model sometimes outputs create_plan{...} without <|tool_call|> tags
+	if len(calls) == 0 {
+		return parsePlainTextToolCalls(output)
 	}
 
 	return calls, cleanText.String()
@@ -122,4 +116,75 @@ var unquotedKeyRe = regexp.MustCompile(`([{,]\s*)(\w+)\s*:`)
 
 func fixUnquotedKeys(s string) string {
 	return unquotedKeyRe.ReplaceAllString(s, `$1"$2":`)
+}
+
+// parseToolArgs parses JSON args from a tool call, with fallbacks for malformed JSON.
+func parseToolArgs(argsStr string) map[string]interface{} {
+	sanitized := sanitizeGemmaTokens(argsStr)
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(sanitized), &args); err != nil {
+		fixed := fixUnquotedKeys(sanitized)
+		if err2 := json.Unmarshal([]byte(fixed), &args); err2 != nil {
+			args = map[string]interface{}{"raw": sanitized}
+		}
+	}
+	return args
+}
+
+// plainToolCallRe matches plain-text tool calls without special tokens.
+// Matches patterns like: create_plan{"steps":["step 1","step 2"]}
+// or: delegate_to{"persona":"code","task":"do something"}
+var plainToolCallRe = regexp.MustCompile(`(\w+)\s*(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})`)
+
+// knownToolNames is the set of valid tool names for plain-text matching.
+var knownToolNames = map[string]bool{
+	"create_plan": true, "delegate_to": true, "update_plan": true, "synthesize": true,
+	"bash": true, "search_web": true, "browse_to": true, "click_element": true,
+	"type_text": true, "read_page": true, "yield_artifact": true,
+	"computer_use_enable": true, "computer_use_screenshot": true,
+	"computer_use_snapshot": true, "computer_use_act": true,
+	"desktop_screenshot": true, "desktop_click": true, "desktop_type": true, "desktop_key": true,
+}
+
+// parsePlainTextToolCalls is a fallback for when the model outputs tool calls
+// as plain text (e.g., create_plan{...}) without the <|tool_call|> wrapper tags.
+func parsePlainTextToolCalls(output string) ([]ToolCall, string) {
+	var calls []ToolCall
+	var cleaned string
+
+	matches := plainToolCallRe.FindAllStringSubmatchIndex(output, -1)
+	for _, match := range matches {
+		toolName := output[match[2]:match[3]]
+		if !knownToolNames[toolName] {
+			continue
+		}
+		argsStr := output[match[4]:match[5]]
+		rawMatch := output[match[0]:match[1]]
+
+		args := parseToolArgs(argsStr)
+
+		calls = append(calls, ToolCall{
+			ID:   generateToolCallID(len(calls)),
+			Name: toolName,
+			Args: args,
+			Raw:  rawMatch,
+		})
+	}
+
+	if len(calls) > 0 {
+		// Remove matched tool calls from output
+		cleaned = plainToolCallRe.ReplaceAllStringFunc(output, func(s string) string {
+			// Check if this match is a known tool
+			sub := plainToolCallRe.FindStringSubmatch(s)
+			if len(sub) >= 2 && knownToolNames[sub[1]] {
+				return ""
+			}
+			return s
+		})
+		cleaned = strings.TrimSpace(cleaned)
+	} else {
+		cleaned = output
+	}
+
+	return calls, cleaned
 }
