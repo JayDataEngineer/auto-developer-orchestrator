@@ -1412,8 +1412,9 @@ func classifyError(err error) ErrorClass {
 
 // extractJSONStringValue extracts a value from a loosely-formatted JSON string.
 // Handles cases like {command: "ls -la"} where keys aren't quoted.
+// Also handles single-quoted values like {command: 'ls -la'}.
 func extractJSONStringValue(raw, key string) string {
-	// Try quoted key: "key": "value"
+	// Try double-quoted value with quoted/unquoted key
 	patterns := []string{
 		fmt.Sprintf(`"%s"\s*:\s*"((?:[^"\\]|\\.)*)"`, key),
 		fmt.Sprintf(`%s\s*:\s*"((?:[^"\\]|\\.)*)"`, key),
@@ -1423,6 +1424,18 @@ func extractJSONStringValue(raw, key string) string {
 		m := re.FindStringSubmatch(raw)
 		if len(m) >= 2 {
 			return strings.ReplaceAll(m[1], `\"`, `"`)
+		}
+	}
+	// Try single-quoted value with quoted/unquoted key
+	singlePatterns := []string{
+		fmt.Sprintf(`"%s"\s*:\s*'([^']*)'`, key),
+		fmt.Sprintf(`%s\s*:\s*'([^']*)'`, key),
+	}
+	for _, p := range singlePatterns {
+		re := regexp.MustCompile(p)
+		m := re.FindStringSubmatch(raw)
+		if len(m) >= 2 {
+			return m[1]
 		}
 	}
 	return ""

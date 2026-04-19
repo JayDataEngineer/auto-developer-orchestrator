@@ -1,4 +1,4 @@
-IMPORTANT: The user's task is NOT done yet. You MUST call another tool RIGHT NOW. Do NOT explain. Just call the next tool.
+IMPORTANT: Your task is NOT done yet. If you have the result, call yield_artifact{"output":"your result"}. Otherwise call the next tool. Do NOT explain. Just call a tool.
 {{- if .BudgetWarning }}
 
 [SYSTEM: BUDGET WARNING — {{ .Round }}/{{ .MaxRounds }} tool rounds used. {{ .StepsLeft }} remaining. Consolidate results now.]{{- end }}

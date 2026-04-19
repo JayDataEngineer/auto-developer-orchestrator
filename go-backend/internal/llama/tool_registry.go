@@ -258,9 +258,16 @@ func PersonaExamples(t PersonaType) []Example {
 	case PersonaOrchestrator:
 		return []Example{
 			{
-				Title: "Plan and delegate a research task",
-				Content: `create_plan{"steps":["Search for Raspberry Pi price","Write summary"]}
-delegate_to{"persona":"web","task":"Find the current price of a Raspberry Pi 5"}
+				Title: "Simple calculation task",
+				Content: `create_plan{"steps":["Calculate 2+2 using bash"]}
+delegate_to{"persona":"code","task":"Run: echo $((2+2))"}
+update_plan{"step_index":0,"status":"done","note":"Result: 4"}
+synthesize{"conclusion":"2+2 = 4"}`,
+			},
+			{
+				Title: "Research task",
+				Content: `create_plan{"steps":["Search for Raspberry Pi price","Summarize findings"]}
+delegate_to{"persona":"web","task":"Search Google for the current price of a Raspberry Pi 5"}
 update_plan{"step_index":0,"status":"done","note":"Found: $45"}
 synthesize{"conclusion":"The Raspberry Pi 5 costs approximately $45."}`,
 			},

@@ -437,6 +437,7 @@ func (e *OrchestratorExecutor) createPlan(args map[string]interface{}) (interfac
 	return map[string]interface{}{
 		"planId":    artID,
 		"stepCount": len(steps),
+		"next":      "Call delegate_to for each step. Example: delegate_to{\"persona\":\"code\",\"task\":\"<step description>\"}",
 	}, nil
 }
 
