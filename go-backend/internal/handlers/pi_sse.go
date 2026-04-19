@@ -204,6 +204,16 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 			},
 		}
 	default:
+		// Pass through orchestrator events (artifact_created, plan_created, etc.)
+		switch event.Type {
+		case pi.EventArtifactCreated, pi.EventArtifactUpdated,
+			pi.EventPlanCreated, pi.EventPlanUpdated,
+			pi.EventSubAgentStart, pi.EventSubAgentEnd:
+			return &sseEvent{
+				Type: event.Type,
+				Data: event.Data,
+			}
+		}
 		return nil
 	}
 }

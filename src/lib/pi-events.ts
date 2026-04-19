@@ -24,7 +24,13 @@ export type PiEventType =
   | 'pr_created'
   | 'web_update'
   | 'approval_request'
-  | 'question_asked';
+  | 'question_asked'
+  | 'artifact_created'
+  | 'artifact_updated'
+  | 'plan_created'
+  | 'plan_updated'
+  | 'subagent_start'
+  | 'subagent_end';
 
 // Base event data
 export interface PiTextDelta {
@@ -103,6 +109,61 @@ export interface PiWebUpdate {
   elements: LabeledElement[];
 }
 
+// Orchestrator artifact events
+export interface PiArtifact {
+  id: string;
+  parentId?: string;
+  sourceId: string;
+  persona: string;
+  type: string; // 'data' | 'code' | 'summary' | 'file' | 'plan'
+  title: string;
+  content: string;
+  metadata?: Record<string, string>;
+}
+
+export interface PiArtifactCreated {
+  artifactId: string;
+  artifact: PiArtifact;
+}
+
+export interface PiArtifactUpdated {
+  artifactId: string;
+  content: string;
+}
+
+// Orchestrator plan events
+export interface PiPlanStep {
+  index: number;
+  desc: string;
+  status: 'pending' | 'in_progress' | 'done' | 'failed' | 'skipped';
+  note?: string;
+  artifactId?: string;
+}
+
+export interface PiPlanCreated {
+  artifactId: string;
+  steps: PiPlanStep[];
+}
+
+export interface PiPlanUpdated {
+  stepIndex: number;
+  status: string;
+  note?: string;
+}
+
+// Orchestrator sub-agent events
+export interface PiSubAgentStart {
+  subAgentId: string;
+  persona: string;
+  task: string;
+}
+
+export interface PiSubAgentEnd {
+  subAgentId: string;
+  status: 'complete' | 'failed';
+  artifactId?: string;
+}
+
 // Approval/question events (human-in-the-loop)
 export interface PiApprovalRequest {
   requestId: string;
@@ -132,7 +193,13 @@ export type PiSSEEvent =
   | { type: 'pr_created'; data: PiPRCreated }
   | { type: 'web_update'; data: PiWebUpdate }
   | { type: 'approval_request'; data: PiApprovalRequest }
-  | { type: 'question_asked'; data: PiApprovalRequest };
+  | { type: 'question_asked'; data: PiApprovalRequest }
+  | { type: 'artifact_created'; data: PiArtifactCreated }
+  | { type: 'artifact_updated'; data: PiArtifactUpdated }
+  | { type: 'plan_created'; data: PiPlanCreated }
+  | { type: 'plan_updated'; data: PiPlanUpdated }
+  | { type: 'subagent_start'; data: PiSubAgentStart }
+  | { type: 'subagent_end'; data: PiSubAgentEnd };
 
 // Tool call tracking
 export interface ToolCall {

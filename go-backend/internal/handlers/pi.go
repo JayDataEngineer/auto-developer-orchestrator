@@ -37,25 +37,32 @@ type PiHandler struct {
 	llamaLoops     map[string]*llamaeng.AgentLoop // key: compositeKey(projectPath, agentId)
 	llamaLoopsMu   sync.Mutex
 	cuBridge       *ComputerUseBridge // bridges llama executor to CU/X11 handlers
+
+	// Orchestrator mode (optional — set when LLAMA_ORCHESTRATOR_MODE=1)
+	orchestratorMode bool
+	orchestrators    map[string]*llamaeng.OrchestratorLoop // key: compositeKey(projectPath, agentId)
 }
 
 // NewPiHandler creates a new Pi handler.
 func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, logger *zap.Logger) *PiHandler {
 	return &PiHandler{
-		pool:        pool,
-		db:          db,
-		git:         gitOps,
-		github:      gh,
-		log:         logger,
-		litellmURL:  os.Getenv("LITELLM_PROXY_URL"),
-		litellmKey:  os.Getenv("LITELLM_MASTER_KEY"),
-		toolPerms:   pi.NewToolPermissionConfig(logger),
-		llamaLoops:  make(map[string]*llamaeng.AgentLoop),
+		pool:            pool,
+		db:              db,
+		git:             gitOps,
+		github:          gh,
+		log:             logger,
+		litellmURL:      os.Getenv("LITELLM_PROXY_URL"),
+		litellmKey:      os.Getenv("LITELLM_MASTER_KEY"),
+		toolPerms:       pi.NewToolPermissionConfig(logger),
+		llamaLoops:      make(map[string]*llamaeng.AgentLoop),
+		orchestratorMode: os.Getenv("LLAMA_ORCHESTRATOR_MODE") == "1",
+		orchestrators:   make(map[string]*llamaeng.OrchestratorLoop),
 	}
 }
 
 // SetLlamaEngine configures the handler for library-mode inference.
 // When set, Prompt() routes through llama-go instead of Pi subprocess.
+// If LLAMA_ORCHESTRATOR_MODE=1 is set, Prompt() uses the orchestrator path.
 func (h *PiHandler) SetLlamaEngine(engine *llamaeng.Engine, sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
 	h.llamaEngine = engine
 	h.sandboxMgr = sandboxMgr
@@ -226,7 +233,11 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 
 	// Library-mode path: use llama-go engine directly instead of Pi subprocess
 	if h.llamaEngine != nil && h.llamaEngine.IsLoaded() {
-		h.promptWithLlamaEngine(w, r, req, projectPath)
+		if h.orchestratorMode {
+			h.promptWithOrchestrator(w, r, req, projectPath)
+		} else {
+			h.promptWithLlamaEngine(w, r, req, projectPath)
+		}
 		return
 	}
 
@@ -655,7 +666,156 @@ func (h *PiHandler) accumulateLlamaText(evt llamaeng.AgentEvent, text, thinking 
 	}
 }
 
-// getOrCreateLlamaLoop returns an existing agent loop or creates a new one.
+// promptWithOrchestrator handles prompt requests using the orchestrator + sub-agent pattern.
+// The orchestrator plans and delegates to specialized personas (web, code, desktop).
+func (h *PiHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
+	key := compositeAgentKey(projectPath, req.AgentId)
+	sandboxID := filepath.Base(projectPath)
+
+	orch := h.getOrCreateOrchestrator(key, sandboxID, projectPath)
+	if orch == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to create orchestrator (VRAM full or model not loaded). Try again later.",
+		})
+		return
+	}
+
+	// Set up SSE
+	setSSEHeaders(w)
+	flusher, canFlush := w.(http.Flusher)
+
+	// Send agent_spawned event
+	spawnData, _ := json.Marshal(map[string]string{"agentId": req.AgentId})
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", pi.EventAgentSpawned, string(spawnData))
+	if canFlush {
+		flusher.Flush()
+	}
+
+	// Save user message to DB
+	if h.db != nil {
+		if _, err := h.db.SaveUserMessage(r.Context(), req.Project, req.AgentId, req.Message); err != nil {
+			h.log.Warn("Failed to save user message", zap.Error(err))
+		}
+	}
+
+	// Create event channel
+	events := make(chan llamaeng.AgentEvent, 256)
+
+	// Run orchestrator in a goroutine
+	ctx := r.Context()
+	var loopErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer close(events)
+		if orch.Plan() == nil {
+			loopErr = orch.Run(ctx, req.Message, events)
+		} else {
+			loopErr = orch.Continue(ctx, req.Message, events)
+		}
+	}()
+
+	// Stream events to SSE
+	var assistantText, assistantThinking string
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			// Drain remaining events
+			for evt := range events {
+				h.writeLlamaSSE(w, evt, canFlush, flusher)
+				h.accumulateLlamaText(evt, &assistantText, &assistantThinking)
+			}
+			if h.db != nil {
+				if _, err := h.db.SaveAssistantMessage(ctx, req.Project, req.AgentId, assistantText, assistantThinking, "[]"); err != nil {
+					h.log.Warn("Failed to save assistant message", zap.Error(err))
+				}
+			}
+			if loopErr != nil {
+				h.log.Error("Orchestrator error", zap.Error(loopErr))
+			}
+			return
+		case <-keepalive.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			if canFlush {
+				flusher.Flush()
+			}
+		case evt, ok := <-events:
+			if !ok {
+				return
+			}
+			keepalive.Reset(15 * time.Second)
+			h.writeLlamaSSE(w, evt, canFlush, flusher)
+			h.accumulateLlamaText(evt, &assistantText, &assistantThinking)
+		}
+	}
+}
+
+// getOrCreateOrchestrator returns an existing orchestrator or creates a new one.
+// Max 1 orchestrator at a time (orchestrator KV + 1 sub-agent KV = 2 sessions in VRAM).
+func (h *PiHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) *llamaeng.OrchestratorLoop {
+	h.llamaLoopsMu.Lock()
+	defer h.llamaLoopsMu.Unlock()
+
+	if orch, ok := h.orchestrators[key]; ok {
+		return orch
+	}
+
+	// Evict existing orchestrators if any (only 1 at a time)
+	for k, orch := range h.orchestrators {
+		if !orch.IsRunning() {
+			h.log.Info("Evicting orchestrator (VRAM budget)", zap.String("evictKey", k))
+			orch.Close()
+			delete(h.orchestrators, k)
+		}
+	}
+
+	// Also evict any llama loops — orchestrator needs VRAM for sub-agents
+	for k, l := range h.llamaLoops {
+		if !l.IsRunning() {
+			h.log.Info("Evicting llama loop for orchestrator VRAM", zap.String("evictKey", k))
+			l.Close()
+			delete(h.llamaLoops, k)
+		}
+	}
+
+	// Build base executor for sub-agents
+	var baseExecutor llamaeng.ToolExecutor
+	if h.sandboxMgr != nil {
+		baseExecutor = &llamaeng.SandboxToolExecutor{
+			SandboxID: sandboxID,
+			Manager:   h.sandboxMgr,
+			CU:        h.cuBridge,
+			Logger:    h.log,
+		}
+	}
+
+	cfg := llamaeng.OrchestratorConfig{
+		ProjectDir:  projectPath,
+		SandboxID:   sandboxID,
+		ContextSize: 8192,
+	}
+
+	orch, err := llamaeng.NewOrchestratorLoop(h.llamaEngine, baseExecutor, cfg, h.log)
+	if err != nil {
+		h.log.Error("Failed to create orchestrator", zap.Error(err))
+		return nil
+	}
+
+	h.orchestrators[key] = orch
+	h.log.Info("Created new orchestrator loop",
+		zap.String("key", key),
+		zap.String("sandbox", sandboxID),
+	)
+	return orch
+}
+
+
 func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID, projectPath string) *llamaeng.AgentLoop {
 	h.llamaLoopsMu.Lock()
 	defer h.llamaLoopsMu.Unlock()

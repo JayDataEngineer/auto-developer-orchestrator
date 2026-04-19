@@ -40,6 +40,18 @@ func ConvertEvent(evt AgentEvent) pi.AgentEvent {
 		rpcType = pi.RpcEventAgentEnd
 	case EventTypeError:
 		rpcType = pi.RpcEventError
+	case EventTypeArtifactCreated:
+		rpcType = pi.EventArtifactCreated
+	case EventTypeArtifactUpdated:
+		rpcType = pi.EventArtifactUpdated
+	case EventTypePlanCreated:
+		rpcType = pi.EventPlanCreated
+	case EventTypePlanUpdated:
+		rpcType = pi.EventPlanUpdated
+	case EventTypeSubAgentStart:
+		rpcType = pi.EventSubAgentStart
+	case EventTypeSubAgentEnd:
+		rpcType = pi.EventSubAgentEnd
 	default:
 		return pi.AgentEvent{Type: "unknown"}
 	}

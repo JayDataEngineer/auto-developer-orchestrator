@@ -10,6 +10,8 @@ import type {
   AssistantMessage,
   PiWebUpdate,
   PiApprovalRequest,
+  PiArtifact,
+  PiPlanStep,
 } from '../lib/pi-events';
 import type { SubAgentInfo } from '../lib/api';
 
@@ -32,6 +34,8 @@ export interface PiAgentState {
   prUrl: string | null;
   prNumber: number | null;
   subAgents: SubAgentInfo[];
+  artifacts: PiArtifact[];
+  plan: { artifactId: string; steps: PiPlanStep[] } | null;
   webUpdate: PiWebUpdate | null;
   lastCommit: { message: string; branch: string } | null;
   lastPush: { branch: string } | null;
@@ -53,6 +57,8 @@ export const initialAgentState: PiAgentState = {
   prUrl: null,
   prNumber: null,
   subAgents: [],
+  artifacts: [],
+  plan: null,
   webUpdate: null,
   lastCommit: null,
   lastPush: null,
@@ -327,6 +333,103 @@ export function agentReducer(
     case 'question_asked': {
       const approvalData = event.data as PiApprovalRequest;
       return { ...state, pendingApproval: approvalData };
+    }
+
+    case 'artifact_created': {
+      const artData = event.data as { artifactId: string; artifact?: PiArtifact };
+      if (artData.artifact) {
+        return {
+          ...state,
+          artifacts: [...state.artifacts, artData.artifact],
+        };
+      }
+      return state;
+    }
+
+    case 'artifact_updated': {
+      const updData = event.data as { artifactId: string; content: string };
+      return {
+        ...state,
+        artifacts: state.artifacts.map(a =>
+          a.id === updData.artifactId ? { ...a, content: updData.content } : a,
+        ),
+      };
+    }
+
+    case 'plan_created': {
+      const planData = event.data as {
+        artifactId: string;
+        steps: PiPlanStep[];
+      };
+      return {
+        ...state,
+        plan: { artifactId: planData.artifactId, steps: planData.steps },
+      };
+    }
+
+    case 'plan_updated': {
+      const planUpd = event.data as {
+        stepIndex: number;
+        status: string;
+        note?: string;
+      };
+      if (!state.plan) return state;
+      return {
+        ...state,
+        plan: {
+          ...state.plan,
+          steps: state.plan.steps.map(s =>
+            s.index === planUpd.stepIndex
+              ? { ...s, status: planUpd.status as PiPlanStep['status'], note: planUpd.note }
+              : s,
+          ),
+        },
+      };
+    }
+
+    case 'subagent_start': {
+      const subData = event.data as {
+        subAgentId: string;
+        persona: string;
+        task: string;
+      };
+      const exists = state.subAgents.find(
+        sa => sa.subAgentId === subData.subAgentId,
+      );
+      if (exists) return state;
+      return {
+        ...state,
+        subAgents: [
+          ...state.subAgents,
+          {
+            subAgentId: subData.subAgentId,
+            type: subData.persona as SubAgentInfo['type'],
+            status: 'running' as const,
+            output: '',
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheTokens: 0,
+            durationMs: 0,
+            toolCalls: 0,
+          },
+        ],
+      };
+    }
+
+    case 'subagent_end': {
+      const subEnd = event.data as {
+        subAgentId: string;
+        status: 'complete' | 'failed';
+        artifactId?: string;
+      };
+      return {
+        ...state,
+        subAgents: state.subAgents.map(sa =>
+          sa.subAgentId === subEnd.subAgentId
+            ? { ...sa, status: subEnd.status === 'complete' ? 'complete' as const : 'failed' as const }
+            : sa,
+        ),
+      };
     }
 
     default:

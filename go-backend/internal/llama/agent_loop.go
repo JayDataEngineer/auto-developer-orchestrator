@@ -18,13 +18,19 @@ import (
 type AgentEventType string
 
 const (
-	EventTypeTextDelta     AgentEventType = "text_delta"
-	EventTypeThinkingDelta AgentEventType = "thinking_delta"
-	EventTypeToolStart     AgentEventType = "tool_execution_start"
-	EventTypeToolEnd       AgentEventType = "tool_execution_end"
-	EventTypeAgentStart    AgentEventType = "agent_start"
-	EventTypeAgentEnd      AgentEventType = "agent_end"
-	EventTypeError         AgentEventType = "error"
+	EventTypeTextDelta       AgentEventType = "text_delta"
+	EventTypeThinkingDelta   AgentEventType = "thinking_delta"
+	EventTypeToolStart       AgentEventType = "tool_execution_start"
+	EventTypeToolEnd         AgentEventType = "tool_execution_end"
+	EventTypeAgentStart      AgentEventType = "agent_start"
+	EventTypeAgentEnd        AgentEventType = "agent_end"
+	EventTypeError           AgentEventType = "error"
+	EventTypeArtifactCreated AgentEventType = "artifact_created"
+	EventTypeArtifactUpdated AgentEventType = "artifact_updated"
+	EventTypePlanCreated     AgentEventType = "plan_created"
+	EventTypePlanUpdated     AgentEventType = "plan_updated"
+	EventTypeSubAgentStart   AgentEventType = "subagent_start"
+	EventTypeSubAgentEnd     AgentEventType = "subagent_end"
 )
 
 // AgentEvent is an event emitted by the agent loop.

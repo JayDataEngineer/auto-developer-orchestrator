@@ -183,6 +183,14 @@ const (
 	RpcEventResponse        = "response"
 	RpcEventStateUpdate     = "state_update"
 	RpcEventError           = "error"
+
+	// Orchestrator events (from library mode, not Pi RPC)
+	EventArtifactCreated = "artifact_created"
+	EventArtifactUpdated = "artifact_updated"
+	EventPlanCreated     = "plan_created"
+	EventPlanUpdated     = "plan_updated"
+	EventSubAgentStart   = "subagent_start"
+	EventSubAgentEnd     = "subagent_end"
 )
 
 // ApprovalRequestData is sent to the frontend when the agent needs approval.
