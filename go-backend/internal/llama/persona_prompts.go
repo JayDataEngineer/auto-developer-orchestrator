@@ -47,6 +47,6 @@ func personaTemplateName(t PersonaType) string {
 	case PersonaDesktop:
 		return "desktop"
 	default:
-		return "monolithic"
+		return "code" // fallback for unknown personas
 	}
 }
