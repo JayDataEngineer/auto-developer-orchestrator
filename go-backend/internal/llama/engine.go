@@ -84,7 +84,7 @@ func (e *Engine) NewSession(ctxSize int) (*Session, error) {
 	ctx, err := model.NewContext(
 		llamago.WithContext(ctxSize),
 		llamago.WithPrefixCaching(true),
-		llamago.WithBatch(512),
+		llamago.WithBatch(cfg.BatchSize),
 		llamago.WithF16Memory(),
 	)
 	if err != nil {

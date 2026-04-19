@@ -349,18 +349,18 @@ type AgentLoopConfig struct {
 	SystemPrompt  string
 	MaxToolRounds int           // Maximum tool call rounds before forcing end (default: 20)
 	MaxTokens     int           // Max tokens per generation (default: 4096)
-	ContextSize   int           // KV cache context size (default: 8192)
+	ContextSize   int           // KV cache context size (default from ModelConfig: 32K)
 	Opts          GenerateOptions
 	Compaction    CompactionConfig // zero-value disables compaction
 }
 
-// DefaultAgentLoopConfig returns sensible defaults.
+// DefaultAgentLoopConfig returns sensible defaults from ModelConfig.
 func DefaultAgentLoopConfig() AgentLoopConfig {
 	return AgentLoopConfig{
 		SystemPrompt:  "You are a coding assistant with access to tools.",
-		MaxToolRounds: 20,
-		MaxTokens:     4096,
-		ContextSize:   32768,
+		MaxToolRounds: cfg.DefaultMaxToolRounds,
+		MaxTokens:     cfg.MaxTokens,
+		ContextSize:   cfg.DefaultContextSize,
 		Opts:          DefaultGenerateOptions(),
 	}
 }
@@ -498,7 +498,6 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 	var modelResponse strings.Builder
 	// Track consecutive failures per tool to prevent infinite retry loops
 	failCounts := make(map[string]int)
-	const maxRetriesPerTool = 3
 
 	for {
 		modelResponse.Reset()
@@ -508,7 +507,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 		var pendingStart bool // true if we saw "<|channel>" but not "thought" yet
 		// Repetition detection: track recent output to break loops
 		var recentOutput string
-		const maxRepeatLen = 100 // check last 100 chars for repetition
+		maxRepeatLen := cfg.RepetitionWindow
 		for evt := range tokenCh {
 			if ctx.Err() != nil {
 				subscriber <- AgentEvent{Type: EventTypeAgentEnd}
@@ -650,10 +649,10 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			)
 
 			// Check retry limit — if this tool has failed 3 times, skip it
-			if failCounts[tc.Name] >= maxRetriesPerTool {
+			if failCounts[tc.Name] >= cfg.MaxRetriesPerTool {
 				resultStr := fmt.Sprintf(
 					"[SYSTEM: Tool '%s' has failed %d times. Do NOT retry it. Use a COMPLETELY DIFFERENT approach or tool.]",
-					tc.Name, maxRetriesPerTool,
+					tc.Name, cfg.MaxRetriesPerTool,
 				)
 				loop.logger.Warn("Tool retry limit reached, forcing strategy change",
 					zap.String("tool", tc.Name),
@@ -689,7 +688,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			if err != nil {
 				failCounts[tc.Name]++
 				errClass := classifyError(err)
-				resultStr = fmt.Sprintf("Error (attempt %d/%d): %v", failCounts[tc.Name], maxRetriesPerTool, err)
+				resultStr = fmt.Sprintf("Error (attempt %d/%d): %v", failCounts[tc.Name], cfg.MaxRetriesPerTool, err)
 				if errClass == ErrorPermanent {
 					resultStr += "\n[This is a permanent error — the tool or arguments are invalid. Try a different tool or approach.]"
 				}
@@ -704,8 +703,8 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				delete(failCounts, tc.Name)
 				resultBytes, _ := json.Marshal(result)
 				resultStr = string(resultBytes)
-				if len(resultStr) > 6000 {
-					resultStr = resultStr[:6000] + "...[truncated]"
+				if len(resultStr) > cfg.ToolResultMaxChars {
+					resultStr = resultStr[:cfg.ToolResultMaxChars] + "...[truncated]"
 				}
 				loop.logger.Info("AGENT TOOL RESULT",
 					zap.String("tool", tc.Name),

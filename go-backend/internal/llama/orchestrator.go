@@ -32,14 +32,14 @@ type OrchestratorLoop struct {
 type OrchestratorConfig struct {
 	ProjectDir  string
 	SandboxID   string
-	ContextSize int // default: 8192
+	ContextSize int // 0 = use ModelConfig default (32K)
 }
 
 // NewOrchestratorLoop creates a new orchestrator with a fresh KV session.
 func NewOrchestratorLoop(
 	engine *Engine,
 	baseExecutor ToolExecutor, // SandboxToolExecutor for sub-agent tool dispatch
-	cfg OrchestratorConfig,
+	ocfg OrchestratorConfig,
 	logger *zap.Logger,
 ) (*OrchestratorLoop, error) {
 	if !engine.IsLoaded() {
@@ -51,16 +51,16 @@ func NewOrchestratorLoop(
 	}
 
 	personaCfg := PersonaConfig{
-		ProjectDir: cfg.ProjectDir,
-		SandboxID:  cfg.SandboxID,
+		ProjectDir: ocfg.ProjectDir,
+		SandboxID:  ocfg.SandboxID,
 	}
 
 	artifacts := NewArtifactRegistry()
 	persona := NewPersona(PersonaOrchestrator, personaCfg)
 
-	ctxSize := cfg.ContextSize
+	ctxSize := ocfg.ContextSize
 	if ctxSize == 0 {
-		ctxSize = 8192
+		ctxSize = cfg.DefaultContextSize
 	}
 
 	orchestratorExec := &OrchestratorExecutor{
@@ -80,8 +80,8 @@ func NewOrchestratorLoop(
 		Opts: GenerateOptions{
 			MaxTokens:   persona.MaxTokens,
 			Temperature: persona.Temperature,
-			TopP:        0.95,
-			TopK:        64,
+			TopP:        cfg.TopP,
+			TopK:        cfg.TopK,
 		},
 	}
 
@@ -260,18 +260,18 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 		logger:       e.logger,
 	}
 
-	// Create sub-agent AgentLoop (fresh KV cache, ~170MB VRAM)
+	// Create sub-agent AgentLoop (fresh KV cache)
 	loopCfg := AgentLoopConfig{
 		SystemPrompt:  persona.SystemPrompt,
 		MaxToolRounds: persona.MaxToolRounds,
 		MaxTokens:     persona.MaxTokens,
-		ContextSize:   8192,
+		ContextSize:   cfg.DefaultContextSize,
 		Compaction:    DefaultCompactionConfig(),
 		Opts: GenerateOptions{
 			MaxTokens:   persona.MaxTokens,
 			Temperature: persona.Temperature,
-			TopP:        0.95,
-			TopK:        64,
+			TopP:        cfg.TopP,
+			TopK:        cfg.TopK,
 		},
 	}
 	subLoop, err := NewAgentLoop(e.engine, subExecutor, loopCfg, e.logger)
@@ -373,7 +373,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 		"subAgentId": subAgentID,
 		"persona":    string(personaType),
 		"status":     "complete",
-		"output":     truncate(output, 4000),
+		"output":     truncate(output, cfg.SynthesisMaxChars),
 	}, nil
 }
 

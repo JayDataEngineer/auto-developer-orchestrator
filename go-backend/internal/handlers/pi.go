@@ -796,9 +796,9 @@ func (h *PiHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) 
 	}
 
 	cfg := llamaeng.OrchestratorConfig{
-		ProjectDir:  projectPath,
-		SandboxID:   sandboxID,
-		ContextSize: 8192,
+		ProjectDir: projectPath,
+		SandboxID:  sandboxID,
+		// ContextSize 0 means "use ModelConfig default" (32K)
 	}
 
 	orch, err := llamaeng.NewOrchestratorLoop(h.llamaEngine, baseExecutor, cfg, h.log)
@@ -825,8 +825,7 @@ func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID, projectPath string) *ll
 	}
 
 	// VRAM constraint: evict oldest non-running loops if we have too many.
-	// With 24GB VRAM: 12.8GB model + ~3.7GB per 32K context = 1-2 concurrent agents.
-	const maxLlamaLoops = 2
+	maxLlamaLoops := llamaeng.GetModelConfig().MaxConcurrentAgents
 	if len(h.llamaLoops) >= maxLlamaLoops {
 		// Find oldest non-running loop to evict
 		var evictKey string
@@ -858,9 +857,10 @@ func (h *PiHandler) getOrCreateLlamaLoop(key, sandboxID, projectPath string) *ll
 		}
 	}
 
+	agentCfg := llamaeng.GetModelConfig()
 	cfg := llamaeng.DefaultAgentLoopConfig()
-	cfg.MaxToolRounds = 30 // Browser automation needs many rounds
-	cfg.MaxTokens = 2048  // Model needs room for tool calls; cap text to prevent repetition loops
+	cfg.MaxToolRounds = agentCfg.BrowserMaxToolRounds // Browser automation needs many rounds
+	cfg.MaxTokens = 2048                              // Cap text to prevent repetition loops
 	cfg.Compaction = llamaeng.DefaultCompactionConfig()
 	cfg.SystemPrompt = llamaeng.BuildLibraryModeSystemPrompt(llamaeng.LibraryPromptConfig{
 		ProjectDir: projectPath,

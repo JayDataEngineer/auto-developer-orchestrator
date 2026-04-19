@@ -237,9 +237,9 @@ type GenerateOptions struct {
 // DefaultGenerateOptions returns sensible defaults for Gemma 4.
 func DefaultGenerateOptions() GenerateOptions {
 	return GenerateOptions{
-		MaxTokens:   4096,
-		Temperature: 0.7,
-		TopP:        0.95,
-		TopK:        64,
+		MaxTokens:   cfg.MaxTokens,
+		Temperature: cfg.Temperature,
+		TopP:        cfg.TopP,
+		TopK:        cfg.TopK,
 	}
 }

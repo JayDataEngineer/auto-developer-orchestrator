@@ -29,43 +29,44 @@ type PersonaConfig struct {
 }
 
 // NewPersona creates a persona of the given type with the provided config.
-func NewPersona(t PersonaType, cfg PersonaConfig) *Persona {
+func NewPersona(t PersonaType, pcfg PersonaConfig) *Persona {
+	defaults := cfg.PersonaConfig(t)
 	switch t {
 	case PersonaOrchestrator:
 		return &Persona{
 			Type:          PersonaOrchestrator,
-			SystemPrompt:  buildOrchestratorPrompt(cfg),
+			SystemPrompt:  buildOrchestratorPrompt(pcfg),
 			Tools:         []string{"delegate_to", "create_plan", "update_plan", "synthesize"},
-			MaxToolRounds: 15, // orchestrator does planning, not execution
-			MaxTokens:     2048,
-			Temperature:   0.7,
+			MaxToolRounds: defaults.MaxToolRounds,
+			MaxTokens:     defaults.MaxTokens,
+			Temperature:   defaults.Temperature,
 		}
 	case PersonaWeb:
 		return &Persona{
 			Type:          PersonaWeb,
-			SystemPrompt:  buildWebPersonaPrompt(cfg),
+			SystemPrompt:  buildWebPersonaPrompt(pcfg),
 			Tools:         []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "bash"},
-			MaxToolRounds: 20,
-			MaxTokens:     2048,
-			Temperature:   0.4, // lower temp for focused web tasks
+			MaxToolRounds: defaults.MaxToolRounds,
+			MaxTokens:     defaults.MaxTokens,
+			Temperature:   defaults.Temperature,
 		}
 	case PersonaCode:
 		return &Persona{
 			Type:          PersonaCode,
-			SystemPrompt:  buildCodePersonaPrompt(cfg),
+			SystemPrompt:  buildCodePersonaPrompt(pcfg),
 			Tools:         []string{"bash"},
-			MaxToolRounds: 20,
-			MaxTokens:     2048,
-			Temperature:   0.3, // low temp for precise code execution
+			MaxToolRounds: defaults.MaxToolRounds,
+			MaxTokens:     defaults.MaxTokens,
+			Temperature:   defaults.Temperature,
 		}
 	case PersonaDesktop:
 		return &Persona{
 			Type:          PersonaDesktop,
-			SystemPrompt:  buildDesktopPersonaPrompt(cfg),
+			SystemPrompt:  buildDesktopPersonaPrompt(pcfg),
 			Tools:         []string{"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act", "desktop_screenshot", "desktop_click", "desktop_type", "desktop_key", "bash"},
-			MaxToolRounds: 30, // desktop automation needs many rounds
-			MaxTokens:     2048,
-			Temperature:   0.4,
+			MaxToolRounds: defaults.MaxToolRounds,
+			MaxTokens:     defaults.MaxTokens,
+			Temperature:   defaults.Temperature,
 		}
 	default:
 		return nil

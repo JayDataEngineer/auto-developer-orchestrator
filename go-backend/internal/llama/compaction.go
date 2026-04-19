@@ -13,12 +13,12 @@ type CompactionConfig struct {
 	MaxCompactChars   int // max chars for the compacted summary block (default: 2000)
 }
 
-// DefaultCompactionConfig returns sensible defaults.
+// DefaultCompactionConfig returns sensible defaults from ModelConfig.
 func DefaultCompactionConfig() CompactionConfig {
 	return CompactionConfig{
-		TriggerAfterTurns: 8,
-		KeepLastTurns:     3,
-		MaxCompactChars:   2000,
+		TriggerAfterTurns: cfg.CompactionTriggerTurns,
+		KeepLastTurns:     cfg.CompactionKeepTurns,
+		MaxCompactChars:   cfg.CompactionMaxChars,
 	}
 }
 
