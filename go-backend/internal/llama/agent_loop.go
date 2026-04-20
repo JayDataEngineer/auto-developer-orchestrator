@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,6 +103,16 @@ type SandboxToolExecutor struct {
 	lastElements map[string]map[string]bool       // sandboxID → set of "tag:text" signatures (for change detection)
 	elemIndex    map[string][]indexedElement       // sandboxID → ordered list of elements (for description→ID lookup)
 	credsLoaded  bool                             // true after first attempt to load credentials
+
+	// Page fingerprinting for loop/stagnation detection
+	pageFingerprints map[string][]pageFingerprint // sandboxID → recent fingerprints (last 10)
+}
+
+// pageFingerprint is a compact hash of page state for detecting stagnation.
+type pageFingerprint struct {
+	url     string
+	elCount int
+	sig     string // first 16 chars of element signature hash
 }
 
 // normalizeToolName normalizes common tool name aliases to canonical names.
@@ -1075,6 +1086,27 @@ func (e *SandboxToolExecutor) extractPageSummary(result map[string]interface{}) 
 		}
 		e.lastElements[e.SandboxID] = newSigs
 
+		// Track page fingerprint for stagnation detection
+		fp := pageFingerprint{
+			url:     parts[0], // URL: ...
+			elCount: len(newSigs),
+			sig:     fingerprintSig(newSigs),
+		}
+		if e.pageFingerprints == nil {
+			e.pageFingerprints = make(map[string][]pageFingerprint)
+		}
+		fps := e.pageFingerprints[e.SandboxID]
+		fps = append(fps, fp)
+		if len(fps) > 10 {
+			fps = fps[len(fps)-10:]
+		}
+		e.pageFingerprints[e.SandboxID] = fps
+
+		// Add stagnation warning if page hasn't changed for 3+ consecutive steps
+		if stagnantCount := countStagnant(fps); stagnantCount >= 3 {
+			parts = append(parts, fmt.Sprintf("[WARNING: Page unchanged for %d steps. Try a DIFFERENT action — scroll, click elsewhere, or navigate to a new URL.]", stagnantCount))
+		}
+
 		// Build element index for description→ID resolution
 		var idx []indexedElement
 		for _, elems := range grouped {
@@ -1353,6 +1385,39 @@ func extractJSONStringValue(raw, key string) string {
 		}
 	}
 	return ""
+}
+
+// fingerprintSig creates a compact signature from element signatures for page fingerprinting.
+// Uses sorted signatures to produce a deterministic hash of page state.
+func fingerprintSig(sigs map[string]bool) string {
+	keys := make([]string, 0, len(sigs))
+	for k := range sigs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	combined := strings.Join(keys, "|")
+	if len(combined) > 64 {
+		combined = combined[:64]
+	}
+	return combined
+}
+
+// countStagnant returns how many of the most recent fingerprints are identical.
+// A stagnant page (same URL + same element signature) suggests the agent is stuck.
+func countStagnant(fps []pageFingerprint) int {
+	if len(fps) < 2 {
+		return 0
+	}
+	last := fps[len(fps)-1]
+	count := 0
+	for i := len(fps) - 1; i >= 0; i-- {
+		if fps[i].url == last.url && fps[i].sig == last.sig {
+			count++
+		} else {
+			break
+		}
+	}
+	return count
 }
 
 // Session returns the underlying session for inspection.

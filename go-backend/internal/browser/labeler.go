@@ -23,7 +23,7 @@ const labelerJS = `
 
 	const elements = [];
 	// Only truly interactive elements — no divs, spans, imgs
-	const interactiveSelectors = 'a, button, input, select, textarea, [role="button"], [role="link"], [type="submit"]';
+	const interactiveSelectors = 'a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="switch"], [role="radio"], [role="searchbox"], [role="option"], [type="submit"], details, summary, [contenteditable="true"]';
 
 	// Create overlay for visual labels (SoM annotations)
 	const overlay = document.createElement('div');
@@ -89,8 +89,8 @@ const labelerJS = `
 
 	// ── Core element collection ─────────────────────────────────
 	function processElement(el) {
-		// Hard cap at 25 elements — prevents overwhelming the model
-		if (id > 25) return false;
+		// Hard cap at 50 elements — prevents overwhelming the model context
+		if (id > 50) return false;
 
 		const rect = el.getBoundingClientRect();
 		// Skip invisible elements
@@ -184,7 +184,7 @@ const labelerJS = `
 		// Also check all elements for shadow roots (not just interactive ones)
 		const allElements = root.querySelectorAll('*');
 		for (const el of allElements) {
-			if (id > 25) break;
+			if (id > 50) break;
 			if (el.shadowRoot) {
 				collectFromShadowRoots(el.shadowRoot);
 			}
@@ -198,7 +198,7 @@ const labelerJS = `
 	}
 
 	// ── Also traverse shadow DOMs ───────────────────────────────
-	if (id <= 25) {
+	if (id <= 50) {
 		collectFromShadowRoots(document);
 	}
 
