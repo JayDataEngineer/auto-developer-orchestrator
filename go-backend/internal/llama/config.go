@@ -28,6 +28,7 @@ type ModelConfig struct {
 	DefaultMaxToolRounds  int // Standard max tool rounds
 	BrowserMaxToolRounds  int // Browser/desktop automation needs more rounds
 	MaxRetriesPerTool     int // Max retries for transient errors
+	ToolExecTimeoutSec    int // Per-tool execution timeout in seconds (0 = no timeout)
 	RepetitionWindow      int // Character window for repetition detection
 	ToolResultMaxChars    int // Truncate tool results to this many chars
 	SynthesisMaxChars     int // Max chars for synthesized orchestrator output
@@ -60,6 +61,7 @@ func DefaultModelConfig() ModelConfig {
 		DefaultMaxToolRounds:  20,
 		BrowserMaxToolRounds:  30,
 		MaxRetriesPerTool:     3,
+		ToolExecTimeoutSec:    120, // 2 minutes per tool — browser setup can take ~90s
 		RepetitionWindow:      100,
 		ToolResultMaxChars:    6000,
 		SynthesisMaxChars:     4000,

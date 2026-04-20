@@ -77,6 +77,7 @@ func sendEvent(ch chan<- AgentEvent, evt AgentEvent) {
 // Implemented by handlers via ComputerUseBridge.
 type ComputerUseProvider interface {
 	// Browser automation (CDP)
+	IsReady(sandboxID string) bool
 	Enable(ctx context.Context, sandboxID string) (map[string]interface{}, error)
 	Screenshot(ctx context.Context, sandboxID string, describe bool) (map[string]interface{}, error)
 	Snapshot(ctx context.Context, sandboxID string) (map[string]interface{}, error)
@@ -727,9 +728,31 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 				continue
 			}
 
-			// Execute the tool
+			// Execute the tool with timeout to prevent hanging
 			startTime := time.Now()
-			result, err := loop.executor.Execute(ctx, tc.Name, tc.Args)
+			result, err := func() (interface{}, error) {
+				if cfg.ToolExecTimeoutSec <= 0 {
+					return loop.executor.Execute(ctx, tc.Name, tc.Args)
+				}
+				toolCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.ToolExecTimeoutSec)*time.Second)
+				defer cancel()
+
+				type toolResult struct {
+					val interface{}
+					err error
+				}
+				ch := make(chan toolResult, 1)
+				go func() {
+					val, err := loop.executor.Execute(toolCtx, tc.Name, tc.Args)
+					ch <- toolResult{val, err}
+				}()
+				select {
+				case r := <-ch:
+					return r.val, r.err
+				case <-toolCtx.Done():
+					return nil, fmt.Errorf("tool '%s' timed out after %ds", tc.Name, cfg.ToolExecTimeoutSec)
+				}
+			}()
 			elapsed := time.Since(startTime)
 
 			// Auto-retry transient errors
@@ -741,7 +764,9 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 					zap.Error(err),
 				)
 				time.Sleep(backoff)
-				result, err = loop.executor.Execute(ctx, tc.Name, tc.Args)
+				retryCtx, retryCancel := context.WithTimeout(ctx, time.Duration(cfg.ToolExecTimeoutSec)*time.Second)
+				result, err = loop.executor.Execute(retryCtx, tc.Name, tc.Args)
+				retryCancel()
 				elapsed = time.Since(startTime)
 			}
 
@@ -1118,37 +1143,43 @@ func truncate(s string, maxLen int) string {
 }
 
 // ensureBrowserReady ensures the browser CDP client is connected and ready.
-// Uses Screenshot (simple CDP command, no page load) for readiness checking.
+// Uses IsReady (fast in-memory check) for polling instead of Screenshot
+// (which is slow and can block for 30s on CDP timeout).
 func (e *SandboxToolExecutor) ensureBrowserReady(ctx context.Context, sandboxID string) error {
-	// Fast path: try Screenshot — if it works, CDP is connected
-	_, err := e.CU.Screenshot(ctx, sandboxID, false)
-	if err == nil {
-		return nil // Browser ready
+	// Fast path: IsReady checks if CDP client exists and is connected (~1ms)
+	if e.CU.IsReady(sandboxID) {
+		return nil
 	}
 
 	// Browser not running — enable it (returns immediately, sets up CDP in background)
-	_, err = e.CU.Enable(ctx, sandboxID)
+	_, err := e.CU.Enable(ctx, sandboxID)
 	if err != nil {
 		return fmt.Errorf("enable failed: %w", err)
 	}
 
-	// Wait for background setup to complete (sandbox + CDP connect + X11 tools + landing page).
-	// Total: ~30-40 seconds for fresh sandbox, ~5s for already-running.
-	// Poll with Screenshot every 2 seconds.
-	for i := 0; i < 30; i++ {
+	// Poll IsReady every second until CDP client connects or timeout.
+	// IsReady is a cheap in-memory check — no CDP calls, no image capture.
+	setupCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	for i := 0; i < 90; i++ {
 		select {
+		case <-setupCtx.Done():
+			return fmt.Errorf("browser setup timed out after 90s")
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("agent cancelled while waiting for browser: %w", ctx.Err())
 		default:
 		}
-		time.Sleep(2 * time.Second)
-		_, err := e.CU.Screenshot(ctx, sandboxID, false)
-		if err == nil {
-			return nil // CDP connected and responsive
+
+		time.Sleep(1 * time.Second)
+		if e.CU.IsReady(sandboxID) {
+			e.Logger.Info("Browser ready", zap.Int("polls", i+1))
+			return nil
 		}
+		e.Logger.Debug("Browser not ready yet", zap.Int("poll", i+1))
 	}
 
-	return fmt.Errorf("browser did not become ready after 60 seconds")
+	return fmt.Errorf("browser did not become ready after 90 seconds")
 }
 
 // macroReadPage is a macro tool: returns the current page elements and info.

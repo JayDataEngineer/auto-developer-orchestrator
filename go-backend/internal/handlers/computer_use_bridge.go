@@ -63,6 +63,15 @@ func callHandler(ctx context.Context, handler http.HandlerFunc, method, path str
 	return result, nil
 }
 
+// IsReady checks if the CDP client is connected without making any CDP calls.
+// This is a fast in-memory check (~1ms) suitable for polling.
+func (b *ComputerUseBridge) IsReady(sandboxID string) bool {
+	b.CU.mu.RLock()
+	client, ok := b.CU.clients[sandboxID]
+	b.CU.mu.RUnlock()
+	return ok && client.IsConnected()
+}
+
 // Enable enables the sandbox desktop environment.
 func (b *ComputerUseBridge) Enable(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
 	return callHandler(ctx, b.CU.Enable, http.MethodPost, "/api/sandbox/{id}/computer-use/enable", nil, sandboxID)
