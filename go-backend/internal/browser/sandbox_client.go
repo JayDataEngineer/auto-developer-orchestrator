@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"go.uber.org/zap"
 )
@@ -128,7 +129,16 @@ func (sbc *SandboxBrowserClient) Screenshot(ctx context.Context) ([]byte, error)
 }
 
 // Navigate navigates to a URL, labels elements, and takes a screenshot.
+// First checks CDP health with a lightweight ping; reconnects if stale.
 func (sbc *SandboxBrowserClient) Navigate(ctx context.Context, url string) (*PageInfo, error) {
+	// Health check: try a cheap CDP call first. If it fails, reconnect before navigate.
+	if !sbc.pingCDP() {
+		sbc.logger.Warn("CDP health check failed, reconnecting before navigate")
+		if err := sbc.reconnectTab(ctx); err != nil {
+			return nil, fmt.Errorf("CDP unhealthy and reconnect failed: %w", err)
+		}
+	}
+
 	info, err := sbc.navigateInner(ctx, url)
 	if err != nil {
 		// Tab may be corrupted after a failed navigate — recreate it and retry once
@@ -139,6 +149,25 @@ func (sbc *SandboxBrowserClient) Navigate(ctx context.Context, url string) (*Pag
 		info, err = sbc.navigateInner(ctx, url)
 	}
 	return info, err
+}
+
+// pingCDP checks if the CDP connection is responsive by evaluating a trivial JS expression.
+// Returns true if CDP is alive, false if it's stale or broken.
+func (sbc *SandboxBrowserClient) pingCDP() bool {
+	sbc.mu.RLock()
+	tabCtx := sbc.tabCtx
+	sbc.mu.RUnlock()
+
+	if tabCtx == nil || tabCtx.Err() != nil {
+		return false
+	}
+
+	pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	var result int
+	err := chromedp.Run(pingCtx, chromedp.Evaluate(`1+1`, &result))
+	return err == nil && result == 2
 }
 
 // navigateInner performs the actual navigation without retry logic.
@@ -445,6 +474,8 @@ func (sbc *SandboxBrowserClient) Close() {
 
 // reconnectTab closes the current tab and creates a fresh one.
 // Used to recover from corrupted tab state after a failed navigation.
+// Closes extra Chrome tabs left open from previous sessions to prevent
+// tab accumulation that can cause CDP to become unresponsive.
 func (sbc *SandboxBrowserClient) reconnectTab(ctx context.Context) error {
 	sbc.mu.Lock()
 	defer sbc.mu.Unlock()
@@ -465,6 +496,17 @@ func (sbc *SandboxBrowserClient) reconnectTab(ctx context.Context) error {
 	// Create fresh allocator and tab
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), sbc.wsURL)
 	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
+
+	// Close stale Chrome tabs left from previous sessions.
+	// When reconnectTab creates a new chromedp context, it gets a NEW browser tab,
+	// but old tabs from crashed/failed sessions remain open in Chrome.
+	// Use a short timeout to avoid hanging if Chrome is unresponsive.
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cleanupCancel()
+	if err := sbc.closeStaleTabs(cleanupCtx, tabCtx); err != nil {
+		sbc.logger.Warn("failed to close stale tabs (non-fatal)", zap.Error(err))
+	}
+
 	if err := chromedp.Run(tabCtx, chromedp.Navigate("about:blank")); err != nil {
 		tabCancel()
 		allocCancel()
@@ -477,6 +519,40 @@ func (sbc *SandboxBrowserClient) reconnectTab(ctx context.Context) error {
 	sbc.tabCancel = tabCancel
 
 	sbc.logger.Info("tab recreated successfully", zap.Int("cdp_port", sbc.cdpPort))
+	return nil
+}
+
+// closeStaleTabs closes all Chrome tabs except the current one.
+// This prevents tab accumulation from failed navigate retries.
+func (sbc *SandboxBrowserClient) closeStaleTabs(ctx context.Context, currentTabCtx context.Context) error {
+	// List all open targets via CDP
+	targets, err := chromedp.Targets(currentTabCtx)
+	if err != nil {
+		return fmt.Errorf("list targets: %w", err)
+	}
+
+	// Find our current tab's target ID
+	var currentTargetID target.ID
+	if bt := chromedp.FromContext(currentTabCtx); bt != nil && bt.Target != nil {
+		currentTargetID = bt.Target.TargetID
+	}
+
+	closed := 0
+	for _, t := range targets {
+		// Skip our current tab and any non-page targets (service workers, etc.)
+		if t.TargetID == currentTargetID || t.Type != "page" {
+			continue
+		}
+		// Close the stale tab via CDP
+		if err := target.CloseTarget(t.TargetID).Do(ctx); err != nil {
+			sbc.logger.Debug("failed to close stale tab", zap.String("targetID", string(t.TargetID)), zap.Error(err))
+		} else {
+			closed++
+		}
+	}
+	if closed > 0 {
+		sbc.logger.Info("closed stale Chrome tabs", zap.Int("count", closed))
+	}
 	return nil
 }
 
