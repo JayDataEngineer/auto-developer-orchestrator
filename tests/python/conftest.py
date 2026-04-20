@@ -177,15 +177,11 @@ def pytest_collection_modifyitems(config, items):
         _SERVICES_AVAILABLE["api"] = _probe(f"{API_BASE_URL}/api/health")
         _SERVICES_AVAILABLE["frontend"] = _probe(FRONTEND_BASE_URL)
         _SERVICES_AVAILABLE["sandbox"] = _probe(f"{API_BASE_URL}/api/sandbox", expect_lt=500)
-        _SERVICES_AVAILABLE["browser"] = _probe(
-            f"{API_BASE_URL}/api/pi/web/session", method="POST", expect_lt=400
-        )
 
     skip_map = {
         "api": "API server unreachable",
         "sse": "API server unreachable",
         "sandbox": "Sandbox service unreachable",
-        "browser": "Web browser service unreachable",
         "playwright": "Frontend server unreachable",
     }
 
