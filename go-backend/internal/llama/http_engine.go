@@ -22,10 +22,8 @@ type HTTPEngine struct {
 	logger     *zap.Logger
 	modelName  string
 
-	mu      sync.RWMutex
-	loaded  bool
-	slots   int
-	slotCtx int // context size per slot
+	mu     sync.RWMutex
+	loaded bool
 }
 
 // HTTPEngineConfig holds configuration for creating an HTTPEngine.
@@ -116,11 +114,6 @@ func (e *HTTPEngine) IsLoaded() bool {
 	return e.loaded
 }
 
-// LoadDuration returns 0 for HTTP engine (model loaded by llama-server at startup).
-func (e *HTTPEngine) LoadDuration() time.Duration {
-	return 0
-}
-
 // WarmUp sends a single-token request to pre-compile CUDA kernels on the server side.
 func (e *HTTPEngine) WarmUp() error {
 	e.logger.Info("Warming up llama-server with single-token request...")
@@ -149,11 +142,6 @@ func (e *HTTPEngine) Close() error {
 	e.mu.Unlock()
 	e.logger.Info("HTTP engine disconnected")
 	return nil
-}
-
-// ModelName returns the display model name.
-func (e *HTTPEngine) ModelName() string {
-	return e.modelName
 }
 
 // ── /v1/chat/completions types ─────────────────────────────────────

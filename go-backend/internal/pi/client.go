@@ -72,9 +72,6 @@ type PiClient struct {
 	// MCP client for external tool servers
 	mcpClient *MCPClient
 
-	// Allowed tools (for sub-agent restrictions)
-	allowedTools map[string]bool
-
 	// Pending approvals for human-in-the-loop
 	pendingMu        sync.Mutex
 	pendingApprovals map[string]chan ApprovalResponse
@@ -428,22 +425,6 @@ func (c *PiClient) findOrchestratorRoot() string {
 	// Fallback: current directory
 	abs, _ := filepath.Abs(".")
 	return abs
-}
-
-// SetAllowedTools restricts which tools this client can execute
-func (c *PiClient) SetAllowedTools(tools []string) {
-	c.allowedTools = make(map[string]bool, len(tools))
-	for _, t := range tools {
-		c.allowedTools[t] = true
-	}
-}
-
-// IsToolAllowed returns true if the tool is allowed (or no restrictions set)
-func (c *PiClient) IsToolAllowed(toolName string) bool {
-	if c.allowedTools == nil {
-		return true
-	}
-	return c.allowedTools[toolName]
 }
 
 // start launches the Pi subprocess inside an OpenShell sandbox.
@@ -885,16 +866,6 @@ func (c *PiClient) SetModel(provider string, modelId string) error {
 	return nil
 }
 
-// GetAvailableModels requests model list from Pi.
-func (c *PiClient) GetAvailableModels() error {
-	return c.SendCommand(RpcCommand{Type: CmdGetModels})
-}
-
-// GetMessages requests full conversation history.
-func (c *PiClient) GetMessages() error {
-	return c.SendCommand(RpcCommand{Type: CmdGetMessages})
-}
-
 // Steer sends a follow-up message while Pi is working.
 func (c *PiClient) Steer(message string) error {
 	return c.SendCommand(RpcCommand{Type: CmdSteer, Message: message})
@@ -994,25 +965,6 @@ func (c *PiClient) AgentId() string {
 // Namespace returns the OpenShell sandbox ID for this client.
 func (c *PiClient) Namespace() string {
 	return c.namespace
-}
-
-// EnableDesktopMode enables Computer Use Mode for this agent's sandbox.
-func (c *PiClient) EnableDesktopMode(reason string) (*sandbox.DesktopSession, error) {
-	if c.sandboxManager == nil {
-		return nil, fmt.Errorf("sandbox manager not available")
-	}
-
-	c.logger.Info("Enabling desktop mode for sandbox",
-		zap.String("sandbox_id", c.namespace),
-		zap.String("reason", reason),
-	)
-
-	return c.sandboxManager.EnableDesktopMode(c.ctx, c.namespace)
-}
-
-// IsSandboxed returns whether this agent is running inside a sandbox.
-func (c *PiClient) IsSandboxed() bool {
-	return c.sandboxed
 }
 
 // RegisterApproval creates a pending approval channel and returns it.

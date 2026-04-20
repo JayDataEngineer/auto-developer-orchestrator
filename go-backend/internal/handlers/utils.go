@@ -4,30 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 )
-
-var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 // writeJSON writes a JSON response with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
-}
-
-// generateID returns a simple unique ID for session names.
-func generateID() int64 {
-	return rng.Int63()
 }
 
 // truncateStr truncates a string to maxLen characters.

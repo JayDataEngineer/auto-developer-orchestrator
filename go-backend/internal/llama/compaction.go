@@ -31,8 +31,6 @@ func SubAgentCompactionConfig() CompactionConfig {
 	}
 }
 
-// ShouldCompactMessages returns true if the message history is long enough to warrant compaction.
-
 // ── Message-based compaction ───────────────────────────────────────
 
 // ShouldCompactMessages returns true if the message history is long enough to warrant compaction.

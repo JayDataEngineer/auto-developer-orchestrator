@@ -151,10 +151,7 @@ func (h *SubAgentHandler) Result(w http.ResponseWriter, r *http.Request) {
 	if inst.IsTerminalState() {
 		result := inst.GetResult()
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no")
+		setSSEHeaders(w)
 
 		data, _ := json.Marshal(result)
 		fmt.Fprintf(w, "event: subagent_result\ndata: %s\n\n", string(data))
@@ -165,10 +162,7 @@ func (h *SubAgentHandler) Result(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set up SSE
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
+	setSSEHeaders(w)
 
 	flusher, canFlush := w.(http.Flusher)
 

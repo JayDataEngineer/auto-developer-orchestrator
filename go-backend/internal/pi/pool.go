@@ -59,12 +59,6 @@ func NewPiPoolWithSandbox(logger *zap.Logger, idleTimeout time.Duration, sandbox
 	return p
 }
 
-// GetOrCreate returns a PiClient for the given project path with agentId "default".
-// Backward-compatible wrapper.
-func (p *PiPool) GetOrCreate(projectPath string) (*PiClient, error) {
-	return p.GetOrCreateWithID(projectPath, "default")
-}
-
 // GetOrCreateWithID returns a PiClient for the given project path and agentId.
 // If an existing client's settings fingerprint matches expectedFP, it is reused.
 // If the fingerprint differs (model/provider changed), the client is evicted and recreated.
@@ -142,11 +136,6 @@ func (p *PiPool) GetOrCreateWithFingerprint(projectPath, agentId, expectedFP str
 	return client, nil
 }
 
-// Get returns an existing PiClient for projectPath with agentId "default", or nil.
-func (p *PiPool) Get(projectPath string) *PiClient {
-	return p.GetWithID(projectPath, "default")
-}
-
 // GetWithID returns an existing PiClient for the given composite key, or nil.
 func (p *PiPool) GetWithID(projectPath, agentId string) *PiClient {
 	p.mu.Lock()
@@ -158,11 +147,6 @@ func (p *PiPool) GetWithID(projectPath, agentId string) *PiClient {
 		return nil
 	}
 	return client
-}
-
-// Remove shuts down and removes the PiClient for a project with agentId "default".
-func (p *PiPool) Remove(projectPath string) {
-	p.RemoveAgent(projectPath, "default")
 }
 
 // RemoveAgent shuts down and removes a specific agent.
@@ -293,47 +277,6 @@ func (p *PiPool) RegisterIfAbsent(projectPath, agentId string, client *PiClient)
 	return client, nil
 }
 
-// ListActive returns paths of all projects with active Pi processes.
-func (p *PiPool) ListActive() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	seen := make(map[string]bool)
-	for key, client := range p.clients {
-		if client.IsRunning() {
-			projectPath, _ := splitCompositeKey(key)
-			seen[projectPath] = true
-		}
-	}
-	active := make([]string, 0, len(seen))
-	for path := range seen {
-		active = append(active, path)
-	}
-	return active
-}
-
-// ListActiveByProject returns all agents for a single project.
-func (p *PiPool) ListActiveByProject(projectPath string) []AgentEntry {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	var entries []AgentEntry
-	for key, client := range p.clients {
-		pPath, aId := splitCompositeKey(key)
-		if pPath != projectPath || !client.IsRunning() {
-			continue
-		}
-		entries = append(entries, AgentEntry{
-			AgentId:     aId,
-			Project:     filepath.Base(pPath),
-			ProjectPath: pPath,
-			Namespace:   client.Namespace(), // Per-project OpenShell namespace
-			State:       client.GetState(),
-		})
-	}
-	return entries
-}
-
 // ListAllActive returns all agents grouped by project path.
 func (p *PiPool) ListAllActive() map[string][]AgentEntry {
 	p.mu.Lock()
@@ -355,13 +298,6 @@ func (p *PiPool) ListAllActive() map[string][]AgentEntry {
 		result[pPath] = append(result[pPath], entry)
 	}
 	return result
-}
-
-// CountForProject returns the number of active agents for a project.
-func (p *PiPool) CountForProject(projectPath string) int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.countForProjectLocked(projectPath)
 }
 
 // countForProjectLocked is the lock-held version of CountForProject.

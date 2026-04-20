@@ -68,7 +68,6 @@ type FinishReason string
 const (
 	FinishStop      FinishReason = "stop"
 	FinishToolCalls FinishReason = "tool_calls"
-	FinishLength    FinishReason = "length"
 )
 
 // ChatEventType identifies the type of a ChatEvent.

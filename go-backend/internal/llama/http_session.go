@@ -231,20 +231,6 @@ func (s *Session) Messages() []Message {
 	return s.messages
 }
 
-// MessagesLen returns the number of messages.
-func (s *Session) MessagesLen() int {
-	return len(s.messages)
-}
-
-// TrackAssistantMessage appends an assistant message to the messages history.
-func (s *Session) TrackAssistantMessage(content string, toolCalls []ToolCallResponse) {
-	s.messages = append(s.messages, Message{
-		Role:      "assistant",
-		Content:   content,
-		ToolCalls: toolCalls,
-	})
-}
-
 // SetMessages replaces the message history (used after compaction).
 func (s *Session) SetMessages(messages []Message) {
 	s.messages = messages

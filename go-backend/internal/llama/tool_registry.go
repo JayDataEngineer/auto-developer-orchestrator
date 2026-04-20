@@ -213,21 +213,6 @@ func ToolsByNames(names []string) []ToolSpec {
 	return specs
 }
 
-// ToolsByCategory returns all tools in the given categories.
-func ToolsByCategory(cats ...ToolCategory) []ToolSpec {
-	want := make(map[ToolCategory]bool, len(cats))
-	for _, c := range cats {
-		want[c] = true
-	}
-	var specs []ToolSpec
-	for _, t := range allTools {
-		if want[t.Category] {
-			specs = append(specs, t)
-		}
-	}
-	return specs
-}
-
 // FormatToolList renders a list of ToolSpecs as the prompt block:
 //
 //	## tool_name — description

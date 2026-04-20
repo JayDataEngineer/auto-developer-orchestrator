@@ -113,13 +113,6 @@ type SessionState struct {
 	SessionId string  `json:"sessionId"`
 }
 
-// AgentMessage represents a message in the Pi conversation.
-type AgentMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-	Type    string `json:"type,omitempty"`
-}
-
 // SessionInfo represents a saved Pi session.
 type SessionInfo struct {
 	Id        string `json:"id"`
@@ -148,22 +141,16 @@ const (
 
 	// Human-in-the-loop events
 	EventApprovalRequest = "approval_request"
-	EventQuestionAsked   = "question_asked"
 )
 
 // RPC command types
 const (
 	CmdPrompt        = "prompt"
 	CmdSteer         = "steer"
-	CmdFollowUp      = "follow_up"
 	CmdAbort         = "abort"
 	CmdGetState      = "get_state"
-	CmdGetMessages   = "get_messages"
 	CmdCompact       = "compact"
 	CmdSetModel      = "set_model"
-	CmdGetModels     = "get_available_models"
-	CmdBash          = "bash"
-	CmdAbortBash     = "abort_bash"
 	CmdListSessions  = "list_sessions"
 	CmdSwitchSession = "switch_session"
 )
@@ -173,7 +160,6 @@ const (
 	RpcEventAgentStart      = "agent_start"
 	RpcEventAgentEnd        = "agent_end"
 	RpcEventTurnEnd         = "turn_end"
-	RpcEventMessageStart    = "message_start"
 	RpcEventMessageUpdate   = "message_update"
 	RpcEventMessageEnd      = "message_end"
 	RpcEventToolStart       = "tool_execution_start"

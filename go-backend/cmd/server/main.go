@@ -67,15 +67,14 @@ func main() {
 	os.Setenv("TOOL_MODEL", modelCfg.ToolModel().ModelId)
 
 	// Connect to llama-server HTTP engine.
-	// llama-server manages the model and KV cache — the Go backend sends HTTP requests.
-	// This replaces the in-process CGo engine, gaining GBNF grammar support for
-	// constrained tool call generation (model physically cannot hallucinate tool names).
+	// llama-server manages the model and KV cache — the Go backend sends HTTP requests
+	// using OpenAI-style native tool calling for structured tool responses.
 	llamaServerURL := os.Getenv("LLAMA_SERVER_URL")
 	if llamaServerURL == "" {
 		llamaServerURL = "http://localhost:8001"
 	}
 	var llamaEngine *llamaeng.HTTPEngine
-	if os.Getenv("LLAMA_LIBRARY_MODE") == "1" || os.Getenv("LLAMA_HTTP_MODE") == "1" || true {
+	{
 		llamaEngine = llamaeng.NewHTTPEngine(llamaeng.HTTPEngineConfig{
 			BaseURL:   llamaServerURL,
 			ModelName: "gemma-4-26b",

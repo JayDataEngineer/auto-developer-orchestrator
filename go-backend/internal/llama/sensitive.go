@@ -1,9 +1,7 @@
 package llama
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -25,65 +23,6 @@ func NewCredentialStore() *CredentialStore {
 	}
 }
 
-// LoadFromSecretsFile reads credentials from a secrets file.
-// Format: one entry per line, either:
-//
-//	domain key=value
-//	key=value  (uses "default" domain)
-//
-// Lines starting with # are comments. Blank lines are skipped.
-func LoadFromSecretsFile(path string) (*CredentialStore, error) {
-	store := NewCredentialStore()
-
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return store, nil // No file = empty store, not an error
-		}
-		return nil, fmt.Errorf("failed to open secrets file: %w", err)
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		parts := strings.SplitN(line, " ", 3)
-		var domain, kv string
-		if len(parts) == 1 {
-			// key=value only → default domain
-			domain = "default"
-			kv = parts[0]
-		} else if len(parts) >= 2 {
-			// Check if first part contains "=" (it's a key=value without domain)
-			if strings.Contains(parts[0], "=") {
-				domain = "default"
-				kv = parts[0]
-			} else {
-				domain = parts[0]
-				kv = parts[1]
-			}
-		}
-
-		kvParts := strings.SplitN(kv, "=", 2)
-		if len(kvParts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(kvParts[0])
-		value := strings.TrimSpace(kvParts[1])
-		if key == "" || value == "" {
-			continue
-		}
-
-		store.Set(domain, key, value)
-	}
-
-	return store, scanner.Err()
-}
-
 // Set adds a credential for a domain.
 func (c *CredentialStore) Set(domain, key, value string) {
 	c.mu.Lock()
@@ -92,11 +31,6 @@ func (c *CredentialStore) Set(domain, key, value string) {
 		c.creds[domain] = make(map[string]string)
 	}
 	c.creds[domain][key] = value
-}
-
-// Placeholder returns the placeholder form for a credential: <secret>domain.key</secret>
-func (c *CredentialStore) Placeholder(domain, key string) string {
-	return fmt.Sprintf("<secret>%s.%s</secret>", domain, key)
 }
 
 // Domains returns the list of configured domains.
@@ -124,29 +58,6 @@ func (c *CredentialStore) Keys(domain string) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-// PromptHint returns a string for the system prompt listing available credentials.
-func (c *CredentialStore) PromptHint() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if len(c.creds) == 0 {
-		return "No credentials configured."
-	}
-
-	var b strings.Builder
-	b.WriteString("Credentials: Use <secret>domain.key</secret> placeholders in tool arguments.\n")
-	b.WriteString("Example: <secret>gmail.username</secret> for username.\n")
-	b.WriteString("Available:\n")
-
-	for _, domain := range c.Domains() {
-		keys := c.Keys(domain)
-		for _, key := range keys {
-			b.WriteString(fmt.Sprintf("  - <secret>%s.%s</secret>\n", domain, key))
-		}
-	}
-	return b.String()
 }
 
 // Resolve replaces <secret>domain.key</secret> placeholders in args with actual values.

@@ -11,10 +11,8 @@ import (
 type ArtifactType string
 
 const (
-	ArtifactData    ArtifactType = "data"
 	ArtifactCode    ArtifactType = "code"
 	ArtifactSummary ArtifactType = "summary"
-	ArtifactFile    ArtifactType = "file"
 	ArtifactPlan    ArtifactType = "plan"
 )
 
@@ -89,20 +87,6 @@ func (r *ArtifactRegistry) ListByType(t ArtifactType) []*Artifact {
 	return result
 }
 
-// ListByPersona returns all artifacts from a given persona.
-func (r *ArtifactRegistry) ListByPersona(p PersonaType) []*Artifact {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	var result []*Artifact
-	for _, id := range r.order {
-		a := r.artifacts[id]
-		if a.Persona == p {
-			result = append(result, a)
-		}
-	}
-	return result
-}
-
 // All returns all artifacts in creation order.
 func (r *ArtifactRegistry) All() []*Artifact {
 	r.mu.RLock()
@@ -112,13 +96,6 @@ func (r *ArtifactRegistry) All() []*Artifact {
 		result = append(result, r.artifacts[id])
 	}
 	return result
-}
-
-// Count returns the number of artifacts.
-func (r *ArtifactRegistry) Count() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.artifacts)
 }
 
 // ── Plan Types ───────────────────────────────────────────────────────
@@ -143,11 +120,3 @@ func (p *Plan) ToContent() string {
 	return string(b)
 }
 
-// ParsePlan deserializes a plan from artifact content.
-func ParsePlan(content string) (*Plan, error) {
-	var p Plan
-	if err := json.Unmarshal([]byte(content), &p); err != nil {
-		return nil, err
-	}
-	return &p, nil
-}

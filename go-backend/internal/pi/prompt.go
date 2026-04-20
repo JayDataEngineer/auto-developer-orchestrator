@@ -485,21 +485,6 @@ curl -s "http://localhost:%s/api/scheduler/JOB_ID/runs?limit=10"
 Schedule types: "cron" (6-field cron expression), "every" (N seconds), "at" (RFC3339 timestamp)`, port, tm, port, port, port, port, port, port, port, port)
 }
 
-// buildHooksSection describes the hook system to the agent
-func buildHooksSection() string {
-	return `# Hooks and Self-Correction
-
-Hooks are scripts that run before, after, or on failure of tool execution. They enable self-correction and validation.
-
-- **Pre-tool-use hooks** can validate your tool input before it runs. They may modify your input, deny the tool, or allow it unchanged.
-- **Post-tool-use hooks** run after successful execution. They may add feedback about the result.
-- **On-tool-failure hooks** run when a tool fails. They may suggest retrying with different parameters.
-
-If a hook denies a tool, you will receive feedback explaining why. Adjust your approach and try again.
-If a hook provides feedback after execution, incorporate it into your next step.
-If a tool fails and a failure hook suggests a retry, use the suggested parameters.`
-}
-
 // buildMCPToolsSection adds MCP tools to the system prompt
 func (b *SystemPromptBuilder) buildMCPToolsSection() string {
 	port := b.ServerPort

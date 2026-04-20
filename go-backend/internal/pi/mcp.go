@@ -508,8 +508,3 @@ func (mc *MCPClient) StartMCPServers(ctx context.Context, projectDir string) err
 
 	return nil
 }
-
-// GetMCPClient returns the MCP client for direct access
-func (c *PiClient) GetMCPClient() *MCPClient {
-	return c.mcpClient
-}
