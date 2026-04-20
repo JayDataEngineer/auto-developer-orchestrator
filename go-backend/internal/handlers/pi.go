@@ -53,9 +53,8 @@ func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, gh 
 	}
 }
 
-// SetLlamaEngine configures the handler for library-mode inference.
-// When set, Prompt() routes through llama-go instead of Pi subprocess.
-// If LLAMA_ORCHESTRATOR_MODE=1 is set, Prompt() uses the orchestrator path.
+// SetLlamaEngine configures the handler for llama-server HTTP inference.
+// When set, Prompt() uses the orchestrator + ephemeral sub-agent path.
 func (h *PiHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
 	h.llamaEngine = engine
 	h.sandboxMgr = sandboxMgr

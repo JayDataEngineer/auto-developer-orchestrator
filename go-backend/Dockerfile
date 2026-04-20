@@ -4,7 +4,7 @@ FROM golang:1.26-alpine AS builder
 WORKDIR /app
 
 # Install dependencies
-RUN apk add --no-cache git gcc musl-dev
+RUN apk add --no-cache git
 
 # Copy go mod files
 COPY go.mod go.sum ./
@@ -14,7 +14,7 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -a -o main ./cmd/server
 
 # ===========================================
 # Final runtime image

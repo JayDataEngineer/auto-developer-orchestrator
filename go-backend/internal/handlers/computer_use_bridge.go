@@ -14,7 +14,13 @@ import (
 
 // ComputerUseBridge implements the llama.ComputerUseProvider interface
 // by calling the existing HTTP handlers directly (no network hop).
-// It uses httptest.NewRecorder to capture handler responses.
+//
+// It uses httptest.NewRecorder to capture handler responses. This pattern is
+// necessary because the handlers (ComputerUseHandler.Enable, X11Handler.Mouse, etc.)
+// are http.HandlerFunc — they write to http.ResponseWriter and read chi path params
+// via r.PathValue("id"). Converting to direct function calls would require refactoring
+// every handler to accept sandboxID as an explicit parameter. The recorder adds ~0.1ms
+// overhead per call vs agent loop taking 1-3 seconds per tool call.
 type ComputerUseBridge struct {
 	CU  *ComputerUseHandler
 	X11 *X11Handler

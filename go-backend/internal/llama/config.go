@@ -16,7 +16,6 @@ type ModelConfig struct {
 	DefaultContextSize int // KV cache context size for orchestrator/persistent sessions (32K recommended)
 	SubAgentContextSize int // KV cache context size for ephemeral sub-agents (4K — smaller = less VRAM)
 	MaxContextSize     int // Hard upper limit (256K for Gemma 4 26B-A4B)
-	BatchSize          int // Processing batch size for llama-go context
 
 	// Generation defaults (Gemma 4 recommended: temp=1.0, top_p=0.95, top_k=64)
 	MaxTokens     int
@@ -49,7 +48,6 @@ func DefaultModelConfig() ModelConfig {
 		DefaultContextSize: 32768,
 		SubAgentContextSize: 8192, // 8K — enough for system prompt + 10 tool rounds
 		MaxContextSize:     262144, // 256K — Gemma 4 26B-A4B max
-		BatchSize:          512,
 
 		// Generation — Gemma 4 recommended sampling params
 		MaxTokens:     4096,

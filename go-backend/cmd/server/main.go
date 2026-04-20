@@ -158,20 +158,6 @@ func main() {
 	visionKey := os.Getenv("LITELLM_MASTER_KEY")
 	visionClient := browser.NewVisionClient(visionURL, visionKey, modelCfg)
 
-	// Browser automation (Web Sub-Agent)
-	var browserClient *browser.BrowserClient
-	var webHandler *handlers.WebHandler
-	if browserlessURL := os.Getenv("BROWSERLESS_URL"); browserlessURL != "" {
-		var err error
-		browserClient, err = browser.NewBrowserClient(browserlessURL, logger)
-		if err != nil {
-			logger.Warn("Failed to initialize browser client, web automation disabled", zap.Error(err))
-		} else {
-			webHandler = handlers.NewWebHandler(browserClient, visionClient, logger)
-			logger.Info("Browser automation enabled", zap.String("browserless_url", browserlessURL))
-		}
-	}
-
 	// Computer Use handler (CDP bridge for sandbox browser automation)
 	computerUseHandler := handlers.NewComputerUseHandler(sandboxMgr, visionClient, logger)
 
@@ -352,13 +338,6 @@ func main() {
 			r.HandleFunc("/vnc/{id}/*", sandboxHandler.VNCProxy)
 		})
 
-		// Browser automation (Web Sub-Agent)
-		if webHandler != nil {
-			r.Route("/pi/web", func(r chi.Router) {
-				webHandler.RegisterRoutes(r)
-			})
-		}
-
 		// Artifacts (plans, todos, notes from agents)
 		r.Route("/pi/artifacts", func(r chi.Router) {
 			artifactHandler.RegisterRoutes(r)
@@ -407,11 +386,6 @@ func main() {
 
 	// Shutdown sub-agent manager
 	subAgentMgr.Shutdown()
-
-	// Shutdown browser client
-	if browserClient != nil {
-		browserClient.Shutdown()
-	}
 
 	// Shutdown computer use handler
 	computerUseHandler.Shutdown()
