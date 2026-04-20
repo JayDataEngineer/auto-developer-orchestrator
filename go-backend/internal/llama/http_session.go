@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,17 +51,14 @@ func (s *Session) ChatWithTools(system string, userMsg string, tools []OpenAIToo
 	return s.generateChatStream(opts), nil
 }
 
-// FeedToolResults appends the assistant's tool call message + tool result messages,
-// then continues generation.
+// FeedToolResults appends tool result messages and continues generation.
+// The assistant message is already stored by generateChatStream, so we only add tool results.
 func (s *Session) FeedToolResults(assistantMsg Message, toolResults []ToolResult, goalNudge string, opts GenerateOptions) (<-chan ChatEvent, error) {
 	if s.closed {
 		return nil, fmt.Errorf("session is closed")
 	}
 
-	// Append assistant message with tool_calls
-	s.messages = append(s.messages, assistantMsg)
-
-	// Append tool result messages (one per tool call)
+	// Tool result messages (one per tool call)
 	for _, tr := range toolResults {
 		s.messages = append(s.messages, Message{
 			Role:       "tool",
@@ -117,14 +115,16 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 			Stream:        true,
 		}
 
-		// Accumulate tool calls across streaming chunks
+		// Accumulate the full assistant response (content + tool calls)
 		toolCallAccum := make(map[int]*ToolCallResponse)
+		var contentBuf strings.Builder
 		tokenCount := 0
 
 		err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason) bool {
 			// Content delta
 			if delta.Content != "" {
 				tokenCount++
+				contentBuf.WriteString(delta.Content)
 				ch <- ChatEvent{Type: ChatEventContent, Content: delta.Content}
 			}
 			// Thinking/reasoning delta
@@ -159,7 +159,7 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 					}
 				}
 			}
-			// On finish, send done event with accumulated tool calls
+			// On finish, store assistant message on session and send done event
 			if finish != "" {
 				// Collect accumulated tool calls in index order
 				var toolCalls []ToolCallResponse
@@ -171,6 +171,14 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 				for _, idx := range indices {
 					toolCalls = append(toolCalls, *toolCallAccum[idx])
 				}
+
+				// Store assistant message in conversation history
+				assistantMsg := Message{
+					Role:      "assistant",
+					Content:   contentBuf.String(),
+					ToolCalls: toolCalls,
+				}
+				s.messages = append(s.messages, assistantMsg)
 
 				ch <- ChatEvent{
 					Type:    ChatEventDone,
