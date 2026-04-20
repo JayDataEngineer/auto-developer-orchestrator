@@ -3,7 +3,10 @@ package browser
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -21,16 +24,37 @@ const (
 )
 
 // SandboxBrowserClient manages a browser connection to a sandbox Chrome instance
-// via Chrome DevTools Protocol (CDP). A persistent tab is created on Connect()
-// and reused for all actions so the user can see agent activity in the VNC viewer.
+// via Chrome DevTools Protocol (CDP).
+//
+// STRATEGY: We keep ONE long-lived Chrome tab (the one the user sees in VNC)
+// but create a FRESH chromedp session for each action. This is necessary because
+// chromedp's internal state gets corrupted when a page navigates — the CDP session
+// attached to the target becomes stale and all subsequent calls hang.
+//
+// Each action:
+//  1. Creates a fresh chromedp context via NewContext(allocator)
+//  2. That automatically creates a new Chrome tab — NOT what we want
+//  3. So instead: we navigate the EXISTING tab via raw CDP HTTP (fetch /json/list,
+//     find our tab, send Page.navigate via WebSocket), then attach a fresh chromedp
+//     session to that tab for post-navigation queries.
+//
+// For non-navigation actions (click, type, scroll), we use the simpler approach of
+// a fresh tab each time since they don't corrupt the session.
 type SandboxBrowserClient struct {
 	cdpPort     int
-	wsURL       string
+	wsURL       string // ws://hostname:port for Chrome CDP
 	logger      *zap.Logger
 	allocator   context.Context
 	allocCancel context.CancelFunc
-	tabCtx      context.Context  // persistent tab — reused across actions
-	tabCancel   context.CancelFunc
+
+	// The target ID of the Chrome tab we're currently using.
+	// Updated on each Navigate to point to the new tab.
+	persistentTargetID string
+
+	// Keep-alive references for the current navigated tab.
+	// Cancelling keepAliveCancel will close the Chrome tab.
+	keepAliveCtx    context.Context
+	keepAliveCancel context.CancelFunc
 
 	// Cached state from last action
 	lastURL        string
@@ -61,47 +85,104 @@ func NewSandboxBrowserClient(cdpPort int, hostname string, logger *zap.Logger) (
 	}, nil
 }
 
-// Connect verifies Chrome CDP is reachable, stores the allocator, and creates
-// a persistent tab that will be reused for all subsequent actions.
+// Connect verifies Chrome CDP is reachable, creates the allocator, and
+// finds or creates a persistent tab. The tab is the one the user sees in VNC.
 func (sbc *SandboxBrowserClient) Connect(ctx context.Context) error {
 	sbc.mu.Lock()
 	defer sbc.mu.Unlock()
 
-	if sbc.tabCtx != nil {
+	if sbc.allocator != nil {
 		return nil
 	}
 
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), sbc.wsURL)
+	sbc.allocator = allocCtx
+	sbc.allocCancel = allocCancel
 
-	// Create the persistent tab — this is the tab the user sees in VNC.
-	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
-	if err := chromedp.Run(tabCtx, chromedp.Navigate("about:blank")); err != nil {
-		tabCancel()
+	// Find an existing page target or create one
+	targetID, err := sbc.findOrCreateTarget(ctx)
+	if err != nil {
 		allocCancel()
+		sbc.allocator = nil
 		return fmt.Errorf("CDP connection test failed: %w", err)
 	}
 
-	sbc.allocator = allocCtx
-	sbc.allocCancel = allocCancel
-	sbc.tabCtx = tabCtx
-	sbc.tabCancel = tabCancel
-
-	sbc.logger.Info("sandbox browser client connected", zap.Int("cdp_port", sbc.cdpPort))
+	sbc.persistentTargetID = targetID
+	sbc.logger.Info("sandbox browser client connected",
+		zap.Int("cdp_port", sbc.cdpPort),
+		zap.String("targetID", targetID))
 	return nil
 }
 
-// runInTab runs fn in the persistent tab with a timeout. The same tab is reused
-// across all actions so the user sees agent activity in the VNC viewer.
-func (sbc *SandboxBrowserClient) runInTab(timeout time.Duration, fn func(ctx context.Context) error) error {
-	sbc.mu.RLock()
-	tabCtx := sbc.tabCtx
-	sbc.mu.RUnlock()
+// cdpHTTPPut makes a PUT request to the Chrome CDP HTTP API.
+// Used for /json/new endpoint which requires PUT method.
+func (sbc *SandboxBrowserClient) cdpHTTPPut(url string) (map[string]interface{}, error) {
+	req, err := http.NewRequest(http.MethodPut, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("CDP HTTP PUT: %w", err)
+	}
+	defer resp.Body.Close()
 
-	if tabCtx == nil {
-		return fmt.Errorf("not connected — call Connect() first")
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	timeoutCtx, timeoutCancel := context.WithTimeout(tabCtx, timeout)
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("decode response: %w (body: %s)", err, string(body[:min(len(body), 200)]))
+	}
+	return result, nil
+}
+
+// findOrCreateTarget finds an existing page target in Chrome or creates a new one.
+// Returns the target ID string.
+func (sbc *SandboxBrowserClient) findOrCreateTarget(ctx context.Context) (string, error) {
+	// Create a temporary context to list targets
+	tmpCtx, tmpCancel := chromedp.NewContext(sbc.allocator)
+	defer tmpCancel()
+
+	targets, err := chromedp.Targets(tmpCtx)
+	if err != nil {
+		return "", fmt.Errorf("list targets: %w", err)
+	}
+
+	// Find first page-type target that's NOT about:blank or the landing page
+	for _, t := range targets {
+		if t.Type == "page" && t.URL != "" && t.URL != "about:blank" && t.URL != "about:blank#" {
+			return string(t.TargetID), nil
+		}
+	}
+
+	// No existing target — create one by navigating
+	if err := chromedp.Run(tmpCtx, chromedp.Navigate("about:blank")); err != nil {
+		return "", fmt.Errorf("create target: %w", err)
+	}
+
+	// Get the target ID of the tab we just created
+	bt := chromedp.FromContext(tmpCtx)
+	if bt == nil || bt.Target == nil {
+		return "", fmt.Errorf("no target in context")
+	}
+	return string(bt.Target.TargetID), nil
+}
+
+// runOnActiveTab runs fn on the currently active Chrome tab.
+// It reuses the keepAlive context (which keeps the tab alive) with a timeout.
+func (sbc *SandboxBrowserClient) runOnActiveTab(timeout time.Duration, fn func(ctx context.Context) error) error {
+	sbc.mu.RLock()
+	ctx := sbc.keepAliveCtx
+	sbc.mu.RUnlock()
+
+	if ctx == nil {
+		return fmt.Errorf("no active tab — navigate first")
+	}
+
+	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, timeout)
 	defer timeoutCancel()
 
 	return fn(timeoutCtx)
@@ -110,7 +191,7 @@ func (sbc *SandboxBrowserClient) runInTab(timeout time.Duration, fn func(ctx con
 // Screenshot takes a screenshot via CDP and returns raw PNG bytes.
 func (sbc *SandboxBrowserClient) Screenshot(ctx context.Context) ([]byte, error) {
 	var screenshotBuf []byte
-	err := sbc.runInTab(defaultTimeout, func(actCtx context.Context) error {
+	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 			var err error
 			screenshotBuf, err = page.CaptureScreenshot().Do(ctx)
@@ -129,126 +210,114 @@ func (sbc *SandboxBrowserClient) Screenshot(ctx context.Context) ([]byte, error)
 }
 
 // Navigate navigates to a URL, labels elements, and takes a screenshot.
-// First checks CDP health with a lightweight ping; reconnects if stale.
+// Creates a new Chrome tab for the navigation and keeps it alive for subsequent actions.
 func (sbc *SandboxBrowserClient) Navigate(ctx context.Context, url string) (*PageInfo, error) {
-	// Health check: try a cheap CDP call first. If it fails, reconnect before navigate.
-	if !sbc.pingCDP() {
-		sbc.logger.Warn("CDP health check failed, reconnecting before navigate")
-		if err := sbc.reconnectTab(ctx); err != nil {
-			return nil, fmt.Errorf("CDP unhealthy and reconnect failed: %w", err)
-		}
-	}
-
 	info, err := sbc.navigateInner(ctx, url)
 	if err != nil {
-		// Tab may be corrupted after a failed navigate — recreate it and retry once
-		sbc.logger.Warn("navigate failed, recreating tab and retrying", zap.Error(err))
-		if recErr := sbc.reconnectTab(ctx); recErr != nil {
-			return nil, fmt.Errorf("navigate failed and tab recovery also failed: %w (recovery: %v)", err, recErr)
+		sbc.logger.Warn("navigate failed, reconnecting and retrying", zap.Error(err))
+		if recErr := sbc.reconnect(ctx); recErr != nil {
+			return nil, fmt.Errorf("navigate failed and recovery also failed: %w (recovery: %v)", err, recErr)
 		}
 		info, err = sbc.navigateInner(ctx, url)
 	}
 	return info, err
 }
 
-// pingCDP checks if the CDP connection is responsive by evaluating a trivial JS expression.
-// Returns true if CDP is alive, false if it's stale or broken.
-func (sbc *SandboxBrowserClient) pingCDP() bool {
-	sbc.mu.RLock()
-	tabCtx := sbc.tabCtx
-	sbc.mu.RUnlock()
-
-	if tabCtx == nil || tabCtx.Err() != nil {
-		return false
-	}
-
-	pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	var result int
-	err := chromedp.Run(pingCtx, chromedp.Evaluate(`1+1`, &result))
-	return err == nil && result == 2
-}
-
-// navigateInner performs the actual navigation without retry logic.
+// navigateInner creates a new Chrome tab via HTTP CDP API, navigates it,
+// then attaches a fresh chromedp context to the navigated tab for data collection.
 func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) (*PageInfo, error) {
 	var title, currentURL string
 	var screenshotBuf []byte
 	var elementsJSON string
 
-	err := sbc.runInTab(navigationTimeout, func(actCtx context.Context) error {
-		return chromedp.Run(actCtx,
-			// Navigate to the URL
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				_, _, _, _, err := page.Navigate(url).Do(ctx)
-				return err
-			}),
-			// Wait for the URL to actually change (proves navigation happened)
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				deadline := time.After(8 * time.Second)
-				ticker := time.NewTicker(300 * time.Millisecond)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-deadline:
-						return nil // proceed with whatever we have
-					case <-ticker.C:
-						var loc string
-						if err := chromedp.Evaluate(`window.location.href`, &loc).Do(ctx); err != nil {
-							return nil
-						}
-						// Any non-blank URL means navigation started
-						if loc != "" && loc != "about:blank" {
-							return nil
-						}
-					}
-				}
-			}),
-			// Wait for body to be ready
-			chromedp.WaitReady("body", chromedp.ByQuery),
-			// Poll readyState until "interactive" or "complete"
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				deadline := time.After(5 * time.Second)
-				ticker := time.NewTicker(200 * time.Millisecond)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-deadline:
-						return nil
-					case <-ticker.C:
-						var state string
-						if err := chromedp.Evaluate(`document.readyState`, &state).Do(ctx); err != nil {
-							return nil
-						}
-						if state == "complete" || state == "interactive" {
-							return nil
-						}
-					}
-				}
-			}),
-			chromedp.Sleep(500*time.Millisecond),
-			chromedp.Title(&title),
-			chromedp.Location(&currentURL),
-			chromedp.Evaluate(labelerJS, &elementsJSON),
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				var err error
-				screenshotBuf, err = page.CaptureScreenshot().Do(ctx)
-				return err
-			}),
-		)
-	})
+	sbc.mu.RLock()
+	allocCtx := sbc.allocator
+	oldTargetID := sbc.persistentTargetID
+	sbc.mu.RUnlock()
+
+	if allocCtx == nil {
+		return nil, fmt.Errorf("not connected — call Connect() first")
+	}
+
+	// Step 1: Create a new tab and navigate using raw HTTP CDP API.
+	// This avoids the chromedp session-invalidation issue entirely.
+	// The CDP HTTP endpoint /json/new?URL creates a new tab at the given URL.
+	httpURL := fmt.Sprintf("http://%s/json/new?%s", sbc.wsURL[len("ws://"):], url)
+	sbc.logger.Info("navigateInner: creating tab via HTTP API", zap.String("httpURL", httpURL))
+
+	createResp, err := sbc.cdpHTTPPut(httpURL)
 	if err != nil {
-		return nil, fmt.Errorf("navigate failed: %w", err)
+		return nil, fmt.Errorf("create tab: %w", err)
+	}
+	newTargetID, _ := createResp["id"].(string)
+	if newTargetID == "" {
+		return nil, fmt.Errorf("create tab: no target ID in response")
+	}
+	sbc.logger.Info("navigateInner: tab created", zap.String("targetID", newTargetID))
+
+	// Step 2: Wait for the page to load (short sleep — HTTP server is local)
+	time.Sleep(settleDelay)
+
+	// Step 3: Attach a fresh chromedp context to the new tab for data collection
+	tabCtx, tabCancel := chromedp.NewContext(allocCtx,
+		chromedp.WithTargetID(target.ID(newTargetID)),
+	)
+
+	err = chromedp.Run(tabCtx,
+		chromedp.Title(&title),
+		chromedp.Location(&currentURL),
+		chromedp.Evaluate(labelerJS, &elementsJSON),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var err error
+			screenshotBuf, err = page.CaptureScreenshot().Do(ctx)
+			return err
+		}),
+	)
+
+	if err != nil {
+		tabCancel()
+		// Clean up the new tab on error
+		go func() {
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer closeCancel()
+			target.CloseTarget(target.ID(newTargetID)).Do(closeCtx)
+		}()
+		return nil, fmt.Errorf("navigate data collection failed: %w", err)
+	}
+
+	// Store the tab context to keep it alive — cancelling it would close the tab
+	sbc.mu.Lock()
+	if sbc.keepAliveCancel != nil {
+		sbc.keepAliveCancel()
+	}
+	sbc.keepAliveCtx = tabCtx
+	sbc.keepAliveCancel = tabCancel
+	sbc.persistentTargetID = newTargetID
+	sbc.mu.Unlock()
+
+	// Close old tab
+	if oldTargetID != "" && oldTargetID != newTargetID {
+		go func() {
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer closeCancel()
+			if err := target.CloseTarget(target.ID(oldTargetID)).Do(closeCtx); err != nil {
+				sbc.logger.Debug("failed to close old tab (non-fatal)", zap.String("targetID", oldTargetID), zap.Error(err))
+			}
+		}()
 	}
 
 	elements := parseElements(elementsJSON)
-
 	sbc.mu.Lock()
 	sbc.lastURL = currentURL
 	sbc.lastTitle = title
 	sbc.lastElements = elements
 	sbc.lastScreenshot = screenshotBuf
 	sbc.mu.Unlock()
+
+	sbc.logger.Info("navigated successfully",
+		zap.String("url", currentURL),
+		zap.String("targetID", newTargetID),
+		zap.Int("elements", len(elements)))
 
 	return &PageInfo{
 		URL:        currentURL,
@@ -262,9 +331,9 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 func (sbc *SandboxBrowserClient) Click(ctx context.Context, elementID int) (*PageInfo, error) {
 	info, err := sbc.clickInner(ctx, elementID)
 	if err != nil {
-		sbc.logger.Warn("click failed, recreating tab and retrying", zap.Error(err))
-		if recErr := sbc.reconnectTab(ctx); recErr != nil {
-			return nil, fmt.Errorf("click failed and tab recovery also failed: %w (recovery: %v)", err, recErr)
+		sbc.logger.Warn("click failed, reconnecting and retrying", zap.Error(err))
+		if recErr := sbc.reconnect(ctx); recErr != nil {
+			return nil, fmt.Errorf("click failed and recovery also failed: %w (recovery: %v)", err, recErr)
 		}
 		info, err = sbc.clickInner(ctx, elementID)
 	}
@@ -284,11 +353,9 @@ func (sbc *SandboxBrowserClient) clickInner(ctx context.Context, elementID int) 
 	var screenshotBuf []byte
 	var elementsJSON string
 
-	// Use JavaScript click instead of chromedp.Click — avoids NodeVisible
-	// hang on pages loaded via raw CDP that haven't completed full load cycle.
 	clickJS := fmt.Sprintf(`document.querySelector('%s') && document.querySelector('%s').click()`, selector, selector)
 
-	err := sbc.runInTab(navigationTimeout, func(actCtx context.Context) error {
+	err := sbc.runOnActiveTab(navigationTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx,
 			chromedp.Evaluate(clickJS, nil),
 			chromedp.Sleep(settleDelay),
@@ -321,9 +388,9 @@ func (sbc *SandboxBrowserClient) clickInner(ctx context.Context, elementID int) 
 func (sbc *SandboxBrowserClient) Type(ctx context.Context, elementID int, text string, submit bool) (*PageInfo, error) {
 	info, err := sbc.typeInner(ctx, elementID, text, submit)
 	if err != nil {
-		sbc.logger.Warn("type failed, recreating tab and retrying", zap.Error(err))
-		if recErr := sbc.reconnectTab(ctx); recErr != nil {
-			return nil, fmt.Errorf("type failed and tab recovery also failed: %w (recovery: %v)", err, recErr)
+		sbc.logger.Warn("type failed, reconnecting and retrying", zap.Error(err))
+		if recErr := sbc.reconnect(ctx); recErr != nil {
+			return nil, fmt.Errorf("type failed and recovery also failed: %w (recovery: %v)", err, recErr)
 		}
 		info, err = sbc.typeInner(ctx, elementID, text, submit)
 	}
@@ -343,8 +410,6 @@ func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, t
 	var screenshotBuf []byte
 	var elementsJSON string
 
-	// Use JavaScript to set value and optionally submit — avoids chromedp.SendKeys
-	// NodeVisible hang on pages loaded via raw CDP.
 	escaped := strings.ReplaceAll(text, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
 	escaped = strings.ReplaceAll(escaped, "\n", `\n`)
@@ -362,7 +427,7 @@ func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, t
 	if submit {
 		timeout = navigationTimeout
 	}
-	err := sbc.runInTab(timeout, func(actCtx context.Context) error {
+	err := sbc.runOnActiveTab(timeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx,
 			chromedp.Evaluate(typeJS, nil),
 			chromedp.Sleep(settleDelay),
@@ -395,9 +460,9 @@ func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, t
 func (sbc *SandboxBrowserClient) Scroll(ctx context.Context, direction string, amount int) (*PageInfo, error) {
 	info, err := sbc.scrollInner(ctx, direction, amount)
 	if err != nil {
-		sbc.logger.Warn("scroll failed, recreating tab and retrying", zap.Error(err))
-		if recErr := sbc.reconnectTab(ctx); recErr != nil {
-			return nil, fmt.Errorf("scroll failed and tab recovery also failed: %w (recovery: %v)", err, recErr)
+		sbc.logger.Warn("scroll failed, reconnecting and retrying", zap.Error(err))
+		if recErr := sbc.reconnect(ctx); recErr != nil {
+			return nil, fmt.Errorf("scroll failed and recovery also failed: %w (recovery: %v)", err, recErr)
 		}
 		info, err = sbc.scrollInner(ctx, direction, amount)
 	}
@@ -414,7 +479,7 @@ func (sbc *SandboxBrowserClient) scrollInner(ctx context.Context, direction stri
 	var screenshotBuf []byte
 	var elementsJSON string
 
-	err := sbc.runInTab(defaultTimeout, func(actCtx context.Context) error {
+	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx,
 			chromedp.Evaluate(fmt.Sprintf("window.scrollBy(0, %d)", scrollBy), nil),
 			chromedp.Title(&title),
@@ -454,37 +519,35 @@ func (sbc *SandboxBrowserClient) GetSnapshot() (*PageInfo, error) {
 	}, nil
 }
 
-// Close closes the persistent tab and the allocator.
+// Close releases the allocator connection and closes the active tab.
 func (sbc *SandboxBrowserClient) Close() {
 	sbc.mu.Lock()
 	defer sbc.mu.Unlock()
 
-	if sbc.tabCancel != nil {
-		sbc.tabCancel()
-		sbc.tabCtx = nil
-		sbc.tabCancel = nil
+	if sbc.keepAliveCancel != nil {
+		sbc.keepAliveCancel()
+		sbc.keepAliveCtx = nil
+		sbc.keepAliveCancel = nil
 	}
 	if sbc.allocCancel != nil {
 		sbc.allocCancel()
 		sbc.allocator = nil
 		sbc.allocCancel = nil
 	}
+	sbc.persistentTargetID = ""
 	sbc.logger.Info("sandbox browser client closed", zap.Int("cdp_port", sbc.cdpPort))
 }
 
-// reconnectTab closes the current tab and creates a fresh one.
-// Used to recover from corrupted tab state after a failed navigation.
-// Closes extra Chrome tabs left open from previous sessions to prevent
-// tab accumulation that can cause CDP to become unresponsive.
-func (sbc *SandboxBrowserClient) reconnectTab(ctx context.Context) error {
+// reconnect recreates the allocator and finds a fresh target.
+// Closes stale Chrome tabs to prevent accumulation.
+func (sbc *SandboxBrowserClient) reconnect(ctx context.Context) error {
 	sbc.mu.Lock()
-	defer sbc.mu.Unlock()
 
 	// Close old tab
-	if sbc.tabCancel != nil {
-		sbc.tabCancel()
-		sbc.tabCtx = nil
-		sbc.tabCancel = nil
+	if sbc.keepAliveCancel != nil {
+		sbc.keepAliveCancel()
+		sbc.keepAliveCtx = nil
+		sbc.keepAliveCancel = nil
 	}
 	// Close old allocator
 	if sbc.allocCancel != nil {
@@ -493,57 +556,57 @@ func (sbc *SandboxBrowserClient) reconnectTab(ctx context.Context) error {
 		sbc.allocCancel = nil
 	}
 
-	// Create fresh allocator and tab
+	// Create fresh allocator
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), sbc.wsURL)
-	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
+	sbc.allocator = allocCtx
+	sbc.allocCancel = allocCancel
+	sbc.mu.Unlock()
 
-	// Close stale Chrome tabs left from previous sessions.
-	// When reconnectTab creates a new chromedp context, it gets a NEW browser tab,
-	// but old tabs from crashed/failed sessions remain open in Chrome.
-	// Use a short timeout to avoid hanging if Chrome is unresponsive.
+	// Close stale tabs
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cleanupCancel()
-	if err := sbc.closeStaleTabs(cleanupCtx, tabCtx); err != nil {
+	tmpCtx, tmpCancel := chromedp.NewContext(allocCtx)
+	defer tmpCancel()
+	if err := sbc.closeStaleTabs(cleanupCtx, tmpCtx); err != nil {
 		sbc.logger.Warn("failed to close stale tabs (non-fatal)", zap.Error(err))
 	}
 
-	if err := chromedp.Run(tabCtx, chromedp.Navigate("about:blank")); err != nil {
-		tabCancel()
-		allocCancel()
-		return fmt.Errorf("CDP reconnection test failed: %w", err)
+	// Find or create a target
+	targetID, err := sbc.findOrCreateTarget(ctx)
+	if err != nil {
+		return fmt.Errorf("reconnect failed: %w", err)
 	}
 
-	sbc.allocator = allocCtx
-	sbc.allocCancel = allocCancel
-	sbc.tabCtx = tabCtx
-	sbc.tabCancel = tabCancel
+	sbc.mu.Lock()
+	sbc.persistentTargetID = targetID
+	sbc.mu.Unlock()
 
-	sbc.logger.Info("tab recreated successfully", zap.Int("cdp_port", sbc.cdpPort))
+	sbc.logger.Info("reconnected successfully", zap.Int("cdp_port", sbc.cdpPort), zap.String("targetID", targetID))
 	return nil
 }
 
-// closeStaleTabs closes all Chrome tabs except the current one.
-// This prevents tab accumulation from failed navigate retries.
+// closeStaleTabs closes all Chrome page tabs except the current one.
 func (sbc *SandboxBrowserClient) closeStaleTabs(ctx context.Context, currentTabCtx context.Context) error {
-	// List all open targets via CDP
 	targets, err := chromedp.Targets(currentTabCtx)
 	if err != nil {
 		return fmt.Errorf("list targets: %w", err)
 	}
 
-	// Find our current tab's target ID
 	var currentTargetID target.ID
 	if bt := chromedp.FromContext(currentTabCtx); bt != nil && bt.Target != nil {
 		currentTargetID = bt.Target.TargetID
 	}
 
+	// Also protect our persistent target
+	sbc.mu.RLock()
+	persistentID := target.ID(sbc.persistentTargetID)
+	sbc.mu.RUnlock()
+
 	closed := 0
 	for _, t := range targets {
-		// Skip our current tab and any non-page targets (service workers, etc.)
-		if t.TargetID == currentTargetID || t.Type != "page" {
+		if t.TargetID == currentTargetID || t.TargetID == persistentID || t.Type != "page" {
 			continue
 		}
-		// Close the stale tab via CDP
 		if err := target.CloseTarget(t.TargetID).Do(ctx); err != nil {
 			sbc.logger.Debug("failed to close stale tab", zap.String("targetID", string(t.TargetID)), zap.Error(err))
 		} else {
@@ -556,15 +619,11 @@ func (sbc *SandboxBrowserClient) closeStaleTabs(ctx context.Context, currentTabC
 	return nil
 }
 
-// IsConnected returns whether the client has an active tab.
+// IsConnected returns whether the client has an active allocator and target.
 func (sbc *SandboxBrowserClient) IsConnected() bool {
 	sbc.mu.RLock()
 	defer sbc.mu.RUnlock()
-	if sbc.tabCtx == nil {
-		return false
-	}
-	// Check if the tab context has been cancelled (e.g. container died)
-	return sbc.tabCtx.Err() == nil
+	return sbc.allocator != nil && sbc.persistentTargetID != ""
 }
 
 // updateState caches the current page state.
