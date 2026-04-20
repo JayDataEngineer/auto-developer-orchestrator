@@ -179,12 +179,27 @@ func (h *X11Handler) Screenshot(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
 	display := h.displayForSandbox(sandboxID)
 
-	// Use xdotool + scrot for screenshot, then base64 encode inside container.
-	// We pipe through xxd to get hex output (ASCII-safe), then decode server-side.
-	// This avoids Docker multiplexed stream framing corrupting binary data.
-	output, err := h.exec(r, sandboxID, display, []string{
-		"bash", "-c", "import -window root /tmp/x11-screenshot.png && base64 -w0 /tmp/x11-screenshot.png | tr -d '\\0'",
-	})
+	// Screenshot fallback chain: import → scrot → xdotool
+	// Each method uses base64 to avoid Docker multiplexed stream framing issues.
+	screenshotCmds := []string{
+		// Method 1: ImageMagick import (fastest, most reliable)
+		"import -window root /tmp/x11-screenshot.png && base64 -w0 /tmp/x11-screenshot.png",
+		// Method 2: scrot (lightweight alternative)
+		"scrot /tmp/x11-screenshot.png && base64 -w0 /tmp/x11-screenshot.png",
+		// Method 3: xdotool + xwd (X11 native, always available)
+		"xwd -root -out /tmp/x11-screenshot.xwd && convert xwd:/tmp/x11-screenshot.xwd /tmp/x11-screenshot.png && base64 -w0 /tmp/x11-screenshot.png",
+	}
+
+	var output string
+	var err error
+	for _, cmd := range screenshotCmds {
+		output, err = h.exec(r, sandboxID, display, []string{
+			"bash", "-c", cmd + " | tr -d '\\0'",
+		})
+		if err == nil && len(output) > 100 {
+			break
+		}
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

@@ -87,10 +87,34 @@ const labelerJS = `
 		return parts.join(' ');
 	}
 
+	// ── Paint-order visibility check (browser-use pattern) ───────
+	// Skips elements that are rendered invisible by CSS, even if they
+	// technically exist in the DOM tree. Prevents the model from targeting
+	// elements the user can't actually see or interact with.
+	function isVisible(el) {
+		// Modern API: checkVisibility() (Chrome 110+, Firefox 120+)
+		if (el.checkVisibility) {
+			return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+		}
+		// Fallback: manual computed style checks
+		try {
+			const style = getComputedStyle(el);
+			if (style.display === 'none') return false;
+			if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+			if (parseFloat(style.opacity) === 0) return false;
+		} catch (e) {
+			return false;
+		}
+		return true;
+	}
+
 	// ── Core element collection ─────────────────────────────────
 	function processElement(el) {
 		// Hard cap at 50 elements — prevents overwhelming the model context
 		if (id > 50) return false;
+
+		// Paint-order filtering: skip elements hidden by CSS
+		if (!isVisible(el)) return true;
 
 		const rect = el.getBoundingClientRect();
 		// Skip invisible elements

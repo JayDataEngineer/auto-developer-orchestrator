@@ -129,3 +129,8 @@ func (b *ComputerUseBridge) DesktopKey(ctx context.Context, sandboxID string, ke
 		"key":    key,
 	}, sandboxID)
 }
+
+// Resolution returns the screen dimensions (width x height) for coordinate normalization.
+func (b *ComputerUseBridge) Resolution(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	return callHandler(ctx, b.X11.Resolution, http.MethodGet, "/api/sandbox/{id}/x11/resolution", nil, sandboxID)
+}

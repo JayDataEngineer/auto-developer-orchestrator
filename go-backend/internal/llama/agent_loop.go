@@ -89,6 +89,9 @@ type ComputerUseProvider interface {
 	DesktopClick(ctx context.Context, sandboxID string, x, y float64, button int) (map[string]interface{}, error)
 	DesktopType(ctx context.Context, sandboxID string, text string) (map[string]interface{}, error)
 	DesktopKey(ctx context.Context, sandboxID string, key string) (map[string]interface{}, error)
+
+	// Resolution query (for coordinate normalization)
+	Resolution(ctx context.Context, sandboxID string) (map[string]interface{}, error)
 }
 
 // SandboxToolExecutor executes tools via the sandbox manager and computer use provider.
@@ -327,6 +330,73 @@ func (e *SandboxToolExecutor) resolveElement(args map[string]interface{}) (int, 
 	return 0, fmt.Errorf("could not resolve element description %q to an ID (best match score: %d)", desc, bestScore)
 }
 
+// selfHealElement attempts to find a replacement element when the original is stale.
+// Stagehand pattern: re-snapshot the page and match by tag + text similarity.
+// Returns the new element ID, or 0 if no suitable match found.
+func (e *SandboxToolExecutor) selfHealElement(ctx context.Context, sandboxID string, originalID int, hint string) (int, error) {
+	// Look up the original element's tag/text from the index
+	var origTag, origText string
+	if elems, ok := e.elemIndex[sandboxID]; ok {
+		for _, el := range elems {
+			if el.ID == originalID {
+				origTag = el.Tag
+				origText = el.Text
+				break
+			}
+		}
+	}
+
+	// Re-snapshot to get fresh elements
+	snapResult, err := e.CU.Snapshot(ctx, sandboxID)
+	if err != nil {
+		return 0, fmt.Errorf("self-heal: re-snapshot failed: %w", err)
+	}
+
+	// Parse the new snapshot and find the best match
+	summary := e.extractPageSummary(snapResult)
+	_ = summary // Elements are indexed by extractPageSummary
+
+	newElems, ok := e.elemIndex[sandboxID]
+	if !ok || len(newElems) == 0 {
+		return 0, fmt.Errorf("self-heal: no elements in fresh snapshot")
+	}
+
+	// Score by similarity to original element
+	bestID := 0
+	bestScore := 0
+	for _, el := range newElems {
+		score := 0
+		if origTag != "" && el.Tag == origTag {
+			score += 50
+		}
+		if origText != "" {
+			origLower := strings.ToLower(origText)
+			elLower := strings.ToLower(el.Text)
+			if origLower == elLower {
+				score += 60
+			} else if strings.Contains(origLower, elLower) || strings.Contains(elLower, origLower) {
+				score += 30
+			}
+		}
+		if hint != "" {
+			hintLower := strings.ToLower(hint)
+			elLower := strings.ToLower(el.Text)
+			if strings.Contains(hintLower, elLower) || strings.Contains(elLower, hintLower) {
+				score += 20
+			}
+		}
+		if score > bestScore {
+			bestScore = score
+			bestID = el.ID
+		}
+	}
+
+	if bestID > 0 && bestScore >= 30 {
+		return bestID, nil
+	}
+	return 0, fmt.Errorf("self-heal: no similar element found (best score: %d)", bestScore)
+}
+
 // Execute runs a tool in the sandbox and returns the result.
 func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
 	// Resolve actual sandbox ID from project name
@@ -464,6 +534,23 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		if b, ok := args["button"]; ok {
 			if f, ok := b.(float64); ok {
 				button = int(f)
+			}
+		}
+		// Coordinate normalization: if x,y are in 0-1000 range (CUA pattern),
+		// convert to actual screen pixels
+		if x >= 0 && x <= 1000 && y >= 0 && y <= 1000 {
+			if res, err := e.CU.Resolution(ctx, sandboxID); err == nil {
+				screenW := atoiFromInterface(res["width"])
+				screenH := atoiFromInterface(res["height"])
+				if screenW > 0 && screenH > 0 {
+					xInt, yInt := NormalizeCoords(x, y, screenW, screenH)
+					x = float64(xInt)
+					y = float64(yInt)
+					e.Logger.Debug("Normalized desktop coordinates",
+						zap.Float64("normX", x), zap.Float64("normY", y),
+						zap.Int("screenW", screenW), zap.Int("screenH", screenH),
+					)
+				}
 			}
 		}
 		return e.CU.DesktopClick(ctx, sandboxID, x, y, button)
@@ -655,6 +742,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 	failCounts := make(map[string]int)
 	consecutiveTotalFails := 0
 	const maxConsecutiveTotalFails = 5
+	cycleDetector := NewCycleDetector(10)
 
 	for {
 		var contentBuf strings.Builder
@@ -862,6 +950,19 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 				ToolName:   tc.Name,
 				Content:    resultStr,
 			})
+
+			// Cycle detection: record this tool call and check for loops
+			if cycleDetector.Record(tc.Name, tc.Args, resultStr, round) {
+				loop.logger.Warn("Cycle detected, injecting nudge",
+					zap.String("tool", tc.Name),
+					zap.Int("round", round),
+				)
+				toolResults = append(toolResults, ToolResult{
+					ToolCallID: "__cycle_nudge__",
+					ToolName:   "system",
+					Content:    CycleNudge(),
+				})
+			}
 
 			// yield_artifact is a terminal signal
 			if tc.Name == "yield_artifact" {
@@ -1340,7 +1441,15 @@ func (e *SandboxToolExecutor) macroClickElement(ctx context.Context, sandboxID s
 	normalizeElementArg(args)
 	elementID, err := e.resolveElement(args)
 	if err != nil {
-		return nil, fmt.Errorf("click_element: %w", err)
+		// Self-heal: re-snapshot and try to find a matching element
+		if healedID, healErr := e.selfHealElement(ctx, sandboxID, 0, fmt.Sprintf("%v", args["element"])); healErr == nil {
+			elementID = healedID
+			e.Logger.Debug("Self-healed element for click",
+				zap.Int("newID", healedID),
+			)
+		} else {
+			return nil, fmt.Errorf("click_element: %w (self-heal also failed: %v)", err, healErr)
+		}
 	}
 
 	clickArgs := map[string]interface{}{
@@ -1349,7 +1458,21 @@ func (e *SandboxToolExecutor) macroClickElement(ctx context.Context, sandboxID s
 	}
 	result, err := e.CU.Act(ctx, sandboxID, "click", clickArgs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to click element %d: %w", elementID, err)
+		// Self-heal: element may have gone stale after page change
+		if healedID, healErr := e.selfHealElement(ctx, sandboxID, elementID, ""); healErr == nil {
+			clickArgs["element"] = healedID
+			result, err = e.CU.Act(ctx, sandboxID, "click", clickArgs)
+			if err != nil {
+				return nil, fmt.Errorf("failed to click element %d (self-healed to %d): %w", elementID, healedID, err)
+			}
+			elementID = healedID
+			e.Logger.Debug("Self-healed click after Act failure",
+				zap.Int("oldID", elementID),
+				zap.Int("newID", healedID),
+			)
+		} else {
+			return nil, fmt.Errorf("failed to click element %d: %w", elementID, err)
+		}
 	}
 
 	resp := map[string]interface{}{
@@ -1376,7 +1499,15 @@ func (e *SandboxToolExecutor) macroTypeText(ctx context.Context, sandboxID strin
 	normalizeElementArg(args)
 	elementID, err := e.resolveElement(args)
 	if err != nil {
-		return nil, fmt.Errorf("type_text: %w", err)
+		// Self-heal: re-snapshot and try to find a matching element
+		if healedID, healErr := e.selfHealElement(ctx, sandboxID, 0, fmt.Sprintf("%v", args["element"])); healErr == nil {
+			elementID = healedID
+			e.Logger.Debug("Self-healed element for type_text",
+				zap.Int("newID", healedID),
+			)
+		} else {
+			return nil, fmt.Errorf("type_text: %w (self-heal also failed: %v)", err, healErr)
+		}
 	}
 
 	submit := false
