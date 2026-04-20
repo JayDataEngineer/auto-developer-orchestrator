@@ -4,17 +4,14 @@
 # Usage:
 #   task --list              show all tasks
 #   task <name>              run a task
-#   task up                  start dev environment
-#   task test                run all tests
+#   task model               start model server
+#   task dev                 start dev environment
 
 version: "3"
 
 vars:
   GO_PORT: 3847
   JS_PORT: 5174
-  # ── llama.cpp Model Paths ─────────────────────────────────────────────
-  # Models live in shared-docker-infra (not this repo).
-  # Override with: task model -- MODELS=/other/path
   MODELS_DIR:
     sh: echo "${MODELS_DIR:-/home/ubuntu/Documents/programs/shared-docker-infra/models/llm}"
   VISION_DIR:
@@ -38,9 +35,26 @@ tasks:
 
   # ── Local Development ───────────────────────────────────────────────────
   dev:
-    desc: Start all services locally (Go + Vite)
+    desc: Start Go backend + Vite frontend
     cmds:
-      - bash scripts/dev.sh {{.JS_PORT}}
+      - cmd: fuser -k {{.GO_PORT}}/tcp 2>/dev/null; fuser -k {{.JS_PORT}}/tcp 2>/dev/null; true
+        ignore_error: true
+        silent: true
+      - cmd: cd go-backend && PROJECT_ROOT=$(pwd)/.. go run cmd/server/main.go &
+        ignore_error: true
+      - cmd: npm run dev -- --port {{.JS_PORT }} &
+        ignore_error: true
+      - |
+        for i in $(seq 1 30); do
+          GO_UP=$(ss -tlnp 2>/dev/null | grep -c ":{{.GO_PORT}} " || true)
+          VITE_UP=$(ss -tlnp 2>/dev/null | grep -c ":{{.JS_PORT}} " || true)
+          if [ "$GO_UP" -ge 1 ] && [ "$VITE_UP" -ge 1 ]; then
+            echo "Backend  http://localhost:{{.GO_PORT}}"
+            echo "Frontend http://localhost:{{.JS_PORT}}"
+            break
+          fi
+          sleep 1
+        done
 
   dev-frontend:
     desc: Start Vite frontend only
@@ -68,15 +82,18 @@ tasks:
       - echo "Dev services started → http://orchestrator.local"
 
   down:
-    desc: Stop everything — local dev, dev compose, prod compose, sandboxes
+    desc: Stop everything — local dev, compose, sandboxes, model
     cmds:
-      - cmd: fuser -k 3847/tcp 2>/dev/null; fuser -k 5174/tcp 2>/dev/null; true
+      - cmd: fuser -k {{.GO_PORT}}/tcp 2>/dev/null; fuser -k {{.JS_PORT}}/tcp 2>/dev/null; true
         ignore_error: true
         silent: true
       - cmd: docker compose -f docker-compose.dev.yml down --remove-orphans 2>/dev/null; true
         ignore_error: true
         silent: true
       - cmd: docker compose -f docker-compose.yml down --remove-orphans 2>/dev/null; true
+        ignore_error: true
+        silent: true
+      - cmd: docker rm -f orchestrator-llama 2>/dev/null; true
         ignore_error: true
         silent: true
       - cmd: docker ps -q --filter "name=orchestrator-" | xargs -r docker rm -f
@@ -184,15 +201,103 @@ tasks:
   # ── llama.cpp Model Server ────────────────────────────────────────────
   model:
     desc: |
-      Start optimized llama.cpp server for agent workloads (~118 tok/s on RTX 4090).
-      Modes:
-        task model              vision + thinking (default, for screenshots/OCR)
+      Start llama.cpp server. Modes:
+        task model              vision + thinking (default)
         task model FLAGS=fast   vision, no thinking
-        task model FLAGS=text   text-only + thinking (more VRAM for context)
-        task model FLAGS=bare   text-only, no thinking (minimal)
+        task model FLAGS=text   text-only + thinking
+        task model FLAGS=bare   text-only, no thinking
     deps: [model-down]
     cmds:
-      - bash scripts/model.sh {{.FLAGS}}
+      - |
+        case "{{.FLAGS}}" in
+          bare)
+            echo "Starting Gemma-4-26B (bare — text-only, no thinking)..."
+            docker run -d --name orchestrator-llama \
+              --gpus all \
+              --network shared-infra \
+              -p {{.LLAMA_PORT}}:8001 \
+              -v "{{.MODELS_DIR}}:/models:ro" \
+              {{.LLAMA_IMAGE}} \
+              --model /models/gemma-4-26B-A4B-it-UD-IQ4_NL.gguf \
+              --alias gemma-4-26b-a4b \
+              --port 8001 --host 0.0.0.0 \
+              --jinja --flash-attn on \
+              --ctx-size 262144 \
+              --cache-type-k q8_0 --cache-type-v q8_0 \
+              --batch-size 512 --ubatch-size 512 \
+              --cont-batching --parallel 4 --metrics
+            ;;
+          text)
+            echo "Starting Gemma-4-26B (text-only + thinking)..."
+            docker run -d --name orchestrator-llama \
+              --gpus all \
+              --network shared-infra \
+              -p {{.LLAMA_PORT}}:8001 \
+              -v "{{.MODELS_DIR}}:/models:ro" \
+              {{.LLAMA_IMAGE}} \
+              --model /models/gemma-4-26B-A4B-it-UD-IQ4_NL.gguf \
+              --alias gemma-4-26b-a4b \
+              --port 8001 --host 0.0.0.0 \
+              --jinja --flash-attn on \
+              --ctx-size 262144 \
+              --cache-type-k q8_0 --cache-type-v q8_0 \
+              --batch-size 512 --ubatch-size 512 \
+              --cont-batching --parallel 2 --metrics \
+              --chat-template-kwargs '{"enable_thinking":true}'
+            ;;
+          fast)
+            echo "Starting Gemma-4-26B vision (fast — no thinking)..."
+            docker run -d --name orchestrator-llama \
+              --gpus all \
+              --network shared-infra \
+              -p {{.LLAMA_PORT}}:8001 \
+              -v "{{.MODELS_DIR}}:/models:ro" \
+              -v "{{.VISION_DIR}}:/vision:ro" \
+              {{.LLAMA_IMAGE}} \
+              --model /models/gemma-4-26B-A4B-it-UD-IQ4_NL.gguf \
+              --mmproj /vision/gemma-4-26B-A4B-it-mmproj-F16.gguf \
+              --alias gemma-4-26b-a4b \
+              --port 8001 --host 0.0.0.0 \
+              --jinja --flash-attn on \
+              --ctx-size 262144 --cache-ram 2048 \
+              --cache-type-k q8_0 --cache-type-v q8_0 \
+              --batch-size 512 --ubatch-size 512 \
+              --cont-batching --parallel 2 --metrics \
+              --chat-template-kwargs '{"enable_thinking":false}'
+            ;;
+          *)
+            echo "Starting Gemma-4-26B vision (default — thinking enabled)..."
+            docker run -d --name orchestrator-llama \
+              --gpus all \
+              --network shared-infra \
+              -p {{.LLAMA_PORT}}:8001 \
+              -v "{{.MODELS_DIR}}:/models:ro" \
+              -v "{{.VISION_DIR}}:/vision:ro" \
+              {{.LLAMA_IMAGE}} \
+              --model /models/gemma-4-26B-A4B-it-UD-IQ4_NL.gguf \
+              --mmproj /vision/gemma-4-26B-A4B-it-mmproj-F16.gguf \
+              --alias gemma-4-26b-a4b \
+              --port 8001 --host 0.0.0.0 \
+              --jinja --flash-attn on \
+              --ctx-size 262144 --cache-ram 2048 \
+              --cache-type-k q8_0 --cache-type-v q8_0 \
+              --batch-size 512 --ubatch-size 512 \
+              --cont-batching --parallel 2 --metrics \
+              --chat-template-kwargs '{"enable_thinking":true}'
+            ;;
+        esac
+      - |
+        echo "Waiting for model to load..."
+        for i in $(seq 1 90); do
+          if curl -sf "http://localhost:{{.LLAMA_PORT}}/health" > /dev/null 2>&1; then
+            echo "Model ready on port {{.LLAMA_PORT}}"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "ERROR: Model did not start within 180s"
+        docker logs orchestrator-llama 2>&1 | tail -5
+        exit 1
 
   model-down:
     desc: Stop the llama.cpp model server
