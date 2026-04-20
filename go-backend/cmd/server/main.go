@@ -183,31 +183,37 @@ func main() {
 	schedSender := handlers.NewSchedulerPromptSenderAdapter(piPool, db, projectRoot)
 	sched := scheduler.NewScheduler(schedulerStorePath, schedSender, logger)
 
-	// Phase 1: Set up isolated executor for job execution
-	isolatedExec, err := scheduler.NewIsolatedExecutor(projectRoot, logger)
-	if err != nil {
-		logger.Warn("Failed to create isolated executor, falling back to main agent", zap.Error(err))
+	// Phase 3: Use llama engine directly for scheduled jobs (no Pi subprocess needed)
+	if llamaEngine != nil {
+		llamaExec := scheduler.NewLlamaExecutor(llamaEngine, sandboxMgr, projectRoot, logger)
+		sched.SetLlamaExecutor(llamaExec)
+		logger.Info("Scheduler configured for direct llama engine execution")
 	} else {
-		runLogMgr, err := scheduler.NewRunLogManager("")
+		// Fallback: Use isolated Pi subprocess for job execution
+		isolatedExec, err := scheduler.NewIsolatedExecutor(projectRoot, logger)
 		if err != nil {
-			logger.Warn("Failed to create run log manager", zap.Error(err))
-		}
-		sched.SetIsolatedExecutor(isolatedExec, runLogMgr, projectRoot)
-
-		// Phase 4: Set up session delivery (inject job output into main agent)
-		sched.SetSessionInjector(func(project, agentID, text string) error {
-			client := piPool.GetWithID(projectRoot+"/"+project, agentID)
-			if client == nil {
-				// No active session — log it
-				logger.Info("no active session for delivery",
-					zap.String("project", project),
-					zap.String("agentId", agentID),
-				)
-				return nil
+			logger.Warn("Failed to create isolated executor, falling back to main agent", zap.Error(err))
+		} else {
+			runLogMgr, err := scheduler.NewRunLogManager("")
+			if err != nil {
+				logger.Warn("Failed to create run log manager", zap.Error(err))
 			}
-			return client.SendPrompt(text, "", "")
-		})
+			sched.SetIsolatedExecutor(isolatedExec, runLogMgr, projectRoot)
+		}
 	}
+
+	// Session delivery: inject job output into the main agent session
+	sched.SetSessionInjector(func(project, agentID, text string) error {
+		client := piPool.GetWithID(projectRoot+"/"+project, agentID)
+		if client == nil {
+			logger.Info("no active session for delivery",
+				zap.String("project", project),
+				zap.String("agentId", agentID),
+			)
+			return nil
+		}
+		return client.SendPrompt(text, "", "")
+	})
 
 	if err := sched.Start(context.Background()); err != nil {
 		logger.Warn("Failed to start scheduler", zap.Error(err))

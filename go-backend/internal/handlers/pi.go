@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/approval"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
@@ -30,6 +31,9 @@ type PiHandler struct {
 	litellmKey string
 	toolPerms  *pi.ToolPermissionConfig
 
+	// Channel-based approval manager (decoupled from Pi subprocess)
+	approvalMgr *approval.Manager
+
 	// Library mode — always uses orchestrator + ephemeral sub-agents
 	llamaEngine *llamaeng.HTTPEngine
 	sandboxMgr  *sandbox.Manager
@@ -41,15 +45,16 @@ type PiHandler struct {
 // NewPiHandler creates a new Pi handler.
 func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, logger *zap.Logger) *PiHandler {
 	return &PiHandler{
-		pool:            pool,
-		db:              db,
-		git:             gitOps,
-		github:          gh,
-		log:             logger,
-		litellmURL:      os.Getenv("LITELLM_PROXY_URL"),
-		litellmKey:      os.Getenv("LITELLM_MASTER_KEY"),
-		toolPerms:       pi.NewToolPermissionConfig(logger),
-		orchestrators:   make(map[string]*llamaeng.OrchestratorLoop),
+		pool:          pool,
+		db:            db,
+		git:           gitOps,
+		github:        gh,
+		log:           logger,
+		litellmURL:    os.Getenv("LITELLM_PROXY_URL"),
+		litellmKey:    os.Getenv("LITELLM_MASTER_KEY"),
+		toolPerms:     pi.NewToolPermissionConfig(logger),
+		approvalMgr:   approval.NewManager(5 * time.Minute),
+		orchestrators: make(map[string]*llamaeng.OrchestratorLoop),
 	}
 }
 
@@ -76,7 +81,10 @@ func (h *PiHandler) waitForApproval(
 ) (*pi.ApprovalResponse, string) {
 	writeSSE(w, pi.EventApprovalRequest, approvalData, canFlush, flusher)
 
-	ch := client.RegisterApproval(approvalData.RequestID)
+	// Use the decoupled approval manager
+	ch := h.approvalMgr.Register(approvalData.RequestID)
+	defer h.approvalMgr.Cleanup(approvalData.RequestID)
+
 	select {
 	case resp, ok := <-ch:
 		if !ok {
@@ -85,8 +93,10 @@ func (h *PiHandler) waitForApproval(
 		return &resp, ""
 	case <-ctx.Done():
 		return nil, "context cancelled"
-	case <-time.After(5 * time.Minute):
-		client.Steer("APPROVAL_TIMEOUT: do NOT proceed. No response received.")
+	case <-time.After(h.approvalMgr.Timeout()):
+		if client != nil {
+			client.Steer("APPROVAL_TIMEOUT: do NOT proceed. No response received.")
+		}
 		return nil, "timeout"
 	}
 }
@@ -149,28 +159,13 @@ func (h *PiHandler) Respond(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectPath := resolveProjectPath(req.Project, h.db)
-	if projectPath == "" {
-		writeJSON(w, http.StatusNotFound, map[string]interface{}{
-			"success": false, "error": "Project not found",
-		})
-		return
-	}
-
-	client := h.pool.GetWithID(projectPath, req.AgentId)
-	if client == nil {
-		writeJSON(w, http.StatusNotFound, map[string]interface{}{
-			"success": false, "error": "Agent not found",
-		})
-		return
-	}
-
 	resp := pi.ApprovalResponse{
 		Action:  req.Action,
 		Message: req.Message,
 	}
 
-	if ok := client.ResolveApproval(req.RequestID, resp); !ok {
+	// Use the decoupled approval manager (works with both Pi and orchestrator paths)
+	if ok := h.approvalMgr.Resolve(req.RequestID, resp); !ok {
 		writeJSON(w, http.StatusNotFound, map[string]interface{}{
 			"success": false, "error": "No pending approval found for this request",
 		})

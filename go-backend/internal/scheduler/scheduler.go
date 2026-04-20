@@ -148,6 +148,9 @@ type Scheduler struct {
 	runLogMgr   *RunLogManager
 	projectRoot string
 
+	// Phase 3: Direct llama engine execution (preferred over isolated + promptSender)
+	llamaExec *LlamaExecutor
+
 	// Phase 4: Session delivery
 	sessionInjector SessionInjector
 }
@@ -171,6 +174,12 @@ func (s *Scheduler) SetIsolatedExecutor(executor *IsolatedExecutor, runLogMgr *R
 	s.isolated = executor
 	s.runLogMgr = runLogMgr
 	s.projectRoot = projectRoot
+}
+
+// SetLlamaExecutor configures the scheduler to use the llama HTTP engine directly.
+// This is the preferred path — no Pi subprocess or pool needed.
+func (s *Scheduler) SetLlamaExecutor(executor *LlamaExecutor) {
+	s.llamaExec = executor
 }
 
 // SetSessionInjector configures the scheduler to inject job output into the
@@ -484,11 +493,24 @@ func (s *Scheduler) executeJob(jobID string) {
 		zap.String("project", job.Project),
 	)
 
-	// Use isolated execution if configured
+	// Use llama engine if configured (preferred path — no Pi subprocess)
 	var output string
 	var err error
 	var result *JobResult
-	if s.isolated != nil {
+	if s.llamaExec != nil {
+		projectPath := s.resolveProjectPath(job.Project)
+		if projectPath == "" {
+			err = fmt.Errorf("project %s not found", job.Project)
+		} else {
+			result = s.llamaExec.Execute(ctx, jobID, job.Name, projectPath, job.Message, job.Model, 0)
+			if result.Error != "" {
+				err = fmt.Errorf("%s", result.Error)
+			}
+			output = result.Output
+			job.InputTokens = result.InputTokens
+			job.OutputTokens = result.OutputTokens
+		}
+	} else if s.isolated != nil {
 		projectPath := s.resolveProjectPath(job.Project)
 		if projectPath == "" {
 			err = fmt.Errorf("project %s not found", job.Project)
