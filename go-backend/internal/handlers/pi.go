@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/approval"
@@ -22,7 +21,6 @@ import (
 
 // PiHandler handles Pi agent HTTP endpoints.
 type PiHandler struct {
-	pool       *pi.PiPool
 	db         *storage.Database
 	git        *git.GitOps
 	github     *GitHubHandler
@@ -34,7 +32,7 @@ type PiHandler struct {
 	// Channel-based approval manager (decoupled from Pi subprocess)
 	approvalMgr *approval.Manager
 
-	// Library mode — always uses orchestrator + ephemeral sub-agents
+	// Llama engine — always uses orchestrator + ephemeral sub-agents
 	llamaEngine *llamaeng.HTTPEngine
 	sandboxMgr  *sandbox.Manager
 	cuBridge    *ComputerUseBridge // bridges llama executor to CU/X11 handlers
@@ -43,9 +41,8 @@ type PiHandler struct {
 }
 
 // NewPiHandler creates a new Pi handler.
-func NewPiHandler(pool *pi.PiPool, db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, logger *zap.Logger) *PiHandler {
+func NewPiHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, logger *zap.Logger) *PiHandler {
 	return &PiHandler{
-		pool:          pool,
 		db:            db,
 		git:           gitOps,
 		github:        gh,
@@ -74,7 +71,6 @@ func (h *PiHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *sand
 func (h *PiHandler) waitForApproval(
 	ctx context.Context,
 	w http.ResponseWriter,
-	client *pi.PiClient,
 	approvalData pi.ApprovalRequestData,
 	canFlush bool,
 	flusher http.Flusher,
@@ -94,9 +90,6 @@ func (h *PiHandler) waitForApproval(
 	case <-ctx.Done():
 		return nil, "context cancelled"
 	case <-time.After(h.approvalMgr.Timeout()):
-		if client != nil {
-			client.Steer("APPROVAL_TIMEOUT: do NOT proceed. No response received.")
-		}
 		return nil, "timeout"
 	}
 }
@@ -104,24 +97,12 @@ func (h *PiHandler) waitForApproval(
 // RegisterRoutes registers all Pi routes on the given router.
 func (h *PiHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/prompt", h.Prompt)
-	r.Post("/abort", h.Abort)
 	r.Post("/respond", h.Respond)
-	r.Get("/state", h.GetState)
-	r.Get("/messages", h.GetMessages)
-	r.Get("/models", h.GetModels)
-	r.Put("/model", h.SetModel)
-	r.Post("/compact", h.Compact)
-	r.Get("/sessions", h.ListSessions)
-	r.Put("/session", h.SwitchSession)
-	r.Get("/active", h.ListActive)
-	r.Post("/agent/spawn", h.SpawnAgent)
-	r.Post("/agent/destroy", h.DestroyAgent)
+	r.Get("/tool-permissions", h.GetToolPermissions)
+	r.Put("/tool-permissions", h.SetToolPermission)
 	r.Get("/history", h.GetHistory)
 	r.Delete("/conversation", h.DeleteConversation)
 	r.Put("/conversation/rename", h.RenameConversation)
-	r.Get("/tool-permissions", h.GetToolPermissions)
-	r.Put("/tool-permissions", h.SetToolPermission)
-	r.Get("/debug/rpc-test", h.DebugRpcTest)
 }
 
 // resolveAgent reads ?agentId= from the query string, defaulting to "default".
@@ -224,298 +205,11 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := h.pool.GetOrCreateWithID(projectPath, req.AgentId)
-	if req.Model != "" {
-		// Re-fetch with fingerprint to validate settings haven't changed
-		fp := pi.ComputeFingerprint(req.Model, "")
-		client, err = h.pool.GetOrCreateWithFingerprint(projectPath, req.AgentId, fp)
-	}
-	if err != nil {
-		h.log.Error("Failed to get Pi client", zap.Error(err))
-		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
-			"success": false, "error": fmt.Sprintf("Failed to start Pi agent: %v", err),
-		})
-		return
-	}
-
-	// Auto-branch if requested
-	var autoBranchName string
-	if req.AutoBranch && h.git != nil {
-		autoBranchName = fmt.Sprintf("pi/task-%d", time.Now().Unix())
-		if err := h.git.Checkout(r.Context(), git.CheckoutOptions{
-			Dir:       projectPath,
-			Branch:    autoBranchName,
-			CreateNew: true,
-		}); err != nil {
-			h.log.Warn("Auto-branch failed (non-fatal)", zap.Error(err), zap.String("branch", autoBranchName))
-			autoBranchName = ""
-		}
-	}
-
-	// Set up SSE
-	setSSEHeaders(w)
-
-	flusher, canFlush := w.(http.Flusher)
-
-	// Send agent_spawned event
-	spawnData, _ := json.Marshal(map[string]string{"agentId": req.AgentId})
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", pi.EventAgentSpawned, string(spawnData))
-	if canFlush {
-		flusher.Flush()
-	}
-
-	// Send branch_created event if auto-branched
-	if autoBranchName != "" {
-		data, _ := json.Marshal(map[string]string{"branch": autoBranchName})
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", pi.EventBranchCreated, string(data))
-		if canFlush {
-			flusher.Flush()
-		}
-	}
-
-	// Subscribe to events
-	subId := fmt.Sprintf("sse-%d", time.Now().UnixNano())
-	events := client.Subscribe(subId)
-	defer client.Unsubscribe(subId)
-
-	// Save user message to DB
-	if h.db != nil {
-		if _, err := h.db.SaveUserMessage(r.Context(), req.Project, req.AgentId, req.Message); err != nil {
-			h.log.Warn("Failed to save user message", zap.Error(err))
-		}
-	}
-
-	// Send prompt command
-	if err := client.SendPrompt(req.Message, req.Model, req.ThinkingLevel); err != nil {
-		h.log.Error("Failed to send prompt to Pi", zap.Error(err))
-		JSONError(w, "Failed to send prompt", http.StatusInternalServerError)
-		return
-	}
-
-	// Stream events to SSE, accumulating assistant response for DB persistence
-	ctx := r.Context()
-	var assistantText, assistantThinking string
-	var assistantToolCalls []json.RawMessage
-	var approvalTriggered bool
-	var lastToolStartID string // Track tool start ID for matching with end events
-
-	// Keepalive ticker — sends a comment every 15s to prevent client/proxy timeouts
-	keepalive := time.NewTicker(15 * time.Second)
-	defer keepalive.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-keepalive.C:
-			// SSE comment as keepalive (clients ignore lines starting with ":")
-			fmt.Fprintf(w, ": keepalive\n\n")
-			if canFlush {
-				flusher.Flush()
-			}
-		case event, ok := <-events:
-			if !ok {
-				return
-			}
-			// Reset keepalive timer on every real event
-			keepalive.Reset(15 * time.Second)
-			h.log.Info("Pi event received", zap.String("type", event.Type))
-			sseEvent := h.mapEventToSSE(event)
-			if sseEvent == nil {
-				continue
-			}
-
-			// Track tool start IDs so end events can be matched when Pi doesn't provide IDs
-			if sseEvent.Type == pi.EventToolStart {
-				if dataMap, ok := sseEvent.Data.(map[string]interface{}); ok {
-					tid, _ := dataMap["toolId"].(string)
-					if tid == "" {
-						tid = nextToolFallbackId()
-						dataMap["toolId"] = tid
-					}
-					lastToolStartID = tid
-				}
-			}
-			if sseEvent.Type == pi.EventToolEnd {
-				if dataMap, ok := sseEvent.Data.(map[string]interface{}); ok {
-					tid, _ := dataMap["toolId"].(string)
-					if tid == "" && lastToolStartID != "" {
-						dataMap["toolId"] = lastToolStartID
-					}
-				}
-			}
-
-			// Intercept tool invocations that need approval before forwarding to SSE
-			if sseEvent.Type == pi.EventToolStart && !approvalTriggered {
-				if dataMap, ok := sseEvent.Data.(map[string]interface{}); ok {
-					toolName, _ := dataMap["toolName"].(string)
-					args, _ := dataMap["args"].(map[string]interface{})
-					if args == nil {
-						args = map[string]interface{}{}
-					}
-
-					needsApproval, riskLevel, reason := h.toolPerms.ShouldApprove(toolName, args)
-					if needsApproval {
-						requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
-						approvalTriggered = true
-
-						resp, status := h.waitForApproval(ctx, w, client, pi.ApprovalRequestData{
-							RequestID: requestID,
-							Type:      "tool_confirm",
-							ToolName:  toolName,
-							ToolArgs:  args,
-							Message:   reason + ": " + toolName,
-							Risk:      riskLevel,
-						}, canFlush, flusher)
-
-						if status == "context cancelled" {
-							return
-						}
-						if resp == nil {
-							continue // timeout
-						}
-						if resp.Action == "approve" {
-							client.Steer("APPROVED: " + resp.Message)
-						} else {
-							client.Steer("DENIED: do NOT execute " + toolName + ". Reason: " + resp.Message)
-							continue
-						}
-					}
-				}
-			}
-
-			data, err := json.Marshal(sseEvent.Data)
-			if err != nil {
-				continue
-			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", sseEvent.Type, string(data))
-			if canFlush {
-				flusher.Flush()
-			}
-
-			// Accumulate assistant response for persistence
-			switch sseEvent.Type {
-			case "text_delta":
-				switch td := sseEvent.Data.(type) {
-				case map[string]string:
-					assistantText += td["text"]
-				case map[string]interface{}:
-					if t, ok := td["text"].(string); ok {
-						assistantText += t
-					}
-				}
-			case "thinking_delta":
-				switch td := sseEvent.Data.(type) {
-				case map[string]string:
-					assistantThinking += td["text"]
-				case map[string]interface{}:
-					if t, ok := td["text"].(string); ok {
-						assistantThinking += t
-					}
-				}
-			case "tool_execution_start":
-				if raw, err := json.Marshal(sseEvent.Data); err == nil {
-					assistantToolCalls = append(assistantToolCalls, raw)
-				}
-			}
-
-			// Check for approval/question markers in accumulated text
-			if !approvalTriggered {
-				if idx := strings.Index(assistantText, "??APPROVAL:"); idx >= 0 {
-					approvalTriggered = true
-					msg := strings.TrimSpace(assistantText[idx+len("??APPROVAL:"):])
-					if msg == "" {
-						msg = "Plan approval requested"
-					}
-					requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
-
-					resp, status := h.waitForApproval(ctx, w, client, pi.ApprovalRequestData{
-						RequestID: requestID,
-						Type:      "plan",
-						Message:   msg,
-						Risk:      "high",
-					}, canFlush, flusher)
-					if status == "context cancelled" {
-						return
-					}
-					if resp != nil {
-						if resp.Action == "approve" {
-							client.Steer(fmt.Sprintf("APPROVED by user: %s. Proceed with the planned action.", resp.Message))
-						} else {
-							client.Steer(fmt.Sprintf("DENIED by user: %s. Do NOT proceed with this action.", resp.Message))
-						}
-					}
-				} else if idx := strings.Index(assistantText, "??QUESTION:"); idx >= 0 {
-					approvalTriggered = true
-					question := strings.TrimSpace(assistantText[idx+len("??QUESTION:"):])
-					if question == "" {
-						question = "Question asked"
-					}
-					requestID := fmt.Sprintf("req-%d", time.Now().UnixMilli())
-
-					resp, status := h.waitForApproval(ctx, w, client, pi.ApprovalRequestData{
-						RequestID: requestID,
-						Type:      "question",
-						Message:   question,
-						Risk:      "low",
-					}, canFlush, flusher)
-					if status == "context cancelled" {
-						return
-					}
-					if resp != nil {
-						client.Steer(fmt.Sprintf("USER ANSWER: %s", resp.Message))
-					}
-				}
-			}
-
-			// After agent_end, save assistant message and run post-completion
-			if sseEvent.Type == pi.EventAgentEnd {
-				// Extract thinking from agent_end messages if streaming didn't capture it
-				if assistantThinking == "" && len(event.Messages) > 0 {
-					var msgs []struct {
-						Role    string `json:"role"`
-						Content []struct {
-							Type     string `json:"type"`
-							Thinking string `json:"thinking"`
-							Text     string `json:"text"`
-						} `json:"content"`
-					}
-					if json.Unmarshal(event.Messages, &msgs) == nil {
-						for i := len(msgs) - 1; i >= 0; i-- {
-							if msgs[i].Role == "assistant" {
-								for _, block := range msgs[i].Content {
-									if block.Type == "thinking" && block.Thinking != "" {
-										assistantThinking += block.Thinking
-									}
-									// Also grab text from content blocks if streaming missed it
-									if block.Type == "text" && block.Text != "" && assistantText == "" {
-										assistantText += block.Text
-									}
-								}
-								break
-							}
-						}
-					}
-				}
-				if h.db != nil {
-					toolCallsJSON := "[]"
-					if len(assistantToolCalls) > 0 {
-						if raw, err := json.Marshal(assistantToolCalls); err == nil {
-							toolCallsJSON = string(raw)
-						}
-					}
-					if _, err := h.db.SaveAssistantMessage(ctx, req.Project, req.AgentId, assistantText, assistantThinking, toolCallsJSON); err != nil {
-						h.log.Warn("Failed to save assistant message", zap.Error(err))
-					}
-				}
-
-				if autoBranchName != "" {
-					h.postCompletion(ctx, projectPath, autoBranchName, req.Message, req.AutoMerge, w, canFlush, flusher)
-				}
-				return
-			}
-		}
-	}
+	// No engine available
+	writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+		"success": false,
+		"error":   "Agent engine not available. Start llama-server first.",
+	})
 }
 
 // writeLlamaSSE converts a llama engine event to SSE and writes it.
@@ -736,4 +430,84 @@ func (h *PiHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
 		"tool":    req.Tool,
 		"level":   req.Level,
 	})
+}
+
+// GetHistory returns conversation history for a project+agent.
+// GET /api/pi/history?project=...&agentId=...&limit=...
+func (h *PiHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	agentID := r.URL.Query().Get("agentId")
+	if project == "" {
+		JSONError(w, "project query parameter is required", http.StatusBadRequest)
+		return
+	}
+	limit := 200
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := fmt.Sscanf(l, "%d", &limit); err != nil || n != 1 {
+			limit = 200
+		}
+	}
+
+	if h.db == nil {
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+
+	msgs, err := h.db.GetConversationHistory(r.Context(), project, agentID, limit)
+	if err != nil {
+		JSONError(w, "Failed to get history", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, msgs)
+}
+
+// DeleteConversation deletes all messages for a project+agent.
+// DELETE /api/pi/conversation?project=...&agentId=...
+func (h *PiHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	agentID := r.URL.Query().Get("agentId")
+	if project == "" {
+		JSONError(w, "project query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	if h.db == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+		return
+	}
+
+	if err := h.db.ClearConversationHistory(r.Context(), project, agentID); err != nil {
+		JSONError(w, "Failed to delete conversation", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+// RenameConversation sets a custom title for a conversation.
+// PUT /api/pi/conversation/rename
+func (h *PiHandler) RenameConversation(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+		AgentID string `json:"agentId"`
+		Title   string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Project == "" || req.Title == "" {
+		JSONError(w, "project and title are required", http.StatusBadRequest)
+		return
+	}
+
+	if h.db == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+		return
+	}
+
+	if err := h.db.SetConversationTitle(r.Context(), req.Project, req.AgentID, req.Title); err != nil {
+		JSONError(w, "Failed to rename conversation", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 }

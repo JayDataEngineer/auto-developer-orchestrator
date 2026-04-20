@@ -7,14 +7,10 @@ import (
 )
 
 // ConvertEvent converts a llama AgentEvent to a pi AgentEvent for SSE streaming.
-// This allows the frontend SSE handler to work with both Pi RPC events
-// and llama-go library events without modification.
 func ConvertEvent(evt AgentEvent) pi.AgentEvent {
-	// Convert our event types to Pi's RPC event types
 	var rpcType string
 	switch evt.Type {
 	case EventTypeTextDelta:
-		// Pi sends text deltas as message_update with nested assistantMessageEvent
 		return pi.AgentEvent{
 			Type: "message_update",
 			AssistantMessageEvent: &pi.AssistantMessageEvent{
@@ -56,7 +52,6 @@ func ConvertEvent(evt AgentEvent) pi.AgentEvent {
 		return pi.AgentEvent{Type: "unknown"}
 	}
 
-	// Build the data payload
 	data := pi.AgentEventData{
 		ToolName: evt.Data.ToolName,
 		ToolArgs: evt.Data.ToolArgs,
@@ -68,19 +63,18 @@ func ConvertEvent(evt AgentEvent) pi.AgentEvent {
 		Output:   evt.Data.Output,
 	}
 
-	// For agent_end, include usage in messages field (Pi sends it there)
 	if evt.Type == EventTypeAgentEnd {
 		msgs, _ := json.Marshal([]struct {
-			Role    string `json:"role"`
-			Usage   struct {
+			Role     string `json:"role"`
+			Usage    struct {
 				Input  float64 `json:"input"`
 				Output float64 `json:"output"`
 			} `json:"usage"`
 			Provider string `json:"provider"`
 			Model    string `json:"model"`
 		}{{
-			Role:     "assistant",
-			Usage:    struct {
+			Role: "assistant",
+			Usage: struct {
 				Input  float64 `json:"input"`
 				Output float64 `json:"output"`
 			}{Input: evt.Data.Input, Output: evt.Data.Output},

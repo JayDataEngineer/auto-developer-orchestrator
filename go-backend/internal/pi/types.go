@@ -1,6 +1,9 @@
 package pi
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // RpcCommand represents a command sent to the Pi agent subprocess.
 // See pi-mono/packages/coding-agent/src/modes/rpc/rpc-types.ts for the full protocol.
@@ -221,4 +224,48 @@ func IsRiskyBashCommand(cmd string) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+// ToFloat64 converts an interface{} to float64.
+// Handles float64, int, int64, string, and json.Number.
+func ToFloat64(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	case string:
+		// Try parsing string as float
+		var f float64
+		_, err := fmt.Sscanf(n, "%f", &f)
+		return f, err == nil
+	default:
+		return 0, false
+	}
+}
+
+// ModelConfigProvider is a package-level hook that resolves the provider
+// for a given model ID. Set once in main.go from the centralized ModelConfig.
+// Defaults to "llamacpp" when not configured.
+var ModelConfigProvider func(modelId string) string = func(_ string) string { return "llamacpp" }
+
+// ComputeFingerprint generates a stable hash from the model and system prompt.
+// Used by handlers to compute expected fingerprints for validation.
+func ComputeFingerprint(model string, systemPrompt string) string {
+	const prime = 1099511628211
+	var hash uint64 = 14695981039346656037 // FNV offset basis
+	for _, b := range []byte(model) {
+		hash ^= uint64(b)
+		hash *= prime
+	}
+	for _, b := range []byte(systemPrompt) {
+		hash ^= uint64(b)
+		hash *= prime
+	}
+	return fmt.Sprintf("%016x", hash)
 }

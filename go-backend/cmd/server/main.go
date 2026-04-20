@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
@@ -18,8 +19,6 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/scheduler"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
-
-	"github.com/auto-developer-orchestrator/backend/internal/browser"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -62,9 +61,6 @@ func main() {
 
 	// Wire model config into pi package for provider resolution
 	pi.ModelConfigProvider = modelCfg.ProviderForModel
-
-	// Set TOOL_MODEL env var so Pi extensions (cron-tool, etc.) can read it
-	os.Setenv("TOOL_MODEL", modelCfg.ToolModel().ModelId)
 
 	// Connect to llama-server HTTP engine.
 	// llama-server manages the model and KV cache — the Go backend sends HTTP requests
@@ -142,15 +138,8 @@ func main() {
 	githubHandler := handlers.NewGitHubHandler(logger, githubTokenStore)
 	cliHandler := handlers.NewCLIHandler(logger, projectRoot)
 
-	// Pi agent pool
-	piPool := pi.NewPiPool(logger, 5*time.Minute)
-	piHandler := handlers.NewPiHandler(piPool, db, gitOps, githubHandler, logger)
-
-	// Sub-agent manager
-	subAgentMgr := pi.NewSubAgentManager(piPool, logger,
-		pi.WithSandboxManager(sandboxMgr),
-	)
-	subAgentHandler := handlers.NewSubAgentHandler(subAgentMgr, piPool, logger, modelCfg)
+	// Agent handler (orchestrator + ephemeral sub-agents via llama-server)
+	piHandler := handlers.NewPiHandler(db, gitOps, githubHandler, logger)
 
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
@@ -180,19 +169,19 @@ func main() {
 	if schedulerStorePath == "" {
 		schedulerStorePath = "../data/scheduler/jobs.json"
 	}
-	schedSender := handlers.NewSchedulerPromptSenderAdapter(piPool, db, projectRoot)
-	sched := scheduler.NewScheduler(schedulerStorePath, schedSender, logger)
+	// No-op sender — llama executor handles job execution directly
+	sched := scheduler.NewScheduler(schedulerStorePath, nil, logger)
 
-	// Phase 3: Use llama engine directly for scheduled jobs (no Pi subprocess needed)
+	// Use llama engine directly for scheduled jobs
 	if llamaEngine != nil {
 		llamaExec := scheduler.NewLlamaExecutor(llamaEngine, sandboxMgr, projectRoot, logger)
 		sched.SetLlamaExecutor(llamaExec)
 		logger.Info("Scheduler configured for direct llama engine execution")
 	} else {
-		// Fallback: Use isolated Pi subprocess for job execution
+		// Fallback: Use isolated executor for job execution
 		isolatedExec, err := scheduler.NewIsolatedExecutor(projectRoot, logger)
 		if err != nil {
-			logger.Warn("Failed to create isolated executor, falling back to main agent", zap.Error(err))
+			logger.Warn("Failed to create isolated executor", zap.Error(err))
 		} else {
 			runLogMgr, err := scheduler.NewRunLogManager("")
 			if err != nil {
@@ -201,19 +190,6 @@ func main() {
 			sched.SetIsolatedExecutor(isolatedExec, runLogMgr, projectRoot)
 		}
 	}
-
-	// Session delivery: inject job output into the main agent session
-	sched.SetSessionInjector(func(project, agentID, text string) error {
-		client := piPool.GetWithID(projectRoot+"/"+project, agentID)
-		if client == nil {
-			logger.Info("no active session for delivery",
-				zap.String("project", project),
-				zap.String("agentId", agentID),
-			)
-			return nil
-		}
-		return client.SendPrompt(text, "", "")
-	})
 
 	if err := sched.Start(context.Background()); err != nil {
 		logger.Warn("Failed to start scheduler", zap.Error(err))
@@ -300,11 +276,6 @@ func main() {
 		// Pi Coding Agent
 		r.Route("/pi", func(r chi.Router) {
 			piHandler.RegisterRoutes(r)
-
-			// Sub-agent routes
-			r.Route("/subagent", func(r chi.Router) {
-				subAgentHandler.RegisterRoutes(r)
-			})
 		})
 
 		// Sandbox management (OpenShell)
@@ -388,12 +359,6 @@ func main() {
 	<-quit
 
 	logger.Info("Shutting down server...")
-
-	// Shutdown Pi agent pool
-	piPool.Shutdown()
-
-	// Shutdown sub-agent manager
-	subAgentMgr.Shutdown()
 
 	// Shutdown computer use handler
 	computerUseHandler.Shutdown()

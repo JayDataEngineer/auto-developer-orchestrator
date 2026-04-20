@@ -523,12 +523,14 @@ func (s *Scheduler) executeJob(jobID string) {
 			job.InputTokens = result.InputTokens
 			job.OutputTokens = result.OutputTokens
 		}
-	} else {
-		// Fallback to main agent pool
+	} else if s.promptSender != nil {
+		// Fallback to prompt sender
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		output, err = s.promptSender(ctx, job.Project, job.AgentID, job.Message, job.Model, job.AutoBranch, job.AutoMerge)
+	} else {
+		err = fmt.Errorf("no executor configured for scheduled jobs")
 	}
 
 	execution.EndedAt = time.Now()
