@@ -99,6 +99,12 @@ type SandboxToolExecutor struct {
 	Logger    *zap.Logger
 	Creds     *CredentialStore // optional: resolve/redact sensitive data
 
+	// Vision in the loop: after page-changing actions, automatically capture a
+	// screenshot and describe it via the vision model. Gives the agent spatial
+	// understanding that pure DOM element lists can't provide (layout, colors,
+	// images, error messages rendered as text, etc.)
+	VisionEnabled bool
+
 	// Change detection: caches last seen element signatures per sandbox
 	lastElements map[string]map[string]bool       // sandboxID → set of "tag:text" signatures (for change detection)
 	elemIndex    map[string][]indexedElement       // sandboxID → ordered list of elements (for description→ID lookup)
@@ -984,11 +990,18 @@ func (e *SandboxToolExecutor) macroBrowseTo(ctx context.Context, sandboxID strin
 		return nil, fmt.Errorf("failed to navigate to %s: %w", url, err)
 	}
 
-	return map[string]interface{}{
+	resp := map[string]interface{}{
 		"success":      true,
 		"navigated_to": url,
 		"page_summary": e.extractPageSummary(navResult),
-	}, nil
+	}
+
+	// Vision: describe what the page looks like after navigation
+	if vision := e.visionSummary(ctx, sandboxID); vision != "" {
+		resp["vision"] = vision
+	}
+
+	return resp, nil
 }
 
 // interactiveTags are tags the model can meaningfully interact with.
@@ -1163,6 +1176,33 @@ func (e *SandboxToolExecutor) extractPageSummary(result map[string]interface{}) 
 	return strings.Join(parts, "\n")
 }
 
+// visionSummary captures a screenshot and describes it via the vision model.
+// Returns a text description of what's visible on the page, or empty string on failure.
+// This gives the agent spatial understanding beyond the DOM element list — layout,
+// colors, images, error banners, popups, etc.
+func (e *SandboxToolExecutor) visionSummary(ctx context.Context, sandboxID string) string {
+	if !e.VisionEnabled {
+		return ""
+	}
+
+	result, err := e.CU.Screenshot(ctx, sandboxID, true)
+	if err != nil {
+		e.Logger.Debug("vision screenshot failed", zap.Error(err))
+		return ""
+	}
+
+	desc, ok := result["description"].(string)
+	if !ok || desc == "" {
+		return ""
+	}
+
+	// Truncate to prevent context bloat — 500 chars is enough for page overview
+	if len(desc) > 500 {
+		desc = desc[:497] + "..."
+	}
+	return desc
+}
+
 // truncate shortens a string to maxLen characters.
 func truncate(s string, maxLen int) string {
 	s = strings.TrimSpace(s)
@@ -1220,10 +1260,18 @@ func (e *SandboxToolExecutor) macroReadPage(ctx context.Context, sandboxID strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to read page: %w", err)
 	}
-	return map[string]interface{}{
+
+	resp := map[string]interface{}{
 		"success":      true,
 		"page_summary": e.extractPageSummary(result),
-	}, nil
+	}
+
+	// Vision: describe the current page state
+	if vision := e.visionSummary(ctx, sandboxID); vision != "" {
+		resp["vision"] = vision
+	}
+
+	return resp, nil
 }
 
 // macroClickElement is a macro tool: clicks an element and returns updated page info.
@@ -1243,11 +1291,18 @@ func (e *SandboxToolExecutor) macroClickElement(ctx context.Context, sandboxID s
 		return nil, fmt.Errorf("failed to click element %d: %w", elementID, err)
 	}
 
-	return map[string]interface{}{
+	resp := map[string]interface{}{
 		"success":          true,
 		"clicked_element":  elementID,
 		"page_after_click": e.extractPageSummary(result),
-	}, nil
+	}
+
+	// Vision: describe page state after click (dialog? new page? error?)
+	if vision := e.visionSummary(ctx, sandboxID); vision != "" {
+		resp["vision"] = vision
+	}
+
+	return resp, nil
 }
 
 // macroTypeText is a macro tool: types text into an element, optionally submitting.
@@ -1287,6 +1342,11 @@ func (e *SandboxToolExecutor) macroTypeText(ctx context.Context, sandboxID strin
 	}
 	if submit {
 		resp["page_after_submit"] = e.extractPageSummary(result)
+
+		// Vision: describe page after form submission (results? error? redirect?)
+		if vision := e.visionSummary(ctx, sandboxID); vision != "" {
+			resp["vision"] = vision
+		}
 	}
 	return resp, nil
 }
@@ -1320,12 +1380,19 @@ func (e *SandboxToolExecutor) macroSearchWeb(ctx context.Context, sandboxID stri
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
-	return map[string]interface{}{
-		"success":       true,
-		"query":         query,
-		"search_url":    searchURL,
-		"page_summary":  e.extractPageSummary(navResult),
-	}, nil
+	resp := map[string]interface{}{
+		"success":      true,
+		"query":        query,
+		"search_url":   searchURL,
+		"page_summary": e.extractPageSummary(navResult),
+	}
+
+	// Vision: describe search results page
+	if vision := e.visionSummary(ctx, sandboxID); vision != "" {
+		resp["vision"] = vision
+	}
+
+	return resp, nil
 }
 
 // ErrorClass categorizes tool execution errors for appropriate retry behavior.

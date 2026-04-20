@@ -34,6 +34,11 @@ func NewComputerUseHandler(manager *sandbox.Manager, visionClient *browser.Visio
 	}
 }
 
+// VisionClient returns the vision client (nil if vision is not available).
+func (h *ComputerUseHandler) VisionClient() *browser.VisionClient {
+	return h.visionClient
+}
+
 // RegisterRoutes registers computer use routes on a chi.Router
 func (h *ComputerUseHandler) RegisterRoutes(r interface {
 	Post(string, http.HandlerFunc)

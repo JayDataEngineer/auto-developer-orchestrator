@@ -672,10 +672,11 @@ func (h *PiHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) 
 	var baseExecutor llamaeng.ToolExecutor
 	if h.sandboxMgr != nil {
 		baseExecutor = &llamaeng.SandboxToolExecutor{
-			SandboxID: sandboxID,
-			Manager:   h.sandboxMgr,
-			CU:        h.cuBridge,
-			Logger:    h.log,
+			SandboxID:     sandboxID,
+			Manager:       h.sandboxMgr,
+			CU:            h.cuBridge,
+			Logger:        h.log,
+			VisionEnabled: h.cuBridge.CU.VisionClient() != nil,
 		}
 	}
 
