@@ -81,16 +81,19 @@ func main() {
 			Logger:    logger,
 		})
 		if err := llamaEngine.LoadModel(); err != nil {
-			logger.Fatal("Failed to connect to llama-server", zap.Error(err), zap.String("url", llamaServerURL))
+			logger.Warn("llama-server not reachable — agent features disabled, sandbox/API only",
+				zap.Error(err), zap.String("url", llamaServerURL))
+			llamaEngine = nil
+		} else {
+			defer llamaEngine.Close()
+			// Warm up CUDA kernels on the server side
+			if err := llamaEngine.WarmUp(); err != nil {
+				logger.Warn("Warm-up request failed (first prompt may be slow)", zap.Error(err))
+			}
+			logger.Info("llama-server HTTP engine connected",
+				zap.String("url", llamaServerURL),
+			)
 		}
-		defer llamaEngine.Close()
-		// Warm up CUDA kernels on the server side
-		if err := llamaEngine.WarmUp(); err != nil {
-			logger.Warn("Warm-up request failed (first prompt may be slow)", zap.Error(err))
-		}
-		logger.Info("llama-server HTTP engine connected",
-			zap.String("url", llamaServerURL),
-		)
 	}
 
 	// Initialize sandbox manager

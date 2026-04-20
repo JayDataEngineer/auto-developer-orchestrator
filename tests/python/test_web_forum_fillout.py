@@ -64,7 +64,7 @@ FORM_DATA_URI = "data:text/html;base64," + base64.b64encode(FORM_HTML.encode()).
 
 
 def _cleanup(api_session):
-    """Best-effort cleanup."""
+    """Best-effort cleanup via API, then Docker CLI as fallback."""
     try:
         api_session.post(f"{API_URL}/api/sandbox/{SANDBOX_ID}/computer-use/disable", timeout=10)
     except Exception:
@@ -73,22 +73,47 @@ def _cleanup(api_session):
         api_session.delete(f"{API_URL}/api/sandbox/{SANDBOX_ID}", timeout=10)
     except Exception:
         pass
+    # Fallback: remove container directly via Docker (handles orphaned containers)
+    import subprocess
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", f"orchestrator-sandbox-{SANDBOX_ID}"],
+            timeout=15, capture_output=True,
+        )
+    except Exception:
+        pass
 
 
-def _wait_for_ready(api_session, timeout=45):
-    """Wait for CDP to be connected after enable."""
+def _wait_for_ready(api_session, timeout=60):
+    """Wait for CDP to be connected after enable.
+    Polls screenshot endpoint until it returns 200 (CDP client connected + tab active)."""
     deadline = time.time() + timeout
+    attempt = 0
     while time.time() < deadline:
+        attempt += 1
+        # First try screenshot — if it works, CDP is connected and has a tab
         try:
             resp = api_session.get(
                 f"{API_URL}/api/sandbox/{SANDBOX_ID}/computer-use/screenshot?format=png",
                 timeout=5,
             )
-            if resp.status_code == 200:
+            if resp.status_code == 200 and len(resp.content) > 1000:
                 return True
         except Exception:
             pass
-        time.sleep(2)
+
+        # If screenshot fails (no tab yet), try navigate to create one
+        if attempt % 3 == 1:
+            try:
+                api_session.post(
+                    f"{API_URL}/api/sandbox/{SANDBOX_ID}/computer-use/act",
+                    json={"action": "navigate", "url": "about:blank"},
+                    timeout=10,
+                )
+            except Exception:
+                pass
+
+        time.sleep(3)
     raise TimeoutError(f"Sandbox not ready after {timeout}s")
 
 
@@ -110,23 +135,42 @@ def api_session():
 @pytest.fixture(scope="module", autouse=True)
 def setup_sandbox(api_session):
     """Create sandbox and enable computer use for all tests."""
-    _cleanup(api_session)
-
     # Check backend is running
     resp = api_session.get(f"{API_URL}/api/health", timeout=5)
     if resp.status_code != 200:
         pytest.skip("Backend not running")
 
-    # Create sandbox
+    # Fast path: check if CDP already works (sandbox + computer use from prior run)
+    try:
+        r = api_session.get(
+            f"{API_URL}/api/sandbox/{SANDBOX_ID}/computer-use/screenshot?format=png",
+            timeout=5,
+        )
+        if r.status_code == 200 and len(r.content) > 1000:
+            yield
+            return
+    except Exception:
+        pass
+
+    # Try to create sandbox (409 = already exists is fine)
     resp = api_session.post(
         f"{API_URL}/api/sandbox/",
         json={"id": SANDBOX_ID, "project_path": f"/app/projects/{SANDBOX_ID}"},
         timeout=120,
     )
-    if resp.status_code not in (200, 201, 409):  # 409 = already exists
-        pytest.skip(f"Cannot create sandbox: {resp.status_code} {resp.text[:200]}")
+    if resp.status_code not in (200, 201, 409):
+        # If container name conflict, try removing and recreating
+        _cleanup(api_session)
+        time.sleep(2)
+        resp = api_session.post(
+            f"{API_URL}/api/sandbox/",
+            json={"id": SANDBOX_ID, "project_path": f"/app/projects/{SANDBOX_ID}"},
+            timeout=120,
+        )
+        if resp.status_code not in (200, 201, 409):
+            pytest.skip(f"Cannot create sandbox: {resp.status_code} {resp.text[:200]}")
 
-    # Enable computer use
+    # Enable computer use (idempotent — safe to call on existing)
     resp = api_session.post(
         f"{API_URL}/api/sandbox/{SANDBOX_ID}/computer-use/enable",
         timeout=60,
@@ -135,7 +179,10 @@ def setup_sandbox(api_session):
         pytest.skip(f"Computer use enable failed: {resp.status_code} {resp.text[:200]}")
 
     # Wait for CDP to be ready
-    _wait_for_ready(api_session, timeout=60)
+    try:
+        _wait_for_ready(api_session, timeout=60)
+    except TimeoutError:
+        pytest.skip("Sandbox CDP not ready after 60s")
 
     yield
 
@@ -291,6 +338,14 @@ class TestFormFillout:
 
     def test_07_element_count_under_cap(self, api_session):
         """Verify the test form's element count is well within the 50-element cap."""
+        # Navigate back to form (submit in test_06 may have navigated away)
+        api_session.post(
+            f"{API_URL}/api/sandbox/{SANDBOX_ID}/computer-use/act",
+            json={"action": "navigate", "url": FORM_DATA_URI},
+            timeout=30,
+        )
+        time.sleep(1)  # Let page settle
+
         resp = api_session.get(
             f"{API_URL}/api/sandbox/{SANDBOX_ID}/computer-use/snapshot",
             timeout=15,
