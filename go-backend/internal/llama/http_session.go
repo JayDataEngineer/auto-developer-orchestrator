@@ -1,8 +1,9 @@
 package llama
 
 import (
+	"encoding/json"
 	"fmt"
-	"strings"
+	"sort"
 	"sync"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 )
 
 // Session manages an inference session via the HTTP engine.
-// It tracks conversation history and maintains a session_id for KV cache
+// It tracks conversation messages and maintains a session_id for KV cache
 // persistence on the llama-server side.
 //
 // Each agent gets its own Session with a unique session_id.
@@ -19,110 +20,80 @@ type Session struct {
 	engine    *HTTPEngine
 	sessionID string
 	ctxSize   int
-	grammar   string // GBNF grammar for constrained generation (per-session)
 
-	history []Turn
-	mu      sync.Mutex
-	closed  bool
+	messages []Message
+	tools    []OpenAITool // tool definitions for this session
+
+	mu     sync.Mutex
+	closed bool
 
 	// Token count tracking
 	totalInputTokens  int
 	totalOutputTokens int
 }
 
-// Chat sends a user message and streams the model's response.
-// Returns a channel of TokenEvent for streaming. The channel closes when done.
-func (s *Session) Chat(userMsg string, opts GenerateOptions) (<-chan TokenEvent, error) {
+// ── New chat completions API methods ───────────────────────────────
+
+// ChatWithTools sends a system + user message with tool definitions.
+// This is the primary entry point for the agent loop.
+func (s *Session) ChatWithTools(system string, userMsg string, tools []OpenAITool, opts GenerateOptions) (<-chan ChatEvent, error) {
 	if s.closed {
 		return nil, fmt.Errorf("session is closed")
 	}
 
-	prompt := formatUserTurn(userMsg)
-	s.history = append(s.history, Turn{Role: "user", Content: userMsg})
+	s.messages = []Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: userMsg},
+	}
+	s.tools = tools
 
-	ch := s.generateStream(prompt, opts)
-	return ch, nil
+	return s.generateChatStream(opts), nil
 }
 
-// ChatWithSystem sends a system + first user message. Used for the initial prompt.
-func (s *Session) ChatWithSystem(system string, userMsg string, opts GenerateOptions) (<-chan TokenEvent, error) {
+// FeedToolResults appends the assistant's tool call message + tool result messages,
+// then continues generation.
+func (s *Session) FeedToolResults(assistantMsg Message, toolResults []ToolResult, goalNudge string, opts GenerateOptions) (<-chan ChatEvent, error) {
 	if s.closed {
 		return nil, fmt.Errorf("session is closed")
 	}
 
-	prompt := formatSystemPrompt(system) + formatUserTurn(userMsg)
+	// Append assistant message with tool_calls
+	s.messages = append(s.messages, assistantMsg)
 
-	s.history = append(s.history,
-		Turn{Role: "system", Content: system},
-		Turn{Role: "user", Content: userMsg},
-	)
+	// Append tool result messages (one per tool call)
+	for _, tr := range toolResults {
+		s.messages = append(s.messages, Message{
+			Role:       "tool",
+			Content:    tr.Content,
+			ToolCallID: tr.ToolCallID,
+			Name:       tr.ToolName,
+		})
+	}
 
-	ch := s.generateStream(prompt, opts)
-	return ch, nil
+	// Inject goal reminder as a user message if provided
+	if goalNudge != "" {
+		s.messages = append(s.messages, Message{
+			Role:    "user",
+			Content: goalNudge,
+		})
+	}
+
+	return s.generateChatStream(opts), nil
 }
 
-// FeedResult appends a tool result and continues generation.
-func (s *Session) FeedResult(modelResponse string, toolResult string, nextUserMsg string, opts GenerateOptions) (<-chan TokenEvent, error) {
+// FeedUserMessage appends a user message and continues generation.
+func (s *Session) FeedUserMessage(userMsg string, opts GenerateOptions) (<-chan ChatEvent, error) {
 	if s.closed {
 		return nil, fmt.Errorf("session is closed")
 	}
 
-	var prompt strings.Builder
-	prompt.WriteString(modelResponse)
-	prompt.WriteString(endModelTurn)
-	prompt.WriteString(formatUserTurnWithResult(toolResult, nextUserMsg))
-
-	s.history = append(s.history,
-		Turn{Role: "model", Content: modelResponse},
-		Turn{Role: "user", Content: toolResult},
-	)
-
-	ch := s.generateStream(prompt.String(), opts)
-	return ch, nil
+	s.messages = append(s.messages, Message{Role: "user", Content: userMsg})
+	return s.generateChatStream(opts), nil
 }
 
-// FeedContinue appends the model response end tag + a new user message.
-func (s *Session) FeedContinue(modelResponse string, userMsg string, opts GenerateOptions) (<-chan TokenEvent, error) {
-	if s.closed {
-		return nil, fmt.Errorf("session is closed")
-	}
-
-	var prompt strings.Builder
-	prompt.WriteString(modelResponse)
-	prompt.WriteString(endModelTurn)
-	prompt.WriteString(formatUserTurn(userMsg))
-
-	s.history = append(s.history,
-		Turn{Role: "model", Content: modelResponse},
-		Turn{Role: "user", Content: userMsg},
-	)
-
-	ch := s.generateStream(prompt.String(), opts)
-	return ch, nil
-}
-
-// AppendUserTurn closes the previous model turn and appends a new user message.
-func (s *Session) AppendUserTurn(modelResponse string, userMsg string, opts GenerateOptions) (<-chan TokenEvent, error) {
-	if s.closed {
-		return nil, fmt.Errorf("session is closed")
-	}
-
-	var prompt strings.Builder
-	prompt.WriteString(modelResponse)
-	prompt.WriteString(endModelTurn)
-	prompt.WriteString(formatUserTurn(userMsg))
-
-	s.history = append(s.history,
-		Turn{Role: "user", Content: userMsg},
-	)
-
-	ch := s.generateStream(prompt.String(), opts)
-	return ch, nil
-}
-
-// generateStream runs the model and returns a channel of tokens.
-func (s *Session) generateStream(prompt string, opts GenerateOptions) <-chan TokenEvent {
-	ch := make(chan TokenEvent, 256)
+// generateChatStream runs the model via /v1/chat/completions and returns a channel of ChatEvents.
+func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
+	ch := make(chan ChatEvent, 256)
 
 	go func() {
 		defer close(ch)
@@ -131,64 +102,152 @@ func (s *Session) generateStream(prompt string, opts GenerateOptions) <-chan Tok
 			opts.MaxTokens = cfg.MaxTokens
 		}
 
-		var output strings.Builder
-		tokenCount := 0
 		t0 := time.Now()
 
-		req := CompletionRequest{
-			Prompt:       prompt,
-			MaxTokens:    opts.MaxTokens,
-			Temperature:  opts.Temperature,
-			TopP:         opts.TopP,
-			TopK:         opts.TopK,
+		req := ChatCompletionRequest{
+			Messages:      s.messages,
+			Tools:         s.tools,
+			MaxTokens:     opts.MaxTokens,
+			Temperature:   opts.Temperature,
+			TopP:          opts.TopP,
+			TopK:          opts.TopK,
 			RepeatPenalty: 1.1,
-			CachePrompt:  true,
-			SessionID:    s.sessionID,
-			Grammar:      s.grammar,
-			Stream:       true,
+			CachePrompt:   true,
+			SessionID:     s.sessionID,
+			Stream:        true,
 		}
 
-		err := s.engine.completeStream(req, func(token string) bool {
-			output.WriteString(token)
-			tokenCount++
-			ch <- TokenEvent{Token: token}
-			return true // continue generating
+		// Accumulate tool calls across streaming chunks
+		toolCallAccum := make(map[int]*ToolCallResponse)
+		tokenCount := 0
+
+		err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason) bool {
+			// Content delta
+			if delta.Content != "" {
+				tokenCount++
+				ch <- ChatEvent{Type: ChatEventContent, Content: delta.Content}
+			}
+			// Thinking/reasoning delta
+			if delta.ReasoningContent != "" {
+				ch <- ChatEvent{Type: ChatEventThinking, Content: delta.ReasoningContent}
+			}
+			// Tool call chunks — accumulate across streaming
+			for _, tc := range delta.ToolCalls {
+				if existing, ok := toolCallAccum[tc.Index]; ok {
+					// Append to existing accumulation
+					if tc.Function.Name != "" {
+						existing.Function.Name += tc.Function.Name
+					}
+					if tc.Function.Arguments != "" {
+						existing.Function.Arguments += tc.Function.Arguments
+					}
+					if tc.ID != "" {
+						existing.ID = tc.ID
+					}
+					if tc.Type != "" {
+						existing.Type = tc.Type
+					}
+				} else {
+					// New tool call
+					toolCallAccum[tc.Index] = &ToolCallResponse{
+						ID:   tc.ID,
+						Type: tc.Type,
+						Function: FunctionCallData{
+							Name:      tc.Function.Name,
+							Arguments: tc.Function.Arguments,
+						},
+					}
+				}
+			}
+			// On finish, send done event with accumulated tool calls
+			if finish != "" {
+				// Collect accumulated tool calls in index order
+				var toolCalls []ToolCallResponse
+				indices := make([]int, 0, len(toolCallAccum))
+				for idx := range toolCallAccum {
+					indices = append(indices, idx)
+				}
+				sort.Ints(indices)
+				for _, idx := range indices {
+					toolCalls = append(toolCalls, *toolCallAccum[idx])
+				}
+
+				ch <- ChatEvent{
+					Type:    ChatEventDone,
+					Finish:  finish,
+					Content: serializeToolCalls(toolCalls),
+				}
+				return false
+			}
+			return true
 		})
 
 		elapsed := time.Since(t0)
 		s.totalOutputTokens += tokenCount
 
-		s.engine.logger.Debug("Generation complete",
+		s.engine.logger.Debug("Chat generation complete",
 			zap.Int("tokens", tokenCount),
 			zap.Duration("duration", elapsed),
-			zap.Float64("tok_per_sec", float64(tokenCount)/elapsed.Seconds()),
+			zap.Float64("tok_per_sec", tokPerSec(tokenCount, elapsed)),
 		)
 
 		if err != nil {
-			ch <- TokenEvent{Err: err, Done: true}
-			return
+			ch <- ChatEvent{Type: ChatEventError, Err: err}
 		}
-
-		ch <- TokenEvent{Done: true}
 	}()
 
 	return ch
 }
 
-// TrackModelResponse adds a model response to history.
-func (s *Session) TrackModelResponse(content string) {
-	s.history = append(s.history, Turn{Role: "model", Content: content})
+// serializeToolCalls serializes accumulated tool calls as JSON for the done event content.
+func serializeToolCalls(calls []ToolCallResponse) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(calls)
+	return string(b)
 }
 
-// History returns the conversation history.
-func (s *Session) History() []Turn {
-	return s.history
+// tokPerSec safely calculates tokens per second.
+func tokPerSec(tokens int, d time.Duration) float64 {
+	if d.Seconds() == 0 {
+		return 0
+	}
+	return float64(tokens) / d.Seconds()
 }
 
-// HistoryLen returns the number of turns in history.
-func (s *Session) HistoryLen() int {
-	return len(s.history)
+// ── New message-based accessors ───────────────────────────────────
+
+// Messages returns the conversation messages.
+func (s *Session) Messages() []Message {
+	return s.messages
 }
+
+// MessagesLen returns the number of messages.
+func (s *Session) MessagesLen() int {
+	return len(s.messages)
+}
+
+// TrackAssistantMessage appends an assistant message to the messages history.
+func (s *Session) TrackAssistantMessage(content string, toolCalls []ToolCallResponse) {
+	s.messages = append(s.messages, Message{
+		Role:      "assistant",
+		Content:   content,
+		ToolCalls: toolCalls,
+	})
+}
+
+// SetMessages replaces the message history (used after compaction).
+func (s *Session) SetMessages(messages []Message) {
+	s.messages = messages
+}
+
+// SetTools updates the tool definitions for this session.
+func (s *Session) SetTools(tools []OpenAITool) {
+	s.tools = tools
+}
+
+// ── Shared methods ─────────────────────────────────────────────────
 
 // TokenCounts returns total input and output token counts.
 func (s *Session) TokenCounts() (input, output int) {
@@ -205,7 +264,6 @@ func (s *Session) Close() error {
 	}
 	s.closed = true
 
-	// Best-effort cleanup — free the slot's KV cache
 	_ = s.freeSlot()
 
 	s.engine.logger.Debug("Session closed, KV cache freed",
@@ -216,17 +274,12 @@ func (s *Session) Close() error {
 
 // freeSlot sends a minimal request to free the slot's KV cache.
 func (s *Session) freeSlot() error {
-	req := CompletionRequest{
-		Prompt:      "",
+	req := ChatCompletionRequest{
+		Messages:    []Message{{Role: "user", Content: ""}},
 		MaxTokens:   0,
 		CachePrompt: false,
 		SessionID:   s.sessionID,
 	}
-	_, err := s.engine.complete(req)
+	_, err := s.engine.chatComplete(req)
 	return err
-}
-
-// SetGrammar sets the GBNF grammar for this session.
-func (s *Session) SetGrammar(grammar string) {
-	s.grammar = grammar
 }

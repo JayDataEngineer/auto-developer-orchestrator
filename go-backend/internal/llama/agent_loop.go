@@ -475,7 +475,7 @@ type AgentLoopConfig struct {
 	MaxToolRounds int           // Maximum tool call rounds before forcing end (default: 20)
 	MaxTokens     int           // Max tokens per generation (default: 4096)
 	ContextSize   int           // KV cache context size (default from ModelConfig: 32K)
-	Grammar       string        // GBNF grammar for constrained tool call generation
+	Tools         []OpenAITool  // Tool definitions for native tool calling
 	Opts          GenerateOptions
 	Compaction    CompactionConfig // zero-value disables compaction
 }
@@ -516,10 +516,9 @@ func NewAgentLoop(engine *HTTPEngine, executor ToolExecutor, cfg AgentLoopConfig
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// Apply grammar for constrained tool call generation
-	if cfg.Grammar != "" {
-		session.SetGrammar(cfg.Grammar)
-		logger.Info("Grammar applied to session", zap.Int("grammarLen", len(cfg.Grammar)))
+	// Set tool definitions on session
+	if len(cfg.Tools) > 0 {
+		session.SetTools(cfg.Tools)
 	}
 
 	if logger == nil {
@@ -557,18 +556,18 @@ func (loop *AgentLoop) Run(ctx context.Context, userMsg string, subscriber chan<
 	// Emit agent_start
 	sendEvent(subscriber, AgentEvent{Type: EventTypeAgentStart})
 
-	// First generation: system prompt + user message
+	// First generation: system prompt + user message + tools
 	opts := loop.config.Opts
-	opts.MaxTokens = loop.config.MaxTokens // Always use config's value
+	opts.MaxTokens = loop.config.MaxTokens
 
-	tokenCh, err := loop.session.ChatWithSystem(loop.config.SystemPrompt, userMsg, opts)
+	chatCh, err := loop.session.ChatWithTools(loop.config.SystemPrompt, userMsg, loop.config.Tools, opts)
 	if err != nil {
 		sendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
 		sendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 		return err
 	}
 
-	return loop.runLoop(ctx, tokenCh, subscriber, opts)
+	return loop.runLoop(ctx, chatCh, subscriber, opts)
 }
 
 // Continue sends a follow-up message within an existing session.
@@ -593,182 +592,80 @@ func (loop *AgentLoop) Continue(ctx context.Context, userMsg string, subscriber 
 	sendEvent(subscriber, AgentEvent{Type: EventTypeAgentStart})
 
 	opts := loop.config.Opts
-	opts.MaxTokens = loop.config.MaxTokens // Always use config's value
+	opts.MaxTokens = loop.config.MaxTokens
 
-	// Get the last model response from history to close the turn properly
-	var lastModelResponse string
-	hist := loop.session.History()
-	for i := len(hist) - 1; i >= 0; i-- {
-		if hist[i].Role == "model" {
-			lastModelResponse = hist[i].Content
-			break
-		}
-	}
-
-	var tokenCh <-chan TokenEvent
-	var err error
-	if lastModelResponse != "" {
-		// AppendUserTurn closes the model turn and appends user message
-		// The model response is already in KV cache — only new tokens processed
-		tokenCh, err = loop.session.AppendUserTurn(lastModelResponse, userMsg, opts)
-	} else {
-		// No previous model response — just chat
-		tokenCh, err = loop.session.Chat(userMsg, opts)
-	}
+	chatCh, err := loop.session.FeedUserMessage(userMsg, opts)
 	if err != nil {
 		sendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
 		sendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 		return err
 	}
 
-	return loop.runLoop(ctx, tokenCh, subscriber, opts)
+	return loop.runLoop(ctx, chatCh, subscriber, opts)
 }
 
-// runLoop is the core generation → parse → execute → feed-back cycle.
-func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, subscriber chan<- AgentEvent, opts GenerateOptions) error {
+// runLoop is the core generation → execute tools → feed-back cycle.
+// Uses native structured tool calling via /v1/chat/completions.
+func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, subscriber chan<- AgentEvent, opts GenerateOptions) error {
 	round := 0
-	var modelResponse strings.Builder
-	// Track consecutive failures per tool to prevent infinite retry loops
 	failCounts := make(map[string]int)
-	// Track total consecutive failures across all tools — death spiral prevention
 	consecutiveTotalFails := 0
 	const maxConsecutiveTotalFails = 5
 
 	for {
-		modelResponse.Reset()
+		var contentBuf strings.Builder
+		var finishReason FinishReason
 
-		// Phase 1: Stream tokens until generation completes
-		var thinkingActive bool
-		var pendingStart bool // true if we saw "<|channel>" but not "thought" yet
-		// Repetition detection: track recent output to break loops
-		var recentOutput string
-		maxRepeatLen := cfg.RepetitionWindow
-		for evt := range tokenCh {
+		// Phase 1: Stream ChatEvents until generation completes
+		for evt := range chatCh {
 			if ctx.Err() != nil {
 				sendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 				return ctx.Err()
 			}
-			if evt.Err != nil {
+
+			switch evt.Type {
+			case ChatEventError:
 				loop.logger.Error("Generation error", zap.Error(evt.Err))
 				sendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: evt.Err.Error()}})
 				sendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 				return evt.Err
+
+			case ChatEventDone:
+				finishReason = evt.Finish
+
+			case ChatEventContent:
+				contentBuf.WriteString(evt.Content)
+				sendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: evt.Content}})
+
+			case ChatEventThinking:
+				sendEvent(subscriber, AgentEvent{Type: EventTypeThinkingDelta, Data: AgentEventData{Text: evt.Content}})
 			}
-			if evt.Done {
+
+			if evt.Type == ChatEventDone {
 				break
 			}
-			// Accumulate raw output for tool call parsing
-			modelResponse.WriteString(evt.Token)
+		}
 
-			// Repetition detection: if the last 100 chars repeat 4+ times, force-stop
-			recentOutput += evt.Token
-			if len(recentOutput) > maxRepeatLen*4 {
-				tail := recentOutput[len(recentOutput)-maxRepeatLen*4:]
-				chunk := tail[len(tail)-maxRepeatLen:]
-				if strings.Count(tail, chunk) >= 4 {
-					loop.logger.Warn("Repetition loop detected, forcing stop",
-						zap.Int("round", round),
-					)
-					break
-				}
-				// Keep buffer bounded
-				recentOutput = recentOutput[len(recentOutput)-maxRepeatLen*4:]
-			}
-
-			token := evt.Token
-
-			// Filter Gemma 4 control tokens from SSE output
-			if token == "<end_of_turn>" || token == "<turn|>" {
-				continue
-			}
-			if strings.HasPrefix(token, "<start_of_turn>") {
-				continue
-			}
-
-			// Detect thinking start patterns
-			// Pattern 1: <|channel|>thought (combined in one token)
-			if strings.Contains(token, "<|channel") && strings.Contains(token, "thought") {
-				thinkingActive = true
-				cleaned := strings.ReplaceAll(token, "<|channel|>thought", "")
-				cleaned = strings.ReplaceAll(cleaned, "<|channel>thought", "")
-				cleaned = strings.TrimSpace(cleaned)
-				if cleaned != "" {
-					sendEvent(subscriber, AgentEvent{Type: EventTypeThinkingDelta, Data: AgentEventData{Text: cleaned}})
-				}
-				continue
-			}
-
-			// Pattern 2: <|channel> alone — might be start or end
-			if strings.Contains(token, "<|channel") || strings.Contains(token, "<channel") {
-				if thinkingActive {
-					// End of thinking block
-					thinkingActive = false
-				} else if !pendingStart {
-					// Start of thinking block — next token should be "thought"
-					pendingStart = true
-				}
-				// Strip the marker
-				cleaned := strings.ReplaceAll(token, "<|channel|>", "")
-				cleaned = strings.ReplaceAll(cleaned, "<|channel>", "")
-				cleaned = strings.ReplaceAll(cleaned, "<channel|>", "")
-				cleaned = strings.TrimSpace(cleaned)
-				if cleaned != "" && !thinkingActive {
-					sendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: cleaned}})
-				}
-				continue
-			}
-
-			// Pattern 3: "thought" token following <|channel> marker
-			if pendingStart && token == "thought" {
-				pendingStart = false
-				thinkingActive = true
-				continue // skip the "thought" marker itself
-			}
-			pendingStart = false
-
-			if thinkingActive {
-				sendEvent(subscriber, AgentEvent{Type: EventTypeThinkingDelta, Data: AgentEventData{Text: token}})
-			} else {
-				sendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: token}})
+		// Phase 2: Check if we got tool calls
+		// The session's last assistant message has the accumulated tool calls
+		msgs := loop.session.Messages()
+		var toolCalls []ToolCallResponse
+		if len(msgs) > 0 {
+			lastMsg := msgs[len(msgs)-1]
+			if lastMsg.Role == "assistant" {
+				toolCalls = lastMsg.ToolCalls
 			}
 		}
 
-		output := modelResponse.String()
-
-		// Strip Gemma 4 special tokens that leak through with IgnoreEOS
-		output = strings.ReplaceAll(output, "<end_of_turn>", "")
-		output = strings.ReplaceAll(output, "<turn|>", "")
-		output = strings.ReplaceAll(output, "<start_of_turn>", "")
-		output = strings.ReplaceAll(output, "<|file_separator|>", "")
-
-		// Debug: log accumulated output (first 500 chars) for parsing diagnostics
-		logOutput := output
-		if len(logOutput) > 500 {
-			logOutput = logOutput[:500] + "..."
-		}
-		loop.logger.Debug("Accumulated model response",
-			zap.Int("len", len(output)),
-			zap.Int("round", round),
-			zap.String("preview", logOutput),
-		)
-
-		// Phase 2: Parse tool calls from the accumulated output
-		toolCalls, _ := ParseToolCalls(output)
-
-		if len(toolCalls) == 0 || round >= loop.config.MaxToolRounds {
+		// No tool calls, max rounds, or normal stop → done
+		if len(toolCalls) == 0 || finishReason != FinishToolCalls || round >= loop.config.MaxToolRounds {
 			if round >= loop.config.MaxToolRounds {
 				loop.logger.Warn("Max tool rounds reached, stopping agent loop",
 					zap.Int("round", round),
 					zap.Int("maxRounds", loop.config.MaxToolRounds),
 				)
 			}
-			// No tool calls — the model is done (or we hit the round limit)
-			// Track the model response in session history for multi-turn
-			loop.session.TrackModelResponse(output)
 
-			// Emit agent_end with token counts
-
-			// Emit agent_end with token counts
 			inputTokens, outputTokens := loop.session.TokenCounts()
 			sendEvent(subscriber, AgentEvent{
 				Type: EventTypeAgentEnd,
@@ -788,9 +685,10 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 		)
 
 		// Phase 3: Execute each tool call
-		var toolResults []string
-		for _, tc := range toolCalls {
-			// Emit tool_execution_start
+		var toolResults []ToolResult
+		for _, tcr := range toolCalls {
+			tc := tcr.ToToolCall()
+
 			sendEvent(subscriber, AgentEvent{
 				Type: EventTypeToolStart,
 				Data: AgentEventData{
@@ -800,7 +698,6 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				},
 			})
 
-			// Log the tool call
 			argsJSON, _ := json.Marshal(tc.Args)
 			loop.logger.Info("AGENT TOOL CALL",
 				zap.Int("round", round),
@@ -808,7 +705,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				zap.String("args", string(argsJSON)),
 			)
 
-			// Check retry limit — if this tool has failed 3 times, skip it
+			// Check retry limit
 			if failCounts[tc.Name] >= cfg.MaxRetriesPerTool {
 				resultStr := fmt.Sprintf(
 					"[SYSTEM: Tool '%s' has failed %d times. Do NOT retry it. Use a COMPLETELY DIFFERENT approach or tool.]",
@@ -818,7 +715,11 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 					zap.String("tool", tc.Name),
 					zap.Int("failCount", failCounts[tc.Name]),
 				)
-				toolResults = append(toolResults, resultStr)
+				toolResults = append(toolResults, ToolResult{
+					ToolCallID: tcr.ID,
+					ToolName:   tc.Name,
+					Content:    resultStr,
+				})
 				sendEvent(subscriber, AgentEvent{
 					Type: EventTypeToolEnd,
 					Data: AgentEventData{ToolName: tc.Name, ToolID: tc.ID, Error: resultStr},
@@ -826,12 +727,12 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				continue
 			}
 
-			// Execute the tool (with retry for transient errors)
+			// Execute the tool
 			startTime := time.Now()
 			result, err := loop.executor.Execute(ctx, tc.Name, tc.Args)
 			elapsed := time.Since(startTime)
 
-			// Auto-retry transient errors once with backoff
+			// Auto-retry transient errors
 			if err != nil && classifyError(err) == ErrorTransient {
 				backoff := time.Duration(min(500*time.Millisecond*time.Duration(1<<min(failCounts[tc.Name], 4)), 10*time.Second))
 				loop.logger.Warn("Transient error, retrying with backoff",
@@ -849,11 +750,9 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				failCounts[tc.Name]++
 				consecutiveTotalFails++
 
-				// Format error in OpenClaude style: clear, actionable, with example
 				errMsg := err.Error()
 				resultStr = fmt.Sprintf("<tool_use_error>%s</tool_use_error>", errMsg)
 
-				// Death spiral prevention: too many consecutive failures
 				if consecutiveTotalFails >= maxConsecutiveTotalFails {
 					resultStr += "\n\n[SYSTEM: Too many consecutive failures. Call yield_artifact{\"output\":\"Failed: ...\"} to end.]"
 				}
@@ -866,7 +765,6 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 					zap.Error(err),
 				)
 			} else {
-				// Success — reset fail counts
 				delete(failCounts, tc.Name)
 				consecutiveTotalFails = 0
 				resultBytes, _ := json.Marshal(result)
@@ -881,7 +779,6 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				)
 			}
 
-			// Emit tool_execution_end
 			sendEvent(subscriber, AgentEvent{
 				Type: EventTypeToolEnd,
 				Data: AgentEventData{
@@ -892,16 +789,18 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 				},
 			})
 
-			toolResults = append(toolResults, resultStr)
+			toolResults = append(toolResults, ToolResult{
+				ToolCallID: tcr.ID,
+				ToolName:   tc.Name,
+				Content:    resultStr,
+			})
 
-			// yield_artifact is a terminal signal — sub-agent is done
-			if normalized := normalizeToolName(tc.Name, tc.Args); normalized == "yield_artifact" {
+			// yield_artifact is a terminal signal
+			if tc.Name == "yield_artifact" {
 				loop.logger.Info("Sub-agent yielded artifact, terminating loop",
 					zap.String("tool", tc.Name),
 					zap.Int("round", round),
 				)
-				loop.session.TrackModelResponse(output)
-
 				inputTokens, outputTokens := loop.session.TokenCounts()
 				sendEvent(subscriber, AgentEvent{
 					Type: EventTypeAgentEnd,
@@ -915,35 +814,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			}
 		}
 
-		// Phase 4: Feed tool results back into the session (incremental — KV cache persists!)
-		// Strip any text AFTER tool calls to prevent the model from "remembering"
-		// its own post-tool explanation and continuing in explanatory mode.
-		cleanOutput := output
-		if len(toolCalls) > 0 {
-			// Only keep text up to and including the last tool call
-			lastEnd := 0
-			for _, tc := range toolCalls {
-				if tc.End > lastEnd {
-					lastEnd = tc.End
-				}
-			}
-			if lastEnd < len(output) {
-				cleanOutput = output[:lastEnd]
-			}
-			// Strip hallucinated [tool_result] tags from model output
-			// to prevent double-wrapping when formatUserTurnWithResult adds its own
-			cleanOutput = strings.ReplaceAll(cleanOutput, "[tool_result]", "")
-			cleanOutput = strings.ReplaceAll(cleanOutput, "[/tool_result]", "")
-		}
-		combinedResult := strings.Join(toolResults, "\n")
-
-		// Redact sensitive data from tool results before feeding to model
-		if ste, ok := loop.executor.(*SandboxToolExecutor); ok && ste.Creds != nil {
-			combinedResult = ste.Creds.Redact(combinedResult)
-		}
-
-		// Re-inject the user's original goal as a reminder so the model
-		// doesn't lose track of what it's doing after seeing tool results.
+		// Phase 4: Goal nudge
 		budgetWarning := round >= int(float64(loop.config.MaxToolRounds)*0.75) && round < loop.config.MaxToolRounds
 		goalReminder, _ := RenderTemplate("goal_nudge", GoalNudgeData{
 			Round:         round,
@@ -952,20 +823,35 @@ func (loop *AgentLoop) runLoop(ctx context.Context, tokenCh <-chan TokenEvent, s
 			BudgetWarning: budgetWarning,
 		})
 
-		// Context compaction — check after each tool round
-		if loop.config.Compaction.TriggerAfterTurns > 0 && ShouldCompact(loop.session.History(), loop.config.Compaction) {
+		// Redact sensitive data
+		if ste, ok := loop.executor.(*SandboxToolExecutor); ok && ste.Creds != nil {
+			for i := range toolResults {
+				toolResults[i].Content = ste.Creds.Redact(toolResults[i].Content)
+			}
+		}
+
+		// Context compaction
+		if loop.config.Compaction.TriggerAfterTurns > 0 && ShouldCompactMessages(loop.session.Messages(), loop.config.Compaction) {
 			if err := loop.compactSession(subscriber); err != nil {
 				loop.logger.Warn("Compaction failed, continuing with full history", zap.Error(err))
 			}
 		}
 
-		nextCh, err := loop.session.FeedResult(cleanOutput, combinedResult, goalReminder, opts)
+		// Phase 5: Feed tool results back
+		// Build the assistant message with tool calls
+		assistantMsg := Message{
+			Role:      "assistant",
+			Content:   contentBuf.String(),
+			ToolCalls: toolCalls,
+		}
+
+		nextCh, err := loop.session.FeedToolResults(assistantMsg, toolResults, goalReminder, opts)
 		if err != nil {
 			sendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
 			sendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 			return err
 		}
-		tokenCh = nextCh
+		chatCh = nextCh
 	}
 }
 
@@ -996,15 +882,15 @@ func (loop *AgentLoop) IsRunning() bool {
 // compactSession performs extractive compaction by creating a new session
 // with compacted history, freeing the old KV cache.
 func (loop *AgentLoop) compactSession(subscriber chan<- AgentEvent) error {
-	history := loop.session.History()
+	messages := loop.session.Messages()
 	systemPrompt := loop.config.SystemPrompt
-	cfg := loop.config.Compaction
+	compCfg := loop.config.Compaction
 
-	newHistory := CompactHistory(history, systemPrompt, cfg)
+	newMessages := CompactMessages(messages, systemPrompt, compCfg)
 
 	loop.logger.Info("Compacting session",
-		zap.Int("oldTurns", len(history)),
-		zap.Int("newTurns", len(newHistory)),
+		zap.Int("oldMessages", len(messages)),
+		zap.Int("newMessages", len(newMessages)),
 	)
 
 	// Close old session (free VRAM)
@@ -1018,41 +904,9 @@ func (loop *AgentLoop) compactSession(subscriber chan<- AgentEvent) error {
 		return fmt.Errorf("failed to create new session: %w", err)
 	}
 
-	// Replay compacted history into new session
-	// The first two turns are system + user(original task) — use ChatWithSystem
-	if len(newHistory) >= 2 {
-		systemTurn := newHistory[0]
-		userTurn := newHistory[1]
-		ch, err := newSession.ChatWithSystem(systemTurn.Content, userTurn.Content, loop.config.Opts)
-		if err != nil {
-			newSession.Close()
-			return fmt.Errorf("failed to replay system+user: %w", err)
-		}
-		// Drain the generation (we don't need its output — we're just populating the KV cache)
-		for evt := range ch {
-			if evt.Err != nil {
-				newSession.Close()
-				return fmt.Errorf("error during replay: %w", evt.Err)
-			}
-		}
-
-		// Replay remaining turns as model+user pairs via FeedResult
-		for i := 2; i < len(newHistory)-1; i += 2 {
-			modelContent := newHistory[i].Content
-			userContent := newHistory[i+1].Content
-			ch, err := newSession.FeedResult(modelContent, userContent, "", loop.config.Opts)
-			if err != nil {
-				newSession.Close()
-				return fmt.Errorf("failed to replay turn %d: %w", i, err)
-			}
-			for evt := range ch {
-				if evt.Err != nil {
-					newSession.Close()
-					return fmt.Errorf("error during replay turn %d: %w", i, evt.Err)
-				}
-			}
-		}
-	}
+	// Set compacted messages and tools on new session
+	newSession.SetMessages(newMessages)
+	newSession.SetTools(loop.config.Tools)
 
 	loop.session = newSession
 	loop.logger.Info("Session compaction complete")

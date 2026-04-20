@@ -1,7 +1,6 @@
 package llama
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -32,90 +31,83 @@ func SubAgentCompactionConfig() CompactionConfig {
 	}
 }
 
-// ShouldCompact returns true if the history is long enough to warrant compaction.
-// A "turn pair" is a model response followed by a user/tool result.
-func ShouldCompact(history []Turn, cfg CompactionConfig) bool {
-	pairs := countTurnPairs(history)
+// ShouldCompactMessages returns true if the message history is long enough to warrant compaction.
+
+// ── Message-based compaction ───────────────────────────────────────
+
+// ShouldCompactMessages returns true if the message history is long enough to warrant compaction.
+// Counts assistant→tool message pairs.
+func ShouldCompactMessages(messages []Message, cfg CompactionConfig) bool {
+	pairs := countMessagePairs(messages)
 	return pairs >= cfg.TriggerAfterTurns
 }
 
-// countTurnPairs counts model→user turn pairs in the history.
-func countTurnPairs(history []Turn) int {
+// countMessagePairs counts assistant→tool message pairs.
+func countMessagePairs(messages []Message) int {
 	pairs := 0
-	for i := 1; i < len(history); i++ {
-		if history[i-1].Role == "model" && history[i].Role == "user" {
+	for i := 1; i < len(messages); i++ {
+		if messages[i-1].Role == "assistant" && messages[i].Role == "tool" {
 			pairs++
 		}
 	}
 	return pairs
 }
 
-// CompactHistory performs extractive compaction on session history.
-// No LLM call needed — we extract tool calls and compress tool results.
+// CompactMessages performs extractive compaction on message-based history.
+// Returns a new []Message suitable for setting on a fresh session:
 //
-// Returns a new []Turn suitable for replaying into a fresh session:
-//   [system, user(original_task), model(compacted_summary), user("Continue"), ...lastNTurns]
-func CompactHistory(history []Turn, systemPrompt string, cfg CompactionConfig) []Turn {
-	if len(history) < 4 {
-		return history // not enough to compact
+//	[system, user(original_task), assistant(compacted_summary), user("Continue"), ...lastNMessages]
+func CompactMessages(messages []Message, systemPrompt string, cfg CompactionConfig) []Message {
+	if len(messages) < 4 {
+		return messages
 	}
 
-	// Find the original user task (first user turn after system)
+	// Find original user task
 	var originalTask string
-	for _, t := range history {
-		if t.Role == "user" {
-			originalTask = t.Content
+	for _, m := range messages {
+		if m.Role == "user" {
+			originalTask = m.Content
 			break
 		}
 	}
 	if originalTask == "" {
-		return history
+		return messages
 	}
 
-	// Split history: [system, user_task, ...middle_turns..., ...lastNTurns]
-	// The "middle" section gets compacted.
-	turnPairStart := 2 // index after system + first user
-	lastNStart := len(history) - cfg.KeepLastTurns*2 // each pair = 2 turns
+	// Split: [system, user_task, ...middle..., ...lastN...]
+	turnPairStart := 2
+	lastNStart := len(messages) - cfg.KeepLastTurns*4 // each round ≈ 4 messages (assistant + tool + user goal)
 	if lastNStart <= turnPairStart {
-		return history // not enough middle turns to compact
+		return messages
 	}
 
-	// Build compacted summary from middle turns
+	// Build compacted summary from middle messages
 	var compacted strings.Builder
 	compacted.WriteString("[COMPACTED HISTORY — summary of previous actions]\n")
 
 	for i := turnPairStart; i < lastNStart; i++ {
-		t := history[i]
-		switch t.Role {
-		case "model":
-			// Extract only tool calls from model output, drop explanatory text
-			toolCalls, _ := ParseToolCalls(t.Content)
-			if len(toolCalls) > 0 {
-				for _, tc := range toolCalls {
-					compacted.WriteString(fmt.Sprintf("Called %s(", tc.Name))
-					// Summarize args in one line
-					argsJSON, _ := jsonMarshalOneLine(tc.Args)
-					if len(argsJSON) > 80 {
-						argsJSON = argsJSON[:80] + "..."
+		m := messages[i]
+		switch m.Role {
+		case "assistant":
+			if len(m.ToolCalls) > 0 {
+				for _, tc := range m.ToolCalls {
+					argsSummary := tc.Function.Arguments
+					if len(argsSummary) > 80 {
+						argsSummary = argsSummary[:80] + "..."
 					}
-					compacted.WriteString(argsJSON)
-					compacted.WriteString(")")
+					compacted.WriteString(fmt.Sprintf("Called %s(%s)\n", tc.Function.Name, argsSummary))
 				}
 			} else {
-				// No tool calls — was a text-only response, keep first 100 chars
-				text := strings.TrimSpace(t.Content)
-				text = stripSpecialTokens(text)
+				text := strings.TrimSpace(m.Content)
 				if len(text) > 100 {
 					text = text[:100] + "..."
 				}
 				if text != "" {
-					compacted.WriteString("Responded: " + text)
+					compacted.WriteString("Responded: " + text + "\n")
 				}
 			}
-			compacted.WriteString("\n")
-		case "user":
-			// Tool result — first 150 chars
-			result := t.Content
+		case "tool":
+			result := m.Content
 			if len(result) > 150 {
 				result = result[:150] + "..."
 			}
@@ -123,60 +115,24 @@ func CompactHistory(history []Turn, systemPrompt string, cfg CompactionConfig) [
 		}
 	}
 
-	// Truncate compacted block if too long
 	summary := compacted.String()
 	if len(summary) > cfg.MaxCompactChars {
 		summary = summary[:cfg.MaxCompactChars] + "\n...[further history omitted]"
 	}
 
-	// Build new history
-	var newHistory []Turn
-
-	// System prompt
-	newHistory = append(newHistory, Turn{Role: "system", Content: systemPrompt})
-
-	// Original user task
-	newHistory = append(newHistory, Turn{Role: "user", Content: originalTask})
-
-	// Compacted summary as a model response
-	newHistory = append(newHistory, Turn{
-		Role:    "model",
-		Content: summary,
+	// Build new messages
+	var newMessages []Message
+	newMessages = append(newMessages, Message{Role: "system", Content: systemPrompt})
+	newMessages = append(newMessages, Message{Role: "user", Content: originalTask})
+	newMessages = append(newMessages, Message{Role: "assistant", Content: summary})
+	newMessages = append(newMessages, Message{
+		Role:    "user",
+		Content: "The above is a compacted summary of previous actions. Continue from where you left off.",
 	})
 
-	// "Continue" user message
-	newHistory = append(newHistory, Turn{
-		Role: "user",
-		Content: "The above is a compacted summary of previous actions. Continue from where you left off. " +
-			"The original task is still active. Call the next tool.",
-	})
-
-	// Last N full turns (preserve context for current task)
-	for i := lastNStart; i < len(history); i++ {
-		newHistory = append(newHistory, history[i])
+	for i := lastNStart; i < len(messages); i++ {
+		newMessages = append(newMessages, messages[i])
 	}
 
-	return newHistory
-}
-
-// stripSpecialTokens removes Gemma 4 special tokens from text.
-func stripSpecialTokens(text string) string {
-	text = strings.ReplaceAll(text, "<|channel|>thought", "")
-	text = strings.ReplaceAll(text, "<|channel>thought", "")
-	text = strings.ReplaceAll(text, "<|channel|>", "")
-	text = strings.ReplaceAll(text, "<|channel>", "")
-	text = strings.ReplaceAll(text, "<|tool_call>", "")
-	text = strings.ReplaceAll(text, "<tool_call|>", "")
-	text = strings.ReplaceAll(text, "<|end|>", "")
-	text = strings.ReplaceAll(text, "<end_of_turn>", "")
-	return strings.TrimSpace(text)
-}
-
-// jsonMarshalOneLine marshals to a single-line JSON string.
-func jsonMarshalOneLine(v interface{}) (string, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return newMessages
 }

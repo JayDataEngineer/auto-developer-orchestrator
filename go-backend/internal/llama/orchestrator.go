@@ -76,7 +76,7 @@ func NewOrchestratorLoop(
 		MaxToolRounds: persona.MaxToolRounds,
 		MaxTokens:     persona.MaxTokens,
 		ContextSize:   ctxSize,
-		Grammar:       PersonaGrammar(PersonaOrchestrator),
+		Tools:         PersonaOpenAITools(PersonaOrchestrator),
 		Compaction:    DefaultCompactionConfig(),
 		Opts: GenerateOptions{
 			MaxTokens:   persona.MaxTokens,
@@ -287,7 +287,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 		MaxToolRounds: persona.MaxToolRounds,
 		MaxTokens:     persona.MaxTokens,
 		ContextSize:   cfg.SubAgentContextSize, // 8K — much smaller than orchestrator's 32K
-		Grammar:       PersonaGrammar(personaType),
+		Tools:         PersonaOpenAITools(personaType),
 		Compaction:    SubAgentCompactionConfig(),
 		Opts: GenerateOptions{
 			MaxTokens:   persona.MaxTokens,

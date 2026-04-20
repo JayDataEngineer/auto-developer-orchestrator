@@ -15,8 +15,7 @@ import (
 )
 
 // HTTPEngine communicates with llama-server over HTTP.
-// It replaces the in-process CGo engine with HTTP calls to llama-server,
-// gaining GBNF grammar support for constrained tool call generation.
+// Uses /v1/chat/completions with native OpenAI-style tool calling.
 type HTTPEngine struct {
 	baseURL    string
 	client     *http.Client
@@ -100,25 +99,14 @@ func (e *HTTPEngine) NewSession(ctxSize int) (*Session, error) {
 		return nil, fmt.Errorf("engine not connected to llama-server")
 	}
 
-	// Generate a unique session ID for KV cache persistence
 	sessionID := fmt.Sprintf("sess-%d", time.Now().UnixNano())
 
 	return &Session{
 		engine:    e,
 		sessionID: sessionID,
 		ctxSize:   ctxSize,
-		history:   []Turn{},
+		messages:  []Message{},
 	}, nil
-}
-
-// NewSessionWithGrammar creates a session with a GBNF grammar for constrained generation.
-func (e *HTTPEngine) NewSessionWithGrammar(ctxSize int, grammar string) (*Session, error) {
-	sess, err := e.NewSession(ctxSize)
-	if err != nil {
-		return nil, err
-	}
-	sess.grammar = grammar
-	return sess, nil
 }
 
 // IsLoaded returns whether the engine is connected to llama-server.
@@ -137,15 +125,15 @@ func (e *HTTPEngine) LoadDuration() time.Duration {
 func (e *HTTPEngine) WarmUp() error {
 	e.logger.Info("Warming up llama-server with single-token request...")
 
-	req := CompletionRequest{
-		Prompt:      "Hello",
+	req := ChatCompletionRequest{
+		Messages:    []Message{{Role: "user", Content: "Hello"}},
 		MaxTokens:   1,
 		Temperature: 0.1,
 		CachePrompt: true,
 	}
 
 	t0 := time.Now()
-	_, err := e.complete(req)
+	_, err := e.chatComplete(req)
 	if err != nil {
 		e.logger.Warn("Warm-up request had error (non-fatal)", zap.Error(err))
 	} else {
@@ -168,14 +156,71 @@ func (e *HTTPEngine) ModelName() string {
 	return e.modelName
 }
 
-// complete sends a completion request to llama-server and returns the full response.
-func (e *HTTPEngine) complete(req CompletionRequest) (*CompletionResponse, error) {
+// ── /v1/chat/completions types ─────────────────────────────────────
+
+// ChatCompletionRequest maps to llama-server's /v1/chat/completions request body.
+type ChatCompletionRequest struct {
+	Messages      []Message    `json:"messages"`
+	Tools         []OpenAITool `json:"tools,omitempty"`
+	MaxTokens     int          `json:"max_tokens,omitempty"`
+	Temperature   float32      `json:"temperature,omitempty"`
+	TopP          float32      `json:"top_p,omitempty"`
+	TopK          int          `json:"top_k,omitempty"`
+	RepeatPenalty float32      `json:"repeat_penalty,omitempty"`
+
+	// KV cache persistence (llama-server extension)
+	CachePrompt bool   `json:"cache_prompt"`
+	SessionID   string `json:"session_id,omitempty"`
+
+	// Stream mode
+	Stream bool `json:"stream,omitempty"`
+}
+
+// OpenAITool represents a tool definition in the OpenAI function calling format.
+type OpenAITool struct {
+	Type     string      `json:"type"` // always "function"
+	Function FunctionDef `json:"function"`
+}
+
+// FunctionDef describes a function's name, description, and parameter schema.
+type FunctionDef struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"` // JSON Schema object
+}
+
+// ChatCompletionResponse maps to the non-streaming /v1/chat/completions response.
+type ChatCompletionResponse struct {
+	Choices []ChatChoice `json:"choices"`
+	Usage   struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
+}
+
+// ChatChoice is a single choice in a chat completion response.
+type ChatChoice struct {
+	Message      ChatMessage  `json:"message"`
+	FinishReason FinishReason `json:"finish_reason"`
+}
+
+// ChatMessage is the full message in a non-streaming response.
+type ChatMessage struct {
+	Role             string             `json:"role"`
+	Content          string             `json:"content"`
+	ReasoningContent string             `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCallResponse `json:"tool_calls,omitempty"`
+}
+
+// chatComplete sends a chat completion request (non-streaming).
+func (e *HTTPEngine) chatComplete(req ChatCompletionRequest) (*ChatCompletionResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", e.baseURL+"/v1/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequest("POST", e.baseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -196,7 +241,7 @@ func (e *HTTPEngine) complete(req CompletionRequest) (*CompletionResponse, error
 		return nil, fmt.Errorf("llama-server HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	var result CompletionResponse
+	var result ChatCompletionResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("decode response: %w (body: %s)", err, string(respBody))
 	}
@@ -204,15 +249,16 @@ func (e *HTTPEngine) complete(req CompletionRequest) (*CompletionResponse, error
 	return &result, nil
 }
 
-// completeStream sends a completion request and streams tokens via callback.
-// llama-server returns SSE format: lines of "data: {json}\n\n" terminated by "data: [DONE]\n\n"
-func (e *HTTPEngine) completeStream(req CompletionRequest, onToken func(token string) bool) error {
+// chatCompleteStream sends a chat completion request and streams chunks via callback.
+// SSE format: "data: {json}\n\n" with delta objects containing content, reasoning_content, or tool_calls.
+func (e *HTTPEngine) chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason) bool) error {
+	req.Stream = true
 	body, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", e.baseURL+"/v1/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequest("POST", e.baseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -229,84 +275,42 @@ func (e *HTTPEngine) completeStream(req CompletionRequest, onToken func(token st
 		return fmt.Errorf("llama-server HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Parse SSE stream: "data: {json}\n\n" lines
 	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // up to 1MB lines
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, ":") {
 			continue
 		}
 
-		// Check for stream end
 		if line == "data: [DONE]" {
 			break
 		}
 
-		// Parse SSE data line
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
-		jsonStr := line[6:] // strip "data: " prefix
+		jsonStr := line[6:]
 
 		var event struct {
 			Choices []struct {
-				Text string `json:"text"`
+				Delta        StreamDelta `json:"delta"`
+				FinishReason FinishReason `json:"finish_reason"`
 			} `json:"choices"`
 		}
 		if err := json.Unmarshal([]byte(jsonStr), &event); err != nil {
-			// Skip malformed lines
 			continue
 		}
 
 		if len(event.Choices) > 0 {
-			text := event.Choices[0].Text
-			if text != "" {
-				if !onToken(text) {
-					break
-				}
+			choice := event.Choices[0]
+			if !onChunk(choice.Delta, choice.FinishReason) {
+				break
 			}
 		}
 	}
 
 	return scanner.Err()
-}
-
-// CompletionRequest maps to llama-server's /v1/completions request body.
-type CompletionRequest struct {
-	Prompt      string  `json:"prompt"`
-	MaxTokens   int     `json:"n_predict,omitempty"`
-	Temperature float32 `json:"temperature,omitempty"`
-	TopP        float32 `json:"top_p,omitempty"`
-	TopK        int     `json:"top_k,omitempty"`
-	RepeatPenalty float32 `json:"repeat_penalty,omitempty"`
-
-	// KV cache persistence — session_id tells llama-server to reuse the slot's KV cache
-	CachePrompt bool   `json:"cache_prompt"`
-	SessionID   string `json:"session_id,omitempty"`
-
-	// Grammar-constrained generation
-	Grammar string `json:"grammar,omitempty"`
-
-	// Stop sequences
-	Stop []string `json:"stop,omitempty"`
-
-	// Stream mode
-	Stream bool `json:"stream,omitempty"`
-}
-
-// CompletionResponse maps to llama-server's /v1/completions response.
-type CompletionResponse struct {
-	Content string `json:"content"`
-	Stop    bool   `json:"stop"`
-	Tokens  int    `json:"tokens_predicted"`
-	// Usage tracking
-	Timings struct {
-		PromptN       int     `json:"prompt_n"`
-		PredictedN    int     `json:"predicted_n"`
-		PredictedMs   float64 `json:"predicted_ms"`
-		PromptMs      float64 `json:"prompt_ms"`
-	} `json:"timings"`
 }
