@@ -482,6 +482,32 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		}
 		return e.CU.DesktopKey(ctx, sandboxID, key)
 
+	// ── New unified tools ──
+
+	case "observe":
+		// Stagehand pattern: screenshot + DOM snapshot + vision description in one call
+		return e.macroObserve(ctx, sandboxID)
+
+	case "wait":
+		// Explicit wait between actions (from CUA/browser-use)
+		seconds := 2
+		if s, ok := args["seconds"]; ok {
+			if f, ok := s.(float64); ok && f > 0 && f <= 30 {
+				seconds = int(f)
+			}
+		}
+		time.Sleep(time.Duration(seconds) * time.Second)
+		return map[string]interface{}{"output": fmt.Sprintf("Waited %d seconds", seconds)}, nil
+
+	case "scroll_page":
+		// Browser page scroll (from browser-use)
+		direction := "down"
+		if d, ok := args["direction"].(string); ok {
+			direction = d
+		}
+		scrollArgs := map[string]interface{}{"action": "scroll", "direction": direction}
+		return e.CU.Act(ctx, sandboxID, "scroll", scrollArgs)
+
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", toolName)
 	}
@@ -1269,6 +1295,41 @@ func (e *SandboxToolExecutor) macroReadPage(ctx context.Context, sandboxID strin
 	// Vision: describe the current page state
 	if vision := e.visionSummary(ctx, sandboxID); vision != "" {
 		resp["vision"] = vision
+	}
+
+	return resp, nil
+}
+
+// macroObserve is a macro tool: screenshot + DOM snapshot + vision description in one call.
+// Combines read_page + screenshot into a single "observe the page" operation (Stagehand pattern).
+func (e *SandboxToolExecutor) macroObserve(ctx context.Context, sandboxID string) (interface{}, error) {
+	// Get DOM snapshot with element IDs
+	snapshotResult, err := e.CU.Snapshot(ctx, sandboxID)
+	if err != nil {
+		return nil, fmt.Errorf("observe: snapshot failed: %w", err)
+	}
+
+	resp := map[string]interface{}{
+		"success":      true,
+		"page_summary": e.extractPageSummary(snapshotResult),
+	}
+
+	// Get screenshot with vision description
+	screenshotResult, err := e.CU.Screenshot(ctx, sandboxID, true)
+	if err == nil {
+		if url, ok := screenshotResult["url"]; ok {
+			resp["screenshot_url"] = url
+		}
+		if desc, ok := screenshotResult["description"]; ok {
+			resp["vision"] = desc
+		}
+	}
+
+	// Vision summary as fallback
+	if _, ok := resp["vision"]; !ok {
+		if vision := e.visionSummary(ctx, sandboxID); vision != "" {
+			resp["vision"] = vision
+		}
 	}
 
 	return resp, nil

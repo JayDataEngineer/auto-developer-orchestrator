@@ -81,6 +81,22 @@ var allTools = []ToolSpec{
 		Returns:          "Use when you need to see the page again.",
 		ParametersSchema: `{"type":"object","properties":{}}`,
 	},
+	{
+		Name:             "observe",
+		Category:         CategoryBrowser,
+		Description:      "observe current page: screenshot + DOM elements + AI description",
+		Schema:           `{}`,
+		Returns:          "Returns structured page state: elements with IDs, page title, URL, and AI description of what's visible. Use this to understand a page before acting.",
+		ParametersSchema: `{"type":"object","properties":{}}`,
+	},
+	{
+		Name:             "scroll_page",
+		Category:         CategoryBrowser,
+		Description:      "scroll the browser page up or down",
+		Schema:           `{"direction": "down"}`,
+		Returns:          "direction: 'up' or 'down'. Scrolls one viewport height.",
+		ParametersSchema: `{"type":"object","properties":{"direction":{"type":"string","description":"Scroll direction: up or down","enum":["up","down"]}},"required":["direction"]}`,
+	},
 
 	// Desktop
 	{
@@ -177,6 +193,14 @@ var allTools = []ToolSpec{
 
 	// Meta
 	{
+		Name:             "wait",
+		Category:         CategoryMeta,
+		Description:      "wait for a specified duration before proceeding",
+		Schema:           `{"seconds": 2}`,
+		Returns:          "Waits the specified number of seconds. Use after navigation or actions that need time to take effect.",
+		ParametersSchema: `{"type":"object","properties":{"seconds":{"type":"integer","description":"Seconds to wait (1-30)"}},"required":["seconds"]}`,
+	},
+	{
 		Name:             "yield_artifact",
 		Category:         CategoryMeta,
 		Description:      "signal task completion and return output to orchestrator",
@@ -239,14 +263,29 @@ func FormatToolList(specs []ToolSpec) string {
 func PersonaToolNames(t PersonaType) []string {
 	switch t {
 	case PersonaOrchestrator:
-		return []string{"delegate_to", "create_plan", "update_plan", "synthesize"}
+		// The orchestrator IS the unified agent — has ALL tools.
+		// delegate_to is available but not the default; the orchestrator
+		// handles most tasks directly with bash/browse/click/type/desktop tools.
+		return []string{
+			// Execution
+			"bash",
+			// Browser
+			"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page",
+			// Desktop
+			"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act",
+			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key",
+			// Orchestration (optional — for complex multi-step tasks)
+			"delegate_to", "create_plan", "update_plan", "synthesize",
+			// Meta
+			"wait",
+		}
 	case PersonaWeb:
-		return []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "bash", "yield_artifact"}
+		return []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "bash", "wait", "yield_artifact"}
 	case PersonaCode:
-		return []string{"bash", "yield_artifact"}
+		return []string{"bash", "wait", "yield_artifact"}
 	case PersonaDesktop:
 		return []string{"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act",
-			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key", "bash", "yield_artifact"}
+			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key", "bash", "wait", "yield_artifact"}
 	default:
 		return nil
 	}
@@ -264,18 +303,34 @@ func PersonaExamples(t PersonaType) []Example {
 	case PersonaOrchestrator:
 		return []Example{
 			{
-				Title: "Fill out a web form",
-				Content: `create_plan{"steps":["Navigate to form page","Fill in name, email, and message","Click Submit"]}
-delegate_to{"persona":"web","task":"Go to http://localhost:8888/form.html and fill in Name: John Doe, Email: john@example.com, Message: Hello World. Then click the Submit button."}
-update_plan{"step_index":0,"status":"done","note":"Form filled and submitted"}
-synthesize{"conclusion":"The contact form has been filled out and submitted successfully."}`,
+				Title: "Run a shell command",
+				Content: `bash{"command":"echo 'Hello World'"}
+→ Hello World`,
 			},
 			{
-				Title: "Run a calculation",
-				Content: `create_plan{"steps":["Calculate 2+2 using bash"]}
-delegate_to{"persona":"code","task":"Run: echo $((2+2))"}
-update_plan{"step_index":0,"status":"done","note":"Result: 4"}
-synthesize{"conclusion":"2+2 = 4"}`,
+				Title: "Browse a website and interact",
+				Content: `browse_to{"url":"https://example.com"}
+→ Page loaded. Elements: [1] <a> "More information" [2] <h1> "Example Domain"
+
+click_element{"element":1}
+→ Navigated to new page with more content.`,
+			},
+			{
+				Title: "Take a desktop screenshot",
+				Content: `desktop_screenshot{}
+→ Screenshot captured. Resolution: 1920x1080.
+
+desktop_click{"x":500,"y":300}
+→ Clicked at (500, 300).`,
+			},
+			{
+				Title: "Complex multi-step task (delegate to sub-agent)",
+				Content: `create_plan{"steps":["Research topic online","Write a script about it","Test the script"]}
+delegate_to{"persona":"web","task":"Search for 'golang concurrency patterns' and summarize the top 3 results"}
+update_plan{"step_index":0,"status":"done","note":"Research complete: goroutines, channels, select"}
+delegate_to{"persona":"code","task":"Write a Go script demonstrating goroutines and channels based on: goroutines are lightweight threads, channels are typed conduits"}
+update_plan{"step_index":1,"status":"done"}
+synthesize{"conclusion":"Research and script complete."}`,
 			},
 		}
 	case PersonaWeb:
