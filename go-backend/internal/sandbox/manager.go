@@ -805,11 +805,6 @@ func (m *Manager) disableModeLocked(ctx context.Context, sandboxID string) error
 	return nil
 }
 
-// Deprecated: Use DisableMode instead
-func (m *Manager) DisableDesktopMode(ctx context.Context, sandboxID string) error {
-	return m.DisableMode(ctx, sandboxID)
-}
-
 // GetDesktopSession returns the desktop session for a sandbox
 func (m *Manager) GetDesktopSession(sandboxID string) (*DesktopSession, error) {
 	m.mu.RLock()

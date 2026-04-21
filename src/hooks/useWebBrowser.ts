@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { LabeledElement, PageInfo } from '../lib/api';
 
 export type { LabeledElement, PageInfo };
@@ -36,15 +36,12 @@ function pageInfoToState(info: PageInfo): Partial<WebBrowserState> {
 
 export function useWebBrowser() {
   const [state, setState] = useState<WebBrowserState>(initialState);
-  const mountedRef = useRef(true);
 
   // Auto-create session on mount, auto-close on unmount
   useEffect(() => {
-    mountedRef.current = true;
     createSession();
 
     return () => {
-      mountedRef.current = false;
       if (state.sessionId) {
         fetch('/api/pi/web/session', {
           method: 'DELETE',
@@ -64,13 +61,9 @@ export function useWebBrowser() {
       });
       if (!res.ok) throw new Error('Failed to create session');
       const data = await res.json();
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, sessionId: data.sessionId }));
-      }
+      setState(prev => ({ ...prev, sessionId: data.sessionId }));
     } catch (err) {
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, error: String(err) }));
-      }
+      setState(prev => ({ ...prev, error: String(err) }));
     }
   }, []);
 
@@ -96,13 +89,9 @@ export function useWebBrowser() {
       });
       if (!res.ok) throw new Error(`${endpoint} failed: ${res.statusText}`);
       const data: T = await res.json();
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, ...mapResult(data), loading: false }));
-      }
+      setState(prev => ({ ...prev, ...mapResult(data), loading: false }));
     } catch (err) {
-      if (mountedRef.current) {
-        setState(prev => ({ ...prev, loading: false, error: String(err) }));
-      }
+      setState(prev => ({ ...prev, loading: false, error: String(err) }));
     }
   }, [state.sessionId]);
 

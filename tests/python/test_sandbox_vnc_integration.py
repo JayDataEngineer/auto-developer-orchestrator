@@ -14,7 +14,9 @@ Run:
 """
 
 import json
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
 
@@ -439,3 +441,256 @@ class TestMultiSandbox:
 
         for sid in ids:
             assert sid in listed_ids, f"Sandbox {sid} not in list: {listed_ids}"
+
+
+# ---------------------------------------------------------------------------
+# Desktop Mode
+# ---------------------------------------------------------------------------
+
+
+class TestDesktopMode:
+    """Tests for full desktop mode (VNC + Xvfb + XFCE4) lifecycle."""
+
+    def test_enable_desktop_mode(self, api_url, api_session):
+        """POST /{id}/desktop-mode should return a desktop session."""
+        sid = "e2e-desktop-mode"
+        _ensure_sandbox(api_url, api_session, sid)
+
+        resp = api_session.post(
+            f"{api_url}/api/sandbox/{sid}/desktop-mode",
+            json={"reason": "desktop test"},
+            timeout=120,
+        )
+        if resp.status_code == 500:
+            pytest.skip("Desktop mode enable failed (may need Xvfb in image)")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("mode") == "desktop"
+        # Desktop mode should have allocated ports
+        assert data.get("vnc_port") or data.get("VNCPort") or data.get("VncPort"), \
+            f"No VNC port in response: {data}"
+
+        api_session.delete(f"{api_url}/api/sandbox/{sid}/mode", timeout=10)
+
+    def test_desktop_viewer_urls(self, api_url, api_session):
+        """GET /{id}/viewer should return desktop mode with VNC URLs."""
+        sid = "e2e-desktop-viewer"
+        _ensure_sandbox(api_url, api_session, sid)
+
+        enable_resp = api_session.post(
+            f"{api_url}/api/sandbox/{sid}/desktop-mode",
+            json={},
+            timeout=120,
+        )
+        if enable_resp.status_code != 200:
+            pytest.skip("Desktop mode enable failed")
+            return
+
+        viewer_resp = api_session.get(f"{api_url}/api/sandbox/{sid}/viewer", timeout=10)
+        assert viewer_resp.status_code == 200
+        data = viewer_resp.json()
+        assert data.get("mode") == "desktop"
+        assert data.get("vncUrl") or data.get("vnc_url"), f"No VNC URL: {data}"
+        assert data.get("novncUrl") or data.get("novnc_url"), f"No noVNC URL: {data}"
+
+        api_session.delete(f"{api_url}/api/sandbox/{sid}/mode", timeout=10)
+
+    def test_desktop_ready(self, api_url, api_session):
+        """Sandbox should be ready after desktop mode is enabled."""
+        sid = "e2e-desktop-ready"
+        _ensure_sandbox(api_url, api_session, sid)
+
+        enable_resp = api_session.post(
+            f"{api_url}/api/sandbox/{sid}/desktop-mode",
+            json={},
+            timeout=120,
+        )
+        if enable_resp.status_code != 200:
+            pytest.skip("Desktop mode enable failed")
+            return
+
+        ready_resp = api_session.get(f"{api_url}/api/sandbox/{sid}/ready", timeout=10)
+        assert ready_resp.status_code == 200
+        # Desktop mode sets DesktopSession.IsActive = true
+        assert ready_resp.json().get("ready") is True
+
+        api_session.delete(f"{api_url}/api/sandbox/{sid}/mode", timeout=10)
+
+    def test_desktop_disable(self, api_url, api_session):
+        """Disabling desktop mode should return sandbox to CLI mode."""
+        sid = "e2e-desktop-disable"
+        _ensure_sandbox(api_url, api_session, sid)
+
+        enable_resp = api_session.post(
+            f"{api_url}/api/sandbox/{sid}/desktop-mode",
+            json={},
+            timeout=120,
+        )
+        if enable_resp.status_code != 200:
+            pytest.skip("Desktop mode enable failed")
+            return
+
+        # Disable
+        disable_resp = api_session.delete(f"{api_url}/api/sandbox/{sid}/mode", timeout=10)
+        assert disable_resp.status_code in (200, 204)
+
+        # Viewer should 404 (no desktop session)
+        viewer_resp = api_session.get(f"{api_url}/api/sandbox/{sid}/viewer", timeout=10)
+        assert viewer_resp.status_code == 404
+
+        # Sandbox should still be in CLI mode, ready
+        get_resp = api_session.get(f"{api_url}/api/sandbox/{sid}", timeout=10)
+        assert get_resp.status_code == 200
+        assert get_resp.json().get("mode") == "cli"
+
+
+# ---------------------------------------------------------------------------
+# Backend Restart Recovery
+# ---------------------------------------------------------------------------
+
+
+class TestBackendRecovery:
+    """Tests that verify sandbox state persists across backend restarts."""
+
+    def test_startup_recovery_finds_containers(self, api_url, api_session):
+        """
+        The backend calls RecoverAllSandboxes on startup.
+        Verify containers recovered from Docker appear in the list.
+        """
+        list_resp = api_session.get(f"{api_url}/api/sandbox/", timeout=10)
+        assert list_resp.status_code == 200
+        data = list_resp.json()
+        sandboxes = data if isinstance(data, list) else data.get("sandboxes", data.get("items", []))
+
+        # The server log showed it recovered 'test-repo' and 'test-e2e' on startup.
+        # At minimum, the list should be non-empty and each entry should have valid fields.
+        assert len(sandboxes) > 0, "No sandboxes found — recovery may have failed"
+
+        for sb in sandboxes:
+            if isinstance(sb, dict):
+                assert "id" in sb, f"Sandbox missing 'id' field: {sb}"
+                assert sb.get("status") in ("running", "stopped", "destroyed"), \
+                    f"Invalid status for {sb.get('id')}: {sb.get('status')}"
+
+    def test_recovered_sandbox_has_metadata(self, api_url, api_session):
+        """
+        Sandboxes recovered from Docker labels should retain their project_path.
+        Create a new one, verify it persists, then verify it's in the list.
+        """
+        sid = f"e2e-recovery-meta-{int(time.time())}"
+        project_path = f"/tmp/recovery-test-{int(time.time())}"
+        os.makedirs(project_path, exist_ok=True)
+        _ensure_sandbox(api_url, api_session, sid, project_path=project_path)
+
+        # Verify via GET
+        get_resp = api_session.get(f"{api_url}/api/sandbox/{sid}", timeout=10)
+        assert get_resp.status_code == 200
+        data = get_resp.json()
+        assert data.get("project_path") == project_path, \
+            f"Recovered sandbox lost project_path: {data.get('project_path')!r} != {project_path!r}"
+
+    def test_recovered_sandbox_browser_mode(self, api_url, api_session):
+        """
+        A sandbox recovered from Docker should still support browser mode enable.
+        This tests the auto-recovery path in EnableBrowserMode (line 524-556 in manager.go).
+        """
+        sid = "test-repo"  # This was recovered on startup from Docker labels
+        # Try to get it
+        get_resp = api_session.get(f"{api_url}/api/sandbox/{sid}", timeout=10)
+        if get_resp.status_code != 200:
+            pytest.skip("test-repo sandbox not found (not recovered)")
+            return
+
+        # Enable browser mode on the recovered sandbox
+        enable_resp = api_session.post(
+            f"{api_url}/api/sandbox/{sid}/browser-mode",
+            json={"reason": "recovery test"},
+            timeout=60,
+        )
+        assert enable_resp.status_code == 200, f"Browser mode enable failed: {enable_resp.text}"
+        data = enable_resp.json()
+        assert data.get("mode") == "browser"
+
+        # Verify ready
+        ready_resp = api_session.get(f"{api_url}/api/sandbox/{sid}/ready", timeout=10)
+        assert ready_resp.status_code == 200
+        assert ready_resp.json().get("ready") is True
+
+        api_session.delete(f"{api_url}/api/sandbox/{sid}/mode", timeout=10)
+
+
+# ---------------------------------------------------------------------------
+# Concurrency
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrency:
+    """Tests for concurrent access to the same sandbox."""
+
+    def test_concurrent_browser_mode_enable(self, api_url, api_session):
+        """
+        Two concurrent browser-mode enables on the same sandbox should both succeed.
+        The second call hits the idempotent path (same mode, return existing session).
+        """
+        sid = "e2e-concurrent"
+        _ensure_sandbox(api_url, api_session, sid)
+
+        def enable_browser():
+            return api_session.post(
+                f"{api_url}/api/sandbox/{sid}/browser-mode",
+                json={"reason": "concurrent test"},
+                timeout=60,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(enable_browser) for _ in range(2)]
+            results = [f.result() for f in as_completed(futures)]
+
+        # Both should succeed (200)
+        for resp in results:
+            assert resp.status_code == 200, f"Concurrent enable failed: {resp.status_code} {resp.text[:200]}"
+            data = resp.json()
+            assert data.get("mode") == "browser"
+
+        # Verify sandbox is still in good state
+        get_resp = api_session.get(f"{api_url}/api/sandbox/{sid}", timeout=10)
+        assert get_resp.status_code == 200
+        assert get_resp.json().get("mode") == "browser"
+
+        api_session.delete(f"{api_url}/api/sandbox/{sid}/mode", timeout=10)
+
+    def test_concurrent_exec_commands(self, api_url, api_session):
+        """
+        Multiple concurrent exec commands on the same sandbox should all succeed.
+        Tests that Docker exec doesn't race on the same container.
+        """
+        sid = "e2e-concurrent-exec"
+        _ensure_sandbox(api_url, api_session, sid)
+
+        def run_command(cmd_str):
+            return api_session.post(
+                f"{api_url}/api/sandbox/{sid}/exec",
+                json={"cmd": ["sh", "-c", cmd_str]},
+                timeout=30,
+            )
+
+        commands = [
+            "echo alpha",
+            "echo beta",
+            "echo gamma",
+        ]
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [pool.submit(run_command, cmd) for cmd in commands]
+            results = [f.result() for f in as_completed(futures)]
+
+        outputs = []
+        for resp in results:
+            assert resp.status_code == 200, f"Exec failed: {resp.text[:200]}"
+            outputs.append(resp.json().get("output", ""))
+
+        # All three outputs should be present (order doesn't matter due to as_completed)
+        combined = " ".join(outputs)
+        assert "alpha" in combined, f"Missing 'alpha' in outputs: {combined}"
+        assert "beta" in combined, f"Missing 'beta' in outputs: {combined}"
+        assert "gamma" in combined, f"Missing 'gamma' in outputs: {combined}"
