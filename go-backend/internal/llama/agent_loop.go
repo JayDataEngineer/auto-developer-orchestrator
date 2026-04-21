@@ -32,9 +32,28 @@ const (
 	EventTypeArtifactUpdated AgentEventType = "artifact_updated"
 	EventTypePlanCreated     AgentEventType = "plan_created"
 	EventTypePlanUpdated     AgentEventType = "plan_updated"
-	EventTypeSubAgentStart   AgentEventType = "subagent_start"
-	EventTypeSubAgentEnd     AgentEventType = "subagent_end"
+	EventTypeSubAgentStart    AgentEventType = "subagent_start"
+	EventTypeSubAgentEnd      AgentEventType = "subagent_end"
+	EventTypeApprovalRequest  AgentEventType = "approval_request"
 )
+
+// subscriberKey is the context key for injecting the SSE subscriber channel
+// into tool execution contexts. This lets tools like ask_user send events
+// to the frontend without the executor needing a direct subscriber reference.
+type subscriberKeyType struct{}
+
+var subscriberKeyTypeVal = subscriberKeyType{}
+
+// ContextWithSubscriber injects the SSE subscriber channel into a context.
+func ContextWithSubscriber(ctx context.Context, ch chan<- AgentEvent) context.Context {
+	return context.WithValue(ctx, subscriberKeyTypeVal, ch)
+}
+
+// SubscriberFromContext retrieves the SSE subscriber channel from a context.
+func SubscriberFromContext(ctx context.Context) chan<- AgentEvent {
+	ch, _ := ctx.Value(subscriberKeyTypeVal).(chan<- AgentEvent)
+	return ch
+}
 
 // AgentEvent is an event emitted by the agent loop.
 // These map directly to the SSE events the frontend expects.
@@ -62,6 +81,20 @@ type AgentEventData struct {
 // This interface decouples the agent loop from specific tool implementations.
 type ToolExecutor interface {
 	Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error)
+}
+
+// ApprovalResponse is the user's response to an approval/question request.
+type ApprovalResponse struct {
+	Action  string // "approve", "deny", "answer"
+	Message string // User's text response (for "answer" action)
+}
+
+// ApprovalManager manages pending approval/question requests.
+// Interface to decouple the llama package from the approval package.
+type ApprovalManager interface {
+	Register(requestID string) <-chan ApprovalResponse
+	Resolve(requestID string, resp ApprovalResponse) bool
+	Cleanup(requestID string)
 }
 
 // sendEvent sends an event to the subscriber channel without blocking.
@@ -103,6 +136,7 @@ type SandboxToolExecutor struct {
 	Logger    *zap.Logger
 	Creds     *CredentialStore // optional: resolve/redact sensitive data
 	MCPClient *mcp.Client      // optional: MCP research server for search/scrape
+	ApprovalMgr ApprovalManager // optional: nil for scheduled jobs (fire-and-forget)
 
 	// Vision in the loop: after page-changing actions, automatically capture a
 	// screenshot and describe it via the vision model. Gives the agent spatial
@@ -459,6 +493,52 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		return map[string]interface{}{"output": output}, nil
 	}
 
+	// ask_user: ask the user a question and wait for response (interactive sessions only)
+	if toolName == "ask_user" {
+		question, _ := args["question"].(string)
+		if question == "" {
+			return nil, fmt.Errorf("missing 'question' argument")
+		}
+		if e.ApprovalMgr == nil {
+			return nil, fmt.Errorf("ask_user is not available in non-interactive sessions")
+		}
+
+		// Generate unique request ID
+		requestID := fmt.Sprintf("ask-%d", time.Now().UnixMilli())
+
+		// Send approval_request SSE event via subscriber in context
+		subscriber := SubscriberFromContext(ctx)
+		if subscriber != nil {
+			sendEvent(subscriber, AgentEvent{
+				Type: EventTypeApprovalRequest,
+				Data: AgentEventData{
+					ToolName: "ask_user",
+					ToolID:   requestID,
+					ToolArgs: map[string]interface{}{"question": question},
+					Result: map[string]interface{}{
+						"requestId": requestID,
+						"type":      "question",
+						"message":   question,
+					},
+				},
+			})
+		}
+
+		// Register and wait for user response
+		ch := e.ApprovalMgr.Register(requestID)
+		defer e.ApprovalMgr.Cleanup(requestID)
+
+		select {
+		case resp := <-ch:
+			if resp.Action == "answer" {
+				return map[string]interface{}{"answer": resp.Message}, nil
+			}
+			return nil, fmt.Errorf("user declined to answer")
+		case <-ctx.Done():
+			return nil, fmt.Errorf("ask_user timed out: context cancelled")
+		}
+	}
+
 	// Computer use tools — require ComputerUseProvider
 	if e.CU == nil {
 		return nil, fmt.Errorf("computer use not available: %s", toolName)
@@ -749,6 +829,9 @@ func (loop *AgentLoop) Continue(ctx context.Context, userMsg string, subscriber 
 // runLoop is the core generation → execute tools → feed-back cycle.
 // Uses native structured tool calling via /v1/chat/completions.
 func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, subscriber chan<- AgentEvent, opts GenerateOptions) error {
+	// Inject subscriber into context so tools (ask_user) can send SSE events
+	ctx = ContextWithSubscriber(ctx, subscriber)
+
 	round := 0
 	failCounts := make(map[string]int)
 	consecutiveTotalFails := 0

@@ -213,6 +213,16 @@ func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 				Type: event.Type,
 				Data: event.Data,
 			}
+		case pi.EventApprovalRequest:
+			// Extract approval data from Result field
+			result, _ := event.Data.Result.(map[string]interface{})
+			if result != nil {
+				return &sseEvent{
+					Type: pi.EventApprovalRequest,
+					Data: result,
+				}
+			}
+			return nil
 		}
 		return nil
 	}

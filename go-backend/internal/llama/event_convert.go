@@ -48,6 +48,8 @@ func ConvertEvent(evt AgentEvent) pi.AgentEvent {
 		rpcType = pi.EventSubAgentStart
 	case EventTypeSubAgentEnd:
 		rpcType = pi.EventSubAgentEnd
+	case EventTypeApprovalRequest:
+		rpcType = pi.EventApprovalRequest
 	default:
 		return pi.AgentEvent{Type: "unknown"}
 	}

@@ -216,6 +216,14 @@ var allTools = []ToolSpec{
 		Returns:          "Call this when your assigned task is done.",
 		ParametersSchema: `{"type":"object","properties":{"output":{"type":"string","description":"Task output or summary"}},"required":["output"]}`,
 	},
+	{
+		Name:             "ask_user",
+		Category:         CategoryMeta,
+		Description:      "ask the user a clarifying question and wait for their response",
+		Schema:           `{"question": "Which framework would you like to use: React or Vue?"}`,
+		Returns:          "Returns the user's answer as text. Use this before starting complex tasks.",
+		ParametersSchema: `{"type":"object","properties":{"question":{"type":"string","description":"Question to ask the user"}},"required":["question"]}`,
+	},
 }
 
 // toolIndex maps tool name → ToolSpec for O(1) lookup.
@@ -285,7 +293,7 @@ func PersonaToolNames(t PersonaType) []string {
 			// Orchestration (optional — for complex multi-step tasks)
 			"delegate_to", "create_plan", "update_plan", "synthesize",
 			// Meta
-			"wait",
+			"wait", "ask_user",
 		}
 	case PersonaWeb:
 		return []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "scrape", "bash", "wait", "yield_artifact"}

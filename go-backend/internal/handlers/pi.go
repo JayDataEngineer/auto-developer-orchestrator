@@ -355,6 +355,7 @@ func (h *PiHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) 
 			Logger:        h.log,
 			VisionEnabled: h.cuBridge.CU.VisionClient() != nil,
 			MCPClient:     h.mcpClient,
+			ApprovalMgr:   (*approvalManagerAdapter)(h.approvalMgr),
 		}
 	}
 
@@ -383,6 +384,29 @@ func (h *PiHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) 
 // compositeAgentKey builds a key from projectPath and agentId for the llama loops map.
 func compositeAgentKey(projectPath, agentId string) string {
 	return projectPath + "\x00" + agentId
+}
+
+// approvalManagerAdapter wraps *approval.Manager to satisfy llama.ApprovalManager.
+// Converts between pi.ApprovalResponse and llama.ApprovalResponse (structurally identical).
+type approvalManagerAdapter approval.Manager
+
+func (a *approvalManagerAdapter) Register(requestID string) <-chan llamaeng.ApprovalResponse {
+	piCh := (*approval.Manager)(a).Register(requestID)
+	ch := make(chan llamaeng.ApprovalResponse, 1)
+	go func() {
+		if resp, ok := <-piCh; ok {
+			ch <- llamaeng.ApprovalResponse{Action: resp.Action, Message: resp.Message}
+		}
+	}()
+	return ch
+}
+
+func (a *approvalManagerAdapter) Resolve(requestID string, resp llamaeng.ApprovalResponse) bool {
+	return (*approval.Manager)(a).Resolve(requestID, pi.ApprovalResponse{Action: resp.Action, Message: resp.Message})
+}
+
+func (a *approvalManagerAdapter) Cleanup(requestID string) {
+	(*approval.Manager)(a).Cleanup(requestID)
 }
 
 // GetToolPermissions returns all configured tool permissions.
