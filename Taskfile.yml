@@ -33,6 +33,15 @@ tasks:
         ignore_error: true
       - echo "Done — all dependencies installed."
 
+  # ── Build ──────────────────────────────────────────────────────────────
+  build:
+    desc: Build server and CLI binaries
+    dir: go-backend
+    cmds:
+      - go build -o server ./cmd/server/
+      - go build -o orch ./cmd/cli/
+      - echo "Built go-backend/server and go-backend/orch"
+
   # ── Local Development ───────────────────────────────────────────────────
   dev:
     desc: Start Go backend + Vite frontend
@@ -72,6 +81,13 @@ tasks:
     dir: docs
     cmds:
       - npx next dev -p 3001 --webpack
+
+  # ── CLI ─────────────────────────────────────────────────────────────────
+  cli:
+    desc: Run the orch CLI (pass extra args via CLI_ARGS)
+    dir: go-backend
+    cmds:
+      - go run ./cmd/cli/ {{.CLI_ARGS}}
 
   # ── Docker Development ──────────────────────────────────────────────────
   up:
@@ -136,7 +152,19 @@ tasks:
     desc: Run Go backend tests
     dir: go-backend
     cmds:
-      - go test -v ./...
+      - go test -v -count=1 ./...
+
+  test-cli:
+    desc: Run CLI integration tests
+    dir: go-backend
+    cmds:
+      - go test -v -count=1 ./internal/cli/...
+
+  test-mcp:
+    desc: Run MCP client tests
+    dir: go-backend
+    cmds:
+      - go test -v -count=1 ./internal/mcp/...
 
   test-js:
     desc: Run frontend unit + component tests (no backend required)
@@ -157,14 +185,14 @@ tasks:
   lint:
     desc: Run all linters
     cmds:
-      - cmd: cd go-backend && go fmt ./...
+      - cmd: cd go-backend && go fmt ./... && go vet ./...
       - npm run lint
 
   # ── Maintenance ─────────────────────────────────────────────────────────
   clean:
     desc: Remove build artifacts and all docker resources
     cmds:
-      - rm -rf dist go-backend/bin
+      - rm -rf dist go-backend/bin go-backend/orch go-backend/server
       - docker compose -f docker-compose.dev.yml down -v --remove-orphans
       - cmd: docker compose -f docker-compose.yml down -v
         ignore_error: true
