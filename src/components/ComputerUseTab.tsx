@@ -94,7 +94,7 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
   // window.location.port is empty on default ports (80/443) — noVNC needs an explicit port
   const effectivePort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
   const novncUrl = sandboxId
-    ? `/api/sandbox/vnc/${sandboxId}/vnc.html?host=${window.location.hostname}&port=${effectivePort}&path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&resize=scale`
+    ? `/api/sandbox/vnc/${sandboxId}/vnc.html?host=${window.location.hostname}&port=${effectivePort}&path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&reconnect=true&reconnect_delay=3000&resize=scale`
     : null;
 
   const openDesktop = useCallback(() => {

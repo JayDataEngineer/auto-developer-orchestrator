@@ -1,16 +1,21 @@
 package handlers
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
 
@@ -228,8 +233,37 @@ func getNoVNCURL(session *sandbox.DesktopSession) string {
 	return fmt.Sprintf("http://localhost:%d/vnc.html", session.NoVNCPort)
 }
 
+// ---------------------------------------------------------------------------
+// VNC Proxy — gorilla/websocket based
+// ---------------------------------------------------------------------------
+
+// vncUpgrader upgrades HTTP connections to WebSocket for VNC proxying.
+var vncUpgrader = websocket.Upgrader{
+	ReadBufferSize:  8192,
+	WriteBufferSize: 8192,
+	CheckOrigin:     func(r *http.Request) bool { return true },
+}
+
+// vncConn tracks a single VNC proxy connection for lifecycle management.
+type vncConn struct {
+	id         string
+	clientConn *websocket.Conn
+	targetConn net.Conn
+	cancel     context.CancelFunc
+	startedAt  time.Time
+}
+
+// activeVNCConns tracks active VNC proxy connections for cleanup and stats.
+var activeVNCConns sync.Map // key: connID string, value: *vncConn
+
+// generateConnID creates a unique connection identifier.
+func generateConnID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 // VNCProxy proxies requests to the sandbox's noVNC web server.
-// This allows the frontend to display the sandbox desktop in an iframe.
 // Handles both HTTP (for vnc.html page) and WebSocket (for screen streaming).
 func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -241,25 +275,19 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve the actual noVNC port from the desktop session.
-	// EnableDesktopMode dynamically allocates ports (6081, 6082, ...),
-	// while EnableBrowserMode uses the fixed port 6080 (supervisord).
 	novncPort := 6080
 	if session, sessErr := h.manager.GetDesktopSession(id); sessErr == nil {
 		novncPort = session.NoVNCPort
 	}
 
-	// Resolve container IP directly (avoids Docker DNS which isn't available from host)
-	containerIP, err := h.manager.GetContainerIP(r.Context(), id)
+	// Resolve container address (IP or container name)
+	containerHost, err := h.manager.GetContainerIP(r.Context(), id)
 	if err != nil {
-		// Fallback to container name for hostname resolution
-		containerIP = fmt.Sprintf("orchestrator-sandbox-%s", id)
+		containerHost = fmt.Sprintf("orchestrator-sandbox-%s", id)
 	}
-
-	containerName := containerIP
 
 	// Build the proxy request path
 	proxyPath := r.URL.Path
-	// Strip the /api/sandbox/vnc/{id} prefix (matching the chi route)
 	prefix := fmt.Sprintf("/api/sandbox/vnc/%s", id)
 	if strings.HasPrefix(proxyPath, prefix) {
 		proxyPath = strings.TrimPrefix(proxyPath, prefix)
@@ -270,35 +298,32 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 		proxyPath = "/vnc.html"
 	}
 
-	target := fmt.Sprintf("http://%s:%d%s", containerName, novncPort, proxyPath)
+	// Check for WebSocket upgrade
+	if websocket.IsWebSocketUpgrade(r) {
+		h.proxyVNCWebSocket(w, r, containerHost, novncPort, proxyPath, id)
+		return
+	}
+
+	// Regular HTTP reverse proxy
+	target := fmt.Sprintf("http://%s%s", net.JoinHostPort(containerHost, fmt.Sprintf("%d", novncPort)), proxyPath)
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
 
-	h.logger.Debug("VNC proxy", zap.String("target", target))
+	h.logger.Debug("VNC HTTP proxy", zap.String("target", target))
 
-	// Check for WebSocket upgrade
-	if r.Header.Get("Upgrade") == "websocket" {
-		h.handleWebSocket(w, r, containerName, novncPort, proxyPath)
-		return
-	}
-
-	// Regular HTTP proxy
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
 	if err != nil {
 		JSONError(w, "proxy request failed", http.StatusInternalServerError)
 		return
 	}
-
-	// Copy headers (but change Host)
 	for k, vv := range r.Header {
 		for _, v := range vv {
 			proxyReq.Header.Add(k, v)
 		}
 	}
-	proxyReq.Host = containerName
+	proxyReq.Host = containerHost
 
-	// Use a short-timeout transport for container network
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
 	}
@@ -310,7 +335,6 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	// Copy response headers
 	for k, vv := range resp.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
@@ -320,57 +344,154 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
-// handleWebSocket takes over the HTTP connection and proxies raw TCP to websockify.
-// This is needed because noVNC uses WebSocket for the actual VNC screen stream.
-func (h *SandboxHandler) handleWebSocket(w http.ResponseWriter, r *http.Request, containerName string, novncPort int, path string) {
-	// Use ResponseController to hijack through middleware wrappers (chi Timeout, etc.)
-	rc := http.NewResponseController(w)
-	conn, _, err := rc.Hijack()
+// proxyVNCWebSocket handles WebSocket proxying for VNC screen streaming.
+// Upgrades the client connection with gorilla/websocket, connects to the
+// container's websockify, and pipes data bidirectionally with idle timeout.
+func (h *SandboxHandler) proxyVNCWebSocket(w http.ResponseWriter, r *http.Request, containerHost string, novncPort int, path string, sandboxID string) {
+	// Upgrade client connection
+	clientConn, err := vncUpgrader.Upgrade(w, r, nil)
 	if err != nil {
-		h.logger.Error("failed to hijack connection", zap.Error(err))
-		JSONError(w, "hijack failed", http.StatusInternalServerError)
+		h.logger.Error("VNC WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
 
-	// Connect to the sandbox container's websockify on the allocated noVNC port
-	targetAddr := fmt.Sprintf("%s:%d", containerName, novncPort)
+	// Connect to container's websockify via raw TCP
+	targetAddr := net.JoinHostPort(containerHost, fmt.Sprintf("%d", novncPort))
 	targetConn, err := net.DialTimeout("tcp", targetAddr, 5*time.Second)
 	if err != nil {
-		h.logger.Error("failed to connect to websockify", zap.Error(err))
+		h.logger.Error("VNC websockify connect failed", zap.Error(err))
+		clientConn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "websockify unreachable"))
+		clientConn.Close()
 		return
 	}
-	defer targetConn.Close()
 
-	// Rebuild the original request and send it to websockify
-	// We need to reconstruct the HTTP request that the client was trying to make
+	// Send WebSocket upgrade request to websockify
 	reqPath := path
 	if r.URL.RawQuery != "" {
 		reqPath = reqPath + "?" + r.URL.RawQuery
 	}
-	requestLine := fmt.Sprintf("%s %s %s\r\n", r.Method, reqPath, r.Proto)
-	targetConn.Write([]byte(requestLine))
-	targetConn.Write([]byte(fmt.Sprintf("Host: %s\r\n", containerName)))
-	// Forward all original headers
-	for k, vv := range r.Header {
-		for _, v := range vv {
-			targetConn.Write([]byte(fmt.Sprintf("%s: %s\r\n", k, v)))
-		}
+	upgradeReq := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n", reqPath, containerHost)
+	if _, err := targetConn.Write([]byte(upgradeReq)); err != nil {
+		h.logger.Error("VNC websockify upgrade write failed", zap.Error(err))
+		targetConn.Close()
+		clientConn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "upgrade failed"))
+		clientConn.Close()
+		return
 	}
-	targetConn.Write([]byte("\r\n"))
 
-	// Bidirectional pipe — proxy data between client and target
+	// Read websockify's HTTP upgrade response (and discard it)
+	buf := make([]byte, 4096)
+	if _, err := targetConn.Read(buf); err != nil {
+		h.logger.Error("VNC websockify upgrade response read failed", zap.Error(err))
+		targetConn.Close()
+		clientConn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "upgrade response failed"))
+		clientConn.Close()
+		return
+	}
+
+	// Track connection
+	connID := generateConnID()
+	ctx, cancel := context.WithCancel(context.Background())
+	conn := &vncConn{
+		id:         connID,
+		clientConn: clientConn,
+		targetConn: targetConn,
+		cancel:     cancel,
+		startedAt:  time.Now(),
+	}
+	activeVNCConns.Store(connID, conn)
+
+	h.logger.Info("VNC WebSocket connected",
+		zap.String("conn_id", connID),
+		zap.String("sandbox_id", sandboxID),
+	)
+
+	// Idle timeout — close connection after 10 minutes of no data
+	const idleTimeout = 10 * time.Minute
+	clientConn.SetReadDeadline(time.Now().Add(idleTimeout))
+
+	// Bidirectional proxy
 	done := make(chan struct{}, 2)
+
+	// Client → Target (read WebSocket frames from browser, write raw to websockify)
 	go func() {
-		io.Copy(conn, targetConn)
-		done <- struct{}{}
-	}()
-	go func() {
-		io.Copy(targetConn, conn)
-		done <- struct{}{}
+		defer func() { done <- struct{}{} }()
+		for {
+			_, msg, err := clientConn.ReadMessage()
+			if err != nil {
+				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					h.logger.Debug("VNC client read error", zap.String("conn_id", connID), zap.Error(err))
+				}
+				return
+			}
+			if _, err := targetConn.Write(msg); err != nil {
+				return
+			}
+			clientConn.SetReadDeadline(time.Now().Add(idleTimeout))
+		}
 	}()
 
-	// Wait for one side to close, then cleanup
-	<-done
-	h.logger.Debug("VNC WebSocket proxy connection closed", zap.String("sandbox_id", chi.URLParam(r, "id")))
+	// Target → Client (read raw bytes from websockify, write WebSocket frames to browser)
+	go func() {
+		defer func() { done <- struct{}{} }()
+		readBuf := make([]byte, 32*1024)
+		for {
+			n, err := targetConn.Read(readBuf)
+			if err != nil {
+				return
+			}
+			if err := clientConn.WriteMessage(websocket.BinaryMessage, readBuf[:n]); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Wait for one direction to close, then cleanup
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+
+	// Cleanup
+	activeVNCConns.Delete(connID)
+	clientConn.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "shutting down"))
+	clientConn.Close()
+	targetConn.Close()
+
+	h.logger.Info("VNC WebSocket disconnected",
+		zap.String("conn_id", connID),
+		zap.String("sandbox_id", sandboxID),
+		zap.Duration("duration", time.Since(conn.startedAt)),
+	)
+}
+
+// CleanupVNCConnections closes all active VNC proxy connections.
+// Call during server shutdown.
+func (h *SandboxHandler) CleanupVNCConnections() {
+	activeVNCConns.Range(func(key, value interface{}) bool {
+		if conn, ok := value.(*vncConn); ok {
+			conn.cancel()
+			conn.clientConn.Close()
+			conn.targetConn.Close()
+		}
+		activeVNCConns.Delete(key)
+		return true
+	})
+}
+
+// VNCStats returns stats about active VNC proxy connections.
+// GET /api/sandbox/vnc-stats
+func (h *SandboxHandler) VNCStats(w http.ResponseWriter, r *http.Request) {
+	var count int
+	activeVNCConns.Range(func(_, _ interface{}) bool {
+		count++
+		return true
+	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"active_connections": count,
+	})
 }

@@ -325,6 +325,9 @@ func main() {
 
 			// VNC proxy — serves the sandbox desktop via noVNC
 			r.HandleFunc("/vnc/{id}/*", sandboxHandler.VNCProxy)
+
+			// VNC connection stats
+			r.Get("/vnc-stats", sandboxHandler.VNCStats)
 		})
 
 		// Artifacts (plans, todos, notes from agents)
@@ -372,6 +375,9 @@ func main() {
 
 	// Shutdown computer use handler
 	computerUseHandler.Shutdown()
+
+	// Close all active VNC proxy connections
+	sandboxHandler.CleanupVNCConnections()
 
 	// Shutdown scheduler
 	sched.Stop()
