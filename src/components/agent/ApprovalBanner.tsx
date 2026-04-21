@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Shield, HelpCircle, Check, X, Send } from 'lucide-react';
 import { PiApprovalRequest } from '../../lib/pi-events';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
 
 interface ApprovalBannerProps {
   approval: PiApprovalRequest;
@@ -62,12 +64,12 @@ export const ApprovalBanner: React.FC<ApprovalBannerProps> = ({ approval, onResp
         <div className="shrink-0 flex items-center gap-2">
           {isQuestion ? (
             <>
-              <input
+              <Input
                 type="text"
                 value={answer}
                 onChange={(e) => setAnswer(e.target.value)}
                 placeholder="Your answer..."
-                className="w-48 bg-zinc-900 border border-white/10 px-3 py-1.5 text-sm text-white font-mono placeholder-zinc-600 outline-none focus:border-blue-500/40"
+                className="w-48 placeholder:text-muted-foreground focus-visible:border-blue-500/40"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && answer.trim()) {
                     onRespond(approval.requestId, 'answer', answer.trim());
@@ -75,28 +77,31 @@ export const ApprovalBanner: React.FC<ApprovalBannerProps> = ({ approval, onResp
                   }
                 }}
               />
-              <button
+              <Button
+                variant="default"
+                size="xs"
                 onClick={() => { onRespond(approval.requestId, 'answer', answer.trim() || 'No answer provided'); setAnswer(''); }}
                 disabled={!answer.trim()}
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-black text-xs font-black uppercase tracking-widest hover:bg-blue-400 disabled:opacity-30 transition-colors"
               >
                 <Send size={9} /> Submit
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <button
+              <Button
+                variant="default"
+                size="xs"
                 onClick={() => onRespond(approval.requestId, 'approve')}
-                className="flex items-center gap-1 px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
               >
                 <Check size={9} /> Approve
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="destructive"
+                size="xs"
                 onClick={() => onRespond(approval.requestId, 'deny', 'User denied this action')}
-                className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 text-red-400 text-xs font-black uppercase tracking-widest hover:bg-red-500/30 transition-colors border border-red-500/30"
               >
                 <X size={9} /> Deny
-              </button>
+              </Button>
             </>
           )}
         </div>

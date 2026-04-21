@@ -2,6 +2,9 @@ import React from 'react';
 import { Globe, Loader } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useComputerUse } from '../hooks/useComputerUse';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { ScrollArea } from './ui/scroll-area';
 
 export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, setTypeText, selectedElement, setSelectedElement, onNavigate, onElementClick, onType, onEnable }: {
   cu: ReturnType<typeof useComputerUse>;
@@ -26,13 +29,14 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
             Computer Use
           </span>
         </div>
-        <button
+        <Button
+          variant="default"
+          size="xs"
           onClick={onEnable}
           disabled={!sandboxId || cu.loading}
-          className="px-4 py-2 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
         >
           {cu.loading ? 'Starting...' : 'Enable Computer Use'}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -49,41 +53,45 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
 
       {/* Toolbar */}
       <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-black/30">
-        <button
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={cu.takeScreenshot}
           disabled={cu.loading}
-          className="px-2 py-1 text-xs font-mono uppercase tracking-widest bg-white/5 text-muted hover:text-zinc-300 hover:bg-white/10 disabled:opacity-30 transition-colors"
         >
           {cu.loading ? <Loader size={9} className="animate-spin" /> : 'Screenshot'}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={cu.getSnapshot}
           disabled={cu.loading}
-          className="px-2 py-1 text-xs font-mono uppercase tracking-widest bg-white/5 text-muted hover:text-zinc-300 hover:bg-white/10 disabled:opacity-30 transition-colors"
         >
           Elements
-        </button>
+        </Button>
         <div className="flex-1" />
-        <button
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={cu.disableComputerUse}
-          className="px-2 py-1 text-xs font-mono uppercase tracking-widest text-red-400/50 hover:text-red-400 hover:bg-red-400/5 transition-colors"
+          className="text-red-400/50 hover:text-red-400 hover:bg-red-400/5"
         >
           Off
-        </button>
+        </Button>
       </div>
 
       {/* URL bar */}
       <form onSubmit={onNavigate} className="flex items-center gap-1 px-2 py-1 border-b border-white/5">
-        <input
+        <Input
           type="text"
           value={urlInput}
           onChange={e => setUrlInput(e.target.value)}
           placeholder="URL..."
-          className="flex-1 bg-zinc-900 border border-white/5 px-2 py-0.5 text-xs font-mono text-white placeholder-zinc-600 focus:outline-none focus:border-primary/40"
+          className="flex-1"
         />
-        <button type="submit" className="px-2 py-0.5 bg-primary/20 text-primary text-xs font-mono uppercase tracking-widest hover:bg-primary/30 transition-colors">
+        <Button variant="default" size="xs" type="submit">
           Go
-        </button>
+        </Button>
       </form>
 
       {/* Screenshot */}
@@ -111,28 +119,32 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
 
       {/* Element list */}
       {cu.elements.length > 0 && (
-        <div className="border-t border-white/5 max-h-36 overflow-y-auto">
+        <div className="border-t border-white/5">
           <div className="px-2 py-0.5 text-xs font-black uppercase tracking-[0.2em] text-muted-foreground border-b border-white/5">
             Elements ({cu.elements.length})
           </div>
-          {cu.elements.map(el => (
-            <button
-              key={el.id}
-              onClick={() => onElementClick(el.id, el.tag)}
-              className={cn(
-                'w-full text-left px-2 py-0.5 flex items-center gap-1.5 hover:bg-white/5 transition-colors border-b border-white/[0.02]',
-                selectedElement === el.id && 'bg-primary/10'
-              )}
-            >
-              <span className="text-[10px] bg-red-600/80 text-white px-0.5 font-mono min-w-[12px] text-center">
-                {el.id}
-              </span>
-              <span className="text-xs font-mono text-zinc-500">{el.tag}</span>
-              {el.text && (
-                <span className="text-xs font-mono text-zinc-400 truncate">{el.text}</span>
-              )}
-            </button>
-          ))}
+          <ScrollArea className="max-h-36">
+            {cu.elements.map(el => (
+              <Button
+                key={el.id}
+                variant="ghost"
+                size="xs"
+                className={cn(
+                  'w-full justify-start border-b border-white/[0.02]',
+                  selectedElement === el.id && 'bg-primary/10'
+                )}
+                onClick={() => onElementClick(el.id, el.tag)}
+              >
+                <span className="text-[10px] bg-red-600/80 text-white px-0.5 font-mono min-w-[12px] text-center">
+                  {el.id}
+                </span>
+                <span className="text-xs font-mono text-zinc-500">{el.tag}</span>
+                {el.text && (
+                  <span className="text-xs font-mono text-zinc-400 truncate">{el.text}</span>
+                )}
+              </Button>
+            ))}
+          </ScrollArea>
         </div>
       )}
 
@@ -142,16 +154,16 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
           <span className="text-xs font-mono text-muted-foreground">
             [{selectedElement}]
           </span>
-          <input
+          <Input
             type="text"
             value={typeText}
             onChange={e => setTypeText(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && onType()}
             placeholder="Type text..."
-            className="flex-1 bg-zinc-900 border border-white/5 px-2 py-0.5 text-xs font-mono text-white focus:outline-none focus:border-primary/40"
+            className="flex-1"
             autoFocus
           />
-          <button onClick={onType} className="px-2 py-0.5 bg-primary/20 text-primary text-xs">Send</button>
+          <Button variant="default" size="xs" onClick={onType}>Send</Button>
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import {
-  Send, Square, Sparkles, ChevronDown, ChevronRight, Trash2,
-  Loader, Zap, RotateCcw, ArrowLeft, ChevronUp, GitBranch,
+  Send, Square, Sparkles, ChevronDown, Trash2,
+  Loader, Zap, RotateCcw, ArrowLeft, GitBranch,
   ExternalLink, Check, GitPullRequest, Wrench
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -14,6 +14,17 @@ import { MarkdownBlock } from './agent/MarkdownBlock';
 import { ReasoningBlock } from './agent/ReasoningBlock';
 import { FleetBar } from './agent/FleetBar';
 import { ApprovalBanner } from './agent/ApprovalBanner';
+import { Button } from './ui/button';
+import { Textarea } from './ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 
 interface PiAgentViewProps {
   selectedProject?: string;
@@ -55,19 +66,6 @@ const InputBar = memo(function InputBar({
   onAutoBranchChange, onAutoMergeChange, onSetToolModel,
 }: InputBarProps) {
   const [input, setInput] = useState('');
-  const [modelDropdownOpen, setModelDropdownOpen] = useState<'main' | 'tool' | null>(null);
-  const modelDropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!modelDropdownOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
-        setModelDropdownOpen(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [modelDropdownOpen]);
 
   const handleSend = useCallback(() => {
     if (!input.trim() || isStreaming) return;
@@ -90,114 +88,126 @@ const InputBar = memo(function InputBar({
       )}>
         <div className="flex gap-2">
           <div className="flex-1 relative">
-            <textarea
+            <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={selectedProject ? "Describe a coding task..." : "Select a project first..."}
               disabled={disabled}
               data-prompt-input
-              className="w-full bg-zinc-900 border border-white/5 rounded p-4 pr-14 text-sm text-white placeholder-zinc-700 outline-none focus:border-primary/40 transition-all font-mono resize-none"
+              className="w-full border-white/5 rounded p-4 pr-14 text-sm text-white placeholder-zinc-700 resize-none"
               rows={3}
             />
             <div className="absolute right-3 bottom-3 flex items-center gap-2">
               {isStreaming ? (
-                <button onClick={onAbort} className="p-2 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all">
+                <Button variant="destructive" size="xs" onClick={onAbort}>
                   <Square size={16} />
-                </button>
+                </Button>
               ) : (
-                <button onClick={handleSend} disabled={!input.trim() || disabled} className="p-2 bg-primary text-black rounded hover:bg-primary/80 disabled:opacity-20 transition-all">
+                <Button variant="default" size="xs" onClick={handleSend} disabled={!input.trim() || disabled}>
                   <Send size={16} />
-                </button>
+                </Button>
               )}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-4 mt-2">
-          <div className="relative" ref={modelDropdownRef}>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setModelDropdownOpen(modelDropdownOpen === 'main' ? null : 'main')}
-                className={cn(
-                  "text-xs font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
-                  modelDropdownOpen === 'main' ? "text-primary" : "text-muted hover:text-muted-foreground"
-                )}
-              >
-                Main: {model || 'default'}
-                {modelDropdownOpen === 'main' ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-              </button>
-              <button
-                onClick={() => setModelDropdownOpen(modelDropdownOpen === 'tool' ? null : 'tool')}
-                className={cn(
-                  "text-xs font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
-                  modelDropdownOpen === 'tool' ? "text-primary" : "text-muted hover:text-muted-foreground"
-                )}
-              >
-                Tool: {toolModel || 'default'}
-                {modelDropdownOpen === 'tool' ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-              </button>
-            </div>
-            {modelDropdownOpen && (
-              <div className="absolute bottom-full left-0 mb-1 w-64 max-h-[300px] overflow-y-auto border border-white/10 bg-zinc-950 shadow-2xl z-[100] custom-scrollbar scrollbar-gutter-stable">
-                <div className="px-3 py-1 text-[10px] font-mono text-muted/60 uppercase tracking-widest border-b border-white/5">
-                  {modelDropdownOpen === 'main' ? 'Main Model (conversation)' : 'Tool Model (sub-agents/vision)'}
-                </div>
+          <div className="flex items-center gap-3">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="xs" className="text-muted hover:text-muted-foreground">
+                  Main: {model || 'default'} <ChevronDown size={10} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64 max-h-[300px] overflow-y-auto">
+                <DropdownMenuLabel>Main Model (conversation)</DropdownMenuLabel>
+                <DropdownMenuSeparator />
                 {models.length === 0 && (
-                  <div className="px-3 py-2 text-xs font-mono text-muted uppercase tracking-widest">Loading models...</div>
+                  <div className="px-2 py-2 text-xs font-mono text-muted uppercase tracking-widest">Loading models...</div>
                 )}
-                {models.map((m) => {
-                  const isSelected = modelDropdownOpen === 'main' ? model === m.id : toolModel === m.id;
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => {
-                        if (modelDropdownOpen === 'main') {
-                          onSwitchModel(m.provider || 'llamacpp', m.id);
-                        } else {
-                          onSetToolModel(m.provider || 'llamacpp', m.id);
-                        }
-                        setModelDropdownOpen(null);
-                      }}
-                      className={cn(
-                        "w-full text-left px-3 py-2 text-xs font-mono uppercase tracking-widest transition-colors",
-                        isSelected
-                          ? "bg-primary/10 text-primary"
-                          : "text-muted hover:bg-white/5 hover:text-muted-foreground"
-                      )}
-                    >
-                      {m.name || m.id}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+                {models.map(m => (
+                  <DropdownMenuItem
+                    key={m.id}
+                    onClick={() => onSwitchModel(m.provider || 'llamacpp', m.id)}
+                    className={model === m.id ? 'text-primary' : ''}
+                  >
+                    {m.name || m.id}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="xs" className="text-muted hover:text-muted-foreground">
+                  Tool: {toolModel || 'default'} <ChevronDown size={10} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64 max-h-[300px] overflow-y-auto">
+                <DropdownMenuLabel>Tool Model (sub-agents/vision)</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {models.length === 0 && (
+                  <div className="px-2 py-2 text-xs font-mono text-muted uppercase tracking-widest">Loading models...</div>
+                )}
+                {models.map(m => (
+                  <DropdownMenuItem
+                    key={m.id}
+                    onClick={() => onSetToolModel(m.provider || 'llamacpp', m.id)}
+                    className={toolModel === m.id ? 'text-primary' : ''}
+                  >
+                    {m.name || m.id}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-          <button onClick={onReset} className="text-xs font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest">
-            <RotateCcw size={10} /> New Task
-          </button>
-          <button
-            onClick={() => { onAutoBranchChange(!autoBranch); if (!autoBranch) onAutoMergeChange(false); }}
-            className={cn(
-              "text-xs font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
-              autoBranch ? "text-primary" : "text-muted hover:text-muted-foreground"
-            )}
-          >
-            <GitBranch size={10} /> Auto-Branch
-          </button>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="xs" onClick={onReset}>
+                <RotateCcw size={10} /> New Task
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>New Task <span className="kbd ml-1">Ctrl+Shift+N</span></TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => { onAutoBranchChange(!autoBranch); if (!autoBranch) onAutoMergeChange(false); }}
+                className={autoBranch ? 'text-primary' : ''}
+              >
+                <GitBranch size={10} /> Auto-Branch
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Auto-Branch <span className="kbd ml-1">Ctrl+Shift+B</span></TooltipContent>
+          </Tooltip>
+
           {autoBranch && (
-            <button
-              onClick={() => onAutoMergeChange(!autoMerge)}
-              className={cn(
-                "text-xs font-mono flex items-center gap-1 uppercase tracking-widest transition-colors",
-                autoMerge ? "text-primary" : "text-muted hover:text-muted-foreground"
-              )}
-            >
-              <GitPullRequest size={10} /> Auto-Merge
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => onAutoMergeChange(!autoMerge)}
+                  className={autoMerge ? 'text-primary' : ''}
+                >
+                  <GitPullRequest size={10} /> Auto-Merge
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Auto-Merge <span className="kbd ml-1">Ctrl+Shift+M</span></TooltipContent>
+            </Tooltip>
           )}
-          <button onClick={onCompact} disabled={isStreaming} className="text-xs font-mono text-muted hover:text-muted-foreground flex items-center gap-1 uppercase tracking-widest disabled:opacity-30">
-            <Trash2 size={10} /> Compact
-          </button>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="xs" onClick={onCompact} disabled={isStreaming}>
+                <Trash2 size={10} /> Compact
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Compact <span className="kbd ml-1">Ctrl+Shift+C</span></TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </div>
@@ -290,9 +300,9 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
         <div className="w-full h-12 border-b border-white/5 flex items-center px-6 shrink-0 bg-black/50 backdrop-blur-md">
           <div className="flex items-center gap-3">
             {onBack && !isZenMode && (
-              <button onClick={onBack} className="flex items-center gap-1.5 text-muted hover:text-zinc-300 transition-colors">
+              <Button variant="ghost" size="icon-xs" onClick={onBack}>
                 <ArrowLeft size={14} />
-              </button>
+              </Button>
             )}
             <div className="flex items-center gap-2 text-sm font-mono tracking-widest text-muted uppercase font-bold">
               <Zap size={12} className="text-primary" />
@@ -434,15 +444,20 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                   {state.prUrl}
                 </div>
               </div>
-              <a
-                href={state.prUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
+              <Button
+                variant="default"
+                size="xs"
+                asChild
               >
-                <ExternalLink size={10} />
-                Open PR
-              </a>
+                <a
+                  href={state.prUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink size={10} />
+                  Open PR
+                </a>
+              </Button>
             </div>
           </div>
         )}

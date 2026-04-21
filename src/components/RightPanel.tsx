@@ -9,6 +9,10 @@ import { ToolCall } from '../lib/pi-events';
 import { ArtifactView } from './ArtifactView';
 import { BrowserTools } from './BrowserTools';
 import { useComputerUse } from '../hooks/useComputerUse';
+import { Button } from './ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { ScrollArea, ScrollBar } from './ui/scroll-area';
+import { Separator } from './ui/separator';
 
 interface StreamingState {
   isStreaming: boolean;
@@ -94,60 +98,75 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
       {/* Top bar: artifact tabs + action buttons */}
       <div className="h-10 border-b border-white/5 flex items-center px-1 shrink-0 bg-black/50 gap-0.5">
         {/* Artifact icon tabs — horizontal, dynamic */}
-        <div className="flex items-center gap-0.5 overflow-x-auto custom-scrollbar">
-          {artifacts.map(a => (
-            <button
-              key={a.id}
-              onClick={() => { setSelectedArtifactId(a.id); setShowSettings(false); setShowBrowser(false); }}
-              title={`${typeLabels[a.type]}: ${a.title}`}
+        <ScrollArea className="flex-1 min-w-0">
+          <div className="flex items-center gap-0.5">
+            {artifacts.map(a => (
+              <Button
+                key={a.id}
+                variant="ghost"
+                size="xs"
+                onClick={() => { setSelectedArtifactId(a.id); setShowSettings(false); setShowBrowser(false); }}
+                title={`${typeLabels[a.type]}: ${a.title}`}
+                className={cn(
+                  'shrink-0',
+                  selectedArtifact?.id === a.id && !showSettings && !showBrowser
+                    ? 'text-primary bg-primary/10'
+                    : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+                )}
+              >
+                {typeIcons[a.type]}
+                <span className="truncate max-w-[80px]">{a.title}</span>
+              </Button>
+            ))}
+            {artifacts.length === 0 && !artifactsLoading && (
+              <span className="text-xs font-mono text-zinc-700 px-2">No artifacts yet</span>
+            )}
+            {artifactsLoading && (
+              <Loader size={10} className="text-muted-foreground animate-spin mx-2" />
+            )}
+          </div>
+          <ScrollBar orientation="horizontal" />
+        </ScrollArea>
+
+        {/* Browser toggle */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => { setShowBrowser(!showBrowser); setShowSettings(false); }}
               className={cn(
-                'flex items-center gap-1 px-2 py-1 text-xs font-mono uppercase tracking-widest transition-colors rounded shrink-0',
-                selectedArtifact?.id === a.id && !showSettings && !showBrowser
+                showBrowser
                   ? 'text-primary bg-primary/10'
                   : 'text-muted hover:text-muted-foreground hover:bg-white/5'
               )}
             >
-              {typeIcons[a.type]}
-              <span className="truncate max-w-[80px]">{a.title}</span>
-            </button>
-          ))}
-          {artifacts.length === 0 && !artifactsLoading && (
-            <span className="text-xs font-mono text-zinc-700 px-2">No artifacts yet</span>
-          )}
-          {artifactsLoading && (
-            <Loader size={10} className="text-muted-foreground animate-spin mx-2" />
-          )}
-        </div>
+              <Globe size={12} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Browser / Computer Use</TooltipContent>
+        </Tooltip>
 
-        <div className="flex-1" />
-
-        {/* Browser toggle */}
-        <button
-          onClick={() => { setShowBrowser(!showBrowser); setShowSettings(false); }}
-          className={cn(
-            'p-1.5 transition-colors rounded',
-            showBrowser
-              ? 'text-primary bg-primary/10'
-              : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-          )}
-          title="Browser / Computer Use"
-        >
-          <Globe size={12} />
-        </button>
+        <Separator orientation="vertical" className="h-3" />
 
         {/* Settings toggle */}
-        <button
-          onClick={() => { setShowSettings(!showSettings); setShowBrowser(false); }}
-          className={cn(
-            'p-1.5 transition-colors rounded',
-            showSettings
-              ? 'text-primary bg-primary/10'
-              : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-          )}
-          title="Settings"
-        >
-          <Settings size={12} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => { setShowSettings(!showSettings); setShowBrowser(false); }}
+              className={cn(
+                showSettings
+                  ? 'text-primary bg-primary/10'
+                  : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+              )}
+            >
+              <Settings size={12} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Settings</TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Live streaming status */}
@@ -208,33 +227,36 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
               {cu.enabled ? (
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-mono text-primary">Enabled</span>
-                  <button
+                  <Button
+                    variant="destructive"
+                    size="xs"
                     onClick={() => {
                       cu.disableComputerUse();
                     }}
-                    className="px-3 py-1 text-xs font-mono uppercase tracking-widest text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 transition-colors"
                   >
                     Disable
-                  </button>
+                  </Button>
                   {sandboxId && (
-                    <button
+                    <Button
+                      variant="outline"
+                      size="xs"
                       onClick={() => {
                         window.open(`/api/sandbox/vnc/${sandboxId}/vnc.html`, '_blank', 'width=1280,height=720');
                       }}
-                      className="px-3 py-1 text-xs font-mono uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 transition-colors"
                     >
                       Open Desktop
-                    </button>
+                    </Button>
                   )}
                 </div>
               ) : (
-                <button
+                <Button
+                  variant="default"
+                  size="xs"
                   onClick={() => { if (sandboxId) cu.enableComputerUse(sandboxId); }}
                   disabled={!sandboxId || cu.loading}
-                  className="px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
                 >
                   {cu.loading ? 'Starting...' : 'Enable Computer Use'}
-                </button>
+                </Button>
               )}
               {cu.error && (
                 <p className="text-xs font-mono text-red-400">{cu.error}</p>
@@ -252,15 +274,16 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
               <p className="text-xs font-mono text-muted-foreground leading-relaxed">
                 Connect your GitHub account to enable PR creation, branch management, and repository cloning.
               </p>
-              <button
+              <Button
+                variant="outline"
+                size="xs"
                 onClick={() => {
                   // Trigger the GitHub modal in AppShell via custom event
                   window.dispatchEvent(new CustomEvent('open-github-settings'));
                 }}
-                className="px-3 py-1.5 text-xs font-black uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 transition-colors"
               >
                 Configure GitHub
-              </button>
+              </Button>
             </div>
           </div>
         )}

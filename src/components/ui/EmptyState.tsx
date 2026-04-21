@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '../../lib/utils';
+import { Button } from './button';
 
 interface EmptyStateProps {
   icon: React.ReactNode;
@@ -18,12 +19,14 @@ export function EmptyState({ icon, title, description, action, className }: Empt
         <p className="text-xs font-mono text-zinc-700 max-w-xs">{description}</p>
       )}
       {action && (
-        <button
+        <Button
+          variant="outline"
+          size="xs"
           onClick={action.onClick}
-          className="mt-2 px-3 py-1.5 text-xs font-mono uppercase tracking-widest bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+          className="mt-2"
         >
           {action.label}
-        </button>
+        </Button>
       )}
     </div>
   );

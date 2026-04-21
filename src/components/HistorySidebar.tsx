@@ -4,6 +4,17 @@ import { cn } from '../lib/utils';
 import { api, ConversationSummary } from '../lib/api';
 import { useToastContext } from './ui/Toast';
 import { usePolling } from '../hooks/usePolling';
+import { Button } from './ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
+import { ScrollArea } from './ui/scroll-area';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from './ui/context-menu';
+import { Input } from './ui/input';
 
 interface HistorySidebarProps {
   projects: string[];
@@ -40,7 +51,6 @@ export function HistorySidebar({
 }: HistorySidebarProps) {
   const [groups, setGroups] = useState<ProjectGroup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [contextMenu, setContextMenu] = useState<{ project: string; agentId: string; x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState<{ project: string; agentId: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -98,14 +108,6 @@ export function HistorySidebar({
 
   usePolling(fetchHistory, 15000, true);
 
-  // Close context menu on click outside
-  useEffect(() => {
-    if (!contextMenu) return;
-    const handler = () => setContextMenu(null);
-    window.addEventListener('click', handler);
-    return () => window.removeEventListener('click', handler);
-  }, [contextMenu]);
-
   // Focus rename input
   useEffect(() => {
     if (renaming) renameInputRef.current?.focus();
@@ -126,14 +128,7 @@ export function HistorySidebar({
     (sum, g) => sum + g.conversations.length, 0
   );
 
-  const handleContextMenu = useCallback((e: React.MouseEvent, project: string, agentId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setContextMenu({ project, agentId, x: e.clientX, y: e.clientY });
-  }, []);
-
   const handleDelete = useCallback(async (project: string, agentId: string) => {
-    setContextMenu(null);
     try {
       await api.pi.deleteConversation(project, agentId);
       addToast('success', 'Conversation deleted');
@@ -144,7 +139,6 @@ export function HistorySidebar({
   }, [fetchHistory, addToast]);
 
   const handleRenameStart = useCallback((project: string, agentId: string, currentTitle: string) => {
-    setContextMenu(null);
     setRenaming({ project, agentId });
     setRenameValue(currentTitle);
   }, []);
@@ -168,160 +162,157 @@ export function HistorySidebar({
   }, []);
 
   return (
-    <div className="h-full flex flex-col bg-black">
-      {/* Header */}
-      <div className="p-3 border-b border-white/5 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Clock size={10} className="text-muted-foreground" />
-          <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
-            History
-          </span>
-          <span className="text-xs font-mono text-zinc-700">{totalConversations}</span>
+    <TooltipProvider delayDuration={300}>
+      <div className="h-full flex flex-col bg-black">
+        {/* Header */}
+        <div className="p-3 border-b border-white/5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Clock size={10} className="text-muted-foreground" />
+            <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
+              History
+            </span>
+            <span className="text-xs font-mono text-zinc-700">{totalConversations}</span>
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" onClick={onNewChat}>
+                <Plus size={12} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              New chat <span className="kbd">Ctrl+Shift+N</span>
+            </TooltipContent>
+          </Tooltip>
         </div>
-        <button
-          onClick={onNewChat}
-          className="p-1 hover:bg-white/5 text-muted hover:text-zinc-300 transition-colors"
-          title="New chat"
-        >
-          <Plus size={12} />
-        </button>
-      </div>
 
-      {/* Project groups */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {loading && groups.length === 0 ? (
-          <div className="flex items-center justify-center h-20 text-zinc-700 text-xs font-mono">
-            Loading...
-          </div>
-        ) : groups.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-6 opacity-20">
-            <MessageSquare size={20} className="mb-2" />
-            <p className="text-xs font-mono uppercase tracking-widest text-center">
-              No projects yet
-            </p>
-          </div>
-        ) : (
-          groups.map(group => (
-            <div key={group.project}>
-              {/* Project header */}
-              <button
-                onClick={() => toggleGroup(group.project)}
-                className={cn(
-                  "w-full text-left px-3 py-2 flex items-center gap-2 transition-colors border-b border-white/[0.02]",
-                  group.project === activeProject
-                    ? "bg-primary/5 text-primary"
-                    : "text-zinc-400 hover:bg-white/[0.02] hover:text-zinc-300"
-                )}
-              >
-                {group.collapsed ? (
-                  <ChevronRight size={10} className="shrink-0 text-zinc-600" />
-                ) : (
-                  <ChevronDown size={10} className="shrink-0 text-zinc-600" />
-                )}
-                <FolderOpen size={10} className="shrink-0" />
-                <span className="text-xs font-mono uppercase tracking-widest truncate">
-                  {group.project}
-                </span>
-                {group.conversations.length > 0 && (
-                  <span className="text-xs font-mono text-zinc-600 ml-auto">
-                    {group.conversations.length}
-                  </span>
-                )}
-              </button>
-
-              {/* Conversations */}
-              {!group.collapsed && (
-                <div>
-                  {group.conversations.map(conv => {
-                    const isRenaming = renaming?.project === conv.project && renaming?.agentId === conv.agentId;
-
-                    return (
-                      <div
-                        key={`${conv.project}-${conv.agentId}`}
-                        onClick={() => {
-                          if (!isRenaming) onSelectSession(conv.project, conv.agentId);
-                        }}
-                        onContextMenu={(e) => handleContextMenu(e, conv.project, conv.agentId)}
-                        className={cn(
-                          "px-3 py-1.5 pl-8 flex flex-col gap-0.5 transition-colors cursor-pointer",
-                          isActive(conv.project, conv.agentId)
-                            ? "bg-primary/10 text-primary border-l-2 border-primary"
-                            : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300 border-l-2 border-transparent"
-                        )}
-                      >
-                        {isRenaming ? (
-                          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                            <input
-                              ref={renameInputRef}
-                              value={renameValue}
-                              onChange={e => setRenameValue(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') handleRenameSubmit();
-                                if (e.key === 'Escape') setRenaming(null);
-                              }}
-                              className="flex-1 bg-zinc-900 border border-white/10 rounded px-1.5 py-0.5 text-xs font-mono text-zinc-200 outline-none focus:border-primary/40"
-                            />
-                            <button onClick={handleRenameSubmit} className="p-0.5 hover:text-primary">
-                              <Check size={9} />
-                            </button>
-                            <button onClick={() => setRenaming(null)} className="p-0.5 hover:text-red-400">
-                              <X size={9} />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-xs font-mono truncate">
-                            {getConvDisplayTitle(conv)}
-                          </span>
-                        )}
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-zinc-600">
-                            {formatTimeAgo(conv.lastAt)}
-                          </span>
-                          <span className="text-xs font-mono text-zinc-700">
-                            {conv.messageCount} msgs
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {group.conversations.length === 0 && (
-                    <div className="px-8 py-2 text-xs font-mono text-zinc-700">
-                      No conversations yet
-                    </div>
-                  )}
-                </div>
-              )}
+        {/* Project groups */}
+        <ScrollArea className="flex-1">
+          {loading && groups.length === 0 ? (
+            <div className="flex items-center justify-center h-20 text-zinc-700 text-xs font-mono">
+              Loading...
             </div>
-          ))
-        )}
-      </div>
+          ) : groups.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-6 opacity-20">
+              <MessageSquare size={20} className="mb-2" />
+              <p className="text-xs font-mono uppercase tracking-widest text-center">
+                No projects yet
+              </p>
+            </div>
+          ) : (
+            groups.map(group => (
+              <div key={group.project}>
+                {/* Project header */}
+                <button
+                  onClick={() => toggleGroup(group.project)}
+                  className={cn(
+                    "w-full text-left px-3 py-2 flex items-center gap-2 transition-colors border-b border-white/[0.02]",
+                    group.project === activeProject
+                      ? "bg-primary/5 text-primary"
+                      : "text-zinc-400 hover:bg-white/[0.02] hover:text-zinc-300"
+                  )}
+                >
+                  {group.collapsed ? (
+                    <ChevronRight size={10} className="shrink-0 text-zinc-600" />
+                  ) : (
+                    <ChevronDown size={10} className="shrink-0 text-zinc-600" />
+                  )}
+                  <FolderOpen size={10} className="shrink-0" />
+                  <span className="text-xs font-mono uppercase tracking-widest truncate">
+                    {group.project}
+                  </span>
+                  {group.conversations.length > 0 && (
+                    <span className="text-xs font-mono text-zinc-600 ml-auto">
+                      {group.conversations.length}
+                    </span>
+                  )}
+                </button>
 
-      {/* Context menu */}
-      {contextMenu && (
-        <div
-          className="fixed z-50 bg-zinc-900 border border-white/10 shadow-xl rounded py-1 min-w-[120px]"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={e => e.stopPropagation()}
-        >
-          <button
-            onClick={() => {
-              const conv = groups
-                .flatMap(g => g.conversations)
-                .find(c => c.project === contextMenu.project && c.agentId === contextMenu.agentId);
-              handleRenameStart(contextMenu.project, contextMenu.agentId, conv ? getConvDisplayTitle(conv) : '');
-            }}
-            className="w-full text-left px-3 py-1.5 text-xs font-mono text-zinc-300 hover:bg-white/5 flex items-center gap-2"
-          >
-            <Pencil size={9} /> Rename
-          </button>
-          <button
-            onClick={() => handleDelete(contextMenu.project, contextMenu.agentId)}
-            className="w-full text-left px-3 py-1.5 text-xs font-mono text-red-400 hover:bg-red-400/10 flex items-center gap-2"
-          >
-            <Trash2 size={9} /> Delete
-          </button>
-        </div>
-      )}
-    </div>
+                {/* Conversations */}
+                {!group.collapsed && (
+                  <div>
+                    {group.conversations.map(conv => {
+                      const isRenaming = renaming?.project === conv.project && renaming?.agentId === conv.agentId;
+
+                      return (
+                        <ContextMenu key={`${conv.project}-${conv.agentId}`}>
+                          <ContextMenuTrigger asChild>
+                            <div
+                              onClick={() => {
+                                if (!isRenaming) onSelectSession(conv.project, conv.agentId);
+                              }}
+                              className={cn(
+                                "px-3 py-1.5 pl-8 flex flex-col gap-0.5 transition-all duration-150 cursor-pointer",
+                                isActive(conv.project, conv.agentId)
+                                  ? "bg-primary/10 text-primary border-l-2 border-primary"
+                                  : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300 border-l-2 border-transparent"
+                              )}
+                            >
+                              {isRenaming ? (
+                                <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                  <Input
+                                    ref={renameInputRef}
+                                    value={renameValue}
+                                    onChange={e => setRenameValue(e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') handleRenameSubmit();
+                                      if (e.key === 'Escape') setRenaming(null);
+                                    }}
+                                    className="flex-1 px-1.5 py-0.5 text-xs"
+                                  />
+                                  <Button variant="ghost" size="icon-xs" onClick={handleRenameSubmit}>
+                                    <Check size={9} />
+                                  </Button>
+                                  <Button variant="ghost" size="icon-xs" onClick={() => setRenaming(null)}>
+                                    <X size={9} />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <span className="text-xs font-mono truncate">
+                                  {getConvDisplayTitle(conv)}
+                                </span>
+                              )}
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-mono text-zinc-600">
+                                  {formatTimeAgo(conv.lastAt)}
+                                </span>
+                                <span className="text-xs font-mono text-zinc-700">
+                                  {conv.messageCount} msgs
+                                </span>
+                              </div>
+                            </div>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent>
+                            <ContextMenuItem
+                              onClick={() => {
+                                const c = conv;
+                                handleRenameStart(c.project, c.agentId, getConvDisplayTitle(c));
+                              }}
+                            >
+                              <Pencil size={9} /> Rename
+                            </ContextMenuItem>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem
+                              className="text-red-400 focus:text-red-400 focus:bg-red-400/10"
+                              onClick={() => handleDelete(conv.project, conv.agentId)}
+                            >
+                              <Trash2 size={9} /> Delete
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
+                      );
+                    })}
+                    {group.conversations.length === 0 && (
+                      <div className="px-8 py-2 text-xs font-mono text-zinc-700">
+                        No conversations yet
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </ScrollArea>
+      </div>
+    </TooltipProvider>
   );
 }

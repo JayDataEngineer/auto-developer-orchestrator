@@ -6,12 +6,20 @@ import { useToastContext } from './ui/Toast';
 import { StatusBadge } from './ui/StatusBadge';
 import { EmptyState } from './ui/EmptyState';
 import { usePolling } from '../hooks/usePolling';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Switch } from './ui/switch';
+import { ScrollArea } from './ui/scroll-area';
+import { Badge } from './ui/badge';
+import { Separator } from './ui/separator';
 import {
   LayoutGrid, Plus, Play, Trash2, Clock,
   Loader, AlertCircle, X, Layers, RefreshCw, Save, Copy, Link
 } from 'lucide-react';
 
-// ─── Helpers ─────────────────────────────────────────────────
+// --- Helpers ---
 
 function formatDuration(ms?: number): string {
   if (!ms) return '—';
@@ -63,7 +71,7 @@ function jobBadgeStatus(job: SchedulerJob): string {
   return job.status;
 }
 
-// ─── Manual Task Card ────────────────────────────────────────
+// --- Manual Task Card ---
 
 interface TaskCardProps {
   task: SchedulerJob;
@@ -75,7 +83,6 @@ interface TaskCardProps {
 
 function TaskCard({ task, isSelected, onSelect, onTrigger, onDelete }: TaskCardProps) {
   const isRunning = task.status === 'running';
-  const hasRun = !!task.lastRunAt;
 
   return (
     <div
@@ -106,22 +113,22 @@ function TaskCard({ task, isSelected, onSelect, onTrigger, onDelete }: TaskCardP
       {/* Actions on hover */}
       <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
         {!isRunning && (
-          <button onClick={e => { e.stopPropagation(); onTrigger(); }} className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors" title="Run">
+          <Button variant="ghost" size="icon-xs" onClick={e => { e.stopPropagation(); onTrigger(); }} title="Run">
             <Play size={10} />
-          </button>
+          </Button>
         )}
         {isRunning && (
           <span className="p-1 text-yellow-400 animate-pulse"><Loader size={10} /></span>
         )}
-        <button onClick={e => { e.stopPropagation(); onDelete(); }} className="p-1 text-zinc-500 hover:text-red-400 transition-colors" title="Delete">
+        <Button variant="ghost" size="icon-xs" onClick={e => { e.stopPropagation(); onDelete(); }} title="Delete">
           <Trash2 size={10} />
-        </button>
+        </Button>
       </div>
     </div>
   );
 }
 
-// ─── Edit Task Modal ──────────────────────────────────────────
+// --- Edit Task Modal ---
 
 interface EditTaskModalProps {
   task: SchedulerJob;
@@ -195,126 +202,145 @@ function EditTaskModal({ task, onClose, onSave, onTrigger, onDelete }: EditTaskM
             <span className="text-sm font-bold flex-1 truncate">Edit Task</span>
             <div className="flex items-center gap-1">
               {!isRunning && (
-                <button onClick={() => onTrigger(task.id)} className="flex items-center gap-1 px-2 py-1 text-xs font-mono uppercase tracking-widest bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors rounded">
+                <Button variant="ghost" size="xs" onClick={() => onTrigger(task.id)}>
                   <Play size={10} /> Run
-                </button>
+                </Button>
               )}
               {isRunning && (
                 <span className="flex items-center gap-1 px-2 py-1 text-xs font-mono uppercase tracking-widest text-yellow-400">
                   <Loader size={10} className="animate-spin" /> Running
                 </span>
               )}
-              <button onClick={() => { onDelete(task.id); onClose(); }} className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors">
+              <Button variant="ghost" size="icon-xs" onClick={() => { onDelete(task.id); onClose(); }}>
                 <Trash2 size={14} />
-              </button>
-              <button onClick={onClose} className="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors">
+              </Button>
+              <Button variant="ghost" size="icon-xs" onClick={onClose}>
                 <X size={14} />
-              </button>
+              </Button>
             </div>
           </div>
 
           {/* Form */}
-          <form onSubmit={handleSave} className="p-6 space-y-3 max-h-[70vh] overflow-y-auto custom-scrollbar">
-            {error && (
-              <div className="p-2 bg-red-500/10 border border-red-500/20 text-xs text-red-400 rounded-lg">{error}</div>
-            )}
+          <form onSubmit={handleSave} className="p-6 space-y-3">
+            <ScrollArea className="max-h-[70vh]">
+              <div className="space-y-3 pr-2">
+                {error && (
+                  <div className="p-2 bg-red-500/10 border border-red-500/20 text-xs text-red-400 rounded-lg">{error}</div>
+                )}
 
-            {task.lastError && (
-              <div className="p-2 bg-red-500/5 border border-red-500/20 flex items-start gap-2 rounded-lg">
-                <AlertCircle size={12} className="text-red-400 shrink-0 mt-0.5" />
-                <pre className="text-xs font-mono text-red-400 whitespace-pre-wrap">{task.lastError}</pre>
-              </div>
-            )}
+                {task.lastError && (
+                  <div className="p-2 bg-red-500/5 border border-red-500/20 flex items-start gap-2 rounded-lg">
+                    <AlertCircle size={12} className="text-red-400 shrink-0 mt-0.5" />
+                    <pre className="text-xs font-mono text-red-400 whitespace-pre-wrap">{task.lastError}</pre>
+                  </div>
+                )}
 
-            <div className="flex gap-2">
-              <input value={name} onChange={e => setName(e.target.value)} placeholder="Task name" className="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2.5 text-sm text-zinc-300 outline-none focus:border-primary/50 transition-colors" autoFocus />
-              <select value={scheduleType} onChange={e => setScheduleType(e.target.value as any)} className="bg-black border border-white/10 rounded-xl px-3 py-2.5 text-sm text-zinc-300 outline-none focus:border-primary/50 transition-colors">
-                <option value="manual">Manual</option>
-                <option value="cron">Cron</option>
-                <option value="every">Interval</option>
-              </select>
-            </div>
-
-            <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Description (optional)" className="w-full bg-black border border-white/10 rounded-xl px-3 py-2.5 text-sm text-zinc-300 outline-none focus:border-primary/50 transition-colors" />
-
-            {scheduleType === 'cron' && (
-              <div>
-                <input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="0 0 9 * * *" className="w-full bg-black border border-white/10 rounded-xl px-3 py-2.5 text-sm text-zinc-300 outline-none focus:border-primary/50 transition-colors font-mono" />
-                <p className="text-[10px] text-zinc-600 mt-1 ml-1">6 fields: sec min hour day month dow — e.g. "0 0 9 * * *" = daily at 9am</p>
-              </div>
-            )}
-
-            {scheduleType === 'every' && (
-              <select value={everySeconds} onChange={e => setEverySeconds(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-3 py-2.5 text-sm text-zinc-300 outline-none focus:border-primary/50 transition-colors">
-                <option value="300">Every 5 minutes</option>
-                <option value="900">Every 15 minutes</option>
-                <option value="1800">Every 30 minutes</option>
-                <option value="3600">Every hour</option>
-                <option value="21600">Every 6 hours</option>
-                <option value="43200">Every 12 hours</option>
-                <option value="86400">Every 24 hours</option>
-              </select>
-            )}
-
-            <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Prompt — what should the agent do?" rows={4} className="w-full bg-black border border-white/10 rounded-xl px-3 py-2.5 text-sm text-zinc-300 outline-none focus:border-primary/50 transition-colors resize-none" />
-
-            <div className="flex items-center gap-2">
-              <input value={model} onChange={e => setModel(e.target.value)} placeholder="Model (optional)" className="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2.5 text-sm text-zinc-300 outline-none focus:border-primary/50 transition-colors" />
-            </div>
-
-            {/* Metrics (read-only) */}
-            <div className="flex items-center gap-4 pt-2 border-t border-white/5">
-              <div>
-                <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Duration</span>
-                <p className="text-xs font-mono text-zinc-400">{formatDuration(task.durationMs)}</p>
-              </div>
-              <div>
-                <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Tokens</span>
-                <p className="text-xs font-mono text-zinc-400">{formatTokens(task.inputTokens)} in / {formatTokens(task.outputTokens)} out</p>
-              </div>
-              <div>
-                <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Last Run</span>
-                <p className="text-xs font-mono text-zinc-400">{task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : '—'}</p>
-              </div>
-            </div>
-
-            {/* Webhook URL */}
-            {task.webhookToken && (
-              <div className="pt-2 border-t border-white/5">
-                <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Webhook URL</span>
-                <div className="flex items-center gap-2 mt-1">
-                  <Link size={10} className="text-zinc-600 shrink-0" />
-                  <code className="flex-1 text-xs font-mono text-zinc-400 bg-black/50 rounded-lg px-2 py-1.5 truncate border border-white/5">
-                    {window.location.origin}/api/scheduler/webhook/{task.webhookToken}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}/api/scheduler/webhook/${task.webhookToken}`);
-                      addToast('success', 'Webhook URL copied');
-                    }}
-                    className="p-1.5 text-zinc-500 hover:text-primary transition-colors shrink-0"
-                    title="Copy webhook URL"
-                  >
-                    <Copy size={12} />
-                  </button>
+                <div className="flex gap-2">
+                  <Input value={name} onChange={e => setName(e.target.value)} placeholder="Task name" className="flex-1" autoFocus />
+                  <Select value={scheduleType} onValueChange={v => setScheduleType(v as any)}>
+                    <SelectTrigger className="w-[120px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manual">Manual</SelectItem>
+                      <SelectItem value="cron">Cron</SelectItem>
+                      <SelectItem value="every">Interval</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <p className="text-[10px] text-zinc-700 mt-1 ml-4">POST to this URL to trigger the job. Optional body: {"{"}"message": "override prompt"{"}"}</p>
-              </div>
-            )}
 
-            {/* Save button */}
-            <button
-              type="submit"
-              disabled={saving || !name || !message}
-              className="w-full bg-primary text-black font-bold py-3 rounded-xl text-xs uppercase tracking-widest hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? (
-                <><Loader size={14} className="animate-spin" /> Saving...</>
-              ) : (
-                <><Save size={14} /> Save Changes</>
-              )}
-            </button>
+                <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="Description (optional)" />
+
+                {scheduleType === 'cron' && (
+                  <div>
+                    <Input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="0 0 9 * * *" className="font-mono" />
+                    <p className="text-[10px] text-zinc-600 mt-1 ml-1">6 fields: sec min hour day month dow — e.g. "0 0 9 * * *" = daily at 9am</p>
+                  </div>
+                )}
+
+                {scheduleType === 'every' && (
+                  <Select value={everySeconds} onValueChange={setEverySeconds}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="300">Every 5 minutes</SelectItem>
+                      <SelectItem value="900">Every 15 minutes</SelectItem>
+                      <SelectItem value="1800">Every 30 minutes</SelectItem>
+                      <SelectItem value="3600">Every hour</SelectItem>
+                      <SelectItem value="21600">Every 6 hours</SelectItem>
+                      <SelectItem value="43200">Every 12 hours</SelectItem>
+                      <SelectItem value="86400">Every 24 hours</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+
+                <Textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Prompt — what should the agent do?" rows={4} />
+
+                <Input value={model} onChange={e => setModel(e.target.value)} placeholder="Model (optional)" />
+
+                {/* Metrics (read-only) */}
+                <Separator className="my-2" />
+                <div className="flex items-center gap-4 pt-2">
+                  <div>
+                    <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Duration</span>
+                    <p className="text-xs font-mono text-zinc-400">{formatDuration(task.durationMs)}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Tokens</span>
+                    <p className="text-xs font-mono text-zinc-400">{formatTokens(task.inputTokens)} in / {formatTokens(task.outputTokens)} out</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Last Run</span>
+                    <p className="text-xs font-mono text-zinc-400">{task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : '—'}</p>
+                  </div>
+                </div>
+
+                {/* Webhook URL */}
+                {task.webhookToken && (
+                  <>
+                    <Separator className="my-2" />
+                    <div className="pt-2">
+                      <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Webhook URL</span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Link size={10} className="text-zinc-600 shrink-0" />
+                        <code className="flex-1 text-xs font-mono text-zinc-400 bg-black/50 rounded-lg px-2 py-1.5 truncate border border-white/5">
+                          {window.location.origin}/api/scheduler/webhook/{task.webhookToken}
+                        </code>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`${window.location.origin}/api/scheduler/webhook/${task.webhookToken}`);
+                            addToast('success', 'Webhook URL copied');
+                          }}
+                          title="Copy webhook URL"
+                        >
+                          <Copy size={12} />
+                        </Button>
+                      </div>
+                      <p className="text-[10px] text-zinc-700 mt-1 ml-4">POST to this URL to trigger the job. Optional body: {"{"}"message": "override prompt"{"}"}</p>
+                    </div>
+                  </>
+                )}
+
+                {/* Save button */}
+                <Button
+                  type="submit"
+                  variant="default"
+                  size="default"
+                  disabled={saving || !name || !message}
+                  className="w-full"
+                >
+                  {saving ? (
+                    <><Loader size={14} className="animate-spin" /> Saving...</>
+                  ) : (
+                    <><Save size={14} /> Save Changes</>
+                  )}
+                </Button>
+              </div>
+            </ScrollArea>
           </form>
         </motion.div>
       </div>
@@ -322,7 +348,7 @@ function EditTaskModal({ task, onClose, onSave, onTrigger, onDelete }: EditTaskM
   );
 }
 
-// ─── Scheduled Job Row ────────────────────────────────────────
+// --- Scheduled Job Row ---
 
 interface JobRowProps {
   job: SchedulerJob;
@@ -347,7 +373,7 @@ function JobRow({ job, onEdit, onTrigger, onToggle, onDelete }: JobRowProps) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium truncate">{job.name}</span>
-          {!job.enabled && <span className="text-[10px] font-mono uppercase bg-zinc-800 px-1 py-0.5 text-zinc-500">off</span>}
+          {!job.enabled && <Badge variant="outline">off</Badge>}
         </div>
         <div className="flex items-center gap-3 mt-0.5">
           <span className="text-xs font-mono text-zinc-600">{formatSchedule(job)}</span>
@@ -355,21 +381,19 @@ function JobRow({ job, onEdit, onTrigger, onToggle, onDelete }: JobRowProps) {
         </div>
       </div>
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-        <button onClick={onTrigger} disabled={job.status === 'running'} className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors disabled:opacity-30" title="Run now">
+        <Button variant="ghost" size="icon-xs" onClick={onTrigger} disabled={job.status === 'running'} title="Run now">
           <Play size={11} />
-        </button>
-        <button onClick={onToggle} className={cn("p-1 transition-colors text-xs font-mono", job.enabled ? "text-emerald-400 hover:text-yellow-400" : "text-zinc-600 hover:text-emerald-400")} title={job.enabled ? "Pause schedule" : "Enable schedule"}>
-          {job.enabled ? 'ON' : 'OFF'}
-        </button>
-        <button onClick={onDelete} className="p-1 text-zinc-500 hover:text-red-400 transition-colors" title="Delete">
+        </Button>
+        <Switch checked={job.enabled} onCheckedChange={onToggle} title={job.enabled ? "Pause schedule" : "Enable schedule"} />
+        <Button variant="ghost" size="icon-xs" onClick={onDelete} title="Delete">
           <Trash2 size={11} />
-        </button>
+        </Button>
       </div>
     </div>
   );
 }
 
-// ─── Create Task/Job Form ─────────────────────────────────────
+// --- Create Task/Job Form ---
 
 interface CreateFormProps {
   projectDir: string;
@@ -421,47 +445,59 @@ function CreateForm({ projectDir, onSubmit, onCancel }: CreateFormProps) {
     <form onSubmit={handleSubmit} className="p-3 border-b border-white/5 bg-zinc-950/50 space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-mono uppercase tracking-widest text-primary">New Task</span>
-        <button type="button" onClick={onCancel} className="text-zinc-500 hover:text-zinc-300"><X size={12} /></button>
+        <Button type="button" variant="ghost" size="icon-xs" onClick={onCancel}>
+          <X size={12} />
+        </Button>
       </div>
       {error && <div className="p-1.5 bg-red-500/10 border border-red-500/20 text-xs text-red-400">{error}</div>}
       <div className="flex gap-2">
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Task name" className="flex-1 bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" autoFocus />
-        <select value={scheduleType} onChange={e => setScheduleType(e.target.value as any)} className="bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40">
-          <option value="manual">Manual</option>
-          <option value="cron">Cron</option>
-          <option value="every">Interval</option>
-        </select>
+        <Input value={name} onChange={e => setName(e.target.value)} placeholder="Task name" className="flex-1" autoFocus />
+        <Select value={scheduleType} onValueChange={v => setScheduleType(v as any)}>
+          <SelectTrigger className="w-[120px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="manual">Manual</SelectItem>
+            <SelectItem value="cron">Cron</SelectItem>
+            <SelectItem value="every">Interval</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
-      <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Description (optional)" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" />
+      <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="Description (optional)" />
       {scheduleType === 'cron' && (
         <div>
-          <input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="0 0 9 * * *" className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40 font-mono" />
+          <Input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="0 0 9 * * *" className="font-mono" />
           <p className="text-[10px] text-zinc-600 mt-0.5">6 fields: sec min hour day month dow — e.g. "0 0 9 * * *" = daily at 9am</p>
         </div>
       )}
       {scheduleType === 'every' && (
-        <select value={everySeconds} onChange={e => setEverySeconds(e.target.value)} className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40">
-          <option value="300">Every 5 minutes</option>
-          <option value="900">Every 15 minutes</option>
-          <option value="1800">Every 30 minutes</option>
-          <option value="3600">Every hour</option>
-          <option value="21600">Every 6 hours</option>
-          <option value="43200">Every 12 hours</option>
-          <option value="86400">Every 24 hours</option>
-        </select>
+        <Select value={everySeconds} onValueChange={setEverySeconds}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="300">Every 5 minutes</SelectItem>
+            <SelectItem value="900">Every 15 minutes</SelectItem>
+            <SelectItem value="1800">Every 30 minutes</SelectItem>
+            <SelectItem value="3600">Every hour</SelectItem>
+            <SelectItem value="21600">Every 6 hours</SelectItem>
+            <SelectItem value="43200">Every 12 hours</SelectItem>
+            <SelectItem value="86400">Every 24 hours</SelectItem>
+          </SelectContent>
+        </Select>
       )}
-      <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Prompt — what should the agent do?" rows={3} className="w-full bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40 resize-none" />
+      <Textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Prompt — what should the agent do?" rows={3} />
       <div className="flex items-center gap-2">
-        <input value={model} onChange={e => setModel(e.target.value)} placeholder="Model (optional)" className="flex-1 bg-zinc-900 border border-white/5 rounded px-2 py-1.5 text-sm outline-none focus:border-primary/40" />
-        <button type="submit" disabled={submitting || !name || !message} className="px-3 py-1.5 bg-primary text-black text-xs font-mono uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors">
+        <Input value={model} onChange={e => setModel(e.target.value)} placeholder="Model (optional)" className="flex-1" />
+        <Button type="submit" variant="default" size="xs" disabled={submitting || !name || !message}>
           {submitting ? 'Creating...' : 'Create'}
-        </button>
+        </Button>
       </div>
     </form>
   );
 }
 
-// ─── Task Board Tab (Unified) ─────────────────────────────────
+// --- Task Board Tab (Unified) ---
 
 export function TaskBoardTab() {
   const { addToast } = useToastContext();
@@ -567,7 +603,7 @@ export function TaskBoardTab() {
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <ScrollArea className="flex-1">
         {loading && allJobs.length === 0 ? (
           <div className="flex-1 flex items-center justify-center h-32">
             <Loader size={16} className="animate-spin text-zinc-600" />
@@ -587,7 +623,7 @@ export function TaskBoardTab() {
                 <div className="flex items-center gap-2 mb-2 px-1">
                   <Layers size={10} className="text-primary" />
                   <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 font-bold">Manual Tasks</span>
-                  <span className="text-xs font-mono text-zinc-700">{manualTasks.length}</span>
+                  <Badge variant="outline">{manualTasks.length}</Badge>
                 </div>
                 <div className="space-y-1">
                   {manualTasks.map(task => (
@@ -610,7 +646,7 @@ export function TaskBoardTab() {
                 <div className="flex items-center gap-2 mb-2 px-1">
                   <Clock size={10} className="text-primary" />
                   <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 font-bold">Scheduled Jobs</span>
-                  <span className="text-xs font-mono text-zinc-700">{scheduledJobs.length}</span>
+                  <Badge variant="outline">{scheduledJobs.length}</Badge>
                 </div>
                 <div className="border border-white/5 divide-y divide-white/5">
                   {scheduledJobs.map(job => (
@@ -628,20 +664,21 @@ export function TaskBoardTab() {
             )}
           </div>
         )}
-      </div>
+      </ScrollArea>
 
       {/* Bottom bar */}
       {!showCreate && (
         <div className="px-3 py-2 border-t border-white/5 shrink-0 flex items-center gap-2">
-          <button
+          <Button
+            variant="default"
+            size="xs"
             onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono uppercase tracking-widest bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
           >
             <Plus size={10} /> New Task
-          </button>
-          <button onClick={fetchJobs} className="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors" title="Refresh">
+          </Button>
+          <Button variant="ghost" size="icon-xs" onClick={fetchJobs} title="Refresh">
             <RefreshCw size={12} />
-          </button>
+          </Button>
           <span className="ml-auto text-xs font-mono text-zinc-700">{allJobs.length} total</span>
         </div>
       )}

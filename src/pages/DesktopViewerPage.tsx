@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Monitor, Globe, Terminal, ExternalLink, Maximize, Minimize } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { Button } from '../components/ui/button';
 
 interface DesktopViewerPageProps {
   sandboxId: string;
@@ -112,13 +113,14 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
               <span className="text-sm text-zinc-500">- Watch and interact with Chrome</span>
             </div>
             <div className="flex items-center gap-1">
-              <button
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => openInNewWindow(session.novncUrl || '')}
-                className="p-1 hover:bg-zinc-800 rounded"
                 title="Open in new window"
               >
                 <ExternalLink size={12} />
-              </button>
+              </Button>
             </div>
           </div>
           <div className="flex-1 bg-zinc-950">
@@ -182,20 +184,22 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
               <span className="text-xs font-medium text-zinc-300">Chrome Browser (CDP)</span>
             </div>
             <div className="flex items-center gap-1">
-              <button
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setLeftPaneMaximized(!leftPaneMaximized)}
-                className="p-1 hover:bg-zinc-800 rounded"
                 title={leftPaneMaximized ? 'Restore' : 'Maximize'}
               >
                 {leftPaneMaximized ? <Minimize size={12} /> : <Maximize size={12} />}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => openInNewWindow(session.cdpUrl || '')}
-                className="p-1 hover:bg-zinc-800 rounded"
                 title="Open in new window"
               >
                 <ExternalLink size={12} />
-              </button>
+              </Button>
             </div>
           </div>
           <div className="flex-1 bg-zinc-950">
@@ -228,20 +232,22 @@ export function DesktopViewerPage({ sandboxId }: DesktopViewerPageProps) {
               <span className="text-sm text-zinc-500">(Telegram, etc.)</span>
             </div>
             <div className="flex items-center gap-1">
-              <button
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setRightPaneMaximized(!rightPaneMaximized)}
-                className="p-1 hover:bg-zinc-800 rounded"
                 title={rightPaneMaximized ? 'Restore' : 'Maximize'}
               >
                 {rightPaneMaximized ? <Minimize size={12} /> : <Maximize size={12} />}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => openInNewWindow(session.novncUrl || '')}
-                className="p-1 hover:bg-zinc-800 rounded"
                 title="Open in new window"
               >
                 <ExternalLink size={12} />
-              </button>
+              </Button>
             </div>
           </div>
           <div className="flex-1 bg-zinc-950">

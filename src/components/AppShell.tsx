@@ -9,10 +9,15 @@ import { PiAgentView } from './PiAgentView';
 import { ComputerUseTab } from './ComputerUseTab';
 import { TaskBoardTab } from './TaskBoardTab';
 import { ToastProvider } from './ui/Toast';
+import { Button } from './ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from './ui/tooltip';
+import { Separator } from './ui/separator';
+import { Input } from './ui/input';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from './ui/select';
 import { useResizable } from '../hooks/useResizable';
 import { useArtifacts } from '../hooks/useArtifacts';
 import {
-  Zap, Settings, ChevronDown, LayoutGrid, Monitor, MessageSquare,
+  Zap, Settings, LayoutGrid, Monitor, MessageSquare,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Globe,
   FolderOpen, Plus
 } from 'lucide-react';
@@ -108,13 +113,14 @@ function DesktopChatSection({
           Chats
         </span>
         <div className="flex-1" />
-        <button
+        <Button
+          variant="ghost"
+          size="icon-xs"
           onClick={onNewConversation}
-          className="p-1 hover:bg-white/5 text-muted hover:text-zinc-300 transition-colors"
           title="New conversation"
         >
           <Plus size={10} />
-        </button>
+        </Button>
       </div>
 
       {/* Project selector */}
@@ -123,33 +129,33 @@ function DesktopChatSection({
           <FolderOpen size={9} className="text-zinc-500" />
           <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Project</span>
         </div>
-        <select
-          value={selectedProject || ''}
-          onChange={e => onSelectProject(e.target.value)}
-          className="w-full bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 outline-none focus:border-primary/40"
-        >
-          <option value="">Select project...</option>
-          {projects.map(p => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
+        <Select value={selectedProject || ''} onValueChange={onSelectProject}>
+          <SelectTrigger className="w-full bg-zinc-900 border-white/10 rounded">
+            <SelectValue placeholder="Select project..." />
+          </SelectTrigger>
+          <SelectContent>
+            {projects.map(p => (
+              <SelectItem key={p} value={p}>{p}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* Create sandbox project */}
         <div className="mt-2 flex gap-1">
-          <input
+          <Input
             value={sandboxName}
             onChange={e => setSandboxName(e.target.value)}
             placeholder="New sandbox name..."
-            className="flex-1 bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 outline-none focus:border-primary/40"
+            className="flex-1 bg-zinc-900 border-white/10 rounded"
             onKeyDown={e => { if (e.key === 'Enter') createSandbox(); }}
           />
-          <button
+          <Button
             onClick={createSandbox}
             disabled={!sandboxName.trim() || sandboxCreating}
-            className="px-2 py-1 text-xs font-mono bg-primary text-black rounded hover:bg-primary/80 disabled:opacity-30"
+            size="xs"
           >
             {sandboxCreating ? '...' : '+'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -330,55 +336,64 @@ function AppShellInner() {
       <div className="h-10 border-b border-white/5 flex items-center px-2 shrink-0 bg-black/50 backdrop-blur-md gap-1">
         {/* Left sidebar toggle — label changes per tab */}
         {leftLabel && (
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className={cn(
-              'flex items-center gap-1 px-2 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors rounded',
-              !sidebarCollapsed
-                ? 'text-primary bg-primary/10'
-                : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-            )}
-            title={sidebarCollapsed ? `Show ${leftLabel}` : `Hide ${leftLabel}`}
-          >
-            {sidebarCollapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
-            {!sidebarCollapsed && <span>{leftLabel}</span>}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className={cn(
+                  !sidebarCollapsed
+                    ? 'text-primary bg-primary/10'
+                    : ''
+                )}
+              >
+                {sidebarCollapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
+                {!sidebarCollapsed && <span>{leftLabel}</span>}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{sidebarCollapsed ? `Show ${leftLabel}` : `Hide ${leftLabel}`}</TooltipContent>
+          </Tooltip>
         )}
 
         {/* Tab switcher */}
         <div className="flex items-center gap-1">
-          {TABS.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 text-sm font-mono uppercase tracking-widest transition-colors rounded',
-                activeTab === tab.id
-                  ? 'text-primary bg-primary/10'
-                  : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-              )}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
+          {TABS.map((tab, i) => (
+            <Tooltip key={tab.id}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={cn(
+                    activeTab === tab.id
+                      ? 'text-primary bg-primary/10'
+                      : ''
+                  )}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{tab.label} <span className="kbd">Ctrl+{i+1}</span></TooltipContent>
+            </Tooltip>
           ))}
         </div>
 
-        <div className="w-px h-4 bg-white/10" />
+        <Separator orientation="vertical" className="h-4" />
 
         {/* Project selector */}
         <div className="relative">
-          <select
-            value={selectedProject || ''}
-            onChange={e => handleProjectChange(e.target.value)}
-            className="appearance-none bg-transparent text-sm font-mono uppercase tracking-widest text-muted-foreground pr-4 cursor-pointer focus:outline-none"
-          >
-            {safeProjects.length === 0 && <option value="">No projects</option>}
-            {safeProjects.map(p => (
-              <option key={p} value={p} className="bg-zinc-900 text-white">{p}</option>
-            ))}
-          </select>
-          <ChevronDown size={10} className="absolute right-0 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Select value={selectedProject || ''} onValueChange={handleProjectChange}>
+            <SelectTrigger className="w-48 bg-transparent border-0">
+              <SelectValue placeholder="No projects" />
+            </SelectTrigger>
+            <SelectContent>
+              {safeProjects.map(p => (
+                <SelectItem key={p} value={p}>{p}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex-1" />
@@ -392,38 +407,48 @@ function AppShellInner() {
 
         {/* Right sidebar toggle — label changes per tab */}
         {rightLabel && (
-          <button
-            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-            className={cn(
-              'flex items-center gap-1 px-2 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors rounded',
-              !rightPanelCollapsed
-                ? 'text-primary bg-primary/10'
-                : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-            )}
-            title={rightPanelCollapsed ? `Show ${rightLabel}` : `Hide ${rightLabel}`}
-          >
-            {!rightPanelCollapsed && <span>{rightLabel}</span>}
-            {rightPanelCollapsed ? <PanelRightOpen size={12} /> : <PanelRightClose size={12} />}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+                className={cn(
+                  !rightPanelCollapsed
+                    ? 'text-primary bg-primary/10'
+                    : ''
+                )}
+              >
+                {!rightPanelCollapsed && <span>{rightLabel}</span>}
+                {rightPanelCollapsed ? <PanelRightOpen size={12} /> : <PanelRightClose size={12} />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{rightPanelCollapsed ? `Show ${rightLabel}` : `Hide ${rightLabel}`}</TooltipContent>
+          </Tooltip>
         )}
 
         {/* Settings */}
-        <button
-          onClick={() => {
-            if (rightPanelCollapsed) setRightPanelCollapsed(false);
-            setShowSettings(!showSettings);
-          }}
-          className={cn(
-            'flex items-center gap-1.5 px-2 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors rounded',
-            showSettings
-              ? 'text-primary bg-primary/10'
-              : 'text-muted hover:text-muted-foreground hover:bg-white/5'
-          )}
-          title="Settings"
-        >
-          <Settings size={12} />
-          <span className="hidden md:inline">Settings</span>
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => {
+                if (rightPanelCollapsed) setRightPanelCollapsed(false);
+                setShowSettings(!showSettings);
+              }}
+              className={cn(
+                showSettings
+                  ? 'text-primary bg-primary/10'
+                  : ''
+              )}
+            >
+              <Settings size={12} />
+              <span className="hidden md:inline">Settings</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Settings <span className="kbd">Ctrl+,</span></TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Main content: left sidebar | center tab | right sidebar */}
@@ -555,13 +580,14 @@ function AppShellInner() {
                         <p className="text-xs font-mono text-muted-foreground">
                           Enable browser automation for the sandbox.
                         </p>
-                        <button
+                        <Button
+                          variant="default"
+                          size="xs"
                           onClick={() => resolvedSandboxId && cu.enableComputerUse(resolvedSandboxId)}
                           disabled={!resolvedSandboxId || cu.loading}
-                          className="px-3 py-1.5 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 disabled:opacity-30 transition-colors"
                         >
                           {cu.loading ? 'Starting...' : 'Enable Computer Use'}
-                        </button>
+                        </Button>
                         {cu.error && (
                           <p className="text-xs font-mono text-red-400">{cu.error}</p>
                         )}
@@ -580,25 +606,27 @@ function AppShellInner() {
                             }}
                             className="flex gap-1"
                           >
-                            <input
+                            <Input
                               name="url"
                               placeholder="https://"
-                              className="flex-1 bg-zinc-900 border border-white/10 rounded px-2 py-1 text-xs font-mono text-zinc-200 outline-none focus:border-primary/40"
+                              className="flex-1 bg-zinc-900 border-white/10 rounded"
                             />
-                            <button type="submit" className="px-2 py-1 text-xs font-mono bg-primary text-black rounded hover:bg-primary/80">
+                            <Button type="submit" variant="default" size="xs">
                               Go
-                            </button>
+                            </Button>
                           </form>
                         </div>
 
                         <div className="border border-white/5 p-3 space-y-2">
                           <span className="text-xs font-mono text-zinc-400">Screenshot</span>
-                          <button
+                          <Button
+                            variant="outline"
+                            size="xs"
                             onClick={() => cu.takeScreenshot()}
-                            className="w-full px-3 py-1.5 text-xs font-mono uppercase tracking-widest text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                            className="w-full"
                           >
                             Capture
-                          </button>
+                          </Button>
                           {cu.screenshot && (
                             <img
                               src={`data:image/png;base64,${cu.screenshot}`}
@@ -618,12 +646,14 @@ function AppShellInner() {
                           </div>
                         )}
 
-                        <button
+                        <Button
+                          variant="destructive"
+                          size="xs"
                           onClick={() => cu.disableComputerUse()}
-                          className="w-full px-3 py-1.5 text-xs font-mono uppercase tracking-widest text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 transition-colors"
+                          className="w-full"
                         >
                           Disable Computer Use
-                        </button>
+                        </Button>
                       </>
                     )}
                   </div>
@@ -649,7 +679,9 @@ function AppShellInner() {
 export function AppShell() {
   return (
     <ToastProvider>
-      <AppShellInner />
+      <TooltipProvider delayDuration={300}>
+        <AppShellInner />
+      </TooltipProvider>
     </ToastProvider>
   );
 }

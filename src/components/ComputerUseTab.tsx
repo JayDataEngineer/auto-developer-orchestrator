@@ -7,6 +7,8 @@ import {
 import { usePiAgentContext } from '../contexts/PiAgentContext';
 import { DesktopConsolePanel } from './DesktopConsolePanel';
 import { api } from '../lib/api';
+import { Button } from './ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 interface ComputerUseTabProps {
   selectedProject: string | null;
@@ -135,20 +137,30 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
               Desktop
             </span>
             <div className="w-px h-3 bg-white/10" />
-            <button
-              onClick={() => setDesktopFull(!desktopFull)}
-              className="p-1 hover:bg-white/5 text-zinc-500 hover:text-zinc-300"
-              title={desktopFull ? 'Exit full screen' : 'Full screen'}
-            >
-              {desktopFull ? <Minimize2 size={10} /> : <Maximize2 size={10} />}
-            </button>
-            <button
-              onClick={openDesktop}
-              className="p-1 hover:bg-white/5 text-zinc-500 hover:text-zinc-300"
-              title="Open in new window"
-            >
-              <ExternalLink size={10} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => setDesktopFull(!desktopFull)}
+                >
+                  {desktopFull ? <Minimize2 size={10} /> : <Maximize2 size={10} />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{desktopFull ? 'Exit fullscreen' : 'Fullscreen'}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={openDesktop}
+                >
+                  <ExternalLink size={10} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Open in new window</TooltipContent>
+            </Tooltip>
           </>
         )}
       </div>
@@ -178,12 +190,14 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
               <AlertCircle size={48} className="mx-auto mb-4 text-red-400/50" />
               <p className="text-sm font-mono text-zinc-400 mb-2">Desktop not available</p>
               <p className="text-xs font-mono text-zinc-600">{cu.error || sessionError}</p>
-              <button
+              <Button
+                variant="default"
+                size="xs"
                 onClick={startDesktop}
-                className="mt-4 px-4 py-2 bg-primary text-black text-xs font-black uppercase tracking-widest hover:bg-primary/80 transition-colors"
+                className="mt-4"
               >
                 Retry
-              </button>
+              </Button>
             </div>
           </div>
         ) : session && novncUrl ? (

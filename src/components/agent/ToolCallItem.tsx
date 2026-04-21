@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { ChevronRight, Wrench, Loader, FileCode, Search, Terminal as TerminalIcon } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ToolCall } from '../../lib/pi-events';
+import { Button } from '../ui/button';
+import { ScrollArea } from '../ui/scroll-area';
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
   read: <FileCode size={12} />,
@@ -40,9 +42,11 @@ export function ToolCallItem({ tc }: { tc: ToolCall }) {
       "border bg-zinc-950",
       isRunning ? "border-primary/30 bg-primary/5" : "border-white/5"
     )}>
-      <button
+      <Button
+        variant="ghost"
+        size="xs"
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left justify-start"
       >
         {TOOL_ICONS[tc.name] || <Wrench size={11} className="text-muted-foreground" />}
         <span className={cn(
@@ -60,19 +64,23 @@ export function ToolCallItem({ tc }: { tc: ToolCall }) {
         ) : (
           <ChevronRight size={10} className={cn("text-muted-foreground transition-transform", open && "rotate-90")} />
         )}
-      </button>
+      </Button>
       {open && formatResult(tc.result) && (
         <div className="px-3 pb-2 border-t border-white/5">
-          <pre className="text-xs font-mono text-zinc-400 whitespace-pre-wrap max-h-40 overflow-auto">
-            {formatResult(tc.result)}
-          </pre>
+          <ScrollArea className="max-h-40">
+            <pre className="text-xs font-mono text-zinc-400 whitespace-pre-wrap">
+              {formatResult(tc.result)}
+            </pre>
+          </ScrollArea>
         </div>
       )}
       {open && tc.error && (
         <div className="px-3 pb-2 border-t border-white/5">
-          <pre className="text-xs font-mono text-red-400 whitespace-pre-wrap max-h-40 overflow-auto">
-            {tc.error}
-          </pre>
+          <ScrollArea className="max-h-40">
+            <pre className="text-xs font-mono text-red-400 whitespace-pre-wrap">
+              {tc.error}
+            </pre>
+          </ScrollArea>
         </div>
       )}
     </div>
