@@ -1,0 +1,173 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/auto-developer-orchestrator/backend/internal/cli/api"
+	"github.com/charmbracelet/glamour"
+	"github.com/spf13/cobra"
+)
+
+var (
+	agentModel     string
+	agentThinking  string
+	agentAutoBranch bool
+)
+
+var agentCmd = &cobra.Command{
+	Use:   "agent",
+	Short: "Agent commands",
+}
+
+var agentPromptCmd = &cobra.Command{
+	Use:   "prompt <message>",
+	Short: "Send a prompt to the agent (streams SSE to stdout)",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireProject(); err != nil {
+			return err
+		}
+		client := api.NewClient(serverURL)
+		message := args[0]
+
+		req := api.PromptRequest{
+			Message:       message,
+			Project:       projectName,
+			AgentID:       "default",
+			Model:         agentModel,
+			ThinkingLevel: agentThinking,
+			AutoBranch:    agentAutoBranch,
+		}
+
+		resp, err := client.StreamPost("/api/pi/prompt", req)
+		if err != nil {
+			return fmt.Errorf("prompt failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if outputFmt == "json" {
+			return streamJSON(resp.Body)
+		}
+		return streamText(resp.Body)
+	},
+}
+
+var agentHistoryCmd = &cobra.Command{
+	Use:   "history",
+	Short: "List conversation history",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireProject(); err != nil {
+			return err
+		}
+		client := api.NewClient(serverURL)
+		var result api.HistoryResponse
+		if err := client.Get("/api/pi/history?project="+projectName, &result); err != nil {
+			return err
+		}
+		if outputFmt == "json" {
+			return printJSON(result)
+		}
+		for _, c := range result.Conversations {
+			title := c.Title
+			if title == "" {
+				title = c.LastMessage
+			}
+			fmt.Printf("%s/%s  %s  (%d msgs)\n", c.Project, c.AgentID, title, c.MessageCount)
+		}
+		return nil
+	},
+}
+
+func streamText(body io.Reader) error {
+	renderer, _ := glamour.NewTermRenderer(
+		glamour.WithEnvironmentConfig(),
+		glamour.WithAutoStyle(),
+	)
+
+	ch := make(chan api.SSEEvent, 100)
+	go api.StreamSSE(body, ch)
+
+	var accumulated string
+	for event := range ch {
+		switch event.Type {
+		case api.EventTextDelta:
+			var d api.TextDeltaData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				accumulated += d.Text
+				rendered, err := renderer.Render(accumulated)
+				if err != nil {
+					rendered = accumulated
+				}
+				fmt.Print("\033[H\033[2J") // clear screen for re-render
+				fmt.Print(rendered)
+			}
+		case api.EventThinkingDelta:
+			var d api.TextDeltaData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[2m%s\033[0m", d.Text)
+			}
+		case api.EventToolStart:
+			var d api.ToolStartData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[33m[TOOL] %s\033[0m\n", d.ToolName)
+			}
+		case api.EventToolEnd:
+			var d api.ToolEndData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				if d.Error != "" {
+					fmt.Fprintf(os.Stderr, "\033[31m  ✗ %s\033[0m\n", d.Error)
+				} else {
+					fmt.Fprintf(os.Stderr, "\033[32m  ✓\033[0m\n")
+				}
+			}
+		case api.EventError:
+			var d struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[31mError: %s\033[0m\n", d.Error)
+			}
+		case api.EventAgentEnd:
+			var d api.AgentEndData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[2mTokens: %d in / %d out\033[0m\n", d.InputTokens, d.OutputTokens)
+			}
+		}
+	}
+
+	// Final render
+	if accumulated != "" {
+		rendered, _ := renderer.Render(accumulated)
+		fmt.Print(rendered)
+	}
+	return nil
+}
+
+func streamJSON(body io.Reader) error {
+	ch := make(chan api.SSEEvent, 100)
+	go api.StreamSSE(body, ch)
+
+	for event := range ch {
+		fmt.Printf(`{"type":"%s","data":%s}`+"\n", event.Type, string(event.Data))
+	}
+	return nil
+}
+
+func printJSON(v interface{}) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
+func init() {
+	agentPromptCmd.Flags().StringVar(&agentModel, "model", "", "Model override")
+	agentPromptCmd.Flags().StringVar(&agentThinking, "thinking-level", "", "Thinking level")
+	agentPromptCmd.Flags().BoolVar(&agentAutoBranch, "auto-branch", false, "Auto-create branch")
+
+	agentCmd.AddCommand(agentPromptCmd)
+	agentCmd.AddCommand(agentHistoryCmd)
+	rootCmd.AddCommand(agentCmd)
+}
