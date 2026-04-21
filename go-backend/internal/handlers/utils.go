@@ -118,3 +118,8 @@ func parseOwnerRepo(remoteURL string) (owner, repo string, err error) {
 	}
 	return "", "", fmt.Errorf("cannot parse owner/repo from remote URL: %s", remoteURL)
 }
+
+// shellEscape wraps a string in single quotes, escaping embedded single quotes.
+func shellEscape(s string) string {
+	return strings.ReplaceAll(s, "'", "'\\''")
+}

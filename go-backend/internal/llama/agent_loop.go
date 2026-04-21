@@ -624,7 +624,12 @@ func DefaultAgentLoopConfig() AgentLoopConfig {
 		MaxToolRounds: cfg.DefaultMaxToolRounds,
 		MaxTokens:     cfg.MaxTokens,
 		ContextSize:   cfg.DefaultContextSize,
-		Opts:          DefaultGenerateOptions(),
+		Opts: GenerateOptions{
+			MaxTokens:   cfg.MaxTokens,
+			Temperature: cfg.Temperature,
+			TopP:        cfg.TopP,
+			TopK:        cfg.TopK,
+		},
 	}
 }
 

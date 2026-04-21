@@ -182,12 +182,6 @@ func (s *Scheduler) SetLlamaExecutor(executor *LlamaExecutor) {
 	s.llamaExec = executor
 }
 
-// SetSessionInjector configures the scheduler to inject job output into the
-// main agent session (delivery mode "session").
-func (s *Scheduler) SetSessionInjector(injector SessionInjector) {
-	s.sessionInjector = injector
-}
-
 // Start loads persisted jobs and starts the scheduler.
 func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.load(); err != nil {

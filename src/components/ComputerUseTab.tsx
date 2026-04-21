@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { usePiAgentContext } from '../contexts/PiAgentContext';
 import { DesktopConsolePanel } from './DesktopConsolePanel';
+import { api } from '../lib/api';
 
 interface ComputerUseTabProps {
   selectedProject: string | null;
@@ -42,18 +43,14 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
       const deadline = Date.now() + 60_000; // 60s — Docker pull + container start can be slow
       while (Date.now() < deadline && !cancelled) {
         try {
-          const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
-          if (res.ok) {
-            const data = await res.json();
-            if (!cancelled) {
-              setSession(data);
-              setSessionLoading(false);
-            }
-            return;
+          const data = await api.sandbox.getViewer(sandboxId);
+          if (!cancelled) {
+            setSession(data);
+            setSessionLoading(false);
           }
-          // 404 = background setup not done yet — keep polling
+          return;
         } catch {
-          // Network error — keep polling
+          // 404 or network error = background setup not done yet — keep polling
         }
         await new Promise(r => setTimeout(r, 2000)); // 2s between attempts
       }
@@ -75,13 +72,10 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
       try {
-        const res = await fetch(`/api/sandbox/${sandboxId}/viewer`);
-        if (res.ok) {
-          const data = await res.json();
-          setSession(data);
-          setSessionLoading(false);
-          return;
-        }
+        const data = await api.sandbox.getViewer(sandboxId);
+        setSession(data);
+        setSessionLoading(false);
+        return;
       } catch { /* keep polling */ }
       await new Promise(r => setTimeout(r, 2000));
     }

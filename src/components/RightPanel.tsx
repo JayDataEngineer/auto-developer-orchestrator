@@ -8,6 +8,7 @@ import { Artifact } from '../lib/api';
 import { ToolCall } from '../lib/pi-events';
 import { ArtifactView } from './ArtifactView';
 import { BrowserTools } from './BrowserTools';
+import { useComputerUse } from '../hooks/useComputerUse';
 
 interface StreamingState {
   isStreaming: boolean;
@@ -15,28 +16,7 @@ interface StreamingState {
   thinking: string;
 }
 
-// Match the shape returned by useComputerUse
-interface CUState {
-  enabled: boolean;
-  loading: boolean;
-  error: string | null;
-  sandboxId: string | null;
-  screenshot: string | null;
-  description: string | null;
-  elements: any[];
-  url: string;
-  title: string;
-  cdpPort: number | null;
-  enableComputerUse: (sandboxId: string) => Promise<void>;
-  disableComputerUse: () => Promise<void>;
-  takeScreenshot: () => Promise<void>;
-  getSnapshot: () => Promise<void>;
-  act: (action: any) => Promise<void>;
-  navigate: (url: string) => void;
-  clickElement: (element: number) => void;
-  typeText: (element: number, text: string, submit?: boolean) => void;
-  scroll: (direction: string, amount?: number) => void;
-}
+type CUState = ReturnType<typeof useComputerUse>;
 
 interface RightPanelProps {
   agentId: string | null;

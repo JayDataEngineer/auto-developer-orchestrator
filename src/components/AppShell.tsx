@@ -89,15 +89,9 @@ function DesktopChatSection({
     setSandboxCreating(true);
     try {
       // Register as a local project via the API
-      const res = await fetch('/api/projects/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: sandboxName.trim(), path: `/tmp/sandbox-${sandboxName.trim()}` }),
-      });
-      if (res.ok) {
-        onSelectProject(sandboxName.trim());
-        setSandboxName('');
-      }
+      await api.projects.register(sandboxName.trim(), `/tmp/sandbox-${sandboxName.trim()}`);
+      onSelectProject(sandboxName.trim());
+      setSandboxName('');
     } catch {
       // ignore
     } finally {
@@ -229,10 +223,7 @@ function AppShellInner() {
     let cancelled = false;
     const resolve = async () => {
       try {
-        const res = await fetch('/api/sandbox/');
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        const sandboxes = Array.isArray(data) ? data : (data.sandboxes || []);
+        const sandboxes = await api.sandbox.list();
         if (cancelled) return;
         if (sandboxes.length === 0) {
           setResolvedSandboxId(`sandbox-${selectedProject}`);

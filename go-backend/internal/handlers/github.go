@@ -35,46 +35,37 @@ func (h *GitHubHandler) getToken() (string, error) {
 }
 
 func (h *GitHubHandler) githubGet(url string) ([]byte, int, error) {
-	token, err := h.getToken()
-	if err != nil {
-		return nil, 401, err
-	}
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, 500, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		return nil, 502, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	return body, resp.StatusCode, nil
+	return h.githubRequest("GET", url, nil)
 }
 
 func (h *GitHubHandler) githubPost(url string, payload interface{}) ([]byte, int, error) {
+	return h.githubRequest("POST", url, payload)
+}
+
+func (h *GitHubHandler) githubRequest(method, url string, payload interface{}) ([]byte, int, error) {
 	token, err := h.getToken()
 	if err != nil {
 		return nil, 401, err
 	}
 
-	bodyBytes, err := json.Marshal(payload)
-	if err != nil {
-		return nil, 500, err
+	var body io.Reader
+	if payload != nil {
+		bodyBytes, err := json.Marshal(payload)
+		if err != nil {
+			return nil, 500, err
+		}
+		body = bytes.NewReader(bodyBytes)
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil, 500, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Content-Type", "application/json")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -158,32 +149,7 @@ func (h *GitHubHandler) MergePR(owner, repo string, prNum int, commitMessage str
 
 // githubPut sends a PUT request to the GitHub API.
 func (h *GitHubHandler) githubPut(url string, payload interface{}) ([]byte, int, error) {
-	token, err := h.getToken()
-	if err != nil {
-		return nil, 401, err
-	}
-
-	bodyBytes, err := json.Marshal(payload)
-	if err != nil {
-		return nil, 500, err
-	}
-
-	req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, 500, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		return nil, 502, err
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	return respBody, resp.StatusCode, nil
+	return h.githubRequest("PUT", url, payload)
 }
 
 // GetRepos returns the authenticated user's GitHub repositories.

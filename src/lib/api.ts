@@ -73,27 +73,6 @@ export interface ReposResponse {
   repos?: Repo[];
 }
 
-export interface ActiveAgent {
-  agentId: string;
-  namespace: string; // OpenShell namespace for per-project isolation
-  state: {
-    model: string;
-    streaming: boolean;
-    input: number;
-    output: number;
-    cache: number;
-  };
-}
-
-export interface ActiveProject {
-  project: string;
-  agents: ActiveAgent[];
-}
-
-export interface ActiveSessionsResponse {
-  projects: ActiveProject[];
-}
-
 export interface ConversationSummary {
   project: string;
   agentId: string;
@@ -307,7 +286,7 @@ export const api = {
     getSystem: () => apiFetch<{ projectsDir: string }>('/api/config/system'),
     setSystem: (projectsDir: string) =>
       apiFetch<{ success: boolean; systemConfig: { projectsDir: string } }>('/api/config/system', {
-        method: 'POST',
+        method: 'PUT',
         body: JSON.stringify({ projectsDir }),
       }),
     getModels: () => apiFetch<{
@@ -370,8 +349,6 @@ export const api = {
       }).then(() => {}),
     compact: (project: string, agentId: string = 'default') =>
       fetch(`/api/pi/compact?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, { method: 'POST' }).then(() => {}),
-    getActiveSessions: () =>
-      apiFetch<ActiveSessionsResponse>('/api/pi/active'),
     getHistory: () =>
       apiFetch<{ conversations: ConversationSummary[] }>('/api/pi/history'),
     deleteConversation: (project: string, agentId: string) =>
@@ -382,16 +359,6 @@ export const api = {
       apiFetch<{ renamed: boolean }>(`/api/pi/conversation/rename?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, {
         method: 'PUT',
         body: JSON.stringify({ title }),
-      }),
-    spawnAgent: (project: string, agentId?: string) =>
-      apiFetch<{ success: boolean; agentId: string }>('/api/pi/agent/spawn', {
-        method: 'POST',
-        body: JSON.stringify({ project, agentId }),
-      }),
-    destroyAgent: (project: string, agentId: string) =>
-      apiFetch<{ success: boolean }>('/api/pi/agent/destroy', {
-        method: 'POST',
-        body: JSON.stringify({ project, agentId }),
       }),
     respond: (project: string, agentId: string, requestId: string, action: 'approve' | 'deny' | 'answer', message?: string) =>
       apiFetch<{ success: boolean }>('/api/pi/respond', {
@@ -520,24 +487,6 @@ export const api = {
         body: JSON.stringify({ blocks, blockedBy }),
       }),
   },
-  subAgents: {
-    spawn: (parentAgentId: string, type: SubAgentInfo['type'] = 'code', projectDir?: string, message?: string) =>
-      apiFetch<SubAgentInfo>('/api/pi/subagent/spawn', {
-        method: 'POST',
-        body: JSON.stringify({ parentAgentId, type, projectDir, message }),
-      }),
-    status: (subAgentId: string) =>
-      apiFetch<SubAgentInfo>(`/api/pi/subagent/status?subAgentId=${encodeURIComponent(subAgentId)}`),
-    result: (subAgentId: string) =>
-      apiFetch<SubAgentInfo>(`/api/pi/subagent/result?subAgentId=${encodeURIComponent(subAgentId)}`),
-    abort: (subAgentId: string) =>
-      apiFetch<{ success: boolean }>('/api/pi/subagent/abort', {
-        method: 'POST',
-        body: JSON.stringify({ subAgentId }),
-      }),
-    list: (parentAgentId: string) =>
-      apiFetch<{ subAgents: SubAgentInfo[] }>(`/api/pi/subagent/list?parentAgentId=${encodeURIComponent(parentAgentId)}`),
-  },
   cli: {
     ls: (path: string) =>
       apiFetch<{ entries: FileEntry[] }>(`/api/cli/ls?path=${encodeURIComponent(path)}`),
@@ -545,5 +494,16 @@ export const api = {
       apiFetch<{ content: string }>(`/api/cli/cat?path=${encodeURIComponent(path)}`),
     commands: () =>
       apiFetch<{ commands: string[] }>('/api/cli/commands'),
+  },
+  sandbox: {
+    list: () =>
+      fetch('/api/sandbox/').then(r => {
+        if (!r.ok) throw new Error('Failed to list sandboxes');
+        return r.json() as Promise<any[]>;
+      }),
+    getViewer: (sandboxId: string) =>
+      apiFetch<{ mode?: string; cdpUrl?: string; vncUrl?: string; novncUrl?: string }>(
+        `/api/sandbox/${encodeURIComponent(sandboxId)}/viewer`,
+      ),
   },
 };

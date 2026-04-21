@@ -3,6 +3,7 @@ import { MessageSquare, Plus, Clock, FolderOpen, ChevronDown, ChevronRight, Tras
 import { cn } from '../lib/utils';
 import { api, ConversationSummary } from '../lib/api';
 import { useToastContext } from './ui/Toast';
+import { usePolling } from '../hooks/usePolling';
 
 interface HistorySidebarProps {
   projects: string[];
@@ -95,10 +96,7 @@ export function HistorySidebar({
     fetchHistory();
   }, [fetchHistory]);
 
-  useEffect(() => {
-    const interval = setInterval(fetchHistory, 15000);
-    return () => clearInterval(interval);
-  }, [fetchHistory]);
+  usePolling(fetchHistory, 15000, true);
 
   // Close context menu on click outside
   useEffect(() => {

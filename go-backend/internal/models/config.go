@@ -112,20 +112,6 @@ func (c *ModelConfig) ToolModel() ModelEntry {
 	return c.tool
 }
 
-// ToolModelArg returns "provider/modelId" for the --model CLI flag.
-func (c *ModelConfig) ToolModelArg() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.tool.Provider + "/" + c.tool.ModelId
-}
-
-// MainModelArg returns "provider/modelId" for the --model CLI flag.
-func (c *ModelConfig) MainModelArg() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.main.Provider + "/" + c.main.ModelId
-}
-
 // ProviderForModel returns the provider name for a given model ID.
 // Checks if it matches main or tool model, falls back to "llamacpp".
 func (c *ModelConfig) ProviderForModel(modelId string) string {
@@ -154,40 +140,6 @@ func (c *ModelConfig) SetToolModel(provider, modelId string) error {
 	c.tool = ModelEntry{Provider: provider, ModelId: modelId}
 	c.mu.Unlock()
 	return c.persist()
-}
-
-// Reload re-reads the config from disk.
-func (c *ModelConfig) Reload() error {
-	if c.path == "" {
-		return nil
-	}
-
-	data, err := os.ReadFile(c.path)
-	if err != nil {
-		return err
-	}
-
-	var sf settingsFile
-	if err := json.Unmarshal(data, &sf); err != nil {
-		return err
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if sf.MainModel != nil && sf.MainModel.Provider != "" && sf.MainModel.ModelId != "" {
-		c.main = *sf.MainModel
-	} else if sf.DefaultProvider != "" && sf.DefaultModel != "" {
-		c.main = ModelEntry{Provider: sf.DefaultProvider, ModelId: sf.DefaultModel}
-	}
-
-	if sf.ToolModel != nil && sf.ToolModel.Provider != "" && sf.ToolModel.ModelId != "" {
-		c.tool = *sf.ToolModel
-	} else {
-		c.tool = c.main
-	}
-
-	return nil
 }
 
 // persist writes the current config to disk using atomic rename.

@@ -177,31 +177,6 @@ func TestSetToolModelPersists(t *testing.T) {
 	}
 }
 
-func TestToolModelArg(t *testing.T) {
-	cfg := &ModelConfig{
-		main:   ModelEntry{Provider: "anthropic", ModelId: "claude-3-opus"},
-		tool:   ModelEntry{Provider: "llamacpp", ModelId: "gemma-4-26b"},
-		logger: testLogger(),
-	}
-
-	arg := cfg.ToolModelArg()
-	if arg != "llamacpp/gemma-4-26b" {
-		t.Errorf("ToolModelArg() = %q, want %q", arg, "llamacpp/gemma-4-26b")
-	}
-}
-
-func TestMainModelArg(t *testing.T) {
-	cfg := &ModelConfig{
-		main:   ModelEntry{Provider: "anthropic", ModelId: "claude-3-opus"},
-		tool:   ModelEntry{Provider: "llamacpp", ModelId: "gemma-4-26b"},
-		logger: testLogger(),
-	}
-
-	arg := cfg.MainModelArg()
-	if arg != "anthropic/claude-3-opus" {
-		t.Errorf("MainModelArg() = %q, want %q", arg, "anthropic/claude-3-opus")
-	}
-}
 
 func TestProviderForModel(t *testing.T) {
 	cfg := &ModelConfig{
@@ -263,7 +238,6 @@ func TestConcurrentReadWrite(t *testing.T) {
 			defer wg.Done()
 			_ = cfg.MainModel()
 			_ = cfg.ToolModel()
-			_ = cfg.ToolModelArg()
 			_ = cfg.ProviderForModel("test")
 		}()
 	}
@@ -327,41 +301,3 @@ func TestPersistPreservesOtherFields(t *testing.T) {
 	}
 }
 
-func TestReload(t *testing.T) {
-	dir := t.TempDir()
-	settingsPath := filepath.Join(dir, ".pi", "agent")
-	os.MkdirAll(settingsPath, 0755)
-
-	content := `{"defaultProvider":"llamacpp","defaultModel":"gemma-4-26b"}`
-	settingsFile := filepath.Join(settingsPath, "settings.json")
-	os.WriteFile(settingsFile, []byte(content), 0644)
-
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
-
-	cfg, _ := LoadModelConfig(testLogger())
-
-	// Edit file externally
-	newContent := `{
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-3-opus",
-  "mainModel": {"provider": "anthropic", "modelId": "claude-3-opus"},
-  "toolModel": {"provider": "llamacpp", "modelId": "gemma-4-26b"}
-}`
-	os.WriteFile(settingsFile, []byte(newContent), 0644)
-
-	if err := cfg.Reload(); err != nil {
-		t.Fatal(err)
-	}
-
-	main := cfg.MainModel()
-	if main.Provider != "anthropic" || main.ModelId != "claude-3-opus" {
-		t.Errorf("main after reload = %+v", main)
-	}
-
-	tool := cfg.ToolModel()
-	if tool.Provider != "llamacpp" || tool.ModelId != "gemma-4-26b" {
-		t.Errorf("tool after reload = %+v", tool)
-	}
-}

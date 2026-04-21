@@ -5,6 +5,7 @@ import { api, SchedulerJob, CreateJobRequest } from '../lib/api';
 import { useToastContext } from './ui/Toast';
 import { StatusBadge } from './ui/StatusBadge';
 import { EmptyState } from './ui/EmptyState';
+import { usePolling } from '../hooks/usePolling';
 import {
   LayoutGrid, Plus, Play, Trash2, Clock,
   Loader, AlertCircle, X, Layers, RefreshCw, Save, Copy, Link
@@ -491,10 +492,7 @@ export function TaskBoardTab() {
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
   // Auto-refresh every 5s
-  useEffect(() => {
-    const interval = setInterval(fetchJobs, 5000);
-    return () => clearInterval(interval);
-  }, [fetchJobs]);
+  usePolling(fetchJobs, 5000, true);
 
   const handleCreate = useCallback(async (data: { name: string; description?: string; message: string; model?: string; scheduleType: string; cronExpr?: string; everySeconds?: number }) => {
     const job: CreateJobRequest = {

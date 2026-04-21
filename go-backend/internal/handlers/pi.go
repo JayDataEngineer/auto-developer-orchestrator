@@ -72,35 +72,6 @@ func (h *PiHandler) SetMCPClient(client *mcp.Client) {
 	h.mcpClient = client
 }
 
-// waitForApproval sends an approval SSE event and blocks until the user responds,
-// the context is cancelled, or the timeout expires.
-// Returns the approval response, or nil if the context timed out.
-func (h *PiHandler) waitForApproval(
-	ctx context.Context,
-	w http.ResponseWriter,
-	approvalData pi.ApprovalRequestData,
-	canFlush bool,
-	flusher http.Flusher,
-) (*pi.ApprovalResponse, string) {
-	writeSSE(w, pi.EventApprovalRequest, approvalData, canFlush, flusher)
-
-	// Use the decoupled approval manager
-	ch := h.approvalMgr.Register(approvalData.RequestID)
-	defer h.approvalMgr.Cleanup(approvalData.RequestID)
-
-	select {
-	case resp, ok := <-ch:
-		if !ok {
-			return nil, "channel closed"
-		}
-		return &resp, ""
-	case <-ctx.Done():
-		return nil, "context cancelled"
-	case <-time.After(h.approvalMgr.Timeout()):
-		return nil, "timeout"
-	}
-}
-
 // RegisterRoutes registers all Pi routes on the given router.
 func (h *PiHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/prompt", h.Prompt)

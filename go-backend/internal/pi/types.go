@@ -5,55 +5,26 @@ import (
 	"fmt"
 )
 
-// RpcCommand represents a command sent to the Pi agent subprocess.
-// See pi-mono/packages/coding-agent/src/modes/rpc/rpc-types.ts for the full protocol.
-type RpcCommand struct {
-	Type          string      `json:"type"`
-	Message       string      `json:"message,omitempty"`
-	Model         string      `json:"model,omitempty"`
-	ModelId       string      `json:"modelId,omitempty"` // For set_model command
-	Provider      string      `json:"provider,omitempty"`
-	ThinkingLevel string      `json:"thinkingLevel,omitempty"`
-	Command       string      `json:"command,omitempty"`
-	Timeout       int         `json:"timeout,omitempty"`
-	WorkingDir    string      `json:"workingDir,omitempty"`
-	SessionId     string      `json:"sessionId,omitempty"`
-	Id            string      `json:"id,omitempty"`
-	Data          interface{} `json:"data,omitempty"`
-}
-
-// RpcResponse represents a response from the Pi agent subprocess.
-type RpcResponse struct {
-	Type    string      `json:"type"`
-	Command string      `json:"command,omitempty"`
-	Id      string      `json:"id,omitempty"`
-	Success bool        `json:"success,omitempty"`
-	Data    interface{} `json:"data,omitempty"`
-	Error   string      `json:"error,omitempty"`
-}
-
-// AgentEvent represents a streaming event from the Pi agent.
-// Pi's RPC protocol puts most data at the top level (not nested under "data").
-// Tool fields (toolName, args, toolId) can appear either at the top level
-// OR nested under "data" depending on the Pi version.
+// AgentEvent represents a streaming event from the agent.
+// Converted from llama.AgentEvent via event_convert.go, then mapped to SSE in pi_sse.go.
 type AgentEvent struct {
 	Type string `json:"type"`
-	// Top-level fields from pi RPC
+	// Nested event for text/thinking deltas (from message_update)
 	AssistantMessageEvent *AssistantMessageEvent `json:"assistantMessageEvent,omitempty"`
 	Message               json.RawMessage        `json:"message,omitempty"`
 	Messages              json.RawMessage        `json:"messages,omitempty"`
 	ToolResults           json.RawMessage        `json:"toolResults,omitempty"`
-	// Top-level tool fields (Pi sends these directly, not nested under "data")
+	// Tool fields at top level (from event_convert.go)
 	ToolName string                 `json:"toolName,omitempty"`
 	ToolArgs map[string]interface{} `json:"args,omitempty"`
 	ToolId   string                 `json:"toolId,omitempty"`
 	Result   interface{}            `json:"result,omitempty"`
 	Error    string                 `json:"error,omitempty"`
-	// Legacy "data" field for error/state events
+	// Data payload for state/error events
 	Data AgentEventData `json:"data,omitempty"`
 }
 
-// AssistantMessageEvent is the nested event inside message_update from pi RPC.
+// AssistantMessageEvent is the nested event inside message_update.
 type AssistantMessageEvent struct {
 	Type         string          `json:"type"`
 	ContentIndex int             `json:"contentIndex"`
@@ -62,9 +33,8 @@ type AssistantMessageEvent struct {
 	Partial      json.RawMessage `json:"partial,omitempty"`
 }
 
-// AgentEventData holds the payload of an agent event (used for error/state events).
+// AgentEventData holds the payload of an agent event.
 type AgentEventData struct {
-	// Text delta events (legacy)
 	Text string `json:"text,omitempty"`
 
 	// Tool execution events
@@ -75,53 +45,15 @@ type AgentEventData struct {
 	Error    string                 `json:"error,omitempty"`
 
 	// Session state
-	Model     string      `json:"model,omitempty"`
-	Streaming bool        `json:"streaming,omitempty"`
-	Input     interface{} `json:"input,omitempty"` // float64 for usage stats, []string for model capabilities
-	Output    float64     `json:"output,omitempty"`
-	Cache     float64     `json:"cache,omitempty"`
+	Model   string      `json:"model,omitempty"`
+	Input   interface{} `json:"input,omitempty"`
+	Output  float64     `json:"output,omitempty"`
+	Cache   float64     `json:"cache,omitempty"`
+	Streaming bool      `json:"streaming,omitempty"`
 
 	// Compaction
 	CompactedMessages int `json:"compactedMessages,omitempty"`
 	KeptMessages      int `json:"keptMessages,omitempty"`
-
-	// Available models
-	Models []ModelInfo `json:"models,omitempty"`
-}
-
-// ModelInfo represents a model available in Pi.
-type ModelInfo struct {
-	Provider string `json:"provider"`
-	Id       string `json:"id"`
-	Name     string `json:"name"`
-}
-
-// AgentEntry represents a single agent in the pool listing.
-// Each agent runs in a per-project OpenShell namespace for isolation.
-type AgentEntry struct {
-	AgentId     string       `json:"agentId"`
-	Project     string       `json:"project"`
-	ProjectPath string       `json:"projectPath"`
-	Namespace   string       `json:"namespace"` // OpenShell namespace (per-project isolation)
-	State       SessionState `json:"state"`
-}
-
-// SessionState represents the current state of a Pi session.
-type SessionState struct {
-	Model     string  `json:"model"`
-	Streaming bool    `json:"streaming"`
-	Input     float64 `json:"input"`
-	Output    float64 `json:"output"`
-	Cache     float64 `json:"cache"`
-	SessionId string  `json:"sessionId"`
-}
-
-// SessionInfo represents a saved Pi session.
-type SessionInfo struct {
-	Id        string `json:"id"`
-	Name      string `json:"name"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
 }
 
 // Event types sent to the frontend via SSE
@@ -137,7 +69,6 @@ const (
 	EventCompactionEnd   = "compaction_end"
 	EventError           = "error"
 	EventStateUpdate     = "state_update"
-	EventBranchCreated   = "branch_created"
 	EventCommitCreated   = "commit_created"
 	EventPushComplete    = "push_complete"
 	EventPRCreated       = "pr_created"
@@ -146,34 +77,18 @@ const (
 	EventApprovalRequest = "approval_request"
 )
 
-// RPC command types
+// Event type constants used by event_convert.go and pi_sse.go
 const (
-	CmdPrompt        = "prompt"
-	CmdSteer         = "steer"
-	CmdAbort         = "abort"
-	CmdGetState      = "get_state"
-	CmdCompact       = "compact"
-	CmdSetModel      = "set_model"
-	CmdListSessions  = "list_sessions"
-	CmdSwitchSession = "switch_session"
-)
-
-// Pi RPC event types (from Pi subprocess stdout)
-const (
-	RpcEventAgentStart      = "agent_start"
-	RpcEventAgentEnd        = "agent_end"
-	RpcEventTurnEnd         = "turn_end"
-	RpcEventMessageUpdate   = "message_update"
-	RpcEventMessageEnd      = "message_end"
 	RpcEventToolStart       = "tool_execution_start"
 	RpcEventToolEnd         = "tool_execution_end"
+	RpcEventAgentStart      = "agent_start"
+	RpcEventAgentEnd        = "agent_end"
 	RpcEventCompactionStart = "compaction_start"
 	RpcEventCompactionEnd   = "compaction_end"
-	RpcEventResponse        = "response"
-	RpcEventStateUpdate     = "state_update"
 	RpcEventError           = "error"
+	RpcEventResponse        = "response"
 
-	// Orchestrator events (from library mode, not Pi RPC)
+	// Orchestrator events
 	EventArtifactCreated = "artifact_created"
 	EventArtifactUpdated = "artifact_updated"
 	EventPlanCreated     = "plan_created"
@@ -198,36 +113,7 @@ type ApprovalResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
-// IsRiskyBashCommand checks if a bash command needs human approval.
-func IsRiskyBashCommand(cmd string) (bool, string) {
-	riskyPatterns := []struct {
-		pattern string
-		reason  string
-	}{
-		{"git push", "Pushing to remote repository"},
-		{"git push-f", "Force pushing to remote"},
-		{"rm -rf", "Recursive file deletion"},
-		{"rm -r", "Recursive file deletion"},
-		{"drop table", "Dropping database table"},
-		{"curl -X DELETE", "HTTP DELETE request"},
-		{"curl -X POST", "HTTP POST request to external service"},
-		{"curl -X PUT", "HTTP PUT request to external service"},
-		{":(){ :|:&", "Fork bomb pattern"},
-	}
-	for _, p := range riskyPatterns {
-		if len(cmd) >= len(p.pattern) {
-			for i := 0; i <= len(cmd)-len(p.pattern); i++ {
-				if cmd[i:i+len(p.pattern)] == p.pattern {
-					return true, p.reason
-				}
-			}
-		}
-	}
-	return false, ""
-}
-
 // ToFloat64 converts an interface{} to float64.
-// Handles float64, int, int64, string, and json.Number.
 func ToFloat64(v interface{}) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
@@ -240,7 +126,6 @@ func ToFloat64(v interface{}) (float64, bool) {
 		f, err := n.Float64()
 		return f, err == nil
 	case string:
-		// Try parsing string as float
 		var f float64
 		_, err := fmt.Sscanf(n, "%f", &f)
 		return f, err == nil
@@ -249,23 +134,5 @@ func ToFloat64(v interface{}) (float64, bool) {
 	}
 }
 
-// ModelConfigProvider is a package-level hook that resolves the provider
-// for a given model ID. Set once in main.go from the centralized ModelConfig.
-// Defaults to "llamacpp" when not configured.
+// ModelConfigProvider resolves the provider for a given model ID.
 var ModelConfigProvider func(modelId string) string = func(_ string) string { return "llamacpp" }
-
-// ComputeFingerprint generates a stable hash from the model and system prompt.
-// Used by handlers to compute expected fingerprints for validation.
-func ComputeFingerprint(model string, systemPrompt string) string {
-	const prime = 1099511628211
-	var hash uint64 = 14695981039346656037 // FNV offset basis
-	for _, b := range []byte(model) {
-		hash ^= uint64(b)
-		hash *= prime
-	}
-	for _, b := range []byte(systemPrompt) {
-		hash ^= uint64(b)
-		hash *= prime
-	}
-	return fmt.Sprintf("%016x", hash)
-}

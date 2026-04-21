@@ -38,13 +38,6 @@ type ToolPermissionOverride struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// DefaultProjectSettings returns a blank settings with no overrides.
-func DefaultProjectSettings(logger *zap.Logger) *ProjectSettings {
-	return &ProjectSettings{
-		logger: logger,
-	}
-}
-
 // LoadProjectSettings reads per-project settings from <projectPath>/.pi/settings.json.
 // Returns default settings if no file exists.
 func LoadProjectSettings(projectPath string, logger *zap.Logger) *ProjectSettings {
@@ -70,48 +63,6 @@ func LoadProjectSettings(projectPath string, logger *zap.Logger) *ProjectSetting
 		zap.Bool("hasToolModel", ps.ToolModel != nil),
 	)
 	return ps
-}
-
-// ResolveMainModel returns the effective main model (project override > global).
-func (ps *ProjectSettings) ResolveMainModel(global ModelEntry) ModelEntry {
-	ps.mu.RLock()
-	defer ps.mu.RUnlock()
-	if ps.MainModel != nil && ps.MainModel.Provider != "" && ps.MainModel.ModelId != "" {
-		return *ps.MainModel
-	}
-	return global
-}
-
-// ResolveToolModel returns the effective tool model (project override > global).
-func (ps *ProjectSettings) ResolveToolModel(global ModelEntry) ModelEntry {
-	ps.mu.RLock()
-	defer ps.mu.RUnlock()
-	if ps.ToolModel != nil && ps.ToolModel.Provider != "" && ps.ToolModel.ModelId != "" {
-		return *ps.ToolModel
-	}
-	return global
-}
-
-// ResolveThinkingLevel returns the effective thinking level (project override > provided default).
-func (ps *ProjectSettings) ResolveThinkingLevel(fallback string) string {
-	ps.mu.RLock()
-	defer ps.mu.RUnlock()
-	if ps.ThinkingLevel != "" {
-		return ps.ThinkingLevel
-	}
-	return fallback
-}
-
-// Save persists the current settings to disk.
-func (ps *ProjectSettings) Save() error {
-	if ps.path == "" {
-		return nil
-	}
-
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-
-	return ps.saveLocked()
 }
 
 // saveLocked writes settings to disk. Must be called with ps.mu held.

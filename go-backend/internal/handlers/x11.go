@@ -143,7 +143,7 @@ func (h *X11Handler) Keyboard(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Shell-escape single quotes for xdotool
-		escaped := strings.ReplaceAll(req.Text, "'", "'\\''")
+		escaped := shellEscape(req.Text)
 		_, err := h.exec(r, sandboxID, display, []string{
 			"bash", "-c", fmt.Sprintf("xdotool type -- '%s'", escaped),
 		})

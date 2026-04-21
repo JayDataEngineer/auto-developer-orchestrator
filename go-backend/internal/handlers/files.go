@@ -260,8 +260,3 @@ func validateSandboxPath(path string) error {
 	}
 	return nil
 }
-
-// shellEscape wraps a string in single quotes, escaping embedded single quotes.
-func shellEscape(s string) string {
-	return strings.ReplaceAll(s, "'", "'\\''")
-}
