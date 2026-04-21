@@ -16,10 +16,14 @@ type Database struct {
 
 // NewDatabase creates a new database connection
 func NewDatabase(dataSource string) (*Database, error) {
-	db, err := sql.Open("sqlite3", dataSource)
+	db, err := sql.Open("sqlite3", dataSource+"?_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+
+	// Connection pool settings
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
 
 	// Create tables
 	_, err = db.Exec(`
