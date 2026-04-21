@@ -254,7 +254,17 @@ func (h *PiHandler) accumulateLlamaText(evt llamaeng.AgentEvent, text, thinking 
 // The orchestrator plans and delegates to specialized personas (web, code, desktop).
 func (h *PiHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
 	key := compositeAgentKey(projectPath, req.AgentId)
-	sandboxID := filepath.Base(projectPath)
+
+	// Resolve sandbox ID via project path lookup, fall back to basename
+	sandboxID := ""
+	if h.sandboxMgr != nil {
+		if sb := h.sandboxMgr.FindSandboxByProject(projectPath); sb != nil {
+			sandboxID = sb.ID
+		}
+	}
+	if sandboxID == "" {
+		sandboxID = filepath.Base(projectPath)
+	}
 
 	orch := h.getOrCreateOrchestrator(key, sandboxID, projectPath)
 	if orch == nil {

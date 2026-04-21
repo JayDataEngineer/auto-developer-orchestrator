@@ -98,6 +98,13 @@ func main() {
 		logger.Warn("Failed to initialize sandbox manager, running without isolation", zap.Error(err))
 	}
 
+	// Recover sandboxes from Docker containers (survives backend restarts)
+	if sandboxMgr != nil {
+		if err := sandboxMgr.RecoverAllSandboxes(context.Background()); err != nil {
+			logger.Warn("Failed to recover sandboxes from Docker", zap.Error(err))
+		}
+	}
+
 	// Initialize database
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -294,6 +301,9 @@ func main() {
 
 			// Disable any mode
 			r.Delete("/{id}/mode", sandboxHandler.DisableMode)
+
+			// Readiness check
+			r.Get("/{id}/ready", sandboxHandler.IsReady)
 
 			// Get viewer URLs
 			r.Get("/{id}/viewer", sandboxHandler.GetDesktopViewer)

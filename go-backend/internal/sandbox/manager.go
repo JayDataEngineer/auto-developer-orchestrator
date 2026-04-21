@@ -214,7 +214,11 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		Config: &container.Config{
 			Image:  image,
 			Env:    envVars,
-			Labels: map[string]string{"openshell.policy": policy, "openshell.sandbox-id": opts.ID},
+			Labels: map[string]string{
+				"openshell.policy":       policy,
+				"openshell.sandbox-id":   opts.ID,
+				"openshell.project-path": projectPath,
+			},
 		},
 		HostConfig: &container.HostConfig{
 			Binds: []string{
@@ -244,16 +248,16 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		return nil, fmt.Errorf("failed to start container %s: %w", containerName, err)
 	}
 
-	// Wait for supervisord to start, then restore persisted state in background
-	go func() {
-		time.Sleep(5 * time.Second)
-		m.restorePersistedState(context.Background(), containerName)
-	}()
+	// Restore persisted state (Chrome profile, dotfiles, packages) synchronously.
+	// This is just file copies — typically completes in <2s.
+	restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer restoreCancel()
+	m.restorePersistedState(restoreCtx, containerName)
 
 	sandbox := &Sandbox{
 		ID:          opts.ID,
 		ContainerID: createResp.ID,
-		ProjectPath: opts.ProjectPath,
+		ProjectPath: projectPath,
 		Policy:      policy,
 		Mode:        ModeCLI,
 		Status:      StatusRunning,
@@ -450,11 +454,21 @@ func (m *Manager) RecoverSandbox(ctx context.Context, sandboxID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Recover metadata from container labels
+	projectPath := ""
+	policy := "developer"
+	if result.Container.Config != nil && result.Container.Config.Labels != nil {
+		projectPath = result.Container.Config.Labels["openshell.project-path"]
+		if p := result.Container.Config.Labels["openshell.policy"]; p != "" {
+			policy = p
+		}
+	}
+
 	sandbox := &Sandbox{
 		ID:          sandboxID,
 		ContainerID: result.Container.ID,
-		ProjectPath: "",
-		Policy:      "developer",
+		ProjectPath: projectPath,
+		Policy:      policy,
 		Mode:        ModeCLI,
 		Status:      StatusRunning,
 		CreatedAt:   time.Now(),
@@ -481,6 +495,23 @@ func (m *Manager) ListSandboxes() []*Sandbox {
 	return result
 }
 
+// IsReady returns true if the sandbox's current mode is fully operational.
+func (m *Manager) IsReady(sandboxID string) bool {
+	m.mu.RLock()
+	sb, exists := m.sandboxes[sandboxID]
+	m.mu.RUnlock()
+	if !exists {
+		return false
+	}
+	switch sb.Mode {
+	case ModeCLI:
+		return sb.Status == StatusRunning
+	case ModeBrowser, ModeDesktop:
+		return sb.DesktopSession != nil && sb.DesktopSession.IsActive
+	}
+	return false
+}
+
 // EnableBrowserMode enables lightweight browser mode for a sandbox.
 // The sandbox container image already runs Xvfb + Chrome + VNC + socat via supervisord.
 // This method verifies Chrome is up and returns the session info.
@@ -492,7 +523,7 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 	if !exists {
 		// Sandbox not in memory — check if container exists and recover it
 		containerName := m.getContainerName(sandboxID)
-		_, inspectErr := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
+		inspectResult, inspectErr := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
 		if inspectErr != nil {
 			return nil, fmt.Errorf("sandbox %s not found", sandboxID)
 		}
@@ -502,11 +533,22 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 			zap.String("sandbox_id", sandboxID),
 			zap.String("container", containerName),
 		)
+
+		// Recover metadata from container labels
+		projectPath := ""
+		policy := "developer"
+		if inspectResult.Container.Config != nil && inspectResult.Container.Config.Labels != nil {
+			projectPath = inspectResult.Container.Config.Labels["openshell.project-path"]
+			if p := inspectResult.Container.Config.Labels["openshell.policy"]; p != "" {
+				policy = p
+			}
+		}
+
 		sandbox = &Sandbox{
 			ID:          sandboxID,
-			ContainerID: containerName,
-			ProjectPath: "",
-			Policy:      "developer",
+			ContainerID: inspectResult.Container.ID,
+			ProjectPath: projectPath,
+			Policy:      policy,
 			Mode:        ModeCLI,
 			Status:      StatusRunning,
 			CreatedAt:   time.Now(),
@@ -807,4 +849,53 @@ func (m *Manager) GetContainerIP(ctx context.Context, sandboxID string) (string,
 		}
 	}
 	return "", fmt.Errorf("no IP address found for container %s (networks: %d)", containerName, len(result.Container.NetworkSettings.Networks))
+}
+
+// RecoverAllSandboxes discovers running OpenShell containers and recovers them
+// into the in-memory map. Called on startup to restore state after a backend restart.
+func (m *Manager) RecoverAllSandboxes(ctx context.Context) error {
+	if m.dockerClient == nil {
+		return nil
+	}
+
+	result, err := m.dockerClient.ContainerList(ctx, client.ContainerListOptions{
+		Filters: client.Filters{
+			"label": {"openshell.sandbox-id": true},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	for _, c := range result.Items {
+		sandboxID := c.Labels["openshell.sandbox-id"]
+		if sandboxID == "" {
+			continue
+		}
+		projectPath := c.Labels["openshell.project-path"]
+		policy := c.Labels["openshell.policy"]
+		if policy == "" {
+			policy = "developer"
+		}
+
+		m.mu.Lock()
+		if _, exists := m.sandboxes[sandboxID]; !exists {
+			m.sandboxes[sandboxID] = &Sandbox{
+				ID:          sandboxID,
+				ContainerID: c.ID,
+				ProjectPath: projectPath,
+				Policy:      policy,
+				Mode:        ModeCLI,
+				Status:      StatusRunning,
+				CreatedAt:   time.Now(),
+			}
+			m.logger.Info("recovered sandbox from Docker",
+				zap.String("id", sandboxID),
+				zap.String("project_path", projectPath),
+			)
+		}
+		m.mu.Unlock()
+	}
+
+	return nil
 }

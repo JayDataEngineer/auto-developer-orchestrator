@@ -80,6 +80,14 @@ func (h *SandboxHandler) ListSandboxes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sandboxes)
 }
 
+// IsReady returns whether a sandbox's current mode is fully operational.
+// GET /api/sandbox/{id}/ready
+func (h *SandboxHandler) IsReady(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ready := h.manager.IsReady(id)
+	writeJSON(w, http.StatusOK, map[string]bool{"ready": ready})
+}
+
 // DestroySandbox destroys a sandbox
 // DELETE /api/sandbox/{id}
 func (h *SandboxHandler) DestroySandbox(w http.ResponseWriter, r *http.Request) {
