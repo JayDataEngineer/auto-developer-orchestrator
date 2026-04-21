@@ -97,6 +97,14 @@ var allTools = []ToolSpec{
 		Returns:          "direction: 'up' or 'down'. Scrolls one viewport height.",
 		ParametersSchema: `{"type":"object","properties":{"direction":{"type":"string","description":"Scroll direction: up or down","enum":["up","down"]}},"required":["direction"]}`,
 	},
+	{
+		Name:             "scrape",
+		Category:         CategoryBrowser,
+		Description:      "fetch a URL and return its content as clean text",
+		Schema:           `{"url": "https://example.com"}`,
+		Returns:          "Returns page content as markdown. Use instead of browse_to when you just need the text.",
+		ParametersSchema: `{"type":"object","properties":{"url":{"type":"string","description":"URL to fetch"}},"required":["url"]}`,
+	},
 
 	// Desktop
 	{
@@ -270,7 +278,7 @@ func PersonaToolNames(t PersonaType) []string {
 			// Execution
 			"bash",
 			// Browser
-			"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page",
+			"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "scrape",
 			// Desktop
 			"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act",
 			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key",
@@ -280,7 +288,7 @@ func PersonaToolNames(t PersonaType) []string {
 			"wait",
 		}
 	case PersonaWeb:
-		return []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "bash", "wait", "yield_artifact"}
+		return []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "scrape", "bash", "wait", "yield_artifact"}
 	case PersonaCode:
 		return []string{"bash", "wait", "yield_artifact"}
 	case PersonaDesktop:

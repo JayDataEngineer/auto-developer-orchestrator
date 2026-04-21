@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"go.uber.org/zap"
 )
@@ -101,6 +102,7 @@ type SandboxToolExecutor struct {
 	CU        ComputerUseProvider
 	Logger    *zap.Logger
 	Creds     *CredentialStore // optional: resolve/redact sensitive data
+	MCPClient *mcp.Client      // optional: MCP research server for search/scrape
 
 	// Vision in the loop: after page-changing actions, automatically capture a
 	// screenshot and describe it via the vision model. Gives the agent spatial
@@ -482,8 +484,12 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		return e.macroTypeText(ctx, sandboxID, args)
 
 	case "search_web":
-		// Macro: browse to search engine → type query → return results (all-in-one)
+		// Try MCP research server first, fall back to browser-based Google search
 		return e.macroSearchWeb(ctx, sandboxID, args)
+
+	case "scrape":
+		// Scrape a URL via MCP server (returns clean markdown)
+		return e.macroScrape(ctx, args)
 
 	// ── Low-level tools (exposed for advanced use) ──
 
@@ -1543,8 +1549,8 @@ func (e *SandboxToolExecutor) macroTypeText(ctx context.Context, sandboxID strin
 	return resp, nil
 }
 
-// macroSearchWeb is an all-in-one macro: browse to Google → type query → submit → return results.
-// The model only needs ONE tool call to complete a search task.
+// macroSearchWeb searches the web. Uses MCP research server if available,
+// falls back to browser-based Google search otherwise.
 func (e *SandboxToolExecutor) macroSearchWeb(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
@@ -1560,7 +1566,22 @@ func (e *SandboxToolExecutor) macroSearchWeb(ctx context.Context, sandboxID stri
 		return nil, fmt.Errorf("missing 'query' argument for search_web")
 	}
 
-	// Step 1: Navigate directly to Google search URL
+	// Try MCP research server first (much faster, no browser needed)
+	if e.MCPClient != nil {
+		result, err := e.MCPClient.Research(ctx, query, 3)
+		if err == nil && result != "" {
+			e.Logger.Info("search via MCP research server", zap.String("query", query))
+			return map[string]interface{}{
+				"success": true,
+				"query":   query,
+				"source":  "mcp_research",
+				"results": result,
+			}, nil
+		}
+		e.Logger.Warn("MCP research failed, falling back to browser search", zap.Error(err))
+	}
+
+	// Fallback: browser-based Google search
 	searchURL := fmt.Sprintf("https://www.google.com/search?q=%s", url.QueryEscape(query))
 	if err := e.ensureBrowserReady(ctx, sandboxID); err != nil {
 		return nil, fmt.Errorf("failed to start browser: %w", err)
@@ -1575,16 +1596,41 @@ func (e *SandboxToolExecutor) macroSearchWeb(ctx context.Context, sandboxID stri
 	resp := map[string]interface{}{
 		"success":      true,
 		"query":        query,
+		"source":       "browser_google",
 		"search_url":   searchURL,
 		"page_summary": e.extractPageSummary(navResult),
 	}
 
-	// Vision: describe search results page
 	if vision := e.visionSummary(ctx, sandboxID); vision != "" {
 		resp["vision"] = vision
 	}
 
 	return resp, nil
+}
+
+// macroScrape fetches a URL and returns its content as clean markdown via MCP.
+func (e *SandboxToolExecutor) macroScrape(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	targetURL, _ := args["url"].(string)
+	if targetURL == "" {
+		return nil, fmt.Errorf("missing 'url' argument for scrape")
+	}
+
+	// MCP scrape (primary path)
+	if e.MCPClient != nil {
+		result, err := e.MCPClient.Scrape(ctx, targetURL)
+		if err == nil && result != "" {
+			e.Logger.Info("scrape via MCP server", zap.String("url", targetURL))
+			return map[string]interface{}{
+				"success": true,
+				"url":     targetURL,
+				"source":  "mcp_scrape",
+				"content": result,
+			}, nil
+		}
+		e.Logger.Warn("MCP scrape failed", zap.Error(err))
+	}
+
+	return nil, fmt.Errorf("scrape failed: MCP server unavailable and no browser fallback for scrape")
 }
 
 // ErrorClass categorizes tool execution errors for appropriate retry behavior.

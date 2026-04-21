@@ -14,6 +14,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
+	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/models"
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
@@ -166,6 +167,15 @@ func main() {
 	if llamaEngine != nil {
 		piHandler.SetLlamaEngine(llamaEngine, sandboxMgr, computerUseHandler, x11Handler)
 		logger.Info("PiHandler configured for llama-server HTTP mode with computer use")
+	}
+
+	// MCP research server — non-fatal, tools fall back to browser-based search
+	mcpClient := mcp.NewClient("", logger)
+	if mcpClient.IsAvailable() {
+		piHandler.SetMCPClient(mcpClient)
+		logger.Info("MCP research server connected", zap.String("endpoint", mcpClient.Endpoint()))
+	} else {
+		logger.Info("MCP research server not available — search/scrape will use browser fallback")
 	}
 
 	// File transfer handler (upload/download files to/from sandbox)

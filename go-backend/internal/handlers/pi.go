@@ -12,6 +12,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/approval"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
+	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/pi"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
@@ -36,6 +37,7 @@ type PiHandler struct {
 	llamaEngine *llamaeng.HTTPEngine
 	sandboxMgr  *sandbox.Manager
 	cuBridge    *ComputerUseBridge // bridges llama executor to CU/X11 handlers
+	mcpClient   *mcp.Client        // optional: MCP research server for search/scrape
 
 	orchestrators map[string]*llamaeng.OrchestratorLoop // key: compositeKey(projectPath, agentId)
 }
@@ -63,6 +65,11 @@ func (h *PiHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *sand
 	if cu != nil {
 		h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
 	}
+}
+
+// SetMCPClient configures the MCP research server client for search/scrape tools.
+func (h *PiHandler) SetMCPClient(client *mcp.Client) {
+	h.mcpClient = client
 }
 
 // waitForApproval sends an approval SSE event and blocks until the user responds,
@@ -376,6 +383,7 @@ func (h *PiHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) 
 			CU:            h.cuBridge,
 			Logger:        h.log,
 			VisionEnabled: h.cuBridge.CU.VisionClient() != nil,
+			MCPClient:     h.mcpClient,
 		}
 	}
 
