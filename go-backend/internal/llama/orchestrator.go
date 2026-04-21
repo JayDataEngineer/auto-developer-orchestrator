@@ -323,6 +323,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 	}()
 
 	err = subLoop.Run(ctx, task, subEvents)
+	close(subEvents) // Signal the forwarding goroutine to finish
 	<-done // Wait for event forwarding to complete
 
 	// Build result

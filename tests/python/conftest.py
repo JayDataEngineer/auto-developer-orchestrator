@@ -214,6 +214,12 @@ VALID_SSE_EVENT_TYPES = {
     "branch_created", "commit_created", "push_complete", "pr_created",
     "web_update",
     "approval_request", "question_asked",
+    # Orchestrator events (from unified agent framework)
+    "plan_created", "plan_updated",
+    "artifact_created", "artifact_updated",
+    "subagent_start", "subagent_end",
+    # SSE protocol events
+    "message",
 }
 
 # Required fields for each event type (mirrors PiSSEEvent discriminated union)
@@ -236,6 +242,14 @@ SSE_EVENT_REQUIRED_FIELDS = {
     "web_update": {"url", "title", "screenshot", "elements"},
     "approval_request": {"requestId", "type", "message", "risk"},
     "question_asked": {"requestId", "type", "message", "risk"},
+    # Orchestrator events
+    "plan_created": set(),
+    "plan_updated": set(),
+    "artifact_created": set(),
+    "artifact_updated": set(),
+    "subagent_start": set(),
+    "subagent_end": set(),
+    "message": set(),
 }
 
 # Type constraints for fields the frontend uses in arithmetic or comparison
