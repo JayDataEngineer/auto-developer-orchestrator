@@ -407,28 +407,6 @@ function AppShellInner() {
 
         <div className="flex-1" />
 
-        {/* Right sidebar toggle — label changes per tab */}
-        {rightLabel && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-                className={cn(
-                  !rightPanelCollapsed
-                    ? 'text-primary bg-primary/10'
-                    : ''
-                )}
-              >
-                {!rightPanelCollapsed && <span>{rightLabel}</span>}
-                {rightPanelCollapsed ? <PanelRightOpen size={12} /> : <PanelRightClose size={12} />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{rightPanelCollapsed ? `Show ${rightLabel}` : `Hide ${rightLabel}`}</TooltipContent>
-          </Tooltip>
-        )}
-
         {/* Theme toggle */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -463,6 +441,28 @@ function AppShellInner() {
           </TooltipTrigger>
           <TooltipContent>Settings <span className="kbd">Ctrl+,</span></TooltipContent>
         </Tooltip>
+
+        {/* Right sidebar toggle — pinned far right */}
+        {rightLabel && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+                className={cn(
+                  !rightPanelCollapsed
+                    ? 'text-primary bg-primary/10'
+                    : ''
+                )}
+              >
+                {!rightPanelCollapsed && <span>{rightLabel}</span>}
+                {rightPanelCollapsed ? <PanelRightOpen size={12} /> : <PanelRightClose size={12} />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{rightPanelCollapsed ? `Show ${rightLabel}` : `Hide ${rightLabel}`}</TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
       {/* Main content: left sidebar | center tab | right sidebar */}
