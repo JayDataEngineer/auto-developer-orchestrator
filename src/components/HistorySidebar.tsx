@@ -194,7 +194,7 @@ export function HistorySidebar({
           ) : groups.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-6 opacity-20">
               <MessageSquare size={20} className="mb-2" />
-              <p className="text-xs font-mono uppercase tracking-widest text-center">
+              <p className="text-xs text-muted-foreground text-center">
                 No projects yet
               </p>
             </div>
@@ -217,7 +217,7 @@ export function HistorySidebar({
                     <ChevronDown size={10} className="shrink-0 text-muted-foreground" />
                   )}
                   <FolderOpen size={10} className="shrink-0" />
-                  <span className="text-xs font-mono uppercase tracking-widest truncate">
+                  <span className="text-xs font-medium truncate">
                     {group.project}
                   </span>
                   {group.conversations.length > 0 && (

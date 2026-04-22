@@ -128,7 +128,7 @@ function DesktopChatSection({
       <div className="px-3 py-2 border-b border-border">
         <div className="flex items-center gap-1 mb-1.5">
           <FolderOpen size={9} className="text-muted-foreground" />
-          <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Project</span>
+          <span className="text-[10px] font-medium text-muted-foreground">Project</span>
         </div>
         <Select value={selectedProject || ''} onValueChange={onSelectProject}>
           <SelectTrigger className="w-full bg-muted border-border rounded">

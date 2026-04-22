@@ -10,7 +10,7 @@ interface StatusBadgeProps {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-zinc-600',
+  pending: 'bg-muted-foreground/60',
   in_progress: 'bg-yellow-400 animate-pulse',
   running: 'bg-yellow-400 animate-pulse',
   completed: 'bg-emerald-400',
@@ -19,13 +19,13 @@ const STATUS_COLORS: Record<string, string> = {
   ok: 'bg-emerald-400',
   failed: 'bg-red-400',
   error: 'bg-red-400',
-  aborted: 'bg-zinc-500',
-  idle: 'bg-zinc-600',
-  disabled: 'bg-zinc-600',
+  aborted: 'bg-muted-foreground/50',
+  idle: 'bg-muted-foreground/60',
+  disabled: 'bg-muted-foreground/60',
 };
 
 const STATUS_TEXT_COLORS: Record<string, string> = {
-  pending: 'text-zinc-500',
+  pending: 'text-muted-foreground/60',
   in_progress: 'text-yellow-400',
   running: 'text-yellow-400',
   completed: 'text-emerald-400',
@@ -34,9 +34,9 @@ const STATUS_TEXT_COLORS: Record<string, string> = {
   ok: 'text-emerald-400',
   failed: 'text-red-400',
   error: 'text-red-400',
-  aborted: 'text-zinc-500',
-  idle: 'text-zinc-600',
-  disabled: 'text-zinc-600',
+  aborted: 'text-muted-foreground/60',
+  idle: 'text-muted-foreground/60',
+  disabled: 'text-muted-foreground/60',
 };
 
 export function StatusBadge({ status, label, size = 'sm' }: StatusBadgeProps) {
@@ -45,9 +45,9 @@ export function StatusBadge({ status, label, size = 'sm' }: StatusBadgeProps) {
 
   return (
     <div className="flex items-center gap-1.5">
-      <div className={cn('rounded-full shrink-0', dotSize, STATUS_COLORS[status] || 'bg-zinc-600')} />
+      <div className={cn('rounded-full shrink-0', dotSize, STATUS_COLORS[status] || 'bg-muted-foreground/60')} />
       {(label || status) && (
-        <span className={cn('font-mono uppercase tracking-widest', textSize, STATUS_TEXT_COLORS[status] || 'text-zinc-500')}>
+        <span className={cn('font-medium', textSize, STATUS_TEXT_COLORS[status] || 'text-muted-foreground/60')}>
           {label || status}
         </span>
       )}

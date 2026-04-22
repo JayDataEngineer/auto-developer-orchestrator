@@ -39,8 +39,8 @@ export function ToolCallItem({ tc }: { tc: ToolCall }) {
   const [open, setOpen] = useState(isRunning);
   return (
     <div className={cn(
-      "border bg-zinc-950",
-      isRunning ? "border-primary/30 bg-primary/5" : "border-white/5"
+      "border bg-background",
+      isRunning ? "border-primary/30 bg-primary/5" : "border-border"
     )}>
       <Button
         variant="ghost"
@@ -50,12 +50,12 @@ export function ToolCallItem({ tc }: { tc: ToolCall }) {
       >
         {TOOL_ICONS[tc.name] || <Wrench size={11} className="text-muted-foreground" />}
         <span className={cn(
-          "text-xs font-mono uppercase tracking-widest",
+          "text-xs font-semibold",
           isRunning ? "text-primary" : "text-muted-foreground"
         )}>
           {tc.name}
         </span>
-        <span className="text-xs font-mono text-zinc-600 truncate">
+        <span className="text-xs font-mono text-muted-foreground/60 truncate">
           {formatToolArgs(tc.name, tc.args)}
         </span>
         <div className="flex-1" />
@@ -66,16 +66,16 @@ export function ToolCallItem({ tc }: { tc: ToolCall }) {
         )}
       </Button>
       {open && formatResult(tc.result) && (
-        <div className="px-3 pb-2 border-t border-white/5">
+        <div className="px-3 pb-2 border-t border-border">
           <ScrollArea className="max-h-40">
-            <pre className="text-xs font-mono text-zinc-400 whitespace-pre-wrap">
+            <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap">
               {formatResult(tc.result)}
             </pre>
           </ScrollArea>
         </div>
       )}
       {open && tc.error && (
-        <div className="px-3 pb-2 border-t border-white/5">
+        <div className="px-3 pb-2 border-t border-border">
           <ScrollArea className="max-h-40">
             <pre className="text-xs font-mono text-red-400 whitespace-pre-wrap">
               {tc.error}

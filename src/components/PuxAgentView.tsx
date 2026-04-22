@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import {
-  Send, Square, Sparkles, ChevronDown, Trash2,
+  Send, Square, ChevronDown, Trash2,
   Loader, Zap, RotateCcw, ArrowLeft, GitBranch,
   ExternalLink, Check, GitPullRequest, Wrench
 } from 'lucide-react';
@@ -81,7 +81,7 @@ const InputBar = memo(function InputBar({
   }, [handleSend]);
 
   return (
-    <div className="w-full border-t border-white/5 bg-black/50 backdrop-blur-md">
+    <div className="w-full border-t border-border bg-background/80 backdrop-blur-md">
       <div className={cn(
         "mx-auto p-4 transition-all duration-500",
         isZenMode ? "max-w-7xl" : "max-w-3xl"
@@ -123,7 +123,7 @@ const InputBar = memo(function InputBar({
                 <DropdownMenuLabel>Main Model (conversation)</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {models.length === 0 && (
-                  <div className="px-2 py-2 text-xs font-mono text-muted uppercase tracking-widest">Loading models...</div>
+                  <div className="px-2 py-2 text-xs text-muted-foreground">Loading models...</div>
                 )}
                 {models.map(m => (
                   <DropdownMenuItem
@@ -146,7 +146,7 @@ const InputBar = memo(function InputBar({
                 <DropdownMenuLabel>Tool Model (sub-agents/vision)</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {models.length === 0 && (
-                  <div className="px-2 py-2 text-xs font-mono text-muted uppercase tracking-widest">Loading models...</div>
+                  <div className="px-2 py-2 text-xs text-muted-foreground">Loading models...</div>
                 )}
                 {models.map(m => (
                   <DropdownMenuItem
@@ -347,13 +347,20 @@ export const PuxAgentView: React.FC<PuxAgentViewProps> = ({ selectedProject, sel
             {/* Empty state */}
             {!hasContent && (
               <div className="h-full flex flex-col items-center justify-center text-center py-20 space-y-6">
-                <div className="w-16 h-16 border border-primary flex items-center justify-center text-primary">
-                  <Sparkles size={32} className="animate-pulse-slow" />
+                {/* Pux orb — soft glowing circle with inner sparkle */}
+                <div className="relative w-16 h-16">
+                  <div className="absolute inset-0 rounded-full bg-primary/15 animate-pulse-slow" />
+                  <div className="absolute inset-1 rounded-full bg-primary/10" />
+                  <div className="absolute inset-0 flex items-center justify-center text-primary">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2L13.4 8.6L20 12L13.4 15.4L12 22L10.6 15.4L4 12L10.6 8.6Z" />
+                    </svg>
+                  </div>
                 </div>
                 <div className="space-y-3 max-w-md">
-                  <h3 className="text-lg font-bold text-foreground">Ready to help</h3>
+                  <h3 className="text-xl font-semibold text-foreground">Hi, I'm Pux</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    Tell Pux what you want to build or automate, and watch it work.
+                    What would you like me to build, research, or automate for you today?
                   </p>
                 </div>
               </div>
@@ -403,7 +410,7 @@ export const PuxAgentView: React.FC<PuxAgentViewProps> = ({ selectedProject, sel
                   {aMsg.streaming && !aMsg.text && !aMsg.thinking && aMsg.toolCalls.length === 0 && (
                     <div className="flex items-center gap-2 py-2">
                       <Loader size={12} className="text-primary animate-spin" />
-                      <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Thinking...</span>
+                      <span className="text-xs text-muted-foreground">Thinking...</span>
                     </div>
                   )}
                 </div>
@@ -416,7 +423,7 @@ export const PuxAgentView: React.FC<PuxAgentViewProps> = ({ selectedProject, sel
 
         {/* Token usage */}
         {(state.tokenUsage.input > 0 || state.tokenUsage.output > 0) && (
-          <div className="w-full border-t border-white/5">
+          <div className="w-full border-t border-border">
             <div className={cn(
               "mx-auto py-2 px-6 flex items-center gap-6 text-xs font-mono text-muted-foreground transition-all duration-500",
               isZenMode ? "max-w-7xl" : "max-w-3xl"
@@ -437,10 +444,10 @@ export const PuxAgentView: React.FC<PuxAgentViewProps> = ({ selectedProject, sel
                 <Check size={12} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-black uppercase tracking-widest text-primary">
+                <div className="text-sm font-bold text-primary">
                   Pull Request #{state.prNumber} Created
                 </div>
-                <div className="text-xs font-mono text-muted-foreground truncate mt-0.5">
+                <div className="text-xs text-muted-foreground truncate mt-0.5">
                   {state.prUrl}
                 </div>
               </div>

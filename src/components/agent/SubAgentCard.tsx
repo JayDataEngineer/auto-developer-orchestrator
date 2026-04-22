@@ -7,7 +7,7 @@ export function SubAgentCard({ agent }: { agent: SubAgentInfo }) {
   const [open, setOpen] = useState(agent.status === 'running');
   const statusIcon = agent.status === 'running' ? <Loader size={10} className="animate-spin text-blue-400" /> :
     agent.status === 'complete' ? <Check size={10} className="text-green-400" /> :
-    <span className="text-xs text-zinc-500">{agent.status}</span>;
+    <span className="text-xs text-muted-foreground/60">{agent.status}</span>;
 
   const toolCount = agent.toolCalls ?? 0;
 
@@ -18,14 +18,14 @@ export function SubAgentCard({ agent }: { agent: SubAgentInfo }) {
         className="w-full flex items-center gap-2 px-3 py-2 text-left"
       >
         <Box size={11} className="text-blue-400" />
-        <span className="text-xs font-mono uppercase tracking-widest text-blue-300">
+        <span className="text-xs font-semibold text-blue-300">
           {agent.type} sub-agent
         </span>
-        <span className="text-xs font-mono text-zinc-500 truncate">
+        <span className="text-xs font-mono text-muted-foreground/60 truncate">
           {agent.subAgentId.slice(0, 30)}...
         </span>
         {toolCount > 0 && (
-          <span className="text-xs font-mono text-zinc-600">
+          <span className="text-xs font-mono text-muted-foreground/60">
             {toolCount} tools
           </span>
         )}

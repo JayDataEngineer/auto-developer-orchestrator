@@ -25,7 +25,7 @@ const ContextMenuSubTrigger = React.forwardRef<
   <ContextMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      "flex cursor-default select-none items-center gap-2 px-2 py-1 text-xs font-mono outline-none",
+      "flex cursor-default select-none items-center gap-2 px-2 py-1 text-xs outline-none",
       "focus:bg-accent focus:text-accent-foreground",
       inset && "pl-6",
       className
@@ -85,7 +85,7 @@ const ContextMenuItem = React.forwardRef<
   <ContextMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center gap-2 px-2 py-1 text-xs font-mono outline-none transition-colors",
+      "relative flex cursor-default select-none items-center gap-2 px-2 py-1 text-xs outline-none transition-colors",
       "focus:bg-accent focus:text-accent-foreground",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-30",
       inset && "pl-6",
@@ -103,7 +103,7 @@ const ContextMenuCheckboxItem = React.forwardRef<
   <ContextMenuPrimitive.CheckboxItem
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center py-1 pl-6 pr-2 text-xs font-mono outline-none transition-colors",
+      "relative flex cursor-default select-none items-center py-1 pl-6 pr-2 text-xs outline-none transition-colors",
       "focus:bg-accent focus:text-accent-foreground",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-30",
       className
@@ -128,7 +128,7 @@ const ContextMenuRadioItem = React.forwardRef<
   <ContextMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center py-1 pl-6 pr-2 text-xs font-mono outline-none transition-colors",
+      "relative flex cursor-default select-none items-center py-1 pl-6 pr-2 text-xs outline-none transition-colors",
       "focus:bg-accent focus:text-accent-foreground",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-30",
       className
@@ -154,7 +154,7 @@ const ContextMenuLabel = React.forwardRef<
   <ContextMenuPrimitive.Label
     ref={ref}
     className={cn(
-      "px-2 py-1.5 text-[10px] font-mono uppercase tracking-widest text-muted-foreground",
+      "px-2 py-1.5 text-[10px] font-medium text-muted-foreground",
       inset && "pl-6",
       className
     )}
@@ -181,7 +181,7 @@ const ContextMenuShortcut = ({
 }: React.HTMLAttributes<HTMLSpanElement>) => {
   return (
     <span
-      className={cn("ml-auto text-[10px] font-mono tracking-widest text-muted-foreground", className)}
+      className={cn("ml-auto text-[10px] font-mono text-muted-foreground", className)}
       {...props}
     />
   )

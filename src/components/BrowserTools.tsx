@@ -22,10 +22,10 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
 }) {
   if (!cu.enabled) {
     return (
-      <div className="border-b border-white/5 p-4">
+      <div className="border-b border-border p-4">
         <div className="flex items-center gap-2 mb-3">
           <Globe size={11} className="text-muted-foreground" />
-          <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">
+          <span className="text-xs font-semibold text-muted-foreground">
             Computer Use
           </span>
         </div>
@@ -42,17 +42,17 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
   }
 
   return (
-    <div className="border-b border-white/5">
+    <div className="border-b border-border">
       {/* Section header */}
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950/30">
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/30">
         <Globe size={11} className="text-muted-foreground" />
-        <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">
+        <span className="text-xs font-semibold text-muted-foreground">
           Browser
         </span>
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-black/30">
+      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-muted/50">
         <Button
           variant="ghost"
           size="xs"
@@ -81,7 +81,7 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
       </div>
 
       {/* URL bar */}
-      <form onSubmit={onNavigate} className="flex items-center gap-1 px-2 py-1 border-b border-white/5">
+      <form onSubmit={onNavigate} className="flex items-center gap-1 px-2 py-1 border-b border-border">
         <Input
           type="text"
           value={urlInput}
@@ -95,7 +95,7 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
       </form>
 
       {/* Screenshot */}
-      <div className="min-h-[100px] max-h-[280px] overflow-auto bg-zinc-950 flex items-center justify-center">
+      <div className="min-h-[100px] max-h-[280px] overflow-auto bg-background flex items-center justify-center">
         {cu.screenshot ? (
           <img
             src={`data:image/png;base64,${cu.screenshot}`}
@@ -103,24 +103,24 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
             className="max-w-full max-h-full object-contain"
           />
         ) : (
-          <div className="text-center text-zinc-700 py-6">
+          <div className="text-center text-muted-foreground/50 py-6">
             <Globe size={18} className="mx-auto mb-1 opacity-20" />
-            <p className="text-xs font-mono">Screenshot to capture</p>
+            <p className="text-xs text-muted-foreground">Screenshot to capture</p>
           </div>
         )}
       </div>
 
       {/* Vision description */}
       {cu.description && (
-        <div className="px-2 py-1 border-t border-white/5 bg-zinc-950/50 max-h-16 overflow-y-auto">
-          <p className="text-xs font-mono text-muted-foreground leading-relaxed">{cu.description}</p>
+        <div className="px-2 py-1 border-t border-border bg-muted/50 max-h-16 overflow-y-auto">
+          <p className="text-xs text-muted-foreground leading-relaxed">{cu.description}</p>
         </div>
       )}
 
       {/* Element list */}
       {cu.elements.length > 0 && (
-        <div className="border-t border-white/5">
-          <div className="px-2 py-0.5 text-xs font-black uppercase tracking-[0.2em] text-muted-foreground border-b border-white/5">
+        <div className="border-t border-border">
+          <div className="px-2 py-0.5 text-xs font-semibold text-muted-foreground border-b border-border">
             Elements ({cu.elements.length})
           </div>
           <ScrollArea className="max-h-36">
@@ -130,17 +130,17 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
                 variant="ghost"
                 size="xs"
                 className={cn(
-                  'w-full justify-start border-b border-white/[0.02]',
+                  'w-full justify-start border-b border-border/50',
                   selectedElement === el.id && 'bg-primary/10'
                 )}
                 onClick={() => onElementClick(el.id, el.tag)}
               >
-                <span className="text-[10px] bg-red-600/80 text-white px-0.5 font-mono min-w-[12px] text-center">
+                <span className="text-[10px] bg-red-600/80 text-primary-foreground px-0.5 font-mono min-w-[12px] text-center">
                   {el.id}
                 </span>
-                <span className="text-xs font-mono text-zinc-500">{el.tag}</span>
+                <span className="text-xs font-mono text-muted-foreground/60">{el.tag}</span>
                 {el.text && (
-                  <span className="text-xs font-mono text-zinc-400 truncate">{el.text}</span>
+                  <span className="text-xs font-mono text-muted-foreground truncate">{el.text}</span>
                 )}
               </Button>
             ))}
@@ -150,7 +150,7 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
 
       {/* Type input */}
       {selectedElement !== null && (
-        <div className="flex items-center gap-1 px-2 py-1 border-t border-white/5 bg-black/50">
+        <div className="flex items-center gap-1 px-2 py-1 border-t border-border bg-muted/80">
           <span className="text-xs font-mono text-muted-foreground">
             [{selectedElement}]
           </span>
@@ -169,7 +169,7 @@ export function BrowserTools({ cu, sandboxId, urlInput, setUrlInput, typeText, s
 
       {/* Error */}
       {cu.error && (
-        <div className="px-2 py-1 border-t border-red-900/30 text-xs font-mono text-red-400">
+        <div className="px-2 py-1 border-t border-red-900/30 text-xs text-red-400">
           {cu.error}
         </div>
       )}

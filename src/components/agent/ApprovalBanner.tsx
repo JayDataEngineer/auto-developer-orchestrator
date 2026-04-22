@@ -34,27 +34,27 @@ export const ApprovalBanner: React.FC<ApprovalBannerProps> = ({ approval, onResp
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className={`text-sm font-black uppercase tracking-widest ${
+            <span className={`text-sm font-semibold ${
               isQuestion ? 'text-blue-400' : 'text-amber-400'
             }`}>
               {isQuestion ? 'Agent Asks' : 'Approval Required'}
             </span>
             {!isQuestion && (
-              <span className={`text-xs font-mono font-bold uppercase px-1.5 py-0.5 ${riskColors[approval.risk]}`}>
+              <span className={`text-xs font-medium px-1.5 py-0.5 ${riskColors[approval.risk]}`}>
                 {approval.risk}
               </span>
             )}
             {approval.toolName && (
-              <span className="text-xs font-mono text-muted-foreground bg-white/5 px-1.5 py-0.5">
+              <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5">
                 {approval.toolName}
               </span>
             )}
           </div>
-          <p className="text-xs text-white/90 font-mono leading-relaxed">
+          <p className="text-xs text-foreground/90 leading-relaxed">
             {approval.message}
           </p>
           {approval.toolArgs && approval.toolArgs.command && (
-            <code className="block mt-1.5 text-sm font-mono text-muted-foreground bg-black/30 px-2 py-1 border border-white/5 break-all">
+            <code className="block mt-1.5 text-sm font-mono text-muted-foreground bg-muted px-2 py-1 border border-border break-all">
               {String(approval.toolArgs.command)}
             </code>
           )}

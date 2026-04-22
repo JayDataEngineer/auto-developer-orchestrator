@@ -171,10 +171,10 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
 
       {/* Live streaming status */}
       {streamingState?.isStreaming && (
-        <div className="border-b border-primary/20 bg-primary/5 px-3 py-2">
+          <div className="border-b border-primary/20 bg-primary/5 px-3 py-2">
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            <span className="text-xs font-black text-primary uppercase tracking-widest">
+            <span className="text-xs font-semibold text-primary">
               Agent Active
             </span>
           </div>
@@ -209,7 +209,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
         {/* Settings panel */}
         {showSettings && (
           <div className="p-4 space-y-4">
-            <div className="text-xs font-black uppercase tracking-widest text-muted-foreground mb-3">
+            <div className="text-xs font-semibold text-muted-foreground mb-3">
               Settings
             </div>
 
@@ -217,7 +217,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
             <div className="border border-border p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Monitor size={12} className="text-muted-foreground" />
-                <span className="text-sm font-bold uppercase tracking-widest text-foreground">
+                <span className="text-sm font-semibold text-foreground">
                   Computer Use
                 </span>
               </div>
@@ -267,7 +267,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
             <div className="border border-border p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Github size={12} className="text-muted-foreground" />
-                <span className="text-sm font-bold uppercase tracking-widest text-foreground">
+                <span className="text-sm font-semibold text-foreground">
                   GitHub
                 </span>
               </div>
@@ -290,7 +290,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
             <div className="border border-border p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Brain size={12} className="text-muted-foreground" />
-                <span className="text-sm font-bold text-foreground">
+                <span className="text-sm font-semibold text-foreground">
                   AI Providers
                 </span>
               </div>
@@ -326,7 +326,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
             <div className="p-3">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-muted-foreground">{typeIcons[selectedArtifact.type]}</span>
-                <span className="text-sm font-bold text-zinc-300 uppercase tracking-widest">
+                <span className="text-sm font-semibold text-foreground">
                   {typeLabels[selectedArtifact.type]}
                 </span>
                 <span className="text-xs font-mono text-muted-foreground">
@@ -338,10 +338,10 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
           ) : (
             <div className="flex flex-col items-center justify-center h-40 text-muted-foreground/50">
               <FileText size={20} className="mb-2 opacity-20" />
-              <p className="text-xs font-mono uppercase tracking-widest">
+              <p className="text-xs text-muted-foreground">
                 {artifactsLoading ? 'Loading...' : 'No artifacts yet'}
               </p>
-              <p className="text-xs font-mono text-muted-foreground/30 mt-1">
+              <p className="text-xs text-muted-foreground/50 mt-1">
                 Artifacts appear here as the agent works
               </p>
             </div>

@@ -48,7 +48,7 @@ function TodoArtifact({ content }: { content: string }) {
     <div className="space-y-1">
       {/* Progress bar */}
       <div className="flex items-center gap-3 mb-3">
-        <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
+        <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
           <div
             className="h-full bg-primary rounded-full transition-all"
             style={{ width: `${items.length > 0 ? (completed / items.length) * 100 : 0}%` }}
@@ -67,11 +67,11 @@ function TodoArtifact({ content }: { content: string }) {
           className="flex items-start gap-2 px-2 py-1"
         >
           <div className={`w-3.5 h-3.5 mt-0.5 border flex items-center justify-center shrink-0 ${
-            item.checked ? 'bg-primary border-primary' : item.inProgress ? 'border-primary bg-primary/20' : 'border-zinc-600'
+            item.checked ? 'bg-primary border-primary' : item.inProgress ? 'border-primary bg-primary/20' : 'border-muted-foreground/60'
           }`}>
             {item.checked && (
-              <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                <path d="M1 4L3 6L7 2" stroke="black" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none" className="text-primary-foreground">
+                <path d="M1 4L3 6L7 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             )}
             {item.inProgress && (
@@ -79,7 +79,7 @@ function TodoArtifact({ content }: { content: string }) {
             )}
           </div>
           <span className={`text-xs font-mono leading-relaxed ${
-            item.checked ? 'text-muted-foreground line-through' : item.inProgress ? 'text-primary' : 'text-zinc-300'
+            item.checked ? 'text-muted-foreground line-through' : item.inProgress ? 'text-primary' : 'text-foreground'
           }`}>
             {item.text}
           </span>

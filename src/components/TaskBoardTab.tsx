@@ -89,7 +89,7 @@ function TaskCard({ task, isSelected, onSelect, onTrigger, onDelete }: TaskCardP
       onClick={onSelect}
       className={cn(
         'p-2.5 border cursor-pointer transition-colors group',
-        isSelected ? 'border-primary/30 bg-primary/5' : 'border-white/5 bg-zinc-900 hover:border-white/10 hover:bg-zinc-900/80'
+        isSelected ? 'border-primary/30 bg-primary/5' : 'border-border bg-card hover:border-border hover:bg-card/80'
       )}
     >
       <div className="flex items-start gap-2">
@@ -97,18 +97,18 @@ function TaskCard({ task, isSelected, onSelect, onTrigger, onDelete }: TaskCardP
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium truncate">{task.name}</p>
           {task.description && (
-            <p className="text-xs font-mono text-zinc-600 truncate mt-0.5">{task.description}</p>
+            <p className="text-xs text-muted-foreground/60 truncate mt-0.5">{task.description}</p>
           )}
         </div>
       </div>
-      <div className="flex items-center gap-3 mt-1.5 text-xs font-mono text-zinc-600">
+      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground/60">
         {task.durationMs ? (
           <span className="flex items-center gap-0.5"><Clock size={7} />{formatDuration(task.durationMs)}</span>
         ) : null}
         {task.inputTokens || task.outputTokens ? (
           <span>{formatTokens(task.inputTokens)}in / {formatTokens(task.outputTokens)}out</span>
         ) : null}
-        <span className="ml-auto text-zinc-700">{new Date(task.updatedAt).toLocaleString()}</span>
+        <span className="ml-auto text-muted-foreground/50">{new Date(task.updatedAt).toLocaleString()}</span>
       </div>
       {/* Actions on hover */}
       <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -188,16 +188,16 @@ function EditTaskModal({ task, onClose, onSave, onTrigger, onDelete }: EditTaskM
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+          className="absolute inset-0 bg-background/80 backdrop-blur-sm"
         />
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="relative w-full max-w-lg bg-zinc-900 border border-white/10 rounded-3xl overflow-hidden shadow-2xl"
+          className="relative w-full max-w-lg bg-card border border-border rounded-3xl overflow-hidden shadow-2xl"
         >
           {/* Header */}
-          <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5">
+          <div className="flex items-center gap-3 px-6 py-4 border-b border-border">
             <StatusBadge status={jobBadgeStatus(task) as any} size="md" />
             <span className="text-sm font-bold flex-1 truncate">Edit Task</span>
             <div className="flex items-center gap-1">
@@ -207,7 +207,7 @@ function EditTaskModal({ task, onClose, onSave, onTrigger, onDelete }: EditTaskM
                 </Button>
               )}
               {isRunning && (
-                <span className="flex items-center gap-1 px-2 py-1 text-xs font-mono uppercase tracking-widest text-yellow-400">
+                <span className="flex items-center gap-1 px-2 py-1 text-xs font-semibold text-yellow-400">
                   <Loader size={10} className="animate-spin" /> Running
                 </span>
               )}
@@ -254,7 +254,7 @@ function EditTaskModal({ task, onClose, onSave, onTrigger, onDelete }: EditTaskM
                 {scheduleType === 'cron' && (
                   <div>
                     <Input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="0 0 9 * * *" className="font-mono" />
-                    <p className="text-[10px] text-zinc-600 mt-1 ml-1">6 fields: sec min hour day month dow — e.g. "0 0 9 * * *" = daily at 9am</p>
+                    <p className="text-[10px] text-muted-foreground/60 mt-1 ml-1">6 fields: sec min hour day month dow — e.g. "0 0 9 * * *" = daily at 9am</p>
                   </div>
                 )}
 
@@ -283,16 +283,16 @@ function EditTaskModal({ task, onClose, onSave, onTrigger, onDelete }: EditTaskM
                 <Separator className="my-2" />
                 <div className="flex items-center gap-4 pt-2">
                   <div>
-                    <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Duration</span>
-                    <p className="text-xs font-mono text-zinc-400">{formatDuration(task.durationMs)}</p>
+                    <span className="text-[10px] font-medium text-muted-foreground/60">Duration</span>
+                    <p className="text-xs text-muted-foreground">{formatDuration(task.durationMs)}</p>
                   </div>
                   <div>
-                    <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Tokens</span>
-                    <p className="text-xs font-mono text-zinc-400">{formatTokens(task.inputTokens)} in / {formatTokens(task.outputTokens)} out</p>
+                    <span className="text-[10px] font-medium text-muted-foreground/60">Tokens</span>
+                    <p className="text-xs text-muted-foreground">{formatTokens(task.inputTokens)} in / {formatTokens(task.outputTokens)} out</p>
                   </div>
                   <div>
-                    <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Last Run</span>
-                    <p className="text-xs font-mono text-zinc-400">{task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : '—'}</p>
+                    <span className="text-[10px] font-medium text-muted-foreground/60">Last Run</span>
+                    <p className="text-xs text-muted-foreground">{task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : '—'}</p>
                   </div>
                 </div>
 
@@ -301,10 +301,10 @@ function EditTaskModal({ task, onClose, onSave, onTrigger, onDelete }: EditTaskM
                   <>
                     <Separator className="my-2" />
                     <div className="pt-2">
-                      <span className="text-[10px] font-mono uppercase text-zinc-600 tracking-widest">Webhook URL</span>
+                      <span className="text-[10px] font-medium text-muted-foreground/60">Webhook URL</span>
                       <div className="flex items-center gap-2 mt-1">
-                        <Link size={10} className="text-zinc-600 shrink-0" />
-                        <code className="flex-1 text-xs font-mono text-zinc-400 bg-black/50 rounded-lg px-2 py-1.5 truncate border border-white/5">
+                        <Link size={10} className="text-muted-foreground/60 shrink-0" />
+                        <code className="flex-1 text-xs font-mono text-muted-foreground bg-muted rounded-lg px-2 py-1.5 truncate border border-border">
                           {window.location.origin}/api/scheduler/webhook/{task.webhookToken}
                         </code>
                         <Button
@@ -320,7 +320,7 @@ function EditTaskModal({ task, onClose, onSave, onTrigger, onDelete }: EditTaskM
                           <Copy size={12} />
                         </Button>
                       </div>
-                      <p className="text-[10px] text-zinc-700 mt-1 ml-4">POST to this URL to trigger the job. Optional body: {"{"}"message": "override prompt"{"}"}</p>
+                      <p className="text-[10px] text-muted-foreground/50 mt-1 ml-4">POST to this URL to trigger the job. Optional body: {"{"}"message": "override prompt"{"}"}</p>
                     </div>
                   </>
                 )}
@@ -361,14 +361,14 @@ interface JobRowProps {
 function JobRow({ job, onEdit, onTrigger, onToggle, onDelete }: JobRowProps) {
   return (
     <div
-      className="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-white/[0.02] transition-colors"
+      className="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-muted/50 transition-colors"
       onClick={onEdit}
     >
       <div className={cn(
         "w-2 h-2 rounded-full shrink-0",
         job.status === 'running' ? "bg-yellow-400 animate-pulse" :
         job.status === 'error' ? "bg-red-400" :
-        job.enabled ? "bg-emerald-400" : "bg-zinc-600"
+        job.enabled ? "bg-emerald-400" : "bg-muted-foreground/60"
       )} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
@@ -376,8 +376,8 @@ function JobRow({ job, onEdit, onTrigger, onToggle, onDelete }: JobRowProps) {
           {!job.enabled && <Badge variant="outline">off</Badge>}
         </div>
         <div className="flex items-center gap-3 mt-0.5">
-          <span className="text-xs font-mono text-zinc-600">{formatSchedule(job)}</span>
-          <span className="text-xs font-mono text-zinc-600">{formatNextRun(job.nextRunAt)}</span>
+          <span className="text-xs text-muted-foreground/60">{formatSchedule(job)}</span>
+          <span className="text-xs text-muted-foreground/60">{formatNextRun(job.nextRunAt)}</span>
         </div>
       </div>
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
@@ -442,9 +442,9 @@ function CreateForm({ projectDir, onSubmit, onCancel }: CreateFormProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="p-3 border-b border-white/5 bg-zinc-950/50 space-y-2">
+    <form onSubmit={handleSubmit} className="p-3 border-b border-border bg-muted/50 space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-mono uppercase tracking-widest text-primary">New Task</span>
+        <span className="text-xs font-semibold text-primary">New Task</span>
         <Button type="button" variant="ghost" size="icon-xs" onClick={onCancel}>
           <X size={12} />
         </Button>
@@ -467,7 +467,7 @@ function CreateForm({ projectDir, onSubmit, onCancel }: CreateFormProps) {
       {scheduleType === 'cron' && (
         <div>
           <Input value={cronExpr} onChange={e => setCronExpr(e.target.value)} placeholder="0 0 9 * * *" className="font-mono" />
-          <p className="text-[10px] text-zinc-600 mt-0.5">6 fields: sec min hour day month dow — e.g. "0 0 9 * * *" = daily at 9am</p>
+              <p className="text-[10px] text-muted-foreground/60 mt-0.5">6 fields: sec min hour day month dow — e.g. "0 0 9 * * *" = daily at 9am</p>
         </div>
       )}
       {scheduleType === 'every' && (
@@ -606,7 +606,7 @@ export function TaskBoardTab() {
       <ScrollArea className="flex-1">
         {loading && allJobs.length === 0 ? (
           <div className="flex-1 flex items-center justify-center h-32">
-            <Loader size={16} className="animate-spin text-zinc-600" />
+            <Loader size={16} className="animate-spin text-muted-foreground/60" />
           </div>
         ) : allJobs.length === 0 ? (
           <EmptyState
@@ -622,7 +622,7 @@ export function TaskBoardTab() {
               <div>
                 <div className="flex items-center gap-2 mb-2 px-1">
                   <Layers size={10} className="text-primary" />
-                  <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 font-bold">Manual Tasks</span>
+                  <span className="text-xs font-semibold text-muted-foreground">Manual Tasks</span>
                   <Badge variant="outline">{manualTasks.length}</Badge>
                 </div>
                 <div className="space-y-1">
@@ -645,10 +645,10 @@ export function TaskBoardTab() {
               <div>
                 <div className="flex items-center gap-2 mb-2 px-1">
                   <Clock size={10} className="text-primary" />
-                  <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 font-bold">Scheduled Jobs</span>
+                  <span className="text-xs font-semibold text-muted-foreground">Scheduled Jobs</span>
                   <Badge variant="outline">{scheduledJobs.length}</Badge>
                 </div>
-                <div className="border border-white/5 divide-y divide-white/5">
+                <div className="border border-border divide-y divide-border">
                   {scheduledJobs.map(job => (
                     <JobRow
                       key={job.id}
@@ -668,7 +668,7 @@ export function TaskBoardTab() {
 
       {/* Bottom bar */}
       {!showCreate && (
-        <div className="px-3 py-2 border-t border-white/5 shrink-0 flex items-center gap-2">
+        <div className="px-3 py-2 border-t border-border shrink-0 flex items-center gap-2">
           <Button
             variant="default"
             size="xs"
@@ -679,7 +679,7 @@ export function TaskBoardTab() {
           <Button variant="ghost" size="icon-xs" onClick={fetchJobs} title="Refresh">
             <RefreshCw size={12} />
           </Button>
-          <span className="ml-auto text-xs font-mono text-zinc-700">{allJobs.length} total</span>
+          <span className="ml-auto text-xs text-muted-foreground/50">{allJobs.length} total</span>
         </div>
       )}
 
