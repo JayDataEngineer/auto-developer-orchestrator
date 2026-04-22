@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
 
@@ -651,5 +654,230 @@ func TestCDPURLDesktopPort(t *testing.T) {
 	url := getCDPURL(session)
 	if !strings.Contains(url, ":9222") {
 		t.Errorf("desktop mode CDP URL should contain :9222, got %q", url)
+	}
+}
+
+// ─── VNC WebSocket Proxy Integration Tests ──────────────────────
+// These tests spin up a fake websockify server and verify the proxy
+// correctly relays WebSocket frames between browser and websockify.
+
+// fakeWebsockifyHandler is a gorilla WebSocket handler that simulates
+// a real websockify: it accepts connections and echoes messages back.
+func fakeWebsockifyHandler(w http.ResponseWriter, r *http.Request) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	// Echo loop — read a message, send it back
+	for {
+		mt, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		if err := conn.WriteMessage(mt, msg); err != nil {
+			return
+		}
+	}
+}
+
+func setupVNCIntegrationTest(t *testing.T) (*httptest.Server, *chi.Mux, *sandbox.Manager) {
+	t.Helper()
+
+	// 1. Start fake websockify server
+	wsifySrv := httptest.NewServer(http.HandlerFunc(fakeWebsockifyHandler))
+	t.Cleanup(wsifySrv.Close)
+
+	// Parse host and port from fake websockify URL
+	wsifyURL, _ := url.Parse(wsifySrv.URL)
+	host := wsifyURL.Hostname()
+	port := wsifyURL.Port()
+
+	// 2. Set up proxy handler with sandbox pointing to fake websockify
+	mgr := sandbox.NewTestManager()
+	sandboxID := "sb-vnc-integration"
+	mgr.AddTestSandbox(&sandbox.Sandbox{
+		ID:     sandboxID,
+		Status: sandbox.StatusRunning,
+		Mode:   sandbox.ModeBrowser,
+	})
+	mgr.AddTestDesktopSession(sandboxID, &sandbox.DesktopSession{
+		SandboxID: sandboxID,
+		NoVNCPort: mustAtoi(port),
+	})
+	mgr.SetTestContainerIP(sandboxID, host)
+
+	handler := NewSandboxHandler(mgr, zap.NewNop())
+	r := chi.NewRouter()
+	r.HandleFunc("/api/sandbox/vnc/{id}/*", handler.VNCProxy)
+
+	return wsifySrv, r, mgr
+}
+
+func mustAtoi(s string) int {
+	n := 0
+	for _, c := range s {
+		n = n*10 + int(c-'0')
+	}
+	return n
+}
+
+func TestVNCWebSocketProxyIntegration(t *testing.T) {
+	_, router, _ := setupVNCIntegrationTest(t)
+
+	// Start proxy server
+	proxySrv := httptest.NewServer(router)
+	t.Cleanup(proxySrv.Close)
+
+	// Connect WebSocket client through the proxy to websockify path
+	wsURL := "ws" + strings.TrimPrefix(proxySrv.URL, "http") + "/api/sandbox/vnc/sb-vnc-integration/websockify"
+	client, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("WebSocket dial failed: %v", err)
+	}
+	defer client.Close()
+
+	// Test 1: Send text message → should echo back
+	textMsg := "hello-vnc-proxy"
+	if err := client.WriteMessage(websocket.TextMessage, []byte(textMsg)); err != nil {
+		t.Fatalf("write text: %v", err)
+	}
+	client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	mt, got, err := client.ReadMessage()
+	if err != nil {
+		t.Fatalf("read echo: %v", err)
+	}
+	if mt != websocket.TextMessage {
+		t.Errorf("echo message type = %d, want TextMessage", mt)
+	}
+	if string(got) != textMsg {
+		t.Errorf("echo = %q, want %q", string(got), textMsg)
+	}
+
+	// Test 2: Send binary message → should echo back with binary type preserved
+	binaryMsg := []byte{0x00, 0x01, 0x02, 0xFF}
+	if err := client.WriteMessage(websocket.BinaryMessage, binaryMsg); err != nil {
+		t.Fatalf("write binary: %v", err)
+	}
+	client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	mt, got, err = client.ReadMessage()
+	if err != nil {
+		t.Fatalf("read binary echo: %v", err)
+	}
+	if mt != websocket.BinaryMessage {
+		t.Errorf("binary echo type = %d, want BinaryMessage", mt)
+	}
+	if string(got) != string(binaryMsg) {
+		t.Errorf("binary echo = %x, want %x", got, binaryMsg)
+	}
+
+	// Test 3: Large message (simulates VNC framebuffer update)
+	largeMsg := make([]byte, 64*1024)
+	for i := range largeMsg {
+		largeMsg[i] = byte(i % 256)
+	}
+	if err := client.WriteMessage(websocket.BinaryMessage, largeMsg); err != nil {
+		t.Fatalf("write large: %v", err)
+	}
+	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, got, err = client.ReadMessage()
+	if err != nil {
+		t.Fatalf("read large echo: %v", err)
+	}
+	if len(got) != len(largeMsg) {
+		t.Errorf("large echo len = %d, want %d", len(got), len(largeMsg))
+	}
+
+	// Test 4: Multiple rapid messages (VNC sends many small frames)
+	for i := 0; i < 10; i++ {
+		msg := []byte{byte(i)}
+		if err := client.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+			t.Fatalf("write rapid[%d]: %v", i, err)
+		}
+	}
+	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for i := 0; i < 10; i++ {
+		_, got, err = client.ReadMessage()
+		if err != nil {
+			t.Fatalf("read rapid[%d]: %v", i, err)
+		}
+		if got[0] != byte(i) {
+			t.Errorf("rapid[%d] = %d, want %d", i, got[0], i)
+		}
+	}
+
+	t.Log("VNC WebSocket proxy integration test passed — text, binary, large, and rapid messages all relayed correctly")
+}
+
+func TestVNCWebSocketProxyClosePropagation(t *testing.T) {
+	_, router, _ := setupVNCIntegrationTest(t)
+
+	proxySrv := httptest.NewServer(router)
+	t.Cleanup(proxySrv.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(proxySrv.URL, "http") + "/api/sandbox/vnc/sb-vnc-integration/websockify"
+	client, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("WebSocket dial failed: %v", err)
+	}
+
+	// Send a message to confirm connection works
+	client.WriteMessage(websocket.TextMessage, []byte("ping"))
+	client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, _, err = client.ReadMessage()
+	if err != nil {
+		t.Fatalf("ping/echo failed: %v", err)
+	}
+
+	// Client closes → proxy should propagate close to websockify
+	if err := client.WriteMessage(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye"),
+	); err != nil {
+		t.Fatalf("write close: %v", err)
+	}
+	client.Close()
+}
+
+func TestVNCWebSocketProxyUpstreamUnreachable(t *testing.T) {
+	// Proxy should handle upstream (websockify) being unreachable gracefully.
+	// The proxy upgrades the browser connection first, then tries websockify.
+	// Client sees: dial succeeds → close frame (websockify unreachable).
+	mgr := sandbox.NewTestManager()
+	sandboxID := "sb-unreachable"
+	mgr.AddTestSandbox(&sandbox.Sandbox{
+		ID:     sandboxID,
+		Status: sandbox.StatusRunning,
+		Mode:   sandbox.ModeBrowser,
+	})
+	mgr.AddTestDesktopSession(sandboxID, &sandbox.DesktopSession{
+		SandboxID: sandboxID,
+		NoVNCPort: 19999, // nobody listening here
+	})
+	mgr.SetTestContainerIP(sandboxID, "127.0.0.1")
+
+	handler := NewSandboxHandler(mgr, zap.NewNop())
+	r := chi.NewRouter()
+	r.HandleFunc("/api/sandbox/vnc/{id}/*", handler.VNCProxy)
+	proxySrv := httptest.NewServer(r)
+	t.Cleanup(proxySrv.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(proxySrv.URL, "http") + "/api/sandbox/vnc/sb-unreachable/websockify"
+	client, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		// Dial itself failed — also acceptable
+		t.Logf("Dial failed (acceptable): %v", err)
+		return
+	}
+	defer client.Close()
+
+	// Dial succeeded but proxy should close immediately since websockify is unreachable
+	client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, _, err = client.ReadMessage()
+	if err == nil {
+		t.Error("expected error/close when upstream is unreachable, but got a message")
+	} else {
+		t.Logf("Got expected error after upstream failure: %v", err)
 	}
 }

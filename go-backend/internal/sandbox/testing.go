@@ -29,3 +29,14 @@ func (m *Manager) AddTestDesktopSession(id string, session *DesktopSession) {
 	}
 	m.desktopSessions[id] = session
 }
+
+// SetTestContainerIP overrides GetContainerIP to return the given IP for a sandbox.
+// This allows integration tests to redirect the VNC proxy to a fake websockify server.
+func (m *Manager) SetTestContainerIP(sandboxID, ip string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.testContainerIPs == nil {
+		m.testContainerIPs = make(map[string]string)
+	}
+	m.testContainerIPs[sandboxID] = ip
+}

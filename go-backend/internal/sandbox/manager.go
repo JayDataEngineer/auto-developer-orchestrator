@@ -26,6 +26,9 @@ type Manager struct {
 	mu              sync.RWMutex
 	portMutex       sync.Mutex
 	logger          *zap.Logger
+
+	// testContainerIPs overrides GetContainerIP in tests (nil in production).
+	testContainerIPs map[string]string
 }
 
 // NewManager creates a new sandbox manager
@@ -820,6 +823,15 @@ func (m *Manager) GetDesktopSession(sandboxID string) (*DesktopSession, error) {
 
 // GetContainerIP returns the IP address of a sandbox container on the shared network.
 func (m *Manager) GetContainerIP(ctx context.Context, sandboxID string) (string, error) {
+	// Test override — allows integration tests to redirect VNC proxy to fake websockify.
+	if m.testContainerIPs != nil {
+		m.mu.RLock()
+		ip, ok := m.testContainerIPs[sandboxID]
+		m.mu.RUnlock()
+		if ok {
+			return ip, nil
+		}
+	}
 	if m.dockerClient == nil {
 		return "", fmt.Errorf("docker client not available")
 	}

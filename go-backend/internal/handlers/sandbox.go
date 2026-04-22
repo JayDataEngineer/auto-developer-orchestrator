@@ -248,7 +248,7 @@ var vncUpgrader = websocket.Upgrader{
 type vncConn struct {
 	id         string
 	clientConn *websocket.Conn
-	targetConn net.Conn
+	targetConn *websocket.Conn // gorilla WebSocket connection to websockify
 	cancel     context.CancelFunc
 	startedAt  time.Time
 }
@@ -345,49 +345,28 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 // proxyVNCWebSocket handles WebSocket proxying for VNC screen streaming.
-// Upgrades the client connection with gorilla/websocket, connects to the
-// container's websockify, and pipes data bidirectionally with idle timeout.
+// Uses gorilla/websocket on BOTH sides — browser and websockify — so WebSocket
+// frames are handled correctly (no raw TCP framing mismatch).
 func (h *SandboxHandler) proxyVNCWebSocket(w http.ResponseWriter, r *http.Request, containerHost string, novncPort int, path string, sandboxID string) {
-	// Upgrade client connection
+	// Upgrade client (browser) connection
 	clientConn, err := vncUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("VNC WebSocket upgrade failed", zap.Error(err))
 		return
 	}
 
-	// Connect to container's websockify via raw TCP
+	// Connect to container's websockify via gorilla/websocket Dialer
 	targetAddr := net.JoinHostPort(containerHost, fmt.Sprintf("%d", novncPort))
-	targetConn, err := net.DialTimeout("tcp", targetAddr, 5*time.Second)
+	wsURL := fmt.Sprintf("ws://%s%s", targetAddr, path)
+	dialer := websocket.Dialer{
+		ReadBufferSize:  8192,
+		WriteBufferSize: 8192,
+	}
+	targetConn, _, err := dialer.Dial(wsURL, nil)
 	if err != nil {
-		h.logger.Error("VNC websockify connect failed", zap.Error(err))
+		h.logger.Error("VNC websockify connect failed", zap.Error(err), zap.String("url", wsURL))
 		clientConn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "websockify unreachable"))
-		clientConn.Close()
-		return
-	}
-
-	// Send WebSocket upgrade request to websockify
-	reqPath := path
-	if r.URL.RawQuery != "" {
-		reqPath = reqPath + "?" + r.URL.RawQuery
-	}
-	upgradeReq := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n", reqPath, containerHost)
-	if _, err := targetConn.Write([]byte(upgradeReq)); err != nil {
-		h.logger.Error("VNC websockify upgrade write failed", zap.Error(err))
-		targetConn.Close()
-		clientConn.WriteMessage(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "upgrade failed"))
-		clientConn.Close()
-		return
-	}
-
-	// Read websockify's HTTP upgrade response (and discard it)
-	buf := make([]byte, 4096)
-	if _, err := targetConn.Read(buf); err != nil {
-		h.logger.Error("VNC websockify upgrade response read failed", zap.Error(err))
-		targetConn.Close()
-		clientConn.WriteMessage(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "upgrade response failed"))
 		clientConn.Close()
 		return
 	}
@@ -412,40 +391,43 @@ func (h *SandboxHandler) proxyVNCWebSocket(w http.ResponseWriter, r *http.Reques
 	// Idle timeout — close connection after 10 minutes of no data
 	const idleTimeout = 10 * time.Minute
 	clientConn.SetReadDeadline(time.Now().Add(idleTimeout))
+	targetConn.SetReadDeadline(time.Now().Add(idleTimeout))
 
-	// Bidirectional proxy
+	// Bidirectional relay — both sides use gorilla ReadMessage/WriteMessage
 	done := make(chan struct{}, 2)
 
-	// Client → Target (read WebSocket frames from browser, write raw to websockify)
+	// Client → Target
 	go func() {
 		defer func() { done <- struct{}{} }()
 		for {
-			_, msg, err := clientConn.ReadMessage()
+			mt, msg, err := clientConn.ReadMessage()
 			if err != nil {
 				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 					h.logger.Debug("VNC client read error", zap.String("conn_id", connID), zap.Error(err))
 				}
 				return
 			}
-			if _, err := targetConn.Write(msg); err != nil {
+			if err := targetConn.WriteMessage(mt, msg); err != nil {
 				return
 			}
 			clientConn.SetReadDeadline(time.Now().Add(idleTimeout))
+			targetConn.SetReadDeadline(time.Now().Add(idleTimeout))
 		}
 	}()
 
-	// Target → Client (read raw bytes from websockify, write WebSocket frames to browser)
+	// Target → Client
 	go func() {
 		defer func() { done <- struct{}{} }()
-		readBuf := make([]byte, 32*1024)
 		for {
-			n, err := targetConn.Read(readBuf)
+			mt, msg, err := targetConn.ReadMessage()
 			if err != nil {
 				return
 			}
-			if err := clientConn.WriteMessage(websocket.BinaryMessage, readBuf[:n]); err != nil {
+			if err := clientConn.WriteMessage(mt, msg); err != nil {
 				return
 			}
+			clientConn.SetReadDeadline(time.Now().Add(idleTimeout))
+			targetConn.SetReadDeadline(time.Now().Add(idleTimeout))
 		}
 	}()
 
