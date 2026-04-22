@@ -1,40 +1,40 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { usePiAgent } from '../hooks/usePiAgent';
-import { PiAgentState } from '../hooks/agentReducer';
+import { usePuxAgent } from '../hooks/usePuxAgent';
+import { PuxAgentState } from '../hooks/agentReducer';
 import { SubAgentInfo } from '../lib/api';
-import { ToolCall, PiModel, AssistantMessage } from '../lib/pi-events';
+import { ToolCall, PuxModel, AssistantMessage } from '../lib/pux-events';
 
-interface PiAgentContextValue {
-  state: PiAgentState;
+interface PuxAgentContextValue {
+  state: PuxAgentState;
   sendPrompt: (message: string, project: string, opts?: any) => Promise<void>;
   abort: (project: string, agentId?: string) => Promise<void>;
   compact: (project: string, agentId?: string) => Promise<void>;
   switchModel: (project: string, provider: string, modelId: string, agentId?: string) => Promise<void>;
-  getModels: (project: string, agentId?: string) => Promise<PiModel[]>;
+  getModels: (project: string, agentId?: string) => Promise<PuxModel[]>;
   reset: () => void;
   hydrateState: (project: string, agentId?: string) => Promise<void>;
   loadHistory: (project: string, agentId?: string) => Promise<void>;
   respondToApproval: (project: string, agentId: string, requestId: string, action: 'approve' | 'deny' | 'answer', message?: string) => Promise<void>;
 }
 
-const PiAgentContext = createContext<PiAgentContextValue | undefined>(undefined);
+const PuxAgentContext = createContext<PuxAgentContextValue | undefined>(undefined);
 
-export const PiAgentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // For now, we share a single agent state (default). 
+export const PuxAgentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // For now, we share a single agent state (default).
   // In a more complex app, we might have a map of states per agentId.
-  const pi = usePiAgent('default');
+  const pux = usePuxAgent('default');
 
   return (
-    <PiAgentContext.Provider value={pi}>
+    <PuxAgentContext.Provider value={pux}>
       {children}
-    </PiAgentContext.Provider>
+    </PuxAgentContext.Provider>
   );
 };
 
-export const usePiAgentContext = () => {
-  const context = useContext(PiAgentContext);
+export const usePuxAgentContext = () => {
+  const context = useContext(PuxAgentContext);
   if (!context) {
-    throw new Error('usePiAgentContext must be used within a PiAgentProvider');
+    throw new Error('usePuxAgentContext must be used within a PuxAgentProvider');
   }
   return context;
 };

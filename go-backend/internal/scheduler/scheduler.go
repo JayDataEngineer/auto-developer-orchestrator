@@ -62,7 +62,7 @@ const (
 	StatusDisabled JobStatus = "disabled"
 )
 
-// Job represents a scheduled job that sends prompts to Pi agents.
+// Job represents a scheduled job that sends prompts to Pux.
 type Job struct {
 	ID          string       `json:"id"`
 	Name        string       `json:"name"`

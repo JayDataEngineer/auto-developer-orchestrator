@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useRef, useEffect } from 'react';
-import type { PiSSEEvent } from '../lib/pi-events';
+import type { PuxSSEEvent } from '../lib/pux-events';
 
 export function useThrottledDeltas(
   onFlush: (textDelta: string, thinkingDelta: string) => void,
@@ -38,7 +38,7 @@ export function useThrottledDeltas(
 
   // If this is a text_delta or thinking_delta, buffer it and schedule a RAF flush
   const accumulate = useCallback(
-    (event: PiSSEEvent): boolean => {
+    (event: PuxSSEEvent): boolean => {
       if (event.type === 'text_delta') {
         pendingTextRef.current += (event.data as { text: string }).text;
         if (flushRafRef.current === null) {

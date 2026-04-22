@@ -242,7 +242,7 @@ func (h *ChecklistHandler) Merge(w http.ResponseWriter, r *http.Request) {
 
 // GenerateChecklistStream handles SSE streaming for checklist generation.
 // Scans the project for basic structure and generates a task list.
-// For full LLM-powered analysis, use the Pi agent (/api/pi/prompt).
+// For full LLM-powered analysis, use Pux (/api/pux/prompt).
 func (h *ChecklistHandler) GenerateChecklistStream(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project string `json:"project"`

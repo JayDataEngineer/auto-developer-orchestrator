@@ -1,12 +1,12 @@
 /**
- * Pi Agent SSE Event Types
+ * Pux Agent SSE Event Types
  * Mirrors the Go handler's SSE output for the frontend.
  */
 
 import type { LabeledElement } from './api';
 
 // SSE event types sent from the Go backend
-export type PiEventType =
+export type PuxEventType =
   | 'text_delta'
   | 'thinking_delta'
   | 'tool_execution_start'
@@ -33,67 +33,67 @@ export type PiEventType =
   | 'subagent_end';
 
 // Base event data
-export interface PiTextDelta {
+export interface PuxTextDelta {
   text: string;
 }
 
-export interface PiThinkingDelta {
+export interface PuxThinkingDelta {
   text: string;
 }
 
-export interface PiToolStart {
+export interface PuxToolStart {
   toolName: string;
   args: Record<string, unknown>;
   toolId: string;
 }
 
-export interface PiToolEnd {
+export interface PuxToolEnd {
   toolName: string;
   toolId: string;
   result: unknown;
   error?: string;
 }
 
-export interface PiAgentEnd {
+export interface PuxAgentEnd {
   input: number;
   output: number;
   cache: number;
 }
 
-export interface PiCompactionEnd {
+export interface PuxCompactionEnd {
   compactedMessages: number;
   keptMessages: number;
 }
 
-export interface PiError {
+export interface PuxError {
   error: string;
 }
 
-export interface PiStateUpdate {
+export interface PuxStateUpdate {
   model: string;
   input: number;
   output: number;
   cache: number;
 }
 
-export interface PiBranchCreated {
+export interface PuxBranchCreated {
   branch: string;
 }
 
-export interface PiAgentSpawned {
+export interface PuxAgentSpawned {
   agentId: string;
 }
 
-export interface PiCommitCreated {
+export interface PuxCommitCreated {
   message: string;
   branch: string;
 }
 
-export interface PiPushComplete {
+export interface PuxPushComplete {
   branch: string;
 }
 
-export interface PiPRCreated {
+export interface PuxPRCreated {
   url: string;
   number: number;
   title: string;
@@ -102,7 +102,7 @@ export interface PiPRCreated {
 // Web browser automation events
 export type { LabeledElement };
 
-export interface PiWebUpdate {
+export interface PuxWebUpdate {
   url: string;
   title: string;
   screenshot: string; // base64
@@ -110,7 +110,7 @@ export interface PiWebUpdate {
 }
 
 // Orchestrator artifact events
-export interface PiArtifact {
+export interface PuxArtifact {
   id: string;
   parentId?: string;
   sourceId: string;
@@ -121,18 +121,18 @@ export interface PiArtifact {
   metadata?: Record<string, string>;
 }
 
-export interface PiArtifactCreated {
+export interface PuxArtifactCreated {
   artifactId: string;
-  artifact: PiArtifact;
+  artifact: PuxArtifact;
 }
 
-export interface PiArtifactUpdated {
+export interface PuxArtifactUpdated {
   artifactId: string;
   content: string;
 }
 
 // Orchestrator plan events
-export interface PiPlanStep {
+export interface PuxPlanStep {
   index: number;
   desc: string;
   status: 'pending' | 'in_progress' | 'done' | 'failed' | 'skipped';
@@ -140,32 +140,32 @@ export interface PiPlanStep {
   artifactId?: string;
 }
 
-export interface PiPlanCreated {
+export interface PuxPlanCreated {
   artifactId: string;
-  steps: PiPlanStep[];
+  steps: PuxPlanStep[];
 }
 
-export interface PiPlanUpdated {
+export interface PuxPlanUpdated {
   stepIndex: number;
   status: string;
   note?: string;
 }
 
 // Orchestrator sub-agent events
-export interface PiSubAgentStart {
+export interface PuxSubAgentStart {
   subAgentId: string;
   persona: string;
   task: string;
 }
 
-export interface PiSubAgentEnd {
+export interface PuxSubAgentEnd {
   subAgentId: string;
   status: 'complete' | 'failed';
   artifactId?: string;
 }
 
 // Approval/question events (human-in-the-loop)
-export interface PiApprovalRequest {
+export interface PuxApprovalRequest {
   requestId: string;
   type: 'tool_confirm' | 'plan' | 'question';
   toolName?: string;
@@ -174,32 +174,32 @@ export interface PiApprovalRequest {
   risk: 'low' | 'medium' | 'high';
 }
 
-// Discriminated union of all Pi events
-export type PiSSEEvent =
-  | { type: 'text_delta'; data: PiTextDelta }
-  | { type: 'thinking_delta'; data: PiThinkingDelta }
-  | { type: 'tool_execution_start'; data: PiToolStart }
-  | { type: 'tool_execution_end'; data: PiToolEnd }
+// Discriminated union of all Pux events
+export type PuxSSEEvent =
+  | { type: 'text_delta'; data: PuxTextDelta }
+  | { type: 'thinking_delta'; data: PuxThinkingDelta }
+  | { type: 'tool_execution_start'; data: PuxToolStart }
+  | { type: 'tool_execution_end'; data: PuxToolEnd }
   | { type: 'agent_start'; data: Record<string, never> }
-  | { type: 'agent_end'; data: PiAgentEnd }
-  | { type: 'agent_spawned'; data: PiAgentSpawned }
+  | { type: 'agent_end'; data: PuxAgentEnd }
+  | { type: 'agent_spawned'; data: PuxAgentSpawned }
   | { type: 'compaction_start'; data: Record<string, never> }
-  | { type: 'compaction_end'; data: PiCompactionEnd }
-  | { type: 'error'; data: PiError }
-  | { type: 'state_update'; data: PiStateUpdate }
-  | { type: 'branch_created'; data: PiBranchCreated }
-  | { type: 'commit_created'; data: PiCommitCreated }
-  | { type: 'push_complete'; data: PiPushComplete }
-  | { type: 'pr_created'; data: PiPRCreated }
-  | { type: 'web_update'; data: PiWebUpdate }
-  | { type: 'approval_request'; data: PiApprovalRequest }
-  | { type: 'question_asked'; data: PiApprovalRequest }
-  | { type: 'artifact_created'; data: PiArtifactCreated }
-  | { type: 'artifact_updated'; data: PiArtifactUpdated }
-  | { type: 'plan_created'; data: PiPlanCreated }
-  | { type: 'plan_updated'; data: PiPlanUpdated }
-  | { type: 'subagent_start'; data: PiSubAgentStart }
-  | { type: 'subagent_end'; data: PiSubAgentEnd };
+  | { type: 'compaction_end'; data: PuxCompactionEnd }
+  | { type: 'error'; data: PuxError }
+  | { type: 'state_update'; data: PuxStateUpdate }
+  | { type: 'branch_created'; data: PuxBranchCreated }
+  | { type: 'commit_created'; data: PuxCommitCreated }
+  | { type: 'push_complete'; data: PuxPushComplete }
+  | { type: 'pr_created'; data: PuxPRCreated }
+  | { type: 'web_update'; data: PuxWebUpdate }
+  | { type: 'approval_request'; data: PuxApprovalRequest }
+  | { type: 'question_asked'; data: PuxApprovalRequest }
+  | { type: 'artifact_created'; data: PuxArtifactCreated }
+  | { type: 'artifact_updated'; data: PuxArtifactUpdated }
+  | { type: 'plan_created'; data: PuxPlanCreated }
+  | { type: 'plan_updated'; data: PuxPlanUpdated }
+  | { type: 'subagent_start'; data: PuxSubAgentStart }
+  | { type: 'subagent_end'; data: PuxSubAgentEnd };
 
 // Tool call tracking
 export interface ToolCall {
@@ -233,7 +233,7 @@ export interface AssistantMessage {
 export type ConversationMessage = UserMessage | AssistantMessage;
 
 // Session state
-export interface PiSessionState {
+export interface PuxSessionState {
   model: string | null;
   streaming: boolean;
   input: number;
@@ -242,14 +242,14 @@ export interface PiSessionState {
 }
 
 // Model info
-export interface PiModel {
+export interface PuxModel {
   provider: string;
   id: string;
   name: string;
 }
 
 // Parse an SSE event from raw text
-export function parseSSEEvent(raw: string): PiSSEEvent | null {
+export function parseSSEEvent(raw: string): PuxSSEEvent | null {
   const lines = raw.split('\n');
   let eventType: string | null = null;
   let eventData: string | null = null;
@@ -271,5 +271,5 @@ export function parseSSEEvent(raw: string): PiSSEEvent | null {
     return null;
   }
 
-  return { type: eventType as PiEventType, data } as PiSSEEvent;
+  return { type: eventType as PuxEventType, data } as PuxSSEEvent;
 }

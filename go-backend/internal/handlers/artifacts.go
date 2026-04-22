@@ -55,7 +55,7 @@ type CreateOrUpdateArtifactRequest struct {
 }
 
 // CreateOrUpdate creates or updates an artifact
-// POST /api/pi/artifacts
+// POST /api/pux/artifacts
 func (h *ArtifactHandler) CreateOrUpdate(w http.ResponseWriter, r *http.Request) {
 	var req CreateOrUpdateArtifactRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -110,7 +110,7 @@ func (h *ArtifactHandler) CreateOrUpdate(w http.ResponseWriter, r *http.Request)
 }
 
 // List returns all artifacts for an agent
-// GET /api/pi/artifacts?agentId=...
+// GET /api/pux/artifacts?agentId=...
 func (h *ArtifactHandler) List(w http.ResponseWriter, r *http.Request) {
 	agentID := r.URL.Query().Get("agentId")
 	if agentID == "" {

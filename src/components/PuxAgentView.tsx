@@ -5,9 +5,9 @@ import {
   ExternalLink, Check, GitPullRequest, Wrench
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { usePiAgentContext } from '../contexts/PiAgentContext';
+import { usePuxAgentContext } from '../contexts/PuxAgentContext';
 import { SubAgentInfo, api } from '../lib/api';
-import { PiModel, AssistantMessage, ToolCall } from '../lib/pi-events';
+import { PuxModel, AssistantMessage, ToolCall } from '../lib/pux-events';
 import { ToolCallItem } from './agent/ToolCallItem';
 import { SubAgentCard } from './agent/SubAgentCard';
 import { MarkdownBlock } from './agent/MarkdownBlock';
@@ -26,7 +26,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 
-interface PiAgentViewProps {
+interface PuxAgentViewProps {
   selectedProject?: string;
   selectedAgentId?: string;
   projects?: string[];
@@ -42,7 +42,7 @@ interface InputBarProps {
   isStreaming: boolean;
   disabled: boolean;
   model: string | null;
-  models: PiModel[];
+  models: PuxModel[];
   selectedProject?: string;
   selectedAgentId: string;
   isZenMode: boolean;
@@ -92,7 +92,7 @@ const InputBar = memo(function InputBar({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={selectedProject ? "Tell Pi what you want to build or automate..." : "Select a project to get started..."}
+              placeholder={selectedProject ? "Tell Pux what you want to build or automate..." : "Select a project to get started..."}
               disabled={disabled}
               data-prompt-input
               className="w-full border-border rounded-lg p-4 pr-14 text-base text-foreground placeholder-muted-foreground/60 resize-none bg-card"
@@ -216,9 +216,9 @@ const InputBar = memo(function InputBar({
 
 // ─── Main component ────────────────────────────────────────────────────────
 
-export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack, isZenMode = false, onZenToggle, onStreamingStateChange }) => {
-  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels, loadHistory, respondToApproval } = usePiAgentContext();
-  const [models, setModels] = useState<PiModel[]>([]);
+export const PuxAgentView: React.FC<PuxAgentViewProps> = ({ selectedProject, selectedAgentId = 'default', projects = [], onBack, isZenMode = false, onZenToggle, onStreamingStateChange }) => {
+  const { state, sendPrompt, abort, compact, switchModel, reset, hydrateState, getModels, loadHistory, respondToApproval } = usePuxAgentContext();
+  const [models, setModels] = useState<PuxModel[]>([]);
   const [toolModel, setToolModel] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -306,7 +306,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
             )}
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Zap size={12} className="text-primary" />
-              <span className="text-primary">Pi</span>
+              <span className="text-primary">Pux</span>
               <span className="text-muted-foreground">Assistant</span>
             </div>
           </div>
@@ -353,7 +353,7 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                 <div className="space-y-3 max-w-md">
                   <h3 className="text-lg font-bold text-foreground">Ready to help</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    Tell Pi what you want to build or automate, and watch it work.
+                    Tell Pux what you want to build or automate, and watch it work.
                   </p>
                 </div>
               </div>

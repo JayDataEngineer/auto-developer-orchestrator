@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { Shield, HelpCircle, Check, X, Send } from 'lucide-react';
-import { PiApprovalRequest } from '../../lib/pi-events';
+import { PuxApprovalRequest } from '../../lib/pux-events';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 
 interface ApprovalBannerProps {
-  approval: PiApprovalRequest;
+  approval: PuxApprovalRequest;
   onRespond: (requestId: string, action: 'approve' | 'deny' | 'answer', message?: string) => void;
 }
 

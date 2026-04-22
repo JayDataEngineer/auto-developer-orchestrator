@@ -33,12 +33,12 @@ func main() {
 	gitconfig := `[safe]
 	directory = *
 [user]
-	email = pi@orchestrator.local
-	name = Pi Agent
+	email = pux@orchestrator.local
+	name = Pux Agent
 `
 	// Write git-credentials file if GITHUB_TOKEN is available, so git push works.
 	if ghToken := os.Getenv("GITHUB_TOKEN"); ghToken != "" {
-		os.WriteFile("/tmp/.git-credentials", []byte("https://pi-agent:"+ghToken+"@github.com\n"), 0600)
+		os.WriteFile("/tmp/.git-credentials", []byte("https://pux-agent:"+ghToken+"@github.com\n"), 0600)
 		gitconfig += `[credential]
 	helper = store --file /tmp/.git-credentials
 `
@@ -175,7 +175,7 @@ func main() {
 	cliHandler := handlers.NewCLIHandler(logger, projectRoot)
 
 	// Agent handler (orchestrator + ephemeral sub-agents via llama-server)
-	piHandler := handlers.NewPiHandler(db, gitOps, githubHandler, logger)
+	puxHandler := handlers.NewPuxHandler(db, gitOps, githubHandler, logger)
 
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
@@ -191,21 +191,21 @@ func main() {
 	// X11 handler (xdotool-based desktop automation for native apps)
 	x11Handler := handlers.NewX11Handler(sandboxMgr, logger)
 
-	// Wire llama-server HTTP engine into PiHandler
+	// Wire llama-server HTTP engine into PuxHandler
 	if activeEngine != nil {
-		piHandler.SetLlamaEngine(activeEngine, sandboxMgr, computerUseHandler, x11Handler)
-		logger.Info("PiHandler configured with LLM engine", zap.String("model", activeEngine.ModelName()))
+		puxHandler.SetLlamaEngine(activeEngine, sandboxMgr, computerUseHandler, x11Handler)
+		logger.Info("PuxHandler configured with LLM engine", zap.String("model", activeEngine.ModelName()))
 	}
 
 	// Wire Gemini cloud engine (optional)
 	if geminiEngine != nil {
-		piHandler.SetGeminiEngine(geminiEngine)
+		puxHandler.SetGeminiEngine(geminiEngine)
 	}
 
 	// MCP research server — non-fatal, tools fall back to browser-based search
 	mcpClient := mcp.NewClient("", logger)
 	if mcpClient.IsAvailable() {
-		piHandler.SetMCPClient(mcpClient)
+		puxHandler.SetMCPClient(mcpClient)
 		logger.Info("MCP research server connected", zap.String("endpoint", mcpClient.Endpoint()))
 	} else {
 		logger.Info("MCP research server not available — search/scrape will use browser fallback")
@@ -325,9 +325,9 @@ func main() {
 		r.Get("/cli/cat", cliHandler.ReadFile)
 		r.Get("/cli/ls", cliHandler.ListDirectory)
 
-		// Pi Coding Agent
-		r.Route("/pi", func(r chi.Router) {
-			piHandler.RegisterRoutes(r)
+		// Pux Agent
+		r.Route("/pux", func(r chi.Router) {
+			puxHandler.RegisterRoutes(r)
 		})
 
 		// Sandbox management (OpenShell)
@@ -376,7 +376,7 @@ func main() {
 		})
 
 		// Artifacts (plans, todos, notes from agents)
-		r.Route("/pi/artifacts", func(r chi.Router) {
+		r.Route("/pux/artifacts", func(r chi.Router) {
 			artifactHandler.RegisterRoutes(r)
 		})
 

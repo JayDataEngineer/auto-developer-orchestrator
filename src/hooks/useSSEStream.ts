@@ -1,4 +1,4 @@
-import { PiSSEEvent, parseSSEEvent } from '../lib/pi-events';
+import { PuxSSEEvent, parseSSEEvent } from '../lib/pux-events';
 
 /**
  * Read an SSE stream from a fetch Response, split on `\n\n`,
@@ -7,7 +7,7 @@ import { PiSSEEvent, parseSSEEvent } from '../lib/pi-events';
  */
 export async function readSSEStream(
   response: Response,
-  onEvent: (event: PiSSEEvent) => void,
+  onEvent: (event: PuxSSEEvent) => void,
 ): Promise<void> {
   if (!response.body) return;
   const reader = response.body.getReader();

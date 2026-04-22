@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Artifact, api } from '../lib/api';
-import { ToolCall } from '../lib/pi-events';
+import { ToolCall } from '../lib/pux-events';
 import { ArtifactView } from './ArtifactView';
 import { BrowserTools } from './BrowserTools';
 import { useComputerUse } from '../hooks/useComputerUse';

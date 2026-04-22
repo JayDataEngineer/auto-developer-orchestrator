@@ -5,7 +5,7 @@ import { useComputerUse } from '../hooks/useComputerUse';
 import { HistorySidebar } from './HistorySidebar';
 import { RightPanel } from './RightPanel';
 import { AgentTab } from './AgentTab';
-import { PiAgentView } from './PiAgentView';
+import { PuxAgentView } from './PuxAgentView';
 import { ComputerUseTab } from './ComputerUseTab';
 import { TaskBoardTab } from './TaskBoardTab';
 import { ToastProvider } from './ui/Toast';
@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
 import { api, ConversationSummary } from '../lib/api';
-import { ToolCall } from '../lib/pi-events';
+import { ToolCall } from '../lib/pux-events';
 
 type TabId = 'agent' | 'tasks' | 'desktop';
 
@@ -74,7 +74,7 @@ function DesktopChatSection({
     let cancelled = false;
     const fetchConvos = async () => {
       try {
-        const data = await api.pi.getHistory();
+        const data = await api.pux.getHistory();
         if (!cancelled) {
           const filtered = (data.conversations || []).filter(
             (c: ConversationSummary) => c.project === selectedProject
@@ -402,7 +402,7 @@ function AppShellInner() {
 
         <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
           <Zap size={9} className="text-primary" />
-          <span className="text-primary">Pi</span>
+          <span className="text-primary">Pux</span>
         </div>
 
         <div className="flex-1" />
@@ -488,7 +488,7 @@ function AppShellInner() {
             )}
             {activeTab === 'desktop' && (
               <div className="absolute inset-0 bg-background">
-                <PiAgentView
+                <PuxAgentView
                   selectedProject={selectedProject || undefined}
                   selectedAgentId={activeAgentId}
                   projects={safeProjects}

@@ -38,7 +38,7 @@ func writeSSE(w http.ResponseWriter, eventType string, data interface{}, canFlus
 // mapEventToSSE converts a Pi RPC event to an SSE event for the frontend.
 // Pi's RPC protocol sends message_update events with nested assistantMessageEvent
 // containing the actual text deltas in its "delta" field.
-func (h *PiHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
+func (h *PuxHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
 	switch event.Type {
 	case "message_update":
 		// Pi sends message updates with nested assistantMessageEvent

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, memo } from 'react';
 import { ChevronDown, ChevronUp, Terminal } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { ToolCall } from '../lib/pi-events';
+import { ToolCall } from '../lib/pux-events';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 
@@ -102,7 +102,7 @@ const ConsolePanel = memo(function ConsolePanel({ toolCalls }: DesktopConsolePan
         <ScrollArea className="text-xs font-mono leading-relaxed" style={{ minHeight: 60, maxHeight: 200 }}>
           <div ref={scrollRef}>
             {filtered.length === 0 ? (
-              <div className="px-3 py-2 text-muted-foreground/50">Pi will show activity here as it works</div>
+              <div className="px-3 py-2 text-muted-foreground/50">Pux will show activity here as it works</div>
             ) : (
               filtered.map(tc => (
                 <div key={tc.id} className="px-3 py-0.5 border-b border-border/50 hover:bg-muted/50">

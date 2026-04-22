@@ -20,8 +20,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// PiHandler handles Pi agent HTTP endpoints.
-type PiHandler struct {
+// PuxHandler handles Pux agent HTTP endpoints.
+type PuxHandler struct {
 	db         *storage.Database
 	git        *git.GitOps
 	github     *GitHubHandler
@@ -44,9 +44,9 @@ type PiHandler struct {
 	selectedEngines map[string]*llamaeng.HTTPEngine        // per-agent engine override
 }
 
-// NewPiHandler creates a new Pi handler.
-func NewPiHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, logger *zap.Logger) *PiHandler {
-	return &PiHandler{
+// NewPuxHandler creates a new Pux handler.
+func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, logger *zap.Logger) *PuxHandler {
+	return &PuxHandler{
 		db:            db,
 		git:           gitOps,
 		github:        gh,
@@ -62,7 +62,7 @@ func NewPiHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, l
 
 // SetLlamaEngine configures the handler for llama-server HTTP inference.
 // When set, Prompt() uses the orchestrator + ephemeral sub-agent path.
-func (h *PiHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
+func (h *PuxHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
 	h.llamaEngine = engine
 	h.sandboxMgr = sandboxMgr
 	if cu != nil {
@@ -71,17 +71,17 @@ func (h *PiHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *sand
 }
 
 // SetGeminiEngine configures the optional Gemini cloud engine.
-func (h *PiHandler) SetGeminiEngine(engine *llamaeng.HTTPEngine) {
+func (h *PuxHandler) SetGeminiEngine(engine *llamaeng.HTTPEngine) {
 	h.geminiEngine = engine
 }
 
 // SetMCPClient configures the MCP research server client for search/scrape tools.
-func (h *PiHandler) SetMCPClient(client *mcp.Client) {
+func (h *PuxHandler) SetMCPClient(client *mcp.Client) {
 	h.mcpClient = client
 }
 
-// RegisterRoutes registers all Pi routes on the given router.
-func (h *PiHandler) RegisterRoutes(r chi.Router) {
+// RegisterRoutes registers all Pux routes on the given router.
+func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/prompt", h.Prompt)
 	r.Post("/respond", h.Respond)
 	r.Get("/tool-permissions", h.GetToolPermissions)
@@ -112,7 +112,7 @@ type respondRequest struct {
 }
 
 // Respond handles user approval/denial responses for pending agent approvals.
-func (h *PiHandler) Respond(w http.ResponseWriter, r *http.Request) {
+func (h *PuxHandler) Respond(w http.ResponseWriter, r *http.Request) {
 	var req respondRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -157,8 +157,8 @@ type promptRequest struct {
 	AutoMerge     bool   `json:"autoMerge,omitempty"`
 }
 
-// Prompt sends a coding task to Pi and streams events back via SSE.
-func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
+// Prompt sends a coding task to Pux and streams events back via SSE.
+func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	var req promptRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -201,7 +201,7 @@ func (h *PiHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeLlamaSSE converts a llama engine event to SSE and writes it.
-func (h *PiHandler) writeLlamaSSE(w http.ResponseWriter, evt llamaeng.AgentEvent, canFlush bool, flusher http.Flusher) {
+func (h *PuxHandler) writeLlamaSSE(w http.ResponseWriter, evt llamaeng.AgentEvent, canFlush bool, flusher http.Flusher) {
 	piEvent := llamaeng.ConvertEvent(evt)
 	sseEvt := h.mapEventToSSE(piEvent)
 	if sseEvt == nil {
@@ -229,7 +229,7 @@ func (h *PiHandler) writeLlamaSSE(w http.ResponseWriter, evt llamaeng.AgentEvent
 }
 
 // accumulateLlamaText accumulates text/thinking from llama events for DB persistence.
-func (h *PiHandler) accumulateLlamaText(evt llamaeng.AgentEvent, text, thinking *string) {
+func (h *PuxHandler) accumulateLlamaText(evt llamaeng.AgentEvent, text, thinking *string) {
 	switch evt.Type {
 	case llamaeng.EventTypeTextDelta:
 		*text += evt.Data.Text
@@ -240,7 +240,7 @@ func (h *PiHandler) accumulateLlamaText(evt llamaeng.AgentEvent, text, thinking 
 
 // promptWithOrchestrator handles prompt requests using the orchestrator + sub-agent pattern.
 // The orchestrator plans and delegates to specialized personas (web, code, desktop).
-func (h *PiHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
+func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
 	key := compositeAgentKey(projectPath, req.AgentId)
 
 	// Resolve sandbox ID via project path lookup, fall back to basename
@@ -343,7 +343,7 @@ func (h *PiHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reques
 
 // getOrCreateOrchestrator returns an existing orchestrator or creates a new one.
 // Evicts ALL previous orchestrators (even running ones) to free VRAM.
-func (h *PiHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) *llamaeng.OrchestratorLoop {
+func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) *llamaeng.OrchestratorLoop {
 	if orch, ok := h.orchestrators[key]; ok {
 		return orch
 	}
@@ -426,14 +426,14 @@ func (a *approvalManagerAdapter) Cleanup(requestID string) {
 }
 
 // GetToolPermissions returns all configured tool permissions.
-// GET /api/pi/tool-permissions
-func (h *PiHandler) GetToolPermissions(w http.ResponseWriter, r *http.Request) {
+// GET /api/pux/tool-permissions
+func (h *PuxHandler) GetToolPermissions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.toolPerms.AllPermissions())
 }
 
 // SetToolPermission updates a single tool's permission level.
-// PUT /api/pi/tool-permissions
-func (h *PiHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
+// PUT /api/pux/tool-permissions
+func (h *PuxHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Tool   string `json:"tool"`
 		Level  string `json:"level"` // "auto", "confirm", "deny"
@@ -462,8 +462,8 @@ func (h *PiHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetHistory returns conversation history for a project+agent.
-// GET /api/pi/history?project=...&agentId=...&limit=...
-func (h *PiHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
+// GET /api/pux/history?project=...&agentId=...&limit=...
+func (h *PuxHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	agentID := r.URL.Query().Get("agentId")
 	if project == "" {
@@ -491,8 +491,8 @@ func (h *PiHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteConversation deletes all messages for a project+agent.
-// DELETE /api/pi/conversation?project=...&agentId=...
-func (h *PiHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
+// DELETE /api/pux/conversation?project=...&agentId=...
+func (h *PuxHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	agentID := r.URL.Query().Get("agentId")
 	if project == "" {
@@ -513,8 +513,8 @@ func (h *PiHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 // RenameConversation sets a custom title for a conversation.
-// PUT /api/pi/conversation/rename
-func (h *PiHandler) RenameConversation(w http.ResponseWriter, r *http.Request) {
+// PUT /api/pux/conversation/rename
+func (h *PuxHandler) RenameConversation(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project string `json:"project"`
 		AgentID string `json:"agentId"`
@@ -542,8 +542,8 @@ func (h *PiHandler) RenameConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetModels returns available models from settings.json.
-// GET /api/pi/models
-func (h *PiHandler) GetModels(w http.ResponseWriter, r *http.Request) {
+// GET /api/pux/models
+func (h *PuxHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 	type modelInfo struct {
 		ID       string `json:"id"`
 		Name     string `json:"name"`
@@ -592,8 +592,8 @@ func (h *PiHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // SetModel switches the active engine for a specific agent.
-// PUT /api/pi/model
-func (h *PiHandler) SetModel(w http.ResponseWriter, r *http.Request) {
+// PUT /api/pux/model
+func (h *PuxHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project  string `json:"project"`
 		Provider string `json:"provider"`
@@ -656,7 +656,7 @@ func (h *PiHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 
 // engineFromSettings reads a provider's apiKey and baseUrl from settings.json
 // and creates a temporary HTTPEngine for it.
-func (h *PiHandler) engineFromSettings(providerID, modelID string) *llamaeng.HTTPEngine {
+func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.HTTPEngine {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil

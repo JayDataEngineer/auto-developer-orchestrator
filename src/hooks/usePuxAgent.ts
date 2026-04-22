@@ -1,17 +1,17 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
-  PiSSEEvent,
+  PuxSSEEvent,
   ToolCall,
-  PiModel,
+  PuxModel,
   ConversationMessage,
   AssistantMessage,
-} from '../lib/pi-events';
+} from '../lib/pux-events';
 import { SubAgentInfo } from '../lib/api';
 import { readSSEStream } from './useSSEStream';
 import { api } from '../lib/api';
 import { showToast } from '../lib/toast';
 import {
-  PiAgentState,
+  PuxAgentState,
   initialAgentState,
   updateLastAssistant,
   agentReducer,
@@ -21,13 +21,13 @@ import { useMessageQueue, QueuedMessage } from './useMessageQueue';
 
 // Re-exports for backward compatibility
 export type { SubAgentInfo } from '../lib/api';
-export type { PiAgentState } from './agentReducer';
+export type { PuxAgentState } from './agentReducer';
 
 // Instance-scoped ID generators via refs
 let instanceCounter = 0;
 
-export function usePiAgent(initialAgentId: string = 'default') {
-  const [state, setState] = useState<PiAgentState>({ ...initialAgentState, agentId: initialAgentId });
+export function usePuxAgent(initialAgentId: string = 'default') {
+  const [state, setState] = useState<PuxAgentState>({ ...initialAgentState, agentId: initialAgentId });
   const abortRef = useRef<AbortController | null>(null);
   const projectRef = useRef<string | null>(null);
   const agentIdRef = useRef<string>(initialAgentId);
@@ -67,7 +67,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
     }, []),
   );
 
-  const handleEvent = useCallback((event: PiSSEEvent) => {
+  const handleEvent = useCallback((event: PuxSSEEvent) => {
     if (accumulate(event)) return;
     syncFlush();
     setState(prev => agentReducer(prev, event, nextMsgId, nextToolFallbackId));
@@ -84,7 +84,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
     agentIdRef.current = aid;
     const genAtCall = promptGenRef.current;
     try {
-      const serverState = await api.pi.getState(project, aid);
+      const serverState = await api.pux.getState(project, aid);
 
       // If the user sent a prompt while we were fetching, don't overwrite their state
       if (promptGenRef.current !== genAtCall) return;
@@ -164,7 +164,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
       }));
 
       try {
-        const response = await api.pi.prompt(message, project, aid, {
+        const response = await api.pux.prompt(message, project, aid, {
           model: opts?.model,
           thinkingLevel: opts?.thinkingLevel,
           autoBranch: opts?.autoBranch,
@@ -244,7 +244,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
     }
     const aid = agentId || agentIdRef.current;
     try {
-      await api.pi.abort(project, aid);
+      await api.pux.abort(project, aid);
     } catch {}
     setState(prev => ({
       ...prev,
@@ -256,24 +256,24 @@ export function usePiAgent(initialAgentId: string = 'default') {
   const compact = useCallback(async (project: string, agentId?: string) => {
     const aid = agentId || agentIdRef.current;
     try {
-      await api.pi.compact(project, aid);
+      await api.pux.compact(project, aid);
     } catch {}
   }, []);
 
   const switchModel = useCallback(async (project: string, provider: string, modelId: string, agentId?: string) => {
     const aid = agentId || agentIdRef.current;
     try {
-      await api.pi.setModel(project, provider, modelId, aid);
+      await api.pux.setModel(project, provider, modelId, aid);
       setState(prev => ({ ...prev, model: modelId }));
     } catch {
       showToast('error', `Failed to switch model to ${modelId}`);
     }
   }, []);
 
-  const getModels = useCallback(async (project: string, agentId?: string): Promise<PiModel[]> => {
+  const getModels = useCallback(async (project: string, agentId?: string): Promise<PuxModel[]> => {
     const aid = agentId || agentIdRef.current;
     try {
-      const data = await api.pi.getModels(project, aid);
+      const data = await api.pux.getModels(project, aid);
       return data.models || [];
     } catch {
       return [];
@@ -294,7 +294,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
     // we were waiting, discard the stale history to avoid overwriting active messages
     const genAtCall = promptGenRef.current;
     try {
-      const msgs = await api.pi.getMessages(project, aid);
+      const msgs = await api.pux.getMessages(project, aid);
       if (!Array.isArray(msgs) || msgs.length === 0) return;
 
       // If the user sent a prompt while we were fetching, don't overwrite their messages
@@ -348,7 +348,7 @@ export function usePiAgent(initialAgentId: string = 'default') {
     message?: string,
   ) => {
     try {
-      await api.pi.respond(project, agentId, requestId, action, message);
+      await api.pux.respond(project, agentId, requestId, action, message);
     } catch {
       showToast('error', 'Failed to send approval response');
     }

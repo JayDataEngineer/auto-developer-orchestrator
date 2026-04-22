@@ -1,25 +1,25 @@
 /**
- * Pure state transitions for Pi agent events.
+ * Pure state transitions for Pux agent events.
  * No React, no hooks, no side effects — fully testable.
  */
 
 import type {
-  PiSSEEvent,
+  PuxSSEEvent,
   ToolCall,
   ConversationMessage,
   AssistantMessage,
-  PiWebUpdate,
-  PiApprovalRequest,
-  PiArtifact,
-  PiPlanStep,
-} from '../lib/pi-events';
+  PuxWebUpdate,
+  PuxApprovalRequest,
+  PuxArtifact,
+  PuxPlanStep,
+} from '../lib/pux-events';
 import type { SubAgentInfo } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface PiAgentState {
+export interface PuxAgentState {
   messages: ConversationMessage[];
   isStreaming: boolean;
   text: string;
@@ -34,15 +34,15 @@ export interface PiAgentState {
   prUrl: string | null;
   prNumber: number | null;
   subAgents: SubAgentInfo[];
-  artifacts: PiArtifact[];
-  plan: { artifactId: string; steps: PiPlanStep[] } | null;
-  webUpdate: PiWebUpdate | null;
+  artifacts: PuxArtifact[];
+  plan: { artifactId: string; steps: PuxPlanStep[] } | null;
+  webUpdate: PuxWebUpdate | null;
   lastCommit: { message: string; branch: string } | null;
   lastPush: { branch: string } | null;
-  pendingApproval: PiApprovalRequest | null;
+  pendingApproval: PuxApprovalRequest | null;
 }
 
-export const initialAgentState: PiAgentState = {
+export const initialAgentState: PuxAgentState = {
   messages: [],
   isStreaming: false,
   text: '',
@@ -93,11 +93,11 @@ export function updateLastAssistant(
  * testable — callers pass module-level counters or test stubs.
  */
 export function agentReducer(
-  state: PiAgentState,
-  event: PiSSEEvent,
+  state: PuxAgentState,
+  event: PuxSSEEvent,
   genMsgId: () => string,
   genToolId: () => string,
-): PiAgentState {
+): PuxAgentState {
   switch (event.type) {
     // Delta types are handled upstream by the throttler; listed for exhaustiveness.
     case 'text_delta':
@@ -325,18 +325,18 @@ export function agentReducer(
     }
 
     case 'web_update': {
-      const webData = event.data as PiWebUpdate;
+      const webData = event.data as PuxWebUpdate;
       return { ...state, webUpdate: webData };
     }
 
     case 'approval_request':
     case 'question_asked': {
-      const approvalData = event.data as PiApprovalRequest;
+      const approvalData = event.data as PuxApprovalRequest;
       return { ...state, pendingApproval: approvalData };
     }
 
     case 'artifact_created': {
-      const artData = event.data as { artifactId: string; artifact?: PiArtifact };
+      const artData = event.data as { artifactId: string; artifact?: PuxArtifact };
       if (artData.artifact) {
         return {
           ...state,
@@ -359,7 +359,7 @@ export function agentReducer(
     case 'plan_created': {
       const planData = event.data as {
         artifactId: string;
-        steps: PiPlanStep[];
+        steps: PuxPlanStep[];
       };
       return {
         ...state,
@@ -380,7 +380,7 @@ export function agentReducer(
           ...state.plan,
           steps: state.plan.steps.map(s =>
             s.index === planUpd.stepIndex
-              ? { ...s, status: planUpd.status as PiPlanStep['status'], note: planUpd.note }
+              ? { ...s, status: planUpd.status as PuxPlanStep['status'], note: planUpd.note }
               : s,
           ),
         },

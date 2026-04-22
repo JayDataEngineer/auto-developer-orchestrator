@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronRight, Wrench, Loader, FileCode, Search, Terminal as TerminalIcon } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { ToolCall } from '../../lib/pi-events';
+import { ToolCall } from '../../lib/pux-events';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 

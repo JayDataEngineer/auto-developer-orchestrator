@@ -339,43 +339,43 @@ export const api = {
         body: JSON.stringify({ project }),
       }),
   },
-  pi: {
+  pux: {
     prompt: (message: string, project: string, agentId: string = 'default', opts?: { model?: string; thinkingLevel?: string; autoBranch?: boolean }) => {
-      return fetch('/api/pi/prompt', {
+      return fetch('/api/pux/prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, project, agentId, ...opts }),
       });
     },
     abort: (project: string, agentId: string = 'default') =>
-      fetch(`/api/pi/abort?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, { method: 'POST' }).then(() => {}),
+      fetch(`/api/pux/abort?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, { method: 'POST' }).then(() => {}),
     getState: (project: string, agentId: string = 'default') =>
-      apiFetch<any>(`/api/pi/state?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`),
+      apiFetch<any>(`/api/pux/state?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`),
     getMessages: (project: string, agentId: string = 'default') =>
-      apiFetch<any>(`/api/pi/messages?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`),
+      apiFetch<any>(`/api/pux/messages?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`),
     getModels: (project: string, agentId: string = 'default') =>
-      apiFetch<any>(`/api/pi/models?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`),
+      apiFetch<any>(`/api/pux/models?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`),
     setModel: (project: string, provider: string, modelId: string, agentId: string = 'default') =>
-      fetch('/api/pi/model', {
+      fetch('/api/pux/model', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project, provider, modelId, agentId }),
       }).then(() => {}),
     compact: (project: string, agentId: string = 'default') =>
-      fetch(`/api/pi/compact?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, { method: 'POST' }).then(() => {}),
+      fetch(`/api/pux/compact?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, { method: 'POST' }).then(() => {}),
     getHistory: () =>
-      apiFetch<{ conversations: ConversationSummary[] }>('/api/pi/history'),
+      apiFetch<{ conversations: ConversationSummary[] }>('/api/pux/history'),
     deleteConversation: (project: string, agentId: string) =>
-      apiFetch<{ deleted: boolean }>(`/api/pi/conversation?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, {
+      apiFetch<{ deleted: boolean }>(`/api/pux/conversation?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, {
         method: 'DELETE',
       }),
     renameConversation: (project: string, agentId: string, title: string) =>
-      apiFetch<{ renamed: boolean }>(`/api/pi/conversation/rename?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, {
+      apiFetch<{ renamed: boolean }>(`/api/pux/conversation/rename?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`, {
         method: 'PUT',
         body: JSON.stringify({ title }),
       }),
     respond: (project: string, agentId: string, requestId: string, action: 'approve' | 'deny' | 'answer', message?: string) =>
-      apiFetch<{ success: boolean }>('/api/pi/respond', {
+      apiFetch<{ success: boolean }>('/api/pux/respond', {
         method: 'POST',
         body: JSON.stringify({ project, agentId, requestId, action, message }),
       }),
@@ -459,12 +459,12 @@ export const api = {
   },
   artifacts: {
     create: (agentId: string, type: 'plan' | 'todo' | 'notes', title: string, content: string) =>
-      apiFetch<Artifact>(`/api/pi/artifacts`, {
+      apiFetch<Artifact>(`/api/pux/artifacts`, {
         method: 'POST',
         body: JSON.stringify({ agentId, type, title, content }),
       }),
     list: (agentId: string) =>
-      apiFetch<{ artifacts: Artifact[] }>(`/api/pi/artifacts?agentId=${encodeURIComponent(agentId)}`),
+      apiFetch<{ artifacts: Artifact[] }>(`/api/pux/artifacts?agentId=${encodeURIComponent(agentId)}`),
   },
   scheduler: {
     list: () =>

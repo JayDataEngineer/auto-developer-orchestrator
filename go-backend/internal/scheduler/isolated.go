@@ -89,7 +89,7 @@ Execute the task using your available tools. Report results as plain text.`, job
 		return &JobResult{Error: fmt.Sprintf("failed to start: %v", err)}
 	}
 
-	e.logger.Info("isolated Pi started", zap.String("job", jobID), zap.Int("pid", cmd.Process.Pid))
+	e.logger.Info("isolated agent started", zap.String("job", jobID), zap.Int("pid", cmd.Process.Pid))
 
 	// Collect stderr
 	var stderrBuf strings.Builder

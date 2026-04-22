@@ -58,7 +58,7 @@ export function HistorySidebar({
 
   const fetchHistory = useCallback(async () => {
     try {
-      const data = await api.pi.getHistory();
+      const data = await api.pux.getHistory();
       const summaries: ConversationSummary[] = data.conversations || [];
 
       const projectMap = new Map<string, ConversationSummary[]>();
@@ -130,7 +130,7 @@ export function HistorySidebar({
 
   const handleDelete = useCallback(async (project: string, agentId: string) => {
     try {
-      await api.pi.deleteConversation(project, agentId);
+      await api.pux.deleteConversation(project, agentId);
       addToast('success', 'Conversation deleted');
       fetchHistory();
     } catch {
@@ -146,7 +146,7 @@ export function HistorySidebar({
   const handleRenameSubmit = useCallback(async () => {
     if (!renaming || !renameValue.trim()) return;
     try {
-      await api.pi.renameConversation(renaming.project, renaming.agentId, renameValue.trim());
+      await api.pux.renameConversation(renaming.project, renaming.agentId, renameValue.trim());
       addToast('success', 'Conversation renamed');
       fetchHistory();
     } catch {

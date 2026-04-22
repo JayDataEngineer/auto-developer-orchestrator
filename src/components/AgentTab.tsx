@@ -1,6 +1,6 @@
 import React from 'react';
-import { PiAgentView } from './PiAgentView';
-import { ToolCall } from '../lib/pi-events';
+import { PuxAgentView } from './PuxAgentView';
+import { ToolCall } from '../lib/pux-events';
 
 interface AgentTabProps {
   selectedProject: string | null;
@@ -18,7 +18,7 @@ export function AgentTab({
 }: AgentTabProps) {
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-hidden">
-      <PiAgentView
+      <PuxAgentView
         selectedProject={selectedProject || undefined}
         selectedAgentId={activeAgentId}
         projects={projects}

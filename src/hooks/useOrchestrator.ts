@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, ProjectResponse, Task, StatusResponse, AIConfig, GitHubUser } from '../lib/api';
-import { PiSSEEvent } from '../lib/pi-events';
+import { PuxSSEEvent } from '../lib/pux-events';
 import { readSSEStream } from './useSSEStream';
 
 export type ModalType = 'review' | 'aiConfig' | 'coverage' | 'clone' | 'addProject' | 'user' | 'githubConnect' | null;
@@ -11,15 +11,15 @@ export type ModalType = 'review' | 'aiConfig' | 'coverage' | 'clone' | 'addProje
  */
 async function drainSSEResponse(response: Response, addLog: (msg: string, type?: any) => void) {
   if (!response.body) return;
-  await readSSEStream(response, (event: PiSSEEvent) => {
+  await readSSEStream(response, (event: PuxSSEEvent) => {
     if (event.type === 'tool_execution_start') {
-      addLog(`PI_AGENT: Running tool ${(event.data as any).toolName}...`, 'INFO');
+      addLog(`PUX_AGENT: Running tool ${(event.data as any).toolName}...`, 'INFO');
     } else if (event.type === 'error') {
-      addLog(`PI_AGENT_ERROR: ${(event.data as any).error}`, 'ERROR');
+      addLog(`PUX_AGENT_ERROR: ${(event.data as any).error}`, 'ERROR');
     } else if (event.type === 'pr_created') {
-      addLog(`PI_AGENT: PR #${(event.data as any).number} created - ${(event.data as any).url}`, 'SUCCESS');
+      addLog(`PUX_AGENT: PR #${(event.data as any).number} created - ${(event.data as any).url}`, 'SUCCESS');
     } else if (event.type === 'commit_created') {
-      addLog(`PI_AGENT: Committed "${(event.data as any).message}" to ${(event.data as any).branch}`, 'INFO');
+      addLog(`PUX_AGENT: Committed "${(event.data as any).message}" to ${(event.data as any).branch}`, 'INFO');
     }
   });
 }
@@ -97,21 +97,21 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
     if (!selectedProject) return;
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
-    addLog(`PI_AGENT: Dispatching task "${task.text}" to Pi coding agent...`, 'SYSTEM');
+    addLog(`PUX_AGENT: Dispatching task "${task.text}" to Pux agent...`, 'SYSTEM');
     setIsDispatching(true);
     try {
-      const response = await api.pi.prompt(
+      const response = await api.pux.prompt(
         `Implement the following task in the current project:\n\nTask: ${task.text}\n\nProject: ${selectedProject}`,
         selectedProject
       );
-      if (!response.ok) throw new Error('Pi prompt failed');
-      addLog(`PI_AGENT: Task dispatched, streaming response...`, 'INFO');
+      if (!response.ok) throw new Error('Pux prompt failed');
+      addLog(`PUX_AGENT: Task dispatched, streaming response...`, 'INFO');
       // Consume the SSE stream so it isn't leaked
       await drainSSEResponse(response, addLog);
-      addLog(`PI_AGENT: Task completed successfully`, 'SUCCESS');
+      addLog(`PUX_AGENT: Task completed successfully`, 'SUCCESS');
       refreshProjectData();
     } catch (e) {
-      addLog(`PI_AGENT_ERROR: ${e instanceof Error ? e.message : String(e)}`, 'ERROR');
+      addLog(`PUX_AGENT_ERROR: ${e instanceof Error ? e.message : String(e)}`, 'ERROR');
     } finally {
       setIsDispatching(false);
     }
@@ -121,25 +121,25 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
     if (!selectedProject) return;
     const pendingTasks = tasks.filter(t => t.status === 'pending');
     if (pendingTasks.length === 0) {
-      addLog('PI_AGENT: No pending tasks to dispatch.', 'INFO');
+      addLog('PUX_AGENT: No pending tasks to dispatch.', 'INFO');
       return;
     }
     setIsDispatching(true);
 
     const taskList = pendingTasks.map((t, i) => `${i + 1}. ${t.text}`).join('\n');
-    addLog(`PI_AGENT: Dispatching ${pendingTasks.length} tasks to Pi agent...`, 'SYSTEM');
+    addLog(`PUX_AGENT: Dispatching ${pendingTasks.length} tasks to Pux agent...`, 'SYSTEM');
 
     try {
-      const response = await api.pi.prompt(
+      const response = await api.pux.prompt(
         `Implement the following tasks in the current project, one by one:\n\n${taskList}\n\nProject: ${selectedProject}`,
         selectedProject
       );
-      if (!response.ok) throw new Error('Pi prompt failed');
-      addLog(`PI_AGENT: ${pendingTasks.length} tasks dispatched, streaming response...`, 'INFO');
+      if (!response.ok) throw new Error('Pux prompt failed');
+      addLog(`PUX_AGENT: ${pendingTasks.length} tasks dispatched, streaming response...`, 'INFO');
       await drainSSEResponse(response, addLog);
-      addLog(`PI_AGENT: All tasks completed.`, 'SUCCESS');
+      addLog(`PUX_AGENT: All tasks completed.`, 'SUCCESS');
     } catch (e) {
-      addLog(`PI_AGENT_ERROR: ${e instanceof Error ? e.message : String(e)}`, 'ERROR');
+      addLog(`PUX_AGENT_ERROR: ${e instanceof Error ? e.message : String(e)}`, 'ERROR');
     } finally {
       setIsDispatching(false);
     }
