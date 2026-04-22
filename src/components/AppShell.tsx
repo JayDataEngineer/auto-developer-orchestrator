@@ -501,7 +501,7 @@ function AppShellInner() {
             <div
               {...sidebarHandleProps}
               className={cn(
-                'absolute top-0 right-0 bottom-0 w-1 cursor-col-resize z-10 transition-colors',
+                'absolute top-0 right-0 bottom-0 w-1.5 cursor-col-resize z-10',
                 sidebarDragging ? 'bg-primary/30' : 'hover:bg-muted'
               )}
             />
@@ -538,7 +538,7 @@ function AppShellInner() {
             <div
               {...rightPanelHandleProps}
               className={cn(
-                'absolute top-0 left-0 bottom-0 w-1 cursor-col-resize z-10 transition-colors',
+                'absolute top-0 left-0 bottom-0 w-1.5 cursor-col-resize z-10',
                 rightPanelDragging ? 'bg-primary/30' : 'hover:bg-muted'
               )}
             />
