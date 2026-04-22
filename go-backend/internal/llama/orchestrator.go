@@ -527,10 +527,11 @@ func (e *OrchestratorExecutor) synthesize(args map[string]interface{}) (interfac
 // alternativePersona suggests a different persona when one fails.
 func alternativePersona(failed PersonaType) string {
 	alternatives := map[PersonaType]string{
-		PersonaWeb:     "desktop (for browser automation), code (for API/scripting), or mcp (for research)",
-		PersonaCode:    "desktop (for GUI-based tools), web (for web-based solutions), or mcp (for research)",
-		PersonaDesktop: "code (for CLI-based approach), web (for web-based approach), or mcp (for research)",
-		PersonaMCP:     "web (for browser automation) or code (for scripting)",
+		PersonaWeb:      "desktop (for browser automation), code (for API/scripting), or mcp (for research)",
+		PersonaCode:     "desktop (for GUI-based tools), web (for web-based solutions), or mcp (for research)",
+		PersonaDesktop:  "code (for CLI-based approach), web (for web-based approach), or mcp (for research)",
+		PersonaMCP:      "web (for browser automation) or code (for scripting)",
+		PersonaResearch: "mcp (for simpler research) or web (for browser-based research)",
 	}
 	if alt, ok := alternatives[failed]; ok {
 		return alt

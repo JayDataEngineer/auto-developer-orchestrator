@@ -9,6 +9,7 @@ const (
 	PersonaCode         PersonaType = "code"
 	PersonaDesktop      PersonaType = "desktop"
 	PersonaMCP          PersonaType = "mcp"
+	PersonaResearch     PersonaType = "research"
 )
 
 // Persona defines an agent's identity, capabilities, and generation config.
@@ -67,6 +68,8 @@ func (p *Persona) InferArtifactType() ArtifactType {
 	case PersonaDesktop:
 		return ArtifactSummary
 	case PersonaMCP:
+		return ArtifactSummary
+	case PersonaResearch:
 		return ArtifactSummary
 	default:
 		return ArtifactSummary

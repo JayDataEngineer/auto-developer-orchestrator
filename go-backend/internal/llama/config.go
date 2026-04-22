@@ -129,6 +129,12 @@ func (c ModelConfig) PersonaConfig(t PersonaType) PersonaDefaults {
 			MaxTokens:     4096, // MCP results can be large
 			Temperature:   0.3,  // precise for structured data
 		}
+	case PersonaResearch:
+		return PersonaDefaults{
+			MaxToolRounds: 30,   // Research needs many rounds
+			MaxTokens:     4096, // Reports are long
+			Temperature:   0.4,  // Factual, not creative
+		}
 	default:
 		return PersonaDefaults{
 			MaxToolRounds: c.DefaultMaxToolRounds,

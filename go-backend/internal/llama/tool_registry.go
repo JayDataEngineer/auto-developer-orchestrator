@@ -182,8 +182,8 @@ var allTools = []ToolSpec{
 		Category:         CategoryOrchestration,
 		Description:      "assign a task to a sub-agent",
 		Schema:           `{"persona": "web", "task": "Search for the price of a Raspberry Pi"}`,
-		Returns:          `Personas: "web" (search/browse), "code" (bash/coding), "desktop" (browser automation)`,
-		ParametersSchema: `{"type":"object","properties":{"persona":{"type":"string","description":"Sub-agent persona: web, code, or desktop","enum":["web","code","desktop"]},"task":{"type":"string","description":"Task description for the sub-agent"}},"required":["persona","task"]}`,
+		Returns:          `Personas: "web" (search/browse), "code" (bash/coding), "desktop" (browser automation), "research" (deep web research)`,
+		ParametersSchema: `{"type":"object","properties":{"persona":{"type":"string","description":"Sub-agent persona: web, code, desktop, or research","enum":["web","code","desktop","research"]},"task":{"type":"string","description":"Task description for the sub-agent"}},"required":["persona","task"]}`,
 	},
 	{
 		Name:             "create_plan",
@@ -314,6 +314,8 @@ func PersonaToolNames(t PersonaType) []string {
 			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key", "bash", "wait", "yield_artifact"}
 	case PersonaMCP:
 		return []string{"mcp_call", "wait", "yield_artifact"}
+	case PersonaResearch:
+		return []string{"mcp_call", "search_web", "scrape", "bash", "wait", "yield_artifact"}
 	default:
 		return nil
 	}
@@ -421,6 +423,19 @@ mcp_call{"tool":"extract","arguments":{"url":"https://example.com/products","sch
 → Returns structured JSON with products
 
 yield_artifact{"output":"Scraped content and extracted 5 products"}`,
+			},
+		}
+	case PersonaResearch:
+		return []Example{
+			{
+				Title: "Research a topic",
+				Content: `mcp_call{"tool":"research","arguments":{"query":"fusion energy breakthroughs 2025","max_results":3}}
+→ Returns 3 results with full page content
+
+mcp_call{"tool":"research","arguments":{"query":"fusion reactor cost economics","max_results":3}}
+→ Second query targeting a different angle
+
+yield_artifact{"output":"# Fusion Energy Report\n## Summary\n...\n## Sources\n- ..."}`,
 			},
 		}
 	default:
