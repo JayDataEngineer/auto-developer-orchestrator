@@ -11,6 +11,55 @@ import (
 	"go.uber.org/zap"
 )
 
+// ProviderInfo describes a known LLM provider for the settings UI.
+type ProviderInfo struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	BaseURL string `json:"baseUrl"`
+	HasKey  bool   `json:"hasKey"` // true if an API key is saved (key itself never sent to frontend)
+	Models  []ProviderModel `json:"models"`
+}
+
+// ProviderModel describes a model offered by a provider.
+type ProviderModel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// knownProviders defines the providers the UI can configure.
+// Models are hardcoded here — the user just needs to provide an API key.
+var knownProviders = []ProviderInfo{
+	{
+		ID:      "gemini",
+		Name:    "Google Gemini",
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+		Models: []ProviderModel{
+			{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview"},
+			{ID: "gemini-3-flash", Name: "Gemini 3 Flash"},
+			{ID: "gemini-3-pro", Name: "Gemini 3 Pro"},
+		},
+	},
+	{
+		ID:      "openai",
+		Name:    "OpenAI",
+		BaseURL: "https://api.openai.com/v1",
+		Models: []ProviderModel{
+			{ID: "gpt-4o", Name: "GPT-4o"},
+			{ID: "gpt-4o-mini", Name: "GPT-4o Mini"},
+			{ID: "o3-mini", Name: "o3 Mini"},
+		},
+	},
+	{
+		ID:      "anthropic",
+		Name:    "Anthropic",
+		BaseURL: "https://api.anthropic.com/v1",
+		Models: []ProviderModel{
+			{ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4"},
+			{ID: "claude-haiku-4-20250506", Name: "Claude Haiku 4.5"},
+		},
+	},
+}
+
 // ConfigHandler handles configuration requests
 type ConfigHandler struct {
 	logger     *zap.Logger
@@ -363,4 +412,165 @@ func (h *ConfigHandler) SetProjectSettings(w http.ResponseWriter, r *http.Reques
 		"success":  true,
 		"settings": ps,
 	})
+}
+
+// GetProviders returns available LLM providers with their configuration status.
+// API keys are never sent to the frontend — only a boolean "hasKey" flag.
+// GET /api/config/providers
+func (h *ConfigHandler) GetProviders(w http.ResponseWriter, r *http.Request) {
+	// Read saved API keys from settings.json to check which are configured
+	savedKeys := h.loadProviderKeys()
+
+	result := make([]ProviderInfo, len(knownProviders))
+	for i, p := range knownProviders {
+		result[i] = p
+		result[i].HasKey = savedKeys[p.ID] != ""
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"providers": result,
+	})
+}
+
+// SetProviderKey saves an API key for a provider and persists to settings.json.
+// PUT /api/config/providers
+func (h *ConfigHandler) SetProviderKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"` // e.g. "gemini", "openai", "anthropic"
+		APIKey   string `json:"apiKey"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate the provider is known
+	found := false
+	for _, p := range knownProviders {
+		if p.ID == req.Provider {
+			found = true
+			break
+		}
+	}
+	if !found {
+		JSONError(w, "Unknown provider: "+req.Provider, http.StatusBadRequest)
+		return
+	}
+
+	// Save to settings.json
+	if err := h.saveProviderKey(req.Provider, req.APIKey); err != nil {
+		h.logger.Error("Failed to save provider key", zap.String("provider", req.Provider), zap.Error(err))
+		JSONError(w, "Failed to save API key", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info("Provider API key saved", zap.String("provider", req.Provider))
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+	})
+}
+
+// loadProviderKeys reads API keys from ~/.pi/agent/settings.json providers section.
+func (h *ConfigHandler) loadProviderKeys() map[string]string {
+	keys := make(map[string]string)
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return keys
+	}
+
+	data, err := os.ReadFile(homeDir + "/.pi/agent/settings.json")
+	if err != nil {
+		return keys
+	}
+
+	var settings struct {
+		Providers map[string]struct {
+			APIKey string `json:"apiKey"`
+		} `json:"providers"`
+	}
+	if json.Unmarshal(data, &settings) != nil {
+		return keys
+	}
+
+	for id, p := range settings.Providers {
+		if p.APIKey != "" {
+			keys[id] = p.APIKey
+		}
+	}
+	return keys
+}
+
+// saveProviderKey updates a provider's API key in ~/.pi/agent/settings.json.
+// If the provider doesn't exist yet, it creates it with the appropriate baseUrl.
+func (h *ConfigHandler) saveProviderKey(providerID, apiKey string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	path := homeDir + "/.pi/agent/settings.json"
+
+	// Read existing
+	existing := make(map[string]any)
+	if data, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(data, &existing)
+	}
+
+	// Find base URL for this provider
+	var baseURL string
+	for _, p := range knownProviders {
+		if p.ID == providerID {
+			baseURL = p.BaseURL
+			break
+		}
+	}
+
+	// Ensure providers map exists
+	providers, ok := existing["providers"].(map[string]any)
+	if !ok {
+		providers = make(map[string]any)
+		existing["providers"] = providers
+	}
+
+	// Update or create the provider entry
+	providerEntry, ok := providers[providerID].(map[string]any)
+	if !ok {
+		providerEntry = make(map[string]any)
+		providers[providerID] = providerEntry
+	}
+	providerEntry["apiKey"] = apiKey
+	providerEntry["baseUrl"] = baseURL
+	providerEntry["api"] = "openai-completions"
+
+	// Build models array for this provider
+	var models []ProviderModel
+	for _, p := range knownProviders {
+		if p.ID == providerID {
+			models = p.Models
+			break
+		}
+	}
+	modelsArr := make([]any, len(models))
+	for i, m := range models {
+		modelsArr[i] = map[string]any{
+			"id":           m.ID,
+			"name":         m.Name,
+			"api":          "openai-completions",
+			"reasoning":    true,
+			"input":        []string{"text", "image"},
+			"cost":         map[string]float64{"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+			"contextWindow": 1048576,
+			"maxTokens":    65536,
+		}
+	}
+	providerEntry["models"] = modelsArr
+
+	// Write back
+	data, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0600) // 0600: only owner can read (contains API keys)
 }

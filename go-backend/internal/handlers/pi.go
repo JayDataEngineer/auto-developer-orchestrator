@@ -611,7 +611,16 @@ func (h *PiHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 	case req.ModelID == "gemini-3-flash-preview" && h.geminiEngine != nil:
 		engine = h.geminiEngine
 	default:
-		engine = h.llamaEngine
+		// For cloud models, try to create an engine from settings.json
+		if req.Provider != "llamacpp" && req.Provider != "" {
+			if eng := h.engineFromSettings(req.Provider, req.ModelID); eng != nil {
+				engine = eng
+			}
+		}
+		// Fall back to local llama engine
+		if engine == nil {
+			engine = h.llamaEngine
+		}
 	}
 
 	if engine == nil {
@@ -643,4 +652,45 @@ func (h *PiHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"model":   engine.ModelName(),
 	})
+}
+
+// engineFromSettings reads a provider's apiKey and baseUrl from settings.json
+// and creates a temporary HTTPEngine for it.
+func (h *PiHandler) engineFromSettings(providerID, modelID string) *llamaeng.HTTPEngine {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	data, err := os.ReadFile(homeDir + "/.pi/agent/settings.json")
+	if err != nil {
+		return nil
+	}
+
+	var settings struct {
+		Providers map[string]struct {
+			BaseURL string `json:"baseUrl"`
+			APIKey  string `json:"apiKey"`
+		} `json:"providers"`
+	}
+	if json.Unmarshal(data, &settings) != nil {
+		return nil
+	}
+
+	p, ok := settings.Providers[providerID]
+	if !ok || p.APIKey == "" || p.BaseURL == "" {
+		return nil
+	}
+
+	eng := llamaeng.NewHTTPEngine(llamaeng.HTTPEngineConfig{
+		BaseURL:   p.BaseURL,
+		APIKey:    p.APIKey,
+		ModelName: modelID,
+		Logger:    h.log,
+	})
+	if err := eng.LoadModel(); err != nil {
+		h.log.Warn("Failed to create engine from settings", zap.String("provider", providerID), zap.Error(err))
+		return nil
+	}
+	return eng
 }

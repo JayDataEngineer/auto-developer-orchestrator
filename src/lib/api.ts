@@ -301,6 +301,20 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(models),
       }),
+    getProviders: () => apiFetch<{
+      providers: Array<{
+        id: string;
+        name: string;
+        baseUrl: string;
+        hasKey: boolean;
+        models: Array<{ id: string; name: string }>;
+      }>;
+    }>('/api/config/providers'),
+    setProviderKey: (provider: string, apiKey: string) =>
+      apiFetch<{ success: boolean }>('/api/config/providers', {
+        method: 'PUT',
+        body: JSON.stringify({ provider, apiKey }),
+      }),
   },
   github: {
     getRepos: () => apiFetch<ReposResponse>('/api/github/repos'),

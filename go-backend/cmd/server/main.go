@@ -302,6 +302,8 @@ func main() {
 		r.Post("/config/system", configHandler.SetSystem)
 		r.Get("/config/models", configHandler.GetModels)
 		r.Put("/config/models", configHandler.SetModels)
+		r.Get("/config/providers", configHandler.GetProviders)
+		r.Put("/config/providers", configHandler.SetProviderKey)
 
 		// GitHub integration
 		r.Get("/github/user", configHandler.GetGitHubUser)

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   FileText, CheckSquare, StickyNote, Loader, Monitor,
-  Settings, Wrench, Brain, Github, Globe
+  Settings, Wrench, Brain, Github, Globe, Key, Check, Eye, EyeOff
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { Artifact } from '../lib/api';
+import { Artifact, api } from '../lib/api';
 import { ToolCall } from '../lib/pi-events';
 import { ArtifactView } from './ArtifactView';
 import { BrowserTools } from './BrowserTools';
@@ -285,6 +285,20 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
                 Configure GitHub
               </Button>
             </div>
+
+            {/* AI Providers */}
+            <div className="border border-border p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <Brain size={12} className="text-muted-foreground" />
+                <span className="text-sm font-bold text-foreground">
+                  AI Providers
+                </span>
+              </div>
+              <p className="text-xs font-mono text-muted-foreground leading-relaxed">
+                Add API keys to use cloud models alongside your local model. Keys are stored locally on this machine.
+              </p>
+              <ProviderSettings />
+            </div>
           </div>
         )}
 
@@ -334,6 +348,106 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
           )
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Provider Settings sub-component ─────────────────────────────────────
+
+interface ProviderInfo {
+  id: string;
+  name: string;
+  baseUrl: string;
+  hasKey: boolean;
+  models: Array<{ id: string; name: string }>;
+}
+
+function ProviderSettings() {
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [keyInput, setKeyInput] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedId, setSavedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.config.getProviders().then(data => {
+      setProviders(data.providers || []);
+    }).catch(() => {});
+  }, []);
+
+  const handleSave = async (providerId: string) => {
+    if (!keyInput.trim()) return;
+    setSaving(true);
+    try {
+      await api.config.setProviderKey(providerId, keyInput.trim());
+      setProviders(prev => prev.map(p =>
+        p.id === providerId ? { ...p, hasKey: true } : p
+      ));
+      setKeyInput('');
+      setShowKey(false);
+      setSavedId(providerId);
+      setTimeout(() => setSavedId(null), 2000);
+    } catch {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      {providers.map(provider => (
+        <div key={provider.id} className="border border-border rounded p-2 space-y-1.5">
+          <button
+            className="w-full flex items-center gap-2 text-left"
+            onClick={() => setExpandedId(expandedId === provider.id ? null : provider.id)}
+          >
+            <Key size={10} className={provider.hasKey ? 'text-green-500' : 'text-muted-foreground'} />
+            <span className="text-xs font-semibold text-foreground flex-1">{provider.name}</span>
+            {provider.hasKey && (
+              <span className="text-[10px] font-mono text-green-500">connected</span>
+            )}
+          </button>
+
+          {expandedId === provider.id && (
+            <div className="space-y-1.5 pt-1">
+              <div className="text-[10px] font-mono text-muted-foreground">
+                Models: {provider.models.map(m => m.name).join(', ')}
+              </div>
+              <div className="flex gap-1">
+                <div className="flex-1 relative">
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={keyInput}
+                    onChange={e => setKeyInput(e.target.value)}
+                    placeholder={provider.hasKey ? 'Update API key...' : 'Enter API key...'}
+                    className="w-full bg-muted border border-border rounded px-2 py-1 text-xs font-mono text-foreground placeholder:text-muted-foreground/50 pr-7"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKey(!showKey)}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showKey ? <EyeOff size={10} /> : <Eye size={10} />}
+                  </button>
+                </div>
+                <Button
+                  variant="default"
+                  size="xs"
+                  onClick={() => handleSave(provider.id)}
+                  disabled={!keyInput.trim() || saving}
+                >
+                  {savedId === provider.id ? <Check size={10} /> : saving ? <Loader size={10} className="animate-spin" /> : 'Save'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+      {providers.length === 0 && (
+        <p className="text-[10px] font-mono text-muted-foreground text-center">Loading providers...</p>
+      )}
     </div>
   );
 }
