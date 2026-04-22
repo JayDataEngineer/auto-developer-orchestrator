@@ -17,7 +17,7 @@ export function AgentTab({
   onStreamingStateChange,
 }: AgentTabProps) {
   return (
-    <div className="flex flex-col h-full bg-black text-slate-100 overflow-hidden">
+    <div className="flex flex-col h-full bg-background text-foreground overflow-hidden">
       <PiAgentView
         selectedProject={selectedProject || undefined}
         selectedAgentId={activeAgentId}

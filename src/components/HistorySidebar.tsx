@@ -163,15 +163,15 @@ export function HistorySidebar({
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="h-full flex flex-col bg-black">
+      <div className="h-full flex flex-col bg-background">
         {/* Header */}
-        <div className="p-3 border-b border-white/5 flex items-center justify-between">
+        <div className="p-3 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Clock size={10} className="text-muted-foreground" />
-            <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
+            <span className="text-xs font-semibold text-muted-foreground">
               History
             </span>
-            <span className="text-xs font-mono text-zinc-700">{totalConversations}</span>
+            <span className="text-xs text-muted-foreground/50">{totalConversations}</span>
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -188,7 +188,7 @@ export function HistorySidebar({
         {/* Project groups */}
         <ScrollArea className="flex-1">
           {loading && groups.length === 0 ? (
-            <div className="flex items-center justify-center h-20 text-zinc-700 text-xs font-mono">
+            <div className="flex items-center justify-center h-20 text-muted-foreground/50 text-xs font-mono">
               Loading...
             </div>
           ) : groups.length === 0 ? (
@@ -205,23 +205,23 @@ export function HistorySidebar({
                 <button
                   onClick={() => toggleGroup(group.project)}
                   className={cn(
-                    "w-full text-left px-3 py-2 flex items-center gap-2 transition-colors border-b border-white/[0.02]",
+                    "w-full text-left px-3 py-2 flex items-center gap-2 transition-colors border-b border-border/50",
                     group.project === activeProject
                       ? "bg-primary/5 text-primary"
-                      : "text-zinc-400 hover:bg-white/[0.02] hover:text-zinc-300"
+                      : "text-foreground hover:bg-muted hover:text-foreground"
                   )}
                 >
                   {group.collapsed ? (
-                    <ChevronRight size={10} className="shrink-0 text-zinc-600" />
+                    <ChevronRight size={10} className="shrink-0 text-muted-foreground" />
                   ) : (
-                    <ChevronDown size={10} className="shrink-0 text-zinc-600" />
+                    <ChevronDown size={10} className="shrink-0 text-muted-foreground" />
                   )}
                   <FolderOpen size={10} className="shrink-0" />
                   <span className="text-xs font-mono uppercase tracking-widest truncate">
                     {group.project}
                   </span>
                   {group.conversations.length > 0 && (
-                    <span className="text-xs font-mono text-zinc-600 ml-auto">
+                    <span className="text-xs font-mono text-muted-foreground ml-auto">
                       {group.conversations.length}
                     </span>
                   )}
@@ -244,7 +244,7 @@ export function HistorySidebar({
                                 "px-3 py-1.5 pl-8 flex flex-col gap-0.5 transition-all duration-150 cursor-pointer",
                                 isActive(conv.project, conv.agentId)
                                   ? "bg-primary/10 text-primary border-l-2 border-primary"
-                                  : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300 border-l-2 border-transparent"
+                                  : "text-muted-foreground hover:bg-muted hover:text-foreground border-l-2 border-transparent"
                               )}
                             >
                               {isRenaming ? (
@@ -272,10 +272,10 @@ export function HistorySidebar({
                                 </span>
                               )}
                               <div className="flex items-center gap-2">
-                                <span className="text-xs font-mono text-zinc-600">
+                                <span className="text-xs font-mono text-muted-foreground">
                                   {formatTimeAgo(conv.lastAt)}
                                 </span>
-                                <span className="text-xs font-mono text-zinc-700">
+                                <span className="text-xs font-mono text-muted-foreground/50">
                                   {conv.messageCount} msgs
                                 </span>
                               </div>
@@ -302,7 +302,7 @@ export function HistorySidebar({
                       );
                     })}
                     {group.conversations.length === 0 && (
-                      <div className="px-8 py-2 text-xs font-mono text-zinc-700">
+                      <div className="px-8 py-2 text-xs font-mono text-muted-foreground/50">
                         No conversations yet
                       </div>
                     )}

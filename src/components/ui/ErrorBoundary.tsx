@@ -25,12 +25,12 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       if (this.props.fallback) return this.props.fallback;
 
       return (
-        <div className="flex items-center justify-center h-screen bg-black text-white p-8">
+        <div className="flex items-center justify-center h-screen bg-background text-foreground p-8">
           <div className="max-w-md text-center space-y-4">
-            <div className="text-red-400 text-sm font-mono uppercase tracking-widest">
+            <div className="text-red-500 text-sm">
               Something went wrong
             </div>
-            <pre className="text-xs font-mono text-zinc-400 bg-zinc-900 border border-white/5 p-4 overflow-auto max-h-48 text-left">
+            <pre className="text-xs font-mono text-muted-foreground bg-muted border border-border p-4 overflow-auto max-h-48 text-left rounded-lg">
               {this.state.error?.message || 'Unknown error'}
             </pre>
             <button

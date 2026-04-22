@@ -4,15 +4,15 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
-export const proseClasses = `prose prose-invert prose-sm max-w-none
-  prose-headings:text-white prose-headings:font-bold prose-headings:tracking-widest prose-headings:uppercase
-  prose-p:text-zinc-300 prose-p:text-sm prose-p:leading-relaxed prose-p:font-mono
+export const proseClasses = `prose prose-sm max-w-none
+  prose-headings:text-foreground prose-headings:font-bold
+  prose-p:text-foreground prose-p:text-sm prose-p:leading-relaxed
   prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:rounded
-  prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-white/5 prose-pre:rounded-none
+  prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-pre:rounded-lg
   prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-  prose-strong:text-white
-  prose-ul:text-zinc-300 prose-ol:text-zinc-300
-  prose-li:text-sm prose-li:font-mono`;
+  prose-strong:text-foreground
+  prose-ul:text-foreground prose-ol:text-foreground
+  prose-li:text-sm`;
 
 export function MarkdownBlock({ content, streaming }: { content: string; streaming: boolean }) {
   return (

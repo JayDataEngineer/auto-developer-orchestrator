@@ -90,7 +90,7 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
   // window.location.port is empty on default ports (80/443) — noVNC needs an explicit port
   const effectivePort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
   const novncUrl = sandboxId
-    ? `/api/sandbox/vnc/${sandboxId}/vnc.html?host=${window.location.hostname}&port=${effectivePort}&path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&reconnect=true&reconnect_delay=3000&resize=scale`
+    ? `/api/sandbox/vnc/${sandboxId}/vnc.html?host=${window.location.hostname}&port=${effectivePort}&path=/api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&reconnect=true&reconnect_delay=3000&resize=scale`
     : null;
 
   const openDesktop = useCallback(() => {
@@ -102,22 +102,22 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
   return (
     <div className={cn(
       'flex flex-col h-full',
-      desktopFull && 'fixed inset-0 z-50 bg-black'
+      desktopFull && 'fixed inset-0 z-50 bg-background'
     )}>
       {/* Desktop header */}
-      <div className="h-8 bg-zinc-900/50 border-b border-white/5 flex items-center px-3 gap-2 shrink-0">
-        <Monitor size={12} className="text-green-400" />
-        <span className="text-sm font-mono text-zinc-400 truncate">
+      <div className="h-8 bg-muted/50 border-b border-border flex items-center px-3 gap-2 shrink-0">
+        <Monitor size={12} className="text-green-500" />
+        <span className="text-sm text-muted-foreground truncate">
           {sandboxId ? sandboxId : 'Select a project to start'}
         </span>
         <div className="flex-1" />
         {cu.loading && !sessionLoading && (
-          <span className="text-xs font-mono text-zinc-500 flex items-center gap-1">
+          <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
             <Loader size={8} className="animate-spin" /> Enabling...
           </span>
         )}
         {sessionLoading && (
-          <span className="text-xs font-mono text-zinc-500 flex items-center gap-1">
+          <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
             <Loader size={8} className="animate-spin" /> Starting desktop...
           </span>
         )}
@@ -133,7 +133,7 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
         )}
         {session && (
           <>
-            <span className="text-xs font-mono text-zinc-600">
+            <span className="text-xs font-mono text-muted-foreground">
               Desktop
             </span>
             <div className="w-px h-3 bg-white/10" />
@@ -166,20 +166,20 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
       </div>
 
       {/* Desktop content */}
-      <div className="flex-1 bg-zinc-950 relative">
+      <div className="flex-1 bg-background relative">
         {!sandboxId ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
-              <Monitor size={48} className="mx-auto mb-4 text-zinc-700" />
-              <p className="text-sm font-mono text-zinc-500">Select a project above to start your desktop</p>
-              <p className="text-xs font-mono text-zinc-700 mt-2">Your agent will control this environment</p>
+              <Monitor size={48} className="mx-auto mb-4 text-muted-foreground/50" />
+              <p className="text-sm font-mono text-muted-foreground">Select a project above to start your desktop</p>
+              <p className="text-xs font-mono text-muted-foreground/50 mt-2">Your agent will control this environment</p>
             </div>
           </div>
         ) : cu.loading || sessionLoading ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-              <p className="text-sm font-mono text-zinc-500">
+              <p className="text-sm font-mono text-muted-foreground">
                 {cu.loading ? 'Enabling computer use...' : 'Starting desktop...'}
               </p>
             </div>
@@ -188,8 +188,8 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center max-w-md">
               <AlertCircle size={48} className="mx-auto mb-4 text-red-400/50" />
-              <p className="text-sm font-mono text-zinc-400 mb-2">Desktop not available</p>
-              <p className="text-xs font-mono text-zinc-600">{cu.error || sessionError}</p>
+              <p className="text-sm font-mono text-foreground mb-2">Desktop not available</p>
+              <p className="text-xs font-mono text-muted-foreground">{cu.error || sessionError}</p>
               <Button
                 variant="default"
                 size="xs"
@@ -210,15 +210,15 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
         ) : cu.enabled && !session ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
-              <Loader size={24} className="mx-auto mb-3 text-zinc-600 animate-spin" />
-              <p className="text-xs font-mono text-zinc-500">Connecting to desktop...</p>
+              <Loader size={24} className="mx-auto mb-3 text-muted-foreground animate-spin" />
+              <p className="text-xs font-mono text-muted-foreground">Connecting to desktop...</p>
             </div>
           </div>
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
-              <Monitor size={32} className="mx-auto mb-3 text-zinc-600" />
-              <p className="text-sm font-mono text-zinc-500">Initializing...</p>
+              <Monitor size={32} className="mx-auto mb-3 text-muted-foreground" />
+              <p className="text-sm font-mono text-muted-foreground">Initializing...</p>
             </div>
           </div>
         )}

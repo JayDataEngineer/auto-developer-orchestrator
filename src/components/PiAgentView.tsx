@@ -92,11 +92,11 @@ const InputBar = memo(function InputBar({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={selectedProject ? "Describe a coding task..." : "Select a project first..."}
+              placeholder={selectedProject ? "Tell Pi what you want to build or automate..." : "Select a project to get started..."}
               disabled={disabled}
               data-prompt-input
-              className="w-full border-white/5 rounded p-4 pr-14 text-sm text-white placeholder-zinc-700 resize-none"
-              rows={3}
+              className="w-full border-border rounded-lg p-4 pr-14 text-base text-foreground placeholder-muted-foreground/60 resize-none bg-card"
+              rows={4}
             />
             <div className="absolute right-3 bottom-3 flex items-center gap-2">
               {isStreaming ? (
@@ -293,32 +293,32 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
   }, [state.isStreaming, runningTool?.id, state.thinking, onStreamingStateChange]);
 
   return (
-    <div className="flex h-full w-full bg-black overflow-hidden">
+    <div className="flex h-full w-full bg-background overflow-hidden">
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <div className="w-full h-12 border-b border-white/5 flex items-center px-6 shrink-0 bg-black/50 backdrop-blur-md">
+        <div className="w-full h-12 border-b border-border flex items-center px-6 shrink-0 bg-background/50 backdrop-blur-md">
           <div className="flex items-center gap-3">
             {onBack && !isZenMode && (
               <Button variant="ghost" size="icon-xs" onClick={onBack}>
                 <ArrowLeft size={14} />
               </Button>
             )}
-            <div className="flex items-center gap-2 text-sm font-mono tracking-widest text-muted uppercase font-bold">
+            <div className="flex items-center gap-2 text-sm font-semibold">
               <Zap size={12} className="text-primary" />
-              <span className="text-primary">PI</span>
-              <span className="text-muted">CODING AGENT</span>
+              <span className="text-primary">Pi</span>
+              <span className="text-muted-foreground">Assistant</span>
             </div>
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-3">
             {state.isStreaming && (
-              <span className="text-xs font-black text-primary uppercase tracking-widest animate-pulse">
+              <span className="text-xs font-semibold text-primary animate-pulse">
                 Streaming
               </span>
             )}
             {runningTool && (
-              <span className="flex items-center gap-1.5 text-xs font-mono text-primary/80 uppercase tracking-widest">
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Wrench size={9} className="text-primary" />
                 Running: {runningTool.name}
               </span>
@@ -351,9 +351,9 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
                   <Sparkles size={32} className="animate-pulse-slow" />
                 </div>
                 <div className="space-y-3 max-w-md">
-                  <h3 className="text-lg font-bold text-white tracking-widest uppercase">Pi Agent Ready</h3>
-                  <p className="text-xs text-muted-foreground leading-relaxed font-mono">
-                    Describe a coding task and Pi will implement it with real file editing, bash execution, and intelligent analysis.
+                  <h3 className="text-lg font-bold text-foreground">Ready to help</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    Tell Pi what you want to build or automate, and watch it work.
                   </p>
                 </div>
               </div>
@@ -362,8 +362,8 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
             {/* Sub-Agent Status Cards */}
             {state.subAgents.length > 0 && (
               <div className="space-y-1">
-                <div className="text-xs font-mono text-muted-foreground uppercase tracking-widest px-1">
-                  Sub-Agents ({state.subAgents.length})
+                <div className="text-xs text-muted-foreground px-1">
+                  Working on it ({state.subAgents.length})
                 </div>
                 {state.subAgents.map(sa => (
                   <SubAgentCard key={sa.subAgentId} agent={sa} />
@@ -376,8 +376,8 @@ export const PiAgentView: React.FC<PiAgentViewProps> = ({ selectedProject, selec
               if (msg.role === 'user') {
                 return (
                   <div key={msg.id} className="flex justify-end">
-                    <div className="max-w-[80%] bg-white/5 border border-white/10 px-4 py-3 rounded-none">
-                      <p className="text-xs text-white font-mono leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                    <div className="max-w-[80%] bg-muted border border-border px-4 py-3 rounded-lg">
+                      <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                     </div>
                   </div>
                 );

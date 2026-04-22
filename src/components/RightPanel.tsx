@@ -94,9 +94,9 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
   };
 
   return (
-    <div className="h-full flex flex-col bg-black">
+    <div className="h-full flex flex-col bg-background">
       {/* Top bar: artifact tabs + action buttons */}
-      <div className="h-10 border-b border-white/5 flex items-center px-1 shrink-0 bg-black/50 gap-0.5">
+      <div className="h-10 border-b border-border flex items-center px-1 shrink-0 bg-background/50 gap-0.5">
         {/* Artifact icon tabs — horizontal, dynamic */}
         <ScrollArea className="flex-1 min-w-0">
           <div className="flex items-center gap-0.5">
@@ -111,7 +111,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
                   'shrink-0',
                   selectedArtifact?.id === a.id && !showSettings && !showBrowser
                     ? 'text-primary bg-primary/10'
-                    : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+                    : 'text-muted-foreground hover:bg-muted'
                 )}
               >
                 {typeIcons[a.type]}
@@ -119,7 +119,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
               </Button>
             ))}
             {artifacts.length === 0 && !artifactsLoading && (
-              <span className="text-xs font-mono text-zinc-700 px-2">No artifacts yet</span>
+              <span className="text-xs text-muted-foreground px-2">No artifacts yet</span>
             )}
             {artifactsLoading && (
               <Loader size={10} className="text-muted-foreground animate-spin mx-2" />
@@ -138,7 +138,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
               className={cn(
                 showBrowser
                   ? 'text-primary bg-primary/10'
-                  : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+                  : 'text-muted-foreground hover:bg-muted'
               )}
             >
               <Globe size={12} />
@@ -159,7 +159,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
               className={cn(
                 showSettings
                   ? 'text-primary bg-primary/10'
-                  : 'text-muted hover:text-muted-foreground hover:bg-white/5'
+                  : 'text-muted-foreground hover:bg-muted'
               )}
             >
               <Settings size={12} />
@@ -184,7 +184,7 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
               <span className="text-xs font-mono text-primary/80">
                 Running: {streamingState.runningTool.name}
               </span>
-              <span className="text-xs font-mono text-zinc-600 truncate">
+              <span className="text-xs font-mono text-muted-foreground truncate">
                 {streamingState.runningTool.name === 'bash' && typeof streamingState.runningTool.args?.command === 'string'
                   ? String(streamingState.runningTool.args.command).slice(0, 40)
                   : streamingState.runningTool.name === 'read' || streamingState.runningTool.name === 'write' || streamingState.runningTool.name === 'edit'
@@ -195,8 +195,8 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
           )}
           {streamingState.thinking && (
             <div className="flex items-center gap-1.5 mt-1.5">
-              <Brain size={9} className="text-zinc-500" />
-              <span className="text-xs font-mono text-zinc-500 truncate">
+              <Brain size={9} className="text-muted-foreground" />
+              <span className="text-xs font-mono text-muted-foreground truncate">
                 Thinking... ({streamingState.thinking.length} chars)
               </span>
             </div>
@@ -214,10 +214,10 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
             </div>
 
             {/* Computer Use */}
-            <div className="border border-white/5 p-3 space-y-2">
+            <div className="border border-border p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Monitor size={12} className="text-muted-foreground" />
-                <span className="text-sm font-bold uppercase tracking-widest text-zinc-300">
+                <span className="text-sm font-bold uppercase tracking-widest text-foreground">
                   Computer Use
                 </span>
               </div>
@@ -264,10 +264,10 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
             </div>
 
             {/* GitHub connection link */}
-            <div className="border border-white/5 p-3 space-y-2">
+            <div className="border border-border p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Github size={12} className="text-muted-foreground" />
-                <span className="text-sm font-bold uppercase tracking-widest text-zinc-300">
+                <span className="text-sm font-bold uppercase tracking-widest text-foreground">
                   GitHub
                 </span>
               </div>
@@ -315,19 +315,19 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
                 <span className="text-sm font-bold text-zinc-300 uppercase tracking-widest">
                   {typeLabels[selectedArtifact.type]}
                 </span>
-                <span className="text-xs font-mono text-zinc-600">
+                <span className="text-xs font-mono text-muted-foreground">
                   {selectedArtifact.title}
                 </span>
               </div>
               <ArtifactView artifact={selectedArtifact} />
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-40 text-zinc-700">
+            <div className="flex flex-col items-center justify-center h-40 text-muted-foreground/50">
               <FileText size={20} className="mb-2 opacity-20" />
               <p className="text-xs font-mono uppercase tracking-widest">
                 {artifactsLoading ? 'Loading...' : 'No artifacts yet'}
               </p>
-              <p className="text-xs font-mono text-zinc-800 mt-1">
+              <p className="text-xs font-mono text-muted-foreground/30 mt-1">
                 Artifacts appear here as the agent works
               </p>
             </div>

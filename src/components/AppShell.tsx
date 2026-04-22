@@ -16,10 +16,11 @@ import { Input } from './ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from './ui/select';
 import { useResizable } from '../hooks/useResizable';
 import { useArtifacts } from '../hooks/useArtifacts';
+import { useTheme } from '../hooks/useTheme';
 import {
   Zap, Settings, LayoutGrid, Monitor, MessageSquare,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Globe,
-  FolderOpen, Plus
+  FolderOpen, Plus, Sun, Moon
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
 import { api, ConversationSummary } from '../lib/api';
@@ -35,14 +36,14 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
 
 // Per-tab labels for the sidebar toggle buttons
 const LEFT_LABELS: Record<TabId, string> = {
-  agent: 'Chats',
+  agent: 'History',
   tasks: '',
   desktop: 'Agent',
 };
 const RIGHT_LABELS: Record<TabId, string> = {
   agent: 'Artifacts',
   tasks: '',
-  desktop: 'Browser',
+  desktop: 'Controls',
 };
 
 function DesktopChatSection({
@@ -107,7 +108,7 @@ function DesktopChatSection({
   return (
     <div>
       {/* Section header */}
-      <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
+      <div className="px-3 py-2 border-b border-border flex items-center gap-2">
         <MessageSquare size={10} className="text-muted-foreground" />
         <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
           Chats
@@ -124,13 +125,13 @@ function DesktopChatSection({
       </div>
 
       {/* Project selector */}
-      <div className="px-3 py-2 border-b border-white/5">
+      <div className="px-3 py-2 border-b border-border">
         <div className="flex items-center gap-1 mb-1.5">
-          <FolderOpen size={9} className="text-zinc-500" />
-          <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Project</span>
+          <FolderOpen size={9} className="text-muted-foreground" />
+          <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Project</span>
         </div>
         <Select value={selectedProject || ''} onValueChange={onSelectProject}>
-          <SelectTrigger className="w-full bg-zinc-900 border-white/10 rounded">
+          <SelectTrigger className="w-full bg-muted border-border rounded">
             <SelectValue placeholder="Select project..." />
           </SelectTrigger>
           <SelectContent>
@@ -145,8 +146,8 @@ function DesktopChatSection({
           <Input
             value={sandboxName}
             onChange={e => setSandboxName(e.target.value)}
-            placeholder="New sandbox name..."
-            className="flex-1 bg-zinc-900 border-white/10 rounded"
+            placeholder="Environment name..."
+            className="flex-1 bg-muted border-border rounded"
             onKeyDown={e => { if (e.key === 'Enter') createSandbox(); }}
           />
           <Button
@@ -162,7 +163,7 @@ function DesktopChatSection({
       {/* Conversation list */}
       <div className="max-h-48 overflow-y-auto">
         {conversations.length === 0 ? (
-          <div className="px-3 py-3 text-xs font-mono text-zinc-700 text-center">
+          <div className="px-3 py-3 text-xs font-mono text-muted-foreground/50 text-center">
             {selectedProject ? 'No conversations yet' : 'Select a project'}
           </div>
         ) : (
@@ -177,11 +178,11 @@ function DesktopChatSection({
                   "w-full text-left px-3 py-1.5 flex flex-col gap-0.5 transition-colors border-l-2",
                   isActive
                     ? "bg-primary/10 text-primary border-primary"
-                    : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300 border-transparent"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground border-transparent"
                 )}
               >
                 <span className="text-xs font-mono truncate">{title}</span>
-                <span className="text-[10px] font-mono text-zinc-600">
+                <span className="text-[10px] font-mono text-muted-foreground">
                   {conv.messageCount} msgs
                 </span>
               </button>
@@ -194,6 +195,7 @@ function DesktopChatSection({
 }
 
 function AppShellInner() {
+  const { theme, resolved, toggleTheme } = useTheme();
   const addLog = useCallback((_msg: string, _type?: any) => {}, []);
   const { state, actions } = useOrchestrator(addLog);
   const [activeTab, setActiveTab] = useState<TabId>('agent');
@@ -331,9 +333,9 @@ function AppShellInner() {
   const rightLabel = RIGHT_LABELS[activeTab];
 
   return (
-    <div className="flex flex-col h-screen bg-black text-slate-100 font-sans selection:bg-primary/20 overflow-hidden">
+    <div className="flex flex-col h-screen bg-background text-foreground font-sans selection:bg-primary/20 overflow-hidden">
       {/* Top bar */}
-      <div className="h-10 border-b border-white/5 flex items-center px-2 shrink-0 bg-black/50 backdrop-blur-md gap-1">
+      <div className="h-10 border-b border-border flex items-center px-2 shrink-0 bg-background/50 backdrop-blur-md gap-1">
         {/* Left sidebar toggle — label changes per tab */}
         {leftLabel && (
           <Tooltip>
@@ -398,9 +400,9 @@ function AppShellInner() {
 
         <div className="flex-1" />
 
-        <div className="flex items-center gap-1.5 text-xs font-mono uppercase tracking-widest text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
           <Zap size={9} className="text-primary" />
-          <span className="text-primary">PI</span>
+          <span className="text-primary">Pi</span>
         </div>
 
         <div className="flex-1" />
@@ -426,6 +428,18 @@ function AppShellInner() {
             <TooltipContent>{rightPanelCollapsed ? `Show ${rightLabel}` : `Hide ${rightLabel}`}</TooltipContent>
           </Tooltip>
         )}
+
+        {/* Theme toggle */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-xs" onClick={toggleTheme}>
+              {resolved === 'dark' ? <Sun size={12} /> : <Moon size={12} />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {theme === 'system' ? `System (${resolved})` : theme === 'dark' ? 'Dark' : 'Light'} — click to change
+          </TooltipContent>
+        </Tooltip>
 
         {/* Settings */}
         <Tooltip>
@@ -455,7 +469,7 @@ function AppShellInner() {
       <div className="flex-1 overflow-hidden flex">
         {/* Left sidebar — content changes per tab */}
         {!sidebarCollapsed && leftLabel && (
-          <div style={{ width: sidebarWidth }} className="relative shrink-0 border-r border-white/5 overflow-hidden">
+          <div style={{ width: sidebarWidth }} className="relative shrink-0 border-r border-border overflow-hidden">
             {activeTab === 'agent' && (
               <HistorySidebar
                 projects={safeProjects}
@@ -473,7 +487,7 @@ function AppShellInner() {
               />
             )}
             {activeTab === 'desktop' && (
-              <div className="absolute inset-0 bg-black">
+              <div className="absolute inset-0 bg-background">
                 <PiAgentView
                   selectedProject={selectedProject || undefined}
                   selectedAgentId={activeAgentId}
@@ -488,7 +502,7 @@ function AppShellInner() {
               {...sidebarHandleProps}
               className={cn(
                 'absolute top-0 right-0 bottom-0 w-1 cursor-col-resize z-10 transition-colors',
-                sidebarDragging ? 'bg-primary/30' : 'hover:bg-white/10'
+                sidebarDragging ? 'bg-primary/30' : 'hover:bg-muted'
               )}
             />
           </div>
@@ -519,13 +533,13 @@ function AppShellInner() {
 
         {/* Right sidebar — content changes per tab */}
         {!rightPanelCollapsed && rightLabel && (
-          <div style={{ width: rightPanelWidth }} className="relative shrink-0 border-l border-white/5">
+          <div style={{ width: rightPanelWidth }} className="relative shrink-0 border-l border-border">
             {/* Drag handle */}
             <div
               {...rightPanelHandleProps}
               className={cn(
                 'absolute top-0 left-0 bottom-0 w-1 cursor-col-resize z-10 transition-colors',
-                rightPanelDragging ? 'bg-primary/30' : 'hover:bg-white/10'
+                rightPanelDragging ? 'bg-primary/30' : 'hover:bg-muted'
               )}
             />
             {activeTab === 'agent' && (
@@ -541,9 +555,9 @@ function AppShellInner() {
               />
             )}
             {activeTab === 'desktop' && (
-              <div className="h-full flex flex-col bg-black">
+              <div className="h-full flex flex-col bg-background">
                 {/* Browser header */}
-                <div className="h-10 border-b border-white/5 flex items-center px-3 gap-2 shrink-0 bg-black/50">
+                <div className="h-10 border-b border-border flex items-center px-3 gap-2 shrink-0 bg-background/50">
                   <Globe size={12} className="text-primary" />
                   <span className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground">
                     Browser
@@ -552,7 +566,7 @@ function AppShellInner() {
                   {cu.enabled ? (
                     <span className="text-xs font-mono text-primary">Active</span>
                   ) : (
-                    <span className="text-xs font-mono text-zinc-600">Inactive</span>
+                    <span className="text-xs font-mono text-muted-foreground">Inactive</span>
                   )}
                 </div>
 
@@ -571,12 +585,12 @@ function AppShellInner() {
                   />
 
                   {/* Divider */}
-                  <div className="border-t border-white/5" />
+                  <div className="border-t border-border" />
 
                   {/* Browser tools section */}
                   <div className="p-3 space-y-3">
                     {!cu.enabled && (
-                      <div className="border border-white/5 p-3 space-y-2">
+                      <div className="border border-border p-3 space-y-2">
                         <p className="text-xs font-mono text-muted-foreground">
                           Enable browser automation for the sandbox.
                         </p>
@@ -596,8 +610,8 @@ function AppShellInner() {
 
                     {cu.enabled && (
                       <>
-                        <div className="border border-white/5 p-3 space-y-2">
-                          <span className="text-xs font-mono text-zinc-400">Navigate</span>
+                        <div className="border border-border p-3 space-y-2">
+                          <span className="text-xs font-mono text-foreground">Navigate</span>
                           <form
                             onSubmit={(e) => {
                               e.preventDefault();
@@ -609,7 +623,7 @@ function AppShellInner() {
                             <Input
                               name="url"
                               placeholder="https://"
-                              className="flex-1 bg-zinc-900 border-white/10 rounded"
+                              className="flex-1 bg-muted border-border rounded"
                             />
                             <Button type="submit" variant="default" size="xs">
                               Go
@@ -617,8 +631,8 @@ function AppShellInner() {
                           </form>
                         </div>
 
-                        <div className="border border-white/5 p-3 space-y-2">
-                          <span className="text-xs font-mono text-zinc-400">Screenshot</span>
+                        <div className="border border-border p-3 space-y-2">
+                          <span className="text-xs font-mono text-foreground">Screenshot</span>
                           <Button
                             variant="outline"
                             size="xs"
@@ -631,17 +645,17 @@ function AppShellInner() {
                             <img
                               src={`data:image/png;base64,${cu.screenshot}`}
                               alt="Desktop"
-                              className="w-full border border-white/10 rounded"
+                              className="w-full border border-border rounded"
                             />
                           )}
                         </div>
 
                         {cu.url && (
-                          <div className="border border-white/5 p-3 space-y-1">
-                            <span className="text-xs font-mono text-zinc-400">Current page</span>
+                          <div className="border border-border p-3 space-y-1">
+                            <span className="text-xs font-mono text-foreground">Current page</span>
                             <p className="text-xs font-mono text-primary break-all">{cu.url}</p>
                             {cu.title && (
-                              <p className="text-xs font-mono text-zinc-500">{cu.title}</p>
+                              <p className="text-xs font-mono text-muted-foreground">{cu.title}</p>
                             )}
                           </div>
                         )}

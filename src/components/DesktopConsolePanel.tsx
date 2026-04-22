@@ -68,7 +68,7 @@ function resultSummary(result: unknown): string {
 }
 
 const ConsolePanel = memo(function ConsolePanel({ toolCalls }: DesktopConsolePanelProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const filtered = toolCalls.filter(tc => isDesktopTool(tc.name)).slice(-100);
@@ -81,20 +81,20 @@ const ConsolePanel = memo(function ConsolePanel({ toolCalls }: DesktopConsolePan
   }, [filtered.length, collapsed]);
 
   return (
-    <div className="border-t border-white/5 bg-zinc-950 shrink-0 flex flex-col" style={{ maxHeight: '35%' }}>
+    <div className="border-t border-border bg-background shrink-0 flex flex-col" style={{ maxHeight: '35%' }}>
       {/* Header */}
       <Button
         variant="ghost"
         size="xs"
         onClick={() => setCollapsed(!collapsed)}
-        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/50 border-b border-white/5 w-full justify-start hover:bg-zinc-900 transition-colors"
+        className="flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-b border-border w-full justify-start hover:bg-muted transition-colors"
       >
-        <Terminal size={10} className="text-zinc-500" />
-        <span className="text-xs font-mono text-zinc-500 uppercase tracking-widest">
-          Console ({filtered.length})
+        <Terminal size={10} className="text-muted-foreground" />
+        <span className="text-xs font-mono text-muted-foreground">
+          Activity ({filtered.length})
         </span>
         <div className="flex-1" />
-        {collapsed ? <ChevronUp size={10} className="text-zinc-600" /> : <ChevronDown size={10} className="text-zinc-600" />}
+        {collapsed ? <ChevronUp size={10} className="text-muted-foreground" /> : <ChevronDown size={10} className="text-muted-foreground" />}
       </Button>
 
       {/* Log entries */}
@@ -102,15 +102,15 @@ const ConsolePanel = memo(function ConsolePanel({ toolCalls }: DesktopConsolePan
         <ScrollArea className="text-xs font-mono leading-relaxed" style={{ minHeight: 60, maxHeight: 200 }}>
           <div ref={scrollRef}>
             {filtered.length === 0 ? (
-              <div className="px-3 py-2 text-zinc-700">No desktop tool calls yet</div>
+              <div className="px-3 py-2 text-muted-foreground/50">Pi will show activity here as it works</div>
             ) : (
               filtered.map(tc => (
-                <div key={tc.id} className="px-3 py-0.5 border-b border-white/[0.02] hover:bg-white/[0.02]">
-                  <span className="text-zinc-600">{formatTime(tc.startTime)}</span>
+                <div key={tc.id} className="px-3 py-0.5 border-b border-border/50 hover:bg-muted/50">
+                  <span className="text-muted-foreground">{formatTime(tc.startTime)}</span>
                   {' '}
-                  <span className={cn('font-bold', toolColor[tc.name] || 'text-zinc-400')}>{tc.name}</span>
+                  <span className={cn('font-bold', toolColor[tc.name] || 'text-foreground')}>{tc.name}</span>
                   {argsSummary(tc.name, tc.args) && (
-                    <span className="text-zinc-500"> {argsSummary(tc.name, tc.args)}</span>
+                    <span className="text-muted-foreground"> {argsSummary(tc.name, tc.args)}</span>
                   )}
                   {tc.error && (
                     <span className="text-red-400"> ERR: {tc.error.slice(0, 60)}</span>
@@ -119,7 +119,7 @@ const ConsolePanel = memo(function ConsolePanel({ toolCalls }: DesktopConsolePan
                     <span className="text-primary animate-pulse"> ...</span>
                   )}
                   {tc.endTime && tc.result && (
-                    <span className="text-zinc-600">{'->'} {resultSummary(tc.result)}</span>
+                    <span className="text-muted-foreground">{'->'} {resultSummary(tc.result)}</span>
                   )}
                 </div>
               ))
