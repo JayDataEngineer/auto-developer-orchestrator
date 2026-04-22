@@ -12,42 +12,44 @@ interface UseResizableReturn {
   width: number;
   isDragging: boolean;
   handleProps: {
-    onMouseDown: (e: React.MouseEvent) => void;
+    onPointerDown: (e: React.PointerEvent) => void;
   };
 }
 
 export function useResizable({ defaultWidth, minWidth, maxWidth, side }: UseResizableOptions): UseResizableReturn {
-  // Width state — only updated on mouseup to avoid re-renders during drag
+  // Width state — only updated on pointerup to avoid re-renders during drag
   const [width, setWidth] = useState(defaultWidth);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Store current width in a ref so mousedown always reads the latest value
+  // Store current width in a ref so pointerdown always reads the latest value
   // without needing width in the useCallback dependency array
   const widthRef = useRef(defaultWidth);
   widthRef.current = width;
 
-  // Ref to the panel container element — set during mousedown for direct DOM manipulation
-  const panelRef = useRef<HTMLElement | null>(null);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    // Only respond to primary button
+    if (e.button !== 0) return;
     e.preventDefault();
 
-    // Find the panel container — the parent of the drag handle
     const handle = e.currentTarget as HTMLElement;
     const panel = handle.parentElement;
     if (!panel) return;
 
-    panelRef.current = panel;
     const startX = e.clientX;
     const startWidth = widthRef.current;
+
+    // Capture the pointer — all subsequent events fire on this element
+    // even if the pointer moves over iframes, canvas, or outside the window.
+    // This fixes the "stuck in resize mode" bug when dragging over noVNC.
+    handle.setPointerCapture(e.pointerId);
 
     setIsDragging(true);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
-    // Disable transitions on the panel during drag for instant feedback
+    // Disable CSS transitions on the panel during drag for instant feedback
     panel.style.transition = 'none';
 
-    const handleMouseMove = (ev: MouseEvent) => {
+    const handlePointerMove = (ev: PointerEvent) => {
       const delta = ev.clientX - startX;
       const newWidth = side === 'right'
         ? startWidth + delta
@@ -57,27 +59,28 @@ export function useResizable({ defaultWidth, minWidth, maxWidth, side }: UseResi
       panel.style.width = `${clamped}px`;
     };
 
-    const handleMouseUp = () => {
-      // Re-enable transitions
-      if (panelRef.current) panelRef.current.style.transition = '';
-      panelRef.current = null;
+    const handlePointerUp = (ev: PointerEvent) => {
+      handle.releasePointerCapture(ev.pointerId);
+      handle.removeEventListener('pointermove', handlePointerMove);
+      handle.removeEventListener('pointerup', handlePointerUp);
 
+      // Re-enable transitions
+      panel.style.transition = '';
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
 
-      // Read the final width from the DOM to avoid stale values
-      const finalWidth = panel ? parseInt(panel.style.width, 10) : widthRef.current;
+      // Read the final width from the DOM
+      const finalWidth = parseInt(panel.style.width, 10);
       const clamped = Math.min(maxWidth, Math.max(minWidth, finalWidth));
 
       setWidth(clamped);
       setIsDragging(false);
-
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    // Add listeners to the handle element (not window).
+    // With pointer capture, these fire even when pointer is over other elements.
+    handle.addEventListener('pointermove', handlePointerMove);
+    handle.addEventListener('pointerup', handlePointerUp);
   }, [minWidth, maxWidth, side]);
 
   // Cleanup on unmount in case component is removed while dragging
@@ -88,5 +91,5 @@ export function useResizable({ defaultWidth, minWidth, maxWidth, side }: UseResi
     };
   }, []);
 
-  return { width, isDragging, handleProps: { onMouseDown: handleMouseDown } };
+  return { width, isDragging, handleProps: { onPointerDown: handlePointerDown } };
 }

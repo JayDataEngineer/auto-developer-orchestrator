@@ -86,11 +86,11 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
     setSessionLoading(false);
   }, [sandboxId]);
 
-  // Build noVNC iframe URL
-  // window.location.port is empty on default ports (80/443) — noVNC needs an explicit port
-  const effectivePort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+  // Build noVNC iframe URL — uses relative path so it inherits the page's origin.
+  // noVNC defaults to connecting to the iframe's own host:port, which is correct
+  // since the Vite proxy (or production server) forwards /api/ to the Go backend.
   const novncUrl = sandboxId
-    ? `/api/sandbox/vnc/${sandboxId}/vnc.html?host=${window.location.hostname}&port=${effectivePort}&path=/api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&reconnect=true&reconnect_delay=3000&resize=scale`
+    ? `/api/sandbox/vnc/${sandboxId}/vnc.html?path=/api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&reconnect=true&reconnect_delay=3000&resize=scale`
     : null;
 
   const openDesktop = useCallback(() => {
