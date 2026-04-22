@@ -110,9 +110,15 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 			TopP:          opts.TopP,
 			TopK:          opts.TopK,
 			RepeatPenalty: 1.1,
-			CachePrompt:   true,
+			CachePrompt:   !s.engine.IsCloud(), // only local llama-server supports KV caching
 			SessionID:     s.sessionID,
 			Stream:        true,
+		}
+
+		// Cloud providers require the model field
+		if s.engine.IsCloud() {
+			req.Model = s.engine.ModelName()
+			req.SessionID = "" // no session slot concept for cloud
 		}
 
 		// Accumulate the full assistant response (content + tool calls)

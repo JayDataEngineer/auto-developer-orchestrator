@@ -93,6 +93,34 @@ func main() {
 		}
 	}
 
+	// Connect to Gemini cloud engine (optional — requires GEMINI_API_KEY env var).
+	// Uses Google's OpenAI-compatible endpoint with Bearer auth.
+	var geminiEngine *llamaeng.HTTPEngine
+	if geminiKey := os.Getenv("GEMINI_API_KEY"); geminiKey != "" {
+		geminiEngine = llamaeng.NewHTTPEngine(llamaeng.HTTPEngineConfig{
+			BaseURL:   "https://generativelanguage.googleapis.com/v1beta/openai",
+			APIKey:    geminiKey,
+			ModelName: "gemini-3-flash-preview",
+			Logger:    logger,
+		})
+		if err := geminiEngine.LoadModel(); err != nil {
+			logger.Warn("Gemini engine failed to initialize", zap.Error(err))
+			geminiEngine = nil
+		} else {
+			defer geminiEngine.Close()
+			logger.Info("Gemini cloud engine connected", zap.String("model", "gemini-3-flash-preview"))
+		}
+	}
+
+	// Select the default engine: prefer llama-server (local, fast), fall back to Gemini
+	activeEngine := llamaEngine
+	if activeEngine == nil {
+		activeEngine = geminiEngine
+	}
+	if activeEngine == nil {
+		logger.Warn("No LLM engine available — agent features disabled")
+	}
+
 	// Initialize sandbox manager
 	sandboxMgr, err := sandbox.NewManager(logger)
 	if err != nil {
@@ -164,9 +192,14 @@ func main() {
 	x11Handler := handlers.NewX11Handler(sandboxMgr, logger)
 
 	// Wire llama-server HTTP engine into PiHandler
-	if llamaEngine != nil {
-		piHandler.SetLlamaEngine(llamaEngine, sandboxMgr, computerUseHandler, x11Handler)
-		logger.Info("PiHandler configured for llama-server HTTP mode with computer use")
+	if activeEngine != nil {
+		piHandler.SetLlamaEngine(activeEngine, sandboxMgr, computerUseHandler, x11Handler)
+		logger.Info("PiHandler configured with LLM engine", zap.String("model", activeEngine.ModelName()))
+	}
+
+	// Wire Gemini cloud engine (optional)
+	if geminiEngine != nil {
+		piHandler.SetGeminiEngine(geminiEngine)
 	}
 
 	// MCP research server — non-fatal, tools fall back to browser-based search
@@ -189,9 +222,9 @@ func main() {
 	// No-op sender — llama executor handles job execution directly
 	sched := scheduler.NewScheduler(schedulerStorePath, nil, logger)
 
-	// Use llama engine directly for scheduled jobs
-	if llamaEngine != nil {
-		llamaExec := scheduler.NewLlamaExecutor(llamaEngine, sandboxMgr, projectRoot, logger)
+	// Use engine directly for scheduled jobs
+	if activeEngine != nil {
+		llamaExec := scheduler.NewLlamaExecutor(activeEngine, sandboxMgr, projectRoot, logger)
 		sched.SetLlamaExecutor(llamaExec)
 		logger.Info("Scheduler configured for direct llama engine execution")
 	} else {

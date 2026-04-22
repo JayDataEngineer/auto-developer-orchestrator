@@ -34,12 +34,14 @@ type PiHandler struct {
 	approvalMgr *approval.Manager
 
 	// Llama engine — always uses orchestrator + ephemeral sub-agents
-	llamaEngine *llamaeng.HTTPEngine
-	sandboxMgr  *sandbox.Manager
-	cuBridge    *ComputerUseBridge // bridges llama executor to CU/X11 handlers
-	mcpClient   *mcp.Client        // optional: MCP research server for search/scrape
+	llamaEngine  *llamaeng.HTTPEngine
+	geminiEngine *llamaeng.HTTPEngine // optional cloud provider
+	sandboxMgr   *sandbox.Manager
+	cuBridge     *ComputerUseBridge // bridges llama executor to CU/X11 handlers
+	mcpClient    *mcp.Client        // optional: MCP research server for search/scrape
 
-	orchestrators map[string]*llamaeng.OrchestratorLoop // key: compositeKey(projectPath, agentId)
+	orchestrators   map[string]*llamaeng.OrchestratorLoop  // key: compositeKey(projectPath, agentId)
+	selectedEngines map[string]*llamaeng.HTTPEngine        // per-agent engine override
 }
 
 // NewPiHandler creates a new Pi handler.
@@ -53,7 +55,8 @@ func NewPiHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, l
 		litellmKey:    os.Getenv("LITELLM_MASTER_KEY"),
 		toolPerms:     pi.NewToolPermissionConfig(logger),
 		approvalMgr:   approval.NewManager(5 * time.Minute),
-		orchestrators: make(map[string]*llamaeng.OrchestratorLoop),
+		orchestrators:   make(map[string]*llamaeng.OrchestratorLoop),
+		selectedEngines: make(map[string]*llamaeng.HTTPEngine),
 	}
 }
 
@@ -65,6 +68,11 @@ func (h *PiHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *sand
 	if cu != nil {
 		h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
 	}
+}
+
+// SetGeminiEngine configures the optional Gemini cloud engine.
+func (h *PiHandler) SetGeminiEngine(engine *llamaeng.HTTPEngine) {
+	h.geminiEngine = engine
 }
 
 // SetMCPClient configures the MCP research server client for search/scrape tools.
@@ -81,6 +89,8 @@ func (h *PiHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/history", h.GetHistory)
 	r.Delete("/conversation", h.DeleteConversation)
 	r.Put("/conversation/rename", h.RenameConversation)
+	r.Get("/models", h.GetModels)
+	r.Put("/model", h.SetModel)
 }
 
 // resolveAgent reads ?agentId= from the query string, defaulting to "default".
@@ -365,7 +375,13 @@ func (h *PiHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) 
 		// ContextSize 0 means "use ModelConfig default" (32K)
 	}
 
-	orch, err := llamaeng.NewOrchestratorLoop(h.llamaEngine, baseExecutor, cfg, h.log)
+	// Use the per-agent selected engine, or fall back to the default llama engine
+	engine := h.llamaEngine
+	if sel, ok := h.selectedEngines[key]; ok {
+		engine = sel
+	}
+
+	orch, err := llamaeng.NewOrchestratorLoop(engine, baseExecutor, cfg, h.log)
 	if err != nil {
 		h.log.Error("Failed to create orchestrator", zap.Error(err))
 		return nil
@@ -523,4 +539,108 @@ func (h *PiHandler) RenameConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+// GetModels returns available models from settings.json.
+// GET /api/pi/models
+func (h *PiHandler) GetModels(w http.ResponseWriter, r *http.Request) {
+	type modelInfo struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Provider string `json:"provider,omitempty"`
+	}
+
+	models := []modelInfo{}
+
+	// Read settings.json to discover all providers/models
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		settingsPath := filepath.Join(homeDir, ".pi", "agent", "settings.json")
+		if data, err := os.ReadFile(settingsPath); err == nil {
+			var settings struct {
+				Providers map[string]struct {
+					Models []struct {
+						ID   string `json:"id"`
+						Name string `json:"name"`
+					} `json:"models"`
+				} `json:"providers"`
+			}
+			if json.Unmarshal(data, &settings) == nil {
+				for providerName, provider := range settings.Providers {
+					for _, m := range provider.Models {
+						models = append(models, modelInfo{
+							ID:       m.ID,
+							Name:     m.Name,
+							Provider: providerName,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// If no models found from settings, add the engine's current model
+	if len(models) == 0 && h.llamaEngine != nil {
+		models = append(models, modelInfo{
+			ID:       h.llamaEngine.ModelName(),
+			Name:     h.llamaEngine.ModelName(),
+			Provider: "llamacpp",
+		})
+	}
+
+	writeJSON(w, http.StatusOK, models)
+}
+
+// SetModel switches the active engine for a specific agent.
+// PUT /api/pi/model
+func (h *PiHandler) SetModel(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project  string `json:"project"`
+		Provider string `json:"provider"`
+		ModelID  string `json:"modelId"`
+		AgentID  string `json:"agentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Resolve which engine to use based on provider/model
+	var engine *llamaeng.HTTPEngine
+	switch {
+	case req.ModelID == "gemini-3-flash-preview" && h.geminiEngine != nil:
+		engine = h.geminiEngine
+	default:
+		engine = h.llamaEngine
+	}
+
+	if engine == nil {
+		JSONError(w, "No engine available for the requested model", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Resolve project path to build the orchestrator key
+	projectPath := resolveProjectPath(req.Project, h.db)
+	key := compositeAgentKey(projectPath, req.AgentID)
+
+	// Evict existing orchestrator for this agent so next prompt uses the new engine
+	if existing, ok := h.orchestrators[key]; ok {
+		existing.Close()
+		delete(h.orchestrators, key)
+	}
+
+	// Store the engine selection for this agent
+	h.selectedEngines[key] = engine
+
+	h.log.Info("Model switched",
+		zap.String("model", req.ModelID),
+		zap.String("provider", req.Provider),
+		zap.String("agent", req.AgentID),
+		zap.String("engine_model", engine.ModelName()),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"model":   engine.ModelName(),
+	})
 }

@@ -14,10 +14,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// HTTPEngine communicates with llama-server over HTTP.
+// HTTPEngine communicates with an OpenAI-compatible API over HTTP.
+// Works with llama-server, Google Gemini (OpenAI compat), or any compatible endpoint.
 // Uses /v1/chat/completions with native OpenAI-style tool calling.
 type HTTPEngine struct {
 	baseURL    string
+	apiKey     string // optional — set for cloud providers (Gemini, OpenAI, etc.)
 	client     *http.Client
 	logger     *zap.Logger
 	modelName  string
@@ -28,8 +30,9 @@ type HTTPEngine struct {
 
 // HTTPEngineConfig holds configuration for creating an HTTPEngine.
 type HTTPEngineConfig struct {
-	BaseURL   string // e.g. "http://localhost:8001"
-	ModelName string // display name for logs/events
+	BaseURL   string // e.g. "http://localhost:8001" or "https://generativelanguage.googleapis.com/v1beta/openai"
+	APIKey    string // optional Bearer token for cloud providers
+	ModelName string // model ID sent in requests and used for logs/events
 	Logger    *zap.Logger
 }
 
@@ -46,22 +49,32 @@ func NewHTTPEngine(cfg HTTPEngineConfig) *HTTPEngine {
 	}
 	return &HTTPEngine{
 		baseURL:   cfg.BaseURL,
+		apiKey:    cfg.APIKey,
 		client:    &http.Client{Timeout: 120 * time.Second},
 		logger:    cfg.Logger,
 		modelName: cfg.ModelName,
 	}
 }
 
-// CheckHealth verifies the llama-server is running and the model is loaded.
+// CheckHealth verifies the endpoint is reachable.
+// For local llama-server, checks /health. For cloud providers, marks as loaded immediately.
 func (e *HTTPEngine) CheckHealth() error {
+	// Cloud providers don't have a /health endpoint — just mark as loaded
+	if e.apiKey != "" {
+		e.mu.Lock()
+		e.loaded = true
+		e.mu.Unlock()
+		return nil
+	}
+
 	resp, err := e.client.Get(e.baseURL + "/health")
 	if err != nil {
-		return fmt.Errorf("llama-server not reachable at %s: %w", e.baseURL, err)
+		return fmt.Errorf("server not reachable at %s: %w", e.baseURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("llama-server health check failed: HTTP %d", resp.StatusCode)
+		return fmt.Errorf("health check failed: HTTP %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -72,7 +85,7 @@ func (e *HTTPEngine) CheckHealth() error {
 	}
 
 	if result.Status != "ok" {
-		return fmt.Errorf("llama-server status: %s", result.Status)
+		return fmt.Errorf("server status: %s", result.Status)
 	}
 
 	e.mu.Lock()
@@ -81,13 +94,13 @@ func (e *HTTPEngine) CheckHealth() error {
 	return nil
 }
 
-// LoadModel is a no-op for HTTP engine — llama-server loads the model at startup.
+// LoadModel is a no-op for HTTP engine — the server loads the model at startup.
 // It verifies connectivity instead.
 func (e *HTTPEngine) LoadModel() error {
 	if err := e.CheckHealth(); err != nil {
 		return err
 	}
-	e.logger.Info("HTTP engine connected to llama-server", zap.String("url", e.baseURL))
+	e.logger.Info("HTTP engine connected", zap.String("url", e.baseURL), zap.String("model", e.modelName))
 	return nil
 }
 
@@ -107,11 +120,21 @@ func (e *HTTPEngine) NewSession(ctxSize int) (*Session, error) {
 	}, nil
 }
 
-// IsLoaded returns whether the engine is connected to llama-server.
+// IsLoaded returns whether the engine is connected.
 func (e *HTTPEngine) IsLoaded() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.loaded
+}
+
+// ModelName returns the model ID this engine is configured for.
+func (e *HTTPEngine) ModelName() string {
+	return e.modelName
+}
+
+// IsCloud returns true if this engine talks to a cloud provider (has an API key).
+func (e *HTTPEngine) IsCloud() bool {
+	return e.apiKey != ""
 }
 
 // WarmUp sends a single-token request to pre-compile CUDA kernels on the server side.
@@ -146,8 +169,9 @@ func (e *HTTPEngine) Close() error {
 
 // ── /v1/chat/completions types ─────────────────────────────────────
 
-// ChatCompletionRequest maps to llama-server's /v1/chat/completions request body.
+// ChatCompletionRequest maps to the /v1/chat/completions request body.
 type ChatCompletionRequest struct {
+	Model         string       `json:"model,omitempty"` // model ID for cloud providers
 	Messages      []Message    `json:"messages"`
 	Tools         []OpenAITool `json:"tools,omitempty"`
 	MaxTokens     int          `json:"max_tokens,omitempty"`
@@ -213,10 +237,13 @@ func (e *HTTPEngine) chatComplete(req ChatCompletionRequest) (*ChatCompletionRes
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if e.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+e.apiKey)
+	}
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("llama-server request failed: %w", err)
+		return nil, fmt.Errorf("chat request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -226,7 +253,7 @@ func (e *HTTPEngine) chatComplete(req ChatCompletionRequest) (*ChatCompletionRes
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("llama-server HTTP %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("chat API HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result ChatCompletionResponse
@@ -251,16 +278,19 @@ func (e *HTTPEngine) chatCompleteStream(req ChatCompletionRequest, onChunk func(
 		return fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if e.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+e.apiKey)
+	}
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("llama-server request failed: %w", err)
+		return fmt.Errorf("chat stream request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("llama-server HTTP %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("chat API HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
