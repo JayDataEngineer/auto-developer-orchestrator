@@ -283,7 +283,8 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 	// Resolve container address (IP or container name)
 	containerHost, err := h.manager.GetContainerIP(r.Context(), id)
 	if err != nil {
-		containerHost = fmt.Sprintf("orchestrator-sandbox-%s", id)
+		JSONError(w, fmt.Sprintf("sandbox not reachable (container may not be running): %v", err), http.StatusBadGateway)
+		return
 	}
 
 	// Build the proxy request path

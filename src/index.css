@@ -33,7 +33,7 @@
   --error: #EF4444;
 
   /* Extended */
-  --sidebar: #F5F5F5;
+  --sidebar: #F0F0F0;
   --panel: #FFFFFF;
 
   background-color: var(--background);
@@ -70,7 +70,7 @@
   --error: #F85149;
 
   /* Extended */
-  --sidebar: #0D1117;
+  --sidebar: #010409;
   --panel: #161B22;
 }
 

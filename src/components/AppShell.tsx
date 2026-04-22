@@ -335,7 +335,7 @@ function AppShellInner() {
   return (
     <div className="flex flex-col h-screen bg-background text-foreground font-sans selection:bg-primary/20 overflow-hidden">
       {/* Top bar */}
-      <div className="h-10 border-b border-border flex items-center px-2 shrink-0 bg-background/50 backdrop-blur-md gap-1">
+      <div className="h-10 border-b border-border flex items-center px-2 shrink-0 bg-sidebar backdrop-blur-md gap-1">
         {/* Left sidebar toggle — label changes per tab */}
         {leftLabel && (
           <Tooltip>
@@ -469,7 +469,7 @@ function AppShellInner() {
       <div className="flex-1 overflow-hidden flex">
         {/* Left sidebar — content changes per tab */}
         {!sidebarCollapsed && leftLabel && (
-          <div style={{ width: sidebarWidth }} className="relative shrink-0 border-r border-border overflow-hidden">
+          <div style={{ width: sidebarWidth }} className="relative shrink-0 border-r border-border overflow-hidden bg-sidebar">
             {activeTab === 'agent' && (
               <HistorySidebar
                 projects={safeProjects}
