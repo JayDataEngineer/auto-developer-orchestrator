@@ -347,15 +347,30 @@ export const PuxAgentView: React.FC<PuxAgentViewProps> = ({ selectedProject, sel
             {/* Empty state */}
             {!hasContent && (
               <div className="h-full flex flex-col items-center justify-center text-center py-20 space-y-6">
-                {/* Pux orb — soft glowing circle with inner sparkle */}
-                <div className="relative w-16 h-16">
-                  <div className="absolute inset-0 rounded-full bg-primary/15 animate-pulse-slow" />
-                  <div className="absolute inset-1 rounded-full bg-primary/10" />
-                  <div className="absolute inset-0 flex items-center justify-center text-primary">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 2L13.4 8.6L20 12L13.4 15.4L12 22L10.6 15.4L4 12L10.6 8.6Z" />
-                    </svg>
-                  </div>
+                {/* Pux mascot — friendly sprite */}
+                <div className="relative w-20 h-20">
+                  {/* Glow */}
+                  <div className="absolute -inset-2 rounded-full bg-primary/10 animate-pulse-slow" />
+                  <svg viewBox="0 0 80 80" fill="none" className="relative w-full h-full">
+                    {/* Left wing */}
+                    <ellipse cx="18" cy="38" rx="12" ry="7" fill="currentColor" opacity="0.15" />
+                    {/* Right wing */}
+                    <ellipse cx="62" cy="38" rx="12" ry="7" fill="currentColor" opacity="0.15" />
+                    {/* Body */}
+                    <ellipse cx="40" cy="42" rx="16" ry="18" fill="currentColor" opacity="0.2" />
+                    <ellipse cx="40" cy="42" rx="14" ry="16" fill="currentColor" opacity="0.15" />
+                    {/* Eyes */}
+                    <circle cx="34" cy="38" r="3" fill="currentColor" opacity="0.6" />
+                    <circle cx="46" cy="38" r="3" fill="currentColor" opacity="0.6" />
+                    {/* Eye highlights */}
+                    <circle cx="35" cy="37" r="1.2" fill="white" opacity="0.8" />
+                    <circle cx="47" cy="37" r="1.2" fill="white" opacity="0.8" />
+                    {/* Smile */}
+                    <path d="M36 45 Q40 49 44 45" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" fill="none" />
+                    {/* Antenna spark */}
+                    <line x1="40" y1="24" x2="40" y2="16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.3" />
+                    <circle cx="40" cy="14" r="2.5" fill="currentColor" opacity="0.5" />
+                  </svg>
                 </div>
                 <div className="space-y-3 max-w-md">
                   <h3 className="text-xl font-semibold text-foreground">Hi, I'm Pux</h3>
