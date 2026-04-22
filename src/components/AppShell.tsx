@@ -29,9 +29,9 @@ import { ToolCall } from '../lib/pux-events';
 type TabId = 'agent' | 'tasks' | 'desktop';
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: 'agent', label: 'Agent', icon: <Zap size={10} /> },
-  { id: 'tasks', label: 'Tasks', icon: <LayoutGrid size={10} /> },
-  { id: 'desktop', label: 'Desktop', icon: <Monitor size={10} /> },
+  { id: 'agent', label: 'Code', icon: <Zap size={10} /> },
+  { id: 'tasks', label: 'Automate', icon: <LayoutGrid size={10} /> },
+  { id: 'desktop', label: 'Pilot', icon: <Monitor size={10} /> },
 ];
 
 // Per-tab labels for the sidebar toggle buttons
