@@ -105,6 +105,14 @@ var allTools = []ToolSpec{
 		Returns:          "Returns page content as markdown. Use instead of browse_to when you just need the text.",
 		ParametersSchema: `{"type":"object","properties":{"url":{"type":"string","description":"URL to fetch"}},"required":["url"]}`,
 	},
+	{
+		Name:             "mcp_call",
+		Category:         CategoryBrowser,
+		Description:      "call any tool on the MCP research server (search, scrape, extract, map, crawl, docs, stats, proxy, etc.)",
+		Schema:           `{"tool": "research", "arguments": {"query": "golang concurrency", "max_results": 3}}`,
+		Returns:          "Returns the raw result from the MCP server as text. Use for any web research, extraction, or crawling task.",
+		ParametersSchema: `{"type":"object","properties":{"tool":{"type":"string","description":"MCP tool name: research, search, scrape, extract, list_schemas, map, crawl, docs_list_sources, docs_fetch_docs, domains, stats, reset, clear_blacklist, proxy_status, proxy_test, proxy_rotate"},"arguments":{"type":"object","description":"Tool-specific arguments as a JSON object"}},"required":["tool","arguments"]}`,
+	},
 
 	// Desktop
 	{
@@ -281,12 +289,14 @@ func PersonaToolNames(t PersonaType) []string {
 	case PersonaOrchestrator:
 		// The orchestrator IS the unified agent — has ALL tools.
 		// delegate_to is available but not the default; the orchestrator
-		// handles most tasks directly with bash/browse/click/type/desktop tools.
+		// handles most tasks directly with bash/browse/click/desktop tools.
 		return []string{
 			// Execution
 			"bash",
 			// Browser
 			"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "scrape",
+			// MCP research server (direct access to all MCP tools)
+			"mcp_call",
 			// Desktop
 			"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act",
 			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key",
@@ -302,6 +312,8 @@ func PersonaToolNames(t PersonaType) []string {
 	case PersonaDesktop:
 		return []string{"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act",
 			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key", "bash", "wait", "yield_artifact"}
+	case PersonaMCP:
+		return []string{"mcp_call", "wait", "yield_artifact"}
 	default:
 		return nil
 	}
@@ -389,6 +401,26 @@ computer_use_act{"action":"navigate","url":"https://example.com"}
 computer_use_snapshot{}
 → Returns [3] <a> "More information"
 computer_use_act{"action":"click","element":3}`,
+			},
+		}
+	case PersonaMCP:
+		return []Example{
+			{
+				Title: "Research a topic",
+				Content: `mcp_call{"tool":"research","arguments":{"query":"golang concurrency patterns","max_results":3}}
+→ Returns search results with page content
+
+yield_artifact{"output":"Key patterns: goroutines, channels, select"}`,
+			},
+			{
+				Title: "Scrape and extract structured data",
+				Content: `mcp_call{"tool":"scrape","arguments":{"url":"https://example.com"}}
+→ Returns clean markdown
+
+mcp_call{"tool":"extract","arguments":{"url":"https://example.com/products","schema_type":"ecommerce"}}
+→ Returns structured JSON with products
+
+yield_artifact{"output":"Scraped content and extracted 5 products"}`,
 			},
 		}
 	default:

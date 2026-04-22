@@ -123,6 +123,12 @@ func (c ModelConfig) PersonaConfig(t PersonaType) PersonaDefaults {
 			MaxTokens:     2048,
 			Temperature:   0.4,
 		}
+	case PersonaMCP:
+		return PersonaDefaults{
+			MaxToolRounds: c.DefaultMaxToolRounds,
+			MaxTokens:     4096, // MCP results can be large
+			Temperature:   0.3,  // precise for structured data
+		}
 	default:
 		return PersonaDefaults{
 			MaxToolRounds: c.DefaultMaxToolRounds,

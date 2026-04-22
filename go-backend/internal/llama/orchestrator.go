@@ -237,7 +237,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 		}
 	}
 	if personaName == "" {
-		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'persona'. Valid options: web, code, desktop. Example: delegate_to{\"persona\":\"web\",\"task\":\"your task\"}</tool_use_error>")
+		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'persona'. Valid options: web, code, desktop, mcp. Example: delegate_to{\"persona\":\"web\",\"task\":\"your task\"}</tool_use_error>")
 	}
 	if task == "" {
 		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'task'. Example: delegate_to{\"persona\":\"web\",\"task\":\"Go to URL and fill form\"}</tool_use_error>")
@@ -246,7 +246,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 	personaType := PersonaType(personaName)
 	persona := NewPersona(personaType, e.personaCfg)
 	if persona == nil {
-		return nil, fmt.Errorf("<tool_use_error>Unknown persona %q. Valid options: web, code, desktop. Example: delegate_to{\"persona\":\"web\",\"task\":\"your task\"}</tool_use_error>", personaName)
+		return nil, fmt.Errorf("<tool_use_error>Unknown persona %q. Valid options: web, code, desktop, mcp. Example: delegate_to{\"persona\":\"web\",\"task\":\"your task\"}</tool_use_error>", personaName)
 	}
 
 	subAgentID := fmt.Sprintf("sub-%s-%d", personaType, time.Now().UnixMilli())
@@ -527,9 +527,10 @@ func (e *OrchestratorExecutor) synthesize(args map[string]interface{}) (interfac
 // alternativePersona suggests a different persona when one fails.
 func alternativePersona(failed PersonaType) string {
 	alternatives := map[PersonaType]string{
-		PersonaWeb:     "desktop (for browser automation) or code (for API/scripting)",
-		PersonaCode:    "desktop (for GUI-based tools) or web (for web-based solutions)",
-		PersonaDesktop: "code (for CLI-based approach) or web (for web-based approach)",
+		PersonaWeb:     "desktop (for browser automation), code (for API/scripting), or mcp (for research)",
+		PersonaCode:    "desktop (for GUI-based tools), web (for web-based solutions), or mcp (for research)",
+		PersonaDesktop: "code (for CLI-based approach), web (for web-based approach), or mcp (for research)",
+		PersonaMCP:     "web (for browser automation) or code (for scripting)",
 	}
 	if alt, ok := alternatives[failed]; ok {
 		return alt

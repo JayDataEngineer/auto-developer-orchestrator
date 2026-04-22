@@ -571,6 +571,10 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		// Scrape a URL via MCP server (returns clean markdown)
 		return e.macroScrape(ctx, args)
 
+	case "mcp_call":
+		// Generic MCP tool passthrough — call any tool on the MCP research server
+		return e.macroMCPCall(ctx, args)
+
 	// ── Low-level tools (exposed for advanced use) ──
 
 	case "computer_use_enable":
@@ -1719,6 +1723,41 @@ func (e *SandboxToolExecutor) macroScrape(ctx context.Context, args map[string]i
 	}
 
 	return nil, fmt.Errorf("scrape failed: MCP server unavailable and no browser fallback for scrape")
+}
+
+// macroMCPCall is a generic passthrough to any tool on the MCP research server.
+func (e *SandboxToolExecutor) macroMCPCall(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	toolName, _ := args["tool"].(string)
+	if toolName == "" {
+		return nil, fmt.Errorf("missing 'tool' argument for mcp_call. Specify the MCP tool name, e.g. 'research', 'scrape', 'extract', 'map', 'crawl'")
+	}
+
+	arguments := make(map[string]any)
+	if raw, ok := args["arguments"].(map[string]interface{}); ok {
+		for k, v := range raw {
+			arguments[k] = v
+		}
+	} else if raw, ok := args["arguments"].(map[string]any); ok {
+		arguments = raw
+	}
+
+	if e.MCPClient == nil {
+		return nil, fmt.Errorf("mcp_call failed: MCP client not configured")
+	}
+
+	result, err := e.MCPClient.CallTool(ctx, toolName, arguments)
+	if err != nil {
+		e.Logger.Warn("mcp_call failed", zap.String("tool", toolName), zap.Error(err))
+		return nil, fmt.Errorf("mcp_call %s failed: %w", toolName, err)
+	}
+
+	e.Logger.Info("mcp_call succeeded", zap.String("tool", toolName))
+	return map[string]interface{}{
+		"success": true,
+		"tool":    toolName,
+		"source":  "mcp",
+		"result":  result,
+	}, nil
 }
 
 // ErrorClass categorizes tool execution errors for appropriate retry behavior.
