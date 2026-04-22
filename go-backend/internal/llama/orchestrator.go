@@ -174,8 +174,7 @@ func (o *OrchestratorLoop) IsRunning() bool {
 // ── OrchestratorExecutor ─────────────────────────────────────────────
 
 // OrchestratorExecutor implements ToolExecutor for the orchestrator persona.
-// It handles delegate_to, create_plan, update_plan, and synthesize.
-// All other tool calls are rejected — the orchestrator should delegate, not execute.
+// It handles delegate_to, delegate_async, collect_results, create_plan, update_plan, and synthesize.
 type OrchestratorExecutor struct {
 	engine       *HTTPEngine
 	artifacts    *ArtifactRegistry
@@ -186,6 +185,21 @@ type OrchestratorExecutor struct {
 
 	mu   sync.Mutex
 	plan *Plan
+
+	// Async delegate tracking
+	asyncMu    sync.Mutex
+	asyncTasks map[string]*asyncDelegateResult
+	asyncWait  chan struct{}
+}
+
+// asyncDelegateResult holds the result of an async delegate_to call.
+type asyncDelegateResult struct {
+	taskID     string
+	persona    PersonaType
+	artifactID string
+	output     string
+	err        error
+	done       bool
 }
 
 // Execute handles orchestrator-specific tools.
@@ -193,6 +207,10 @@ func (e *OrchestratorExecutor) Execute(ctx context.Context, toolName string, arg
 	switch toolName {
 	case "delegate_to":
 		return e.delegate(ctx, args)
+	case "delegate_async":
+		return e.delegateAsync(ctx, args)
+	case "collect_results":
+		return e.collectResults(ctx)
 	case "create_plan":
 		return e.createPlan(args)
 	case "update_plan":
@@ -537,6 +555,125 @@ func alternativePersona(failed PersonaType) string {
 		return alt
 	}
 	return "a different persona"
+}
+
+// delegateAsync launches a sub-agent in the background and returns immediately.
+// The caller should use collect_results to wait for completion.
+func (e *OrchestratorExecutor) delegateAsync(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	taskID, _ := args["task_id"].(string)
+	if taskID == "" {
+		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'task_id'. Example: delegate_async{\"persona\":\"web\",\"task\":\"search prices\",\"task_id\":\"price-search\"}</tool_use_error>")
+	}
+
+	// Initialize async tracking
+	e.asyncMu.Lock()
+	if e.asyncTasks == nil {
+		e.asyncTasks = make(map[string]*asyncDelegateResult)
+	}
+	if e.asyncWait == nil {
+		e.asyncWait = make(chan struct{}, 16)
+	}
+	e.asyncTasks[taskID] = &asyncDelegateResult{taskID: taskID}
+	e.asyncMu.Unlock()
+
+	// Launch delegate in background goroutine
+	go func() {
+		result, err := e.delegate(ctx, args)
+
+		e.asyncMu.Lock()
+		output := ""
+		var artifactID string
+		if err == nil && result != nil {
+			if m, ok := result.(map[string]interface{}); ok {
+				if o, ok := m["output"].(string); ok {
+					output = o
+				}
+				if a, ok := m["artifactId"].(string); ok {
+					artifactID = a
+				}
+			}
+		}
+		personaName, _ := args["persona"].(string)
+		e.asyncTasks[taskID] = &asyncDelegateResult{
+			taskID:     taskID,
+			persona:    PersonaType(personaName),
+			artifactID: artifactID,
+			output:     output,
+			err:        err,
+			done:       true,
+		}
+		e.asyncMu.Unlock()
+
+		// Signal completion
+		select {
+		case e.asyncWait <- struct{}{}:
+		default:
+		}
+	}()
+
+	return map[string]interface{}{
+		"taskId":  taskID,
+		"status":  "launched",
+		"message": "Task running in background. Call collect_results{} when ready.",
+	}, nil
+}
+
+// collectResults blocks until all pending async delegates complete, then returns their results.
+func (e *OrchestratorExecutor) collectResults(ctx context.Context) (interface{}, error) {
+	for {
+		e.asyncMu.Lock()
+		allDone := true
+		pending := 0
+		for _, r := range e.asyncTasks {
+			if !r.done {
+				allDone = false
+				pending++
+			}
+		}
+		if allDone && len(e.asyncTasks) > 0 {
+			results := e.asyncTasks
+			e.asyncTasks = make(map[string]*asyncDelegateResult)
+			e.asyncMu.Unlock()
+
+			out := make(map[string]interface{})
+			for id, r := range results {
+				entry := map[string]interface{}{
+					"taskId":  r.taskID,
+					"persona": string(r.persona),
+					"status":  "complete",
+				}
+				if r.err != nil {
+					entry["status"] = "failed"
+					entry["error"] = r.err.Error()
+				}
+				if r.artifactID != "" {
+					entry["artifactId"] = r.artifactID
+				}
+				if r.output != "" {
+					entry["output"] = truncate(r.output, cfg.SynthesisMaxChars)
+				}
+				out[id] = entry
+			}
+			return out, nil
+		}
+		e.asyncMu.Unlock()
+
+		if len(e.asyncTasks) == 0 {
+			return map[string]interface{}{"message": "No pending async tasks. Use delegate_async first."}, nil
+		}
+
+		// Wait for a completion signal or context cancellation
+		select {
+		case <-e.asyncWait:
+			// A task completed, loop to check
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(30 * time.Second):
+			e.logger.Warn("collect_results: still waiting for async tasks",
+				zap.Int("pending", pending),
+			)
+		}
+	}
 }
 
 // ── PersonaAwareExecutor ─────────────────────────────────────────────

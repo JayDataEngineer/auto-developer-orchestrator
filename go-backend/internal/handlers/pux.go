@@ -40,6 +40,8 @@ type PuxHandler struct {
 	cuBridge     *ComputerUseBridge // bridges llama executor to CU/X11 handlers
 	mcpClient    *mcp.Client        // optional: MCP research server for search/scrape
 
+	eventStore     *storage.EventStore
+
 	orchestrators   map[string]*llamaeng.OrchestratorLoop  // key: compositeKey(projectPath, agentId)
 	selectedEngines map[string]*llamaeng.HTTPEngine        // per-agent engine override
 }
@@ -78,6 +80,11 @@ func (h *PuxHandler) SetGeminiEngine(engine *llamaeng.HTTPEngine) {
 // SetMCPClient configures the MCP research server client for search/scrape tools.
 func (h *PuxHandler) SetMCPClient(client *mcp.Client) {
 	h.mcpClient = client
+}
+
+// SetEventStore configures the event store for session event persistence.
+func (h *PuxHandler) SetEventStore(store *storage.EventStore) {
+	h.eventStore = store
 }
 
 // RegisterRoutes registers all Pux routes on the given router.
@@ -281,8 +288,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Create event channel
+	// Create event channel — downstream is what SSE reads from
 	events := make(chan llamaeng.AgentEvent, 256)
+
+	// Wrap with persistence so non-delta events are saved to SQLite
+	sessionID := fmt.Sprintf("%s:%s", req.Project, req.AgentId)
+	orchEvents := llamaeng.PersistEvents(r.Context(), h.eventStore, sessionID, events)
 
 	// Run orchestrator in a goroutine with a 3-minute timeout
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
@@ -291,13 +302,13 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		defer close(events)
+		defer close(orchEvents)
 		// Format message to keep the task front and center for the 26B model
 		orchMsg := fmt.Sprintf("User request: %s\n\nCreate a plan and delegate each step.", req.Message)
 		if orch.Plan() == nil {
-			loopErr = orch.Run(ctx, orchMsg, events)
+			loopErr = orch.Run(ctx, orchMsg, orchEvents)
 		} else {
-			loopErr = orch.Continue(ctx, orchMsg, events)
+			loopErr = orch.Continue(ctx, orchMsg, orchEvents)
 		}
 	}()
 

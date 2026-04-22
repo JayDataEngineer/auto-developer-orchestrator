@@ -86,6 +86,19 @@ func NewDatabase(dataSource string) (*Database, error) {
 
 		CREATE INDEX IF NOT EXISTS idx_artifacts_agent
 			ON artifacts(agent_id);
+
+		CREATE TABLE IF NOT EXISTS agent_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			event_data TEXT NOT NULL DEFAULT '{}',
+			sub_agent_id TEXT NOT NULL DEFAULT '',
+			sequence_num INTEGER NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_events_session_seq
+			ON agent_events(session_id, sequence_num);
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
@@ -103,6 +116,11 @@ func NewDatabase(dataSource string) (*Database, error) {
 // Close closes the database connection
 func (d *Database) Close() error {
 	return d.db.Close()
+}
+
+// DB returns the underlying *sql.DB for use by other stores (e.g. EventStore).
+func (d *Database) DB() *sql.DB {
+	return d.db
 }
 
 // GetProjectsDir returns the configured projects directory.

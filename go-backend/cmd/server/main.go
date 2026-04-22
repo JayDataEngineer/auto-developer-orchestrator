@@ -177,6 +177,10 @@ func main() {
 	// Agent handler (orchestrator + ephemeral sub-agents via llama-server)
 	puxHandler := handlers.NewPuxHandler(db, gitOps, githubHandler, logger)
 
+	// Event store for session persistence (survives server restarts)
+	eventStore := storage.NewEventStore(db.DB())
+	puxHandler.SetEventStore(eventStore)
+
 	// Sandbox handler
 	sandboxHandler := handlers.NewSandboxHandler(sandboxMgr, logger)
 

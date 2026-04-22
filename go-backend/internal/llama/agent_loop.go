@@ -914,9 +914,20 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 			zap.Int("round", round),
 		)
 
-		// Phase 3: Execute each tool call
+		// Phase 3: Execute tool calls
+		// Partition into delegate_to (can run concurrently) and everything else (sequential).
 		var toolResults []ToolResult
+		var delegateCalls, sequentialCalls []ToolCallResponse
 		for _, tcr := range toolCalls {
+			if tcr.Function.Name == "delegate_to" {
+				delegateCalls = append(delegateCalls, tcr)
+			} else {
+				sequentialCalls = append(sequentialCalls, tcr)
+			}
+		}
+
+		// Execute sequential tool calls
+		for _, tcr := range sequentialCalls {
 			tc := tcr.ToToolCall()
 
 			sendEvent(subscriber, AgentEvent{
@@ -1079,6 +1090,16 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 				})
 				return nil
 			}
+		}
+
+		// Execute delegate_to calls concurrently
+		if len(delegateCalls) > 0 {
+			loop.logger.Info("Executing delegate_to calls concurrently",
+				zap.Int("count", len(delegateCalls)),
+				zap.Int("round", round),
+			)
+			delegateResults := loop.executeDelegatesConcurrently(ctx, delegateCalls, subscriber, failCounts, round)
+			toolResults = append(toolResults, delegateResults...)
 		}
 
 		// Phase 4: Goal nudge
@@ -1768,6 +1789,107 @@ const (
 	ErrorPermanent                    // invalid tool, bad args, permission denied
 	ErrorUnknown
 )
+
+// executeDelegatesConcurrently runs multiple delegate_to calls in parallel goroutines.
+// For local engines, concurrency is capped at MaxConcurrentAgents-1 to protect VRAM.
+// For cloud engines, all delegates run simultaneously.
+func (loop *AgentLoop) executeDelegatesConcurrently(
+	ctx context.Context,
+	delegateCalls []ToolCallResponse,
+	subscriber chan<- AgentEvent,
+	failCounts map[string]int,
+	round int,
+) []ToolResult {
+	maxConcurrent := cfg.MaxConcurrentAgents - 1 // -1 for the orchestrator session
+	if loop.engine.IsCloud() {
+		maxConcurrent = len(delegateCalls)
+	}
+	if maxConcurrent < 1 {
+		maxConcurrent = 1
+	}
+
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+	results := make([]ToolResult, len(delegateCalls))
+
+	for i, tcr := range delegateCalls {
+		wg.Add(1)
+		sem <- struct{}{} // acquire slot
+		go func(idx int, call ToolCallResponse) {
+			defer wg.Done()
+			defer func() { <-sem }() // release slot
+
+			tc := call.ToToolCall()
+
+			sendEvent(subscriber, AgentEvent{
+				Type: EventTypeToolStart,
+				Data: AgentEventData{
+					ToolName: tc.Name,
+					ToolArgs: tc.Args,
+					ToolID:   tc.ID,
+				},
+			})
+
+			argsJSON, _ := json.Marshal(tc.Args)
+			loop.logger.Info("CONCURRENT DELEGATE",
+				zap.Int("round", round),
+				zap.Int("index", idx),
+				zap.String("args", string(argsJSON)),
+			)
+
+			// Execute the delegate
+			var result interface{}
+			var err error
+			if cfg.ToolExecTimeoutSec <= 0 {
+				result, err = loop.executor.Execute(ctx, tc.Name, tc.Args)
+			} else {
+				toolCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.ToolExecTimeoutSec)*time.Second)
+				result, err = loop.executor.Execute(toolCtx, tc.Name, tc.Args)
+				cancel()
+			}
+
+			var resultStr string
+			if err != nil {
+				failCounts[tc.Name]++
+				resultStr = fmt.Sprintf("<tool_use_error>%s</tool_use_error>", err.Error())
+				loop.logger.Error("CONCURRENT DELEGATE ERROR",
+					zap.Int("index", idx),
+					zap.Error(err),
+				)
+			} else {
+				delete(failCounts, tc.Name)
+				resultBytes, _ := json.Marshal(result)
+				resultStr = string(resultBytes)
+				if len(resultStr) > cfg.ToolResultMaxChars {
+					resultStr = resultStr[:cfg.ToolResultMaxChars] + "...[truncated]"
+				}
+				loop.logger.Info("CONCURRENT DELEGATE DONE",
+					zap.Int("index", idx),
+					zap.Int("resultLen", len(resultStr)),
+				)
+			}
+
+			sendEvent(subscriber, AgentEvent{
+				Type: EventTypeToolEnd,
+				Data: AgentEventData{
+					ToolName: tc.Name,
+					ToolID:   tc.ID,
+					Result:   result,
+					Error:    func() string { if err != nil { return err.Error() }; return "" }(),
+				},
+			})
+
+			results[idx] = ToolResult{
+				ToolCallID: call.ID,
+				ToolName:   tc.Name,
+				Content:    resultStr,
+			}
+		}(i, tcr)
+	}
+
+	wg.Wait()
+	return results
+}
 
 // classifyError categorizes an error for retry decisions.
 func classifyError(err error) ErrorClass {

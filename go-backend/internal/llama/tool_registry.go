@@ -186,6 +186,22 @@ var allTools = []ToolSpec{
 		ParametersSchema: `{"type":"object","properties":{"persona":{"type":"string","description":"Sub-agent persona: web, code, desktop, or research","enum":["web","code","desktop","research"]},"task":{"type":"string","description":"Task description for the sub-agent"}},"required":["persona","task"]}`,
 	},
 	{
+		Name:             "delegate_async",
+		Category:         CategoryOrchestration,
+		Description:      "launch a sub-agent task in the background (returns immediately)",
+		Schema:           `{"persona": "web", "task": "Search for prices", "task_id": "price-search"}`,
+		Returns:          `Returns task_id immediately. Call collect_results to wait for all async tasks.`,
+		ParametersSchema: `{"type":"object","properties":{"persona":{"type":"string","description":"Sub-agent persona","enum":["web","code","desktop","research"]},"task":{"type":"string","description":"Task description for the sub-agent"},"task_id":{"type":"string","description":"Unique identifier for this async task"}},"required":["persona","task","task_id"]}`,
+	},
+	{
+		Name:             "collect_results",
+		Category:         CategoryOrchestration,
+		Description:      "wait for all async delegates to complete and collect their results",
+		Schema:           `{}`,
+		Returns:          `Returns map of task_id → result for all pending async delegates.`,
+		ParametersSchema: `{"type":"object","properties":{}}`,
+	},
+	{
 		Name:             "create_plan",
 		Category:         CategoryOrchestration,
 		Description:      "create a step-by-step plan",
@@ -301,7 +317,7 @@ func PersonaToolNames(t PersonaType) []string {
 			"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act",
 			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key",
 			// Orchestration (optional — for complex multi-step tasks)
-			"delegate_to", "create_plan", "update_plan", "synthesize",
+			"delegate_to", "delegate_async", "collect_results", "create_plan", "update_plan", "synthesize",
 			// Meta
 			"wait", "ask_user",
 		}
