@@ -126,7 +126,7 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 		var contentBuf strings.Builder
 		tokenCount := 0
 
-		err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason) bool {
+		err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool {
 			// Content delta
 			if delta.Content != "" {
 				tokenCount++
@@ -167,6 +167,12 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 			}
 			// On finish, store assistant message on session and send done event
 			if finish != "" {
+				// Store token usage from API response
+				if usage != nil {
+					s.totalInputTokens = usage.PromptTokens // absolute, not accumulated
+					s.totalOutputTokens += usage.CompletionTokens
+				}
+
 				// Collect accumulated tool calls in index order
 				var toolCalls []ToolCallResponse
 				indices := make([]int, 0, len(toolCallAccum))
@@ -197,10 +203,14 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 		})
 
 		elapsed := time.Since(t0)
-		s.totalOutputTokens += tokenCount
+		// Only accumulate manual count if API didn't provide usage
+		if s.totalOutputTokens == 0 && tokenCount > 0 {
+			s.totalOutputTokens += tokenCount
+		}
 
 		s.engine.logger.Debug("Chat generation complete",
-			zap.Int("tokens", tokenCount),
+			zap.Int("outputTokens", tokenCount),
+			zap.Int("promptTokens", s.totalInputTokens),
 			zap.Duration("duration", elapsed),
 			zap.Float64("tok_per_sec", tokPerSec(tokenCount, elapsed)),
 		)
@@ -252,6 +262,12 @@ func (s *Session) SetTools(tools []OpenAITool) {
 // TokenCounts returns total input and output token counts.
 func (s *Session) TokenCounts() (input, output int) {
 	return s.totalInputTokens, s.totalOutputTokens
+}
+
+// ContextUsage returns the current prompt token count and context capacity.
+// Used by the compaction system to decide when to compact.
+func (s *Session) ContextUsage() (usedTokens int, capacity int) {
+	return s.totalInputTokens, s.ctxSize
 }
 
 // Close releases the session slot on llama-server.

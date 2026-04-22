@@ -270,6 +270,17 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Inject project memory into the message if available
+	var memoryPrefix string
+	if mem := orch.Memory(); mem != nil {
+		memoryPrefix = mem.InjectPrefix()
+	} else {
+		memoryPrefix = llamaeng.ReadMemoryFile(projectPath)
+		if memoryPrefix != "" {
+			memoryPrefix = "<memory>\n" + memoryPrefix + "\n</memory>\n\n"
+		}
+	}
+
 	// Set up SSE
 	setSSEHeaders(w)
 	flusher, canFlush := w.(http.Flusher)
@@ -304,7 +315,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		defer close(done)
 		defer close(orchEvents)
 		// Format message to keep the task front and center for the 26B model
-		orchMsg := fmt.Sprintf("User request: %s\n\nCreate a plan and delegate each step.", req.Message)
+		orchMsg := fmt.Sprintf("%sUser request: %s\n\nCreate a plan and delegate each step.", memoryPrefix, req.Message)
 		if orch.Plan() == nil {
 			loopErr = orch.Run(ctx, orchMsg, orchEvents)
 		} else {
@@ -398,6 +409,14 @@ func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string)
 		return nil
 	}
 
+	// Wire transcript saver for pre-compaction snapshots
+	if h.db != nil {
+		orch.SetTranscriptSaver(&dbTranscriptSaver{db: h.db, log: h.log})
+	}
+
+	// Wire project memory (MEMORY.md per project)
+	orch.SetMemory(llamaeng.NewProjectMemory(projectPath))
+
 	h.orchestrators[key] = orch
 	h.log.Info("Created new orchestrator loop",
 		zap.String("key", key),
@@ -430,6 +449,20 @@ func (a *approvalManagerAdapter) Register(requestID string) <-chan llamaeng.Appr
 
 func (a *approvalManagerAdapter) Resolve(requestID string, resp llamaeng.ApprovalResponse) bool {
 	return (*approval.Manager)(a).Resolve(requestID, pi.ApprovalResponse{Action: resp.Action, Message: resp.Message})
+}
+
+// dbTranscriptSaver adapts Database to the TranscriptSaver interface.
+type dbTranscriptSaver struct {
+	db  *storage.Database
+	log *zap.Logger
+}
+
+func (s *dbTranscriptSaver) SaveTranscript(messagesJSON []byte, reason string, tokenCount int) {
+	ctx := context.Background()
+	// Use empty session ID — the session ID is tracked at the event store level
+	if _, err := s.db.SaveTranscript(ctx, "", "", string(messagesJSON), reason, tokenCount); err != nil {
+		s.log.Warn("Failed to save transcript", zap.Error(err))
+	}
 }
 
 func (a *approvalManagerAdapter) Cleanup(requestID string) {

@@ -266,7 +266,8 @@ func (e *HTTPEngine) chatComplete(req ChatCompletionRequest) (*ChatCompletionRes
 
 // chatCompleteStream sends a chat completion request and streams chunks via callback.
 // SSE format: "data: {json}\n\n" with delta objects containing content, reasoning_content, or tool_calls.
-func (e *HTTPEngine) chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason) bool) error {
+// The final chunk includes a usage field with prompt_tokens and completion_tokens.
+func (e *HTTPEngine) chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error {
 	req.Stream = true
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -317,6 +318,7 @@ func (e *HTTPEngine) chatCompleteStream(req ChatCompletionRequest, onChunk func(
 				Delta        StreamDelta `json:"delta"`
 				FinishReason FinishReason `json:"finish_reason"`
 			} `json:"choices"`
+			Usage *StreamUsage `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(jsonStr), &event); err != nil {
 			continue
@@ -324,7 +326,7 @@ func (e *HTTPEngine) chatCompleteStream(req ChatCompletionRequest, onChunk func(
 
 		if len(event.Choices) > 0 {
 			choice := event.Choices[0]
-			if !onChunk(choice.Delta, choice.FinishReason) {
+			if !onChunk(choice.Delta, choice.FinishReason, event.Usage) {
 				break
 			}
 		}

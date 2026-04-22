@@ -35,6 +35,8 @@ const (
 	EventTypeSubAgentStart    AgentEventType = "subagent_start"
 	EventTypeSubAgentEnd      AgentEventType = "subagent_end"
 	EventTypeApprovalRequest  AgentEventType = "approval_request"
+	EventTypeCompactionStart  AgentEventType = "compaction_start"
+	EventTypeCompactionEnd    AgentEventType = "compaction_end"
 )
 
 // subscriberKey is the context key for injecting the SSE subscriber channel
@@ -81,6 +83,12 @@ type AgentEventData struct {
 // This interface decouples the agent loop from specific tool implementations.
 type ToolExecutor interface {
 	Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error)
+}
+
+// TranscriptSaver persists pre-compaction message snapshots.
+// Implemented by the handler layer to avoid importing storage into the llama package.
+type TranscriptSaver interface {
+	SaveTranscript(messagesJSON []byte, reason string, tokenCount int)
 }
 
 // ApprovalResponse is the user's response to an approval/question request.
@@ -729,6 +737,10 @@ type AgentLoop struct {
 	mu       sync.Mutex
 	running  bool
 	cancel   context.CancelFunc
+
+	// Context management
+	consecutiveCompactionFailures int
+	saver                        TranscriptSaver
 }
 
 // NewAgentLoop creates a new agent loop bound to an engine.
@@ -1118,10 +1130,31 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 			}
 		}
 
-		// Context compaction
-		if loop.config.Compaction.TriggerAfterTurns > 0 && ShouldCompactMessages(loop.session.Messages(), loop.config.Compaction) {
-			if err := loop.compactSession(subscriber); err != nil {
-				loop.logger.Warn("Compaction failed, continuing with full history", zap.Error(err))
+		// Context compaction — size-based with circuit breaker
+		if loop.consecutiveCompactionFailures < cfg.MaxCompactionFailures {
+			needMicro, needFull := ShouldCompact(loop.session)
+			if needFull {
+				if err := loop.compactSession(subscriber); err != nil {
+					loop.consecutiveCompactionFailures++
+					loop.logger.Warn("Full compaction failed",
+						zap.Error(err),
+						zap.Int("consecutiveFailures", loop.consecutiveCompactionFailures))
+				} else {
+					loop.consecutiveCompactionFailures = 0
+				}
+			} else if needMicro {
+				// Micro-compact: clear old tool results (cheap, no LLM call)
+				MicroCompactInPlace(loop.session, 4)
+				if subscriber != nil {
+					sendEvent(subscriber, AgentEvent{
+						Type: EventTypeCompactionEnd,
+						Data: AgentEventData{
+							Result: map[string]interface{}{
+								"type": "micro",
+							},
+						},
+					})
+				}
 			}
 		}
 
@@ -1167,6 +1200,11 @@ func (loop *AgentLoop) IsRunning() bool {
 	return loop.running
 }
 
+// SetTranscriptSaver configures the transcript saver for pre-compaction snapshots.
+func (loop *AgentLoop) SetTranscriptSaver(saver TranscriptSaver) {
+	loop.saver = saver
+}
+
 // compactSession performs extractive compaction by creating a new session
 // with compacted history, freeing the old KV cache.
 func (loop *AgentLoop) compactSession(subscriber chan<- AgentEvent) error {
@@ -1174,7 +1212,32 @@ func (loop *AgentLoop) compactSession(subscriber chan<- AgentEvent) error {
 	systemPrompt := loop.config.SystemPrompt
 	compCfg := loop.config.Compaction
 
-	newMessages := CompactMessages(messages, systemPrompt, compCfg)
+	// Notify frontend: compaction starting
+	if subscriber != nil {
+		used, capacity := loop.session.ContextUsage()
+		sendEvent(subscriber, AgentEvent{
+			Type: EventTypeCompactionStart,
+			Data: AgentEventData{
+				Result: map[string]interface{}{
+					"type":         "full",
+					"messageCount": len(messages),
+					"usedTokens":   used,
+					"capacity":     capacity,
+				},
+			},
+		})
+	}
+
+	// Save transcript before compacting (best-effort)
+	if loop.saver != nil {
+		if msgsJSON, err := json.Marshal(messages); err == nil {
+			used, _ := loop.session.ContextUsage()
+			loop.saver.SaveTranscript(msgsJSON, "full_compaction", used)
+		}
+	}
+
+	// Try LLM-based summarization, fall back to extractive
+	newMessages := CompactWithSummary(messages, systemPrompt, loop.engine, compCfg.KeepLastTurns)
 
 	loop.logger.Info("Compacting session",
 		zap.Int("oldMessages", len(messages)),
@@ -1202,11 +1265,14 @@ func (loop *AgentLoop) compactSession(subscriber chan<- AgentEvent) error {
 	// Notify frontend
 	if subscriber != nil {
 		sendEvent(subscriber, AgentEvent{
-			Type: EventTypeAgentEnd,
-			Data: AgentEventData{Model: "compacted"},
-		})
-		sendEvent(subscriber, AgentEvent{
-			Type: EventTypeAgentStart,
+			Type: EventTypeCompactionEnd,
+			Data: AgentEventData{
+				Result: map[string]interface{}{
+					"type":       "full",
+					"oldMessages": len(messages),
+					"newMessages": len(newMessages),
+				},
+			},
 		})
 	}
 

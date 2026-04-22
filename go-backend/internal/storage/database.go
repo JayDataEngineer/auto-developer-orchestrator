@@ -99,6 +99,19 @@ func NewDatabase(dataSource string) (*Database, error) {
 
 		CREATE INDEX IF NOT EXISTS idx_events_session_seq
 			ON agent_events(session_id, sequence_num);
+
+		CREATE TABLE IF NOT EXISTS context_transcripts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id TEXT NOT NULL,
+			agent_id TEXT NOT NULL DEFAULT '',
+			messages_json TEXT NOT NULL,
+			token_count INTEGER DEFAULT 0,
+			trigger_reason TEXT NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_transcripts_session
+			ON context_transcripts(session_id, created_at DESC);
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
@@ -429,4 +442,44 @@ func (d *Database) GetArtifactsByAgent(ctx context.Context, agentID string) ([]*
 		artifacts = append(artifacts, &a)
 	}
 	return artifacts, rows.Err()
+}
+
+// ── Context Transcripts (pre-compaction snapshots) ──────────────────
+
+// Transcript is a saved snapshot of conversation messages before compaction.
+type Transcript struct {
+	ID            int64  `json:"id"`
+	SessionID     string `json:"sessionId"`
+	AgentID       string `json:"agentId"`
+	MessagesJSON  string `json:"messagesJson"`
+	TokenCount    int    `json:"tokenCount"`
+	TriggerReason string `json:"triggerReason"`
+	CreatedAt     string `json:"createdAt"`
+}
+
+// SaveTranscript persists a pre-compaction message snapshot.
+func (d *Database) SaveTranscript(ctx context.Context, sessionID, agentID, messagesJSON, triggerReason string, tokenCount int) (int64, error) {
+	res, err := d.db.ExecContext(ctx, `
+		INSERT INTO context_transcripts (session_id, agent_id, messages_json, token_count, trigger_reason)
+		VALUES (?, ?, ?, ?, ?)`,
+		sessionID, agentID, messagesJSON, tokenCount, triggerReason)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GetLatestTranscript returns the most recent transcript for a session.
+func (d *Database) GetLatestTranscript(ctx context.Context, sessionID string) (*Transcript, error) {
+	var t Transcript
+	err := d.db.QueryRowContext(ctx, `
+		SELECT id, session_id, agent_id, messages_json, token_count, trigger_reason, created_at
+		FROM context_transcripts
+		WHERE session_id = ?
+		ORDER BY created_at DESC LIMIT 1`,
+		sessionID).Scan(&t.ID, &t.SessionID, &t.AgentID, &t.MessagesJSON, &t.TokenCount, &t.TriggerReason, &t.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
 }

@@ -21,6 +21,7 @@ type OrchestratorLoop struct {
 	loop      *AgentLoop
 	cfg       PersonaConfig
 	logger    *zap.Logger
+	saver     TranscriptSaver
 
 	mu      sync.Mutex
 	running bool
@@ -103,6 +104,30 @@ func NewOrchestratorLoop(
 	}, nil
 }
 
+// SetTranscriptSaver configures the transcript saver for pre-compaction snapshots.
+// Propagates to the orchestrator's own loop. Sub-agents get it via their own creation.
+func (o *OrchestratorLoop) SetTranscriptSaver(saver TranscriptSaver) {
+	o.saver = saver
+	if o.loop != nil {
+		o.loop.SetTranscriptSaver(saver)
+	}
+}
+
+// SetMemory configures the project memory for persistent MEMORY.md storage.
+func (o *OrchestratorLoop) SetMemory(memory *ProjectMemory) {
+	if o.executor != nil {
+		o.executor.memory = memory
+	}
+}
+
+// Memory returns the project memory instance.
+func (o *OrchestratorLoop) Memory() *ProjectMemory {
+	if o.executor != nil {
+		return o.executor.memory
+	}
+	return nil
+}
+
 // Run starts the orchestrator for a user prompt. Blocks until complete.
 // Events (including sub-agent events) are emitted to the subscriber channel.
 func (o *OrchestratorLoop) Run(ctx context.Context, userMsg string, subscriber chan<- AgentEvent) error {
@@ -182,6 +207,7 @@ type OrchestratorExecutor struct {
 	baseExecutor ToolExecutor // SandboxToolExecutor for sub-agent tool dispatch
 	subscriber   chan<- AgentEvent
 	logger       *zap.Logger
+	memory       *ProjectMemory // optional: per-project persistent memory
 
 	mu   sync.Mutex
 	plan *Plan
@@ -217,6 +243,8 @@ func (e *OrchestratorExecutor) Execute(ctx context.Context, toolName string, arg
 		return e.updatePlan(args)
 	case "synthesize":
 		return e.synthesize(args)
+	case "update_memory":
+		return e.updateMemory(args)
 	default:
 		return nil, fmt.Errorf(
 			"<tool_use_error>Unknown tool %q. Available tools: delegate_to, create_plan, update_plan, synthesize. Example: delegate_to{\"persona\":\"web\",\"task\":\"description\"}</tool_use_error>",
@@ -539,6 +567,34 @@ func (e *OrchestratorExecutor) synthesize(args map[string]interface{}) (interfac
 	return map[string]interface{}{
 		"synthesized": true,
 		"conclusion":  conclusion,
+	}, nil
+}
+
+// updateMemory saves information to the project's persistent MEMORY.md file.
+func (e *OrchestratorExecutor) updateMemory(args map[string]interface{}) (interface{}, error) {
+	content, _ := args["content"].(string)
+	if content == "" {
+		return nil, fmt.Errorf("<tool_use_error>Missing 'content' parameter. Example: update_memory{\"content\":\"Key finding: ...\"}</tool_use_error>")
+	}
+	if e.memory == nil {
+		return map[string]interface{}{
+			"saved":  false,
+			"reason": "No project directory configured for memory",
+		}, nil
+	}
+
+	e.memory.Update(content)
+	if err := e.memory.Save(); err != nil {
+		return map[string]interface{}{
+			"saved": false,
+			"error": err.Error(),
+		}, nil
+	}
+
+	return map[string]interface{}{
+		"saved":     true,
+		"lineCount": e.memory.LineCount(),
+		"sizeBytes": len(e.memory.Content()),
 	}, nil
 }
 

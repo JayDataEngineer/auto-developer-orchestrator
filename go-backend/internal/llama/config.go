@@ -33,9 +33,14 @@ type ModelConfig struct {
 	SynthesisMaxChars     int // Max chars for synthesized orchestrator output
 
 	// Compaction
-	CompactionTriggerTurns int // Compact after this many model+tool turn pairs
+	CompactionTriggerTurns int // Compact after this many model+tool turn pairs (legacy, replaced by size-based)
 	CompactionKeepTurns    int // Preserve this many full turns at the end
 	CompactionMaxChars     int // Max chars for the compacted summary block
+
+	// Size-based context management (replaces turn-based triggers)
+	MicroCompactThreshold float64 // Trigger micro-compact at this fraction of context (default: 0.70)
+	FullCompactThreshold  float64 // Trigger full compact at this fraction of context (default: 0.87)
+	MaxCompactionFailures int     // Circuit breaker: stop after N consecutive failures (default: 3)
 
 	// VRAM budget (RTX 4090 24GB)
 	MaxConcurrentAgents int // Max concurrent agent KV sessions
@@ -64,10 +69,15 @@ func DefaultModelConfig() ModelConfig {
 		ToolResultMaxChars:    6000,
 		SynthesisMaxChars:     4000,
 
-		// Compaction — with 32K context, triggers later than 8K would
+		// Compaction — legacy turn-based (kept as fallback)
 		CompactionTriggerTurns: 16,
 		CompactionKeepTurns:    4,
 		CompactionMaxChars:     3000,
+
+		// Size-based context management
+		MicroCompactThreshold: 0.70, // 70% → clear old tool results (32K: ~22K, 8K: ~5.6K)
+		FullCompactThreshold:  0.87, // 87% → LLM summary + trim (32K: ~28K, 8K: ~7K)
+		MaxCompactionFailures: 3,    // circuit breaker after 3 consecutive failures
 
 		// VRAM — 24GB RTX 4090: 12.5GB model + 32K orchestrator KV ≈ 3-4GB + 4K sub-agent KV ≈ 0.5GB
 		MaxConcurrentAgents: 3, // orchestrator + 1 sub-agent comfortably, 2 sub-agents possible

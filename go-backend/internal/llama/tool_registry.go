@@ -225,6 +225,14 @@ var allTools = []ToolSpec{
 
 	// Meta
 	{
+		Name:             "update_memory",
+		Category:         CategoryMeta,
+		Description:      "save important information to project memory for future sessions",
+		Schema:           `{"content": "Key finding: database uses PostgreSQL 15..."}`,
+		Returns:          "Saves to MEMORY.md in the project directory. Persisted across sessions. Max 200 lines.",
+		ParametersSchema: `{"type":"object","properties":{"content":{"type":"string","description":"Information to save to project memory. Will replace existing memory."}},"required":["content"]}`,
+	},
+	{
 		Name:             "wait",
 		Category:         CategoryMeta,
 		Description:      "wait for a specified duration before proceeding",
@@ -319,7 +327,7 @@ func PersonaToolNames(t PersonaType) []string {
 			// Orchestration (optional — for complex multi-step tasks)
 			"delegate_to", "delegate_async", "collect_results", "create_plan", "update_plan", "synthesize",
 			// Meta
-			"wait", "ask_user",
+			"update_memory", "wait", "ask_user",
 		}
 	case PersonaWeb:
 		return []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "scrape", "bash", "wait", "yield_artifact"}

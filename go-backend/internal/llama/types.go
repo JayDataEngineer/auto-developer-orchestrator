@@ -62,6 +62,13 @@ type FunctionCallDelta struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
+// StreamUsage holds token usage data returned in streaming SSE chunks.
+// llama-server includes this on the final chunk (with finish_reason set).
+type StreamUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}
+
 // FinishReason indicates why the model stopped generating.
 type FinishReason string
 
