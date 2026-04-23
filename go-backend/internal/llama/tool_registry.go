@@ -90,6 +90,14 @@ var allTools = []ToolSpec{
 		Returns:          "Operations: find_references, find_definition, list_symbols, hover. Uses ripgrep with language-aware patterns.",
 		ParametersSchema: `{"type":"object","properties":{"operation":{"type":"string","description":"Operation: find_references, find_definition, list_symbols, hover","enum":["find_references","find_definition","list_symbols","hover"]},"symbol":{"type":"string","description":"Symbol name to search for"},"path":{"type":"string","description":"Directory to search (default: /sandbox/workspace)"},"file_type":{"type":"string","description":"Language: go, py, js, ts, rs, java, rb"}},"required":["operation"]}`,
 	},
+	{
+		Name:             "image_read",
+		Category:         CategoryExecution,
+		Description:      "read and describe an image file using vision model",
+		Schema:           `{"file_path": "/sandbox/workspace/screenshot.png", "prompt": "What does this show?"}`,
+		Returns:          "Sends the image to the vision model and returns a text description. Supports PNG, JPG, GIF, WebP.",
+		ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Path to image file in sandbox"},"prompt":{"type":"string","description":"What to describe (default: general description)"}},"required":["file_path"]}`,
+	},
 
 	// Browser
 	{

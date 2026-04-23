@@ -35,6 +35,8 @@ func NewLlamaExecutor(engine *llamaeng.HTTPEngine, sandboxMgr *sandbox.Manager, 
 
 // Execute runs a job using the llama engine. Creates a fresh OrchestratorLoop
 // per execution, collects text output, then closes it to free VRAM.
+const defaultSandboxID = "scheduler-default"
+
 func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath, message, model string, timeoutSec int) *JobResult {
 	start := time.Now()
 	if timeoutSec <= 0 {
@@ -43,7 +45,16 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
+	// When no project is specified, use a default sandbox so the agent can
+	// still run bash commands, write files, etc.
 	sandboxID := filepath.Base(projectPath)
+	if sandboxID == "" || sandboxID == "." {
+		sandboxID = defaultSandboxID
+		if projectPath == "" {
+			projectPath = "/tmp/scheduler-default"
+		}
+		e.ensureDefaultSandbox(ctx)
+	}
 
 	// Build base executor for tool dispatch
 	var baseExecutor llamaeng.ToolExecutor
@@ -110,6 +121,23 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 		result.Error = fmt.Sprintf("job execution timed out after %ds", timeoutSec)
 	}
 	return result
+}
+
+// ensureDefaultSandbox creates a default sandbox if it doesn't already exist.
+// This gives projectless tasks a place to run bash commands.
+func (e *LlamaExecutor) ensureDefaultSandbox(ctx context.Context) {
+	if e.sandboxMgr == nil {
+		return
+	}
+	if sb := e.sandboxMgr.FindSandboxByProject(defaultSandboxID); sb != nil {
+		return // already exists
+	}
+	_, err := e.sandboxMgr.CreateSandbox(ctx, sandbox.SandboxOptions{
+		ID: defaultSandboxID,
+	})
+	if err != nil {
+		e.logger.Warn("Failed to create default sandbox for projectless task", zap.Error(err))
+	}
 }
 
 // resolveProjectPath resolves a project name to an absolute path.

@@ -396,6 +396,7 @@ func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string)
 			CU:            h.cuBridge,
 			Logger:        h.log,
 			VisionEnabled: h.cuBridge.CU.VisionClient() != nil,
+			Vision:        h.cuBridge.CU.VisionClient(),
 			MCPClient:     h.mcpClient,
 			ApprovalMgr:   (*approvalManagerAdapter)(h.approvalMgr),
 		}

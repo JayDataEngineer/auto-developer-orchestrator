@@ -2,7 +2,9 @@ package llama
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 )
 
 // buildPersonaPrompt builds a system prompt for any persona using the template + tool registry.
@@ -32,7 +34,44 @@ func buildPersonaPrompt(t PersonaType, pcfg PersonaConfig) string {
 		// Fall back to a minimal prompt rather than crashing
 		return fmt.Sprintf("You are Pi's %s agent. Tools: %s", t, toolsBlock)
 	}
+
+	// Append AGENTS.md project context if present (like CLAUDE.md for Claude Code)
+	agentsMD := readProjectContextFile(pcfg.ProjectDir, "AGENTS.md")
+	if agentsMD == "" {
+		agentsMD = readProjectContextFile(pcfg.ProjectDir, "CLAUDE.md")
+	}
+	if agentsMD != "" {
+		prompt += "\n\n--- Project Context (AGENTS.md) ---\n" + agentsMD
+	}
+
 	return prompt
+}
+
+// readProjectContextFile reads a project-level context file (AGENTS.md, CLAUDE.md)
+// from the project directory or its parent. Returns empty string if not found.
+func readProjectContextFile(projectDir, filename string) string {
+	if projectDir == "" {
+		return ""
+	}
+
+	// Try project dir first, then parent
+	candidates := []string{
+		filepath.Join(projectDir, filename),
+		filepath.Join(projectDir, "..", filename),
+	}
+
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			content := strings.TrimSpace(string(data))
+			// Cap at 4K chars to avoid bloating the system prompt
+			if len(content) > 4096 {
+				content = content[:4093] + "\n..."
+			}
+			return content
+		}
+	}
+	return ""
 }
 
 // personaTemplateName maps PersonaType to the short template filename (without path/extension).

@@ -123,3 +123,84 @@ func (vc *VisionClient) DescribePage(ctx context.Context, screenshot []byte) (st
 
 	return result.Choices[0].Message.Content, nil
 }
+
+// DescribeImage sends an arbitrary image (as bytes) to the vision model with a custom prompt.
+// Unlike DescribePage which is tuned for web screenshots, this accepts any image type.
+func (vc *VisionClient) DescribeImage(ctx context.Context, imageBytes []byte, prompt, mimeType string) (string, error) {
+	b64 := base64.StdEncoding.EncodeToString(imageBytes)
+
+	if mimeType == "" {
+		mimeType = "image/png"
+	}
+
+	payload := map[string]any{
+		"model": vc.model,
+		"messages": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{
+						"type": "image_url",
+						"image_url": map[string]string{
+							"url": fmt.Sprintf("data:%s;base64,%s", mimeType, b64),
+						},
+					},
+					{
+						"type": "text",
+						"text": prompt,
+					},
+				},
+			},
+		},
+		"max_tokens": 2048,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	url := vc.baseURL + "/v1/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if vc.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+vc.apiKey)
+	}
+
+	resp, err := vc.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("vision API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read vision response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("vision API returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("failed to parse vision response: %w", err)
+	}
+
+	if len(result.Choices) == 0 {
+		return "", fmt.Errorf("vision API returned no choices")
+	}
+
+	return result.Choices[0].Message.Content, nil
+}

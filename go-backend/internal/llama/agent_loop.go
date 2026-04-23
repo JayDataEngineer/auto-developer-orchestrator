@@ -2,9 +2,11 @@ package llama
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -15,6 +17,9 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"go.uber.org/zap"
+
+	// Imported for image_read tool — sends images to vision model
+	"github.com/auto-developer-orchestrator/backend/internal/browser"
 )
 
 // AgentEventType identifies the type of agent event.
@@ -159,6 +164,7 @@ type SandboxToolExecutor struct {
 	Creds     *CredentialStore // optional: resolve/redact sensitive data
 	MCPClient *mcp.Client      // optional: MCP research server for search/scrape
 	ApprovalMgr ApprovalManager // optional: nil for scheduled jobs (fire-and-forget)
+	Vision    *browser.VisionClient // optional: for image_read tool
 
 	// Vision in the loop: after page-changing actions, automatically capture a
 	// screenshot and describe it via the vision model. Gives the agent spatial
@@ -737,6 +743,9 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 
 	case "code_search":
 		return e.executeCodeSearch(ctx, sandboxID, args)
+
+	case "image_read":
+		return e.executeImageRead(ctx, sandboxID, args)
 
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", toolName)
@@ -2271,5 +2280,76 @@ func (e *SandboxToolExecutor) executeCodeSearch(ctx context.Context, sandboxID s
 		"operation": operation,
 		"symbol":    symbol,
 		"results":   result,
+	}, nil
+}
+
+// executeImageRead reads an image file from the sandbox and sends it to the
+// vision model for description. Supports PNG, JPG, JPEG, GIF, WebP.
+func (e *SandboxToolExecutor) executeImageRead(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	filePath, _ := args["file_path"].(string)
+	if filePath == "" {
+		return nil, fmt.Errorf("missing 'file_path' argument")
+	}
+	prompt, _ := args["prompt"].(string)
+	if prompt == "" {
+		prompt = "Describe this image in detail. Include any text, UI elements, data, diagrams, or code visible."
+	}
+
+	if e.Vision == nil {
+		return nil, fmt.Errorf("image_read requires vision model (no VisionClient configured)")
+	}
+
+	// Validate file extension
+	ext := strings.ToLower(filepath.Ext(filePath))
+	isImage := false
+	imageExts := map[string]string{
+		".png":  "image/png",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".gif":  "image/gif",
+		".webp": "image/webp",
+	}
+	mimeType := ""
+	for e, mt := range imageExts {
+		if ext == e {
+			isImage = true
+			mimeType = mt
+			break
+		}
+	}
+	if !isImage {
+		return nil, fmt.Errorf("unsupported image format (use png, jpg, gif, or webp): %s", filePath)
+	}
+
+	// Read the file as base64 from the sandbox
+	ops := e.ensureFileOps(sandboxID)
+	output, err := ops.exec(ctx, fmt.Sprintf("base64 '%s'", sandbox.ShellEscape(filePath)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read image file: %w", err)
+	}
+	b64 := strings.TrimSpace(output)
+	if b64 == "" {
+		return nil, fmt.Errorf("image file is empty: %s", filePath)
+	}
+
+	// Decode base64 to check size (limit to 10MB)
+	imageBytes, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode image: %w", err)
+	}
+	if len(imageBytes) > 10*1024*1024 {
+		return nil, fmt.Errorf("image too large (%d bytes, max 10MB)", len(imageBytes))
+	}
+
+	// Send to vision model
+	desc, err := e.Vision.DescribeImage(ctx, imageBytes, prompt, mimeType)
+	if err != nil {
+		return nil, fmt.Errorf("vision failed: %w", err)
+	}
+
+	return map[string]interface{}{
+		"description": desc,
+		"file":        filePath,
+		"size_bytes":  len(imageBytes),
 	}, nil
 }
