@@ -3,6 +3,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 /**
  * Shared polling hook. Calls fetchFn immediately, then every intervalMs.
  * Cleans up interval on unmount or when enabled becomes false.
+ *
+ * Only sets loading=true on the initial fetch — background polls run silently
+ * to avoid triggering re-renders that reset scroll position, animations, etc.
  */
 export function usePolling(
   fetchFn: () => Promise<void>,
@@ -10,24 +13,29 @@ export function usePolling(
   enabled: boolean,
 ) {
   const [loading, setLoading] = useState(false);
+  const initialDone = useRef(false);
   const fetchRef = useRef(fetchFn);
   fetchRef.current = fetchFn;
 
-  const wrappedFetch = useCallback(async () => {
+  const doFetch = useCallback(async (isInitial: boolean) => {
     try {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       await fetchRef.current();
     } finally {
-      setLoading(false);
+      if (isInitial) {
+        setLoading(false);
+        initialDone.current = true;
+      }
     }
   }, []);
 
   useEffect(() => {
     if (!enabled) return;
-    wrappedFetch();
-    const id = setInterval(wrappedFetch, intervalMs);
+    initialDone.current = false;
+    doFetch(true);
+    const id = setInterval(() => doFetch(false), intervalMs);
     return () => clearInterval(id);
-  }, [enabled, intervalMs, wrappedFetch]);
+  }, [enabled, intervalMs, doFetch]);
 
   return { loading };
 }

@@ -506,7 +506,7 @@ function AppShellInner() {
             />
           )}
           {activeTab === 'tasks' && (
-            <TaskBoardTab />
+            <TaskBoardTab currentProject={selectedProject} />
           )}
           {activeTab === 'desktop' && (
             <ComputerUseTab

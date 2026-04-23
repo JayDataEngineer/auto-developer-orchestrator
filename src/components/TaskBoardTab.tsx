@@ -499,10 +499,9 @@ function CreateForm({ projectDir, onSubmit, onCancel }: CreateFormProps) {
 
 // --- Task Board Tab (Unified) ---
 
-export function TaskBoardTab() {
+export function TaskBoardTab({ currentProject }: { currentProject?: string | null }) {
   const { addToast } = useToastContext();
   const [allJobs, setAllJobs] = useState<SchedulerJob[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editingTask, setEditingTask] = useState<SchedulerJob | null>(null);
@@ -512,7 +511,6 @@ export function TaskBoardTab() {
 
   const fetchJobs = useCallback(async () => {
     try {
-      setLoading(true);
       const data = await api.scheduler.list();
       const jobs = data.jobs || [];
       jobs.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -520,21 +518,19 @@ export function TaskBoardTab() {
       setError(null);
     } catch (err: any) {
       setError(err.message);
-    } finally {
-      setLoading(false);
     }
   }, []);
 
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
   // Auto-refresh every 5s
-  usePolling(fetchJobs, 5000, true);
+  const { loading } = usePolling(fetchJobs, 5000, true);
 
   const handleCreate = useCallback(async (data: { name: string; description?: string; message: string; model?: string; scheduleType: string; cronExpr?: string; everySeconds?: number }) => {
     const job: CreateJobRequest = {
       name: data.name,
       description: data.description,
-      project: '',
+      project: currentProject || 'projects/test-repo',
       message: data.message,
       model: data.model,
       scheduleType: data.scheduleType as any,
