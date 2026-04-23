@@ -201,6 +201,7 @@ func (c *Client) Endpoint() string {
 }
 
 // doRequest sends a JSON-RPC request and returns the response body and headers.
+// Handles both plain JSON and SSE (text/event-stream) responses from the MCP server.
 func (c *Client) doRequest(ctx context.Context, req jsonRPCRequest) ([]byte, http.Header, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -237,5 +238,24 @@ func (c *Client) doRequest(ctx context.Context, req jsonRPCRequest) ([]byte, htt
 		return nil, resp.Header, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody[:min(len(respBody), 200)]))
 	}
 
+	// If the response is SSE (text/event-stream), extract the data payload
+	ct := resp.Header.Get("Content-Type")
+	if len(ct) >= 10 && ct[:10] == "text/event" {
+		return parseSSEData(respBody), resp.Header, nil
+	}
+
 	return respBody, resp.Header, nil
+}
+
+// parseSSEData extracts JSON from an SSE response body.
+// Looks for "data: " lines and returns the first one as bytes.
+func parseSSEData(body []byte) []byte {
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if after, ok := bytes.CutPrefix(line, []byte("data: ")); ok {
+			return after
+		}
+	}
+	// No SSE data lines found — return raw body as fallback
+	return body
 }

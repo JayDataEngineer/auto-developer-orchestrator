@@ -265,15 +265,17 @@ tasks:
           *)     VISION=true;  ENABLE_THINKING=$THINK;;
         esac
 
-        # Build docker args
-        VISION_ARGS=""
+        # Build docker volume mounts and llama-server args separately
+        VISION_MOUNT=""
+        MMPROJ_ARG=""
         if [ "$VISION" = "true" ] && [ "$MMPROJ" != "null" ]; then
-          VISION_ARGS="-v {{.VISION_DIR}}:/vision:ro --mmproj /vision/$MMPROJ"
+          VISION_MOUNT="-v {{.VISION_DIR}}:/vision:ro"
+          MMPROJ_ARG="--mmproj /vision/$MMPROJ"
         fi
 
         THINK_ARGS=""
         if [ "$ENABLE_THINKING" = "true" ]; then
-          THINK_ARGS="--chat-template-kwargs '{\"enable_thinking\":true}'"
+          THINK_ARGS='--chat-template-kwargs {"enable_thinking":true}'
         fi
 
         CACHE_RAM_ARGS=""
@@ -298,13 +300,14 @@ tasks:
           --network shared-infra \
           -p {{.LLAMA_PORT}}:8001 \
           -v "{{.MODELS_DIR}}:/models:ro" \
-          $VISION_ARGS \
+          $VISION_MOUNT \
           {{.LLAMA_IMAGE}} \
           --model /models/$LLM \
           --alias $ALIAS \
           --port 8001 --host 0.0.0.0 \
           --jinja --flash-attn on \
           --ctx-size $CTX \
+          $MMPROJ_ARG \
           $CACHE_RAM_ARGS \
           --cache-type-k q8_0 --cache-type-v q8_0 \
           --batch-size 512 --ubatch-size 512 \

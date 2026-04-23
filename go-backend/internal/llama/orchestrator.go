@@ -228,7 +228,8 @@ type asyncDelegateResult struct {
 	done       bool
 }
 
-// Execute handles orchestrator-specific tools.
+// Execute handles orchestrator-specific tools and falls through to the base
+// executor (SandboxToolExecutor) for all other tools (bash, search_web, etc.).
 func (e *OrchestratorExecutor) Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
 	switch toolName {
 	case "delegate_to":
@@ -246,8 +247,12 @@ func (e *OrchestratorExecutor) Execute(ctx context.Context, toolName string, arg
 	case "update_memory":
 		return e.updateMemory(args)
 	default:
+		// Fall through to SandboxToolExecutor for bash, search_web, mcp_call, browser, etc.
+		if e.baseExecutor != nil {
+			return e.baseExecutor.Execute(ctx, toolName, args)
+		}
 		return nil, fmt.Errorf(
-			"<tool_use_error>Unknown tool %q. Available tools: delegate_to, create_plan, update_plan, synthesize. Example: delegate_to{\"persona\":\"web\",\"task\":\"description\"}</tool_use_error>",
+			"<tool_use_error>Unknown tool %q. Available tools: delegate_to, create_plan, update_plan, synthesize, bash, search_web, mcp_call, browse_to, etc.</tool_use_error>",
 			toolName,
 		)
 	}

@@ -613,8 +613,8 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		return e.macroSearchWeb(ctx, sandboxID, args)
 
 	case "scrape":
-		// Scrape a URL via MCP server (returns clean markdown)
-		return e.macroScrape(ctx, args)
+		// Scrape a URL via MCP server, with browser fallback
+		return e.macroScrape(ctx, sandboxID, args)
 
 	case "mcp_call":
 		// Generic MCP tool passthrough — call any tool on the MCP research server
@@ -960,7 +960,26 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 
 		// No tool calls, max rounds, or normal stop → done
 		if len(toolCalls) == 0 || finishReason != FinishToolCalls || round >= loop.config.MaxToolRounds {
-			if round >= loop.config.MaxToolRounds {
+			if round >= loop.config.MaxToolRounds && contentBuf.Len() == 0 {
+				// Model hit max rounds without producing text — do one final synthesis
+				loop.logger.Warn("Max tool rounds reached with no text output, requesting synthesis",
+					zap.Int("round", round),
+					zap.Int("maxRounds", loop.config.MaxToolRounds),
+				)
+				synthesisPrompt := "Based on all your research and tool results above, provide your comprehensive final answer now. Do NOT call any more tools. Just write your response directly."
+				synthOpts := loop.config.Opts
+				synthOpts.MaxTokens = loop.config.MaxTokens
+				// No tools for synthesis — force the model to produce text, not tool calls
+				synthCh, err := loop.session.FeedUserMessage(synthesisPrompt, synthOpts)
+				if err == nil {
+					for evt := range synthCh {
+						if evt.Type == ChatEventContent {
+							contentBuf.WriteString(evt.Content)
+							sendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: evt.Content}})
+						}
+					}
+				}
+			} else if round >= loop.config.MaxToolRounds {
 				loop.logger.Warn("Max tool rounds reached, stopping agent loop",
 					zap.Int("round", round),
 					zap.Int("maxRounds", loop.config.MaxToolRounds),
@@ -1877,7 +1896,7 @@ func (e *SandboxToolExecutor) macroSearchWeb(ctx context.Context, sandboxID stri
 }
 
 // macroScrape fetches a URL and returns its content as clean markdown via MCP.
-func (e *SandboxToolExecutor) macroScrape(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (e *SandboxToolExecutor) macroScrape(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
 	targetURL, _ := args["url"].(string)
 	if targetURL == "" {
 		return nil, fmt.Errorf("missing 'url' argument for scrape")
@@ -1895,10 +1914,61 @@ func (e *SandboxToolExecutor) macroScrape(ctx context.Context, args map[string]i
 				"content": result,
 			}, nil
 		}
-		e.Logger.Warn("MCP scrape failed", zap.Error(err))
+		e.Logger.Warn("MCP scrape failed, trying browser fallback", zap.Error(err))
+	}
+
+	// Browser fallback: navigate to URL and extract page text
+	if sandboxID != "" {
+		text, err := e.browserScrapeFallback(ctx, sandboxID, targetURL)
+		if err == nil && text != "" {
+			e.Logger.Info("scrape via browser fallback", zap.String("url", targetURL))
+			return map[string]interface{}{
+				"success": true,
+				"url":     targetURL,
+				"source":  "browser_fallback",
+				"content": text,
+			}, nil
+		}
+		e.Logger.Warn("browser scrape fallback also failed", zap.Error(err))
 	}
 
 	return nil, fmt.Errorf("scrape failed: MCP server unavailable and no browser fallback for scrape")
+}
+
+// browserScrapeFallback uses the sandbox browser to navigate to a URL and extract text content.
+func (e *SandboxToolExecutor) browserScrapeFallback(ctx context.Context, sandboxID, targetURL string) (string, error) {
+	if e.CU == nil {
+		return "", fmt.Errorf("no computer use handler available")
+	}
+
+	// Ensure browser is ready
+	if err := e.ensureBrowserReady(ctx, sandboxID); err != nil {
+		return "", fmt.Errorf("failed to start browser: %w", err)
+	}
+
+	// Navigate to URL
+	navArgs := map[string]interface{}{"action": "navigate", "url": targetURL}
+	_, err := e.CU.Act(ctx, sandboxID, "navigate", navArgs)
+	if err != nil {
+		return "", fmt.Errorf("navigate failed: %w", err)
+	}
+
+	// Get page content via snapshot
+	snapshot, err := e.CU.Snapshot(ctx, sandboxID)
+	if err != nil {
+		return "", fmt.Errorf("snapshot failed: %w", err)
+	}
+
+	// Extract text from the snapshot result
+	if text, ok := snapshot["text"].(string); ok && text != "" {
+		return text, nil
+	}
+	if html, ok := snapshot["html"].(string); ok && html != "" {
+		return html, nil
+	}
+
+	// Fallback: return the string representation
+	return fmt.Sprintf("%v", snapshot), nil
 }
 
 // macroMCPCall is a generic passthrough to any tool on the MCP research server.
