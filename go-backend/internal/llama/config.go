@@ -62,7 +62,7 @@ func DefaultModelConfig() ModelConfig {
 		TopK:          64,
 
 		// Agent loop
-		ThinkingBudgetTokens:  2048, // Small models: cap reasoning, force commitment
+		ThinkingBudgetTokens:  0, // 0 = unlimited — trust the model to self-regulate
 		DefaultMaxToolRounds:  20,
 		BrowserMaxToolRounds:  30,
 		MaxRetriesPerTool:     3,
@@ -113,9 +113,9 @@ func (c ModelConfig) PersonaConfig(t PersonaType) PersonaDefaults {
 	switch t {
 	case PersonaOrchestrator:
 		return PersonaDefaults{
-			MaxToolRounds: 15, // orchestrator plans, doesn't execute
-			MaxTokens:     2048,
-			Temperature:   0.7, // moderate creativity for planning
+			MaxToolRounds: 40, // research needs many rounds
+			MaxTokens:     8192,
+			Temperature:   0.7,
 		}
 	case PersonaWeb:
 		return PersonaDefaults{
