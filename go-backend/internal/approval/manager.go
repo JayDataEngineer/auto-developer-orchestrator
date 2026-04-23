@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/auto-developer-orchestrator/backend/internal/pi"
+	"github.com/auto-developer-orchestrator/backend/internal/llama"
 )
 
 // Manager handles pending approval requests via channels.
@@ -16,7 +16,7 @@ import (
 // scheduler) can register and resolve approvals.
 type Manager struct {
 	mu       sync.Mutex
-	pending  map[string]chan pi.ApprovalResponse // requestID → response channel
+	pending  map[string]chan llama.ApprovalResponse // requestID → response channel
 	timeout  time.Duration
 }
 
@@ -26,7 +26,7 @@ func NewManager(timeout time.Duration) *Manager {
 		timeout = 5 * time.Minute
 	}
 	return &Manager{
-		pending: make(map[string]chan pi.ApprovalResponse),
+		pending: make(map[string]chan llama.ApprovalResponse),
 		timeout: timeout,
 	}
 }
@@ -34,8 +34,8 @@ func NewManager(timeout time.Duration) *Manager {
 // Register creates a pending approval request and returns a channel that
 // will receive the user's response. The caller should select on the channel
 // with a timeout. The channel is buffered(1) so Resolve never blocks.
-func (m *Manager) Register(requestID string) <-chan pi.ApprovalResponse {
-	ch := make(chan pi.ApprovalResponse, 1)
+func (m *Manager) Register(requestID string) <-chan llama.ApprovalResponse {
+	ch := make(chan llama.ApprovalResponse, 1)
 	m.mu.Lock()
 	m.pending[requestID] = ch
 	m.mu.Unlock()
@@ -44,7 +44,7 @@ func (m *Manager) Register(requestID string) <-chan pi.ApprovalResponse {
 
 // Resolve delivers the user's response to a pending approval request.
 // Returns false if no pending request exists for the given ID.
-func (m *Manager) Resolve(requestID string, resp pi.ApprovalResponse) bool {
+func (m *Manager) Resolve(requestID string, resp llama.ApprovalResponse) bool {
 	m.mu.Lock()
 	ch, ok := m.pending[requestID]
 	if ok {

@@ -55,8 +55,8 @@ type PromptRequest struct {
 	AutoBranch    bool   `json:"autoBranch,omitempty"`
 }
 
-// Approval
-type ApprovalResponse struct {
+// Approval request body (HTTP wire format with routing fields)
+type ApprovalRequestBody struct {
 	Project   string `json:"project"`
 	AgentID   string `json:"agentId"`
 	RequestID string `json:"requestId"`

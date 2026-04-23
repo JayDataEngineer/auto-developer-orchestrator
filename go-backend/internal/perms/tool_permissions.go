@@ -1,4 +1,4 @@
-package pi
+package perms
 
 import (
 	"sync"
@@ -10,9 +10,9 @@ import (
 type PermissionLevel string
 
 const (
-	PermAutoApprove      PermissionLevel = "auto"
-	PermRequireApproval  PermissionLevel = "confirm"
-	PermDeny             PermissionLevel = "deny"
+	PermAutoApprove     PermissionLevel = "auto"
+	PermRequireApproval PermissionLevel = "confirm"
+	PermDeny            PermissionLevel = "deny"
 )
 
 // ToolPermission defines the permission level for a specific tool.
@@ -34,14 +34,14 @@ type ToolPermissionConfig struct {
 func NewToolPermissionConfig(logger *zap.Logger) *ToolPermissionConfig {
 	return &ToolPermissionConfig{
 		perms: map[string]ToolPermission{
-			"bash":          {Tool: "bash", Level: PermAutoApprove, RiskLevel: "medium"},
-			"write":         {Tool: "write", Level: PermAutoApprove, RiskLevel: "low"},
-			"edit":          {Tool: "edit", Level: PermAutoApprove, RiskLevel: "low"},
-			"delete":        {Tool: "delete", Level: PermRequireApproval, RiskLevel: "high"},
-			"git_push":      {Tool: "git_push", Level: PermRequireApproval, RiskLevel: "high"},
-			"git_reset":     {Tool: "git_reset", Level: PermRequireApproval, RiskLevel: "high"},
-			"web_fetch":     {Tool: "web_fetch", Level: PermAutoApprove, RiskLevel: "low"},
-			"computer_use":  {Tool: "computer_use", Level: PermAutoApprove, RiskLevel: "medium"},
+			"bash":         {Tool: "bash", Level: PermAutoApprove, RiskLevel: "medium"},
+			"write":        {Tool: "write", Level: PermAutoApprove, RiskLevel: "low"},
+			"edit":         {Tool: "edit", Level: PermAutoApprove, RiskLevel: "low"},
+			"delete":       {Tool: "delete", Level: PermRequireApproval, RiskLevel: "high"},
+			"git_push":     {Tool: "git_push", Level: PermRequireApproval, RiskLevel: "high"},
+			"git_reset":    {Tool: "git_reset", Level: PermRequireApproval, RiskLevel: "high"},
+			"web_fetch":    {Tool: "web_fetch", Level: PermAutoApprove, RiskLevel: "low"},
+			"computer_use": {Tool: "computer_use", Level: PermAutoApprove, RiskLevel: "medium"},
 		},
 		logger: logger,
 	}
@@ -82,3 +82,6 @@ func (c *ToolPermissionConfig) AllPermissions() map[string]ToolPermission {
 	}
 	return result
 }
+
+// ModelConfigProvider resolves the provider for a given model ID.
+var ModelConfigProvider func(modelId string) string = func(_ string) string { return "llamacpp" }

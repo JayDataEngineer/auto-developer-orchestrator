@@ -42,7 +42,7 @@ var agentPromptCmd = &cobra.Command{
 			AutoBranch:    agentAutoBranch,
 		}
 
-		resp, err := client.StreamPost("/api/pi/prompt", req)
+		resp, err := client.StreamPost("/api/pux/prompt", req)
 		if err != nil {
 			return fmt.Errorf("prompt failed: %w", err)
 		}
@@ -64,7 +64,7 @@ var agentHistoryCmd = &cobra.Command{
 		}
 		client := api.NewClient(serverURL)
 		var result api.HistoryResponse
-		if err := client.Get("/api/pi/history?project="+projectName, &result); err != nil {
+		if err := client.Get("/api/pux/history?project="+projectName, &result); err != nil {
 			return err
 		}
 		if outputFmt == "json" {

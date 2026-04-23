@@ -24,7 +24,7 @@ func TestArtifactHandler(t *testing.T) {
 		}
 		jsonBody, _ := json.Marshal(body)
 
-		req := httptest.NewRequest("POST", "/api/pi/artifacts", bytes.NewBuffer(jsonBody))
+		req := httptest.NewRequest("POST", "/api/pux/artifacts", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -66,7 +66,7 @@ func TestArtifactHandler(t *testing.T) {
 		}
 		jsonBody, _ := json.Marshal(body)
 
-		req := httptest.NewRequest("POST", "/api/pi/artifacts", bytes.NewBuffer(jsonBody))
+		req := httptest.NewRequest("POST", "/api/pux/artifacts", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -95,7 +95,7 @@ func TestArtifactHandler(t *testing.T) {
 		}
 		jsonBody, _ := json.Marshal(body)
 
-		req := httptest.NewRequest("POST", "/api/pi/artifacts", bytes.NewBuffer(jsonBody))
+		req := httptest.NewRequest("POST", "/api/pux/artifacts", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -114,7 +114,7 @@ func TestArtifactHandler(t *testing.T) {
 		}
 		jsonBody, _ := json.Marshal(body)
 
-		req := httptest.NewRequest("POST", "/api/pi/artifacts", bytes.NewBuffer(jsonBody))
+		req := httptest.NewRequest("POST", "/api/pux/artifacts", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -135,7 +135,7 @@ func TestArtifactHandler(t *testing.T) {
 			}
 			jsonBody, _ := json.Marshal(body)
 
-			req := httptest.NewRequest("POST", "/api/pi/artifacts", bytes.NewBuffer(jsonBody))
+			req := httptest.NewRequest("POST", "/api/pux/artifacts", bytes.NewBuffer(jsonBody))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -148,7 +148,7 @@ func TestArtifactHandler(t *testing.T) {
 	})
 
 	t.Run("List - returns artifacts for agent", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/pi/artifacts?agentId=agent-1", nil)
+		req := httptest.NewRequest("GET", "/api/pux/artifacts?agentId=agent-1", nil)
 		w := httptest.NewRecorder()
 
 		handler.List(w, req)
@@ -172,7 +172,7 @@ func TestArtifactHandler(t *testing.T) {
 	})
 
 	t.Run("List - empty for unknown agent", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/pi/artifacts?agentId=unknown-agent", nil)
+		req := httptest.NewRequest("GET", "/api/pux/artifacts?agentId=unknown-agent", nil)
 		w := httptest.NewRecorder()
 
 		handler.List(w, req)
@@ -194,7 +194,7 @@ func TestArtifactHandler(t *testing.T) {
 	})
 
 	t.Run("List - missing agentId parameter", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/pi/artifacts", nil)
+		req := httptest.NewRequest("GET", "/api/pux/artifacts", nil)
 		w := httptest.NewRecorder()
 
 		handler.List(w, req)
@@ -213,7 +213,7 @@ func TestArtifactHandler(t *testing.T) {
 		}
 		jsonBody, _ := json.Marshal(body)
 
-		req := httptest.NewRequest("POST", "/api/pi/artifacts", bytes.NewBuffer(jsonBody))
+		req := httptest.NewRequest("POST", "/api/pux/artifacts", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -224,7 +224,7 @@ func TestArtifactHandler(t *testing.T) {
 		}
 
 		// agent-2 should have 1 artifact
-		req2 := httptest.NewRequest("GET", "/api/pi/artifacts?agentId=agent-2", nil)
+		req2 := httptest.NewRequest("GET", "/api/pux/artifacts?agentId=agent-2", nil)
 		w2 := httptest.NewRecorder()
 		handler.List(w2, req2)
 
@@ -237,7 +237,7 @@ func TestArtifactHandler(t *testing.T) {
 		}
 
 		// agent-1 should still have 3 artifacts (not affected)
-		req3 := httptest.NewRequest("GET", "/api/pi/artifacts?agentId=agent-1", nil)
+		req3 := httptest.NewRequest("GET", "/api/pux/artifacts?agentId=agent-1", nil)
 		w3 := httptest.NewRecorder()
 		handler.List(w3, req3)
 
@@ -250,7 +250,7 @@ func TestArtifactHandler(t *testing.T) {
 	})
 
 	t.Run("CreateOrUpdate - invalid JSON body", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/api/pi/artifacts", bytes.NewBufferString("{invalid"))
+		req := httptest.NewRequest("POST", "/api/pux/artifacts", bytes.NewBufferString("{invalid"))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 

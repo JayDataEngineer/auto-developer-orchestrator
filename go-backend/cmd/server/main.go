@@ -16,7 +16,7 @@ import (
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/models"
-	"github.com/auto-developer-orchestrator/backend/internal/pi"
+	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/scheduler"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// Wire model config into pi package for provider resolution
-	pi.ModelConfigProvider = modelCfg.ProviderForModel
+	perms.ModelConfigProvider = modelCfg.ProviderForModel
 
 	// Connect to llama-server HTTP engine.
 	// llama-server manages the model and KV cache — the Go backend sends HTTP requests

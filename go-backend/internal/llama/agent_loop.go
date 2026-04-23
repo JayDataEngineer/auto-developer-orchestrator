@@ -38,6 +38,8 @@ const (
 	EventTypeCompactionStart  AgentEventType = "compaction_start"
 	EventTypeCompactionEnd    AgentEventType = "compaction_end"
 	EventTypeToolUpdate       AgentEventType = "tool_update"
+	EventTypeAgentSpawned     AgentEventType = "agent_spawned"
+	EventTypeStateUpdate      AgentEventType = "state_update"
 )
 
 // subscriberKey is the context key for injecting the SSE subscriber channel
@@ -78,6 +80,10 @@ type AgentEventData struct {
 	Output   float64                `json:"output,omitempty"`
 	Cache    float64                `json:"cache,omitempty"`
 	Model    string                 `json:"model,omitempty"`
+	Streaming bool                 `json:"streaming,omitempty"`
+	// Compaction
+	CompactedMessages int `json:"compactedMessages,omitempty"`
+	KeptMessages      int `json:"keptMessages,omitempty"`
 }
 
 // ToolExecutor executes a tool and returns its result.

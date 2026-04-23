@@ -11,8 +11,8 @@ import (
 
 func TestAgentHistory(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/pi/history" {
-			t.Errorf("expected /api/pi/history, got %s", r.URL.Path)
+		if r.URL.Path != "/api/pux/history" {
+			t.Errorf("expected /api/pux/history, got %s", r.URL.Path)
 		}
 		if r.URL.Query().Get("project") != "test-repo" {
 			t.Errorf("expected project=test-repo, got %s", r.URL.Query().Get("project"))

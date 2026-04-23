@@ -398,7 +398,7 @@ func (m Model) sendMessage() (tea.Model, tea.Cmd) {
 // returns the first event. Subsequent events are read via chainReadNext.
 func startStreamCmd(client *api.Client, project, agentID, text string, ch chan api.SSEEvent) tea.Cmd {
 	return func() tea.Msg {
-		resp, err := client.StreamPost("/api/pi/prompt", api.PromptRequest{
+		resp, err := client.StreamPost("/api/pux/prompt", api.PromptRequest{
 			Message: text,
 			Project: project,
 			AgentID: agentID,
@@ -434,7 +434,7 @@ func (m Model) respondToApproval(action, message string) (tea.Model, tea.Cmd) {
 
 	return m, tea.Batch(
 		func() tea.Msg {
-			_ = m.client.Post("/api/pi/respond", api.ApprovalResponse{
+			_ = m.client.Post("/api/pux/respond", api.ApprovalRequestBody{
 				Project:   m.project,
 				AgentID:   m.agentID,
 				RequestID: ap.requestID,

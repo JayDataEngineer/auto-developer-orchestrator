@@ -6,16 +6,16 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"github.com/auto-developer-orchestrator/backend/internal/pi"
+	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 )
 
 // sseEvent is a simplified event for the frontend.
 type sseEvent struct {
-	Type string      `json:"type"`
-	Data interface{} `json:"data"`
+	Type string
+	Data interface{}
 }
 
-// toolIdCounter generates unique IDs for tool calls when Pi doesn't provide one.
+// toolIdCounter generates unique IDs for tool calls when the agent doesn't provide one.
 var toolIdCounter int64
 
 func nextToolFallbackId() string {
@@ -35,195 +35,117 @@ func writeSSE(w http.ResponseWriter, eventType string, data interface{}, canFlus
 	}
 }
 
-// mapEventToSSE converts a Pi RPC event to an SSE event for the frontend.
-// Pi's RPC protocol sends message_update events with nested assistantMessageEvent
-// containing the actual text deltas in its "delta" field.
-func (h *PuxHandler) mapEventToSSE(event pi.AgentEvent) *sseEvent {
+// mapEventToSSE converts a llama agent event to an SSE event for the frontend.
+// Consumes llamaeng.AgentEvent directly — no intermediate type conversion needed.
+func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 	switch event.Type {
-	case "message_update":
-		// Pi sends message updates with nested assistantMessageEvent
-		if event.AssistantMessageEvent != nil {
-			ame := event.AssistantMessageEvent
-			switch ame.Type {
-			case "text_delta":
-				return &sseEvent{
-					Type: pi.EventTextDelta,
-					Data: map[string]string{"text": ame.Delta},
-				}
-			case "thinking_delta":
-				return &sseEvent{
-					Type: pi.EventThinkingDelta,
-					Data: map[string]string{"text": ame.Delta},
-				}
-			case "text_end":
-				// Text complete — extract usage from partial if available
-				return nil // Frontend accumulates deltas, no action needed
-			}
-		}
-		return nil
-
-	case "message_start":
-		// Extract model info from assistant messages
-		return nil // Frontend doesn't need message_start
-
-	case "message_end":
-		return nil // Frontend handles via text_delta accumulation
-
-	case pi.RpcEventToolStart:
-		// Tool fields may appear at top level OR nested under "data"
-		toolName := event.Data.ToolName
-		if toolName == "" {
-			toolName = event.ToolName
-		}
-		toolArgs := event.Data.ToolArgs
-		if toolArgs == nil {
-			toolArgs = event.ToolArgs
-		}
-		toolId := event.Data.ToolId
-		if toolId == "" {
-			toolId = event.ToolId
-		}
-		// Note: if toolId is still empty, the stream loop will assign a fallback ID
+	case llamaeng.EventTypeTextDelta:
 		return &sseEvent{
-			Type: pi.EventToolStart,
+			Type: "text_delta",
+			Data: map[string]string{"text": event.Data.Text},
+		}
+
+	case llamaeng.EventTypeThinkingDelta:
+		return &sseEvent{
+			Type: "thinking_delta",
+			Data: map[string]string{"text": event.Data.Text},
+		}
+
+	case llamaeng.EventTypeToolStart:
+		return &sseEvent{
+			Type: "tool_execution_start",
 			Data: map[string]interface{}{
-				"toolName": toolName,
-				"args":     toolArgs,
-				"toolId":   toolId,
+				"toolName": event.Data.ToolName,
+				"args":     event.Data.ToolArgs,
+				"toolId":   event.Data.ToolID,
 			},
 		}
-	case pi.RpcEventToolEnd:
-		toolName := event.Data.ToolName
-		if toolName == "" {
-			toolName = event.ToolName
-		}
-		toolId := event.Data.ToolId
-		if toolId == "" {
-			toolId = event.ToolId
-		}
-		// Note: if toolId is still empty, the stream loop will match with lastToolStartID
-		result := event.Data.Result
-		if result == nil {
-			result = event.Result
-		}
-		errMsg := event.Data.Error
-		if errMsg == "" {
-			errMsg = event.Error
-		}
+
+	case llamaeng.EventTypeToolEnd:
 		return &sseEvent{
-			Type: pi.EventToolEnd,
+			Type: "tool_execution_end",
 			Data: map[string]interface{}{
-				"toolName": toolName,
-				"toolId":   toolId,
-				"result":   result,
-				"error":    errMsg,
+				"toolName": event.Data.ToolName,
+				"toolId":   event.Data.ToolID,
+				"result":   event.Data.Result,
+				"error":    event.Data.Error,
 			},
 		}
-	case pi.RpcEventAgentStart:
+
+	case llamaeng.EventTypeToolUpdate:
 		return &sseEvent{
-			Type: pi.EventAgentStart,
+			Type: "tool_update",
+			Data: map[string]interface{}{
+				"toolName": event.Data.ToolName,
+				"toolId":   event.Data.ToolID,
+				"text":     event.Data.Text,
+			},
+		}
+
+	case llamaeng.EventTypeAgentStart:
+		return &sseEvent{
+			Type: "agent_start",
 			Data: map[string]interface{}{},
 		}
-	case pi.RpcEventAgentEnd:
-		// Extract usage and thinking from the messages field
-		data := map[string]interface{}{}
-		if len(event.Messages) > 0 {
-			// Parse the last assistant message for usage + thinking
-			var msgs []struct {
-				Role  string `json:"role"`
-				Usage struct {
-					Input     float64 `json:"input"`
-					Output    float64 `json:"output"`
-					CacheRead float64 `json:"cacheRead"`
-				} `json:"usage"`
-				API      string `json:"api"`
-				Provider string `json:"provider"`
-				Model    string `json:"model"`
-				Content  []struct {
-					Type     string `json:"type"`
-					Thinking string `json:"thinking"`
-					Text     string `json:"text"`
-				} `json:"content"`
-			}
-			if json.Unmarshal(event.Messages, &msgs) == nil {
-				for i := len(msgs) - 1; i >= 0; i-- {
-					if msgs[i].Role == "assistant" {
-						data["input"] = msgs[i].Usage.Input
-						data["output"] = msgs[i].Usage.Output
-						data["cache"] = msgs[i].Usage.CacheRead
-						data["model"] = msgs[i].Provider + "/" + msgs[i].Model
-						// Extract thinking from content blocks
-						var thinking string
-						for _, block := range msgs[i].Content {
-							if block.Type == "thinking" && block.Thinking != "" {
-								thinking += block.Thinking
-							}
-						}
-						if thinking != "" {
-							data["thinking"] = thinking
-						}
-						break
-					}
-				}
-			}
-		}
+
+	case llamaeng.EventTypeAgentEnd:
 		return &sseEvent{
-			Type: pi.EventAgentEnd,
-			Data: data,
+			Type: "agent_end",
+			Data: map[string]interface{}{
+				"input":  event.Data.Input,
+				"output": event.Data.Output,
+				"cache":  event.Data.Cache,
+				"model":  event.Data.Model,
+			},
 		}
-	case pi.RpcEventCompactionStart:
+
+	case llamaeng.EventTypeCompactionStart:
 		return &sseEvent{
-			Type: pi.EventCompactionStart,
+			Type: "compaction_start",
 			Data: map[string]interface{}{},
 		}
-	case pi.RpcEventCompactionEnd:
+
+	case llamaeng.EventTypeCompactionEnd:
 		return &sseEvent{
-			Type: pi.EventCompactionEnd,
+			Type: "compaction_end",
 			Data: map[string]interface{}{
 				"compactedMessages": event.Data.CompactedMessages,
 				"keptMessages":      event.Data.KeptMessages,
 			},
 		}
-	case pi.RpcEventError:
+
+	case llamaeng.EventTypeError:
 		return &sseEvent{
-			Type: pi.EventError,
+			Type: "error",
 			Data: map[string]string{"error": event.Data.Error},
 		}
-	case pi.RpcEventResponse:
-		inputVal := 0.0
-		if v, ok := pi.ToFloat64(event.Data.Input); ok {
-			inputVal = v
+
+	case llamaeng.EventTypeArtifactCreated:
+		return &sseEvent{Type: "artifact_created", Data: event.Data}
+
+	case llamaeng.EventTypeArtifactUpdated:
+		return &sseEvent{Type: "artifact_updated", Data: event.Data}
+
+	case llamaeng.EventTypePlanCreated:
+		return &sseEvent{Type: "plan_created", Data: event.Data}
+
+	case llamaeng.EventTypePlanUpdated:
+		return &sseEvent{Type: "plan_updated", Data: event.Data}
+
+	case llamaeng.EventTypeSubAgentStart:
+		return &sseEvent{Type: "subagent_start", Data: event.Data}
+
+	case llamaeng.EventTypeSubAgentEnd:
+		return &sseEvent{Type: "subagent_end", Data: event.Data}
+
+	case llamaeng.EventTypeApprovalRequest:
+		result, _ := event.Data.Result.(map[string]interface{})
+		if result != nil {
+			return &sseEvent{Type: "approval_request", Data: result}
 		}
-		return &sseEvent{
-			Type: pi.EventStateUpdate,
-			Data: map[string]interface{}{
-				"model":  event.Data.Model,
-				"input":  inputVal,
-				"output": event.Data.Output,
-				"cache":  event.Data.Cache,
-			},
-		}
+		return nil
+
 	default:
-		// Pass through orchestrator events (artifact_created, plan_created, etc.)
-		switch event.Type {
-		case pi.EventArtifactCreated, pi.EventArtifactUpdated,
-			pi.EventPlanCreated, pi.EventPlanUpdated,
-			pi.EventSubAgentStart, pi.EventSubAgentEnd:
-			return &sseEvent{
-				Type: event.Type,
-				Data: event.Data,
-			}
-		case pi.EventApprovalRequest:
-			// Extract approval data from Result field
-			result, _ := event.Data.Result.(map[string]interface{})
-			if result != nil {
-				return &sseEvent{
-					Type: pi.EventApprovalRequest,
-					Data: result,
-				}
-			}
-			return nil
-		}
 		return nil
 	}
 }

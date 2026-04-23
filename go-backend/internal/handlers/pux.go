@@ -13,7 +13,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
-	"github.com/auto-developer-orchestrator/backend/internal/pi"
+	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/go-chi/chi/v5"
@@ -28,7 +28,7 @@ type PuxHandler struct {
 	log        *zap.Logger
 	litellmURL string
 	litellmKey string
-	toolPerms  *pi.ToolPermissionConfig
+	toolPerms  *perms.ToolPermissionConfig
 
 	// Channel-based approval manager (decoupled from Pi subprocess)
 	approvalMgr *approval.Manager
@@ -55,7 +55,7 @@ func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, 
 		log:           logger,
 		litellmURL:    os.Getenv("LITELLM_PROXY_URL"),
 		litellmKey:    os.Getenv("LITELLM_MASTER_KEY"),
-		toolPerms:     pi.NewToolPermissionConfig(logger),
+		toolPerms:     perms.NewToolPermissionConfig(logger),
 		approvalMgr:   approval.NewManager(5 * time.Minute),
 		orchestrators:   make(map[string]*llamaeng.OrchestratorLoop),
 		selectedEngines: make(map[string]*llamaeng.HTTPEngine),
@@ -135,7 +135,7 @@ func (h *PuxHandler) Respond(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := pi.ApprovalResponse{
+	resp := llamaeng.ApprovalResponse{
 		Action:  req.Action,
 		Message: req.Message,
 	}
@@ -209,14 +209,13 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 
 // writeLlamaSSE converts a llama engine event to SSE and writes it.
 func (h *PuxHandler) writeLlamaSSE(w http.ResponseWriter, evt llamaeng.AgentEvent, canFlush bool, flusher http.Flusher) {
-	piEvent := llamaeng.ConvertEvent(evt)
-	sseEvt := h.mapEventToSSE(piEvent)
+	sseEvt := h.mapEventToSSE(evt)
 	if sseEvt == nil {
 		return
 	}
 
 	// Ensure tool events have IDs
-	if sseEvt.Type == pi.EventToolStart {
+	if sseEvt.Type == "tool_execution_start" {
 		if dataMap, ok := sseEvt.Data.(map[string]interface{}); ok {
 			tid, _ := dataMap["toolId"].(string)
 			if tid == "" {
@@ -295,7 +294,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 
 	// Send agent_spawned event
 	spawnData, _ := json.Marshal(map[string]string{"agentId": req.AgentId})
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", pi.EventAgentSpawned, string(spawnData))
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", string(llamaeng.EventTypeAgentSpawned), string(spawnData))
 	if canFlush {
 		flusher.Flush()
 	}
@@ -445,23 +444,16 @@ func compositeAgentKey(projectPath, agentId string) string {
 	return projectPath + "\x00" + agentId
 }
 
-// approvalManagerAdapter wraps *approval.Manager to satisfy llama.ApprovalManager.
-// Converts between pi.ApprovalResponse and llama.ApprovalResponse (structurally identical).
+// approvalManagerAdapter wraps *approval.Manager to satisfy llamaeng.ApprovalManager.
+// Both sides now use llamaeng.ApprovalResponse — no conversion needed.
 type approvalManagerAdapter approval.Manager
 
 func (a *approvalManagerAdapter) Register(requestID string) <-chan llamaeng.ApprovalResponse {
-	piCh := (*approval.Manager)(a).Register(requestID)
-	ch := make(chan llamaeng.ApprovalResponse, 1)
-	go func() {
-		if resp, ok := <-piCh; ok {
-			ch <- llamaeng.ApprovalResponse{Action: resp.Action, Message: resp.Message}
-		}
-	}()
-	return ch
+	return (*approval.Manager)(a).Register(requestID)
 }
 
 func (a *approvalManagerAdapter) Resolve(requestID string, resp llamaeng.ApprovalResponse) bool {
-	return (*approval.Manager)(a).Resolve(requestID, pi.ApprovalResponse{Action: resp.Action, Message: resp.Message})
+	return (*approval.Manager)(a).Resolve(requestID, resp)
 }
 
 // dbTranscriptSaver adapts Database to the TranscriptSaver interface.
@@ -505,7 +497,7 @@ func (h *PuxHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.toolPerms.SetPermission(req.Tool, pi.PermissionLevel(req.Level), req.Reason)
+	h.toolPerms.SetPermission(req.Tool, perms.PermissionLevel(req.Level), req.Reason)
 	h.log.Info("Tool permission updated",
 		zap.String("tool", req.Tool),
 		zap.String("level", req.Level),
