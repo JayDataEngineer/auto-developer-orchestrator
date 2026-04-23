@@ -17,11 +17,14 @@ type ModelConfig struct {
 	SubAgentContextSize int // KV cache context size for ephemeral sub-agents (4K — smaller = less VRAM)
 	MaxContextSize     int // Hard upper limit (256K for Gemma 4 26B-A4B)
 
-	// Generation defaults (Gemma 4 recommended: temp=1.0, top_p=0.95, top_k=64)
-	MaxTokens     int
-	Temperature   float32
-	TopP          float32
-	TopK          int
+	// Generation defaults (model-specific sampling params)
+	MaxTokens        int
+	Temperature      float32
+	TopP             float32
+	TopK             int
+	RepeatPenalty    float32 // 1.0 = disabled. Qwen3.6 recommends 1.0, Gemma 4 used 1.1
+	PresencePenalty  float32 // 0.0 = disabled. Qwen3.6 recommends 1.5 for thinking mode
+	MinP             float32 // 0.0 = disabled. Qwen3.6 recommends 0.0
 
 	// Agent loop
 	ThinkingBudgetTokens  int // Max thinking/reasoning tokens per turn (0 = unlimited). Small models benefit from ~2048.
@@ -55,11 +58,16 @@ func DefaultModelConfig() ModelConfig {
 		SubAgentContextSize: 8192, // 8K — enough for system prompt + 10 tool rounds
 		MaxContextSize:     262144, // 256K — Gemma 4 26B-A4B max
 
-		// Generation — Gemma 4 recommended sampling params
-		MaxTokens:     4096,
-		Temperature:   1.0,
-		TopP:          0.95,
-		TopK:          64,
+		// Generation — defaults work for both Gemma 4 and Qwen 3.6
+		// Qwen 3.6 thinking mode: temp=1.0, top_p=0.95, top_k=20, presence_penalty=1.5, repeat_penalty=1.0
+		// Gemma 4 thinking mode: temp=1.0, top_p=0.95, top_k=64, presence_penalty=0, repeat_penalty=1.1
+		MaxTokens:       4096,
+		Temperature:     1.0,
+		TopP:            0.95,
+		TopK:            20,
+		RepeatPenalty:   1.0,
+		PresencePenalty: 1.5,
+		MinP:            0.0,
 
 		// Agent loop
 		ThinkingBudgetTokens:  0, // 0 = unlimited — trust the model to self-regulate

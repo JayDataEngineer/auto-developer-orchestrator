@@ -171,14 +171,16 @@ func (e *HTTPEngine) Close() error {
 
 // ChatCompletionRequest maps to the /v1/chat/completions request body.
 type ChatCompletionRequest struct {
-	Model         string       `json:"model,omitempty"` // model ID for cloud providers
-	Messages      []Message    `json:"messages"`
-	Tools         []OpenAITool `json:"tools,omitempty"`
-	MaxTokens     int          `json:"max_tokens,omitempty"`
-	Temperature   float32      `json:"temperature,omitempty"`
-	TopP          float32      `json:"top_p,omitempty"`
-	TopK          int          `json:"top_k,omitempty"`
-	RepeatPenalty float32      `json:"repeat_penalty,omitempty"`
+	Model            string       `json:"model,omitempty"` // model ID for cloud providers
+	Messages         []Message    `json:"messages"`
+	Tools            []OpenAITool `json:"tools,omitempty"`
+	MaxTokens        int          `json:"max_tokens,omitempty"`
+	Temperature      float32      `json:"temperature,omitempty"`
+	TopP             float32      `json:"top_p,omitempty"`
+	TopK             int          `json:"top_k,omitempty"`
+	RepeatPenalty    float32      `json:"repeat_penalty,omitempty"`
+	PresencePenalty  float32      `json:"presence_penalty,omitempty"`
+	MinP             float32      `json:"min_p,omitempty"`
 
 	// KV cache persistence (llama-server extension)
 	CachePrompt bool   `json:"cache_prompt"`

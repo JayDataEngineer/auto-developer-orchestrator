@@ -103,16 +103,18 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 		t0 := time.Now()
 
 		req := ChatCompletionRequest{
-			Messages:      s.messages,
-			Tools:         s.tools,
-			MaxTokens:     opts.MaxTokens,
-			Temperature:   opts.Temperature,
-			TopP:          opts.TopP,
-			TopK:          opts.TopK,
-			RepeatPenalty: 1.1,
-			CachePrompt:   !s.engine.IsCloud(), // only local llama-server supports KV caching
-			SessionID:     s.sessionID,
-			Stream:        true,
+			Messages:        s.messages,
+			Tools:           s.tools,
+			MaxTokens:       opts.MaxTokens,
+			Temperature:     opts.Temperature,
+			TopP:            opts.TopP,
+			TopK:            opts.TopK,
+			RepeatPenalty:   cfg.RepeatPenalty,
+			PresencePenalty: cfg.PresencePenalty,
+			MinP:            cfg.MinP,
+			CachePrompt:     !s.engine.IsCloud(), // only local llama-server supports KV caching
+			SessionID:       s.sessionID,
+			Stream:          true,
 		}
 
 		// Cloud providers require the model field
