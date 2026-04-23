@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -66,15 +67,18 @@ func main() {
 	// Connect to llama-server HTTP engine.
 	// llama-server manages the model and KV cache — the Go backend sends HTTP requests
 	// using OpenAI-style native tool calling for structured tool responses.
+	// Model name is read from /tmp/orchestrator-model.json (written by `task model`)
+	// or falls back to the model alias in config/models.json.
 	llamaServerURL := os.Getenv("LLAMA_SERVER_URL")
 	if llamaServerURL == "" {
 		llamaServerURL = "http://localhost:8001"
 	}
+	modelAlias := readActiveModelAlias()
 	var llamaEngine *llamaeng.HTTPEngine
 	{
 		llamaEngine = llamaeng.NewHTTPEngine(llamaeng.HTTPEngineConfig{
 			BaseURL:   llamaServerURL,
-			ModelName: "gemma-4-26b",
+			ModelName: modelAlias,
 			Logger:    logger,
 		})
 		if err := llamaEngine.LoadModel(); err != nil {
@@ -441,4 +445,39 @@ func main() {
 	}
 
 	logger.Info("Server stopped")
+}
+
+// readActiveModelAlias determines the model alias to send in API requests.
+// Priority: /tmp/orchestrator-model.json (written by `task model`) →
+// config/models.json current field → hardcoded fallback "gemma-4-26b".
+func readActiveModelAlias() string {
+	// Fast path: runtime file from `task model`
+	if data, err := os.ReadFile("/tmp/orchestrator-model.json"); err == nil {
+		var m struct {
+			Alias string `json:"alias"`
+		}
+		if json.Unmarshal(data, &m) == nil && m.Alias != "" {
+			return m.Alias
+		}
+	}
+
+	// Config path: read current profile from config/models.json
+	if root := os.Getenv("PROJECT_ROOT"); root != "" {
+		cfgPath := filepath.Join(root, "config", "models.json")
+		if data, err := os.ReadFile(cfgPath); err == nil {
+			var cfg struct {
+				Current string `json:"current"`
+				Models  map[string]struct {
+					Alias string `json:"alias"`
+				} `json:"models"`
+			}
+			if json.Unmarshal(data, &cfg) == nil && cfg.Current != "" {
+				if m, ok := cfg.Models[cfg.Current]; ok && m.Alias != "" {
+					return m.Alias
+				}
+			}
+		}
+	}
+
+	return "gemma-4-26b"
 }

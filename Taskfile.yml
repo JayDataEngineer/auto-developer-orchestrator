@@ -229,96 +229,95 @@ tasks:
   # ── llama.cpp Model Server ────────────────────────────────────────────
   model:
     desc: |
-      Start llama.cpp server. Modes:
-        task model              vision + thinking (default)
+      Start llama.cpp server. Reads profiles from config/models.json.
+        task model              default model, vision + thinking
+        task model MODEL=qwen36 switch to Qwen 3.6
         task model FLAGS=fast   vision, no thinking
         task model FLAGS=text   text-only + thinking
         task model FLAGS=bare   text-only, no thinking
     deps: [model-down]
     cmds:
       - |
+        # Read model profile from config/models.json
+        PROFILE="{{.MODEL}}"
+        [ -z "$PROFILE" ] && PROFILE=$(jq -r '.current' config/models.json 2>/dev/null)
+        [ -z "$PROFILE" ] && PROFILE="gemma4"
+
+        LLM=$(jq -r ".models.\"$PROFILE\".llm" config/models.json)
+        MMPROJ=$(jq -r ".models.\"$PROFILE\".mmproj" config/models.json)
+        ALIAS=$(jq -r ".models.\"$PROFILE\".alias" config/models.json)
+        CTX=$(jq -r ".models.\"$PROFILE\".ctx_size" config/models.json)
+        PARALLEL=$(jq -r ".models.\"$PROFILE\".parallel" config/models.json)
+        CACHE_RAM=$(jq -r ".models.\"$PROFILE\".cache_ram" config/models.json)
+        THINK=$(jq -r ".models.\"$PROFILE\".thinking" config/models.json)
+        LABEL=$(jq -r ".models.\"$PROFILE\".name" config/models.json)
+
+        [ "$LLM" = "null" ] && { echo "ERROR: Model profile '$PROFILE' not found in config/models.json"; exit 1; }
+
+        # Determine flags based on FLAGS var
+        VISION=false
+        ENABLE_THINKING=false
         case "{{.FLAGS}}" in
-          bare)
-            echo "Starting Gemma-4-26B (bare — text-only, no thinking)..."
-            docker run -d --name orchestrator-llama \
-              --gpus all \
-              --network shared-infra \
-              -p {{.LLAMA_PORT}}:8001 \
-              -v "{{.MODELS_DIR}}:/models:ro" \
-              {{.LLAMA_IMAGE}} \
-              --model /models/gemma-4-26B-A4B-it-UD-IQ4_NL.gguf \
-              --alias gemma-4-26b-a4b \
-              --port 8001 --host 0.0.0.0 \
-              --jinja --flash-attn on \
-              --ctx-size 262144 \
-              --cache-type-k q8_0 --cache-type-v q8_0 \
-              --batch-size 512 --ubatch-size 512 \
-              --cont-batching --parallel 4 --metrics
-            ;;
-          text)
-            echo "Starting Gemma-4-26B (text-only + thinking)..."
-            docker run -d --name orchestrator-llama \
-              --gpus all \
-              --network shared-infra \
-              -p {{.LLAMA_PORT}}:8001 \
-              -v "{{.MODELS_DIR}}:/models:ro" \
-              {{.LLAMA_IMAGE}} \
-              --model /models/gemma-4-26B-A4B-it-UD-IQ4_NL.gguf \
-              --alias gemma-4-26b-a4b \
-              --port 8001 --host 0.0.0.0 \
-              --jinja --flash-attn on \
-              --ctx-size 262144 \
-              --cache-type-k q8_0 --cache-type-v q8_0 \
-              --batch-size 512 --ubatch-size 512 \
-              --cont-batching --parallel 2 --metrics \
-              --chat-template-kwargs '{"enable_thinking":true}'
-            ;;
-          fast)
-            echo "Starting Gemma-4-26B vision (fast — no thinking)..."
-            docker run -d --name orchestrator-llama \
-              --gpus all \
-              --network shared-infra \
-              -p {{.LLAMA_PORT}}:8001 \
-              -v "{{.MODELS_DIR}}:/models:ro" \
-              -v "{{.VISION_DIR}}:/vision:ro" \
-              {{.LLAMA_IMAGE}} \
-              --model /models/gemma-4-26B-A4B-it-UD-IQ4_NL.gguf \
-              --mmproj /vision/gemma-4-26B-A4B-it-mmproj-F16.gguf \
-              --alias gemma-4-26b-a4b \
-              --port 8001 --host 0.0.0.0 \
-              --jinja --flash-attn on \
-              --ctx-size 262144 --cache-ram 2048 \
-              --cache-type-k q8_0 --cache-type-v q8_0 \
-              --batch-size 512 --ubatch-size 512 \
-              --cont-batching --parallel 2 --metrics \
-              --chat-template-kwargs '{"enable_thinking":false}'
-            ;;
-          *)
-            echo "Starting Gemma-4-26B vision (default — thinking enabled)..."
-            docker run -d --name orchestrator-llama \
-              --gpus all \
-              --network shared-infra \
-              -p {{.LLAMA_PORT}}:8001 \
-              -v "{{.MODELS_DIR}}:/models:ro" \
-              -v "{{.VISION_DIR}}:/vision:ro" \
-              {{.LLAMA_IMAGE}} \
-              --model /models/gemma-4-26B-A4B-it-UD-IQ4_NL.gguf \
-              --mmproj /vision/gemma-4-26B-A4B-it-mmproj-F16.gguf \
-              --alias gemma-4-26b-a4b \
-              --port 8001 --host 0.0.0.0 \
-              --jinja --flash-attn on \
-              --ctx-size 262144 --cache-ram 2048 \
-              --cache-type-k q8_0 --cache-type-v q8_0 \
-              --batch-size 512 --ubatch-size 512 \
-              --cont-batching --parallel 2 --metrics \
-              --chat-template-kwargs '{"enable_thinking":true}'
-            ;;
+          bare)  VISION=false; ENABLE_THINKING=false;;
+          text)  VISION=false; ENABLE_THINKING=true;;
+          fast)  VISION=true;  ENABLE_THINKING=false;;
+          *)     VISION=true;  ENABLE_THINKING=$THINK;;
         esac
+
+        # Build docker args
+        VISION_ARGS=""
+        if [ "$VISION" = "true" ] && [ "$MMPROJ" != "null" ]; then
+          VISION_ARGS="-v {{.VISION_DIR}}:/vision:ro --mmproj /vision/$MMPROJ"
+        fi
+
+        THINK_ARGS=""
+        if [ "$ENABLE_THINKING" = "true" ]; then
+          THINK_ARGS="--chat-template-kwargs '{\"enable_thinking\":true}'"
+        fi
+
+        CACHE_RAM_ARGS=""
+        if [ "$CACHE_RAM" != "0" ] && [ "$CACHE_RAM" != "null" ]; then
+          CACHE_RAM_ARGS="--cache-ram $CACHE_RAM"
+        fi
+
+        echo "Starting $LABEL..."
+        echo "  model:   $LLM"
+        echo "  vision:  $VISION ($MMPROJ)"
+        echo "  thinking: $ENABLE_THINKING"
+        echo "  ctx:     $CTX"
+
+        docker run -d --name orchestrator-llama \
+          --gpus all \
+          --network shared-infra \
+          -p {{.LLAMA_PORT}}:8001 \
+          -v "{{.MODELS_DIR}}:/models:ro" \
+          $VISION_ARGS \
+          {{.LLAMA_IMAGE}} \
+          --model /models/$LLM \
+          --alias $ALIAS \
+          --port 8001 --host 0.0.0.0 \
+          --jinja --flash-attn on \
+          --ctx-size $CTX \
+          $CACHE_RAM_ARGS \
+          --cache-type-k q8_0 --cache-type-v q8_0 \
+          --batch-size 512 --ubatch-size 512 \
+          --cont-batching --parallel $PARALLEL --metrics \
+          $THINK_ARGS
+
+        # Write current profile so Go backend can read it
+        echo "{\"profile\":\"$PROFILE\",\"alias\":\"$ALIAS\",\"llm\":\"$LLM\"}" > /tmp/orchestrator-model.json
       - |
         echo "Waiting for model to load..."
         for i in $(seq 1 90); do
           if curl -sf "http://localhost:{{.LLAMA_PORT}}/health" > /dev/null 2>&1; then
             echo "Model ready on port {{.LLAMA_PORT}}"
+            # Print TPS from health endpoint
+            curl -sf "http://localhost:{{.LLAMA_PORT}}/health" | python3 -c "
+        import json,sys
+        d=json.load(sys.stdin)
+        tps=d.get('timings',{}).get('predicted_per_second',0)
+        print(f'  TPS: {tps:.1f} tokens/sec')
+        " 2>/dev/null || true
             exit 0
           fi
           sleep 2
@@ -330,12 +329,48 @@ tasks:
   model-down:
     desc: Stop the llama.cpp model server
     cmds:
-      - cmd: docker rm -f orchestrator-llama 2>/dev/null; true
+      - cmd: docker rm -f orchestrator-llama 2>/dev/null; rm -f /tmp/orchestrator-model.json; true
         silent: true
 
   model-status:
-    desc: Check model server health and stats
+    desc: Check model server health, TPS, and loaded model
     cmds:
-      - cmd: curl -sf http://localhost:{{.LLAMA_PORT}}/health | python3 -m json.tool || echo "Model server not running"
-      - cmd: curl -sf http://localhost:{{.LLAMA_PORT}}/props | python3 -m json.tool || true
+      - cmd: |
+          echo "=== Current profile ==="
+          cat /tmp/orchestrator-model.json 2>/dev/null | python3 -m json.tool || echo "No model running"
+          echo ""
+          echo "=== Health ==="
+          curl -sf http://localhost:{{.LLAMA_PORT}}/health | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          tps=d.get('timings',{}).get('predicted_per_second',0)
+          ctx=d.get('tokens_evaluated',0)
+          gen=d.get('tokens_predicted',0)
+          print(f'  Status:   {d.get(\"status\",\"unknown\")}')
+          print(f'  TPS:      {tps:.1f} tokens/sec')
+          print(f'  Context:  {ctx} tokens evaluated')
+          print(f'  Generated: {gen} tokens predicted')
+          " 2>/dev/null || echo "Model server not running"
+      - cmd: curl -sf http://localhost:{{.LLAMA_PORT}}/props | python3 -m json.tool 2>/dev/null || true
         silent: true
+
+  model-list:
+    desc: List available model profiles from config/models.json
+    cmds:
+      - cmd: |
+          echo "Available models (config/models.json):"
+          echo ""
+          python3 -c "
+          import json
+          with open('config/models.json') as f:
+              cfg = json.load(f)
+          current = cfg.get('current','?')
+          for k,v in cfg.get('models',{}).items():
+              marker = ' ← current' if k == current else ''
+              print(f'  {k:15s} {v[\"name\"]}{marker}')
+              print(f'                  llm:    {v[\"llm\"]}')
+              print(f'                  mmproj: {v[\"mmproj\"]}')
+              print(f'                  ctx:    {v[\"ctx_size\"]}')
+              print()
+          print('Usage: task model MODEL=qwen36')
+          "

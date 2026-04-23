@@ -1,0 +1,45 @@
+{
+  "current": "gemma4",
+  "models": {
+    "gemma4": {
+      "name": "Gemma 4 26B-A4B (MoE, IQ4_NL, 13GB)",
+      "llm": "gemma-4-26B-A4B-it-UD-IQ4_NL.gguf",
+      "mmproj": "gemma-4-26B-A4B-it-mmproj-F16.gguf",
+      "alias": "gemma-4-26b",
+      "ctx_size": 262144,
+      "thinking": true,
+      "parallel": 2,
+      "cache_ram": 2048
+    },
+    "qwen36": {
+      "name": "Qwen 3.6 35B-A3B (MoE, IQ4_NL, 17GB)",
+      "llm": "Qwen3.6-35B-A3B-UD-IQ4_NL.gguf",
+      "mmproj": "Qwen3.6-35B-A3B-UD-IQ4_NL_mmproj-BF16.gguf",
+      "alias": "qwen3.6-35b",
+      "ctx_size": 131072,
+      "thinking": true,
+      "parallel": 2,
+      "cache_ram": 2048
+    },
+    "gemma31": {
+      "name": "Gemma 4 31B (Q4_K_XL, 18GB)",
+      "llm": "gemma-4-31B-it-UD-Q4_K_XL.gguf",
+      "mmproj": "gemma-4-31B-it-UD-Q4_K_XL-mmproj-F16.gguf",
+      "alias": "gemma-4-31b",
+      "ctx_size": 262144,
+      "thinking": true,
+      "parallel": 2,
+      "cache_ram": 2048
+    },
+    "qwen35-small": {
+      "name": "Qwen 3.5 2B (Q4_K_XL, 1.3GB — testing)",
+      "llm": "Qwen3.5-2B-UD-Q4_K_XL.gguf",
+      "mmproj": "mmproj-Qwen3.5-27B-F16.gguf",
+      "alias": "qwen3.5-2b",
+      "ctx_size": 32768,
+      "thinking": false,
+      "parallel": 4,
+      "cache_ram": 0
+    }
+  }
+}
