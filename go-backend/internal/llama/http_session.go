@@ -269,6 +269,11 @@ func (s *Session) SetTools(tools []OpenAITool) {
 	s.tools = tools
 }
 
+// GetTools returns the current tool definitions for this session.
+func (s *Session) GetTools() []OpenAITool {
+	return s.tools
+}
+
 // ── Shared methods ─────────────────────────────────────────────────
 
 // TokenCounts returns total input and output token counts.

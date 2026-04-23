@@ -155,6 +155,9 @@ type ComputerUseProvider interface {
 
 	// Resolution query (for coordinate normalization)
 	Resolution(ctx context.Context, sandboxID string) (map[string]interface{}, error)
+
+	// Page content extraction (real browser, bypasses anti-bot)
+	ExtractHTML(ctx context.Context, sandboxID string) (string, error)
 }
 
 // SandboxToolExecutor executes tools via the sandbox manager and computer use provider.
@@ -961,17 +964,26 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 		// No tool calls, max rounds, or normal stop → done
 		maxRounds := loop.config.MaxToolRounds
 		hitMaxRounds := maxRounds > 0 && round >= maxRounds
-		if len(toolCalls) == 0 || finishReason != FinishToolCalls || hitMaxRounds {
-			if hitMaxRounds && contentBuf.Len() == 0 {
-				// Model hit max rounds without producing text — do one final synthesis
-				loop.logger.Warn("Max tool rounds reached with no text output, requesting synthesis",
+
+		// Synthesis safety net: if unlimited rounds and agent has done many tool
+		// calls with no text output, force a synthesis. Prevents infinite research
+		// loops that never produce a report.
+		needsSynthesis := contentBuf.Len() == 0 && round >= 20
+
+		if len(toolCalls) == 0 || finishReason != FinishToolCalls || hitMaxRounds || needsSynthesis {
+			if (hitMaxRounds || needsSynthesis) && contentBuf.Len() == 0 {
+				// Model has been researching without producing text — force synthesis
+				loop.logger.Warn("Agent has many tool rounds with no text, forcing synthesis",
 					zap.Int("round", round),
 					zap.Int("maxRounds", maxRounds),
+					zap.Bool("unlimitedRounds", maxRounds == 0),
 				)
 				synthesisPrompt := "Based on all your research and tool results above, provide your comprehensive final answer now. Do NOT call any more tools. Just write your response directly."
 				synthOpts := loop.config.Opts
 				synthOpts.MaxTokens = loop.config.MaxTokens
-				// No tools for synthesis — force the model to produce text, not tool calls
+				// Remove tools so model can ONLY produce text, not more tool calls
+				savedTools := loop.session.GetTools()
+				loop.session.SetTools(nil)
 				synthCh, err := loop.session.FeedUserMessage(synthesisPrompt, synthOpts)
 				if err == nil {
 					for evt := range synthCh {
@@ -981,6 +993,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 						}
 					}
 				}
+				loop.session.SetTools(savedTools)
 			} else if hitMaxRounds {
 				loop.logger.Warn("Max tool rounds reached, stopping agent loop",
 					zap.Int("round", round),
@@ -1941,6 +1954,8 @@ func (e *SandboxToolExecutor) macroScrape(ctx context.Context, sandboxID string,
 }
 
 // browserScrapeFallback uses the sandbox browser to navigate to a URL and extract text content.
+// The real Chrome browser handles JS rendering, cookies, and bypasses most anti-bot measures
+// that block HTTP-based crawlers like Crawl4AI.
 func (e *SandboxToolExecutor) browserScrapeFallback(ctx context.Context, sandboxID, targetURL string) (string, error) {
 	if e.CU == nil {
 		return "", fmt.Errorf("no computer use handler available")
@@ -1951,29 +1966,25 @@ func (e *SandboxToolExecutor) browserScrapeFallback(ctx context.Context, sandbox
 		return "", fmt.Errorf("failed to start browser: %w", err)
 	}
 
-	// Navigate to URL
+	// Navigate to URL (real Chrome — handles JS, cookies, anti-bot)
 	navArgs := map[string]interface{}{"action": "navigate", "url": targetURL}
 	_, err := e.CU.Act(ctx, sandboxID, "navigate", navArgs)
 	if err != nil {
 		return "", fmt.Errorf("navigate failed: %w", err)
 	}
 
-	// Get page content via snapshot
-	snapshot, err := e.CU.Snapshot(ctx, sandboxID)
+	// Extract page content via CDP JavaScript evaluation
+	// document.body.innerText gives clean text (no scripts/styles/markup)
+	text, err := e.CU.ExtractHTML(ctx, sandboxID)
 	if err != nil {
-		return "", fmt.Errorf("snapshot failed: %w", err)
+		return "", fmt.Errorf("extract content: %w", err)
 	}
 
-	// Extract text from the snapshot result
-	if text, ok := snapshot["text"].(string); ok && text != "" {
-		return text, nil
-	}
-	if html, ok := snapshot["html"].(string); ok && html != "" {
-		return html, nil
+	if text == "" {
+		return "", fmt.Errorf("page returned empty content")
 	}
 
-	// Fallback: return the string representation
-	return fmt.Sprintf("%v", snapshot), nil
+	return text, nil
 }
 
 // macroMCPCall is a generic passthrough to any tool on the MCP research server.

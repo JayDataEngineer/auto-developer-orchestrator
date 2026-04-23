@@ -507,6 +507,23 @@ func (sbc *SandboxBrowserClient) scrollInner(ctx context.Context, direction stri
 	}, nil
 }
 
+// ExtractHTML evaluates JavaScript on the active tab to return the full page HTML.
+// The browser is a real Chrome — it renders JS, handles cookies, bypasses most anti-bot.
+// Use this to scrape pages that block HTTP-based crawlers (Cloudflare, captchas, etc.).
+func (sbc *SandboxBrowserClient) ExtractHTML(ctx context.Context) (string, error) {
+	var html string
+	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
+		// Get innerText for clean text content (no scripts, styles, or markup)
+		return chromedp.Run(actCtx,
+			chromedp.Evaluate(`document.body ? document.body.innerText : document.documentElement.outerHTML`, &html),
+		)
+	})
+	if err != nil {
+		return "", fmt.Errorf("extract page content: %w", err)
+	}
+	return html, nil
+}
+
 // GetSnapshot returns cached URL, title, and elements.
 func (sbc *SandboxBrowserClient) GetSnapshot() (*PageInfo, error) {
 	sbc.mu.RLock()

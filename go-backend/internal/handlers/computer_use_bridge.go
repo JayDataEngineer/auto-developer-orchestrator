@@ -134,3 +134,13 @@ func (b *ComputerUseBridge) DesktopKey(ctx context.Context, sandboxID string, ke
 func (b *ComputerUseBridge) Resolution(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
 	return callHandler(ctx, b.X11.Resolution, http.MethodGet, "/api/sandbox/{id}/x11/resolution", nil, sandboxID)
 }
+
+// ExtractHTML gets the page content from the active browser tab via CDP JavaScript evaluation.
+// Uses the real Chrome browser — bypasses anti-bot that blocks HTTP crawlers.
+func (b *ComputerUseBridge) ExtractHTML(ctx context.Context, sandboxID string) (string, error) {
+	client, err := b.CU.getClient(sandboxID)
+	if err != nil {
+		return "", fmt.Errorf("get browser client: %w", err)
+	}
+	return client.ExtractHTML(ctx)
+}
