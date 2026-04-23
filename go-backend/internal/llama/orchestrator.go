@@ -583,7 +583,13 @@ func (e *OrchestratorExecutor) updateMemory(args map[string]interface{}) (interf
 		}, nil
 	}
 
-	e.memory.Update(content)
+	// Support section-based updates
+	if section, ok := args["section"].(string); ok && section != "" {
+		e.memory.UpdateSection(MemorySection("## "+section), content)
+	} else {
+		e.memory.Update(content)
+	}
+
 	if err := e.memory.Save(); err != nil {
 		return map[string]interface{}{
 			"saved": false,

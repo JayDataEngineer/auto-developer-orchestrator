@@ -28,6 +28,8 @@ func ConvertEvent(evt AgentEvent) pi.AgentEvent {
 		}
 	case EventTypeToolStart:
 		rpcType = pi.RpcEventToolStart
+	case EventTypeToolUpdate:
+		rpcType = pi.RpcEventToolUpdate
 	case EventTypeToolEnd:
 		rpcType = pi.RpcEventToolEnd
 	case EventTypeAgentStart:

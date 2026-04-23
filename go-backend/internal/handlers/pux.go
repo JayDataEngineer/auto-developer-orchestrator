@@ -270,6 +270,14 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Load project skills (SKILL.md files)
+	var skillsBlock string
+	skillLoader := llamaeng.NewSkillLoader(projectPath)
+	if count, err := skillLoader.Load(); err == nil && count > 0 {
+		skillsBlock = skillLoader.SkillsForPrompt() + "\n\n"
+		h.log.Debug("Loaded project skills", zap.Int("count", count))
+	}
+
 	// Inject project memory into the message if available
 	var memoryPrefix string
 	if mem := orch.Memory(); mem != nil {
@@ -315,7 +323,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		defer close(done)
 		defer close(orchEvents)
 		// Format message to keep the task front and center for the 26B model
-		orchMsg := fmt.Sprintf("%sUser request: %s\n\nCreate a plan and delegate each step.", memoryPrefix, req.Message)
+		orchMsg := fmt.Sprintf("%s%sUser request: %s\n\nCreate a plan and delegate each step.", skillsBlock, memoryPrefix, req.Message)
 		if orch.Plan() == nil {
 			loopErr = orch.Run(ctx, orchMsg, orchEvents)
 		} else {
@@ -380,7 +388,7 @@ func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string)
 	// Build base executor for sub-agents
 	var baseExecutor llamaeng.ToolExecutor
 	if h.sandboxMgr != nil {
-		baseExecutor = &llamaeng.SandboxToolExecutor{
+		sandboxExec := &llamaeng.SandboxToolExecutor{
 			SandboxID:     sandboxID,
 			Manager:       h.sandboxMgr,
 			CU:            h.cuBridge,
@@ -389,6 +397,11 @@ func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string)
 			MCPClient:     h.mcpClient,
 			ApprovalMgr:   (*approvalManagerAdapter)(h.approvalMgr),
 		}
+
+		// Wrap with hooks (git checkpoint, auditing, etc.)
+		var hooks []llamaeng.ToolHook
+		hooks = append(hooks, llamaeng.NewGitCheckpointHook(h.sandboxMgr, sandboxID, h.log))
+		baseExecutor = llamaeng.NewHookedExecutor(sandboxExec, hooks, h.log)
 	}
 
 	cfg := llamaeng.OrchestratorConfig{

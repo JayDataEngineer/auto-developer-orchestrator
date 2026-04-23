@@ -41,6 +41,56 @@ var allTools = []ToolSpec{
 		ParametersSchema: `{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"}},"required":["command"]}`,
 	},
 
+	// File Operations (Claude Code pattern: read before edit)
+	{
+		Name:             "file_read",
+		Category:         CategoryExecution,
+		Description:      "read a file with line numbers",
+		Schema:           `{"file_path": "/sandbox/workspace/main.go", "offset": 10, "limit": 50}`,
+		Returns:          "Returns file content with line numbers. Must read before editing.",
+		ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Absolute path to file in sandbox"},"offset":{"type":"integer","description":"Starting line number (1-based, optional)"},"limit":{"type":"integer","description":"Max lines to return (optional)"}},"required":["file_path"]}`,
+	},
+	{
+		Name:             "file_write",
+		Category:         CategoryExecution,
+		Description:      "create or overwrite a file",
+		Schema:           `{"file_path": "/sandbox/workspace/newfile.go", "content": "package main\nfunc main() {}"}`,
+		Returns:          "Creates parent dirs automatically. Overwrites existing files.",
+		ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Absolute path in sandbox"},"content":{"type":"string","description":"File content to write"}},"required":["file_path","content"]}`,
+	},
+	{
+		Name:             "file_edit",
+		Category:         CategoryExecution,
+		Description:      "replace exact string in a file (must read first)",
+		Schema:           `{"file_path": "/sandbox/workspace/main.go", "old_string": "fmt.Println(\"hello\")", "new_string": "fmt.Println(\"world\")"}`,
+		Returns:          "Finds and replaces old_string with new_string. Set replace_all for multiple matches. File must be read first.",
+		ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Absolute path in sandbox"},"old_string":{"type":"string","description":"Exact text to find and replace"},"new_string":{"type":"string","description":"Replacement text"},"replace_all":{"type":"boolean","description":"Replace all occurrences (default: false)"}},"required":["file_path","old_string","new_string"]}`,
+	},
+	{
+		Name:             "file_grep",
+		Category:         CategoryExecution,
+		Description:      "search files with regex (like ripgrep)",
+		Schema:           `{"pattern": "func main", "path": "/sandbox/workspace", "output_mode": "content", "context_lines": 3}`,
+		Returns:          "Returns matching lines with context. Modes: content, files_with_matches, count.",
+		ParametersSchema: `{"type":"object","properties":{"pattern":{"type":"string","description":"Regex pattern to search for"},"path":{"type":"string","description":"Directory or file to search (default: /sandbox/workspace)"},"glob":{"type":"string","description":"File filter: '*.go', '*.{ts,tsx}'"},"output_mode":{"type":"string","description":"Output format: content, files_with_matches, count","enum":["content","files_with_matches","count"]},"context_lines":{"type":"integer","description":"Lines of context around matches"},"case_insensitive":{"type":"boolean","description":"Case-insensitive search"},"head_limit":{"type":"integer","description":"Max number of results (default: 50)"}},"required":["pattern"]}`,
+	},
+	{
+		Name:             "file_glob",
+		Category:         CategoryExecution,
+		Description:      "find files by name pattern",
+		Schema:           `{"pattern": "*.go", "path": "/sandbox/workspace"}`,
+		Returns:          "Returns file paths sorted by modification time.",
+		ParametersSchema: `{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern: *.go, **/*.ts, test_*.py"},"path":{"type":"string","description":"Directory to search (default: /sandbox/workspace)"}},"required":["pattern"]}`,
+	},
+	{
+		Name:             "code_search",
+		Category:         CategoryExecution,
+		Description:      "search code with structured operations (find references, definitions, symbols)",
+		Schema:           `{"operation": "find_references", "symbol": "handleRequest", "path": "/sandbox/workspace", "file_type": "go"}`,
+		Returns:          "Operations: find_references, find_definition, list_symbols, hover. Uses ripgrep with language-aware patterns.",
+		ParametersSchema: `{"type":"object","properties":{"operation":{"type":"string","description":"Operation: find_references, find_definition, list_symbols, hover","enum":["find_references","find_definition","list_symbols","hover"]},"symbol":{"type":"string","description":"Symbol name to search for"},"path":{"type":"string","description":"Directory to search (default: /sandbox/workspace)"},"file_type":{"type":"string","description":"Language: go, py, js, ts, rs, java, rb"}},"required":["operation"]}`,
+	},
+
 	// Browser
 	{
 		Name:             "search_web",
@@ -228,9 +278,9 @@ var allTools = []ToolSpec{
 		Name:             "update_memory",
 		Category:         CategoryMeta,
 		Description:      "save important information to project memory for future sessions",
-		Schema:           `{"content": "Key finding: database uses PostgreSQL 15..."}`,
-		Returns:          "Saves to MEMORY.md in the project directory. Persisted across sessions. Max 200 lines.",
-		ParametersSchema: `{"type":"object","properties":{"content":{"type":"string","description":"Information to save to project memory. Will replace existing memory."}},"required":["content"]}`,
+		Schema:           `{"content": "Key finding: database uses PostgreSQL 15...", "section": "Project Facts"}`,
+		Returns:          "Saves to MEMORY.md in the project directory. Persisted across sessions. Max 200 lines. Sections: User Preferences, Project Facts, Feedback, Reference.",
+		ParametersSchema: `{"type":"object","properties":{"content":{"type":"string","description":"Information to save to project memory."},"section":{"type":"string","description":"Optional section to update: User Preferences, Project Facts, Feedback, Reference. Without this, replaces entire memory."}},"required":["content"]}`,
 	},
 	{
 		Name:             "wait",
@@ -317,6 +367,10 @@ func PersonaToolNames(t PersonaType) []string {
 		return []string{
 			// Execution
 			"bash",
+			// File operations (Claude Code pattern)
+			"file_read", "file_write", "file_edit", "file_grep", "file_glob",
+			// Code intelligence
+			"code_search",
 			// Browser
 			"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "scrape",
 			// MCP research server (direct access to all MCP tools)
@@ -330,16 +384,16 @@ func PersonaToolNames(t PersonaType) []string {
 			"update_memory", "wait", "ask_user",
 		}
 	case PersonaWeb:
-		return []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "scrape", "bash", "wait", "yield_artifact"}
+		return []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "scrape", "bash", "file_read", "file_grep", "file_glob", "wait", "yield_artifact"}
 	case PersonaCode:
-		return []string{"bash", "wait", "yield_artifact"}
+		return []string{"bash", "file_read", "file_write", "file_edit", "file_grep", "file_glob", "code_search", "wait", "yield_artifact"}
 	case PersonaDesktop:
 		return []string{"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act",
 			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key", "bash", "wait", "yield_artifact"}
 	case PersonaMCP:
 		return []string{"mcp_call", "wait", "yield_artifact"}
 	case PersonaResearch:
-		return []string{"mcp_call", "search_web", "scrape", "bash", "wait", "yield_artifact"}
+		return []string{"mcp_call", "search_web", "scrape", "bash", "file_read", "file_grep", "file_glob", "wait", "yield_artifact"}
 	default:
 		return nil
 	}
@@ -360,6 +414,26 @@ func PersonaExamples(t PersonaType) []Example {
 				Title: "Run a shell command",
 				Content: `bash{"command":"echo 'Hello World'"}
 → Hello World`,
+			},
+			{
+				Title: "Read and edit a file",
+				Content: `file_read{"file_path":"/sandbox/workspace/main.go"}
+→      1  package main
+→      2  import "fmt"
+→      3  func main() {
+→      4      fmt.Println("hello")
+→      5  }
+
+file_edit{"file_path":"/sandbox/workspace/main.go","old_string":"fmt.Println(\"hello\")","new_string":"fmt.Println(\"world\")"}
+→ Replaced 1 occurrence in main.go`,
+			},
+			{
+				Title: "Search code and find files",
+				Content: `file_grep{"pattern":"func main","path":"/sandbox/workspace","output_mode":"content"}
+→ main.go:3:func main() {
+
+file_glob{"pattern":"*.go","path":"/sandbox/workspace"}
+→ main.go, utils.go, handler.go`,
 			},
 			{
 				Title: "Browse a website and interact",

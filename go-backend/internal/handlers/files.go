@@ -248,15 +248,10 @@ func (h *FileHandler) Stat(w http.ResponseWriter, r *http.Request) {
 
 // validateSandboxPath ensures the path is under allowed directories.
 func validateSandboxPath(path string) error {
-	// Must be absolute
-	if !strings.HasPrefix(path, "/") {
-		return fmt.Errorf("path must be absolute")
-	}
-	// Clean the path to prevent traversal
-	clean := filepath.Clean(path)
-	// Only allow paths under /sandbox/ or /tmp/
-	if !strings.HasPrefix(clean, "/sandbox/") && !strings.HasPrefix(clean, "/tmp/") {
-		return fmt.Errorf("path must be under /sandbox/ or /tmp/")
-	}
-	return nil
+	return sandbox.ValidatePath(path)
+}
+
+// shellEscape wraps a string in single quotes, escaping embedded single quotes.
+func shellEscape(s string) string {
+	return sandbox.ShellEscape(s)
 }

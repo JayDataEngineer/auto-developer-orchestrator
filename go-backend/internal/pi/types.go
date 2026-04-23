@@ -81,6 +81,7 @@ const (
 const (
 	RpcEventToolStart       = "tool_execution_start"
 	RpcEventToolEnd         = "tool_execution_end"
+	RpcEventToolUpdate      = "tool_update"
 	RpcEventAgentStart      = "agent_start"
 	RpcEventAgentEnd        = "agent_end"
 	RpcEventCompactionStart = "compaction_start"

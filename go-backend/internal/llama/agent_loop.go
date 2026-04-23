@@ -37,6 +37,7 @@ const (
 	EventTypeApprovalRequest  AgentEventType = "approval_request"
 	EventTypeCompactionStart  AgentEventType = "compaction_start"
 	EventTypeCompactionEnd    AgentEventType = "compaction_end"
+	EventTypeToolUpdate       AgentEventType = "tool_update"
 )
 
 // subscriberKey is the context key for injecting the SSE subscriber channel
@@ -83,6 +84,13 @@ type AgentEventData struct {
 // This interface decouples the agent loop from specific tool implementations.
 type ToolExecutor interface {
 	Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error)
+}
+
+// ToolExecutorStreaming is an optional interface for tools that stream partial results.
+// The agent loop checks for this interface and uses it when available.
+type ToolExecutorStreaming interface {
+	ToolExecutor
+	ExecuteStreaming(ctx context.Context, toolName string, args map[string]interface{}, onUpdate func(string)) (interface{}, error)
 }
 
 // TranscriptSaver persists pre-compaction message snapshots.
@@ -159,6 +167,9 @@ type SandboxToolExecutor struct {
 
 	// Page fingerprinting for loop/stagnation detection
 	pageFingerprints map[string][]pageFingerprint // sandboxID → recent fingerprints (last 10)
+
+	// File operations (lazy-initialized on first file tool call)
+	fileOps *SandboxFileOps
 }
 
 // pageFingerprint is a compact hash of page state for detecting stagnation.
@@ -213,6 +224,18 @@ func normalizeToolName(name string, args map[string]interface{}) string {
 	case "enable", "enable_desktop", "start_browser", "enable_browser",
 		"enable_computer_use", "setup_browser", "init_browser":
 		return "computer_use_enable"
+	case "read", "cat", "read_file", "view":
+		return "file_read"
+	case "write", "write_file", "create_file":
+		return "file_write"
+	case "edit", "replace", "file_edit", "sed_replace":
+		return "file_edit"
+	case "grep", "search", "search_files", "rg":
+		return "file_grep"
+	case "glob", "find_files", "list_files", "ls_files":
+		return "file_glob"
+	case "code_search", "find_references", "find_definition", "list_symbols":
+		return "code_search"
 	}
 
 	// Fuzzy matching for common patterns
@@ -693,6 +716,22 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		scrollArgs := map[string]interface{}{"action": "scroll", "direction": direction}
 		return e.CU.Act(ctx, sandboxID, "scroll", scrollArgs)
 
+	// ── File tools (Claude Code pattern: read before edit) ──
+
+	case "file_read":
+		return e.executeFileRead(ctx, sandboxID, args)
+	case "file_write":
+		return e.executeFileWrite(ctx, sandboxID, args)
+	case "file_edit":
+		return e.executeFileEdit(ctx, sandboxID, args)
+	case "file_grep":
+		return e.executeFileGrep(ctx, sandboxID, args)
+	case "file_glob":
+		return e.executeFileGlob(ctx, sandboxID, args)
+
+	case "code_search":
+		return e.executeCodeSearch(ctx, sandboxID, args)
+
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", toolName)
 	}
@@ -982,11 +1021,30 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 
 			// Execute the tool with timeout to prevent hanging
 			startTime := time.Now()
+
+			// Check if the executor supports streaming for this tool
+			var streamer ToolExecutorStreaming
+			if s, ok := loop.executor.(ToolExecutorStreaming); ok {
+				streamer = s
+			}
+
 			result, err := func() (interface{}, error) {
-				if cfg.ToolExecTimeoutSec <= 0 {
+				timeout := time.Duration(cfg.ToolExecTimeoutSec) * time.Second
+				useStreaming := streamer != nil
+
+				if timeout <= 0 {
+					if useStreaming {
+						return streamer.ExecuteStreaming(ctx, tc.Name, tc.Args, func(update string) {
+							sendEvent(subscriber, AgentEvent{
+								Type: EventTypeToolUpdate,
+								Data: AgentEventData{ToolName: tc.Name, ToolID: tc.ID, Text: update},
+							})
+						})
+					}
 					return loop.executor.Execute(ctx, tc.Name, tc.Args)
 				}
-				toolCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.ToolExecTimeoutSec)*time.Second)
+
+				toolCtx, cancel := context.WithTimeout(ctx, timeout)
 				defer cancel()
 
 				type toolResult struct {
@@ -995,7 +1053,18 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 				}
 				ch := make(chan toolResult, 1)
 				go func() {
-					val, err := loop.executor.Execute(toolCtx, tc.Name, tc.Args)
+					var val interface{}
+					var err error
+					if useStreaming {
+						val, err = streamer.ExecuteStreaming(toolCtx, tc.Name, tc.Args, func(update string) {
+							sendEvent(subscriber, AgentEvent{
+								Type: EventTypeToolUpdate,
+								Data: AgentEventData{ToolName: tc.Name, ToolID: tc.ID, Text: update},
+							})
+						})
+					} else {
+						val, err = loop.executor.Execute(toolCtx, tc.Name, tc.Args)
+					}
 					ch <- toolResult{val, err}
 				}()
 				select {
@@ -2043,4 +2112,158 @@ func countStagnant(fps []pageFingerprint) int {
 // Session returns the underlying session for inspection.
 func (loop *AgentLoop) Session() *Session {
 	return loop.session
+}
+
+// ── File tool handlers (SandboxToolExecutor methods) ────────────────
+
+// ensureFileOps lazy-initializes the SandboxFileOps for this executor.
+func (e *SandboxToolExecutor) ensureFileOps(sandboxID string) *SandboxFileOps {
+	if e.fileOps == nil {
+		e.fileOps = NewSandboxFileOps(e.Manager, sandboxID, e.Logger)
+	}
+	return e.fileOps
+}
+
+func (e *SandboxToolExecutor) executeFileRead(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	path, _ := args["file_path"].(string)
+	if path == "" {
+		return nil, fmt.Errorf("missing 'file_path' argument")
+	}
+	var offset, limit int
+	if v, ok := args["offset"].(float64); ok {
+		offset = int(v)
+	}
+	if v, ok := args["limit"].(float64); ok {
+		limit = int(v)
+	}
+
+	content, lineCount, err := e.ensureFileOps(sandboxID).ReadFile(ctx, path, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"content":    content,
+		"lineCount":  lineCount,
+		"file_path":  path,
+	}, nil
+}
+
+func (e *SandboxToolExecutor) executeFileWrite(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	path, _ := args["file_path"].(string)
+	content, _ := args["content"].(string)
+	if path == "" {
+		return nil, fmt.Errorf("missing 'file_path' argument")
+	}
+	if content == "" {
+		return nil, fmt.Errorf("missing 'content' argument")
+	}
+
+	if err := e.ensureFileOps(sandboxID).WriteFile(ctx, path, content); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"success":   true,
+		"file_path": path,
+		"size":      len(content),
+	}, nil
+}
+
+func (e *SandboxToolExecutor) executeFileEdit(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	path, _ := args["file_path"].(string)
+	oldString, _ := args["old_string"].(string)
+	newString, _ := args["new_string"].(string)
+	replaceAll := false
+	if v, ok := args["replace_all"].(bool); ok {
+		replaceAll = v
+	}
+
+	if path == "" || oldString == "" {
+		return nil, fmt.Errorf("missing 'file_path' or 'old_string' argument")
+	}
+
+	count, err := e.ensureFileOps(sandboxID).EditFile(ctx, path, oldString, newString, replaceAll)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"success":      true,
+		"file_path":    path,
+		"replacements": count,
+	}, nil
+}
+
+func (e *SandboxToolExecutor) executeFileGrep(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	pattern, _ := args["pattern"].(string)
+	if pattern == "" {
+		return nil, fmt.Errorf("missing 'pattern' argument")
+	}
+	path, _ := args["path"].(string)
+	glob, _ := args["glob"].(string)
+	outputMode, _ := args["output_mode"].(string)
+	if outputMode == "" {
+		outputMode = "content"
+	}
+	var contextLines int
+	if v, ok := args["context_lines"].(float64); ok {
+		contextLines = int(v)
+	}
+	caseInsensitive := false
+	if v, ok := args["case_insensitive"].(bool); ok {
+		caseInsensitive = v
+	}
+	var headLimit int
+	if v, ok := args["head_limit"].(float64); ok {
+		headLimit = int(v)
+	}
+
+	result, err := e.ensureFileOps(sandboxID).Grep(ctx, pattern, path, glob, outputMode, contextLines, caseInsensitive, headLimit)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"success": true,
+		"pattern": pattern,
+		"results": result,
+	}, nil
+}
+
+func (e *SandboxToolExecutor) executeFileGlob(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	pattern, _ := args["pattern"].(string)
+	if pattern == "" {
+		return nil, fmt.Errorf("missing 'pattern' argument")
+	}
+	path, _ := args["path"].(string)
+
+	files, err := e.ensureFileOps(sandboxID).Glob(ctx, pattern, path)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"success": true,
+		"pattern": pattern,
+		"files":   files,
+		"count":   len(files),
+	}, nil
+}
+
+func (e *SandboxToolExecutor) executeCodeSearch(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	operation, _ := args["operation"].(string)
+	if operation == "" {
+		return nil, fmt.Errorf("missing 'operation' argument (use: find_references, find_definition, list_symbols, hover)")
+	}
+	symbol, _ := args["symbol"].(string)
+	path, _ := args["path"].(string)
+	fileType, _ := args["file_type"].(string)
+
+	ops := NewCodeSearchOps(e.ensureFileOps(sandboxID))
+	result, err := ops.Search(ctx, operation, symbol, path, fileType)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"success":   true,
+		"operation": operation,
+		"symbol":    symbol,
+		"results":   result,
+	}, nil
 }
