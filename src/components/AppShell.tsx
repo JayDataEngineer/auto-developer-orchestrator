@@ -16,11 +16,10 @@ import { Input } from './ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from './ui/select';
 import { useResizable } from '../hooks/useResizable';
 import { useArtifacts } from '../hooks/useArtifacts';
-import { useTheme } from '../hooks/useTheme';
 import {
   Zap, Settings, LayoutGrid, Monitor, MessageSquare,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Globe,
-  FolderOpen, Plus, Sun, Moon
+  FolderOpen, Plus
 } from 'lucide-react';
 import { GitHubConnectModal } from './GitHubConnectModal';
 import { api, ConversationSummary } from '../lib/api';
@@ -195,7 +194,6 @@ function DesktopChatSection({
 }
 
 function AppShellInner() {
-  const { theme, resolved, toggleTheme } = useTheme();
   const addLog = useCallback((_msg: string, _type?: any) => {}, []);
   const { state, actions } = useOrchestrator(addLog);
   const [activeTab, setActiveTab] = useState<TabId>('agent');
@@ -406,18 +404,6 @@ function AppShellInner() {
         </div>
 
         <div className="flex-1" />
-
-        {/* Theme toggle */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-xs" onClick={toggleTheme}>
-              {resolved === 'dark' ? <Sun size={12} /> : <Moon size={12} />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {theme === 'system' ? `System (${resolved})` : theme === 'dark' ? 'Dark' : 'Light'} — click to change
-          </TooltipContent>
-        </Tooltip>
 
         {/* Settings */}
         <Tooltip>

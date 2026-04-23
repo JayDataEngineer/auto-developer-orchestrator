@@ -308,6 +308,8 @@ func main() {
 		r.Put("/config/models", configHandler.SetModels)
 		r.Get("/config/providers", configHandler.GetProviders)
 		r.Put("/config/providers", configHandler.SetProviderKey)
+		r.Get("/config/agent", configHandler.GetAgent)
+		r.Put("/config/agent", configHandler.SetAgent)
 
 		// GitHub integration
 		r.Get("/github/user", configHandler.GetGitHubUser)

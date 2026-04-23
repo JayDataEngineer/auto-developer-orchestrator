@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   FileText, CheckSquare, StickyNote, Loader, Monitor,
-  Settings, Wrench, Brain, Github, Globe, Key, Check, Eye, EyeOff
+  Settings, Wrench, Brain, Github, Globe, Key, Check, Eye, EyeOff,
+  Sun, Moon, MonitorSmartphone, Sliders, RotateCcw
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { Artifact, api } from '../lib/api';
+import { Artifact, api, AgentConfig } from '../lib/api';
 import { ToolCall } from '../lib/pux-events';
 import { ArtifactView } from './ArtifactView';
 import { BrowserTools } from './BrowserTools';
 import { useComputerUse } from '../hooks/useComputerUse';
+import { useTheme, Theme } from '../hooks/useTheme';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { ScrollArea, ScrollBar } from './ui/scroll-area';
@@ -299,6 +301,12 @@ export function RightPanel({ agentId, sandboxId, artifacts, artifactsLoading, st
               </p>
               <ProviderSettings />
             </div>
+
+            {/* Theme */}
+            <ThemeSection />
+
+            {/* Agent Settings */}
+            <AgentSettingsSection />
           </div>
         )}
 
@@ -448,6 +456,242 @@ function ProviderSettings() {
       {providers.length === 0 && (
         <p className="text-[10px] font-mono text-muted-foreground text-center">Loading providers...</p>
       )}
+    </div>
+  );
+}
+
+// ── Theme Section ────────────────────────────────────────────────────
+
+function ThemeSection() {
+  const { theme, resolved, setTheme } = useTheme();
+
+  const themes: { value: Theme; label: string; icon: React.ReactNode }[] = [
+    { value: 'light', label: 'Light', icon: <Sun size={11} /> },
+    { value: 'dark', label: 'Dark', icon: <Moon size={11} /> },
+    { value: 'system', label: 'System', icon: <MonitorSmartphone size={11} /> },
+  ];
+
+  return (
+    <div className="border border-border p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        {resolved === 'dark' ? <Moon size={12} className="text-muted-foreground" /> : <Sun size={12} className="text-muted-foreground" />}
+        <span className="text-sm font-semibold text-foreground">Theme</span>
+      </div>
+      <div className="flex gap-1">
+        {themes.map(t => (
+          <Button
+            key={t.value}
+            variant={theme === t.value ? 'default' : 'outline'}
+            size="xs"
+            onClick={() => setTheme(t.value)}
+            className="flex-1 gap-1"
+          >
+            {t.icon}
+            <span className="text-[10px]">{t.label}</span>
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Agent Settings Section ───────────────────────────────────────────
+
+const defaultConfig: AgentConfig = {
+  defaultContextSize: 32768,
+  subAgentContextSize: 8192,
+  maxTokens: 4096,
+  temperature: 1.0,
+  topP: 0.95,
+  topK: 64,
+  thinkingBudgetTokens: 2048,
+  defaultMaxToolRounds: 20,
+  browserMaxToolRounds: 30,
+  toolExecTimeoutSec: 120,
+  toolResultMaxChars: 6000,
+  microCompactThreshold: 0.70,
+  fullCompactThreshold: 0.87,
+  maxConcurrentAgents: 3,
+};
+
+function AgentSettingsSection() {
+  const [config, setConfig] = useState<AgentConfig>(defaultConfig);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    api.config.getAgent().then(data => {
+      setConfig(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const save = useCallback(async (updates: Partial<AgentConfig>) => {
+    const next = { ...config, ...updates };
+    setConfig(next);
+    setSaving(true);
+    try {
+      await api.config.setAgent(updates);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch {
+      // revert on failure
+      setConfig(config);
+    } finally {
+      setSaving(false);
+    }
+  }, [config]);
+
+  const resetToDefaults = useCallback(() => {
+    save(defaultConfig);
+  }, [save]);
+
+  if (loading) {
+    return (
+      <div className="border border-border p-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <Sliders size={12} className="text-muted-foreground" />
+          <span className="text-sm font-semibold text-foreground">Agent Settings</span>
+        </div>
+        <p className="text-xs text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border border-border p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Sliders size={12} className="text-muted-foreground" />
+          <span className="text-sm font-semibold text-foreground">Agent Settings</span>
+        </div>
+        <div className="flex items-center gap-1">
+          {saved && <span className="text-[10px] font-mono text-green-500">saved</span>}
+          {saving && <Loader size={10} className="animate-spin text-muted-foreground" />}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" onClick={resetToDefaults}>
+                <RotateCcw size={10} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Reset to defaults</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+
+      {/* Generation */}
+      <div className="space-y-2">
+        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Generation</div>
+
+        <SliderRow
+          label="Temperature"
+          value={config.temperature}
+          min={0} max={2} step={0.1}
+          onChange={v => save({ temperature: v })}
+        />
+        <SliderRow
+          label="Top P"
+          value={config.topP}
+          min={0} max={1} step={0.05}
+          onChange={v => save({ topP: v })}
+        />
+        <SliderRow
+          label="Top K"
+          value={config.topK}
+          min={1} max={128} step={1}
+          onChange={v => save({ topK: v })}
+        />
+        <SliderRow
+          label="Max Tokens"
+          value={config.maxTokens}
+          min={256} max={8192} step={256}
+          onChange={v => save({ maxTokens: v })}
+        />
+      </div>
+
+      <Separator />
+
+      {/* Agent Loop */}
+      <div className="space-y-2">
+        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Agent Loop</div>
+
+        <SliderRow
+          label="Thinking Budget"
+          value={config.thinkingBudgetTokens}
+          min={0} max={8192} step={256}
+          onChange={v => save({ thinkingBudgetTokens: v })}
+          hint={config.thinkingBudgetTokens === 0 ? 'unlimited' : `${config.thinkingBudgetTokens} tokens`}
+        />
+        <SliderRow
+          label="Max Tool Rounds"
+          value={config.defaultMaxToolRounds}
+          min={5} max={50} step={1}
+          onChange={v => save({ defaultMaxToolRounds: v })}
+        />
+        <SliderRow
+          label="Browser Rounds"
+          value={config.browserMaxToolRounds}
+          min={5} max={60} step={1}
+          onChange={v => save({ browserMaxToolRounds: v })}
+        />
+        <SliderRow
+          label="Tool Timeout"
+          value={config.toolExecTimeoutSec}
+          min={10} max={300} step={10}
+          onChange={v => save({ toolExecTimeoutSec: v })}
+          hint={`${config.toolExecTimeoutSec}s`}
+        />
+      </div>
+
+      <Separator />
+
+      {/* Context */}
+      <div className="space-y-2">
+        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Context</div>
+
+        <SliderRow
+          label="Compact Trigger"
+          value={config.microCompactThreshold}
+          min={0.5} max={0.95} step={0.05}
+          onChange={v => save({ microCompactThreshold: v })}
+          hint={`${Math.round(config.microCompactThreshold * 100)}%`}
+        />
+        <SliderRow
+          label="Full Compact"
+          value={config.fullCompactThreshold}
+          min={0.6} max={0.99} step={0.05}
+          onChange={v => save({ fullCompactThreshold: v })}
+          hint={`${Math.round(config.fullCompactThreshold * 100)}%`}
+        />
+      </div>
+    </div>
+  );
+}
+
+// SliderRow is a labeled range slider that shows the current value.
+function SliderRow({ label, value, min, max, step, onChange, hint }: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+  hint?: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-mono text-muted-foreground w-24 shrink-0">{label}</span>
+      <input
+        type="range"
+        min={min} max={max} step={step}
+        value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        className="flex-1 h-1 accent-primary cursor-pointer"
+      />
+      <span className="text-[10px] font-mono text-foreground w-12 text-right shrink-0">
+        {hint ?? value}
+      </span>
     </div>
   );
 }

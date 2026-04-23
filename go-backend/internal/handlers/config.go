@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/models"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"go.uber.org/zap"
@@ -573,4 +574,139 @@ func (h *ConfigHandler) saveProviderKey(providerID, apiKey string) error {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0600) // 0600: only owner can read (contains API keys)
+}
+
+// AgentConfigDTO is the JSON representation of the tuning knobs exposed to the frontend.
+// Only includes user-adjustable fields from llama.ModelConfig.
+type AgentConfigDTO struct {
+	// Context
+	DefaultContextSize  int `json:"defaultContextSize"`
+	SubAgentContextSize int `json:"subAgentContextSize"`
+
+	// Generation
+	MaxTokens   int     `json:"maxTokens"`
+	Temperature float32 `json:"temperature"`
+	TopP        float32 `json:"topP"`
+	TopK        int     `json:"topK"`
+
+	// Agent loop
+	ThinkingBudgetTokens int `json:"thinkingBudgetTokens"`
+	DefaultMaxToolRounds int `json:"defaultMaxToolRounds"`
+	BrowserMaxToolRounds int `json:"browserMaxToolRounds"`
+	ToolExecTimeoutSec   int `json:"toolExecTimeoutSec"`
+	ToolResultMaxChars   int `json:"toolResultMaxChars"`
+
+	// Compaction
+	MicroCompactThreshold float64 `json:"microCompactThreshold"`
+	FullCompactThreshold  float64 `json:"fullCompactThreshold"`
+
+	// VRAM
+	MaxConcurrentAgents int `json:"maxConcurrentAgents"`
+}
+
+// GetAgent returns the current agent tuning configuration.
+// GET /api/config/agent
+func (h *ConfigHandler) GetAgent(w http.ResponseWriter, r *http.Request) {
+	cfg := llama.GetModelConfig()
+	writeJSON(w, http.StatusOK, AgentConfigDTO{
+		DefaultContextSize:    cfg.DefaultContextSize,
+		SubAgentContextSize:   cfg.SubAgentContextSize,
+		MaxTokens:             cfg.MaxTokens,
+		Temperature:           cfg.Temperature,
+		TopP:                  cfg.TopP,
+		TopK:                  cfg.TopK,
+		ThinkingBudgetTokens:  cfg.ThinkingBudgetTokens,
+		DefaultMaxToolRounds:  cfg.DefaultMaxToolRounds,
+		BrowserMaxToolRounds:  cfg.BrowserMaxToolRounds,
+		ToolExecTimeoutSec:    cfg.ToolExecTimeoutSec,
+		ToolResultMaxChars:    cfg.ToolResultMaxChars,
+		MicroCompactThreshold: cfg.MicroCompactThreshold,
+		FullCompactThreshold:  cfg.FullCompactThreshold,
+		MaxConcurrentAgents:   cfg.MaxConcurrentAgents,
+	})
+}
+
+// SetAgent updates the agent tuning configuration.
+// PUT /api/config/agent
+func (h *ConfigHandler) SetAgent(w http.ResponseWriter, r *http.Request) {
+	var req AgentConfigDTO
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	cfg := llama.GetModelConfig()
+
+	// Apply only non-zero fields (partial update)
+	if req.DefaultContextSize > 0 {
+		cfg.DefaultContextSize = req.DefaultContextSize
+	}
+	if req.SubAgentContextSize > 0 {
+		cfg.SubAgentContextSize = req.SubAgentContextSize
+	}
+	if req.MaxTokens > 0 {
+		cfg.MaxTokens = req.MaxTokens
+	}
+	if req.Temperature > 0 {
+		cfg.Temperature = req.Temperature
+	}
+	if req.TopP > 0 {
+		cfg.TopP = req.TopP
+	}
+	if req.TopK > 0 {
+		cfg.TopK = req.TopK
+	}
+	if req.ThinkingBudgetTokens >= 0 {
+		cfg.ThinkingBudgetTokens = req.ThinkingBudgetTokens
+	}
+	if req.DefaultMaxToolRounds > 0 {
+		cfg.DefaultMaxToolRounds = req.DefaultMaxToolRounds
+	}
+	if req.BrowserMaxToolRounds > 0 {
+		cfg.BrowserMaxToolRounds = req.BrowserMaxToolRounds
+	}
+	if req.ToolExecTimeoutSec > 0 {
+		cfg.ToolExecTimeoutSec = req.ToolExecTimeoutSec
+	}
+	if req.ToolResultMaxChars > 0 {
+		cfg.ToolResultMaxChars = req.ToolResultMaxChars
+	}
+	if req.MicroCompactThreshold > 0 {
+		cfg.MicroCompactThreshold = req.MicroCompactThreshold
+	}
+	if req.FullCompactThreshold > 0 {
+		cfg.FullCompactThreshold = req.FullCompactThreshold
+	}
+	if req.MaxConcurrentAgents > 0 {
+		cfg.MaxConcurrentAgents = req.MaxConcurrentAgents
+	}
+
+	llama.SetModelConfig(cfg)
+
+	h.logger.Info("Agent config updated",
+		zap.Float32("temperature", cfg.Temperature),
+		zap.Int("thinkingBudget", cfg.ThinkingBudgetTokens),
+		zap.Int("maxTokens", cfg.MaxTokens),
+		zap.Int("maxToolRounds", cfg.DefaultMaxToolRounds),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"config": AgentConfigDTO{
+			DefaultContextSize:    cfg.DefaultContextSize,
+			SubAgentContextSize:   cfg.SubAgentContextSize,
+			MaxTokens:             cfg.MaxTokens,
+			Temperature:           cfg.Temperature,
+			TopP:                  cfg.TopP,
+			TopK:                  cfg.TopK,
+			ThinkingBudgetTokens:  cfg.ThinkingBudgetTokens,
+			DefaultMaxToolRounds:  cfg.DefaultMaxToolRounds,
+			BrowserMaxToolRounds:  cfg.BrowserMaxToolRounds,
+			ToolExecTimeoutSec:    cfg.ToolExecTimeoutSec,
+			ToolResultMaxChars:    cfg.ToolResultMaxChars,
+			MicroCompactThreshold: cfg.MicroCompactThreshold,
+			FullCompactThreshold:  cfg.FullCompactThreshold,
+			MaxConcurrentAgents:   cfg.MaxConcurrentAgents,
+		},
+	})
 }

@@ -42,6 +42,23 @@ export interface AIConfig {
   };
 }
 
+export interface AgentConfig {
+  defaultContextSize: number;
+  subAgentContextSize: number;
+  maxTokens: number;
+  temperature: number;
+  topP: number;
+  topK: number;
+  thinkingBudgetTokens: number;
+  defaultMaxToolRounds: number;
+  browserMaxToolRounds: number;
+  toolExecTimeoutSec: number;
+  toolResultMaxChars: number;
+  microCompactThreshold: number;
+  fullCompactThreshold: number;
+  maxConcurrentAgents: number;
+}
+
 export interface GitHubUser {
   connected: boolean;
   user?: {
@@ -314,6 +331,12 @@ export const api = {
       apiFetch<{ success: boolean }>('/api/config/providers', {
         method: 'PUT',
         body: JSON.stringify({ provider, apiKey }),
+      }),
+    getAgent: () => apiFetch<AgentConfig>('/api/config/agent'),
+    setAgent: (config: Partial<AgentConfig>) =>
+      apiFetch<{ success: boolean; config: AgentConfig }>('/api/config/agent', {
+        method: 'PUT',
+        body: JSON.stringify(config),
       }),
   },
   github: {
