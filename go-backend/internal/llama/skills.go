@@ -96,24 +96,48 @@ func (l *SkillLoader) SkillsForPrompt() string {
 	return b.String()
 }
 
-// MatchTrigger returns skills whose trigger keywords match the given message.
-// Returns all skills if the message matches any trigger.
-func (l *SkillLoader) MatchTrigger(message string) []Skill {
-	msgLower := strings.ToLower(message)
-	var matched []Skill
+// SkillsForPromptMatched returns only skills whose trigger keywords match the message.
+// Falls back to all skills if nothing matches (so skills without triggers still work).
+// Output is capped at maxTokens characters (~500 tokens ≈ 2000 chars).
+func (l *SkillLoader) SkillsForPromptMatched(message string) string {
+	if len(l.skills) == 0 {
+		return ""
+	}
+
+	// Match skills by trigger keywords
+	var selected []Skill
 	for _, s := range l.skills {
 		if s.Trigger == "" {
-			continue
+			continue // skip triggerless skills — they're always available in SKILL.md files
 		}
+		msgLower := strings.ToLower(message)
 		keywords := strings.Fields(s.Trigger)
 		for _, kw := range keywords {
 			if strings.Contains(msgLower, strings.ToLower(kw)) {
-				matched = append(matched, s)
+				selected = append(selected, s)
 				break
 			}
 		}
 	}
-	return matched
+
+	// If nothing matched, return empty — the model can discover SKILL.md files via file_read
+	if len(selected) == 0 {
+		return ""
+	}
+
+	// Format with token cap (~4 chars per token, max 500 tokens = 2000 chars)
+	const maxChars = 2000
+	var b strings.Builder
+	b.WriteString("<skills>\n")
+	for _, s := range selected {
+		entry := fmt.Sprintf("<skill name=\"%s\">\n%s\n</skill>\n", s.Name, s.Instructions)
+		if b.Len()+len(entry) > maxChars {
+			break // cap reached
+		}
+		b.WriteString(entry)
+	}
+	b.WriteString("</skills>")
+	return b.String()
 }
 
 // parseSkillFile parses a SKILL.md file with YAML frontmatter.

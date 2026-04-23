@@ -89,11 +89,22 @@ func (f *SandboxFileOps) ReadFile(ctx context.Context, path string, offset, limi
 
 // --- WriteFile ---
 
-// WriteFile creates or overwrites a file in the sandbox.
-// Uses base64 pipe to safely handle special characters and binary data.
+// WriteFile creates a new file in the sandbox.
+// Refuses to overwrite existing files — the model must use EditFile instead.
+// This prevents accidental destruction of partially working code (little-coder
+// paper: write guard fires on 57% of exercises, preventing silent code loss).
 func (f *SandboxFileOps) WriteFile(ctx context.Context, path, content string) error {
 	if err := sandbox.ValidatePath(path); err != nil {
 		return err
+	}
+
+	// Write guard: refuse to overwrite existing files
+	exists, err := f.FileExists(ctx, path)
+	if err != nil {
+		return fmt.Errorf("failed to check file existence: %w", err)
+	}
+	if exists {
+		return fmt.Errorf("file %s already exists — use file_edit to modify it instead of file_write. file_write is only for creating new files", path)
 	}
 
 	// Ensure parent directory exists

@@ -24,6 +24,7 @@ type ModelConfig struct {
 	TopK          int
 
 	// Agent loop
+	ThinkingBudgetTokens  int // Max thinking/reasoning tokens per turn (0 = unlimited). Small models benefit from ~2048.
 	DefaultMaxToolRounds  int // Standard max tool rounds
 	BrowserMaxToolRounds  int // Browser/desktop automation needs more rounds
 	MaxRetriesPerTool     int // Max retries for transient errors
@@ -61,6 +62,7 @@ func DefaultModelConfig() ModelConfig {
 		TopK:          64,
 
 		// Agent loop
+		ThinkingBudgetTokens:  2048, // Small models: cap reasoning, force commitment
 		DefaultMaxToolRounds:  20,
 		BrowserMaxToolRounds:  30,
 		MaxRetriesPerTool:     3,

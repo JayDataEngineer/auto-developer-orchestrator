@@ -53,10 +53,10 @@ var allTools = []ToolSpec{
 	{
 		Name:             "file_write",
 		Category:         CategoryExecution,
-		Description:      "create or overwrite a file",
+		Description:      "create a new file (cannot overwrite — use file_edit for existing files)",
 		Schema:           `{"file_path": "/sandbox/workspace/newfile.go", "content": "package main\nfunc main() {}"}`,
-		Returns:          "Creates parent dirs automatically. Overwrites existing files.",
-		ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Absolute path in sandbox"},"content":{"type":"string","description":"File content to write"}},"required":["file_path","content"]}`,
+		Returns:          "Creates parent dirs automatically. REFUSES to overwrite existing files — use file_edit instead.",
+		ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Absolute path in sandbox — must NOT already exist"},"content":{"type":"string","description":"File content to write"}},"required":["file_path","content"]}`,
 	},
 	{
 		Name:             "file_edit",

@@ -269,12 +269,15 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Load project skills (SKILL.md files)
+	// Load project skills (SKILL.md files) — per-turn injection, not upfront dump
 	var skillsBlock string
 	skillLoader := llamaeng.NewSkillLoader(projectPath)
 	if count, err := skillLoader.Load(); err == nil && count > 0 {
-		skillsBlock = skillLoader.SkillsForPrompt() + "\n\n"
-		h.log.Debug("Loaded project skills", zap.Int("count", count))
+		skillsBlock = skillLoader.SkillsForPromptMatched(req.Message)
+		if skillsBlock != "" {
+			skillsBlock += "\n\n"
+		}
+		h.log.Debug("Loaded project skills", zap.Int("total", count), zap.Bool("matched", skillsBlock != ""))
 	}
 
 	// Inject project memory into the message if available

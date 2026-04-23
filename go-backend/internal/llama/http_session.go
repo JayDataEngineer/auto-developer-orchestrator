@@ -125,6 +125,8 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 		toolCallAccum := make(map[int]*ToolCallResponse)
 		var contentBuf strings.Builder
 		tokenCount := 0
+		thinkingTokens := 0
+		thinkingBudget := cfg.ThinkingBudgetTokens
 
 		err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool {
 			// Content delta
@@ -133,9 +135,19 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 				contentBuf.WriteString(delta.Content)
 				ch <- ChatEvent{Type: ChatEventContent, Content: delta.Content}
 			}
-			// Thinking/reasoning delta
+			// Thinking/reasoning delta — enforce budget
 			if delta.ReasoningContent != "" {
-				ch <- ChatEvent{Type: ChatEventThinking, Content: delta.ReasoningContent}
+				thinkingTokens++
+				if thinkingBudget > 0 && thinkingTokens > thinkingBudget {
+					// Budget exceeded — stop forwarding thinking but let generation continue.
+					// The model will naturally transition to content generation.
+					// Emit a single truncation notice so the frontend knows thinking was capped.
+					if thinkingTokens == thinkingBudget+1 {
+						ch <- ChatEvent{Type: ChatEventThinking, Content: "\n[Thinking budget reached — committing to implementation]"}
+					}
+				} else {
+					ch <- ChatEvent{Type: ChatEventThinking, Content: delta.ReasoningContent}
+				}
 			}
 			// Tool call chunks — accumulate across streaming
 			for _, tc := range delta.ToolCalls {
