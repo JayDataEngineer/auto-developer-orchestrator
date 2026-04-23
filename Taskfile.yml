@@ -250,6 +250,7 @@ tasks:
         PARALLEL=$(jq -r ".models.\"$PROFILE\".parallel" config/models.json)
         CACHE_RAM=$(jq -r ".models.\"$PROFILE\".cache_ram" config/models.json)
         THINK=$(jq -r ".models.\"$PROFILE\".thinking" config/models.json)
+        MMPROJ_RAM=$(jq -r ".models.\"$PROFILE\".mmproj_ram // false" config/models.json)
         LABEL=$(jq -r ".models.\"$PROFILE\".name" config/models.json)
 
         [ "$LLM" = "null" ] && { echo "ERROR: Model profile '$PROFILE' not found in config/models.json"; exit 1; }
@@ -280,11 +281,17 @@ tasks:
           CACHE_RAM_ARGS="--cache-ram $CACHE_RAM"
         fi
 
+        MMPROJ_RAM_ARGS=""
+        if [ "$MMPROJ_RAM" = "true" ] && [ "$VISION" = "true" ]; then
+          MMPROJ_RAM_ARGS="--override-tensor v.*=CPU"
+        fi
+
         echo "Starting $LABEL..."
-        echo "  model:   $LLM"
-        echo "  vision:  $VISION ($MMPROJ)"
+        echo "  model:    $LLM"
+        echo "  vision:   $VISION ($MMPROJ)"
         echo "  thinking: $ENABLE_THINKING"
-        echo "  ctx:     $CTX"
+        echo "  ctx:      $CTX"
+        echo "  mmproj:   $([ "$MMPROJ_RAM" = "true" ] && echo "RAM (saves VRAM)" || echo "VRAM")"
 
         docker run -d --name orchestrator-llama \
           --gpus all \
@@ -302,6 +309,7 @@ tasks:
           --cache-type-k q8_0 --cache-type-v q8_0 \
           --batch-size 512 --ubatch-size 512 \
           --cont-batching --parallel $PARALLEL --metrics \
+          $MMPROJ_RAM_ARGS \
           $THINK_ARGS
 
         # Write current profile so Go backend can read it
