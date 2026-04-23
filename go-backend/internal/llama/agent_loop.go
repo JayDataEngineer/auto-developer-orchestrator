@@ -157,7 +157,9 @@ type ComputerUseProvider interface {
 	Resolution(ctx context.Context, sandboxID string) (map[string]interface{}, error)
 
 	// Page content extraction (real browser, bypasses anti-bot)
-	ExtractHTML(ctx context.Context, sandboxID string) (string, error)
+	// rawHTML=true: returns full HTML for MCP process_html cleaning
+	// rawHTML=false: returns innerText for quick text
+	ExtractPageContent(ctx context.Context, sandboxID string, rawHTML bool) (string, error)
 }
 
 // SandboxToolExecutor executes tools via the sandbox manager and computer use provider.
@@ -967,8 +969,8 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 
 		// Synthesis safety net: if unlimited rounds and agent has done many tool
 		// calls with no text output, force a synthesis. Prevents infinite research
-		// loops that never produce a report.
-		needsSynthesis := contentBuf.Len() == 0 && round >= 20
+		// loops that never produce a report. 60 rounds ≈ 1-2 hours of deep research.
+		needsSynthesis := contentBuf.Len() == 0 && round >= 60
 
 		if len(toolCalls) == 0 || finishReason != FinishToolCalls || hitMaxRounds || needsSynthesis {
 			if (hitMaxRounds || needsSynthesis) && contentBuf.Len() == 0 {
@@ -1956,6 +1958,9 @@ func (e *SandboxToolExecutor) macroScrape(ctx context.Context, sandboxID string,
 // browserScrapeFallback uses the sandbox browser to navigate to a URL and extract text content.
 // The real Chrome browser handles JS rendering, cookies, and bypasses most anti-bot measures
 // that block HTTP-based crawlers like Crawl4AI.
+//
+// Pipeline: browser navigate → extract raw HTML → MCP process_html → clean markdown.
+// Falls back to innerText if MCP is unavailable.
 func (e *SandboxToolExecutor) browserScrapeFallback(ctx context.Context, sandboxID, targetURL string) (string, error) {
 	if e.CU == nil {
 		return "", fmt.Errorf("no computer use handler available")
@@ -1973,9 +1978,21 @@ func (e *SandboxToolExecutor) browserScrapeFallback(ctx context.Context, sandbox
 		return "", fmt.Errorf("navigate failed: %w", err)
 	}
 
-	// Extract page content via CDP JavaScript evaluation
-	// document.body.innerText gives clean text (no scripts/styles/markup)
-	text, err := e.CU.ExtractHTML(ctx, sandboxID)
+	// Try raw HTML → MCP process_html pipeline first (best quality)
+	if e.MCPClient != nil {
+		rawHTML, err := e.CU.ExtractPageContent(ctx, sandboxID, true) // raw HTML
+		if err == nil && rawHTML != "" {
+			clean, mcpErr := e.MCPClient.ProcessHTML(ctx, rawHTML)
+			if mcpErr == nil && clean != "" {
+				e.Logger.Info("scrape via browser + MCP process_html", zap.String("url", targetURL))
+				return clean, nil
+			}
+			e.Logger.Warn("MCP process_html failed, falling back to innerText", zap.Error(mcpErr))
+		}
+	}
+
+	// Fallback: extract innerText directly (quick, no MCP dependency)
+	text, err := e.CU.ExtractPageContent(ctx, sandboxID, false)
 	if err != nil {
 		return "", fmt.Errorf("extract content: %w", err)
 	}

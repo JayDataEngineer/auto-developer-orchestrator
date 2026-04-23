@@ -45,6 +45,17 @@
       "cache_ram": 2048,
       "mmproj_ram": true
     },
+    "qwen36-27b": {
+      "name": "Qwen 3.6 27B (dense, IQ4_NL, 16GB + mmproj in RAM)",
+      "llm": "Qwen3.6-27B-IQ4_NL.gguf",
+      "mmproj": "mmproj-BF16.gguf",
+      "alias": "qwen3.6-27b",
+      "ctx_size": 131072,
+      "thinking": true,
+      "parallel": 1,
+      "cache_ram": 1024,
+      "mmproj_ram": true
+    },
     "gemma31": {
       "name": "Gemma 4 31B (Q4_K_XL, 18GB)",
       "llm": "gemma-4-31B-it-UD-Q4_K_XL.gguf",

@@ -135,12 +135,13 @@ func (b *ComputerUseBridge) Resolution(ctx context.Context, sandboxID string) (m
 	return callHandler(ctx, b.X11.Resolution, http.MethodGet, "/api/sandbox/{id}/x11/resolution", nil, sandboxID)
 }
 
-// ExtractHTML gets the page content from the active browser tab via CDP JavaScript evaluation.
-// Uses the real Chrome browser — bypasses anti-bot that blocks HTTP crawlers.
-func (b *ComputerUseBridge) ExtractHTML(ctx context.Context, sandboxID string) (string, error) {
+// ExtractPageContent gets the page content from the active browser tab via CDP JavaScript evaluation.
+// rawHTML=true returns document.documentElement.outerHTML for processing by MCP process_html.
+// rawHTML=false returns document.body.innerText for quick text extraction.
+func (b *ComputerUseBridge) ExtractPageContent(ctx context.Context, sandboxID string, rawHTML bool) (string, error) {
 	client, err := b.CU.getClient(sandboxID)
 	if err != nil {
 		return "", fmt.Errorf("get browser client: %w", err)
 	}
-	return client.ExtractHTML(ctx)
+	return client.ExtractPageContent(ctx, rawHTML)
 }

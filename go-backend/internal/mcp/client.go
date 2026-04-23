@@ -188,6 +188,15 @@ func (c *Client) Scrape(ctx context.Context, url string) (string, error) {
 	})
 }
 
+// ProcessHTML takes raw HTML and returns clean LLM-ready markdown.
+// Used by the browser scrape fallback: browser gets HTML (bypasses anti-bot),
+// then this cleans it through Crawl4AI's content extraction pipeline.
+func (c *Client) ProcessHTML(ctx context.Context, html string) (string, error) {
+	return c.CallTool(ctx, "process_html", map[string]any{
+		"html": html,
+	})
+}
+
 // IsAvailable returns true if the MCP server is reachable.
 func (c *Client) IsAvailable() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
