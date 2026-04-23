@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -746,6 +748,9 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 
 	case "image_read":
 		return e.executeImageRead(ctx, sandboxID, args)
+
+	case "http_request":
+		return e.executeHTTPRequest(ctx, sandboxID, args)
 
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", toolName)
@@ -2352,4 +2357,110 @@ func (e *SandboxToolExecutor) executeImageRead(ctx context.Context, sandboxID st
 		"file":        filePath,
 		"size_bytes":  len(imageBytes),
 	}, nil
+}
+
+// executeHTTPRequest makes an HTTP request from the Go backend.
+// Supports any method, custom headers, body, and returns structured response.
+// Works for external APIs and sandbox-local services via Docker networking.
+func (e *SandboxToolExecutor) executeHTTPRequest(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	method, _ := args["method"].(string)
+	targetURL, _ := args["url"].(string)
+
+	if method == "" {
+		method = "GET"
+	}
+	if targetURL == "" {
+		return nil, fmt.Errorf("missing 'url' argument")
+	}
+
+	// Timeout (default 30s, max 120s)
+	timeout := 30
+	if t, ok := args["timeout"]; ok {
+		if f, ok := t.(float64); ok && f > 0 {
+			timeout = int(f)
+		}
+	}
+	if timeout > 120 {
+		timeout = 120
+	}
+
+	// Build request
+	var bodyReader io.Reader
+	if body, ok := args["body"]; ok && body != nil {
+		bodyStr, isStr := body.(string)
+		if !isStr {
+			// JSON-encode object body
+			bodyBytes, err := json.Marshal(body)
+			if err != nil {
+				return nil, fmt.Errorf("failed to encode body: %w", err)
+			}
+			bodyStr = string(bodyBytes)
+		}
+		bodyReader = strings.NewReader(bodyStr)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(method), targetURL, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("invalid request: %w", err)
+	}
+
+	// Apply custom headers
+	if headers, ok := args["headers"].(map[string]interface{}); ok {
+		for k, v := range headers {
+			if vs, ok := v.(string); ok {
+				req.Header.Set(k, vs)
+			}
+		}
+	}
+
+	// Set Content-Type for body if not specified
+	if bodyReader != nil && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	// Execute with timeout
+	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body (cap at 64KB)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Try to parse as JSON for structured output
+	bodyStr := string(respBody)
+	var jsonBody interface{}
+	isJSON := json.Unmarshal(respBody, &jsonBody) == nil
+
+	result := map[string]interface{}{
+		"status_code": resp.StatusCode,
+		"status":      resp.Status,
+		"url":         resp.Request.URL.String(),
+	}
+
+	// Collect response headers
+	respHeaders := make(map[string]string)
+	for k, v := range resp.Header {
+		if len(v) > 0 {
+			respHeaders[k] = v[0]
+		}
+	}
+	result["headers"] = respHeaders
+
+	if isJSON {
+		result["body"] = jsonBody
+	} else {
+		// Truncate large non-JSON responses
+		if len(bodyStr) > 8000 {
+			bodyStr = bodyStr[:7997] + "..."
+		}
+		result["body"] = bodyStr
+	}
+
+	return result, nil
 }

@@ -98,6 +98,14 @@ var allTools = []ToolSpec{
 		Returns:          "Sends the image to the vision model and returns a text description. Supports PNG, JPG, GIF, WebP.",
 		ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Path to image file in sandbox"},"prompt":{"type":"string","description":"What to describe (default: general description)"}},"required":["file_path"]}`,
 	},
+	{
+		Name:             "http_request",
+		Category:         CategoryExecution,
+		Description:      "make an HTTP request to any URL (APIs, local services, webhooks)",
+		Schema:           `{"method": "POST", "url": "http://localhost:8188/prompt", "headers": {"Content-Type": "application/json"}, "body": "{\"workflow\": ...}", "timeout": 30}`,
+		Returns:          "Returns status code, response headers, and body. Supports GET, POST, PUT, DELETE, PATCH. Body can be string or JSON object.",
+		ParametersSchema: `{"type":"object","properties":{"method":{"type":"string","description":"HTTP method: GET, POST, PUT, DELETE, PATCH","enum":["GET","POST","PUT","DELETE","PATCH"]},"url":{"type":"string","description":"Full URL to request"},"headers":{"type":"object","description":"Request headers as key-value pairs"},"body":{"type":"string","description":"Request body (string or JSON)"},"timeout":{"type":"integer","description":"Timeout in seconds (default: 30, max: 120)"}},"required":["method","url"]}`,
+	},
 
 	// Browser
 	{
