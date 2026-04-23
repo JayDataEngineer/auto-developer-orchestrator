@@ -76,6 +76,12 @@ func resolveProjectPath(project string, db *storage.Database) string {
 		return candidate
 	}
 
+	// Try under projects/ subdirectory
+	candidate = filepath.Join(projectsDir, "projects", project)
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return candidate
+	}
+
 	return ""
 }
 

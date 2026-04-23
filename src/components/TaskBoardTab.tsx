@@ -530,7 +530,7 @@ export function TaskBoardTab({ currentProject }: { currentProject?: string | nul
     const job: CreateJobRequest = {
       name: data.name,
       description: data.description,
-      project: currentProject || 'projects/test-repo',
+      project: currentProject || '',
       message: data.message,
       model: data.model,
       scheduleType: data.scheduleType as any,

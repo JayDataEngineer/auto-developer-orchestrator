@@ -493,7 +493,7 @@ func (s *Scheduler) executeJob(jobID string) {
 	var result *JobResult
 	if s.llamaExec != nil {
 		projectPath := s.resolveProjectPath(job.Project)
-		if projectPath == "" {
+		if job.Project != "" && projectPath == "" {
 			err = fmt.Errorf("project %s not found", job.Project)
 		} else {
 			result = s.llamaExec.Execute(ctx, jobID, job.Name, projectPath, job.Message, job.Model, 0)
@@ -506,7 +506,7 @@ func (s *Scheduler) executeJob(jobID string) {
 		}
 	} else if s.isolated != nil {
 		projectPath := s.resolveProjectPath(job.Project)
-		if projectPath == "" {
+		if job.Project != "" && projectPath == "" {
 			err = fmt.Errorf("project %s not found", job.Project)
 		} else {
 			result = s.isolated.Execute(ctx, jobID, job.Name, projectPath, job.Message, job.Model, 0)
@@ -718,6 +718,11 @@ func (s *Scheduler) resolveProjectPath(project string) string {
 	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 		return candidate
 	}
+	// Try under projects/ subdirectory
+	candidate = filepath.Join(s.projectRoot, "projects", project)
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return candidate
+	}
 	// Try as absolute path
 	if info, err := os.Stat(project); err == nil && info.IsDir() {
 		return project
@@ -809,8 +814,8 @@ func (s *Scheduler) validateJob(job *Job) error {
 	if job.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if job.Project == "" {
-		return fmt.Errorf("project is required")
+	if job.Project == "" && job.Schedule != ScheduleManual {
+		return fmt.Errorf("project is required for scheduled jobs")
 	}
 	if job.Message == "" {
 		return fmt.Errorf("message is required")
