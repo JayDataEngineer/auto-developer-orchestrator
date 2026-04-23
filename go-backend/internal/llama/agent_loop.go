@@ -959,12 +959,14 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 		}
 
 		// No tool calls, max rounds, or normal stop → done
-		if len(toolCalls) == 0 || finishReason != FinishToolCalls || round >= loop.config.MaxToolRounds {
-			if round >= loop.config.MaxToolRounds && contentBuf.Len() == 0 {
+		maxRounds := loop.config.MaxToolRounds
+		hitMaxRounds := maxRounds > 0 && round >= maxRounds
+		if len(toolCalls) == 0 || finishReason != FinishToolCalls || hitMaxRounds {
+			if hitMaxRounds && contentBuf.Len() == 0 {
 				// Model hit max rounds without producing text — do one final synthesis
 				loop.logger.Warn("Max tool rounds reached with no text output, requesting synthesis",
 					zap.Int("round", round),
-					zap.Int("maxRounds", loop.config.MaxToolRounds),
+					zap.Int("maxRounds", maxRounds),
 				)
 				synthesisPrompt := "Based on all your research and tool results above, provide your comprehensive final answer now. Do NOT call any more tools. Just write your response directly."
 				synthOpts := loop.config.Opts
@@ -979,10 +981,10 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 						}
 					}
 				}
-			} else if round >= loop.config.MaxToolRounds {
+			} else if hitMaxRounds {
 				loop.logger.Warn("Max tool rounds reached, stopping agent loop",
 					zap.Int("round", round),
-					zap.Int("maxRounds", loop.config.MaxToolRounds),
+					zap.Int("maxRounds", maxRounds),
 				)
 			}
 
@@ -1222,14 +1224,17 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 			toolResults = append(toolResults, delegateResults...)
 		}
 
-		// Phase 4: Goal nudge
-		budgetWarning := round >= int(float64(loop.config.MaxToolRounds)*0.75) && round < loop.config.MaxToolRounds
-		goalReminder, _ := RenderTemplate("goal_nudge", GoalNudgeData{
-			Round:         round,
-			MaxRounds:     loop.config.MaxToolRounds,
-			StepsLeft:     loop.config.MaxToolRounds - round,
-			BudgetWarning: budgetWarning,
-		})
+		// Phase 4: Goal nudge (skip when no round limit)
+		var goalReminder string
+		if maxRounds > 0 {
+			budgetWarning := round >= int(float64(maxRounds)*0.75) && round < maxRounds
+			goalReminder, _ = RenderTemplate("goal_nudge", GoalNudgeData{
+				Round:         round,
+				MaxRounds:     maxRounds,
+				StepsLeft:     maxRounds - round,
+				BudgetWarning: budgetWarning,
+			})
+		}
 
 		// Redact sensitive data
 		if ste, ok := loop.executor.(*SandboxToolExecutor); ok && ste.Creds != nil {

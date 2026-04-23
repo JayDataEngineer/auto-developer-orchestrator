@@ -316,9 +316,9 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	sessionID := fmt.Sprintf("%s:%s", req.Project, req.AgentId)
 	orchEvents := llamaeng.PersistEvents(r.Context(), h.eventStore, sessionID, events)
 
-	// Run orchestrator in a goroutine with a 10-minute timeout
-	// (research tasks with multiple sub-agents need more time)
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	// Run orchestrator with no artificial timeout — let the model work
+	// until it's done or the client disconnects.
+	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	var loopErr error
 	done := make(chan struct{})

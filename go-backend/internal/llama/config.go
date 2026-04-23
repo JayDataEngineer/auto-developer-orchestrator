@@ -113,8 +113,8 @@ func (c ModelConfig) PersonaConfig(t PersonaType) PersonaDefaults {
 	switch t {
 	case PersonaOrchestrator:
 		return PersonaDefaults{
-			MaxToolRounds: 40, // research needs many rounds
-			MaxTokens:     8192,
+			MaxToolRounds: 0, // 0 = unlimited, let the model work until done
+			MaxTokens:     16384,
 			Temperature:   0.7,
 		}
 	case PersonaWeb:
