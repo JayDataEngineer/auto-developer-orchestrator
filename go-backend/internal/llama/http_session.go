@@ -28,6 +28,9 @@ type Session struct {
 	mu     sync.Mutex
 	closed bool
 
+	// Per-session thinking budget override (0 = use global default)
+	thinkingBudget int
+
 	// Token count tracking
 	totalInputTokens  int
 	totalOutputTokens int
@@ -129,7 +132,10 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 		var reasoningBuf strings.Builder
 		tokenCount := 0
 		thinkingTokens := 0
-		thinkingBudget := cfg.ThinkingBudgetTokens
+		thinkingBudget := s.thinkingBudget
+		if thinkingBudget == 0 {
+			thinkingBudget = cfg.ThinkingBudgetTokens
+		}
 
 		err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool {
 			// Content delta
@@ -277,6 +283,11 @@ func (s *Session) SetMessages(messages []Message) {
 // SetTools updates the tool definitions for this session.
 func (s *Session) SetTools(tools []OpenAITool) {
 	s.tools = tools
+}
+
+// SetThinkingBudget sets a per-session thinking budget override.
+func (s *Session) SetThinkingBudget(tokens int) {
+	s.thinkingBudget = tokens
 }
 
 // GetTools returns the current tool definitions for this session.

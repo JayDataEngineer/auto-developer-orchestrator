@@ -39,7 +39,7 @@ func NewClient(endpoint string, logger *zap.Logger) *Client {
 	return &Client{
 		endpoint: endpoint,
 		httpClient: &http.Client{
-			Timeout: 45 * time.Second,
+			Timeout: 90 * time.Second, // MCP research can be slow (search + scrape)
 		},
 		logger: logger,
 		sem:    make(chan struct{}, 2), // max 2 concurrent MCP requests
@@ -249,15 +249,24 @@ func (c *Client) doRequest(ctx context.Context, req jsonRPCRequest) ([]byte, htt
 	return respBody, resp.Header, nil
 }
 
-// parseSSEData extracts JSON from an SSE response body.
-// Looks for "data: " lines and returns the first one as bytes.
+// parseSSEData extracts the JSON-RPC response from an SSE response body.
+// The MCP server may send multiple SSE events (progress notifications, then the result).
+// We need the event with matching "id" field, not the first data line.
 func parseSSEData(body []byte) []byte {
+	var lastData []byte
 	for _, line := range bytes.Split(body, []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if after, ok := bytes.CutPrefix(line, []byte("data: ")); ok {
-			return after
+			// Check if this is a JSON-RPC response (has "result" or "error" field)
+			if bytes.Contains(after, []byte(`"result":`)) || bytes.Contains(after, []byte(`"error":`)) {
+				return after
+			}
+			lastData = after
 		}
 	}
-	// No SSE data lines found — return raw body as fallback
+	// No JSON-RPC response found — return last data line as fallback
+	if lastData != nil {
+		return lastData
+	}
 	return body
 }

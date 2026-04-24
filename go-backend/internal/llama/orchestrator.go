@@ -344,12 +344,13 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 
 	// Create sub-agent AgentLoop (minimal KV cache — ephemeral, not persistent)
 	loopCfg := AgentLoopConfig{
-		SystemPrompt:  persona.SystemPrompt,
-		MaxToolRounds: persona.MaxToolRounds,
-		MaxTokens:     persona.MaxTokens,
-		ContextSize:   cfg.SubAgentContextSize, // 8K — much smaller than orchestrator's 32K
-		Tools:         PersonaOpenAITools(personaType),
-		Compaction:    SubAgentCompactionConfig(),
+		SystemPrompt:   persona.SystemPrompt,
+		MaxToolRounds:  persona.MaxToolRounds,
+		MaxTokens:      persona.MaxTokens,
+		ContextSize:    cfg.SubAgentContextSize, // 16K — research sub-agents need room for large scrape results
+		ThinkingBudget: 2048,                    // Cap thinking so sub-agents don't generate 10K thinking tokens
+		Tools:          PersonaOpenAITools(personaType),
+		Compaction:     SubAgentCompactionConfig(),
 		Opts: GenerateOptions{
 			MaxTokens:   persona.MaxTokens,
 			Temperature: persona.Temperature,
@@ -383,7 +384,11 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 		close(done)
 	}()
 
-	err = subLoop.Run(ctx, task, subEvents)
+	// Run sub-agent with its own timeout (sub-agents shouldn't run forever)
+	subCtx, subCancel := context.WithTimeout(ctx, 120*time.Second)
+	defer subCancel()
+
+	err = subLoop.Run(subCtx, task, subEvents)
 	close(subEvents) // Signal the forwarding goroutine to finish
 	<-done // Wait for event forwarding to complete
 
@@ -550,7 +555,7 @@ func (e *OrchestratorExecutor) createPlan(ctx context.Context, args map[string]i
 				return map[string]interface{}{
 					"stepCount": len(steps),
 					"approved":  true,
-					"next":      "Plan approved. Now call delegate_to for step 1. Pick the right persona: web, code, or desktop.",
+					"next":      "Plan approved. Execute steps directly using your tools (mcp_call, bash, browse_to). Only delegate if a step needs isolated execution.",
 				}, nil
 			}
 			return nil, fmt.Errorf("<tool_use_error>Plan was denied. User says: %s. Revise the plan and call create_plan again with updated steps.</tool_use_error>", resp.Message)
@@ -561,7 +566,7 @@ func (e *OrchestratorExecutor) createPlan(ctx context.Context, args map[string]i
 
 	return map[string]interface{}{
 		"stepCount": len(steps),
-		"next":      "Now call delegate_to for step 1. Pick the right persona: web, code, or desktop.",
+		"next":      "Plan created. Execute steps directly using your tools (mcp_call, bash, browse_to). Only delegate if a step needs isolated execution.",
 	}, nil
 }
 

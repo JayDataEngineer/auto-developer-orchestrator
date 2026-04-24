@@ -770,13 +770,14 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 
 // AgentLoopConfig holds configuration for the agent loop.
 type AgentLoopConfig struct {
-	SystemPrompt  string
-	MaxToolRounds int           // Maximum tool call rounds before forcing end (default: 20)
-	MaxTokens     int           // Max tokens per generation (default: 4096)
-	ContextSize   int           // KV cache context size (default from ModelConfig: 32K)
-	Tools         []OpenAITool  // Tool definitions for native tool calling
-	Opts          GenerateOptions
-	Compaction    CompactionConfig // zero-value disables compaction
+	SystemPrompt   string
+	MaxToolRounds  int           // Maximum tool call rounds before forcing end (default: 20)
+	MaxTokens      int           // Max tokens per generation (default: 4096)
+	ContextSize    int           // KV cache context size (default from ModelConfig: 32K)
+	ThinkingBudget int           // Max thinking tokens per turn (0 = use global default from ModelConfig)
+	Tools          []OpenAITool  // Tool definitions for native tool calling
+	Opts           GenerateOptions
+	Compaction     CompactionConfig // zero-value disables compaction
 }
 
 // DefaultAgentLoopConfig returns sensible defaults from ModelConfig.
@@ -827,6 +828,11 @@ func NewAgentLoop(engine *HTTPEngine, executor ToolExecutor, cfg AgentLoopConfig
 	// Set tool definitions on session
 	if len(cfg.Tools) > 0 {
 		session.SetTools(cfg.Tools)
+	}
+
+	// Set thinking budget override (sub-agents get a lower budget)
+	if cfg.ThinkingBudget > 0 {
+		session.SetThinkingBudget(cfg.ThinkingBudget)
 	}
 
 	if logger == nil {
