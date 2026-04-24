@@ -48,7 +48,7 @@
     "qwen36-27b": {
       "name": "Qwen 3.6 27B (dense, IQ4_NL, 16GB + mmproj in RAM)",
       "llm": "Qwen3.6-27B-IQ4_NL.gguf",
-      "mmproj": "mmproj-BF16.gguf",
+      "mmproj": "Qwen3.6-27B-mmproj-BF16.gguf",
       "alias": "qwen3.6-27b",
       "ctx_size": 131072,
       "thinking": true,
