@@ -57,7 +57,7 @@ func NewOrchestratorLoop(
 	}
 
 	artifacts := NewArtifactRegistry()
-	persona := NewPersona(PersonaOrchestrator, personaCfg)
+	persona := NewOrchestratorPersona(personaCfg)
 
 	ctxSize := ocfg.ContextSize
 	if ctxSize == 0 {
@@ -229,7 +229,7 @@ type OrchestratorExecutor struct {
 // asyncDelegateResult holds the result of an async delegate_to call.
 type asyncDelegateResult struct {
 	taskID     string
-	persona    PersonaType
+	taskSlug   string
 	artifactID string
 	output     string
 	err        error
@@ -268,23 +268,24 @@ func (e *OrchestratorExecutor) Execute(ctx context.Context, toolName string, arg
 	}
 }
 
-// delegate runs a sub-agent synchronously:
-// 1. Create a new AgentLoop with the target persona's prompt and tool whitelist (minimal KV cache)
-// 2. Run it with the task prompt
-// 3. Collect the final output as an Artifact
-// 4. Close the sub-agent session (free VRAM immediately)
-// 5. Return the artifact summary to the orchestrator
+// delegate runs a sub-agent synchronously with dynamic instructions and tools:
+// 1. Parse task, instructions, tools from the orchestrator's call
+// 2. Build a custom system prompt from the instructions + tool reference
+// 3. Create a new AgentLoop with the selected tools (minimal KV cache)
+// 4. Run it with the task prompt
+// 5. Collect the final output as an Artifact
+// 6. Close the sub-agent session (free VRAM immediately)
 func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-	personaName, _ := args["persona"].(string)
-	// Accept "task" or common aliases "step", "step_description"
 	task, _ := args["task"].(string)
+	instructions, _ := args["instructions"].(string)
+
+	// Also accept "step" or "step_description" as aliases for "task"
 	if task == "" {
 		task, _ = args["step"].(string)
 	}
 	if task == "" {
 		task, _ = args["step_description"].(string)
 	}
-	// If "step" was sent as a number, look up the plan step text at that index
 	if task == "" {
 		if stepNum, ok := args["step"].(float64); ok {
 			e.mu.Lock()
@@ -297,24 +298,60 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 			e.mu.Unlock()
 		}
 	}
-	if personaName == "" {
-		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'persona'. Valid options: web, code, desktop, mcp. Example: delegate_to{\"persona\":\"web\",\"task\":\"your task\"}</tool_use_error>")
+
+	// Parse tool names
+	var toolNames []string
+	if toolsRaw, ok := args["tools"].([]interface{}); ok {
+		for _, t := range toolsRaw {
+			if name, ok := t.(string); ok {
+				toolNames = append(toolNames, name)
+			}
+		}
 	}
+
+	// Validate required fields
 	if task == "" {
-		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'task'. Example: delegate_to{\"persona\":\"web\",\"task\":\"Go to URL and fill form\"}</tool_use_error>")
+		return nil, fmt.Errorf("<tool_use_error>Missing 'task'. Example: delegate_to{\"task\":\"Search prices\",\"instructions\":\"You are a researcher...\",\"tools\":[\"mcp_call\",\"scrape\"]}</tool_use_error>")
+	}
+	if instructions == "" {
+		return nil, fmt.Errorf("<tool_use_error>Missing 'instructions'. Write specific instructions telling the sub-agent how to approach the task. Example: delegate_to{\"task\":\"Search prices\",\"instructions\":\"You are a researcher. Search 3 stores and compare.\",\"tools\":[\"mcp_call\"]}</tool_use_error>")
+	}
+	if len(toolNames) == 0 {
+		return nil, fmt.Errorf("<tool_use_error>Missing 'tools'. Select tools for the sub-agent. Example: delegate_to{\"task\":\"...\",\"instructions\":\"...\",\"tools\":[\"mcp_call\",\"scrape\",\"bash\"]}</tool_use_error>")
 	}
 
-	personaType := PersonaType(personaName)
-	persona := NewPersona(personaType, e.personaCfg)
-	if persona == nil {
-		return nil, fmt.Errorf("<tool_use_error>Unknown persona %q. Valid options: web, code, desktop, mcp. Example: delegate_to{\"persona\":\"web\",\"task\":\"your task\"}</tool_use_error>", personaName)
+	// Parse optional overrides
+	maxRounds := 15
+	if v, ok := args["max_rounds"].(float64); ok && v > 0 {
+		maxRounds = int(v)
+	}
+	thinkingBudget := 2048
+	if v, ok := args["thinking_budget"].(float64); ok && v > 0 {
+		thinkingBudget = int(v)
+	}
+	temperature := float32(0.4)
+	if v, ok := args["temperature"].(float64); ok {
+		temperature = float32(v)
 	}
 
-	subAgentID := fmt.Sprintf("sub-%s-%d", personaType, time.Now().UnixMilli())
+	// Build tool specs (validates names, always includes yield_artifact)
+	specs := SubAgentToolSpecs(toolNames)
+	if len(specs) <= 1 { // only yield_artifact
+		return nil, fmt.Errorf("<tool_use_error>No valid tools found in %v. Valid tool names: bash, file_read, file_write, file_edit, file_grep, file_glob, code_search, search_web, browse_to, click_element, type_text, read_page, observe, scroll_page, scrape, mcp_call, desktop_screenshot, desktop_click, desktop_type, desktop_key, image_read, http_request, wait</tool_use_error>", toolNames)
+	}
+
+	// Build sub-agent system prompt
+	toolsBlock := FormatToolList(specs)
+	systemPrompt := buildSubAgentPrompt(instructions, toolsBlock, e.personaCfg)
+
+	// Generate descriptive sub-agent ID
+	taskSlug := slugifyTask(task, 20)
+	subAgentID := fmt.Sprintf("sub-%s-%d", taskSlug, time.Now().UnixMilli())
 
 	e.logger.Info("ORCHESTRATOR: delegating to sub-agent",
-		zap.String("persona", string(personaType)),
+		zap.String("taskSlug", taskSlug),
 		zap.String("task", truncate(task, 80)),
+		zap.Int("toolCount", len(specs)),
 		zap.String("subAgentId", subAgentID),
 	)
 
@@ -328,39 +365,45 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 				ToolArgs: args,
 				Result: map[string]interface{}{
 					"subAgentId": subAgentID,
-					"persona":    string(personaType),
+					"taskSlug":   taskSlug,
 					"task":       task,
+					"tools":      toolNames,
 				},
 			},
 		})
 	}
 
-	// Create PersonaAwareExecutor wrapping the base SandboxToolExecutor
-	subExecutor := &PersonaAwareExecutor{
-		persona:      persona,
-		baseExecutor: e.baseExecutor,
-		logger:       e.logger,
+	// Create ToolWhitelistExecutor wrapping the base SandboxToolExecutor
+	whitelist := make([]string, len(specs))
+	for i, s := range specs {
+		whitelist[i] = s.Name
+	}
+	subExecutor := &ToolWhitelistExecutor{
+		toolWhitelist: whitelist,
+		baseExecutor:  e.baseExecutor,
+		logger:        e.logger,
 	}
 
 	// Create sub-agent AgentLoop (minimal KV cache — ephemeral, not persistent)
+	maxTokens := 4096
 	loopCfg := AgentLoopConfig{
-		SystemPrompt:   persona.SystemPrompt,
-		MaxToolRounds:  persona.MaxToolRounds,
-		MaxTokens:      persona.MaxTokens,
-		ContextSize:    cfg.SubAgentContextSize, // 16K — research sub-agents need room for large scrape results
-		ThinkingBudget: 2048,                    // Cap thinking so sub-agents don't generate 10K thinking tokens
-		Tools:          PersonaOpenAITools(personaType),
+		SystemPrompt:   systemPrompt,
+		MaxToolRounds:  maxRounds,
+		MaxTokens:      maxTokens,
+		ContextSize:    cfg.SubAgentContextSize,
+		ThinkingBudget: thinkingBudget,
+		Tools:          ToOpenAITools(specs),
 		Compaction:     SubAgentCompactionConfig(),
 		Opts: GenerateOptions{
-			MaxTokens:   persona.MaxTokens,
-			Temperature: persona.Temperature,
+			MaxTokens:   maxTokens,
+			Temperature: temperature,
 			TopP:        cfg.TopP,
 			TopK:        cfg.TopK,
 		},
 	}
 	subLoop, err := NewAgentLoop(e.engine, subExecutor, loopCfg, e.logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create sub-agent %s: %w", personaType, err)
+		return nil, fmt.Errorf("failed to create sub-agent: %w", err)
 	}
 	defer subLoop.Close() // Free VRAM when done
 
@@ -372,11 +415,9 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 	done := make(chan error, 1)
 	go func() {
 		for evt := range subEvents {
-			// Forward to orchestrator's subscriber (which goes to SSE)
 			if e.subscriber != nil {
 				sendEvent(e.subscriber, evt)
 			}
-			// Accumulate text output
 			if evt.Type == EventTypeTextDelta {
 				subOutput.WriteString(evt.Data.Text)
 			}
@@ -389,8 +430,8 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 	defer subCancel()
 
 	err = subLoop.Run(subCtx, task, subEvents)
-	close(subEvents) // Signal the forwarding goroutine to finish
-	<-done // Wait for event forwarding to complete
+	close(subEvents)
+	<-done
 
 	// Build result
 	output := subOutput.String()
@@ -403,7 +444,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 				ToolID: subAgentID,
 				Result: map[string]interface{}{
 					"subAgentId": subAgentID,
-					"persona":    string(personaType),
+					"taskSlug":   taskSlug,
 					"status":     "complete",
 					"outputLen":  len(output),
 				},
@@ -413,29 +454,26 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 
 	if err != nil {
 		e.logger.Error("ORCHESTRATOR: sub-agent failed",
-			zap.String("persona", string(personaType)),
+			zap.String("taskSlug", taskSlug),
 			zap.Error(err),
 		)
 		return map[string]interface{}{
 			"subAgentId": subAgentID,
-			"persona":    string(personaType),
+			"taskSlug":   taskSlug,
 			"status":     "failed",
 			"error":      err.Error(),
-			"suggestion": fmt.Sprintf(
-				"Consider: trying %s instead, simplifying the task, or breaking it into smaller steps.",
-				alternativePersona(personaType),
-			),
-		}, nil // Return as result, not error — orchestrator can retry or adapt
+			"suggestion": "Consider simplifying the task, writing more specific instructions, or selecting different tools.",
+		}, nil
 	}
 
 	// Create artifact from sub-agent output
 	artifact := &Artifact{
-		SourceID:  subAgentID,
-		Persona:   personaType,
-		Type:      persona.InferArtifactType(),
-		Title:     fmt.Sprintf("%s: %s", personaType, truncate(task, 60)),
-		Content:   output,
-		Metadata:  map[string]string{"task": task},
+		SourceID: subAgentID,
+		Source:   taskSlug,
+		Type:     ArtifactSummary,
+		Title:    fmt.Sprintf("%s: %s", taskSlug, truncate(task, 60)),
+		Content:  output,
+		Metadata: map[string]string{"task": task},
 	}
 	artID := e.artifacts.Create(artifact)
 
@@ -452,7 +490,7 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 	}
 
 	e.logger.Info("ORCHESTRATOR: sub-agent completed",
-		zap.String("persona", string(personaType)),
+		zap.String("taskSlug", taskSlug),
 		zap.String("artifactId", artID),
 		zap.Int("outputLen", len(output)),
 	)
@@ -460,10 +498,37 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 	return map[string]interface{}{
 		"artifactId": artID,
 		"subAgentId": subAgentID,
-		"persona":    string(personaType),
+		"taskSlug":   taskSlug,
 		"status":     "complete",
 		"output":     truncate(output, cfg.SynthesisMaxChars),
 	}, nil
+}
+
+// slugifyTask creates a short URL-safe slug from a task description.
+func slugifyTask(task string, maxLen int) string {
+	s := strings.ToLower(task)
+	s = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		return '-'
+	}, s)
+	// Collapse multiple dashes
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	if len(s) > maxLen {
+		s = s[:maxLen]
+		// Trim to last dash to avoid cutting mid-word
+		if idx := strings.LastIndex(s, "-"); idx > maxLen/2 {
+			s = s[:idx]
+		}
+	}
+	if s == "" {
+		s = "task"
+	}
+	return s
 }
 
 // createPlan creates a new execution plan.
@@ -504,7 +569,7 @@ func (e *OrchestratorExecutor) createPlan(ctx context.Context, args map[string]i
 
 	// Store plan as artifact
 	artifact := &Artifact{
-		Persona: PersonaOrchestrator,
+		Source:  "orchestrator",
 		Type:    ArtifactPlan,
 		Title:   "Execution Plan",
 		Content: plan.ToContent(),
@@ -782,27 +847,12 @@ func (e *OrchestratorExecutor) updateMemory(args map[string]interface{}) (interf
 	}, nil
 }
 
-// alternativePersona suggests a different persona when one fails.
-func alternativePersona(failed PersonaType) string {
-	alternatives := map[PersonaType]string{
-		PersonaWeb:      "desktop (for browser automation), code (for API/scripting), or mcp (for research)",
-		PersonaCode:     "desktop (for GUI-based tools), web (for web-based solutions), or mcp (for research)",
-		PersonaDesktop:  "code (for CLI-based approach), web (for web-based approach), or mcp (for research)",
-		PersonaMCP:      "web (for browser automation) or code (for scripting)",
-		PersonaResearch: "mcp (for simpler research) or web (for browser-based research)",
-	}
-	if alt, ok := alternatives[failed]; ok {
-		return alt
-	}
-	return "a different persona"
-}
-
 // delegateAsync launches a sub-agent in the background and returns immediately.
 // The caller should use collect_results to wait for completion.
 func (e *OrchestratorExecutor) delegateAsync(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
-		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'task_id'. Example: delegate_async{\"persona\":\"web\",\"task\":\"search prices\",\"task_id\":\"price-search\"}</tool_use_error>")
+		return nil, fmt.Errorf("<tool_use_error>Missing required parameter 'task_id'. Example: delegate_async{\"task\":\"search prices\",\"instructions\":\"You are a researcher...\",\"tools\":[\"mcp_call\"],\"task_id\":\"price-search\"}</tool_use_error>")
 	}
 
 	// Initialize async tracking
@@ -825,7 +875,7 @@ func (e *OrchestratorExecutor) delegateAsync(ctx context.Context, args map[strin
 
 		e.asyncMu.Lock()
 		output := ""
-		var artifactID string
+		var artifactID, taskSlug string
 		if err == nil && result != nil {
 			if m, ok := result.(map[string]interface{}); ok {
 				if o, ok := m["output"].(string); ok {
@@ -834,12 +884,14 @@ func (e *OrchestratorExecutor) delegateAsync(ctx context.Context, args map[strin
 				if a, ok := m["artifactId"].(string); ok {
 					artifactID = a
 				}
+				if s, ok := m["taskSlug"].(string); ok {
+					taskSlug = s
+				}
 			}
 		}
-		personaName, _ := args["persona"].(string)
 		e.asyncTasks[taskID] = &asyncDelegateResult{
 			taskID:     taskID,
-			persona:    PersonaType(personaName),
+			taskSlug:   taskSlug,
 			artifactID: artifactID,
 			output:     output,
 			err:        err,
@@ -881,9 +933,9 @@ func (e *OrchestratorExecutor) collectResults(ctx context.Context) (interface{},
 			out := make(map[string]interface{})
 			for id, r := range results {
 				entry := map[string]interface{}{
-					"taskId":  r.taskID,
-					"persona": string(r.persona),
-					"status":  "complete",
+					"taskId":   r.taskID,
+					"taskSlug": r.taskSlug,
+					"status":   "complete",
 				}
 				if r.err != nil {
 					entry["status"] = "failed"
@@ -919,18 +971,18 @@ func (e *OrchestratorExecutor) collectResults(ctx context.Context) (interface{},
 	}
 }
 
-// ── PersonaAwareExecutor ─────────────────────────────────────────────
+// ── ToolWhitelistExecutor ────────────────────────────────────────────
 
-// PersonaAwareExecutor wraps a ToolExecutor and enforces the persona's tool whitelist.
-// If the model calls a tool not in its persona's list, an error is returned.
-type PersonaAwareExecutor struct {
-	persona      *Persona
-	baseExecutor ToolExecutor
-	logger       *zap.Logger
+// ToolWhitelistExecutor wraps a ToolExecutor and enforces a dynamic tool whitelist.
+// Used by sub-agents created via delegate_to — the orchestrator picks the tool set.
+type ToolWhitelistExecutor struct {
+	toolWhitelist []string
+	baseExecutor  ToolExecutor
+	logger        *zap.Logger
 }
 
-// Execute checks the persona's tool whitelist before delegating to the base executor.
-func (e *PersonaAwareExecutor) Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
+// Execute checks the tool whitelist before delegating to the base executor.
+func (e *ToolWhitelistExecutor) Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
 	// Normalize tool name (handle common aliases)
 	normalized := normalizeToolName(toolName, args)
 
@@ -945,19 +997,20 @@ func (e *PersonaAwareExecutor) Execute(ctx context.Context, toolName string, arg
 	}
 
 	// Check whitelist
-	if !e.persona.HasTool(normalized) {
-		e.logger.Error("Persona whitelist rejection",
-			zap.String("original", toolName),
-			zap.String("normalized", normalized),
-			zap.String("persona", string(e.persona.Type)),
-			zap.Int("toolListLen", len(e.persona.Tools)),
-		)
-		return nil, fmt.Errorf(
-			"[SYSTEM: Tool %q is not available for %s persona. Available tools: %v. Use only the tools listed above.]",
-			toolName, e.persona.Type, e.persona.Tools,
-		)
+	for _, allowed := range e.toolWhitelist {
+		if normalized == allowed {
+			return e.baseExecutor.Execute(ctx, normalized, args)
+		}
 	}
 
-	return e.baseExecutor.Execute(ctx, normalized, args)
+	e.logger.Error("Tool whitelist rejection",
+		zap.String("original", toolName),
+		zap.String("normalized", normalized),
+		zap.Int("whitelistLen", len(e.toolWhitelist)),
+	)
+	return nil, fmt.Errorf(
+		"[SYSTEM: Tool %q is not available. Available tools: %v. Use only the tools listed above.]",
+		toolName, e.toolWhitelist,
+	)
 }
 

@@ -246,18 +246,18 @@ var allTools = []ToolSpec{
 	{
 		Name:             "delegate_to",
 		Category:         CategoryOrchestration,
-		Description:      "assign a task to a sub-agent",
-		Schema:           `{"persona": "web", "task": "Search for the price of a Raspberry Pi"}`,
-		Returns:          `Personas: "web" (search/browse), "code" (bash/coding), "desktop" (browser automation), "research" (deep web research)`,
-		ParametersSchema: `{"type":"object","properties":{"persona":{"type":"string","description":"Sub-agent persona: web, code, desktop, or research","enum":["web","code","desktop","research"]},"task":{"type":"string","description":"Task description for the sub-agent"}},"required":["persona","task"]}`,
+		Description:      "spawn a focused sub-agent with custom instructions and selected tools",
+		Schema:           `{"task": "Search for Raspberry Pi prices", "instructions": "You are a price researcher. Search each store, record prices, summarize in a table.", "tools": ["mcp_call", "scrape", "search_web"]}`,
+		Returns:          `Returns the sub-agent's output as an artifact. The sub-agent runs in an isolated context with only the tools you specify.`,
+		ParametersSchema: `{"type":"object","properties":{"task":{"type":"string","description":"What the sub-agent should accomplish"},"instructions":{"type":"string","description":"Custom system prompt for this sub-agent. Write focused instructions that tell the sub-agent exactly how to approach the task."},"tools":{"type":"array","items":{"type":"string"},"description":"Tool names to give the sub-agent"},"max_rounds":{"type":"integer","description":"Max tool rounds (default: 15)"},"thinking_budget":{"type":"integer","description":"Max thinking tokens per turn (default: 2048)"},"temperature":{"type":"number","description":"Temperature for generation (default: 0.4)"}},"required":["task","instructions","tools"]}`,
 	},
 	{
 		Name:             "delegate_async",
 		Category:         CategoryOrchestration,
 		Description:      "launch a sub-agent task in the background (returns immediately)",
-		Schema:           `{"persona": "web", "task": "Search for prices", "task_id": "price-search"}`,
+		Schema:           `{"task": "Search for prices", "instructions": "You are a price researcher...", "tools": ["mcp_call", "scrape"], "task_id": "price-search"}`,
 		Returns:          `Returns task_id immediately. Call collect_results to wait for all async tasks.`,
-		ParametersSchema: `{"type":"object","properties":{"persona":{"type":"string","description":"Sub-agent persona","enum":["web","code","desktop","research"]},"task":{"type":"string","description":"Task description for the sub-agent"},"task_id":{"type":"string","description":"Unique identifier for this async task"}},"required":["persona","task","task_id"]}`,
+		ParametersSchema: `{"type":"object","properties":{"task":{"type":"string","description":"What the sub-agent should accomplish"},"instructions":{"type":"string","description":"Custom system prompt for this sub-agent"},"tools":{"type":"array","items":{"type":"string"},"description":"Tool names to give the sub-agent"},"task_id":{"type":"string","description":"Unique identifier for this async task"},"max_rounds":{"type":"integer","description":"Max tool rounds (default: 15)"},"thinking_budget":{"type":"integer","description":"Max thinking tokens per turn (default: 2048)"},"temperature":{"type":"number","description":"Temperature for generation (default: 0.4)"}},"required":["task","instructions","tools","task_id"]}`,
 	},
 	{
 		Name:             "collect_results",
@@ -358,6 +358,29 @@ func ToolsByNames(names []string) []ToolSpec {
 	return specs
 }
 
+// SubAgentToolSpecs returns ToolSpecs for the given tool names, always including yield_artifact.
+// Used by delegate_to to build the sub-agent's tool set. Unknown names are silently skipped.
+func SubAgentToolSpecs(names []string) []ToolSpec {
+	seen := make(map[string]bool, len(names)+1)
+	var result []ToolSpec
+
+	// Always include yield_artifact
+	result = append(result, *LookupTool("yield_artifact"))
+	seen["yield_artifact"] = true
+
+	for _, n := range names {
+		if seen[n] {
+			continue
+		}
+		if s := LookupTool(n); s != nil && s.Category != CategoryOrchestration {
+			// Sub-agents cannot use orchestration tools (delegate_to, create_plan, etc.)
+			result = append(result, *s)
+			seen[n] = true
+		}
+	}
+	return result
+}
+
 // FormatToolList renders a list of ToolSpecs as the prompt block:
 //
 //	## tool_name — description
@@ -380,13 +403,11 @@ func FormatToolList(specs []ToolSpec) string {
 }
 
 // PersonaToolNames returns the default tool whitelist for a persona type.
-// This replaces the hardcoded tool lists in persona.go.
+// Only PersonaOrchestrator has a whitelist — sub-agents get dynamic tool sets via delegate_to.
 func PersonaToolNames(t PersonaType) []string {
 	switch t {
 	case PersonaOrchestrator:
 		// The orchestrator IS the unified agent — has ALL tools.
-		// delegate_to is available but not the default; the orchestrator
-		// handles most tasks directly with bash/browse/click/desktop tools.
 		return []string{
 			// Execution
 			"bash",
@@ -401,22 +422,11 @@ func PersonaToolNames(t PersonaType) []string {
 			// Desktop
 			"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act",
 			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key",
-			// Orchestration (optional — for complex multi-step tasks)
+			// Orchestration
 			"delegate_to", "delegate_async", "collect_results", "create_plan", "update_plan", "clarify", "synthesize",
 			// Meta
 			"update_memory", "wait", "ask_user",
 		}
-	case PersonaWeb:
-		return []string{"search_web", "browse_to", "click_element", "type_text", "read_page", "observe", "scroll_page", "scrape", "bash", "file_read", "file_grep", "file_glob", "wait", "yield_artifact"}
-	case PersonaCode:
-		return []string{"bash", "file_read", "file_write", "file_edit", "file_grep", "file_glob", "code_search", "wait", "yield_artifact"}
-	case PersonaDesktop:
-		return []string{"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act",
-			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key", "bash", "wait", "yield_artifact"}
-	case PersonaMCP:
-		return []string{"mcp_call", "wait", "yield_artifact"}
-	case PersonaResearch:
-		return []string{"mcp_call", "search_web", "scrape", "bash", "file_read", "file_grep", "file_glob", "wait", "yield_artifact"}
 	default:
 		return nil
 	}
@@ -428,7 +438,7 @@ func PersonaToolSpecs(t PersonaType) []ToolSpec {
 }
 
 // PersonaExamples returns few-shot examples for a persona type.
-// Critical for the 26B model — it learns tool format from these.
+// Only the orchestrator has examples — sub-agents learn from their custom instructions.
 func PersonaExamples(t PersonaType) []Example {
 	switch t {
 	case PersonaOrchestrator:
@@ -475,88 +485,13 @@ desktop_click{"x":500,"y":300}
 → Clicked at (500, 300).`,
 			},
 			{
-				Title: "Complex multi-step task (delegate to sub-agent)",
-				Content: `create_plan{"steps":["Research topic online","Write a script about it","Test the script"]}
-delegate_to{"persona":"web","task":"Search for 'golang concurrency patterns' and summarize the top 3 results"}
+				Title: "Delegate to a sub-agent with custom instructions",
+				Content: `create_plan{"steps":["Research golang concurrency","Write demo script","Test it"]}
+delegate_to{"task":"Research golang concurrency patterns","instructions":"Search for golang concurrency patterns. For each pattern (goroutines, channels, select, sync.WaitGroup), find a code example and explain it. Cite sources.","tools":["mcp_call","scrape","search_web"]}
 update_plan{"step_index":0,"status":"done","note":"Research complete: goroutines, channels, select"}
-delegate_to{"persona":"code","task":"Write a Go script demonstrating goroutines and channels based on: goroutines are lightweight threads, channels are typed conduits"}
+delegate_to{"task":"Write a Go script demonstrating goroutines and channels","instructions":"Write a Go script that demonstrates goroutines launching concurrent tasks, channels for communication, and select for multiplexing. Include comments explaining each pattern.","tools":["bash","file_write","file_read"]}
 update_plan{"step_index":1,"status":"done"}
 synthesize{"conclusion":"Research and script complete."}`,
-			},
-		}
-	case PersonaWeb:
-		return []Example{
-			{
-				Title: "Search and browse",
-				Content: `search_web{"query":"weather in Tokyo"}
-→ Returns search results with links
-
-browse_to{"url":"https://www.google.com"}
-→ Returns elements like [6] <textarea> "q"
-
-type_text{"element":6, "text":"cats", "submit":true}
-→ Types "cats" and presses Enter
-
-read_page{}
-→ Returns updated page with results`,
-			},
-			{
-				Title: "Click a link",
-				Content: `read_page{} → see [3] <a> "Click here"
-click_element{"element":3}`,
-			},
-		}
-	case PersonaCode:
-		return []Example{
-			{
-				Title: "Create and verify a file",
-				Content: `bash{"command":"echo 'hello' > /sandbox/workspace/test.txt"}
-bash{"command":"cat /sandbox/workspace/test.txt"}`,
-			},
-		}
-	case PersonaDesktop:
-		return []Example{
-			{
-				Title: "Enable desktop and navigate",
-				Content: `computer_use_enable{}
-computer_use_screenshot{}
-computer_use_act{"action":"navigate","url":"https://example.com"}
-computer_use_snapshot{}
-→ Returns [3] <a> "More information"
-computer_use_act{"action":"click","element":3}`,
-			},
-		}
-	case PersonaMCP:
-		return []Example{
-			{
-				Title: "Research a topic",
-				Content: `mcp_call{"tool":"research","arguments":{"query":"golang concurrency patterns","max_results":3}}
-→ Returns search results with page content
-
-yield_artifact{"output":"Key patterns: goroutines, channels, select"}`,
-			},
-			{
-				Title: "Scrape and extract structured data",
-				Content: `mcp_call{"tool":"scrape","arguments":{"url":"https://example.com"}}
-→ Returns clean markdown
-
-mcp_call{"tool":"extract","arguments":{"url":"https://example.com/products","schema_type":"ecommerce"}}
-→ Returns structured JSON with products
-
-yield_artifact{"output":"Scraped content and extracted 5 products"}`,
-			},
-		}
-	case PersonaResearch:
-		return []Example{
-			{
-				Title: "Research a topic",
-				Content: `mcp_call{"tool":"research","arguments":{"query":"fusion energy breakthroughs 2025","max_results":3}}
-→ Returns 3 results with full page content
-
-mcp_call{"tool":"research","arguments":{"query":"fusion reactor cost economics","max_results":3}}
-→ Second query targeting a different angle
-
-yield_artifact{"output":"# Fusion Energy Report\n## Summary\n...\n## Sources\n- ..."}`,
 			},
 		}
 	default:

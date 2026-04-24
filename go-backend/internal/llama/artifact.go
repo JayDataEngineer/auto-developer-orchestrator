@@ -23,7 +23,7 @@ type Artifact struct {
 	ID        string            `json:"id"`
 	ParentID  string            `json:"parentId"`            // orchestrator agent ID
 	SourceID  string            `json:"sourceId"`            // sub-agent ID that produced it
-	Persona   PersonaType       `json:"persona"`             // which persona created it
+	Source    string            `json:"source"`              // which source created it ("orchestrator" or task slug)
 	Type      ArtifactType      `json:"type"`                // data, code, summary, file, plan
 	Title     string            `json:"title"`               // human-readable title
 	Content   string            `json:"content"`             // text content or serialized data

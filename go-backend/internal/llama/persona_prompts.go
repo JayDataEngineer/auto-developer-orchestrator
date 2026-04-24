@@ -7,8 +7,7 @@ import (
 	"strings"
 )
 
-// buildPersonaPrompt builds a system prompt for any persona using the template + tool registry.
-// This is the single entry point — all four personas go through here.
+// buildPersonaPrompt builds the system prompt for the orchestrator using its template.
 func buildPersonaPrompt(t PersonaType, pcfg PersonaConfig) string {
 	sandboxID := pcfg.SandboxID
 	if sandboxID == "" {
@@ -20,19 +19,16 @@ func buildPersonaPrompt(t PersonaType, pcfg PersonaConfig) string {
 	toolsBlock := FormatToolList(specs)
 	examples := PersonaExamples(t)
 
-	// Map persona type to template name
-	tmplName := personaTemplateName(t)
-
 	data := PromptData{
 		SandboxID: sandboxID,
 		Tools:     toolsBlock,
 		Examples:  examples,
 	}
 
-	prompt, err := RenderTemplate(tmplName, data)
+	prompt, err := RenderTemplate("orchestrator", data)
 	if err != nil {
 		// Fall back to a minimal prompt rather than crashing
-		return fmt.Sprintf("You are Pi's %s agent. Tools: %s", t, toolsBlock)
+		return fmt.Sprintf("You are Pux, an autonomous agent. Tools: %s", toolsBlock)
 	}
 
 	// Append AGENTS.md project context if present (like CLAUDE.md for Claude Code)
@@ -45,6 +41,24 @@ func buildPersonaPrompt(t PersonaType, pcfg PersonaConfig) string {
 	}
 
 	return prompt
+}
+
+// buildSubAgentPrompt builds the system prompt for a dynamically-created sub-agent.
+// The orchestrator writes the instructions; we add the tool reference and sandbox info.
+func buildSubAgentPrompt(instructions string, toolsBlock string, pcfg PersonaConfig) string {
+	sandboxID := pcfg.SandboxID
+	if sandboxID == "" {
+		sandboxID = "sandbox-" + filepath.Base(pcfg.ProjectDir)
+	}
+
+	var b strings.Builder
+	b.WriteString(instructions)
+	b.WriteString("\n\n# Tools\n\n")
+	b.WriteString(toolsBlock)
+	b.WriteString("\n\nSandbox ID: ")
+	b.WriteString(sandboxID)
+
+	return b.String()
 }
 
 // readProjectContextFile reads a project-level context file (AGENTS.md, CLAUDE.md)
@@ -72,24 +86,4 @@ func readProjectContextFile(projectDir, filename string) string {
 		}
 	}
 	return ""
-}
-
-// personaTemplateName maps PersonaType to the short template filename (without path/extension).
-func personaTemplateName(t PersonaType) string {
-	switch t {
-	case PersonaOrchestrator:
-		return "orchestrator"
-	case PersonaWeb:
-		return "web"
-	case PersonaCode:
-		return "code"
-	case PersonaDesktop:
-		return "desktop"
-	case PersonaMCP:
-		return "mcp"
-	case PersonaResearch:
-		return "research"
-	default:
-		return "code" // fallback for unknown personas
-	}
 }

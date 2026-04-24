@@ -111,58 +111,19 @@ func GetModelConfig() ModelConfig {
 	return cfg
 }
 
-// PersonaDefaults returns per-persona overrides on top of the base ModelConfig.
-// Temperatures are persona-specific: code needs precision, orchestrator needs creativity.
+// PersonaDefaults returns the generation defaults for the orchestrator.
+// Sub-agents get their defaults from delegate_to args, not from here.
 type PersonaDefaults struct {
 	MaxToolRounds int
 	MaxTokens     int
 	Temperature   float32
 }
 
-// PersonaConfig returns the generation defaults for a given persona type.
-func (c ModelConfig) PersonaConfig(t PersonaType) PersonaDefaults {
-	switch t {
-	case PersonaOrchestrator:
-		return PersonaDefaults{
-			MaxToolRounds: 0, // 0 = unlimited, let the model work until done
-			MaxTokens:     16384,
-			Temperature:   0.7,
-		}
-	case PersonaWeb:
-		return PersonaDefaults{
-			MaxToolRounds: c.DefaultMaxToolRounds,
-			MaxTokens:     2048,
-			Temperature:   0.4, // focused for search/browse tasks
-		}
-	case PersonaCode:
-		return PersonaDefaults{
-			MaxToolRounds: c.DefaultMaxToolRounds,
-			MaxTokens:     2048,
-			Temperature:   0.3, // precise for code execution
-		}
-	case PersonaDesktop:
-		return PersonaDefaults{
-			MaxToolRounds: c.BrowserMaxToolRounds, // desktop needs many rounds
-			MaxTokens:     2048,
-			Temperature:   0.4,
-		}
-	case PersonaMCP:
-		return PersonaDefaults{
-			MaxToolRounds: c.DefaultMaxToolRounds,
-			MaxTokens:     4096, // MCP results can be large
-			Temperature:   0.3,  // precise for structured data
-		}
-	case PersonaResearch:
-		return PersonaDefaults{
-			MaxToolRounds: 15, // Enough for 5 queries + synthesis, not infinite
-			MaxTokens:     8192, // Long reports with citations
-			Temperature:   0.4,  // Factual, not creative
-		}
-	default:
-		return PersonaDefaults{
-			MaxToolRounds: c.DefaultMaxToolRounds,
-			MaxTokens:     c.MaxTokens,
-			Temperature:   c.Temperature,
-		}
+// OrchestratorDefaults returns the generation defaults for the orchestrator persona.
+func (c ModelConfig) OrchestratorDefaults() PersonaDefaults {
+	return PersonaDefaults{
+		MaxToolRounds: 0, // 0 = unlimited, let the model work until done
+		MaxTokens:     16384,
+		Temperature:   0.7,
 	}
 }

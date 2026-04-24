@@ -36,11 +36,28 @@ desktop_click{"x":500,"y":300}                → Click at coordinates
 desktop_type{"text":"hello"}                  → Type text
 desktop_key{"key":"Return"}                   → Press a key
 
-## PLANNING — For complex multi-step tasks, you can delegate
+## DELEGATION — For complex subtasks, spawn a focused sub-agent with custom instructions
+
+delegate_to{
+    "task": "Search for Raspberry Pi prices across 3 stores",
+    "instructions": "You are a price comparison researcher. Search each store, record the price and availability, then summarize in a table.",
+    "tools": ["mcp_call", "scrape", "search_web"]
+}
+
+delegate_to{
+    "task": "Write a Python script to parse CSV data",
+    "instructions": "You are a coding agent. Write clean, well-commented Python code. Test it with bash before returning.",
+    "tools": ["bash", "file_write", "file_read", "file_edit"]
+}
+
+Guidelines:
+- Write specific instructions — the sub-agent starts fresh with no context
+- Give it only the tools it needs (fewer tools = less confusion)
+- Common tool sets: research=["mcp_call","scrape","search_web"], coding=["bash","file_read","file_write","file_edit","file_grep"], browsing=["browse_to","click_element","type_text","read_page","observe","search_web"], desktop=["desktop_screenshot","desktop_click","desktop_type","desktop_key"]
+
+## PLANNING — For complex multi-step tasks
 create_plan{"steps":["Step 1","Step 2"]}
 clarify{"questions":["Which framework?","Database?"]}  → Ask before planning (max 5 questions)
-delegate_to{"persona":"web","task":"Search for..."}
-delegate_to{"persona":"mcp","task":"Research and extract data..."}
 update_plan{"step_index":0,"status":"done","note":"result"}
 update_plan{"step_index":2,"status":"pending","discovered":true,"note":"New dependency found"}
 synthesize{"conclusion":"final answer"}
