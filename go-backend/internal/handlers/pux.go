@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/approval"
+	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
@@ -75,6 +76,15 @@ func (h *PuxHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *san
 // SetGeminiEngine configures the optional Gemini cloud engine.
 func (h *PuxHandler) SetGeminiEngine(engine *llamaeng.HTTPEngine) {
 	h.geminiEngine = engine
+}
+
+// SetSandboxOnly wires sandbox manager + computer use without a local LLM engine.
+// Used in cloud-only mode (OpenRouter, Gemini) when llama-server is off.
+func (h *PuxHandler) SetSandboxOnly(sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
+	h.sandboxMgr = sandboxMgr
+	if cu != nil {
+		h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
+	}
 }
 
 // SetMCPClient configures the MCP research server client for search/scrape tools.
@@ -194,8 +204,24 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if a per-agent cloud engine is selected (OpenRouter, Gemini, etc.)
+	// This allows prompts to work even when local llama-server is off.
+	key := compositeAgentKey(projectPath, req.AgentId)
+	if selEngine, ok := h.selectedEngines[key]; ok && selEngine.IsLoaded() {
+		h.llamaEngine = selEngine
+	}
+
 	// Library-mode path: always use orchestrator + ephemeral sub-agents
 	if h.llamaEngine != nil && h.llamaEngine.IsLoaded() {
+		h.promptWithOrchestrator(w, r, req, projectPath)
+		return
+	}
+
+	// Try to bootstrap from settings.json (cloud providers)
+	if eng := h.engineFromSettings("openrouter", "deepseek/deepseek-v4-flash"); eng != nil {
+		h.llamaEngine = eng
+		h.selectedEngines[key] = eng
+		h.log.Info("Bootstrapped cloud engine (no local model)", zap.String("model", eng.ModelName()))
 		h.promptWithOrchestrator(w, r, req, projectPath)
 		return
 	}
@@ -203,7 +229,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	// No engine available
 	writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 		"success": false,
-		"error":   "Agent engine not available. Start llama-server first.",
+		"error":   "Agent engine not available. Start llama-server or configure a cloud provider.",
 	})
 }
 
@@ -391,13 +417,21 @@ func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string)
 	// Build base executor for sub-agents
 	var baseExecutor llamaeng.ToolExecutor
 	if h.sandboxMgr != nil {
+		// Nil-check cuBridge — it's only set via SetLlamaEngine which requires local model.
+		// Cloud-only mode (no llama-server) works without vision/browser.
+		var visionEnabled bool
+		var visionClient *browser.VisionClient
+		if h.cuBridge != nil && h.cuBridge.CU != nil {
+			visionEnabled = h.cuBridge.CU.VisionClient() != nil
+			visionClient = h.cuBridge.CU.VisionClient()
+		}
 		sandboxExec := &llamaeng.SandboxToolExecutor{
 			SandboxID:     sandboxID,
 			Manager:       h.sandboxMgr,
 			CU:            h.cuBridge,
 			Logger:        h.log,
-			VisionEnabled: h.cuBridge.CU.VisionClient() != nil,
-			Vision:        h.cuBridge.CU.VisionClient(),
+			VisionEnabled: visionEnabled,
+			Vision:        visionClient,
 			MCPClient:     h.mcpClient,
 			ApprovalMgr:   (*approvalManagerAdapter)(h.approvalMgr),
 		}
@@ -433,6 +467,9 @@ func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string)
 
 	// Wire project memory (MEMORY.md per project)
 	orch.SetMemory(llamaeng.NewProjectMemory(projectPath))
+
+	// Wire approval manager for plan approval when PlanApprovalEnabled
+	orch.SetApprovalManager((*approvalManagerAdapter)(h.approvalMgr))
 
 	h.orchestrators[key] = orch
 	h.log.Info("Created new orchestrator loop",

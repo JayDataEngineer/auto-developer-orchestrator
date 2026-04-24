@@ -128,6 +128,13 @@ func (o *OrchestratorLoop) Memory() *ProjectMemory {
 	return nil
 }
 
+// SetApprovalManager configures the approval manager for plan approval.
+func (o *OrchestratorLoop) SetApprovalManager(mgr ApprovalManager) {
+	if o.executor != nil {
+		o.executor.approvalMgr = mgr
+	}
+}
+
 // Run starts the orchestrator for a user prompt. Blocks until complete.
 // Events (including sub-agent events) are emitted to the subscriber channel.
 func (o *OrchestratorLoop) Run(ctx context.Context, userMsg string, subscriber chan<- AgentEvent) error {
@@ -208,6 +215,7 @@ type OrchestratorExecutor struct {
 	subscriber   chan<- AgentEvent
 	logger       *zap.Logger
 	memory       *ProjectMemory // optional: per-project persistent memory
+	approvalMgr  ApprovalManager // optional: for plan approval when PlanApprovalEnabled=true
 
 	mu   sync.Mutex
 	plan *Plan
@@ -239,9 +247,11 @@ func (e *OrchestratorExecutor) Execute(ctx context.Context, toolName string, arg
 	case "collect_results":
 		return e.collectResults(ctx)
 	case "create_plan":
-		return e.createPlan(args)
+		return e.createPlan(ctx, args)
 	case "update_plan":
-		return e.updatePlan(args)
+		return e.updatePlan(ctx, args)
+	case "clarify":
+		return e.clarify(ctx, args)
 	case "synthesize":
 		return e.synthesize(args)
 	case "update_memory":
@@ -452,7 +462,8 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 }
 
 // createPlan creates a new execution plan.
-func (e *OrchestratorExecutor) createPlan(args map[string]interface{}) (interface{}, error) {
+// When PlanApprovalEnabled is true, it pauses and waits for user approval before returning.
+func (e *OrchestratorExecutor) createPlan(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	stepsRaw, ok := args["steps"].([]interface{})
 	if !ok || len(stepsRaw) == 0 {
 		// Try parsing from a string (model may send as JSON string)
@@ -508,6 +519,46 @@ func (e *OrchestratorExecutor) createPlan(args map[string]interface{}) (interfac
 		})
 	}
 
+	// Plan approval gate — when enabled, pause and wait for user approval
+	if cfg.PlanApprovalEnabled && e.approvalMgr != nil {
+		requestID := fmt.Sprintf("plan-%d", time.Now().UnixMilli())
+		subscriber := SubscriberFromContext(ctx)
+
+		if subscriber != nil {
+			sendEvent(subscriber, AgentEvent{
+				Type: EventTypeApprovalRequest,
+				Data: AgentEventData{
+					ToolName: "create_plan",
+					ToolID:   requestID,
+					ToolArgs: args,
+					Result: map[string]interface{}{
+						"requestId": requestID,
+						"type":      "plan",
+						"steps":     steps,
+						"message":   "Plan created. Awaiting approval to proceed.",
+					},
+				},
+			})
+		}
+
+		respCh := e.approvalMgr.Register(requestID)
+		defer e.approvalMgr.Cleanup(requestID)
+
+		select {
+		case resp := <-respCh:
+			if resp.Action == "approve" {
+				return map[string]interface{}{
+					"stepCount": len(steps),
+					"approved":  true,
+					"next":      "Plan approved. Now call delegate_to for step 1. Pick the right persona: web, code, or desktop.",
+				}, nil
+			}
+			return nil, fmt.Errorf("<tool_use_error>Plan was denied. User says: %s. Revise the plan and call create_plan again with updated steps.</tool_use_error>", resp.Message)
+		case <-ctx.Done():
+			return nil, fmt.Errorf("plan approval timed out: context cancelled")
+		}
+	}
+
 	return map[string]interface{}{
 		"stepCount": len(steps),
 		"next":      "Now call delegate_to for step 1. Pick the right persona: web, code, or desktop.",
@@ -515,11 +566,13 @@ func (e *OrchestratorExecutor) createPlan(args map[string]interface{}) (interfac
 }
 
 // updatePlan updates a step's status in the current plan.
-func (e *OrchestratorExecutor) updatePlan(args map[string]interface{}) (interface{}, error) {
+// When discovered:true and PlanApprovalEnabled, pauses for user approval.
+func (e *OrchestratorExecutor) updatePlan(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	stepIdx, _ := args["step_index"].(float64)
 	status, _ := args["status"].(string)
 	note, _ := args["note"].(string)
 	artifactID, _ := args["artifactId"].(string)
+	discovered, _ := args["discovered"].(bool)
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -553,9 +606,48 @@ func (e *OrchestratorExecutor) updatePlan(args map[string]interface{}) (interfac
 					"stepIndex": idx,
 					"status":    status,
 					"note":      note,
+					"discovered": discovered,
 				},
 			},
 		})
+	}
+
+	// Discovered-task approval gate — when enabled and discovered:true, pause for user approval
+	if discovered && cfg.PlanApprovalEnabled && e.approvalMgr != nil {
+		requestID := fmt.Sprintf("plan-update-%d", time.Now().UnixMilli())
+		subscriber := SubscriberFromContext(ctx)
+
+		if subscriber != nil {
+			sendEvent(subscriber, AgentEvent{
+				Type: EventTypeApprovalRequest,
+				Data: AgentEventData{
+					ToolName: "update_plan",
+					ToolID:   requestID,
+					ToolArgs: args,
+					Result: map[string]interface{}{
+						"requestId":  requestID,
+						"type":       "plan_update",
+						"stepIndex":  idx,
+						"note":       note,
+						"message":    fmt.Sprintf("Discovered new work at step %d: %s", idx, note),
+					},
+				},
+			})
+		}
+
+		respCh := e.approvalMgr.Register(requestID)
+		defer e.approvalMgr.Cleanup(requestID)
+
+		select {
+		case resp := <-respCh:
+			if resp.Action == "approve" {
+				// Continue with the discovered step
+			} else {
+				return nil, fmt.Errorf("<tool_use_error>Discovered task at step %d was denied. User says: %s. Skip this step and continue.</tool_use_error>", idx, resp.Message)
+			}
+		case <-ctx.Done():
+			return nil, fmt.Errorf("discovered task approval timed out: context cancelled")
+		}
 	}
 
 	result := map[string]interface{}{"updated": true, "step": idx}
@@ -563,6 +655,82 @@ func (e *OrchestratorExecutor) updatePlan(args map[string]interface{}) (interfac
 		result["hint"] = "Step failed. Consider delegating to a different persona, simplifying the task, or splitting into smaller steps."
 	}
 	return result, nil
+}
+
+// clarify asks the user up to 5 clarifying questions before planning.
+// Only active when PlanApprovalEnabled is true.
+func (e *OrchestratorExecutor) clarify(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if !cfg.PlanApprovalEnabled {
+		return nil, fmt.Errorf("<tool_use_error>clarify is only available when plan-approval mode is enabled. Enable it in agent settings, or proceed with create_plan directly.</tool_use_error>")
+	}
+	if e.approvalMgr == nil {
+		return nil, fmt.Errorf("<tool_use_error>clarify is not available in non-interactive sessions</tool_use_error>")
+	}
+
+	questionsRaw, ok := args["questions"].([]interface{})
+	if !ok || len(questionsRaw) == 0 {
+		return nil, fmt.Errorf("<tool_use_error>Missing 'questions' argument. Example: clarify{\"questions\":[\"Which framework?\",\"Database?\"]}</tool_use_error>")
+	}
+	if len(questionsRaw) > 5 {
+		return nil, fmt.Errorf("<tool_use_error>Too many questions (%d). Maximum is 5.</tool_use_error>", len(questionsRaw))
+	}
+
+	var questions []string
+	for _, q := range questionsRaw {
+		s, ok := q.(string)
+		if !ok || s == "" {
+			return nil, fmt.Errorf("<tool_use_error>All questions must be non-empty strings.</tool_use_error>")
+		}
+		questions = append(questions, s)
+	}
+
+	// Format as numbered list for display
+	var questionText string
+	for i, q := range questions {
+		questionText += fmt.Sprintf("%d. %s\n", i+1, q)
+	}
+
+	requestID := fmt.Sprintf("clarify-%d", time.Now().UnixMilli())
+	subscriber := SubscriberFromContext(ctx)
+
+	if subscriber != nil {
+		sendEvent(subscriber, AgentEvent{
+			Type: EventTypeApprovalRequest,
+			Data: AgentEventData{
+				ToolName: "clarify",
+				ToolID:   requestID,
+				ToolArgs: args,
+				Result: map[string]interface{}{
+					"requestId": requestID,
+					"type":      "clarify",
+					"questions": questions,
+					"message":   questionText,
+				},
+			},
+		})
+	}
+
+	respCh := e.approvalMgr.Register(requestID)
+	defer e.approvalMgr.Cleanup(requestID)
+
+	select {
+	case resp := <-respCh:
+		if resp.Action == "answer" && resp.Message != "" {
+			return map[string]interface{}{
+				"answered": true,
+				"answers":  resp.Message,
+			}, nil
+		}
+		if resp.Action == "approve" {
+			return map[string]interface{}{
+				"answered": true,
+				"answers":  resp.Message,
+			}, nil
+		}
+		return nil, fmt.Errorf("<tool_use_error>User declined to answer clarification questions. Proceed with best assumptions.</tool_use_error>")
+	case <-ctx.Done():
+		return nil, fmt.Errorf("clarify timed out: context cancelled")
+	}
 }
 
 // synthesize returns the final summary. The orchestrator's text output
@@ -643,9 +811,12 @@ func (e *OrchestratorExecutor) delegateAsync(ctx context.Context, args map[strin
 	e.asyncTasks[taskID] = &asyncDelegateResult{taskID: taskID}
 	e.asyncMu.Unlock()
 
-	// Launch delegate in background goroutine
+	// Launch delegate in background goroutine with detached context
+	// so it survives after the parent request's context is canceled.
+	asyncCtx, asyncCancel := context.WithCancel(context.Background())
 	go func() {
-		result, err := e.delegate(ctx, args)
+		defer asyncCancel()
+		result, err := e.delegate(asyncCtx, args)
 
 		e.asyncMu.Lock()
 		output := ""

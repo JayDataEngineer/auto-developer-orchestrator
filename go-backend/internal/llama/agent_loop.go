@@ -127,9 +127,12 @@ type ApprovalManager interface {
 }
 
 // sendEvent sends an event to the subscriber channel without blocking.
-// If the channel is full (subscriber not reading fast enough), the event is dropped.
-// This prevents the agent loop from hanging if the SSE handler disconnects.
+// If the channel is full or closed, the event is silently dropped.
+// This prevents the agent loop from hanging or panicking if the SSE handler disconnects.
 func sendEvent(ch chan<- AgentEvent, evt AgentEvent) {
+	defer func() {
+		recover() // swallow send-on-closed-channel panic
+	}()
 	select {
 	case ch <- evt:
 	default:
@@ -967,20 +970,39 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 		maxRounds := loop.config.MaxToolRounds
 		hitMaxRounds := maxRounds > 0 && round >= maxRounds
 
-		// Synthesis safety net: if unlimited rounds and agent has done many tool
-		// calls with no text output, force a synthesis. Prevents infinite research
-		// loops that never produce a report. 60 rounds ≈ 1-2 hours of deep research.
-		needsSynthesis := contentBuf.Len() == 0 && round >= 60
+		// Synthesis safety net: force the model to write a final report when:
+		// 1. No text at all after 40 rounds
+		// 2. Text exists but it's short (planning text, not a real report) after 50+ rounds
+		// 3. Agent stopped naturally after 20+ rounds with only planning-style output
+		// This prevents infinite research loops that never produce a report.
+		contentLen := contentBuf.Len()
+		needsSynthesis := false
+		unlimited := maxRounds == 0
+
+		if unlimited || maxRounds > 50 {
+			if contentLen == 0 && round >= 40 {
+				needsSynthesis = true
+			} else if round >= 50 && contentLen < 3000 {
+				// Model has been researching but only produced short planning text
+				needsSynthesis = true
+			}
+		}
+
+		// Also check when agent stops naturally (no tool calls) after significant research
+		stoppedNaturally := len(toolCalls) == 0 || finishReason != FinishToolCalls
+		if stoppedNaturally && round >= 20 && contentLen < 3000 && !needsSynthesis {
+			needsSynthesis = true
+		}
 
 		if len(toolCalls) == 0 || finishReason != FinishToolCalls || hitMaxRounds || needsSynthesis {
-			if (hitMaxRounds || needsSynthesis) && contentBuf.Len() == 0 {
+			if (hitMaxRounds || needsSynthesis) {
 				// Model has been researching without producing text — force synthesis
 				loop.logger.Warn("Agent has many tool rounds with no text, forcing synthesis",
 					zap.Int("round", round),
 					zap.Int("maxRounds", maxRounds),
 					zap.Bool("unlimitedRounds", maxRounds == 0),
 				)
-				synthesisPrompt := "Based on all your research and tool results above, provide your comprehensive final answer now. Do NOT call any more tools. Just write your response directly."
+				synthesisPrompt := "Based on all your research and tool results above, provide your comprehensive final answer now. Do NOT call any more tools. Write your answer directly in your response (NOT in your thinking/reasoning). Just write the final report."
 				synthOpts := loop.config.Opts
 				synthOpts.MaxTokens = loop.config.MaxTokens
 				// Remove tools so model can ONLY produce text, not more tool calls
@@ -988,11 +1010,19 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 				loop.session.SetTools(nil)
 				synthCh, err := loop.session.FeedUserMessage(synthesisPrompt, synthOpts)
 				if err == nil {
+					var thinkingBuf strings.Builder
 					for evt := range synthCh {
 						if evt.Type == ChatEventContent {
 							contentBuf.WriteString(evt.Content)
 							sendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: evt.Content}})
+						} else if evt.Type == ChatEventThinking {
+							thinkingBuf.WriteString(evt.Content)
 						}
+					}
+					// Qwen3.6 fallback: if model put everything in thinking, use it as content
+					if contentBuf.Len() == 0 && thinkingBuf.Len() > 0 {
+						contentBuf.WriteString(thinkingBuf.String())
+						sendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: thinkingBuf.String()}})
 					}
 				}
 				loop.session.SetTools(savedTools)
@@ -1086,6 +1116,10 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 
 			result, err := func() (interface{}, error) {
 				timeout := time.Duration(cfg.ToolExecTimeoutSec) * time.Second
+				// Delegate tools run entire sub-agents — they need much more time
+				if tc.Name == "delegate_to" || tc.Name == "delegate_async" {
+					timeout = 30 * time.Minute // Sub-agents can run for up to 30 minutes
+				}
 				useStreaming := streamer != nil
 
 				if timeout <= 0 {
@@ -1889,15 +1923,23 @@ func (e *SandboxToolExecutor) macroSearchWeb(ctx context.Context, sandboxID stri
 	}
 
 	// Fallback: browser-based Google search
+	// Requires CU (computer use bridge). Skip if unavailable (cloud-only mode).
+	if e.CU == nil {
+		return nil, fmt.Errorf("search unavailable: MCP research failed and no browser bridge (cloud-only mode)")
+	}
+	// Use a short timeout (30s) so we don't hang if Chrome is dead or unresponsive
 	searchURL := fmt.Sprintf("https://www.google.com/search?q=%s", url.QueryEscape(query))
-	if err := e.ensureBrowserReady(ctx, sandboxID); err != nil {
-		return nil, fmt.Errorf("failed to start browser: %w", err)
+	browserCtx, browserCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer browserCancel()
+
+	if err := e.ensureBrowserReady(browserCtx, sandboxID); err != nil {
+		return nil, fmt.Errorf("search unavailable: MCP timed out and browser not ready: %w", err)
 	}
 
 	navArgs := map[string]interface{}{"action": "navigate", "url": searchURL}
-	navResult, err := e.CU.Act(ctx, sandboxID, "navigate", navArgs)
+	navResult, err := e.CU.Act(browserCtx, sandboxID, "navigate", navArgs)
 	if err != nil {
-		return nil, fmt.Errorf("search failed: %w", err)
+		return nil, fmt.Errorf("search failed (MCP timed out, browser also failed): %w", err)
 	}
 
 	resp := map[string]interface{}{
@@ -1908,7 +1950,7 @@ func (e *SandboxToolExecutor) macroSearchWeb(ctx context.Context, sandboxID stri
 		"page_summary": e.extractPageSummary(navResult),
 	}
 
-	if vision := e.visionSummary(ctx, sandboxID); vision != "" {
+	if vision := e.visionSummary(browserCtx, sandboxID); vision != "" {
 		resp["vision"] = vision
 	}
 
@@ -2098,10 +2140,15 @@ func (loop *AgentLoop) executeDelegatesConcurrently(
 			// Execute the delegate
 			var result interface{}
 			var err error
-			if cfg.ToolExecTimeoutSec <= 0 {
+			timeout := time.Duration(cfg.ToolExecTimeoutSec) * time.Second
+			// Delegate tools run entire sub-agents — they need much more time
+			if tc.Name == "delegate_to" || tc.Name == "delegate_async" {
+				timeout = 30 * time.Minute
+			}
+			if timeout <= 0 {
 				result, err = loop.executor.Execute(ctx, tc.Name, tc.Args)
 			} else {
-				toolCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.ToolExecTimeoutSec)*time.Second)
+				toolCtx, cancel := context.WithTimeout(ctx, timeout)
 				result, err = loop.executor.Execute(toolCtx, tc.Name, tc.Args)
 				cancel()
 			}

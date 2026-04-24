@@ -203,6 +203,9 @@ func main() {
 	if activeEngine != nil {
 		puxHandler.SetLlamaEngine(activeEngine, sandboxMgr, computerUseHandler, x11Handler)
 		logger.Info("PuxHandler configured with LLM engine", zap.String("model", activeEngine.ModelName()))
+	} else {
+		// No local model, but still wire sandbox manager + computer use for cloud-only mode
+		puxHandler.SetSandboxOnly(sandboxMgr, computerUseHandler, x11Handler)
 	}
 
 	// Wire Gemini cloud engine (optional)
@@ -265,7 +268,7 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(handlers.Recoverer(logger))
-	r.Use(middleware.Timeout(10 * time.Minute)) // Long timeout for SSE streaming (agent conversations can take minutes)
+	r.Use(middleware.Timeout(2 * time.Hour)) // Deep research can take hours; SSE streams must not be cut short
 
 	// CORS
 	r.Use(cors.Handler(cors.Options{

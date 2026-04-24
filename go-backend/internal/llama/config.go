@@ -46,6 +46,9 @@ type ModelConfig struct {
 	FullCompactThreshold  float64 // Trigger full compact at this fraction of context (default: 0.87)
 	MaxCompactionFailures int     // Circuit breaker: stop after N consecutive failures (default: 3)
 
+	// Plan-first workflow
+	PlanApprovalEnabled bool // When true, create_plan pauses for user approval before execution
+
 	// VRAM budget (RTX 4090 24GB)
 	MaxConcurrentAgents int // Max concurrent agent KV sessions
 }
@@ -55,7 +58,7 @@ func DefaultModelConfig() ModelConfig {
 	return ModelConfig{
 		// Context window — 32K is the sweet spot for responsiveness + capacity
 		DefaultContextSize: 32768,
-		SubAgentContextSize: 8192, // 8K — enough for system prompt + 10 tool rounds
+		SubAgentContextSize: 16384, // 16K — research sub-agents need room for large scrape results
 		MaxContextSize:     262144, // 256K — Gemma 4 26B-A4B max
 
 		// Generation — defaults work for both Gemma 4 and Qwen 3.6
@@ -74,7 +77,7 @@ func DefaultModelConfig() ModelConfig {
 		DefaultMaxToolRounds:  20,
 		BrowserMaxToolRounds:  30,
 		MaxRetriesPerTool:     3,
-		ToolExecTimeoutSec:    120, // 2 minutes per tool — browser setup can take ~90s
+		ToolExecTimeoutSec:    300, // 5 minutes per tool — MCP research + browser scraping can be slow
 		RepetitionWindow:      100,
 		ToolResultMaxChars:    6000,
 		SynthesisMaxChars:     4000,
@@ -85,8 +88,8 @@ func DefaultModelConfig() ModelConfig {
 		CompactionMaxChars:     3000,
 
 		// Size-based context management
-		MicroCompactThreshold: 0.70, // 70% → clear old tool results (32K: ~22K, 8K: ~5.6K)
-		FullCompactThreshold:  0.87, // 87% → LLM summary + trim (32K: ~28K, 8K: ~7K)
+		MicroCompactThreshold: 0.55, // 55% → clear old tool results early (16K: ~9K, 32K: ~18K)
+		FullCompactThreshold:  0.75, // 75% → LLM summary + trim (16K: ~12K, 32K: ~24K)
 		MaxCompactionFailures: 3,    // circuit breaker after 3 consecutive failures
 
 		// VRAM — 24GB RTX 4090: 12.5GB model + 32K orchestrator KV ≈ 3-4GB + 4K sub-agent KV ≈ 0.5GB
@@ -151,8 +154,8 @@ func (c ModelConfig) PersonaConfig(t PersonaType) PersonaDefaults {
 		}
 	case PersonaResearch:
 		return PersonaDefaults{
-			MaxToolRounds: 30,   // Research needs many rounds
-			MaxTokens:     4096, // Reports are long
+			MaxToolRounds: 0,    // 0 = unlimited, deep research needs room
+			MaxTokens:     8192, // Long reports with citations
 			Temperature:   0.4,  // Factual, not creative
 		}
 	default:

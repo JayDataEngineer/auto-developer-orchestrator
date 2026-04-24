@@ -26,3 +26,12 @@ test-results/
 tests/e2e/screenshots/
 ~/.pi/
 passwords.txt
+
+# Keys and credentials — NEVER commit
+.pi/
+pi-config/
+**/settings.json
+**/auth.json
+**/*api-key*
+**/*apikey*
+**/*credentials*

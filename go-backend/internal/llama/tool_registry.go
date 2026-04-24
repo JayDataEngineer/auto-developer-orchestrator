@@ -270,16 +270,23 @@ var allTools = []ToolSpec{
 	{
 		Name:             "create_plan",
 		Category:         CategoryOrchestration,
-		Description:      "create a step-by-step plan",
+		Description:      "create a step-by-step plan (pauses for user approval when plan-approval mode is on)",
 		Schema:           `{"steps": ["Step 1 description", "Step 2 description"]}`,
 		ParametersSchema: `{"type":"object","properties":{"steps":{"type":"array","items":{"type":"string"},"description":"List of step descriptions"}},"required":["steps"]}`,
 	},
 	{
 		Name:             "update_plan",
 		Category:         CategoryOrchestration,
-		Description:      "mark a step as done/failed",
-		Schema:           `{"step_index": 0, "status": "done", "note": "Found: price is $45"}`,
-		ParametersSchema: `{"type":"object","properties":{"step_index":{"type":"integer","description":"Step index to update"},"status":{"type":"string","description":"New status: done, failed, or pending"},"note":{"type":"string","description":"Optional note about the result"}},"required":["step_index","status"]}`,
+		Description:      "mark a step as done/failed, or flag discovered work",
+		Schema:           `{"step_index": 0, "status": "done", "note": "Found: price is $45", "discovered": false}`,
+		ParametersSchema: `{"type":"object","properties":{"step_index":{"type":"integer","description":"Step index to update"},"status":{"type":"string","description":"New status: done, failed, or pending"},"note":{"type":"string","description":"Optional note about the result"},"discovered":{"type":"boolean","description":"Set true when new unlisted work is found (triggers approval in plan-approval mode)"}},"required":["step_index","status"]}`,
+	},
+	{
+		Name:             "clarify",
+		Category:         CategoryOrchestration,
+		Description:      "ask the user clarifying questions before planning (max 5, plan-approval mode only)",
+		Schema:           `{"questions": ["Which framework?", "What database?"]}`,
+		ParametersSchema: `{"type":"object","properties":{"questions":{"type":"array","items":{"type":"string"},"description":"1-5 clarifying questions for the user","minItems":1,"maxItems":5}},"required":["questions"]}`,
 	},
 	{
 		Name:             "synthesize",
@@ -395,7 +402,7 @@ func PersonaToolNames(t PersonaType) []string {
 			"computer_use_enable", "computer_use_screenshot", "computer_use_snapshot", "computer_use_act",
 			"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key",
 			// Orchestration (optional — for complex multi-step tasks)
-			"delegate_to", "delegate_async", "collect_results", "create_plan", "update_plan", "synthesize",
+			"delegate_to", "delegate_async", "collect_results", "create_plan", "update_plan", "clarify", "synthesize",
 			// Meta
 			"update_memory", "wait", "ask_user",
 		}

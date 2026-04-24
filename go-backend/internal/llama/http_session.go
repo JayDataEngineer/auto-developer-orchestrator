@@ -285,8 +285,28 @@ func (s *Session) TokenCounts() (input, output int) {
 
 // ContextUsage returns the current prompt token count and context capacity.
 // Used by the compaction system to decide when to compact.
+// Falls back to estimating from message content when the API doesn't provide usage data.
 func (s *Session) ContextUsage() (usedTokens int, capacity int) {
-	return s.totalInputTokens, s.ctxSize
+	if s.totalInputTokens > 0 {
+		return s.totalInputTokens, s.ctxSize
+	}
+	// API didn't return usage — estimate from message content (~4 chars/token)
+	return s.estimateTokens(), s.ctxSize
+}
+
+// estimateTokens roughly estimates token count from all message content.
+// Used as fallback when the streaming API doesn't return usage data.
+func (s *Session) estimateTokens() int {
+	chars := 0
+	for _, m := range s.messages {
+		chars += len(m.Content)
+		for _, tc := range m.ToolCalls {
+			chars += len(tc.Function.Name) + len(tc.Function.Arguments)
+		}
+	}
+	// Rough estimate: 1 token ≈ 4 characters for English text
+	// Add 20% overhead for formatting, roles, tool definitions
+	return int(float64(chars) * 0.3)
 }
 
 // Close releases the session slot on llama-server.

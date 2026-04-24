@@ -59,6 +59,14 @@ var knownProviders = []ProviderInfo{
 			{ID: "claude-haiku-4-20250506", Name: "Claude Haiku 4.5"},
 		},
 	},
+	{
+		ID:      "openrouter",
+		Name:    "OpenRouter",
+		BaseURL: "https://openrouter.ai/api",
+		Models: []ProviderModel{
+			{ID: "deepseek/deepseek-v4-flash", Name: "DeepSeek V4 Flash"},
+		},
+	},
 }
 
 // ConfigHandler handles configuration requests
@@ -602,6 +610,9 @@ type AgentConfigDTO struct {
 
 	// VRAM
 	MaxConcurrentAgents int `json:"maxConcurrentAgents"`
+
+	// Plan-first workflow
+	PlanApprovalEnabled bool `json:"planApprovalEnabled"`
 }
 
 // GetAgent returns the current agent tuning configuration.
@@ -623,6 +634,7 @@ func (h *ConfigHandler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		MicroCompactThreshold: cfg.MicroCompactThreshold,
 		FullCompactThreshold:  cfg.FullCompactThreshold,
 		MaxConcurrentAgents:   cfg.MaxConcurrentAgents,
+		PlanApprovalEnabled:   cfg.PlanApprovalEnabled,
 	})
 }
 
@@ -680,6 +692,7 @@ func (h *ConfigHandler) SetAgent(w http.ResponseWriter, r *http.Request) {
 	if req.MaxConcurrentAgents > 0 {
 		cfg.MaxConcurrentAgents = req.MaxConcurrentAgents
 	}
+	cfg.PlanApprovalEnabled = req.PlanApprovalEnabled
 
 	llama.SetModelConfig(cfg)
 
@@ -688,6 +701,7 @@ func (h *ConfigHandler) SetAgent(w http.ResponseWriter, r *http.Request) {
 		zap.Int("thinkingBudget", cfg.ThinkingBudgetTokens),
 		zap.Int("maxTokens", cfg.MaxTokens),
 		zap.Int("maxToolRounds", cfg.DefaultMaxToolRounds),
+		zap.Bool("planApprovalEnabled", cfg.PlanApprovalEnabled),
 	)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -707,6 +721,7 @@ func (h *ConfigHandler) SetAgent(w http.ResponseWriter, r *http.Request) {
 			MicroCompactThreshold: cfg.MicroCompactThreshold,
 			FullCompactThreshold:  cfg.FullCompactThreshold,
 			MaxConcurrentAgents:   cfg.MaxConcurrentAgents,
+			PlanApprovalEnabled:   cfg.PlanApprovalEnabled,
 		},
 	})
 }
