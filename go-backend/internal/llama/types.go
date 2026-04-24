@@ -7,11 +7,12 @@ import "encoding/json"
 // Message represents a single message in the OpenAI chat completions format.
 // Replaces Turn for all new code.
 type Message struct {
-	Role       string             `json:"role"`                    // "system", "user", "assistant", "tool"
-	Content    string             `json:"content"`                 // text content (empty for tool_calls-only)
-	ToolCalls  []ToolCallResponse `json:"tool_calls,omitempty"`    // assistant messages with tool calls
-	ToolCallID string             `json:"tool_call_id,omitempty"`  // tool result messages
-	Name       string             `json:"name,omitempty"`          // tool name for tool messages
+	Role             string             `json:"role"`                              // "system", "user", "assistant", "tool"
+	Content          string             `json:"content"`                           // text content (empty for tool_calls-only)
+	ToolCalls        []ToolCallResponse `json:"tool_calls,omitempty"`              // assistant messages with tool calls
+	ToolCallID       string             `json:"tool_call_id,omitempty"`            // tool result messages
+	Name             string             `json:"name,omitempty"`                    // tool name for tool messages
+	ReasoningContent string             `json:"reasoning_content,omitempty"`       // DeepSeek V4 requires this in multi-turn messages
 }
 
 // ToolCallResponse is a structured tool call returned by the server.
@@ -45,6 +46,7 @@ type StreamDelta struct {
 	Role             string          `json:"role,omitempty"`
 	Content          string          `json:"content,omitempty"`
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	Reasoning        string          `json:"reasoning,omitempty"`        // DeepSeek V4 uses "reasoning" (not "reasoning_content") in streaming deltas
 	ToolCalls        []ToolCallDelta `json:"tool_calls,omitempty"`
 }
 

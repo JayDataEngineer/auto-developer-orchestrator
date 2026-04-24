@@ -192,6 +192,9 @@ type SandboxToolExecutor struct {
 
 	// File operations (lazy-initialized on first file tool call)
 	fileOps *SandboxFileOps
+
+	// URL cache: avoid redundant network requests when model re-scrapes the same URL
+	scrapedURLs map[string]string // url → cached content
 }
 
 // pageFingerprint is a compact hash of page state for detecting stagnation.
@@ -232,11 +235,11 @@ func normalizeToolName(name string, args map[string]interface{}) string {
 			}
 		}
 		return "type_text"
-	case "scroll", "browser_scroll", "scroll_page", "scroll_down", "scroll_up":
+	case "scroll", "browser_scroll", "scroll_down", "scroll_up":
 		if _, ok := args["action"]; !ok {
 			args["action"] = "scroll"
 		}
-		return "computer_use_act"
+		return "scroll_page"
 	case "screenshot", "take_screenshot", "browser_screenshot",
 		"capture_screenshot", "screen_capture", "capture_screen":
 		return "computer_use_screenshot"
@@ -280,7 +283,7 @@ func normalizeToolName(name string, args map[string]interface{}) string {
 	if strings.Contains(lower, "screenshot") || strings.Contains(lower, "capture") {
 		return "computer_use_screenshot"
 	}
-	if strings.Contains(lower, "snapshot") || strings.Contains(lower, "element") {
+	if strings.Contains(lower, "snapshot") || strings.Contains(lower, "page_elements") {
 		return "computer_use_snapshot"
 	}
 	if strings.Contains(lower, "click") {
@@ -971,18 +974,18 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 		hitMaxRounds := maxRounds > 0 && round >= maxRounds
 
 		// Synthesis safety net: force the model to write a final report when:
-		// 1. No text at all after 40 rounds
-		// 2. Text exists but it's short (planning text, not a real report) after 50+ rounds
-		// 3. Agent stopped naturally after 20+ rounds with only planning-style output
+		// 1. No text at all after 10 rounds (was 40 — too high for cloud models)
+		// 2. Text exists but it's short (planning text, not a real report) after 15+ rounds
+		// 3. Agent stopped naturally after 5+ rounds with only planning-style output
 		// This prevents infinite research loops that never produce a report.
 		contentLen := contentBuf.Len()
 		needsSynthesis := false
 		unlimited := maxRounds == 0
 
-		if unlimited || maxRounds > 50 {
-			if contentLen == 0 && round >= 40 {
+		if unlimited || maxRounds > 15 {
+			if contentLen == 0 && round >= 10 {
 				needsSynthesis = true
-			} else if round >= 50 && contentLen < 3000 {
+			} else if round >= 15 && contentLen < 3000 {
 				// Model has been researching but only produced short planning text
 				needsSynthesis = true
 			}
@@ -990,7 +993,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 
 		// Also check when agent stops naturally (no tool calls) after significant research
 		stoppedNaturally := len(toolCalls) == 0 || finishReason != FinishToolCalls
-		if stoppedNaturally && round >= 20 && contentLen < 3000 && !needsSynthesis {
+		if stoppedNaturally && round >= 5 && contentLen < 3000 && !needsSynthesis {
 			needsSynthesis = true
 		}
 
@@ -1246,6 +1249,11 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 
 			// yield_artifact is a terminal signal
 			if tc.Name == "yield_artifact" {
+				// Emit the output as a text delta so the parent delegate_to
+				// handler captures it in subOutput (it only collects TextDelta events)
+				if output, _ := tc.Args["output"].(string); output != "" {
+					sendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: output}})
+				}
 				loop.logger.Info("Sub-agent yielded artifact, terminating loop",
 					zap.String("tool", tc.Name),
 					zap.Int("round", round),
@@ -1964,11 +1972,26 @@ func (e *SandboxToolExecutor) macroScrape(ctx context.Context, sandboxID string,
 		return nil, fmt.Errorf("missing 'url' argument for scrape")
 	}
 
+	// Check cache: avoid redundant network requests for already-scraped URLs
+	if e.scrapedURLs == nil {
+		e.scrapedURLs = make(map[string]string)
+	}
+	if cached, ok := e.scrapedURLs[targetURL]; ok {
+		e.Logger.Info("scrape cache hit", zap.String("url", targetURL))
+		return map[string]interface{}{
+			"success": true,
+			"url":     targetURL,
+			"source":  "cache",
+			"content": cached,
+		}, nil
+	}
+
 	// MCP scrape (primary path)
 	if e.MCPClient != nil {
 		result, err := e.MCPClient.Scrape(ctx, targetURL)
 		if err == nil && result != "" {
 			e.Logger.Info("scrape via MCP server", zap.String("url", targetURL))
+			e.scrapedURLs[targetURL] = result
 			return map[string]interface{}{
 				"success": true,
 				"url":     targetURL,
@@ -1984,6 +2007,7 @@ func (e *SandboxToolExecutor) macroScrape(ctx context.Context, sandboxID string,
 		text, err := e.browserScrapeFallback(ctx, sandboxID, targetURL)
 		if err == nil && text != "" {
 			e.Logger.Info("scrape via browser fallback", zap.String("url", targetURL))
+			e.scrapedURLs[targetURL] = text
 			return map[string]interface{}{
 				"success": true,
 				"url":     targetURL,

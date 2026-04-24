@@ -123,9 +123,10 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 			req.SessionID = "" // no session slot concept for cloud
 		}
 
-		// Accumulate the full assistant response (content + tool calls)
+		// Accumulate the full assistant response (content + tool calls + reasoning)
 		toolCallAccum := make(map[int]*ToolCallResponse)
 		var contentBuf strings.Builder
+		var reasoningBuf strings.Builder
 		tokenCount := 0
 		thinkingTokens := 0
 		thinkingBudget := cfg.ThinkingBudgetTokens
@@ -138,7 +139,13 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 				ch <- ChatEvent{Type: ChatEventContent, Content: delta.Content}
 			}
 			// Thinking/reasoning delta — enforce budget
-			if delta.ReasoningContent != "" {
+			// DeepSeek V4 uses "reasoning" field; others use "reasoning_content". Capture both.
+			reasoningDelta := delta.ReasoningContent
+			if reasoningDelta == "" {
+				reasoningDelta = delta.Reasoning
+			}
+			if reasoningDelta != "" {
+				reasoningBuf.WriteString(reasoningDelta)
 				thinkingTokens++
 				if thinkingBudget > 0 && thinkingTokens > thinkingBudget {
 					// Budget exceeded — stop forwarding thinking but let generation continue.
@@ -148,7 +155,7 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 						ch <- ChatEvent{Type: ChatEventThinking, Content: "\n[Thinking budget reached — committing to implementation]"}
 					}
 				} else {
-					ch <- ChatEvent{Type: ChatEventThinking, Content: delta.ReasoningContent}
+					ch <- ChatEvent{Type: ChatEventThinking, Content: reasoningDelta}
 				}
 			}
 			// Tool call chunks — accumulate across streaming
@@ -200,9 +207,10 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 
 				// Store assistant message in conversation history
 				assistantMsg := Message{
-					Role:      "assistant",
-					Content:   contentBuf.String(),
-					ToolCalls: toolCalls,
+					Role:             "assistant",
+					Content:          contentBuf.String(),
+					ToolCalls:        toolCalls,
+					ReasoningContent: reasoningBuf.String(),
 				}
 				s.messages = append(s.messages, assistantMsg)
 

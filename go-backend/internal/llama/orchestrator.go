@@ -941,6 +941,12 @@ func (e *PersonaAwareExecutor) Execute(ctx context.Context, toolName string, arg
 
 	// Check whitelist
 	if !e.persona.HasTool(normalized) {
+		e.logger.Error("Persona whitelist rejection",
+			zap.String("original", toolName),
+			zap.String("normalized", normalized),
+			zap.String("persona", string(e.persona.Type)),
+			zap.Int("toolListLen", len(e.persona.Tools)),
+		)
 		return nil, fmt.Errorf(
 			"[SYSTEM: Tool %q is not available for %s persona. Available tools: %v. Use only the tools listed above.]",
 			toolName, e.persona.Type, e.persona.Tools,
