@@ -425,11 +425,10 @@ func (e *OrchestratorExecutor) delegate(ctx context.Context, args map[string]int
 		close(done)
 	}()
 
-	// Run sub-agent with its own timeout (sub-agents shouldn't run forever)
-	subCtx, subCancel := context.WithTimeout(ctx, 120*time.Second)
-	defer subCancel()
-
-	err = subLoop.Run(subCtx, task, subEvents)
+	// Run sub-agent — no artificial timeout here. The agent_loop handles
+	// per-tool timeouts (300s regular, 30min for nested delegates).
+	// MaxToolRounds (default 15) is the real limiter.
+	err = subLoop.Run(ctx, task, subEvents)
 	close(subEvents)
 	<-done
 

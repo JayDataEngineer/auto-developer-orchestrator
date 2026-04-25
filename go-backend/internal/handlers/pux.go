@@ -342,9 +342,10 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	sessionID := fmt.Sprintf("%s:%s", req.Project, req.AgentId)
 	orchEvents := llamaeng.PersistEvents(r.Context(), h.eventStore, sessionID, events)
 
-	// Run orchestrator with no artificial timeout — let the model work
-	// until it's done or the client disconnects.
-	ctx, cancel := context.WithCancel(r.Context())
+	// Run orchestrator with a detached context — the orchestrator should finish
+	// its work even if the client disconnects (SSE stream ends, but agent keeps running).
+	// Sub-agent results are collected as artifacts and persisted to DB.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var loopErr error
 	done := make(chan struct{})
