@@ -142,14 +142,28 @@ func (h *X11Handler) Keyboard(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text is required for type action"})
 			return
 		}
-		// Shell-escape single quotes for xdotool
+		// Unicode text via clipboard paste (Agent-S pattern): xdotool type fails on
+		// special characters. Try xclip paste first, fall back to xdotool type.
 		escaped := shellEscape(req.Text)
-		_, err := h.exec(r, sandboxID, display, []string{
-			"bash", "-c", fmt.Sprintf("xdotool type -- '%s'", escaped),
-		})
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
+		if containsNonASCII(req.Text) {
+			// Clipboard paste for any non-ASCII text
+			_, err := h.exec(r, sandboxID, display, []string{
+				"bash", "-c",
+				fmt.Sprintf("printf '%%s' '%s' | xclip -selection clipboard 2>/dev/null && xdotool key ctrl+v || xdotool type -- '%s'",
+					escaped, escaped),
+			})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		} else {
+			_, err := h.exec(r, sandboxID, display, []string{
+				"bash", "-c", fmt.Sprintf("xdotool type -- '%s'", escaped),
+			})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 
@@ -291,4 +305,15 @@ func (h *X11Handler) ActiveWindow(w http.ResponseWriter, r *http.Request) {
 		"windowId":   strings.TrimSpace(windowID),
 		"windowName": strings.TrimSpace(windowName),
 	})
+}
+
+// containsNonASCII returns true if the string contains any non-ASCII characters.
+// Used to determine whether to use clipboard paste instead of xdotool type.
+func containsNonASCII(s string) bool {
+	for _, r := range s {
+		if r > 127 {
+			return true
+		}
+	}
+	return false
 }
