@@ -35,3 +35,40 @@ pi-config/
 **/*api-key*
 **/*apikey*
 **/*credentials*
+
+# Session scratch files
+CONV.txt
+convo.txt
+PROGRESS.md
+go-backend/CONV.txt
+go-backend/convo.txt
+
+# LLM progress reports / temp files
+llms*.txt
+research_field_report.md
+*.out
+
+# Compiled Go binaries
+go-backend/main
+go-backend/orch
+go-backend/server
+go-backend/tmp/
+
+# Sandbox / external reference repos (large, not source)
+reference/
+openshell/
+claw-code-parity/
+projects/
+go-backend/projects/
+
+# Docs scaffolding (not in use)
+docs-old/
+docs-template/
+docs/.next/
+docs/next-env.d.ts
+docs/next.config.mjs
+docs/package-lock.json
+docs/package.json
+docs/postcss.config.mjs
+docs/src/
+docs/tsconfig.json
