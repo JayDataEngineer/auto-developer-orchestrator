@@ -1,0 +1,78 @@
+package llama
+
+func init() {
+	allTools = append(allTools,
+		ToolSpec{
+			Name:             "bash",
+			Category:         CategoryExecution,
+			Description:      "run a shell command",
+			Schema:           `{"command": "ls -la"}`,
+			Returns:          "Runs in sandbox as root. Working dir: /sandbox/workspace",
+			ParametersSchema: `{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"}},"required":["command"]}`,
+		},
+		ToolSpec{
+			Name:             "file_read",
+			Category:         CategoryExecution,
+			Description:      "read a file with line numbers",
+			Schema:           `{"file_path": "/sandbox/workspace/main.go", "offset": 10, "limit": 50}`,
+			Returns:          "Returns file content with line numbers. Must read before editing.",
+			ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Absolute path to file in sandbox"},"offset":{"type":"integer","description":"Starting line number (1-based, optional)"},"limit":{"type":"integer","description":"Max lines to return (optional)"}},"required":["file_path"]}`,
+		},
+		ToolSpec{
+			Name:             "file_write",
+			Category:         CategoryExecution,
+			Description:      "create a new file (cannot overwrite — use file_edit for existing files)",
+			Schema:           `{"file_path": "/sandbox/workspace/newfile.go", "content": "package main\nfunc main() {}"}`,
+			Returns:          "Creates parent dirs automatically. REFUSES to overwrite existing files — use file_edit instead.",
+			ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Absolute path in sandbox — must NOT already exist"},"content":{"type":"string","description":"File content to write"}},"required":["file_path","content"]}`,
+		},
+		ToolSpec{
+			Name:             "file_edit",
+			Category:         CategoryExecution,
+			Description:      "replace exact string in a file (must read first)",
+			Schema:           `{"file_path": "/sandbox/workspace/main.go", "old_string": "fmt.Println(\"hello\")", "new_string": "fmt.Println(\"world\")"}`,
+			Returns:          "Finds and replaces old_string with new_string. Set replace_all for multiple matches. File must be read first.",
+			ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Absolute path in sandbox"},"old_string":{"type":"string","description":"Exact text to find and replace"},"new_string":{"type":"string","description":"Replacement text"},"replace_all":{"type":"boolean","description":"Replace all occurrences (default: false)"}},"required":["file_path","old_string","new_string"]}`,
+		},
+		ToolSpec{
+			Name:             "file_grep",
+			Category:         CategoryExecution,
+			Description:      "search files with regex (like ripgrep)",
+			Schema:           `{"pattern": "func main", "path": "/sandbox/workspace", "output_mode": "content", "context_lines": 3}`,
+			Returns:          "Returns matching lines with context. Modes: content, files_with_matches, count.",
+			ParametersSchema: `{"type":"object","properties":{"pattern":{"type":"string","description":"Regex pattern to search for"},"path":{"type":"string","description":"Directory or file to search (default: /sandbox/workspace)"},"glob":{"type":"string","description":"File filter: '*.go', '*.{ts,tsx}'"},"output_mode":{"type":"string","description":"Output format: content, files_with_matches, count","enum":["content","files_with_matches","count"]},"context_lines":{"type":"integer","description":"Lines of context around matches"},"case_insensitive":{"type":"boolean","description":"Case-insensitive search"},"head_limit":{"type":"integer","description":"Max number of results (default: 50)"}},"required":["pattern"]}`,
+		},
+		ToolSpec{
+			Name:             "file_glob",
+			Category:         CategoryExecution,
+			Description:      "find files by name pattern",
+			Schema:           `{"pattern": "*.go", "path": "/sandbox/workspace"}`,
+			Returns:          "Returns file paths sorted by modification time.",
+			ParametersSchema: `{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern: *.go, **/*.ts, test_*.py"},"path":{"type":"string","description":"Directory to search (default: /sandbox/workspace)"}},"required":["pattern"]}`,
+		},
+		ToolSpec{
+			Name:             "code_search",
+			Category:         CategoryExecution,
+			Description:      "search code with structured operations (find references, definitions, symbols)",
+			Schema:           `{"operation": "find_references", "symbol": "handleRequest", "path": "/sandbox/workspace", "file_type": "go"}`,
+			Returns:          "Operations: find_references, find_definition, list_symbols, hover. Uses ripgrep with language-aware patterns.",
+			ParametersSchema: `{"type":"object","properties":{"operation":{"type":"string","description":"Operation: find_references, find_definition, list_symbols, hover","enum":["find_references","find_definition","list_symbols","hover"]},"symbol":{"type":"string","description":"Symbol name to search for"},"path":{"type":"string","description":"Directory to search (default: /sandbox/workspace)"},"file_type":{"type":"string","description":"Language: go, py, js, ts, rs, java, rb"}},"required":["operation"]}`,
+		},
+		ToolSpec{
+			Name:             "image_read",
+			Category:         CategoryExecution,
+			Description:      "read and describe an image file using vision model",
+			Schema:           `{"file_path": "/sandbox/workspace/screenshot.png", "prompt": "What does this show?"}`,
+			Returns:          "Sends the image to the vision model and returns a text description. Supports PNG, JPG, GIF, WebP.",
+			ParametersSchema: `{"type":"object","properties":{"file_path":{"type":"string","description":"Path to image file in sandbox"},"prompt":{"type":"string","description":"What to describe (default: general description)"}},"required":["file_path"]}`,
+		},
+		ToolSpec{
+			Name:             "http_request",
+			Category:         CategoryExecution,
+			Description:      "make an HTTP request to any URL (APIs, local services, webhooks)",
+			Schema:           `{"method": "POST", "url": "http://localhost:8188/prompt", "headers": {"Content-Type": "application/json"}, "body": "{\"workflow\": ...}", "timeout": 30}`,
+			Returns:          "Returns status code, response headers, and body. Supports GET, POST, PUT, DELETE, PATCH. Body can be string or JSON object.",
+			ParametersSchema: `{"type":"object","properties":{"method":{"type":"string","description":"HTTP method: GET, POST, PUT, DELETE, PATCH","enum":["GET","POST","PUT","DELETE","PATCH"]},"url":{"type":"string","description":"Full URL to request"},"headers":{"type":"object","description":"Request headers as key-value pairs"},"body":{"type":"string","description":"Request body (string or JSON)"},"timeout":{"type":"integer","description":"Timeout in seconds (default: 30, max: 120)"}},"required":["method","url"]}`,
+		},
+	)
+}

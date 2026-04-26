@@ -1,0 +1,77 @@
+package llama
+
+func init() {
+	allTools = append(allTools,
+		ToolSpec{
+			Name:             "search_web",
+			Category:         CategoryBrowser,
+			Description:      "search Google and return results (ONE step)",
+			Schema:           `{"query": "cats"}`,
+			Returns:          "Returns search results. Use this for any search task.",
+			ParametersSchema: `{"type":"object","properties":{"query":{"type":"string","description":"Search query"}},"required":["query"]}`,
+		},
+		ToolSpec{
+			Name:             "browse_to",
+			Category:         CategoryBrowser,
+			Description:      "open a URL",
+			Schema:           `{"url": "https://example.com"}`,
+			Returns:          "Returns page with clickable elements.",
+			ParametersSchema: `{"type":"object","properties":{"url":{"type":"string","description":"URL to navigate to"}},"required":["url"]}`,
+		},
+		ToolSpec{
+			Name:             "click_element",
+			Category:         CategoryBrowser,
+			Description:      "click element by ID number",
+			Schema:           `{"element": 5}`,
+			ParametersSchema: `{"type":"object","properties":{"element":{"type":"integer","description":"Element ID to click"}},"required":["element"]}`,
+		},
+		ToolSpec{
+			Name:             "type_text",
+			Category:         CategoryBrowser,
+			Description:      "type text into an element",
+			Schema:           `{"element": 1, "text": "hello", "submit": true}`,
+			Returns:          "submit:true presses Enter after typing.",
+			ParametersSchema: `{"type":"object","properties":{"element":{"type":"integer","description":"Element ID to type into"},"text":{"type":"string","description":"Text to type"},"submit":{"type":"boolean","description":"Press Enter after typing"}},"required":["element","text"]}`,
+		},
+		ToolSpec{
+			Name:             "read_page",
+			Category:         CategoryBrowser,
+			Description:      "re-read current page content",
+			Schema:           `{}`,
+			Returns:          "Use when you need to see the page again.",
+			ParametersSchema: `{"type":"object","properties":{}}`,
+		},
+		ToolSpec{
+			Name:             "observe",
+			Category:         CategoryBrowser,
+			Description:      "observe current page: screenshot + DOM elements + AI description",
+			Schema:           `{}`,
+			Returns:          "Returns structured page state: elements with IDs, page title, URL, and AI description of what's visible. Use this to understand a page before acting.",
+			ParametersSchema: `{"type":"object","properties":{}}`,
+		},
+		ToolSpec{
+			Name:             "scroll_page",
+			Category:         CategoryBrowser,
+			Description:      "scroll the browser page up or down",
+			Schema:           `{"direction": "down"}`,
+			Returns:          "direction: 'up' or 'down'. Scrolls one viewport height.",
+			ParametersSchema: `{"type":"object","properties":{"direction":{"type":"string","description":"Scroll direction: up or down","enum":["up","down"]}},"required":["direction"]}`,
+		},
+		ToolSpec{
+			Name:             "scrape",
+			Category:         CategoryBrowser,
+			Description:      "fetch a URL and return its content as clean text",
+			Schema:           `{"url": "https://example.com"}`,
+			Returns:          "Returns page content as markdown. Use instead of browse_to when you just need the text.",
+			ParametersSchema: `{"type":"object","properties":{"url":{"type":"string","description":"URL to fetch"}},"required":["url"]}`,
+		},
+		ToolSpec{
+			Name:             "mcp_call",
+			Category:         CategoryBrowser,
+			Description:      "call any tool on the MCP research server (search, scrape, extract, map, crawl, docs, stats, proxy, etc.)",
+			Schema:           `{"tool": "research", "arguments": {"query": "golang concurrency", "max_results": 3}}`,
+			Returns:          "Returns the raw result from the MCP server as text. Use for any web research, extraction, or crawling task.",
+			ParametersSchema: `{"type":"object","properties":{"tool":{"type":"string","description":"MCP tool name: research, search, scrape, extract, list_schemas, map, crawl, docs_list_sources, docs_fetch_docs, domains, stats, reset, clear_blacklist, proxy_status, proxy_test, proxy_rotate"},"arguments":{"type":"object","description":"Tool-specific arguments as a JSON object"}},"required":["tool","arguments"]}`,
+		},
+	)
+}
