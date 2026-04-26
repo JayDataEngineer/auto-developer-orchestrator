@@ -303,9 +303,29 @@ func main() {
 
 	// API Routes
 	r.Route("/api", func(r chi.Router) {
-		// Health check
+		// Health check — reports component status
 		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("OK"))
+			status := map[string]string{
+				"status": "ok",
+			}
+			if activeEngine != nil {
+				if err := activeEngine.CheckHealth(); err != nil {
+					status["llm"] = "degraded: " + err.Error()
+				} else {
+					status["llm"] = "healthy"
+				}
+			} else {
+				status["llm"] = "unavailable"
+			}
+			if sandboxMgr != nil {
+				status["sandbox"] = "available"
+			} else {
+				status["sandbox"] = "unavailable"
+			}
+			status["version"] = "0.2.0"
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(status)
 		})
 
 		// Projects

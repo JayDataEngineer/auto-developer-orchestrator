@@ -14,6 +14,21 @@ import (
 	"go.uber.org/zap"
 )
 
+// ChatProvider is the interface that LLMClient implements.
+// Used by AgentLoop, OrchestratorLoop, and related subsystems.
+// Mocks can implement this for testing.
+type ChatProvider interface {
+	chatComplete(req ChatCompletionRequest) (*ChatCompletionResponse, error)
+	chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error
+	NewSession(ctxSize int) (*Session, error)
+	IsLoaded() bool
+	IsCloud() bool
+	ModelName() string
+	CheckHealth() error
+	WarmUp() error
+	Close() error
+}
+
 // LLMClient communicates with an OpenAI-compatible API over HTTP.
 // Works with llama-server, Google Gemini (OpenAI compat), or any compatible endpoint.
 // Uses /v1/chat/completions with native OpenAI-style tool calling.

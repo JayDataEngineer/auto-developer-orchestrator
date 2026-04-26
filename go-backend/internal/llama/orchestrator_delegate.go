@@ -15,7 +15,7 @@ import (
 // OrchestratorExecutor implements ToolExecutor for the orchestrator persona.
 // It handles delegate_to, delegate_async, collect_results, create_plan, update_plan, and synthesize.
 type OrchestratorExecutor struct {
-	engine       *LLMClient
+	engine       ChatProvider
 	artifacts    *ArtifactRegistry
 	personaCfg   PersonaConfig
 	memory       *ProjectMemory

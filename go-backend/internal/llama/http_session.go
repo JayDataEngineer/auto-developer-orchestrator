@@ -18,7 +18,7 @@ import (
 // Each agent gets its own Session with a unique session_id.
 // llama-server maps session_id → slot, keeping the KV cache warm between calls.
 type Session struct {
-	engine    *LLMClient
+	engine    ChatProvider
 	sessionID string
 	ctxSize   int
 
@@ -236,7 +236,7 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 			s.totalOutputTokens += tokenCount
 		}
 
-		s.engine.logger.Debug("Chat generation complete",
+		zap.L().Debug("Chat generation complete",
 			zap.Int("outputTokens", tokenCount),
 			zap.Int("promptTokens", s.totalInputTokens),
 			zap.Duration("duration", elapsed),
@@ -340,7 +340,7 @@ func (s *Session) Close() error {
 
 	_ = s.freeSlot()
 
-	s.engine.logger.Debug("Session closed, KV cache freed",
+	zap.L().Debug("Session closed, KV cache freed",
 		zap.String("sessionId", s.sessionID),
 	)
 	return nil

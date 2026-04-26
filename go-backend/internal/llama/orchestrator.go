@@ -12,7 +12,7 @@ import (
 // It owns the orchestrator's AgentLoop (KV session) and the ArtifactRegistry.
 // Sub-agents are created on demand, run synchronously, and freed after yielding.
 type OrchestratorLoop struct {
-	engine    *LLMClient
+	engine    ChatProvider
 	artifacts *ArtifactRegistry
 	executor  *OrchestratorExecutor
 	loop      *AgentLoop
@@ -35,7 +35,7 @@ type OrchestratorConfig struct {
 
 // NewOrchestratorLoop creates a new orchestrator with a fresh KV session.
 func NewOrchestratorLoop(
-	engine *LLMClient,
+	engine ChatProvider,
 	baseExecutor ToolExecutor, // SandboxToolExecutor for sub-agent tool dispatch
 	ocfg OrchestratorConfig,
 	logger *zap.Logger,
