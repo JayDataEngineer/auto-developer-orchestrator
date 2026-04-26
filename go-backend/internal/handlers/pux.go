@@ -14,6 +14,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
+	"github.com/auto-developer-orchestrator/backend/internal/observability"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
@@ -42,6 +43,9 @@ type PuxHandler struct {
 	mcpClient    *mcp.Client        // optional: MCP research server for search/scrape
 
 	eventStore     *storage.EventStore
+
+	metrics  *observability.Metrics
+	langfuse *observability.LangfuseClient
 
 	orchestrators   map[string]*llamaeng.OrchestratorLoop  // key: compositeKey(projectPath, agentId)
 	selectedEngines map[string]*llamaeng.LLMClient        // per-agent engine override
@@ -95,6 +99,16 @@ func (h *PuxHandler) SetMCPClient(client *mcp.Client) {
 // SetEventStore configures the event store for session event persistence.
 func (h *PuxHandler) SetEventStore(store *storage.EventStore) {
 	h.eventStore = store
+}
+
+// SetMetrics configures Prometheus metrics recording.
+func (h *PuxHandler) SetMetrics(m *observability.Metrics) {
+	h.metrics = m
+}
+
+// SetLangfuse configures Langfuse tracing.
+func (h *PuxHandler) SetLangfuse(lf *observability.LangfuseClient) {
+	h.langfuse = lf
 }
 
 // RegisterRoutes registers all Pux routes on the given router.

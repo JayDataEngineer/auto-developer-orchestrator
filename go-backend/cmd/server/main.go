@@ -17,6 +17,7 @@ import (
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/models"
+	"github.com/auto-developer-orchestrator/backend/internal/observability"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/scheduler"
@@ -181,6 +182,12 @@ func main() {
 	// Agent handler (orchestrator + ephemeral sub-agents via llama-server)
 	puxHandler := handlers.NewPuxHandler(db, gitOps, githubHandler, logger)
 
+	// Observability
+	metrics := observability.NewMetrics()
+	puxHandler.SetMetrics(metrics)
+	langfuse := observability.NewLangfuseClient()
+	puxHandler.SetLangfuse(langfuse)
+
 	// Event store for session persistence (survives server restarts)
 	eventStore := storage.NewEventStore(db.DB())
 	puxHandler.SetEventStore(eventStore)
@@ -300,6 +307,9 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// Prometheus metrics
+	r.Get("/metrics", metrics.HTTPHandler().ServeHTTP)
 
 	// API Routes
 	r.Route("/api", func(r chi.Router) {

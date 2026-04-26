@@ -178,6 +178,22 @@ type AgentLoopConfig struct {
 	Tools          []OpenAITool
 	Opts           GenerateOptions
 	Compaction     CompactionConfig
+	// Observability (optional — no-ops when nil)
+	Metrics   AgentMetrics
+	Langfuse  AgentLangfuse
+}
+
+// AgentMetrics is an optional metrics recorder for Prometheus.
+type AgentMetrics interface {
+	RecordToolCall(toolName string, duration time.Duration)
+	RecordTokens(input, output int)
+	RecordLLMResponse(model, finishReason string)
+}
+
+// AgentLangfuse is an optional trace handle for Langfuse.
+type AgentLangfuse interface {
+	Generation(name, model string, start, end time.Time, inputTokens, outputTokens, totalTokens int)
+	Span(name string, start, end time.Time, input, output map[string]interface{})
 }
 
 // DefaultAgentLoopConfig returns sensible defaults from ModelConfig.
@@ -437,6 +453,12 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 				Type: EventTypeAgentEnd,
 				Data: AgentEventData{Input: float64(inputTokens), Output: float64(outputTokens), Model: "llama-server/gemma-4-26b"},
 			})
+
+			// Record LLM metrics
+			if loop.config.Metrics != nil {
+				loop.config.Metrics.RecordTokens(inputTokens, outputTokens)
+				loop.config.Metrics.RecordLLMResponse(loop.engine.ModelName(), string(finishReason))
+			}
 			return nil
 		}
 
@@ -571,8 +593,12 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 				Data: AgentEventData{ToolName: tc.Name, ToolID: tc.ID, Result: result,
 					Error: func() string { if err != nil { return err.Error() }; return "" }()},
 			})
-
 			toolResults = append(toolResults, ToolResult{ToolCallID: tcr.ID, ToolName: tc.Name, Content: resultStr})
+
+			// Record tool metrics
+			if loop.config.Metrics != nil {
+				loop.config.Metrics.RecordToolCall(tc.Name, elapsed)
+			}
 
 			if cycleDetector.Record(tc.Name, tc.Args, resultStr, round) {
 				loop.logger.Warn("Cycle detected, injecting nudge", zap.String("tool", tc.Name), zap.Int("round", round))
