@@ -196,6 +196,27 @@ func DefaultAgentLoopConfig() AgentLoopConfig {
 	}
 }
 
+// Validate checks that the config has valid values and returns all errors found.
+func (c *AgentLoopConfig) Validate() []string {
+	var errs []string
+	if c.ContextSize <= 0 {
+		errs = append(errs, "ContextSize must be positive")
+	}
+	if c.MaxTokens <= 0 {
+		errs = append(errs, "MaxTokens must be positive")
+	}
+	if c.MaxTokens > c.ContextSize {
+		errs = append(errs, "MaxTokens cannot exceed ContextSize")
+	}
+	if c.MaxToolRounds <= 0 {
+		errs = append(errs, "MaxToolRounds must be positive")
+	}
+	if c.SystemPrompt == "" {
+		errs = append(errs, "SystemPrompt must not be empty")
+	}
+	return errs
+}
+
 // AgentLoop runs the full agent loop: generate → parse tool calls → execute → feed back.
 type AgentLoop struct {
 	engine   ChatProvider
@@ -213,6 +234,9 @@ type AgentLoop struct {
 
 // NewAgentLoop creates a new agent loop bound to an engine.
 func NewAgentLoop(engine ChatProvider, executor ToolExecutor, cfg AgentLoopConfig, logger *zap.Logger) (*AgentLoop, error) {
+	if errs := cfg.Validate(); len(errs) > 0 {
+		return nil, fmt.Errorf("invalid agent loop config: %s", strings.Join(errs, "; "))
+	}
 	if !engine.IsLoaded() {
 		return nil, fmt.Errorf("engine model not loaded")
 	}

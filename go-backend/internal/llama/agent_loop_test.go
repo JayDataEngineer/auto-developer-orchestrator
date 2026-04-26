@@ -347,3 +347,82 @@ func TestAgentLoop_Close(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
+
+func TestAgentLoopConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      AgentLoopConfig
+		wantErrs int
+	}{
+		{
+			name: "valid",
+			cfg: AgentLoopConfig{
+				SystemPrompt:  "hi",
+				MaxToolRounds: 5,
+				MaxTokens:     256,
+				ContextSize:   4096,
+				Compaction:    DefaultCompactionConfig(),
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "zero ContextSize",
+			cfg: AgentLoopConfig{
+				SystemPrompt:  "hi",
+				MaxToolRounds: 5,
+				MaxTokens:     0,
+				ContextSize:   0,
+				Compaction:    DefaultCompactionConfig(),
+			},
+			wantErrs: 2, // ContextSize + MaxTokens
+		},
+		{
+			name: "MaxTokens exceeds ContextSize",
+			cfg: AgentLoopConfig{
+				SystemPrompt:  "hi",
+				MaxToolRounds: 5,
+				MaxTokens:     9999,
+				ContextSize:   4096,
+				Compaction:    DefaultCompactionConfig(),
+			},
+			wantErrs: 1,
+		},
+		{
+			name: "multiple errors",
+			cfg: AgentLoopConfig{
+				SystemPrompt:  "",
+				MaxToolRounds: 0,
+				MaxTokens:     0,
+				ContextSize:   0,
+				Compaction:    DefaultCompactionConfig(),
+			},
+			wantErrs: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := tt.cfg.Validate()
+			if len(errs) != tt.wantErrs {
+				t.Errorf("Validate() got %d errors (%v), want %d", len(errs), errs, tt.wantErrs)
+			}
+		})
+	}
+}
+
+func TestAgentLoopConfig_ValidationOnCreate(t *testing.T) {
+	mock := newMockLLMClient([]string{"ok"}, "ok")
+	exec := newMockExecutor()
+	cfg := AgentLoopConfig{
+		SystemPrompt:  "",
+		MaxToolRounds: 0,
+		MaxTokens:     0,
+		ContextSize:   0,
+		Compaction:    DefaultCompactionConfig(),
+	}
+
+	_, err := NewAgentLoop(mock, exec, cfg, zap.NewNop())
+	if err == nil {
+		t.Error("expected error for invalid config")
+	}
+}
