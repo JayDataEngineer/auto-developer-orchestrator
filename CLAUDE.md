@@ -40,8 +40,32 @@ task down              # Stop everything (backend, frontend, sandboxes)
 
 - **Port**: 3847
 - **Build**: `cd go-backend && go build -o server ./cmd/server/` (no CGo)
+- **CLI Build**: `cd go-backend && go build -o orch ./cmd/cli/` (the `orch` binary)
 - **Non-fatal startup**: runs in sandbox/API-only mode when llama-server is down
 - **PROJECT_ROOT**: must be set to repo root when running binary directly
+
+## Interfaces — THREE ways to use the system
+
+### 1. TUI (Terminal UI) — `orch` or `orch chat`
+- Bubble Tea (charmbracelet) TUI with viewport, textarea, spinner
+- Streams SSE, renders thinking/tool calls/assistant text in terminal
+- Files: `go-backend/internal/cli/tui/` (app.go, sse_reader.go, styles.go, messages.go)
+- Build: `cd go-backend && go build -o orch ./cmd/cli/`
+- Run: `./orch` or `./orch --server http://localhost:3847 --project myproject`
+
+### 2. CLI (scripting) — `orch agent prompt "message"`
+- Cobra subcommands for scripting/CI: `orch agent prompt`, `orch agent history`, `orch sandbox`, `orch project`, etc.
+- `orch agent prompt "do the thing" -p myproject` — streams SSE as text or JSON (`-o json`)
+- Files: `go-backend/internal/cli/cmd/` (agent.go, chat.go, sandbox.go, etc.)
+- SSE client: `go-backend/internal/cli/api/client.go`
+
+### 3. Frontend (web) — Vite React app on port 5174
+- `task dev` starts both Go backend + Vite frontend
+- SSE via `fetch` + `ReadableStream.getReader()` in `src/hooks/useSSEStream.ts`
+- State: `src/hooks/agentReducer.ts`, `src/hooks/usePuxAgent.ts`
+- Vite proxies `/api/*` to Go backend on 3847
+
+**When testing, use the CLI or TUI — NOT curl.** Curl is a last-resort debug tool with its own timeout issues.
 
 ## Architecture
 
@@ -58,7 +82,7 @@ User → Vite (5174) → Go Backend (3847) → llama-server (8001)
 
 1. **One agent, one loop, one model.** The orchestrator IS the agent. There is no separate "generalist mode" vs "orchestrator mode." Every prompt goes through the same agent loop. The model calls tools, reads results, calls more tools, then responds. The user sees one thinking block + one response.
 2. **`delegate_to` is just another tool.** Sub-agents exist for VRAM management on complex multi-step subtasks — not as a different architecture. The orchestrator has ALL tools (bash + browser + desktop) and uses them directly by default.
-3. **Pull from the best.** Reference repos in `reference/` contain proven patterns: OmniParser (screen parsing), browser-use (element detection), Stagehand (caching/self-healing), Agent-S (grounding/reflection), CUA (coordinate normalization), OS-Symphony (desktop abstraction). Port the best ideas, don't reinvent.
+3. **Pull from the best.** Reference repos in `reference/` contain proven patterns: OmniParser (screen parsing), browser-use (element detection), Stagehand (caching/self-healing), Agent-S (grounding/reflection), CUA (coordinate normalization), OS-Symphony (desktop abstraction). Port the best ideas, don't reinvent. See `docs/insights/` for per-project analysis — what we've adopted, what's still missing, and priority rankings.
 4. **Simple over clever.** Flat agent loops beat deep hierarchies (Agent-S S3 proved this — 72.6% on OSWorld by removing DAG planning). One loop with reflection > nested orchestration.
 5. **Code, browse, desktop — unified.** Three capabilities, one framework. The model decides which tools to use based on the task. No separate "modes" or "paths."
 
