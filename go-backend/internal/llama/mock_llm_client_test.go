@@ -12,6 +12,7 @@ type mockLLMClient struct {
 	responses  []mockResponse
 	callCount  int
 	defaultMsg string
+	blockCh    chan struct{} // if set, blocks until closed before each response
 }
 
 type mockResponse struct {
@@ -96,6 +97,10 @@ func (m *mockLLMClient) buildResponse(r mockResponse) *ChatCompletionResponse {
 func (m *mockLLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletionResponse, error) {
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("mock: no messages in request")
+	}
+	// If blocked, wait for signal
+	if m.blockCh != nil {
+		<-m.blockCh
 	}
 	return m.nextResponse()
 }
