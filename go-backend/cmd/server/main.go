@@ -218,6 +218,27 @@ func main() {
 	if mcpClient.IsAvailable() {
 		puxHandler.SetMCPClient(mcpClient)
 		logger.Info("MCP research server connected", zap.String("endpoint", mcpClient.Endpoint()))
+
+		// Discover MCP tools and register them as first-class tools with full schemas
+		mcpTools, err := mcpClient.ListTools(context.Background())
+		if err != nil {
+			logger.Warn("Failed to list MCP tools — using mcp_call fallback only", zap.Error(err))
+		} else {
+			var regs []llamaeng.MCPToolRegistration
+			for _, t := range mcpTools {
+				regs = append(regs, llamaeng.MCPToolRegistration{
+					MCPName:       t.Name,
+					Description:   t.Description,
+					InputSchema:   string(t.InputSchema),
+					SchemaExample: llamaeng.SchemaToExample(string(t.InputSchema)),
+				})
+			}
+			names := llamaeng.RegisterMCPTools(regs)
+			logger.Info("Registered MCP tools as first-class tools",
+				zap.Int("count", len(names)),
+				zap.Strings("tools", names),
+			)
+		}
 	} else {
 		logger.Info("MCP research server not available — search/scrape will use browser fallback")
 	}

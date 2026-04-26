@@ -195,6 +195,47 @@ func (c *Client) IsAvailable() bool {
 	return c.Initialize(ctx) == nil
 }
 
+// MCPTool represents a tool definition from the MCP server's tools/list response.
+type MCPTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+}
+
+// ListTools queries the MCP server for available tools and their schemas.
+// Must be called after Initialize. Returns an empty list if the server has no tools.
+func (c *Client) ListTools(ctx context.Context) ([]MCPTool, error) {
+	req := jsonRPCRequest{
+		JSONRPC: "2.0",
+		ID:      3,
+		Method:  "tools/list",
+	}
+
+	respBody, _, err := c.doRequest(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("MCP tools/list failed: %w", err)
+	}
+
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("MCP tools/list parse error: %w", err)
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("MCP tools/list error: [%d] %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result struct {
+		Tools []MCPTool `json:"tools"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("MCP tools/list result parse error: %w", err)
+	}
+
+	c.logger.Debug("MCP tools listed", zap.Int("count", len(result.Tools)))
+	return result.Tools, nil
+}
+
 // Endpoint returns the MCP server endpoint URL.
 func (c *Client) Endpoint() string {
 	return c.endpoint
