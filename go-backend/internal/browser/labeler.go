@@ -47,9 +47,31 @@ const labelerJS = `
 	}
 
 	// ── JS click event listener detection ───────────────────────
-	// getEventListeners is Chrome DevTools only, so we use attribute-based detection
+	// Detects inline handlers and framework patterns (React, Vue, Angular).
 	function hasClickHandler(el) {
-		return el.onclick !== null || el.getAttribute('onclick') !== null;
+		// Direct event handlers
+		if (el.onclick !== null) return true;
+		if (el.getAttribute('onclick') !== null) return true;
+
+		// React: fiber key, __reactProps, data-reactid
+		if (el._reactProps || el.__reactFiber || el.hasAttribute('data-reactid')) return true;
+
+		// Vue: v-on:click, @click, __vue__ component instance
+		if (el.__vue__ || el._vnode) return true;
+		var attrs = el.attributes;
+		for (var i = 0; i < attrs.length; i++) {
+			if (attrs[i].name.startsWith('v-on:') || attrs[i].name.startsWith('@')) return true;
+		}
+
+		// Angular: ng-click, (click)
+		if (el.hasAttribute('ng-click')) return true;
+		if (el.hasAttribute('(click)')) return true;
+
+		// Semantic — these almost always have handlers
+		if (el.tagName === 'BUTTON') return true;
+		if (el.tagName === 'A' && el.getAttribute('role') === 'button') return true;
+
+		return false;
 	}
 
 	// ── Build tag with annotations for display ──────────────────
