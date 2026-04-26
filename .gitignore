@@ -48,6 +48,10 @@ llms*.txt
 research_field_report.md
 *.out
 
+# One-off planning docs
+docs/OPENSHELL_INTEGRATION_PLAN.md
+docs/SCHEDULER_PLAN.md
+
 # Compiled Go binaries
 go-backend/main
 go-backend/orch
