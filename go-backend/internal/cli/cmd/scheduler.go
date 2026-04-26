@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/auto-developer-orchestrator/backend/internal/cli/api"
+	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +35,7 @@ var schedulerListCmd = &cobra.Command{
 				schedule = j.ScheduleType
 			}
 			fmt.Printf("%s  %-20s  %s  %s  enabled:%v\n",
-				j.ID[:8], truncate(j.Name, 20), j.Project, schedule, j.Enabled)
+				j.ID[:8], util.TruncateEllipsis(j.Name, 20), j.Project, schedule, j.Enabled)
 		}
 		return nil
 	},
@@ -185,13 +186,6 @@ var schedulerRunsCmd = &cobra.Command{
 		}
 		return nil
 	},
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }
 
 func init() {

@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
+	"github.com/auto-developer-orchestrator/backend/internal/util"
 )
 
-// ── truncateStr ───────────────────────────────────────────────
+// ── Truncate ──────────────────────────────────────────────────
 
-func TestTruncateStr(t *testing.T) {
+func TestTruncate(t *testing.T) {
 	tests := []struct {
 		input  string
 		maxLen int
@@ -25,9 +26,9 @@ func TestTruncateStr(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := truncateStr(tt.input, tt.maxLen)
+		got := util.Truncate(tt.input, tt.maxLen)
 		if got != tt.want {
-			t.Errorf("truncateStr(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+			t.Errorf("Truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
 		}
 	}
 }

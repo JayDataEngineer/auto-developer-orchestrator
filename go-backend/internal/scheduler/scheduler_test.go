@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"go.uber.org/zap"
 )
 
@@ -386,10 +387,10 @@ func TestComputeNextRunAt(t *testing.T) {
 // --- TruncateStr ---
 
 func TestTruncateStr(t *testing.T) {
-	if s := truncateClip("hello", 10); s != "hello" {
+	if s := util.Truncate("hello", 10); s != "hello" {
 		t.Errorf("expected hello, got %s", s)
 	}
-	if s := truncateClip("hello world", 5); s != "hello" {
+	if s := util.Truncate("hello world", 5); s != "hello" {
 		t.Errorf("expected hello, got %s", s)
 	}
 }

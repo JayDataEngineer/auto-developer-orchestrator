@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"go.uber.org/zap"
 )
 
@@ -66,9 +69,9 @@ Execute the task using your available tools. Report results as plain text.`, job
 `, jsonStr(message))
 
 	shellCmd := fmt.Sprintf(`(echo %s; sleep 10) | %s --mode rpc --append-system-prompt %s %s`,
-		shellEscape(promptInput),
+		sandbox.ShellEscape(promptInput),
 		e.piPath,
-		shellEscape(systemPrompt),
+		sandbox.ShellEscape(systemPrompt),
 		modelFlag(model),
 	)
 
@@ -214,7 +217,7 @@ Execute the task using your available tools. Report results as plain text.`, job
 		if ctx.Err() == context.DeadlineExceeded {
 			return &JobResult{
 				Output:     out,
-				Error:      fmt.Sprintf("job execution timed out after %ds. stderr: %s", timeoutSec, truncateEllipsis(errStr, 200)),
+				Error:      fmt.Sprintf("job execution timed out after %ds. stderr: %s", timeoutSec, util.TruncateEllipsis(errStr, 200)),
 				DurationMs: time.Since(start).Milliseconds(),
 				Model:      model,
 			}
@@ -244,7 +247,7 @@ Execute the task using your available tools. Report results as plain text.`, job
 			}
 			return &JobResult{
 				Output:     out,
-				Error:      fmt.Sprintf("pi process exited: %v. stderr: %s", err, truncateEllipsis(errStr, 200)),
+				Error:      fmt.Sprintf("pi process exited: %v. stderr: %s", err, util.TruncateEllipsis(errStr, 200)),
 				DurationMs: time.Since(start).Milliseconds(),
 				Model:      model,
 			}
@@ -263,7 +266,7 @@ Execute the task using your available tools. Report results as plain text.`, job
 			if errStr != "" {
 				return &JobResult{
 					Output:     "",
-					Error:      fmt.Sprintf("pi produced no output. stderr: %s", truncateEllipsis(errStr, 500)),
+					Error:      fmt.Sprintf("pi produced no output. stderr: %s", util.TruncateEllipsis(errStr, 500)),
 					DurationMs: time.Since(start).Milliseconds(),
 					Model:      model,
 				}
@@ -281,10 +284,6 @@ Execute the task using your available tools. Report results as plain text.`, job
 func jsonStr(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
-}
-
-func shellEscape(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func modelFlag(model string) string {

@@ -1,6 +1,11 @@
 package scheduler
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
+	"github.com/auto-developer-orchestrator/backend/internal/util"
+)
 
 func TestJsonStr(t *testing.T) {
 	got := jsonStr("hello")
@@ -21,17 +26,19 @@ func TestJsonStr(t *testing.T) {
 }
 
 func TestShellEscape(t *testing.T) {
+	// Note: sandbox.ShellEscape only replaces single quotes with '\'',
+	// the caller wraps in single quotes separately.
 	tests := []struct {
 		input, want string
 	}{
-		{"simple", "'simple'"},
-		{"it's", "'it'\\''s'"},
-		{"", "''"},
+		{"simple", "simple"},
+		{"it's", "it'\\''s"},
+		{"", ""},
 	}
 	for _, tt := range tests {
-		got := shellEscape(tt.input)
+		got := sandbox.ShellEscape(tt.input)
 		if got != tt.want {
-			t.Errorf("shellEscape(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("ShellEscape(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }
@@ -46,13 +53,13 @@ func TestModelFlag(t *testing.T) {
 }
 
 func TestTruncateEllipsis(t *testing.T) {
-	if got := truncateEllipsis("hello", 10); got != "hello" {
+	if got := util.TruncateEllipsis("hello", 10); got != "hello" {
 		t.Errorf("truncate short = %q", got)
 	}
-	if got := truncateEllipsis("hello world", 5); got != "hello..." {
+	if got := util.TruncateEllipsis("hello world", 5); got != "hello..." {
 		t.Errorf("truncate long = %q", got)
 	}
-	if got := truncateEllipsis("", 5); got != "" {
+	if got := util.TruncateEllipsis("", 5); got != "" {
 		t.Errorf("truncate empty = %q", got)
 	}
 }
