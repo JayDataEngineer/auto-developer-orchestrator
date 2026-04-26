@@ -17,14 +17,14 @@ import (
 // This replaces both IsolatedExecutor (Pi subprocess) and SchedulerPromptSender
 // (Pi pool) — no Pi subprocess needed.
 type LlamaExecutor struct {
-	engine      *llamaeng.HTTPEngine
+	engine      *llamaeng.LLMClient
 	sandboxMgr  *sandbox.Manager
 	projectRoot string
 	logger      *zap.Logger
 }
 
 // NewLlamaExecutor creates a scheduler executor backed by the llama engine.
-func NewLlamaExecutor(engine *llamaeng.HTTPEngine, sandboxMgr *sandbox.Manager, projectRoot string, logger *zap.Logger) *LlamaExecutor {
+func NewLlamaExecutor(engine *llamaeng.LLMClient, sandboxMgr *sandbox.Manager, projectRoot string, logger *zap.Logger) *LlamaExecutor {
 	return &LlamaExecutor{
 		engine:      engine,
 		sandboxMgr:  sandboxMgr,

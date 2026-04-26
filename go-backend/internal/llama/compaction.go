@@ -210,7 +210,7 @@ Omit code details unless they affect future decisions.`
 
 // CompactWithSummary uses the model to generate a structured summary of conversation history.
 // Falls back to extractive CompactMessages on failure.
-func CompactWithSummary(messages []Message, systemPrompt string, engine *HTTPEngine, keepLast int) []Message {
+func CompactWithSummary(messages []Message, systemPrompt string, engine *LLMClient, keepLast int) []Message {
 	compCfg := CompactionConfig{
 		KeepLastTurns:   keepLast,
 		MaxCompactChars: 4000,

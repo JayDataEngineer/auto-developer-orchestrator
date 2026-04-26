@@ -74,9 +74,9 @@ func main() {
 		llamaServerURL = "http://localhost:8001"
 	}
 	modelAlias := readActiveModelAlias()
-	var llamaEngine *llamaeng.HTTPEngine
+	var llamaEngine *llamaeng.LLMClient
 	{
-		llamaEngine = llamaeng.NewHTTPEngine(llamaeng.HTTPEngineConfig{
+		llamaEngine = llamaeng.NewLLMClient(llamaeng.LLMClientConfig{
 			BaseURL:   llamaServerURL,
 			ModelName: modelAlias,
 			Logger:    logger,
@@ -99,9 +99,9 @@ func main() {
 
 	// Connect to Gemini cloud engine (optional — requires GEMINI_API_KEY env var).
 	// Uses Google's OpenAI-compatible endpoint with Bearer auth.
-	var geminiEngine *llamaeng.HTTPEngine
+	var geminiEngine *llamaeng.LLMClient
 	if geminiKey := os.Getenv("GEMINI_API_KEY"); geminiKey != "" {
-		geminiEngine = llamaeng.NewHTTPEngine(llamaeng.HTTPEngineConfig{
+		geminiEngine = llamaeng.NewLLMClient(llamaeng.LLMClientConfig{
 			BaseURL:   "https://generativelanguage.googleapis.com/v1beta/openai",
 			APIKey:    geminiKey,
 			ModelName: "gemini-3-flash-preview",

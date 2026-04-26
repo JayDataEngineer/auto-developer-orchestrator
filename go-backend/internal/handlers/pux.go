@@ -35,8 +35,8 @@ type PuxHandler struct {
 	approvalMgr *approval.Manager
 
 	// Llama engine — always uses orchestrator + ephemeral sub-agents
-	llamaEngine  *llamaeng.HTTPEngine
-	geminiEngine *llamaeng.HTTPEngine // optional cloud provider
+	llamaEngine  *llamaeng.LLMClient
+	geminiEngine *llamaeng.LLMClient // optional cloud provider
 	sandboxMgr   *sandbox.Manager
 	cuBridge     *ComputerUseBridge // bridges llama executor to CU/X11 handlers
 	mcpClient    *mcp.Client        // optional: MCP research server for search/scrape
@@ -44,7 +44,7 @@ type PuxHandler struct {
 	eventStore     *storage.EventStore
 
 	orchestrators   map[string]*llamaeng.OrchestratorLoop  // key: compositeKey(projectPath, agentId)
-	selectedEngines map[string]*llamaeng.HTTPEngine        // per-agent engine override
+	selectedEngines map[string]*llamaeng.LLMClient        // per-agent engine override
 }
 
 // NewPuxHandler creates a new Pux handler.
@@ -59,13 +59,13 @@ func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, 
 		toolPerms:     perms.NewToolPermissionConfig(logger),
 		approvalMgr:   approval.NewManager(5 * time.Minute),
 		orchestrators:   make(map[string]*llamaeng.OrchestratorLoop),
-		selectedEngines: make(map[string]*llamaeng.HTTPEngine),
+		selectedEngines: make(map[string]*llamaeng.LLMClient),
 	}
 }
 
 // SetLlamaEngine configures the handler for llama-server HTTP inference.
 // When set, Prompt() uses the orchestrator + ephemeral sub-agent path.
-func (h *PuxHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
+func (h *PuxHandler) SetLlamaEngine(engine *llamaeng.LLMClient, sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
 	h.llamaEngine = engine
 	h.sandboxMgr = sandboxMgr
 	if cu != nil {
@@ -74,7 +74,7 @@ func (h *PuxHandler) SetLlamaEngine(engine *llamaeng.HTTPEngine, sandboxMgr *san
 }
 
 // SetGeminiEngine configures the optional Gemini cloud engine.
-func (h *PuxHandler) SetGeminiEngine(engine *llamaeng.HTTPEngine) {
+func (h *PuxHandler) SetGeminiEngine(engine *llamaeng.LLMClient) {
 	h.geminiEngine = engine
 }
 
@@ -698,7 +698,7 @@ func (h *PuxHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve which engine to use based on provider/model
-	var engine *llamaeng.HTTPEngine
+	var engine *llamaeng.LLMClient
 	switch {
 	case req.ModelID == "gemini-3-flash-preview" && h.geminiEngine != nil:
 		engine = h.geminiEngine
@@ -747,8 +747,8 @@ func (h *PuxHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 }
 
 // engineFromSettings reads a provider's apiKey and baseUrl from settings.json
-// and creates a temporary HTTPEngine for it.
-func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.HTTPEngine {
+// and creates a temporary LLMClient for it.
+func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.LLMClient {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -774,7 +774,7 @@ func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.HT
 		return nil
 	}
 
-	eng := llamaeng.NewHTTPEngine(llamaeng.HTTPEngineConfig{
+	eng := llamaeng.NewLLMClient(llamaeng.LLMClientConfig{
 		BaseURL:   p.BaseURL,
 		APIKey:    p.APIKey,
 		ModelName: modelID,

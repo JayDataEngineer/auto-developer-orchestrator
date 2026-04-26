@@ -20,6 +20,7 @@ type Client struct {
 	endpoint   string
 	httpClient *http.Client
 	logger     *zap.Logger
+	sessionID  string        // Mcp-Session-Id from initialize response
 	sem        chan struct{} // concurrency limiter — 2 concurrent requests max
 }
 
@@ -83,9 +84,14 @@ func (c *Client) Initialize(ctx context.Context) error {
 		},
 	}
 
-	respBody, _, err := c.doRequest(ctx, req)
+	respBody, headers, err := c.doRequest(ctx, req)
 	if err != nil {
 		return fmt.Errorf("MCP initialize failed: %w", err)
+	}
+
+	// Capture session ID from response headers for subsequent requests
+	if sid := headers.Get("Mcp-Session-Id"); sid != "" {
+		c.sessionID = sid
 	}
 
 	// Send initialized notification (fire-and-forget, no ID)
@@ -95,13 +101,24 @@ func (c *Client) Initialize(ctx context.Context) error {
 	}
 	_, _, _ = c.doRequest(ctx, notif)
 
-	c.logger.Debug("MCP initialize response", zap.String("body", string(respBody)))
+	c.logger.Debug("MCP initialize response",
+		zap.String("sessionId", c.sessionID),
+		zap.String("body", string(respBody)),
+	)
 	return nil
 }
 
 // CallTool calls an MCP tool by name with the given arguments.
 // Returns the text content from the tool result.
+// Auto-initializes the session if not already initialized.
 func (c *Client) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
+	// Auto-initialize if no session established yet
+	if c.sessionID == "" {
+		if err := c.Initialize(ctx); err != nil {
+			return "", fmt.Errorf("MCP auto-initialize failed: %w", err)
+		}
+	}
+
 	req := jsonRPCRequest{
 		JSONRPC: "2.0",
 		ID:      2,
@@ -266,6 +283,9 @@ func (c *Client) doRequest(ctx context.Context, req jsonRPCRequest) ([]byte, htt
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 
 	// Attach session ID if we have one
+	if c.sessionID != "" {
+		httpReq.Header.Set("Mcp-Session-Id", c.sessionID)
+	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, nil, err

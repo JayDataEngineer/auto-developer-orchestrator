@@ -18,7 +18,7 @@ import (
 // Each agent gets its own Session with a unique session_id.
 // llama-server maps session_id → slot, keeping the KV cache warm between calls.
 type Session struct {
-	engine    *HTTPEngine
+	engine    *LLMClient
 	sessionID string
 	ctxSize   int
 

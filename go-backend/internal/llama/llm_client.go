@@ -14,10 +14,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// HTTPEngine communicates with an OpenAI-compatible API over HTTP.
+// LLMClient communicates with an OpenAI-compatible API over HTTP.
 // Works with llama-server, Google Gemini (OpenAI compat), or any compatible endpoint.
 // Uses /v1/chat/completions with native OpenAI-style tool calling.
-type HTTPEngine struct {
+type LLMClient struct {
 	baseURL    string
 	apiKey     string // optional — set for cloud providers (Gemini, OpenAI, etc.)
 	client     *http.Client
@@ -28,16 +28,16 @@ type HTTPEngine struct {
 	loaded bool
 }
 
-// HTTPEngineConfig holds configuration for creating an HTTPEngine.
-type HTTPEngineConfig struct {
+// LLMClientConfig holds configuration for creating an LLMClient.
+type LLMClientConfig struct {
 	BaseURL   string // e.g. "http://localhost:8001" or "https://generativelanguage.googleapis.com/v1beta/openai"
 	APIKey    string // optional Bearer token for cloud providers
 	ModelName string // model ID sent in requests and used for logs/events
 	Logger    *zap.Logger
 }
 
-// NewHTTPEngine creates a new HTTP engine (does NOT load the model — llama-server does that).
-func NewHTTPEngine(cfg HTTPEngineConfig) *HTTPEngine {
+// NewLLMClient creates a new HTTP engine (does NOT load the model — llama-server does that).
+func NewLLMClient(cfg LLMClientConfig) *LLMClient {
 	if cfg.Logger == nil {
 		cfg.Logger = zap.NewNop()
 	}
@@ -47,7 +47,7 @@ func NewHTTPEngine(cfg HTTPEngineConfig) *HTTPEngine {
 	if cfg.ModelName == "" {
 		cfg.ModelName = "gemma-4-26b"
 	}
-	return &HTTPEngine{
+	return &LLMClient{
 		baseURL:   cfg.BaseURL,
 		apiKey:    cfg.APIKey,
 		client:    &http.Client{Timeout: 120 * time.Second},
@@ -58,7 +58,7 @@ func NewHTTPEngine(cfg HTTPEngineConfig) *HTTPEngine {
 
 // CheckHealth verifies the endpoint is reachable.
 // For local llama-server, checks /health. For cloud providers, marks as loaded immediately.
-func (e *HTTPEngine) CheckHealth() error {
+func (e *LLMClient) CheckHealth() error {
 	// Cloud providers don't have a /health endpoint — just mark as loaded
 	if e.apiKey != "" {
 		e.mu.Lock()
@@ -96,7 +96,7 @@ func (e *HTTPEngine) CheckHealth() error {
 
 // LoadModel is a no-op for HTTP engine — the server loads the model at startup.
 // It verifies connectivity instead.
-func (e *HTTPEngine) LoadModel() error {
+func (e *LLMClient) LoadModel() error {
 	if err := e.CheckHealth(); err != nil {
 		return err
 	}
@@ -105,7 +105,7 @@ func (e *HTTPEngine) LoadModel() error {
 }
 
 // NewSession creates a new HTTP-based session that uses a llama-server slot.
-func (e *HTTPEngine) NewSession(ctxSize int) (*Session, error) {
+func (e *LLMClient) NewSession(ctxSize int) (*Session, error) {
 	if !e.IsLoaded() {
 		return nil, fmt.Errorf("engine not connected to llama-server")
 	}
@@ -121,24 +121,24 @@ func (e *HTTPEngine) NewSession(ctxSize int) (*Session, error) {
 }
 
 // IsLoaded returns whether the engine is connected.
-func (e *HTTPEngine) IsLoaded() bool {
+func (e *LLMClient) IsLoaded() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.loaded
 }
 
 // ModelName returns the model ID this engine is configured for.
-func (e *HTTPEngine) ModelName() string {
+func (e *LLMClient) ModelName() string {
 	return e.modelName
 }
 
 // IsCloud returns true if this engine talks to a cloud provider (has an API key).
-func (e *HTTPEngine) IsCloud() bool {
+func (e *LLMClient) IsCloud() bool {
 	return e.apiKey != ""
 }
 
 // WarmUp sends a single-token request to pre-compile CUDA kernels on the server side.
-func (e *HTTPEngine) WarmUp() error {
+func (e *LLMClient) WarmUp() error {
 	e.logger.Info("Warming up llama-server with single-token request...")
 
 	req := ChatCompletionRequest{
@@ -159,7 +159,7 @@ func (e *HTTPEngine) WarmUp() error {
 }
 
 // Close is a no-op for HTTP engine.
-func (e *HTTPEngine) Close() error {
+func (e *LLMClient) Close() error {
 	e.mu.Lock()
 	e.loaded = false
 	e.mu.Unlock()
@@ -228,7 +228,7 @@ type ChatMessage struct {
 }
 
 // chatComplete sends a chat completion request (non-streaming).
-func (e *HTTPEngine) chatComplete(req ChatCompletionRequest) (*ChatCompletionResponse, error) {
+func (e *LLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletionResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -269,7 +269,7 @@ func (e *HTTPEngine) chatComplete(req ChatCompletionRequest) (*ChatCompletionRes
 // chatCompleteStream sends a chat completion request and streams chunks via callback.
 // SSE format: "data: {json}\n\n" with delta objects containing content, reasoning_content, or tool_calls.
 // The final chunk includes a usage field with prompt_tokens and completion_tokens.
-func (e *HTTPEngine) chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error {
+func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error {
 	req.Stream = true
 	body, err := json.Marshal(req)
 	if err != nil {

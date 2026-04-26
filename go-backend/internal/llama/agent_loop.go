@@ -198,7 +198,7 @@ func DefaultAgentLoopConfig() AgentLoopConfig {
 
 // AgentLoop runs the full agent loop: generate → parse tool calls → execute → feed back.
 type AgentLoop struct {
-	engine   *HTTPEngine
+	engine   *LLMClient
 	session  *Session
 	executor ToolExecutor
 	config   AgentLoopConfig
@@ -212,7 +212,7 @@ type AgentLoop struct {
 }
 
 // NewAgentLoop creates a new agent loop bound to an engine.
-func NewAgentLoop(engine *HTTPEngine, executor ToolExecutor, cfg AgentLoopConfig, logger *zap.Logger) (*AgentLoop, error) {
+func NewAgentLoop(engine *LLMClient, executor ToolExecutor, cfg AgentLoopConfig, logger *zap.Logger) (*AgentLoop, error) {
 	if !engine.IsLoaded() {
 		return nil, fmt.Errorf("engine model not loaded")
 	}
