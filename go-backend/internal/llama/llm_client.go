@@ -207,14 +207,15 @@ type ChatCompletionRequest struct {
 
 // sanitizeRequest strips llama.cpp-specific fields for cloud providers.
 // Cloud APIs (Gemini, OpenRouter, OpenAI) reject unknown fields like
-// top_k, repeat_penalty, cache_prompt, and session_id with HTTP 400.
+// top_k, repeat_penalty, presence_penalty, min_p, cache_prompt, and session_id.
 func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionRequest {
 	if !e.IsCloud() {
 		return req
 	}
-	// Zero out llama.cpp-only fields — omitempty will exclude them
+	// Zero out llama.cpp-only / unsupported fields — omitempty will exclude them
 	req.TopK = 0
 	req.RepeatPenalty = 0
+	req.PresencePenalty = 0
 	req.MinP = 0
 	req.CachePrompt = false
 	req.SessionID = ""

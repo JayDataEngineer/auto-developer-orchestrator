@@ -357,10 +357,28 @@ func (e *SandboxToolExecutor) desktopClick(ctx context.Context, sandboxID string
 
 // dispatchMCPTool handles a dynamically-registered MCP tool call.
 func (e *SandboxToolExecutor) dispatchMCPTool(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
+	mcpName := strings.TrimPrefix(toolName, "mcp_")
+
+	// Try multi-client first (routes to correct server)
+	if e.MCPMulti != nil && e.MCPMulti.HasTool(mcpName) {
+		result, err := e.MCPMulti.CallTool(ctx, mcpName, args)
+		if err != nil {
+			e.Logger.Warn("MCP multi tool call failed", zap.String("tool", mcpName), zap.Error(err))
+			return nil, fmt.Errorf("MCP %s failed: %w", mcpName, err)
+		}
+		e.Logger.Info("MCP multi tool call succeeded", zap.String("tool", mcpName))
+		return map[string]interface{}{
+			"success": true,
+			"tool":    mcpName,
+			"source":  "mcp",
+			"result":  result,
+		}, nil
+	}
+
+	// Fallback to single client
 	if e.MCPClient == nil {
 		return nil, fmt.Errorf("MCP tool %s failed: MCP client not configured", toolName)
 	}
-	mcpName := strings.TrimPrefix(toolName, "mcp_")
 	result, err := e.MCPClient.CallTool(ctx, mcpName, args)
 	if err != nil {
 		e.Logger.Warn("MCP tool call failed", zap.String("tool", mcpName), zap.Error(err))

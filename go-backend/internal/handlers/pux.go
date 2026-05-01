@@ -43,6 +43,7 @@ type PuxHandler struct {
 	sandboxMgr   *sandbox.Manager
 	cuBridge     *ComputerUseBridge // bridges llama executor to CU/X11 handlers
 	mcpClient    *mcp.Client        // optional: MCP research server for search/scrape
+	mcpMulti     *mcp.MultiClient   // optional: multi-server MCP routing
 
 	eventStore     *storage.EventStore
 
@@ -101,6 +102,11 @@ func (h *PuxHandler) SetSandboxOnly(sandboxMgr *sandbox.Manager, cu *ComputerUse
 // SetMCPClient configures the MCP research server client for search/scrape tools.
 func (h *PuxHandler) SetMCPClient(client *mcp.Client) {
 	h.mcpClient = client
+}
+
+// SetMCPMulti configures the multi-server MCP client for routing tool calls.
+func (h *PuxHandler) SetMCPMulti(multi *mcp.MultiClient) {
+	h.mcpMulti = multi
 }
 
 // SetEventStore configures the event store for session event persistence.
@@ -455,6 +461,7 @@ func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string)
 			VisionEnabled: visionEnabled,
 			Vision:        visionClient,
 			MCPClient:     h.mcpClient,
+			MCPMulti:      h.mcpMulti,
 			ApprovalMgr:   (*approvalManagerAdapter)(h.approvalMgr),
 		}
 

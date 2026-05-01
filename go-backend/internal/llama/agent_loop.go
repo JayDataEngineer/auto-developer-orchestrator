@@ -145,6 +145,7 @@ type SandboxToolExecutor struct {
 	Logger      *zap.Logger
 	Creds       *CredentialStore
 	MCPClient   *mcp.Client
+	MCPMulti    *mcp.MultiClient // multi-server routing (supersedes MCPClient)
 	ApprovalMgr ApprovalManager
 	Vision      *browser.VisionClient
 

@@ -267,19 +267,32 @@ func main() {
 		puxHandler.SetOpenRouterEngine(openrouterEngine)
 	}
 
-	// MCP research server — non-fatal, tools fall back to browser-based search
-	mcpClient := mcp.NewClient("", logger)
-	if mcpClient.IsAvailable() {
-		puxHandler.SetMCPClient(mcpClient)
-		logger.Info("MCP research server connected", zap.String("endpoint", mcpClient.Endpoint()))
+	// MCP servers — non-fatal, tools fall back to browser-based search
+	mcpMulti := mcp.NewMultiClient(logger)
 
-		// Discover MCP tools and register them as first-class tools with full schemas
-		mcpTools, err := mcpClient.ListTools(context.Background())
-		if err != nil {
-			logger.Warn("Failed to list MCP tools — using mcp_call fallback only", zap.Error(err))
-		} else {
+	// Web research server (search, scrape, crawl, extract, docs)
+	webResearchClient := mcp.NewClient("http://100.86.69.57:8327/mcp", logger)
+	mcpMulti.AddClient("web", webResearchClient)
+
+	// Media analysis server (image, audio, video analysis)
+	mediaAnalysisClient := mcp.NewClient("http://100.86.69.57:8001/mcp", logger)
+	mcpMulti.AddClient("media", mediaAnalysisClient)
+
+	if mcpMulti.IsAvailable() {
+		// Initialize all servers and discover tools
+		if err := mcpMulti.InitializeAll(context.Background()); err != nil {
+			logger.Warn("MCP multi-client initialization had errors", zap.Error(err))
+		}
+		puxHandler.SetMCPMulti(mcpMulti)
+
+		// Also set primary client for backward compat (Research/Scrape helpers)
+		puxHandler.SetMCPClient(webResearchClient)
+
+		// Register all MCP tools as first-class tools with full schemas
+		allTools := mcpMulti.AllTools()
+		if len(allTools) > 0 {
 			var regs []llamaeng.MCPToolRegistration
-			for _, t := range mcpTools {
+			for _, t := range allTools {
 				regs = append(regs, llamaeng.MCPToolRegistration{
 					MCPName:       t.Name,
 					Description:   t.Description,
@@ -288,13 +301,13 @@ func main() {
 				})
 			}
 			names := llamaeng.RegisterMCPTools(regs)
-			logger.Info("Registered MCP tools as first-class tools",
+			logger.Info("Registered MCP tools from all servers",
 				zap.Int("count", len(names)),
 				zap.Strings("tools", names),
 			)
 		}
 	} else {
-		logger.Info("MCP research server not available — search/scrape will use browser fallback")
+		logger.Info("MCP servers not available — search/scrape will use browser fallback")
 	}
 
 	// File transfer handler (upload/download files to/from sandbox)

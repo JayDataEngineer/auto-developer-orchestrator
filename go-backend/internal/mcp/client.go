@@ -26,13 +26,13 @@ type Client struct {
 
 // NewClient creates a new MCP client. The endpoint should be the MCP server URL.
 // If endpoint is empty, it falls back to the MCP_RESEARCH_ENDPOINT env var,
-// then to "http://100.121.245.20:8327/mcp".
+// then to "http://100.86.69.57:8327/mcp".
 func NewClient(endpoint string, logger *zap.Logger) *Client {
 	if endpoint == "" {
 		endpoint = os.Getenv("MCP_RESEARCH_ENDPOINT")
 	}
 	if endpoint == "" {
-		endpoint = "http://100.121.245.20:8327/mcp"
+		endpoint = "http://100.86.69.57:8327/mcp"
 	}
 	if logger == nil {
 		logger = zap.NewNop()
@@ -330,4 +330,112 @@ func parseSSEData(body []byte) []byte {
 		return lastData
 	}
 	return body
+}
+
+// MultiClient routes MCP tool calls to the correct server.
+// Each server has a prefix (e.g. "mcp_" for web-research, "media_" for media-analysis).
+// Tool calls are routed by matching the tool name to the registered prefix.
+type MultiClient struct {
+	clients map[string]*Client // prefix → client
+	toolMap map[string]string  // toolName → prefix (built from ListTools)
+	logger  *zap.Logger
+}
+
+// NewMultiClient creates a multi-server MCP client.
+func NewMultiClient(logger *zap.Logger) *MultiClient {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &MultiClient{
+		clients: make(map[string]*Client),
+		toolMap: make(map[string]string),
+		logger:  logger,
+	}
+}
+
+// AddClient registers an MCP server with a tool name prefix.
+func (m *MultiClient) AddClient(prefix string, client *Client) {
+	m.clients[prefix] = client
+}
+
+// InitializeAll initializes all registered MCP servers and discovers their tools.
+func (m *MultiClient) InitializeAll(ctx context.Context) error {
+	for prefix, client := range m.clients {
+		if err := client.Initialize(ctx); err != nil {
+			m.logger.Warn("MCP server initialize failed", zap.String("prefix", prefix), zap.Error(err))
+			continue
+		}
+		tools, err := client.ListTools(ctx)
+		if err != nil {
+			m.logger.Warn("MCP tools/list failed", zap.String("prefix", prefix), zap.Error(err))
+			continue
+		}
+		for _, t := range tools {
+			m.toolMap[t.Name] = prefix
+		}
+		m.logger.Info("MCP server initialized", zap.String("prefix", prefix), zap.Int("tools", len(tools)))
+	}
+	return nil
+}
+
+// AllTools returns all tools from all registered servers, with their original names.
+func (m *MultiClient) AllTools() []MCPTool {
+	var all []MCPTool
+	for _, client := range m.clients {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		tools, err := client.ListTools(ctx)
+		cancel()
+		if err != nil {
+			continue
+		}
+		all = append(all, tools...)
+	}
+	return all
+}
+
+// CallTool routes a tool call to the correct server based on the tool name.
+func (m *MultiClient) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
+	prefix, ok := m.toolMap[name]
+	if !ok {
+		return "", fmt.Errorf("MCP tool %q not found in any server", name)
+	}
+	client, ok := m.clients[prefix]
+	if !ok {
+		return "", fmt.Errorf("MCP server %q not available", prefix)
+	}
+	return client.CallTool(ctx, name, args)
+}
+
+// IsAvailable returns true if at least one server is reachable.
+func (m *MultiClient) IsAvailable() bool {
+	for _, client := range m.clients {
+		if client.IsAvailable() {
+			return true
+		}
+	}
+	return false
+}
+
+// ClientForTool returns the MCP client that handles the given tool name.
+// Returns nil if the tool is not registered.
+func (m *MultiClient) ClientForTool(toolName string) *Client {
+	prefix, ok := m.toolMap[toolName]
+	if !ok {
+		return nil
+	}
+	return m.clients[prefix]
+}
+
+// HasTool checks if a tool name is registered in any server.
+func (m *MultiClient) HasTool(toolName string) bool {
+	_, ok := m.toolMap[toolName]
+	return ok
+}
+
+// PrimaryClient returns the first registered client (for backward compatibility).
+func (m *MultiClient) PrimaryClient() *Client {
+	for _, c := range m.clients {
+		return c
+	}
+	return nil
 }
