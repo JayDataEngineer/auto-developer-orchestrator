@@ -90,14 +90,14 @@ Each goal has a concrete test task that proves it works.
 
 | Goal | Status | Notes |
 |------|--------|-------|
-| 1. Coding Tasks | PASS | file_write + bash tools verified via sub-agent delegation. Script creation and execution work. |
-| 2. Web Research | PASS | MCP research tool working. Sub-agent searched + scraped Wikipedia, MDN, caniuse. 6 successful MCP calls. |
+| 1. Coding Tasks | PASS | Pac-Man HTML5 game: 627 lines, orchestrator used file_write + bash directly. Also verified Python script creation + execution. |
+| 2. Web Research | PASS | Browser automation: navigated to Bing Images, observed search results for "anime art", returned categories. Also: MCP research tool verified. |
 | 3. Media Analysis | PASS | MCP tools registered (34 tools: 18 web + 16 media). Image analysis via mcp_call verified. |
 | 4. Context Management | PARTIAL | Compaction code exists. Cloud models have huge context windows — compaction rarely triggers. |
 | 5. Scheduling | PASS | Scheduler API tested: create, list, trigger, delete. Jobs register and execute. |
 | 6. Multi-Model Cloud | PASS | DeepSeek V4 Flash + Gemini verified. Model switching API works. Cloud param sanitization fixed. |
 | 7. Sub-agent Delegation | PASS | Sub-agent delegation with restricted tools verified. Sub-agents use whitelisted tools only. |
-| 8. Desktop Automation | SKIP | Requires VNC/Xvfb sandbox mode. Endpoint exists, skips when unavailable. |
+| 8. Desktop Automation | PASS | Telegram Desktop downloaded, extracted, launched on X11 display :99. Login UI visible via VNC. Agent used bash + xdotool. |
 
 ### Infrastructure Tests (all PASS)
 - Health endpoint: component status (LLM, sandbox)
@@ -108,3 +108,5 @@ Each goal has a concrete test task that proves it works.
 ### Bug Fixes Applied
 - **Cloud provider param sanitization**: `sanitizeRequest()` strips llama.cpp-specific fields (top_k, repeat_penalty, presence_penalty, min_p, cache_prompt, session_id) for cloud APIs
 - **OpenAI protocol fix**: Cycle/reflection nudges converted from fake `role: "tool"` messages to `role: "user"` messages. Cloud providers validate that every tool message has a matching tool_call_id.
+- **Orchestrator tool access**: `OrchestratorExecutor.Execute()` falls through to `baseExecutor` for non-orchestrator tools (bash, file_*, browser, desktop)
+- **Browser navigation fix**: `navigateInner()` now creates a blank tab via `/json/new` then uses `chromedp.Navigate()` which properly waits for page load. Previous approach (`/json/new?URL`) resulted in `about:blank` because async navigation wasn't awaited.

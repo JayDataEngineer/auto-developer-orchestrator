@@ -239,10 +239,10 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 		return nil, fmt.Errorf("not connected — call Connect() first")
 	}
 
-	// Step 1: Create a new tab and navigate using raw HTTP CDP API.
-	// This avoids the chromedp session-invalidation issue entirely.
-	// The CDP HTTP endpoint /json/new?URL creates a new tab at the given URL.
-	httpURL := fmt.Sprintf("http://%s/json/new?%s", sbc.wsURL[len("ws://"):], url)
+	// Step 1: Create a blank tab via CDP HTTP API, then navigate with chromedp.
+	// Using /json/new (without URL) avoids async navigation issues.
+	// chromedp.Navigate properly waits for the page load event.
+	httpURL := fmt.Sprintf("http://%s/json/new", sbc.wsURL[len("ws://"):])
 	sbc.logger.Info("navigateInner: creating tab via HTTP API", zap.String("httpURL", httpURL))
 
 	createResp, err := sbc.cdpHTTPPut(httpURL)
@@ -255,15 +255,15 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 	}
 	sbc.logger.Info("navigateInner: tab created", zap.String("targetID", newTargetID))
 
-	// Step 2: Wait for the page to load (short sleep — HTTP server is local)
-	time.Sleep(settleDelay)
-
-	// Step 3: Attach a fresh chromedp context to the new tab for data collection
+	// Step 2: Attach a fresh chromedp context to the new tab
 	tabCtx, tabCancel := chromedp.NewContext(allocCtx,
 		chromedp.WithTargetID(target.ID(newTargetID)),
 	)
 
+	// Step 3: Navigate using chromedp (waits for page load event) then collect data.
 	err = chromedp.Run(tabCtx,
+		chromedp.Navigate(url),
+		chromedp.Sleep(500*time.Millisecond), // brief settle for dynamic content
 		chromedp.Title(&title),
 		chromedp.Location(&currentURL),
 		chromedp.Evaluate(labelerJS, &elementsJSON),
