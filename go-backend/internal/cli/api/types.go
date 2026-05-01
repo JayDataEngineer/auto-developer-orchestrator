@@ -120,6 +120,10 @@ type SchedulerRun struct {
 	Error     string `json:"error,omitempty"`
 }
 
+type SchedulerRunsResponse struct {
+	Runs []SchedulerRun `json:"runs"`
+}
+
 // Sandbox
 type SandboxInfo struct {
 	ID          string `json:"id"`

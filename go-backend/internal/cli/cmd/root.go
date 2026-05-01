@@ -27,6 +27,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&serverURL, "server", envOr("ORCH_SERVER_URL", "http://localhost:3847"), "Backend URL")
 	rootCmd.PersistentFlags().StringVarP(&outputFmt, "output", "o", "text", "Output format: text|json")
 	rootCmd.PersistentFlags().StringVarP(&projectName, "project", "p", envOr("ORCH_PROJECT", ""), "Project name")
+
+	// Register 'chat' as an alias for the default TUI mode
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "chat",
+		Short: "Launch interactive TUI chat mode",
+		RunE:  runChat,
+	})
 }
 
 func Execute() error {

@@ -173,16 +173,28 @@ var schedulerRunsCmd = &cobra.Command{
 		if len(args) > 0 {
 			path = "/api/scheduler/" + args[0] + "/runs"
 		}
-		var result []api.SchedulerRun
+		var result api.SchedulerRunsResponse
 		if err := client.Get(path, &result); err != nil {
 			return err
 		}
 		if outputFmt == "json" {
-			return printJSON(result)
+			return printJSON(result.Runs)
 		}
-		for _, r := range result {
+		if len(result.Runs) == 0 {
+			fmt.Println("No runs found.")
+			return nil
+		}
+		for _, r := range result.Runs {
+			id := r.ID
+			jobID := r.JobID
+			if len(id) > 8 {
+				id = id[:8]
+			}
+			if len(jobID) > 8 {
+				jobID = jobID[:8]
+			}
 			fmt.Printf("%s  job:%s  status:%s  started:%s\n",
-				r.ID[:8], r.JobID[:8], r.Status, r.StartedAt)
+				id, jobID, r.Status, r.StartedAt)
 		}
 		return nil
 	},
