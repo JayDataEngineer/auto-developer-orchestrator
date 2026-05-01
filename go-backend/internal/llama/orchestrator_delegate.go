@@ -43,6 +43,9 @@ type asyncDelegateResult struct {
 }
 
 // Execute routes tool calls to the appropriate handler.
+// Orchestrator-specific tools (delegate_to, create_plan, etc.) are handled here.
+// All other tools (bash, file_read, file_write, browser, desktop, etc.) fall through
+// to the baseExecutor (SandboxToolExecutor) so the orchestrator can use them directly.
 func (e *OrchestratorExecutor) Execute(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
 	switch toolName {
 	case "delegate_to":
@@ -68,7 +71,30 @@ func (e *OrchestratorExecutor) Execute(ctx context.Context, toolName string, arg
 			"output":  output,
 		}, nil
 	default:
-		return nil, fmt.Errorf("orchestrator-executor: unknown tool %q (orchestrator tools: delegate_to, delegate_async, collect_results, create_plan, update_plan, clarify, synthesize, update_memory)", toolName)
+		// Fall through to base executor for sandbox tools (bash, file_*, browser, desktop, etc.)
+		if e.baseExecutor != nil {
+			return e.baseExecutor.Execute(ctx, toolName, args)
+		}
+		return nil, fmt.Errorf("orchestrator-executor: unknown tool %q and no base executor available", toolName)
+	}
+}
+
+// ExecuteStreaming forwards streaming tool calls to the base executor.
+// This lets the orchestrator use streaming tools (like bash) directly.
+func (e *OrchestratorExecutor) ExecuteStreaming(ctx context.Context, toolName string, args map[string]interface{}, onUpdate func(string)) (interface{}, error) {
+	// Orchestrator-specific tools don't stream — route normally
+	switch toolName {
+	case "delegate_to", "delegate_async", "collect_results", "create_plan",
+		"update_plan", "clarify", "synthesize", "update_memory", "yield_artifact":
+		return e.Execute(ctx, toolName, args)
+	default:
+		if streamer, ok := e.baseExecutor.(ToolExecutorStreaming); ok {
+			return streamer.ExecuteStreaming(ctx, toolName, args, onUpdate)
+		}
+		if e.baseExecutor != nil {
+			return e.baseExecutor.Execute(ctx, toolName, args)
+		}
+		return nil, fmt.Errorf("orchestrator-executor: no base executor for streaming tool %q", toolName)
 	}
 }
 
