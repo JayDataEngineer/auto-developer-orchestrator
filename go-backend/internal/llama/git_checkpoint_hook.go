@@ -64,7 +64,7 @@ func (h *GitCheckpointHook) AfterToolCall(ctx context.Context, toolName string, 
 // shouldCheckpoint returns true for tools that modify files.
 func (h *GitCheckpointHook) shouldCheckpoint(toolName string, args map[string]interface{}) bool {
 	switch toolName {
-	case "file_write", "file_edit":
+	case "file_write", "file_edit", "undo_edit":
 		return true
 	case "bash":
 		return isRiskyBash(args)

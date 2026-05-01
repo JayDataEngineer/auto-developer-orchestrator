@@ -23,18 +23,20 @@ type SandboxFileOps struct {
 	SandboxID string
 	Logger    *zap.Logger
 
-	mu        sync.Mutex
-	readCache map[string]string // path → content hash (must-read-before-edit)
-	rgReady   bool              // true after ripgrep installed
+	mu             sync.Mutex
+	readCache      map[string]string   // path → content hash (must-read-before-edit)
+	editSnapshots  map[string][]string // path → stack of pre-edit content (for undo)
+	rgReady        bool                // true after ripgrep installed
 }
 
 // NewSandboxFileOps creates a new SandboxFileOps for the given sandbox.
 func NewSandboxFileOps(mgr *sandbox.Manager, sandboxID string, logger *zap.Logger) *SandboxFileOps {
 	return &SandboxFileOps{
-		Manager:   mgr,
-		SandboxID: sandboxID,
-		Logger:    logger,
-		readCache: make(map[string]string),
+		Manager:        mgr,
+		SandboxID:      sandboxID,
+		Logger:         logger,
+		readCache:      make(map[string]string),
+		editSnapshots:  make(map[string][]string),
 	}
 }
 
@@ -89,35 +91,49 @@ func (f *SandboxFileOps) ReadFile(ctx context.Context, path string, offset, limi
 
 // --- WriteFile ---
 
-// WriteFile creates a new file in the sandbox.
-// Refuses to overwrite existing files — the model must use EditFile instead.
-// This prevents accidental destruction of partially working code (little-coder
-// paper: write guard fires on 57% of exercises, preventing silent code loss).
-func (f *SandboxFileOps) WriteFile(ctx context.Context, path, content string) error {
+// WriteFile creates or overwrites a file in the sandbox.
+// Without force=true, refuses to overwrite existing files — the model must use EditFile instead.
+// With force=true, overwrites and returns a diff of changes.
+// Returns a map with success status, file path, size, and optional diff.
+func (f *SandboxFileOps) WriteFile(ctx context.Context, path, content string, force bool) (map[string]interface{}, error) {
 	if err := sandbox.ValidatePath(path); err != nil {
-		return err
+		return nil, err
 	}
 
-	// Write guard: refuse to overwrite existing files
 	exists, err := f.FileExists(ctx, path)
 	if err != nil {
-		return fmt.Errorf("failed to check file existence: %w", err)
+		return nil, fmt.Errorf("failed to check file existence: %w", err)
 	}
+
+	var diff string
 	if exists {
-		return fmt.Errorf("file %s already exists — use file_edit to modify it instead of file_write. file_write is only for creating new files", path)
+		if !force {
+			return nil, fmt.Errorf("file %s already exists — use file_edit to modify it, or set overwrite:true to replace it entirely", path)
+		}
+		// Capture old content for diff before overwriting
+		oldContent, _ := f.exec(ctx, fmt.Sprintf("cat '%s'", sandbox.ShellEscape(path)))
+		diff = unifiedDiff(path, oldContent, content)
+
+		// Save snapshot for undo
+		f.mu.Lock()
+		f.editSnapshots[path] = append(f.editSnapshots[path], oldContent)
+		if len(f.editSnapshots[path]) > 10 {
+			f.editSnapshots[path] = f.editSnapshots[path][len(f.editSnapshots[path])-10:]
+		}
+		f.mu.Unlock()
 	}
 
 	// Ensure parent directory exists
 	dir := filepath.Dir(path)
 	if _, err := f.exec(ctx, fmt.Sprintf("mkdir -p '%s'", sandbox.ShellEscape(dir))); err != nil {
-		return fmt.Errorf("failed to create parent dir: %w", err)
+		return nil, fmt.Errorf("failed to create parent dir: %w", err)
 	}
 
 	// Transfer via base64 pipe (safe for all content types)
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	cmd := fmt.Sprintf("echo '%s' | base64 -d > '%s'", encoded, sandbox.ShellEscape(path))
 	if _, err := f.exec(ctx, cmd); err != nil {
-		return fmt.Errorf("failed to write %s: %w", path, err)
+		return nil, fmt.Errorf("failed to write %s: %w", path, err)
 	}
 
 	// Mark as read so subsequent edits work
@@ -126,17 +142,26 @@ func (f *SandboxFileOps) WriteFile(ctx context.Context, path, content string) er
 	f.readCache[path] = fmt.Sprintf("%x", hash[:8])
 	f.mu.Unlock()
 
-	return nil
+	result := map[string]interface{}{
+		"success":   true,
+		"file_path": path,
+		"size":      len(content),
+		"overwrote": exists,
+	}
+	if diff != "" {
+		result["diff"] = diff
+	}
+	return result, nil
 }
 
 // --- EditFile ---
 
 // EditFile replaces an exact string in a file.
 // Enforces must-read-before-edit: the file must have been read first.
-// Returns the number of replacements made.
-func (f *SandboxFileOps) EditFile(ctx context.Context, path, oldString, newString string, replaceAll bool) (int, error) {
+// Captures pre-edit content for undo, returns a diff of changes.
+func (f *SandboxFileOps) EditFile(ctx context.Context, path, oldString, newString string, replaceAll bool) (int, string, error) {
 	if err := sandbox.ValidatePath(path); err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	// Must-read-before-edit check
@@ -144,8 +169,11 @@ func (f *SandboxFileOps) EditFile(ctx context.Context, path, oldString, newStrin
 	_, read := f.readCache[path]
 	f.mu.Unlock()
 	if !read {
-		return 0, fmt.Errorf("file %s has not been read yet. Call file_read first before editing.", path)
+		return 0, "", fmt.Errorf("file %s has not been read yet. Call file_read first before editing.", path)
 	}
+
+	// Capture pre-edit content for diff and undo snapshot
+	preContent, _ := f.exec(ctx, fmt.Sprintf("cat '%s'", sandbox.ShellEscape(path)))
 
 	// Count occurrences of old string
 	countCmd := fmt.Sprintf("grep -c -F '%s' '%s' 2>/dev/null || echo 0",
@@ -154,23 +182,13 @@ func (f *SandboxFileOps) EditFile(ctx context.Context, path, oldString, newStrin
 	countOut = strings.TrimSpace(countOut)
 	occurrences, _ := strconv.Atoi(countOut)
 	if occurrences == 0 {
-		return 0, fmt.Errorf("old_string not found in %s. The file may have changed since last read.", path)
+		return 0, "", fmt.Errorf("old_string not found in %s. The file may have changed since last read.", path)
 	}
 	if occurrences > 1 && !replaceAll {
-		return 0, fmt.Errorf("old_string found %d times in %s. Set replace_all=true to replace all occurrences, or provide a more specific old_string that is unique.", occurrences, path)
-	}
-
-	// Perform replacement using a heredoc-based approach for safe string handling
-	// Write the sed script to a temp file to avoid shell escaping issues
-	script := fmt.Sprintf("s%s%s%s%s", "\x00", oldString, "\x00", newString)
-	if replaceAll {
-		script += "\x00g"
-	} else {
-		script += "\x00"
+		return 0, "", fmt.Errorf("old_string found %d times in %s. Set replace_all=true to replace all occurrences, or provide a more specific old_string that is unique.", occurrences, path)
 	}
 
 	// Use perl for replacement (handles multiline, special chars better than sed)
-	// Escape for single-quoted shell string
 	escapedOld := perlEscape(oldString)
 	escapedNew := perlEscape(newString)
 
@@ -184,17 +202,27 @@ func (f *SandboxFileOps) EditFile(ctx context.Context, path, oldString, newStrin
 		escapedOld, escapedNew, replaceFlag, sandbox.ShellEscape(path),
 	)
 	if _, err := f.exec(ctx, editCmd); err != nil {
-		return 0, fmt.Errorf("edit failed for %s: %w", path, err)
+		return 0, "", fmt.Errorf("edit failed for %s: %w", path, err)
 	}
 
-	// Update read cache with new content
-	newContent, _ := f.exec(ctx, fmt.Sprintf("cat '%s'", sandbox.ShellEscape(path)))
-	hash := sha256.Sum256([]byte(newContent))
+	// Get post-edit content for diff
+	postContent, _ := f.exec(ctx, fmt.Sprintf("cat '%s'", sandbox.ShellEscape(path)))
+
+	// Save pre-edit snapshot for undo (keep last 10 per file)
 	f.mu.Lock()
+	f.editSnapshots[path] = append(f.editSnapshots[path], preContent)
+	if len(f.editSnapshots[path]) > 10 {
+		f.editSnapshots[path] = f.editSnapshots[path][len(f.editSnapshots[path])-10:]
+	}
+	// Update read cache with new content hash
+	hash := sha256.Sum256([]byte(postContent))
 	f.readCache[path] = fmt.Sprintf("%x", hash[:8])
 	f.mu.Unlock()
 
-	return occurrences, nil
+	// Generate unified diff
+	diff := unifiedDiff(path, preContent, postContent)
+
+	return occurrences, diff, nil
 }
 
 // perlEscape escapes a string for use in a perl replacement expression.
@@ -203,6 +231,134 @@ func perlEscape(s string) string {
 	s = strings.ReplaceAll(s, `/`, `\/`)
 	s = strings.ReplaceAll(s, "'", "\\'")
 	return s
+}
+
+// UndoEdit restores a file to its state before the last edit.
+// Returns the restored content or an error if no snapshot exists.
+func (f *SandboxFileOps) UndoEdit(ctx context.Context, path string) (string, error) {
+	if err := sandbox.ValidatePath(path); err != nil {
+		return "", err
+	}
+
+	f.mu.Lock()
+	snapshots := f.editSnapshots[path]
+	if len(snapshots) == 0 {
+		f.mu.Unlock()
+		return "", fmt.Errorf("no edit snapshots for %s — nothing to undo", path)
+	}
+	// Pop the last snapshot
+	prev := snapshots[len(snapshots)-1]
+	f.editSnapshots[path] = snapshots[:len(snapshots)-1]
+	f.mu.Unlock()
+
+	// Restore the file
+	encoded := base64.StdEncoding.EncodeToString([]byte(prev))
+	cmd := fmt.Sprintf("echo '%s' | base64 -d > '%s'", encoded, sandbox.ShellEscape(path))
+	if _, err := f.exec(ctx, cmd); err != nil {
+		return "", fmt.Errorf("undo failed for %s: %w", path, err)
+	}
+
+	// Update read cache
+	hash := sha256.Sum256([]byte(prev))
+	f.mu.Lock()
+	f.readCache[path] = fmt.Sprintf("%x", hash[:8])
+	f.mu.Unlock()
+
+	return prev, nil
+}
+
+// unifiedDiff generates a compact unified diff between old and new content.
+// Returns up to 40 lines of diff output showing what changed.
+func unifiedDiff(path, oldContent, newContent string) string {
+	oldLines := strings.Split(oldContent, "\n")
+	newLines := strings.Split(newContent, "\n")
+
+	var buf strings.Builder
+	buf.WriteString(fmt.Sprintf("--- %s (before)\n", path))
+	buf.WriteString(fmt.Sprintf("+++ %s (after)\n", path))
+
+	// Simple line-by-line diff: find first and last change
+	firstChange := -1
+	lastChange := -1
+	maxLen := len(oldLines)
+	if len(newLines) > maxLen {
+		maxLen = len(newLines)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		oldLine := ""
+		newLine := ""
+		if i < len(oldLines) {
+			oldLine = oldLines[i]
+		}
+		if i < len(newLines) {
+			newLine = newLines[i]
+		}
+		if oldLine != newLine {
+			if firstChange == -1 {
+				firstChange = i
+			}
+			lastChange = i
+		}
+	}
+
+	if firstChange == -1 {
+		return "(no changes detected)"
+	}
+
+	// Show context: 2 lines before first change to 2 lines after last change
+	start := firstChange - 2
+	if start < 0 {
+		start = 0
+	}
+	end := lastChange + 3
+	if end > maxLen {
+		end = maxLen
+	}
+
+	// Header with line range
+	buf.WriteString(fmt.Sprintf("@@ lines %d-%d @@\n", start+1, end))
+
+	lineCount := 0
+	for i := start; i < end; i++ {
+		if lineCount >= 40 {
+			buf.WriteString("... (diff truncated)\n")
+			break
+		}
+		oldLine := ""
+		newLine := ""
+		if i < len(oldLines) {
+			oldLine = oldLines[i]
+		}
+		if i < len(newLines) {
+			newLine = newLines[i]
+		}
+
+		if oldLine == newLine {
+			buf.WriteString(fmt.Sprintf(" %s\n", oldLine))
+			lineCount++
+		} else {
+			if oldLine != "" {
+				// Truncate long lines
+				o := oldLine
+				if len(o) > 120 {
+					o = o[:117] + "..."
+				}
+				buf.WriteString(fmt.Sprintf("-%s\n", o))
+				lineCount++
+			}
+			if newLine != "" {
+				n := newLine
+				if len(n) > 120 {
+					n = n[:117] + "..."
+				}
+				buf.WriteString(fmt.Sprintf("+%s\n", n))
+				lineCount++
+			}
+		}
+	}
+
+	return buf.String()
 }
 
 // --- Grep ---

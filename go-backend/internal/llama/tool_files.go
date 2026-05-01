@@ -43,10 +43,15 @@ func (e *SandboxToolExecutor) executeFileWrite(ctx context.Context, sandboxID st
 	if path == "" || content == "" {
 		return nil, fmt.Errorf("missing 'file_path' or 'content' argument")
 	}
-	if err := e.ensureFileOps(sandboxID).WriteFile(ctx, path, content); err != nil {
+	force := false
+	if v, ok := args["overwrite"].(bool); ok {
+		force = v
+	}
+	result, err := e.ensureFileOps(sandboxID).WriteFile(ctx, path, content, force)
+	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"success": true, "file_path": path, "size": len(content)}, nil
+	return result, nil
 }
 
 func (e *SandboxToolExecutor) executeFileEdit(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
@@ -60,11 +65,11 @@ func (e *SandboxToolExecutor) executeFileEdit(ctx context.Context, sandboxID str
 	if path == "" || oldString == "" {
 		return nil, fmt.Errorf("missing 'file_path' or 'old_string' argument")
 	}
-	count, err := e.ensureFileOps(sandboxID).EditFile(ctx, path, oldString, newString, replaceAll)
+	count, diff, err := e.ensureFileOps(sandboxID).EditFile(ctx, path, oldString, newString, replaceAll)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"success": true, "file_path": path, "replacements": count}, nil
+	return map[string]interface{}{"success": true, "file_path": path, "replacements": count, "diff": diff}, nil
 }
 
 func (e *SandboxToolExecutor) executeFileGrep(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
@@ -108,6 +113,19 @@ func (e *SandboxToolExecutor) executeFileGlob(ctx context.Context, sandboxID str
 		return nil, err
 	}
 	return map[string]interface{}{"success": true, "pattern": pattern, "files": files, "count": len(files)}, nil
+}
+
+func (e *SandboxToolExecutor) executeUndoEdit(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {
+	path, _ := args["file_path"].(string)
+	if path == "" {
+		return nil, fmt.Errorf("missing 'file_path' argument")
+	}
+	content, err := e.ensureFileOps(sandboxID).UndoEdit(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Count(content, "\n") + 1
+	return map[string]interface{}{"success": true, "file_path": path, "restored_lines": lines, "message": fmt.Sprintf("Restored %s to previous version (%d lines)", path, lines)}, nil
 }
 
 func (e *SandboxToolExecutor) executeCodeSearch(ctx context.Context, sandboxID string, args map[string]interface{}) (interface{}, error) {

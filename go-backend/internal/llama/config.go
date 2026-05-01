@@ -77,7 +77,7 @@ func DefaultModelConfig() ModelConfig {
 		DefaultMaxToolRounds:  20,
 		BrowserMaxToolRounds:  30,
 		MaxRetriesPerTool:     3,
-		ToolExecTimeoutSec:    300, // 5 minutes per tool — MCP research + browser scraping can be slow
+		ToolExecTimeoutSec:    600, // 10 minutes per tool — builds, tests, MCP research, browser scraping
 		RepetitionWindow:      100,
 		ToolResultMaxChars:    6000,
 		SynthesisMaxChars:     4000,

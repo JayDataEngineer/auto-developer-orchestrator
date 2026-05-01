@@ -64,6 +64,8 @@ func normalizeToolName(name string, args map[string]interface{}) string {
 		return "file_write"
 	case "edit", "replace", "file_edit", "sed_replace":
 		return "file_edit"
+	case "undo", "undo_edit", "revert", "revert_edit":
+		return "undo_edit"
 	case "grep", "search", "search_files", "rg":
 		return "file_grep"
 	case "glob", "find_files", "list_files", "ls_files":
@@ -285,6 +287,8 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		return e.executeFileWrite(ctx, sandboxID, args)
 	case "file_edit":
 		return e.executeFileEdit(ctx, sandboxID, args)
+	case "undo_edit":
+		return e.executeUndoEdit(ctx, sandboxID, args)
 	case "file_grep":
 		return e.executeFileGrep(ctx, sandboxID, args)
 	case "file_glob":

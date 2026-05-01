@@ -118,7 +118,7 @@ func PersonaToolNames(t PersonaType) []string {
 			// Execution
 			"bash",
 			// File operations (Claude Code pattern)
-			"file_read", "file_write", "file_edit", "file_grep", "file_glob",
+			"file_read", "file_write", "file_edit", "undo_edit", "file_grep", "file_glob",
 			// Code intelligence
 			"code_search",
 			// Browser (for navigation tasks the orchestrator handles directly)
