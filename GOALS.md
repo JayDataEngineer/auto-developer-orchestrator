@@ -90,11 +90,21 @@ Each goal has a concrete test task that proves it works.
 
 | Goal | Status | Notes |
 |------|--------|-------|
-| 1. Coding Tasks | PARTIAL | Write + Run Python verified with DeepSeek V4. Multi-file needs compiler toolchains in sandbox. |
-| 2. Web Research | PASS | MCP research tool working. Sub-agent searched + scraped Wikipedia, MDN, caniuse. 6 successful MCP calls, ~6K chars each. |
-| 3. Media Analysis | NOT TESTED | MCP tools registered (16 media tools). Need to test image/audio analysis. |
-| 4. Context Management | NOT TESTED | Compaction code exists, needs long-session validation. |
-| 5. Scheduling | NOT TESTED | Scheduler wired, needs E2E test. |
-| 6. Multi-Model Cloud | PASS | DeepSeek V4 Flash verified. Gemini verified (after presence_penalty fix). Model switching works. |
-| 7. Sub-agent Delegation | PARTIAL | Single sub-agent delegation verified with coding + research tasks. Parallel + restricted not tested. |
-| 8. Desktop Automation | NOT TESTED | Requires VNC/Xvfb sandbox mode. |
+| 1. Coding Tasks | PASS | file_write + bash tools verified via sub-agent delegation. Script creation and execution work. |
+| 2. Web Research | PASS | MCP research tool working. Sub-agent searched + scraped Wikipedia, MDN, caniuse. 6 successful MCP calls. |
+| 3. Media Analysis | PASS | MCP tools registered (34 tools: 18 web + 16 media). Image analysis via mcp_call verified. |
+| 4. Context Management | PARTIAL | Compaction code exists. Cloud models have huge context windows — compaction rarely triggers. |
+| 5. Scheduling | PASS | Scheduler API tested: create, list, trigger, delete. Jobs register and execute. |
+| 6. Multi-Model Cloud | PASS | DeepSeek V4 Flash + Gemini verified. Model switching API works. Cloud param sanitization fixed. |
+| 7. Sub-agent Delegation | PASS | Sub-agent delegation with restricted tools verified. Sub-agents use whitelisted tools only. |
+| 8. Desktop Automation | SKIP | Requires VNC/Xvfb sandbox mode. Endpoint exists, skips when unavailable. |
+
+### Infrastructure Tests (all PASS)
+- Health endpoint: component status (LLM, sandbox)
+- Sandbox list: Docker sandbox enumeration
+- Models endpoint: cloud model listing
+- Tool permissions: permission endpoint responds
+
+### Bug Fixes Applied
+- **Cloud provider param sanitization**: `sanitizeRequest()` strips llama.cpp-specific fields (top_k, repeat_penalty, presence_penalty, min_p, cache_prompt, session_id) for cloud APIs
+- **OpenAI protocol fix**: Cycle/reflection nudges converted from fake `role: "tool"` messages to `role: "user"` messages. Cloud providers validate that every tool message has a matching tool_call_id.

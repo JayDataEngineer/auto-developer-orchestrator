@@ -400,6 +400,26 @@ def stream_prompt(api_url, api_session, project, message,
     ))
 
 
+def stream_pux_prompt(api_url, api_session, project, message,
+                      agent_id="default", timeout=300):
+    """
+    Send a prompt via the Pux agent endpoint and collect all SSE events.
+    Uses /api/pux/prompt (the current orchestrator endpoint).
+
+    Returns list of (event_type, data_dict) tuples.
+    """
+    return list(post_and_stream(
+        api_session,
+        f"{api_url}/api/pux/prompt",
+        {
+            "message": message,
+            "project": project,
+            "agentId": agent_id,
+        },
+        timeout=timeout,
+    ))
+
+
 # ---------------------------------------------------------------------------
 # Playwright config — pytest-playwright handles browser/page fixtures natively.
 # Use `pytest --headed` to run with visible browser during development.

@@ -391,12 +391,12 @@ func TestAgentLoopConfig_Validate(t *testing.T) {
 			name: "multiple errors",
 			cfg: AgentLoopConfig{
 				SystemPrompt:  "",
-				MaxToolRounds: 0,
+				MaxToolRounds: 0, // 0 = unlimited (valid)
 				MaxTokens:     0,
 				ContextSize:   0,
 				Compaction:    DefaultCompactionConfig(),
 			},
-			wantErrs: 4,
+			wantErrs: 3,
 		},
 	}
 

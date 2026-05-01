@@ -468,6 +468,7 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 
 		// Phase 3: Execute tool calls
 		var toolResults []ToolResult
+		var cycleDetected bool
 		var delegateCalls, sequentialCalls []ToolCallResponse
 		for _, tcr := range toolCalls {
 			if tcr.Function.Name == "delegate_to" {
@@ -602,19 +603,11 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 			}
 
 			if cycleDetector.Record(tc.Name, tc.Args, resultStr, round) {
+				cycleDetected = true
 				loop.logger.Warn("Cycle detected, injecting nudge", zap.String("tool", tc.Name), zap.Int("round", round))
-				toolResults = append(toolResults, ToolResult{
-					ToolCallID: "__cycle_nudge__", ToolName: "system", Content: CycleNudge(),
-				})
 			}
 
 			// Periodic reflection every 3 tool calls (Agent-S pattern: check progress without prescribing fixes)
-			if round%3 == 0 {
-				toolResults = append(toolResults, ToolResult{
-					ToolCallID: "__reflect_nudge__", ToolName: "system",
-					Content: "REFLECT: Review the last few actions. Did they make progress toward your goal? If not, change your approach. Are you close to done? If so, stop using tools and write your final answer.",
-				})
-			}
 
 			if tc.Name == "yield_artifact" {
 				if output, _ := tc.Args["output"].(string); output != "" {
@@ -636,13 +629,21 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 			toolResults = append(toolResults, delegateResults...)
 		}
 
-		// Phase 4: Goal nudge
+		// Phase 4: Goal nudge + system nudges (injected as user messages, NOT fake tool results)
 		var goalReminder string
 		if maxRounds > 0 {
 			budgetWarning := round >= int(float64(maxRounds)*0.75) && round < maxRounds
 			goalReminder, _ = RenderTemplate("goal_nudge", GoalNudgeData{
 				Round: round, MaxRounds: maxRounds, StepsLeft: maxRounds - round, BudgetWarning: budgetWarning,
 			})
+		}
+		// Cycle nudge — injected as user message (fake tool_call_ids violate OpenAI protocol for cloud providers)
+		if cycleDetected {
+			goalReminder += "\n\n" + CycleNudge()
+		}
+		// Periodic reflection every 3 tool calls (Agent-S pattern)
+		if round%3 == 0 {
+			goalReminder += "\n\nREFLECT: Review the last few actions. Did they make progress toward your goal? If not, change your approach. Are you close to done? If so, stop using tools and write your final answer."
 		}
 
 		if ste, ok := loop.executor.(*SandboxToolExecutor); ok && ste.Creds != nil {
