@@ -224,8 +224,8 @@ func (c *AgentLoopConfig) Validate() []string {
 	if c.MaxTokens > c.ContextSize {
 		errs = append(errs, "MaxTokens cannot exceed ContextSize")
 	}
-	if c.MaxToolRounds <= 0 {
-		errs = append(errs, "MaxToolRounds must be positive")
+	if c.MaxToolRounds < 0 {
+		errs = append(errs, "MaxToolRounds must be non-negative")
 	}
 	if c.SystemPrompt == "" {
 		errs = append(errs, "SystemPrompt must not be empty")

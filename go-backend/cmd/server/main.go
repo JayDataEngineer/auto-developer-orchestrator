@@ -117,10 +117,52 @@ func main() {
 		}
 	}
 
-	// Select the default engine: prefer llama-server (local, fast), fall back to Gemini
+	// Connect to OpenRouter cloud engine (optional — reads from settings.json).
+	// Supports DeepSeek V4 Flash and any model on OpenRouter.
+	var openrouterEngine *llamaeng.LLMClient
+	{
+		type providerSettings struct {
+			BaseURL string `json:"baseUrl"`
+			APIKey  string `json:"apiKey"`
+			Models  []struct {
+				ID string `json:"id"`
+			} `json:"models"`
+		}
+		if data, err := os.ReadFile(os.Getenv("HOME") + "/.pi/agent/settings.json"); err == nil {
+			var settings struct {
+				Providers map[string]providerSettings `json:"providers"`
+			}
+			if json.Unmarshal(data, &settings) == nil {
+				if or, ok := settings.Providers["openrouter"]; ok && or.APIKey != "" {
+					modelID := "deepseek/deepseek-v4-flash"
+					if len(or.Models) > 0 && or.Models[0].ID != "" {
+						modelID = or.Models[0].ID
+					}
+					openrouterEngine = llamaeng.NewLLMClient(llamaeng.LLMClientConfig{
+						BaseURL:   or.BaseURL,
+						APIKey:    or.APIKey,
+						ModelName: modelID,
+						Logger:    logger,
+					})
+					if err := openrouterEngine.LoadModel(); err != nil {
+						logger.Warn("OpenRouter engine failed to initialize", zap.Error(err))
+						openrouterEngine = nil
+					} else {
+						defer openrouterEngine.Close()
+						logger.Info("OpenRouter cloud engine connected", zap.String("model", modelID))
+					}
+				}
+			}
+		}
+	}
+
+	// Select the default engine: prefer llama-server (local, fast), fall back to Gemini, then OpenRouter
 	activeEngine := llamaEngine
 	if activeEngine == nil {
 		activeEngine = geminiEngine
+	}
+	if activeEngine == nil {
+		activeEngine = openrouterEngine
 	}
 	if activeEngine == nil {
 		logger.Warn("No LLM engine available — agent features disabled")
@@ -218,6 +260,11 @@ func main() {
 	// Wire Gemini cloud engine (optional)
 	if geminiEngine != nil {
 		puxHandler.SetGeminiEngine(geminiEngine)
+	}
+
+	// Wire OpenRouter cloud engine (optional)
+	if openrouterEngine != nil {
+		puxHandler.SetOpenRouterEngine(openrouterEngine)
 	}
 
 	// MCP research server — non-fatal, tools fall back to browser-based search

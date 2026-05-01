@@ -198,11 +198,27 @@ type ChatCompletionRequest struct {
 	MinP             float32      `json:"min_p,omitempty"`
 
 	// KV cache persistence (llama-server extension)
-	CachePrompt bool   `json:"cache_prompt"`
+	CachePrompt bool   `json:"cache_prompt,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`
 
 	// Stream mode
 	Stream bool `json:"stream,omitempty"`
+}
+
+// sanitizeRequest strips llama.cpp-specific fields for cloud providers.
+// Cloud APIs (Gemini, OpenRouter, OpenAI) reject unknown fields like
+// top_k, repeat_penalty, cache_prompt, and session_id with HTTP 400.
+func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionRequest {
+	if !e.IsCloud() {
+		return req
+	}
+	// Zero out llama.cpp-only fields — omitempty will exclude them
+	req.TopK = 0
+	req.RepeatPenalty = 0
+	req.MinP = 0
+	req.CachePrompt = false
+	req.SessionID = ""
+	return req
 }
 
 // OpenAITool represents a tool definition in the OpenAI function calling format.
@@ -244,7 +260,7 @@ type ChatMessage struct {
 
 // chatComplete sends a chat completion request (non-streaming).
 func (e *LLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletionResponse, error) {
-	body, err := json.Marshal(req)
+	body, err := json.Marshal(e.sanitizeRequest(req))
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -286,7 +302,7 @@ func (e *LLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletionResp
 // The final chunk includes a usage field with prompt_tokens and completion_tokens.
 func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error {
 	req.Stream = true
-	body, err := json.Marshal(req)
+	body, err := json.Marshal(e.sanitizeRequest(req))
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"path/filepath"
 	"time"
 
@@ -36,8 +37,9 @@ type PuxHandler struct {
 	approvalMgr *approval.Manager
 
 	// Llama engine — always uses orchestrator + ephemeral sub-agents
-	llamaEngine  *llamaeng.LLMClient
-	geminiEngine *llamaeng.LLMClient // optional cloud provider
+	llamaEngine     *llamaeng.LLMClient
+	geminiEngine    *llamaeng.LLMClient // optional Gemini cloud provider
+	openrouterEngine *llamaeng.LLMClient // optional OpenRouter cloud provider
 	sandboxMgr   *sandbox.Manager
 	cuBridge     *ComputerUseBridge // bridges llama executor to CU/X11 handlers
 	mcpClient    *mcp.Client        // optional: MCP research server for search/scrape
@@ -80,6 +82,11 @@ func (h *PuxHandler) SetLlamaEngine(engine *llamaeng.LLMClient, sandboxMgr *sand
 // SetGeminiEngine configures the optional Gemini cloud engine.
 func (h *PuxHandler) SetGeminiEngine(engine *llamaeng.LLMClient) {
 	h.geminiEngine = engine
+}
+
+// SetOpenRouterEngine configures the optional OpenRouter cloud engine.
+func (h *PuxHandler) SetOpenRouterEngine(engine *llamaeng.LLMClient) {
+	h.openrouterEngine = engine
 }
 
 // SetSandboxOnly wires sandbox manager + computer use without a local LLM engine.
@@ -716,6 +723,8 @@ func (h *PuxHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case req.ModelID == "gemini-3-flash-preview" && h.geminiEngine != nil:
 		engine = h.geminiEngine
+	case strings.Contains(req.ModelID, "deepseek") && h.openrouterEngine != nil:
+		engine = h.openrouterEngine
 	default:
 		// For cloud models, try to create an engine from settings.json
 		if req.Provider != "llamacpp" && req.Provider != "" {
