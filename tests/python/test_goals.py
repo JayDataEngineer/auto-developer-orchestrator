@@ -451,7 +451,7 @@ class TestDesktopAutomation:
 
         # Try to take a screenshot (requires desktop mode enabled)
         resp = _mod_session.get(
-            f"{API}/api/sandbox/{sandbox_id}/x11/desktop-screenshot",
+            f"{API}/api/sandbox/{sandbox_id}/x11/screenshot?format=json",
             timeout=30,
         )
         # Desktop mode may not be enabled — that's OK, we're testing the endpoint
