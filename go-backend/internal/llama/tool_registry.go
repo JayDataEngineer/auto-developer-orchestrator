@@ -132,6 +132,8 @@ func PersonaToolNames(t PersonaType) []string {
 			"delegate_to", "delegate_async", "collect_results", "create_plan", "update_plan", "clarify", "synthesize",
 			// Meta
 			"update_memory", "wait", "ask_user",
+			// Custom tools (self-improvement)
+			"create_tool", "list_tools", "run_tool",
 		}
 	default:
 		return nil
