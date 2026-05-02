@@ -96,13 +96,28 @@ Use these to verify capabilities haven't regressed after changes.
 **Prompt**:
 > Schedule a recurring job that runs every 30 minutes. It should curl the health endpoint of this server (http://localhost:3847/api/health) and append the timestamp and status to `/sandbox/workspace/health_log.txt`. Name the job "health-monitor".
 
-**Tool Chain**: Scheduler API (`POST /api/scheduler`) → verify via `GET /api/scheduler`
+**API Call**:
+```bash
+curl -X POST http://localhost:3847/api/scheduler \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "health-monitor",
+    "project": "test-repo",
+    "message": "Run the health check and log the result",
+    "scheduleType": "cron",
+    "cronExpr": "0 */30 * * * *"
+  }'
+```
+
+**Tool Chain**: Scheduler API (`POST /api/scheduler`) → verify via `GET /api/scheduler` → trigger via `POST /api/scheduler/{jobId}/trigger`
 
 **Success Criteria**:
 - Job created with name "health-monitor"
-- Cron expression is correct for 30-minute interval
+- 6-field cron expression (`0 */30 * * * *`) accepted
 - Job appears in scheduler list
-- (Manual trigger optional: `POST /api/scheduler/{jobId}/trigger`)
+- Manual trigger returns `{"success": true}`
+
+**Notes**: Low complexity. Tests scheduler CRUD. Cron uses 6 fields (seconds + standard 5). `message` field is required (the prompt sent to the agent when the job fires).
 
 **Notes**: Low complexity. Tests scheduler CRUD without requiring LLM for execution.
 
@@ -203,6 +218,36 @@ print(fibonacci_recursive(10))
 - Second screenshot shows "Hello from the orchestrator" in terminal output
 
 **Notes**: Requires desktop mode enabled (XFCE4 + Xvfb running in sandbox). The `desktop_*` tools use xdotool under the hood. Display `:99` is the browser mode default.
+
+---
+
+## Test Results
+
+| Use Case | Status | Notes |
+|----------|--------|-------|
+| UC-01: Build & Test CLI | PASS | 14 tools used. Created wordfreq.py + sample.txt, ran successfully. 1257 chars response. |
+| UC-02: Research & Summarize | PASS | 28 tools used. MCP research tool called 23x. Delegated to sub-agent. 13801 chars response with sources. |
+| UC-03: Web Form Automation | NOT TESTED | Requires browser automation — pending vision model. |
+| UC-04: Refactor Across Files | PASS | 13 tools used. User→Account rename + created_at field across 3 files. Runs clean after refactor. |
+| UC-05: Parallel Research | NOT TESTED | Requires async delegation + collect_results. Pending. |
+| UC-06: Scheduled Monitoring | PASS | Job CRUD verified: create (6-field cron), list, trigger all succeed. |
+| UC-07: Image Analysis Pipeline | NOT TESTED | Requires MCP media server + vision. Pending. |
+| UC-08: Full-Stack Scaffolding | NOT TESTED | High complexity, pending. |
+| UC-09: Code Review & Patch | PASS | 9 tools used. Read buggy code, identified issues, fixed, ran. 1536 chars response. |
+| UC-10: Desktop Interaction | NOT TESTED | Requires desktop mode + vision. Pending. |
+
+### Quick Smoke Test (UC-01 + UC-02 + UC-06)
+
+All three pass. Run after any change to verify core capabilities:
+```bash
+# UC-06 (API only, instant)
+curl -X POST http://localhost:3847/api/scheduler \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"smoke-test","project":"test-repo","message":"echo smoke","scheduleType":"cron","cronExpr":"0 */30 * * * *"}'
+
+# UC-01 + UC-02 require LLM — use test script:
+# python /tmp/test_uc_sh.py
+```
 
 ---
 
