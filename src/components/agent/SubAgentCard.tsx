@@ -22,7 +22,7 @@ export function SubAgentCard({ agent }: { agent: SubAgentInfo }) {
           {agent.type} sub-agent
         </span>
         <span className="text-xs font-mono text-muted-foreground/60 truncate">
-          {agent.subAgentId.slice(0, 30)}...
+          {agent.subAgentId ? agent.subAgentId.slice(0, 30) + '...' : 'unknown'}
         </span>
         {toolCount > 0 && (
           <span className="text-xs font-mono text-muted-foreground/60">
