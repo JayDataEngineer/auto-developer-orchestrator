@@ -24,8 +24,13 @@ const fmtArgs = (raw: unknown): string => {
   if (!s || s === "{}" || s === "null") return "";
   try {
     const obj = JSON.parse(s);
-    const pairs = Object.entries(obj as Record<string, unknown>).slice(0, 3);
-    return pairs.map(([k, v]) => `${k}=${ensureStr(v).slice(0, 30)}`).join(" ");
+    // Show key=value pairs, preferring the "main" argument
+    const entries = Object.entries(obj as Record<string, unknown>);
+    if (entries.length === 0) return "";
+    // For common tools, extract the key argument
+    const priKey = entries.find(([k]) => k === "command" || k === "path" || k === "file" || k === "url" || k === "message");
+    if (priKey) return ensureStr(priKey[1]).slice(0, 60);
+    return entries.slice(0, 2).map(([k, v]) => `${k}=${ensureStr(v).slice(0, 30)}`).join(" ");
   } catch {
     return s.length > 80 ? s.slice(0, 77) + "…" : s;
   }
@@ -57,9 +62,8 @@ const renderToolResult = (tool: ToolCall): React.ReactNode => {
   const isScreenshot = tool.name === "browse_to" || tool.name === "read_page" ||
     tool.name === "desktop_screenshot" || tool.name === "screenshot";
   if (isScreenshot && r.length > 100) {
-    // Check if result is base64 image data (starts with typical base64 for PNG: iVBOR)
     if (r.startsWith("iVBOR") || r.startsWith("/9j/") || r.startsWith("R0lG")) {
-      const imgSeq = renderImage(r, { maxW: 60, maxH: 15 });
+      const imgSeq = renderImage(r, { maxW: 50, maxH: 12 });
       if (imgSeq) {
         return (
           <Box flexDirection="column">
@@ -68,18 +72,33 @@ const renderToolResult = (tool: ToolCall): React.ReactNode => {
           </Box>
         );
       }
-      // No image support — show placeholder
       return <Text dimColor>{imagePlaceholder(r, tool.name)}</Text>;
     }
   }
 
-  if (tool.name === "bash" || tool.name === "exec") return <Text dimColor>{r.slice(0, 500)}</Text>;
-  if (tool.name === "edit" || tool.name === "write" || tool.name === "patch") {
-    if (r.includes("@@") || r.includes("+++") || r.includes("---")) return <Box flexDirection="column">{renderDiff(r)}</Box>;
-    return <Text dimColor>{trunc(r, 400)}</Text>;
+  // Bash/exec: show first N lines of output
+  if (tool.name === "bash" || tool.name === "exec") {
+    const lines = r.split("\n").slice(0, 8);
+    const out = lines.join("\n");
+    return <Text dimColor>{out.length > 400 ? out.slice(0, 397) + "…" : out}</Text>;
   }
-  if (tool.name === "read" || tool.name === "view" || tool.name === "cat") return <Text dimColor>{trunc(r, 400)}</Text>;
-  return <Text dimColor>{trunc(r, 400)}</Text>;
+  // Edit/patch: show diff or summary
+  if (tool.name === "edit" || tool.name === "write" || tool.name === "patch") {
+    if (r.includes("@@") || r.includes("+++") || r.includes("---")) {
+      return <Box flexDirection="column">{renderDiff(r)}</Box>;
+    }
+    return <Text dimColor>{trunc(r, 300)}</Text>;
+  }
+  // Read/view: show first 6 lines
+  if (tool.name === "read" || tool.name === "view" || tool.name === "cat" || tool.name === "grep") {
+    const lines = r.split("\n").slice(0, 6);
+    return <Text dimColor>{lines.join("\n").slice(0, 400)}</Text>;
+  }
+  // Browse/web: show response summary
+  if (tool.name.startsWith("browse") || tool.name.startsWith("search")) {
+    return <Text dimColor>{trunc(r, 250)}</Text>;
+  }
+  return <Text dimColor>{trunc(r, 300)}</Text>;
 };
 
 // ── types ────────────────────────────────────────────────────────────────────
@@ -262,14 +281,52 @@ function ThinkBlock({ text, expanded, startMs }: { text: string; expanded: boole
   );
 }
 
-function ToolView({ tool }: { tool: ToolCall }) {
-  const icon = tool.done ? (tool.error ? "✗" : "✓") : "●";
-  const col = tool.done ? (tool.error ? "red" as const : "green" as const) : "yellow" as const;
-  const label = tool.done ? (tool.error ? "failed" : "ok") : "...";
+// ── tool color by category ──────────────────────────────────────────────────
+
+const toolColor = (name: string): string => {
+  if (name === "bash" || name === "exec") return "yellow";
+  if (name === "edit" || name === "write" || name === "patch") return "blue";
+  if (name === "read" || name === "view" || name === "cat" || name === "grep") return "green";
+  if (name.startsWith("browse") || name.startsWith("click") || name.startsWith("type") || name.startsWith("search")) return "cyan";
+  if (name.startsWith("desktop") || name.startsWith("screenshot") || name.startsWith("key")) return "magenta";
+  if (name === "delegate_to") return "red";
+  return "dim";
+};
+
+const ICONS: Record<string, string> = {
+  bash: ">_", exec: ">_", edit: "✎", write: "✎", patch: "✎",
+  read: "☰", view: "☰", cat: "☰", grep: "⌕",
+  browse_to: "◈", read_page: "◈", click_element: "◈", type_text: "◈", search_web: "◈",
+  desktop_screenshot: "▣", desktop_click: "▣", desktop_type: "▣", desktop_key: "▣",
+  delegate_to: "▶",
+};
+
+function ToolCard({ tool, elapsed }: { tool: ToolCall; elapsed?: number }) {
+  const icon = ICONS[tool.name] ?? "●";
+  const cls = tool.done ? (tool.error ? "red" : toolColor(tool.name)) : "yellow";
+  const status = tool.done ? (tool.error ? "✗" : "✓") : "●";
+  const dur = elapsed != null ? `${(elapsed / 1000).toFixed(1)}s` : "";
+  const args = fmtArgs(tool.args);
+
   return (
-    <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
-      <Box><Text color={col}>{icon} </Text><Text color="yellow" bold>{tool.name}</Text>{tool.args ? <Dim> {tool.args}</Dim> : null}<Dim> [{label}]</Dim></Box>
-      {tool.done ? <Box paddingLeft={2} marginTop={0}>{renderToolResult(tool)}</Box> : null}
+    <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
+      <Box flexDirection="row">
+        <Text color={cls}>{status} </Text>
+        <Text color={cls} bold>{icon} {tool.name}</Text>
+        {args ? <Dim> {args}</Dim> : null}
+        {dur ? <Dim> · {dur}</Dim> : null}
+      </Box>
+      {tool.done && tool.result ? (
+        <Box flexDirection="column" paddingLeft={3}>
+          {renderToolResult(tool)}
+        </Box>
+      ) : null}
+      {tool.error ? (
+        <Box paddingLeft={3}><Text color="red">{trunc(tool.error, 120)}</Text></Box>
+      ) : null}
+      {!tool.done ? (
+        <Box paddingLeft={3}><Text color="yellow"><Spinner type="dots" /> running…</Text></Box>
+      ) : null}
     </Box>
   );
 }
@@ -279,7 +336,7 @@ function AsstMsg({ msg, thinkOpen }: { msg: Message; thinkOpen: boolean }) {
     <Box flexDirection="column" marginBottom={1}>
       {msg.thinking ? <ThinkBlock text={msg.thinking} expanded={thinkOpen} startMs={msg.timestamp} /> : null}
       {msg.content ? <Box marginBottom={1}><Text>{renderMd(msg.content)}</Text></Box> : null}
-      {msg.tools.map((t, i) => <ToolView key={i} tool={t} />)}
+      {msg.tools.map((t, i) => <ToolCard key={i} tool={t} />)}
       {msg.tokens ? <Dim>↑{msg.tokens.in} ↓{msg.tokens.out}</Dim> : null}
     </Box>
   );
@@ -290,8 +347,8 @@ function StreamBlock({ text, think, tools, thinkOpen, thinkStart }: { text: stri
   return (
     <Box flexDirection="column" marginBottom={1}>
       {think ? <ThinkBlock text={think} expanded={thinkOpen} startMs={thinkStart} /> : null}
-      {text ? <Box marginBottom={1}><Text>{text}</Text></Box> : null}
-      {tools.map((t, i) => <ToolView key={i} tool={t} />)}
+      {text ? <Box marginBottom={1}><Text>{renderMd(text)}</Text></Box> : null}
+      {tools.map((t, i) => <ToolCard key={i} tool={t} />)}
       <Box><Text color="green">● </Text><Dim>thinking...</Dim></Box>
     </Box>
   );
@@ -525,6 +582,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
   const abort = useRef<AbortController | null>(null);
   const { stdout } = useStdout();
   const h = stdout?.rows ?? 40;
+  const MSG_WINDOW = Math.max(8, h - 16); // dynamic: fill terminal
   const tabIdx = useRef(-1);       // tab completion cycle index
   const lastTab = useRef(0);       // timestamp of last tab press
 
@@ -655,11 +713,11 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
     // PageUp/PageDown = scroll messages (only when not streaming, no input)
     if (key.pageUp && !input && !state.streaming) {
-      setScrollOffset(s => Math.min(state.messages.length, s + 5));
+      setScrollOffset(s => Math.min(state.messages.length, s + 3));
       return;
     }
     if (key.pageDown && !input && !state.streaming) {
-      setScrollOffset(s => Math.max(0, s - 5));
+      setScrollOffset(s => Math.max(0, s - 3));
       return;
     }
 
@@ -857,15 +915,15 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
           <Box flexDirection="column" flexGrow={1} marginTop={1}>
             {scrollOffset > 0 ? (
               <Box marginBottom={1}>
-                <Text dimColor>── {scrollOffset} messages above · PgUp/PgDn scroll ──</Text>
+                <Text dimColor>── {scrollOffset > state.messages.length ? state.messages.length : scrollOffset} older · {state.messages.length} total · PgUp/PgDn ──</Text>
               </Box>
             ) : null}
             {state.messages.length === 0 && !state.streaming ? (
               <Box paddingY={1}><Dim>No messages. /help for commands.</Dim></Box>
             ) : (
               state.messages.slice(
-                Math.max(0, state.messages.length - 15 - scrollOffset),
-                state.messages.length - scrollOffset
+                Math.max(0, state.messages.length - MSG_WINDOW - scrollOffset),
+                Math.max(0, state.messages.length - scrollOffset)
               ).map(m =>
                 m.role === "user" ? (
                   <Box key={m.id} marginBottom={1}>
@@ -877,13 +935,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
                     {m.thinking ? <ThinkBlock text={m.thinking} expanded={state.thinkOpen} startMs={m.timestamp} /> : null}
                     {m.content ? <Box marginBottom={1}><Text>{renderMd(m.content)}</Text></Box> : null}
                     {m.tools.map((t, i) => (
-                      <Box key={i} flexDirection="column" marginBottom={1} paddingLeft={2}>
-                        <Text color="yellow" bold>{t.name}</Text>
-                        {t.args ? <Dim> {t.args}</Dim> : null}
-                        {t.done ? (
-                          <Box paddingLeft={2}>{renderToolResult(t)}</Box>
-                        ) : null}
-                      </Box>
+                      <ToolCard key={i} tool={t} />
                     ))}
                     {m.tokens ? <Dim>↑{m.tokens.in} ↓{m.tokens.out}</Dim> : null}
                   </Box>
@@ -895,13 +947,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
                 {state.sThink ? <ThinkBlock text={state.sThink} expanded={state.thinkOpen} startMs={state.thinkStart} /> : null}
                 {state.sText ? <Box marginBottom={1}><Text>{state.sText}</Text></Box> : null}
                 {state.sTools.map((t, i) => (
-                  <Box key={i} flexDirection="column" marginBottom={1} paddingLeft={2}>
-                    <Text color="yellow" bold>
-                      <Spinner type="dots" /> {t.name}
-                    </Text>
-                    {t.args ? <Dim> {t.args}</Dim> : null}
-                    {t.done ? <Box paddingLeft={2}>{renderToolResult(t)}</Box> : null}
-                  </Box>
+                  <ToolCard key={i} tool={t} />
                 ))}
                 {!state.sText && !state.sThink && state.sTools.length === 0 ? (
                   <Box><Text color="green"><Spinner type="dots" /></Text><Dim> thinking...</Dim></Box>
