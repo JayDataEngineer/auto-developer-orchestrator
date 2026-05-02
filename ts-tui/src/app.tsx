@@ -724,13 +724,20 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
         if (((mod - 1) & 1) === 1) { setSuppress(); setInput((v: string) => v + "\n"); }
         return;
       }
-      // xterm modifyOtherKeys: \x1b[27;mod;code~ or \x1b[code;mod~
+      // xterm modifyOtherKeys: \x1b[27;mod;code~ (format 1) or \x1b[code;mod~ (format 2)
       // Same 1-indexed modifier encoding as CSI-u
-      const m2 = s.match(/^\x1b\[(?:27;)?(\d+);(\d+)~/);
+      const m3 = s.match(/^\x1b\[27;(\d+);(\d+)~/);
+      if (m3 && m3[1] && m3[2]) {
+        const mod = parseInt(m3[1], 10);
+        const code = parseInt(m3[2], 10);
+        if ((code === 13 || code === 57414) && ((mod - 1) & 1) === 1) { setSuppress(); setInput((v: string) => v + "\n"); }
+        return;
+      }
+      const m2 = s.match(/^\x1b\[(\d+);(\d+)~/);
       if (m2 && m2[1] && m2[2]) {
         const code = parseInt(m2[1], 10);
         const mod = parseInt(m2[2], 10);
-        if ((code === 13 || code === 27) && ((mod - 1) & 1) === 1) { setSuppress(); setInput((v: string) => v + "\n"); }
+        if ((code === 13 || code === 57414) && ((mod - 1) & 1) === 1) { setSuppress(); setInput((v: string) => v + "\n"); }
         return;
       }
       // Kitty custom mapping: \x1b\r
