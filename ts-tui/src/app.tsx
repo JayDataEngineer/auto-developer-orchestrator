@@ -474,7 +474,7 @@ function Sched({ client, onBack }: { client: ApiClient; onBack: () => void }) {
 
   const refresh = useCallback(async () => {
     setLoad(true);
-    try { const j = await client.getJobs(); setJobs(j as any); if (sel >= j.length) setSel(Math.max(0, j.length - 1)); } catch { setNotif("Load failed"); }
+    try { const j = await client.getJobs(); const arr = Array.isArray(j) ? j : []; setJobs(arr); if (sel >= arr.length) setSel(Math.max(0, arr.length - 1)); } catch { setNotif("Load failed"); }
     setLoad(false);
   }, [sel]);
 
@@ -490,7 +490,7 @@ function Sched({ client, onBack }: { client: ApiClient; onBack: () => void }) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box marginBottom={1}><Accent>pux Scheduler</Accent><Spacer /><Dim>{jobs.length} jobs</Dim></Box>
+      <Box marginBottom={1}><Accent>pux Scheduler</Accent><Spacer /><Dim>{jobs?.length ?? 0} jobs</Dim></Box>
       <Line />
       <Box marginY={1}><Dim>ID       │ En │ Schedule      │ Last Run              │ Name</Dim></Box>
       {load ? <Dim>Loading...</Dim>
@@ -742,13 +742,9 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
       }
       // Kitty custom mapping: \x1b\r
       if (s === "\x1b\r") { setSuppress(); setInput((v: string) => v + "\n"); return; }
-      // Ghostty custom mapping: \n (on Kitty protocol terminals)
-      if (s === "\n") {
-        if ((process.env.TERM || "").includes("kitty") || (process.env.TERM_PROGRAM || "").toLowerCase() === "ghostty") {
-          setSuppress(); setInput((v: string) => v + "\n"); return;
-        }
-        return;
-      }
+      // Ctrl+J (universal newline) + Ghostty/Kitty Shift+Enter: \n
+      // On 99% of terminals, Enter = \r in raw mode, so \n is always intentional newline
+      if (s === "\n") { setSuppress(); setInput((v: string) => v + "\n"); return; }
       // ---- Tab completion ----
       if (s === "\t" && inputRef.current.startsWith("/")) {
         const partial = inputRef.current.trim().split(/\s+/)[0] || inputRef.current;
