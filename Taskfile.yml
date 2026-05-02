@@ -89,6 +89,13 @@ tasks:
     cmds:
       - go run ./cmd/cli/ {{.CLI_ARGS}}
 
+  chat:
+    desc: Launch the interactive TUI (builds + runs orch)
+    dir: go-backend
+    cmds:
+      - go build -o orch ./cmd/cli/
+      - ./orch {{.CLI_ARGS}}
+
   # ── Docker Development ──────────────────────────────────────────────────
   up:
     desc: Start dev environment with hot reload (Docker)

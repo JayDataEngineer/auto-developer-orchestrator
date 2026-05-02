@@ -76,3 +76,20 @@ docs/package.json
 docs/postcss.config.mjs
 docs/src/
 docs/tsconfig.json
+
+# Test artifacts from sandbox/agent use case runs
+ctx_test2.py
+database.py
+fib_bench.py
+hello.txt
+is_prime.py
+main.py
+models.py
+pacman.html
+review_target.py
+sample.txt
+test_is_prime.py
+test_primes.py
+wordfreq.py
+llms_txt_report.md
+httpserver/
