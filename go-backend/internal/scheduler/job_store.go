@@ -10,6 +10,24 @@ import (
 	"go.uber.org/zap"
 )
 
+// CreateJobFromManifest creates a cron job from a pux.yaml schedule entry.
+// This implements the ScheduleRegisterer interface used by ProjectHandler.
+func (s *Scheduler) CreateJobFromManifest(project, name, cronExpr, promptText, description string) (string, error) {
+	job := &Job{
+		Name:        name,
+		Description: description,
+		Project:     project,
+		Message:     promptText,
+		Schedule:    ScheduleCron,
+		CronExpr:    cronExpr,
+		Enabled:     true,
+	}
+	if err := s.CreateJob(job); err != nil {
+		return "", err
+	}
+	return job.ID, nil
+}
+
 // CreateJob creates and schedules a new job.
 func (s *Scheduler) CreateJob(job *Job) error {
 	s.mu.Lock()

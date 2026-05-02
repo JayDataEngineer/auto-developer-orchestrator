@@ -11,15 +11,23 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/git"
+	"github.com/auto-developer-orchestrator/backend/internal/manifest"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"go.uber.org/zap"
 )
 
 // ProjectHandler handles project-related HTTP requests
 type ProjectHandler struct {
-	db     *storage.Database
-	logger *zap.Logger
-	git    *git.GitOps
+	db        *storage.Database
+	logger    *zap.Logger
+	git       *git.GitOps
+	scheduler ScheduleRegisterer // optional: for auto-registering manifest schedules
+}
+
+// ScheduleRegisterer is implemented by *scheduler.Scheduler to auto-register
+// schedule entries from a project manifest.
+type ScheduleRegisterer interface {
+	CreateJobFromManifest(project, name, cronExpr, promptText, description string) (string, error)
 }
 
 // NewProjectHandler creates a new ProjectHandler
@@ -29,6 +37,11 @@ func NewProjectHandler(db *storage.Database, logger *zap.Logger, gitOps *git.Git
 		logger: logger,
 		git:    gitOps,
 	}
+}
+
+// SetScheduler sets the scheduler for auto-registering manifest schedules.
+func (h *ProjectHandler) SetScheduler(s ScheduleRegisterer) {
+	h.scheduler = s
 }
 
 // List returns all projects (default + custom)
@@ -63,11 +76,26 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Filter to only projects that resolve to an actual directory
-	projects := make([]string, 0, len(projectSet))
+	type projectInfo struct {
+		Name         string `json:"name"`
+		HasManifest  bool   `json:"has_manifest"`
+		Description  string `json:"description,omitempty"`
+		Version      string `json:"version,omitempty"`
+	}
+	projects := make([]projectInfo, 0, len(projectSet))
 	for project := range projectSet {
-		if resolveProjectPath(project, h.db) != "" {
-			projects = append(projects, project)
+		dir := resolveProjectPath(project, h.db)
+		if dir == "" {
+			continue
 		}
+		info := projectInfo{Name: project}
+		mf, _ := manifest.LoadManifest(dir)
+		if mf != nil {
+			info.HasManifest = true
+			info.Description = mf.Description
+			info.Version = mf.Version
+		}
+		projects = append(projects, info)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -144,10 +172,40 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	// Try to load manifest
+	resp := map[string]interface{}{
 		"success": true,
 		"message": "Project " + req.Name + " added",
-	})
+	}
+
+	mf, err := manifest.LoadManifest(req.Path)
+	if err != nil {
+		h.logger.Warn("Failed to parse pux.yaml", zap.Error(err))
+		resp["manifest_error"] = err.Error()
+	} else if mf != nil {
+		resp["manifest"] = mf
+		resp["brief"] = mf.Brief()
+
+		// Auto-register schedules from manifest
+		if h.scheduler != nil && mf.ScheduleCount() > 0 {
+			registered := []string{}
+			for schedName, schedDef := range mf.Schedule {
+				promptText, _ := mf.ResolvePrompt(req.Path, schedDef.Prompt)
+				jobID, schedErr := h.scheduler.CreateJobFromManifest(
+					req.Name, schedName, schedDef.Cron, promptText, schedDef.Description,
+				)
+				if schedErr != nil {
+					h.logger.Warn("Failed to register schedule",
+						zap.String("schedule", schedName), zap.Error(schedErr))
+					continue
+				}
+				registered = append(registered, fmt.Sprintf("%s (%s) → job %s", schedName, schedDef.Cron, jobID))
+			}
+			resp["registered_schedules"] = registered
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // Clone clones a repository via git CLI

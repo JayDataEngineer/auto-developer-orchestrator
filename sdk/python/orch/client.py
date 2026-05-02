@@ -324,13 +324,67 @@ class OrchestratorClient:
         return resp.get("projects", [])
 
     def register_project(self, name: str, path: str = "", repo_url: str = "") -> dict:
-        """Register a new project."""
+        """Register a new project.
+
+        If the project has a pux.yaml manifest, schedules are auto-registered.
+        Returns the registration response with manifest brief and registered_schedules.
+        """
         payload = {"name": name}
         if path:
             payload["path"] = path
         if repo_url:
             payload["repoUrl"] = repo_url
         return self._post("/api/projects/register", payload)
+
+    # ── Manifest / App Config ──────────────────────────────────────────
+
+    def app_config(self, project: str) -> dict:
+        """Get the parsed pux.yaml manifest for a project.
+
+        Returns dict with 'manifest', 'resolved_prompts', and 'prompt_errors'.
+        Raises OrchestratorError if project has no manifest (404).
+        """
+        return self._get(f"/api/projects/{project}/manifest")
+
+    def install_app(self, name: str, path: str = "", repo_url: str = "") -> dict:
+        """Install a Pux app: register project + auto-register schedules.
+
+        Combines register_project with manifest parsing. Returns the
+        registration response including brief and registered_schedules.
+        """
+        return self.register_project(name, path=path, repo_url=repo_url)
+
+    def run_command(self, project: str, command: str, args: dict = None) -> ToolResult:
+        """Run a named command from the project's pux.yaml manifest.
+
+        Reads the manifest to find the command's exec string, then
+        executes it via bash in the project's sandbox.
+        """
+        config = self.app_config(project)
+        manifest = config.get("manifest", {})
+        commands = manifest.get("commands", {})
+
+        if command not in commands:
+            raise OrchestratorError(
+                f"Command '{command}' not found in {project} manifest. "
+                f"Available: {', '.join(commands.keys())}"
+            )
+
+        cmd_def = commands[command]
+        exec_str = cmd_def.get("exec", "")
+
+        # Substitute {placeholders} from args
+        if args:
+            for key, val in args.items():
+                exec_str = exec_str.replace(f"{{{key}}}", str(val))
+
+        # Get sandbox and run
+        sandboxes = self.list_sandboxes()
+        if not sandboxes:
+            raise OrchestratorError("No sandboxes available")
+        sandbox_id = sandboxes[0]["id"]
+
+        return self.exec_tool("bash", {"command": exec_str, "sandboxId": sandbox_id})
 
     # ── Internal helpers ────────────────────────────────────────────────
 

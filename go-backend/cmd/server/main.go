@@ -347,6 +347,7 @@ func main() {
 		logger.Warn("Failed to start scheduler", zap.Error(err))
 	}
 	schedulerHandler := handlers.NewSchedulerHandler(sched, logger)
+	projectHandler.SetScheduler(sched)
 
 	// Artifacts handler (plans, todos, notes from agents)
 	artifactHandler := handlers.NewArtifactHandler(db, logger)
@@ -412,6 +413,7 @@ func main() {
 		r.Post("/clone", projectHandler.Clone)
 		r.Post("/branch/checkout", projectHandler.CheckoutBranch)
 		r.Get("/branch", projectHandler.GetBranch)
+		r.Get("/projects/{name}/manifest", projectHandler.GetManifest)
 
 		// Status
 		r.Get("/status", projectHandler.GetStatus)
