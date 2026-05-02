@@ -24,15 +24,24 @@ const fmtArgs = (raw: unknown): string => {
   if (!s || s === "{}" || s === "null") return "";
   try {
     const obj = JSON.parse(s);
-    // Show key=value pairs, preferring the "main" argument
     const entries = Object.entries(obj as Record<string, unknown>);
     if (entries.length === 0) return "";
-    // For common tools, extract the key argument
-    const priKey = entries.find(([k]) => k === "command" || k === "path" || k === "file" || k === "url" || k === "message");
-    if (priKey) return ensureStr(priKey[1]).slice(0, 60);
-    return entries.slice(0, 2).map(([k, v]) => `${k}=${ensureStr(v).slice(0, 30)}`).join(" ");
+    // Extract the primary "meaningful" key
+    const priKey = entries.find(([k]) =>
+      k === "command" || k === "path" || k === "file" || k === "url" ||
+      k === "message" || k === "query" || k === "content" || k === "text"
+    );
+    if (priKey) {
+      const v = ensureStr(priKey[1]);
+      return v.length > 70 ? v.slice(0, 67) + "…" : v;
+    }
+    // Fallback: just the first value
+    const fv = entries[0]?.[1];
+    if (fv === undefined || fv === null) return "";
+    const v = ensureStr(fv);
+    return v.length > 50 ? v.slice(0, 47) + "…" : v;
   } catch {
-    return s.length > 80 ? s.slice(0, 77) + "…" : s;
+    return s.length > 70 ? s.slice(0, 67) + "…" : s;
   }
 };
 
@@ -54,51 +63,27 @@ const renderDiff = (text: string): React.ReactNode =>
   });
 
 const renderToolResult = (tool: ToolCall): React.ReactNode => {
-  if (tool.error) return <Text color="red">✗ {trunc(tool.error, 200)}</Text>;
+  if (tool.error) return <Text color="red">✗ {trunc(tool.error, 120)}</Text>;
   const r = tool.result;
   if (!r) return null;
 
-  // Browser/desktop screenshot tools — try inline image display
+  // Screenshot tools — image display
   const isScreenshot = tool.name === "browse_to" || tool.name === "read_page" ||
     tool.name === "desktop_screenshot" || tool.name === "screenshot";
   if (isScreenshot && r.length > 100) {
     if (r.startsWith("iVBOR") || r.startsWith("/9j/") || r.startsWith("R0lG")) {
       const imgSeq = renderImage(r, { maxW: 50, maxH: 12 });
-      if (imgSeq) {
-        return (
-          <Box flexDirection="column">
-            <Text>{imgSeq}</Text>
-            <Text dimColor>screenshot</Text>
-          </Box>
-        );
-      }
+      if (imgSeq) return <Box flexDirection="column"><Text>{imgSeq}</Text><Text dimColor>screenshot</Text></Box>;
       return <Text dimColor>{imagePlaceholder(r, tool.name)}</Text>;
     }
   }
 
-  // Bash/exec: show first N lines of output
-  if (tool.name === "bash" || tool.name === "exec") {
-    const lines = r.split("\n").slice(0, 8);
-    const out = lines.join("\n");
-    return <Text dimColor>{out.length > 400 ? out.slice(0, 397) + "…" : out}</Text>;
-  }
-  // Edit/patch: show diff or summary
-  if (tool.name === "edit" || tool.name === "write" || tool.name === "patch") {
-    if (r.includes("@@") || r.includes("+++") || r.includes("---")) {
-      return <Box flexDirection="column">{renderDiff(r)}</Box>;
-    }
-    return <Text dimColor>{trunc(r, 300)}</Text>;
-  }
-  // Read/view: show first 6 lines
-  if (tool.name === "read" || tool.name === "view" || tool.name === "cat" || tool.name === "grep") {
-    const lines = r.split("\n").slice(0, 6);
-    return <Text dimColor>{lines.join("\n").slice(0, 400)}</Text>;
-  }
-  // Browse/web: show response summary
-  if (tool.name.startsWith("browse") || tool.name.startsWith("search")) {
-    return <Text dimColor>{trunc(r, 250)}</Text>;
-  }
-  return <Text dimColor>{trunc(r, 300)}</Text>;
+  // Any tool: show at most 3 lines, trimmed
+  const lines = r.split("\n").slice(0, 3);
+  let preview = lines.join("\n");
+  // Trim per-line
+  if (preview.length > 300) preview = preview.slice(0, 297) + "…";
+  return <Text dimColor>{preview}</Text>;
 };
 
 // ── types ────────────────────────────────────────────────────────────────────
@@ -575,14 +560,12 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
   const [input, setInput] = useState("");
   const [pasteExpanded, setPasteExpanded] = useState(false);
   const wasPasted = useRef(false);
-  const [scrollOffset, setScrollOffset] = useState(0);  // how many messages scrolled up
   const [health, setHealth] = useState<{ llm: string; sandbox: string; version: string } | null>(null);
   const client = useRef(new ApiClient(serverUrl));
   const { exit } = useApp();
   const abort = useRef<AbortController | null>(null);
   const { stdout } = useStdout();
   const h = stdout?.rows ?? 40;
-  const MSG_WINDOW = Math.max(8, h - 16); // dynamic: fill terminal
   const tabIdx = useRef(-1);       // tab completion cycle index
   const lastTab = useRef(0);       // timestamp of last tab press
 
@@ -628,7 +611,6 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
     dispatch({ type: "USER", text: t });
     dispatch({ type: "STREAM" });
-    setScrollOffset(0); // auto-scroll to bottom on new message
 
     const ctrl = new AbortController();
     abort.current = ctrl;
@@ -708,16 +690,6 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
     // Backspace at start of empty last line: merge with previous line
     if ((key.backspace || key.delete) && input.endsWith("\n") && !state.streaming) {
       setInput(input.slice(0, -1));
-      return;
-    }
-
-    // PageUp/PageDown = scroll messages (only when not streaming, no input)
-    if (key.pageUp && !input && !state.streaming) {
-      setScrollOffset(s => Math.min(state.messages.length, s + 3));
-      return;
-    }
-    if (key.pageDown && !input && !state.streaming) {
-      setScrollOffset(s => Math.max(0, s - 3));
       return;
     }
 
@@ -836,13 +808,13 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
   );
 
   return (
-    <Box flexDirection="column" height={h} paddingX={1}>
+    <Box flexDirection="column" minHeight={h} paddingX={1}>
 
       {/* BODY — split pane */}
       <Box flexDirection="row" flexGrow={1}>
 
         {/* LEFT SIDEBAR — tools + sub-agents */}
-        <Box flexDirection="column" width="28%" borderStyle="single" borderColor="grey" paddingX={1}>
+        <Box flexDirection="column" width="28%" paddingX={1}>
           <Text bold color="blueBright">Activity</Text>
 
           {/* Streaming status */}
@@ -910,21 +882,13 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
           </Box>
         </Box>
 
-        {/* RIGHT PANEL — messages */}
-        <Box flexDirection="column" flexGrow={1} borderStyle="single" borderColor="grey" paddingX={1}>
-          <Box flexDirection="column" flexGrow={1} marginTop={1}>
-            {scrollOffset > 0 ? (
-              <Box marginBottom={1}>
-                <Text dimColor>── {scrollOffset > state.messages.length ? state.messages.length : scrollOffset} older · {state.messages.length} total · PgUp/PgDn ──</Text>
-              </Box>
-            ) : null}
+        {/* RIGHT PANEL — messages: no clipping, terminal scrolls naturally */}
+        <Box flexDirection="column" flexGrow={1} paddingX={1}>
+          <Box flexDirection="column" flexGrow={1}>
             {state.messages.length === 0 && !state.streaming ? (
               <Box paddingY={1}><Dim>No messages. /help for commands.</Dim></Box>
             ) : (
-              state.messages.slice(
-                Math.max(0, state.messages.length - MSG_WINDOW - scrollOffset),
-                Math.max(0, state.messages.length - scrollOffset)
-              ).map(m =>
+              state.messages.map(m =>
                 m.role === "user" ? (
                   <Box key={m.id} marginBottom={1}>
                     <Text color="cyan" bold>❯ </Text>
