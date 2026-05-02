@@ -833,10 +833,11 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
           {/* Dynamic input box */}
           {(() => {
             const lines = input.split("\n");
-            const visibleLines = Math.max(1, Math.min(6, lines.length));
+            // Only add extra height when there are actual lines above
+            const visibleLines = lines.length > 1 ? Math.max(1, Math.min(6, lines.length)) : 1;
             return (
               <Box borderStyle="single" borderColor="cyan" paddingX={1} height={visibleLines + 2}>
-                <Box flexDirection="column" flexGrow={1}>
+                <Box flexDirection="column" flexGrow={1} justifyContent="flex-end">
                   {/* Paste placeholder or multi-line display */}
                   {wasPasted.current && lines.length > 3 && !pasteExpanded ? (
                     <Box>
@@ -846,7 +847,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
                   ) : lines.length > 1 ? (
                     <Box flexDirection="column">
                       {lines.slice(0, -1).map((line, i) => (
-                        <Text key={i} dimColor>{line}</Text>
+                        <Text key={i} dimColor>{line || " "}</Text>
                       ))}
                     </Box>
                   ) : null}
@@ -862,7 +863,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
                           setPasteExpanded(false);
                           if (full.split("\n").length <= 3) wasPasted.current = false;
                         }}
-                        placeholder={input.startsWith("/") ? "Command..." : "Type a message..."}
+                        placeholder={lines.length <= 1 ? "Type a message..." : undefined}
                         focus={!state.streaming}
                         showCursor={!state.streaming}
                       />
