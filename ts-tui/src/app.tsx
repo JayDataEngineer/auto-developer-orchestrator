@@ -663,7 +663,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
       return;
     }
 
-    // Enter/Shift+Enter — handled here because ink-text-input fires onSubmit for both
+    // Enter handling
     if (key.return && !state.streaming && state.mode === "chat") {
       if (state.approval) {
         const v = input.trim().toLowerCase();
@@ -673,14 +673,13 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
         setInput("");
         return;
       }
-      // During paste: insert newlines instead of submitting
-      if (key.shift || (key as any).paste) {
-        if ((key as any).paste) wasPasted.current = true;
-        setInput(v => v + "\n");
-        return;
-      }
-      // Plain Enter = send
+      // Shift+Enter detected via raw stdin (works on Kitty/Ghostty/iTerm2/xterm)
+      if (shiftEnterRef.current) { shiftEnterRef.current = false; setInput(v => v + "\n"); return; }
+      // Bracketed paste: insert newlines, don't send
+      if ((key as any).paste) { wasPasted.current = true; setInput(v => v + "\n"); return; }
+      // Backslash at end = newline
       if (input.endsWith("\\")) { setInput(input.slice(0, -1) + "\n"); return; }
+      // Plain Enter = send
       if (input.trim()) send(input);
       return;
     }
@@ -693,25 +692,40 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
   // Tab completion for slash commands via raw stdin (TextInput consumes Tab before useInput)
   const { stdin } = useStdin();
+  const shiftEnterRef = useRef(false);
+
+  // Detect Shift+Enter via raw stdin — same sequences pi-mono uses across all terminals
   useEffect(() => {
-    if (!stdin || !input.startsWith("/") || state.streaming) return;
+    if (!stdin || state.streaming) return;
     const handler = (data: Buffer) => {
-      // Tab key = \t (0x09)
-      if (data.toString() !== "\t") return;
-      const partial = input.trim().split(/\s+/)[0] || input;
-      const matches = SLASH_COMMANDS.filter(c => c.cmd.startsWith(partial));
-      if (matches.length === 0) return;
-      if (matches.length === 1) {
-        setInput(matches[0]!.cmd + " ");
-        tabIdx.current = -1;
+      const s = data.toString();
+      // Shift+Enter: Kitty CSI-u
+      if (s === "\x1b[13;2u" || s === "\x1b[57414;2u") { shiftEnterRef.current = true; return; }
+      // Shift+Enter: xterm modifyOtherKeys
+      if (s === "\x1b[27;2;13~" || s === "\x1b[13;2~") { shiftEnterRef.current = true; return; }
+      // Shift+Enter: Kitty/Ghostty custom mappings
+      if (s === "\x1b\r" || s === "\n") {
+        // Only treat as Shift+Enter when Kitty protocol is active
+        // (otherwise \n is plain Enter in legacy mode)
+        if (process.env.KITTY_WINDOW_ID || process.env.WEZTERM_PANE ||
+            (process.env.TERM_PROGRAM || "").toLowerCase() === "ghostty") {
+          shiftEnterRef.current = true;
+        }
         return;
       }
-      const now = Date.now();
-      if (now - lastTab.current > 1500) tabIdx.current = -1;
-      lastTab.current = now;
-      tabIdx.current = (tabIdx.current + 1) % matches.length;
-      const cmd = matches[tabIdx.current];
-      if (cmd) setInput(cmd.cmd + " ");
+      // Tab = \t (for slash command completion)
+      if (s === "\t" && input.startsWith("/")) {
+        const partial = input.trim().split(/\s+/)[0] || input;
+        const matches = SLASH_COMMANDS.filter(c => c.cmd.startsWith(partial));
+        if (matches.length === 0) return;
+        if (matches.length === 1) { setInput(matches[0]!.cmd + " "); tabIdx.current = -1; return; }
+        const now = Date.now();
+        if (now - lastTab.current > 1500) tabIdx.current = -1;
+        lastTab.current = now;
+        tabIdx.current = (tabIdx.current + 1) % matches.length;
+        const cmd = matches[tabIdx.current];
+        if (cmd) setInput(cmd.cmd + " ");
+      }
     };
     stdin.on("data", handler);
     return () => { stdin.off("data", handler); };
