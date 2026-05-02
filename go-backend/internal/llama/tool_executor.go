@@ -299,6 +299,12 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		return e.executeImageRead(ctx, sandboxID, args)
 	case "http_request":
 		return e.executeHTTPRequest(ctx, sandboxID, args)
+	case "create_tool":
+		return e.executeCreateTool(ctx, sandboxID, args)
+	case "list_tools":
+		return e.executeListTools(ctx, sandboxID)
+	case "run_tool":
+		return e.executeRunTool(ctx, sandboxID, args)
 	default:
 		if strings.HasPrefix(toolName, "mcp_") {
 			return e.dispatchMCPTool(ctx, toolName, args)

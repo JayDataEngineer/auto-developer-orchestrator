@@ -236,6 +236,16 @@ print(fibonacci_recursive(10))
 | UC-09: Code Review & Patch | PASS | 9 tools used. Read buggy code, identified issues, fixed, ran. 1536 chars response. |
 | UC-10: Desktop Interaction | NOT TESTED | Requires desktop mode + vision. Pending. |
 
+### Anti-Bot Bypass (SeleniumBase)
+
+| Test | Status | Notes |
+|------|--------|-------|
+| Cloudflare Turnstile | PASS | Solved in ~9.6s via `sb.solve_captcha()`. Token obtained, success image visible. |
+| Bot Detection (sannysoft.com) | PASS | Not detected as bot. `navigator.webdriver` hidden. |
+| Regular Browsing (HN) | PASS | Normal site navigation works. |
+
+Setup: `pip install seleniumbase` + `apt install python3-tk` in sandbox. Helper at `/usr/local/bin/sb_stealth.py`.
+
 ### Quick Smoke Test (UC-01 + UC-02 + UC-06)
 
 All three pass. Run after any change to verify core capabilities:
