@@ -665,6 +665,8 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
     // Enter handling
     if (key.return && !state.streaming && state.mode === "chat") {
+      // Was Shift+Enter, already handled by raw stdin handler above
+      if (suppressEnterRef.current) { suppressEnterRef.current = false; return; }
       if (state.approval) {
         const v = input.trim().toLowerCase();
         if (v === "y" || v === "yes") approve("approve");
@@ -673,8 +675,6 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
         setInput("");
         return;
       }
-      // Shift+Enter detected via raw stdin (works on Kitty/Ghostty/iTerm2/xterm)
-      if (shiftEnterRef.current) { shiftEnterRef.current = false; setInput(v => v + "\n"); return; }
       // Bracketed paste: insert newlines, don't send
       if ((key as any).paste) { wasPasted.current = true; setInput(v => v + "\n"); return; }
       // Backslash at end = newline
@@ -692,28 +692,33 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
   // Tab completion for slash commands via raw stdin (TextInput consumes Tab before useInput)
   const { stdin } = useStdin();
-  const shiftEnterRef = useRef(false);
+  const suppressEnterRef = useRef(false);
 
-  // Detect Shift+Enter via raw stdin — same sequences pi-mono uses across all terminals
+  // Detect Shift+Enter via raw stdin.
+  // Ink's useInput parser does NOT understand CSI-u escape sequences
+  // (Kitty/Ghostty/WezTerm keyboard protocol) — so we must detect them
+  // ourselves and directly call setInput/send.
   useEffect(() => {
     if (!stdin || state.streaming) return;
     const handler = (data: Buffer) => {
       const s = data.toString();
-      // Shift+Enter: Kitty CSI-u
-      if (s === "\x1b[13;2u" || s === "\x1b[57414;2u") { shiftEnterRef.current = true; return; }
-      // Shift+Enter: xterm modifyOtherKeys
-      if (s === "\x1b[27;2;13~" || s === "\x1b[13;2~") { shiftEnterRef.current = true; return; }
-      // Shift+Enter: Kitty/Ghostty custom mappings
-      if (s === "\x1b\r" || s === "\n") {
-        // Only treat as Shift+Enter when Kitty protocol is active
-        // (otherwise \n is plain Enter in legacy mode)
-        if (process.env.KITTY_WINDOW_ID || process.env.WEZTERM_PANE ||
+      // ---- Shift+Enter (unambiguous escape sequences) ----
+      // Kitty CSI-u: codepoint 13 (Enter) or 57414 (KP Enter), modifier bit 1 (Shift)
+      if (s === "\x1b[13;2u" || s === "\x1b[57414;2u") { suppressEnterRef.current = true; setInput((v: string) => v + "\n"); return; }
+      // xterm modifyOtherKeys: format CSI 27;mod;keycode ~ or CSI keycode;mod ~
+      if (s === "\x1b[27;2;13~" || s === "\x1b[13;2~") { suppressEnterRef.current = true; setInput((v: string) => v + "\n"); return; }
+      // Kitty custom mapping: \x1b\r
+      if (s === "\x1b\r") { suppressEnterRef.current = true; setInput((v: string) => v + "\n"); return; }
+      // Ghostty custom mapping: \n (but only when Kitty protocol is active,
+      // otherwise \n is plain Enter in raw mode)
+      if (s === "\n") {
+        if (process.env.KITTY_WINDOW_ID || (process.env.TERM || "").includes("kitty") ||
             (process.env.TERM_PROGRAM || "").toLowerCase() === "ghostty") {
-          shiftEnterRef.current = true;
+          suppressEnterRef.current = true; setInput((v: string) => v + "\n"); return;
         }
         return;
       }
-      // Tab = \t (for slash command completion)
+      // ---- Tab completion ----
       if (s === "\t" && input.startsWith("/")) {
         const partial = input.trim().split(/\s+/)[0] || input;
         const matches = SLASH_COMMANDS.filter(c => c.cmd.startsWith(partial));
