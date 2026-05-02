@@ -32,6 +32,8 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [desktopFull, setDesktopFull] = useState(false);
+  const [vncHealthy, setVncHealthy] = useState(false);
+  const [vncChecking, setVncChecking] = useState(false);
 
   // Fetch viewer info once computer use is enabled — polls until background setup completes
   useEffect(() => {
@@ -66,6 +68,41 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
     return () => { cancelled = true; };
   }, [sandboxId, cu.enabled]);
 
+  // Poll VNC health (websockify readiness) once session is resolved
+  useEffect(() => {
+    if (!sandboxId || !cu.enabled || !session || vncHealthy) return;
+
+    let cancelled = false;
+    setVncChecking(true);
+
+    const pollVNC = async () => {
+      const deadline = Date.now() + 60_000; // 60s max
+      while (Date.now() < deadline && !cancelled) {
+        try {
+          const result = await api.sandbox.checkVNC(sandboxId);
+          if (result.healthy) {
+            if (!cancelled) {
+              setVncHealthy(true);
+              setVncChecking(false);
+            }
+            return;
+          }
+        } catch {
+          // Network error — keep polling
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+      if (!cancelled) {
+        setVncChecking(false);
+        // Don't set an error — let the iframe try anyway; noVNC has reconnect=true
+        setVncHealthy(true);
+      }
+    };
+
+    pollVNC();
+    return () => { cancelled = true; };
+  }, [sandboxId, cu.enabled, session, vncHealthy]);
+
   // Retry / explicit start — polls until background setup completes
   const startDesktop = useCallback(async () => {
     if (!sandboxId) return;
@@ -89,8 +126,10 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
   // Build noVNC iframe URL — uses relative path so it inherits the page's origin.
   // noVNC defaults to connecting to the iframe's own host:port, which is correct
   // since the Vite proxy (or production server) forwards /api/ to the Go backend.
+  // NOTE: noVNC's ui.js line 1016 does `url += '/' + path` — it prepends '/'.
+  // So we must NOT include a leading '/' in the path value, or we get a double-slash.
   const novncUrl = sandboxId
-    ? `/api/sandbox/vnc/${sandboxId}/vnc.html?path=/api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&reconnect=true&reconnect_delay=3000&resize=scale`
+    ? `/api/sandbox/vnc/${sandboxId}/vnc.html?path=api/sandbox/vnc/${sandboxId}/websockify&autoconnect=true&reconnect=true&reconnect_delay=3000&resize=scale`
     : null;
 
   const openDesktop = useCallback(() => {
@@ -119,6 +158,11 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
         {sessionLoading && (
           <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
             <Loader size={8} className="animate-spin" /> Starting desktop...
+          </span>
+        )}
+        {vncChecking && session && (
+          <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+            <Loader size={8} className="animate-spin" /> Waiting for VNC...
           </span>
         )}
         {cu.error && (
@@ -200,7 +244,7 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
               </Button>
             </div>
           </div>
-        ) : session && novncUrl ? (
+        ) : session && novncUrl && vncHealthy ? (
           <iframe
             src={novncUrl}
             className="absolute inset-0 w-full h-full border-0"
@@ -212,6 +256,14 @@ export function ComputerUseTab({ selectedProject, sandboxId, cu }: ComputerUseTa
             <div className="text-center">
               <Loader size={24} className="mx-auto mb-3 text-muted-foreground animate-spin" />
               <p className="text-xs font-mono text-muted-foreground">Connecting to desktop...</p>
+            </div>
+          </div>
+        ) : session && vncChecking ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center">
+              <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+              <p className="text-sm font-mono text-muted-foreground">Waiting for VNC...</p>
+              <p className="text-xs font-mono text-muted-foreground/50 mt-1">Setting up remote display</p>
             </div>
           </div>
         ) : (

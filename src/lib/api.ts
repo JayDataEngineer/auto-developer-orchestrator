@@ -542,5 +542,9 @@ export const api = {
       apiFetch<{ mode?: string; cdpUrl?: string; vncUrl?: string; novncUrl?: string }>(
         `/api/sandbox/${encodeURIComponent(sandboxId)}/viewer`,
       ),
+    checkVNC: (sandboxId: string) =>
+      apiFetch<{ healthy: boolean; error?: string }>(
+        `/api/sandbox/${encodeURIComponent(sandboxId)}/vnc-health`,
+      ),
   },
 };

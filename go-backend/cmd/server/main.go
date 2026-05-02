@@ -474,6 +474,9 @@ func main() {
 			// Readiness check
 			r.Get("/{id}/ready", sandboxHandler.IsReady)
 
+			// VNC health check (is websockify listening?)
+			r.Get("/{id}/vnc-health", sandboxHandler.VNCReadinessCheck)
+
 			// Get viewer URLs
 			r.Get("/{id}/viewer", sandboxHandler.GetDesktopViewer)
 

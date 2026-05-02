@@ -468,6 +468,50 @@ func (h *SandboxHandler) CleanupVNCConnections() {
 	})
 }
 
+// VNCReadinessCheck checks whether websockify is accepting connections
+// inside the sandbox container. GET /api/sandbox/{id}/vnc-health
+func (h *SandboxHandler) VNCReadinessCheck(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	// Verify sandbox exists
+	if _, err := h.manager.GetSandbox(id); err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// Resolve container IP
+	containerHost, err := h.manager.GetContainerIP(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"healthy": false,
+			"error":   "container not reachable: " + err.Error(),
+		})
+		return
+	}
+
+	// Resolve noVNC port from desktop session
+	novncPort := 6080
+	if session, sessErr := h.manager.GetDesktopSession(id); sessErr == nil {
+		novncPort = session.NoVNCPort
+	}
+
+	// TCP dial with short timeout to check websockify is listening
+	addr := net.JoinHostPort(containerHost, fmt.Sprintf("%d", novncPort))
+	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"healthy": false,
+			"error":   "websockify not listening: " + err.Error(),
+		})
+		return
+	}
+	conn.Close()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"healthy": true,
+	})
+}
+
 // VNCStats returns stats about active VNC proxy connections.
 // GET /api/sandbox/vnc-stats
 func (h *SandboxHandler) VNCStats(w http.ResponseWriter, r *http.Request) {
