@@ -313,6 +313,9 @@ func main() {
 	// File transfer handler (upload/download files to/from sandbox)
 	fileHandler := handlers.NewFileHandler(sandboxMgr, logger)
 
+	// Direct tool execution handler (for Python SDK / external consumers)
+	toolsHandler := handlers.NewToolsHandler(sandboxMgr, mcpMulti, webResearchClient, logger)
+
 	// Scheduler (CRON/heartbeat system)
 	schedulerStorePath := os.Getenv("SCHEDULER_STORE_PATH")
 	if schedulerStorePath == "" {
@@ -373,6 +376,10 @@ func main() {
 
 	// API Routes
 	r.Route("/api", func(r chi.Router) {
+		// Direct tool execution (Python SDK / external consumers)
+		r.Post("/tools/exec", toolsHandler.ExecTool)
+		r.Get("/tools", toolsHandler.ToolsList)
+
 		// Health check — reports component status
 		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			status := map[string]string{
