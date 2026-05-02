@@ -20,12 +20,14 @@ func buildPersonaPrompt(t PersonaType, pcfg PersonaConfig) string {
 	examples := PersonaExamples(t)
 
 	mcpRef := MCPToolReference()
+	appRef := AppToolReference()
 
 	data := PromptData{
-		SandboxID:    sandboxID,
-		Tools:        toolsBlock,
-		MCPReference: mcpRef,
-		Examples:     examples,
+		SandboxID:        sandboxID,
+		Tools:            toolsBlock,
+		MCPReference:     mcpRef,
+		AppToolReference: appRef,
+		Examples:         examples,
 	}
 
 	prompt, err := RenderTemplate("orchestrator", data)

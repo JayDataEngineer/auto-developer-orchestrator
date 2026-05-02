@@ -15,6 +15,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
+	"github.com/auto-developer-orchestrator/backend/internal/manifest"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/models"
 	"github.com/auto-developer-orchestrator/backend/internal/observability"
@@ -348,6 +349,19 @@ func main() {
 	}
 	schedulerHandler := handlers.NewSchedulerHandler(sched, logger)
 	projectHandler.SetScheduler(sched)
+
+	// Wire app tool registerer for manifest tool auto-registration
+	appToolReg := llamaeng.NewAppToolRegisterer(logger)
+	projectHandler.SetToolRegisterer(appToolReg)
+
+	// Re-register app tools from existing projects on startup
+	if projects, err := db.GetCustomProjects(context.Background()); err == nil {
+		for _, p := range projects {
+			if mf, err := manifest.LoadManifest(p.Path); err == nil && mf != nil && len(mf.Tools) > 0 {
+				appToolReg.RegisterFromManifest(p.Name, p.Path, mf.Tools)
+			}
+		}
+	}
 
 	// Artifacts handler (plans, todos, notes from agents)
 	artifactHandler := handlers.NewArtifactHandler(db, logger)

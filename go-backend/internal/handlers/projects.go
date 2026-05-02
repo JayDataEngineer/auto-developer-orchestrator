@@ -22,12 +22,20 @@ type ProjectHandler struct {
 	logger    *zap.Logger
 	git       *git.GitOps
 	scheduler ScheduleRegisterer // optional: for auto-registering manifest schedules
+	toolReg   ToolRegisterer     // optional: for auto-registering manifest tools
 }
 
 // ScheduleRegisterer is implemented by *scheduler.Scheduler to auto-register
 // schedule entries from a project manifest.
 type ScheduleRegisterer interface {
 	CreateJobFromManifest(project, name, cronExpr, promptText, description string) (string, error)
+}
+
+// ToolRegisterer is implemented by the llama engine to auto-register
+// app tools from a project manifest.
+type ToolRegisterer interface {
+	RegisterFromManifest(projectName, projectDir string, tools []manifest.ToolDef) []string
+	UnregisterFromManifest(projectName string)
 }
 
 // NewProjectHandler creates a new ProjectHandler
@@ -42,6 +50,11 @@ func NewProjectHandler(db *storage.Database, logger *zap.Logger, gitOps *git.Git
 // SetScheduler sets the scheduler for auto-registering manifest schedules.
 func (h *ProjectHandler) SetScheduler(s ScheduleRegisterer) {
 	h.scheduler = s
+}
+
+// SetToolRegisterer sets the tool registerer for auto-registering manifest tools.
+func (h *ProjectHandler) SetToolRegisterer(tr ToolRegisterer) {
+	h.toolReg = tr
 }
 
 // List returns all projects (default + custom)
@@ -202,6 +215,12 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 				registered = append(registered, fmt.Sprintf("%s (%s) → job %s", schedName, schedDef.Cron, jobID))
 			}
 			resp["registered_schedules"] = registered
+		}
+
+		// Auto-register app tools from manifest
+		if h.toolReg != nil && len(mf.Tools) > 0 {
+			registered := h.toolReg.RegisterFromManifest(req.Name, req.Path, mf.Tools)
+			resp["registered_tools"] = registered
 		}
 	}
 

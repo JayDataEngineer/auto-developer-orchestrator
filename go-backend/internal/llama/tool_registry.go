@@ -114,7 +114,7 @@ func PersonaToolNames(t PersonaType) []string {
 		// list — they're registered globally for SubAgentToolSpecs (sub-agents use them).
 		// The orchestrator's prompt includes a reference section describing MCP tools
 		// so it can write accurate delegate_to instructions.
-		return []string{
+		base := []string{
 			// Execution
 			"bash",
 			// File operations (Claude Code pattern)
@@ -135,6 +135,9 @@ func PersonaToolNames(t PersonaType) []string {
 			// Custom tools (self-improvement)
 			"create_tool", "list_tools", "run_tool",
 		}
+		// Dynamically append app tools (registered from project manifests)
+		base = append(base, appToolNames...)
+		return base
 	default:
 		return nil
 	}

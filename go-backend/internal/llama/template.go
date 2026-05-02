@@ -19,11 +19,12 @@ var (
 
 // PromptData is passed to all prompt templates.
 type PromptData struct {
-	SandboxID     string
-	Tools         string // Pre-rendered tool reference block from FormatToolList
-	MCPReference  string // MCP tool parameter reference for delegation (NOT callable tools)
-	Identity      string // Identity + rules block (for monolithic template)
-	Examples      []Example
+	SandboxID        string
+	Tools            string // Pre-rendered tool reference block from FormatToolList
+	MCPReference     string // MCP tool parameter reference for delegation (NOT callable tools)
+	AppToolReference string // App tool reference for direct calling
+	Identity         string // Identity + rules block (for monolithic template)
+	Examples         []Example
 }
 
 // Example is a few-shot example for the model.

@@ -16,6 +16,9 @@ func normalizeToolName(name string, args map[string]interface{}) string {
 	if strings.HasPrefix(name, "mcp_") {
 		return name
 	}
+	if strings.HasPrefix(name, "app_") {
+		return name
+	}
 	switch name {
 	case "bash_execute", "execute_bash", "run_command", "shell", "execute",
 		"terminal_use", "terminal", "run", "command", "run_bash", "run_shell",
@@ -309,6 +312,9 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		if strings.HasPrefix(toolName, "mcp_") {
 			return e.dispatchMCPTool(ctx, toolName, args)
 		}
+		if strings.HasPrefix(toolName, "app_") {
+			return e.dispatchAppTool(ctx, sandboxID, toolName, args)
+		}
 		return nil, fmt.Errorf("unsupported tool: %s", toolName)
 	}
 }
@@ -396,6 +402,53 @@ func (e *SandboxToolExecutor) dispatchMCPTool(ctx context.Context, toolName stri
 		"tool":    mcpName,
 		"source":  "mcp",
 		"result":  result,
+	}, nil
+}
+
+// dispatchAppTool handles a dynamically-registered app tool call.
+// It resolves the handler template, substitutes parameters from args,
+// and executes the command in the current sandbox.
+func (e *SandboxToolExecutor) dispatchAppTool(ctx context.Context, sandboxID, toolName string, args map[string]interface{}) (interface{}, error) {
+	reg := LookupAppTool(toolName)
+	if reg == nil {
+		return nil, fmt.Errorf("app tool %s not found in registry", toolName)
+	}
+
+	// Resolve the handler template with args
+	cmd := resolveHandlerTemplate(reg.Handler, args)
+
+	e.Logger.Info("Dispatching app tool",
+		zap.String("tool", toolName),
+		zap.String("project", reg.ProjectName),
+		zap.String("command", cmd),
+	)
+
+	// Execute in the current sandbox
+	if e.Manager == nil {
+		return nil, fmt.Errorf("app tool %s failed: sandbox manager not available", toolName)
+	}
+
+	output, err := e.Manager.ExecInSandbox(ctx, sandboxID, []string{"bash", "-c", cmd})
+	if err != nil {
+		e.Logger.Warn("App tool execution failed",
+			zap.String("tool", toolName),
+			zap.String("command", cmd),
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("app tool %s failed: %w", toolName, err)
+	}
+
+	e.Logger.Info("App tool succeeded",
+		zap.String("tool", toolName),
+		zap.Int("output_len", len(output)),
+	)
+
+	return map[string]interface{}{
+		"success": true,
+		"tool":    toolName,
+		"source":  "app",
+		"project": reg.ProjectName,
+		"output":  output,
 	}, nil
 }
 

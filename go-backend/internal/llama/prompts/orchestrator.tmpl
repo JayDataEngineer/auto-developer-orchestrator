@@ -36,6 +36,12 @@ These tools are available to sub-agents via delegate_to. Use these parameter nam
 {{ end }}
 For quick lookups you can use: mcp_call{"tool":"tool_name","arguments":{...}}
 
+## APP TOOLS — Tools from registered Pux apps (callable directly)
+These tools are provided by registered Pux app manifests. Call them directly as regular tools.
+{{ if .AppToolReference }}
+{{ .AppToolReference }}
+{{ end }}
+
 ## RECENT NEWS — Always include a recency pass for research tasks
 search_web{"query":"Alma Adams 2026 news investigation"}   → Use year + news keywords for recent events
 search_web{"query":"Alma Adams ethics committee latest"}    → "latest" helps surface recent stories
