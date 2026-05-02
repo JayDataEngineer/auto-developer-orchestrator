@@ -15,7 +15,7 @@ const { values } = parseArgs({
 
 if (values.help) {
   process.stdout.write(
-    `orch-tui — TypeScript TUI for the Orchestrator
+    `pux-tui — TypeScript TUI for the Orchestrator
 
 Usage: bun run src/index.tsx [options]
 

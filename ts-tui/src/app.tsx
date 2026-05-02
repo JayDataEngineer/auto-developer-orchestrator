@@ -322,7 +322,7 @@ function Approve({ approval, onR }: { approval: PendingApproval; onR: (a: "appro
 function Head({ project, streaming }: { project: string; streaming: boolean }) {
   return (
     <Box flexDirection="row" paddingX={1}>
-      <Accent>orch</Accent>
+      <Accent>pux</Accent>
       <Dim> · {project}</Dim>
       <Spacer />
       {streaming ? <Text color="green">● streaming</Text> : null}
@@ -490,7 +490,7 @@ function Sched({ client, onBack }: { client: ApiClient; onBack: () => void }) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box marginBottom={1}><Accent>orch Scheduler</Accent><Spacer /><Dim>{jobs.length} jobs</Dim></Box>
+      <Box marginBottom={1}><Accent>pux Scheduler</Accent><Spacer /><Dim>{jobs.length} jobs</Dim></Box>
       <Line />
       <Box marginY={1}><Dim>ID       │ En │ Schedule      │ Last Run              │ Name</Dim></Box>
       {load ? <Dim>Loading...</Dim>
@@ -633,7 +633,18 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
   useInput((inp, key) => {
     if (key.escape) { if (state.mode !== "chat") dispatch({ type: "MODE", mode: "chat" }); return; }
-    if (key.upArrow && !input && state.history.length > 0 && !state.streaming) { navHistory(-1); return; }
+    // Up/Down arrow handling
+    if (key.upArrow && !state.streaming && state.mode === "chat") {
+      // With text + multi-line: merge last line into previous
+      if (input && input.includes("\n")) {
+        const lines = input.split("\n");
+        const last = lines.pop() || "";
+        setInput(lines.join("\n") + (last ? " " + last : ""));
+        return;
+      }
+      // Empty input: history navigation
+      if (!input && state.history.length > 0) { navHistory(-1); return; }
+    }
     if (key.downArrow && !input && state.history.length > 0 && !state.streaming) { navHistory(1); return; }
 
     // PageUp/PageDown = scroll messages (only when not streaming, no input)
@@ -845,7 +856,6 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
                   ) : null}
                   {/* Active line */}
                   <Box flexDirection="row">
-                    <Text color="cyan" bold>❯ </Text>
                     <Box flexGrow={1}>
                       <TextInput
                         value={lines[lines.length - 1] || ""}
@@ -856,9 +866,9 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
                           setPasteExpanded(false);
                           if (full.split("\n").length <= 3) wasPasted.current = false;
                         }}
-                        placeholder={input.startsWith("/") ? "Command..." : "Message orch... (/ for commands, tab to complete)"}
+                        placeholder={input.startsWith("/") ? "Command..." : "Type a message..."}
                         focus={!state.streaming}
-                        showCursor={false}
+                        showCursor={!state.streaming}
                       />
                     </Box>
                   </Box>
@@ -875,8 +885,8 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
         {health ? (
           <Dim>
             v{health.version}
-            {"  "}<Text color={health.llm === "healthy" ? "green" : "red"}>{health.llm === "healthy" ? "●" : "○"}</Text><Dim> llm</Dim>
-            {"  "}<Text color={health.sandbox === "available" ? "green" : "yellow"}>{health.sandbox === "available" ? "●" : "◐"}</Text><Dim> sandbox</Dim>
+            {"  "}<Text color={health.llm === "healthy" ? "green" : "red"}>{health.llm === "healthy" ? "llm" : "llm down"}</Text>
+            {"  "}<Text color={health.sandbox === "available" ? "green" : "yellow"}>{health.sandbox === "available" ? "sandbox" : "sandbox busy"}</Text>
           </Dim>
         ) : <Dim>offline</Dim>}
       </Box>
