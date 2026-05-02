@@ -647,6 +647,12 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
     }
     if (key.downArrow && !input && state.history.length > 0 && !state.streaming) { navHistory(1); return; }
 
+    // Backspace at start of empty last line: merge with previous line
+    if ((key.backspace || key.delete) && input.endsWith("\n") && !state.streaming) {
+      setInput(input.slice(0, -1));
+      return;
+    }
+
     // PageUp/PageDown = scroll messages (only when not streaming, no input)
     if (key.pageUp && !input && !state.streaming) {
       setScrollOffset(s => Math.min(state.messages.length, s + 5));
@@ -673,6 +679,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
         setInput(v => v + "\n");
         return;
       }
+      // Plain Enter = send
       if (input.endsWith("\\")) { setInput(input.slice(0, -1) + "\n"); return; }
       if (input.trim()) send(input);
       return;
@@ -732,37 +739,75 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
         {/* LEFT SIDEBAR — tools + sub-agents */}
         <Box flexDirection="column" width="28%" borderStyle="single" borderColor="grey" paddingX={1}>
-          <Text bold color="blueBright">Tools</Text>
-          <Box flexDirection="column" marginTop={1}>
-            {["bash", "browse", "read", "write", "edit", "grep", "glob", "search", "desktop"].map(t => (
-              <Dim key={t}>  {t}</Dim>
-            ))}
-          </Box>
-          {/* Streaming tools highlight */}
-          {state.streaming && state.sTools.length > 0 ? (
+          <Text bold color="blueBright">Activity</Text>
+
+          {/* Streaming status */}
+          {state.streaming ? (
             <Box flexDirection="column" marginTop={1}>
-              <Text bold color="yellow">Active</Text>
-              {state.sTools.filter(t => !t.done).map(t => (
-                <Text key={t.name} color="yellow">
-                  <Spinner type="dots" /> {t.name}
+              <Box>
+                <Text color="green"><Spinner type="dots" /></Text>
+                <Text color="green"> active</Text>
+              </Box>
+              {state.sThink && !state.sText ? (
+                <Box marginTop={1}>
+                  <Dim>thinking...</Dim>
+                </Box>
+              ) : null}
+              {state.sText ? (
+                <Box marginTop={1}>
+                  <Dim>generating response</Dim>
+                </Box>
+              ) : null}
+            </Box>
+          ) : (
+            <Box marginTop={1}>
+              <Dim>idle</Dim>
+            </Box>
+          )}
+
+          {/* Current tools running */}
+          {state.sTools.length > 0 ? (
+            <Box flexDirection="column" marginTop={2}>
+              <Text bold color="yellow">Tools</Text>
+              {state.sTools.map(t => (
+                <Box key={t.name} flexDirection="row">
+                  {t.done ? (
+                    t.error ? <Text color="red">✗</Text> : <Text color="green">✓</Text>
+                  ) : (
+                    <Text color="yellow"><Spinner type="dots" /></Text>
+                  )}
+                  <Text dimColor> {t.name}</Text>
+                </Box>
+              ))}
+            </Box>
+          ) : null}
+
+          {/* Browser/desktop indicators */}
+          {state.sTools.filter(t => t.name.includes("desktop") || t.name.includes("browse") || t.name.includes("click") || t.name.includes("screenshot")).length > 0 ? (
+            <Box flexDirection="column" marginTop={2}>
+              <Text bold color="magenta">Visual</Text>
+              {state.sTools.filter(t => t.name.includes("desktop") || t.name.includes("browse") || t.name.includes("click") || t.name.includes("screenshot")).map(t => (
+                <Text key={t.name} dimColor>
+                  {t.done ? "  " : "  "}{t.name} {t.done ? (t.error ? "failed" : "done") : ""}
                 </Text>
               ))}
             </Box>
           ) : null}
+
+          {/* Conversation list */}
           <Box flexDirection="column" marginTop={2}>
             <Text bold color="blueBright">Chats</Text>
-            <Text dimColor>{state.conversations.length} conversations</Text>
-            {state.conversations.slice(0, 5).map(c => (
-              <Text key={c.id} dimColor>
-                {c.id === state.convId ? "▶" : " "} {c.title.slice(0, 20)}
-              </Text>
+            <Dim>{state.conversations.length} conversations</Dim>
+            {state.conversations.slice(0, 4).map(c => (
+              <Box key={c.id}>
+                <Text dimColor>{c.id === state.convId ? "▶" : " "} {c.title.slice(0, 18)}</Text>
+              </Box>
             ))}
           </Box>
         </Box>
 
-        {/* RIGHT PANEL — agent feed */}
+        {/* RIGHT PANEL — messages */}
         <Box flexDirection="column" flexGrow={1} borderStyle="single" borderColor="grey" paddingX={1}>
-          <Text bold color="blueBright">Agent Feed</Text>
           <Box flexDirection="column" flexGrow={1} marginTop={1}>
             {scrollOffset > 0 ? (
               <Box marginBottom={1}>
@@ -833,8 +878,8 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
           {/* Dynamic input box */}
           {(() => {
             const lines = input.split("\n");
-            // Only add extra height when there are actual lines above
-            const visibleLines = lines.length > 1 ? Math.max(1, Math.min(6, lines.length)) : 1;
+            // Box grows with content, capped for reasonable height
+            const visibleLines = Math.min(10, lines.length);
             return (
               <Box borderStyle="single" borderColor="cyan" paddingX={1} height={visibleLines + 2}>
                 <Box flexDirection="column" flexGrow={1} justifyContent="flex-end">
@@ -863,6 +908,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
                           setPasteExpanded(false);
                           if (full.split("\n").length <= 3) wasPasted.current = false;
                         }}
+                        onSubmit={() => {}} // no-op: handled by useInput above
                         placeholder={lines.length <= 1 ? "Type a message..." : undefined}
                         focus={!state.streaming}
                         showCursor={!state.streaming}
