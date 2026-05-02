@@ -19,6 +19,7 @@ func PersistEvents(
 	in := make(chan AgentEvent, 256)
 
 	go func() {
+		defer close(downstream)
 		for evt := range in {
 			// Persist non-delta events (skip high-volume text/thinking deltas)
 			if evt.Type != EventTypeTextDelta && evt.Type != EventTypeThinkingDelta && store != nil {

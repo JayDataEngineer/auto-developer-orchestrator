@@ -621,6 +621,20 @@ func (loop *AgentLoop) runLoop(ctx context.Context, chatCh <-chan ChatEvent, sub
 				})
 				return nil
 			}
+
+			// synthesize also ends the loop — the orchestrator has provided its conclusion
+			if tc.Name == "synthesize" {
+				if conclusion, _ := tc.Args["conclusion"].(string); conclusion != "" {
+					sendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: conclusion}})
+				}
+				loop.logger.Info("Orchestrator synthesized, terminating loop", zap.Int("round", round))
+				inputTokens, outputTokens := loop.session.TokenCounts()
+				sendEvent(subscriber, AgentEvent{
+					Type: EventTypeAgentEnd,
+					Data: AgentEventData{Input: float64(inputTokens), Output: float64(outputTokens), Model: "llama-server/gemma-4-26b"},
+				})
+				return nil
+			}
 		}
 
 		if len(delegateCalls) > 0 {

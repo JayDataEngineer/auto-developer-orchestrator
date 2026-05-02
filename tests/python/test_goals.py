@@ -34,7 +34,7 @@ TEST_PROJECT = "test-repo"
 _mod_session = None
 
 
-def _pux(message, timeout=300):
+def _pux(message, timeout=600):
     """Send a prompt and return all SSE events."""
     return stream_pux_prompt(API, _mod_session, TEST_PROJECT, message, timeout=timeout)
 

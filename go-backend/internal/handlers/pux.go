@@ -411,6 +411,11 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			if loopErr != nil {
 				h.log.Error("Orchestrator error", zap.Error(loopErr))
 			}
+			// Send [DONE] marker so clients know the stream ended
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			if canFlush {
+				flusher.Flush()
+			}
 			return
 		case <-keepalive.C:
 			fmt.Fprintf(w, ": keepalive\n\n")
@@ -419,6 +424,11 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			}
 		case evt, ok := <-events:
 			if !ok {
+				// Channel closed — stream is done
+				fmt.Fprintf(w, "data: [DONE]\n\n")
+				if canFlush {
+					flusher.Flush()
+				}
 				return
 			}
 			keepalive.Reset(15 * time.Second)
