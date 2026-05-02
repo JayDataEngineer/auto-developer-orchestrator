@@ -693,34 +693,58 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
   // Tab completion for slash commands via raw stdin (TextInput consumes Tab before useInput)
   const { stdin } = useStdin();
   const suppressEnterRef = useRef(false);
+  const suppressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setSuppress = () => {
+    suppressEnterRef.current = true;
+    if (suppressTimer.current) clearTimeout(suppressTimer.current);
+    suppressTimer.current = setTimeout(() => { suppressEnterRef.current = false; suppressTimer.current = null; }, 200);
+  };
+  const inputRef = useRef(input);
+  useEffect(() => { inputRef.current = input; }, [input]);
+  const streamingRef = useRef(state.streaming);
+  useEffect(() => { streamingRef.current = state.streaming; }, [state.streaming]);
 
   // Detect Shift+Enter via raw stdin.
   // Ink's useInput parser does NOT understand CSI-u escape sequences
   // (Kitty/Ghostty/WezTerm keyboard protocol) — so we must detect them
-  // ourselves and directly call setInput/send.
+  // ourselves and directly call setInput.
   useEffect(() => {
-    if (!stdin || state.streaming) return;
+    if (!stdin) return;
     const handler = (data: Buffer) => {
+      if (streamingRef.current) return;
       const s = data.toString();
-      // ---- Shift+Enter (unambiguous escape sequences) ----
-      // Kitty CSI-u: codepoint 13 (Enter) or 57414 (KP Enter), modifier bit 1 (Shift)
-      if (s === "\x1b[13;2u" || s === "\x1b[57414;2u") { suppressEnterRef.current = true; setInput((v: string) => v + "\n"); return; }
-      // xterm modifyOtherKeys: format CSI 27;mod;keycode ~ or CSI keycode;mod ~
-      if (s === "\x1b[27;2;13~" || s === "\x1b[13;2~") { suppressEnterRef.current = true; setInput((v: string) => v + "\n"); return; }
+      // ---- Shift+Enter ----
+      // CSI-u: \x1b[codepoint;mod u  — modifier is 1-indexed:
+      //   1=none, 2=shift, 3=alt, 4=shift+alt, 5=ctrl, 6=ctrl+shift
+      // shift = ((mod-1) & 1) === 1   (bit 0 of 0-based modifier)
+      // Codepoints: 13=Enter, 57414=KP Enter
+      const m = s.match(/^\x1b\[(13|57414);([\d]+)(u|~)/);
+      if (m && m[2]) {
+        const mod = parseInt(m[2], 10);
+        if (((mod - 1) & 1) === 1) { setSuppress(); setInput((v: string) => v + "\n"); }
+        return;
+      }
+      // xterm modifyOtherKeys: \x1b[27;mod;code~ or \x1b[code;mod~
+      // Same 1-indexed modifier encoding as CSI-u
+      const m2 = s.match(/^\x1b\[(?:27;)?(\d+);(\d+)~/);
+      if (m2 && m2[1] && m2[2]) {
+        const code = parseInt(m2[1], 10);
+        const mod = parseInt(m2[2], 10);
+        if ((code === 13 || code === 27) && ((mod - 1) & 1) === 1) { setSuppress(); setInput((v: string) => v + "\n"); }
+        return;
+      }
       // Kitty custom mapping: \x1b\r
-      if (s === "\x1b\r") { suppressEnterRef.current = true; setInput((v: string) => v + "\n"); return; }
-      // Ghostty custom mapping: \n (but only when Kitty protocol is active,
-      // otherwise \n is plain Enter in raw mode)
+      if (s === "\x1b\r") { setSuppress(); setInput((v: string) => v + "\n"); return; }
+      // Ghostty custom mapping: \n (on Kitty protocol terminals)
       if (s === "\n") {
-        if (process.env.KITTY_WINDOW_ID || (process.env.TERM || "").includes("kitty") ||
-            (process.env.TERM_PROGRAM || "").toLowerCase() === "ghostty") {
-          suppressEnterRef.current = true; setInput((v: string) => v + "\n"); return;
+        if ((process.env.TERM || "").includes("kitty") || (process.env.TERM_PROGRAM || "").toLowerCase() === "ghostty") {
+          setSuppress(); setInput((v: string) => v + "\n"); return;
         }
         return;
       }
       // ---- Tab completion ----
-      if (s === "\t" && input.startsWith("/")) {
-        const partial = input.trim().split(/\s+/)[0] || input;
+      if (s === "\t" && inputRef.current.startsWith("/")) {
+        const partial = inputRef.current.trim().split(/\s+/)[0] || inputRef.current;
         const matches = SLASH_COMMANDS.filter(c => c.cmd.startsWith(partial));
         if (matches.length === 0) return;
         if (matches.length === 1) { setInput(matches[0]!.cmd + " "); tabIdx.current = -1; return; }
@@ -734,7 +758,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
     };
     stdin.on("data", handler);
     return () => { stdin.off("data", handler); };
-  }, [input, state.streaming, stdin]);
+  }, [stdin]); // stable registration — only register once
 
   // render
   if (state.mode === "help") return <HelpView onDismiss={() => dispatch({ type: "MODE", mode: "chat" })} />;
