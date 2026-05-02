@@ -726,10 +726,6 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
   return (
     <Box flexDirection="column" height={h} paddingX={1}>
-      {/* HEADER — minimal, just project name */}
-      <Box flexDirection="row" paddingX={1}>
-        <Dim>{project}</Dim>
-      </Box>
 
       {/* BODY — split pane */}
       <Box flexDirection="row" flexGrow={1}>
@@ -739,7 +735,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
           <Text bold color="blueBright">Tools</Text>
           <Box flexDirection="column" marginTop={1}>
             {["bash", "browse", "read", "write", "edit", "grep", "glob", "search", "desktop"].map(t => (
-              <Text key={t}><Text color="green">● </Text><Dim> {t}</Dim></Text>
+              <Dim key={t}>  {t}</Dim>
             ))}
           </Box>
           {/* Streaming tools highlight */}
