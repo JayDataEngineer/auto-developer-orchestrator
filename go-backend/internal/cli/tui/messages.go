@@ -1,6 +1,8 @@
 package tui
 
-// Message types for Bubble Tea updates.
+// Bubble Tea message types for the chat TUI.
+
+// --- SSE event messages ---
 
 type textDeltaMsg struct {
 	text string
@@ -47,3 +49,24 @@ type doneMsg struct {
 }
 
 type streamEndMsg struct{}
+
+// --- UI action messages ---
+
+// toggleThinkMsg toggles the thinking block for a given message index.
+type toggleThinkMsg struct {
+	msgIndex int
+}
+
+// toggleToolMsg toggles the tool result display.
+type toggleToolMsg struct {
+	msgIndex int
+	toolIdx  int
+}
+
+// toggleHelpMsg shows or hides the keyboard help overlay.
+type toggleHelpMsg struct{}
+
+// scrollMsg scrolls the viewport.
+type scrollMsg struct {
+	lines int // positive = down, negative = up
+}
