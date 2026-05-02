@@ -30,6 +30,9 @@ type SandboxOptions struct {
 	MemoryLimit int
 	// CPULimit is the CPU limit in cores
 	CPULimit float64
+	// InitialMode sets the sandbox mode after creation (cli, browser, desktop).
+	// Default is "browser" — the OpenShell image already runs Chrome via supervisord.
+	InitialMode SandboxMode
 }
 
 // Sandbox represents an OpenShell sandbox instance

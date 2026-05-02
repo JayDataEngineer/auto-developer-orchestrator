@@ -38,6 +38,7 @@ type CreateSandboxRequest struct {
 	ID          string `json:"id"`
 	ProjectPath string `json:"project_path"`
 	Policy      string `json:"policy"`
+	InitialMode string `json:"initial_mode"` // "cli", "browser", "desktop" — default: "browser"
 }
 
 // CreateSandbox creates a new sandbox
@@ -53,6 +54,7 @@ func (h *SandboxHandler) CreateSandbox(w http.ResponseWriter, r *http.Request) {
 		ID:          req.ID,
 		ProjectPath: req.ProjectPath,
 		Policy:      req.Policy,
+		InitialMode: sandbox.SandboxMode(req.InitialMode),
 	})
 	if err != nil {
 		h.logger.Error("failed to create sandbox", zap.Error(err))

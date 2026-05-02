@@ -166,8 +166,10 @@ func TestSchedulerRuns(t *testing.T) {
 		if r.URL.Path != "/api/scheduler/runs" {
 			t.Errorf("expected /api/scheduler/runs, got %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode([]map[string]interface{}{
-			{"id": "run12345678", "jobId": "job12345678", "status": "completed", "startedAt": "2025-01-01"},
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"runs": []map[string]interface{}{
+				{"id": "run12345678", "jobId": "job12345678", "status": "completed", "startedAt": "2025-01-01"},
+			},
 		})
 	}))
 	defer srv.Close()
@@ -186,7 +188,9 @@ func TestSchedulerRunsByJob(t *testing.T) {
 		if r.URL.Path != "/api/scheduler/job123/runs" {
 			t.Errorf("expected /api/scheduler/job123/runs, got %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode([]interface{}{})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"runs": []interface{}{},
+		})
 	}))
 	defer srv.Close()
 

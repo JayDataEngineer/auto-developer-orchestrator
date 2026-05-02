@@ -119,7 +119,6 @@ func (m *Manager) execInContainer(ctx context.Context, containerName string, cmd
 // CreateSandbox creates a new OpenShell sandbox by provisioning a Docker container.
 func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sandbox, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Generate ID if empty
 	if opts.ID == "" {
@@ -156,6 +155,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 
 	// Pull image if not present locally
 	if m.dockerClient == nil {
+		m.mu.Unlock()
 		return nil, fmt.Errorf("docker client not available")
 	}
 	_, inspectErr := m.dockerClient.ImageInspect(ctx, image)
@@ -164,10 +164,12 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		m.logger.Info("pulling sandbox image", zap.String("image", image))
 		pullResp, pullErr := m.dockerClient.ImagePull(ctx, image, client.ImagePullOptions{})
 		if pullErr != nil {
+			m.mu.Unlock()
 			return nil, fmt.Errorf("failed to pull image %s: %w", image, pullErr)
 		}
 		if err := pullResp.Wait(ctx); err != nil {
 			pullResp.Close()
+			m.mu.Unlock()
 			return nil, fmt.Errorf("image pull failed for %s: %w", image, err)
 		}
 		pullResp.Close()
@@ -241,6 +243,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		Name: containerName,
 	})
 	if err != nil {
+		m.mu.Unlock()
 		return nil, fmt.Errorf("failed to create container %s: %w", containerName, err)
 	}
 
@@ -248,6 +251,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	if _, err := m.dockerClient.ContainerStart(ctx, createResp.ID, client.ContainerStartOptions{}); err != nil {
 		// Clean up the created container on start failure
 		m.dockerClient.ContainerRemove(ctx, createResp.ID, client.ContainerRemoveOptions{Force: true})
+		m.mu.Unlock()
 		return nil, fmt.Errorf("failed to start container %s: %w", containerName, err)
 	}
 
@@ -275,6 +279,34 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		zap.String("container_id", createResp.ID),
 	)
 
+	// Auto-enable browser/desktop mode if requested.
+	// Must release lock first since EnableBrowserMode/EnableDesktopMode acquire it.
+	mode := opts.InitialMode
+	if mode == "" {
+		mode = ModeBrowser // default: OpenShell image already runs Chrome via supervisord
+	}
+	if mode == ModeCLI {
+		m.mu.Unlock()
+		return sandbox, nil
+	}
+
+	m.mu.Unlock() // release before calling enable methods that acquire the lock
+	var session *DesktopSession
+	var modeErr error
+	if mode == ModeDesktop {
+		session, modeErr = m.EnableDesktopMode(ctx, opts.ID)
+	} else {
+		session, modeErr = m.EnableBrowserMode(ctx, opts.ID)
+	}
+	if modeErr != nil {
+		m.logger.Warn("auto-enable mode failed, sandbox stays in CLI mode",
+			zap.String("mode", string(mode)),
+			zap.Error(modeErr))
+	} else {
+		m.logger.Info("auto-enabled mode",
+			zap.String("mode", string(mode)),
+			zap.Int("cdp_port", session.CDPPort))
+	}
 	return sandbox, nil
 }
 
