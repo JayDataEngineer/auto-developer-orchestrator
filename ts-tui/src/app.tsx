@@ -517,6 +517,9 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
   const [state, dispatch] = useReducer(reduce, undefined, () => ({ ...init(), convId: initialAgentId }));
   const [input, setInput] = useState("");
   const [pasteExpanded, setPasteExpanded] = useState(false);
+  const wasPasted = useRef(false);
+  const [scrollOffset, setScrollOffset] = useState(0);  // how many messages scrolled up
+  const [health, setHealth] = useState<{ llm: string; sandbox: string; version: string } | null>(null);
   const client = useRef(new ApiClient(serverUrl));
   const { exit } = useApp();
   const abort = useRef<AbortController | null>(null);
@@ -530,12 +533,26 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
     // Try to load existing conversation messages from backend
     client.current.getHistory(project, "default").then(msgs => {
       if (msgs && msgs.length > 0) {
-        // Extract conversations from messages
-        // For now, just track the default conversation
         const conv: Conversation = { id: "default", title: "Default", lastMessage: msgs[msgs.length - 1]?.content?.slice(0, 80) || "", messageCount: msgs.length, lastAt: new Date().toISOString() };
         dispatch({ type: "LOAD_CONVS", convs: [conv] });
       }
     }).catch(() => {});
+  }, []);
+
+  // ── health polling ──
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await fetch(`${serverUrl}/api/health`);
+        if (res.ok) {
+          const data = await res.json();
+          setHealth(data as any);
+        }
+      } catch { setHealth(null); }
+    };
+    poll();
+    const iv = setInterval(poll, 30000);
+    return () => clearInterval(iv);
   }, []);
 
   // ── send ──
@@ -543,6 +560,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
     const t = text.trim();
     if (!t || state.streaming) return;
     setInput("");
+    wasPasted.current = false;
 
     // Handle slash commands
     if (t.startsWith("/")) {
@@ -552,6 +570,7 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
     dispatch({ type: "USER", text: t });
     dispatch({ type: "STREAM" });
+    setScrollOffset(0); // auto-scroll to bottom on new message
 
     const ctrl = new AbortController();
     abort.current = ctrl;
@@ -617,6 +636,16 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
     if (key.upArrow && !input && state.history.length > 0 && !state.streaming) { navHistory(-1); return; }
     if (key.downArrow && !input && state.history.length > 0 && !state.streaming) { navHistory(1); return; }
 
+    // PageUp/PageDown = scroll messages (only when not streaming, no input)
+    if (key.pageUp && !input && !state.streaming) {
+      setScrollOffset(s => Math.min(state.messages.length, s + 5));
+      return;
+    }
+    if (key.pageDown && !input && !state.streaming) {
+      setScrollOffset(s => Math.max(0, s - 5));
+      return;
+    }
+
     // Enter/Shift+Enter — handled here because ink-text-input fires onSubmit for both
     if (key.return && !state.streaming && state.mode === "chat") {
       if (state.approval) {
@@ -628,7 +657,11 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
         return;
       }
       // During paste: insert newlines instead of submitting
-      if (key.shift || (key as any).paste) { setInput(v => v + "\n"); return; }
+      if (key.shift || (key as any).paste) {
+        if ((key as any).paste) wasPasted.current = true;
+        setInput(v => v + "\n");
+        return;
+      }
       if (input.endsWith("\\")) { setInput(input.slice(0, -1) + "\n"); return; }
       if (input.trim()) send(input);
       return;
@@ -681,13 +714,10 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
   );
 
   return (
-    <Box flexDirection="column" height={h} borderStyle="round" borderColor="blue" paddingX={1}>
-      {/* HEADER */}
-      <Box flexDirection="row" justifyContent="space-between" paddingX={1}>
-        <Accent>orch</Accent>
+    <Box flexDirection="column" height={h} paddingX={1}>
+      {/* HEADER — minimal, just project name */}
+      <Box flexDirection="row" paddingX={1}>
         <Dim>{project}</Dim>
-        <Spacer />
-        <Text color="green">System: 🟢</Text>
       </Box>
 
       {/* BODY — split pane */}
@@ -727,10 +757,18 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
         <Box flexDirection="column" flexGrow={1} borderStyle="single" borderColor="grey" paddingX={1}>
           <Text bold color="blueBright">Agent Feed</Text>
           <Box flexDirection="column" flexGrow={1} marginTop={1}>
+            {scrollOffset > 0 ? (
+              <Box marginBottom={1}>
+                <Text dimColor>── {scrollOffset} messages above · PgUp/PgDn scroll ──</Text>
+              </Box>
+            ) : null}
             {state.messages.length === 0 && !state.streaming ? (
               <Box paddingY={1}><Dim>No messages. /help for commands.</Dim></Box>
             ) : (
-              state.messages.map(m =>
+              state.messages.slice(
+                Math.max(0, state.messages.length - 15 - scrollOffset),
+                state.messages.length - scrollOffset
+              ).map(m =>
                 m.role === "user" ? (
                   <Box key={m.id} marginBottom={1}>
                     <Text color="cyan" bold>❯ </Text>
@@ -785,54 +823,62 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
       {!state.approval ? (
         <Box flexDirection="column">
           <SlashHint input={input} />
-          <Box borderStyle="single" borderColor="cyan" paddingX={1} flexDirection="column">
-            {/* Multi-line preview: collapse >3 lines into placeholder */}
-            {((): React.ReactNode => {
-              const lines = input.split("\n");
-              if (lines.length > 3 && !pasteExpanded) {
-                return (
+          {/* Dynamic input box */}
+          {(() => {
+            const lines = input.split("\n");
+            const visibleLines = Math.max(1, Math.min(6, lines.length));
+            return (
+              <Box borderStyle="single" borderColor="cyan" paddingX={1} height={visibleLines + 2}>
+                <Box flexDirection="column" flexGrow={1}>
+                  {/* Paste placeholder or multi-line display */}
+                  {wasPasted.current && lines.length > 3 && !pasteExpanded ? (
+                    <Box>
+                      <Text color="yellow">[Pasted ~{lines.length} lines</Text>
+                      <Text dimColor> — Ctrl+O to expand]</Text>
+                    </Box>
+                  ) : lines.length > 1 ? (
+                    <Box flexDirection="column">
+                      {lines.slice(0, -1).map((line, i) => (
+                        <Text key={i} dimColor>{line}</Text>
+                      ))}
+                    </Box>
+                  ) : null}
+                  {/* Active line */}
                   <Box flexDirection="row">
-                    <Text color="yellow">[Pasted ~{lines.length} lines</Text>
-                    <Text dimColor> — Ctrl+O to expand]</Text>
+                    <Text color="cyan" bold>❯ </Text>
+                    <Box flexGrow={1}>
+                      <TextInput
+                        value={lines[lines.length - 1] || ""}
+                        onChange={(newLast) => {
+                          const prev = lines.slice(0, -1).join("\n");
+                          const full = prev ? prev + "\n" + newLast : newLast;
+                          setInput(full);
+                          setPasteExpanded(false);
+                          if (full.split("\n").length <= 3) wasPasted.current = false;
+                        }}
+                        placeholder={input.startsWith("/") ? "Command..." : "Message orch... (/ for commands, tab to complete)"}
+                        focus={!state.streaming}
+                        showCursor={false}
+                      />
+                    </Box>
                   </Box>
-                );
-              }
-              if (lines.length > 1) {
-                return (
-                  <Box flexDirection="column">
-                    {lines.slice(0, -1).map((line, i) => (
-                      <Text key={i} dimColor>{line}</Text>
-                    ))}
-                  </Box>
-                );
-              }
-              return null;
-            })()}
-            <Box flexDirection="row">
-              <Text color="cyan" bold>❯ </Text>
-              <Box flexGrow={1}>
-                <TextInput value={input.split("\n").pop() || ""}
-                  onChange={(newLast) => {
-                    const prev = input.split("\n").slice(0, -1).join("\n");
-                    setInput(prev ? prev + "\n" + newLast : newLast);
-                    setPasteExpanded(false); // collapse when editing
-                  }}
-                  placeholder={input.startsWith("/") ? "Command..." : "Message orch... (/ for commands, tab to complete)"}
-                  focus={!state.streaming} showCursor={!state.streaming} />
+                </Box>
               </Box>
-            </Box>
-          </Box>
+            );
+          })()}
         </Box>
       ) : null}
 
-      {/* FOOTER */}
-      <Box flexDirection="row" justifyContent="space-around" paddingX={1}>
-        <Dim>enter send</Dim>
-        <Dim>shift+enter newline</Dim>
-        <Dim>↑↓ history</Dim>
-        <Dim>tab complete</Dim>
-        <Dim>/help commands</Dim>
-        <Dim>ctrl+c quit</Dim>
+      {/* FOOTER — health status */}
+      <Box flexDirection="row" paddingX={1}>
+        <Spacer />
+        {health ? (
+          <Dim>
+            v{health.version}
+            {"  "}<Text color={health.llm === "healthy" ? "green" : "red"}>{health.llm === "healthy" ? "●" : "○"}</Text><Dim> llm</Dim>
+            {"  "}<Text color={health.sandbox === "available" ? "green" : "yellow"}>{health.sandbox === "available" ? "●" : "◐"}</Text><Dim> sandbox</Dim>
+          </Dim>
+        ) : <Dim>offline</Dim>}
       </Box>
     </Box>
   );
