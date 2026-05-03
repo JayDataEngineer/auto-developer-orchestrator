@@ -698,9 +698,13 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
   const navHistory = useCallback((dir: -1 | 1) => {
     if (state.history.length === 0) return;
-    const cur = state.histIdx === -1 ? (dir === -1 ? 0 : state.history.length - 1) : Math.max(0, Math.min(state.history.length - 1, state.histIdx + dir));
-    dispatch({ type: "HIST_IDX", idx: dir === 1 && state.histIdx === state.history.length - 1 ? -1 : cur });
-    setInput(state.history[cur] || "");
+    // history is newest-first. dir=-1 (up) = older, dir=1 (down) = newer
+    let next = state.histIdx === -1
+      ? (dir < 0 ? 0 : -1)           // fresh: up → newest (0), down → nothing
+      : state.histIdx + dir;         // in history: up (+1 older), down (-1 newer → -1 = editing)
+    next = Math.max(-1, Math.min(next, state.history.length - 1));
+    dispatch({ type: "HIST_IDX", idx: next });
+    if (next >= 0) setInput(state.history[next] || "");
   }, [state.history, state.histIdx]);
 
   const switchConv = useCallback(async (id: string) => {
@@ -873,77 +877,6 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
       {/* BODY — split pane */}
       <Box flexDirection="row" flexGrow={1}>
-
-        {/* LEFT SIDEBAR — tools + sub-agents */}
-        <Box flexDirection="column" width="28%" paddingX={1}>
-          <Text bold color="blueBright">Activity</Text>
-
-          {/* Streaming status */}
-          {state.streaming ? (
-            <Box flexDirection="column" marginTop={1}>
-              <Box>
-                <Text color="green"><Spinner type="dots" /></Text>
-                <Text color="green"> active</Text>
-              </Box>
-              {state.sThink && !state.sText ? (
-                <Box marginTop={1}>
-                  <Dim>thinking...</Dim>
-                </Box>
-              ) : null}
-              {state.sText ? (
-                <Box marginTop={1}>
-                  <Dim>generating response</Dim>
-                </Box>
-              ) : null}
-            </Box>
-          ) : (
-            <Box marginTop={1}>
-              <Dim>idle</Dim>
-            </Box>
-          )}
-
-          {/* Current tools running */}
-          {state.sTools.length > 0 ? (
-            <Box flexDirection="column" marginTop={2}>
-              <Text bold color="yellow">Tools</Text>
-              {state.sTools.map(t => (
-                <Box key={t.name} flexDirection="row">
-                  {t.done ? (
-                    t.error ? <Text color="red">✗</Text> : <Text color="green">✓</Text>
-                  ) : (
-                    <Text color="yellow"><Spinner type="dots" /></Text>
-                  )}
-                  <Text dimColor> {t.name}</Text>
-                </Box>
-              ))}
-            </Box>
-          ) : null}
-
-          {/* Browser/desktop indicators */}
-          {state.sTools.filter(t => t.name.includes("desktop") || t.name.includes("browse") || t.name.includes("click") || t.name.includes("screenshot")).length > 0 ? (
-            <Box flexDirection="column" marginTop={2}>
-              <Text bold color="magenta">Visual</Text>
-              {state.sTools.filter(t => t.name.includes("desktop") || t.name.includes("browse") || t.name.includes("click") || t.name.includes("screenshot")).map(t => (
-                <Text key={t.name} dimColor>
-                  {t.done ? "  " : "  "}{t.name} {t.done ? (t.error ? "failed" : "done") : ""}
-                </Text>
-              ))}
-            </Box>
-          ) : null}
-
-          {/* Conversation list */}
-          <Box flexDirection="column" marginTop={2}>
-            <Text bold color="blueBright">Chats</Text>
-            <Dim>{state.conversations.length} conversations</Dim>
-            {state.conversations.slice(0, 6).map(c => (
-              <Box key={c.id}>
-                <Text dimColor>{c.id === state.convId ? "▶" : " "} {c.title.slice(0, 20)}</Text>
-                <Spacer />
-                <Text dimColor>{c.messageCount}</Text>
-              </Box>
-            ))}
-          </Box>
-        </Box>
 
         {/* RIGHT PANEL — messages: no clipping, terminal scrolls naturally */}
         <Box flexDirection="column" flexGrow={1} paddingX={1}>
