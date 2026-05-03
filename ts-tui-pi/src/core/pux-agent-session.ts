@@ -20,11 +20,29 @@ interface PuxModel {
 }
 
 const DEFAULT_MODEL: PuxModel = {
-  id: "deepseek-v4-flash",
+  id: "deepseek/deepseek-v4-flash",
   name: "DeepSeek V4 Flash",
   api: "openrouter",
   provider: "openrouter",
 };
+
+// Build a pi-ai compatible Model shape from backend data
+function toPiModel(m: { id: string; name: string; provider: string }): PuxModel {
+  const [api, ...rest] = m.id.split("/");
+  return {
+    id: rest.join("/") || m.id,
+    name: m.name,
+    api: m.provider,
+    provider: m.provider,
+    // pi-ai Model also expects these:
+    reasoning: false,
+    input: ["text" as const] as ("text" | "image")[],
+    contextWindow: 128000,
+    maxTokens: 16384,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    baseUrl: "",
+  } as any;
+}
 
 // ---------------------------------------------------------------------------
 // Helper: emit a well-formed AssistantMessage (needed by message_start/update/end)
@@ -65,6 +83,7 @@ export class PuxAgentSession {
   public model: any = DEFAULT_MODEL;
   public thinkingLevel: ThinkingLevel = "none";
   public scopedModels: Array<{ model: any; thinkingLevel?: ThinkingLevel }> = [];
+  private _availableModels: any[] = [];
   public resourceLoader: any = {
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getExtensions: () => ({ extensions: [], errors: [], diagnostics: [] }),
@@ -77,10 +96,10 @@ export class PuxAgentSession {
     reload: async () => {},
   };
   public modelRegistry: any = {
-    get: () => undefined,
-    find: () => undefined,
-    getAll: () => [],
-    getAvailable: () => [],
+    get: (provider: string, id: string) => this._availableModels.find((m: any) => m.provider === provider && m.id === id),
+    find: (provider: string, id: string) => this._availableModels.find((m: any) => m.provider === provider && m.id === id),
+    getAll: () => this._availableModels,
+    getAvailable: () => this._availableModels,
     getError: () => null,
     getApiKeyAndHeaders: () => ({ apiKey: "", headers: {} }),
     hasConfiguredAuth: () => false,
@@ -388,13 +407,45 @@ export class PuxAgentSession {
   getSteeringMessages(): string[] { return []; }
   getToolDefinition(_name: string) { return null; }
   getUserMessagesForForking() { return []; }
-  setModel(model: any): void { this.model = model; }
+  setModel(model: any): void {
+    this.model = model;
+    this.state.model = model;
+    this.agent.model = model;
+    // Notify Go backend in background
+    fetch(`${this.serverUrl}/api/pux/model`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project: this.project,
+        provider: model.provider,
+        modelId: `${model.provider}/${model.id}`,
+        agentId: "default",
+      }),
+    }).catch(() => {});
+  }
   setThinkingLevel(level: ThinkingLevel): void { this.thinkingLevel = level; }
-  setScopedModels(models: any[]): void { this.scopedModels = models; }
+  setScopedModels(models: any[]): void {
+    this.scopedModels = models;
+    if (models.length > 0) {
+      this._availableModels = models.map((s) => s.model);
+    }
+  }
   setAutoCompactionEnabled(enabled: boolean): void { this.autoCompactionEnabled = enabled; }
   setSteeringMode(enabled: boolean): void { this.steeringMode = enabled; }
   setFollowUpMode(mode: string): void { this.followUpMode = mode === "on"; }
-  async cycleModel(): Promise<void> {}
+  async cycleModel(): Promise<any> {
+    const models = this.scopedModels.length > 0
+      ? this.scopedModels.map((s) => s.model)
+      : this._availableModels;
+    if (models.length <= 1) return undefined;
+    const idx = models.findIndex((m: any) => m.id === this.model.id);
+    const next = idx < 0 || idx >= models.length - 1 ? models[0] : models[idx + 1];
+    if (next.thinkingLevel !== undefined) {
+      this.thinkingLevel = next.thinkingLevel;
+    }
+    this.setModel(next);
+    return { model: next, thinkingLevel: this.thinkingLevel };
+  }
   async cycleThinkingLevel(): Promise<void> {}
   async compact(_opts?: any): Promise<any> { return undefined; }
   async reload(): Promise<void> {}

@@ -28,22 +28,48 @@ const settingsManager = SettingsManager.create(cwd, agentDir);
 // Create SessionManager (in-memory for now, no persistence between runs)
 const sessionManager = SessionManager.inMemory(cwd);
 
-// Fetch available models from Go backend to discover active model
+// Fetch available models from Go backend
 let activeModelId = opts.model!;
 let activeModel: any = null;
+let backendModels: Array<{ id: string; name: string; provider: string }> = [];
 try {
   const resp = await fetch(`${opts.server}/api/pux/models`);
   if (resp.ok) {
-    const models: Array<{ id: string; name: string; provider: string }> = await resp.json();
-    if (models.length > 0) {
-      const matched = models.find((m) => m.id.includes(opts.model!)) ?? models[0];
+    backendModels = await resp.json();
+    if (backendModels.length > 0) {
+      const matched = backendModels.find((m) => m.id.includes(opts.model!)) ?? backendModels[0];
       activeModelId = matched.id;
-      activeModel = { id: matched.id, name: matched.name, provider: matched.provider, reasoning: false };
+      activeModel = {
+        id: matched.id.split("/").pop() || matched.id,  // "deepseek/deepseek-v4-flash" → "deepseek-v4-flash"
+        name: matched.name,
+        provider: matched.provider,
+        api: matched.provider,
+        reasoning: false,
+        input: ["text"],
+        contextWindow: 128000,
+        maxTokens: 16384,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        baseUrl: "",
+      };
     }
   }
 } catch {
   // backend not reachable yet, keep default
 }
+
+// Build pi-ai compatible model list
+const piModels = backendModels.map((m) => ({
+  id: m.id.split("/").pop() || m.id,
+  name: m.name,
+  provider: m.provider,
+  api: m.provider,
+  reasoning: false,
+  input: ["text"],
+  contextWindow: 128000,
+  maxTokens: 16384,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  baseUrl: "",
+}));
 
 // Create our PuxAgentSession — bridges to Go SSE backend
 const session = new PuxAgentSession(
@@ -54,9 +80,27 @@ const session = new PuxAgentSession(
   activeModelId,
 );
 
-// Set discovered model on session state (footer reads state.model)
-if (activeModel) {
-  session.state.model = activeModel;
+// Populate models: scopedModels for the UI, and _availableModels for the model selector
+if (piModels.length > 0) {
+  session.scopedModels = piModels.map((m: any) => ({ model: m }));
+  // Also push into the internal _availableModels array (referenced by modelRegistry)
+  // We access via the duck-typed object
+  const registry = session.modelRegistry as any;
+  // Override the available models getter
+  const modelsList = [...piModels];
+  registry.getAvailable = () => modelsList;
+  registry.getAll = () => modelsList;
+  registry.find = (provider: string, id: string) =>
+    modelsList.find((m: any) => m.provider === provider && m.id === id);
+  registry.get = (provider: string, id: string) =>
+    modelsList.find((m: any) => m.provider === provider && m.id === id);
+
+  // Set the active model
+  if (activeModel) {
+    session.model = activeModel;
+    session.state.model = activeModel;
+    session.agent.model = activeModel;
+  }
 }
 
 // Create AgentSessionServices (minimal duck-typed object)
