@@ -91,11 +91,12 @@ func (a *Adapter) StreamChat(ctx context.Context, messages []core.Message, tools
 		return convertEvents(ch), nil
 	}
 
-	// Continuation — find new messages since last call
+	// Continuation — find NEW messages since last call.
+	// The session already has all prior messages from previous calls.
+	// We only need to send the latest tool results (after the last assistant message).
 	// Tool results: send via FeedToolResults
 	// User messages: send via FeedUserMessage
 
-	// Check the last message role
 	if len(messages) > 0 {
 		lastRole := messages[len(messages)-1].Role
 
@@ -110,56 +111,44 @@ func (a *Adapter) StreamChat(ctx context.Context, messages []core.Message, tools
 			return convertEvents(ch), nil
 		}
 
-		// Tool results + optional nudge
-		// Find last assistant message for tool call IDs
-		var assistantMsg llama.Message
+		// Find the LAST assistant message with tool calls — we only need
+		// tool results that follow it (i.e. the current round's results).
+		lastAssistantIdx := -1
 		for i := len(messages) - 1; i >= 0; i-- {
 			if messages[i].Role == "assistant" && len(messages[i].ToolCalls) > 0 {
-				assistantMsg = llama.Message{
-					Role:    messages[i].Role,
-					Content: messages[i].Content,
-				}
-				for _, tc := range messages[i].ToolCalls {
-					assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, llama.ToolCallResponse{
-						ID:   tc.ID,
-						Type: tc.Type,
-						Function: llama.FunctionCallData{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
-					})
-				}
+				lastAssistantIdx = i
 				break
 			}
 		}
 
-		// Collect tool results and detect goal nudges (user messages injected
-		// between the initial prompt and the final assistant response).
-		var toolResults []llama.ToolResult
-		var goalNudge string
-		for i, m := range messages {
-			if m.Role == "tool" {
-				toolResults = append(toolResults, llama.ToolResult{
-					ToolCallID: m.ToolCallID,
-					ToolName:   m.Name,
-					Content:    m.Content,
-				})
-			} else if m.Role == "user" {
-				lastMsg := messages[len(messages)-1]
-				if lastMsg.Role != "user" || i != len(messages)-1 {
+		if lastAssistantIdx >= 0 {
+			// Collect only tool results after the last assistant message
+			var toolResults []llama.ToolResult
+			var goalNudge string
+			for i := lastAssistantIdx + 1; i < len(messages); i++ {
+				m := messages[i]
+				if m.Role == "tool" {
+					toolResults = append(toolResults, llama.ToolResult{
+						ToolCallID: m.ToolCallID,
+						ToolName:   m.Name,
+						Content:    m.Content,
+					})
+				} else if m.Role == "user" {
 					goalNudge = m.Content
 				}
 			}
-		}
 
-		if len(toolResults) > 0 {
-			ch, err := a.session.FeedToolResults(assistantMsg, toolResults, goalNudge, llamaOpts)
-			if err != nil {
-				a.session.Close()
-				a.session = nil
-				return nil, fmt.Errorf("adapter: feed tool results failed: %w", err)
+			if len(toolResults) > 0 {
+				// assistantMsg is unused by FeedToolResults but kept for API compat
+				var assistantMsg llama.Message
+				ch, err := a.session.FeedToolResults(assistantMsg, toolResults, goalNudge, llamaOpts)
+				if err != nil {
+					a.session.Close()
+					a.session = nil
+					return nil, fmt.Errorf("adapter: feed tool results failed: %w", err)
+				}
+				return convertEvents(ch), nil
 			}
-			return convertEvents(ch), nil
 		}
 	}
 
