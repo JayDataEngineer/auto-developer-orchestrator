@@ -100,6 +100,17 @@ export class ApiClient {
   }
 
   // Conversation management
+  async getConversations(): Promise<any[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/pux/conversations`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data as any[];
+    } catch {
+      return [];
+    }
+  }
+
   async getHistory(project: string, agentId?: string): Promise<any[]> {
     const params = new URLSearchParams({ project });
     if (agentId) params.set("agentId", agentId);

@@ -131,6 +131,7 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/tool-permissions", h.GetToolPermissions)
 	r.Put("/tool-permissions", h.SetToolPermission)
 	r.Get("/history", h.GetHistory)
+	r.Get("/conversations", h.GetConversations)
 	r.Delete("/conversation", h.DeleteConversation)
 	r.Put("/conversation/rename", h.RenameConversation)
 	r.Get("/models", h.GetModels)
@@ -618,6 +619,24 @@ func (h *PuxHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, msgs)
+}
+
+// GetConversations returns a summary list of all conversations.
+// GET /api/pux/conversations
+func (h *PuxHandler) GetConversations(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+	summaries, err := h.db.GetConversationSummaries(r.Context())
+	if err != nil {
+		JSONError(w, "Failed to get conversations", http.StatusInternalServerError)
+		return
+	}
+	if summaries == nil {
+		summaries = []storage.ConversationSummary{}
+	}
+	writeJSON(w, http.StatusOK, summaries)
 }
 
 // DeleteConversation deletes all messages for a project+agent.

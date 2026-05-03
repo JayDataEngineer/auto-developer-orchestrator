@@ -28,6 +28,12 @@ beforeAll(() => {
         }), { headers: { "content-type": "application/json" } });
       }
 
+      if (path === "/api/pux/conversations") {
+        return new Response(JSON.stringify([
+          { project: "test", agentId: "agent-test", title: "Test Chat", lastMessage: "hello", messageCount: 2, lastAt: new Date().toISOString() }
+        ]), { headers: { "content-type": "application/json" } });
+      }
+
       if (path === "/api/pux/history") {
         return new Response(JSON.stringify([
           { role: "user", content: "hello" },
@@ -41,9 +47,10 @@ beforeAll(() => {
 
         // Encode SSE events as the Go backend does
         const lines = [
+          `event: agent_spawned\ndata: ${JSON.stringify({ agentId: json.agentId || "agent-test" })}\n`,
           `event: thinking_delta\ndata: ${JSON.stringify({ text: "Let me think about this..." })}\n`,
           `event: text_delta\ndata: ${JSON.stringify({ text: "Hello! How can I help you?" })}\n`,
-          `event: agent_end\ndata: ${JSON.stringify({ conversation_id: "test-conv", inputTokens: 30, outputTokens: 50 })}\n`,
+          `event: agent_end\ndata: ${JSON.stringify({ input: 30, output: 50 })}\n`,
           `event: done\ndata: ${JSON.stringify({})}\n\n`,
         ];
 

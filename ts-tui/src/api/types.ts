@@ -19,6 +19,7 @@ export interface ApprovalRequestBody {
 
 // SSE event types
 export type SSEEventType =
+  | "agent_spawned"
   | "text_delta"
   | "thinking_delta"
   | "tool_execution_start"

@@ -114,7 +114,8 @@ type Action =
   | { type: "SET_CONV"; id: string; messages: Message[] } | { type: "NEW_CONV" }
   | { type: "SLASH"; on: boolean } | { type: "HIST_IDX"; idx: number }
   | { type: "RENAME_CONV"; title: string }
-  | { type: "LOAD_ARTIFACTS"; artifacts: State["artifacts"] };
+  | { type: "LOAD_ARTIFACTS"; artifacts: State["artifacts"] }
+  | { type: "SYNC_AGENT"; id: string };
 
 function genConvId(): string { return "conv_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
@@ -171,6 +172,12 @@ function reduce(state: State, a: Action): State {
       return { ...state, conversations: state.conversations.map(c => c.id === state.convId ? { ...c, title: a.title } : c) };
     case "LOAD_ARTIFACTS":
       return { ...state, artifacts: a.artifacts };
+    case "SYNC_AGENT":
+      return {
+        ...state,
+        convId: a.id,
+        conversations: state.conversations.map(c => c.id === state.convId ? { ...c, id: a.id } : c),
+      };
     default: return state;
   }
 }
@@ -571,14 +578,23 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
 
   // ── load conversations ──
   useEffect(() => {
-    // Try to load existing conversation messages from backend
-    client.current.getHistory(project, "default").then(msgs => {
-      if (msgs && msgs.length > 0) {
-        const conv: Conversation = { id: "default", title: "Default", lastMessage: msgs[msgs.length - 1]?.content?.slice(0, 80) || "", messageCount: msgs.length, lastAt: new Date().toISOString() };
-        dispatch({ type: "LOAD_CONVS", convs: [conv] });
+    client.current.getConversations().then((summaries) => {
+      if (summaries && summaries.length > 0) {
+        const convs: Conversation[] = summaries.map((s: any) => ({
+          id: s.agentId,
+          title: s.title || s.agentId?.slice(0, 8) || "untitled",
+          lastMessage: s.lastMessage?.slice(0, 80) || "",
+          messageCount: s.messageCount || 0,
+          lastAt: s.lastAt || new Date().toISOString(),
+        }));
+        dispatch({ type: "LOAD_CONVS", convs });
+        // Auto-switch to the first (most recent) conversation
+        if (convs.length > 0 && convs[0]) {
+          dispatch({ type: "SET_CONV", id: convs[0].id, messages: [] });
+        }
       }
     }).catch(() => {});
-  }, []);
+  }, [project]);
 
   // ── health polling ──
   useEffect(() => {
@@ -620,12 +636,24 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
       for await (const e of stream) {
         if (ctrl.signal.aborted) break;
         switch (e.type) {
+          case "agent_spawned":
+            // Sync server-assigned agentId
+            const aid = (e.data as any).agentId as string;
+            if (aid && aid !== state.convId) {
+              dispatch({ type: "SYNC_AGENT", id: aid });
+            }
+            break;
           case "text_delta": dispatch({ type: "TEXT", text: ensureStr((e.data as any).text) }); break;
           case "thinking_delta": dispatch({ type: "THINK", text: ensureStr((e.data as any).text) }); break;
           case "tool_execution_start": dispatch({ type: "TOOL_ON", tool: e.data as any }); break;
           case "tool_execution_end": dispatch({ type: "TOOL_OFF", tool: e.data as any }); break;
           case "approval_request": dispatch({ type: "ASK", approval: e.data as any }); return;
-          case "agent_end": dispatch({ type: "END", data: e.data as any }); break;
+          case "agent_end": {
+            // Server sends {input, output} not {inputTokens, outputTokens}
+            const d = e.data as any;
+            dispatch({ type: "END", data: { inputTokens: d.input || 0, outputTokens: d.output || 0 } });
+            break;
+          }
           case "error": dispatch({ type: "ERR", error: ensureStr((e.data as any).error) }); break;
         }
       }
@@ -655,10 +683,17 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
       const mapped: Message[] = (msgs || []).map((m: any, i: number) => ({
         id: Date.now() + i,
         role: m.role === "user" ? "user" as const : "assistant" as const,
-        content: m.content || "",
-        thinking: "",
-        tools: [],
-        timestamp: Date.now(),
+        content: m.content || m.text || "",
+        thinking: m.thinking || "",
+        tools: Array.isArray(m.toolCalls) ? m.toolCalls.map((t: any) => ({
+          name: t.toolName || t.name || "unknown",
+          id: t.toolId || t.id || `tool_${i}`,
+          args: t.args || "",
+          result: t.result || "",
+          error: t.error || "",
+          done: true,
+        })) : [],
+        timestamp: m.createdAt ? Date.parse(m.createdAt) : Date.now(),
       }));
       dispatch({ type: "SET_CONV", id, messages: mapped });
     } catch { /* fallback to empty */ dispatch({ type: "SET_CONV", id, messages: [] }); }
@@ -874,9 +909,11 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
           <Box flexDirection="column" marginTop={2}>
             <Text bold color="blueBright">Chats</Text>
             <Dim>{state.conversations.length} conversations</Dim>
-            {state.conversations.slice(0, 4).map(c => (
+            {state.conversations.slice(0, 6).map(c => (
               <Box key={c.id}>
-                <Text dimColor>{c.id === state.convId ? "▶" : " "} {c.title.slice(0, 18)}</Text>
+                <Text dimColor>{c.id === state.convId ? "▶" : " "} {c.title.slice(0, 20)}</Text>
+                <Spacer />
+                <Text dimColor>{c.messageCount}</Text>
               </Box>
             ))}
           </Box>
