@@ -256,20 +256,17 @@ const Accent = ({ children }: { children: React.ReactNode }) => <Text color="blu
 
 function Line() { return <Text color="grey">{"─".repeat(80)}</Text>; }
 
-function ThinkBlock({ text, expanded, startMs }: { text: string; expanded: boolean; startMs: number }) {
+function ThinkBlock({ text, expanded }: { text: string; expanded: boolean; startMs?: number }) {
   if (!text) return null;
   const words = text.trim().split(/\s+/).length;
-  // Only show elapsed time during live streaming (< 2min old), never for history
-  const elapsed = Math.round((Date.now() - startMs) / 1000);
-  const dur = elapsed > 0 && elapsed < 120 ? `${elapsed}s` : "";
   if (!expanded) return (
     <Box marginBottom={1}>
-      <Text dimColor italic>  ∴ Thought {words} words{dur ? ` · ${dur}` : ""} · Ctrl+T expand</Text>
+      <Text dimColor italic>  ∴ Thought {words} words · Ctrl+T expand</Text>
     </Box>
   );
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Text dimColor italic>·· thinking {dur ? `(${dur})` : ""} ··</Text>
+      <Text dimColor italic>·· thinking ··</Text>
       <Box paddingLeft={2}><Text dimColor italic>{text.trim()}</Text></Box>
     </Box>
   );
@@ -363,11 +360,11 @@ function AsstMsg({ msg, thinkOpen }: { msg: Message; thinkOpen: boolean }) {
   );
 }
 
-function StreamBlock({ text, think, tools, thinkOpen, thinkStart }: { text: string; think: string; tools: ToolCall[]; thinkOpen: boolean; thinkStart: number }) {
+function StreamBlock({ text, think, tools, thinkOpen }: { text: string; think: string; tools: ToolCall[]; thinkOpen: boolean; thinkStart?: number }) {
   if (!text && !think && tools.length === 0) return null;
   return (
     <Box flexDirection="column" marginBottom={1}>
-      {think ? <ThinkBlock text={think} expanded={thinkOpen} startMs={thinkStart} /> : null}
+      {think ? <ThinkBlock text={think} expanded={thinkOpen} /> : null}
       {text ? <Box marginBottom={1}><Text>{renderMd(text)}</Text></Box> : null}
       {tools.map((t, i) => <ToolCard key={i} tool={t} />)}
       <Box><Text color="green">● </Text><Dim>thinking...</Dim></Box>
