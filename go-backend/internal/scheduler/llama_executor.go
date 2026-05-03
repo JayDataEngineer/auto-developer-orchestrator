@@ -9,6 +9,7 @@ import (
 	"time"
 
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
+	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"go.uber.org/zap"
 )
@@ -21,6 +22,7 @@ type LlamaExecutor struct {
 	sandboxMgr  *sandbox.Manager
 	projectRoot string
 	logger      *zap.Logger
+	mcpMulti    *mcp.MultiClient
 }
 
 // NewLlamaExecutor creates a scheduler executor backed by the llama engine.
@@ -31,6 +33,11 @@ func NewLlamaExecutor(engine *llamaeng.LLMClient, sandboxMgr *sandbox.Manager, p
 		projectRoot: projectRoot,
 		logger:      logger,
 	}
+}
+
+// SetMCPMulti injects the MCP multi-client so scheduled jobs can use MCP tools.
+func (e *LlamaExecutor) SetMCPMulti(multi *mcp.MultiClient) {
+	e.mcpMulti = multi
 }
 
 // Execute runs a job using the llama engine. Creates a fresh OrchestratorLoop
@@ -62,9 +69,8 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 		baseExecutor = &llamaeng.SandboxToolExecutor{
 			SandboxID: sandboxID,
 			Manager:   e.sandboxMgr,
-			// CU bridge not needed for most scheduled jobs (coding tasks)
-			// If needed, it can be injected via LlamaExecutor fields
-			Logger: e.logger,
+			MCPMulti:  e.mcpMulti,
+			Logger:    e.logger,
 		}
 	}
 

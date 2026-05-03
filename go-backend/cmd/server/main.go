@@ -328,6 +328,7 @@ func main() {
 	// Use engine directly for scheduled jobs
 	if activeEngine != nil {
 		llamaExec := scheduler.NewLlamaExecutor(activeEngine, sandboxMgr, projectRoot, logger)
+		llamaExec.SetMCPMulti(mcpMulti)
 		sched.SetLlamaExecutor(llamaExec)
 		logger.Info("Scheduler configured for direct llama engine execution")
 	} else {
