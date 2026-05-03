@@ -125,6 +125,7 @@ export class PuxAgentSession {
   public followUpMode = false;
   public retryAttempt = 0;
   public pendingMessageCount = 0;
+  public sessionFile: string | undefined;
 
   private serverUrl: string;
   private project: string;
@@ -150,6 +151,7 @@ export class PuxAgentSession {
       model: DEFAULT_MODEL,
       thinkingLevel: "none",
       abort: () => this.abort(),
+      waitForIdle: async () => {},
     };
     this.session = this;
   }
@@ -398,6 +400,8 @@ export class PuxAgentSession {
   // ---- AgentSession stubs (no-ops for SSE-driven TUI) ----
 
   abort(): void { this.abortCtrl?.abort(); }
+  dispose(): void { this.abort(); }
+  cancelPendingRequests(): void { this.abort(); }
   get isStreaming(): boolean { return this.streaming; }
   get isCompacting(): boolean { return false; }
   get isBashRunning(): boolean { return false; }
