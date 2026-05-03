@@ -2,7 +2,9 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -33,6 +35,17 @@ func NewAdapter(engine *llama.LLMClient, ctxSize int) *Adapter {
 func (a *Adapter) StreamChat(ctx context.Context, messages []core.Message, tools []core.OpenAITool, opts core.GenerateOptions) (<-chan core.ChatEvent, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// Debug: log what we're sending
+	var msgSummary []string
+	for _, m := range messages {
+		role := m.Role
+		contentLen := len(m.Content)
+		tcCount := len(m.ToolCalls)
+		msgSummary = append(msgSummary, fmt.Sprintf("%s(len=%d,tc=%d)", role, contentLen, tcCount))
+	}
+	fmt.Printf("ADAPTER StreamChat: model=%s msgs=%d tools=%d summary=[%s]\n",
+		a.engine.ModelName(), len(messages), len(tools), strings.Join(msgSummary, ","))
 
 	llamaTools := make([]llama.OpenAITool, len(tools))
 	for i, t := range tools {
@@ -215,6 +228,27 @@ func convertEvents(ch <-chan llama.ChatEvent) <-chan core.ChatEvent {
 						Arguments: evt.Delta.Function.Arguments,
 					},
 				}}
+			}
+			// The session accumulates tool calls internally and sends the
+			// serialized JSON in the ChatEventDone's Content field.
+			// Parse them back into Deltas so the core agent loop can see them.
+			if evt.Type == llama.ChatEventDone && evt.Content != "" && coreEvt.Finish == core.FinishToolCalls {
+				var calls []llama.ToolCallResponse
+				if err := json.Unmarshal([]byte(evt.Content), &calls); err == nil {
+					deltas := make([]core.ToolCallDelta, len(calls))
+					for i, tc := range calls {
+						deltas[i] = core.ToolCallDelta{
+							Index: i,
+							ID:    tc.ID,
+							Type:  tc.Type,
+							Function: core.FunctionCallDelta{
+								Name:      tc.Function.Name,
+								Arguments: tc.Function.Arguments,
+							},
+						}
+					}
+					coreEvt.Deltas = deltas
+				}
 			}
 			out <- coreEvt
 		}

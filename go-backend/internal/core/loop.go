@@ -206,6 +206,33 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				if evt.Usage != nil {
 					lastUsage = evt.Usage
 				}
+				// Accumulate tool calls from the done event before breaking.
+				// The session accumulates tool calls and sends them in the done event.
+				for _, tc := range evt.Deltas {
+					if existing, ok := toolCallAccum[tc.Index]; ok {
+						if tc.Function.Name != "" {
+							existing.Function.Name += tc.Function.Name
+						}
+						if tc.Function.Arguments != "" {
+							existing.Function.Arguments += tc.Function.Arguments
+						}
+						if tc.ID != "" {
+							existing.ID = tc.ID
+						}
+						if tc.Type != "" {
+							existing.Type = tc.Type
+						}
+					} else {
+						toolCallAccum[tc.Index] = &ToolCallResponse{
+							ID:   tc.ID,
+							Type: tc.Type,
+							Function: FunctionCallData{
+								Name:      tc.Function.Name,
+								Arguments: tc.Function.Arguments,
+							},
+						}
+					}
+				}
 				break streamLoop
 
 			case ChatEventContent:
@@ -263,11 +290,24 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 		}
 
 		// Store assistant message in session
+		contentStr := contentBuf.String()
+		thinkingStr := thinkingBuf.String()
+
+		// Reasoning models (DeepSeek V4, etc.) sometimes put the full response
+		// in the reasoning stream with empty content. Promote reasoning to content
+		// so the response reaches the user.
+		if contentStr == "" && thinkingStr != "" && len(toolCalls) == 0 {
+			contentStr = thinkingStr
+			thinkingStr = ""
+			// Emit as text delta so the SSE stream includes the response
+			SendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: contentStr}})
+		}
+
 		assistantMsg := Message{
 			Role:             "assistant",
-			Content:          contentBuf.String(),
+			Content:          contentStr,
 			ToolCalls:        toolCalls,
-			ReasoningContent: thinkingBuf.String(),
+			ReasoningContent: thinkingStr,
 		}
 		l.session.AppendMessage(assistantMsg)
 
@@ -278,6 +318,9 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 		hitMaxRounds := maxRounds > 0 && round >= maxRounds
 		circuitBroken := l.config.MaxConsecutiveFails > 0 && state.ConsecutiveFails >= l.config.MaxConsecutiveFails
 		stoppedNaturally := len(toolCalls) == 0 || finishReason != FinishToolCalls
+
+		l.logger.Printf("LOOP DECISION: round=%d toolCalls=%d finishReason=%q contentLen=%d thinkingLen=%d stoppedNaturally=%v hitMaxRounds=%v circuitBroken=%v model=%s",
+			round, len(toolCalls), string(finishReason), contentBuf.Len(), thinkingBuf.Len(), stoppedNaturally, hitMaxRounds, circuitBroken, l.provider.ModelName())
 
 		if stoppedNaturally || hitMaxRounds || circuitBroken {
 			if circuitBroken {

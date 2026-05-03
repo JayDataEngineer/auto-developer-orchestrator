@@ -331,6 +331,7 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
+	chunkCount := 0
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -347,6 +348,21 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 		}
 		jsonStr := line[6:]
 
+		// Debug: log all chunks with tool_calls or finish_reason for cloud providers
+		chunkCount++
+		if e.IsCloud() {
+			hasToolCalls := strings.Contains(jsonStr, `"tool_calls"`)
+			hasFinish := strings.Contains(jsonStr, `"finish_reason"`) && !strings.Contains(jsonStr, `"finish_reason":null`)
+			if hasToolCalls || hasFinish || chunkCount <= 3 {
+				e.logger.Info("Cloud SSE chunk",
+					zap.Int("chunk", chunkCount),
+					zap.Bool("hasToolCalls", hasToolCalls),
+					zap.Bool("hasFinish", hasFinish),
+					zap.String("data", truncateStr(jsonStr, 500)),
+				)
+			}
+		}
+
 		var event struct {
 			Choices []struct {
 				Delta        StreamDelta `json:"delta"`
@@ -355,6 +371,7 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 			Usage *StreamUsage `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(jsonStr), &event); err != nil {
+			e.logger.Info("Cloud SSE parse error", zap.String("data", truncateStr(jsonStr, 200)), zap.Error(err))
 			continue
 		}
 
@@ -366,5 +383,20 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 		}
 	}
 
+	if e.IsCloud() {
+		e.logger.Info("Cloud stream complete",
+			zap.Int("chunks", chunkCount),
+			zap.String("model", e.modelName),
+		)
+	}
+
 	return scanner.Err()
+}
+
+// truncateStr truncates a string to maxLen characters with "..." suffix.
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

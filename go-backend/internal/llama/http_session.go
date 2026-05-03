@@ -211,12 +211,24 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 					toolCalls = append(toolCalls, *toolCallAccum[idx])
 				}
 
+				contentStr := contentBuf.String()
+				reasoningStr := reasoningBuf.String()
+
+				// Reasoning models (DeepSeek V4, etc.) emit everything in the
+				// reasoning stream and leave content empty. Promote reasoning
+				// to content so downstream receives the actual response.
+				if contentStr == "" && reasoningStr != "" && len(toolCalls) == 0 {
+					contentStr = reasoningStr
+					reasoningStr = ""
+					ch <- ChatEvent{Type: ChatEventContent, Content: contentStr}
+				}
+
 				// Store assistant message in conversation history
 				assistantMsg := Message{
 					Role:             "assistant",
-					Content:          contentBuf.String(),
+					Content:          contentStr,
 					ToolCalls:        toolCalls,
-					ReasoningContent: reasoningBuf.String(),
+					ReasoningContent: reasoningStr,
 				}
 				s.messages = append(s.messages, assistantMsg)
 

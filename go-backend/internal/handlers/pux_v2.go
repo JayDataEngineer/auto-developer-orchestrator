@@ -112,8 +112,7 @@ func (h *PuxHandler) promptWithOrchestratorV2(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	// Format message with memory
-	orchMsg := fmt.Sprintf("%sUser request: %s\n\nCreate a plan and delegate each step.", memoryPrefix, req.Message)
+	orchMsg := memoryPrefix + "User request: " + req.Message
 
 	// Event channel
 	events := make(chan core.AgentEvent, 256)
