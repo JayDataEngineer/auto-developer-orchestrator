@@ -259,7 +259,9 @@ function Line() { return <Text color="grey">{"─".repeat(80)}</Text>; }
 function ThinkBlock({ text, expanded, startMs }: { text: string; expanded: boolean; startMs: number }) {
   if (!text) return null;
   const words = text.trim().split(/\s+/).length;
-  const dur = startMs ? `${Math.round((Date.now() - startMs) / 1000)}s` : "";
+  // Only show elapsed time during live streaming (< 2min old), never for history
+  const elapsed = Math.round((Date.now() - startMs) / 1000);
+  const dur = elapsed > 0 && elapsed < 120 ? `${elapsed}s` : "";
   if (!expanded) return (
     <Box marginBottom={1}>
       <Text dimColor italic>  ∴ Thought {words} words{dur ? ` · ${dur}` : ""} · Ctrl+T expand</Text>
@@ -297,8 +299,8 @@ function ToolCard({ tool, elapsed }: { tool: ToolCall; elapsed?: number }) {
   const icon = ICONS[tool.name] ?? "●";
   const cls = tool.done ? (tool.error ? "red" : toolColor(tool.name)) : "yellow";
   const status = tool.done ? (tool.error ? "✗" : "✓") : "●";
-  const dur = elapsed != null ? `${(elapsed / 1000).toFixed(1)}s` : "";
   const args = fmtArgs(tool.args);
+  const inst = tokenBar(tool.name, tool.done, tool.result, tool.error);
 
   return (
     <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
@@ -306,22 +308,49 @@ function ToolCard({ tool, elapsed }: { tool: ToolCall; elapsed?: number }) {
         <Text color={cls}>{status} </Text>
         <Text color={cls} bold>{icon} {tool.name}</Text>
         {args ? <Dim> {args}</Dim> : null}
-        {dur ? <Dim> · {dur}</Dim> : null}
+        {!tool.done ? <Dim> (running…)</Dim> : null}
       </Box>
-      {tool.done && tool.result ? (
-        <Box flexDirection="column" paddingLeft={3}>
-          {renderToolResult(tool)}
-        </Box>
-      ) : null}
-      {tool.error ? (
-        <Box paddingLeft={3}><Text color="red">{trunc(tool.error, 120)}</Text></Box>
-      ) : null}
-      {!tool.done ? (
-        <Box paddingLeft={3}><Text color="yellow"><Spinner type="dots" /> running…</Text></Box>
-      ) : null}
+      {inst ? <Box paddingLeft={3}><Text dimColor>{inst}</Text></Box> : null}
     </Box>
   );
 }
+
+// tokenBar returns a one-line summary of what the tool did.
+const tokenBar = (name: string, done: boolean, result: string, error: string): string | null => {
+  if (!done) return null;
+  if (error) return `error: ${trunc(error, 80)}`;
+  if (!result) return null;
+  // bash/exec: show exit-like summary
+  if (name === "bash" || name === "exec") {
+    const lines = result.split("\n").filter(l => l.trim());
+    if (lines.length === 0 || !lines[0]) return "no output";
+    return lines[0].length > 100 ? lines[0].slice(0, 97) + "…" : lines[0];
+  }
+  // edit/write/patch: count diff lines or show summary
+  if (name === "edit" || name === "write" || name === "patch") {
+    const diffLines = result.split("\n").filter(l => l.startsWith("+") || l.startsWith("-")).length;
+    if (diffLines > 0) return `${diffLines} line changes`;
+    return trunc(result.split("\n")[0] || "", 100);
+  }
+  // read/view/cat/grep: count lines
+  if (name === "read" || name === "view" || name === "cat" || name === "grep") {
+    const lines = result.split("\n").filter(l => l.trim()).length;
+    return `${lines} lines`;
+  }
+  // browse/screenshot: show size or key info
+  if (name.startsWith("browse") || name.startsWith("click") || name.startsWith("type") || name.startsWith("search")) {
+    if (result.startsWith("iVBOR") || result.startsWith("/9j/")) return `image (${Math.round(result.length / 1024)}KB)`;
+    return trunc(result.split("\n")[0] || "", 100);
+  }
+  if (name.startsWith("desktop") || name.startsWith("screenshot") || name.startsWith("key")) {
+    if (result.startsWith("iVBOR") || result.startsWith("/9j/")) return `image (${Math.round(result.length / 1024)}KB)`;
+    return trunc(result.split("\n")[0] || "", 80);
+  }
+  // delegate_to: show agent name
+  if (name === "delegate_to") return trunc(result.split("\n")[0] || "", 80);
+  // default
+  return trunc(result.split("\n")[0] || "", 80);
+};
 
 function AsstMsg({ msg, thinkOpen }: { msg: Message; thinkOpen: boolean }) {
   return (
