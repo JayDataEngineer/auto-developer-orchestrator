@@ -20,12 +20,13 @@ import (
 
 // ProjectHandler handles project-related HTTP requests
 type ProjectHandler struct {
-	db        *storage.Database
-	logger    *zap.Logger
-	git       *git.GitOps
-	scheduler ScheduleRegisterer // optional: for auto-registering manifest schedules
-	toolReg   ToolRegisterer     // optional: for auto-registering manifest tools
-	sandboxIn SandboxInitializer // optional: for auto-initializing sandboxes from manifest
+	db         *storage.Database
+	logger     *zap.Logger
+	git        *git.GitOps
+	scheduler  ScheduleRegisterer // optional: for auto-registering manifest schedules
+	toolReg    ToolRegisterer     // optional: for auto-registering manifest tools
+	sandboxIn  SandboxInitializer // optional: for auto-initializing sandboxes from manifest
+	sandboxMgr *sandbox.Manager   // optional: for auto-creating sandboxes on project add
 }
 
 // ScheduleRegisterer is implemented by *scheduler.Scheduler to auto-register
@@ -156,6 +157,11 @@ func (h *ProjectHandler) SetToolRegisterer(tr ToolRegisterer) {
 // SetSandboxInitializer sets the sandbox initializer for auto-initializing sandboxes.
 func (h *ProjectHandler) SetSandboxInitializer(si SandboxInitializer) {
 	h.sandboxIn = si
+}
+
+// SetSandboxManager sets the sandbox manager for auto-creating sandboxes.
+func (h *ProjectHandler) SetSandboxManager(mgr *sandbox.Manager) {
+	h.sandboxMgr = mgr
 }
 
 // List returns all projects (default + custom)
@@ -346,14 +352,36 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 			resp["registered_tools"] = registered
 		}
 
-		// Auto-initialize sandbox from manifest (files, pip, env)
-		if h.sandboxIn != nil && mf.Sandbox != nil {
-			initCtx, initCancel := context.WithTimeout(r.Context(), 120*time.Second)
-			defer initCancel()
-			initResult := h.sandboxIn.InitFromManifest(initCtx, req.Name, mf.Sandbox, req.Path)
-			if initResult.SandboxNotFound {
-				resp["sandbox_init"] = "deferred (no sandbox yet — will init on first session)"
+		// Auto-create sandbox + initialize from manifest (files, pip, env)
+		if mf.Sandbox != nil && h.sandboxMgr != nil {
+			createCtx, createCancel := context.WithTimeout(r.Context(), 120*time.Second)
+			defer createCancel()
+
+			// Check if sandbox already exists for this project
+			sb := h.sandboxMgr.FindSandboxByProject(req.Name)
+			if sb == nil {
+				// Auto-create sandbox
+				sb, err = h.sandboxMgr.CreateSandbox(createCtx, sandbox.SandboxOptions{
+					ID:          req.Name,
+					ProjectPath: req.Path,
+					InitialMode: sandbox.ModeBrowser,
+				})
+				if err != nil {
+					h.logger.Warn("Failed to auto-create sandbox", zap.Error(err))
+					resp["sandbox_creation_error"] = err.Error()
+				} else {
+					h.logger.Info("Auto-created sandbox for project",
+						zap.String("project", req.Name),
+						zap.String("sandbox_id", sb.ID))
+					resp["sandbox_created"] = sb.ID
+				}
 			} else {
+				resp["sandbox_existed"] = sb.ID
+			}
+
+			// Run IaC init if sandbox is available
+			if sb != nil && h.sandboxIn != nil {
+				initResult := h.sandboxIn.InitFromManifest(createCtx, req.Name, mf.Sandbox, req.Path)
 				resp["sandbox_init"] = initResult
 			}
 		}

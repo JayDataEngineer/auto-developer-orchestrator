@@ -455,15 +455,13 @@ func (m *Manager) CopyToSandbox(ctx context.Context, sandboxID, localPath, sandb
 }
 
 // PipInstall runs pip install for the given packages in a sandbox.
-// Uses --break-system-packages for Debian-based OpenShell images.
+// Uses python3 -m pip which works reliably across OpenShell images.
 func (m *Manager) PipInstall(ctx context.Context, sandboxID string, packages []string) error {
 	if len(packages) == 0 {
 		return nil
 	}
 
-	// Try pip3 first, fall back to pip
-	args := "pip3 install --break-system-packages " + strings.Join(packages, " ") +
-		" 2>/dev/null || pip install --break-system-packages " + strings.Join(packages, " ")
+	args := "python3 -m pip install --break-system-packages " + strings.Join(packages, " ")
 
 	if _, err := m.ExecInSandbox(ctx, sandboxID, []string{"bash", "-c", args}); err != nil {
 		return fmt.Errorf("pip install failed: %w", err)

@@ -351,6 +351,9 @@ func main() {
 	schedulerHandler := handlers.NewSchedulerHandler(sched, logger)
 	projectHandler.SetScheduler(sched)
 
+	// Wire sandbox manager for auto-creating sandboxes on project add
+	projectHandler.SetSandboxManager(sandboxMgr)
+
 	// Wire app tool registerer for manifest tool auto-registration
 	appToolReg := llamaeng.NewAppToolRegisterer(logger)
 	projectHandler.SetToolRegisterer(appToolReg)
