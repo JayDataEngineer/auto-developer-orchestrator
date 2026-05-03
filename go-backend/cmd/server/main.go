@@ -249,6 +249,9 @@ func main() {
 	// X11 handler (xdotool-based desktop automation for native apps)
 	x11Handler := handlers.NewX11Handler(sandboxMgr, logger)
 
+	// New architecture is the default and only path.
+	puxHandler.SetSandboxOnly(sandboxMgr, computerUseHandler, x11Handler)
+
 	// Wire llama-server HTTP engine into PuxHandler
 	if activeEngine != nil {
 		puxHandler.SetLlamaEngine(activeEngine, sandboxMgr, computerUseHandler, x11Handler)
@@ -280,33 +283,12 @@ func main() {
 	mcpMulti.AddClient("media", mediaAnalysisClient)
 
 	if mcpMulti.IsAvailable() {
-		// Initialize all servers and discover tools
 		if err := mcpMulti.InitializeAll(context.Background()); err != nil {
 			logger.Warn("MCP multi-client initialization had errors", zap.Error(err))
 		}
 		puxHandler.SetMCPMulti(mcpMulti)
-
-		// Also set primary client for backward compat (Research/Scrape helpers)
 		puxHandler.SetMCPClient(webResearchClient)
-
-		// Register all MCP tools as first-class tools with full schemas
-		allTools := mcpMulti.AllTools()
-		if len(allTools) > 0 {
-			var regs []llamaeng.MCPToolRegistration
-			for _, t := range allTools {
-				regs = append(regs, llamaeng.MCPToolRegistration{
-					MCPName:       t.Name,
-					Description:   t.Description,
-					InputSchema:   string(t.InputSchema),
-					SchemaExample: llamaeng.SchemaToExample(string(t.InputSchema)),
-				})
-			}
-			names := llamaeng.RegisterMCPTools(regs)
-			logger.Info("Registered MCP tools from all servers",
-				zap.Int("count", len(names)),
-				zap.Strings("tools", names),
-			)
-		}
+		logger.Info("MCP servers ready")
 	} else {
 		logger.Info("MCP servers not available — search/scrape will use browser fallback")
 	}
@@ -353,19 +335,6 @@ func main() {
 
 	// Wire sandbox manager for auto-creating sandboxes on project add
 	projectHandler.SetSandboxManager(sandboxMgr)
-
-	// Wire app tool registerer for manifest tool auto-registration
-	appToolReg := llamaeng.NewAppToolRegisterer(logger)
-	projectHandler.SetToolRegisterer(appToolReg)
-
-	// Re-register app tools from existing projects on startup
-	if projects, err := db.GetCustomProjects(context.Background()); err == nil {
-		for _, p := range projects {
-			if mf, err := manifest.LoadManifest(p.Path); err == nil && mf != nil && len(mf.Tools) > 0 {
-				appToolReg.RegisterFromManifest(p.Name, p.Path, mf.Tools)
-			}
-		}
-	}
 
 	// Wire sandbox initializer for manifest sandbox auto-setup (files, pip, env)
 	sandboxIniter := handlers.NewSandboxInitializer(sandboxMgr, logger)

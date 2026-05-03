@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/approval"
-	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
@@ -33,11 +31,7 @@ type PuxHandler struct {
 	litellmKey string
 	toolPerms  *perms.ToolPermissionConfig
 
-	// Channel-based approval manager (decoupled from Pi subprocess)
-	approvalMgr *approval.Manager
-
-	// Llama engine — always uses orchestrator + ephemeral sub-agents
-	llamaEngine     *llamaeng.LLMClient
+	llamaEngine     *llamaeng.LLMClient // primary llama-server engine
 	geminiEngine    *llamaeng.LLMClient // optional Gemini cloud provider
 	openrouterEngine *llamaeng.LLMClient // optional OpenRouter cloud provider
 	sandboxMgr   *sandbox.Manager
@@ -46,12 +40,12 @@ type PuxHandler struct {
 	mcpMulti     *mcp.MultiClient   // optional: multi-server MCP routing
 
 	eventStore     *storage.EventStore
+	approvalMgr    *approval.Manager // central approval manager for Respond endpoint
 
 	metrics  *observability.Metrics
 	langfuse *observability.LangfuseClient
 
-	orchestrators   map[string]*llamaeng.OrchestratorLoop  // key: compositeKey(projectPath, agentId)
-	selectedEngines map[string]*llamaeng.LLMClient         // per-agent engine override
+	selectedEngines map[string]*llamaeng.LLMClient // per-agent engine override
 }
 
 // NewPuxHandler creates a new Pux handler.
@@ -65,7 +59,6 @@ func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, 
 		litellmKey:    os.Getenv("LITELLM_MASTER_KEY"),
 		toolPerms:     perms.NewToolPermissionConfig(logger),
 		approvalMgr:   approval.NewManager(5 * time.Minute),
-		orchestrators:   make(map[string]*llamaeng.OrchestratorLoop),
 		selectedEngines: make(map[string]*llamaeng.LLMClient),
 	}
 }
@@ -90,14 +83,14 @@ func (h *PuxHandler) SetOpenRouterEngine(engine *llamaeng.LLMClient) {
 	h.openrouterEngine = engine
 }
 
-	// SetSandboxOnly wires sandbox manager + computer use without a local LLM engine.
-	// Used in cloud-only mode (OpenRouter, Gemini) when llama-server is off.
-	func (h *PuxHandler) SetSandboxOnly(sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
-		h.sandboxMgr = sandboxMgr
-		if cu != nil {
-			h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
-		}
+// SetSandboxOnly wires sandbox manager + computer use without a local LLM engine.
+// Used in cloud-only mode (OpenRouter, Gemini) when llama-server is off.
+func (h *PuxHandler) SetSandboxOnly(sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
+	h.sandboxMgr = sandboxMgr
+	if cu != nil {
+		h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
 	}
+}
 
 // SetMCPClient configures the MCP research server client for search/scrape tools.
 func (h *PuxHandler) SetMCPClient(client *mcp.Client) {
@@ -241,7 +234,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 
 	// Library-mode path: always use orchestrator + ephemeral sub-agents
 	if h.llamaEngine != nil && h.llamaEngine.IsLoaded() {
-		h.promptWithOrchestrator(w, r, req, projectPath)
+		h.promptWithOrchestratorV2(w, r, req, projectPath)
 		return
 	}
 
@@ -250,7 +243,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		h.llamaEngine = eng
 		h.selectedEngines[key] = eng
 		h.log.Info("Bootstrapped cloud engine (no local model)", zap.String("model", eng.ModelName()))
-		h.promptWithOrchestrator(w, r, req, projectPath)
+		h.promptWithOrchestratorV2(w, r, req, projectPath)
 		return
 	}
 
@@ -298,269 +291,12 @@ func (h *PuxHandler) accumulateLlamaText(evt llamaeng.AgentEvent, text, thinking
 	}
 }
 
-// promptWithOrchestrator handles prompt requests using the orchestrator + sub-agent pattern.
-// The orchestrator plans and delegates to specialized personas (web, code, desktop).
-func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
-	key := compositeAgentKey(projectPath, req.AgentId)
-
-	// Resolve sandbox ID via project path lookup, fall back to basename
-	sandboxID := ""
-	if h.sandboxMgr != nil {
-		if sb := h.sandboxMgr.FindSandboxByProject(projectPath); sb != nil {
-			sandboxID = sb.ID
-		}
-	}
-	if sandboxID == "" {
-		sandboxID = filepath.Base(projectPath)
-	}
-
-	orch := h.getOrCreateOrchestrator(key, sandboxID, projectPath)
-	if orch == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-			"success": false,
-			"error":   "Failed to create orchestrator (VRAM full or model not loaded). Try again later.",
-		})
-		return
-	}
-
-	// Skills are loaded once at initialization and injected into the system prompt.
-	// The model discovers available skills via <available_skills> block and loads
-	// instructions on demand using the read_skill tool.
-
-	// Inject project memory into the message if available
-	var memoryPrefix string
-	if mem := orch.Memory(); mem != nil {
-		memoryPrefix = mem.InjectPrefix()
-	} else {
-		memoryPrefix = llamaeng.ReadMemoryFile(projectPath)
-		if memoryPrefix != "" {
-			memoryPrefix = "<memory>\n" + memoryPrefix + "\n</memory>\n\n"
-		}
-	}
-
-	// Set up SSE
-	setSSEHeaders(w)
-	flusher, canFlush := w.(http.Flusher)
-
-	// Send agent_spawned event
-	spawnData, _ := json.Marshal(map[string]string{"agentId": req.AgentId})
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", string(llamaeng.EventTypeAgentSpawned), string(spawnData))
-	if canFlush {
-		flusher.Flush()
-	}
-
-	// Save user message to DB
-	if h.db != nil {
-		if _, err := h.db.SaveUserMessage(r.Context(), req.Project, req.AgentId, req.Message); err != nil {
-			h.log.Warn("Failed to save user message", zap.Error(err))
-		}
-	}
-
-	// Create event channel — downstream is what SSE reads from
-	events := make(chan llamaeng.AgentEvent, 256)
-
-	// Wrap with persistence so non-delta events are saved to SQLite
-	sessionID := fmt.Sprintf("%s:%s", req.Project, req.AgentId)
-	orchEvents := llamaeng.PersistEvents(r.Context(), h.eventStore, sessionID, events)
-
-	// Run orchestrator with a detached context — the orchestrator should finish
-	// its work even if the client disconnects (SSE stream ends, but agent keeps running).
-	// Sub-agent results are collected as artifacts and persisted to DB.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var loopErr error
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer close(orchEvents)
-		// Format message to keep the task front and center for the 26B model
-		orchMsg := fmt.Sprintf("%sUser request: %s\n\nCreate a plan and delegate each step.", memoryPrefix, req.Message)
-		if orch.Plan() == nil {
-			loopErr = orch.Run(ctx, orchMsg, orchEvents)
-		} else {
-			loopErr = orch.Continue(ctx, orchMsg, orchEvents)
-		}
-	}()
-
-	// Stream events to SSE
-	var assistantText, assistantThinking string
-	keepalive := time.NewTicker(15 * time.Second)
-	defer keepalive.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-done:
-			// Drain remaining events
-			for evt := range events {
-				h.writeLlamaSSE(w, evt, canFlush, flusher)
-				h.accumulateLlamaText(evt, &assistantText, &assistantThinking)
-			}
-			if h.db != nil {
-				if _, err := h.db.SaveAssistantMessage(ctx, req.Project, req.AgentId, assistantText, assistantThinking, "[]"); err != nil {
-					h.log.Warn("Failed to save assistant message", zap.Error(err))
-				}
-			}
-			if loopErr != nil {
-				h.log.Error("Orchestrator error", zap.Error(loopErr))
-			}
-			// Send [DONE] marker so clients know the stream ended
-			fmt.Fprintf(w, "data: [DONE]\n\n")
-			if canFlush {
-				flusher.Flush()
-			}
-			return
-		case <-keepalive.C:
-			fmt.Fprintf(w, ": keepalive\n\n")
-			if canFlush {
-				flusher.Flush()
-			}
-		case evt, ok := <-events:
-			if !ok {
-				// Channel closed — stream is done
-				fmt.Fprintf(w, "data: [DONE]\n\n")
-				if canFlush {
-					flusher.Flush()
-				}
-				return
-			}
-			keepalive.Reset(15 * time.Second)
-			h.writeLlamaSSE(w, evt, canFlush, flusher)
-			h.accumulateLlamaText(evt, &assistantText, &assistantThinking)
-		}
-	}
-}
-
-// getOrCreateOrchestrator returns an existing orchestrator or creates a new one.
-// Evicts ALL previous orchestrators (even running ones) to free VRAM.
-func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string) *llamaeng.OrchestratorLoop {
-	if orch, ok := h.orchestrators[key]; ok {
-		return orch
-	}
-
-	// Evict ALL previous orchestrators (running or idle) to free VRAM
-	for k, orch := range h.orchestrators {
-		h.log.Info("Evicting orchestrator", zap.String("evictKey", k), zap.Bool("wasRunning", orch.IsRunning()))
-		orch.Close()
-		delete(h.orchestrators, k)
-	}
-
-	// Build base executor for sub-agents
-	var baseExecutor llamaeng.ToolExecutor
-	var skills *llamaeng.SkillStore
-	if h.sandboxMgr != nil {
-		// Load skills from standard discovery paths (pi-mono standard)
-		home, _ := os.UserHomeDir()
-		skills = llamaeng.LoadStandardSkills(projectPath, home)
-		if skills.Count() > 0 {
-			h.log.Info("Skills loaded", zap.Int("count", skills.Count()), zap.String("project", projectPath))
-		}
-
-		// Nil-check cuBridge — it's only set via SetLlamaEngine which requires local model.
-		// Cloud-only mode (no llama-server) works without vision/browser.
-		var visionEnabled bool
-		var visionClient *browser.VisionClient
-		if h.cuBridge != nil && h.cuBridge.CU != nil {
-			visionEnabled = h.cuBridge.CU.VisionClient() != nil
-			visionClient = h.cuBridge.CU.VisionClient()
-		}
-		sandboxExec := &llamaeng.SandboxToolExecutor{
-			SandboxID:     sandboxID,
-			Manager:       h.sandboxMgr,
-			CU:            h.cuBridge,
-			Logger:        h.log,
-			VisionEnabled: visionEnabled,
-			Vision:        visionClient,
-			MCPClient:     h.mcpClient,
-			MCPMulti:      h.mcpMulti,
-			ApprovalMgr:   (*approvalManagerAdapter)(h.approvalMgr),
-			Skills:        skills,
-		}
-
-		// Wrap with hooks (git checkpoint, auditing, etc.)
-		var hooks []llamaeng.ToolHook
-		hooks = append(hooks, llamaeng.NewGitCheckpointHook(h.sandboxMgr, sandboxID, h.log))
-		baseExecutor = llamaeng.NewHookedExecutor(sandboxExec, hooks, h.log)
-	}
-
-	cfg := llamaeng.OrchestratorConfig{
-		ProjectDir: projectPath,
-		SandboxID:  sandboxID,
-		Skills:     skills,
-		// ContextSize 0 means "use ModelConfig default" (32K)
-	}
-
-	// Use the per-agent selected engine, or fall back to the default llama engine
-	engine := h.llamaEngine
-	if sel, ok := h.selectedEngines[key]; ok {
-		engine = sel
-	}
-
-	orch, err := llamaeng.NewOrchestratorLoop(engine, baseExecutor, cfg, h.log)
-	if err != nil {
-		h.log.Error("Failed to create orchestrator", zap.Error(err))
-		return nil
-	}
-
-	// Wire transcript saver for pre-compaction snapshots
-	if h.db != nil {
-		orch.SetTranscriptSaver(&dbTranscriptSaver{db: h.db, log: h.log})
-	}
-
-	// Wire project memory (MEMORY.md per project)
-	orch.SetMemory(llamaeng.NewProjectMemory(projectPath))
-
-	// Wire approval manager for plan approval when PlanApprovalEnabled
-	orch.SetApprovalManager((*approvalManagerAdapter)(h.approvalMgr))
-
-	h.orchestrators[key] = orch
-	h.log.Info("Created new orchestrator loop",
-		zap.String("key", key),
-		zap.String("sandbox", sandboxID),
-	)
-	return orch
-}
-
-
-
-// compositeAgentKey builds a key from projectPath and agentId for the llama loops map.
+// compositeAgentKey builds a key from projectPath and agentId.
 func compositeAgentKey(projectPath, agentId string) string {
 	return projectPath + "\x00" + agentId
 }
 
-// approvalManagerAdapter wraps *approval.Manager to satisfy llamaeng.ApprovalManager.
-// Both sides now use llamaeng.ApprovalResponse — no conversion needed.
-type approvalManagerAdapter approval.Manager
-
-func (a *approvalManagerAdapter) Register(requestID string) <-chan llamaeng.ApprovalResponse {
-	return (*approval.Manager)(a).Register(requestID)
-}
-
-func (a *approvalManagerAdapter) Resolve(requestID string, resp llamaeng.ApprovalResponse) bool {
-	return (*approval.Manager)(a).Resolve(requestID, resp)
-}
-
-// dbTranscriptSaver adapts Database to the TranscriptSaver interface.
-type dbTranscriptSaver struct {
-	db  *storage.Database
-	log *zap.Logger
-}
-
-func (s *dbTranscriptSaver) SaveTranscript(messagesJSON []byte, reason string, tokenCount int) {
-	ctx := context.Background()
-	// Use empty session ID — the session ID is tracked at the event store level
-	if _, err := s.db.SaveTranscript(ctx, "", "", string(messagesJSON), reason, tokenCount); err != nil {
-		s.log.Warn("Failed to save transcript", zap.Error(err))
-	}
-}
-
-func (a *approvalManagerAdapter) Cleanup(requestID string) {
-	(*approval.Manager)(a).Cleanup(requestID)
-}
-
 // GetToolPermissions returns all configured tool permissions.
-// GET /api/pux/tool-permissions
 func (h *PuxHandler) GetToolPermissions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.toolPerms.AllPermissions())
 }
@@ -786,13 +522,7 @@ func (h *PuxHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 	projectPath := resolveProjectPath(req.Project, h.db)
 	key := compositeAgentKey(projectPath, req.AgentID)
 
-	// Evict existing orchestrator for this agent so next prompt uses the new engine
-	if existing, ok := h.orchestrators[key]; ok {
-		existing.Close()
-		delete(h.orchestrators, key)
-	}
-
-	// Store the engine selection for this agent
+	// Store the engine selection for this agent (next prompt uses it)
 	h.selectedEngines[key] = engine
 
 	h.log.Info("Model switched",

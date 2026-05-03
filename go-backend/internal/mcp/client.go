@@ -379,8 +379,10 @@ func (m *MultiClient) InitializeAll(ctx context.Context) error {
 }
 
 // AllTools returns all tools from all registered servers, with their original names.
+// Deduplicates by name — first server wins if multiple servers expose the same tool.
 func (m *MultiClient) AllTools() []MCPTool {
 	var all []MCPTool
+	seen := make(map[string]bool)
 	for _, client := range m.clients {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		tools, err := client.ListTools(ctx)
@@ -388,7 +390,13 @@ func (m *MultiClient) AllTools() []MCPTool {
 		if err != nil {
 			continue
 		}
-		all = append(all, tools...)
+		for _, t := range tools {
+			if seen[t.Name] {
+				continue
+			}
+			seen[t.Name] = true
+			all = append(all, t)
+		}
 	}
 	return all
 }
@@ -414,6 +422,11 @@ func (m *MultiClient) IsAvailable() bool {
 		}
 	}
 	return false
+}
+
+// ClientCount returns the number of registered MCP servers.
+func (m *MultiClient) ClientCount() int {
+	return len(m.clients)
 }
 
 // ClientForTool returns the MCP client that handles the given tool name.

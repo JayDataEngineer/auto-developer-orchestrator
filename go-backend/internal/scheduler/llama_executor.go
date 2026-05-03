@@ -8,16 +8,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/adapters"
+	"github.com/auto-developer-orchestrator/backend/internal/agents/orchestrator"
+	"github.com/auto-developer-orchestrator/backend/internal/core"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
+	"github.com/auto-developer-orchestrator/backend/internal/llm"
 	"github.com/auto-developer-orchestrator/backend/internal/manifest"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
+	"github.com/auto-developer-orchestrator/backend/internal/skills"
 	"go.uber.org/zap"
 )
 
-// LlamaExecutor runs scheduled jobs using the llama HTTP engine directly.
-// This replaces both IsolatedExecutor (Pi subprocess) and SchedulerPromptSender
-// (Pi pool) — no Pi subprocess needed.
+// LlamaExecutor runs scheduled jobs using the llama HTTP engine and new architecture.
 type LlamaExecutor struct {
 	engine      *llamaeng.LLMClient
 	sandboxMgr  *sandbox.Manager
@@ -26,7 +29,6 @@ type LlamaExecutor struct {
 	mcpMulti    *mcp.MultiClient
 }
 
-// NewLlamaExecutor creates a scheduler executor backed by the llama engine.
 func NewLlamaExecutor(engine *llamaeng.LLMClient, sandboxMgr *sandbox.Manager, projectRoot string, logger *zap.Logger) *LlamaExecutor {
 	return &LlamaExecutor{
 		engine:      engine,
@@ -36,13 +38,10 @@ func NewLlamaExecutor(engine *llamaeng.LLMClient, sandboxMgr *sandbox.Manager, p
 	}
 }
 
-// SetMCPMulti injects the MCP multi-client so scheduled jobs can use MCP tools.
 func (e *LlamaExecutor) SetMCPMulti(multi *mcp.MultiClient) {
 	e.mcpMulti = multi
 }
 
-// Execute runs a job using the llama engine. Creates a fresh OrchestratorLoop
-// per execution, collects text output, then closes it to free VRAM.
 const defaultSandboxID = "scheduler-default"
 
 func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath, message, model string, timeoutSec int) *JobResult {
@@ -53,8 +52,6 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	// When no project is specified, use a default sandbox so the agent can
-	// still run bash commands, write files, etc.
 	sandboxID := filepath.Base(projectPath)
 	if sandboxID == "" || sandboxID == "." {
 		sandboxID = defaultSandboxID
@@ -64,29 +61,37 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 		e.ensureDefaultSandbox(ctx)
 	}
 
-	// Load skills from standard discovery paths (pi-mono standard)
-	var skills *llamaeng.SkillStore
-	var baseExecutor llamaeng.ToolExecutor
-	if e.sandboxMgr != nil {
-		// Auto-initialize sandbox from manifest if needed (pip, files, env)
-		e.initSandboxFromManifest(ctx, projectPath, sandboxID)
+	// Auto-initialize sandbox from manifest if needed
+	e.initSandboxFromManifest(ctx, projectPath, sandboxID)
 
-		skills = llamaeng.LoadStandardSkills(projectPath, "")
-		baseExecutor = &llamaeng.SandboxToolExecutor{
-			SandboxID: sandboxID,
-			Manager:   e.sandboxMgr,
-			MCPMulti:  e.mcpMulti,
-			Logger:    e.logger,
-			Skills:    skills,
-		}
+	// Build provider adapter from llama engine
+	provider := llm.NewAdapter(e.engine, 0)
+	defer provider.Close()
+
+	// Build sandbox adapters (shared with handlers)
+	var bashExec adapters.BashExecutor
+	var fileOps adapters.FileOps
+	if e.sandboxMgr != nil {
+		bashExec = adapters.BashExecutor{Mgr: e.sandboxMgr, SandboxID: sandboxID}
+		fileOps = adapters.FileOps{Mgr: e.sandboxMgr, SandboxID: sandboxID}
 	}
 
-	// Create a fresh orchestrator loop for this job
-	orch, err := llamaeng.NewOrchestratorLoop(e.engine, baseExecutor, llamaeng.OrchestratorConfig{
-		ProjectDir: projectPath,
-		SandboxID:  sandboxID,
-		Skills:     skills,
-	}, e.logger)
+	// Load skills from standard paths
+	home, _ := os.UserHomeDir()
+	skillStore := skills.LoadStandard(projectPath, home)
+
+	// Create orchestrator with new architecture
+	orch, err := orchestrator.New(provider, orchestrator.Config{
+		ProjectDir:    projectPath,
+		SandboxID:     sandboxID,
+		ContextSize:   32768,
+		MaxToolRounds: 50,
+		WorkDir:       "/sandbox",
+		BashExecutor:  &bashExec,
+		FileOps:       &fileOps,
+		Skills:        skillStore,
+		GitExecutor:   &adapters.GitExecutor{},
+	})
 	if err != nil {
 		return &JobResult{
 			Error:      fmt.Sprintf("failed to create orchestrator: %v", err),
@@ -96,17 +101,17 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 	defer orch.Close()
 
 	// Subscribe to events and collect text output
-	events := make(chan llamaeng.AgentEvent, 256)
+	events := make(chan core.AgentEvent, 256)
 	var output strings.Builder
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for evt := range events {
-			if evt.Type == llamaeng.EventTypeTextDelta {
+			if evt.Type == core.EventTypeTextDelta {
 				output.WriteString(evt.Data.Text)
 			}
-			if evt.Type == llamaeng.EventTypeAgentEnd {
+			if evt.Type == core.EventTypeAgentEnd {
 				return
 			}
 		}
@@ -137,14 +142,12 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 	return result
 }
 
-// ensureDefaultSandbox creates a default sandbox if it doesn't already exist.
-// This gives projectless tasks a place to run bash commands.
 func (e *LlamaExecutor) ensureDefaultSandbox(ctx context.Context) {
 	if e.sandboxMgr == nil {
 		return
 	}
 	if sb := e.sandboxMgr.FindSandboxByProject(defaultSandboxID); sb != nil {
-		return // already exists
+		return
 	}
 	_, err := e.sandboxMgr.CreateSandbox(ctx, sandbox.SandboxOptions{
 		ID: defaultSandboxID,
@@ -154,24 +157,6 @@ func (e *LlamaExecutor) ensureDefaultSandbox(ctx context.Context) {
 	}
 }
 
-// resolveProjectPath resolves a project name to an absolute path.
-func (e *LlamaExecutor) resolveProjectPath(project string) string {
-	if project == "" {
-		return ""
-	}
-	candidate := filepath.Join(e.projectRoot, project)
-	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-		return candidate
-	}
-	if info, err := os.Stat(project); err == nil && info.IsDir() {
-		return project
-	}
-	return ""
-}
-
-// initSandboxFromManifest checks if the project has a pux.yaml with sandbox config
-// and auto-initializes the sandbox (upload files, pip install, write .env).
-// This is idempotent — safe to call multiple times.
 func (e *LlamaExecutor) initSandboxFromManifest(ctx context.Context, projectPath, sandboxID string) {
 	if e.sandboxMgr == nil || projectPath == "" {
 		return
@@ -191,7 +176,6 @@ func (e *LlamaExecutor) initSandboxFromManifest(ctx context.Context, projectPath
 	initCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
-	// Upload init files
 	for _, relPath := range cfg.InitFiles {
 		localPath := filepath.Join(projectPath, relPath)
 		sandboxPath := filepath.Join("/sandbox", filepath.Base(relPath))
@@ -201,7 +185,6 @@ func (e *LlamaExecutor) initSandboxFromManifest(ctx context.Context, projectPath
 		}
 	}
 
-	// Install pip packages
 	if len(cfg.PipPackages) > 0 {
 		if err := e.sandboxMgr.PipInstall(initCtx, sb.ID, cfg.PipPackages); err != nil {
 			e.logger.Warn("auto-init: pip install failed", zap.Error(err))
@@ -211,7 +194,6 @@ func (e *LlamaExecutor) initSandboxFromManifest(ctx context.Context, projectPath
 		}
 	}
 
-	// Write .env file
 	if len(cfg.Env) > 0 {
 		if err := e.sandboxMgr.WriteEnvFile(initCtx, sb.ID, cfg.Env); err != nil {
 			e.logger.Warn("auto-init: write .env failed", zap.Error(err))
