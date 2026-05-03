@@ -319,8 +319,8 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 		circuitBroken := l.config.MaxConsecutiveFails > 0 && state.ConsecutiveFails >= l.config.MaxConsecutiveFails
 		stoppedNaturally := len(toolCalls) == 0 || finishReason != FinishToolCalls
 
-		l.logger.Printf("LOOP DECISION: round=%d toolCalls=%d finishReason=%q contentLen=%d thinkingLen=%d stoppedNaturally=%v hitMaxRounds=%v circuitBroken=%v model=%s",
-			round, len(toolCalls), string(finishReason), contentBuf.Len(), thinkingBuf.Len(), stoppedNaturally, hitMaxRounds, circuitBroken, l.provider.ModelName())
+		l.logger.Printf("LOOP DECISION: round=%d toolCalls=%d finishReason=%q contentLen=%d thinkingLen=%d stoppedNaturally=%v model=%s",
+			round, len(toolCalls), string(finishReason), contentBuf.Len(), thinkingBuf.Len(), stoppedNaturally, l.provider.ModelName())
 
 		if stoppedNaturally || hitMaxRounds || circuitBroken {
 			if circuitBroken {

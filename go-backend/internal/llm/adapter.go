@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -35,17 +34,6 @@ func NewAdapter(engine *llama.LLMClient, ctxSize int) *Adapter {
 func (a *Adapter) StreamChat(ctx context.Context, messages []core.Message, tools []core.OpenAITool, opts core.GenerateOptions) (<-chan core.ChatEvent, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-
-	// Debug: log what we're sending
-	var msgSummary []string
-	for _, m := range messages {
-		role := m.Role
-		contentLen := len(m.Content)
-		tcCount := len(m.ToolCalls)
-		msgSummary = append(msgSummary, fmt.Sprintf("%s(len=%d,tc=%d)", role, contentLen, tcCount))
-	}
-	fmt.Printf("ADAPTER StreamChat: model=%s msgs=%d tools=%d summary=[%s]\n",
-		a.engine.ModelName(), len(messages), len(tools), strings.Join(msgSummary, ","))
 
 	llamaTools := make([]llama.OpenAITool, len(tools))
 	for i, t := range tools {

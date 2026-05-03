@@ -348,13 +348,13 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 		}
 		jsonStr := line[6:]
 
-		// Debug: log all chunks with tool_calls or finish_reason for cloud providers
+		// Debug: log chunks with tool_calls or finish_reason for cloud providers
 		chunkCount++
 		if e.IsCloud() {
 			hasToolCalls := strings.Contains(jsonStr, `"tool_calls"`)
 			hasFinish := strings.Contains(jsonStr, `"finish_reason"`) && !strings.Contains(jsonStr, `"finish_reason":null`)
 			if hasToolCalls || hasFinish || chunkCount <= 3 {
-				e.logger.Info("Cloud SSE chunk",
+				e.logger.Debug("Cloud SSE chunk",
 					zap.Int("chunk", chunkCount),
 					zap.Bool("hasToolCalls", hasToolCalls),
 					zap.Bool("hasFinish", hasFinish),
@@ -371,7 +371,7 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 			Usage *StreamUsage `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(jsonStr), &event); err != nil {
-			e.logger.Info("Cloud SSE parse error", zap.String("data", truncateStr(jsonStr, 200)), zap.Error(err))
+			e.logger.Debug("Cloud SSE parse error", zap.String("data", truncateStr(jsonStr, 200)), zap.Error(err))
 			continue
 		}
 
@@ -384,7 +384,7 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 	}
 
 	if e.IsCloud() {
-		e.logger.Info("Cloud stream complete",
+		e.logger.Debug("Cloud stream complete",
 			zap.Int("chunks", chunkCount),
 			zap.String("model", e.modelName),
 		)
