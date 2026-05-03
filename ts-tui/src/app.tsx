@@ -19,7 +19,7 @@ const trunc = (s: string, max: number): string => {
   return s.slice(0, max) + "…";
 };
 
-const fmtArgs = (raw: unknown): string => {
+export const fmtArgs = (raw: unknown): string => {
   const s = typeof raw === "string" ? raw : JSON.stringify(raw);
   if (!s || s === "{}" || s === "null") return "";
   try {
@@ -45,7 +45,7 @@ const fmtArgs = (raw: unknown): string => {
   }
 };
 
-const renderMd = (text: string): string => {
+export const renderMd = (text: string): string => {
   let out = text;
   out = out.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => `\x1b[2m\x1b[3m${code.trim()}\x1b[0m`);
   out = out.replace(/`([^`]+)`/g, (_m, c) => `\x1b[2m${c}\x1b[0m`);
@@ -602,8 +602,11 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
   const tabIdx = useRef(-1);       // tab completion cycle index
   const lastTab = useRef(0);       // timestamp of last tab press
 
-  // ── load conversations ──
+  // ── load conversation list (sidebar) ──
+  const loaded = useRef(false);
   useEffect(() => {
+    if (loaded.current) return;
+    loaded.current = true;
     client.current.getConversations().then((summaries) => {
       if (summaries && summaries.length > 0) {
         const convs: Conversation[] = summaries.map((s: any) => ({
@@ -614,10 +617,6 @@ export default function App({ serverUrl, project, agentId: initialAgentId = "def
           lastAt: s.lastAt || new Date().toISOString(),
         }));
         dispatch({ type: "LOAD_CONVS", convs });
-        // Auto-switch to the first (most recent) conversation
-        if (convs.length > 0 && convs[0]) {
-          dispatch({ type: "SET_CONV", id: convs[0].id, messages: [] });
-        }
       }
     }).catch(() => {});
   }, [project]);
