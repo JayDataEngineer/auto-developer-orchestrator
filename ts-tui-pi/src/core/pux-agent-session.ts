@@ -20,10 +20,10 @@ interface PuxModel {
 }
 
 const DEFAULT_MODEL: PuxModel = {
-  id: "pux",
-  name: "Pux Model",
-  api: "pux",
-  provider: "pux",
+  id: "deepseek-v4-flash",
+  name: "DeepSeek V4 Flash",
+  api: "openrouter",
+  provider: "openrouter",
 };
 
 // ---------------------------------------------------------------------------
@@ -98,7 +98,7 @@ export class PuxAgentSession {
   public followUpMessages: string[] = [];
   public tasks: any[] = [];
   public autoCompactionEnabled = false;
-  public state: any = { messages: [] };
+  public state: any = { messages: [], model: DEFAULT_MODEL };
   public systemPrompt = "";
   public extensionRunner: any = null;
   public session: any;

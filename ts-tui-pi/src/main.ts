@@ -28,14 +28,36 @@ const settingsManager = SettingsManager.create(cwd, agentDir);
 // Create SessionManager (in-memory for now, no persistence between runs)
 const sessionManager = SessionManager.inMemory(cwd);
 
+// Fetch available models from Go backend to discover active model
+let activeModelId = opts.model!;
+let activeModel: any = null;
+try {
+  const resp = await fetch(`${opts.server}/api/pux/models`);
+  if (resp.ok) {
+    const models: Array<{ id: string; name: string; provider: string }> = await resp.json();
+    if (models.length > 0) {
+      const matched = models.find((m) => m.id.includes(opts.model!)) ?? models[0];
+      activeModelId = matched.id;
+      activeModel = { id: matched.id, name: matched.name, provider: matched.provider, reasoning: false };
+    }
+  }
+} catch {
+  // backend not reachable yet, keep default
+}
+
 // Create our PuxAgentSession — bridges to Go SSE backend
 const session = new PuxAgentSession(
   settingsManager,
   sessionManager,
   opts.server!,
   opts.project!,
-  opts.model!,
+  activeModelId,
 );
+
+// Set discovered model on session state (footer reads state.model)
+if (activeModel) {
+  session.state.model = activeModel;
+}
 
 // Create AgentSessionServices (minimal duck-typed object)
 const services = {
