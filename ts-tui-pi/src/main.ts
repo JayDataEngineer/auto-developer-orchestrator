@@ -8,7 +8,6 @@ import { AgentSessionRuntime } from "./core/agent-session-runtime.js";
 import { SessionManager } from "./core/session-manager.js";
 import { SettingsManager } from "./core/settings-manager.js";
 import { PuxAgentSession } from "./core/pux-agent-session.js";
-import { initTheme } from "./modes/interactive/theme/theme.js";
 import { parseArgs } from "node:util";
 
 const { values: opts } = parseArgs({
@@ -47,8 +46,8 @@ const services = {
   modelRegistry: null as any,
   resourceLoader: {
     getExtensions: () => ({ extensions: [], diagnostics: [] }),
-    getSkills: () => [],
-    getPrompts: () => [],
+    getSkills: () => ({ skills: [] }),
+    getPrompts: () => ({ prompts: [] }),
     getThemes: () => ({ themes: [] }),
     reload: async () => {},
   } as any,
@@ -67,10 +66,7 @@ const createRuntime: any = async () => ({
 // Create AgentSessionRuntime (wrapper expected by InteractiveMode)
 const runtime = new AgentSessionRuntime(session, services as any, createRuntime, []);
 
-// Initialize theme
-initTheme("dark", true);
-
-// Create InteractiveMode
+// Create InteractiveMode (constructor calls initTheme internally)
 const interactiveMode = new InteractiveMode(runtime, {
   verbose: false,
 });

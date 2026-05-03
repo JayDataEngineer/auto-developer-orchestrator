@@ -1,14 +1,17 @@
-// PuxAgentSession — wraps Go SSE backend, satisfies pi-mono AgentSession interface
-// for InteractiveMode TUI rendering.
+// PuxAgentSession — bridges Go SSE backend to pi-mono InteractiveMode AgentSessionEvent types.
+// Satisfies the interface InteractiveMode expects (duck-typed, no TypeScript enforcement at runtime).
 
-import { EventEmitter } from "node:events";
-import type { AgentSessionEvent } from "./agent-session.js";
+import type { AgentSessionEvent, AgentSessionEventListener } from "./agent-session.js";
 import type { ThinkingLevel } from "../agent-core/types.js";
-import type { Model, AssistantMessage } from "../ai/types.js";
-import type { FooterDataProvider } from "./footer-data-provider.js";
-import type { KeybindingsManager } from "./keybindings.js";
+import type {
+  AssistantMessage, AssistantMessageEvent,
+  TextContent, ThinkingContent, ToolCall,
+} from "../ai/types.js";
 import type { SettingsManager } from "./settings-manager.js";
 
+// ---------------------------------------------------------------------------
+// Minimal model stub — InteractiveMode reads model.id, model.provider, etc.
+// ---------------------------------------------------------------------------
 interface PuxModel {
   id: string;
   name: string;
@@ -17,26 +20,78 @@ interface PuxModel {
 }
 
 const DEFAULT_MODEL: PuxModel = {
-  id: "pux-qwen",
-  name: "Pux Qwen",
+  id: "pux",
+  name: "Pux Model",
   api: "pux",
   provider: "pux",
 };
 
-export class PuxAgentSession extends EventEmitter {
+// ---------------------------------------------------------------------------
+// Helper: emit a well-formed AssistantMessage (needed by message_start/update/end)
+// ---------------------------------------------------------------------------
+function mkAssistant(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
+  return {
+    role: "assistant",
+    content: [],
+    api: "pux",
+    provider: "pux",
+    model: "pux",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+    stopReason: "stop",
+    timestamp: Date.now(),
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Helper: build a user AgentMessage (for message_start with role "user")
+// ---------------------------------------------------------------------------
+function userMessage(text: string): any {
+  return {
+    role: "user",
+    content: [{ type: "text", text }],
+    timestamp: Date.now(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// SSE → pi-mono AgentSessionEvent mapper
+// ---------------------------------------------------------------------------
+
+export class PuxAgentSession {
   public settingsManager: SettingsManager;
   public sessionManager: any;
   public agent: any;
-  public model: PuxModel = DEFAULT_MODEL;
+  public model: any = DEFAULT_MODEL;
   public thinkingLevel: ThinkingLevel = "none";
-  public scopedModels: Array<{ model: PuxModel; thinkingLevel?: ThinkingLevel }> = [];
+  public scopedModels: Array<{ model: any; thinkingLevel?: ThinkingLevel }> = [];
   public resourceLoader: any = {
-    getThemes: () => ({ themes: [] }),
-    getExtensions: () => ({ extensions: [], diagnostics: [] }),
-    getSkills: () => ({ skills: [] }),
+    getThemes: () => ({ themes: [], diagnostics: [] }),
+    getExtensions: () => ({ extensions: [], errors: [], diagnostics: [] }),
+    getSkills: () => ({ skills: [], diagnostics: [] }),
+    getPrompts: () => ({ prompts: [], diagnostics: [] }),
+    getAgentsFiles: () => ({ agentsFiles: [], diagnostics: [] }),
+    getSystemPrompt: () => ({ systemPrompt: "", agentsFiles: [], diagnostics: [] }),
+    getAppendSystemPrompt: () => ({ appendSystemPrompt: "", agentsFiles: [], diagnostics: [] }),
+    extendResources: () => [],
     reload: async () => {},
   };
-  public modelRegistry: any = {};
+  public modelRegistry: any = {
+    get: () => undefined,
+    find: () => undefined,
+    getAll: () => [],
+    getAvailable: () => [],
+    getError: () => null,
+    getApiKeyAndHeaders: () => ({ apiKey: "", headers: {} }),
+    hasConfiguredAuth: () => false,
+    isUsingOAuth: () => false,
+    refresh: () => {},
+    registerProvider: () => {},
+    unregisterProvider: () => {},
+    set: () => {},
+    authStorage: null,
+    keys: () => [],
+  };
   public promptTemplates: any[] = [];
   public messages: any[] = [];
   public steeringMessages: string[] = [];
@@ -55,12 +110,17 @@ export class PuxAgentSession extends EventEmitter {
   private serverUrl: string;
   private project: string;
   private modelName: string;
-  private abortController?: AbortController;
-  private eventQueue: AgentSessionEvent[] = [];
-  private listeners: Array<(event: AgentSessionEvent) => void> = [];
+  private abortCtrl?: AbortController;
+  private listeners: AgentSessionEventListener[] = [];
+  private streaming = false;
 
-  constructor(settingsManager: SettingsManager, sessionManager: any, serverUrl: string, project: string, modelName: string) {
-    super();
+  constructor(
+    settingsManager: SettingsManager,
+    sessionManager: any,
+    serverUrl: string,
+    project: string,
+    modelName: string,
+  ) {
     this.settingsManager = settingsManager;
     this.sessionManager = sessionManager;
     this.serverUrl = serverUrl;
@@ -75,61 +135,58 @@ export class PuxAgentSession extends EventEmitter {
     this.session = this;
   }
 
-  // --- Core methods needed by InteractiveMode ---
+  // ---- subscribe (called by InteractiveMode after init) ----
 
-  subscribe(listener: (event: AgentSessionEvent) => void): () => void {
+  subscribe(listener: AgentSessionEventListener): () => void {
     this.listeners.push(listener);
-    // Drain queued events to the new subscriber
-    const queued = [...this.eventQueue];
-    this.eventQueue = [];
-    for (const event of queued) {
-      listener(event);
-    }
     return () => {
       this.listeners = this.listeners.filter((l) => l !== listener);
     };
   }
 
-  async prompt(text: string, options?: { images?: any[]; streamingBehavior?: string }): Promise<void> {
-    // Build the full prompt with images if any
-    const body: any = {
-      prompt: text,
+  // ---- prompt (called from the main event loop: line 641) ----
+
+  async prompt(text: string, options?: { images?: any[] }): Promise<void> {
+    // 1. Emit user message so TUI renders it
+    this.emit({ type: "message_start", message: userMessage(text) });
+
+    // 2. Emit agent_start (TUI shows loader)
+    this.emit({ type: "agent_start" });
+    this.streaming = true;
+
+    // 3. Emit message_start for assistant (creates streaming component)
+    const assistantMsg = mkAssistant();
+    this.emit({ type: "message_start", message: assistantMsg });
+
+    this.abortCtrl = new AbortController();
+
+    // 4. POST to Go backend
+    const body = JSON.stringify({
+      message: text,
       project: this.project,
       model: this.modelName,
-      stream: true,
-    };
-
-    if (options?.images?.length) {
-      body.images = options.images.map((img: any) => ({
-        data: img.data,
-        media_type: img.media_type || "image/png",
-      }));
-    }
-
-    // Emit agent start
-    this.emitEvent({ type: "agent_start" });
-    this.emitEvent({ type: "turn_start" });
-
-    this.abortController = new AbortController();
+    });
 
     try {
       const response = await fetch(`${this.serverUrl}/api/pux/prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: this.abortController.signal,
+        body,
+        signal: this.abortCtrl.signal,
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Server error ${response.status}: ${errorText}`);
+        const errText = await response.text();
+        throw new Error(`Backend ${response.status}: ${errText}`);
       }
 
+      // 5. Parse SSE stream
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let partialText = "";
-      let partialContent: any[] = [];
+      let currentEvent = "";
+      let accText = "";
+      let accThinking = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -140,193 +197,219 @@ export class PuxAgentSession extends EventEmitter {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data: ")) continue;
-
-          const data = trimmed.slice(6).trim();
-          if (data === "[DONE]") continue;
-          if (!data) continue;
-
-          try {
-            const event = JSON.parse(data);
-            this.handleSSEEvent(event);
-          } catch {
-            // skip parse errors
+          const t = line.trimEnd();
+          if (t.startsWith("event: ")) {
+            currentEvent = t.slice(7).trim();
+          } else if (t.startsWith("event:")) {
+            currentEvent = t.slice(6).trim();
+          } else if (t.startsWith("data: ")) {
+            const raw = t.slice(6).trim();
+            if (raw === "[DONE]") {
+              currentEvent = "";
+              continue;
+            }
+            if (currentEvent) {
+              try {
+                const payload = JSON.parse(raw);
+                this.handleSSE(currentEvent, payload, { accText, accThinking });
+                // Update accumulators
+                if (currentEvent === "text_delta") {
+                  accText += payload.text || "";
+                }
+                if (currentEvent === "thinking_delta") {
+                  accThinking += payload.text || "";
+                }
+              } catch {
+                // malformed JSON — skip
+              }
+            }
+            currentEvent = "";
           }
+          if (t === "") currentEvent = "";
         }
       }
     } catch (err: any) {
-      if (err.name === "AbortError") return;
-      this.emitEvent({
-        type: "message_end",
-        message: { role: "assistant", content: [], errorMessage: err.message },
-      });
+      if (err.name !== "AbortError") {
+        const errMsg = mkAssistant({
+          stopReason: "error",
+          errorMessage: err.message || String(err),
+        });
+        this.emit({ type: "message_end", message: errMsg });
+      }
     } finally {
-      this.emitEvent({ type: "agent_end", messages: [...this.messages] });
+      this.emit({ type: "agent_end", messages: [...this.messages] });
+      this.streaming = false;
     }
   }
 
-  private handleSSEEvent(event: any) {
-    switch (event.type) {
-      case "think": {
-        // Thinking content — emit as assistant message with thinking delta
-        const msg: any = {
-          role: "assistant",
-          content: [{ type: "thinking", thinking: event.content || "" }],
-          api: "pux",
-          provider: "pux",
-          model: this.modelName,
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
-          stopReason: "stop" as const,
-          timestamp: Date.now(),
-        };
-        this.emitEvent({ type: "message_update", message: msg, assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: event.content || "" } as any });
+  // ---- SSE event → pi-mono AgentSessionEvent ----
+
+  private handleSSE(eventType: string, payload: any, acc: { accText: string; accThinking: string }): void {
+    switch (eventType) {
+      case "agent_start":
+        break;
+
+      case "thinking_delta": {
+        const content: any[] = [];
+        if (acc.accThinking || payload.text) content.push({ type: "thinking", thinking: (acc.accThinking || "") + (payload.text || "") });
+        if (acc.accText) content.push({ type: "text", text: acc.accText });
+        if (content.length > 0) this.emitMessageUpdate(content);
         break;
       }
 
-      case "text": {
-        const msg: any = {
-          role: "assistant",
-          content: [{ type: "text", text: event.content || "" }],
-          api: "pux",
-          provider: "pux",
-          model: this.modelName,
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
-          stopReason: "stop",
-          timestamp: Date.now(),
-        };
-        this.emitEvent({ type: "message_update", message: msg, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: event.content || "" } as any });
+      case "text_delta": {
+        const content: any[] = [];
+        if (acc.accThinking) content.push({ type: "thinking", thinking: acc.accThinking });
+        if (acc.accText || payload.text) content.push({ type: "text", text: (acc.accText || "") + (payload.text || "") });
+        if (content.length > 0) this.emitMessageUpdate(content);
         break;
       }
 
-      case "tool_call": {
-        const toolCallId = event.tool_call_id || "tool_" + Date.now();
-        this.emitEvent({
-          type: "tool_execution_start",
-          toolCallId,
-          toolName: event.tool_name || "unknown",
-          args: event.data || {},
-        });
-        // Also emit message update for the tool call
-        const msg: any = {
-          role: "assistant",
-          content: [{ type: "toolCall", id: toolCallId, name: event.tool_name, arguments: event.data || {} }],
-          api: "pux",
-          provider: "pux",
-          model: this.modelName,
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
-          stopReason: "tool_calls",
-          timestamp: Date.now(),
+      case "tool_execution_start": {
+        const toolCall: ToolCall = {
+          type: "toolCall",
+          id: payload.toolId || `tool_${Date.now()}`,
+          name: payload.toolName || "unknown",
+          arguments: payload.args || {},
         };
-        this.emitEvent({ type: "message_update", message: msg, assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 } as any });
+        this.emitMessageUpdate([toolCall]);
         break;
       }
 
-      case "tool_result": {
-        const toolCallId = event.tool_call_id || "";
-        this.emitEvent({
+      case "tool_execution_end": {
+        this.emit({
           type: "tool_execution_end",
-          toolCallId,
-          toolName: event.tool_name || "unknown",
-          result: event.data || event.content || "",
-          isError: false,
+          toolCallId: payload.toolId || "",
+          toolName: payload.toolName || "",
+          result: payload.result !== undefined ? payload.result : payload.error || "",
+          isError: !!payload.error,
+        });
+        break;
+      }
+
+      case "tool_update": {
+        this.emit({
+          type: "tool_execution_update",
+          toolCallId: payload.toolId || "",
+          toolName: payload.toolName || "",
+          args: {},
+          partialResult: payload.text || "",
         });
         break;
       }
 
       case "agent_end": {
-        const tokens = { input: event.inputTokens || 0, output: event.outputTokens || 0 };
-        const msg: any = {
-          role: "assistant",
-          content: [],
-          api: "pux",
-          provider: "pux",
-          model: this.modelName,
-          usage: { input: tokens.input, output: tokens.output, cacheRead: 0, cacheWrite: 0, totalTokens: tokens.input + tokens.output },
+        // Build final content from accumulators
+        const content: any[] = [];
+        if (acc.accThinking) content.push({ type: "thinking", thinking: acc.accThinking });
+        if (acc.accText) content.push({ type: "text", text: acc.accText });
+        const msg = mkAssistant({
+          content,
+          usage: {
+            input: Number(payload.input) || 0,
+            output: Number(payload.output) || 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: (Number(payload.input) || 0) + (Number(payload.output) || 0),
+          },
           stopReason: "stop",
-          timestamp: Date.now(),
-        };
-        this.emitEvent({ type: "message_end", message: msg });
-        this.emitEvent({ type: "turn_end", message: msg, toolResults: [] });
+        });
+        this.emit({ type: "message_end", message: msg });
         break;
       }
 
       case "error": {
-        const msg: any = {
-          role: "assistant",
-          content: [],
-          errorMessage: event.content || "Unknown error",
-          api: "pux",
-          provider: "pux",
-          model: this.modelName,
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+        const content: any[] = [];
+        if (acc.accThinking) content.push({ type: "thinking", thinking: acc.accThinking });
+        if (acc.accText) content.push({ type: "text", text: acc.accText });
+        const msg = mkAssistant({
+          content,
           stopReason: "error",
-          timestamp: Date.now(),
-        };
-        this.emitEvent({ type: "message_end", message: msg });
+          errorMessage: payload.error || payload.message || "Unknown error",
+        });
+        this.emit({ type: "message_end", message: msg });
         break;
       }
 
+      case "compaction_start":
+        this.emit({ type: "compaction_start", reason: "manual" as any });
+        break;
+
+      case "compaction_end":
+        this.emit({
+          type: "compaction_end",
+          reason: "manual" as any,
+          result: undefined,
+          aborted: false,
+          willRetry: false,
+        });
+        break;
+
+      case "artifact_created":
+      case "artifact_updated":
+      case "plan_created":
+      case "plan_updated":
+      case "subagent_start":
+      case "subagent_end":
+      case "approval_request":
+      case "agent_spawned":
+        break;
+
       default:
-        // pass through unknown events
         break;
     }
   }
 
-  abort(): void {
-    this.abortController?.abort();
+  // ---- helpers ----
+
+  private emitMessageUpdate(content: AssistantMessage["content"]): void {
+    const msg = mkAssistant({ content });
+    this.emit({ type: "message_update", message: msg });
   }
 
-  // --- Agent dispatch stubs (no-ops for SSE-driven TUI) ---
+  private emit(event: AgentSessionEvent): void {
+    for (const l of this.listeners) {
+      try { l(event); } catch {}
+    }
+  }
 
-  isStreaming(): boolean { return !!this.abortController && !this.abortController.signal.aborted; }
-  isCompacting(): boolean { return false; }
-  isBashRunning(): boolean { return false; }
+  // ---- AgentSession stubs (no-ops for SSE-driven TUI) ----
+
+  abort(): void { this.abortCtrl?.abort(); }
+  get isStreaming(): boolean { return this.streaming; }
+  get isCompacting(): boolean { return false; }
+  get isBashRunning(): boolean { return false; }
   getCwd(): string { return this.sessionManager?.getCwd?.() || process.cwd(); }
   getContextUsage() { return { used: 0, limit: 128000 }; }
   getAvailableThinkingLevels(): ThinkingLevel[] { return ["none", "low", "high"]; }
   getSessionStats() { return { turns: 0, messages: 0 }; }
   getLastAssistantText(): string { return ""; }
-  getFollowUpMessages(): string[] { return this.followUpMessages; }
-  getSteeringMessages(): string[] { return this.steeringMessages; }
-  getToolDefinition(name: string) { return null; }
+  getFollowUpMessages(): string[] { return []; }
+  getSteeringMessages(): string[] { return []; }
+  getToolDefinition(_name: string) { return null; }
   getUserMessagesForForking() { return []; }
-
   setModel(model: any): void { this.model = model; }
   setThinkingLevel(level: ThinkingLevel): void { this.thinkingLevel = level; }
   setScopedModels(models: any[]): void { this.scopedModels = models; }
   setAutoCompactionEnabled(enabled: boolean): void { this.autoCompactionEnabled = enabled; }
   setSteeringMode(enabled: boolean): void { this.steeringMode = enabled; }
   setFollowUpMode(mode: string): void { this.followUpMode = mode === "on"; }
-
   async cycleModel(): Promise<void> {}
   async cycleThinkingLevel(): Promise<void> {}
-  async compact(opts?: any): Promise<any> { return undefined; }
+  async compact(_opts?: any): Promise<any> { return undefined; }
   async reload(): Promise<void> {}
-  async steer(text: string): Promise<void> {
-    await this.prompt(text, { streamingBehavior: "steer" });
-  }
-  async followUp(text: string): Promise<void> {
-    await this.prompt(text, { streamingBehavior: "followUp" });
-  }
-  async navigateTree(targetId: string, opts?: any): Promise<any> { return undefined; }
-  async executeBash(command: string): Promise<any> { return ""; }
-  async recordBashResult(result: any): Promise<void> {}
-  async exportToHtml(path?: string): Promise<any> { return undefined; }
+  async steer(text: string): Promise<void> { await this.prompt(text); }
+  async followUp(text: string): Promise<void> { await this.prompt(text); }
+  async navigateTree(_targetId: string, _opts?: any): Promise<any> { return undefined; }
+  async executeBash(_command: string): Promise<any> { return ""; }
+  async recordBashResult(_result: any): Promise<void> {}
+  async exportToHtml(_path?: string): Promise<any> { return undefined; }
   async exportToJsonl(): Promise<any> { return undefined; }
   abortBash(): void {}
   abortCompaction(): void {}
   abortBranchSummary(): void {}
   abortRetry(): void {}
   async clearQueue(): Promise<void> {}
-  async bindExtensions(opts?: any): Promise<void> {}
+  async bindExtensions(_opts?: any): Promise<void> {}
   async saveMessages(): Promise<void> {}
-
-  // --- Event emission helper ---
-
-  private emitEvent(event: AgentSessionEvent): void {
-    for (const listener of this.listeners) {
-      try { listener(event); } catch {}
-    }
-  }
 }
