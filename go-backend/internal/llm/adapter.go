@@ -148,7 +148,9 @@ func convertEvents(ch <-chan llama.ChatEvent) <-chan core.ChatEvent {
 			// The session accumulates tool calls internally and sends the
 			// serialized JSON in the ChatEventDone's Content field.
 			// Parse them back into Deltas so the core agent loop can see them.
-			if evt.Type == llama.ChatEventDone && evt.Content != "" && coreEvt.Finish == core.FinishToolCalls {
+			// Note: Gemini sends finish_reason="stop" even with tool calls,
+			// so we check for Content (serialized calls) regardless of finish reason.
+			if evt.Type == llama.ChatEventDone && evt.Content != "" {
 				var calls []llama.ToolCallResponse
 				if err := json.Unmarshal([]byte(evt.Content), &calls); err == nil {
 					deltas := make([]core.ToolCallDelta, len(calls))

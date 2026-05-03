@@ -317,7 +317,9 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 		maxRounds := l.config.MaxToolRounds
 		hitMaxRounds := maxRounds > 0 && round >= maxRounds
 		circuitBroken := l.config.MaxConsecutiveFails > 0 && state.ConsecutiveFails >= l.config.MaxConsecutiveFails
-		stoppedNaturally := len(toolCalls) == 0 || finishReason != FinishToolCalls
+		// Some providers (Gemini) send finish_reason="stop" even with tool calls,
+		// so we only consider it a natural stop if there are NO tool calls.
+		stoppedNaturally := len(toolCalls) == 0
 
 		l.logger.Printf("loop: round=%d tools=%d finish=%s content=%d thinking=%d model=%s",
 			round, len(toolCalls), string(finishReason), contentBuf.Len(), thinkingBuf.Len(), l.provider.ModelName())
