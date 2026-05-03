@@ -51,7 +51,7 @@ type PuxHandler struct {
 	langfuse *observability.LangfuseClient
 
 	orchestrators   map[string]*llamaeng.OrchestratorLoop  // key: compositeKey(projectPath, agentId)
-	selectedEngines map[string]*llamaeng.LLMClient        // per-agent engine override
+	selectedEngines map[string]*llamaeng.LLMClient         // per-agent engine override
 }
 
 // NewPuxHandler creates a new Pux handler.
@@ -90,14 +90,14 @@ func (h *PuxHandler) SetOpenRouterEngine(engine *llamaeng.LLMClient) {
 	h.openrouterEngine = engine
 }
 
-// SetSandboxOnly wires sandbox manager + computer use without a local LLM engine.
-// Used in cloud-only mode (OpenRouter, Gemini) when llama-server is off.
-func (h *PuxHandler) SetSandboxOnly(sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
-	h.sandboxMgr = sandboxMgr
-	if cu != nil {
-		h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
+	// SetSandboxOnly wires sandbox manager + computer use without a local LLM engine.
+	// Used in cloud-only mode (OpenRouter, Gemini) when llama-server is off.
+	func (h *PuxHandler) SetSandboxOnly(sandboxMgr *sandbox.Manager, cu *ComputerUseHandler, x11 *X11Handler) {
+		h.sandboxMgr = sandboxMgr
+		if cu != nil {
+			h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
+		}
 	}
-}
 
 // SetMCPClient configures the MCP research server client for search/scrape tools.
 func (h *PuxHandler) SetMCPClient(client *mcp.Client) {
@@ -323,16 +323,9 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Load project skills (SKILL.md files) — per-turn injection, not upfront dump
-	var skillsBlock string
-	skillLoader := llamaeng.NewSkillLoader(projectPath)
-	if count, err := skillLoader.Load(); err == nil && count > 0 {
-		skillsBlock = skillLoader.SkillsForPromptMatched(req.Message)
-		if skillsBlock != "" {
-			skillsBlock += "\n\n"
-		}
-		h.log.Debug("Loaded project skills", zap.Int("total", count), zap.Bool("matched", skillsBlock != ""))
-	}
+	// Skills are loaded once at initialization and injected into the system prompt.
+	// The model discovers available skills via <available_skills> block and loads
+	// instructions on demand using the read_skill tool.
 
 	// Inject project memory into the message if available
 	var memoryPrefix string
@@ -381,7 +374,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		defer close(done)
 		defer close(orchEvents)
 		// Format message to keep the task front and center for the 26B model
-		orchMsg := fmt.Sprintf("%s%sUser request: %s\n\nCreate a plan and delegate each step.", skillsBlock, memoryPrefix, req.Message)
+		orchMsg := fmt.Sprintf("%sUser request: %s\n\nCreate a plan and delegate each step.", memoryPrefix, req.Message)
 		if orch.Plan() == nil {
 			loopErr = orch.Run(ctx, orchMsg, orchEvents)
 		} else {
@@ -455,7 +448,15 @@ func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string)
 
 	// Build base executor for sub-agents
 	var baseExecutor llamaeng.ToolExecutor
+	var skills *llamaeng.SkillStore
 	if h.sandboxMgr != nil {
+		// Load skills from standard discovery paths (pi-mono standard)
+		home, _ := os.UserHomeDir()
+		skills = llamaeng.LoadStandardSkills(projectPath, home)
+		if skills.Count() > 0 {
+			h.log.Info("Skills loaded", zap.Int("count", skills.Count()), zap.String("project", projectPath))
+		}
+
 		// Nil-check cuBridge — it's only set via SetLlamaEngine which requires local model.
 		// Cloud-only mode (no llama-server) works without vision/browser.
 		var visionEnabled bool
@@ -474,6 +475,7 @@ func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string)
 			MCPClient:     h.mcpClient,
 			MCPMulti:      h.mcpMulti,
 			ApprovalMgr:   (*approvalManagerAdapter)(h.approvalMgr),
+			Skills:        skills,
 		}
 
 		// Wrap with hooks (git checkpoint, auditing, etc.)
@@ -485,6 +487,7 @@ func (h *PuxHandler) getOrCreateOrchestrator(key, sandboxID, projectPath string)
 	cfg := llamaeng.OrchestratorConfig{
 		ProjectDir: projectPath,
 		SandboxID:  sandboxID,
+		Skills:     skills,
 		// ContextSize 0 means "use ModelConfig default" (32K)
 	}
 

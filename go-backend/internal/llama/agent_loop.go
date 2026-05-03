@@ -148,6 +148,7 @@ type SandboxToolExecutor struct {
 	MCPMulti    *mcp.MultiClient // multi-server routing (supersedes MCPClient)
 	ApprovalMgr ApprovalManager
 	Vision      *browser.VisionClient
+	Skills      *SkillStore // loaded skill store for read_skill tool
 
 	VisionEnabled bool
 

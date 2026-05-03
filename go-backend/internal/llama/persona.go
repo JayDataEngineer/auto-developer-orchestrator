@@ -21,6 +21,7 @@ type Persona struct {
 type PersonaConfig struct {
 	ProjectDir string
 	SandboxID  string
+	Skills     *SkillStore // optional: loaded skill store for system prompt injection
 }
 
 // NewOrchestratorPersona creates the orchestrator persona with all tools.

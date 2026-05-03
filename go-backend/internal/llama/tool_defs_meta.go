@@ -34,5 +34,13 @@ func init() {
 			Returns:          "Returns the user's answer as text. Use this before starting complex tasks.",
 			ParametersSchema: `{"type":"object","properties":{"question":{"type":"string","description":"Question to ask the user"}},"required":["question"]}`,
 		},
+		ToolSpec{
+			Name:             "read_skill",
+			Category:         CategoryMeta,
+			Description:      "load the full instructions for a skill available in the <available_skills> list",
+			Schema:           `{"skill_name": "docker-expert"}`,
+			Returns:          "Returns the skill's full instructions. Use this before performing tasks that match a skill's description. Skills are listed in the system prompt.",
+			ParametersSchema: `{"type":"object","properties":{"skill_name":{"type":"string","description":"Name of the skill to load, from the <available_skills> list"}},"required":["skill_name"]}`,
+		},
 	)
 }

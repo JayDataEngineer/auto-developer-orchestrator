@@ -45,6 +45,11 @@ func buildPersonaPrompt(t PersonaType, pcfg PersonaConfig) string {
 		prompt += "\n\n--- Project Context (AGENTS.md) ---\n" + agentsMD
 	}
 
+	// Append available skills (pi-mono standard: name + description + path only)
+	if pcfg.Skills != nil && pcfg.Skills.Count() > 0 {
+		prompt += pcfg.Skills.FormatAvailableSkills()
+	}
+
 	return prompt
 }
 

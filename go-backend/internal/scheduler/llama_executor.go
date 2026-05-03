@@ -63,14 +63,17 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 		e.ensureDefaultSandbox(ctx)
 	}
 
-	// Build base executor for tool dispatch
+	// Load skills from standard discovery paths (pi-mono standard)
+	var skills *llamaeng.SkillStore
 	var baseExecutor llamaeng.ToolExecutor
 	if e.sandboxMgr != nil {
+		skills = llamaeng.LoadStandardSkills(projectPath, "")
 		baseExecutor = &llamaeng.SandboxToolExecutor{
 			SandboxID: sandboxID,
 			Manager:   e.sandboxMgr,
 			MCPMulti:  e.mcpMulti,
 			Logger:    e.logger,
+			Skills:    skills,
 		}
 	}
 
@@ -78,6 +81,7 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 	orch, err := llamaeng.NewOrchestratorLoop(e.engine, baseExecutor, llamaeng.OrchestratorConfig{
 		ProjectDir: projectPath,
 		SandboxID:  sandboxID,
+		Skills:     skills,
 	}, e.logger)
 	if err != nil {
 		return &JobResult{

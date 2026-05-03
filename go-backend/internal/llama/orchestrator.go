@@ -30,7 +30,8 @@ type OrchestratorLoop struct {
 type OrchestratorConfig struct {
 	ProjectDir  string
 	SandboxID   string
-	ContextSize int // 0 = use ModelConfig default (32K)
+	ContextSize int         // 0 = use ModelConfig default (32K)
+	Skills      *SkillStore // optional: loaded skill store
 }
 
 // NewOrchestratorLoop creates a new orchestrator with a fresh KV session.
@@ -51,6 +52,7 @@ func NewOrchestratorLoop(
 	personaCfg := PersonaConfig{
 		ProjectDir: ocfg.ProjectDir,
 		SandboxID:  ocfg.SandboxID,
+		Skills:     ocfg.Skills,
 	}
 
 	artifacts := NewArtifactRegistry()

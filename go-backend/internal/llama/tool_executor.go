@@ -218,6 +218,43 @@ func (e *SandboxToolExecutor) Execute(ctx context.Context, toolName string, args
 		}
 	}
 
+	// read_skill — load a skill's full instructions by name (pi-mono standard)
+	if toolName == "read_skill" {
+		name, _ := args["skill_name"].(string)
+		if name == "" {
+			name, _ = args["name"].(string)
+		}
+		if name == "" {
+			return nil, fmt.Errorf("missing 'skill_name' argument")
+		}
+		if e.Skills == nil {
+			return nil, fmt.Errorf("no skills loaded")
+		}
+		instructions := e.Skills.ReadSkill(name)
+		if instructions == "" {
+			// Try to find by location (path) as fallback
+			if path, ok := args["location"].(string); ok && path != "" {
+				skill := e.Skills.GetByPath(path)
+				if skill != nil {
+					instructions = e.Skills.ReadSkill(skill.Name)
+				}
+			}
+		}
+		if instructions == "" {
+			// List available skill names to help the model
+			all := e.Skills.All()
+			names := make([]string, len(all))
+			for i, s := range all {
+				names[i] = s.Name
+			}
+			return map[string]interface{}{
+				"error":   fmt.Sprintf("skill '%s' not found", name),
+				"available": names,
+			}, nil
+		}
+		return map[string]interface{}{"skill_name": name, "instructions": instructions}, nil
+	}
+
 	if e.CU == nil {
 		return nil, fmt.Errorf("computer use not available: %s", toolName)
 	}

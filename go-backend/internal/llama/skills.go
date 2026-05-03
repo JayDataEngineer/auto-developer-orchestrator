@@ -4,209 +4,370 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
+// ── Skill types ────────────────────────────────────────────────────────────────
+
 // Skill represents a discoverable skill defined by a SKILL.md file.
-// Skills provide reusable instructions that are injected into the system prompt.
-// Pattern from Pi's agent skills standard.
+// Follows pi-mono's Agent Skills standard: YAML frontmatter + markdown body.
+// Skills are injected into the system prompt as an <available_skills> list
+// so the model can use file_read to load instructions on demand.
 type Skill struct {
-	Name         string // Skill identifier (from frontmatter or directory name)
-	Description  string // One-line description (from frontmatter)
-	Trigger      string // Space-separated keywords for matching
-	Instructions string // Markdown body (the actual instructions)
-	SourcePath   string // Where the SKILL.md was loaded from
+	Name        string // [a-z0-9-]+, max 64 chars, from frontmatter "name" or dir name
+	Description string // required, max 1024 chars
+	Location    string // absolute path to SKILL.md file
+	Dir         string // parent directory (for resolving relative paths in instructions)
+	DisableInvocation bool // if true, skill excluded from system prompt listing
 }
 
-// SkillLoader discovers and loads SKILL.md files from the project directory.
-type SkillLoader struct {
-	projectDir string
-	skills     []Skill
+// ── Validation ────────────────────────────────────────────────────────────────
+
+var skillNameRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// validateSkillName checks the pi-mono name rules:
+// lowercase a-z, 0-9, hyphens only. No leading/trailing hyphens, no consecutive hyphens.
+// Max 64 characters. Returns the name if valid, empty string otherwise.
+func validateSkillName(name string, maxLen int) string {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > maxLen {
+		return ""
+	}
+	if !skillNameRe.MatchString(name) {
+		return ""
+	}
+	return name
 }
 
-// NewSkillLoader creates a new skill loader for the given project directory.
-func NewSkillLoader(projectDir string) *SkillLoader {
-	return &SkillLoader{projectDir: projectDir}
-}
-
-// Load discovers all SKILL.md files in the project directory tree.
-// Looks for files named SKILL.md or *.skill.md.
-// Returns the number of skills loaded.
-func (l *SkillLoader) Load() (int, error) {
-	l.skills = nil
-
-	// Walk the project directory
-	err := filepath.WalkDir(l.projectDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil // skip errors
+// parseSkillYAML extracts key-value pairs from simple YAML frontmatter lines.
+// Supports: name, description, disable-model-invocation
+func parseSkillYAML(frontmatter string) map[string]string {
+	m := make(map[string]string)
+	for _, line := range strings.Split(frontmatter, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
 		}
+		key, value, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		// Strip quotes
+		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+			value = value[1 : len(value)-1]
+		}
+		m[key] = value
+	}
+	return m
+}
+
+// parseSkillFile parses a SKILL.md file with YAML frontmatter.
+// Returns nil if validation fails (missing description, etc.).
+func parseSkillFile(absPath string) (*Skill, error) {
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, err
+	}
+	content := string(data)
+
+	fm := make(map[string]string)
+
+	if strings.HasPrefix(content, "---\n") {
+		// Split frontmatter: first ---, then yaml, then ---, then body
+		rest := content[4:] // skip first "---\n"
+		endIdx := strings.Index(rest, "\n---")
+		if endIdx >= 0 {
+			fm = parseSkillYAML(rest[:endIdx])
+			// Body is discarded — model uses read_skill to load instructions on demand
+		}
+	}
+
+	// Validate name
+	name := validateSkillName(fm["name"], 64)
+	if name == "" {
+		// Default: use parent directory name
+		dirName := filepath.Base(filepath.Dir(absPath))
+		name = validateSkillName(dirName, 64)
+	}
+	if name == "" {
+		return nil, fmt.Errorf("invalid skill name in %s", absPath)
+	}
+
+	// Description required (pi-mono standard)
+	description := fm["description"]
+	if description == "" {
+		return nil, fmt.Errorf("skill %s missing required description field", name)
+	}
+	if len(description) > 1024 {
+		description = description[:1021] + "..."
+	}
+
+	// disable-model-invocation: if true, the skill is NOT listed in the system prompt
+	// but can still be loaded on-demand via read_skill tool
+	disableInvocation := strings.ToLower(fm["disable-model-invocation"]) == "true"
+
+	dir := filepath.Dir(absPath)
+
+	return &Skill{
+		Name:               name,
+		Description:        description,
+		Location:           absPath,
+		Dir:                dir,
+		DisableInvocation:  disableInvocation,
+	}, nil
+}
+
+// ── Skill Store ────────────────────────────────────────────────────────────────
+
+// SkillStore holds all discovered skills.
+// Thread-safe — skills are loaded once at startup and never modified.
+type SkillStore struct {
+	skills     []Skill
+	byName     map[string]*Skill // name → skill, first-wins
+	byPath     map[string]*Skill // absPath → skill
+}
+
+// NewSkillStore creates an empty skill store.
+func NewSkillStore() *SkillStore {
+	return &SkillStore{
+		byName: make(map[string]*Skill),
+		byPath: make(map[string]*Skill),
+	}
+}
+
+// LoadFromDirs discovers and loads SKILL.md files from the given directories.
+// Follows pi-mono discovery rules:
+// - SKILL.md at any depth; when found, stop recursing into that directory
+// - In root-only directories: also accept *.md files directly (inline skills)
+// - Deduplication: first-wins by name
+// Returns the number of skills loaded.
+func (s *SkillStore) LoadFromDirs(dirs []string) int {
+	count := 0
+	for _, dir := range dirs {
+		count += s.discoverFromDir(dir, false)
+	}
+	return count
+}
+
+// discoverFromDir walks a directory tree to find SKILL.md files.
+// pi-mono rules:
+// - Find SKILL.md files at any depth
+// - When SKILL.md is found in a dir, STOP recursing into that dir
+// - Skip: hidden dirs (.), node_modules, vendor, .git
+// - Deduplicate by name (first-wins)
+// - If includeRootMDs is true, also accept *.md files directly in the root (not subdirs)
+func (s *SkillStore) discoverFromDir(dir string, includeRootMDs bool) int {
+	if dir == "" {
+		return 0
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return 0
+	}
+
+	// Check if directory exists
+	info, err := os.Stat(abs)
+	if err != nil || !info.IsDir() {
+		return 0
+	}
+
+	count := 0
+	filepath.WalkDir(abs, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil // skip
+		}
+
+		// Directory handling
 		if d.IsDir() {
-			// Skip hidden dirs, node_modules, .git
-			name := d.Name()
-			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" {
+			dirName := d.Name()
+			if path == abs {
+				return nil // always enter root
+			}
+			// Skip hidden dirs, node_modules, vendor
+			if strings.HasPrefix(dirName, ".") || dirName == "node_modules" || dirName == "vendor" || dirName == "__pycache__" {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		// Check if it's a skill file
+		// File handling
 		base := strings.ToLower(d.Name())
-		if base == "skill.md" || strings.HasSuffix(base, ".skill.md") {
-			skill, parseErr := parseSkillFile(path)
-			if parseErr != nil {
-				return nil // skip malformed files
-			}
-			// Make source path relative to project dir
-			rel, _ := filepath.Rel(l.projectDir, path)
-			skill.SourcePath = rel
-			l.skills = append(l.skills, *skill)
+		isSkillMD := base == "skill.md"
+		isInlineMD := includeRootMDs && filepath.Dir(path) == abs && strings.HasSuffix(base, ".md") && !isSkillMD
+
+		if !isSkillMD && !isInlineMD {
+			return nil
 		}
+
+		// Parse
+		skill, err := parseSkillFile(path)
+		if err != nil {
+			return nil // silently skip invalid skills
+		}
+
+		// Deduplicate by name (first-wins)
+		if _, exists := s.byName[skill.Name]; exists {
+			return nil
+		}
+
+		s.skills = append(s.skills, *skill)
+		s.byName[skill.Name] = skill
+		s.byPath[path] = skill
+		count++
+
+		// SKILL.md found → stop recursing into this directory
+		if isSkillMD {
+			parent := filepath.Dir(path)
+			if parent != abs {
+				return filepath.SkipDir
+			}
+		}
+
 		return nil
 	})
 
-	return len(l.skills), err
+	return count
 }
 
-// Skills returns the loaded skills.
-func (l *SkillLoader) Skills() []Skill {
-	return l.skills
+// Get returns a skill by name.
+func (s *SkillStore) Get(name string) *Skill {
+	return s.byName[name]
 }
 
-// SkillsForPrompt returns the skills formatted for injection into the system prompt.
-// Returns empty string if no skills loaded.
-func (l *SkillLoader) SkillsForPrompt() string {
-	if len(l.skills) == 0 {
+// GetByPath returns a skill by absolute file path.
+func (s *SkillStore) GetByPath(path string) *Skill {
+	return s.byPath[path]
+}
+
+// All returns all loaded skills.
+func (s *SkillStore) All() []Skill {
+	return s.skills
+}
+
+// Count returns the number of loaded skills.
+func (s *SkillStore) Count() int {
+	return len(s.skills)
+}
+
+// ── Prompt formatting ──────────────────────────────────────────────────────────
+
+// FormatAvailableSkills builds the <available_skills> XML block for injection
+// into the system prompt. This is the pi-mono pattern:
+// - Lists name, description, and location
+// - Does NOT include full instructions (model uses file_read to load)
+// - Excludes skills with DisableInvocation: true
+// Returns empty string if no skills to show.
+func (s *SkillStore) FormatAvailableSkills() string {
+	var visible []*Skill
+	for _, skill := range s.skills {
+		if skill.DisableInvocation {
+			continue
+		}
+		visible = append(visible, s.byName[skill.Name])
+	}
+
+	if len(visible) == 0 {
 		return ""
 	}
 
 	var b strings.Builder
-	b.WriteString("<skills>\n")
-	for _, s := range l.skills {
-		b.WriteString(fmt.Sprintf("<skill name=\"%s\">\n", s.Name))
-		if s.Description != "" {
-			b.WriteString(fmt.Sprintf("Description: %s\n", s.Description))
-		}
-		if s.Trigger != "" {
-			b.WriteString(fmt.Sprintf("Trigger: %s\n", s.Trigger))
-		}
-		b.WriteString(s.Instructions)
-		b.WriteString("\n</skill>\n")
+	b.WriteString("\n\nThe following skills provide specialized instructions for specific tasks.\n")
+	b.WriteString("Use the read_skill tool to load a skill's instructions when the task matches its description.\n\n")
+	b.WriteString("<available_skills>\n")
+	for _, skill := range visible {
+		b.WriteString("  <skill>\n")
+		b.WriteString(fmt.Sprintf("    <name>%s</name>\n", skill.Name))
+		b.WriteString(fmt.Sprintf("    <description>%s</description>\n", skill.Description))
+		b.WriteString(fmt.Sprintf("    <location>%s</location>\n", skill.Location))
+		b.WriteString("  </skill>\n")
 	}
-	b.WriteString("</skills>")
+	b.WriteString("</available_skills>")
 	return b.String()
 }
 
-// SkillsForPromptMatched returns only skills whose trigger keywords match the message.
-// Falls back to all skills if nothing matches (so skills without triggers still work).
-// Output is capped at maxTokens characters (~500 tokens ≈ 2000 chars).
-func (l *SkillLoader) SkillsForPromptMatched(message string) string {
-	if len(l.skills) == 0 {
+// ReadSkill loads the full instructions for a skill by name.
+// Returns the markdown body, or empty string if not found.
+func (s *SkillStore) ReadSkill(name string) string {
+	skill := s.byName[name]
+	if skill == nil {
 		return ""
 	}
-
-	// Match skills by trigger keywords
-	var selected []Skill
-	for _, s := range l.skills {
-		if s.Trigger == "" {
-			continue // skip triggerless skills — they're always available in SKILL.md files
-		}
-		msgLower := strings.ToLower(message)
-		keywords := strings.Fields(s.Trigger)
-		for _, kw := range keywords {
-			if strings.Contains(msgLower, strings.ToLower(kw)) {
-				selected = append(selected, s)
-				break
-			}
-		}
-	}
-
-	// If nothing matched, return empty — the model can discover SKILL.md files via file_read
-	if len(selected) == 0 {
-		return ""
-	}
-
-	// Format with token cap (~4 chars per token, max 500 tokens = 2000 chars)
-	const maxChars = 2000
-	var b strings.Builder
-	b.WriteString("<skills>\n")
-	for _, s := range selected {
-		entry := fmt.Sprintf("<skill name=\"%s\">\n%s\n</skill>\n", s.Name, s.Instructions)
-		if b.Len()+len(entry) > maxChars {
-			break // cap reached
-		}
-		b.WriteString(entry)
-	}
-	b.WriteString("</skills>")
-	return b.String()
-}
-
-// parseSkillFile parses a SKILL.md file with YAML frontmatter.
-// Format:
-//
-//	---
-//	name: commit
-//	description: Create a git commit
-//	trigger: commit check in
-//	---
-//	Instructions in markdown...
-func parseSkillFile(path string) (*Skill, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(skill.Location)
 	if err != nil {
-		return nil, err
+		return ""
 	}
-
 	content := string(data)
 
-	// Parse frontmatter
-	name := ""
-	description := ""
-	trigger := ""
-	instructions := content
-
-	if strings.HasPrefix(content, "---") {
-		parts := strings.SplitN(content, "---", 3)
-		if len(parts) >= 3 {
-			frontmatter := parts[1]
-			instructions = strings.TrimSpace(parts[2])
-
-			// Parse simple YAML key: value pairs
-			for _, line := range strings.Split(frontmatter, "\n") {
-				line = strings.TrimSpace(line)
-				if line == "" {
-					continue
-				}
-				key, value, found := strings.Cut(line, ":")
-				if !found {
-					continue
-				}
-				key = strings.TrimSpace(key)
-				value = strings.TrimSpace(value)
-				switch key {
-				case "name":
-					name = value
-				case "description":
-					description = value
-				case "trigger":
-					trigger = value
-				}
+	// Strip frontmatter to return just the instructions
+	if strings.HasPrefix(content, "---\n") {
+		rest := content[4:]
+		endIdx := strings.Index(rest, "\n---")
+		if endIdx >= 0 {
+			bodyStart := endIdx + 4
+			if bodyStart < len(rest) {
+				return strings.TrimSpace(rest[bodyStart:])
 			}
 		}
 	}
+	return strings.TrimSpace(content)
+}
 
-	// Default name from directory or file name
-	if name == "" {
-		if strings.HasSuffix(filepath.Base(path), ".skill.md") {
-			name = strings.TrimSuffix(filepath.Base(path), ".skill.md")
-		} else {
-			name = filepath.Base(filepath.Dir(path))
+// ── Standard discovery paths ──────────────────────────────────────────────────
+
+// StandardSkillDirs returns the standard set of directories to discover skills from,
+// following pi-mono conventions. Args:
+//   projectDir — the project root
+//   userHome   — the user's home directory (usually os.UserHomeDir())
+func StandardSkillDirs(projectDir, userHome string) []string {
+	var dirs []string
+
+	// 1. Project: .pux/skills/
+	if projectDir != "" {
+		dirs = append(dirs, filepath.Join(projectDir, ".pux", "skills"))
+	}
+
+	// 2. Project: .agents/skills/ (standard Agent Skills convention)
+	if projectDir != "" {
+		dirs = append(dirs, filepath.Join(projectDir, ".agents", "skills"))
+	}
+
+	// 3. Walk ancestor directories for .agents/skills/ (stop at git root or filesystem root)
+	if projectDir != "" {
+		dir := projectDir
+		for {
+			dirs = append(dirs, filepath.Join(dir, ".agents", "skills"))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break // filesystem root
+			}
+			// Stop at git root
+			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+				break
+			}
+			dir = parent
 		}
 	}
 
-	return &Skill{
-		Name:         name,
-		Description:  description,
-		Trigger:      trigger,
-		Instructions: instructions,
-		SourcePath:   path,
-	}, nil
+	// 4. User: ~/.pux/skills/
+	if userHome != "" {
+		dirs = append(dirs, filepath.Join(userHome, ".pux", "skills"))
+	}
+
+	// 5. User: ~/.agents/skills/
+	if userHome != "" {
+		dirs = append(dirs, filepath.Join(userHome, ".agents", "skills"))
+	}
+
+	return dirs
+}
+
+// LoadStandardSkills creates a SkillStore loaded from standard discovery paths.
+func LoadStandardSkills(projectDir, userHome string) *SkillStore {
+	store := NewSkillStore()
+	dirs := StandardSkillDirs(projectDir, userHome)
+	store.LoadFromDirs(dirs)
+	return store
 }
