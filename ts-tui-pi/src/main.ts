@@ -1,36 +1,79 @@
 #!/usr/bin/env bun
 // pux-tui — pi-mono TUI powered by pux Go backend
 
-import { TUI, ProcessTerminal, Text, Spacer } from "./tui/index.js";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { InteractiveMode } from "./modes/interactive/interactive-mode.js";
+import { AgentSessionRuntime } from "./core/agent-session-runtime.js";
+import { SessionManager } from "./core/session-manager.js";
+import { SettingsManager } from "./core/settings-manager.js";
+import { PuxAgentSession } from "./core/pux-agent-session.js";
+import { initTheme } from "./modes/interactive/theme/theme.js";
 import { parseArgs } from "node:util";
 
 const { values: opts } = parseArgs({
   options: {
     server: { type: "string", default: "http://localhost:3847" },
     project: { type: "string", default: "default" },
+    model: { type: "string", default: "qwen" },
+    cwd: { type: "string", default: process.cwd() },
   },
 });
 
-// Initialize TUI
-const terminal = new ProcessTerminal();
-const tui = new TUI(terminal, false);
+const cwd = opts.cwd!;
+const agentDir = join(homedir(), ".pux");
 
-// Build UI: simple vertical container
-const header = new Text(`pux-tui  server: ${opts.server}  project: ${opts.project}`);
-tui.addChild(header);
-tui.addChild(new Spacer());
-tui.addChild(new Text("SSE backend connected. Type to begin."));
+// Create SettingsManager (reads settings from ~/.pux/settings.json)
+const settingsManager = SettingsManager.create(cwd, agentDir);
 
-tui.start();
+// Create SessionManager (in-memory for now, no persistence between runs)
+const sessionManager = SessionManager.inMemory(cwd);
 
-// Handle input via process.stdin directly
-process.stdin.on("data", (data: Buffer) => {
-  const s = data.toString();
-  if (s === "\x03" || s === "\x04") {
-    tui.stop();
-    process.exit(0);
-  }
+// Create our PuxAgentSession — bridges to Go SSE backend
+const session = new PuxAgentSession(
+  settingsManager,
+  sessionManager,
+  opts.server!,
+  opts.project!,
+  opts.model!,
+);
+
+// Create AgentSessionServices (minimal duck-typed object)
+const services = {
+  cwd,
+  agentDir,
+  settingsManager,
+  sessionManager,
+  modelRegistry: null as any,
+  resourceLoader: {
+    getExtensions: () => ({ extensions: [], diagnostics: [] }),
+    getSkills: () => [],
+    getPrompts: () => [],
+    getThemes: () => ({ themes: [] }),
+    reload: async () => {},
+  } as any,
+  authStorage: null as any,
+  extensionFlags: new Map(),
+};
+
+// Create a no-op CreateAgentSessionRuntimeFactory
+const createRuntime: any = async () => ({
+  session,
+  services,
+  extensionsResult: { extensions: [], diagnostics: [] },
+  diagnostics: [],
 });
 
-// Keep alive
-setInterval(() => {}, 1000);
+// Create AgentSessionRuntime (wrapper expected by InteractiveMode)
+const runtime = new AgentSessionRuntime(session, services as any, createRuntime, []);
+
+// Initialize theme
+initTheme("dark", true);
+
+// Create InteractiveMode
+const interactiveMode = new InteractiveMode(runtime, {
+  verbose: false,
+});
+
+// Initialize and start
+await interactiveMode.init();
