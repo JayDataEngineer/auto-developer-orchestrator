@@ -247,6 +247,7 @@ export class PuxAgentSession {
           if (t === "") currentEvent = "";
         }
       }
+      console.error("[pux] SSE stream ended, events:", eventCount);
     } catch (err: any) {
       if (err.name !== "AbortError") {
         const errMsg = mkAssistant({
@@ -388,7 +389,9 @@ export class PuxAgentSession {
 
   private emit(event: AgentSessionEvent): void {
     for (const l of this.listeners) {
-      try { l(event); } catch {}
+      try { l(event); } catch (e) {
+        // silently ignore handler errors
+      }
     }
   }
 
