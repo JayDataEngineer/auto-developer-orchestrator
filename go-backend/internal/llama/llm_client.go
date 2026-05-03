@@ -65,7 +65,7 @@ func NewLLMClient(cfg LLMClientConfig) *LLMClient {
 	return &LLMClient{
 		baseURL:   cfg.BaseURL,
 		apiKey:    cfg.APIKey,
-		client:    &http.Client{Timeout: 120 * time.Second},
+		client:    &http.Client{Timeout: 5 * time.Minute},
 		logger:    cfg.Logger,
 		modelName: cfg.ModelName,
 	}

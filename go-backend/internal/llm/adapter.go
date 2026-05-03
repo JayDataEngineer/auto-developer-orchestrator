@@ -11,22 +11,20 @@ import (
 )
 
 // Adapter bridges llama.LLMClient (old ChatProvider) to core.LLMProvider.
-// Maintains a persistent old-style Session for KV cache warmth.
+// Maintains a persistent session for KV cache warmth on local llama-server.
 type Adapter struct {
-	engine        *llama.LLMClient
-	ctxSize       int
-	mu            sync.Mutex
-	session       *llama.Session
-	tools         []llama.OpenAITool
-	isNewSession  bool
+	engine  *llama.LLMClient
+	ctxSize int
+	mu      sync.Mutex
+	session *llama.Session
+	tools   []llama.OpenAITool
 }
 
 // NewAdapter creates an adapter wrapping an LLMClient.
 func NewAdapter(engine *llama.LLMClient, ctxSize int) *Adapter {
 	return &Adapter{
-		engine:       engine,
-		ctxSize:      ctxSize,
-		isNewSession: true,
+		engine:  engine,
+		ctxSize: ctxSize,
 	}
 }
 
@@ -54,7 +52,7 @@ func (a *Adapter) StreamChat(ctx context.Context, messages []core.Message, tools
 		TopK:        opts.TopK,
 	}
 
-	// Create or reuse session
+	// Create session if needed
 	if a.session == nil {
 		sess, err := a.engine.NewSession(a.ctxSize)
 		if err != nil {
@@ -62,103 +60,45 @@ func (a *Adapter) StreamChat(ctx context.Context, messages []core.Message, tools
 		}
 		a.session = sess
 		a.tools = llamaTools
-		a.isNewSession = true
 	}
 
-	if a.isNewSession {
-		// Find system prompt and user message
-		var system string
-		var userMessages []string
-		for _, m := range messages {
-			if m.Role == "system" {
-				system = m.Content
-			} else if m.Role == "user" {
-				userMessages = append(userMessages, m.Content)
+	// Convert all core messages to llama messages.
+	// This ensures the session always has the exact same view as the core session,
+	// including after compaction or any other modification.
+	llamaMsgs := make([]llama.Message, 0, len(messages))
+	for _, m := range messages {
+		lm := llama.Message{
+			Role:    m.Role,
+			Content: m.Content,
+		}
+		if m.ToolCallID != "" {
+			lm.ToolCallID = m.ToolCallID
+		}
+		if m.Name != "" {
+			lm.Name = m.Name
+		}
+		if len(m.ToolCalls) > 0 {
+			for _, tc := range m.ToolCalls {
+				lm.ToolCalls = append(lm.ToolCalls, llama.ToolCallResponse{
+					ID:   tc.ID,
+					Type: tc.Type,
+					Function: llama.FunctionCallData{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
+					},
+				})
 			}
 		}
-		userMsg := ""
-		if len(userMessages) > 0 {
-			userMsg = userMessages[len(userMessages)-1]
-		}
-
-		ch, err := a.session.ChatWithTools(system, userMsg, llamaTools, llamaOpts)
-		if err != nil {
-			a.session.Close()
-			a.session = nil
-			return nil, fmt.Errorf("adapter: chat failed: %w", err)
-		}
-		a.isNewSession = false
-		return convertEvents(ch), nil
+		llamaMsgs = append(llamaMsgs, lm)
 	}
 
-	// Continuation — find NEW messages since last call.
-	// The session already has all prior messages from previous calls.
-	// We only need to send the latest tool results (after the last assistant message).
-	// Tool results: send via FeedToolResults
-	// User messages: send via FeedUserMessage
+	// Always set messages from core and trigger generation.
+	// For cloud providers this is required (no KV cache).
+	// For local llama-server, the session_id still enables KV cache reuse.
+	a.session.SetMessages(llamaMsgs)
+	a.session.SetTools(llamaTools)
+	ch := a.session.GenerateStream(llamaOpts)
 
-	if len(messages) > 0 {
-		lastRole := messages[len(messages)-1].Role
-
-		if lastRole == "user" {
-			userMsg := messages[len(messages)-1].Content
-			ch, err := a.session.FeedUserMessage(userMsg, llamaOpts)
-			if err != nil {
-				a.session.Close()
-				a.session = nil
-				return nil, fmt.Errorf("adapter: feed user failed: %w", err)
-			}
-			return convertEvents(ch), nil
-		}
-
-		// Find the LAST assistant message with tool calls — we only need
-		// tool results that follow it (i.e. the current round's results).
-		lastAssistantIdx := -1
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == "assistant" && len(messages[i].ToolCalls) > 0 {
-				lastAssistantIdx = i
-				break
-			}
-		}
-
-		if lastAssistantIdx >= 0 {
-			// Collect only tool results after the last assistant message
-			var toolResults []llama.ToolResult
-			var goalNudge string
-			for i := lastAssistantIdx + 1; i < len(messages); i++ {
-				m := messages[i]
-				if m.Role == "tool" {
-					toolResults = append(toolResults, llama.ToolResult{
-						ToolCallID: m.ToolCallID,
-						ToolName:   m.Name,
-						Content:    m.Content,
-					})
-				} else if m.Role == "user" {
-					goalNudge = m.Content
-				}
-			}
-
-			if len(toolResults) > 0 {
-				// assistantMsg is unused by FeedToolResults but kept for API compat
-				var assistantMsg llama.Message
-				ch, err := a.session.FeedToolResults(assistantMsg, toolResults, goalNudge, llamaOpts)
-				if err != nil {
-					a.session.Close()
-					a.session = nil
-					return nil, fmt.Errorf("adapter: feed tool results failed: %w", err)
-				}
-				return convertEvents(ch), nil
-			}
-		}
-	}
-
-	// Fallback: empty user message (shouldn't happen)
-	ch, err := a.session.FeedUserMessage("", llamaOpts)
-	if err != nil {
-		a.session.Close()
-		a.session = nil
-		return nil, err
-	}
 	return convertEvents(ch), nil
 }
 
@@ -177,7 +117,6 @@ func (a *Adapter) Close() {
 		a.session.Close()
 		a.session = nil
 	}
-	a.isNewSession = true
 }
 
 func (a *Adapter) Reset() {

@@ -92,6 +92,12 @@ func (s *Session) FeedUserMessage(userMsg string, opts GenerateOptions) (<-chan 
 	return s.generateChatStream(opts), nil
 }
 
+// GenerateStream runs the model using the session's current messages and tools.
+// Exported for use by the adapter when rebuilding after compaction.
+func (s *Session) GenerateStream(opts GenerateOptions) <-chan ChatEvent {
+	return s.generateChatStream(opts)
+}
+
 // generateChatStream runs the model via /v1/chat/completions and returns a channel of ChatEvents.
 func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 	ch := make(chan ChatEvent, 256)
