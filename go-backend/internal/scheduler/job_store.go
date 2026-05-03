@@ -12,12 +12,13 @@ import (
 
 // CreateJobFromManifest creates a cron job from a pux.yaml schedule entry.
 // This implements the ScheduleRegisterer interface used by ProjectHandler.
-func (s *Scheduler) CreateJobFromManifest(project, name, cronExpr, promptText, description string) (string, error) {
+func (s *Scheduler) CreateJobFromManifest(project, name, cronExpr, promptText, description, model string) (string, error) {
 	job := &Job{
 		Name:        name,
 		Description: description,
 		Project:     project,
 		Message:     promptText,
+		Model:       model,
 		Schedule:    ScheduleCron,
 		CronExpr:    cronExpr,
 		Enabled:     true,
@@ -216,6 +217,19 @@ func (s *Scheduler) FindJobByWebhookToken(token string) (*Job, error) {
 		}
 	}
 	return nil, fmt.Errorf("no job found for webhook token")
+}
+
+// FindJobByProjectAndName finds a job by its project and name.
+// Returns the job ID or empty string if not found. Used for idempotent re-registration.
+func (s *Scheduler) FindJobByProjectAndName(project, name string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, j := range s.jobs {
+		if j.Project == project && j.Name == name {
+			return j.ID
+		}
+	}
+	return ""
 }
 
 // ListExecutions returns recent executions, optionally filtered by jobID.

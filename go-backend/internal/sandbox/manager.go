@@ -3,10 +3,12 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -434,7 +436,76 @@ func (m *Manager) ExecInSandbox(ctx context.Context, id string, cmd []string) (s
 	return output, nil
 }
 
-// GetSandbox returns a sandbox by ID
+// CopyToSandbox uploads a local file into a sandbox container at the given path.
+// Uses the base64 echo pipe pattern to safely transfer data through Docker exec.
+func (m *Manager) CopyToSandbox(ctx context.Context, sandboxID, localPath, sandboxPath string) error {
+	data, err := os.ReadFile(localPath)
+	if err != nil {
+		return fmt.Errorf("read local file %s: %w", localPath, err)
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(data)
+	cmd := fmt.Sprintf("mkdir -p '%s' && echo '%s' | base64 -d > '%s'",
+		ShellEscape(filepath.Dir(sandboxPath)), encoded, ShellEscape(sandboxPath))
+
+	if _, err := m.ExecInSandbox(ctx, sandboxID, []string{"bash", "-c", cmd}); err != nil {
+		return fmt.Errorf("copy to sandbox failed: %w", err)
+	}
+	return nil
+}
+
+// PipInstall runs pip install for the given packages in a sandbox.
+// Uses --break-system-packages for Debian-based OpenShell images.
+func (m *Manager) PipInstall(ctx context.Context, sandboxID string, packages []string) error {
+	if len(packages) == 0 {
+		return nil
+	}
+
+	// Try pip3 first, fall back to pip
+	args := "pip3 install --break-system-packages " + strings.Join(packages, " ") +
+		" 2>/dev/null || pip install --break-system-packages " + strings.Join(packages, " ")
+
+	if _, err := m.ExecInSandbox(ctx, sandboxID, []string{"bash", "-c", args}); err != nil {
+		return fmt.Errorf("pip install failed: %w", err)
+	}
+	return nil
+}
+
+// WriteEnvFile writes environment variables as a .env file in the sandbox.
+// Values with ${VAR} syntax are resolved from the host environment.
+func (m *Manager) WriteEnvFile(ctx context.Context, sandboxID string, envVars map[string]string) error {
+	if len(envVars) == 0 {
+		return nil
+	}
+
+	var buf strings.Builder
+	for key, value := range envVars {
+		// Resolve ${VAR} references from host environment
+		resolved := envVarRegex.ReplaceAllStringFunc(value, func(match string) string {
+			varName := match[2 : len(match)-1] // strip ${ and }
+			if v := os.Getenv(varName); v != "" {
+				return v
+			}
+			return match // leave unresolved
+		})
+		buf.WriteString(key)
+		buf.WriteByte('=')
+		buf.WriteString(resolved)
+		buf.WriteByte('\n')
+	}
+
+	encoded := base64.StdEncoding.EncodeToString([]byte(buf.String()))
+	cmd := fmt.Sprintf("echo '%s' | base64 -d > /sandbox/.env", encoded)
+
+	if _, err := m.ExecInSandbox(ctx, sandboxID, []string{"bash", "-c", cmd}); err != nil {
+		return fmt.Errorf("write .env failed: %w", err)
+	}
+	return nil
+}
+
+// envVarRegex matches ${VAR_NAME} patterns in env var values.
+var envVarRegex = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
+
 // FindSandboxByProject finds a sandbox by project path basename or project path.
 // Returns the first running sandbox whose ProjectPath ends with name, or whose ID matches name.
 func (m *Manager) FindSandboxByProject(name string) *Sandbox {

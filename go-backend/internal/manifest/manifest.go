@@ -51,7 +51,9 @@ type ScheduleDef struct {
 
 // SandboxConfig describes sandbox initialization requirements.
 type SandboxConfig struct {
-	InitFiles []string `yaml:"init_files" json:"init_files,omitempty"`
+	InitFiles   []string          `yaml:"init_files" json:"init_files,omitempty"`
+	PipPackages []string          `yaml:"pip_packages" json:"pip_packages,omitempty"`
+	Env         map[string]string `yaml:"env" json:"env,omitempty"`
 }
 
 // CommandDef describes a named CLI/TUI operation the app exposes.

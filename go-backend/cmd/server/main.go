@@ -364,6 +364,26 @@ func main() {
 		}
 	}
 
+	// Wire sandbox initializer for manifest sandbox auto-setup (files, pip, env)
+	sandboxIniter := handlers.NewSandboxInitializer(sandboxMgr, logger)
+	projectHandler.SetSandboxInitializer(sandboxIniter)
+
+	// Re-initialize sandboxes for existing projects that have sandbox config
+	if projects, err := db.GetCustomProjects(context.Background()); err == nil {
+		for _, p := range projects {
+			if mf, err := manifest.LoadManifest(p.Path); err == nil && mf != nil && mf.Sandbox != nil {
+				result := sandboxIniter.InitIfSandboxExists(context.Background(), p.Name, mf.Sandbox, p.Path)
+				if !result.SandboxNotFound {
+					logger.Info("Re-initialized sandbox from manifest on startup",
+						zap.String("project", p.Name),
+						zap.Int("files", result.FilesUploaded),
+						zap.Int("pip", result.PipPackagesInstalled),
+					)
+				}
+			}
+		}
+	}
+
 	// Artifacts handler (plans, todos, notes from agents)
 	artifactHandler := handlers.NewArtifactHandler(db, logger)
 

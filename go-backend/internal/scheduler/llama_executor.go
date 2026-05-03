@@ -9,6 +9,7 @@ import (
 	"time"
 
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
+	"github.com/auto-developer-orchestrator/backend/internal/manifest"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"go.uber.org/zap"
@@ -67,6 +68,9 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 	var skills *llamaeng.SkillStore
 	var baseExecutor llamaeng.ToolExecutor
 	if e.sandboxMgr != nil {
+		// Auto-initialize sandbox from manifest if needed (pip, files, env)
+		e.initSandboxFromManifest(ctx, projectPath, sandboxID)
+
 		skills = llamaeng.LoadStandardSkills(projectPath, "")
 		baseExecutor = &llamaeng.SandboxToolExecutor{
 			SandboxID: sandboxID,
@@ -163,4 +167,54 @@ func (e *LlamaExecutor) resolveProjectPath(project string) string {
 		return project
 	}
 	return ""
+}
+
+// initSandboxFromManifest checks if the project has a pux.yaml with sandbox config
+// and auto-initializes the sandbox (upload files, pip install, write .env).
+// This is idempotent — safe to call multiple times.
+func (e *LlamaExecutor) initSandboxFromManifest(ctx context.Context, projectPath, sandboxID string) {
+	if e.sandboxMgr == nil || projectPath == "" {
+		return
+	}
+
+	mf, err := manifest.LoadManifest(projectPath)
+	if err != nil || mf == nil || mf.Sandbox == nil {
+		return
+	}
+
+	sb := e.sandboxMgr.FindSandboxByProject(sandboxID)
+	if sb == nil {
+		return
+	}
+
+	cfg := mf.Sandbox
+	initCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	// Upload init files
+	for _, relPath := range cfg.InitFiles {
+		localPath := filepath.Join(projectPath, relPath)
+		sandboxPath := filepath.Join("/sandbox", filepath.Base(relPath))
+		if err := e.sandboxMgr.CopyToSandbox(initCtx, sb.ID, localPath, sandboxPath); err != nil {
+			e.logger.Warn("auto-init: failed to upload file",
+				zap.String("file", relPath), zap.Error(err))
+		}
+	}
+
+	// Install pip packages
+	if len(cfg.PipPackages) > 0 {
+		if err := e.sandboxMgr.PipInstall(initCtx, sb.ID, cfg.PipPackages); err != nil {
+			e.logger.Warn("auto-init: pip install failed", zap.Error(err))
+		} else {
+			e.logger.Info("auto-init: pip packages installed",
+				zap.Strings("packages", cfg.PipPackages))
+		}
+	}
+
+	// Write .env file
+	if len(cfg.Env) > 0 {
+		if err := e.sandboxMgr.WriteEnvFile(initCtx, sb.ID, cfg.Env); err != nil {
+			e.logger.Warn("auto-init: write .env failed", zap.Error(err))
+		}
+	}
 }

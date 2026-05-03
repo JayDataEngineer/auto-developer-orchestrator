@@ -12,6 +12,8 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/manifest"
+	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
+	"github.com/auto-developer-orchestrator/backend/internal/scheduler"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"go.uber.org/zap"
 )
@@ -23,12 +25,15 @@ type ProjectHandler struct {
 	git       *git.GitOps
 	scheduler ScheduleRegisterer // optional: for auto-registering manifest schedules
 	toolReg   ToolRegisterer     // optional: for auto-registering manifest tools
+	sandboxIn SandboxInitializer // optional: for auto-initializing sandboxes from manifest
 }
 
 // ScheduleRegisterer is implemented by *scheduler.Scheduler to auto-register
 // schedule entries from a project manifest.
 type ScheduleRegisterer interface {
-	CreateJobFromManifest(project, name, cronExpr, promptText, description string) (string, error)
+	CreateJobFromManifest(project, name, cronExpr, promptText, description, model string) (string, error)
+	FindJobByProjectAndName(project, name string) string
+	UpdateJob(jobID string, updates *scheduler.Job) error
 }
 
 // ToolRegisterer is implemented by the llama engine to auto-register
@@ -36,6 +41,97 @@ type ScheduleRegisterer interface {
 type ToolRegisterer interface {
 	RegisterFromManifest(projectName, projectDir string, tools []manifest.ToolDef) []string
 	UnregisterFromManifest(projectName string)
+}
+
+// SandboxInitializer initializes sandbox containers from manifest declarations.
+type SandboxInitializer interface {
+	InitFromManifest(ctx context.Context, projectName string, sandboxCfg *manifest.SandboxConfig, projectDir string) *SandboxInitResult
+	InitIfSandboxExists(ctx context.Context, projectName string, sandboxCfg *manifest.SandboxConfig, projectDir string) *SandboxInitResult
+}
+
+// SandboxInitResult describes the outcome of sandbox initialization.
+type SandboxInitResult struct {
+	FilesUploaded         int      `json:"files_uploaded"`
+	PipPackagesInstalled  int      `json:"pip_packages_installed"`
+	EnvVarsWritten        int      `json:"env_vars_written"`
+	Errors                []string `json:"errors,omitempty"`
+	SandboxNotFound       bool     `json:"sandbox_not_found,omitempty"`
+}
+
+// sandboxInit is the concrete implementation of SandboxInitializer.
+type sandboxInit struct {
+	manager *sandbox.Manager
+	logger  *zap.Logger
+}
+
+// NewSandboxInitializer creates a new SandboxInitializer.
+func NewSandboxInitializer(manager *sandbox.Manager, logger *zap.Logger) SandboxInitializer {
+	return &sandboxInit{manager: manager, logger: logger}
+}
+
+// InitFromManifest runs full sandbox initialization (files, pip, env) for a project.
+// If no sandbox exists, returns a result with SandboxNotFound=true.
+func (si *sandboxInit) InitFromManifest(ctx context.Context, projectName string, sandboxCfg *manifest.SandboxConfig, projectDir string) *SandboxInitResult {
+	result := &SandboxInitResult{}
+
+	sb := si.manager.FindSandboxByProject(projectName)
+	if sb == nil {
+		result.SandboxNotFound = true
+		return result
+	}
+
+	return si.runInit(ctx, sb.ID, sandboxCfg, projectDir)
+}
+
+// InitIfSandboxExists runs init only if a sandbox already exists for the project.
+func (si *sandboxInit) InitIfSandboxExists(ctx context.Context, projectName string, sandboxCfg *manifest.SandboxConfig, projectDir string) *SandboxInitResult {
+	sb := si.manager.FindSandboxByProject(projectName)
+	if sb == nil {
+		return &SandboxInitResult{SandboxNotFound: true}
+	}
+	return si.runInit(ctx, sb.ID, sandboxCfg, projectDir)
+}
+
+func (si *sandboxInit) runInit(ctx context.Context, sandboxID string, sandboxCfg *manifest.SandboxConfig, projectDir string) *SandboxInitResult {
+	result := &SandboxInitResult{}
+
+	// Upload init_files
+	for _, relPath := range sandboxCfg.InitFiles {
+		localPath := filepath.Join(projectDir, relPath)
+		sandboxPath := filepath.Join("/sandbox", filepath.Base(relPath))
+		if err := si.manager.CopyToSandbox(ctx, sandboxID, localPath, sandboxPath); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("upload %s: %v", relPath, err))
+			continue
+		}
+		result.FilesUploaded++
+	}
+
+	// Install pip packages
+	if len(sandboxCfg.PipPackages) > 0 {
+		if err := si.manager.PipInstall(ctx, sandboxID, sandboxCfg.PipPackages); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("pip install: %v", err))
+		} else {
+			result.PipPackagesInstalled = len(sandboxCfg.PipPackages)
+		}
+	}
+
+	// Write .env file
+	if len(sandboxCfg.Env) > 0 {
+		if err := si.manager.WriteEnvFile(ctx, sandboxID, sandboxCfg.Env); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("write .env: %v", err))
+		} else {
+			result.EnvVarsWritten = len(sandboxCfg.Env)
+		}
+	}
+
+	si.logger.Info("sandbox initialized from manifest",
+		zap.String("sandbox_id", sandboxID),
+		zap.Int("files_uploaded", result.FilesUploaded),
+		zap.Int("pip_installed", result.PipPackagesInstalled),
+		zap.Int("env_vars", result.EnvVarsWritten),
+		zap.Int("errors", len(result.Errors)),
+	)
+	return result
 }
 
 // NewProjectHandler creates a new ProjectHandler
@@ -55,6 +151,11 @@ func (h *ProjectHandler) SetScheduler(s ScheduleRegisterer) {
 // SetToolRegisterer sets the tool registerer for auto-registering manifest tools.
 func (h *ProjectHandler) SetToolRegisterer(tr ToolRegisterer) {
 	h.toolReg = tr
+}
+
+// SetSandboxInitializer sets the sandbox initializer for auto-initializing sandboxes.
+func (h *ProjectHandler) SetSandboxInitializer(si SandboxInitializer) {
+	h.sandboxIn = si
 }
 
 // List returns all projects (default + custom)
@@ -204,15 +305,37 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 			registered := []string{}
 			for schedName, schedDef := range mf.Schedule {
 				promptText, _ := mf.ResolvePrompt(req.Path, schedDef.Prompt)
-				jobID, schedErr := h.scheduler.CreateJobFromManifest(
-					req.Name, schedName, schedDef.Cron, promptText, schedDef.Description,
-				)
-				if schedErr != nil {
-					h.logger.Warn("Failed to register schedule",
-						zap.String("schedule", schedName), zap.Error(schedErr))
-					continue
+
+				// Idempotent: update existing job if one with same project+name exists
+				existingID := h.scheduler.FindJobByProjectAndName(req.Name, schedName)
+				if existingID != "" {
+					updErr := h.scheduler.UpdateJob(existingID, &scheduler.Job{
+						Name:        schedName,
+						Description: schedDef.Description,
+						Project:     req.Name,
+						Message:     promptText,
+						Model:       schedDef.Model,
+						Schedule:    scheduler.ScheduleCron,
+						CronExpr:    schedDef.Cron,
+						Enabled:     true,
+					})
+					if updErr != nil {
+						h.logger.Warn("Failed to update existing schedule",
+							zap.String("schedule", schedName), zap.Error(updErr))
+						continue
+					}
+					registered = append(registered, fmt.Sprintf("%s (%s) → job %s [updated]", schedName, schedDef.Cron, existingID))
+				} else {
+					jobID, schedErr := h.scheduler.CreateJobFromManifest(
+						req.Name, schedName, schedDef.Cron, promptText, schedDef.Description, schedDef.Model,
+					)
+					if schedErr != nil {
+						h.logger.Warn("Failed to register schedule",
+							zap.String("schedule", schedName), zap.Error(schedErr))
+						continue
+					}
+					registered = append(registered, fmt.Sprintf("%s (%s) → job %s", schedName, schedDef.Cron, jobID))
 				}
-				registered = append(registered, fmt.Sprintf("%s (%s) → job %s", schedName, schedDef.Cron, jobID))
 			}
 			resp["registered_schedules"] = registered
 		}
@@ -221,6 +344,18 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 		if h.toolReg != nil && len(mf.Tools) > 0 {
 			registered := h.toolReg.RegisterFromManifest(req.Name, req.Path, mf.Tools)
 			resp["registered_tools"] = registered
+		}
+
+		// Auto-initialize sandbox from manifest (files, pip, env)
+		if h.sandboxIn != nil && mf.Sandbox != nil {
+			initCtx, initCancel := context.WithTimeout(r.Context(), 120*time.Second)
+			defer initCancel()
+			initResult := h.sandboxIn.InitFromManifest(initCtx, req.Name, mf.Sandbox, req.Path)
+			if initResult.SandboxNotFound {
+				resp["sandbox_init"] = "deferred (no sandbox yet — will init on first session)"
+			} else {
+				resp["sandbox_init"] = initResult
+			}
 		}
 	}
 
