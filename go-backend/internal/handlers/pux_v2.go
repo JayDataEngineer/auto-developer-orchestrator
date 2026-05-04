@@ -14,6 +14,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	llama "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/llm"
+	"github.com/auto-developer-orchestrator/backend/internal/observability"
 	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"go.uber.org/zap"
@@ -72,6 +73,28 @@ func (h *PuxHandler) promptWithOrchestratorV2(w http.ResponseWriter, r *http.Req
 		ApprovalHandler: approvalHandler,
 		GitExecutor:     &adapters.GitExecutor{Git: h.git, RepoDir: projectPath},
 	}
+
+	// Wire add-on hooks (Langfuse tracing, etc.)
+	var extraHooks []core.LoopHook
+	if h.langfuse != nil && h.langfuse.Enabled() {
+		modelName := ""
+		if engine != nil {
+			modelName = engine.ModelName()
+		}
+		traceCfg := observability.TraceConfig{
+			UserID:    req.AgentId,
+			Project:   req.Project,
+			ModelName: modelName,
+			SandboxID: sandboxID,
+			Message:   truncateStr(req.Message, 200),
+			Tags:      observability.ClassifyTags(req.Message),
+			Release:   h.langfuse.Release(),
+			Env:       h.langfuse.Environment(),
+		}
+		extraHooks = append(extraHooks, observability.NewLangfuseHook(h.langfuse, modelName, traceCfg))
+		h.log.Info("Langfuse tracing hook wired", zap.String("model", modelName), zap.Strings("tags", traceCfg.Tags))
+	}
+	cfg.ExtraHooks = extraHooks
 
 	orch, err := orchestrator.New(provider, cfg)
 	if err != nil {
@@ -187,4 +210,11 @@ func (h *PuxHandler) promptWithOrchestratorV2(w http.ResponseWriter, r *http.Req
 			h.writeLlamaSSE(w, evt, canFlush, flusher)
 		}
 	}
+}
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }

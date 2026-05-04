@@ -5,20 +5,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
 
 // LangfuseClient sends telemetry to a Langfuse instance via its public API.
-// If the LAMFUSE_HOST env var is not set, all methods are no-ops.
+// If LANGFUSE_HOST is not set, all methods are no-ops.
+// Events are buffered and flushed in batches to reduce HTTP overhead.
 type LangfuseClient struct {
 	baseURL    string
 	publicKey  string
 	secretKey  string
 	httpClient *http.Client
+	release    string
+	env        string
 	mu         sync.Mutex
+	buffer     []lfIngestEvent
+	done       chan struct{}
 }
 
 // NewLangfuseClient creates a client using env vars.
@@ -28,16 +36,148 @@ func NewLangfuseClient() *LangfuseClient {
 	if host == "" {
 		return nil // disabled
 	}
-	return &LangfuseClient{
+	c := &LangfuseClient{
 		baseURL:    host + "/api/public",
 		publicKey:  os.Getenv("LANGFUSE_PUBLIC_KEY"),
 		secretKey:  os.Getenv("LANGFUSE_SECRET_KEY"),
 		httpClient: &http.Client{Timeout: 5 * time.Second},
+		done:       make(chan struct{}),
 	}
+
+	// Read release version
+	c.release = os.Getenv("LANGFUSE_RELEASE")
+	if c.release == "" {
+		if out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output(); err == nil {
+			c.release = strings.TrimSpace(string(out))
+		}
+	}
+
+	// Read environment
+	c.env = os.Getenv("LANGFUSE_ENVIRONMENT")
+	if c.env == "" {
+		c.env = "dev"
+	}
+
+	// Background flush every 2 seconds
+	go c.flushLoop()
+
+	return c
 }
 
 // Enabled returns true if Langfuse is configured.
 func (c *LangfuseClient) Enabled() bool { return c != nil }
+
+// Release returns the configured release string.
+func (c *LangfuseClient) Release() string {
+	if c == nil {
+		return ""
+	}
+	return c.release
+}
+
+// Environment returns the configured environment string.
+func (c *LangfuseClient) Environment() string {
+	if c == nil {
+		return ""
+	}
+	return c.env
+}
+
+// Flush sends any buffered events to Langfuse.
+func (c *LangfuseClient) Flush() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	batch := c.buffer
+	c.buffer = nil
+	c.mu.Unlock()
+
+	if len(batch) == 0 {
+		return
+	}
+	c.send(&lfIngest{Batch: batch})
+}
+
+// Close stops the background flush goroutine and flushes remaining events.
+func (c *LangfuseClient) Close() {
+	if c == nil {
+		return
+	}
+	close(c.done)
+	c.Flush()
+}
+
+func (c *LangfuseClient) flushLoop() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			c.Flush()
+		case <-c.done:
+			return
+		}
+	}
+}
+
+func (c *LangfuseClient) enqueue(event lfIngestEvent) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.buffer = append(c.buffer, event)
+	shouldFlush := len(c.buffer) >= 10
+	c.mu.Unlock()
+
+	if shouldFlush {
+		c.Flush()
+	}
+}
+
+// ── TraceConfig ────────────────────────────────────────────────────
+
+// TraceConfig carries request context to the Langfuse hook without
+// changing the core.LoopHook interface.
+type TraceConfig struct {
+	UserID    string   // agentId or project owner
+	SessionID string   // session ID for grouping
+	Project   string   // project name
+	ModelName string   // model name
+	SandboxID string   // sandbox ID
+	Message   string   // user prompt (truncated to 200 chars)
+	Tags      []string // auto-classified tags
+	Release   string   // git commit short hash
+	Env       string   // "dev" or "prod"
+}
+
+// ClassifyTags returns tags based on keywords in the message.
+func ClassifyTags(msg string) []string {
+	lower := strings.ToLower(msg)
+	var tags []string
+	tagRules := []struct {
+		keywords []string
+		tag      string
+	}{
+		{[]string{"browse", "website", "url", "scrape", "search", "navigate", "click", "page"}, "browser"},
+		{[]string{"code", "implement", "fix", "refactor", "build", "debug", "test", "compile"}, "coding"},
+		{[]string{"invest", "stock", "portfolio", "backtest", "signal", "ticker", "market", "price"}, "investing"},
+		{[]string{"file", "read", "write", "edit", "directory", "folder", "glob", "grep"}, "file-ops"},
+		{[]string{"deploy", "docker", "container", "compose", "kubernetes"}, "infra"},
+	}
+	for _, rule := range tagRules {
+		for _, kw := range rule.keywords {
+			if strings.Contains(lower, kw) {
+				tags = append(tags, rule.tag)
+				break
+			}
+		}
+	}
+	if len(tags) == 0 {
+		tags = []string{"general"}
+	}
+	return tags
+}
 
 // ── Trace types ──────────────────────────────────────────────────────
 
@@ -45,7 +185,14 @@ type lfTrace struct {
 	ID        string            `json:"id"`
 	Name      string            `json:"name"`
 	Timestamp string            `json:"timestamp"`
+	UserID    string            `json:"userId,omitempty"`
+	SessionID string            `json:"sessionId,omitempty"`
+	Tags      []string          `json:"tags,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
+	Release   string            `json:"release,omitempty"`
+	Version   string            `json:"version,omitempty"`
+	Input     json.RawMessage   `json:"input,omitempty"`
+	Output    json.RawMessage   `json:"output,omitempty"`
 }
 
 type lfSpan struct {
@@ -82,43 +229,85 @@ type lfIngest struct {
 }
 
 type lfIngestEvent struct {
-	Type string      `json:"type"`
-	Body interface{} `json:"body"`
+	ID        string      `json:"id"`
+	Type      string      `json:"type"`
+	Timestamp string      `json:"timestamp"`
+	Body      interface{} `json:"body"`
 }
 
 // ── Public API ───────────────────────────────────────────────────────
 
 // TraceRun starts a new trace for an agent run and calls the callback
 // with a TraceHandle that can create spans and generations.
-func (c *LangfuseClient) TraceRun(name, sessionID string, fn func(t *TraceHandle)) {
+func (c *LangfuseClient) TraceRun(name string, cfg TraceConfig, fn func(t *TraceHandle)) {
 	if c == nil {
 		return
 	}
 	traceID := fmt.Sprintf("trace-%d", time.Now().UnixNano())
+	now := time.Now().UTC().Format(time.RFC3339)
 	th := &TraceHandle{
-		client:    c,
-		traceID:   traceID,
-		sessionID: sessionID,
+		client:  c,
+		traceID: traceID,
+		cfg:     cfg,
 	}
-	c.send(&lfIngest{Batch: []lfIngestEvent{{
-		Type: "trace-create",
+
+	// Build enriched metadata
+	metadata := map[string]string{}
+	if cfg.Project != "" {
+		metadata["project"] = cfg.Project
+	}
+	if cfg.SandboxID != "" {
+		metadata["sandbox"] = cfg.SandboxID
+	}
+	if cfg.ModelName != "" {
+		metadata["model"] = cfg.ModelName
+	}
+	if cfg.Message != "" {
+		metadata["user_prompt"] = cfg.Message
+	}
+
+	release := cfg.Release
+	if release == "" {
+		release = c.release
+	}
+	env := cfg.Env
+	if env == "" {
+		env = c.env
+	}
+
+	// User input as trace input
+	var input json.RawMessage
+	if cfg.Message != "" {
+		input, _ = json.Marshal(map[string]string{"prompt": cfg.Message})
+	}
+
+	c.enqueue(lfIngestEvent{
+		ID:        fmt.Sprintf("evt-%s-0", traceID),
+		Type:      "trace-create",
+		Timestamp: now,
 		Body: lfTrace{
 			ID:        traceID,
 			Name:      name,
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-			Metadata:  map[string]string{"session": sessionID},
+			Timestamp: now,
+			UserID:    cfg.UserID,
+			SessionID: cfg.SessionID,
+			Tags:      cfg.Tags,
+			Metadata:  metadata,
+			Release:   release,
+			Version:   release,
+			Input:     input,
 		},
-	}}})
+	})
 	fn(th)
 }
 
 // TraceHandle is a builder for spans and generations within a trace.
 type TraceHandle struct {
-	client    *LangfuseClient
-	traceID   string
-	sessionID string
-	counter   int
-	mu        sync.Mutex
+	client  *LangfuseClient
+	traceID string
+	cfg     TraceConfig
+	counter int
+	mu      sync.Mutex
 }
 
 // Span records a span (tool execution, sub-agent, etc.).
@@ -128,15 +317,17 @@ func (th *TraceHandle) Span(name string, start, end time.Time, input, output map
 	}
 	th.mu.Lock()
 	th.counter++
-	id := fmt.Sprintf("%s-span-%d", th.traceID, th.counter)
+	spanID := fmt.Sprintf("%s-span-%d", th.traceID, th.counter)
 	th.mu.Unlock()
 
 	inB, _ := json.Marshal(input)
 	outB, _ := json.Marshal(output)
-	th.client.send(&lfIngest{Batch: []lfIngestEvent{{
-		Type: "span-create",
+	th.client.enqueue(lfIngestEvent{
+		ID:        fmt.Sprintf("evt-%s", spanID),
+		Type:      "span-create",
+		Timestamp: end.UTC().Format(time.RFC3339),
 		Body: lfSpan{
-			ID:        id,
+			ID:        spanID,
 			TraceID:   th.traceID,
 			Name:      name,
 			StartTime: start.UTC().Format(time.RFC3339),
@@ -144,23 +335,25 @@ func (th *TraceHandle) Span(name string, start, end time.Time, input, output map
 			Input:     inB,
 			Output:    outB,
 		},
-	}}})
+	})
 }
 
-// Generation records an LLM generation (prompt → response).
+// Generation records an LLM generation (prompt -> response).
 func (th *TraceHandle) Generation(name, model string, start, end time.Time, inputTokens, outputTokens, totalTokens int) {
 	if th == nil || th.client == nil {
 		return
 	}
 	th.mu.Lock()
 	th.counter++
-	id := fmt.Sprintf("%s-gen-%d", th.traceID, th.counter)
+	genID := fmt.Sprintf("%s-gen-%d", th.traceID, th.counter)
 	th.mu.Unlock()
 
-	th.client.send(&lfIngest{Batch: []lfIngestEvent{{
-		Type: "generation-create",
+	th.client.enqueue(lfIngestEvent{
+		ID:        fmt.Sprintf("evt-%s", genID),
+		Type:      "generation-create",
+		Timestamp: end.UTC().Format(time.RFC3339),
 		Body: lfGeneration{
-			ID:        id,
+			ID:        genID,
 			TraceID:   th.traceID,
 			Name:      name,
 			StartTime: start.UTC().Format(time.RFC3339),
@@ -172,7 +365,7 @@ func (th *TraceHandle) Generation(name, model string, start, end time.Time, inpu
 				Total:  totalTokens,
 			},
 		},
-	}}})
+	})
 }
 
 func (c *LangfuseClient) send(event *lfIngest) {
@@ -183,7 +376,10 @@ func (c *LangfuseClient) send(event *lfIngest) {
 	defer c.mu.Unlock()
 
 	data, _ := json.Marshal(event)
-	req, _ := http.NewRequest("POST", c.baseURL+"/ingestion", bytes.NewReader(data))
+	req, err := http.NewRequest("POST", c.baseURL+"/ingestion", bytes.NewReader(data))
+	if err != nil {
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.SetBasicAuth(c.publicKey, c.secretKey)
 
@@ -192,6 +388,10 @@ func (c *LangfuseClient) send(event *lfIngest) {
 		return
 	}
 	defer resp.Body.Close()
-	// Best-effort — don't block the agent on telemetry failures
-	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		log.Printf("Langfuse ingestion %d: %s", resp.StatusCode, string(body))
+	} else {
+		io.Copy(io.Discard, resp.Body)
+	}
 }

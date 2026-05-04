@@ -40,6 +40,9 @@ type LoopState struct {
 	ConsecutiveFails int
 	TotalInputTokens  int
 	TotalOutputTokens int
+	TurnInputTokens   int
+	TurnOutputTokens  int
+	TurnModel         string
 	StartedAt       time.Time
 }
 

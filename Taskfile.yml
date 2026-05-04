@@ -49,7 +49,7 @@ tasks:
       - cmd: fuser -k {{.GO_PORT}}/tcp 2>/dev/null; fuser -k {{.JS_PORT}}/tcp 2>/dev/null; true
         ignore_error: true
         silent: true
-      - cmd: cd go-backend && PROJECT_ROOT=$(pwd)/.. go run cmd/server/main.go &
+      - cmd: cd go-backend && PROJECT_ROOT=$(pwd)/.. LANGFUSE_HOST=http://localhost:3100 LANGFUSE_PUBLIC_KEY=pk-orch-2026-lf-a1b2c3d4e5f6 LANGFUSE_SECRET_KEY=sk-orch-2026-lf-a1b2c3d4e5f6 go run cmd/server/main.go &
         ignore_error: true
       - cmd: npm run dev -- --port {{.JS_PORT }} &
         ignore_error: true
@@ -90,11 +90,10 @@ tasks:
       - go run ./cmd/cli/ {{.CLI_ARGS}}
 
   chat:
-    desc: Launch the interactive TUI (builds + runs orch)
-    dir: go-backend
+    desc: Launch the interactive TUI (ts-tui-pi via bun)
+    dir: ts-tui-pi
     cmds:
-      - go build -o orch ./cmd/cli/
-      - ./orch {{.CLI_ARGS}}
+      - bun run src/main.ts {{.CLI_ARGS}}
 
   # ── Docker Development ──────────────────────────────────────────────────
   up:
@@ -162,10 +161,12 @@ tasks:
       - go test -v -count=1 ./...
 
   test-cli:
-    desc: Run CLI integration tests
+    desc: Run CLI and TUI tests (Go + TS)
     dir: go-backend
     cmds:
       - go test -v -count=1 ./internal/cli/...
+      - cmd: cd ../ts-tui-pi && bun test
+        ignore_error: true
 
   test-mcp:
     desc: Run MCP client tests
@@ -230,7 +231,11 @@ tasks:
         ignore_error: true
       - cmd: 'echo -n "LiteLLM:  " && (curl -sf http://litellm.local/health > /dev/null && echo "OK" || echo "DOWN (optional)")'
         ignore_error: true
-      - cmd: 'echo -n "Langfuse: " && (curl -sf http://langfuse.local/api/health > /dev/null && echo "OK" || echo "DOWN (optional)")'
+      - cmd: 'echo -n "Langfuse: " && (curl -sf http://langfuse.local/ > /dev/null && echo "OK" || echo "DOWN (optional)")'
+        ignore_error: true
+      - cmd: 'echo -n "Langfuse (standalone): " && (curl -sf http://localhost:3100/ > /dev/null && echo "OK" || echo "DOWN (optional)")'
+        ignore_error: true
+      - cmd: 'echo -n "Evaluator: " && (curl -sf http://localhost:3100/api/public/scores -u "pk-orch-2026-lf-a1b2c3d4e5f6:sk-orch-2026-lf-a1b2c3d4e5f6" > /dev/null && echo "OK" || echo "DOWN")'
         ignore_error: true
 
   # ── llama.cpp Model Server ────────────────────────────────────────────

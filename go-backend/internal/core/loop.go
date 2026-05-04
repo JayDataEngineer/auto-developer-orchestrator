@@ -273,10 +273,15 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 		}
 
 		// Track token usage
+		state.TurnInputTokens = 0
+		state.TurnOutputTokens = 0
 		if lastUsage != nil {
 			state.TotalInputTokens += lastUsage.PromptTokens
 			state.TotalOutputTokens += lastUsage.CompletionTokens
+			state.TurnInputTokens = lastUsage.PromptTokens
+			state.TurnOutputTokens = lastUsage.CompletionTokens
 		}
+		state.TurnModel = l.provider.ModelName()
 
 		// Collect tool calls in index order
 		var toolCalls []ToolCallResponse
