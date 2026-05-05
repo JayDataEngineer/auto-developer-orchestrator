@@ -234,7 +234,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 
 	// Library-mode path: always use orchestrator + ephemeral sub-agents
 	if h.llamaEngine != nil && h.llamaEngine.IsLoaded() {
-		h.promptWithOrchestratorV2(w, r, req, projectPath)
+		h.promptWithOrchestrator(w, r, req, projectPath)
 		return
 	}
 
@@ -243,7 +243,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		h.llamaEngine = eng
 		h.selectedEngines[key] = eng
 		h.log.Info("Bootstrapped cloud engine (no local model)", zap.String("model", eng.ModelName()))
-		h.promptWithOrchestratorV2(w, r, req, projectPath)
+		h.promptWithOrchestrator(w, r, req, projectPath)
 		return
 	}
 

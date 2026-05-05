@@ -20,9 +20,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// promptWithOrchestratorV2 handles prompt requests using the orchestrator agent.
+// promptWithOrchestrator handles prompt requests using the orchestrator agent.
 // This is the default and only path for /api/pux/prompt.
-func (h *PuxHandler) promptWithOrchestratorV2(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
+func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
 	key := compositeAgentKey(projectPath, req.AgentId)
 
 	// Resolve sandbox ID from manager
@@ -98,7 +98,7 @@ func (h *PuxHandler) promptWithOrchestratorV2(w http.ResponseWriter, r *http.Req
 
 	orch, err := orchestrator.New(provider, cfg)
 	if err != nil {
-		h.log.Error("Failed to create orchestrator V2", zap.Error(err))
+		h.log.Error("Failed to create orchestrator", zap.Error(err))
 		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false,
 			"error":   "Failed to create orchestrator: " + err.Error(),
@@ -186,7 +186,7 @@ func (h *PuxHandler) promptWithOrchestratorV2(w http.ResponseWriter, r *http.Req
 				}
 			}
 			if loopErr != nil {
-				h.log.Error("Orchestrator V2 error", zap.Error(loopErr))
+				h.log.Error("Orchestrator error", zap.Error(loopErr))
 			}
 			fmt.Fprintf(w, "data: [DONE]\n\n")
 			if canFlush {

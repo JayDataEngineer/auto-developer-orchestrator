@@ -29,79 +29,16 @@ from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
+from metrics_client import LangfuseMetricsClient
+
 
 # ── Config ───────────────────────────────────────────────────────────
 
-def load_env():
-    """Load .env file if present."""
-    env_path = os.path.join(os.path.dirname(__file__), ".env")
-    if os.path.exists(env_path):
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, val = line.partition("=")
-                    os.environ.setdefault(key.strip(), val.strip())
-
-
 class Config:
     def __init__(self):
-        load_env()
-        self.lf_url = os.environ.get("LANGFUSE_URL", "http://localhost:3100")
-        self.lf_pk = os.environ.get("LANGFUSE_PK", "pk-orch-2026-lf-a1b2c3d4e5f6")
-        self.lf_sk = os.environ.get("LANGFUSE_SK", "sk-orch-2026-lf-a1b2c3d4e5f6")
         self.judge_url = os.environ.get("JUDGE_MODEL_URL", "https://openrouter.ai/api")
         self.judge_model = os.environ.get("JUDGE_MODEL_NAME", "deepseek/deepseek-v4-flash")
         self.judge_api_key = os.environ.get("JUDGE_API_KEY", "")
-
-
-# ── Langfuse API client ─────────────────────────────────────────────
-
-class LangfuseClient:
-    def __init__(self, cfg: Config):
-        self.base = cfg.lf_url.rstrip("/")
-        self.pk = cfg.lf_pk
-        self.sk = cfg.lf_sk
-
-    def _req(self, method, path, body=None):
-        url = f"{self.base}/api/public{path}"
-        data = json.dumps(body).encode() if body else None
-        req = Request(url, data=data, method=method)
-        req.add_header("Content-Type", "application/json")
-        # Basic auth
-        import base64
-        cred = base64.b64encode(f"{self.pk}:{self.sk}".encode()).decode()
-        req.add_header("Authorization", f"Basic {cred}")
-        try:
-            with urlopen(req, timeout=30) as resp:
-                if resp.status == 204:
-                    return None
-                return json.loads(resp.read())
-        except HTTPError as e:
-            body_text = e.read().decode() if e.fp else ""
-            print(f"  API error {e.code} on {method} {path}: {body_text[:200]}")
-            return None
-
-    def get_traces(self, limit=50):
-        return self._req("GET", f"/traces?limit={limit}")
-
-    def get_trace(self, trace_id):
-        return self._req("GET", f"/traces/{trace_id}")
-
-    def get_scores(self, trace_id):
-        data = self._req("GET", f"/scores?traceId={trace_id}")
-        return data if isinstance(data, list) else data.get("data", []) if data else []
-
-    def post_score(self, trace_id, name, value, data_type, comment=""):
-        body = {
-            "traceId": trace_id,
-            "name": name,
-            "value": value,
-            "dataType": data_type,
-            "source": "API",
-            "comment": comment,
-        }
-        return self._req("POST", "/scores", body)
 
 
 # ── LLM Judge ────────────────────────────────────────────────────────
@@ -222,12 +159,11 @@ def build_trace_summary(trace: dict) -> str:
 
 # ── Main ─────────────────────────────────────────────────────────────
 
-def find_unscored_traces(lf: LangfuseClient, scored_names: set):
+def find_unscored_traces(lf: LangfuseMetricsClient, scored_names: set):
     """Find traces that don't have all scored_names yet."""
-    traces_data = lf.get_traces(limit=100)
-    if not traces_data:
+    traces = lf.get_traces(limit=100)
+    if not traces:
         return []
-    traces = traces_data.get("data", traces_data) if isinstance(traces_data, dict) else traces_data
     unscored = []
     for t in traces:
         tid = t.get("id", "")
@@ -241,7 +177,7 @@ def find_unscored_traces(lf: LangfuseClient, scored_names: set):
     return unscored
 
 
-def score_trace(lf: LangfuseClient, cfg: Config, trace: dict, dry_run=False):
+def score_trace(lf: LangfuseMetricsClient, cfg: Config, trace: dict, dry_run=False):
     """Score a single trace via LLM judge and post results."""
     tid = trace.get("id", "?")
     name = trace.get("name", "?")
@@ -303,11 +239,11 @@ def main():
     args = parser.parse_args()
 
     cfg = Config()
-    lf = LangfuseClient(cfg)
+    lf = LangfuseMetricsClient()
 
     scored_names = {"response_quality", "tool_efficiency", "task_completed", "action_quality"}
 
-    print(f"Langfuse Evaluator — {cfg.lf_url}")
+    print(f"Langfuse Evaluator — {lf.base}")
     print(f"Judge model: {cfg.judge_model} @ {cfg.judge_url}")
     print()
 

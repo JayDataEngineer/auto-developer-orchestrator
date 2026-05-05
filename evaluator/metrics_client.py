@@ -60,6 +60,36 @@ class LangfuseMetricsClient:
             print(f"API error {e.code}: {body[:200]}")
             return None
 
+    def _post(self, path, body):
+        """POST request to Langfuse public API."""
+        url = f"{self.base}/api/public{path}"
+        data = json.dumps(body).encode()
+        req = Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "application/json")
+        cred = base64.b64encode(f"{self.pk}:{self.sk}".encode()).decode()
+        req.add_header("Authorization", f"Basic {cred}")
+        try:
+            with urlopen(req, timeout=30) as resp:
+                if resp.status == 204:
+                    return None
+                return json.loads(resp.read())
+        except HTTPError as e:
+            body_text = e.read().decode() if e.fp else ""
+            print(f"API error {e.code} on POST {path}: {body_text[:200]}")
+            return None
+
+    def post_score(self, trace_id, name, value, data_type, comment=""):
+        """Post a score to a trace."""
+        body = {
+            "traceId": trace_id,
+            "name": name,
+            "value": value,
+            "dataType": data_type,
+            "source": "API",
+            "comment": comment,
+        }
+        return self._post("/scores", body)
+
     def get_traces(self, tags=None, user_id=None, session_id=None,
                    from_date=None, to_date=None, limit=100):
         """Get traces with optional filters."""
