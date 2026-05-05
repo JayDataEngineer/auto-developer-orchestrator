@@ -27,6 +27,11 @@ type LangfuseHook struct {
 	// per-turn state (generation tracking)
 	turnStart time.Time
 	prevModel string
+
+	// per-run invest tracking
+	toolsSeen    map[string]bool // tools called during this run
+	regimeLabel  string          // last known regime from metrics
+	isSimulation bool            // true if running backtest/simulation
 }
 
 // NewLangfuseHook creates a new Langfuse tracing hook.
@@ -70,6 +75,9 @@ func (h *LangfuseHook) OnAgentStart(ctx context.Context, state *core.LoopState) 
 
 	h.turnStart = time.Time{}
 	h.prevModel = ""
+	h.toolsSeen = make(map[string]bool)
+	h.regimeLabel = ""
+	h.isSimulation = false
 
 	log.Printf("Langfuse trace started: session=%s project=%s", state.SessionID, h.cfg.Project)
 	return nil
@@ -125,6 +133,14 @@ func (h *LangfuseHook) OnAfterToolCall(ctx context.Context, state *core.LoopStat
 	}
 
 	h.trace.Span("tool:"+toolName, start, end, args, output)
+
+	// Track tools seen for workflow classification
+	h.toolsSeen[toolName] = true
+
+	// Extract trading signals from execute_trade / signals tool output
+	if err == nil && result != "" {
+		h.extractSignals(toolName, result)
+	}
 
 	// Extract metrics from invest-bot tool results and post as Langfuse scores.
 	// If the langfuse_metrics sentinel is present, recordMetricsScores handles everything.
@@ -308,6 +324,17 @@ func (h *LangfuseHook) recordMetricsScores(toolName, result string) bool {
 		}
 		h.trace.Score(key, fval, "NUMERIC", comment)
 	}
+
+	// Track regime label for metadata enrichment
+	h.updateRegimeContext(data)
+
+	// Post simulation flag
+	if data["simulation_mode"] == true {
+		h.isSimulation = true
+		h.trace.Score("is_simulation", 1, "BOOLEAN", "True for backtest/simulation, false for live")
+	} else {
+		h.trace.Score("is_simulation", 0, "BOOLEAN", "True for backtest/simulation, false for live")
+	}
 	return true
 }
 
@@ -357,6 +384,165 @@ func toFloat64(v any) (float64, bool) {
 	}
 }
 
+// ── Workflow classification ────────────────────────────────────────
+
+// classifyWorkflow determines the invest-bot workflow type from tools called.
+// Posted as a CATEGORICAL score so dashboards can filter by workflow type.
+func (h *LangfuseHook) classifyWorkflow() string {
+	switch {
+	case h.toolsSeen["execute_trade"] || h.toolsSeen["app_execute_trade"]:
+		return "trade_execution"
+	case h.toolsSeen["backtest"] || h.toolsSeen["app_backtest"] || h.isSimulation:
+		return "backtest"
+	case h.toolsSeen["metrics"] || h.toolsSeen["historical_metrics"]:
+		return "metrics_collection"
+	case h.toolsSeen["market_snapshot"] || h.toolsSeen["app_market_snapshot"]:
+		return "market_scan"
+	case h.toolsSeen["portfolio_status"] || h.toolsSeen["app_portfolio_status"] ||
+		h.toolsSeen["portfolio_ledger"] || h.toolsSeen["app_portfolio_ledger"]:
+		return "portfolio_review"
+	case h.toolsSeen["bash"] && h.isSimulation:
+		return "backtest"
+	default:
+		return "general"
+	}
+}
+
+// ── Signal extraction ──────────────────────────────────────────────
+
+// extractSignals parses trading signal data (ticker, action, confidence)
+// from execute_trade and bash tool output. Posts per-signal scores for
+// correlating model confidence with actual trade outcomes.
+func (h *LangfuseHook) extractSignals(toolName, result string) {
+	investTools := map[string]bool{
+		"execute_trade": true, "app_execute_trade": true,
+	}
+	if !investTools[toolName] && toolName != "bash" {
+		return
+	}
+
+	data := parseAnyJSON(result)
+	if data == nil {
+		return
+	}
+
+	// Check for signals array (from signals.py or trade.py output)
+	if signals, ok := data["signals"].([]any); ok {
+		for _, s := range signals {
+			if sig, ok := s.(map[string]any); ok {
+				h.scoreSignal(sig)
+			}
+		}
+	}
+
+	// Check for single signal or executed trade
+	if _, hasSymbol := data["symbol"]; hasSymbol {
+		h.scoreSignal(data)
+	}
+
+	// Check for trades array (from trade.py --status)
+	if trades, ok := data["trades"].([]any); ok {
+		for _, t := range trades {
+			if trade, ok := t.(map[string]any); ok {
+				h.scoreSignal(trade)
+			}
+		}
+	}
+
+	// Track simulation mode from metrics output
+	if data["simulation_mode"] == true {
+		h.isSimulation = true
+		h.trace.Score("is_simulation", 1, "BOOLEAN", "True for backtest/simulation, false for live")
+	}
+}
+
+// scoreSignal posts per-signal scores: direction and confidence.
+func (h *LangfuseHook) scoreSignal(sig map[string]any) {
+	symbol, _ := sig["symbol"].(string)
+	if symbol == "" {
+		return
+	}
+	symbol = strings.ToUpper(symbol)
+
+	// Action/direction
+	action := ""
+	for _, key := range []string{"action", "side", "direction", "signal"} {
+		if v, ok := sig[key].(string); ok && v != "" {
+			action = strings.ToLower(v)
+			break
+		}
+	}
+	if action == "" {
+		if side, ok := sig["side"].(string); ok {
+			action = strings.ToLower(side)
+		}
+	}
+
+	// Normalize action to canonical directions
+	direction := "unknown"
+	switch {
+	case strings.Contains(action, "buy") || strings.Contains(action, "long"):
+		direction = "buy"
+	case strings.Contains(action, "sell") || strings.Contains(action, "short"):
+		direction = "sell"
+	case strings.Contains(action, "hold"):
+		direction = "hold"
+	}
+
+	if direction != "unknown" {
+		h.trace.Score("signal_direction:"+symbol, 0, "CATEGORICAL", "Trade signal direction for "+symbol)
+		// Store direction in comment since CATEGORICAL value must be a string
+		// We use a NUMERIC proxy: 1=buy, -1=sell, 0=hold
+		dirVal := 0.0
+		switch direction {
+		case "buy":
+			dirVal = 1
+		case "sell":
+			dirVal = -1
+		}
+		h.trace.Score("signal:"+symbol, dirVal, "NUMERIC", "Signal: "+direction)
+	}
+
+	// Confidence
+	confidence := extractFloat(sig, "confidence")
+	if confidence > 0 {
+		// Normalize to 0-1 if on 0-100 scale
+		if confidence > 1 {
+			confidence = confidence / 100
+		}
+		h.trace.Score("signal_confidence:"+symbol, confidence, "NUMERIC", "Model confidence for "+symbol)
+	}
+}
+
+// ── Regime metadata ────────────────────────────────────────────────
+
+// updateRegimeContext extracts regime label from metrics output and
+// enriches trace metadata for dashboard filtering by market regime.
+func (h *LangfuseHook) updateRegimeContext(data map[string]any) {
+	if label, ok := data["regime_label"].(string); ok && label != "" {
+		h.regimeLabel = label
+	}
+}
+
+// parseAnyJSON tries to parse JSON, unwrapping {"output":"..."} if needed.
+func parseAnyJSON(raw string) map[string]any {
+	var data map[string]any
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return nil
+	}
+
+	// Try unwrapping bash wrapper
+	for _, key := range []string{"output", "stdout"} {
+		if val, ok := data[key].(string); ok && val != "" {
+			var inner map[string]any
+			if err := json.Unmarshal([]byte(val), &inner); err == nil {
+				return inner
+			}
+		}
+	}
+	return data
+}
+
 func (h *LangfuseHook) OnAgentEnd(ctx context.Context, state *core.LoopState) error {
 	if h.trace == nil {
 		return nil
@@ -377,6 +563,32 @@ func (h *LangfuseHook) OnAgentEnd(ctx context.Context, state *core.LoopState) er
 			state.TurnOutputTokens,
 			state.TurnInputTokens+state.TurnOutputTokens,
 		)
+	}
+
+	// Post workflow type classification for invest-bot traces
+	if len(h.toolsSeen) > 0 {
+		workflow := h.classifyWorkflow()
+		// Use NUMERIC proxy for workflow type (CATEGORICAL value must be string in API)
+		// 1=trade, 2=scan, 3=backtest, 4=metrics, 5=review, 0=general
+		workflowVal := 0.0
+		switch workflow {
+		case "trade_execution":
+			workflowVal = 1
+		case "market_scan":
+			workflowVal = 2
+		case "backtest":
+			workflowVal = 3
+		case "metrics_collection":
+			workflowVal = 4
+		case "portfolio_review":
+			workflowVal = 5
+		}
+		h.trace.Score("workflow_type", workflowVal, "NUMERIC", "Workflow: "+workflow)
+	}
+
+	// Post regime as metadata for dashboard filtering
+	if h.regimeLabel != "" {
+		h.trace.Score("regime", 0, "CATEGORICAL", "Market regime: "+h.regimeLabel)
 	}
 
 	// Flush all buffered events
