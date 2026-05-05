@@ -301,13 +301,21 @@ func (c *LangfuseClient) TraceRun(name string, cfg TraceConfig, fn func(t *Trace
 	fn(th)
 }
 
-// TraceHandle is a builder for spans and generations within a trace.
+// TraceHandle is a builder for spans, generations, and scores within a trace.
 type TraceHandle struct {
 	client  *LangfuseClient
 	traceID string
 	cfg     TraceConfig
 	counter int
 	mu      sync.Mutex
+}
+
+// Score posts a numeric score to the trace (chartable in Langfuse dashboards).
+func (th *TraceHandle) Score(name string, value float64, dataType string, comment string) {
+	if th == nil || th.client == nil {
+		return
+	}
+	th.client.postScore(th.traceID, name, value, dataType, comment)
 }
 
 // Span records a span (tool execution, sub-agent, etc.).
@@ -391,6 +399,43 @@ func (c *LangfuseClient) send(event *lfIngest) {
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		log.Printf("Langfuse ingestion %d: %s", resp.StatusCode, string(body))
+	} else {
+		io.Copy(io.Discard, resp.Body)
+	}
+}
+
+// postScore posts a score to a trace via the Langfuse public API.
+// Scores show up in Langfuse dashboards as chartable metrics.
+func (c *LangfuseClient) postScore(traceID, name string, value float64, dataType, comment string) {
+	if c == nil {
+		return
+	}
+	body := map[string]interface{}{
+		"traceId":  traceID,
+		"name":     name,
+		"value":    value,
+		"dataType": dataType, // "NUMERIC", "BOOLEAN", "CATEGORICAL"
+	}
+	if comment != "" {
+		body["comment"] = comment
+	}
+
+	data, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", c.baseURL+"/scores", bytes.NewReader(data))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth(c.publicKey, c.secretKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		log.Printf("Langfuse score post %d: %s", resp.StatusCode, string(respBody))
 	} else {
 		io.Copy(io.Discard, resp.Body)
 	}
