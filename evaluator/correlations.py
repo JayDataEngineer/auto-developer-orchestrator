@@ -63,7 +63,13 @@ def pearson_correlation(xs, ys):
         return None
     if denom_x == 0 or denom_y == 0:
         return None
-    return num / (denom_x * denom_y)
+    r = num / (denom_x * denom_y)
+    # Clamp floating-point noise (e.g. 0.9999999999 → 1.0)
+    if abs(r - 1.0) < 1e-10:
+        return 1.0
+    if abs(r + 1.0) < 1e-10:
+        return -1.0
+    return r
 
 
 def compute_metric_stats(values):
