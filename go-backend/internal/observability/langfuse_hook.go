@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -125,9 +126,13 @@ func (h *LangfuseHook) OnAfterToolCall(ctx context.Context, state *core.LoopStat
 
 	h.trace.Span("tool:"+toolName, start, end, args, output)
 
-	// Extract portfolio metrics from invest-bot tool results and post as scores
+	// Extract metrics from invest-bot tool results and post as Langfuse scores.
+	// If the langfuse_metrics sentinel is present, recordMetricsScores handles everything.
+	// Otherwise, fall back to recordPortfolioScores for legacy portfolio data.
 	if err == nil && result != "" {
-		h.recordPortfolioScores(toolName, result)
+		if !h.recordMetricsScores(toolName, result) {
+			h.recordPortfolioScores(toolName, result)
+		}
 	}
 
 	return nil
@@ -245,6 +250,101 @@ func extractFloat(m map[string]any, key string) float64 {
 		return f
 	}
 	return 0
+}
+
+// metricDescriptions maps invest-bot metric names to human-readable Langfuse score comments.
+var metricDescriptions = map[string]string{
+	"equity":              "Portfolio equity (USD)",
+	"total_pnl":           "Cumulative P&L (USD)",
+	"daily_pnl":           "Daily P&L (USD)",
+	"position_count":      "Number of open positions",
+	"return_pct":          "Total return (%)",
+	"sharpe_ratio":        "Annualized Sharpe ratio",
+	"profit_factor":       "Gross wins / gross losses",
+	"win_rate":            "Win rate (0-1)",
+	"max_drawdown":        "Maximum drawdown (USD, negative)",
+	"max_drawdown_pct":    "Maximum drawdown (%)",
+	"regime_composite":    "Market regime composite score (0-100)",
+	"regime_confidence":   "Regime detection confidence (0-1)",
+	"portfolio_heat":      "Portfolio heat / risk exposure (%)",
+	"prediction_accuracy": "Signal prediction accuracy (0-1)",
+}
+
+// recordMetricsScores detects the langfuse_metrics sentinel in bash tool results
+// and posts all numeric top-level keys as Langfuse scores.
+// Returns true if the sentinel was found (meaning this handles all scoring).
+func (h *LangfuseHook) recordMetricsScores(toolName, result string) bool {
+	if toolName != "bash" {
+		return false
+	}
+
+	data := parseMetricsJSON(result)
+	if data == nil {
+		return false
+	}
+
+	for key, val := range data {
+		// Skip sentinel, meta, and string values (like regime_label)
+		if key == "langfuse_metrics" || strings.HasPrefix(key, "_") {
+			continue
+		}
+		fval, ok := toFloat64(val)
+		if !ok {
+			continue
+		}
+		comment := metricDescriptions[key]
+		if comment == "" {
+			comment = key
+		}
+		h.trace.Score(key, fval, "NUMERIC", comment)
+	}
+	return true
+}
+
+// parseMetricsJSON detects invest-bot metrics output from bash tool results.
+// Returns the parsed map only if it contains the "langfuse_metrics": true sentinel.
+func parseMetricsJSON(raw string) map[string]any {
+	var data map[string]any
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return nil
+	}
+
+	if hasMetricsSentinel(data) {
+		return data
+	}
+
+	// Try unwrapping {"output":"..."} bash wrapper
+	for _, key := range []string{"output", "stdout"} {
+		if val, ok := data[key].(string); ok && val != "" {
+			var inner map[string]any
+			if err := json.Unmarshal([]byte(val), &inner); err == nil {
+				if hasMetricsSentinel(inner) {
+					return inner
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func hasMetricsSentinel(m map[string]any) bool {
+	v, ok := m["langfuse_metrics"]
+	return ok && v == true
+}
+
+func toFloat64(v any) (float64, bool) {
+	switch val := v.(type) {
+	case float64:
+		return val, true
+	case int:
+		return float64(val), true
+	case string:
+		f, err := strconv.ParseFloat(val, 64)
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func (h *LangfuseHook) OnAgentEnd(ctx context.Context, state *core.LoopState) error {
