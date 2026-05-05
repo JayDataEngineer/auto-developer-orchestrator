@@ -142,8 +142,20 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 		if thinkingBudget == 0 {
 			thinkingBudget = cfg.ThinkingBudgetTokens
 		}
+		var lastUsage *StreamUsage // track usage across chunks
+
+		var pendingFinish FinishReason // finish reason waiting for usage chunk
+		var pendingToolCalls []ToolCallResponse
+		var pendingContent string
+		var pendingReasoning string
 
 		err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool {
+			// Capture usage from any chunk that has it
+			if usage != nil {
+				lastUsage = usage
+				s.totalInputTokens = usage.PromptTokens
+				s.totalOutputTokens += usage.CompletionTokens
+			}
 			// Content delta
 			if delta.Content != "" {
 				tokenCount++
@@ -151,7 +163,6 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 				ch <- ChatEvent{Type: ChatEventContent, Content: delta.Content}
 			}
 			// Thinking/reasoning delta — enforce budget
-			// DeepSeek V4 uses "reasoning" field; others use "reasoning_content". Capture both.
 			reasoningDelta := delta.ReasoningContent
 			if reasoningDelta == "" {
 				reasoningDelta = delta.Reasoning
@@ -160,9 +171,6 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 				reasoningBuf.WriteString(reasoningDelta)
 				thinkingTokens++
 				if thinkingBudget > 0 && thinkingTokens > thinkingBudget {
-					// Budget exceeded — stop forwarding thinking but let generation continue.
-					// The model will naturally transition to content generation.
-					// Emit a single truncation notice so the frontend knows thinking was capped.
 					if thinkingTokens == thinkingBudget+1 {
 						ch <- ChatEvent{Type: ChatEventThinking, Content: "\n[Thinking budget reached — committing to implementation]"}
 					}
@@ -172,8 +180,11 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 			}
 			// Tool call chunks — accumulate across streaming
 			for _, tc := range delta.ToolCalls {
+				// Count tool call argument chunks as output tokens
+				if tc.Function.Name != "" || tc.Function.Arguments != "" {
+					tokenCount++
+				}
 				if existing, ok := toolCallAccum[tc.Index]; ok {
-					// Append to existing accumulation
 					if tc.Function.Name != "" {
 						existing.Function.Name += tc.Function.Name
 					}
@@ -187,7 +198,6 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 						existing.Type = tc.Type
 					}
 				} else {
-					// New tool call
 					toolCallAccum[tc.Index] = &ToolCallResponse{
 						ID:   tc.ID,
 						Type: tc.Type,
@@ -198,52 +208,45 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 					}
 				}
 			}
-			// On finish, store assistant message on session and send done event
+			// On finish, save state and check if usage is already available
 			if finish != "" {
-				// Store token usage from API response
-				if usage != nil {
-					s.totalInputTokens = usage.PromptTokens // absolute, not accumulated
-					s.totalOutputTokens += usage.CompletionTokens
-				}
-
+				pendingFinish = finish
 				// Collect accumulated tool calls in index order
-				var toolCalls []ToolCallResponse
 				indices := make([]int, 0, len(toolCallAccum))
 				for idx := range toolCallAccum {
 					indices = append(indices, idx)
 				}
 				sort.Ints(indices)
 				for _, idx := range indices {
-					toolCalls = append(toolCalls, *toolCallAccum[idx])
+					pendingToolCalls = append(pendingToolCalls, *toolCallAccum[idx])
 				}
+				pendingContent = contentBuf.String()
+				pendingReasoning = reasoningBuf.String()
 
-				contentStr := contentBuf.String()
-				reasoningStr := reasoningBuf.String()
-
-				// Reasoning models (DeepSeek V4, etc.) emit everything in the
-				// reasoning stream and leave content empty. Promote reasoning
-				// to content so downstream receives the actual response.
-				if contentStr == "" && reasoningStr != "" && len(toolCalls) == 0 {
-					contentStr = reasoningStr
-					reasoningStr = ""
-					ch <- ChatEvent{Type: ChatEventContent, Content: contentStr}
+				// Reasoning models — promote reasoning to content
+				if pendingContent == "" && pendingReasoning != "" && len(pendingToolCalls) == 0 {
+					pendingContent = pendingReasoning
+					pendingReasoning = ""
+					ch <- ChatEvent{Type: ChatEventContent, Content: pendingContent}
 				}
 
 				// Store assistant message in conversation history
-				assistantMsg := Message{
+				s.messages = append(s.messages, Message{
 					Role:             "assistant",
-					Content:          contentStr,
-					ToolCalls:        toolCalls,
-					ReasoningContent: reasoningStr,
-				}
-				s.messages = append(s.messages, assistantMsg)
-
+					Content:          pendingContent,
+					ToolCalls:        pendingToolCalls,
+					ReasoningContent: pendingReasoning,
+				})
+			}
+			// Send done event when we have finish AND usage (or usage arrived with finish)
+			if pendingFinish != "" && lastUsage != nil {
 				ch <- ChatEvent{
 					Type:    ChatEventDone,
-					Finish:  finish,
-					Content: serializeToolCalls(toolCalls),
+					Finish:  pendingFinish,
+					Content: serializeToolCalls(pendingToolCalls),
+					Usage:   lastUsage,
 				}
-				return false
+				pendingFinish = "" // prevent double send
 			}
 			return true
 		})
@@ -252,6 +255,31 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 		// Only accumulate manual count if API didn't provide usage
 		if s.totalOutputTokens == 0 && tokenCount > 0 {
 			s.totalOutputTokens += tokenCount
+		}
+
+		// If finish arrived but usage never came (local llama-server doesn't
+		// include usage in SSE streams), estimate prompt tokens and build usage.
+		if pendingFinish != "" {
+			if lastUsage == nil {
+				// Always re-estimate from current messages for accurate per-turn counts
+				promptEstimate := s.estimateTokens()
+				outputTokens := tokenCount
+				if outputTokens == 0 {
+					outputTokens = s.totalOutputTokens
+				}
+				s.totalInputTokens = promptEstimate
+				s.totalOutputTokens += outputTokens
+				lastUsage = &StreamUsage{
+					PromptTokens:     promptEstimate,
+					CompletionTokens: outputTokens,
+				}
+			}
+			ch <- ChatEvent{
+				Type:    ChatEventDone,
+				Finish:  pendingFinish,
+				Content: serializeToolCalls(pendingToolCalls),
+				Usage:   lastUsage,
+			}
 		}
 
 		zap.L().Debug("Chat generation complete",
@@ -331,7 +359,7 @@ func (s *Session) ContextUsage() (usedTokens int, capacity int) {
 	return s.estimateTokens(), s.ctxSize
 }
 
-// estimateTokens roughly estimates token count from all message content.
+// estimateTokens roughly estimates token count from all message content + tool definitions.
 // Used as fallback when the streaming API doesn't return usage data.
 func (s *Session) estimateTokens() int {
 	chars := 0
@@ -341,8 +369,11 @@ func (s *Session) estimateTokens() int {
 			chars += len(tc.Function.Name) + len(tc.Function.Arguments)
 		}
 	}
-	// Rough estimate: 1 token ≈ 4 characters for English text
-	// Add 20% overhead for formatting, roles, tool definitions
+	// Include tool definition overhead (name + description + parameter schema)
+	for _, t := range s.tools {
+		chars += len(t.Function.Name) + len(t.Function.Description) + len(t.Function.Parameters)
+	}
+	// Rough estimate: 1 token ≈ 3.3 characters (~4 chars/token + 20% overhead)
 	return int(float64(chars) * 0.3)
 }
 

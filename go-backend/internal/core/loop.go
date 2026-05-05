@@ -280,6 +280,9 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			state.TotalOutputTokens += lastUsage.CompletionTokens
 			state.TurnInputTokens = lastUsage.PromptTokens
 			state.TurnOutputTokens = lastUsage.CompletionTokens
+			log.Printf("loop: usage in=%d out=%d total_in=%d total_out=%d",
+				lastUsage.PromptTokens, lastUsage.CompletionTokens,
+				state.TotalInputTokens, state.TotalOutputTokens)
 		}
 		state.TurnModel = l.provider.ModelName()
 

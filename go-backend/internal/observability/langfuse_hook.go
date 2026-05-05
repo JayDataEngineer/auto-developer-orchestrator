@@ -68,7 +68,8 @@ func (h *LangfuseHook) OnAgentStart(ctx context.Context, state *core.LoopState) 
 
 func (h *LangfuseHook) OnBeforeTurn(ctx context.Context, state *core.LoopState) ([]string, error) {
 	// Record generation for the PREVIOUS turn (now complete).
-	// On the first call (Round=0), we just record the start time for this turn.
+	// When OnBeforeTurn fires for round N, state.TurnInputTokens holds
+	// the tokens from round N-1 (set by loop.go after that turn's stream).
 	if state.Round > 0 && h.trace != nil && !h.turnStart.IsZero() {
 		model := h.prevModel
 		if model == "" {

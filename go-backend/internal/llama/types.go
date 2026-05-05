@@ -94,9 +94,10 @@ const (
 // Replaces TokenEvent for the new streaming path.
 type ChatEvent struct {
 	Type    ChatEventType
-	Content string        // text or thinking content
-	Delta   *ToolCallDelta // tool call chunk (for ChatEventToolChunk)
-	Finish  FinishReason   // set on ChatEventDone
+	Content string         // text or thinking content
+	Delta   *ToolCallDelta  // tool call chunk (for ChatEventToolChunk)
+	Finish  FinishReason    // set on ChatEventDone
+	Usage   *StreamUsage    // token usage (set on ChatEventDone)
 	Err     error
 }
 

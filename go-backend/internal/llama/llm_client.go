@@ -203,6 +203,14 @@ type ChatCompletionRequest struct {
 
 	// Stream mode
 	Stream bool `json:"stream,omitempty"`
+
+	// Request usage data in streaming response (OpenAI stream_options)
+	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+}
+
+// StreamOptions controls what additional data is included in streaming responses.
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 // sanitizeRequest strips llama.cpp-specific fields for cloud providers.
@@ -303,6 +311,9 @@ func (e *LLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletionResp
 // The final chunk includes a usage field with prompt_tokens and completion_tokens.
 func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error {
 	req.Stream = true
+	// Request usage data in streaming response (like Pi-Mono does)
+	// This makes llama-server send a usage-only chunk at the end of the stream.
+	req.StreamOptions = &StreamOptions{IncludeUsage: true}
 	body, err := json.Marshal(e.sanitizeRequest(req))
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
@@ -378,8 +389,11 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 		if len(event.Choices) > 0 {
 			choice := event.Choices[0]
 			if !onChunk(choice.Delta, choice.FinishReason, event.Usage) {
-				break
+				continue
 			}
+		} else if event.Usage != nil {
+			// Usage-only chunk (empty choices) from some providers — pass through
+			onChunk(StreamDelta{}, "", event.Usage)
 		}
 	}
 

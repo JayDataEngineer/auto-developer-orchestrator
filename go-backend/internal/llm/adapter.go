@@ -134,6 +134,12 @@ func convertEvents(ch <-chan llama.ChatEvent) <-chan core.ChatEvent {
 				Finish:  core.FinishReason(evt.Finish),
 				Err:     evt.Err,
 			}
+			if evt.Usage != nil {
+				coreEvt.Usage = &core.StreamUsage{
+					PromptTokens:     evt.Usage.PromptTokens,
+					CompletionTokens: evt.Usage.CompletionTokens,
+				}
+			}
 			if evt.Delta != nil {
 				coreEvt.Deltas = []core.ToolCallDelta{{
 					Index:    evt.Delta.Index,
