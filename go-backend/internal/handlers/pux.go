@@ -281,16 +281,6 @@ func (h *PuxHandler) writeLlamaSSE(w http.ResponseWriter, evt llamaeng.AgentEven
 	}
 }
 
-// accumulateLlamaText accumulates text/thinking from llama events for DB persistence.
-func (h *PuxHandler) accumulateLlamaText(evt llamaeng.AgentEvent, text, thinking *string) {
-	switch evt.Type {
-	case llamaeng.EventTypeTextDelta:
-		*text += evt.Data.Text
-	case llamaeng.EventTypeThinkingDelta:
-		*thinking += evt.Data.Text
-	}
-}
-
 // compositeAgentKey builds a key from projectPath and agentId.
 func compositeAgentKey(projectPath, agentId string) string {
 	return projectPath + "\x00" + agentId

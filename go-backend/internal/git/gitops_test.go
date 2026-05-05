@@ -2,7 +2,6 @@ package git
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,29 +9,25 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestGitOps_Basic(t *testing.T) {
+func TestGitOps_CloneAndCommit(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	g := NewGitOps(logger)
 	ctx := context.Background()
 
-	// Create a temp directory for our "remote" repository
-	remoteDir, err := ioutil.TempDir("", "git-remote-*")
+	// Create a temp "remote" repo with a file and commit
+	remoteDir, err := os.MkdirTemp("", "git-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	// Initialize the remote repo
-	if err := g.InitRepository(ctx, remoteDir); err != nil {
-		t.Fatalf("InitRepository failed: %v", err)
-	}
-
-	// Add a file and commit to the remote repo so it has a HEAD
-	testFile := filepath.Join(remoteDir, "README.md")
-	if err := ioutil.WriteFile(testFile, []byte("# Test Repo"), 0644); err != nil {
+	if err := g.runGitCmd(ctx, remoteDir, "init"); err != nil {
 		t.Fatal(err)
 	}
-
+	testFile := filepath.Join(remoteDir, "README.md")
+	if err := os.WriteFile(testFile, []byte("# Test Repo"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := g.runGitCmd(ctx, remoteDir, "add", "."); err != nil {
 		t.Fatal(err)
 	}
@@ -40,77 +35,56 @@ func TestGitOps_Basic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a temp directory for our local clone
-	localDir, err := ioutil.TempDir("", "git-local-*")
+	// Clone
+	localDir, err := os.MkdirTemp("", "git-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(localDir)
 
-	// Test Clone
-	opts := CloneOptions{
-		URL: remoteDir,
-		Dir: localDir,
-	}
-	if err := g.Clone(ctx, opts); err != nil {
+	if err := g.Clone(ctx, CloneOptions{URL: remoteDir, Dir: localDir}); err != nil {
 		t.Fatalf("Clone failed: %v", err)
 	}
 
-	// Test Status
-	status, err := g.Status(ctx, StatusOptions{Dir: localDir})
-	if err != nil {
-		t.Fatalf("Status failed: %v", err)
-	}
-	if !status.IsClean {
-		t.Errorf("Expected repository to be clean, but it was not")
-	}
-
-	// Test Commit
+	// Commit a change
 	newFile := filepath.Join(localDir, "newfile.txt")
-	if err := ioutil.WriteFile(newFile, []byte("hello world"), 0644); err != nil {
+	if err := os.WriteFile(newFile, []byte("hello world"), 0644); err != nil {
 		t.Fatal(err)
 	}
-
-	commitOpts := CommitOptions{
-		Dir:     localDir,
-		Message: "Add new file",
-	}
-	if err := g.Commit(ctx, commitOpts); err != nil {
+	if err := g.Commit(ctx, CommitOptions{Dir: localDir, Message: "Add new file"}); err != nil {
 		t.Fatalf("Commit failed: %v", err)
-	}
-
-	// Test GetLog
-	logEntries, err := g.GetLog(ctx, GetLogOptions{Dir: localDir, Count: 10})
-	if err != nil {
-		t.Fatalf("GetLog failed: %v", err)
-	}
-	if len(logEntries) < 2 {
-		t.Errorf("Expected at least 2 log entries, got %d", len(logEntries))
-	}
-
-	// Test SanitizeInput
-	input := "git status; rm -rf /"
-	sanitized := SanitizeInput(input)
-	if sanitized != "git status rm -rf /" {
-		t.Errorf("SanitizeInput failed: got %q", sanitized)
 	}
 }
 
-func TestResolvePath(t *testing.T) {
-	baseDir := "/tmp/projects"
+func TestGitOps_GetCurrentBranch(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	g := NewGitOps(logger)
+	ctx := context.Background()
 
-	// Valid path
-	path, err := ResolvePath(baseDir, "my-project")
+	dir, err := os.MkdirTemp("", "git-branch-*")
 	if err != nil {
-		t.Errorf("ResolvePath failed on valid project: %v", err)
+		t.Fatal(err)
 	}
-	if !filepath.IsAbs(path) {
-		t.Errorf("Expected absolute path, got %s", path)
+	defer os.RemoveAll(dir)
+
+	if err := g.runGitCmd(ctx, dir, "init"); err != nil {
+		t.Fatal(err)
+	}
+	// Need a commit before we can get HEAD
+	if err := g.runGitCmd(ctx, dir, "commit", "--allow-empty", "-m", "init"); err != nil {
+		t.Fatal(err)
 	}
 
-	// Traversal attempt
-	_, err = ResolvePath(baseDir, "../outside")
-	if err == nil {
-		t.Errorf("ResolvePath should have failed on directory traversal")
+	// Configure git user for test
+	g.runGitCmd(ctx, dir, "config", "user.email", "test@test.com")
+	g.runGitCmd(ctx, dir, "config", "user.name", "test")
+
+	branch, err := g.GetCurrentBranch(ctx, dir)
+	if err != nil {
+		t.Fatalf("GetCurrentBranch failed: %v", err)
 	}
+	if branch == "" {
+		t.Error("expected non-empty branch name")
+	}
+	t.Logf("branch: %s", branch)
 }

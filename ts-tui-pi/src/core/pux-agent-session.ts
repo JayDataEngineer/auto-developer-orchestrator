@@ -133,6 +133,7 @@ export class PuxAgentSession {
   private abortCtrl?: AbortController;
   private listeners: AgentSessionEventListener[] = [];
   private streaming = false;
+  private _fetch: typeof fetch; // injectable for tests
 
   constructor(
     settingsManager: SettingsManager,
@@ -140,12 +141,14 @@ export class PuxAgentSession {
     serverUrl: string,
     project: string,
     modelName: string,
+    customFetch?: typeof fetch,
   ) {
     this.settingsManager = settingsManager;
     this.sessionManager = sessionManager;
     this.serverUrl = serverUrl;
     this.project = project;
     this.modelName = modelName;
+    this._fetch = customFetch ?? globalThis.fetch.bind(globalThis);
     this.agent = {
       state: { messages: [] },
       model: DEFAULT_MODEL,
@@ -191,7 +194,7 @@ export class PuxAgentSession {
     });
 
     try {
-      const response = await fetch(`${this.serverUrl}/api/pux/prompt`, {
+      const response = await this._fetch(`${this.serverUrl}/api/pux/prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
@@ -432,7 +435,7 @@ export class PuxAgentSession {
     this.state.model = model;
     this.agent.model = model;
     // Notify Go backend in background
-    fetch(`${this.serverUrl}/api/pux/model`, {
+    this._fetch(`${this.serverUrl}/api/pux/model`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

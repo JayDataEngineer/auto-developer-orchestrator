@@ -18,13 +18,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// ProjectHandler handles project-related HTTP requests
+	// ProjectHandler handles project-related HTTP requests
 type ProjectHandler struct {
 	db         *storage.Database
 	logger     *zap.Logger
 	git        *git.GitOps
 	scheduler  ScheduleRegisterer // optional: for auto-registering manifest schedules
-	toolReg    ToolRegisterer     // optional: for auto-registering manifest tools
 	sandboxIn  SandboxInitializer // optional: for auto-initializing sandboxes from manifest
 	sandboxMgr *sandbox.Manager   // optional: for auto-creating sandboxes on project add
 }
@@ -35,13 +34,6 @@ type ScheduleRegisterer interface {
 	CreateJobFromManifest(project, name, cronExpr, promptText, description, model string) (string, error)
 	FindJobByProjectAndName(project, name string) string
 	UpdateJob(jobID string, updates *scheduler.Job) error
-}
-
-// ToolRegisterer is implemented by the llama engine to auto-register
-// app tools from a project manifest.
-type ToolRegisterer interface {
-	RegisterFromManifest(projectName, projectDir string, tools []manifest.ToolDef) []string
-	UnregisterFromManifest(projectName string)
 }
 
 // SandboxInitializer initializes sandbox containers from manifest declarations.
@@ -147,11 +139,6 @@ func NewProjectHandler(db *storage.Database, logger *zap.Logger, gitOps *git.Git
 // SetScheduler sets the scheduler for auto-registering manifest schedules.
 func (h *ProjectHandler) SetScheduler(s ScheduleRegisterer) {
 	h.scheduler = s
-}
-
-// SetToolRegisterer sets the tool registerer for auto-registering manifest tools.
-func (h *ProjectHandler) SetToolRegisterer(tr ToolRegisterer) {
-	h.toolReg = tr
 }
 
 // SetSandboxInitializer sets the sandbox initializer for auto-initializing sandboxes.
@@ -344,12 +331,6 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			resp["registered_schedules"] = registered
-		}
-
-		// Auto-register app tools from manifest
-		if h.toolReg != nil && len(mf.Tools) > 0 {
-			registered := h.toolReg.RegisterFromManifest(req.Name, req.Path, mf.Tools)
-			resp["registered_tools"] = registered
 		}
 
 		// Auto-create sandbox + initialize from manifest (files, pip, env)

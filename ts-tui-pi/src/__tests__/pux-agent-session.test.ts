@@ -94,22 +94,21 @@ describe("PuxAgentSession", () => {
   let fetchSpy: ReturnType<typeof mock>;
 
   beforeEach(() => {
+    fetchSpy = mock(() =>
+      Promise.resolve(new Response("ok", { status: 200 }))
+    );
     session = new PuxAgentSession(
       stubSettingsManager(),
       stubSessionManager(),
       "http://localhost:9999",
       "test-proj",
-      "deepseek/flash",
+      "deepseek/deepseek-v4-flash",
+      fetchSpy as any, // inject mock as fetch
     );
-    // Reset fetch mock
-    fetchSpy = mock(() =>
-      Promise.resolve(new Response("ok", { status: 200 }))
-    );
-    globalThis.fetch = fetchSpy;
   });
 
   afterEach(() => {
-    mock.restore();
+    // no global cleanup needed — fetch is injected, not global
   });
 
   // ---- Basic construction ----
@@ -125,7 +124,7 @@ describe("PuxAgentSession", () => {
 
   test("getCwd delegates to sessionManager", () => {
     const sm = stubSessionManager("/my/project");
-    const s = new PuxAgentSession(stubSettingsManager(), sm, "http://x", "p", "m");
+    const s = new PuxAgentSession(stubSettingsManager(), sm, "http://x", "p", "m", fetchSpy as any);
     expect(s.getCwd()).toBe("/my/project");
   });
 
@@ -474,7 +473,7 @@ describe("PuxAgentSession", () => {
     const body = JSON.parse(fetchCall[1]?.body as string);
     expect(body.message).toBe("my prompt text");
     expect(body.project).toBe("test-proj");
-    expect(body.model).toBe("deepseek/flash");
+    expect(body.model).toBe("deepseek/deepseek-v4-flash");
   });
 
   // ---- Resource loader stubs ----

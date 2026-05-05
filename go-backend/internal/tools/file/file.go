@@ -15,7 +15,6 @@ type SandboxFileOps interface {
 	ReadFile(ctx context.Context, path string) (string, error)
 	WriteFile(ctx context.Context, path string, content string, overwrite bool) (string, error)
 	EditFile(ctx context.Context, path string, oldStr, newStr string) (string, error)
-	UndoEdit(ctx context.Context, path string) (string, error)
 	Grep(ctx context.Context, path string, pattern string) (string, error)
 	Glob(ctx context.Context, path string, pattern string) (string, error)
 }
@@ -64,10 +63,6 @@ func (s *SimpleSandboxOps) EditFile(ctx context.Context, path string, oldStr, ne
 		return "", err
 	}
 	return fmt.Sprintf("Replaced 1 occurrence in %s", path), nil
-}
-
-func (s *SimpleSandboxOps) UndoEdit(ctx context.Context, path string) (string, error) {
-	return "", fmt.Errorf("undo not implemented")
 }
 
 func (s *SimpleSandboxOps) Grep(ctx context.Context, path string, pattern string) (string, error) {

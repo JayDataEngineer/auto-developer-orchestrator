@@ -119,10 +119,6 @@ func (a *Adapter) Close() {
 	}
 }
 
-func (a *Adapter) Reset() {
-	a.Close()
-}
-
 func convertEvents(ch <-chan llama.ChatEvent) <-chan core.ChatEvent {
 	out := make(chan core.ChatEvent, 256)
 	go func() {

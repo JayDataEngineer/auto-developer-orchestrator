@@ -20,8 +20,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// promptWithOrchestratorV2 handles prompt requests using the new architecture.
-// Feature-flagged behind USE_NEW_ARCHITECTURE=true.
+// promptWithOrchestratorV2 handles prompt requests using the orchestrator agent.
+// This is the default and only path for /api/pux/prompt.
 func (h *PuxHandler) promptWithOrchestratorV2(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
 	key := compositeAgentKey(projectPath, req.AgentId)
 

@@ -2,7 +2,6 @@ package hooks
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -108,85 +107,4 @@ func (h *ApprovalHook) OnAfterToolCall(ctx context.Context, state *core.LoopStat
 
 func (h *ApprovalHook) OnAgentEnd(ctx context.Context, state *core.LoopState) error {
 	return nil
-}
-
-// SetLogger sets a custom logger.
-func (h *ApprovalHook) SetLogger(logger *log.Logger) {
-	h.logger = logger
-}
-
-// ChannelApprovalHandler implements ApprovalHandler using Go channels.
-// This is the simplest implementation — register a request, get a channel,
-// then someone sends a response to the channel.
-type ChannelApprovalHandler struct {
-	mu       sync.Mutex
-	channels map[string]chan ApprovalResponse
-}
-
-// NewChannelApprovalHandler creates a channel-based approval handler.
-func NewChannelApprovalHandler() *ChannelApprovalHandler {
-	return &ChannelApprovalHandler{
-		channels: make(map[string]chan ApprovalResponse),
-	}
-}
-
-// RequestApproval creates a channel and blocks until a response is received.
-func (h *ChannelApprovalHandler) RequestApproval(ctx context.Context, requestID string, data map[string]any) (ApprovalResponse, error) {
-	ch := make(chan ApprovalResponse, 1)
-
-	h.mu.Lock()
-	h.channels[requestID] = ch
-	h.mu.Unlock()
-
-	defer func() {
-		h.mu.Lock()
-		delete(h.channels, requestID)
-		h.mu.Unlock()
-	}()
-
-	select {
-	case <-ctx.Done():
-		return ApprovalResponse{Approved: false, Feedback: "timeout"}, ctx.Err()
-	case resp := <-ch:
-		return resp, nil
-	}
-}
-
-// Resolve sends a response to a pending approval request.
-func (h *ChannelApprovalHandler) Resolve(requestID string, resp ApprovalResponse) bool {
-	h.mu.Lock()
-	ch, ok := h.channels[requestID]
-	h.mu.Unlock()
-
-	if !ok {
-		return false
-	}
-
-	select {
-	case ch <- resp:
-		return true
-	default:
-		return false
-	}
-}
-
-// PendingRequests returns the IDs of all pending approval requests.
-func (h *ChannelApprovalHandler) PendingRequests() []string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	ids := make([]string, 0, len(h.channels))
-	for id := range h.channels {
-		ids = append(ids, id)
-	}
-	return ids
-}
-
-// MarshalPlan extracts a plan from a tool result string.
-func MarshalPlan(result string) (map[string]any, error) {
-	var plan map[string]any
-	if err := json.Unmarshal([]byte(result), &plan); err != nil {
-		return nil, fmt.Errorf("failed to parse plan JSON: %w", err)
-	}
-	return plan, nil
 }

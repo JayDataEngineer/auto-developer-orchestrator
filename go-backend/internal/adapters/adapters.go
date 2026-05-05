@@ -75,10 +75,6 @@ func (f *FileOps) EditFile(ctx context.Context, path string, oldStr, newStr stri
 	return fmt.Sprintf("Edited %s", path), nil
 }
 
-func (f *FileOps) UndoEdit(ctx context.Context, path string) (string, error) {
-	return "", fmt.Errorf("undo not implemented in sandbox adapter")
-}
-
 func (f *FileOps) Grep(ctx context.Context, path string, pattern string) (string, error) {
 	return f.exec(ctx, fmt.Sprintf("grep -rn %s %s 2>&1 || true", shQ(pattern), shQ(path)))
 }
