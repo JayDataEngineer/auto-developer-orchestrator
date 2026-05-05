@@ -35,8 +35,9 @@ type Config struct {
 	FileOps         file.SandboxFileOps
 	DelegateRunner  orchestration.DelegateRunner
 	Skills          *skills.Store
-	ApprovalHandler hooks.ApprovalHandler // optional: if set, create_plan requires user approval
-	GitExecutor     hooks.GitExecutor     // optional: if set, git checkpoints are created
+	ApprovalHandler  hooks.ApprovalHandler     // optional: if set, create_plan requires user approval
+	GitExecutor      hooks.GitExecutor         // optional: if set, git checkpoints are created
+	ExtraHooks       []core.LoopHook           // optional: add-on hooks (Langfuse, etc.)
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -167,6 +168,9 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		loopHooks = append(loopHooks, approvalHook)
 		logger.Printf("Approval hook enabled (plan-only mode)")
 	}
+
+	// Add extra hooks from add-ons (Langfuse, etc.)
+	loopHooks = append(loopHooks, cfg.ExtraHooks...)
 
 	systemPrompt := common.BuildOrchestratorPrompt(toolReg.All(), cfg.SandboxID, "", "")
 	if skillStore.Count() > 0 {

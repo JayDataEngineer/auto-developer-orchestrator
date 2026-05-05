@@ -185,7 +185,9 @@ export class PuxAgentSession {
     const body = JSON.stringify({
       message: text,
       project: this.project,
+      agentId: "default",
       model: this.modelName,
+      thinkingLevel: this.thinkingLevel !== "none" ? this.thinkingLevel : undefined,
     });
 
     try {
@@ -249,13 +251,24 @@ export class PuxAgentSession {
           if (t === "") currentEvent = "";
         }
       }
-      console.error("[pux] SSE stream ended, events:", eventCount);
+      // SSE stream ended normally
+
     } catch (err: any) {
       if (err.name !== "AbortError") {
+        let errorMsg = err.message || String(err);
+        // Friendlier messages for common failures
+        if (err.cause?.code === "ECONNREFUSED" || errorMsg.includes("Connection refused")) {
+          errorMsg = `Backend not running at ${this.serverUrl}. Start it with: task dev`;
+        } else if (err.cause?.code === "ENOTFOUND" || errorMsg.includes("fetch failed")) {
+          errorMsg = `Cannot reach ${this.serverUrl}. Check if the backend is running.`;
+        } else if (errorMsg.includes("Project not found")) {
+          errorMsg = `Project "${this.project}" not registered. Register it with: orch project add ${this.project}`;
+        }
         const errMsg = mkAssistant({
           stopReason: "error",
-          errorMessage: err.message || String(err),
-        });
+          errorMessage: errorMsg,
+          status: "error",
+        } as any);
         this.emit({ type: "message_end", message: errMsg });
       }
     } finally {

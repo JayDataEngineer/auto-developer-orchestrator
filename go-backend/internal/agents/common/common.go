@@ -8,13 +8,6 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
 
-// RegisterTools creates a ToolRegistry from a list of tools and registers standard aliases.
-func RegisterTools(tools ...core.Tool) *core.ToolRegistry {
-	reg := core.NewToolRegistry(tools)
-	reg.RegisterCommonAliases()
-	return reg
-}
-
 // ToOpenAITools converts Tool list to OpenAI format.
 func ToOpenAITools(tools []core.Tool) []core.OpenAITool {
 	result := make([]core.OpenAITool, 0, len(tools))
@@ -29,30 +22,6 @@ func ToOpenAITools(tools []core.Tool) []core.OpenAITool {
 		})
 	}
 	return result
-}
-
-// BuildCoderPrompt builds a minimal system prompt for the coder agent (pi-mono style).
-func BuildCoderPrompt(tools []core.Tool, sandboxID string) string {
-	var b strings.Builder
-
-	b.WriteString("You are an expert coding assistant.\n")
-	b.WriteString("You help users by reading files, executing commands, editing code, and writing new files.\n\n")
-
-	b.WriteString("# Tools\n\n")
-	for _, t := range tools {
-		schema := formatSchema(t.Schema())
-		fmt.Fprintf(&b, "## %s\n%s\n%s\n\n", t.Name(), t.Description(), schema)
-	}
-
-	b.WriteString("# Guidelines\n")
-	b.WriteString("- Be precise when editing files — match the exact string to replace\n")
-	b.WriteString("- Read files before editing them\n")
-	b.WriteString("- Test your changes with bash when possible\n")
-	b.WriteString("- Keep responses concise\n\n")
-
-	b.WriteString("Sandbox ID: " + sandboxID + "\n")
-
-	return b.String()
 }
 
 // BuildOrchestratorPrompt builds the full orchestrator system prompt.

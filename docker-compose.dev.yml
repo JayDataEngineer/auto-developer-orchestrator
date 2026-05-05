@@ -18,9 +18,9 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse.local}
-      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
-      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:3100}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-pk-orch-2026-lf-a1b2c3d4e5f6}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-sk-orch-2026-lf-a1b2c3d4e5f6}
       - DOCKER_HOST=unix:///var/run/docker.sock
       - OPENSHELL_POLICIES_DIR=/etc/openshell/policies
       - OPENSHELL_IMAGE=nvidia/openshell:latest

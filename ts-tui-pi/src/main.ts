@@ -22,6 +22,21 @@ const { values: opts } = parseArgs({
 const cwd = opts.cwd!;
 const agentDir = join(homedir(), ".pux");
 
+// ── Startup health check ──
+let backendOnline = false;
+try {
+  const healthResp = await fetch(`${opts.server}/api/health`, { signal: AbortSignal.timeout(3000) });
+  if (healthResp.ok) backendOnline = true;
+} catch {}
+
+if (!backendOnline) {
+  process.stderr.write(
+    `\x1b[33m⚠  Backend not reachable at ${opts.server}\x1b[0m\n` +
+    `\x1b[90m   Start it with: task dev   (or cd go-backend && go run ./cmd/server/)\x1b[0m\n` +
+    `\x1b[90m   The TUI will work but prompts will fail until backend starts.\x1b[0m\n\n`
+  );
+}
+
 const settingsManager = SettingsManager.create(cwd, agentDir);
 const sessionManager = SessionManager.inMemory(cwd);
 

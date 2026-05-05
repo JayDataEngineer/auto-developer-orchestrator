@@ -46,17 +46,17 @@ task down              # Stop everything (backend, frontend, sandboxes)
 
 ## Interfaces — THREE ways to use the system
 
-### 1. TUI (Terminal UI) — `orch` or `orch chat`
-- Bubble Tea (charmbracelet) TUI with viewport, textarea, spinner
-- Streams SSE, renders thinking/tool calls/assistant text in terminal
-- Files: `go-backend/internal/cli/tui/` (app.go, sse_reader.go, styles.go, messages.go)
-- Build: `cd go-backend && go build -o orch ./cmd/cli/`
-- Run: `./orch` or `./orch --server http://localhost:3847 --project myproject`
+### 1. TUI (Terminal UI) — `task chat` or `orch`
+- TypeScript pi-mono TUI via bun (`ts-tui-pi/`), spawned by `orch` chat command
+- Streams SSE from Go backend, renders thinking/tool calls/assistant text in terminal
+- Files: `ts-tui-pi/src/` (core/pux-agent-session.ts is the SSE bridge, modes/interactive/ is the TUI)
+- Run: `task chat` or `cd ts-tui-pi && bun run src/main.ts --project myproject`
+- Tests: `cd ts-tui-pi && bun test`
 
 ### 2. CLI (scripting) — `orch agent prompt "message"`
 - Cobra subcommands for scripting/CI: `orch agent prompt`, `orch agent history`, `orch sandbox`, `orch project`, etc.
 - `orch agent prompt "do the thing" -p myproject` — streams SSE as text or JSON (`-o json`)
-- Files: `go-backend/internal/cli/cmd/` (agent.go, chat.go, sandbox.go, etc.)
+- Files: `go-backend/internal/cli/cmd/` (agent.go, sandbox.go, etc.)
 - SSE client: `go-backend/internal/cli/api/client.go`
 
 ### 3. Frontend (web) — Vite React app on port 5174
