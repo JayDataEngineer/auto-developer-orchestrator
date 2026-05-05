@@ -3,6 +3,7 @@ package llama
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ type ChatProvider interface {
 	NewSession(ctxSize int) (*Session, error)
 	IsLoaded() bool
 	IsCloud() bool
+	HasVision() bool
 	ModelName() string
 	CheckHealth() error
 	WarmUp() error
@@ -39,8 +41,9 @@ type LLMClient struct {
 	logger     *zap.Logger
 	modelName  string
 
-	mu     sync.RWMutex
-	loaded bool
+	mu         sync.RWMutex
+	loaded     bool
+	hasVision  *bool // nil = not checked yet, true/false = cached result
 }
 
 // LLMClientConfig holds configuration for creating an LLMClient.
@@ -150,6 +153,82 @@ func (e *LLMClient) ModelName() string {
 // IsCloud returns true if this engine talks to a cloud provider (has an API key).
 func (e *LLMClient) IsCloud() bool {
 	return e.apiKey != ""
+}
+
+// HasVision returns true if the model supports image understanding.
+// For local llama-server: checks /props for mmproj availability.
+// For cloud providers: uses model name heuristics (Gemini = yes, DeepSeek = no).
+// Results are cached after first check.
+func (e *LLMClient) HasVision() bool {
+	e.mu.RLock()
+	if e.hasVision != nil {
+		result := *e.hasVision
+		e.mu.RUnlock()
+		return result
+	}
+	e.mu.RUnlock()
+
+	// Check and cache
+	result := e.checkVision()
+	e.mu.Lock()
+	e.hasVision = &result
+	e.mu.Unlock()
+	return result
+}
+
+// checkVision determines if the model has vision capability.
+func (e *LLMClient) checkVision() bool {
+	// Cloud providers: model name heuristics
+	if e.IsCloud() {
+		name := strings.ToLower(e.modelName)
+		// Gemini models have vision
+		if strings.Contains(name, "gemini") {
+			return true
+		}
+		// Claude models have vision
+		if strings.Contains(name, "claude") {
+			return true
+		}
+		// DeepSeek, Qwen cloud models — text only
+		return false
+	}
+
+	// Local llama-server: check /props endpoint for mmproj
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", e.baseURL+"/props", nil)
+	if err != nil {
+		return false
+	}
+
+	resp, err := e.client.Do(req)
+	if err != nil {
+		e.logger.Debug("HasVision: /props not reachable, assuming no vision", zap.Error(err))
+		return false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	var props struct {
+		MultiModalProjector struct {
+			Architecture string `json:"architecture"`
+		} `json:"mmproj"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&props); err != nil {
+		return false
+	}
+
+	hasMMProj := props.MultiModalProjector.Architecture != ""
+	if hasMMProj {
+		e.logger.Info("HasVision: mmproj detected on llama-server")
+	} else {
+		e.logger.Info("HasVision: no mmproj on llama-server")
+	}
+	return hasMMProj
 }
 
 // WarmUp sends a single-token request to pre-compile CUDA kernels on the server side.

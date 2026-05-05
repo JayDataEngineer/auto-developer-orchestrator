@@ -17,6 +17,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/observability"
 	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
+	"github.com/auto-developer-orchestrator/backend/internal/vision"
 	"go.uber.org/zap"
 )
 
@@ -95,6 +96,25 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		h.log.Info("Langfuse tracing hook wired", zap.String("model", modelName), zap.Strings("tags", traceCfg.Tags))
 	}
 	cfg.ExtraHooks = extraHooks
+
+	// Build vision fallback chain — ONLY when the engine lacks native vision.
+	// When the LLM can see images (mmproj/Gemini), skip the fallback to avoid
+	// redundant descriptions and extra latency.
+	var visionChain *vision.FallbackChain
+	engineHasVision := false
+	if engine != nil {
+		engineHasVision = engine.HasVision()
+	}
+	if !engineHasVision && h.mcpMulti != nil && h.mcpMulti.HasTool("analyze_image") {
+		providers := []vision.Provider{
+			vision.NewMCPProvider(h.mcpMulti),
+		}
+		visionChain = vision.NewFallbackChain(providers...)
+		h.log.Info("Vision fallback chain configured (LLM has no native vision)", zap.String("engine", engine.ModelName()))
+	} else if engineHasVision {
+		h.log.Debug("LLM has native vision, skipping fallback chain", zap.String("engine", engine.ModelName()))
+	}
+	cfg.VisionChain = visionChain
 
 	orch, err := orchestrator.New(provider, cfg)
 	if err != nil {

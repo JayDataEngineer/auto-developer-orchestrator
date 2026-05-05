@@ -18,6 +18,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
+	"github.com/auto-developer-orchestrator/backend/internal/vision"
 )
 
 // 	Config holds configuration for the orchestrator agent.
@@ -38,6 +39,7 @@ type Config struct {
 	ApprovalHandler  hooks.ApprovalHandler     // optional: if set, create_plan requires user approval
 	GitExecutor      hooks.GitExecutor         // optional: if set, git checkpoints are created
 	ExtraHooks       []core.LoopHook           // optional: add-on hooks (Langfuse, etc.)
+	VisionChain      *vision.FallbackChain     // optional: if set, auto-describes images in tool results
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -196,7 +198,14 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		SandboxID:  cfg.SandboxID,
 	}
 
-	loop := core.NewAgentLoop(provider, toolReg, sess, loopCfg)
+	// Wrap tool registry with vision-aware executor if chain is provided
+	executor := core.ToolExecutor(toolReg)
+	if cfg.VisionChain != nil {
+		executor = vision.NewVisionAwareExecutor(toolReg, cfg.VisionChain, logger)
+		logger.Printf("Vision-aware executor enabled (wrapping tool registry)")
+	}
+
+	loop := core.NewAgentLoop(provider, executor, sess, loopCfg)
 	loop.SetLogger(logger)
 
 	return &Agent{

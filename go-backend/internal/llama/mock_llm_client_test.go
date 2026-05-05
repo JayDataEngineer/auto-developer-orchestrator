@@ -163,6 +163,7 @@ func (m *mockLLMClient) CheckHealth() error { return nil }
 func (m *mockLLMClient) IsLoaded() bool     { return true }
 func (m *mockLLMClient) ModelName() string  { return "mock" }
 func (m *mockLLMClient) IsCloud() bool      { return false }
+func (m *mockLLMClient) HasVision() bool    { return false }
 func (m *mockLLMClient) WarmUp() error      { return nil }
 func (m *mockLLMClient) Close() error       { return nil }
 func (m *mockLLMClient) NewSession(ctxSize int) (*Session, error) {
