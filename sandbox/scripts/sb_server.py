@@ -507,6 +507,36 @@ class Handler(BaseHTTPRequestHandler):
                 "stealth": self.state.stealth,
                 "tabs": safe(lambda: len(self.state.sb.driver.window_handles), 0) if alive else 0,
             })
+        elif self.path.startswith("/file/"):
+            # Serve local file as base64 — agent passes to analyze_image
+            file_path = self.path[6:]  # strip /file/
+            if not file_path.startswith("/"):
+                file_path = "/" + file_path
+            if not os.path.isfile(file_path):
+                return self._err(f"file not found: {file_path}", 404)
+            try:
+                import base64
+                data = open(file_path, "rb").read()
+                b64 = base64.b64encode(data).decode()
+                # Detect MIME type
+                mime = "application/octet-stream"
+                if file_path.endswith(".png"):
+                    mime = "image/png"
+                elif file_path.endswith(".jpg") or file_path.endswith(".jpeg"):
+                    mime = "image/jpeg"
+                elif file_path.endswith(".webp"):
+                    mime = "image/webp"
+                elif file_path.endswith(".gif"):
+                    mime = "image/gif"
+                data_uri = f"data:{mime};base64,{b64}"
+                self._ok({
+                    "path": file_path,
+                    "size": len(data),
+                    "mime": mime,
+                    "data_uri": data_uri,
+                })
+            except Exception as e:
+                self._err(f"read failed: {e}")
         else:
             self._err(f"Unknown GET endpoint: {self.path}", 404)
 
