@@ -22,13 +22,14 @@ type Driver interface {
 
 // PageContext represents the state of a web page.
 type PageContext struct {
-	URL      string   `json:"url"`
-	Title    string   `json:"title"`
-	Elements []Element `json:"elements,omitempty"`
-	Content  string   `json:"content,omitempty"`
-	Vision   string   `json:"vision,omitempty"`
-	Screenshot string `json:"screenshot,omitempty"`
-	Error    string   `json:"error,omitempty"`
+	URL        string    `json:"url"`
+	Title      string    `json:"title"`
+	Elements   []Element `json:"elements,omitempty"`
+	ImageURLs  []string  `json:"image_urls,omitempty"`
+	Content    string    `json:"content,omitempty"`
+	Vision     string    `json:"vision,omitempty"`
+	Screenshot string    `json:"screenshot,omitempty"`
+	Error      string    `json:"error,omitempty"`
 }
 
 // Element represents a labeled interactive element on a page.

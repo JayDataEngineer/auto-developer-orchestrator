@@ -276,3 +276,12 @@ func parseElements(jsonStr string) []LabeledElement {
 	}
 	return elements
 }
+
+// parseImageURLs parses the JSON string returned by the image extractor JS
+func parseImageURLs(jsonStr string) []string {
+	var urls []string
+	if err := json.Unmarshal([]byte(jsonStr), &urls); err != nil {
+		return []string{}
+	}
+	return urls
+}

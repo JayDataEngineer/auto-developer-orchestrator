@@ -96,9 +96,10 @@ RUN ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html
 RUN mkdir -p /var/log/supervisor
 COPY supervisord.conf /etc/supervisor/conf.d/sandbox.conf
 
-# Stealth browser helper script
+# Stealth browser helper scripts
 COPY scripts/sb_agent.py /usr/local/bin/sb_agent.py
-RUN chmod +x /usr/local/bin/sb_agent.py
+COPY scripts/sb_server.py /usr/local/bin/sb_server.py
+RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py
 
 # Working directory
 RUN mkdir -p /workspace

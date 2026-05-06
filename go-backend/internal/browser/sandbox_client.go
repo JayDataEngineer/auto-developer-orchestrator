@@ -23,6 +23,23 @@ const (
 	settleDelay        = 1 * time.Second // pause after navigation for dynamic content
 )
 
+// imageExtractorJS extracts image URLs from the current page.
+// Returns JSON array of src strings (up to 50, skipping data: URIs and SVGs).
+const imageExtractorJS = `
+(function(){
+	var imgs = document.querySelectorAll('img[src]');
+	var urls = [];
+	for (var i = 0; i < imgs.length; i++) {
+		var src = imgs[i].src || imgs[i].getAttribute('src') || '';
+		if (src && !src.startsWith('data:') && !src.startsWith('blob:') && src.length < 2000) {
+			urls.push(src);
+			if (urls.length >= 50) break;
+		}
+	}
+	return JSON.stringify(urls);
+})()
+`
+
 // SandboxBrowserClient manages a browser connection to a sandbox Chrome instance
 // via Chrome DevTools Protocol (CDP).
 //
@@ -229,6 +246,7 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 	var title, currentURL string
 	var screenshotBuf []byte
 	var elementsJSON string
+	var imageURLsJSON string
 
 	sbc.mu.RLock()
 	allocCtx := sbc.allocator
@@ -267,6 +285,7 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 		chromedp.Title(&title),
 		chromedp.Location(&currentURL),
 		chromedp.Evaluate(labelerJS, &elementsJSON),
+		chromedp.Evaluate(imageExtractorJS, &imageURLsJSON),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			var err error
 			screenshotBuf, err = page.CaptureScreenshot().Do(ctx)
@@ -307,6 +326,7 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 	}
 
 	elements := parseElements(elementsJSON)
+	imageURLs := parseImageURLs(imageURLsJSON)
 	sbc.mu.Lock()
 	sbc.lastURL = currentURL
 	sbc.lastTitle = title
@@ -317,12 +337,14 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 	sbc.logger.Info("navigated successfully",
 		zap.String("url", currentURL),
 		zap.String("targetID", newTargetID),
-		zap.Int("elements", len(elements)))
+		zap.Int("elements", len(elements)),
+		zap.Int("images", len(imageURLs)))
 
 	return &PageInfo{
 		URL:        currentURL,
 		Title:      title,
 		Elements:   elements,
+		ImageURLs:  imageURLs,
 		Screenshot: base64.StdEncoding.EncodeToString(screenshotBuf),
 	}, nil
 }
@@ -352,6 +374,7 @@ func (sbc *SandboxBrowserClient) clickInner(ctx context.Context, elementID int) 
 	var title, currentURL string
 	var screenshotBuf []byte
 	var elementsJSON string
+	var imageURLsJSON string
 
 	clickJS := fmt.Sprintf(`document.querySelector('%s') && document.querySelector('%s').click()`, selector, selector)
 
@@ -362,6 +385,7 @@ func (sbc *SandboxBrowserClient) clickInner(ctx context.Context, elementID int) 
 			chromedp.Title(&title),
 			chromedp.Location(&currentURL),
 			chromedp.Evaluate(labelerJS, &elementsJSON),
+			chromedp.Evaluate(imageExtractorJS, &imageURLsJSON),
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				var err error
 				screenshotBuf, err = page.CaptureScreenshot().Do(ctx)
@@ -374,12 +398,14 @@ func (sbc *SandboxBrowserClient) clickInner(ctx context.Context, elementID int) 
 	}
 
 	elements := parseElements(elementsJSON)
+	imageURLs := parseImageURLs(imageURLsJSON)
 	sbc.updateState(currentURL, title, elements, screenshotBuf)
 
 	return &PageInfo{
 		URL:        currentURL,
 		Title:      title,
 		Elements:   elements,
+		ImageURLs:  imageURLs,
 		Screenshot: base64.StdEncoding.EncodeToString(screenshotBuf),
 	}, nil
 }
@@ -409,6 +435,7 @@ func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, t
 	var title, currentURL string
 	var screenshotBuf []byte
 	var elementsJSON string
+	var imageURLsJSON string
 
 	escaped := strings.ReplaceAll(text, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
@@ -434,6 +461,7 @@ func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, t
 			chromedp.Title(&title),
 			chromedp.Location(&currentURL),
 			chromedp.Evaluate(labelerJS, &elementsJSON),
+			chromedp.Evaluate(imageExtractorJS, &imageURLsJSON),
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				var err error
 				screenshotBuf, err = page.CaptureScreenshot().Do(ctx)
@@ -446,12 +474,14 @@ func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, t
 	}
 
 	elements := parseElements(elementsJSON)
+	imageURLs := parseImageURLs(imageURLsJSON)
 	sbc.updateState(currentURL, title, elements, screenshotBuf)
 
 	return &PageInfo{
 		URL:        currentURL,
 		Title:      title,
 		Elements:   elements,
+		ImageURLs:  imageURLs,
 		Screenshot: base64.StdEncoding.EncodeToString(screenshotBuf),
 	}, nil
 }
@@ -478,6 +508,7 @@ func (sbc *SandboxBrowserClient) scrollInner(ctx context.Context, direction stri
 	var title, currentURL string
 	var screenshotBuf []byte
 	var elementsJSON string
+	var imageURLsJSON string
 
 	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx,
@@ -485,6 +516,7 @@ func (sbc *SandboxBrowserClient) scrollInner(ctx context.Context, direction stri
 			chromedp.Title(&title),
 			chromedp.Location(&currentURL),
 			chromedp.Evaluate(labelerJS, &elementsJSON),
+			chromedp.Evaluate(imageExtractorJS, &imageURLsJSON),
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				var err error
 				screenshotBuf, err = page.CaptureScreenshot().Do(ctx)
@@ -497,12 +529,14 @@ func (sbc *SandboxBrowserClient) scrollInner(ctx context.Context, direction stri
 	}
 
 	elements := parseElements(elementsJSON)
+	imageURLs := parseImageURLs(imageURLsJSON)
 	sbc.updateState(currentURL, title, elements, screenshotBuf)
 
 	return &PageInfo{
 		URL:        currentURL,
 		Title:      title,
 		Elements:   elements,
+		ImageURLs:  imageURLs,
 		Screenshot: base64.StdEncoding.EncodeToString(screenshotBuf),
 	}, nil
 }

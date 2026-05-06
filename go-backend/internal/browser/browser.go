@@ -25,6 +25,7 @@ type PageInfo struct {
 	URL        string           `json:"url"`
 	Title      string           `json:"title"`
 	Elements   []LabeledElement `json:"elements"`
+	ImageURLs  []string         `json:"image_urls,omitempty"`
 	Screenshot string           `json:"screenshot,omitempty"` // base64 PNG
 }
 
