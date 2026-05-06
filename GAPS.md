@@ -77,3 +77,15 @@ Documented from deep codebase analysis of browser-use (reference/repos/browser-u
 - **Sandbox image stale**: Running sandboxes use old image. Need `docker build` + recreate to get latest sb_server.
 - **analyze_image local files**: MCP vision can't reach sandbox filesystem. Workaround: GET /file/<path> returns data URI.
 - **Vision model fails on some PNGs**: "Unable to infer channel dimension format" on unusual color channels.
+- **DeepSeek stream errors**: Transient INTERNAL_ERROR from DeepSeek API causes agent loop to terminate. Retry at caller level needed.
+- **Project path jules://**: Projects imported from Jules have `jules://` paths that don't resolve. Manual DB fix needed.
+
+## End-to-End Test Results (2026-05-06)
+
+**Test**: "show me makima from chainsaw man" via POST /api/pux/prompt
+- **Search**: 3 search queries returned 30 results (Zerochan, Fandom, MyAnimeList, AlphaCoders, etc.)
+- **Scrape**: 4 pages scraped (Fandom gallery, Zerochan, MyAnimeList, AlphaCoders)
+- **Browser**: sb_server navigate + extract_images on Zerochan
+- **Download**: 5 Makima images saved to /tmp/ (7-10KB avif thumbnails)
+- **Issue**: DeepSeek API stream error on round 9 (transient, not code bug)
+- **Dedup fix**: Tool call ID deduplication added — no more duplicate tool_call_id errors
