@@ -52,6 +52,14 @@ func BuildOrchestratorPrompt(tools []core.Tool, sandboxID string, projectContext
 	b.WriteString("5. Make decisions autonomously\n")
 	b.WriteString("6. When done, call synthesize if you're the orchestrator, or yield_artifact if you're a sub-agent\n\n")
 
+	b.WriteString("# Tool Tips\n")
+	b.WriteString("- **scrape** returns cleaned markdown — it strips all <img> tags. Do NOT rely on scrape to find image URLs.\n")
+	b.WriteString("- **Finding images**: Use bash with `curl` + `python3` (requests/re) to fetch raw HTML and extract image URLs from <img> tags.\n")
+	b.WriteString("- **analyze_image**: Pass it any direct image URL (jpg, png, webp). It describes what's in the image using a vision model.\n")
+	b.WriteString("- **Downloading files**: Use bash with `curl -L -o /path/file URL` to download. Use `file /path/file` to check format, `ls -la` to check size.\n")
+	b.WriteString("- **Image format issues**: If analyze_image fails on an image, convert with python3: `from PIL import Image; Image.open('in.webp').convert('RGB').save('out.jpg','JPEG')`.\n")
+	b.WriteString("- **Fandom wikis**: Image URLs follow the pattern `https://static.wikia.nocookie.net/DOMAIN/images/HASH/NAME.png`\n\n")
+
 	if projectContext != "" {
 		b.WriteString("--- Project Context ---\n")
 		b.WriteString(projectContext + "\n\n")

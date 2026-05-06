@@ -6,13 +6,46 @@ ENV RESOLUTION=1280x720x24
 ENV CHROME_REMOTE_DEBUGGING_PORT=9222
 ENV NOVNC_PORT=6080
 
-# Install core dependencies
+# Install core dependencies — everything a dev sandbox needs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    jq \
     wget \
+    jq \
     gnupg \
     ca-certificates \
+    file \
+    git \
+    openssh-client \
+    unzip \
+    zip \
+    tar \
+    gzip \
+    bzip2 \
+    xz-utils \
+    zstd \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-tk \
+    nodejs \
+    npm \
+    build-essential \
+    make \
+    cmake \
+    pkg-config \
+    rsync \
+    tree \
+    htop \
+    vim \
+    nano \
+    less \
+    grep \
+    sed \
+    gawk \
+    findutils \
+    procps \
+    iputils-ping \
+    netcat-openbsd \
     xvfb \
     x11vnc \
     fluxbox \
@@ -21,7 +54,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
     socat \
     wmctrl \
+    xdotool \
+    xclip \
     fonts-liberation \
+    fonts-noto-cjk \
     libappindicator3-1 \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -37,6 +73,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcomposite1 \
     libxdamage1 \
     libxrandr2 \
+    libpng-dev \
+    libjpeg-dev \
+    libwebp-dev \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 

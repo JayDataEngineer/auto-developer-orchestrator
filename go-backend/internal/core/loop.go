@@ -206,23 +206,10 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				if evt.Usage != nil {
 					lastUsage = evt.Usage
 				}
-				// Accumulate tool calls from the done event before breaking.
-				// The session accumulates tool calls and sends them in the done event.
-				for _, tc := range evt.Deltas {
-					if existing, ok := toolCallAccum[tc.Index]; ok {
-						if tc.Function.Name != "" {
-							existing.Function.Name += tc.Function.Name
-						}
-						if tc.Function.Arguments != "" {
-							existing.Function.Arguments += tc.Function.Arguments
-						}
-						if tc.ID != "" {
-							existing.ID = tc.ID
-						}
-						if tc.Type != "" {
-							existing.Type = tc.Type
-						}
-					} else {
+				// Tool calls were already accumulated from streaming deltas above.
+				// Only fall back to done-event deltas if we have none (non-streaming providers).
+				if len(toolCallAccum) == 0 {
+					for _, tc := range evt.Deltas {
 						toolCallAccum[tc.Index] = &ToolCallResponse{
 							ID:   tc.ID,
 							Type: tc.Type,
@@ -361,6 +348,13 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 		l.logger.Printf("Tool calls detected: %d (round %d)", len(toolCalls), round)
 		state.Round = round
 		state.ContentLength = contentLen
+
+		// Deduplicate tool calls — some models (DeepSeek) emit identical calls
+		deduped := deduplicateToolCalls(toolCalls)
+		if len(deduped) < len(toolCalls) {
+			l.logger.Printf("Deduplicated tool calls: %d -> %d", len(toolCalls), len(deduped))
+			toolCalls = deduped
+		}
 
 		var toolResults []ToolResult
 		for _, tcr := range toolCalls {
@@ -537,4 +531,21 @@ func (l *AgentLoop) IsRunning() bool {
 // Session returns the underlying session.
 func (l *AgentLoop) Session() Session {
 	return l.session
+}
+
+// deduplicateToolCalls removes duplicate tool calls that have the same function
+// name and arguments. Some models (e.g. DeepSeek) emit identical tool calls
+// multiple times in a single response.
+func deduplicateToolCalls(calls []ToolCallResponse) []ToolCallResponse {
+	seen := make(map[string]int)
+	result := make([]ToolCallResponse, 0, len(calls))
+	for _, tc := range calls {
+		key := tc.Function.Name + "\x00" + tc.Function.Arguments
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = len(result)
+		result = append(result, tc)
+	}
+	return result
 }
