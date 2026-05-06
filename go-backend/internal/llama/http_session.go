@@ -211,14 +211,22 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 			// On finish, save state and check if usage is already available
 			if finish != "" {
 				pendingFinish = finish
-				// Collect accumulated tool calls in index order
+				// Collect accumulated tool calls in index order, deduplicating by ID
 				indices := make([]int, 0, len(toolCallAccum))
 				for idx := range toolCallAccum {
 					indices = append(indices, idx)
 				}
 				sort.Ints(indices)
+				seenIDs := make(map[string]bool)
 				for _, idx := range indices {
-					pendingToolCalls = append(pendingToolCalls, *toolCallAccum[idx])
+					tc := toolCallAccum[idx]
+					if tc.ID != "" && seenIDs[tc.ID] {
+						continue // skip duplicate tool call ID
+					}
+					if tc.ID != "" {
+						seenIDs[tc.ID] = true
+					}
+					pendingToolCalls = append(pendingToolCalls, *tc)
 				}
 				pendingContent = contentBuf.String()
 				pendingReasoning = reasoningBuf.String()

@@ -534,17 +534,26 @@ func (l *AgentLoop) Session() Session {
 }
 
 // deduplicateToolCalls removes duplicate tool calls that have the same function
-// name and arguments. Some models (e.g. DeepSeek) emit identical tool calls
-// multiple times in a single response.
+// name and arguments, or the same ID. Some models (e.g. DeepSeek) emit identical
+// tool calls multiple times in a single response.
 func deduplicateToolCalls(calls []ToolCallResponse) []ToolCallResponse {
-	seen := make(map[string]int)
+	seenKey := make(map[string]bool)
+	seenID := make(map[string]bool)
 	result := make([]ToolCallResponse, 0, len(calls))
 	for _, tc := range calls {
+		// Dedup by ID first (most reliable for API correctness)
+		if tc.ID != "" {
+			if seenID[tc.ID] {
+				continue
+			}
+			seenID[tc.ID] = true
+		}
+		// Also dedup by name+args
 		key := tc.Function.Name + "\x00" + tc.Function.Arguments
-		if _, ok := seen[key]; ok {
+		if seenKey[key] {
 			continue
 		}
-		seen[key] = len(result)
+		seenKey[key] = true
 		result = append(result, tc)
 	}
 	return result
