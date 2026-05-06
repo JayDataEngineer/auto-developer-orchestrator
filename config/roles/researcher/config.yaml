@@ -1,0 +1,6 @@
+description: "Deep research specialist — searches multiple sources, crawls pages, and synthesizes concise reports"
+imports:
+  - research
+  - shell
+max_rounds: 15
+temperature: 0.3

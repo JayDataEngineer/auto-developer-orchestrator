@@ -445,6 +445,17 @@ func (m *MultiClient) HasTool(toolName string) bool {
 	return ok
 }
 
+// ServerToolNames returns all tool names registered under the given MCP server prefix.
+func (m *MultiClient) ServerToolNames(prefix string) []string {
+	var names []string
+	for name, p := range m.toolMap {
+		if p == prefix {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // PrimaryClient returns the first registered client (for backward compatibility).
 func (m *MultiClient) PrimaryClient() *Client {
 	for _, c := range m.clients {

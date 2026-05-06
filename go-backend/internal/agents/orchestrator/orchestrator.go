@@ -99,10 +99,18 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		)
 	}
 
+	// Build MCP server resolver for role-based delegation (used by both paths below)
+	var mcpResolver orchestration.MCPResolver
+	if cfg.MCPClient != nil {
+		mcpResolver = func(prefix string) []string {
+			return cfg.MCPClient.ServerToolNames(prefix)
+		}
+	}
+
 	if cfg.DelegateRunner != nil {
 		tools = append(tools,
-			orchestration.NewDelegateToTool(cfg.DelegateRunner),
-			orchestration.NewDelegateAsyncTool(cfg.DelegateRunner),
+			orchestration.NewDelegateToTool(cfg.DelegateRunner, mcpResolver),
+			orchestration.NewDelegateAsyncTool(cfg.DelegateRunner, mcpResolver),
 			orchestration.NewCollectResultsTool(cfg.DelegateRunner),
 			orchestration.NewPlanTool(),
 			orchestration.NewSynthesizeTool(),
@@ -146,8 +154,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 		// Append delegation tools now that we have a runner
 		tools = append(tools,
-			orchestration.NewDelegateToTool(pr),
-			orchestration.NewDelegateAsyncTool(pr),
+			orchestration.NewDelegateToTool(pr, mcpResolver),
+			orchestration.NewDelegateAsyncTool(pr, mcpResolver),
 			orchestration.NewCollectResultsTool(pr),
 			orchestration.NewPlanTool(),
 			orchestration.NewSynthesizeTool(),

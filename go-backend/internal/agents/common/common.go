@@ -31,22 +31,41 @@ func ToOpenAITools(tools []core.Tool) []core.OpenAITool {
 	return result
 }
 
-// AgentRole holds a loaded agent definition from config/agents/<name>/
+// AgentRole holds a loaded role definition from config/roles/<name>/
 type AgentRole struct {
 	Name        string
 	Description string
 	Prompt      string
 	Tools       []string
+	MCPServers  []string
+	Imports     []string
 	MaxRounds   int
 	Temperature float32
 }
 
-// agentConfig is the YAML structure for config/agents/<name>/config.yaml
+// agentConfig is the YAML structure for config/roles/<name>/config.yaml
 type agentConfig struct {
 	Description string   `yaml:"description"`
 	Tools       []string `yaml:"tools"`
+	MCPServers  []string `yaml:"mcp_servers"`
+	Imports     []string `yaml:"imports"`
 	MaxRounds   int      `yaml:"max_rounds"`
 	Temperature float64  `yaml:"temperature"`
+}
+
+// ToolPackage is a shared tool group from config/tool_packages/<name>.yaml
+type ToolPackage struct {
+	Name        string
+	Description string
+	Tools       []string
+	MCPServers  []string
+}
+
+// toolPackageConfig is the YAML structure for config/tool_packages/<name>.yaml
+type toolPackageConfig struct {
+	Description string   `yaml:"description"`
+	Tools       []string `yaml:"tools"`
+	MCPServers  []string `yaml:"mcp_servers"`
 }
 
 // promptData holds template variables for the main system prompt.
@@ -65,6 +84,9 @@ var (
 
 	agentRoles    map[string]*AgentRole
 	agentLoadOnce sync.Once
+
+	toolPackages    map[string]*ToolPackage
+	toolPkgLoadOnce sync.Once
 )
 
 // loadPromptTemplate loads and parses config/prompt.md as a Go text/template.
@@ -91,19 +113,18 @@ func loadPromptTemplate() (*template.Template, error) {
 func ReloadPromptTemplate() {
 	promptOnce = sync.Once{}
 	agentLoadOnce = sync.Once{}
+	toolPkgLoadOnce = sync.Once{}
 }
 
-// LoadAgentRoles reads agent folders from config/agents/ directory.
-// Each folder must contain config.yaml (metadata) and prompt.md (system prompt).
-// Falls back to loading legacy .md files with YAML frontmatter.
-func LoadAgentRoles() map[string]*AgentRole {
-	agentLoadOnce.Do(func() {
-		agentRoles = make(map[string]*AgentRole)
+// LoadToolPackages reads all .yaml files from config/tool_packages/ directory.
+func LoadToolPackages() map[string]*ToolPackage {
+	toolPkgLoadOnce.Do(func() {
+		toolPackages = make(map[string]*ToolPackage)
 
 		root := os.Getenv("PROJECT_ROOT")
-		dir := "config/agents"
+		dir := "config/tool_packages"
 		if root != "" {
-			dir = filepath.Join(root, "config", "agents")
+			dir = filepath.Join(root, "config", "tool_packages")
 		}
 
 		entries, err := os.ReadDir(dir)
@@ -112,15 +133,90 @@ func LoadAgentRoles() map[string]*AgentRole {
 		}
 
 		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+				continue
+			}
+			name := strings.TrimSuffix(entry.Name(), ".yaml")
+			data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+			if err != nil {
+				continue
+			}
+			var pc toolPackageConfig
+			if err := yaml.Unmarshal(data, &pc); err != nil {
+				continue
+			}
+			toolPackages[name] = &ToolPackage{
+				Name:        name,
+				Description: pc.Description,
+				Tools:       pc.Tools,
+				MCPServers:  pc.MCPServers,
+			}
+		}
+	})
+	return toolPackages
+}
+
+// ResolveImports expands a list of tool package names into concrete tools + mcp_servers.
+func ResolveImports(imports []string) (tools []string, mcpServers []string) {
+	pkgs := LoadToolPackages()
+	seenTools := make(map[string]bool)
+	seenServers := make(map[string]bool)
+	for _, name := range imports {
+		pkg, ok := pkgs[name]
+		if !ok {
+			continue
+		}
+		for _, t := range pkg.Tools {
+			if !seenTools[t] {
+				seenTools[t] = true
+				tools = append(tools, t)
+			}
+		}
+		for _, s := range pkg.MCPServers {
+			if !seenServers[s] {
+				seenServers[s] = true
+				mcpServers = append(mcpServers, s)
+			}
+		}
+	}
+	return tools, mcpServers
+}
+
+// LoadAgentRoles reads role folders from config/roles/ directory.
+// Each folder must contain config.yaml (metadata) and prompt.md (system prompt).
+// Falls back to loading legacy .md files with YAML frontmatter.
+func LoadAgentRoles() map[string]*AgentRole {
+	agentLoadOnce.Do(func() {
+		agentRoles = make(map[string]*AgentRole)
+
+		root := os.Getenv("PROJECT_ROOT")
+		dir := "config/roles"
+		if root != "" {
+			dir = filepath.Join(root, "config", "roles")
+		}
+
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			// Fall back to legacy config/agents/ path
+			legacyDir := filepath.Join(filepath.Dir(dir), "agents")
+			if root != "" {
+				legacyDir = filepath.Join(root, "config", "agents")
+			}
+			entries, err = os.ReadDir(legacyDir)
+			if err != nil {
+				return
+			}
+			dir = legacyDir
+		}
+
+		for _, entry := range entries {
 			if entry.IsDir() {
-				// Folder-based agent: config.yaml + prompt.md
-				role := loadAgentFromFolder(filepath.Join(dir, entry.Name()))
+				role := loadRoleFromFolder(filepath.Join(dir, entry.Name()))
 				if role != nil {
 					role.Name = entry.Name()
 					agentRoles[entry.Name()] = role
 				}
 			} else if strings.HasSuffix(entry.Name(), ".md") {
-				// Legacy single-file agent
 				name := strings.TrimSuffix(entry.Name(), ".md")
 				data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
 				if err != nil {
@@ -134,8 +230,9 @@ func LoadAgentRoles() map[string]*AgentRole {
 	return agentRoles
 }
 
-// loadAgentFromFolder reads config.yaml + prompt.md from an agent folder.
-func loadAgentFromFolder(folder string) *AgentRole {
+// loadRoleFromFolder reads config.yaml + prompt.md from a role folder.
+// If config.yaml has an `imports` field, resolves it into Tools + MCPServers.
+func loadRoleFromFolder(folder string) *AgentRole {
 	cfg, err := os.ReadFile(filepath.Join(folder, "config.yaml"))
 	if err != nil {
 		return nil
@@ -161,10 +258,21 @@ func loadAgentFromFolder(folder string) *AgentRole {
 		temp = float32(ac.Temperature)
 	}
 
+	// Resolve imports → concrete tools + mcp_servers
+	tools := ac.Tools
+	mcpServers := ac.MCPServers
+	if len(ac.Imports) > 0 {
+		importTools, importMCPServers := ResolveImports(ac.Imports)
+		tools = append(tools, importTools...)
+		mcpServers = append(mcpServers, importMCPServers...)
+	}
+
 	return &AgentRole{
 		Description: ac.Description,
 		Prompt:      string(prompt),
-		Tools:       ac.Tools,
+		Tools:       tools,
+		MCPServers:  mcpServers,
+		Imports:     ac.Imports,
 		MaxRounds:   maxRounds,
 		Temperature: temp,
 	}
@@ -224,7 +332,7 @@ func GetAgentRole(name string) *AgentRole {
 func FormatAgentList() string {
 	roles := LoadAgentRoles()
 	if len(roles) == 0 {
-		return "No agent roles loaded from config/agents/"
+		return "No roles loaded from config/roles/"
 	}
 
 	names := make([]string, 0, len(roles))
@@ -236,7 +344,19 @@ func FormatAgentList() string {
 	var b strings.Builder
 	for _, name := range names {
 		role := roles[name]
-		fmt.Fprintf(&b, "### %s\n%s\nTools: %s\n\n", role.Name, role.Description, strings.Join(role.Tools, ", "))
+		var capability string
+		if len(role.Imports) > 0 {
+			capability = "imports: " + strings.Join(role.Imports, ", ")
+		} else {
+			capability = strings.Join(role.Tools, ", ")
+			if len(role.MCPServers) > 0 {
+				if capability != "" {
+					capability += ", "
+				}
+				capability += "mcp:" + strings.Join(role.MCPServers, ", mcp:")
+			}
+		}
+		fmt.Fprintf(&b, "### %s\n%s\nCapabilities: %s\n\n", role.Name, role.Description, capability)
 	}
 	return b.String()
 }
@@ -332,7 +452,7 @@ You do NOT do the work yourself. Delegate using delegate_to and delegate_async.
 
 # Rules
 1. DELEGATE first, do yourself second
-2. Use delegate_to with employee role names (researcher, coder, browser)
+2. Use delegate_to with employee role names (web_expert, researcher, it_worker, developer, designer, desktop_operator)
 3. Synthesize results and respond concisely
 
 {{if .SandboxID}}Sandbox ID: {{.SandboxID}}{{end}}

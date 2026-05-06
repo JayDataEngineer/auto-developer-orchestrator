@@ -1,0 +1,6 @@
+description: "Visual designer — generates, analyzes, and manipulates images and visual assets"
+imports:
+  - vision
+  - shell
+max_rounds: 10
+temperature: 0.5

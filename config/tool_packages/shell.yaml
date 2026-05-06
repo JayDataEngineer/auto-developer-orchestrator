@@ -1,0 +1,9 @@
+description: "Sandbox shell and file operations"
+mcp_servers: []
+tools:
+  - bash
+  - file_read
+  - file_write
+  - file_edit
+  - file_glob
+  - file_grep

@@ -1,0 +1,7 @@
+description: "Desktop automation — controls the GUI via xdotool for screenshots, clicks, typing, and key presses"
+imports:
+  - desktop
+  - vision
+  - shell
+max_rounds: 12
+temperature: 0.3

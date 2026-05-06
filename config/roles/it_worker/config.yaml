@@ -1,0 +1,5 @@
+description: "IT operations — installs packages, configures services, manages files, keeps the sandbox running"
+imports:
+  - shell
+max_rounds: 20
+temperature: 0.2
