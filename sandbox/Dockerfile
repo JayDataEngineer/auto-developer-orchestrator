@@ -79,7 +79,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Google Chrome stable
+# Install Python packages for web scraping, image processing, and stealth browsing
+RUN python3 -m pip install seleniumbase requests beautifulsoup4 Pillow httpx \
+    && rm -rf /root/.cache/pip
 RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get update \
     && apt-get install -y --no-install-recommends /tmp/chrome.deb \
@@ -93,6 +95,10 @@ RUN ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html
 # Supervisor config to manage all services
 RUN mkdir -p /var/log/supervisor
 COPY supervisord.conf /etc/supervisor/conf.d/sandbox.conf
+
+# Stealth browser helper script
+COPY scripts/sb_agent.py /usr/local/bin/sb_agent.py
+RUN chmod +x /usr/local/bin/sb_agent.py
 
 # Working directory
 RUN mkdir -p /workspace
