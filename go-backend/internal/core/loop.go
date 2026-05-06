@@ -28,6 +28,7 @@ type AgentLoopConfig struct {
 	MaxRetriesPerTool    int // max consecutive failures before forcing a new approach (0 = 3)
 	MaxConsecutiveFails  int // circuit breaker: force yield after N consecutive failures (0 = 5)
 	ToolExecTimeoutSec   int // seconds before a tool call times out (0 = 300, delegation gets 30m)
+	MaxProviderRetries   int // max retries when the LLM provider fails mid-stream (0 = 2)
 }
 
 // AgentLoop runs the full agent loop: generate → parse tool calls → execute → feed back.
@@ -54,6 +55,9 @@ func NewAgentLoop(provider LLMProvider, executor ToolExecutor, s Session, cfg Ag
 	}
 	if cfg.ToolExecTimeoutSec == 0 {
 		cfg.ToolExecTimeoutSec = 300
+	}
+	if cfg.MaxProviderRetries == 0 {
+		cfg.MaxProviderRetries = 2
 	}
 	return &AgentLoop{
 		provider: provider,
@@ -161,55 +165,115 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			}
 		}
 
-		// Build context and stream
-		sessCtx, err := l.session.BuildContext(ctx)
-		if err != nil {
-			SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
-			SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
-			return err
-		}
+		// Build context and stream — with provider retry for transient errors
+		var (
+			contentBuf    strings.Builder
+			thinkingBuf   strings.Builder
+			finishReason  FinishReason
+			lastUsage     *StreamUsage
+			toolCallAccum map[int]*ToolCallResponse
+			providerErr   error
+		)
 
-		chatCh, err := l.provider.StreamChat(ctx, sessCtx, l.config.Tools, l.config.Opts)
-		if err != nil {
-			SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
-			SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
-			return err
-		}
-
-		// Phase 1: Stream until generation completes
-		var contentBuf strings.Builder
-		var thinkingBuf strings.Builder
-		var finishReason FinishReason
-		var lastUsage *StreamUsage
-		toolCallAccum := make(map[int]*ToolCallResponse)
-
-	streamLoop:
-		for evt := range chatCh {
-			if ctx.Err() != nil {
-				SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
-				return ctx.Err()
+	providerRetry:
+		for attempt := 0; attempt <= l.config.MaxProviderRetries; attempt++ {
+			if attempt > 0 {
+				backoff := time.Duration(attempt) * 2 * time.Second
+				l.logger.Printf("Provider retry %d/%d after %v (error: %v)", attempt, l.config.MaxProviderRetries, backoff, providerErr)
+				SendEvent(subscriber, AgentEvent{
+					Type: EventTypeTextDelta,
+					Data: AgentEventData{Text: fmt.Sprintf("\n[Retrying generation (attempt %d/%d)...]\n", attempt+1, l.config.MaxProviderRetries+1)},
+				})
+				time.Sleep(backoff)
 			}
 
-			if evt.Usage != nil {
-				lastUsage = evt.Usage
+			// Reset accumulators for each attempt
+			contentBuf.Reset()
+			thinkingBuf.Reset()
+			finishReason = ""
+			lastUsage = nil
+			toolCallAccum = make(map[int]*ToolCallResponse)
+
+			sessCtx, err := l.session.BuildContext(ctx)
+			if err != nil {
+				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
+				SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
+				return err
 			}
 
-			switch evt.Type {
-			case ChatEventError:
-				l.logger.Printf("Generation error: %v", evt.Err)
-				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: evt.Err.Error()}})
+			chatCh, err := l.provider.StreamChat(ctx, sessCtx, l.config.Tools, l.config.Opts)
+			if err != nil {
+				providerErr = err
+				if ClassifyError(err) == ErrorTransient && attempt < l.config.MaxProviderRetries {
+					continue providerRetry
+				}
+				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
 				SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
-				return evt.Err
+				return err
+			}
 
-			case ChatEventDone:
-				finishReason = evt.Finish
+			// Phase 1: Stream until generation completes
+			var streamErr error
+		streamLoop:
+			for evt := range chatCh {
+				if ctx.Err() != nil {
+					SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
+					return ctx.Err()
+				}
+
 				if evt.Usage != nil {
 					lastUsage = evt.Usage
 				}
-				// Tool calls were already accumulated from streaming deltas above.
-				// Only fall back to done-event deltas if we have none (non-streaming providers).
-				if len(toolCallAccum) == 0 {
-					for _, tc := range evt.Deltas {
+
+				switch evt.Type {
+				case ChatEventError:
+					streamErr = evt.Err
+					l.logger.Printf("Generation error on attempt %d: %v", attempt, evt.Err)
+					break streamLoop
+
+				case ChatEventDone:
+					finishReason = evt.Finish
+					if evt.Usage != nil {
+						lastUsage = evt.Usage
+					}
+					if len(toolCallAccum) == 0 {
+						for _, tc := range evt.Deltas {
+							toolCallAccum[tc.Index] = &ToolCallResponse{
+								ID:   tc.ID,
+								Type: tc.Type,
+								Function: FunctionCallData{
+									Name:      tc.Function.Name,
+									Arguments: tc.Function.Arguments,
+								},
+							}
+						}
+					}
+					break streamLoop
+
+				case ChatEventContent:
+					contentBuf.WriteString(evt.Content)
+					SendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: evt.Content}})
+
+				case ChatEventThinking:
+					thinkingBuf.WriteString(evt.Content)
+					SendEvent(subscriber, AgentEvent{Type: EventTypeThinkingDelta, Data: AgentEventData{Text: evt.Content}})
+				}
+
+				for _, tc := range evt.Deltas {
+					if existing, ok := toolCallAccum[tc.Index]; ok {
+						if tc.Function.Name != "" {
+							existing.Function.Name += tc.Function.Name
+						}
+						if tc.Function.Arguments != "" {
+							existing.Function.Arguments += tc.Function.Arguments
+						}
+						if tc.ID != "" {
+							existing.ID = tc.ID
+						}
+						if tc.Type != "" {
+							existing.Type = tc.Type
+						}
+					} else {
 						toolCallAccum[tc.Index] = &ToolCallResponse{
 							ID:   tc.ID,
 							Type: tc.Type,
@@ -220,43 +284,28 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 						}
 					}
 				}
-				break streamLoop
-
-			case ChatEventContent:
-				contentBuf.WriteString(evt.Content)
-				SendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: evt.Content}})
-
-			case ChatEventThinking:
-				thinkingBuf.WriteString(evt.Content)
-				SendEvent(subscriber, AgentEvent{Type: EventTypeThinkingDelta, Data: AgentEventData{Text: evt.Content}})
 			}
 
-			// Accumulate tool call chunks
-			for _, tc := range evt.Deltas {
-				if existing, ok := toolCallAccum[tc.Index]; ok {
-					if tc.Function.Name != "" {
-						existing.Function.Name += tc.Function.Name
-					}
-					if tc.Function.Arguments != "" {
-						existing.Function.Arguments += tc.Function.Arguments
-					}
-					if tc.ID != "" {
-						existing.ID = tc.ID
-					}
-					if tc.Type != "" {
-						existing.Type = tc.Type
-					}
-				} else {
-					toolCallAccum[tc.Index] = &ToolCallResponse{
-						ID:   tc.ID,
-						Type: tc.Type,
-						Function: FunctionCallData{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
-					}
+			// Handle stream errors — retry if transient
+			if streamErr != nil {
+				providerErr = streamErr
+				if ClassifyError(streamErr) == ErrorTransient && attempt < l.config.MaxProviderRetries {
+					continue providerRetry
 				}
+				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: streamErr.Error()}})
+				SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
+				return streamErr
 			}
+
+			// Success — break out of retry loop
+			break providerRetry
+		}
+
+		// If all retries exhausted, providerErr holds the last error
+		if providerErr != nil && finishReason == "" {
+			SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: fmt.Sprintf("Provider failed after %d retries: %v", l.config.MaxProviderRetries, providerErr)}})
+			SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
+			return providerErr
 		}
 
 		// Track token usage

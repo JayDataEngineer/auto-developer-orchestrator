@@ -169,11 +169,15 @@ func ClassifyError(err error) ErrorClass {
 		return ErrorUnknown
 	}
 	msg := strings.ToLower(err.Error())
-	// Transient: network issues, timeouts, connection drops
+	// Transient: network issues, timeouts, connection drops, provider errors
 	if strings.Contains(msg, "timeout") || strings.Contains(msg, "connection") ||
 		strings.Contains(msg, "reset") || strings.Contains(msg, "temporarily") ||
 		strings.Contains(msg, "refused") || strings.Contains(msg, "eof") ||
-		strings.Contains(msg, "context canceled") || strings.Contains(msg, "deadline exceeded") {
+		strings.Contains(msg, "context canceled") || strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "internal_error") || strings.Contains(msg, "stream error") ||
+		strings.Contains(msg, "received from peer") || strings.Contains(msg, "502") ||
+		strings.Contains(msg, "503") || strings.Contains(msg, "504") ||
+		strings.Contains(msg, "overloaded") || strings.Contains(msg, "rate limit") {
 		return ErrorTransient
 	}
 	// Permanent: resource doesn't exist, permission denied, invalid params
