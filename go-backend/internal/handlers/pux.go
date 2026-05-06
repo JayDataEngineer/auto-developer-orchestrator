@@ -225,11 +225,21 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if a per-agent cloud engine is selected (OpenRouter, Gemini, etc.)
-	// This allows prompts to work even when local llama-server is off.
+	// Resolve engine for this prompt.
 	key := compositeAgentKey(projectPath, req.AgentId)
+
+	// 1) Per-agent previously selected engine (from PUT /model)
 	if selEngine, ok := h.selectedEngines[key]; ok && selEngine.IsLoaded() {
 		h.llamaEngine = selEngine
+	}
+
+	// 2) Inline model override from request (e.g. CLI --model deepseek/deepseek-v4-flash)
+	if req.Model != "" && (h.llamaEngine == nil || h.llamaEngine.ModelName() != req.Model) {
+		if eng := h.resolveEngineForModel(req.Model); eng != nil {
+			h.selectedEngines[key] = eng
+			h.llamaEngine = eng
+			h.log.Info("Using model from request", zap.String("model", req.Model))
+		}
 	}
 
 	// Library-mode path: always use orchestrator + ephemeral sub-agents
@@ -567,4 +577,54 @@ func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.LL
 		return nil
 	}
 	return eng
+}
+
+// resolveEngineForModel finds the provider for a model ID in settings.json
+// and creates an LLMClient. Returns nil if the model is not found.
+func (h *PuxHandler) resolveEngineForModel(modelID string) *llamaeng.LLMClient {
+	// Check pre-built engines first
+	switch {
+	case modelID == "gemini-3-flash-preview" && h.geminiEngine != nil:
+		return h.geminiEngine
+	case strings.Contains(modelID, "deepseek") && h.openrouterEngine != nil:
+		return h.openrouterEngine
+	}
+
+	// Scan settings.json for matching model
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(homeDir, ".pi", "agent", "settings.json"))
+	if err != nil {
+		return nil
+	}
+
+	var settings struct {
+		Providers map[string]struct {
+			BaseURL string `json:"baseUrl"`
+			APIKey  string `json:"apiKey"`
+			Models  []struct {
+				ID string `json:"id"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if json.Unmarshal(data, &settings) != nil {
+		return nil
+	}
+
+	for providerName, provider := range settings.Providers {
+		for _, m := range provider.Models {
+			if m.ID == modelID {
+				return h.engineFromSettings(providerName, modelID)
+			}
+		}
+	}
+
+	// Try as local model name (llamacpp)
+	if h.llamaEngine != nil && h.llamaEngine.ModelName() == modelID {
+		return h.llamaEngine
+	}
+
+	return nil
 }
