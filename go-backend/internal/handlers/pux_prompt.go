@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/adapters"
@@ -15,6 +14,7 @@ import (
 	llama "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/llm"
 	"github.com/auto-developer-orchestrator/backend/internal/observability"
+	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
@@ -26,11 +26,26 @@ import (
 func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
 	key := compositeAgentKey(projectPath, req.AgentId)
 
-	// Resolve sandbox ID from manager
-	sandboxID := filepath.Base(projectPath)
+	// Resolve sandbox — find existing or auto-create
+	sandboxID := req.Project // use project name as default sandbox ID
 	if h.sandboxMgr != nil {
 		if sb := h.sandboxMgr.FindSandboxByProject(projectPath); sb != nil {
 			sandboxID = sb.ID
+		} else {
+			// No sandbox for this project — auto-create one
+			sb, err := h.sandboxMgr.CreateSandbox(r.Context(), sandbox.SandboxOptions{
+				ID:          req.Project,
+				ProjectPath: projectPath,
+				InitialMode: sandbox.ModeBrowser,
+			})
+			if err != nil {
+				h.log.Warn("Failed to auto-create sandbox", zap.Error(err))
+			} else {
+				sandboxID = sb.ID
+				h.log.Info("Auto-created sandbox for prompt",
+					zap.String("project", req.Project),
+					zap.String("sandbox_id", sb.ID))
+			}
 		}
 	}
 
