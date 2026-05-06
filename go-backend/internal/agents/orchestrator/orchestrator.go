@@ -9,12 +9,14 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/hooks"
+	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/session"
 	"github.com/auto-developer-orchestrator/backend/internal/skills"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	browsertools "github.com/auto-developer-orchestrator/backend/internal/tools/browser"
 	desktoptools "github.com/auto-developer-orchestrator/backend/internal/tools/desktop"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
+	mcptools "github.com/auto-developer-orchestrator/backend/internal/tools/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
@@ -40,6 +42,7 @@ type Config struct {
 	GitExecutor      hooks.GitExecutor         // optional: if set, git checkpoints are created
 	ExtraHooks       []core.LoopHook           // optional: add-on hooks (Langfuse, etc.)
 	VisionChain      *vision.FallbackChain     // optional: if set, auto-describes images in tool results
+	MCPClient        *mcp.MultiClient          // optional: if set, registers MCP tools (search, analyze_image, etc.)
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -119,6 +122,13 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if skillStore.Count() > 0 {
 		tools = append(tools, skills.NewReadSkillTool(skillStore))
 		logger.Printf("Skills loaded: %d skills discovered", skillStore.Count())
+	}
+
+	// Register MCP tools (search, scrape, analyze_image, etc.) as first-class tools
+	if cfg.MCPClient != nil {
+		before := len(tools)
+		tools = mcptools.RegisterAll(tools, cfg.MCPClient)
+		logger.Printf("MCP tools registered: %d tools available", len(tools)-before)
 	}
 
 	// Create tool registry (needed by hooks and agent loop)

@@ -115,6 +115,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		h.log.Debug("LLM has native vision, skipping fallback chain", zap.String("engine", engine.ModelName()))
 	}
 	cfg.VisionChain = visionChain
+	cfg.MCPClient = h.mcpMulti
 
 	orch, err := orchestrator.New(provider, cfg)
 	if err != nil {
