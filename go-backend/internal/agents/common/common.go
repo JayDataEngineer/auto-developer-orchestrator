@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"text/template"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"gopkg.in/yaml.v3"
 )
 
 // ToOpenAITools converts Tool list to OpenAI format.
@@ -29,14 +31,22 @@ func ToOpenAITools(tools []core.Tool) []core.OpenAITool {
 	return result
 }
 
-// AgentRole holds a loaded agent definition from config/agents/<name>.md
+// AgentRole holds a loaded agent definition from config/agents/<name>/
 type AgentRole struct {
 	Name        string
 	Description string
-	Prompt      string   // body of the markdown file
-	Tools       []string // from frontmatter
-	MaxRounds   int      // from frontmatter
-	Temperature float32  // from frontmatter
+	Prompt      string
+	Tools       []string
+	MaxRounds   int
+	Temperature float32
+}
+
+// agentConfig is the YAML structure for config/agents/<name>/config.yaml
+type agentConfig struct {
+	Description string   `yaml:"description"`
+	Tools       []string `yaml:"tools"`
+	MaxRounds   int      `yaml:"max_rounds"`
+	Temperature float64  `yaml:"temperature"`
 }
 
 // promptData holds template variables for the main system prompt.
@@ -83,7 +93,9 @@ func ReloadPromptTemplate() {
 	agentLoadOnce = sync.Once{}
 }
 
-// LoadAgentRoles reads all .md files from config/agents/ directory.
+// LoadAgentRoles reads agent folders from config/agents/ directory.
+// Each folder must contain config.yaml (metadata) and prompt.md (system prompt).
+// Falls back to loading legacy .md files with YAML frontmatter.
 func LoadAgentRoles() map[string]*AgentRole {
 	agentLoadOnce.Do(func() {
 		agentRoles = make(map[string]*AgentRole)
@@ -100,27 +112,66 @@ func LoadAgentRoles() map[string]*AgentRole {
 		}
 
 		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-				continue
+			if entry.IsDir() {
+				// Folder-based agent: config.yaml + prompt.md
+				role := loadAgentFromFolder(filepath.Join(dir, entry.Name()))
+				if role != nil {
+					role.Name = entry.Name()
+					agentRoles[entry.Name()] = role
+				}
+			} else if strings.HasSuffix(entry.Name(), ".md") {
+				// Legacy single-file agent
+				name := strings.TrimSuffix(entry.Name(), ".md")
+				data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+				if err != nil {
+					continue
+				}
+				role := parseLegacyAgentRole(name, string(data))
+				agentRoles[name] = role
 			}
-
-			name := strings.TrimSuffix(entry.Name(), ".md")
-			path := filepath.Join(dir, entry.Name())
-
-			data, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-
-			role := parseAgentRole(name, string(data))
-			agentRoles[name] = role
 		}
 	})
 	return agentRoles
 }
 
-// parseAgentRole parses a markdown file with optional YAML frontmatter.
-func parseAgentRole(name, content string) *AgentRole {
+// loadAgentFromFolder reads config.yaml + prompt.md from an agent folder.
+func loadAgentFromFolder(folder string) *AgentRole {
+	cfg, err := os.ReadFile(filepath.Join(folder, "config.yaml"))
+	if err != nil {
+		return nil
+	}
+
+	var ac agentConfig
+	if err := yaml.Unmarshal(cfg, &ac); err != nil {
+		return nil
+	}
+
+	prompt, err := os.ReadFile(filepath.Join(folder, "prompt.md"))
+	if err != nil {
+		return nil
+	}
+
+	maxRounds := ac.MaxRounds
+	if maxRounds == 0 {
+		maxRounds = 15
+	}
+
+	temp := float32(0.4)
+	if ac.Temperature != 0 {
+		temp = float32(ac.Temperature)
+	}
+
+	return &AgentRole{
+		Description: ac.Description,
+		Prompt:      string(prompt),
+		Tools:       ac.Tools,
+		MaxRounds:   maxRounds,
+		Temperature: temp,
+	}
+}
+
+// parseLegacyAgentRole parses a legacy .md file with YAML frontmatter.
+func parseLegacyAgentRole(name, content string) *AgentRole {
 	role := &AgentRole{
 		Name:        name,
 		MaxRounds:   15,
@@ -130,7 +181,6 @@ func parseAgentRole(name, content string) *AgentRole {
 
 	body := content
 
-	// Parse YAML frontmatter (between --- delimiters)
 	if strings.HasPrefix(content, "---") {
 		end := strings.Index(content[3:], "---")
 		if end != -1 {
@@ -177,8 +227,15 @@ func FormatAgentList() string {
 		return "No agent roles loaded from config/agents/"
 	}
 
+	names := make([]string, 0, len(roles))
+	for name := range roles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	var b strings.Builder
-	for _, role := range roles {
+	for _, name := range names {
+		role := roles[name]
 		fmt.Fprintf(&b, "### %s\n%s\nTools: %s\n\n", role.Name, role.Description, strings.Join(role.Tools, ", "))
 	}
 	return b.String()
