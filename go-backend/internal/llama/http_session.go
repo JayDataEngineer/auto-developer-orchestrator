@@ -132,6 +132,10 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 			req.SessionID = "" // no session slot concept for cloud
 		}
 
+		// Pre-flight: deduplicate tool_call_ids in the message list.
+		// DeepSeek sometimes emits duplicate IDs which cause API 400 errors.
+		sanitizeMessages(&req.Messages)
+
 		// Accumulate the full assistant response (content + tool calls + reasoning)
 		toolCallAccum := make(map[int]*ToolCallResponse)
 		var contentBuf strings.Builder
@@ -312,6 +316,51 @@ func serializeToolCalls(calls []ToolCallResponse) string {
 	}
 	b, _ := json.Marshal(calls)
 	return string(b)
+}
+
+// sanitizeMessages ensures no duplicate tool_call_ids exist across the message list.
+// DeepSeek emits duplicate IDs which cause API 400 errors.
+func sanitizeMessages(msgs *[]Message) {
+	// First pass: collect all tool_call_ids from assistant messages
+	seenIDs := make(map[string]bool)
+	for i := range *msgs {
+		m := &(*msgs)[i]
+		if len(m.ToolCalls) == 0 {
+			continue
+		}
+		// Dedup tool calls by ID within this assistant message
+		deduped := make([]ToolCallResponse, 0, len(m.ToolCalls))
+		for _, tc := range m.ToolCalls {
+			if tc.ID != "" && seenIDs[tc.ID] {
+				continue
+			}
+			if tc.ID != "" {
+				seenIDs[tc.ID] = true
+			}
+			deduped = append(deduped, tc)
+		}
+		m.ToolCalls = deduped
+	}
+
+	// Second pass: remove tool result messages whose ID was deduped away
+	validIDs := make(map[string]bool)
+	for _, m := range *msgs {
+		for _, tc := range m.ToolCalls {
+			if tc.ID != "" {
+				validIDs[tc.ID] = true
+			}
+		}
+	}
+	cleaned := make([]Message, 0, len(*msgs))
+	for _, m := range *msgs {
+		if m.Role == "tool" && m.ToolCallID != "" {
+			if !validIDs[m.ToolCallID] {
+				continue // drop orphaned tool result
+			}
+		}
+		cleaned = append(cleaned, m)
+	}
+	*msgs = cleaned
 }
 
 // tokPerSec safely calculates tokens per second.
