@@ -6,11 +6,14 @@ The agent sends commands via curl, browser state persists across calls.
 
 Features:
     - SoM (Set-of-Marks) visual labeling: numbered boxes on interactive elements
-    - Auto-screenshot after every page change → vision-in-the-loop via analyze_image
-    - Page stats: viewport size, scroll position, element counts
-    - Index-based interaction: click/type by SoM label index (no CSS selector needed)
-    - CDP-based download tracking (handles click-triggered downloads)
-    - Tab management, search, image extraction, JavaScript evaluation
+    - Auto-screenshot after every page change → vision-in-the-loop
+    - Page fingerprinting: detects when page didn't change after action
+    - Occlusion-aware clicking with JS fallback
+    - CDP-based character-by-character typing (React-safe)
+    - Tab auto-detection after clicks
+    - Dropdown/select support
+    - Explicit wait action
+    - Structured data extraction
 
 Usage:
     sb_server.py [--port PORT] [--stealth]
@@ -20,38 +23,45 @@ Environment:
     DISPLAY         X11 display (set by supervisord)
 
 API — POST unless noted:
-    /navigate       {"url":"..."}                    → page + SoM labels + screenshot
-    /read           {}                               → page data (no re-navigation)
-    /search         {"query":"..."}                  → Google search results
-    /go_back        {}                               → back in history
-    /refresh        {}                               → reload page
-    /click          {"selector":"...","index":n}     → click element (index preferred)
-    /type           {"selector":"...","text":"...","index":n,"submit":false} → type
-    /scroll         {"direction":"down|up"}          → scroll
-    /label          {}                               → SoM labels on current page
-    /interact       {}                               → interactive elements list
-    /extract_images {}                               → image URLs on current page
-    /screenshot     {"path":"/tmp/shot.png"}         → save screenshot
-    /download       {"url":"...","path":"..."}       → direct URL download
-    /find_text      {"text":"..."}                   → scroll to text on page
-    /evaluate       {"code":"..."}                   → execute JS, return result
-    /run            {"code":"..."}                   → execute Python with `sb` loaded
-    /tabs           {}                               → list open tabs
-    /new_tab        {"url":"..."}                    → open new tab
-    /switch_tab     {"index":n}                      → switch to tab
-    /close_tab      {}                               → close current tab
-    /reset          {}                               → kill and recreate browser
-    GET /status     {}                               → browser alive check
+    /navigate           {"url":"..."}                    → page + SoM + screenshot
+    /read               {}                               → page data (no re-navigation)
+    /search             {"query":"..."}                  → DuckDuckGo search results
+    /go_back            {}                               → back in history
+    /refresh            {}                               → reload page
+    /click              {"selector":"...","index":n}     → occlusion-aware click
+    /type               {"selector":"...","text":"...","index":n,"submit":false,"clear":true} → CDP typing
+    /scroll             {"direction":"down|up","amount":0}
+    /label              {}                               → SoM labels on current page
+    /interact           {}                               → interactive elements list
+    /extract_images     {}                               → image URLs on current page
+    /screenshot         {"path":"/tmp/shot.png"}         → save screenshot
+    /download           {"url":"...","path":"..."}       → direct URL download
+    /find_text          {"text":"..."}                   → scroll to text on page
+    /evaluate           {"code":"..."}                   → execute JS, return result
+    /run                {"code":"..."}                   → execute Python with `sb` loaded
+    /tabs               {}                               → list open tabs
+    /new_tab            {"url":"..."}                    → open new tab
+    /switch_tab         {"index":n}                      → switch to tab
+    /close_tab          {}                               → close current tab
+    /dropdown_options   {"selector":"...","index":n}     → list <select> options
+    /select_dropdown    {"selector":"...","index":n,"value":"...","text":"..."} → select option
+    /wait               {"seconds":2}                    → explicit wait (max 30s)
+    /extract            {"query":"..."}                  → extract structured data from page
+    /reset              {}                               → kill and recreate browser
+    GET /status         {}                               → browser alive check
+    GET /file/<path>    {}                               → serve local file as base64 data URI
 """
 
 import sys
 import json
 import os
 import io
+import hashlib
 import time
 import traceback
 import threading
 import re
+import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -65,12 +75,11 @@ DEFAULT_PORT = 9876
 SCREENSHOT_DIR = "/tmp"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SoM (Set-of-Marks) Labeler JavaScript
+# JavaScript Snippets
 # ═══════════════════════════════════════════════════════════════════════════════
 
 SOM_LABELER_JS = r"""
 (() => {
-    // Remove previous overlay
     const existing = document.getElementById('__sb_label_overlay__');
     if (existing) existing.remove();
 
@@ -91,10 +100,6 @@ SOM_LABELER_JS = r"""
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    function safe(fn, fallback) {
-        try { return fn(); } catch(e) { return fallback; }
-    }
-
     function isVisible(el) {
         try {
             if (el.checkVisibility) return el.checkVisibility({checkOpacity:true, checkVisibilityCSS:true});
@@ -112,19 +117,12 @@ SOM_LABELER_JS = r"""
         let current = el;
         while (current && current !== document.body && current !== document.documentElement && parts.length < 3) {
             const tag = current.tagName.toLowerCase();
-            if (current.id) {
-                parts.unshift('#' + CSS.escape(current.id));
-                break;
-            }
+            if (current.id) { parts.unshift('#' + CSS.escape(current.id)); break; }
             const parent = current.parentElement;
             if (!parent) break;
             const siblings = Array.from(parent.children).filter(c => c.tagName === current.tagName);
-            if (siblings.length === 1) {
-                parts.unshift(tag);
-            } else {
-                const idx = siblings.indexOf(current) + 1;
-                parts.unshift(tag + ':nth-of-type(' + idx + ')');
-            }
+            if (siblings.length === 1) parts.unshift(tag);
+            else { const idx = siblings.indexOf(current) + 1; parts.unshift(tag + ':nth-of-type(' + idx + ')'); }
             current = parent;
         }
         return parts.join(' > ') || el.tagName.toLowerCase();
@@ -133,32 +131,20 @@ SOM_LABELER_JS = r"""
     function processElement(el) {
         if (id > 50) return false;
         if (!isVisible(el)) return true;
-
         const rect = el.getBoundingClientRect();
         if (rect.width < 4 || rect.height < 4) return true;
-        // Allow elements slightly off-screen top/bottom (scrollable pages)
         if (rect.bottom < -200 || rect.top > vh + 200) return true;
-
         const selector = buildSelector(el);
         if (seen.has(selector)) return true;
         seen.add(selector);
-
-        // Extract text
         const tag = el.tagName.toLowerCase();
         let text = '';
-        if (tag === 'input' || tag === 'textarea') {
-            text = el.placeholder || el.value || el.name || el.getAttribute('aria-label') || el.type || '';
-        } else if (tag === 'select') {
-            text = el.name || el.getAttribute('aria-label') || '';
-        } else {
-            text = (el.textContent || '').trim();
-        }
+        if (tag === 'input' || tag === 'textarea') text = el.placeholder || el.value || el.name || el.getAttribute('aria-label') || el.type || '';
+        else if (tag === 'select') text = el.name || el.getAttribute('aria-label') || '';
+        else text = (el.textContent || '').trim();
         text = text.substring(0, 80).replace(/\s+/g, ' ');
-
-        // Skip empty non-interactive-looking elements
         if (!text && tag !== 'input' && tag !== 'select' && tag !== 'textarea' && tag !== 'button') return true;
 
-        // Draw numbered label
         const label = document.createElement('div');
         label.style.cssText = 'position:fixed;pointer-events:none;background:rgba(220,38,38,0.88);color:white;font-size:11px;font-family:monospace;padding:1px 5px;border-radius:3px;z-index:1000000;line-height:1.3;white-space:nowrap;font-weight:bold;text-shadow:0 1px 2px rgba(0,0,0,0.5);';
         label.textContent = '' + id;
@@ -166,54 +152,31 @@ SOM_LABELER_JS = r"""
         label.style.top = Math.max(0, rect.top - 1) + 'px';
         overlay.appendChild(label);
 
-        // Draw bounding box
         const box = document.createElement('div');
         box.style.cssText = 'position:fixed;pointer-events:none;border:2px solid rgba(220,38,38,0.5);z-index:999999;border-radius:2px;';
-        box.style.left = rect.left + 'px';
-        box.style.top = rect.top + 'px';
-        box.style.width = rect.width + 'px';
-        box.style.height = rect.height + 'px';
+        box.style.left = rect.left + 'px'; box.style.top = rect.top + 'px';
+        box.style.width = rect.width + 'px'; box.style.height = rect.height + 'px';
         overlay.appendChild(box);
 
-        elements.push({
-            index: id,
-            tag: tag,
-            text: text,
-            selector: selector,
-            x: Math.round(rect.left),
-            y: Math.round(rect.top),
-            w: Math.round(rect.width),
-            h: Math.round(rect.height)
-        });
+        elements.push({index:id, tag:tag, text:text, selector:selector,
+            x:Math.round(rect.left), y:Math.round(rect.top),
+            w:Math.round(rect.width), h:Math.round(rect.height)});
         id++;
         return true;
     }
 
-    try {
-        const nodes = document.querySelectorAll(INTERACTIVE);
-        for (let i = 0; i < nodes.length; i++) {
-            if (!processElement(nodes[i])) break;
-        }
-    } catch(e) {}
-
+    try { const nodes = document.querySelectorAll(INTERACTIVE); for (let i=0;i<nodes.length;i++) { if (!processElement(nodes[i])) break; } } catch(e) {}
     document.body.appendChild(overlay);
     return JSON.stringify(elements);
 })()
 """
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Page Statistics JavaScript
-# ═══════════════════════════════════════════════════════════════════════════════
-
 PAGE_STATS_JS = r"""
 (() => {
     return JSON.stringify({
-        viewport_w: window.innerWidth,
-        viewport_h: window.innerHeight,
-        page_w: document.documentElement.scrollWidth,
-        page_h: document.documentElement.scrollHeight,
-        scroll_x: window.scrollX,
-        scroll_y: window.scrollY,
+        viewport_w: window.innerWidth, viewport_h: window.innerHeight,
+        page_w: document.documentElement.scrollWidth, page_h: document.documentElement.scrollHeight,
+        scroll_x: window.scrollX, scroll_y: window.scrollY,
         max_scroll_y: document.documentElement.scrollHeight - window.innerHeight,
         pixels_above: window.scrollY,
         pixels_below: Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY),
@@ -226,21 +189,93 @@ PAGE_STATS_JS = r"""
 })()
 """
 
+# Occlusion check — returns true if element at selector is blocked by another element
+OCCLUSION_CHECK_JS = r"""
+((selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return JSON.stringify({exists:false});
+    const rect = el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const topEl = document.elementFromPoint(cx, cy);
+    const occluded = topEl !== el && !el.contains(topEl);
+    return JSON.stringify({exists:true, occluded:occluded, blocker: topEl ? topEl.tagName : null});
+})
+"""
+
+# CDP-based character-by-character typing — dispatches proper keyboard events
+CDP_TYPE_JS = r"""
+((selector, text, clear) => {
+    const el = document.querySelector(selector);
+    if (!el) return JSON.stringify({ok:false, error:'element not found'});
+    el.focus();
+    if (clear) {
+        el.value = '';
+        el.dispatchEvent(new Event('input', {bubbles:true}));
+        el.dispatchEvent(new Event('change', {bubbles:true}));
+    }
+    // Use native input setter to trigger React's change detection
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value'
+    )?.set || Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype, 'value'
+    )?.set;
+    if (nativeInputValueSetter) nativeInputValueSetter.call(el, text);
+    else el.value = text;
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+    return JSON.stringify({ok:true, value:el.value});
+})
+"""
+
+# Dropdown options extraction
+DROPDOWN_OPTIONS_JS = r"""
+((selector) => {
+    const sel = document.querySelector(selector);
+    if (!sel) return JSON.stringify({ok:false, error:'element not found'});
+    if (sel.tagName !== 'SELECT') return JSON.stringify({ok:false, error:'not a select element'});
+    const opts = [];
+    for (const opt of sel.options) {
+        opts.push({value:opt.value, text:opt.textContent.trim(), selected:opt.selected, index:opt.index});
+    }
+    return JSON.stringify({ok:true, options:opts, multiple:sel.multiple, selected_count:sel.selectedOptions.length});
+})
+"""
+
+# Select dropdown option by value or text
+SELECT_DROPDOWN_JS = r"""
+((selector, value, text) => {
+    const sel = document.querySelector(selector);
+    if (!sel) return JSON.stringify({ok:false, error:'element not found'});
+    let found = false;
+    for (const opt of sel.options) {
+        if (value !== undefined && opt.value === value) { opt.selected = true; found = true; break; }
+        if (text !== undefined && opt.textContent.trim() === text) { opt.selected = true; found = true; break; }
+    }
+    if (found) {
+        sel.dispatchEvent(new Event('change', {bubbles:true}));
+        sel.dispatchEvent(new Event('input', {bubbles:true}));
+    }
+    return JSON.stringify({ok:found, value:sel.value});
+})
+"""
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Browser State
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class BrowserState:
-    """Persistent SeleniumBase browser with labeler cache."""
+    """Persistent SeleniumBase browser with labeler cache and fingerprinting."""
 
     def __init__(self, stealth=False):
         self.stealth = stealth
         self.sb = None
-        self._ctx = None  # UC Mode context manager if stealth
+        self._ctx = None
         self._lock = threading.Lock()
-        self._last_element_map = []  # cached SoM labels
+        self._last_element_map = []
         self._download_dir = "/tmp/sb_downloads"
+        self._last_fingerprint = ""
         os.makedirs(self._download_dir, exist_ok=True)
         self._init_browser()
 
@@ -258,8 +293,6 @@ class BrowserState:
                 from seleniumbase import sb_cdp
                 self.sb = sb_cdp.Chrome("about:blank", xvfb=True)
                 self._ctx = None
-
-            # Configure CDP for download tracking
             self._setup_cdp_downloads()
         except Exception as e:
             print(f"[sb_server] browser init failed: {e}", file=sys.stderr)
@@ -267,35 +300,29 @@ class BrowserState:
             self._ctx = None
 
     def _setup_cdp_downloads(self):
-        """Configure CDP to handle browser-triggered downloads."""
         try:
             downloads_path = str(Path(self._download_dir).absolute())
             self.sb.execute_cdp_cmd("Page.setDownloadBehavior", {
-                "behavior": "allow",
-                "downloadPath": downloads_path
+                "behavior": "allow", "downloadPath": downloads_path
             })
-            print(f"[sb_server] download directory: {downloads_path}", file=sys.stderr)
         except Exception as e:
             print(f"[sb_server] CDP download setup failed (non-fatal): {e}", file=sys.stderr)
 
     def _close_browser(self):
         if self._ctx is not None:
-            try:
-                self._ctx.__exit__(None, None, None)
-            except Exception:
-                pass
+            try: self._ctx.__exit__(None, None, None)
+            except Exception: pass
             self._ctx = None
         if self.sb is not None:
-            try:
-                self.sb.driver.stop()
-            except Exception:
-                pass
+            try: self.sb.driver.stop()
+            except Exception: pass
             self.sb = None
 
     def reset(self):
         with self._lock:
             self._init_browser()
             self._last_element_map = []
+            self._last_fingerprint = ""
 
     def ensure(self):
         if self.sb is None:
@@ -310,36 +337,42 @@ class BrowserState:
     def has_browser(self):
         return self.sb is not None
 
+    def snapshot_before(self):
+        """Capture current URL + element count as a fingerprint before an action."""
+        if self.sb is None:
+            return ""
+        url = safe(lambda: self.sb.get_current_url() or "", "")
+        try:
+            count = self.sb.execute_script("return document.querySelectorAll('*').length")
+            text_hash = hashlib.md5(safe(lambda: self.sb.get_text("body") or "", "").encode()).hexdigest()[:8]
+            self._last_fingerprint = f"{url}|{count}|{text_hash}"
+        except Exception:
+            self._last_fingerprint = url
+        return self._last_fingerprint
+
+    def check_page_changed(self):
+        """Compare current page to last snapshot. Returns page_changed boolean."""
+        if not self._last_fingerprint:
+            return True
+        old = self._last_fingerprint
+        new = self.snapshot_before()
+        return old != new
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def safe(fn, default=None):
-    try:
-        return fn()
-    except Exception:
-        return default
+    try: return fn()
+    except Exception: return default
 
-
-def ts():
-    return str(int(time.time()))
-
-
-def now():
-    return time.strftime("%H:%M:%S")
-
-
-def log(msg):
-    print(f"[sb_server {now()}] {msg}", file=sys.stderr)
-
-
-def screenshot_path():
-    return f"{SCREENSHOT_DIR}/sb_screenshot_{ts()}.png"
-
+def ts(): return str(int(time.time()))
+def now(): return time.strftime("%H:%M:%S")
+def log(msg): print(f"[sb_server {now()}] {msg}", file=sys.stderr)
+def screenshot_path(): return f"{SCREENSHOT_DIR}/sb_screenshot_{ts()}.png"
 
 def run_labeler(sb, state):
-    """Inject SoM labeler JS, returns element_map list."""
     try:
         result = sb.execute_script(SOM_LABELER_JS)
         element_map = json.loads(result) if isinstance(result, str) else result
@@ -349,18 +382,14 @@ def run_labeler(sb, state):
         log(f"labeler failed: {e}")
         return state._last_element_map or []
 
-
 def run_page_stats(sb):
-    """Extract page statistics via JS."""
     try:
         result = sb.execute_script(PAGE_STATS_JS)
         return json.loads(result) if isinstance(result, str) else result
     except Exception as e:
         return {"error": str(e)}
 
-
 def extract_page_data(sb):
-    """Extract page text, images, links from current browser state."""
     title = safe(lambda: sb.get_title() or "")
     url = safe(lambda: sb.get_current_url() or "")
     text = safe(lambda: sb.get_text("body") or "")
@@ -374,67 +403,21 @@ def extract_page_data(sb):
             if src and not src.startswith("data:") and not src.startswith("blob:") and len(src) < 2000:
                 alt = img.get_attribute("alt") or ""
                 images.append({"src": src, "alt": alt[:100]})
-                if len(images) >= MAX_IMAGES:
-                    break
-    except Exception:
-        pass
+                if len(images) >= MAX_IMAGES: break
+    except Exception: pass
 
     links = []
     try:
         for a in sb.select_all("a[href]", timeout=3):
             href = a.get_attribute("href") or ""
             if href and not href.startswith("#") and not href.startswith("javascript:"):
-                link_text = (a.text or "").strip()[:100]
-                links.append({"text": link_text, "url": href})
-                if len(links) >= MAX_LINKS:
-                    break
-    except Exception:
-        pass
+                links.append({"text": (a.text or "").strip()[:100], "url": href})
+                if len(links) >= MAX_LINKS: break
+    except Exception: pass
 
     return {"title": title, "url": url, "text": text, "images": images, "links": links}
 
-
-def extract_interactive(sb):
-    """Extract interactive elements from current page."""
-    elements = []
-    try:
-        nodes = sb.select_all(
-            'a[href], button, input:not([type="hidden"]), select, textarea, '
-            '[role="button"], [role="link"], [role="textbox"], [role="combobox"], '
-            '[role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], '
-            '[role="option"], [role="searchbox"]',
-            timeout=3
-        )
-        for el in nodes[:MAX_ELEMENTS]:
-            tag = el.tag_name.lower() if el.tag_name else ""
-            text = ""
-            if tag in ("input", "textarea"):
-                text = el.get_attribute("placeholder") or el.get_attribute("name") or el.get_attribute("type") or ""
-            elif tag == "select":
-                text = el.get_attribute("name") or ""
-            else:
-                text = (el.text or "").strip()[:60]
-
-            selector = ""
-            el_id = el.get_attribute("id")
-            if el_id:
-                selector = f"#{el_id}"
-            else:
-                selector = tag
-
-            elements.append({
-                "type": "link" if tag == "a" else ("button" if tag == "button" else "input"),
-                "tag": tag,
-                "text": text,
-                "selector": selector,
-            })
-    except Exception:
-        pass
-    return elements
-
-
 def find_element_by_index(state, index):
-    """Look up element selector from cached SoM label map."""
     for el in state._last_element_map:
         if el.get("index") == index:
             return el.get("selector")
@@ -453,10 +436,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _read_body(self):
         length = int(self.headers.get("Content-Length", 0))
-        if length == 0:
-            return {}
-        raw = self.rfile.read(length)
-        return json.loads(raw)
+        if length == 0: return {}
+        return json.loads(self.rfile.read(length))
 
     def _json_response(self, code, data):
         body = json.dumps(data, ensure_ascii=False).encode()
@@ -469,16 +450,27 @@ class Handler(BaseHTTPRequestHandler):
 
     def _ok(self, data=None, **extra):
         resp = {"ok": True}
-        if data:
-            resp.update(data)
+        if data: resp.update(data)
         resp.update(extra)
         self._json_response(200, resp)
 
     def _err(self, msg, code=500):
         self._json_response(code, {"ok": False, "error": str(msg)})
 
-    def _full_page_capture(self, sb, state):
-        """Run labeler + screenshot + page stats + page data. Used after every page change."""
+    def _resolve_selector(self, body):
+        """Resolve selector from index or direct selector. Returns (selector, error_msg)."""
+        selector = body.get("selector", "")
+        index = body.get("index", 0)
+        if index:
+            selector = find_element_by_index(self.state, index)
+            if not selector:
+                return "", f"element index {index} not found in label map — call /read first"
+        if not selector:
+            return "", "missing selector or index"
+        return selector, ""
+
+    def _capture_with_fingerprint(self, sb, state):
+        """Full capture + fingerprint comparison."""
         element_map = run_labeler(sb, state)
         stats = run_page_stats(sb)
         page_data = extract_page_data(sb)
@@ -486,61 +478,68 @@ class Handler(BaseHTTPRequestHandler):
         spath = screenshot_path()
         safe(lambda: sb.save_screenshot(spath), None)
 
+        page_changed = state.check_page_changed()
+
         return {
             "page_data": page_data,
             "element_map": element_map,
             "screenshot_path": spath,
             "page_stats": stats,
+            "page_changed": page_changed,
         }
+
+    def _capture_tabs_info(self, sb):
+        """Get current tab count and handle info."""
+        try:
+            return sb.driver.window_handles, sb.driver.current_window_handle
+        except Exception:
+            return [], None
+
+    def _detect_and_handle_new_tab(self, sb, before_handles):
+        """Check for new tabs after click. If new tab opened, switch to it. Returns info dict."""
+        try:
+            after_handles = sb.driver.window_handles
+            new_handles = [h for h in after_handles if h not in before_handles]
+            if new_handles:
+                # Auto-switch to the new tab (browser-use behavior)
+                sb.driver.switch_to.window(new_handles[-1])
+                sb.sleep(1)
+                return {"new_tab_opened": True, "total_tabs": len(after_handles)}
+            return {"new_tab_opened": False, "total_tabs": len(after_handles)}
+        except Exception:
+            return {"new_tab_opened": False, "total_tabs": 0}
 
     # ── GET ─────────────────────────────────────────────────────────────────
 
     def do_GET(self):
         if self.path == "/status":
             alive = self.state.sb is not None
-            url = ""
-            if alive:
-                url = safe(lambda: self.state.sb.get_current_url() or "", "")
+            url = safe(lambda: self.state.sb.get_current_url() or "", "") if alive else ""
             self._ok({
-                "alive": alive,
-                "url": url,
+                "alive": alive, "url": url,
                 "stealth": self.state.stealth,
                 "tabs": safe(lambda: len(self.state.sb.driver.window_handles), 0) if alive else 0,
             })
         elif self.path.startswith("/file/"):
-            # Serve local file as base64 — agent passes to analyze_image
-            file_path = self.path[6:]  # strip /file/
-            if not file_path.startswith("/"):
-                file_path = "/" + file_path
+            file_path = self.path[6:]
+            if not file_path.startswith("/"): file_path = "/" + file_path
             if not os.path.isfile(file_path):
                 return self._err(f"file not found: {file_path}", 404)
             try:
-                import base64
                 data = open(file_path, "rb").read()
                 b64 = base64.b64encode(data).decode()
-                # Detect MIME type
                 mime = "application/octet-stream"
-                if file_path.endswith(".png"):
-                    mime = "image/png"
-                elif file_path.endswith(".jpg") or file_path.endswith(".jpeg"):
-                    mime = "image/jpeg"
-                elif file_path.endswith(".webp"):
-                    mime = "image/webp"
-                elif file_path.endswith(".gif"):
-                    mime = "image/gif"
-                data_uri = f"data:{mime};base64,{b64}"
-                self._ok({
-                    "path": file_path,
-                    "size": len(data),
-                    "mime": mime,
-                    "data_uri": data_uri,
-                })
+                for ext, m in [(".png","image/png"),(".jpg","image/jpeg"),(".jpeg","image/jpeg"),
+                               (".webp","image/webp"),(".gif","image/gif"),(".pdf","application/pdf")]:
+                    if file_path.lower().endswith(ext): mime = m; break
+                self._ok({"path": file_path, "size": len(data), "mime": mime,
+                          "data_uri": f"data:{mime};base64,{b64}"})
             except Exception as e:
                 self._err(f"read failed: {e}")
         else:
             self._err(f"Unknown GET endpoint: {self.path}", 404)
 
-    # ── POST dispatch ───────────────────────────────────────────────────────
+    # ── POST ────────────────────────────────────────────────────────────────
 
     def do_POST(self):
         try:
@@ -548,322 +547,248 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._err(f"Invalid JSON: {e}", 400)
             return
-
         with self.state._lock:
             self._dispatch(self.path, body)
 
     def _dispatch(self, path, body):
         sb = self.state.sb
 
-        # ── Reset ─────────────────────────────────────────────────────────
-
         if path == "/reset":
             self.state.reset()
             self._ok({"message": "browser reset"})
 
-        # ── Navigate ──────────────────────────────────────────────────────
-
         elif path == "/navigate":
             url = body.get("url", "")
-            if not url:
-                return self._err("missing url", 400)
-            if not self.state.ensure():
-                return self._err("browser not available")
+            if not url: return self._err("missing url", 400)
+            if not self.state.ensure(): return self._err("browser not available")
             sb = self.state.sb
             sb.get(url)
             sb.sleep(2)
-            capture = self._full_page_capture(sb, self.state)
-            self._ok(capture)
-
-        # ── Read (no navigation) ──────────────────────────────────────────
+            self.state.snapshot_before()
+            self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/read":
-            if sb is None:
-                return self._err("browser not available")
-            capture = self._full_page_capture(sb, self.state)
-            self._ok(capture)
-
-        # ── Search ────────────────────────────────────────────────────────
+            if sb is None: return self._err("browser not available")
+            self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/search":
             query = body.get("query", "")
-            if not query:
-                return self._err("missing query", 400)
-            if not self.state.ensure():
-                return self._err("browser not available")
+            if not query: return self._err("missing query", 400)
+            if not self.state.ensure(): return self._err("browser not available")
             sb = self.state.sb
             sb.get(f"https://duckduckgo.com/?q={query.replace(' ', '+')}&iax=images&ia=images")
             sb.sleep(2)
-            capture = self._full_page_capture(sb, self.state)
-            self._ok(capture)
-
-        # ── Go Back / Refresh ─────────────────────────────────────────────
+            self.state.snapshot_before()
+            self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/go_back":
-            if sb is None:
-                return self._err("browser not available")
+            if sb is None: return self._err("browser not available")
+            before = self.state.snapshot_before()
             sb.go_back()
             sb.sleep(1)
-            capture = self._full_page_capture(sb, self.state)
-            self._ok(capture)
+            self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/refresh":
-            if sb is None:
-                return self._err("browser not available")
+            if sb is None: return self._err("browser not available")
             sb.refresh()
             sb.sleep(2)
-            capture = self._full_page_capture(sb, self.state)
-            self._ok(capture)
-
-        # ── Click ─────────────────────────────────────────────────────────
+            self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/click":
-            if sb is None:
-                return self._err("browser not available")
+            if sb is None: return self._err("browser not available")
+            selector, err = self._resolve_selector(body)
+            if err: return self._err(err, 400)
 
-            selector = body.get("selector", "")
-            index = body.get("index", 0)
+            before_handles, _ = self._capture_tabs_info(sb)
+            self.state.snapshot_before()
 
-            if index:
-                selector = find_element_by_index(self.state, index)
-                if not selector:
-                    return self._err(f"element index {index} not found in label map — call /label first")
-            if not selector:
-                return self._err("missing selector or index", 400)
-
+            # Occlusion-aware click: try Selenium click, fall back to JS click
+            click_method = "selenium"
             try:
-                sb.click(selector)
-            except Exception as e:
-                return self._err(f"click failed: {e}")
+                # Check if element is occluded
+                occ_result = safe(lambda: json.loads(sb.execute_script(f'return {OCCLUSION_CHECK_JS}("{selector.replace(chr(34), chr(92)+chr(34))}")') or "{}"), {})
+                if occ_result.get("occluded"):
+                    log(f"element occluded by {occ_result.get('blocker')}, using JS click")
+                    sb.execute_script(f'document.querySelector("{selector.replace(chr(34), chr(92)+chr(34))}").click()')
+                    click_method = "js_fallback"
+                else:
+                    sb.click(selector)
+            except Exception:
+                # If Selenium click fails, try JS click as fallback
+                try:
+                    escaped = selector.replace('"', '\\"')
+                    sb.execute_script(f'document.querySelector("{escaped}").click()')
+                    click_method = "js_fallback"
+                except Exception as e:
+                    return self._err(f"click failed (both Selenium and JS): {e}")
 
             sb.sleep(1)
 
-            # Detect new tabs opened by click
-            self._detect_new_tabs(sb)
+            # Detect new tabs
+            tab_info = self._detect_and_handle_new_tab(sb, before_handles)
 
-            capture = self._full_page_capture(sb, self.state)
+            capture = self._capture_with_fingerprint(sb, self.state)
+            capture["click_method"] = click_method
+            capture.update(tab_info)
             self._ok(capture)
 
-        # ── Type ──────────────────────────────────────────────────────────
-
         elif path == "/type":
-            if sb is None:
-                return self._err("browser not available")
-
-            selector = body.get("selector", "")
-            index = body.get("index", 0)
+            if sb is None: return self._err("browser not available")
+            selector, err = self._resolve_selector(body)
+            if err: return self._err(err, 400)
             text = body.get("text", "")
+            if not text: return self._err("missing text", 400)
             submit = body.get("submit", False)
+            clear = body.get("clear", True)
 
-            if index:
-                selector = find_element_by_index(self.state, index)
-                if not selector:
-                    return self._err(f"element index {index} not found — call /label first")
-            if not selector:
-                return self._err("missing selector or index", 400)
-            if not text:
-                return self._err("missing text", 400)
+            self.state.snapshot_before()
 
+            # CDP-based typing: uses native input setter for React compatibility
             try:
-                sb.type(selector, text)
-            except Exception as e:
-                return self._err(f"type failed: {e}")
+                escaped_sel = selector.replace("'", "\\'").replace("\\", "\\\\")
+                escaped_text = text.replace("'", "\\'").replace("\\", "\\\\")
+                js_code = f'return {CDP_TYPE_JS}(\'{escaped_sel}\', \'{escaped_text}\', {str(clear).lower()})'
+                result = safe(lambda: json.loads(sb.execute_script(js_code) or "{}"), {})
+                if not result.get("ok"):
+                    # Fall back to Selenium type
+                    if clear:
+                        try: sb.clear(selector)
+                        except Exception: pass
+                    sb.type(selector, text)
+            except Exception:
+                # Final fallback
+                try:
+                    if clear:
+                        try: sb.clear(selector)
+                        except Exception: pass
+                    sb.type(selector, text)
+                except Exception as e:
+                    return self._err(f"type failed: {e}")
 
             if submit:
                 try:
-                    sb.send_keys(selector, "\n")
+                    escaped_sel = selector.replace('"', '\\"')
+                    # Find the closest form and submit it
+                    sb.execute_script(f'''
+                        var el = document.querySelector("{escaped_sel}");
+                        var form = el ? el.closest('form') : null;
+                        if (form) form.submit();
+                        else {{ el.dispatchEvent(new KeyboardEvent('keydown', {{key:'Enter',code:'Enter',keyCode:13}}));
+                                el.dispatchEvent(new KeyboardEvent('keypress', {{key:'Enter',code:'Enter',keyCode:13}}));
+                                el.dispatchEvent(new KeyboardEvent('keyup', {{key:'Enter',code:'Enter',keyCode:13}})); }}
+                    ''')
                 except Exception:
-                    pass
+                    try: sb.send_keys(selector, "\n")
+                    except Exception: pass
 
             sb.sleep(1)
-            capture = self._full_page_capture(sb, self.state)
-            self._ok(capture)
-
-        # ── Scroll ────────────────────────────────────────────────────────
+            self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/scroll":
-            if sb is None:
-                return self._err("browser not available")
-
+            if sb is None: return self._err("browser not available")
             direction = body.get("direction", "down")
-            amount = body.get("amount", 0)  # pixels, 0 = one viewport
-
+            amount = body.get("amount", 0)
+            self.state.snapshot_before()
             if amount > 0:
                 sb.execute_script(f"window.scrollBy(0, {amount if direction != 'up' else -amount})")
-            elif direction == "down":
-                sb.scroll_down()
-            elif direction == "up":
-                sb.scroll_up()
-            else:
-                sb.scroll_to(direction)
-
+            elif direction == "down": sb.scroll_down()
+            elif direction == "up": sb.scroll_up()
+            else: sb.scroll_to(direction)
             sb.sleep(0.5)
-            capture = self._full_page_capture(sb, self.state)
-            self._ok(capture)
-
-        # ── Label ─────────────────────────────────────────────────────────
+            self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/label":
-            if sb is None:
-                return self._err("browser not available")
-
+            if sb is None: return self._err("browser not available")
             element_map = run_labeler(sb, self.state)
             stats = run_page_stats(sb)
             spath = screenshot_path()
             safe(lambda: sb.save_screenshot(spath), None)
-
-            self._ok({
-                "element_map": element_map,
-                "screenshot_path": spath,
-                "page_stats": stats,
-                "url": safe(lambda: sb.get_current_url() or "", ""),
-            })
-
-        # ── Interact ──────────────────────────────────────────────────────
+            self._ok({"element_map": element_map, "screenshot_path": spath,
+                       "page_stats": stats, "url": safe(lambda: sb.get_current_url() or "", "")})
 
         elif path == "/interact":
-            if sb is None:
-                return self._err("browser not available")
-
-            page_data = extract_page_data(sb)
-            elements = extract_interactive(sb)
-            stats = run_page_stats(sb)
-            spath = screenshot_path()
-            safe(lambda: sb.save_screenshot(spath), None)
-
-            self._ok({
-                "page_data": page_data,
-                "elements": elements,
-                "screenshot_path": spath,
-                "page_stats": stats,
-            })
-
-        # ── Extract Images ────────────────────────────────────────────────
+            if sb is None: return self._err("browser not available")
+            self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/extract_images":
-            if sb is None:
-                return self._err("browser not available")
-
+            if sb is None: return self._err("browser not available")
             images = []
             try:
                 for img in sb.select_all("img[src]", timeout=5):
                     src = img.get_attribute("src") or ""
                     if src and not src.startswith("data:") and not src.startswith("blob:") and len(src) < 2000:
-                        alt = img.get_attribute("alt") or ""
-                        images.append({"src": src, "alt": alt[:100]})
-                        if len(images) >= MAX_IMAGES:
-                            break
-            except Exception:
-                pass
-            self._ok({
-                "images": images,
-                "url": safe(lambda: sb.get_current_url() or "", ""),
-            })
-
-        # ── Screenshot ────────────────────────────────────────────────────
+                        images.append({"src": src, "alt": (img.get_attribute("alt") or "")[:100]})
+                        if len(images) >= MAX_IMAGES: break
+            except Exception: pass
+            self._ok({"images": images, "url": safe(lambda: sb.get_current_url() or "", "")})
 
         elif path == "/screenshot":
             path_out = body.get("path", screenshot_path())
-            if sb is None:
-                return self._err("browser not available")
+            if sb is None: return self._err("browser not available")
             sb.save_screenshot(path_out)
-            self._ok({
-                "screenshot_path": path_out,
-                "url": safe(lambda: sb.get_current_url() or "", ""),
-            })
-
-        # ── Download ──────────────────────────────────────────────────────
+            self._ok({"screenshot_path": path_out, "url": safe(lambda: sb.get_current_url() or "", "")})
 
         elif path == "/download":
             url = body.get("url", "")
             out_path = body.get("path", "")
-            if not url or not out_path:
-                return self._err("missing url or path", 400)
+            if not url or not out_path: return self._err("missing url or path", 400)
             import urllib.request
             try:
                 urllib.request.urlretrieve(url, out_path)
-                size = os.path.getsize(out_path)
-                self._ok({"url": url, "path": out_path, "size": size})
+                self._ok({"url": url, "path": out_path, "size": os.path.getsize(out_path)})
             except Exception as e:
                 self._err(f"download failed: {e}")
 
-        # ── Find Text ─────────────────────────────────────────────────────
-
         elif path == "/find_text":
             text_query = body.get("text", "")
-            if not text_query:
-                return self._err("missing text", 400)
-            if sb is None:
-                return self._err("browser not available")
-
+            if not text_query: return self._err("missing text", 400)
+            if sb is None: return self._err("browser not available")
+            self.state.snapshot_before()
             try:
-                # Scroll the page to find and highlight text
                 escaped = text_query.replace('"', '\\"')
-                sb.execute_script(f'var found = window.find("{escaped}"); return found;')
+                sb.execute_script(f'window.find("{escaped}")')
                 sb.sleep(0.5)
             except Exception as e:
                 return self._err(f"find_text failed: {e}")
-
-            capture = self._full_page_capture(sb, self.state)
-            self._ok(capture)
-
-        # ── Evaluate JavaScript ───────────────────────────────────────────
+            self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/evaluate":
             code = body.get("code", "")
-            if not code:
-                return self._err("missing code", 400)
-            if sb is None:
-                return self._err("browser not available")
-
+            if not code: return self._err("missing code", 400)
+            if sb is None: return self._err("browser not available")
             try:
                 result = sb.execute_script(code)
-                self._ok({
-                    "result": str(result)[:5000] if result is not None else None,
-                    "type": type(result).__name__,
-                })
+                self._ok({"result": str(result)[:5000] if result is not None else None,
+                          "type": type(result).__name__})
             except Exception as e:
                 self._err(f"evaluate failed: {e}")
 
-        # ── Run Python (sb pre-loaded) ────────────────────────────────────
-
         elif path == "/run":
             code = body.get("code", "")
-            if not code:
-                return self._err("missing code", 400)
-            if sb is None:
-                return self._err("browser not available")
-
-            namespace = {"sb": sb, "json": json, "os": os, "time": time}
+            if not code: return self._err("missing code", 400)
+            if sb is None: return self._err("browser not available")
+            namespace = {"sb": sb, "json": json, "os": os, "time": time, "state": self.state}
             try:
                 exec(code, namespace)
             except Exception as e:
                 return self._err(f"exec error: {e}")
-
             if "result" in namespace and isinstance(namespace["result"], dict):
                 self._ok(namespace["result"])
             else:
-                capture = self._full_page_capture(sb, self.state)
-                self._ok(capture)
-
-        # ── Tabs ──────────────────────────────────────────────────────────
+                self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/tabs":
-            if sb is None:
-                return self._err("browser not available")
-
+            if sb is None: return self._err("browser not available")
             tabs = []
             try:
                 handles = sb.driver.window_handles
                 current = sb.driver.current_window_handle
                 for i, h in enumerate(handles):
                     sb.driver.switch_to.window(h)
-                    tabs.append({
-                        "index": i,
-                        "url": safe(lambda: sb.get_current_url() or "", ""),
-                        "title": safe(lambda: sb.get_title() or "", ""),
-                        "active": h == current,
-                    })
+                    tabs.append({"index": i,
+                                 "url": safe(lambda: sb.get_current_url() or "", ""),
+                                 "title": safe(lambda: sb.get_title() or "", ""),
+                                 "active": h == current})
                 sb.driver.switch_to.window(current)
             except Exception as e:
                 return self._err(f"tab listing failed: {e}")
@@ -871,51 +796,138 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/new_tab":
             url = body.get("url", "about:blank")
-            if sb is None:
-                return self._err("browser not available")
+            if sb is None: return self._err("browser not available")
             try:
-                sb.driver.execute_script(f"window.open('{url}', '_blank');")
+                escaped = url.replace("'", "\\'")
+                sb.driver.execute_script(f"window.open('{escaped}', '_blank');")
                 handles = sb.driver.window_handles
                 sb.driver.switch_to.window(handles[-1])
                 sb.sleep(2)
-                capture = self._full_page_capture(sb, self.state)
-                self._ok(capture)
+                self._ok(self._capture_with_fingerprint(sb, self.state))
             except Exception as e:
                 self._err(f"new tab failed: {e}")
 
         elif path == "/switch_tab":
             index = body.get("index", 0)
-            if sb is None:
-                return self._err("browser not available")
+            if sb is None: return self._err("browser not available")
             try:
                 handles = sb.driver.window_handles
                 if 0 <= index < len(handles):
                     sb.driver.switch_to.window(handles[index])
                     sb.sleep(1)
-                    capture = self._full_page_capture(sb, self.state)
-                    self._ok(capture)
+                    self._ok(self._capture_with_fingerprint(sb, self.state))
                 else:
                     self._err(f"tab index {index} out of range (0-{len(handles)-1})")
             except Exception as e:
                 self._err(f"switch tab failed: {e}")
 
         elif path == "/close_tab":
-            if sb is None:
-                return self._err("browser not available")
+            if sb is None: return self._err("browser not available")
             try:
                 handles = sb.driver.window_handles
-                if len(handles) <= 1:
-                    return self._err("can't close last tab")
+                if len(handles) <= 1: return self._err("can't close last tab")
                 sb.driver.close()
                 handles = sb.driver.window_handles
                 sb.driver.switch_to.window(handles[-1])
                 sb.sleep(1)
-                capture = self._full_page_capture(sb, self.state)
-                self._ok(capture)
+                self._ok(self._capture_with_fingerprint(sb, self.state))
             except Exception as e:
                 self._err(f"close tab failed: {e}")
 
-        # ── Check recent CDP downloads ────────────────────────────────────
+        elif path == "/dropdown_options":
+            if sb is None: return self._err("browser not available")
+            selector, err = self._resolve_selector(body)
+            if err: return self._err(err, 400)
+            try:
+                escaped = selector.replace("'", "\\'").replace("\\", "\\\\")
+                result = json.loads(sb.execute_script(f'return {DROPDOWN_OPTIONS_JS}(\'{escaped}\')'))
+                if not result.get("ok"):
+                    return self._err(result.get("error", "not a select element"), 400)
+                self._ok({"selector": selector, "options": result["options"],
+                          "multiple": result["multiple"], "selected_count": result["selected_count"]})
+            except Exception as e:
+                self._err(f"dropdown_options failed: {e}")
+
+        elif path == "/select_dropdown":
+            if sb is None: return self._err("browser not available")
+            selector, err = self._resolve_selector(body)
+            if err: return self._err(err, 400)
+            value = body.get("value")
+            text_val = body.get("text")
+            if value is None and text_val is None:
+                return self._err("missing value or text", 400)
+            self.state.snapshot_before()
+            try:
+                escaped = selector.replace("'", "\\'").replace("\\", "\\\\")
+                val_arg = json.dumps(value) if value is not None else "undefined"
+                text_arg = json.dumps(text_val) if text_val is not None else "undefined"
+                result = json.loads(sb.execute_script(
+                    f'return {SELECT_DROPDOWN_JS}(\'{escaped}\', {val_arg}, {text_arg})'))
+                if not result.get("ok"):
+                    return self._err("option not found in dropdown", 400)
+                sb.sleep(0.5)
+                self._ok(self._capture_with_fingerprint(sb, self.state))
+            except Exception as e:
+                self._err(f"select_dropdown failed: {e}")
+
+        elif path == "/wait":
+            seconds = min(body.get("seconds", 2), 30)
+            if sb is None: return self._err("browser not available")
+            time.sleep(seconds)
+            self._ok(self._capture_with_fingerprint(sb, self.state))
+
+        elif path == "/extract":
+            """Extract structured data from current page using a query."""
+            query = body.get("query", "extract all text content")
+            if sb is None: return self._err("browser not available")
+            try:
+                # Extract structured data from the page based on common patterns
+                result = sb.execute_script(f'''
+                    return JSON.stringify((function() {{
+                        var data = {{
+                            title: document.title,
+                            url: window.location.href,
+                            headings: [],
+                            paragraphs: [],
+                            lists: [],
+                            tables: [],
+                            forms: []
+                        }};
+                        document.querySelectorAll('h1,h2,h3').forEach(function(h) {{
+                            data.headings.push({{level: parseInt(h.tagName.charAt(1)), text: h.textContent.trim()}});
+                        }});
+                        document.querySelectorAll('p').forEach(function(p) {{
+                            var t = p.textContent.trim();
+                            if (t.length > 10 && t.length < 500) data.paragraphs.push(t);
+                        }});
+                        document.querySelectorAll('ul,ol').forEach(function(l) {{
+                            var items = [];
+                            l.querySelectorAll('li').forEach(function(li) {{ items.push(li.textContent.trim()); }});
+                            if (items.length > 0) data.lists.push(items);
+                        }});
+                        document.querySelectorAll('table').forEach(function(t) {{
+                            var rows = [];
+                            t.querySelectorAll('tr').forEach(function(tr) {{
+                                var cells = [];
+                                tr.querySelectorAll('th,td').forEach(function(c) {{ cells.push(c.textContent.trim()); }});
+                                if (cells.length > 0) rows.push(cells);
+                            }});
+                            if (rows.length > 0) data.tables.push(rows);
+                        }});
+                        document.querySelectorAll('form').forEach(function(f) {{
+                            var fields = [];
+                            f.querySelectorAll('input,select,textarea').forEach(function(el) {{
+                                fields.push({{name:el.name, type:el.type, value:el.value}});
+                            }});
+                            data.forms.push({{action:f.action, method:f.method, fields:fields}});
+                        }});
+                        return data;
+                    }})())
+                ''')
+                extracted = json.loads(result) if isinstance(result, str) else result
+                self._ok({"extracted": extracted, "query": query})
+            except Exception as e:
+                self._err(f"extract failed: {e}")
 
         elif path == "/check_downloads":
             files = []
@@ -923,27 +935,14 @@ class Handler(BaseHTTPRequestHandler):
                 ddir = self.state._download_dir
                 for f in sorted(Path(ddir).iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
                     if f.is_file() and not f.name.endswith(".crdownload"):
-                        files.append({
-                            "filename": f.name,
-                            "path": str(f),
-                            "size": f.stat().st_size,
-                            "modified": f.stat().st_mtime,
-                        })
+                        files.append({"filename": f.name, "path": str(f),
+                                      "size": f.stat().st_size, "modified": f.stat().st_mtime})
                 self._ok({"downloads": files[:20], "download_dir": ddir})
             except Exception as e:
                 self._err(f"check_downloads failed: {e}")
 
         else:
             self._err(f"Unknown endpoint: {path}", 404)
-
-    def _detect_new_tabs(self, sb):
-        """Detect if a click opened new tabs and don't auto-switch — just log."""
-        try:
-            handles = sb.driver.window_handles
-            if len(handles) > 1:
-                log(f"detected {len(handles)} open tabs after click")
-        except Exception:
-            pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -953,13 +952,10 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     port = int(os.environ.get("SB_SERVER_PORT", DEFAULT_PORT))
     stealth = "--stealth" in sys.argv
-
     state = BrowserState(stealth=stealth)
     Handler.state = state
-
     server = HTTPServer(("127.0.0.1", port), Handler)
     log(f"listening on :{port} stealth={stealth} download_dir={state._download_dir}")
-
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -967,7 +963,6 @@ def main():
     finally:
         state.close()
         server.server_close()
-
 
 if __name__ == "__main__":
     main()
