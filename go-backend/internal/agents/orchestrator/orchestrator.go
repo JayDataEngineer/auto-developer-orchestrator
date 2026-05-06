@@ -184,10 +184,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// Add extra hooks from add-ons (Langfuse, etc.)
 	loopHooks = append(loopHooks, cfg.ExtraHooks...)
 
-	systemPrompt := common.BuildOrchestratorPrompt(toolReg.All(), cfg.SandboxID, "", "")
+	var skillsStr string
 	if skillStore.Count() > 0 {
-		systemPrompt += skillStore.FormatAvailableSkills()
+		skillsStr = skillStore.FormatAvailableSkills()
 	}
+	systemPrompt := common.BuildOrchestratorPrompt(toolReg.All(), cfg.SandboxID, "", skillsStr)
 
 	toolSpecs := common.ToOpenAITools(toolReg.All())
 	loopCfg := core.AgentLoopConfig{
