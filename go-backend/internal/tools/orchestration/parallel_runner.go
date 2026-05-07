@@ -3,11 +3,31 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
+
+// SubOrchestratorConfig holds config for creating a division sub-orchestrator.
+type SubOrchestratorConfig struct {
+	DivisionPath string // absolute path to division directory
+	ProjectDir   string // parent project directory
+	SandboxID    string // shared sandbox ID
+	Depth        int    // current recursion depth
+	ModelID      string // optional model override
+}
+
+// SubOrchestrator is a minimal interface for running a sub-orchestrator.
+type SubOrchestrator interface {
+	Run(ctx context.Context, userMsg string, subscriber chan<- core.AgentEvent) error
+	Close() error
+}
+
+// OrchestratorFactory creates a sub-orchestrator for recursive delegation.
+type OrchestratorFactory func(ctx context.Context, cfg SubOrchestratorConfig) (SubOrchestrator, error)
 
 // ParallelRunner implements DelegateRunner with goroutine-based parallelism.
 // delegate_async spawns independent sub-agents; collect_results waits for all.
@@ -19,6 +39,12 @@ type ParallelRunner struct {
 	ctxSize       int                        // context size for sub-agent
 	modelResolver ModelResolver              // resolves model ID to provider (nil = use default)
 	logger        func(format string, args ...interface{})
+
+	// Recursive delegation
+	orchestratorFactory OrchestratorFactory
+	projectDir          string
+	depth               int
+	maxDepth            int // default 3
 
 	mu      sync.Mutex
 	tasks   map[string]*asyncTask
@@ -54,6 +80,24 @@ func NewParallelRunner(provider core.LLMProvider, executor core.ToolExecutor, to
 // SetLogger sets the logger function.
 func (r *ParallelRunner) SetLogger(fn func(format string, args ...interface{})) {
 	r.logger = fn
+}
+
+// SetOrchestratorFactory configures the factory for recursive delegation.
+func (r *ParallelRunner) SetOrchestratorFactory(factory OrchestratorFactory) {
+	r.orchestratorFactory = factory
+}
+
+// SetProjectDir sets the project root directory for resolving division paths.
+func (r *ParallelRunner) SetProjectDir(dir string) {
+	r.projectDir = dir
+}
+
+// SetDepth sets the current recursion depth (0 = top-level).
+func (r *ParallelRunner) SetDepth(depth int) {
+	r.depth = depth
+	if r.maxDepth == 0 {
+		r.maxDepth = 3
+	}
 }
 
 // RunDelegate runs a synchronous sub-agent.
@@ -142,6 +186,82 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	}
 
 	return map[string]any{"result": finalText, "status": "completed"}, nil
+}
+
+// RunDivisionDelegate creates a full sub-orchestrator for a division head.
+// The division path points to a sub-directory with its own pux.yaml, roles, etc.
+func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error) {
+	if r.orchestratorFactory == nil {
+		return nil, fmt.Errorf("recursive delegation not available: no orchestrator factory configured")
+	}
+	if r.depth >= r.maxDepth {
+		return nil, fmt.Errorf("max delegation depth (%d) reached", r.maxDepth)
+	}
+
+	// Resolve division path relative to project root
+	absPath := divisionPath
+	if !filepath.IsAbs(absPath) {
+		absPath = filepath.Join(r.projectDir, divisionPath)
+	}
+
+	// Verify pux.yaml exists in the division directory
+	puxPath := filepath.Join(absPath, "pux.yaml")
+	if _, err := os.Stat(puxPath); err != nil {
+		return nil, fmt.Errorf("division directory %q has no pux.yaml: %w", absPath, err)
+	}
+
+	r.logger("DIVISION_DELEGATE: path=%s depth=%d model=%q", absPath, r.depth+1, modelID)
+
+	subOrch, err := r.orchestratorFactory(ctx, SubOrchestratorConfig{
+		DivisionPath: absPath,
+		ProjectDir:   r.projectDir,
+		SandboxID:    r.baseSession.ID(),
+		Depth:        r.depth + 1,
+		ModelID:      modelID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create division orchestrator: %w", err)
+	}
+	defer subOrch.Close()
+
+	// Run the sub-orchestrator, collect events
+	events := make(chan core.AgentEvent, 128)
+	done := make(chan struct{})
+	var runErr error
+
+	go func() {
+		defer close(done)
+		defer close(events)
+		runErr = subOrch.Run(ctx, task, events)
+	}()
+
+	var finalText string
+	evtDone := false
+	for !evtDone {
+		select {
+		case <-done:
+			for evt := range events {
+				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+					finalText += evt.Data.Text
+				}
+			}
+			evtDone = true
+		case evt, ok := <-events:
+			if !ok {
+				evtDone = true
+				break
+			}
+			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+				finalText += evt.Data.Text
+			}
+		}
+	}
+
+	if runErr != nil {
+		return map[string]any{"error": runErr.Error(), "partial_result": finalText}, runErr
+	}
+
+	return map[string]any{"result": finalText, "status": "completed", "division": divisionPath}, nil
 }
 
 // RunDelegateAsync launches a sub-agent in a goroutine. Returns immediately.

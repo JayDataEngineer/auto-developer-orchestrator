@@ -138,13 +138,16 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		pr.SetLogger(func(format string, args ...interface{}) {
 			logger.Printf("PARALLEL_RUNNER: "+format, args...)
 		})
+		pr.SetProjectDir(cfg.ProjectDir)
+		pr.SetDepth(0)
+		pr.SetOrchestratorFactory(makeOrchestratorFactory(provider, cfg))
 		runner = pr
 	}
 
 	if runner != nil {
 		ctoTools = append(ctoTools,
-			orchestration.NewDelegateToTool(runner, mcpResolver),
-			orchestration.NewDelegateAsyncTool(runner, mcpResolver),
+			orchestration.NewDelegateToTool(runner, mcpResolver, cfg.OrgRoles),
+			orchestration.NewDelegateAsyncTool(runner, mcpResolver, cfg.OrgRoles),
 			orchestration.NewCollectResultsTool(runner),
 			orchestration.NewPlanTool(),
 			orchestration.NewSynthesizeTool(),
@@ -243,4 +246,69 @@ func (a *Agent) Close() error {
 // IsRunning returns whether the agent is currently active.
 func (a *Agent) IsRunning() bool {
 	return a.Loop.IsRunning()
+}
+
+// makeOrchestratorFactory creates a factory for recursive delegation.
+// The factory captures the parent's infrastructure and creates child orchestrators
+// pointing at division sub-directories.
+func makeOrchestratorFactory(provider core.LLMProvider, parentCfg Config) orchestration.OrchestratorFactory {
+	return func(ctx context.Context, subCfg orchestration.SubOrchestratorConfig) (orchestration.SubOrchestrator, error) {
+		// Load org manifest from the division directory
+		org := common.LoadOrgManifest(subCfg.DivisionPath)
+		if org == nil {
+			return nil, fmt.Errorf("no pux.yaml found in division %q", subCfg.DivisionPath)
+		}
+
+		// Load division-specific roles
+		var orgRoles map[string]*common.AgentRole
+		if org.RolesDir() != "" {
+			orgRoles = common.LoadAgentRolesFrom(org.RolesDir())
+		}
+
+		// Resolve provider (model override or inherit from parent)
+		subProvider := provider
+		if subCfg.ModelID != "" && parentCfg.ModelResolver != nil {
+			if resolved := parentCfg.ModelResolver(subCfg.ModelID); resolved != nil {
+				subProvider = resolved
+			}
+		}
+
+		// Build sub-orchestrator config — reuses parent infrastructure
+		cfg := Config{
+			ProjectDir:    subCfg.DivisionPath,
+			SandboxID:     parentCfg.SandboxID,
+			ContextSize:   parentCfg.ContextSize,
+			MaxToolRounds: 50,
+			WorkDir:       parentCfg.WorkDir,
+			BashExecutor:  parentCfg.BashExecutor,
+			FileOps:       parentCfg.FileOps,
+			MemoryStore:   parentCfg.MemoryStore,
+			Org:           org,
+			OrgRoles:      orgRoles,
+			MCPClient:     parentCfg.MCPClient,
+			VisionChain:   parentCfg.VisionChain,
+			ModelResolver: parentCfg.ModelResolver,
+			ArtifactDB:    parentCfg.ArtifactDB,
+		}
+
+		subOrch, err := New(subProvider, cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		return &subOrchestratorAdapter{agent: subOrch}, nil
+	}
+}
+
+// subOrchestratorAdapter wraps orchestrator.Agent to implement SubOrchestrator.
+type subOrchestratorAdapter struct {
+	agent *Agent
+}
+
+func (a *subOrchestratorAdapter) Run(ctx context.Context, userMsg string, subscriber chan<- core.AgentEvent) error {
+	return a.agent.Run(ctx, userMsg, subscriber)
+}
+
+func (a *subOrchestratorAdapter) Close() error {
+	return a.agent.Close()
 }

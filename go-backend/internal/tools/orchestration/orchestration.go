@@ -13,6 +13,7 @@ type DelegateRunner interface {
 	RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error)
 	RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string) (map[string]any, error)
 	CollectAsyncResults(ctx context.Context) (map[string]any, error)
+	RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error)
 }
 
 // MCPResolver resolves an MCP server prefix to a list of tool names.
@@ -27,8 +28,17 @@ type ModelResolver func(modelID string) core.LLMProvider
 // If it does, returns the role's prompt, tools, and defaults.
 // If not, returns the raw instructions as-is (custom delegation).
 // mcpResolver is called to expand mcp_servers entries into concrete tool names.
-func resolveRole(instructions string, toolNames []string, maxRounds int, temperature float32, mcpResolver MCPResolver) (string, []string, int, float32, string) {
-	role := common.GetAgentRole(instructions)
+// roleMap is checked first (org-specific roles), then kernel defaults.
+// The 6th return value is the division path (non-empty = division head).
+func resolveRole(instructions string, toolNames []string, maxRounds int, temperature float32, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole) (string, []string, int, float32, string, string) {
+	// Try org-specific roles first, then kernel defaults
+	var role *common.AgentRole
+	if roleMap != nil {
+		role = roleMap[instructions]
+	}
+	if role == nil {
+		role = common.GetAgentRole(instructions)
+	}
 	if role != nil {
 		prompt := role.Prompt
 		tools := toolNames
@@ -50,19 +60,20 @@ func resolveRole(instructions string, toolNames []string, maxRounds int, tempera
 		if temp == 0.4 && role.Temperature != 0.4 {
 			temp = role.Temperature
 		}
-		return prompt, tools, rounds, temp, role.Model
+		return prompt, tools, rounds, temp, role.Model, role.Division
 	}
-	return instructions, toolNames, maxRounds, temperature, ""
+	return instructions, toolNames, maxRounds, temperature, "", ""
 }
 
 // DelegateToTool implements core.Tool for synchronous sub-agent delegation.
 type DelegateToTool struct {
 	runner      DelegateRunner
 	mcpResolver MCPResolver
+	roleMap     map[string]*common.AgentRole
 }
 
-func NewDelegateToTool(r DelegateRunner, mcpResolver MCPResolver) *DelegateToTool {
-	return &DelegateToTool{runner: r, mcpResolver: mcpResolver}
+func NewDelegateToTool(r DelegateRunner, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole) *DelegateToTool {
+	return &DelegateToTool{runner: r, mcpResolver: mcpResolver, roleMap: roleMap}
 }
 
 func (t *DelegateToTool) Name() string { return "delegate_to" }
@@ -117,7 +128,12 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	// Resolve role name → prompt + defaults
-	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver)
+	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, division := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver, t.roleMap)
+
+	// Division head: delegate to a full sub-orchestrator
+	if division != "" {
+		return t.runner.RunDivisionDelegate(ctx, task, division, resolvedModel)
+	}
 
 	if len(resolvedTools) == 0 {
 		return nil, core.NewToolError("delegate_to", "no tools specified and role '"+instructions+"' has no default tools")
@@ -130,10 +146,11 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 type DelegateAsyncTool struct {
 	runner      DelegateRunner
 	mcpResolver MCPResolver
+	roleMap     map[string]*common.AgentRole
 }
 
-func NewDelegateAsyncTool(r DelegateRunner, mcpResolver MCPResolver) *DelegateAsyncTool {
-	return &DelegateAsyncTool{runner: r, mcpResolver: mcpResolver}
+func NewDelegateAsyncTool(r DelegateRunner, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole) *DelegateAsyncTool {
+	return &DelegateAsyncTool{runner: r, mcpResolver: mcpResolver, roleMap: roleMap}
 }
 
 func (t *DelegateAsyncTool) Name() string { return "delegate_async" }
@@ -173,7 +190,7 @@ func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (a
 	}
 
 	// Resolve role name → prompt + defaults
-	resolvedInstructions, resolvedTools, _, _, _ := resolveRole(instructions, toolNames, 15, 0.4, t.mcpResolver)
+	resolvedInstructions, resolvedTools, _, _, _, _ := resolveRole(instructions, toolNames, 15, 0.4, t.mcpResolver, t.roleMap)
 
 	if len(resolvedTools) == 0 {
 		return nil, core.NewToolError("delegate_async", "no tools specified and role '"+instructions+"' has no default tools")

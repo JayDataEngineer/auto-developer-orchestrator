@@ -42,6 +42,7 @@ type AgentRole struct {
 	MaxRounds   int
 	Temperature float32
 	Model       string
+	Division    string // non-empty = division head, points to sub-dir with pux.yaml
 }
 
 // agentConfig is the YAML structure for config/roles/<name>/config.yaml
@@ -53,6 +54,7 @@ type agentConfig struct {
 	MaxRounds   int      `yaml:"max_rounds"`
 	Temperature float64  `yaml:"temperature"`
 	Model       string   `yaml:"model"`
+	Division    string   `yaml:"division"`
 }
 
 // ToolPackage is a shared tool group from config/tool_packages/<name>.yaml
@@ -272,6 +274,7 @@ func loadRoleFromFolder(folder string) *AgentRole {
 		MaxRounds:   maxRounds,
 		Temperature: temp,
 		Model:       ac.Model,
+		Division:    ac.Division,
 	}
 }
 
@@ -306,7 +309,9 @@ func formatRolesList(roles map[string]*AgentRole) string {
 	for _, name := range names {
 		role := roles[name]
 		var capability string
-		if len(role.Imports) > 0 {
+		if role.Division != "" {
+			capability = "division: " + role.Division
+		} else if len(role.Imports) > 0 {
 			capability = "imports: " + strings.Join(role.Imports, ", ")
 		} else {
 			capability = strings.Join(role.Tools, ", ")

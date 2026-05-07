@@ -140,6 +140,68 @@ func TestToolPackages(t *testing.T) {
 	}
 }
 
+func TestDivisionFieldLoading(t *testing.T) {
+	// Create a temp role directory with division field
+	dir := t.TempDir()
+	roleDir := filepath.Join(dir, "research-director")
+	if err := os.MkdirAll(roleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	configYAML := `description: "Research Division Head"
+division: "./divisions/research"
+max_rounds: 25
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - research
+`
+	if err := os.WriteFile(filepath.Join(roleDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(roleDir, "prompt.md"), []byte("You manage the research division."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := LoadAgentRolesFrom(dir)
+	role := roles["research-director"]
+	if role == nil {
+		t.Fatal("research-director role not loaded")
+	}
+	if role.Division != "./divisions/research" {
+		t.Errorf("expected division './divisions/research', got %q", role.Division)
+	}
+	if role.Model != "deepseek/deepseek-v4-flash" {
+		t.Errorf("expected model 'deepseek/deepseek-v4-flash', got %q", role.Model)
+	}
+	if role.MaxRounds != 25 {
+		t.Errorf("expected max_rounds 25, got %d", role.MaxRounds)
+	}
+}
+
+func TestDivisionInFormatList(t *testing.T) {
+	roles := map[string]*AgentRole{
+		"research-director": {
+			Name:        "research-director",
+			Description: "Research Division Head",
+			Division:    "./divisions/research",
+		},
+		"analyst": {
+			Name:        "analyst",
+			Description: "Data Analyst",
+			Tools:       []string{"bash", "read_file"},
+		},
+	}
+
+	list := formatRolesList(roles)
+	if !contains(list, "division: ./divisions/research") {
+		t.Error("formatRolesList missing division info")
+		t.Logf("output:\n%s", list)
+	}
+	if !contains(list, "research-director") {
+		t.Error("formatRolesList missing division head name")
+	}
+}
+
 func contains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
