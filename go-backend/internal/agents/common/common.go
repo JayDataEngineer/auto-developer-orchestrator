@@ -118,44 +118,50 @@ func ReloadPromptTemplate() {
 	toolPkgLoadOnce = sync.Once{}
 }
 
-// LoadToolPackages reads all .yaml files from config/tool_packages/ directory.
+// LoadToolPackages reads all .yaml files from the kernel's config/tool_packages/ directory.
+// Cached after first call. Use LoadToolPackagesFrom for org-specific directories.
 func LoadToolPackages() map[string]*ToolPackage {
 	toolPkgLoadOnce.Do(func() {
-		toolPackages = make(map[string]*ToolPackage)
-
 		root := os.Getenv("PROJECT_ROOT")
 		dir := "config/tool_packages"
 		if root != "" {
 			dir = filepath.Join(root, "config", "tool_packages")
 		}
-
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-				continue
-			}
-			name := strings.TrimSuffix(entry.Name(), ".yaml")
-			data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-			if err != nil {
-				continue
-			}
-			var pc toolPackageConfig
-			if err := yaml.Unmarshal(data, &pc); err != nil {
-				continue
-			}
-			toolPackages[name] = &ToolPackage{
-				Name:        name,
-				Description: pc.Description,
-				Tools:       pc.Tools,
-				MCPServers:  pc.MCPServers,
-			}
-		}
+		toolPackages = LoadToolPackagesFrom(dir)
 	})
 	return toolPackages
+}
+
+// LoadToolPackagesFrom scans a directory for .yaml tool package files.
+func LoadToolPackagesFrom(dir string) map[string]*ToolPackage {
+	pkgs := make(map[string]*ToolPackage)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return pkgs
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".yaml")
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		var pc toolPackageConfig
+		if err := yaml.Unmarshal(data, &pc); err != nil {
+			continue
+		}
+		pkgs[name] = &ToolPackage{
+			Name:        name,
+			Description: pc.Description,
+			Tools:       pc.Tools,
+			MCPServers:  pc.MCPServers,
+		}
+	}
+	return pkgs
 }
 
 // ResolveImports expands a list of tool package names into concrete tools + mcp_servers.
@@ -184,44 +190,40 @@ func ResolveImports(imports []string) (tools []string, mcpServers []string) {
 	return tools, mcpServers
 }
 
-// LoadAgentRoles reads role folders from config/roles/ directory.
-// Each folder must contain config.yaml (metadata) and prompt.md (system prompt).
-// Falls back to loading legacy .md files with YAML frontmatter.
+// LoadAgentRoles reads role folders from the kernel's config/roles/ directory.
+// Cached after first call. Use LoadAgentRolesFrom for org-specific directories.
 func LoadAgentRoles() map[string]*AgentRole {
 	agentLoadOnce.Do(func() {
-		agentRoles = make(map[string]*AgentRole)
-
 		root := os.Getenv("PROJECT_ROOT")
 		dir := "config/roles"
 		if root != "" {
 			dir = filepath.Join(root, "config", "roles")
 		}
-
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			// Fall back to legacy config/agents/ path
-			legacyDir := filepath.Join(filepath.Dir(dir), "agents")
-			if root != "" {
-				legacyDir = filepath.Join(root, "config", "agents")
-			}
-			entries, err = os.ReadDir(legacyDir)
-			if err != nil {
-				return
-			}
-			dir = legacyDir
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				role := loadRoleFromFolder(filepath.Join(dir, entry.Name()))
-				if role != nil {
-					role.Name = entry.Name()
-					agentRoles[entry.Name()] = role
-				}
-			}
-		}
+		agentRoles = LoadAgentRolesFrom(dir)
 	})
 	return agentRoles
+}
+
+// LoadAgentRolesFrom scans a directory for role folders.
+// Each subfolder must contain config.yaml + prompt.md.
+func LoadAgentRolesFrom(dir string) map[string]*AgentRole {
+	roles := make(map[string]*AgentRole)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return roles
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			role := loadRoleFromFolder(filepath.Join(dir, entry.Name()))
+			if role != nil {
+				role.Name = entry.Name()
+				roles[entry.Name()] = role
+			}
+		}
+	}
+	return roles
 }
 
 // loadRoleFromFolder reads config.yaml + prompt.md from a role folder.
@@ -285,6 +287,14 @@ func FormatAgentList() string {
 	if len(roles) == 0 {
 		return "No roles loaded from config/roles/"
 	}
+	return formatRolesList(roles)
+}
+
+// formatRolesList formats a roles map as markdown for the prompt.
+func formatRolesList(roles map[string]*AgentRole) string {
+	if len(roles) == 0 {
+		return ""
+	}
 
 	names := make([]string, 0, len(roles))
 	for name := range roles {
@@ -345,6 +355,41 @@ func BuildOrchestratorPrompt(tools []core.Tool, sandboxID string, projectContext
 	}
 
 	return buf.String()
+}
+
+// BuildOrchestratorPromptWithOrg builds the system prompt with an org overlay.
+// Prepends the org manifesto and uses org-specific roles if available.
+func BuildOrchestratorPromptWithOrg(tools []core.Tool, sandboxID string, projectContext string, examples string, org *OrgManifest, orgRoles map[string]*AgentRole) string {
+	// Build the base prompt
+	base := BuildOrchestratorPrompt(tools, sandboxID, projectContext, examples)
+
+	// If no org, return base as-is
+	if org == nil {
+		return base
+	}
+
+	// Build org header
+	var header strings.Builder
+	fmt.Fprintf(&header, "# Organization: %s\n%s\n\n", org.Name, org.Description)
+
+	// Prepend manifesto if present
+	if manifesto := org.ManifestoContent(); manifesto != "" {
+		fmt.Fprintf(&header, "## Manifesto\n%s\n\n", manifesto)
+	}
+
+	// If org has custom roles, replace the Employees section
+	if len(orgRoles) > 0 {
+		// Rebuild agent list from org roles
+		agentList := formatRolesList(orgRoles)
+		// Replace the {{.Agents}} section in the base prompt
+		// The base already expanded the template, so we replace the kernel's agent list
+		kernelAgents := FormatAgentList()
+		if kernelAgents != "" && agentList != "" {
+			base = strings.Replace(base, kernelAgents, agentList, 1)
+		}
+	}
+
+	return header.String() + base
 }
 
 // formatSchema formats a JSON Schema as a readable string.

@@ -41,6 +41,8 @@ type Config struct {
 	MCPClient        *mcp.MultiClient          // optional: if set, registers MCP tools (search, analyze_image, etc.)
 	ModelResolver    orchestration.ModelResolver // optional: if set, sub-agents can use role-specific models
 	ArtifactDB       meta.ArtifactStore         // optional: if set, yield_artifact persists to DB
+	Org              *common.OrgManifest        // optional: org manifest for overlay mode
+	OrgRoles         map[string]*common.AgentRole // optional: org-specific employee roles
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -182,7 +184,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if skillStore.Count() > 0 {
 		skillsStr = skillStore.FormatAvailableSkills()
 	}
-	systemPrompt := common.BuildOrchestratorPrompt(ctoToolReg.All(), cfg.SandboxID, "", skillsStr)
+	systemPrompt := common.BuildOrchestratorPromptWithOrg(ctoToolReg.All(), cfg.SandboxID, "", skillsStr, cfg.Org, cfg.OrgRoles)
 
 	ctoToolSpecs := common.ToOpenAITools(ctoToolReg.All())
 	loopCfg := core.AgentLoopConfig{

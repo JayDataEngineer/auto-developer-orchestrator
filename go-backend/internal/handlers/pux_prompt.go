@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/adapters"
+	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/agents/orchestrator"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	llama "github.com/auto-developer-orchestrator/backend/internal/llama"
@@ -89,6 +90,19 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		ApprovalHandler: approvalHandler,
 		GitExecutor:     &adapters.GitExecutor{Git: h.git, RepoDir: projectPath},
 		ArtifactDB:      h.db,
+	}
+
+	// Detect org mode — if project contains pux.yaml, load org overlay
+	if org := common.LoadOrgManifest(projectPath); org != nil {
+		h.log.Info("Org mode detected",
+			zap.String("org", org.Name),
+			zap.String("path", projectPath),
+		)
+		cfg.Org = org
+		if org.RolesDir() != "" {
+			cfg.OrgRoles = common.LoadAgentRolesFrom(org.RolesDir())
+			h.log.Info("Org roles loaded", zap.Int("count", len(cfg.OrgRoles)))
+		}
 	}
 
 	// Wire add-on hooks (Langfuse tracing, etc.)

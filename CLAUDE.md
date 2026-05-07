@@ -112,6 +112,33 @@ config/
 
 Roles import tool packages — no tool duplication across employees. Adding a new employee = new folder + existing packages. Adding a new capability = new tool package.
 
+### Organization System (Agent OS)
+
+Pux is an **Agent OS** — the kernel provides the engine, external "Organizations" provide config overlays. When a project directory contains `pux.yaml`, the kernel enters org mode:
+
+```
+my-app/                        ← An Organization (separate repo)
+├── pux.yaml                   # Org manifest — name, description, schedules
+├── MANIFESTO.md               # Prepended to CTO prompt (org culture/brand)
+├── roles/                     # Org-specific employees (overrides kernel defaults)
+│   └── content-writer/
+├── tool_packages/             # Org-specific tool groups
+│   └── twitter.yaml
+├── sandbox/                   # Org-specific scripts (mounted into sandbox)
+│   └── post.py
+└── prompts/                   # Scheduled prompt templates
+    └── morning_post.md
+```
+
+**How it works:**
+1. Kernel detects `pux.yaml` in project root → enters org mode
+2. Org roles overlay kernel defaults (org-specific employees replace defaults)
+3. Org manifesto prepended to CTO system prompt
+4. Org schedules registered with the scheduler
+5. No `pux.yaml` → everything works as before (kernel defaults)
+
+**Creating a new app = config only.** No Go code, no recompilation. Write YAML + Markdown, point `--project` at the directory.
+
 ### Agent Pipeline
 
 - **Pux (CTO)** receives prompt, delegates to employees via `delegate_to` / `delegate_async`
