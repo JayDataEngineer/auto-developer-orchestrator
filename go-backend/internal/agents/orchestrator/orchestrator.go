@@ -13,8 +13,6 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/session"
 	"github.com/auto-developer-orchestrator/backend/internal/skills"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
-	browsertools "github.com/auto-developer-orchestrator/backend/internal/tools/browser"
-	desktoptools "github.com/auto-developer-orchestrator/backend/internal/tools/desktop"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
 	mcptools "github.com/auto-developer-orchestrator/backend/internal/tools/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
@@ -33,8 +31,6 @@ type Config struct {
 	WorkDir         string
 	MemoryStore     *memory.Store
 	BashExecutor    bash.Executor
-	BrowserDriver   browsertools.Driver
-	DesktopDriver   desktoptools.Driver
 	FileOps         file.SandboxFileOps
 	DelegateRunner  orchestration.DelegateRunner
 	Skills          *skills.Store
@@ -100,27 +96,6 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// ── Employee tools: NOT registered on the CTO ──
 	// These are collected into allTools for sub-agent toolSpecs only.
 	employeeTools := []core.Tool{}
-
-	if cfg.BrowserDriver != nil {
-		employeeTools = append(employeeTools,
-			browsertools.NewNavigateTool(cfg.BrowserDriver),
-			browsertools.NewClickTool(cfg.BrowserDriver),
-			browsertools.NewTypeTool(cfg.BrowserDriver),
-			browsertools.NewReadPageTool(cfg.BrowserDriver),
-			browsertools.NewScrollTool(cfg.BrowserDriver),
-			browsertools.NewObserveTool(cfg.BrowserDriver),
-			browsertools.NewSearchWebTool(cfg.BrowserDriver),
-		)
-	}
-
-	if cfg.DesktopDriver != nil {
-		employeeTools = append(employeeTools,
-			desktoptools.NewScreenshotTool(cfg.DesktopDriver),
-			desktoptools.NewClickTool(cfg.DesktopDriver),
-			desktoptools.NewTypeTool(cfg.DesktopDriver),
-			desktoptools.NewKeyTool(cfg.DesktopDriver),
-		)
-	}
 
 	if cfg.MCPClient != nil {
 		employeeTools = mcptools.RegisterAll(employeeTools, cfg.MCPClient)

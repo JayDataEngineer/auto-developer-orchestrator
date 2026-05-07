@@ -1,6 +1,0 @@
-description: "Code developer — writes, edits, tests, and ships code"
-imports:
-  - shell
-  - code
-max_rounds: 20
-temperature: 0.2

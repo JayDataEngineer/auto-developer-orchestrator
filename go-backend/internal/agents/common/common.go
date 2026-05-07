@@ -216,14 +216,6 @@ func LoadAgentRoles() map[string]*AgentRole {
 					role.Name = entry.Name()
 					agentRoles[entry.Name()] = role
 				}
-			} else if strings.HasSuffix(entry.Name(), ".md") {
-				name := strings.TrimSuffix(entry.Name(), ".md")
-				data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-				if err != nil {
-					continue
-				}
-				role := parseLegacyAgentRole(name, string(data))
-				agentRoles[name] = role
 			}
 		}
 	})
@@ -276,50 +268,6 @@ func loadRoleFromFolder(folder string) *AgentRole {
 		MaxRounds:   maxRounds,
 		Temperature: temp,
 	}
-}
-
-// parseLegacyAgentRole parses a legacy .md file with YAML frontmatter.
-func parseLegacyAgentRole(name, content string) *AgentRole {
-	role := &AgentRole{
-		Name:        name,
-		MaxRounds:   15,
-		Temperature: 0.4,
-		Tools:       []string{},
-	}
-
-	body := content
-
-	if strings.HasPrefix(content, "---") {
-		end := strings.Index(content[3:], "---")
-		if end != -1 {
-			frontmatter := content[3 : end+3]
-			body = strings.TrimSpace(content[end+6:])
-
-			for _, line := range strings.Split(frontmatter, "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "description:") {
-					role.Description = strings.Trim(strings.TrimPrefix(line, "description:"), " \"'")
-				} else if strings.HasPrefix(line, "tools:") {
-					toolsStr := strings.Trim(strings.TrimPrefix(line, "tools:"), " []")
-					for _, t := range strings.Split(toolsStr, ",") {
-						t = strings.TrimSpace(t)
-						if t != "" {
-							role.Tools = append(role.Tools, t)
-						}
-					}
-				} else if strings.HasPrefix(line, "max_rounds:") {
-					fmt.Sscanf(strings.TrimPrefix(line, "max_rounds:"), "%d", &role.MaxRounds)
-				} else if strings.HasPrefix(line, "temperature:") {
-					var f float64
-					fmt.Sscanf(strings.TrimPrefix(line, "temperature:"), "%f", &f)
-					role.Temperature = float32(f)
-				}
-			}
-		}
-	}
-
-	role.Prompt = body
-	return role
 }
 
 // GetAgentRole returns a specific agent role by name.
@@ -452,7 +400,7 @@ You do NOT do the work yourself. Delegate using delegate_to and delegate_async.
 
 # Rules
 1. DELEGATE first, do yourself second
-2. Use delegate_to with employee role names (web_expert, researcher, it_worker, developer, designer, desktop_operator)
+2. Use delegate_to with employee role names (jake, sarah, alex, marcus, elena, ryan)
 3. Synthesize results and respond concisely
 
 {{if .SandboxID}}Sandbox ID: {{.SandboxID}}{{end}}

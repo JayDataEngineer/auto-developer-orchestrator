@@ -1,0 +1,5 @@
+description: "Alex — IT Operations. Installs packages, configures services, manages files, keeps systems running."
+imports:
+  - shell
+max_rounds: 20
+temperature: 0.2

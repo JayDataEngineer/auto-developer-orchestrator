@@ -63,7 +63,7 @@ func NewDelegateToTool(r DelegateRunner, mcpResolver MCPResolver) *DelegateToToo
 
 func (t *DelegateToTool) Name() string { return "delegate_to" }
 func (t *DelegateToTool) Description() string {
-	return "Delegate a task to an employee. Use a role name (researcher, coder, browser) as instructions, or write custom instructions."
+	return "Delegate a task to an employee. Use a role name (sarah, jake, marcus, elena, alex, ryan) as instructions, or write custom instructions."
 }
 
 func (t *DelegateToTool) Schema() json.RawMessage {
@@ -71,7 +71,7 @@ func (t *DelegateToTool) Schema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"task": {"type": "string", "description": "Description of the task for the sub-agent"},
-			"instructions": {"type": "string", "description": "Employee role name (researcher, coder, browser) or custom instructions"},
+			"instructions": {"type": "string", "description": "Employee role name (sarah, jake, marcus, elena, alex, ryan) or custom instructions"},
 			"tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names the sub-agent can use (optional if using a role name)"},
 			"max_rounds": {"type": "integer", "description": "Maximum tool rounds (default: from role or 15)"},
 			"temperature": {"type": "number", "description": "Temperature for generation (default: from role or 0.4)"}

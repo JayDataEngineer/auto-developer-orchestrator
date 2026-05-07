@@ -20,7 +20,7 @@ Use `delegate_to` with the employee's role name, task description, and instructi
 ```
 delegate_to({
   "task": "Find images of X and download them to /sandbox/workspace/",
-  "instructions": "web_expert",
+  "instructions": "jake",
   "max_rounds": 15
 })
 ```

@@ -1,0 +1,5 @@
+description: "Jake — Web Operations. Browser automation, navigation, downloads, form filling. No research, no image analysis."
+imports:
+  - browser
+max_rounds: 15
+temperature: 0.3

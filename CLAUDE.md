@@ -80,20 +80,46 @@ User → Vite (5174) → Go Backend (3847) → llama-server (8001)
 
 ### Design Principles
 
-1. **One agent, one loop, one model.** The orchestrator IS the agent. There is no separate "generalist mode" vs "orchestrator mode." Every prompt goes through the same agent loop. The model calls tools, reads results, calls more tools, then responds. The user sees one thinking block + one response.
-2. **`delegate_to` is just another tool.** Sub-agents exist for VRAM management on complex multi-step subtasks — not as a different architecture. The orchestrator has ALL tools (bash + browser + desktop) and uses them directly by default.
-3. **Pull from the best.** Reference repos in `reference/` contain proven patterns: OmniParser (screen parsing), browser-use (element detection), Stagehand (caching/self-healing), Agent-S (grounding/reflection), CUA (coordinate normalization), OS-Symphony (desktop abstraction). Port the best ideas, don't reinvent. See `docs/insights/` for per-project analysis — what we've adopted, what's still missing, and priority rankings.
+1. **Kernel-based architecture.** The system is a kernel + add-ons, like pi-mono. The kernel is `config/prompt.md` (CTO system prompt template). Employees are add-ons in `config/roles/`. Shared capabilities are DRY packages in `config/tool_packages/`. Everything is template-driven, separated, and composable. New employees = new folder, new capabilities = new tool package.
+2. **One agent, one loop, one model.** The orchestrator IS the agent. There is no separate "generalist mode" vs "orchestrator mode." Every prompt goes through the same agent loop. The model calls tools, reads results, calls more tools, then responds. The user sees one thinking block + one response.
+3. **CTO/Employee split.** Pux (the CTO) only has delegation tools + basic bash/file ops. Browser, desktop, MCP, and vision tools live exclusively on employees. This forces the model to delegate instead of doing work itself. Employees have distinct, non-overlapping capabilities so the CTO picks the right person for the job.
 4. **Simple over clever.** Flat agent loops beat deep hierarchies (Agent-S S3 proved this — 72.6% on OSWorld by removing DAG planning). One loop with reflection > nested orchestration.
-5. **Code, browse, desktop — unified.** Three capabilities, one framework. The model decides which tools to use based on the task. No separate "modes" or "paths."
+5. **Pull from the best.** Reference repos in `reference/` contain proven patterns. Port the best ideas, don't reinvent.
+
+### Kernel Config Structure
+
+```
+config/
+├── prompt.md              # CTO system prompt template ({{.Tools}}, {{.Agents}}, {{.SandboxID}})
+├── models.json            # llama-server model profiles
+├── roles/                 # Employee add-ons — one folder per employee
+│   ├── sarah/             # Research Lead — web research only
+│   │   ├── config.yaml    # imports: [research], max_rounds, temperature
+│   │   └── prompt.md      # Employee-specific instructions
+│   ├── jake/              # Web Operations — browser automation only
+│   ├── marcus/            # Senior Developer — code editing only
+│   ├── elena/             # Creative Director — image analysis only
+│   ├── alex/              # IT Operations — shell commands only
+│   └── ryan/              # Desktop Support — GUI desktop only
+└── tool_packages/         # Shared capability groups (DRY)
+    ├── browser.yaml       # Browser automation tools (bash for sb_server)
+    ├── research.yaml      # MCP web-research server tools
+    ├── vision.yaml        # MCP media-analysis server tools
+    ├── shell.yaml         # Bash + basic file ops
+    ├── code.yaml          # Bash + full file editing toolkit
+    └── desktop.yaml       # Desktop GUI tools
+```
+
+Roles import tool packages — no tool duplication across employees. Adding a new employee = new folder + existing packages. Adding a new capability = new tool package.
 
 ### Agent Pipeline
 
-- **Orchestrator** receives prompt, has ALL tools available, handles most tasks directly
-- **Sub-agents** (web, code, desktop) — optional, created via `delegate_to` for focused subtasks or VRAM management
-- **Vision-in-the-loop**: every browser macro tool auto-captures screenshot + vision description after page changes
+- **Pux (CTO)** receives prompt, delegates to employees via `delegate_to` / `delegate_async`
+- **CTO tools**: bash, file ops, memory, skills, delegate_to, delegate_async, collect_results
+- **Employees** get their specific tool packages — browser, research, vision, code, shell, desktop
+- **Sub-agents** run in separate agent loops with their role's tools + prompt
+- **Vision-in-the-loop**: browser screenshots auto-described via vision provider chain
 - **SoM labeler**: JS injection labels interactive elements with numbered boxes, 50-element cap
-- **Macro tools**: `browse_to(url)`, `read_page()`, `click_element(id)`, `type_text(element, text, submit)`, `search_web(query)`
-- **Desktop tools**: `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_key`
 
 ### Key Packages
 

@@ -1,8 +1,0 @@
-description: "Browser automation expert — can navigate, scrape, fill forms, extract data, and download files like nobody else"
-imports:
-  - browser
-  - research
-  - vision
-  - shell
-max_rounds: 15
-temperature: 0.3

@@ -19,8 +19,8 @@ func TestLoadAgentRoles(t *testing.T) {
 		t.Fatal("no roles loaded")
 	}
 
-	// Verify expected roles exist
-	expected := []string{"web_expert", "researcher", "it_worker", "developer", "designer", "desktop_operator"}
+	// Verify expected roles exist (employee names)
+	expected := []string{"jake", "sarah", "alex", "marcus", "elena", "ryan"}
 	for _, name := range expected {
 		role := roles[name]
 		if role == nil {
@@ -42,12 +42,12 @@ func TestLoadAgentRoles(t *testing.T) {
 	}
 
 	// Test GetAgentRole resolves
-	r := GetAgentRole("researcher")
+	r := GetAgentRole("sarah")
 	if r == nil {
-		t.Fatal("GetAgentRole(\"researcher\") returned nil")
+		t.Fatal("GetAgentRole(\"sarah\") returned nil")
 	}
-	if r.Name != "researcher" {
-		t.Errorf("expected name 'researcher', got '%s'", r.Name)
+	if r.Name != "sarah" {
+		t.Errorf("expected name 'sarah', got '%s'", r.Name)
 	}
 
 	// Test FormatAgentList
@@ -109,31 +109,22 @@ func TestToolPackages(t *testing.T) {
 	}
 
 	// Test imports are resolved in roles
-	webExpert := GetAgentRole("web_expert")
-	if webExpert == nil {
-		t.Fatal("web_expert role not found")
+	jake := GetAgentRole("jake")
+	if jake == nil {
+		t.Fatal("jake role not found")
 	}
-	if len(webExpert.Imports) == 0 {
-		t.Error("web_expert has no imports")
+	if len(jake.Imports) == 0 {
+		t.Error("jake has no imports")
 	}
-	// Should have tools from resolved imports
+	// Jake imports browser — should have bash tool resolved
 	hasBash = false
-	for _, t := range webExpert.Tools {
+	for _, t := range jake.Tools {
 		if t == "bash" {
 			hasBash = true
 		}
 	}
 	if !hasBash {
-		t.Error("web_expert missing 'bash' from import resolution")
-	}
-	hasWebMCP := false
-	for _, s := range webExpert.MCPServers {
-		if s == "web" {
-			hasWebMCP = true
-		}
-	}
-	if !hasWebMCP {
-		t.Error("web_expert missing 'web' mcp_server from research import")
+		t.Error("jake missing 'bash' tool from browser import")
 	}
 }
 

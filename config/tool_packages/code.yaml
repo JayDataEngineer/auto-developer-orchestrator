@@ -1,3 +1,9 @@
-description: "Code operations — git, build, test (placeholder)"
+description: "Code operations — file editing, search, and build"
 mcp_servers: []
-tools: []
+tools:
+  - bash
+  - file_read
+  - file_write
+  - file_edit
+  - file_glob
+  - file_grep
