@@ -100,3 +100,91 @@ func TestOrgManifestEmptyName(t *testing.T) {
 		t.Error("expected nil for pux.yaml without name")
 	}
 }
+
+func TestLoadInvestDivisionHeads(t *testing.T) {
+	investPath := "/home/ubuntu/Documents/programs/dev/invest"
+	if _, err := os.Stat(investPath); os.IsNotExist(err) {
+		t.Skip("invest project not found at", investPath)
+	}
+
+	org := LoadOrgManifest(investPath)
+	if org == nil {
+		t.Fatal("expected org to be loaded from invest project")
+	}
+
+	if org.RolesDir() == "" {
+		t.Error("expected RolesDir to be set")
+	}
+
+	roles := LoadAgentRolesFrom(org.RolesDir())
+	if len(roles) < 3 {
+		t.Fatalf("expected at least 3 division head roles, got %d", len(roles))
+	}
+
+	// Check division heads
+	rd := roles["research-director"]
+	if rd == nil {
+		t.Fatal("research-director role not found")
+	}
+	if rd.Division != "./divisions/research" {
+		t.Errorf("research-director: expected division './divisions/research', got %q", rd.Division)
+	}
+
+	ro := roles["risk-officer"]
+	if ro == nil {
+		t.Fatal("risk-officer role not found")
+	}
+	if ro.Division != "./divisions/risk" {
+		t.Errorf("risk-officer: expected division './divisions/risk', got %q", ro.Division)
+	}
+
+	em := roles["execution-manager"]
+	if em == nil {
+		t.Fatal("execution-manager role not found")
+	}
+	if em.Division != "./divisions/execution" {
+		t.Errorf("execution-manager: expected division './divisions/execution', got %q", em.Division)
+	}
+}
+
+func TestLoadInvestSubDivisionRoles(t *testing.T) {
+	investPath := "/home/ubuntu/Documents/programs/dev/invest"
+	if _, err := os.Stat(investPath); os.IsNotExist(err) {
+		t.Skip("invest project not found at", investPath)
+	}
+
+	// Load research division
+	researchOrg := LoadOrgManifest(filepath.Join(investPath, "divisions", "research"))
+	if researchOrg == nil {
+		t.Fatal("expected org from research division")
+	}
+	roles := LoadAgentRolesFrom(researchOrg.RolesDir())
+	if len(roles) != 3 {
+		t.Fatalf("expected 3 research roles, got %d", len(roles))
+	}
+	for _, name := range []string{"signal-analyst", "regime-analyst", "researcher"} {
+		if roles[name] == nil {
+			t.Errorf("missing research role: %s", name)
+		}
+	}
+
+	// Load risk division
+	riskOrg := LoadOrgManifest(filepath.Join(investPath, "divisions", "risk"))
+	if riskOrg == nil {
+		t.Fatal("expected org from risk division")
+	}
+	riskRoles := LoadAgentRolesFrom(riskOrg.RolesDir())
+	if len(riskRoles) != 2 {
+		t.Fatalf("expected 2 risk roles, got %d", len(riskRoles))
+	}
+
+	// Load execution division
+	execOrg := LoadOrgManifest(filepath.Join(investPath, "divisions", "execution"))
+	if execOrg == nil {
+		t.Fatal("expected org from execution division")
+	}
+	execRoles := LoadAgentRolesFrom(execOrg.RolesDir())
+	if len(execRoles) != 2 {
+		t.Fatalf("expected 2 execution roles, got %d", len(execRoles))
+	}
+}
