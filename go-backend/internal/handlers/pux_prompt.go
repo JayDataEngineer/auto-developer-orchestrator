@@ -88,6 +88,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		MemoryStore:   memStore,
 		ApprovalHandler: approvalHandler,
 		GitExecutor:     &adapters.GitExecutor{Git: h.git, RepoDir: projectPath},
+		ArtifactDB:      h.db,
 	}
 
 	// Wire add-on hooks (Langfuse tracing, etc.)

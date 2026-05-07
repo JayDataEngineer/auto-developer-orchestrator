@@ -40,6 +40,7 @@ type Config struct {
 	VisionChain      *vision.FallbackChain     // optional: if set, auto-describes images in tool results
 	MCPClient        *mcp.MultiClient          // optional: if set, registers MCP tools (search, analyze_image, etc.)
 	ModelResolver    orchestration.ModelResolver // optional: if set, sub-agents can use role-specific models
+	ArtifactDB       meta.ArtifactStore         // optional: if set, yield_artifact persists to DB
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -76,7 +77,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		file.NewGrepTool(cfg.FileOps),
 		file.NewGlobTool(cfg.FileOps),
 		meta.NewWaitTool(),
-		meta.NewYieldArtifactTool(),
+		meta.NewYieldArtifactToolWithDB(cfg.ArtifactDB, cfg.ProjectDir, cfg.SandboxID),
 	}
 
 	if cfg.MemoryStore != nil {
