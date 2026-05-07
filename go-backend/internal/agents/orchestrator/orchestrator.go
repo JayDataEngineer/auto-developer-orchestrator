@@ -289,6 +289,7 @@ func makeOrchestratorFactory(provider core.LLMProvider, parentCfg Config) orches
 			VisionChain:   parentCfg.VisionChain,
 			ModelResolver: parentCfg.ModelResolver,
 			ArtifactDB:    parentCfg.ArtifactDB,
+			ExtraHooks:    parentCfg.ExtraHooks,
 		}
 
 		subOrch, err := New(subProvider, cfg)
