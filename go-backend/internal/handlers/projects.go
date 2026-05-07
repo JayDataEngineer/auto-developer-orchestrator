@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/manifest"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
@@ -332,6 +333,54 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 			}
 			resp["registered_schedules"] = registered
 		}
+
+	// Register org schedules (schedules: list with role field)
+	if org := common.LoadOrgManifest(req.Path); org != nil && len(org.Schedules) > 0 && h.scheduler != nil {
+		orgRegistered := []string{}
+		for _, sched := range org.Schedules {
+			if !sched.Enabled {
+				continue
+			}
+			promptText, _ := org.PromptContent(sched.Prompt)
+			// Prepend role delegation context so the CTO knows to delegate
+			if sched.Role != "" {
+				promptText = fmt.Sprintf("Delegate this task to %s: %s", sched.Role, promptText)
+			}
+			desc := fmt.Sprintf("Org schedule for %s", org.Name)
+
+			existingID := h.scheduler.FindJobByProjectAndName(req.Name, sched.Name)
+			if existingID != "" {
+				if updErr := h.scheduler.UpdateJob(existingID, &scheduler.Job{
+					Name:        sched.Name,
+					Description: desc,
+					Project:     req.Name,
+					Message:     promptText,
+					Model:       sched.Model,
+					Schedule:    scheduler.ScheduleCron,
+					CronExpr:    sched.Cron,
+					Enabled:     true,
+				}); updErr != nil {
+					h.logger.Warn("Failed to update org schedule",
+						zap.String("schedule", sched.Name), zap.Error(updErr))
+					continue
+				}
+				orgRegistered = append(orgRegistered, fmt.Sprintf("%s (%s, role=%s) → job %s [updated]", sched.Name, sched.Cron, sched.Role, existingID))
+			} else {
+				jobID, schedErr := h.scheduler.CreateJobFromManifest(
+					req.Name, sched.Name, sched.Cron, promptText, desc, sched.Model,
+				)
+				if schedErr != nil {
+					h.logger.Warn("Failed to register org schedule",
+						zap.String("schedule", sched.Name), zap.Error(schedErr))
+					continue
+				}
+				orgRegistered = append(orgRegistered, fmt.Sprintf("%s (%s, role=%s) → job %s", sched.Name, sched.Cron, sched.Role, jobID))
+			}
+		}
+		if len(orgRegistered) > 0 {
+			resp["registered_org_schedules"] = orgRegistered
+		}
+	}
 
 		// Auto-create sandbox + initialize from manifest (files, pip, env)
 		if mf.Sandbox != nil && h.sandboxMgr != nil {
