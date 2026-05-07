@@ -41,6 +41,7 @@ type AgentRole struct {
 	Imports     []string
 	MaxRounds   int
 	Temperature float32
+	Model       string
 }
 
 // agentConfig is the YAML structure for config/roles/<name>/config.yaml
@@ -51,6 +52,7 @@ type agentConfig struct {
 	Imports     []string `yaml:"imports"`
 	MaxRounds   int      `yaml:"max_rounds"`
 	Temperature float64  `yaml:"temperature"`
+	Model       string   `yaml:"model"`
 }
 
 // ToolPackage is a shared tool group from config/tool_packages/<name>.yaml
@@ -267,6 +269,7 @@ func loadRoleFromFolder(folder string) *AgentRole {
 		Imports:     ac.Imports,
 		MaxRounds:   maxRounds,
 		Temperature: temp,
+		Model:       ac.Model,
 	}
 }
 

@@ -39,6 +39,7 @@ type Config struct {
 	ExtraHooks       []core.LoopHook           // optional: add-on hooks (Langfuse, etc.)
 	VisionChain      *vision.FallbackChain     // optional: if set, auto-describes images in tool results
 	MCPClient        *mcp.MultiClient          // optional: if set, registers MCP tools (search, analyze_image, etc.)
+	ModelResolver    orchestration.ModelResolver // optional: if set, sub-agents can use role-specific models
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -130,7 +131,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 
 	if runner == nil && provider != nil {
-		pr := orchestration.NewParallelRunner(provider, allToolReg, allToolSpecs, sess, cfg.ContextSize)
+		pr := orchestration.NewParallelRunner(provider, allToolReg, allToolSpecs, sess, cfg.ContextSize, cfg.ModelResolver)
 		pr.SetLogger(func(format string, args ...interface{}) {
 			logger.Printf("PARALLEL_RUNNER: "+format, args...)
 		})

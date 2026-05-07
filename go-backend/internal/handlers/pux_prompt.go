@@ -132,6 +132,15 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	cfg.VisionChain = visionChain
 	cfg.MCPClient = h.mcpMulti
 
+	// Model resolver — lets sub-agents use role-specific models
+	cfg.ModelResolver = func(modelID string) core.LLMProvider {
+		eng := h.resolveEngineForModel(modelID)
+		if eng == nil {
+			return nil
+		}
+		return llm.NewAdapter(eng, 0)
+	}
+
 	orch, err := orchestrator.New(provider, cfg)
 	if err != nil {
 		h.log.Error("Failed to create orchestrator", zap.Error(err))

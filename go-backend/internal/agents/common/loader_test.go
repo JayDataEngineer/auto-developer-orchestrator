@@ -49,6 +49,18 @@ func TestLoadAgentRoles(t *testing.T) {
 	if r.Name != "sarah" {
 		t.Errorf("expected name 'sarah', got '%s'", r.Name)
 	}
+	if r.Model != "gemini-3-flash-preview" {
+		t.Errorf("expected sarah model 'gemini-3-flash-preview', got '%s'", r.Model)
+	}
+
+	// Test roles without model (inherit CTO's)
+	jake := GetAgentRole("jake")
+	if jake == nil {
+		t.Fatal("jake role not found")
+	}
+	if jake.Model != "" {
+		t.Errorf("expected jake model to be empty (inherit), got '%s'", jake.Model)
+	}
 
 	// Test FormatAgentList
 	list := FormatAgentList()

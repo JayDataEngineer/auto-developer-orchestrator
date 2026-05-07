@@ -1,5 +1,6 @@
 description: "Elena — Creative Director. Analyzes, tags, and describes images and visual assets. No browser, no code."
 imports:
   - vision
+model: gemini-3-flash-preview
 max_rounds: 10
 temperature: 0.4

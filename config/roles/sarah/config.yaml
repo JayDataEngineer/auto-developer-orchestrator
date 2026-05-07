@@ -1,5 +1,6 @@
 description: "Sarah — Research Lead. Searches the web, crawls pages, synthesizes reports. No browser, no image tools."
 imports:
   - research
+model: gemini-3-flash-preview
 max_rounds: 15
 temperature: 0.3

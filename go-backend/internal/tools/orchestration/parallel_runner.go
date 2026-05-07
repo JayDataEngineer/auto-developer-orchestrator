@@ -12,12 +12,13 @@ import (
 // ParallelRunner implements DelegateRunner with goroutine-based parallelism.
 // delegate_async spawns independent sub-agents; collect_results waits for all.
 type ParallelRunner struct {
-	provider    core.LLMProvider           // for creating sub-agent sessions
-	executor    core.ToolExecutor          // for executing sub-agent tools
-	toolSpecs   []core.OpenAITool          // all available tool definitions
-	baseSession core.Session               // parent session for context inheritance
-	ctxSize     int                        // context size for sub-agent
-	logger      func(format string, args ...interface{})
+	provider      core.LLMProvider           // default provider for sub-agents
+	executor      core.ToolExecutor          // for executing sub-agent tools
+	toolSpecs     []core.OpenAITool          // all available tool definitions
+	baseSession   core.Session               // parent session for context inheritance
+	ctxSize       int                        // context size for sub-agent
+	modelResolver ModelResolver              // resolves model ID to provider (nil = use default)
+	logger        func(format string, args ...interface{})
 
 	mu      sync.Mutex
 	tasks   map[string]*asyncTask
@@ -37,15 +38,16 @@ type asyncTask struct {
 }
 
 // NewParallelRunner creates a runner that fans out sub-agents in parallel.
-func NewParallelRunner(provider core.LLMProvider, executor core.ToolExecutor, toolSpecs []core.OpenAITool, baseSession core.Session, ctxSize int) *ParallelRunner {
+func NewParallelRunner(provider core.LLMProvider, executor core.ToolExecutor, toolSpecs []core.OpenAITool, baseSession core.Session, ctxSize int, modelResolver ModelResolver) *ParallelRunner {
 	return &ParallelRunner{
-		provider:    provider,
-		executor:    executor,
-		toolSpecs:   toolSpecs,
-		baseSession: baseSession,
-		ctxSize:     ctxSize,
-		logger:      func(format string, args ...interface{}) {},
-		tasks:       make(map[string]*asyncTask),
+		provider:      provider,
+		executor:      executor,
+		toolSpecs:     toolSpecs,
+		baseSession:   baseSession,
+		ctxSize:       ctxSize,
+		modelResolver: modelResolver,
+		logger:        func(format string, args ...interface{}) {},
+		tasks:         make(map[string]*asyncTask),
 	}
 }
 
@@ -55,8 +57,8 @@ func (r *ParallelRunner) SetLogger(fn func(format string, args ...interface{})) 
 }
 
 // RunDelegate runs a synchronous sub-agent.
-func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32) (map[string]any, error) {
-	r.logger("SYNC_DELEGATE: task=%q tools=%v", task, toolNames)
+func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
+	r.logger("SYNC_DELEGATE: task=%q tools=%v model=%q", task, toolNames, modelID)
 
 	// Filter tools to only those requested
 	var selectedTools []core.OpenAITool
@@ -71,6 +73,15 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	}
 	if len(selectedTools) == 0 {
 		return nil, core.NewToolError("delegate_to", fmt.Sprintf("none of the requested tools were found: %v", toolNames))
+	}
+
+	// Resolve provider for this sub-agent (role-specific model or default)
+	provider := r.provider
+	if modelID != "" && r.modelResolver != nil {
+		if resolved := r.modelResolver(modelID); resolved != nil {
+			provider = resolved
+			r.logger("MODEL_OVERRIDE: using %s for sub-agent", modelID)
+		}
 	}
 
 	// Create sub-agent with a very minimal loop config
@@ -89,7 +100,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	}
 
 	sess := &subSession{parent: r.baseSession, msgCount: 0}
-	loop := core.NewAgentLoop(r.provider, r.executor, sess, cfg)
+	loop := core.NewAgentLoop(provider, r.executor, sess, cfg)
 
 	// Collect events into result
 	events := make(chan core.AgentEvent, 128)
@@ -166,7 +177,7 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
-		result, err := r.RunDelegate(bgCtx, task, instructions, toolNames, 15, 0.4)
+		result, err := r.RunDelegate(bgCtx, task, instructions, toolNames, 15, 0.4, "")
 
 		r.mu.Lock()
 		t.Result = result
