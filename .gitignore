@@ -77,7 +77,11 @@ docs/postcss.config.mjs
 docs/src/
 docs/tsconfig.json
 
+# Agent session files
+.pux/sessions/
+
 # Test artifacts from sandbox/agent use case runs
+makima*.jpg
 ctx_test2.py
 database.py
 fib_bench.py
