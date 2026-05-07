@@ -231,7 +231,6 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 			Binds: []string{
 				projectPath + ":/sandbox/workspace",
 				policiesDir + ":/etc/openshell/policies:ro",
-				"/var/run/docker.sock:/var/run/docker.sock:ro",
 				"/tmp:/sandbox/tmp",
 				volumeName + ":/sandbox/persist",
 			},

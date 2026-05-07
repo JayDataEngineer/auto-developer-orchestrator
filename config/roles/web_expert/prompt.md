@@ -23,6 +23,7 @@ Pass data URIs or remote URLs to analyze_image.
 ## Rules
 - Check `page_changed` after every action to verify it worked
 - Use SoM index numbers for clicks, not CSS selectors
-- Download images to /tmp/ then analyze them
+- Save downloads to `/sandbox/workspace/` (visible on host) or `/sandbox/tmp/` (temporary)
+- Use `/sandbox/tmp/` for screenshots and temp files, never `/tmp/` directly
 - Return structured results: what you found, image URLs, file paths
 - Keep output concise — summarize, don't dump raw HTML

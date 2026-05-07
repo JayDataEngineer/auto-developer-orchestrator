@@ -101,9 +101,9 @@ COPY scripts/sb_agent.py /usr/local/bin/sb_agent.py
 COPY scripts/sb_server.py /usr/local/bin/sb_server.py
 RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py
 
-# Working directory
-RUN mkdir -p /workspace
-WORKDIR /workspace
+# Working directory — must match the sandbox mount point so files
+# saved by sb_server/download land on the host filesystem.
+WORKDIR /sandbox/workspace
 
 EXPOSE 9222 6080
 

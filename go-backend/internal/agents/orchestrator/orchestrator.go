@@ -66,8 +66,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		return nil, fmt.Errorf("orchestrator: failed to create session: %w", err)
 	}
 
-	// Register all tools
-	tools := []core.Tool{
+	// ── Tool split: CTO tools vs Employee tools ──
+	// The CTO (orchestrator) only gets delegation + minimal tools.
+	// Browser, desktop, and MCP tools go ONLY to employees via delegate_to.
+	// This forces the model to delegate instead of doing work itself.
+
+	ctoTools := []core.Tool{
 		bash.New(cfg.BashExecutor),
 		file.NewReadTool(cfg.FileOps),
 		file.NewWriteTool(cfg.FileOps),
@@ -78,8 +82,27 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		meta.NewYieldArtifactTool(),
 	}
 
+	if cfg.MemoryStore != nil {
+		ctoTools = append(ctoTools, memory.NewTool(cfg.MemoryStore))
+	}
+
+	// Register skills (auto-load from standard paths if not provided)
+	skillStore := cfg.Skills
+	if skillStore == nil {
+		home, _ := os.UserHomeDir()
+		skillStore = skills.LoadStandard(cfg.ProjectDir, home)
+	}
+	if skillStore.Count() > 0 {
+		ctoTools = append(ctoTools, skills.NewReadSkillTool(skillStore))
+		logger.Printf("Skills loaded: %d skills discovered", skillStore.Count())
+	}
+
+	// ── Employee tools: NOT registered on the CTO ──
+	// These are collected into allTools for sub-agent toolSpecs only.
+	employeeTools := []core.Tool{}
+
 	if cfg.BrowserDriver != nil {
-		tools = append(tools,
+		employeeTools = append(employeeTools,
 			browsertools.NewNavigateTool(cfg.BrowserDriver),
 			browsertools.NewClickTool(cfg.BrowserDriver),
 			browsertools.NewTypeTool(cfg.BrowserDriver),
@@ -91,7 +114,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 
 	if cfg.DesktopDriver != nil {
-		tools = append(tools,
+		employeeTools = append(employeeTools,
 			desktoptools.NewScreenshotTool(cfg.DesktopDriver),
 			desktoptools.NewClickTool(cfg.DesktopDriver),
 			desktoptools.NewTypeTool(cfg.DesktopDriver),
@@ -99,7 +122,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		)
 	}
 
-	// Build MCP server resolver for role-based delegation (used by both paths below)
+	if cfg.MCPClient != nil {
+		employeeTools = mcptools.RegisterAll(employeeTools, cfg.MCPClient)
+		logger.Printf("MCP tools loaded for employees: %d tools", len(employeeTools))
+	}
+
+	// Build MCP server resolver for role-based delegation
 	var mcpResolver orchestration.MCPResolver
 	if cfg.MCPClient != nil {
 		mcpResolver = func(prefix string) []string {
@@ -107,62 +135,43 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		}
 	}
 
+	// All tools = CTO tools + employee tools (for sub-agent toolSpecs)
+	allTools := append(ctoTools, employeeTools...)
+	allToolSpecs := common.ToOpenAITools(allTools)
+
+	// Create executor that has access to ALL tools (sub-agents need them)
+	allToolReg := core.NewToolRegistry(allTools)
+	allToolReg.RegisterCommonAliases()
+
+	// CTO tool registry only has delegation + minimal tools
+	// BUT the executor behind delegate_to uses allToolReg
+	ctoToolReg := core.NewToolRegistry(ctoTools)
+	ctoToolReg.RegisterCommonAliases()
+
+	// Add delegation tools to CTO
+	var runner orchestration.DelegateRunner
 	if cfg.DelegateRunner != nil {
-		tools = append(tools,
-			orchestration.NewDelegateToTool(cfg.DelegateRunner, mcpResolver),
-			orchestration.NewDelegateAsyncTool(cfg.DelegateRunner, mcpResolver),
-			orchestration.NewCollectResultsTool(cfg.DelegateRunner),
-			orchestration.NewPlanTool(),
-			orchestration.NewSynthesizeTool(),
-		)
+		runner = cfg.DelegateRunner
 	}
 
-	if cfg.MemoryStore != nil {
-		tools = append(tools, memory.NewTool(cfg.MemoryStore))
-	}
-
-	// Register skills (auto-load from standard paths if not provided)
-	skillStore := cfg.Skills
-	if skillStore == nil {
-		home, _ := os.UserHomeDir()
-		skillStore = skills.LoadStandard(cfg.ProjectDir, home)
-	}
-	if skillStore.Count() > 0 {
-		tools = append(tools, skills.NewReadSkillTool(skillStore))
-		logger.Printf("Skills loaded: %d skills discovered", skillStore.Count())
-	}
-
-	// Register MCP tools (search, scrape, analyze_image, etc.) as first-class tools
-	if cfg.MCPClient != nil {
-		before := len(tools)
-		tools = mcptools.RegisterAll(tools, cfg.MCPClient)
-		logger.Printf("MCP tools registered: %d tools available", len(tools)-before)
-	}
-
-	// Create tool registry (needed by hooks and agent loop)
-	toolReg := core.NewToolRegistry(tools)
-	toolReg.RegisterCommonAliases()
-
-	// Auto-create ParallelRunner for fan-out delegation if no custom runner provided
-	if cfg.DelegateRunner == nil && provider != nil {
-		toolSpecs := common.ToOpenAITools(tools)
-		pr := orchestration.NewParallelRunner(provider, toolReg, toolSpecs, sess, cfg.ContextSize)
+	if runner == nil && provider != nil {
+		pr := orchestration.NewParallelRunner(provider, allToolReg, allToolSpecs, sess, cfg.ContextSize)
 		pr.SetLogger(func(format string, args ...interface{}) {
 			logger.Printf("PARALLEL_RUNNER: "+format, args...)
 		})
-		cfg.DelegateRunner = pr
+		runner = pr
+	}
 
-		// Append delegation tools now that we have a runner
-		tools = append(tools,
-			orchestration.NewDelegateToTool(pr, mcpResolver),
-			orchestration.NewDelegateAsyncTool(pr, mcpResolver),
-			orchestration.NewCollectResultsTool(pr),
+	if runner != nil {
+		ctoTools = append(ctoTools,
+			orchestration.NewDelegateToTool(runner, mcpResolver),
+			orchestration.NewDelegateAsyncTool(runner, mcpResolver),
+			orchestration.NewCollectResultsTool(runner),
 			orchestration.NewPlanTool(),
 			orchestration.NewSynthesizeTool(),
 		)
-
-		// Rebuild tool registry with delegation tools included
-		toolReg = core.NewToolRegistry(tools)
+		ctoToolReg = core.NewToolRegistry(ctoTools)
+		ctoToolReg.RegisterCommonAliases()
 	}
 
 	maxRounds := cfg.MaxToolRounds
@@ -196,16 +205,16 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if skillStore.Count() > 0 {
 		skillsStr = skillStore.FormatAvailableSkills()
 	}
-	systemPrompt := common.BuildOrchestratorPrompt(toolReg.All(), cfg.SandboxID, "", skillsStr)
+	systemPrompt := common.BuildOrchestratorPrompt(ctoToolReg.All(), cfg.SandboxID, "", skillsStr)
 
-	toolSpecs := common.ToOpenAITools(toolReg.All())
+	ctoToolSpecs := common.ToOpenAITools(ctoToolReg.All())
 	loopCfg := core.AgentLoopConfig{
 		SystemPrompt:   systemPrompt,
 		MaxToolRounds:  maxRounds,
 		MaxTokens:      16384,
 		ContextSize:    cfg.ContextSize,
 		ThinkingBudget: 4096,
-		Tools:          toolSpecs,
+		Tools:          ctoToolSpecs,
 		Opts: core.GenerateOptions{
 			MaxTokens:   16384,
 			Temperature: 0.7,
@@ -217,11 +226,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		SandboxID:  cfg.SandboxID,
 	}
 
-	// Wrap tool registry with vision-aware executor if chain is provided
-	executor := core.ToolExecutor(toolReg)
+	// Main loop executor uses ctoToolReg (has delegate_to, bash, file tools)
+	// Sub-agents use allToolReg via ParallelRunner (has everything)
+	executor := core.ToolExecutor(ctoToolReg)
 	if cfg.VisionChain != nil {
-		executor = vision.NewVisionAwareExecutor(toolReg, cfg.VisionChain, logger)
-		logger.Printf("Vision-aware executor enabled (wrapping tool registry)")
+		executor = vision.NewVisionAwareExecutor(ctoToolReg, cfg.VisionChain, logger)
+		logger.Printf("Vision-aware executor enabled (wrapping CTO tool registry)")
 	}
 
 	loop := core.NewAgentLoop(provider, executor, sess, loopCfg)
