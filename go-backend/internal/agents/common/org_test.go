@@ -147,6 +147,68 @@ func TestLoadInvestDivisionHeads(t *testing.T) {
 	}
 }
 
+func TestLoadDREOrg(t *testing.T) {
+	drePath := "/home/ubuntu/Documents/programs/deep-research-engine"
+	if _, err := os.Stat(drePath); os.IsNotExist(err) {
+		t.Skip("deep-research-engine not found at", drePath)
+	}
+
+	org := LoadOrgManifest(drePath)
+	if org == nil {
+		t.Fatal("expected org from deep-research-engine")
+	}
+
+	roles := LoadAgentRolesFrom(org.RolesDir())
+	if len(roles) < 3 {
+		t.Fatalf("expected at least 3 division head roles, got %d", len(roles))
+	}
+
+	// Check division heads
+	for _, name := range []string{"research-director", "ingestion-director", "artifact-director"} {
+		role := roles[name]
+		if role == nil {
+			t.Errorf("missing division head: %s", name)
+			continue
+		}
+		if role.Division == "" {
+			t.Errorf("%s: expected division field, got empty", name)
+		}
+	}
+
+	// Load research division
+	rd := roles["research-director"]
+	researchOrg := LoadOrgManifest(filepath.Join(drePath, rd.Division))
+	if researchOrg == nil {
+		t.Fatal("research division pux.yaml not found")
+	}
+	researchRoles := LoadAgentRolesFrom(researchOrg.RolesDir())
+	if len(researchRoles) != 3 {
+		t.Errorf("expected 3 research workers, got %d", len(researchRoles))
+	}
+
+	// Load ingestion division
+	id := roles["ingestion-director"]
+	ingestOrg := LoadOrgManifest(filepath.Join(drePath, id.Division))
+	if ingestOrg == nil {
+		t.Fatal("ingestion division pux.yaml not found")
+	}
+	ingestRoles := LoadAgentRolesFrom(ingestOrg.RolesDir())
+	if len(ingestRoles) != 4 {
+		t.Errorf("expected 4 ingestion workers, got %d", len(ingestRoles))
+	}
+
+	// Load generation division
+	ad := roles["artifact-director"]
+	genOrg := LoadOrgManifest(filepath.Join(drePath, ad.Division))
+	if genOrg == nil {
+		t.Fatal("generation division pux.yaml not found")
+	}
+	genRoles := LoadAgentRolesFrom(genOrg.RolesDir())
+	if len(genRoles) != 5 {
+		t.Errorf("expected 5 generation workers, got %d", len(genRoles))
+	}
+}
+
 func TestLoadInvestSubDivisionRoles(t *testing.T) {
 	investPath := "/home/ubuntu/Documents/programs/dev/invest"
 	if _, err := os.Stat(investPath); os.IsNotExist(err) {
