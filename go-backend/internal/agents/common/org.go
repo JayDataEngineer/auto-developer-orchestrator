@@ -8,16 +8,28 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DatabaseConfig holds connection configuration for a database.
+type DatabaseConfig struct {
+	URI         string `yaml:"uri"`          // for neo4j
+	Username    string `yaml:"username"`     // for neo4j
+	Password    string `yaml:"password"`     // for neo4j
+	PasswordEnv string `yaml:"password_env"` // env var name for password
+	URL         string `yaml:"url"`          // for postgres
+	BaseURL     string `yaml:"base_url"`     // for compreface
+	APIKeyEnv   string `yaml:"api_key_env"` // for compreface
+}
+
 // OrgManifest is the parsed pux.yaml — the "Corporate Charter" for an organization.
 // When a project directory contains a pux.yaml, the kernel enters "org mode" and
 // loads org-specific roles, tool packages, manifesto, and schedules.
 type OrgManifest struct {
-	Name         string       `yaml:"name"`
-	Description  string       `yaml:"description"`
-	Manifesto    string       `yaml:"manifesto"`
-	StaffRoot    string       `yaml:"staff_root"`
-	ToolPkgsRoot string       `yaml:"tool_packages_root"`
-	Schedules    []OrgSchedule `yaml:"schedules"`
+	Name         string            `yaml:"name"`
+	Description  string            `yaml:"description"`
+	Manifesto    string            `yaml:"manifesto"`
+	StaffRoot    string            `yaml:"staff_root"`
+	ToolPkgsRoot string            `yaml:"tool_packages_root"`
+	Schedules    []OrgSchedule     `yaml:"schedules"`
+	Databases    map[string]DatabaseConfig `yaml:"databases"` // NEW
 
 	baseDir string // absolute path to the directory containing pux.yaml
 }

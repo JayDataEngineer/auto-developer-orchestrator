@@ -193,8 +193,13 @@ func TestLoadDREOrg(t *testing.T) {
 		t.Fatal("ingestion division pux.yaml not found")
 	}
 	ingestRoles := LoadAgentRolesFrom(ingestOrg.RolesDir())
-	if len(ingestRoles) != 4 {
-		t.Errorf("expected 4 ingestion workers, got %d", len(ingestRoles))
+	if len(ingestRoles) != 5 {
+		t.Errorf("expected 5 ingestion workers (incl. face-recognition-specialist), got %d", len(ingestRoles))
+	}
+	for _, name := range []string{"audio-processor", "image-analyst", "text-extractor", "content-clusterer", "face-recognition-specialist"} {
+		if ingestRoles[name] == nil {
+			t.Errorf("missing ingestion role: %s", name)
+		}
 	}
 
 	// Load generation division
@@ -206,6 +211,47 @@ func TestLoadDREOrg(t *testing.T) {
 	genRoles := LoadAgentRolesFrom(genOrg.RolesDir())
 	if len(genRoles) != 5 {
 		t.Errorf("expected 5 generation workers, got %d", len(genRoles))
+	}
+
+	// Verify databases section is parsed
+	if len(org.Databases) != 3 {
+		t.Fatalf("expected 3 database configs, got %d", len(org.Databases))
+	}
+
+	// Neo4j config
+	neo4j, ok := org.Databases["neo4j"]
+	if !ok {
+		t.Fatal("missing neo4j database config")
+	}
+	if neo4j.URI != "bolt://172.17.0.9:7687" {
+		t.Errorf("neo4j uri: expected bolt://172.17.0.9:7687, got %q", neo4j.URI)
+	}
+	if neo4j.Username != "neo4j" {
+		t.Errorf("neo4j username: expected neo4j, got %q", neo4j.Username)
+	}
+	if neo4j.PasswordEnv != "NEO4J_PASSWORD" {
+		t.Errorf("neo4j password_env: expected NEO4J_PASSWORD, got %q", neo4j.PasswordEnv)
+	}
+
+	// Postgres config
+	pg, ok := org.Databases["postgres"]
+	if !ok {
+		t.Fatal("missing postgres database config")
+	}
+	if pg.URL != "postgresql://localhost:25432/shared_db" {
+		t.Errorf("postgres url: expected postgresql://localhost:25432/shared_db, got %q", pg.URL)
+	}
+
+	// CompreFace config
+	cf, ok := org.Databases["compreface"]
+	if !ok {
+		t.Fatal("missing compreface database config")
+	}
+	if cf.BaseURL != "http://172.17.0.14:8080" {
+		t.Errorf("compreface base_url: expected http://172.17.0.14:8080, got %q", cf.BaseURL)
+	}
+	if cf.APIKeyEnv != "COMPREFACE_API_KEY" {
+		t.Errorf("compreface api_key_env: expected COMPREFACE_API_KEY, got %q", cf.APIKeyEnv)
 	}
 }
 

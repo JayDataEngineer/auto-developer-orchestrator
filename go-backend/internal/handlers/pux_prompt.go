@@ -103,6 +103,13 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			cfg.OrgRoles = common.LoadAgentRolesFrom(org.RolesDir())
 			h.log.Info("Org roles loaded", zap.Int("count", len(cfg.OrgRoles)))
 		}
+		// Create DBProvider from org databases config (Neo4j, Postgres, CompreFace)
+		if len(org.Databases) > 0 {
+			dbProvider := common.NewOrgDBProvider(org.Databases)
+			cfg.DBProvider = dbProvider
+			h.log.Info("DBProvider created from org config",
+				zap.Int("databases", len(org.Databases)))
+		}
 	}
 
 	// Wire add-on hooks (Langfuse tracing, etc.)

@@ -13,10 +13,13 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/session"
 	"github.com/auto-developer-orchestrator/backend/internal/skills"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/face"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/graph"
 	mcptools "github.com/auto-developer-orchestrator/backend/internal/tools/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/nlp"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
 )
@@ -43,6 +46,8 @@ type Config struct {
 	ArtifactDB       meta.ArtifactStore         // optional: if set, yield_artifact persists to DB
 	Org              *common.OrgManifest        // optional: org manifest for overlay mode
 	OrgRoles         map[string]*common.AgentRole // optional: org-specific employee roles
+	DBProvider       common.DBProvider          // optional: if set, registers graph/face tools for employees
+	LLMProvider      core.LLMProvider           // optional: if set, registers NLP tools for employees
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -104,6 +109,23 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if cfg.MCPClient != nil {
 		employeeTools = mcptools.RegisterAll(employeeTools, cfg.MCPClient)
 		logger.Printf("MCP tools loaded for employees: %d tools", len(employeeTools))
+	}
+
+	if cfg.DBProvider != nil {
+		employeeTools = graph.RegisterAll(employeeTools, cfg.DBProvider)
+		logger.Printf("Graph tools loaded for employees: %d tools", len(employeeTools))
+	}
+
+	if cfg.DBProvider != nil {
+		if baseURL, apiKey, ok := cfg.DBProvider.FaceConfig(); ok {
+			employeeTools = face.RegisterAll(employeeTools, baseURL, apiKey)
+			logger.Printf("Face tools loaded for employees: 5 tools")
+		}
+	}
+
+	if cfg.LLMProvider != nil {
+		employeeTools = nlp.RegisterAll(employeeTools, cfg.LLMProvider)
+		logger.Printf("NLP tools loaded for employees: 2 tools")
 	}
 
 	// Build MCP server resolver for role-based delegation
@@ -290,6 +312,8 @@ func makeOrchestratorFactory(provider core.LLMProvider, parentCfg Config) orches
 			ModelResolver: parentCfg.ModelResolver,
 			ArtifactDB:    parentCfg.ArtifactDB,
 			ExtraHooks:    parentCfg.ExtraHooks,
+			DBProvider:    parentCfg.DBProvider,
+			LLMProvider:   parentCfg.LLMProvider,
 		}
 
 		subOrch, err := New(subProvider, cfg)

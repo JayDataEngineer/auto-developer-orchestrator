@@ -1,0 +1,13 @@
+description: "Graph database and vector search"
+mcp_servers: []
+tools:
+  - graph_query
+  - graph_create_nodes
+  - graph_create_rels
+  - graph_topics
+  - graph_entities
+  - graph_build
+  - graph_stats
+  - graph_schema
+  - vector_search
+  - vector_index

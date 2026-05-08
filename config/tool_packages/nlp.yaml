@@ -1,0 +1,5 @@
+description: "NLP operations — entity extraction, content clustering"
+mcp_servers: []
+tools:
+  - extract_entities
+  - cluster_content
