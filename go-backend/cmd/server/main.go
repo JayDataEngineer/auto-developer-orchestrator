@@ -274,16 +274,16 @@ func main() {
 	// MCP servers — non-fatal, tools fall back to browser-based search
 	mcpMulti := mcp.NewMultiClient(logger)
 
-	// Web research server (search, scrape, crawl, extract, docs)
-	webResearchClient := mcp.NewClient("http://100.86.69.57:8327/mcp", logger)
+	// MCP Hub endpoints — single port 30080 with path-based routing
+	hubBase := os.Getenv("MCP_HUB_ENDPOINT")
+	if hubBase == "" {
+		hubBase = "http://100.86.69.57:30080"
+	}
+
+	webResearchClient := mcp.NewClient(hubBase+"/mcp/web", logger)
 	mcpMulti.AddClient("web", webResearchClient)
 
-	// Media analysis server (image, audio, video analysis)
-	mediaEndpoint := os.Getenv("MCP_MEDIA_ENDPOINT")
-	if mediaEndpoint == "" {
-		mediaEndpoint = "http://100.86.69.57:8101/mcp"
-	}
-	mediaAnalysisClient := mcp.NewClient(mediaEndpoint, logger)
+	mediaAnalysisClient := mcp.NewClient(hubBase+"/mcp/media", logger)
 	mcpMulti.AddClient("media", mediaAnalysisClient)
 
 	if mcpMulti.IsAvailable() {
