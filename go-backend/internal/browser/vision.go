@@ -24,11 +24,16 @@ type VisionClient struct {
 }
 
 // NewVisionClient creates a new vision client.
-// Falls back to localhost:8001 (llama.cpp) when no explicit URL is provided.
+// Falls back to cluster LLM -> localhost:8001 (llama.cpp) when no explicit URL is provided.
 // Uses toolModel from config when available, otherwise VISION_MODEL env or hardcoded default.
 func NewVisionClient(url, apiKey string, modelCfg *models.ModelConfig) *VisionClient {
 	if url == "" {
-		url = "http://localhost:8001"
+		// Prefer cluster LLM endpoint (may have vision), fall back to local llama.cpp
+		if hub := os.Getenv("MCP_HUB_ENDPOINT"); hub != "" {
+			url = hub + "/llm"
+		} else {
+			url = "http://localhost:8001"
+		}
 	}
 	var model string
 	if modelCfg != nil {
@@ -46,6 +51,20 @@ func NewVisionClient(url, apiKey string, modelCfg *models.ModelConfig) *VisionCl
 		model:      model,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
+}
+
+// CheckHealth verifies the vision server is reachable by hitting the models endpoint.
+func (vc *VisionClient) CheckHealth(ctx context.Context) bool {
+	req, err := http.NewRequestWithContext(ctx, "GET", vc.baseURL+"/v1/models", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := vc.httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // DescribePage sends a screenshot to the vision model and returns a text description.

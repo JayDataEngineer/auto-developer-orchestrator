@@ -321,6 +321,8 @@ func main() {
 	mediaAnalysisClient := mcp.NewClient(hubBase+"/mcp/media", logger)
 	mcpMulti.AddClient("media", mediaAnalysisClient)
 
+	puxHandler.SetVisionClient(visionClient)
+
 	if mcpMulti.IsAvailable() {
 		if err := mcpMulti.InitializeAll(context.Background()); err != nil {
 			logger.Warn("MCP multi-client initialization had errors", zap.Error(err))

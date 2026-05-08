@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/approval"
+	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
@@ -40,6 +41,7 @@ type PuxHandler struct {
 	mcpClient    *mcp.Client        // optional: MCP research server for search/scrape
 	mcpMulti     *mcp.MultiClient   // optional: multi-server MCP routing
 
+	visionClient   *browser.VisionClient // local llama.cpp vision (second fallback tier)
 	eventStore     *storage.EventStore
 	approvalMgr    *approval.Manager // central approval manager for Respond endpoint
 
@@ -106,6 +108,11 @@ func (h *PuxHandler) SetMCPClient(client *mcp.Client) {
 // SetMCPMulti configures the multi-server MCP client for routing tool calls.
 func (h *PuxHandler) SetMCPMulti(multi *mcp.MultiClient) {
 	h.mcpMulti = multi
+}
+
+// SetVisionClient configures the local vision client (llama.cpp) for fallback vision.
+func (h *PuxHandler) SetVisionClient(vc *browser.VisionClient) {
+	h.visionClient = vc
 }
 
 // SetEventStore configures the event store for session event persistence.

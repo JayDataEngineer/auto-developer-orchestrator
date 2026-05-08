@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -137,20 +138,46 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	}
 	cfg.ExtraHooks = extraHooks
 
-	// Build vision fallback chain — ONLY when the engine lacks native vision.
-	// When the LLM can see images (mmproj/Gemini), skip the fallback to avoid
-	// redundant descriptions and extra latency.
+	// Build vision fallback chain — used when the engine lacks native vision.
+	// Priority: MCP (Florence-2 on cluster, fast) → Native (llama.cpp/LLM vision, flexible).
+	// When the LLM can see images (mmproj/Gemini), skip to avoid redundant descriptions.
 	var visionChain *vision.FallbackChain
 	engineHasVision := false
 	if engine != nil {
 		engineHasVision = engine.HasVision()
 	}
-	if !engineHasVision && h.mcpMulti != nil && h.mcpMulti.HasTool("analyze_image") {
-		providers := []vision.Provider{
-			vision.NewMCPProvider(h.mcpMulti),
+	if !engineHasVision {
+		var providers []vision.Provider
+
+		// Tier 1: MCP media analysis server (Florence-2, fast structured descriptions)
+		if h.mcpMulti != nil && h.mcpMulti.HasTool("analyze_image") {
+			providers = append(providers, vision.NewMCPProvider(h.mcpMulti))
 		}
-		visionChain = vision.NewFallbackChain(providers...)
-		h.log.Info("Vision fallback chain configured (LLM has no native vision)", zap.String("engine", engine.ModelName()))
+
+		// Tier 2: Native local llama.cpp vision (flexible, handles complex scenes)
+		if h.visionClient != nil {
+			vc := h.visionClient
+			providers = append(providers, vision.NewNativeProvider(vision.NativeProviderOpt{
+				DescribeFunc: func(ctx context.Context, b64, mimeType, prompt string) (string, error) {
+					imgBytes, err := base64.StdEncoding.DecodeString(b64)
+					if err != nil {
+						return "", fmt.Errorf("decode base64: %w", err)
+					}
+					return vc.DescribeImage(ctx, imgBytes, prompt, mimeType)
+				},
+				HealthCheck: func(ctx context.Context) bool {
+					return vc.CheckHealth(ctx)
+				},
+			}))
+		}
+
+		if len(providers) > 0 {
+			visionChain = vision.NewFallbackChain(providers...)
+			h.log.Info("Vision fallback chain configured",
+				zap.Int("providers", len(providers)),
+				zap.String("engine", engine.ModelName()),
+			)
+		}
 	} else if engineHasVision {
 		h.log.Debug("LLM has native vision, skipping fallback chain", zap.String("engine", engine.ModelName()))
 	}
