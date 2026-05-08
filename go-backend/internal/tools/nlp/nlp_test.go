@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/core/testutil"
 )
 
 // mockProvider implements LLMProvider for testing.
@@ -26,52 +27,35 @@ func (m *mockProvider) StreamChat(ctx context.Context, messages []core.Message, 
 	return ch, nil
 }
 
-func (m *mockProvider) ModelName() string    { return "test-model" }
-func (m *mockProvider) ContextSize() int      { return 4096 }
+func (m *mockProvider) ModelName() string   { return "test-model" }
+func (m *mockProvider) ContextSize() int     { return 4096 }
 
 func TestRegisterAll_NilProvider(t *testing.T) {
-	tools := []core.Tool{}
-	result := RegisterAll(tools, nil)
-	if len(result) != 0 {
-		t.Fatalf("expected 0 tools with nil provider, got %d", len(result))
+	result := RegisterAll(nil, nil)
+	if result != nil {
+		t.Fatalf("expected nil with nil provider, got %d tools", len(result))
 	}
 }
 
 func TestRegisterAll_ValidProvider(t *testing.T) {
 	provider := &mockProvider{}
-	tools := []core.Tool{}
-	result := RegisterAll(tools, provider)
-	if len(result) != 2 {
-		t.Fatalf("expected 2 tools, got %d", len(result))
-	}
-
+	tools := RegisterAll(nil, provider)
 	expected := []string{"extract_entities", "cluster_content"}
-	for i, name := range expected {
-		if result[i].Name() != name {
-			t.Errorf("tool %d: expected %q, got %q", i, name, result[i].Name())
-		}
-	}
+	testutil.AssertToolNames(t, tools, expected)
+	testutil.AssertValidSchemas(t, tools)
 }
 
 func TestRegisterAll_PreservesExisting(t *testing.T) {
-	provider := &mockProvider{}
-	existing := []core.Tool{&stubTool{name: "bash"}}
-	result := RegisterAll(existing, provider)
+	existing := []core.Tool{testutil.NewStubTool("bash")}
+	result := RegisterAll(existing, &mockProvider{})
 	if len(result) != 3 {
 		t.Fatalf("expected 3 tools (1 existing + 2 nlp), got %d", len(result))
 	}
 }
 
 func TestExtractEntities_MissingText(t *testing.T) {
-	provider := &mockProvider{}
-	tool := NewExtractEntitiesTool(provider)
-	_, err := tool.Execute(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing text parameter")
-	}
-	if err.Error() != "missing required parameter 'text'" {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	tool := NewExtractEntitiesTool(&mockProvider{})
+	testutil.AssertMissingParam(t, tool, "text")
 }
 
 func TestExtractEntities_BasicExtraction(t *testing.T) {
@@ -82,12 +66,8 @@ func TestExtractEntities_BasicExtraction(t *testing.T) {
 	}
 	tool := NewExtractEntitiesTool(provider)
 
-	result, err := tool.Execute(context.Background(), map[string]any{
-		"text": "Alice works at Google",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	result, err := tool.Execute(context.Background(), map[string]any{"text": "Alice works at Google"})
+	testutil.AssertNoError(t, err)
 
 	m := result.(map[string]any)
 	entities := m["entities"].([]map[string]any)
@@ -117,25 +97,13 @@ func TestExtractEntities_SaveToFile(t *testing.T) {
 		"text":        "test text",
 		"output_path": outputPath,
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	m := result.(map[string]any)
-	if m["saved_to"] != outputPath {
-		t.Errorf("expected saved_to=%q, got %v", outputPath, m["saved_to"])
-	}
+	testutil.AssertStringField(t, m, "saved_to", outputPath)
 
-	// Verify file was written
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("output file not created: %v", err)
-	}
-
-	var entities []map[string]any
-	if err := json.Unmarshal(data, &entities); err != nil {
-		t.Fatalf("output file is not valid JSON: %v", err)
-	}
+	data, _ := os.ReadFile(outputPath)
+	testutil.AssertJSONValid(t, data)
 }
 
 func TestExtractEntities_NonJSONResponse(t *testing.T) {
@@ -146,12 +114,8 @@ func TestExtractEntities_NonJSONResponse(t *testing.T) {
 	}
 	tool := NewExtractEntitiesTool(provider)
 
-	result, err := tool.Execute(context.Background(), map[string]any{
-		"text": "Alice and Bob",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	result, err := tool.Execute(context.Background(), map[string]any{"text": "Alice and Bob"})
+	testutil.AssertNoError(t, err)
 
 	m := result.(map[string]any)
 	entities := m["entities"].([]map[string]any)
@@ -164,17 +128,12 @@ func TestExtractEntities_NonJSONResponse(t *testing.T) {
 }
 
 func TestClusterContent_MissingPath(t *testing.T) {
-	provider := &mockProvider{}
-	tool := NewClusterContentTool(provider)
-	_, err := tool.Execute(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing items_path parameter")
-	}
+	tool := NewClusterContentTool(&mockProvider{})
+	testutil.AssertMissingParam(t, tool, "items_path")
 }
 
 func TestClusterContent_NonexistentPath(t *testing.T) {
-	provider := &mockProvider{}
-	tool := NewClusterContentTool(provider)
+	tool := NewClusterContentTool(&mockProvider{})
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"items_path": "/nonexistent/path.json",
 	})
@@ -197,12 +156,8 @@ func TestClusterContent_StringArray(t *testing.T) {
 	data, _ := json.Marshal(items)
 	os.WriteFile(itemsPath, data, 0644)
 
-	result, err := tool.Execute(context.Background(), map[string]any{
-		"items_path": itemsPath,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	result, err := tool.Execute(context.Background(), map[string]any{"items_path": itemsPath})
+	testutil.AssertNoError(t, err)
 
 	m := result.(map[string]any)
 	clusters := m["clusters"].([]map[string]any)
@@ -225,12 +180,8 @@ func TestClusterContent_ObjectArray(t *testing.T) {
 	data, _ := json.Marshal(items)
 	os.WriteFile(itemsPath, data, 0644)
 
-	_, err := tool.Execute(context.Background(), map[string]any{
-		"items_path": itemsPath,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	_, err := tool.Execute(context.Background(), map[string]any{"items_path": itemsPath})
+	testutil.AssertNoError(t, err)
 }
 
 func TestClusterContent_SaveToFile(t *testing.T) {
@@ -250,16 +201,11 @@ func TestClusterContent_SaveToFile(t *testing.T) {
 		"items_path":  itemsPath,
 		"output_path": outputPath,
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	m := result.(map[string]any)
-	if m["saved_to"] != outputPath {
-		t.Errorf("expected saved_to=%q, got %v", outputPath, m["saved_to"])
-	}
+	testutil.AssertStringField(t, m, "saved_to", outputPath)
 
-	// Verify file exists
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
 		t.Fatal("output file not created")
 	}
@@ -271,35 +217,30 @@ func TestToolSchemas(t *testing.T) {
 		NewExtractEntitiesTool(provider),
 		NewClusterContentTool(provider),
 	}
-
-	for _, tool := range tools {
-		schema := tool.Schema()
-		var parsed map[string]any
-		if err := json.Unmarshal(schema, &parsed); err != nil {
-			t.Fatalf("tool %q has invalid schema: %v", tool.Name(), err)
-		}
-		if typ, ok := parsed["type"].(string); !ok || typ != "object" {
-			t.Fatalf("tool %q schema missing type=object", tool.Name())
-		}
-		props, _ := parsed["properties"].(map[string]any)
-		if len(props) == 0 {
-			t.Fatalf("tool %q schema has no properties", tool.Name())
-		}
-	}
+	testutil.AssertValidSchemas(t, tools)
 }
 
 func TestReplaceTemplate(t *testing.T) {
-	result := replaceTemplate("Hello {{.Name}}, welcome!", "Name", "World")
-	if result != "Hello World, welcome!" {
-		t.Errorf("unexpected result: %q", result)
+	tests := []struct {
+		name     string
+		tmpl     string
+		key      string
+		value    string
+		expected string
+	}{
+		{name: "single placeholder", tmpl: "Hello {{.Name}}, welcome!", key: "Name", value: "World", expected: "Hello World, welcome!"},
+		{name: "multiple same placeholders", tmpl: "{{.X}} and {{.X}}", key: "X", value: "same", expected: "same and {{.X}}"},
+		{name: "empty value", tmpl: "Hello {{.Name}}!", key: "Name", value: "", expected: "Hello !"},
+		{name: "no placeholder", tmpl: "Hello World!", key: "Missing", value: "X", expected: "Hello World!"},
+		{name: "JSON in template", tmpl: `Items: {{.Items}}`, key: "Items", value: `["a","b"]`, expected: `Items: ["a","b"]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := replaceTemplate(tt.tmpl, tt.key, tt.value)
+			if got != tt.expected {
+				t.Errorf("replaceTemplate() = %q, want %q", got, tt.expected)
+			}
+		})
 	}
 }
-
-type stubTool struct {
-	name string
-}
-
-func (s *stubTool) Name() string                                          { return s.name }
-func (s *stubTool) Description() string                                    { return "stub" }
-func (s *stubTool) Schema() json.RawMessage                                { return json.RawMessage(`{}`) }
-func (s *stubTool) Execute(ctx context.Context, args map[string]any) (any, error) { return nil, nil }

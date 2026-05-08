@@ -2,209 +2,167 @@ package graph
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/core/testutil"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/base"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
-// mockDBProvider implements common.DBProvider for testing.
-type mockDBProvider struct {
-	neo4jErr   error
-	pgErr      error
-	faceOk     bool
-}
+// errDBProvider returns errors for all database operations.
+// Satisfies common.DBProvider using concrete neo4j.Driver and pgxpool.Pool return types.
+type errDBProvider struct{}
 
-func (m *mockDBProvider) Neo4jDriver() (any, error) {
-	return nil, m.neo4jErr
-}
-func (m *mockDBProvider) PostgresPool() (any, error) {
-	return nil, m.pgErr
-}
-func (m *mockDBProvider) Neo4jConfig() (string, string, string, bool) {
-	if m.neo4jErr != nil {
-		return "", "", "", false
-	}
-	return "bolt://localhost:7687", "neo4j", "test", true
-}
-func (m *mockDBProvider) PostgresURL() (string, bool) {
-	if m.pgErr != nil {
-		return "", false
-	}
-	return "postgresql://localhost/test", true
-}
-func (m *mockDBProvider) FaceConfig() (string, string, bool) {
-	return "", "", m.faceOk
-}
-func (m *mockDBProvider) Close() error { return nil }
+func (e *errDBProvider) Neo4jDriver() (neo4j.Driver, error)    { return nil, errors.New("no neo4j") }
+func (e *errDBProvider) PostgresPool() (*pgxpool.Pool, error)  { return nil, errors.New("no pg") }
+func (e *errDBProvider) Close() error                           { return nil }
+func (e *errDBProvider) Neo4jConfig() (string, string, string, bool) { return "", "", "", false }
+func (e *errDBProvider) PostgresURL() (string, bool)                 { return "", false }
+func (e *errDBProvider) FaceConfig() (string, string, bool)          { return "", "", false }
 
 func TestRegisterAll_NilProvider(t *testing.T) {
-	tools := []core.Tool{}
-	result := RegisterAll(tools, nil)
+	result := RegisterAll(nil, nil)
 	if len(result) != 0 {
 		t.Fatalf("expected 0 tools with nil provider, got %d", len(result))
 	}
 }
 
-func TestRegisterAll_NilProviderPreservesExisting(t *testing.T) {
-	existing := []core.Tool{&stubTool{name: "bash"}}
+func TestRegisterAll_PreservesExisting(t *testing.T) {
+	existing := []core.Tool{testutil.NewStubTool("bash")}
 	result := RegisterAll(existing, nil)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 existing tool preserved, got %d", len(result))
 	}
 }
 
-func TestToolNames(t *testing.T) {
-	// Verify all tool names and descriptions are correct
-	expectedTools := []struct {
-		name string
-		desc string
+func TestRegisterAll_WithProvider(t *testing.T) {
+	db := &errDBProvider{}
+	tools := RegisterAll(nil, db)
+	expected := []string{
+		"graph_query", "graph_create_nodes", "graph_create_rels",
+		"graph_topics", "graph_entities", "graph_build",
+		"graph_stats", "graph_schema",
+		"vector_search", "vector_index",
+	}
+	testutil.AssertToolNames(t, tools, expected)
+	testutil.AssertValidSchemas(t, tools)
+}
+
+func TestExecFunctions_MissingParams(t *testing.T) {
+	tests := []struct {
+		name   string
+		fn     func(common.DBProvider) base.ToolFunc
+		errMsg string
 	}{
-		{"graph_query", "Execute a Cypher query on Neo4j"},
-		{"graph_create_nodes", "Create nodes from JSON array"},
-		{"graph_create_rels", "Create relationships between nodes"},
-		{"graph_topics", "List Topic nodes"},
-		{"graph_entities", "Look up entity by name"},
-		{"graph_build", "Full build from clusters and entities JSON files"},
-		{"graph_stats", "Get node and relationship counts"},
-		{"graph_schema", "Get graph schema info"},
-		{"vector_search", "Semantic search using pgvector"},
-		{"vector_index", "Index document chunks into pgvector"},
+		{name: "graph_query", fn: queryExec, errMsg: "missing required parameter 'cypher'"},
+		{name: "graph_create_nodes", fn: createNodesExec, errMsg: "missing required parameter 'nodes'"},
+		{name: "graph_create_rels", fn: createRelsExec, errMsg: "missing required parameter 'relationships'"},
+		{name: "graph_entities", fn: entitiesExec, errMsg: "missing required parameter 'name'"},
+		{name: "graph_build", fn: buildExec, errMsg: "missing required parameters"},
+		{name: "vector_search", fn: vectorSearchExec, errMsg: "missing required parameter 'query'"},
+		{name: "vector_index", fn: vectorIndexExec, errMsg: "missing required parameter 'chunks_path'"},
 	}
 
-	// Build tools individually to verify schema validity
-	schema := json.RawMessage(`{"type":"object","properties":{"test":{"type":"string"}}}`)
-	for _, expected := range expectedTools {
-		tool := newStubTool(expected.name, expected.desc, schema)
-		if tool.Name() != expected.name {
-			t.Errorf("expected name %q, got %q", expected.name, tool.Name())
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fn := tt.fn(nil)
+			_, err := fn(context.Background(), map[string]any{})
+			testutil.AssertErrorContains(t, err, tt.errMsg)
+		})
 	}
 }
 
-func TestQueryExec_MissingCypher(t *testing.T) {
-	// graph_query requires cypher parameter
-	fn := queryExec(nil)
-	_, err := fn(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing cypher parameter")
-	}
-	if err.Error() != "missing required parameter 'cypher'" {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestCreateNodesExec_MissingNodes(t *testing.T) {
-	fn := createNodesExec(nil)
-	_, err := fn(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing nodes parameter")
-	}
-}
-
-func TestCreateNodesExec_InvalidJSON(t *testing.T) {
+func TestCreateNodes_InvalidJSON(t *testing.T) {
 	fn := createNodesExec(nil)
 	_, err := fn(context.Background(), map[string]any{"nodes": "not-json"})
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
+	testutil.AssertErrorContains(t, err, "parse nodes")
 }
 
-func TestCreateRelsExec_MissingRels(t *testing.T) {
-	fn := createRelsExec(nil)
-	_, err := fn(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing relationships parameter")
-	}
-}
-
-func TestCreateRelsExec_InvalidJSON(t *testing.T) {
+func TestCreateRels_InvalidJSON(t *testing.T) {
 	fn := createRelsExec(nil)
 	_, err := fn(context.Background(), map[string]any{"relationships": "bad-json"})
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
+	testutil.AssertErrorContains(t, err, "parse relationships")
+}
+
+func TestBuildExec_PartialPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "missing entities_path", args: map[string]any{"clusters_path": "/tmp/c.json"}},
+		{name: "missing clusters_path", args: map[string]any{"entities_path": "/tmp/e.json"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fn := buildExec(nil)
+			_, err := fn(context.Background(), tt.args)
+			testutil.AssertErrorContains(t, err, "missing required parameters")
+		})
 	}
 }
 
-func TestEntitiesExec_MissingName(t *testing.T) {
-	fn := entitiesExec(nil)
+func TestBuildExec_WithFiles(t *testing.T) {
+	db := &errDBProvider{}
+	fn := buildExec(db)
+
+	tmpDir := t.TempDir()
+	clustersPath := filepath.Join(tmpDir, "clusters.json")
+	entitiesPath := filepath.Join(tmpDir, "entities.json")
+	os.WriteFile(clustersPath, []byte(`[{"name": "topic1"}]`), 0644)
+	os.WriteFile(entitiesPath, []byte(`[{"name": "entity1", "type": "PERSON"}]`), 0644)
+
+	_, err := fn(context.Background(), map[string]any{
+		"clusters_path": clustersPath,
+		"entities_path": entitiesPath,
+	})
+	// Should fail with DB error after reading files successfully
+	testutil.AssertErrorContains(t, err, "no neo4j")
+}
+
+func TestVectorSearch_DefaultTopK(t *testing.T) {
+	db := &errDBProvider{}
+	fn := vectorSearchExec(db)
+	_, err := fn(context.Background(), map[string]any{"query": "test"})
+	// Should fail with DB error (not missing param), proving top_k defaults
+	testutil.AssertErrorContains(t, err, "no pg")
+}
+
+func TestVectorSearch_MissingQuery(t *testing.T) {
+	db := &errDBProvider{}
+	fn := vectorSearchExec(db)
+	_, err := fn(context.Background(), map[string]any{"top_k": 10})
+	testutil.AssertErrorContains(t, err, "missing required parameter 'query'")
+}
+
+func TestVectorIndex_DefaultTable(t *testing.T) {
+	db := &errDBProvider{}
+	fn := vectorIndexExec(db)
+
+	tmpDir := t.TempDir()
+	chunksPath := filepath.Join(tmpDir, "chunks.json")
+	os.WriteFile(chunksPath, []byte(`[{"content": "hello"}]`), 0644)
+
+	_, err := fn(context.Background(), map[string]any{"chunks_path": chunksPath})
+	// Should fail with DB error (not missing param), proving default table name is used
+	testutil.AssertErrorContains(t, err, "no pg")
+}
+
+func TestTopicsExec_WithNamespace(t *testing.T) {
+	db := &errDBProvider{}
+	fn := topicsExec(db)
+	_, err := fn(context.Background(), map[string]any{"namespace": "test"})
+	testutil.AssertErrorContains(t, err, "no neo4j")
+}
+
+func TestTopicsExec_WithoutNamespace(t *testing.T) {
+	db := &errDBProvider{}
+	fn := topicsExec(db)
 	_, err := fn(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing name parameter")
-	}
+	testutil.AssertErrorContains(t, err, "no neo4j")
 }
-
-func TestBuildExec_MissingPaths(t *testing.T) {
-	fn := buildExec(nil)
-	_, err := fn(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing paths")
-	}
-}
-
-func TestVectorSearchExec_MissingQuery(t *testing.T) {
-	fn := vectorSearchExec(nil)
-	_, err := fn(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing query parameter")
-	}
-}
-
-func TestVectorIndexExec_MissingPath(t *testing.T) {
-	fn := vectorIndexExec(nil)
-	_, err := fn(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing chunks_path parameter")
-	}
-}
-
-func TestToolSchemas(t *testing.T) {
-	// Verify all tool schemas are valid JSON
-	schemas := []json.RawMessage{
-		json.RawMessage(`{"type":"object","properties":{"cypher":{"type":"string"},"params":{"type":"object"}},"required":["cypher"]}`),
-		json.RawMessage(`{"type":"object","properties":{"nodes":{"type":"array"}},"required":["nodes"]}`),
-		json.RawMessage(`{"type":"object","properties":{"relationships":{"type":"array"}},"required":["relationships"]}`),
-		json.RawMessage(`{"type":"object","properties":{"namespace":{"type":"string"}}}`),
-		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`),
-		json.RawMessage(`{"type":"object","properties":{"clusters_path":{"type":"string"},"entities_path":{"type":"string"},"namespace":{"type":"string"}},"required":["clusters_path","entities_path"]}`),
-		json.RawMessage(`{"type":"object","properties":{}}`),
-		json.RawMessage(`{"type":"object","properties":{}}`),
-		json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"top_k":{"type":"integer"},"table":{"type":"string"}},"required":["query"]}`),
-		json.RawMessage(`{"type":"object","properties":{"chunks_path":{"type":"string"},"table":{"type":"string"}},"required":["chunks_path"]}`),
-	}
-
-	for i, schema := range schemas {
-		var parsed map[string]any
-		if err := json.Unmarshal(schema, &parsed); err != nil {
-			t.Fatalf("schema %d is not valid JSON: %v", i, err)
-		}
-		if typ, ok := parsed["type"].(string); !ok || typ != "object" {
-			t.Fatalf("schema %d missing type=object", i)
-		}
-	}
-}
-
-// stubTool is a minimal core.Tool implementation for testing.
-type stubTool struct {
-	name string
-}
-
-func (s *stubTool) Name() string                                          { return s.name }
-func (s *stubTool) Description() string                                    { return "stub" }
-func (s *stubTool) Schema() json.RawMessage                                { return json.RawMessage(`{}`) }
-func (s *stubTool) Execute(ctx context.Context, args map[string]any) (any, error) { return nil, nil }
-
-func newStubTool(name, desc string, schema json.RawMessage) core.Tool {
-	return &stubToolWithDetails{name: name, desc: desc, schema: schema}
-}
-
-type stubToolWithDetails struct {
-	name   string
-	desc   string
-	schema json.RawMessage
-}
-
-func (s *stubToolWithDetails) Name() string                                          { return s.name }
-func (s *stubToolWithDetails) Description() string                                    { return s.desc }
-func (s *stubToolWithDetails) Schema() json.RawMessage                                { return s.schema }
-func (s *stubToolWithDetails) Execute(ctx context.Context, args map[string]any) (any, error) { return nil, nil }

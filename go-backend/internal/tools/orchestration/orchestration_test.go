@@ -9,26 +9,47 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 )
 
-func TestResolveRole_KernelRole(t *testing.T) {
-	// When no roleMap is provided, falls back to kernel roles
-	// Kernel roles require PROJECT_ROOT to be set
+// makeRole is a helper to create a single-entry role map.
+func makeRole(name, description, prompt, model string, tools []string, rounds int, division string, temp float32) map[string]*common.AgentRole {
+	role := &common.AgentRole{
+		Name:        name,
+		Description: description,
+		Prompt:      prompt,
+		Tools:       tools,
+		MaxRounds:   rounds,
+		Division:    division,
+		Model:       model,
+	}
+	if temp != 0 {
+		role.Temperature = temp
+	}
+	return map[string]*common.AgentRole{name: role}
+}
+
+// webMCPServer returns a resolver that expands "web" and "media" MCP prefixes.
+func webMCPServer(prefix string) []string {
+	switch prefix {
+	case "web":
+		return []string{"mcp__research__search", "mcp__research__scrape", "mcp__research__research"}
+	case "media":
+		return []string{"mcp__media__analyze_image"}
+	}
+	return nil
+}
+
+// setupProjectRoot sets PROJECT_ROOT for kernel role lookups.
+func setupProjectRoot(t *testing.T) {
+	t.Helper()
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
 	os.Setenv("PROJECT_ROOT", repoRoot)
-
-	// Force reload kernel roles with correct PROJECT_ROOT
 	common.ReloadPromptTemplate()
+}
 
-	// Sarah uses imports: [research] → mcp_servers: [web]
-	// Without mcpResolver, tools are empty (MCP expansion requires resolver)
-	mcpResolver := func(prefix string) []string {
-		if prefix == "web" {
-			return []string{"mcp__research__search", "mcp__research__scrape", "mcp__research__research"}
-		}
-		return nil
-	}
+func TestResolveRole_KernelRole(t *testing.T) {
+	setupProjectRoot(t)
 
-	instructions, tools, _, _, model, division := resolveRole("sarah", nil, 15, 0.4, mcpResolver, nil)
+	instructions, tools, _, _, model, division := resolveRole("sarah", nil, 15, 0.4, webMCPServer, nil)
 
 	if division != "" {
 		t.Errorf("expected no division for kernel role, got %q", division)
@@ -39,25 +60,14 @@ func TestResolveRole_KernelRole(t *testing.T) {
 	if len(tools) == 0 {
 		t.Error("expected tools from kernel role after MCP expansion")
 	}
-	// Sarah uses gemini-3-flash-preview
 	if model != "gemini-3-flash-preview" {
 		t.Errorf("expected model 'gemini-3-flash-preview', got %q", model)
 	}
 }
 
 func TestResolveRole_OrgRoleOverridesKernel(t *testing.T) {
-	// Org roleMap takes priority over kernel roles
-	roleMap := map[string]*common.AgentRole{
-		"sarah": {
-			Name:        "sarah",
-			Description: "Org-specific Sarah",
-			Prompt:      "You are org-sarah.",
-			Tools:       []string{"bash", "read_file"},
-			MaxRounds:   10,
-			Temperature: 0.8,
-			Model:       "custom-model",
-		},
-	}
+	roleMap := makeRole("sarah", "Org-specific Sarah", "You are org-sarah.", "custom-model",
+		[]string{"bash", "read_file"}, 10, "", 0.8)
 
 	instructions, tools, rounds, temp, model, division := resolveRole("sarah", nil, 15, 0.4, nil, roleMap)
 
@@ -82,17 +92,8 @@ func TestResolveRole_OrgRoleOverridesKernel(t *testing.T) {
 }
 
 func TestResolveRole_DivisionHead(t *testing.T) {
-	// A role with Division set returns the division path
-	roleMap := map[string]*common.AgentRole{
-		"research-director": {
-			Name:        "research-director",
-			Description: "Research Division Head",
-			Prompt:      "You manage research analysts.",
-			Division:    "./divisions/research",
-			Model:       "deepseek/deepseek-v4-flash",
-			MaxRounds:   25,
-		},
-	}
+	roleMap := makeRole("research-director", "Research Division Head", "You manage research analysts.",
+		"deepseek/deepseek-v4-flash", nil, 25, "./divisions/research", 0)
 
 	instructions, _, _, _, model, division := resolveRole("research-director", nil, 15, 0.4, nil, roleMap)
 
@@ -108,7 +109,6 @@ func TestResolveRole_DivisionHead(t *testing.T) {
 }
 
 func TestResolveRole_CustomInstructions(t *testing.T) {
-	// Non-role instructions pass through as-is
 	customInstructions := "Analyze this dataset and find anomalies"
 	instructions, tools, rounds, temp, model, division := resolveRole(customInstructions, []string{"bash", "grep"}, 20, 0.6, nil, nil)
 
@@ -133,55 +133,27 @@ func TestResolveRole_CustomInstructions(t *testing.T) {
 }
 
 func TestResolveRole_ExplicitToolsOverrideRole(t *testing.T) {
-	// When tools are explicitly passed, they override role defaults
-	roleMap := map[string]*common.AgentRole{
-		"alex": {
-			Name:        "alex",
-			Description: "IT Ops",
-			Prompt:      "You are alex.",
-			Tools:       []string{"bash", "memory"},
-			MaxRounds:   10,
-		},
-	}
+	roleMap := makeRole("alex", "IT Ops", "You are alex.", "", []string{"bash", "memory"}, 10, "", 0)
 
 	_, tools, _, _, _, _ := resolveRole("alex", []string{"bash", "read_file", "write_file"}, 15, 0.4, nil, roleMap)
 
-	// Explicit tools should override role defaults
 	if len(tools) != 3 {
 		t.Errorf("expected 3 explicit tools, got %d: %v", len(tools), tools)
 	}
 }
 
 func TestResolveRole_MCPExpansion(t *testing.T) {
-	// MCP resolver expands mcp_servers into tool names
-	roleMap := map[string]*common.AgentRole{
-		"scout": {
-			Name:        "scout",
-			Description: "News Scout",
-			Prompt:      "You research news.",
-			Tools:       []string{"bash"},
-			MCPServers:  []string{"web", "media"},
-		},
-	}
+	roleMap := makeRole("scout", "News Scout", "You research news.", "",
+		[]string{"bash"}, 15, "", 0)
+	roleMap["scout"].MCPServers = []string{"web", "media"}
 
-	mcpResolver := func(prefix string) []string {
-		if prefix == "web" {
-			return []string{"mcp__research__search", "mcp__research__scrape"}
-		}
-		if prefix == "media" {
-			return []string{"mcp__media__analyze_image"}
-		}
-		return nil
-	}
+	_, tools, _, _, _, _ := resolveRole("scout", nil, 15, 0.4, webMCPServer, roleMap)
 
-	_, tools, _, _, _, _ := resolveRole("scout", nil, 15, 0.4, mcpResolver, roleMap)
-
-	expectedCount := 4 // bash + 2 web tools + 1 media tool
+	expectedCount := 5 // bash + 3 web tools + 1 media tool
 	if len(tools) != expectedCount {
 		t.Errorf("expected %d tools, got %d: %v", expectedCount, len(tools), tools)
 	}
 
-	// Verify MCP tools are present
 	hasSearch := false
 	hasAnalyze := false
 	for _, t := range tools {
@@ -201,17 +173,8 @@ func TestResolveRole_MCPExpansion(t *testing.T) {
 }
 
 func TestResolveRole_DefaultOverrides(t *testing.T) {
-	// max_rounds and temperature are only overridden if NOT at default values
-	roleMap := map[string]*common.AgentRole{
-		"custom": {
-			Name:        "custom",
-			Description: "Custom agent",
-			Prompt:      "Custom prompt.",
-			Tools:       []string{"bash"},
-			MaxRounds:   25,
-			Temperature: 0.9,
-		},
-	}
+	roleMap := makeRole("custom", "Custom agent", "Custom prompt.", "",
+		[]string{"bash"}, 25, "", 0.9)
 
 	// Default values (15, 0.4) should be overridden by role
 	_, _, rounds, temp, _, _ := resolveRole("custom", nil, 15, 0.4, nil, roleMap)

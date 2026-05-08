@@ -2,29 +2,23 @@ package face
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/core/testutil"
 )
 
 func TestRegisterAll_EmptyConfig(t *testing.T) {
-	tools := []core.Tool{}
-	result := RegisterAll(tools, "", "")
-	if len(result) != 0 {
-		t.Fatalf("expected 0 tools with empty config, got %d", len(result))
+	result := RegisterAll(nil, "", "")
+	if result != nil {
+		t.Fatalf("expected nil with empty config, got %d tools", len(result))
 	}
 }
 
 func TestRegisterAll_ValidConfig(t *testing.T) {
-	tools := []core.Tool{}
-	result := RegisterAll(tools, "http://localhost:8080", "test-key")
-	if len(result) != 5 {
-		t.Fatalf("expected 5 tools, got %d", len(result))
-	}
-
+	tools := RegisterAll(nil, "http://localhost:8080", "test-key")
 	expected := []string{
 		"face_recognize",
 		"face_batch_recognize",
@@ -32,15 +26,12 @@ func TestRegisterAll_ValidConfig(t *testing.T) {
 		"face_add_subject",
 		"face_list_subjects",
 	}
-	for i, name := range expected {
-		if result[i].Name() != name {
-			t.Errorf("tool %d: expected %q, got %q", i, name, result[i].Name())
-		}
-	}
+	testutil.AssertToolNames(t, tools, expected)
+	testutil.AssertValidSchemas(t, tools)
 }
 
 func TestRegisterAll_PreservesExisting(t *testing.T) {
-	existing := []core.Tool{&stubTool{name: "bash"}}
+	existing := []core.Tool{testutil.NewStubTool("bash")}
 	result := RegisterAll(existing, "http://localhost:8080", "key")
 	if len(result) != 6 {
 		t.Fatalf("expected 6 tools (1 existing + 5 face), got %d", len(result))
@@ -57,7 +48,7 @@ func TestClient_TrimTrailingSlash(t *testing.T) {
 	}
 }
 
-func TestListSubjects(t *testing.T) {
+func TestListSubjects_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "test-api-key" {
 			t.Errorf("missing or wrong auth header: %q", r.Header.Get("Authorization"))
@@ -74,19 +65,13 @@ func TestListSubjects(t *testing.T) {
 	tool := NewListSubjectsTool(client)
 
 	result, err := tool.Execute(context.Background(), map[string]any{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	m := result.(map[string]any)
-	count := m["count"].(int)
-	if count != 2 {
-		t.Fatalf("expected 2 subjects, got %d", count)
-	}
-
-	names := m["subjects"].([]string)
-	if names[0] != "Alice" || names[1] != "Bob" {
-		t.Fatalf("unexpected subjects: %v", names)
+	testutil.AssertIntField(t, m, "count", 2)
+	subjects := m["subjects"].([]string)
+	if len(subjects) != 2 || subjects[0] != "Alice" || subjects[1] != "Bob" {
+		t.Errorf("unexpected subjects: %v", subjects)
 	}
 }
 
@@ -97,32 +82,29 @@ func TestListSubjects_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "key")
-	tool := NewListSubjectsTool(client)
-
+	tool := NewListSubjectsTool(NewClient(server.URL, "key"))
 	_, err := tool.Execute(context.Background(), map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for 500 response")
 	}
 }
 
-func TestRecognizeTool_MissingImagePath(t *testing.T) {
-	client := NewClient("http://localhost:8080", "key")
-	tool := NewRecognizeTool(client)
-
-	_, err := tool.Execute(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing image_path")
+func TestTools_MissingParams(t *testing.T) {
+	tests := []struct {
+		name      string
+		tool      core.Tool
+		paramName string
+	}{
+		{name: "face_recognize", tool: NewRecognizeTool(NewClient("http://localhost:8080", "key")), paramName: "image_path"},
+		{name: "face_batch_recognize", tool: NewBatchRecognizeTool(NewClient("http://localhost:8080", "key")), paramName: "image_paths"},
+		{name: "face_cluster_identities", tool: NewClusterTool(), paramName: "faces_json"},
+		{name: "face_add_subject", tool: NewAddSubjectTool(NewClient("http://localhost:8080", "key")), paramName: "name"},
 	}
-}
 
-func TestBatchRecognizeTool_MissingPaths(t *testing.T) {
-	client := NewClient("http://localhost:8080", "key")
-	tool := NewBatchRecognizeTool(client)
-
-	_, err := tool.Execute(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing image_paths")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testutil.AssertMissingParam(t, tt.tool, tt.paramName)
+		})
 	}
 }
 
@@ -133,14 +115,6 @@ func TestBatchRecognizeTool_InvalidJSON(t *testing.T) {
 	_, err := tool.Execute(context.Background(), map[string]any{"image_paths": "not-json"})
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
-	}
-}
-
-func TestClusterTool_MissingFacesJSON(t *testing.T) {
-	tool := NewClusterTool()
-	_, err := tool.Execute(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing faces_json")
 	}
 }
 
@@ -166,12 +140,15 @@ func TestClusterTool_SimpleClustering(t *testing.T) {
 		"faces_json":       faces,
 		"min_cluster_size": 2,
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	m := result.(map[string]any)
-	count := m["count"].(int)
+	count, ok := m["count"].(int)
+	if !ok {
+		if f, ok := m["count"].(float64); ok {
+			count = int(f)
+		}
+	}
 	if count < 1 {
 		t.Fatalf("expected at least 1 cluster, got %d", count)
 	}
@@ -185,25 +162,10 @@ func TestClusterTool_TooFewFaces(t *testing.T) {
 		"faces_json":       faces,
 		"min_cluster_size": 2,
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	testutil.AssertNoError(t, err)
 
 	m := result.(map[string]any)
-	count := m["count"].(int)
-	if count != 1 {
-		t.Fatalf("expected 1 face returned (below min_cluster_size), got %d", count)
-	}
-}
-
-func TestAddSubjectTool_MissingParams(t *testing.T) {
-	client := NewClient("http://localhost:8080", "key")
-	tool := NewAddSubjectTool(client)
-
-	_, err := tool.Execute(context.Background(), map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing parameters")
-	}
+	testutil.AssertIntField(t, m, "count", 1)
 }
 
 func TestCosineSimilarity(t *testing.T) {
@@ -213,36 +175,11 @@ func TestCosineSimilarity(t *testing.T) {
 		b    []interface{}
 		want float64
 	}{
-		{
-			name: "identical vectors",
-			a:    []interface{}{1.0, 0.0, 0.0},
-			b:    []interface{}{1.0, 0.0, 0.0},
-			want: 1.0,
-		},
-		{
-			name: "orthogonal vectors",
-			a:    []interface{}{1.0, 0.0},
-			b:    []interface{}{0.0, 1.0},
-			want: 0.0,
-		},
-		{
-			name: "opposite vectors",
-			a:    []interface{}{1.0, 0.0},
-			b:    []interface{}{-1.0, 0.0},
-			want: -1.0,
-		},
-		{
-			name: "different lengths",
-			a:    []interface{}{1.0},
-			b:    []interface{}{1.0, 2.0},
-			want: 0.0,
-		},
-		{
-			name: "zero vectors",
-			a:    []interface{}{0.0, 0.0},
-			b:    []interface{}{0.0, 0.0},
-			want: 0.0,
-		},
+		{name: "identical vectors", a: []interface{}{1.0, 0.0, 0.0}, b: []interface{}{1.0, 0.0, 0.0}, want: 1.0},
+		{name: "orthogonal vectors", a: []interface{}{1.0, 0.0}, b: []interface{}{0.0, 1.0}, want: 0.0},
+		{name: "opposite vectors", a: []interface{}{1.0, 0.0}, b: []interface{}{-1.0, 0.0}, want: -1.0},
+		{name: "different lengths", a: []interface{}{1.0}, b: []interface{}{1.0, 2.0}, want: 0.0},
+		{name: "zero vectors", a: []interface{}{0.0, 0.0}, b: []interface{}{0.0, 0.0}, want: 0.0},
 	}
 
 	for _, tc := range tests {
@@ -264,24 +201,5 @@ func TestToolSchemas(t *testing.T) {
 		NewAddSubjectTool(client),
 		NewListSubjectsTool(client),
 	}
-
-	for _, tool := range tools {
-		schema := tool.Schema()
-		var parsed map[string]any
-		if err := json.Unmarshal(schema, &parsed); err != nil {
-			t.Fatalf("tool %q has invalid schema: %v", tool.Name(), err)
-		}
-		if typ, ok := parsed["type"].(string); !ok || typ != "object" {
-			t.Fatalf("tool %q schema missing type=object", tool.Name())
-		}
-	}
+	testutil.AssertValidSchemas(t, tools)
 }
-
-type stubTool struct {
-	name string
-}
-
-func (s *stubTool) Name() string                                          { return s.name }
-func (s *stubTool) Description() string                                    { return "stub" }
-func (s *stubTool) Schema() json.RawMessage                                { return json.RawMessage(`{}`) }
-func (s *stubTool) Execute(ctx context.Context, args map[string]any) (any, error) { return nil, nil }
