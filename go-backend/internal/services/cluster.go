@@ -43,6 +43,11 @@ func NewClusterClient(logger *zap.Logger) *ClusterClient {
 	}
 }
 
+// healthClient returns an HTTP client with a short timeout for health checks.
+func (c *ClusterClient) healthClient() *http.Client {
+	return &http.Client{Timeout: 5 * time.Second}
+}
+
 // LLMEndpoint returns the cluster LLM endpoint URL (OpenAI-compatible).
 func (c *ClusterClient) LLMEndpoint() string {
 	return c.hubBase + "/llm"
@@ -94,7 +99,7 @@ func AvailableTTSServices() []TTSService {
 	}
 }
 
-// TTSHealth checks health of a specific TTS service.
+// TTSHealth checks health of a specific TTS service (short timeout).
 func (c *ClusterClient) TTSHealth(route string) (*TTSHealth, error) {
 	url := c.hubBase + route
 	req, err := http.NewRequest("GET", url, nil)
@@ -102,7 +107,8 @@ func (c *ClusterClient) TTSHealth(route string) (*TTSHealth, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := c.httpClient.Do(req)
+	client := c.healthClient()
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("tts health %s: %w", route, err)
 	}
@@ -116,6 +122,7 @@ func (c *ClusterClient) TTSHealth(route string) (*TTSHealth, error) {
 }
 
 // Synthesize sends text to a TTS service and returns the audio content.
+// Uses a 30-second timeout per synthesis request.
 func (c *ClusterClient) Synthesize(route, text string) ([]byte, string, error) {
 	url := c.hubBase + route
 	body := TTSRequest{Text: text}
@@ -123,7 +130,8 @@ func (c *ClusterClient) Synthesize(route, text string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal tts: %w", err)
 	}
-	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(data))
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
 		return nil, "", fmt.Errorf("tts request %s: %w", route, err)
 	}
@@ -190,10 +198,11 @@ func (c *ClusterClient) Transcribe(audioB64 []byte) (*ASRResponse, error) {
 	return &asrResp, nil
 }
 
-// ASRHealth checks the ASR service health.
+// ASRHealth checks the ASR service health (short timeout).
 func (c *ClusterClient) ASRHealth() (*ASRHealth, error) {
 	url := c.hubBase + "/asr/whisper/"
-	resp, err := http.Get(url)
+	client := c.healthClient()
+	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("asr health: %w", err)
 	}
@@ -207,9 +216,10 @@ func (c *ClusterClient) ASRHealth() (*ASRHealth, error) {
 
 // --- Forge ---
 
-// ForgeHealth checks the Forge master router.
+// ForgeHealth checks the Forge master router (short timeout).
 func (c *ClusterClient) ForgeHealth() error {
-	resp, err := c.httpClient.Get(c.hubBase + "/forge/")
+	client := c.healthClient()
+	resp, err := client.Get(c.hubBase + "/forge/")
 	if err != nil {
 		return fmt.Errorf("forge health: %w", err)
 	}
@@ -222,10 +232,11 @@ func (c *ClusterClient) ForgeHealth() error {
 
 // --- LLM ---
 
-// LLMHealth checks the cluster LLM health.
+// LLMHealth checks the cluster LLM health (short timeout).
 func (c *ClusterClient) LLMHealth() (*LLMHealth, error) {
 	url := c.hubBase + "/llm/health"
-	resp, err := c.httpClient.Get(url)
+	client := c.healthClient()
+	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("llm health: %w", err)
 	}
@@ -254,38 +265,74 @@ type ServiceStatus struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// AllHealth returns health status of all cluster services.
+// AllHealth returns health status of all cluster services (concurrent, 10s deadline).
 func (c *ClusterClient) AllHealth() []ServiceStatus {
-	results := []ServiceStatus{}
-
-	// LLM
-	if h, err := c.LLMHealth(); err != nil {
-		results = append(results, ServiceStatus{Name: "llm", Healthy: false, Error: err.Error()})
-	} else {
-		results = append(results, ServiceStatus{Name: "llm", Healthy: true, Loaded: h.Loaded})
+	type result struct {
+		name string
+		s    ServiceStatus
 	}
+	ch := make(chan result, 10)
 
-	// ASR
-	if h, err := c.ASRHealth(); err != nil {
-		results = append(results, ServiceStatus{Name: "asr-whisper", Healthy: false, Error: err.Error()})
-	} else {
-		results = append(results, ServiceStatus{Name: "asr-whisper", Healthy: true, Loaded: h.Loaded})
-	}
-
-	// TTS services
-	for _, svc := range AvailableTTSServices() {
-		if h, err := c.TTSHealth(svc.Route); err != nil {
-			results = append(results, ServiceStatus{Name: "tts-" + svc.Name, Healthy: false, Error: err.Error()})
+	check := func(name, route string, fn func(string) (*TTSHealth, error)) {
+		h, err := fn(route)
+		if err != nil {
+			ch <- result{name, ServiceStatus{Name: name, Healthy: false, Error: err.Error()}}
 		} else {
-			results = append(results, ServiceStatus{Name: "tts-" + svc.Name, Healthy: true, Loaded: h.Loaded})
+			ch <- result{name, ServiceStatus{Name: name, Healthy: true, Loaded: h.Loaded}}
 		}
 	}
 
+	// LLM
+	go func() {
+		h, err := c.LLMHealth()
+		if err != nil {
+			ch <- result{"llm", ServiceStatus{Name: "llm", Healthy: false, Error: err.Error()}}
+		} else {
+			ch <- result{"llm", ServiceStatus{Name: "llm", Healthy: true, Loaded: h.Loaded}}
+		}
+	}()
+
+	// ASR
+	go func() {
+		h, err := c.ASRHealth()
+		if err != nil {
+			ch <- result{"asr-whisper", ServiceStatus{Name: "asr-whisper", Healthy: false, Error: err.Error()}}
+		} else {
+			ch <- result{"asr-whisper", ServiceStatus{Name: "asr-whisper", Healthy: true, Loaded: h.Loaded}}
+		}
+	}()
+
+	// TTS services
+	for _, svc := range AvailableTTSServices() {
+		svc := svc // capture
+		go check("tts-"+svc.Name, svc.Route, c.TTSHealth)
+	}
+
 	// Forge
-	if err := c.ForgeHealth(); err != nil {
-		results = append(results, ServiceStatus{Name: "forge", Healthy: false, Error: err.Error()})
-	} else {
-		results = append(results, ServiceStatus{Name: "forge", Healthy: true})
+	go func() {
+		if err := c.ForgeHealth(); err != nil {
+			ch <- result{"forge", ServiceStatus{Name: "forge", Healthy: false, Error: err.Error()}}
+		} else {
+			ch <- result{"forge", ServiceStatus{Name: "forge", Healthy: true}}
+		}
+	}()
+
+	total := 1 + 1 + len(AvailableTTSServices()) + 1 // LLM + ASR + TTS + Forge
+	results := make([]ServiceStatus, 0, total)
+	timeout := time.After(10 * time.Second)
+
+	for i := 0; i < total; i++ {
+		select {
+		case r := <-ch:
+			results = append(results, r.s)
+		case <-timeout:
+			results = append(results, ServiceStatus{Name: "timeout", Healthy: false, Error: "health check timed out"})
+			// Drain remaining
+			for i < total-1 {
+				<-ch
+				i++
+			}
+		}
 	}
 
 	return results
