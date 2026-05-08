@@ -93,13 +93,59 @@ var (
 	toolPkgLoadOnce sync.Once
 )
 
+// findKernelConfigDir resolves the kernel config/ directory by searching
+// multiple locations. Returns "" if not found. This works regardless of
+// whether PROJECT_ROOT points at the repo root, a projects parent, or
+// is unset.
+func findKernelConfigDir() string {
+	root := os.Getenv("PROJECT_ROOT")
+
+	// Candidate base directories to check for config/
+	type dirSrc struct {
+		path string
+	}
+	candidates := []dirSrc{}
+
+	// 1. PROJECT_ROOT itself
+	if root != "" {
+		candidates = append(candidates, dirSrc{root})
+	}
+
+	// 2. Walk up from executable binary
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		for range 5 {
+			candidates = append(candidates, dirSrc{dir})
+			dir = filepath.Dir(dir)
+		}
+	}
+
+	// 3. Working directory and parents
+	if wd, err := os.Getwd(); err == nil {
+		dir := wd
+		for range 3 {
+			candidates = append(candidates, dirSrc{dir})
+			dir = filepath.Dir(dir)
+		}
+	}
+
+	for _, c := range candidates {
+		p := filepath.Join(c.path, "config", "prompt.md")
+		if _, err := os.Stat(p); err == nil {
+			return filepath.Join(c.path, "config")
+		}
+	}
+
+	return ""
+}
+
 // loadPromptTemplate loads and parses config/prompt.md as a Go text/template.
 func loadPromptTemplate() (*template.Template, error) {
 	promptOnce.Do(func() {
-		root := os.Getenv("PROJECT_ROOT")
+		configDir := findKernelConfigDir()
 		path := "config/prompt.md"
-		if root != "" {
-			path = filepath.Join(root, "config", "prompt.md")
+		if configDir != "" {
+			path = filepath.Join(configDir, "prompt.md")
 		}
 
 		data, err := os.ReadFile(path)
@@ -124,10 +170,10 @@ func ReloadPromptTemplate() {
 // Cached after first call. Use LoadToolPackagesFrom for org-specific directories.
 func LoadToolPackages() map[string]*ToolPackage {
 	toolPkgLoadOnce.Do(func() {
-		root := os.Getenv("PROJECT_ROOT")
+		configDir := findKernelConfigDir()
 		dir := "config/tool_packages"
-		if root != "" {
-			dir = filepath.Join(root, "config", "tool_packages")
+		if configDir != "" {
+			dir = filepath.Join(configDir, "tool_packages")
 		}
 		toolPackages = LoadToolPackagesFrom(dir)
 	})
@@ -194,12 +240,13 @@ func ResolveImports(imports []string) (tools []string, mcpServers []string) {
 
 // LoadAgentRoles reads role folders from the kernel's config/roles/ directory.
 // Cached after first call. Use LoadAgentRolesFrom for org-specific directories.
+// Uses findKernelConfigDir to locate config/ regardless of PROJECT_ROOT.
 func LoadAgentRoles() map[string]*AgentRole {
 	agentLoadOnce.Do(func() {
-		root := os.Getenv("PROJECT_ROOT")
+		configDir := findKernelConfigDir()
 		dir := "config/roles"
-		if root != "" {
-			dir = filepath.Join(root, "config", "roles")
+		if configDir != "" {
+			dir = filepath.Join(configDir, "roles")
 		}
 		agentRoles = LoadAgentRolesFrom(dir)
 	})

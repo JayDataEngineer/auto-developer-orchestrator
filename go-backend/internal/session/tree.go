@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -58,6 +59,11 @@ func New(filePath string, cwd string) (*SessionTree, error) {
 	}
 	t.entries[id] = rootEntry
 	t.nodes[id] = &core.TreeNode{Entry: rootEntry}
+
+	// Ensure parent directory exists
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return nil, fmt.Errorf("failed to create session directory: %w", err)
+	}
 
 	// Create/open file
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)

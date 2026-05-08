@@ -308,6 +308,23 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 			zap.String("mode", string(mode)),
 			zap.Int("cdp_port", session.CDPPort))
 	}
+
+	// Create workspace scaffold directories (memos, .pux/sessions) inside the container
+	// so agents can write artifacts and session files without path errors.
+	scaffoldDirs := []string{
+		"/sandbox/workspace/memos",
+		"/sandbox/workspace/.pux/sessions",
+	}
+	for _, dir := range scaffoldDirs {
+		execCreate, err := m.dockerClient.ExecCreate(ctx, containerName, client.ExecCreateOptions{
+			Cmd: []string{"mkdir", "-p", dir},
+		})
+		if err != nil {
+			continue
+		}
+		m.dockerClient.ExecAttach(ctx, execCreate.ID, client.ExecAttachOptions{})
+	}
+
 	return sandbox, nil
 }
 
@@ -505,27 +522,42 @@ var envVarRegex = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
 
 // FindSandboxByProject finds a sandbox by project path basename or project path.
 // Returns the first running sandbox whose ProjectPath ends with name, or whose ID matches name.
+// Verifies the Docker container is actually running before returning.
 func (m *Manager) FindSandboxByProject(name string) *Sandbox {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 
-	// First try exact ID match
+	// Collect candidates while holding the read lock
+	var candidates []*Sandbox
 	if sb, ok := m.sandboxes[name]; ok {
-		return sb
+		candidates = append(candidates, sb)
 	}
-
-	// Then match by project path basename or suffix
 	for _, sb := range m.sandboxes {
 		if sb.Status != StatusRunning {
 			continue
 		}
 		if filepath.Base(sb.ProjectPath) == name || sb.ProjectPath == name {
-			return sb
+			candidates = append(candidates, sb)
 		}
-		// Also match if project path ends with /name
 		if strings.HasSuffix(sb.ProjectPath, "/"+name) {
-			return sb
+			candidates = append(candidates, sb)
 		}
+	}
+	m.mu.RUnlock()
+
+	// Verify the Docker container actually exists for each candidate
+	ctx := context.Background()
+	for _, sb := range candidates {
+		if m.dockerClient != nil {
+			containerName := "orchestrator-sandbox-" + sb.ID
+			if _, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{}); err != nil {
+				// Container gone — remove stale entry and skip
+				m.mu.Lock()
+				delete(m.sandboxes, sb.ID)
+				m.mu.Unlock()
+				continue
+			}
+		}
+		return sb
 	}
 	return nil
 }
