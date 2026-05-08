@@ -50,6 +50,18 @@ func RegisterAll(tools []core.Tool, db common.DBProvider) []core.Tool {
 	)
 }
 
+// withSession opens a Neo4j session and calls fn. Handles driver creation,
+// session lifecycle, and error wrapping.
+func withSession(db common.DBProvider, accessMode neo4j.AccessMode, fn func(neo4j.Session) (any, error)) (any, error) {
+	driver, err := db.Neo4jDriver()
+	if err != nil {
+		return nil, fmt.Errorf("neo4j driver: %w", err)
+	}
+	session := driver.NewSession(neo4j.SessionConfig{AccessMode: accessMode})
+	defer session.Close()
+	return fn(session)
+}
+
 func queryExec(db common.DBProvider) base.ToolFunc {
 	return func(ctx context.Context, args map[string]any) (any, error) {
 		cypher, _ := base.StringArg(args, "cypher")
@@ -57,32 +69,26 @@ func queryExec(db common.DBProvider) base.ToolFunc {
 			return nil, fmt.Errorf("missing required parameter 'cypher'")
 		}
 		params, _ := base.MapArg(args, "params")
-
-		driver, err := db.Neo4jDriver()
-		if err != nil {
-			return nil, fmt.Errorf("neo4j driver: %w", err)
-		}
-		session := driver.NewSession(neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-		defer session.Close()
-
-		result, err := session.Run(cypher, params)
-		if err != nil {
-			return nil, fmt.Errorf("query execution: %w", err)
-		}
-		records, err := result.Collect()
-		if err != nil {
-			return nil, fmt.Errorf("collect results: %w", err)
-		}
-		var output []map[string]any
-		for _, rec := range records {
-			row := make(map[string]any)
-			for _, k := range rec.Keys {
-				val, _ := rec.Get(k)
-				row[k] = val
+		return withSession(db, neo4j.AccessModeRead, func(session neo4j.Session) (any, error) {
+			result, err := session.Run(cypher, params)
+			if err != nil {
+				return nil, fmt.Errorf("query execution: %w", err)
 			}
-			output = append(output, row)
-		}
-		return map[string]any{"results": output, "count": len(output)}, nil
+			records, err := result.Collect()
+			if err != nil {
+				return nil, fmt.Errorf("collect results: %w", err)
+			}
+			var output []map[string]any
+			for _, rec := range records {
+				row := make(map[string]any)
+				for _, k := range rec.Keys {
+					val, _ := rec.Get(k)
+					row[k] = val
+				}
+				output = append(output, row)
+			}
+			return map[string]any{"results": output, "count": len(output)}, nil
+		})
 	}
 }
 
@@ -96,27 +102,21 @@ func createNodesExec(db common.DBProvider) base.ToolFunc {
 		if err := json.Unmarshal([]byte(nodesJSON), &nodes); err != nil {
 			return nil, fmt.Errorf("parse nodes: %w", err)
 		}
-		driver, err := db.Neo4jDriver()
-		if err != nil {
-			return nil, err
-		}
-		session := driver.NewSession(neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-		defer session.Close()
-
-		created := 0
-		for _, node := range nodes {
-			label, _ := node["label"].(string)
-			props, _ := node["properties"].(map[string]any)
-			if label == "" {
-				continue
+		return withSession(db, neo4j.AccessModeWrite, func(session neo4j.Session) (any, error) {
+			created := 0
+			for _, node := range nodes {
+				label, _ := node["label"].(string)
+				props, _ := node["properties"].(map[string]any)
+				if label == "" {
+					continue
+				}
+				cypher := fmt.Sprintf("CREATE (n:%s $props) RETURN id(n)", label)
+				if _, err := session.Run(cypher, map[string]any{"props": props}); err == nil {
+					created++
+				}
 			}
-			cypher := fmt.Sprintf("CREATE (n:%s $props) RETURN id(n)", label)
-			_, err := session.Run(cypher, map[string]any{"props": props})
-			if err == nil {
-				created++
-			}
-		}
-		return map[string]any{"created": created}, nil
+			return map[string]any{"created": created}, nil
+		})
 	}
 }
 
@@ -130,59 +130,47 @@ func createRelsExec(db common.DBProvider) base.ToolFunc {
 		if err := json.Unmarshal([]byte(relsJSON), &rels); err != nil {
 			return nil, fmt.Errorf("parse relationships: %w", err)
 		}
-		driver, err := db.Neo4jDriver()
-		if err != nil {
-			return nil, err
-		}
-		session := driver.NewSession(neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-		defer session.Close()
-
-		created := 0
-		for _, rel := range rels {
-			from, _ := rel["from"].(string)
-			to, _ := rel["to"].(string)
-			relType, _ := rel["type"].(string)
-			props, _ := rel["props"].(map[string]any)
-			if from == "" || to == "" || relType == "" {
-				continue
+		return withSession(db, neo4j.AccessModeWrite, func(session neo4j.Session) (any, error) {
+			created := 0
+			for _, rel := range rels {
+				from, _ := rel["from"].(string)
+				to, _ := rel["to"].(string)
+				relType, _ := rel["type"].(string)
+				props, _ := rel["props"].(map[string]any)
+				if from == "" || to == "" || relType == "" {
+					continue
+				}
+				cypher := fmt.Sprintf("MATCH (a), (b) WHERE a.name = $from AND b.name = $to CREATE (a)-[r:%s]->(b) SET r = $props", relType)
+				if _, err := session.Run(cypher, map[string]any{"from": from, "to": to, "props": props}); err == nil {
+					created++
+				}
 			}
-			cypher := fmt.Sprintf("MATCH (a), (b) WHERE a.name = $from AND b.name = $to CREATE (a)-[r:%s]->(b) SET r = $props", relType)
-			_, err := session.Run(cypher, map[string]any{"from": from, "to": to, "props": props})
-			if err == nil {
-				created++
-			}
-		}
-		return map[string]any{"created": created}, nil
+			return map[string]any{"created": created}, nil
+		})
 	}
 }
 
 func topicsExec(db common.DBProvider) base.ToolFunc {
 	return func(ctx context.Context, args map[string]any) (any, error) {
 		ns, _ := base.StringArg(args, "namespace")
-
-		driver, err := db.Neo4jDriver()
-		if err != nil {
-			return nil, err
-		}
-		session := driver.NewSession(neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-		defer session.Close()
-
-		cypher := "MATCH (t:Topic) RETURN t.name as name, t.namespace as namespace"
-		if ns != "" {
-			cypher = "MATCH (t:Topic {namespace: $ns}) RETURN t.name as name, t.namespace as namespace"
-		}
-		result, err := session.Run(cypher, map[string]any{"ns": ns})
-		if err != nil {
-			return nil, fmt.Errorf("query: %w", err)
-		}
-		records, _ := result.Collect()
-		var topics []map[string]any
-		for _, rec := range records {
-			name, _ := rec.Get("name")
-			namespace, _ := rec.Get("namespace")
-			topics = append(topics, map[string]any{"name": name, "namespace": namespace})
-		}
-		return map[string]any{"topics": topics, "count": len(topics)}, nil
+		return withSession(db, neo4j.AccessModeRead, func(session neo4j.Session) (any, error) {
+			cypher := "MATCH (t:Topic) RETURN t.name as name, t.namespace as namespace"
+			if ns != "" {
+				cypher = "MATCH (t:Topic {namespace: $ns}) RETURN t.name as name, t.namespace as namespace"
+			}
+			result, err := session.Run(cypher, map[string]any{"ns": ns})
+			if err != nil {
+				return nil, fmt.Errorf("query: %w", err)
+			}
+			records, _ := result.Collect()
+			var topics []map[string]any
+			for _, rec := range records {
+				name, _ := rec.Get("name")
+				namespace, _ := rec.Get("namespace")
+				topics = append(topics, map[string]any{"name": name, "namespace": namespace})
+			}
+			return map[string]any{"topics": topics, "count": len(topics)}, nil
+		})
 	}
 }
 
@@ -192,26 +180,21 @@ func entitiesExec(db common.DBProvider) base.ToolFunc {
 		if name == "" {
 			return nil, fmt.Errorf("missing required parameter 'name'")
 		}
-		driver, err := db.Neo4jDriver()
-		if err != nil {
-			return nil, err
-		}
-		session := driver.NewSession(neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-		defer session.Close()
-
-		cypher := "MATCH (e) WHERE e.name = $name RETURN labels(e)[0] as label, properties(e) as props"
-		result, err := session.Run(cypher, map[string]any{"name": name})
-		if err != nil {
-			return nil, err
-		}
-		records, _ := result.Collect()
-		if len(records) == 0 {
-			return map[string]any{"found": false}, nil
-		}
-		rec := records[0]
-		label, _ := rec.Get("label")
-		props, _ := rec.Get("props")
-		return map[string]any{"found": true, "label": label, "properties": props}, nil
+		return withSession(db, neo4j.AccessModeRead, func(session neo4j.Session) (any, error) {
+			cypher := "MATCH (e) WHERE e.name = $name RETURN labels(e)[0] as label, properties(e) as props"
+			result, err := session.Run(cypher, map[string]any{"name": name})
+			if err != nil {
+				return nil, err
+			}
+			records, _ := result.Collect()
+			if len(records) == 0 {
+				return map[string]any{"found": false}, nil
+			}
+			rec := records[0]
+			label, _ := rec.Get("label")
+			props, _ := rec.Get("props")
+			return map[string]any{"found": true, "label": label, "properties": props}, nil
+		})
 	}
 }
 
@@ -240,110 +223,93 @@ func buildExec(db common.DBProvider) base.ToolFunc {
 		if err := json.Unmarshal(entitiesData, &entities); err != nil {
 			return nil, fmt.Errorf("parse entities: %w", err)
 		}
-		driver, err := db.Neo4jDriver()
-		if err != nil {
-			return nil, err
-		}
-		session := driver.NewSession(neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-		defer session.Close()
+		return withSession(db, neo4j.AccessModeWrite, func(session neo4j.Session) (any, error) {
+			createdTopics := 0
+			createdEntities := 0
 
-		createdTopics := 0
-		createdEntities := 0
-
-		for _, cluster := range clusters {
-			topicName, _ := cluster["name"].(string)
-			if topicName == "" {
-				continue
+			for _, cluster := range clusters {
+				topicName, _ := cluster["name"].(string)
+				if topicName == "" {
+					continue
+				}
+				cypher := "CREATE (t:Topic {name: $name, namespace: $ns}) RETURN id(t)"
+				if _, err := session.Run(cypher, map[string]any{"name": topicName, "ns": ns}); err == nil {
+					createdTopics++
+				}
 			}
-			cypher := "CREATE (t:Topic {name: $name, namespace: $ns}) RETURN id(t)"
-			_, err := session.Run(cypher, map[string]any{"name": topicName, "ns": ns})
-			if err == nil {
-				createdTopics++
+			for _, entity := range entities {
+				entityName, _ := entity["name"].(string)
+				entityType, _ := entity["type"].(string)
+				if entityName == "" {
+					continue
+				}
+				cypher := fmt.Sprintf("CREATE (e:Entity {name: $name, type: $type}) RETURN id(e)")
+				if _, err := session.Run(cypher, map[string]any{"name": entityName, "type": entityType}); err == nil {
+					createdEntities++
+				}
 			}
-		}
-		for _, entity := range entities {
-			entityName, _ := entity["name"].(string)
-			entityType, _ := entity["type"].(string)
-			if entityName == "" {
-				continue
-			}
-			cypher := fmt.Sprintf("CREATE (e:Entity {name: $name, type: $type}) RETURN id(e)")
-			_, err := session.Run(cypher, map[string]any{"name": entityName, "type": entityType})
-			if err == nil {
-				createdEntities++
-			}
-		}
-		return map[string]any{"topics": createdTopics, "entities": createdEntities}, nil
+			return map[string]any{"topics": createdTopics, "entities": createdEntities}, nil
+		})
 	}
 }
 
 func statsExec(db common.DBProvider) base.ToolFunc {
 	return func(ctx context.Context, args map[string]any) (any, error) {
-		driver, err := db.Neo4jDriver()
-		if err != nil {
-			return nil, err
-		}
-		session := driver.NewSession(neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-		defer session.Close()
+		return withSession(db, neo4j.AccessModeRead, func(session neo4j.Session) (any, error) {
+			nodeResult, _ := session.Run("MATCH (n) RETURN count(n) as count", nil)
+			relResult, _ := session.Run("MATCH ()-[r]->() RETURN count(r) as count", nil)
 
-		nodeResult, _ := session.Run("MATCH (n) RETURN count(n) as count", nil)
-		relResult, _ := session.Run("MATCH ()-[r]->() RETURN count(r) as count", nil)
+			nodeRecords, _ := nodeResult.Collect()
+			relRecords, _ := relResult.Collect()
 
-		nodeRecords, _ := nodeResult.Collect()
-		relRecords, _ := relResult.Collect()
-
-		nodes := 0
-		rels := 0
-		if len(nodeRecords) > 0 {
-			if n, ok := nodeRecords[0].Get("count"); ok {
-				if c, ok := n.(int64); ok {
-					nodes = int(c)
+			nodes := 0
+			rels := 0
+			if len(nodeRecords) > 0 {
+				if n, ok := nodeRecords[0].Get("count"); ok {
+					if c, ok := n.(int64); ok {
+						nodes = int(c)
+					}
 				}
 			}
-		}
-		if len(relRecords) > 0 {
-			if r, ok := relRecords[0].Get("count"); ok {
-				if c, ok := r.(int64); ok {
-					rels = int(c)
+			if len(relRecords) > 0 {
+				if r, ok := relRecords[0].Get("count"); ok {
+					if c, ok := r.(int64); ok {
+						rels = int(c)
+					}
 				}
 			}
-		}
-		return map[string]any{"nodes": nodes, "relationships": rels}, nil
+			return map[string]any{"nodes": nodes, "relationships": rels}, nil
+		})
 	}
 }
 
 func schemaExec(db common.DBProvider) base.ToolFunc {
 	return func(ctx context.Context, args map[string]any) (any, error) {
-		driver, err := db.Neo4jDriver()
-		if err != nil {
-			return nil, err
-		}
-		session := driver.NewSession(neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-		defer session.Close()
+		return withSession(db, neo4j.AccessModeRead, func(session neo4j.Session) (any, error) {
+			labelsResult, _ := session.Run("CALL db.labels() YIELD label RETURN label", nil)
+			relsResult, _ := session.Run("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType", nil)
 
-		labelsResult, _ := session.Run("CALL db.labels() YIELD label RETURN label", nil)
-		relsResult, _ := session.Run("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType", nil)
+			labelRecords, _ := labelsResult.Collect()
+			relRecords, _ := relsResult.Collect()
 
-		labelRecords, _ := labelsResult.Collect()
-		relRecords, _ := relsResult.Collect()
-
-		var labels []string
-		for _, rec := range labelRecords {
-			if l, ok := rec.Get("label"); ok {
-				if s, ok := l.(string); ok {
-					labels = append(labels, s)
+			var labels []string
+			for _, rec := range labelRecords {
+				if l, ok := rec.Get("label"); ok {
+					if s, ok := l.(string); ok {
+						labels = append(labels, s)
+					}
 				}
 			}
-		}
-		var relTypes []string
-		for _, rec := range relRecords {
-			if r, ok := rec.Get("relationshipType"); ok {
-				if s, ok := r.(string); ok {
-					relTypes = append(relTypes, s)
+			var relTypes []string
+			for _, rec := range relRecords {
+				if r, ok := rec.Get("relationshipType"); ok {
+					if s, ok := r.(string); ok {
+						relTypes = append(relTypes, s)
+					}
 				}
 			}
-		}
-		return map[string]any{"labels": labels, "relationship_types": relTypes}, nil
+			return map[string]any{"labels": labels, "relationship_types": relTypes}, nil
+		})
 	}
 }
 

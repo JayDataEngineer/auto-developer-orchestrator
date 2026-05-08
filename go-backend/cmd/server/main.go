@@ -279,7 +279,11 @@ func main() {
 	mcpMulti.AddClient("web", webResearchClient)
 
 	// Media analysis server (image, audio, video analysis)
-	mediaAnalysisClient := mcp.NewClient("http://100.86.69.57:8001/mcp", logger)
+	mediaEndpoint := os.Getenv("MCP_MEDIA_ENDPOINT")
+	if mediaEndpoint == "" {
+		mediaEndpoint = "http://100.86.69.57:8101/mcp"
+	}
+	mediaAnalysisClient := mcp.NewClient(mediaEndpoint, logger)
 	mcpMulti.AddClient("media", mediaAnalysisClient)
 
 	if mcpMulti.IsAvailable() {

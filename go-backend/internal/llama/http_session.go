@@ -109,196 +109,24 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 			opts.MaxTokens = cfg.MaxTokens
 		}
 
-		t0 := time.Now()
-
-		req := ChatCompletionRequest{
-			Messages:        s.messages,
-			Tools:           s.tools,
-			MaxTokens:       opts.MaxTokens,
-			Temperature:     opts.Temperature,
-			TopP:            opts.TopP,
-			TopK:            opts.TopK,
-			RepeatPenalty:   cfg.RepeatPenalty,
-			PresencePenalty: cfg.PresencePenalty,
-			MinP:            cfg.MinP,
-			CachePrompt:     !s.engine.IsCloud(), // only local llama-server supports KV caching
-			SessionID:       s.sessionID,
-			Stream:          true,
-		}
-
-		// Cloud providers require the model field
-		if s.engine.IsCloud() {
-			req.Model = s.engine.ModelName()
-			req.SessionID = "" // no session slot concept for cloud
-		}
-
-		// Pre-flight: deduplicate tool_call_ids in the message list.
-		// DeepSeek sometimes emits duplicate IDs which cause API 400 errors.
+		req := s.buildRequest(opts)
 		sanitizeMessages(&req.Messages)
 
-		// Accumulate the full assistant response (content + tool calls + reasoning)
-		toolCallAccum := make(map[int]*ToolCallResponse)
-		var contentBuf strings.Builder
-		var reasoningBuf strings.Builder
-		tokenCount := 0
-		thinkingTokens := 0
-		thinkingBudget := s.thinkingBudget
-		if thinkingBudget == 0 {
-			thinkingBudget = cfg.ThinkingBudgetTokens
-		}
-		var lastUsage *StreamUsage // track usage across chunks
+		acc := newStreamAccumulator(s.thinkingBudget)
 
-		var pendingFinish FinishReason // finish reason waiting for usage chunk
-		var pendingToolCalls []ToolCallResponse
-		var pendingContent string
-		var pendingReasoning string
-
+		t0 := time.Now()
 		err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool {
-			// Capture usage from any chunk that has it
-			if usage != nil {
-				lastUsage = usage
-				s.totalInputTokens = usage.PromptTokens
-				s.totalOutputTokens += usage.CompletionTokens
-			}
-			// Content delta
-			if delta.Content != "" {
-				tokenCount++
-				contentBuf.WriteString(delta.Content)
-				ch <- ChatEvent{Type: ChatEventContent, Content: delta.Content}
-			}
-			// Thinking/reasoning delta — enforce budget
-			reasoningDelta := delta.ReasoningContent
-			if reasoningDelta == "" {
-				reasoningDelta = delta.Reasoning
-			}
-			if reasoningDelta != "" {
-				reasoningBuf.WriteString(reasoningDelta)
-				thinkingTokens++
-				if thinkingBudget > 0 && thinkingTokens > thinkingBudget {
-					if thinkingTokens == thinkingBudget+1 {
-						ch <- ChatEvent{Type: ChatEventThinking, Content: "\n[Thinking budget reached — committing to implementation]"}
-					}
-				} else {
-					ch <- ChatEvent{Type: ChatEventThinking, Content: reasoningDelta}
-				}
-			}
-			// Tool call chunks — accumulate across streaming
-			for _, tc := range delta.ToolCalls {
-				// Count tool call argument chunks as output tokens
-				if tc.Function.Name != "" || tc.Function.Arguments != "" {
-					tokenCount++
-				}
-				if existing, ok := toolCallAccum[tc.Index]; ok {
-					if tc.Function.Name != "" {
-						existing.Function.Name += tc.Function.Name
-					}
-					if tc.Function.Arguments != "" {
-						existing.Function.Arguments += tc.Function.Arguments
-					}
-					if tc.ID != "" {
-						existing.ID = tc.ID
-					}
-					if tc.Type != "" {
-						existing.Type = tc.Type
-					}
-				} else {
-					toolCallAccum[tc.Index] = &ToolCallResponse{
-						ID:   tc.ID,
-						Type: tc.Type,
-						Function: FunctionCallData{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
-					}
-				}
-			}
-			// On finish, save state and check if usage is already available
-			if finish != "" {
-				pendingFinish = finish
-				// Collect accumulated tool calls in index order, deduplicating by ID
-				indices := make([]int, 0, len(toolCallAccum))
-				for idx := range toolCallAccum {
-					indices = append(indices, idx)
-				}
-				sort.Ints(indices)
-				seenIDs := make(map[string]bool)
-				for _, idx := range indices {
-					tc := toolCallAccum[idx]
-					if tc.ID != "" && seenIDs[tc.ID] {
-						continue // skip duplicate tool call ID
-					}
-					if tc.ID != "" {
-						seenIDs[tc.ID] = true
-					}
-					pendingToolCalls = append(pendingToolCalls, *tc)
-				}
-				pendingContent = contentBuf.String()
-				pendingReasoning = reasoningBuf.String()
-
-				// Reasoning models — promote reasoning to content
-				if pendingContent == "" && pendingReasoning != "" && len(pendingToolCalls) == 0 {
-					pendingContent = pendingReasoning
-					pendingReasoning = ""
-					ch <- ChatEvent{Type: ChatEventContent, Content: pendingContent}
-				}
-
-				// Store assistant message in conversation history
-				s.messages = append(s.messages, Message{
-					Role:             "assistant",
-					Content:          pendingContent,
-					ToolCalls:        pendingToolCalls,
-					ReasoningContent: pendingReasoning,
-				})
-			}
-			// Send done event when we have finish AND usage (or usage arrived with finish)
-			if pendingFinish != "" && lastUsage != nil {
-				ch <- ChatEvent{
-					Type:    ChatEventDone,
-					Finish:  pendingFinish,
-					Content: serializeToolCalls(pendingToolCalls),
-					Usage:   lastUsage,
-				}
-				pendingFinish = "" // prevent double send
-			}
-			return true
+			return acc.processChunk(ch, delta, finish, usage, s)
 		})
-
 		elapsed := time.Since(t0)
-		// Only accumulate manual count if API didn't provide usage
-		if s.totalOutputTokens == 0 && tokenCount > 0 {
-			s.totalOutputTokens += tokenCount
-		}
 
-		// If finish arrived but usage never came (local llama-server doesn't
-		// include usage in SSE streams), estimate prompt tokens and build usage.
-		if pendingFinish != "" {
-			if lastUsage == nil {
-				// Always re-estimate from current messages for accurate per-turn counts
-				promptEstimate := s.estimateTokens()
-				outputTokens := tokenCount
-				if outputTokens == 0 {
-					outputTokens = s.totalOutputTokens
-				}
-				s.totalInputTokens = promptEstimate
-				s.totalOutputTokens += outputTokens
-				lastUsage = &StreamUsage{
-					PromptTokens:     promptEstimate,
-					CompletionTokens: outputTokens,
-				}
-			}
-			ch <- ChatEvent{
-				Type:    ChatEventDone,
-				Finish:  pendingFinish,
-				Content: serializeToolCalls(pendingToolCalls),
-				Usage:   lastUsage,
-			}
-		}
+		acc.finalize(ch, s)
 
 		zap.L().Debug("Chat generation complete",
-			zap.Int("outputTokens", tokenCount),
+			zap.Int("outputTokens", acc.tokenCount),
 			zap.Int("promptTokens", s.totalInputTokens),
 			zap.Duration("duration", elapsed),
-			zap.Float64("tok_per_sec", tokPerSec(tokenCount, elapsed)),
+			zap.Float64("tok_per_sec", tokPerSec(acc.tokenCount, elapsed)),
 		)
 
 		if err != nil {
@@ -307,6 +135,212 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 	}()
 
 	return ch
+}
+
+// buildRequest constructs a ChatCompletionRequest from session state and options.
+func (s *Session) buildRequest(opts GenerateOptions) ChatCompletionRequest {
+	req := ChatCompletionRequest{
+		Messages:        s.messages,
+		Tools:           s.tools,
+		MaxTokens:       opts.MaxTokens,
+		Temperature:     opts.Temperature,
+		TopP:            opts.TopP,
+		TopK:            opts.TopK,
+		RepeatPenalty:   cfg.RepeatPenalty,
+		PresencePenalty: cfg.PresencePenalty,
+		MinP:            cfg.MinP,
+		CachePrompt:     !s.engine.IsCloud(),
+		SessionID:       s.sessionID,
+		Stream:          true,
+	}
+	if s.engine.IsCloud() {
+		req.Model = s.engine.ModelName()
+		req.SessionID = ""
+	}
+	return req
+}
+
+// streamAccumulator holds state for accumulating a streaming response.
+type streamAccumulator struct {
+	toolCallAccum  map[int]*ToolCallResponse
+	contentBuf     strings.Builder
+	reasoningBuf   strings.Builder
+	tokenCount     int
+	thinkingTokens int
+	thinkingBudget int
+	lastUsage      *StreamUsage
+	pendingFinish  FinishReason
+	pendingCalls   []ToolCallResponse
+	finished       bool
+}
+
+func newStreamAccumulator(thinkingBudget int) *streamAccumulator {
+	tb := thinkingBudget
+	if tb == 0 {
+		tb = cfg.ThinkingBudgetTokens
+	}
+	return &streamAccumulator{
+		toolCallAccum:  make(map[int]*ToolCallResponse),
+		thinkingBudget: tb,
+	}
+}
+
+// processChunk handles a single streaming delta. Returns true to continue streaming.
+func (a *streamAccumulator) processChunk(ch chan<- ChatEvent, delta StreamDelta, finish FinishReason, usage *StreamUsage, s *Session) bool {
+	if usage != nil {
+		a.lastUsage = usage
+		s.totalInputTokens = usage.PromptTokens
+		s.totalOutputTokens += usage.CompletionTokens
+	}
+
+	if delta.Content != "" {
+		a.tokenCount++
+		a.contentBuf.WriteString(delta.Content)
+		ch <- ChatEvent{Type: ChatEventContent, Content: delta.Content}
+	}
+
+	a.processReasoning(ch, delta)
+	a.accumulateToolCalls(delta)
+
+	if finish != "" {
+		a.handleFinish(ch, s, finish)
+	}
+
+	// Emit done when both finish and usage are available
+	if a.pendingFinish != "" && a.lastUsage != nil {
+		a.emitDone(ch)
+	}
+	return true
+}
+
+// processReasoning handles thinking/reasoning deltas with budget enforcement.
+func (a *streamAccumulator) processReasoning(ch chan<- ChatEvent, delta StreamDelta) {
+	reasoningDelta := delta.ReasoningContent
+	if reasoningDelta == "" {
+		reasoningDelta = delta.Reasoning
+	}
+	if reasoningDelta == "" {
+		return
+	}
+	a.reasoningBuf.WriteString(reasoningDelta)
+	a.thinkingTokens++
+	if a.thinkingBudget > 0 && a.thinkingTokens > a.thinkingBudget {
+		if a.thinkingTokens == a.thinkingBudget+1 {
+			ch <- ChatEvent{Type: ChatEventThinking, Content: "\n[Thinking budget reached — committing to implementation]"}
+		}
+	} else {
+		ch <- ChatEvent{Type: ChatEventThinking, Content: reasoningDelta}
+	}
+}
+
+// accumulateToolCalls merges incoming tool call chunks into the accumulator.
+func (a *streamAccumulator) accumulateToolCalls(delta StreamDelta) {
+	for _, tc := range delta.ToolCalls {
+		if tc.Function.Name != "" || tc.Function.Arguments != "" {
+			a.tokenCount++
+		}
+		if existing, ok := a.toolCallAccum[tc.Index]; ok {
+			if tc.Function.Name != "" {
+				existing.Function.Name += tc.Function.Name
+			}
+			if tc.Function.Arguments != "" {
+				existing.Function.Arguments += tc.Function.Arguments
+			}
+			if tc.ID != "" {
+				existing.ID = tc.ID
+			}
+			if tc.Type != "" {
+				existing.Type = tc.Type
+			}
+		} else {
+			a.toolCallAccum[tc.Index] = &ToolCallResponse{
+				ID:   tc.ID,
+				Type: tc.Type,
+				Function: FunctionCallData{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
+			}
+		}
+	}
+}
+
+// handleFinish collects accumulated data when the stream signals completion.
+func (a *streamAccumulator) handleFinish(ch chan<- ChatEvent, s *Session, reason FinishReason) {
+	a.pendingFinish = reason
+
+	// Collect tool calls in index order, deduplicating by ID
+	indices := make([]int, 0, len(a.toolCallAccum))
+	for idx := range a.toolCallAccum {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	seenIDs := make(map[string]bool)
+	for _, idx := range indices {
+		tc := a.toolCallAccum[idx]
+		if tc.ID != "" && seenIDs[tc.ID] {
+			continue
+		}
+		if tc.ID != "" {
+			seenIDs[tc.ID] = true
+		}
+		a.pendingCalls = append(a.pendingCalls, *tc)
+	}
+
+	content := a.contentBuf.String()
+	reasoning := a.reasoningBuf.String()
+
+	// Reasoning models — promote reasoning to content when no explicit content
+	if content == "" && reasoning != "" && len(a.pendingCalls) == 0 {
+		content = reasoning
+		reasoning = ""
+		ch <- ChatEvent{Type: ChatEventContent, Content: content}
+	}
+
+	// Store assistant message in conversation history
+	s.messages = append(s.messages, Message{
+		Role:             "assistant",
+		Content:          content,
+		ToolCalls:        a.pendingCalls,
+		ReasoningContent: reasoning,
+	})
+}
+
+// emitDone sends the done event and clears pending state to prevent double-sends.
+func (a *streamAccumulator) emitDone(ch chan<- ChatEvent) {
+	ch <- ChatEvent{
+		Type:    ChatEventDone,
+		Finish:  a.pendingFinish,
+		Content: serializeToolCalls(a.pendingCalls),
+		Usage:   a.lastUsage,
+	}
+	a.pendingFinish = ""
+}
+
+// finalize handles post-stream cleanup: estimate usage if missing, emit pending done.
+func (a *streamAccumulator) finalize(ch chan<- ChatEvent, s *Session) {
+	// Accumulate manual count if API didn't provide usage
+	if s.totalOutputTokens == 0 && a.tokenCount > 0 {
+		s.totalOutputTokens += a.tokenCount
+	}
+
+	// If finish arrived but usage never came, estimate tokens
+	if a.pendingFinish != "" {
+		if a.lastUsage == nil {
+			promptEstimate := s.estimateTokens()
+			outputTokens := a.tokenCount
+			if outputTokens == 0 {
+				outputTokens = s.totalOutputTokens
+			}
+			s.totalInputTokens = promptEstimate
+			s.totalOutputTokens += outputTokens
+			a.lastUsage = &StreamUsage{
+				PromptTokens:     promptEstimate,
+				CompletionTokens: outputTokens,
+			}
+		}
+		a.emitDone(ch)
+	}
 }
 
 // serializeToolCalls serializes accumulated tool calls as JSON for the done event content.
