@@ -31,7 +31,8 @@ type PuxHandler struct {
 	litellmKey string
 	toolPerms  *perms.ToolPermissionConfig
 
-	llamaEngine     *llamaeng.LLMClient // primary llama-server engine
+	llamaEngine     *llamaeng.LLMClient // primary llama-server engine (local GPU)
+	clusterEngine   *llamaeng.LLMClient // Ray cluster LLM (Qwen3.6, always-on remote)
 	geminiEngine    *llamaeng.LLMClient // optional Gemini cloud provider
 	openrouterEngine *llamaeng.LLMClient // optional OpenRouter cloud provider
 	sandboxMgr   *sandbox.Manager
@@ -71,6 +72,11 @@ func (h *PuxHandler) SetLlamaEngine(engine *llamaeng.LLMClient, sandboxMgr *sand
 	if cu != nil {
 		h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
 	}
+}
+
+// SetClusterEngine configures the Ray cluster LLM (Qwen3.6, always-on).
+func (h *PuxHandler) SetClusterEngine(engine *llamaeng.LLMClient) {
+	h.clusterEngine = engine
 }
 
 // SetGeminiEngine configures the optional Gemini cloud engine.
@@ -588,6 +594,8 @@ func (h *PuxHandler) resolveEngineForModel(modelID string) *llamaeng.LLMClient {
 		return h.geminiEngine
 	case strings.Contains(modelID, "deepseek") && h.openrouterEngine != nil:
 		return h.openrouterEngine
+	case strings.Contains(modelID, "qwen") && h.clusterEngine != nil:
+		return h.clusterEngine
 	}
 
 	// Scan settings.json for matching model

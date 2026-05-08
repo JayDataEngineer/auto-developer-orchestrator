@@ -22,6 +22,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/scheduler"
+	"github.com/auto-developer-orchestrator/backend/internal/services"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 
 	"github.com/go-chi/chi/v5"
@@ -118,6 +119,32 @@ func main() {
 		}
 	}
 
+	// Connect to the Ray cluster LLM (optional, falls back to local).
+	// Cluster has Qwen3.6-27B at 30080/llm — always on GPU server.
+	clusterURL := os.Getenv("CLUSTER_LLM_URL")
+	if clusterURL == "" {
+		clusterURL = services.HubBase() + "/llm"
+	}
+	var clusterEngine *llamaeng.LLMClient
+	if os.Getenv("CLUSTER_LLM_DISABLE") != "true" {
+		clusterEngine = llamaeng.NewLLMClient(llamaeng.LLMClientConfig{
+			BaseURL:   clusterURL,
+			ModelName: "qwen3.6-27b",
+			Logger:    logger,
+		})
+		if err := clusterEngine.LoadModel(); err != nil {
+			logger.Warn("Ray cluster LLM not reachable — will not use cluster engine",
+				zap.Error(err), zap.String("url", clusterURL))
+			clusterEngine = nil
+		} else {
+			defer clusterEngine.Close()
+			logger.Info("Ray cluster LLM engine connected",
+				zap.String("url", clusterURL),
+				zap.String("model", "qwen3.6-27b"),
+			)
+		}
+	}
+
 	// Connect to OpenRouter cloud engine (optional — reads from settings.json).
 	// Supports DeepSeek V4 Flash and any model on OpenRouter.
 	var openrouterEngine *llamaeng.LLMClient
@@ -157,8 +184,11 @@ func main() {
 		}
 	}
 
-	// Select the default engine: prefer llama-server (local, fast), fall back to Gemini, then OpenRouter
+	// Select the default engine: local → cluster → Gemini → OpenRouter
 	activeEngine := llamaEngine
+	if activeEngine == nil {
+		activeEngine = clusterEngine
+	}
 	if activeEngine == nil {
 		activeEngine = geminiEngine
 	}
@@ -266,6 +296,11 @@ func main() {
 		puxHandler.SetGeminiEngine(geminiEngine)
 	}
 
+	// Wire Ray cluster engine (optional — fallback when local is unavailable)
+	if clusterEngine != nil {
+		puxHandler.SetClusterEngine(clusterEngine)
+	}
+
 	// Wire OpenRouter cloud engine (optional)
 	if openrouterEngine != nil {
 		puxHandler.SetOpenRouterEngine(openrouterEngine)
@@ -299,6 +334,9 @@ func main() {
 
 	// File transfer handler (upload/download files to/from sandbox)
 	fileHandler := handlers.NewFileHandler(sandboxMgr, logger)
+
+	// Cluster services handler (LLM, TTS, ASR, Forge on Ray cluster)
+	clusterHandler := handlers.NewClusterHandler(logger)
 
 	// Direct tool execution handler (for Python SDK / external consumers)
 	toolsHandler := handlers.NewToolsHandler(sandboxMgr, mcpMulti, webResearchClient, logger)
@@ -530,6 +568,16 @@ func main() {
 		// Scheduler (CRON/recurring jobs)
 		r.Route("/scheduler", func(r chi.Router) {
 			schedulerHandler.RegisterRoutes(r)
+		})
+
+		// Cluster services (LLM, TTS, ASR, Forge on Ray cluster)
+		r.Route("/cluster", func(r chi.Router) {
+			r.Get("/status", clusterHandler.ClusterStatus)        // health of all services
+			r.Get("/tts", clusterHandler.TTSServices)             // list TTS backends
+			r.Post("/tts/synthesize", clusterHandler.SynthesizeSpeech) // text → speech
+			r.Get("/asr", clusterHandler.ASRStatus)               // ASR health
+			r.Post("/asr/transcribe", clusterHandler.TranscribeAudio) // audio → text
+			r.Get("/forge", clusterHandler.ForgeStatus)           // Forge router health
 		})
 	})
 

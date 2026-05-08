@@ -1,0 +1,292 @@
+package services
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
+
+	"go.uber.org/zap"
+)
+
+// HubBase returns the MCP/Service hub base URL.
+// Configurable via MCP_HUB_ENDPOINT env var.
+func HubBase() string {
+	hub := os.Getenv("MCP_HUB_ENDPOINT")
+	if hub == "" {
+		hub = "http://100.86.69.57:30080"
+	}
+	return hub
+}
+
+// ClusterClient provides access to all Ray cluster services.
+type ClusterClient struct {
+	hubBase    string
+	httpClient *http.Client
+	logger     *zap.Logger
+}
+
+// NewClusterClient creates a client for all Ray cluster services.
+func NewClusterClient(logger *zap.Logger) *ClusterClient {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &ClusterClient{
+		hubBase: HubBase(),
+		httpClient: &http.Client{
+			Timeout: 120 * time.Second,
+		},
+		logger: logger,
+	}
+}
+
+// LLMEndpoint returns the cluster LLM endpoint URL (OpenAI-compatible).
+func (c *ClusterClient) LLMEndpoint() string {
+	return c.hubBase + "/llm"
+}
+
+// LLMModel returns the model name on the cluster LLM.
+func (c *ClusterClient) LLMModel() string {
+	return "qwen3.6-27b-q6_k"
+}
+
+// --- TTS ---
+
+// TTSRequest is the request body for TTS synthesis.
+type TTSRequest struct {
+	Text string `json:"text"`
+}
+
+// TTSResponse is the response from a TTS service.
+type TTSResponse struct {
+	Status string `json:"status"`
+	Output struct {
+		Type    string `json:"type"`
+		Content string `json:"content"` // base64-encoded audio
+	} `json:"output"`
+}
+
+// TTSHealth is the health status of a TTS service.
+type TTSHealth struct {
+	Status string `json:"status"`
+	Model  string `json:"model"`
+	Loaded bool   `json:"loaded"`
+}
+
+// TTSService represents an available TTS backend.
+type TTSService struct {
+	Name   string `json:"name"`
+	Route  string `json:"route"`
+	Loaded bool   `json:"loaded"`
+}
+
+// AvailableTTSServices returns all TTS backends on the cluster.
+func AvailableTTSServices() []TTSService {
+	return []TTSService{
+		{Name: "espeak", Route: "/tts/espeak/"},
+		{Name: "kokoro", Route: "/tts/kokoro/"},
+		{Name: "vibevoice-cpp", Route: "/tts/vibevoice-cpp/"},
+		{Name: "faster-qwen3-tts", Route: "/tts/faster-qwen3-tts/"},
+		{Name: "index-tts", Route: "/tts/index-tts/"},
+	}
+}
+
+// TTSHealth checks health of a specific TTS service.
+func (c *ClusterClient) TTSHealth(route string) (*TTSHealth, error) {
+	url := c.hubBase + route
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("tts health %s: %w", route, err)
+	}
+	defer resp.Body.Close()
+	var h TTSHealth
+	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
+		return nil, fmt.Errorf("decode tts health: %w", err)
+	}
+	h.Status = resp.Status
+	return &h, nil
+}
+
+// Synthesize sends text to a TTS service and returns the audio content.
+func (c *ClusterClient) Synthesize(route, text string) ([]byte, string, error) {
+	url := c.hubBase + route
+	body := TTSRequest{Text: text}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshal tts: %w", err)
+	}
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(data))
+	if err != nil {
+		return nil, "", fmt.Errorf("tts request %s: %w", route, err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("read tts response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("tts %s returned %d: %s", route, resp.StatusCode, string(respBody))
+	}
+	var ttsResp TTSResponse
+	if err := json.Unmarshal(respBody, &ttsResp); err != nil {
+		return nil, "", fmt.Errorf("decode tts response: %w", err)
+	}
+	if ttsResp.Status != "success" {
+		return nil, "", fmt.Errorf("tts synthesis failed: status=%s", ttsResp.Status)
+	}
+	return []byte(ttsResp.Output.Content), ttsResp.Output.Type, nil
+}
+
+// --- ASR ---
+
+// ASRRequest is the request body for ASR transcription.
+type ASRRequest struct {
+	AudioB64 string `json:"audio_b64"`
+}
+
+// ASRResponse is the response from the ASR service.
+type ASRResponse struct {
+	Status string          `json:"status"`
+	Output json.RawMessage `json:"output"`
+	Error  string          `json:"error,omitempty"`
+}
+
+// ASRHealth is the health status of the ASR service.
+type ASRHealth struct {
+	Status string `json:"status"`
+	Model  string `json:"model"`
+	Loaded bool   `json:"loaded"`
+}
+
+// Transcribe sends base64-encoded audio to Whisper ASR.
+func (c *ClusterClient) Transcribe(audioB64 []byte) (*ASRResponse, error) {
+	url := c.hubBase + "/asr/whisper/"
+	body := ASRRequest{AudioB64: string(audioB64)}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal asr: %w", err)
+	}
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("asr request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read asr response: %w", err)
+	}
+	var asrResp ASRResponse
+	if err := json.Unmarshal(respBody, &asrResp); err != nil {
+		return nil, fmt.Errorf("decode asr response: %w", err)
+	}
+	return &asrResp, nil
+}
+
+// ASRHealth checks the ASR service health.
+func (c *ClusterClient) ASRHealth() (*ASRHealth, error) {
+	url := c.hubBase + "/asr/whisper/"
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("asr health: %w", err)
+	}
+	defer resp.Body.Close()
+	var h ASRHealth
+	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
+		return nil, fmt.Errorf("decode asr health: %w", err)
+	}
+	return &h, nil
+}
+
+// --- Forge ---
+
+// ForgeHealth checks the Forge master router.
+func (c *ClusterClient) ForgeHealth() error {
+	resp, err := c.httpClient.Get(c.hubBase + "/forge/")
+	if err != nil {
+		return fmt.Errorf("forge health: %w", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusBadGateway {
+		return nil // BadGateway means it's routing but upstream is down
+	}
+	return fmt.Errorf("forge returned %d", resp.StatusCode)
+}
+
+// --- LLM ---
+
+// LLMHealth checks the cluster LLM health.
+func (c *ClusterClient) LLMHealth() (*LLMHealth, error) {
+	url := c.hubBase + "/llm/health"
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("llm health: %w", err)
+	}
+	defer resp.Body.Close()
+	var h LLMHealth
+	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
+		return nil, fmt.Errorf("decode llm health: %w", err)
+	}
+	return &h, nil
+}
+
+// LLMHealth is the health status of the cluster LLM.
+type LLMHealth struct {
+	Status string `json:"status"`
+	Model  string `json:"model"`
+	Loaded bool   `json:"loaded"`
+}
+
+// --- Health ---
+
+// ServiceStatus summarizes the status of a cluster service.
+type ServiceStatus struct {
+	Name    string `json:"name"`
+	Healthy bool   `json:"healthy"`
+	Loaded  bool   `json:"loaded,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// AllHealth returns health status of all cluster services.
+func (c *ClusterClient) AllHealth() []ServiceStatus {
+	results := []ServiceStatus{}
+
+	// LLM
+	if h, err := c.LLMHealth(); err != nil {
+		results = append(results, ServiceStatus{Name: "llm", Healthy: false, Error: err.Error()})
+	} else {
+		results = append(results, ServiceStatus{Name: "llm", Healthy: true, Loaded: h.Loaded})
+	}
+
+	// ASR
+	if h, err := c.ASRHealth(); err != nil {
+		results = append(results, ServiceStatus{Name: "asr-whisper", Healthy: false, Error: err.Error()})
+	} else {
+		results = append(results, ServiceStatus{Name: "asr-whisper", Healthy: true, Loaded: h.Loaded})
+	}
+
+	// TTS services
+	for _, svc := range AvailableTTSServices() {
+		if h, err := c.TTSHealth(svc.Route); err != nil {
+			results = append(results, ServiceStatus{Name: "tts-" + svc.Name, Healthy: false, Error: err.Error()})
+		} else {
+			results = append(results, ServiceStatus{Name: "tts-" + svc.Name, Healthy: true, Loaded: h.Loaded})
+		}
+	}
+
+	// Forge
+	if err := c.ForgeHealth(); err != nil {
+		results = append(results, ServiceStatus{Name: "forge", Healthy: false, Error: err.Error()})
+	} else {
+		results = append(results, ServiceStatus{Name: "forge", Healthy: true})
+	}
+
+	return results
+}

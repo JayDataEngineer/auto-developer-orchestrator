@@ -50,8 +50,11 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Build provider adapter
+	// Build provider adapter — priority chain: local → cluster → gemini → openrouter
 	engine := h.llamaEngine
+	if engine == nil {
+		engine = h.clusterEngine
+	}
 	if sel, ok := h.selectedEngines[key]; ok {
 		engine = sel
 	}
