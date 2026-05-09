@@ -31,8 +31,14 @@ type LangfuseClient struct {
 
 // NewLangfuseClient creates a client using env vars.
 // Set LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY to enable.
+// Defaults to the cluster Langfuse instance when keys are set but host is not.
 func NewLangfuseClient() *LangfuseClient {
 	host := os.Getenv("LANGFUSE_HOST")
+	if host == "" {
+		if os.Getenv("LANGFUSE_PUBLIC_KEY") != "" || os.Getenv("LANGFUSE_SECRET_KEY") != "" {
+			host = "http://100.86.69.57:30080/langfuse"
+		}
+	}
 	if host == "" {
 		return nil // disabled
 	}

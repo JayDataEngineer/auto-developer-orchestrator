@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/services"
 	"go.uber.org/zap"
@@ -163,4 +165,60 @@ func (h *ClusterHandler) ForgeStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"healthy": true,
 	})
+}
+
+// StorageStatus handles GET /api/cluster/storage — S3 (Garage) status.
+func (h *ClusterHandler) StorageStatus(w http.ResponseWriter, r *http.Request) {
+	s3client, err := services.NewS3Client()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"healthy": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	buckets, err := s3client.ListBuckets(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"healthy": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	endpoint, _, _ := services.S3Config()
+	names := make([]string, len(buckets))
+	for i, b := range buckets {
+		names[i] = b.Name
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"healthy":  true,
+		"endpoint": endpoint,
+		"buckets":  names,
+	})
+}
+
+// StorageBuckets handles GET /api/cluster/storage/buckets — list all buckets.
+func (h *ClusterHandler) StorageBuckets(w http.ResponseWriter, r *http.Request) {
+	s3client, err := services.NewS3Client()
+	if err != nil {
+		JSONError(w, "S3 not configured: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	buckets, err := s3client.ListBuckets(ctx)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	names := make([]string, len(buckets))
+	for i, b := range buckets {
+		names[i] = b.Name
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"buckets": names})
 }

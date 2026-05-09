@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 )
 
@@ -255,6 +258,46 @@ type LLMHealth struct {
 	Loaded bool   `json:"loaded"`
 }
 
+// --- S3 Storage (Garage) ---
+
+// S3Config returns S3 connection parameters from env vars.
+func S3Config() (endpoint, accessKey, secretKey string) {
+	endpoint = os.Getenv("S3_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://100.86.69.57:30390"
+	}
+	return endpoint, os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_SECRET_KEY")
+}
+
+// NewS3Client creates an S3-compatible client for Garage storage.
+// Returns nil if access keys are not configured.
+func NewS3Client() (*minio.Client, error) {
+	endpoint, accessKey, secretKey := S3Config()
+	if accessKey == "" || secretKey == "" {
+		return nil, fmt.Errorf("S3_ACCESS_KEY and S3_SECRET_KEY not set")
+	}
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: false, // HTTP, not HTTPS
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create s3 client: %w", err)
+	}
+	return client, nil
+}
+
+// S3BucketList returns the cluster S3 endpoint and a health check.
+func (c *ClusterClient) S3Health() error {
+	client, err := NewS3Client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = client.ListBuckets(ctx)
+	return err
+}
+
 // --- Health ---
 
 // ServiceStatus summarizes the status of a cluster service.
@@ -317,7 +360,16 @@ func (c *ClusterClient) AllHealth() []ServiceStatus {
 		}
 	}()
 
-	total := 1 + 1 + len(AvailableTTSServices()) + 1 // LLM + ASR + TTS + Forge
+	// S3 Storage (Garage)
+	go func() {
+		if err := c.S3Health(); err != nil {
+			ch <- result{"s3-garage", ServiceStatus{Name: "s3-garage", Healthy: false, Error: err.Error()}}
+		} else {
+			ch <- result{"s3-garage", ServiceStatus{Name: "s3-garage", Healthy: true}}
+		}
+	}()
+
+	total := 1 + 1 + len(AvailableTTSServices()) + 1 + 1 // LLM + ASR + TTS + Forge + S3
 	results := make([]ServiceStatus, 0, total)
 	timeout := time.After(10 * time.Second)
 

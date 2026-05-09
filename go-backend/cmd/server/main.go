@@ -580,6 +580,8 @@ func main() {
 			r.Get("/asr", clusterHandler.ASRStatus)               // ASR health
 			r.Post("/asr/transcribe", clusterHandler.TranscribeAudio) // audio → text
 			r.Get("/forge", clusterHandler.ForgeStatus)           // Forge router health
+			r.Get("/storage", clusterHandler.StorageStatus)       // S3 (Garage) status
+			r.Get("/storage/buckets", clusterHandler.StorageBuckets) // list buckets
 		})
 	})
 
