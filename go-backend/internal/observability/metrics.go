@@ -130,6 +130,13 @@ func (m *Metrics) HTTPHandler() http.Handler {
 	return promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{})
 }
 
+// Registry returns the underlying Prometheus registry for external consumers
+// (e.g., push gateway).
+func (m *Metrics) Registry() *prometheus.Registry {
+	m.ensure()
+	return m.reg
+}
+
 // Middleware returns a func that records request metrics for an HTTP handler.
 func (m *Metrics) Middleware(project string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

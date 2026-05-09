@@ -261,8 +261,23 @@ func main() {
 	langfuse := observability.NewLangfuseClient()
 	puxHandler.SetLangfuse(langfuse)
 
+	// Prometheus pusher — bridges /metrics to cluster Pushgateway
+	promPusher := observability.NewMetricsPusher(metrics.Registry(), logger)
+	promPusher.Start()
+	defer promPusher.Stop()
+
+	// Infisical — resolve secrets from cluster secrets manager (optional)
+	if infisical := services.NewInfisicalClient(); infisical != nil {
+		logger.Info("Infisical client connected")
+		// Resolve common cluster secrets if not already set
+		infisical.ResolveEnvVars("", "dev", map[string]string{
+			"S3_ACCESS_KEY": "S3_ACCESS_KEY",
+			"S3_SECRET_KEY": "S3_SECRET_KEY",
+		})
+	}
+
 	// Event store for session persistence (survives server restarts)
-	eventStore := storage.NewEventStore(db.DB())
+	eventStore := storage.NewEventStore(db.DB(), db.Dialect())
 	puxHandler.SetEventStore(eventStore)
 
 	// Sandbox handler
@@ -580,6 +595,8 @@ func main() {
 			r.Get("/asr", clusterHandler.ASRStatus)                   // ASR health
 			r.Post("/asr/transcribe", clusterHandler.TranscribeAudio) // audio → text
 			r.Get("/forge", clusterHandler.ForgeStatus)               // Forge router health
+			r.Post("/forge/generate", clusterHandler.ForgeGenerate)   // image/3D/music generation
+			r.Get("/infisical", clusterHandler.InfisicalStatus)       // secrets manager status
 			r.Get("/storage", clusterHandler.StorageStatus)           // S3 (Garage) status
 			r.Get("/storage/buckets", clusterHandler.StorageBuckets)  // list buckets
 			r.Get("/storage/objects", clusterHandler.StorageListObjects) // list objects in bucket

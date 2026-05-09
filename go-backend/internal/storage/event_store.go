@@ -19,22 +19,23 @@ type StoredEvent struct {
 	CreatedAt   time.Time       `json:"createdAt"`
 }
 
-// EventStore persists agent events to SQLite for session recovery and replay.
+// EventStore persists agent events for session recovery and replay.
 type EventStore struct {
-	db *sql.DB
+	db      *sql.DB
+	dialect Dialect
 }
 
 // NewEventStore creates a new event store backed by the given database.
-func NewEventStore(db *sql.DB) *EventStore {
-	return &EventStore{db: db}
+func NewEventStore(db *sql.DB, dialect Dialect) *EventStore {
+	return &EventStore{db: db, dialect: dialect}
 }
 
 // Append persists an event to the append-only log.
 func (s *EventStore) Append(ctx context.Context, sessionID, eventType, subAgentID string, eventData []byte) (int64, error) {
-	result, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, Rebind(s.dialect, `
 		INSERT INTO agent_events (session_id, event_type, event_data, sub_agent_id, sequence_num)
 		VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(sequence_num), 0) + 1 FROM agent_events WHERE session_id = ?))
-	`, sessionID, eventType, string(eventData), subAgentID, sessionID)
+	`), sessionID, eventType, string(eventData), subAgentID, sessionID)
 	if err != nil {
 		return 0, fmt.Errorf("append event: %w", err)
 	}
@@ -47,13 +48,13 @@ func (s *EventStore) Replay(ctx context.Context, sessionID string, afterSeq int6
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, Rebind(s.dialect, `
 		SELECT id, session_id, event_type, event_data, sub_agent_id, sequence_num, created_at
 		FROM agent_events
 		WHERE session_id = ? AND sequence_num > ?
 		ORDER BY sequence_num
 		LIMIT ?
-	`, sessionID, afterSeq, limit)
+	`), sessionID, afterSeq, limit)
 	if err != nil {
 		return nil, fmt.Errorf("replay events: %w", err)
 	}
@@ -73,9 +74,9 @@ func (s *EventStore) Replay(ctx context.Context, sessionID string, afterSeq int6
 // LatestSequence returns the highest sequence number for a session (0 if none).
 func (s *EventStore) LatestSequence(ctx context.Context, sessionID string) (int64, error) {
 	var seq int64
-	row := s.db.QueryRowContext(ctx, `
+	row := s.db.QueryRowContext(ctx, Rebind(s.dialect, `
 		SELECT COALESCE(MAX(sequence_num), 0) FROM agent_events WHERE session_id = ?
-	`, sessionID)
+	`), sessionID)
 	if err := row.Scan(&seq); err != nil {
 		return 0, fmt.Errorf("latest sequence: %w", err)
 	}

@@ -172,6 +172,55 @@ func (h *ClusterHandler) ForgeStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ForgeGenerate handles POST /api/cluster/forge/generate — generate via Forge.
+func (h *ClusterHandler) ForgeGenerate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Mode   string          `json:"mode"`
+		Prompt string          `json:"prompt"`
+		Params json.RawMessage `json:"params,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Mode == "" || req.Prompt == "" {
+		JSONError(w, "missing 'mode' and/or 'prompt' fields", http.StatusBadRequest)
+		return
+	}
+
+	result, err := h.client.ForgeGenerate(req.Mode, req.Prompt, req.Params)
+	if err != nil {
+		h.logger.Warn("Forge generation failed", zap.String("mode", req.Mode), zap.Error(err))
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"status":  result.Status,
+		"output":  result.Output,
+	})
+}
+
+// InfisicalStatus handles GET /api/cluster/infisical — Infisical secrets manager status.
+func (h *ClusterHandler) InfisicalStatus(w http.ResponseWriter, r *http.Request) {
+	// Simple health check: can we reach the Infisical service through the hub?
+	client := services.NewInfisicalClient()
+	if client == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"healthy": false,
+			"error":   "not configured (INFISICAL_URL or INFISICAL_TOKEN not set)",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"healthy": true,
+	})
+}
+
 // StorageStatus handles GET /api/cluster/storage — S3 (Garage) status.
 func (h *ClusterHandler) StorageStatus(w http.ResponseWriter, r *http.Request) {
 	s3client, err := services.NewS3Client()

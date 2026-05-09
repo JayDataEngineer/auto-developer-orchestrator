@@ -219,6 +219,54 @@ func (c *ClusterClient) ASRHealth() (*ASRHealth, error) {
 
 // --- Forge ---
 
+// ForgeGenerateRequest is the request body for Forge generation.
+type ForgeGenerateRequest struct {
+	Mode  string `json:"mode"`  // "image", "3d", "music", "video"
+	Prompt string `json:"prompt"`
+	// Optional parameters forwarded to Forge
+	Params json.RawMessage `json:"params,omitempty"`
+}
+
+// ForgeGenerateResponse is the response from Forge generation.
+type ForgeGenerateResponse struct {
+	Status string          `json:"status"`
+	Output json.RawMessage `json:"output,omitempty"`
+	Error  string          `json:"error,omitempty"`
+}
+
+// ForgeGenerate sends a generation request to the Forge service.
+// Routes to the appropriate sub-generator based on mode.
+func (c *ClusterClient) ForgeGenerate(mode, prompt string, params json.RawMessage) (*ForgeGenerateResponse, error) {
+	url := c.hubBase + "/forge/generate"
+	body := ForgeGenerateRequest{
+		Mode:   mode,
+		Prompt: prompt,
+		Params: params,
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal forge request: %w", err)
+	}
+	client := &http.Client{Timeout: 120 * time.Second} // generation can be slow
+	resp, err := client.Post(url, "application/json", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("forge request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read forge response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("forge returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	var forgeResp ForgeGenerateResponse
+	if err := json.Unmarshal(respBody, &forgeResp); err != nil {
+		return nil, fmt.Errorf("decode forge response: %w", err)
+	}
+	return &forgeResp, nil
+}
+
 // ForgeHealth checks the Forge master router (short timeout).
 func (c *ClusterClient) ForgeHealth() error {
 	client := c.healthClient()

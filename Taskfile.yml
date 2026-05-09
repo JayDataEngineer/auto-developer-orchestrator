@@ -95,6 +95,13 @@ tasks:
     cmds:
       - bun run src/main.ts {{.CLI_ARGS}}
 
+  tui-visual:
+    desc: Start TUI visual testing server (autonomous dev loop)
+    cmds:
+      - cmd: test -d /tmp/tui-venv || (uv venv /tmp/tui-venv && source /tmp/tui-venv/bin/activate && uv pip install pyte Pillow)
+        silent: true
+      - source /tmp/tui-venv/bin/activate && python scripts/tui_visual.py --port 9877 {{.CLI_ARGS}}
+
   # ── Docker Development ──────────────────────────────────────────────────
   up:
     desc: Start dev environment with hot reload (Docker)
