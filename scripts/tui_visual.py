@@ -204,13 +204,24 @@ class TerminalRenderer:
         if color is None or color == "default":
             return default
         if isinstance(color, str):
+            # Named ANSI colors
             named = {
                 "black": (0, 0, 0), "red": (205, 49, 49),
                 "green": (13, 188, 121), "yellow": (229, 229, 16),
                 "blue": (36, 114, 200), "magenta": (188, 63, 188),
                 "cyan": (17, 168, 205), "white": (229, 229, 229),
             }
-            return named.get(color, default)
+            if color in named:
+                return named[color]
+            # Hex color from pyte (e.g. "ff0000" for 256-color or truecolor)
+            if len(color) == 6:
+                try:
+                    r = int(color[0:2], 16)
+                    g = int(color[2:4], 16)
+                    b = int(color[4:6], 16)
+                    return (r, g, b)
+                except ValueError:
+                    pass
         return default
 
 
