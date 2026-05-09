@@ -16,16 +16,13 @@
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VENV="/tmp/tui-venv"
+VENV="$ROOT/.venv/tui-visual"
 
 # Check venv
 if [ ! -d "$VENV" ]; then
     echo "Creating venv and installing dependencies..."
     uv venv "$VENV"
-    source "$VENV/bin/activate"
-    uv pip install pyte Pillow
-else
-    source "$VENV/bin/activate"
+    uv pip install --python "$VENV/bin/python" pyte Pillow
 fi
 
 # Kill any existing instances
@@ -52,7 +49,7 @@ fi
 # Start visual server
 echo "Starting TUI visual server on :9877..."
 cd "$ROOT"
-python scripts/tui_visual.py --port 9877 --cols 120 --rows 40 --font-size 14 &
+"$VENV/bin/python" scripts/tui_visual.py --port 9877 --cols 120 --rows 40 --font-size 14 &
 VISUAL_PID=$!
 
 sleep 2

@@ -97,10 +97,14 @@ tasks:
 
   tui-visual:
     desc: Start TUI visual testing server (autonomous dev loop)
+    vars:
+      TUI_VENV: .venv/tui-visual
     cmds:
-      - cmd: test -d /tmp/tui-venv || (uv venv /tmp/tui-venv && source /tmp/tui-venv/bin/activate && uv pip install pyte Pillow)
+      - cmd: test -d {{.TUI_VENV}} || uv venv {{.TUI_VENV}}
         silent: true
-      - source /tmp/tui-venv/bin/activate && python scripts/tui_visual.py --port 9877 {{.CLI_ARGS}}
+      - cmd: "uv pip install --python {{.TUI_VENV}}/bin/python pyte Pillow 2>/dev/null; true"
+        silent: true
+      - cmd: "{{.TUI_VENV}}/bin/python scripts/tui_visual.py --port 9877 {{.CLI_ARGS}}"
 
   # ── Docker Development ──────────────────────────────────────────────────
   up:
