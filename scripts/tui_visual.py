@@ -12,30 +12,31 @@ Usage:
 Endpoints:
     GET  /screenshot  → PNG image of current TUI state
     GET  /screen      → JSON with terminal buffer as text
+    GET  /logs        → last N lines of stderr/log output
+    GET  /observe     → combined: screenshot (base64) + screen text + logs + status
     POST /input       → send keystrokes (body: {"text": "hello\n"})
+    POST /key         → send special keys (body: {"key": "escape"})
     POST /restart     → restart the TUI process
     GET  /health      → server status
 """
 
 import argparse
-import base64
+import collections
 import fcntl
+import io
 import json
 import os
 import pty
 import select
 import signal
 import struct
-import subprocess
 import sys
 import termios
 import time
-import tty
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from threading import Lock
 
-# Lazy imports — installed in /tmp/tui-venv
 try:
     import pyte
     from PIL import Image, ImageDraw, ImageFont
@@ -44,6 +45,69 @@ except ImportError:
     print("  uv venv /tmp/tui-venv && source /tmp/tui-venv/bin/activate")
     print("  uv pip install pyte Pillow")
     sys.exit(1)
+
+
+# ── Special key sequences ──────────────────────────────────────────
+
+SPECIAL_KEYS = {
+    "escape":      "\x1b",
+    "enter":       "\r",
+    "tab":         "\t",
+    "backspace":   "\x7f",
+    "delete":      "\x1b[3~",
+    "up":          "\x1b[A",
+    "down":        "\x1b[B",
+    "right":       "\x1b[C",
+    "left":        "\x1b[D",
+    "home":        "\x1b[H",
+    "end":         "\x1b[F",
+    "pageup":      "\x1b[5~",
+    "pagedown":    "\x1b[6~",
+    "ctrl+c":      "\x03",
+    "ctrl+d":      "\x04",
+    "ctrl+z":      "\x1a",
+    "ctrl+l":      "\x0c",
+    "ctrl+k":      "\x0b",
+    "ctrl+p":      "\x10",
+    "ctrl+o":      "\x0f",
+    "ctrl+t":      "\x14",
+    "ctrl+g":      "\x07",
+    "ctrl+u":      "\x15",
+    "ctrl+w":      "\x17",
+    "ctrl+a":      "\x01",
+    "ctrl+e":      "\x05",
+    "ctrl+n":      "\x0e",
+    "shift+tab":   "\x1b[Z",
+    "shift+ctrl+p": "\x1b[20;5~",
+    "alt+enter":   "\x1b\r",
+    "alt+up":      "\x1b\x1b[A",
+}
+
+
+# ── Ring Buffer for Logs ───────────────────────────────────────────
+
+class RingBuffer:
+    """Thread-safe ring buffer for log capture."""
+
+    def __init__(self, max_lines=500):
+        self.max_lines = max_lines
+        self.buffer = collections.deque(maxlen=max_lines)
+        self.lock = threading.Lock()
+
+    def append(self, line: str):
+        with self.lock:
+            self.buffer.append(line)
+
+    def get_lines(self, n=None):
+        with self.lock:
+            lines = list(self.buffer)
+            if n:
+                return lines[-n:]
+            return lines
+
+    def clear(self):
+        with self.lock:
+            self.buffer.clear()
 
 
 # ── Terminal Renderer ─────────────────────────────────────────────
@@ -57,11 +121,9 @@ class TerminalRenderer:
         self.screen = pyte.Screen(cols, rows)
         self.stream = pyte.Stream(self.screen)
 
-        # Font setup
         if font_path and os.path.exists(font_path):
             self.font = ImageFont.truetype(font_path, font_size)
         else:
-            # Try common monospace fonts
             for candidate in [
                 "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
                 "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
@@ -73,16 +135,12 @@ class TerminalRenderer:
             else:
                 self.font = ImageFont.load_default()
 
-        # Measure character cell size
         bbox = self.font.getbbox("M")
-        self.cell_w = bbox[2] - bbox[0] + 2  # +2 for spacing
-        self.cell_h = bbox[3] - bbox[1] + 4   # +4 for line spacing
-
-        # Lock for thread safety
-        self.lock = Lock()
+        self.cell_w = bbox[2] - bbox[0] + 2
+        self.cell_h = bbox[3] - bbox[1] + 4
+        self.lock = threading.Lock()
 
     def feed(self, data: bytes):
-        """Feed raw terminal output through the emulator."""
         with self.lock:
             try:
                 self.stream.feed(data.decode("utf-8", errors="replace"))
@@ -90,7 +148,6 @@ class TerminalRenderer:
                 pass
 
     def render(self) -> Image.Image:
-        """Render the current screen buffer as a PIL Image."""
         with self.lock:
             img_w = self.cols * self.cell_w
             img_h = self.rows * self.cell_h
@@ -101,7 +158,6 @@ class TerminalRenderer:
                 for x, char in enumerate(line):
                     if char == " " or char == "":
                         continue
-                    # Get color from pyte Char
                     pyte_char = self.screen.buffer[y][x]
                     fg = self._pyte_color(pyte_char.fg, (212, 212, 212))
                     bg = self._pyte_color(pyte_char.bg, None)
@@ -109,39 +165,35 @@ class TerminalRenderer:
                     px = x * self.cell_w
                     py = y * self.cell_h
 
-                    # Draw background if set
                     if bg:
                         draw.rectangle(
                             [px, py, px + self.cell_w, py + self.cell_h],
                             fill=bg,
                         )
-
-                    # Draw character
                     if char.strip():
                         draw.text((px + 1, py + 1), char, fill=fg, font=self.font)
 
             return img
 
     def render_bytes(self, fmt="PNG") -> bytes:
-        """Render and return as bytes."""
-        import io
         buf = io.BytesIO()
         self.render().save(buf, format=fmt)
         return buf.getvalue()
 
+    def render_base64(self) -> str:
+        import base64
+        return base64.b64encode(self.render_bytes()).decode("ascii")
+
     def get_text(self) -> str:
-        """Return the screen buffer as plain text."""
         with self.lock:
             lines = []
             for line in self.screen.display:
                 lines.append(line.rstrip())
-            # Trim trailing empty lines
             while lines and not lines[-1]:
                 lines.pop()
             return "\n".join(lines)
 
     def resize(self, cols, rows):
-        """Resize the terminal."""
         with self.lock:
             self.cols = cols
             self.rows = rows
@@ -149,7 +201,6 @@ class TerminalRenderer:
 
     @staticmethod
     def _pyte_color(color, default):
-        """Convert pyte color to RGB tuple."""
         if color is None or color == "default":
             return default
         if isinstance(color, str):
@@ -160,9 +211,6 @@ class TerminalRenderer:
                 "cyan": (17, 168, 205), "white": (229, 229, 229),
             }
             return named.get(color, default)
-        if hasattr(color, "css"):
-            # pyte.colors.Color has a css property like "rgb(1,2,3)"
-            return default
         return default
 
 
@@ -171,49 +219,56 @@ class TerminalRenderer:
 class TUIProcess:
     """Manages a TUI process running in a pseudo-terminal."""
 
-    def __init__(self, cmd, cwd, renderer: TerminalRenderer, env=None):
+    def __init__(self, cmd, cwd, renderer: TerminalRenderer, log_buffer: RingBuffer, env=None):
         self.cmd = cmd
         self.cwd = cwd
         self.renderer = renderer
+        self.log_buffer = log_buffer
         self.env = env or os.environ.copy()
         self.master_fd = None
         self.pid = None
         self.running = False
+        self.exit_code = None
+        self.raw_output = RingBuffer(200)  # last 200 chunks of raw output
 
     def start(self):
-        """Start the TUI process in a pty."""
         self.stop()
 
         pid, master_fd = pty.fork()
         if pid == 0:
-            # Child process
             os.chdir(self.cwd)
             os.execvp(self.cmd[0], self.cmd)
         else:
-            # Parent process
             self.pid = pid
             self.master_fd = master_fd
             self.running = True
+            self.exit_code = None
 
-            # Set terminal size
             winsize = struct.pack("HHHH", self.renderer.rows, self.renderer.cols, 0, 0)
             fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
 
-            # Set non-blocking
             flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
             fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
-            # Start reader thread
-            import threading
             self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
             self._reader_thread.start()
 
+            self.log_buffer.append(f"[tui-visual] started pid={pid} cmd={' '.join(self.cmd)}")
+
     def stop(self):
-        """Stop the TUI process."""
         if self.pid:
             try:
                 os.kill(self.pid, signal.SIGTERM)
-                os.waitpid(self.pid, os.WNOHANG)
+                for _ in range(10):
+                    pid, status = os.waitpid(self.pid, os.WNOHANG)
+                    if pid != 0:
+                        self.exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -1
+                        break
+                    time.sleep(0.1)
+                else:
+                    os.kill(self.pid, signal.SIGKILL)
+                    os.waitpid(self.pid, 0)
+                    self.exit_code = -9
             except (ProcessLookupError, ChildProcessError):
                 pass
             self.pid = None
@@ -226,7 +281,6 @@ class TUIProcess:
         self.running = False
 
     def write(self, data: str):
-        """Send input to the TUI process."""
         if self.master_fd is not None:
             try:
                 os.write(self.master_fd, data.encode())
@@ -234,7 +288,6 @@ class TUIProcess:
                 pass
 
     def _read_loop(self):
-        """Read from the pty and feed to the terminal emulator."""
         while self.running and self.master_fd is not None:
             try:
                 r, _, _ = select.select([self.master_fd], [], [], 0.1)
@@ -242,33 +295,40 @@ class TUIProcess:
                     data = os.read(self.master_fd, 65536)
                     if data:
                         self.renderer.feed(data)
+                        # Capture raw output for logs (strip ANSI for readability)
+                        text = data.decode("utf-8", errors="replace")
+                        self.raw_output.append(text)
                     else:
                         self.running = False
+                        self.log_buffer.append("[tui-visual] process exited (EOF)")
                         break
             except (OSError, ValueError):
                 self.running = False
+                self.log_buffer.append("[tui-visual] process exited (error)")
                 break
 
     def restart(self):
-        """Restart the TUI process."""
+        self.log_buffer.append("[tui-visual] restarting...")
+        self.raw_output.clear()
         self.start()
 
 
 # ── HTTP Server ────────────────────────────────────────────────────
 
 class TUIVisualHandler(BaseHTTPRequestHandler):
-    """HTTP handler for the visual testing server."""
-
     tui: TUIProcess = None
     renderer: TerminalRenderer = None
-    last_screenshot: bytes = b""
-    last_screenshot_time: float = 0
+    log_buffer: RingBuffer = None
 
     def do_GET(self):
         if self.path == "/screenshot":
             self._serve_screenshot()
         elif self.path == "/screen":
             self._serve_screen()
+        elif self.path == "/logs":
+            self._serve_logs()
+        elif self.path == "/observe":
+            self._serve_observe()
         elif self.path == "/health":
             self._serve_health()
         else:
@@ -280,16 +340,15 @@ class TUIVisualHandler(BaseHTTPRequestHandler):
 
         if self.path == "/input":
             self._handle_input(body)
+        elif self.path == "/key":
+            self._handle_key(body)
         elif self.path == "/restart":
             self._handle_restart()
         else:
             self.send_error(404)
 
     def _serve_screenshot(self):
-        """Return the current TUI state as a PNG."""
         png_data = self.renderer.render_bytes()
-        self.last_screenshot = png_data
-        self.last_screenshot_time = time.time()
         self.send_response(200)
         self.send_header("Content-Type", "image/png")
         self.send_header("Content-Length", str(len(png_data)))
@@ -297,13 +356,67 @@ class TUIVisualHandler(BaseHTTPRequestHandler):
         self.wfile.write(png_data)
 
     def _serve_screen(self):
-        """Return the terminal buffer as text."""
         text = self.renderer.get_text()
         data = json.dumps({
             "screen": text,
             "cols": self.renderer.cols,
             "rows": self.renderer.rows,
-            "process_running": self.tui.running if self.tui else False,
+            "running": self.tui.running if self.tui else False,
+        }).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_logs(self):
+        n = 50
+        if "?" in self.path:
+            from urllib.parse import parse_qs
+            qs = parse_qs(self.path.split("?", 1)[1])
+            n = int(qs.get("n", ["50"])[0])
+        logs = self.log_buffer.get_lines(n)
+        raw = self.tui.raw_output.get_lines(n) if self.tui else []
+        data = json.dumps({
+            "logs": logs,
+            "raw_output_last": raw[-5:] if raw else [],
+            "running": self.tui.running if self.tui else False,
+        }).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_observe(self):
+        """Combined endpoint: screenshot (base64) + screen text + logs + status.
+
+        This is the endpoint an AI agent calls after sending input.
+        Returns everything needed to understand the current state.
+        """
+        # Optional wait parameter — wait N seconds before capturing
+        wait = 0
+        if "?" in self.path:
+            from urllib.parse import parse_qs
+            qs = parse_qs(self.path.split("?", 1)[1])
+            wait = float(qs.get("wait", ["0"])[0])
+        if wait > 0:
+            time.sleep(min(wait, 10))  # cap at 10s
+
+        screenshot_b64 = self.renderer.render_base64()
+        screen_text = self.renderer.get_text()
+        logs = self.log_buffer.get_lines(30)
+        raw = self.tui.raw_output.get_lines(10) if self.tui else []
+
+        data = json.dumps({
+            "screenshot_base64": screenshot_b64,
+            "screen": screen_text,
+            "logs": logs,
+            "raw_output_last": raw,
+            "running": self.tui.running if self.tui else False,
+            "exit_code": self.tui.exit_code,
+            "pid": self.tui.pid,
+            "cols": self.renderer.cols,
+            "rows": self.renderer.rows,
+            "timestamp": time.time(),
         }).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -311,13 +424,14 @@ class TUIVisualHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _handle_input(self, body):
-        """Send keystrokes to the TUI."""
         try:
             req = json.loads(body)
             text = req.get("text", "")
             if text:
                 self.tui.write(text)
-                time.sleep(0.1)  # Let the TUI process the input
+                self.log_buffer.append(f"[input] {repr(text)}")
+                wait = float(req.get("wait", 0.3))
+                time.sleep(min(wait, 5))
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -325,20 +439,39 @@ class TUIVisualHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_error(400, str(e))
 
+    def _handle_key(self, body):
+        """Send a special key by name."""
+        try:
+            req = json.loads(body)
+            key = req.get("key", "").lower()
+            if key in SPECIAL_KEYS:
+                self.tui.write(SPECIAL_KEYS[key])
+                self.log_buffer.append(f"[key] {key}")
+                wait = float(req.get("wait", 0.3))
+                time.sleep(min(wait, 5))
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True, "key": key}).encode())
+            else:
+                available = ", ".join(sorted(SPECIAL_KEYS.keys()))
+                self.send_error(400, f"Unknown key '{key}'. Available: {available}")
+        except Exception as e:
+            self.send_error(400, str(e))
+
     def _handle_restart(self):
-        """Restart the TUI process."""
         self.tui.restart()
-        time.sleep(1)  # Let it initialize
+        time.sleep(1)
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps({"ok": True, "running": self.tui.running}).encode())
 
     def _serve_health(self):
-        """Health check."""
         data = json.dumps({
             "running": self.tui.running if self.tui else False,
-            "pid": self.tui.pid,
+            "exit_code": self.tui.exit_code if self.tui else None,
+            "pid": self.tui.pid if self.tui else None,
             "cols": self.renderer.cols,
             "rows": self.renderer.rows,
         }).encode()
@@ -348,7 +481,6 @@ class TUIVisualHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def log_message(self, format, *args):
-        """Suppress default request logging."""
         pass
 
 
@@ -356,47 +488,44 @@ class TUIVisualHandler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description="TUI Visual Testing Server")
-    parser.add_argument("--port", type=int, default=9877, help="HTTP port (default: 9877)")
-    parser.add_argument("--cols", type=int, default=120, help="Terminal columns (default: 120)")
-    parser.add_argument("--rows", type=int, default=40, help="Terminal rows (default: 40)")
-    parser.add_argument("--font-size", type=int, default=14, help="Font size (default: 14)")
-    parser.add_argument("--server", type=str, default="http://localhost:3847", help="Backend URL")
-    parser.add_argument("--project", type=str, default="ts-tui-pi", help="Project name")
+    parser.add_argument("--port", type=int, default=9877)
+    parser.add_argument("--cols", type=int, default=120)
+    parser.add_argument("--rows", type=int, default=40)
+    parser.add_argument("--font-size", type=int, default=14)
+    parser.add_argument("--server", type=str, default="http://localhost:3847")
+    parser.add_argument("--project", type=str, default="ts-tui-pi")
     args = parser.parse_args()
 
-    # Find the TUI directory
     tui_dir = Path(__file__).parent.parent / "ts-tui-pi"
     if not tui_dir.exists():
         print(f"TUI directory not found: {tui_dir}")
         sys.exit(1)
 
-    # Create renderer
     renderer = TerminalRenderer(cols=args.cols, rows=args.rows, font_size=args.font_size)
-
-    # Create TUI process — run bun with the TUI
+    log_buffer = RingBuffer(500)
     cmd = ["bun", "run", "src/main.ts", "--project", args.project, "--server", args.server]
-    tui = TUIProcess(cmd, str(tui_dir), renderer)
+    tui = TUIProcess(cmd, str(tui_dir), renderer, log_buffer)
 
-    # Wire handler
     TUIVisualHandler.tui = tui
     TUIVisualHandler.renderer = renderer
+    TUIVisualHandler.log_buffer = log_buffer
 
-    # Start TUI
     print(f"Starting TUI: {' '.join(cmd)}")
-    print(f"Working directory: {tui_dir}")
     tui.start()
     time.sleep(1)
 
-    # Start HTTP server
     server = HTTPServer(("0.0.0.0", args.port), TUIVisualHandler)
-    print(f"\nTUI Visual Testing Server running on port {args.port}")
-    print(f"  GET  /screenshot  → PNG of current TUI state")
-    print(f"  GET  /screen      → terminal buffer as text")
-    print(f"  POST /input       → send keystrokes")
-    print(f"  POST /restart     → restart TUI process")
-    print(f"  GET  /health      → server status")
-    print(f"\nProcess running: {tui.running} (pid={tui.pid})")
-    print(f"Terminal: {args.cols}x{args.rows}, font size: {args.font_size}")
+    print(f"\nTUI Visual Testing Server on :{args.port}")
+    print(f"  GET  /observe       → combined screenshot + screen + logs (AI agent endpoint)")
+    print(f"  GET  /screenshot    → PNG of current TUI state")
+    print(f"  GET  /screen        → terminal buffer as text")
+    print(f"  GET  /logs?n=50     → last N log lines + raw output")
+    print(f"  POST /input         → type text (body: {{\"text\": \"hello\\n\", \"wait\": 0.5}})")
+    print(f"  POST /key           → special key (body: {{\"key\": \"escape\", \"wait\": 0.3}})")
+    print(f"  POST /restart       → restart TUI process")
+    print(f"  GET  /health        → server status")
+    print(f"\nSpecial keys: {', '.join(sorted(SPECIAL_KEYS.keys()))}")
+    print(f"\nProcess: {tui.running} (pid={tui.pid}), terminal: {args.cols}x{args.rows}")
     print()
 
     try:
