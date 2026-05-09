@@ -122,21 +122,23 @@ export class FooterComponent implements Component {
 			statsParts.push(costStr);
 		}
 
-		// Colorize context percentage based on usage
-		let contextPercentStr: string;
-		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
-		const contextPercentDisplay =
-			contextPercent === "?"
-				? `?/${formatTokens(contextWindow)}${autoIndicator}`
-				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
-		if (contextPercentValue > 90) {
-			contextPercentStr = theme.fg("error", contextPercentDisplay);
-		} else if (contextPercentValue > 70) {
-			contextPercentStr = theme.fg("warning", contextPercentDisplay);
-		} else {
-			contextPercentStr = contextPercentDisplay;
+		// Colorize context percentage based on usage — only show when we have real data
+		if (contextWindow > 0 || contextPercent === "?") {
+			let contextPercentStr: string;
+			const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
+			const contextPercentDisplay =
+				contextPercent === "?"
+					? `?/${formatTokens(contextWindow)}${autoIndicator}`
+					: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
+			if (contextPercentValue > 90) {
+				contextPercentStr = theme.fg("error", contextPercentDisplay);
+			} else if (contextPercentValue > 70) {
+				contextPercentStr = theme.fg("warning", contextPercentDisplay);
+			} else {
+				contextPercentStr = contextPercentDisplay;
+			}
+			statsParts.push(contextPercentStr);
 		}
-		statsParts.push(contextPercentStr);
 
 		let statsLeft = statsParts.join(" ");
 
