@@ -181,54 +181,88 @@ func (e *LLMClient) checkVision() bool {
 	// Cloud providers: model name heuristics
 	if e.IsCloud() {
 		name := strings.ToLower(e.modelName)
-		// Gemini models have vision
 		if strings.Contains(name, "gemini") {
 			return true
 		}
-		// Claude models have vision
 		if strings.Contains(name, "claude") {
 			return true
 		}
-		// DeepSeek, Qwen cloud models — text only
+		if strings.Contains(name, "vision") {
+			return true
+		}
 		return false
 	}
 
-	// Local llama-server: check /props endpoint for mmproj
+	// Self-hosted providers (local llama-server, cluster LLM):
+	// Try /props first (llama-server specific), then /v1/models fallback.
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Phase 1: Check /props (llama-server mmproj detection)
 	req, err := http.NewRequestWithContext(ctx, "GET", e.baseURL+"/props", nil)
+	if err == nil {
+		resp, err := e.client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			var props struct {
+				MultiModalProjector struct {
+					Architecture string `json:"architecture"`
+				} `json:"mmproj"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&props) == nil {
+				if props.MultiModalProjector.Architecture != "" {
+					e.logger.Info("HasVision: mmproj detected on llama-server")
+					return true
+				}
+				e.logger.Info("HasVision: no mmproj on llama-server")
+				return false
+			}
+		}
+	}
+
+	// Phase 2: Check /v1/models (OpenAI-compatible fallback).
+	// Some servers (vLLM, TGI, SGLang) expose model metadata through this endpoint.
+	return e.checkVisionViaModels(ctx)
+}
+
+// checkVisionViaModels probes /v1/models for vision-capable model IDs.
+func (e *LLMClient) checkVisionViaModels(ctx context.Context) bool {
+	req, err := http.NewRequestWithContext(ctx, "GET", e.baseURL+"/v1/models", nil)
 	if err != nil {
 		return false
 	}
-
 	resp, err := e.client.Do(req)
 	if err != nil {
-		e.logger.Debug("HasVision: /props not reachable, assuming no vision", zap.Error(err))
+		e.logger.Debug("HasVision: /v1/models not reachable, assuming no vision", zap.Error(err))
 		return false
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		e.logger.Debug("HasVision: /v1/models returned non-OK", zap.Int("status", resp.StatusCode))
 		return false
 	}
 
-	var props struct {
-		MultiModalProjector struct {
-			Architecture string `json:"architecture"`
-		} `json:"mmproj"`
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&props); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		e.logger.Debug("HasVision: /v1/models decode failed", zap.Error(err))
 		return false
 	}
 
-	hasMMProj := props.MultiModalProjector.Architecture != ""
-	if hasMMProj {
-		e.logger.Info("HasVision: mmproj detected on llama-server")
-	} else {
-		e.logger.Info("HasVision: no mmproj on llama-server")
+	for _, m := range result.Data {
+		id := strings.ToLower(m.ID)
+		if strings.Contains(id, "vision") || strings.Contains(id, "mmproj") || strings.Contains(id, "multimodal") {
+			e.logger.Info("HasVision: vision model detected via /v1/models", zap.String("model_id", m.ID))
+			return true
+		}
 	}
-	return hasMMProj
+	e.logger.Debug("HasVision: no vision model found in /v1/models")
+	return false
 }
 
 // WarmUp sends a single-token request to pre-compile CUDA kernels on the server side.

@@ -336,9 +336,10 @@ func parseSSEData(body []byte) []byte {
 // Each server has a prefix (e.g. "mcp_" for web-research, "media_" for media-analysis).
 // Tool calls are routed by matching the tool name to the registered prefix.
 type MultiClient struct {
-	clients map[string]*Client // prefix → client
-	toolMap map[string]string  // toolName → prefix (built from ListTools)
-	logger  *zap.Logger
+	clients     map[string]*Client // prefix → client
+	toolMap     map[string]string  // toolName → prefix (built from ListTools)
+	cachedTools []MCPTool          // cached after InitializeAll
+	logger      *zap.Logger
 }
 
 // NewMultiClient creates a multi-server MCP client.
@@ -359,7 +360,10 @@ func (m *MultiClient) AddClient(prefix string, client *Client) {
 }
 
 // InitializeAll initializes all registered MCP servers and discovers their tools.
+// Populates both toolMap (tool → prefix routing) and cachedTools (full tool list).
 func (m *MultiClient) InitializeAll(ctx context.Context) error {
+	m.cachedTools = nil
+	seen := make(map[string]bool)
 	for prefix, client := range m.clients {
 		if err := client.Initialize(ctx); err != nil {
 			m.logger.Warn("MCP server initialize failed", zap.String("prefix", prefix), zap.Error(err))
@@ -371,7 +375,12 @@ func (m *MultiClient) InitializeAll(ctx context.Context) error {
 			continue
 		}
 		for _, t := range tools {
+			if seen[t.Name] {
+				continue
+			}
+			seen[t.Name] = true
 			m.toolMap[t.Name] = prefix
+			m.cachedTools = append(m.cachedTools, t)
 		}
 		m.logger.Info("MCP server initialized", zap.String("prefix", prefix), zap.Int("tools", len(tools)))
 	}
@@ -379,26 +388,16 @@ func (m *MultiClient) InitializeAll(ctx context.Context) error {
 }
 
 // AllTools returns all tools from all registered servers, with their original names.
-// Deduplicates by name — first server wins if multiple servers expose the same tool.
+// Returns cached tools from InitializeAll — no HTTP calls. Call ResetTools() then
+// InitializeAll() to refresh.
 func (m *MultiClient) AllTools() []MCPTool {
-	var all []MCPTool
-	seen := make(map[string]bool)
-	for _, client := range m.clients {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		tools, err := client.ListTools(ctx)
-		cancel()
-		if err != nil {
-			continue
-		}
-		for _, t := range tools {
-			if seen[t.Name] {
-				continue
-			}
-			seen[t.Name] = true
-			all = append(all, t)
-		}
-	}
-	return all
+	return m.cachedTools
+}
+
+// ResetTools clears the cached tool list. The next call to AllTools will be empty
+// until InitializeAll is called again.
+func (m *MultiClient) ResetTools() {
+	m.cachedTools = nil
 }
 
 // CallTool routes a tool call to the correct server based on the tool name.

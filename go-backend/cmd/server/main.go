@@ -572,16 +572,20 @@ func main() {
 			schedulerHandler.RegisterRoutes(r)
 		})
 
-		// Cluster services (LLM, TTS, ASR, Forge on Ray cluster)
+		// Cluster services (LLM, TTS, ASR, Forge, Storage on Ray cluster)
 		r.Route("/cluster", func(r chi.Router) {
-			r.Get("/status", clusterHandler.ClusterStatus)        // health of all services
-			r.Get("/tts", clusterHandler.TTSServices)             // list TTS backends
-			r.Post("/tts/synthesize", clusterHandler.SynthesizeSpeech) // text → speech
-			r.Get("/asr", clusterHandler.ASRStatus)               // ASR health
+			r.Get("/status", clusterHandler.ClusterStatus)            // health of all services
+			r.Get("/tts", clusterHandler.TTSServices)                 // list TTS backends
+			r.Post("/tts/synthesize", clusterHandler.SynthesizeSpeech)     // text → speech
+			r.Get("/asr", clusterHandler.ASRStatus)                   // ASR health
 			r.Post("/asr/transcribe", clusterHandler.TranscribeAudio) // audio → text
-			r.Get("/forge", clusterHandler.ForgeStatus)           // Forge router health
-			r.Get("/storage", clusterHandler.StorageStatus)       // S3 (Garage) status
-			r.Get("/storage/buckets", clusterHandler.StorageBuckets) // list buckets
+			r.Get("/forge", clusterHandler.ForgeStatus)               // Forge router health
+			r.Get("/storage", clusterHandler.StorageStatus)           // S3 (Garage) status
+			r.Get("/storage/buckets", clusterHandler.StorageBuckets)  // list buckets
+			r.Get("/storage/objects", clusterHandler.StorageListObjects) // list objects in bucket
+			r.Post("/storage/upload", clusterHandler.StorageUpload)   // upload object
+			r.Get("/storage/download", clusterHandler.StorageDownload) // download object
+			r.Delete("/storage/delete", clusterHandler.StorageDelete)  // delete object
 		})
 	})
 
