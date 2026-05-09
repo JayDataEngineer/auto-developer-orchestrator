@@ -25,10 +25,10 @@ if (typeof process !== "undefined" && (process.versions?.node || process.version
 
 // Antigravity OAuth credentials (different from Gemini CLI)
 const decode = (s: string) => atob(s);
-const CLIENT_ID = decode(
+const CLIENT_ID = process.env.GOOGLE_ANTIGRAVITY_CLIENT_ID || decode(
 	"REDACTED",
 );
-const CLIENT_SECRET = decode("REDACTED");
+const CLIENT_SECRET = process.env.GOOGLE_ANTIGRAVITY_CLIENT_SECRET || decode("REDACTED");
 const REDIRECT_URI = "http://localhost:51121/oauth-callback";
 
 // Antigravity requires additional scopes

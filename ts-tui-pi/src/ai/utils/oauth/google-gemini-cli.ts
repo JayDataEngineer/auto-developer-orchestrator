@@ -24,10 +24,10 @@ if (typeof process !== "undefined" && (process.versions?.node || process.version
 }
 
 const decode = (s: string) => atob(s);
-const CLIENT_ID = decode(
+const CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || decode(
 	"REDACTED",
 );
-const CLIENT_SECRET = decode("REDACTED");
+const CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || decode("REDACTED");
 const REDIRECT_URI = "http://localhost:8085/oauth2callback";
 const SCOPES = [
 	"https://www.googleapis.com/auth/cloud-platform",
