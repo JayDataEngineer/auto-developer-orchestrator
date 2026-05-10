@@ -133,13 +133,14 @@ export class PuxAgentSession {
   public pendingMessageCount = 0;
   public sessionFile: string | undefined;
 
-  private serverUrl: string;
-  private project: string;
-  private modelName: string;
-  private abortCtrl?: AbortController;
-  private listeners: AgentSessionEventListener[] = [];
-  private streaming = false;
-  private _fetch: typeof fetch; // injectable for tests
+	public agentId: string = "";
+	private serverUrl: string;
+	private project: string;
+	private modelName: string;
+	private abortCtrl?: AbortController;
+	private listeners: AgentSessionEventListener[] = [];
+	private streaming = false;
+	private _fetch: typeof fetch; // injectable for tests
 
   constructor(
     settingsManager: SettingsManager,
@@ -178,7 +179,9 @@ export class PuxAgentSession {
 
   async prompt(text: string, options?: { images?: any[] }): Promise<void> {
     // 1. Emit user message so TUI renders it
-    this.emit({ type: "message_start", message: userMessage(text) });
+    const usrMsg = userMessage(text);
+    this.emit({ type: "message_start", message: usrMsg });
+    this.sessionManager?.appendMessage?.(usrMsg);
 
     // 2. Emit agent_start (TUI shows loader)
     this.emit({ type: "agent_start" });
@@ -194,7 +197,7 @@ export class PuxAgentSession {
     const body = JSON.stringify({
       message: text,
       project: this.project,
-      agentId: "default",
+      agentId: this.agentId || undefined,
       model: this.modelName,
       thinkingLevel: this.thinkingLevel !== "none" ? this.thinkingLevel : undefined,
     });
@@ -359,6 +362,7 @@ export class PuxAgentSession {
           stopReason: "stop",
         });
         this.emit({ type: "message_end", message: msg });
+        this.sessionManager?.appendMessage?.(msg);
 
         // Update model contextWindow from backend if provided
         const cw = Number(payload.contextWindow) || 0;
@@ -380,6 +384,7 @@ export class PuxAgentSession {
           errorMessage: payload.error || payload.message || "Unknown error",
         });
         this.emit({ type: "message_end", message: msg });
+        this.sessionManager?.appendMessage?.(msg);
         break;
       }
 
@@ -404,7 +409,14 @@ export class PuxAgentSession {
       case "subagent_start":
       case "subagent_end":
       case "approval_request":
+        break;
+
       case "agent_spawned":
+        if (payload?.agentId) {
+          this.agentId = payload.agentId;
+          // Also store on the session-like object for TUI display
+          (this as any)._sessionId = payload.agentId;
+        }
         break;
 
       default:
@@ -517,4 +529,38 @@ export class PuxAgentSession {
   async clearQueue(): Promise<void> {}
   async bindExtensions(_opts?: any): Promise<void> {}
   async saveMessages(): Promise<void> {}
+
+  // ---- Session listing / resuming ----
+
+  /** Fetch all available sessions from the backend */
+  async getSessions(): Promise<Array<{ agentId: string; title: string; lastMessage: string; lastAt: string; messageCount: number }>> {
+    try {
+      const res = await this._fetch(`${this.serverUrl}/api/pux/conversations`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      // The backend returns ConversationSummary with agentId, title, lastMessage, lastAt, messageCount
+      return data.map((s: any) => ({
+        agentId: s.agentId || "",
+        title: s.title || s.lastMessage?.slice(0, 60) || "Untitled",
+        lastMessage: s.lastMessage || "",
+        lastAt: s.lastAt || "",
+        messageCount: s.messageCount || 0,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Load message history for a given session and emit them for display */
+  async loadHistory(agentId: string): Promise<any[]> {
+    this.agentId = agentId;
+    try {
+      const res = await this._fetch(`${this.serverUrl}/api/pux/history?project=${encodeURIComponent(this.project)}&agentId=${encodeURIComponent(agentId)}`);
+      if (!res.ok) return [];
+      const msgs = await res.json();
+      return msgs;
+    } catch {
+      return [];
+    }
+  }
 }

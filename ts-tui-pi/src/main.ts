@@ -38,7 +38,9 @@ if (!backendOnline) {
 }
 
 const settingsManager = SettingsManager.create(cwd, agentDir);
-const sessionManager = SessionManager.inMemory(cwd);
+// Resume most recent session for this project, or create new one.
+// Sessions persist to ~/.pi/agent/sessions/<encoded-cwd>/*.jsonl
+const sessionManager = SessionManager.continueRecent(cwd);
 
 // Fetch models for footer display only
 let modelMeta: any = null;
