@@ -29,6 +29,8 @@ import {
 	Markdown,
 	matchesKey,
 	ProcessTerminal,
+	type SelectItem,
+	SelectList,
 	Spacer,
 	setKeybindings,
 	Text,
@@ -605,6 +607,11 @@ export class InteractiveMode {
 
 		if (modelFallbackMessage) {
 			this.showWarning(modelFallbackMessage);
+		}
+
+		// Show session picker on startup if no initial message
+		if (!initialMessage && !initialMessages) {
+			await this.showSessionPicker();
 		}
 
 		// Process initial messages
@@ -2101,6 +2108,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/sessions") {
+				await this.showSessionPicker();
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
@@ -3019,6 +3031,90 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("warning", `Warning: ${warningMessage}`), 1, 0));
 		this.ui.requestRender();
+	}
+
+	private async showSessionPicker(): Promise<void> {
+		const puxSession = this.session as any;
+		if (!puxSession.getSessions) return;
+
+		const sessions = await puxSession.getSessions();
+		if (!sessions || sessions.length === 0) {
+			this.showStatus("No previous sessions found.");
+			return;
+		}
+
+		const items: SelectItem[] = [
+			{ value: "__new__", label: "  New Session", description: "Start a fresh conversation" },
+			...sessions.map((s: any) => ({
+				value: s.agentId,
+				label: `  ${s.title || "Untitled"}`,
+				description: `${s.messageCount} msgs · ${s.lastAt ? new Date(s.lastAt).toLocaleDateString() : ""}`,
+			})),
+		];
+
+		return new Promise<void>((resolve) => {
+			const list = new SelectList(items, Math.min(items.length, 12), {
+				selectedPrefix: (t) => theme.fg("accent", "→"),
+				selectedText: (t) => theme.inverse(t),
+				description: (t) => theme.fg("dim", t),
+				scrollInfo: (t) => theme.fg("dim", t),
+				noMatch: (t) => theme.fg("dim", t),
+			});
+			list.onSelect = async (item) => {
+				this.ui.hideOverlay();
+				if (item.value === "__new__") {
+					puxSession.agentId = undefined;
+					this.showStatus("Starting new session.");
+				} else {
+					puxSession.agentId = item.value;
+					const label = items.find(i => i.value === item.value)?.label?.trim() || "Untitled";
+					this.showStatus(`Resumed: ${label}`);
+					// Load and render history from backend
+					const history = await puxSession.loadHistory(item.value);
+					if (history && history.length > 0) {
+						this.chatContainer.clear();
+						for (const msg of history) {
+							if (msg.role === "user") {
+								const text = msg.text || msg.content || "";
+								if (text) {
+									const component = new UserMessageComponent(text, this.getMarkdownThemeWithSettings());
+									this.chatContainer.addChild(component);
+								}
+							} else if (msg.role === "assistant") {
+								const content: any[] = [];
+								if (msg.thinking) content.push({ type: "thinking", thinking: msg.thinking });
+								const text = msg.text || msg.content || "";
+								if (text) content.push({ type: "text", text });
+								const assistantMsg = {
+									role: "assistant" as const,
+									content,
+									api: "pux" as const,
+									provider: "pux" as const,
+									model: "pux",
+									usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+									stopReason: "stop" as const,
+									timestamp: new Date(msg.createdAt).getTime(),
+								};
+								const component = new AssistantMessageComponent(
+									assistantMsg,
+									this.hideThinkingBlock,
+									this.getMarkdownThemeWithSettings(),
+									this.hiddenThinkingLabel,
+								);
+								this.chatContainer.addChild(component);
+							}
+						}
+						this.ui.requestRender();
+					}
+				}
+				resolve();
+			};
+			list.onCancel = () => {
+				this.ui.hideOverlay();
+				resolve();
+			};
+			this.ui.showOverlay(list, { anchor: "center", width: "70%", maxHeight: "60%" });
+		});
 	}
 
 	showNewVersionNotification(newVersion: string): void {
