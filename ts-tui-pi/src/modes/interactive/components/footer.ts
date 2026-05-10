@@ -123,7 +123,7 @@ export class FooterComponent implements Component {
 		}
 
 		// Colorize context percentage based on usage — only show when we have real data
-		if (contextWindow > 0 || contextPercent === "?") {
+		if (contextWindow > 0) {
 			let contextPercentStr: string;
 			const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
 			const contextPercentDisplay =

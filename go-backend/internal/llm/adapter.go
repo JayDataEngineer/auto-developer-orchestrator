@@ -107,6 +107,10 @@ func (a *Adapter) ModelName() string {
 }
 
 func (a *Adapter) ContextSize() int {
+	// Use dynamic value from engine if available, fall back to static config
+	if cw := a.engine.ContextWindow(); cw > 0 {
+		return cw
+	}
 	return a.ctxSize
 }
 

@@ -446,9 +446,10 @@ func (h *PuxHandler) RenameConversation(w http.ResponseWriter, r *http.Request) 
 // GET /api/pux/models
 func (h *PuxHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 	type modelInfo struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Provider string `json:"provider,omitempty"`
+		ID            string `json:"id"`
+		Name          string `json:"name"`
+		Provider      string `json:"provider,omitempty"`
+		ContextWindow int    `json:"contextWindow,omitempty"`
 	}
 
 	models := []modelInfo{}
@@ -461,8 +462,9 @@ func (h *PuxHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 			var settings struct {
 				Providers map[string]struct {
 					Models []struct {
-						ID   string `json:"id"`
-						Name string `json:"name"`
+						ID            string `json:"id"`
+						Name          string `json:"name"`
+						ContextWindow int    `json:"contextWindow"`
 					} `json:"models"`
 				} `json:"providers"`
 			}
@@ -470,9 +472,10 @@ func (h *PuxHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 				for providerName, provider := range settings.Providers {
 					for _, m := range provider.Models {
 						models = append(models, modelInfo{
-							ID:       m.ID,
-							Name:     m.Name,
-							Provider: providerName,
+							ID:            m.ID,
+							Name:          m.Name,
+							Provider:      providerName,
+							ContextWindow: m.ContextWindow,
 						})
 					}
 				}

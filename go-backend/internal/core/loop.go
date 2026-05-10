@@ -384,9 +384,10 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			SendEvent(subscriber, AgentEvent{
 				Type: EventTypeAgentEnd,
 				Data: AgentEventData{
-					Input:  float64(state.TotalInputTokens),
-					Output: float64(state.TotalOutputTokens),
-					Model:  l.provider.ModelName(),
+					Input:         float64(state.TotalInputTokens),
+					Output:        float64(state.TotalOutputTokens),
+					Model:         l.provider.ModelName(),
+					ContextWindow: l.provider.ContextSize(),
 				},
 			})
 			return nil

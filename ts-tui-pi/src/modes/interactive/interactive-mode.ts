@@ -3810,6 +3810,10 @@ export class InteractiveMode {
 	}
 
 	private async showOAuthSelector(mode: "login" | "logout"): Promise<void> {
+		if (!this.session.modelRegistry?.authStorage) {
+			this.showStatus("OAuth not available in Pux backend mode.");
+			return;
+		}
 		if (mode === "logout") {
 			const providers = this.session.modelRegistry.authStorage.list();
 			const loggedInProviders = providers.filter(

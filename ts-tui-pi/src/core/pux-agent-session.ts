@@ -27,7 +27,7 @@ const DEFAULT_MODEL: PuxModel = {
 };
 
 // Build a pi-ai compatible Model shape from backend data
-function toPiModel(m: { id: string; name: string; provider: string }): PuxModel {
+function toPiModel(m: { id: string; name: string; provider: string }, contextWindow?: number): PuxModel {
   const [api, ...rest] = m.id.split("/");
   return {
     id: rest.join("/") || m.id,
@@ -37,7 +37,7 @@ function toPiModel(m: { id: string; name: string; provider: string }): PuxModel 
     // pi-ai Model also expects these:
     reasoning: false,
     input: ["text" as const] as ("text" | "image")[],
-    contextWindow: 128000,
+    contextWindow: contextWindow || 0,
     maxTokens: 16384,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     baseUrl: "",
@@ -108,8 +108,14 @@ export class PuxAgentSession {
     registerProvider: () => {},
     unregisterProvider: () => {},
     set: () => {},
-    authStorage: null,
-    keys: () => [],
+    authStorage: {
+      list: () => [] as string[],
+      get: (_provider: string) => undefined as any,
+      login: async () => { throw new Error("OAuth not available in Pux backend mode"); },
+      logout: () => {},
+      getOAuthProviders: () => [] as any[],
+    },
+    keys: () => [] as string[],
   };
   public promptTemplates: any[] = [];
   public messages: any[] = [];
@@ -121,8 +127,8 @@ export class PuxAgentSession {
   public systemPrompt = "";
   public extensionRunner: any = null;
   public session: any;
-  public steeringMode = false;
-  public followUpMode = false;
+  public steeringMode: "all" | "one-at-a-time" = "one-at-a-time";
+  public followUpMode: "all" | "one-at-a-time" = "one-at-a-time";
   public retryAttempt = 0;
   public pendingMessageCount = 0;
   public sessionFile: string | undefined;
@@ -353,6 +359,14 @@ export class PuxAgentSession {
           stopReason: "stop",
         });
         this.emit({ type: "message_end", message: msg });
+
+        // Update model contextWindow from backend if provided
+        const cw = Number(payload.contextWindow) || 0;
+        if (cw > 0 && this.model) {
+          (this.model as any).contextWindow = cw;
+          if (this.state.model) (this.state.model as any).contextWindow = cw;
+          if (this.agent.model) (this.agent.model as any).contextWindow = cw;
+        }
         break;
       }
 
@@ -422,9 +436,26 @@ export class PuxAgentSession {
   get isCompacting(): boolean { return false; }
   get isBashRunning(): boolean { return false; }
   getCwd(): string { return this.sessionManager?.getCwd?.() || process.cwd(); }
-  getContextUsage() { return { used: 0, limit: 128000 }; }
+  getContextUsage() {
+    const cw = (this.model as any)?.contextWindow || 0;
+    return { used: 0, limit: cw, contextWindow: cw, percent: cw > 0 ? 0 : null };
+  }
   getAvailableThinkingLevels(): ThinkingLevel[] { return ["none", "low", "high"]; }
-  getSessionStats() { return { turns: 0, messages: 0 }; }
+  getSessionStats() {
+    return {
+      turns: 0,
+      messages: 0,
+      userMessages: 0,
+      assistantMessages: 0,
+      toolCalls: 0,
+      toolResults: 0,
+      totalMessages: 0,
+      sessionFile: undefined as string | undefined,
+      sessionId: "pux-session",
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: 0,
+    };
+  }
   getLastAssistantText(): string { return ""; }
   getFollowUpMessages(): string[] { return []; }
   getSteeringMessages(): string[] { return []; }
@@ -454,8 +485,8 @@ export class PuxAgentSession {
     }
   }
   setAutoCompactionEnabled(enabled: boolean): void { this.autoCompactionEnabled = enabled; }
-  setSteeringMode(enabled: boolean): void { this.steeringMode = enabled; }
-  setFollowUpMode(mode: string): void { this.followUpMode = mode === "on"; }
+  setSteeringMode(mode: "all" | "one-at-a-time"): void { this.steeringMode = mode; }
+  setFollowUpMode(mode: "all" | "one-at-a-time"): void { this.followUpMode = mode; }
   async cycleModel(): Promise<any> {
     const models = this.scopedModels.length > 0
       ? this.scopedModels.map((s) => s.model)

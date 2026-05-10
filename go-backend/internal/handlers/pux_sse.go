@@ -89,14 +89,18 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 		}
 
 	case llamaeng.EventTypeAgentEnd:
+		data := map[string]interface{}{
+			"input":  event.Data.Input,
+			"output": event.Data.Output,
+			"cache":  event.Data.Cache,
+			"model":  event.Data.Model,
+		}
+		if event.Data.ContextWindow > 0 {
+			data["contextWindow"] = event.Data.ContextWindow
+		}
 		return &sseEvent{
 			Type: "agent_end",
-			Data: map[string]interface{}{
-				"input":  event.Data.Input,
-				"output": event.Data.Output,
-				"cache":  event.Data.Cache,
-				"model":  event.Data.Model,
-			},
+			Data: data,
 		}
 
 	case llamaeng.EventTypeCompactionStart:

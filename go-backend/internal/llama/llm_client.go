@@ -41,9 +41,10 @@ type LLMClient struct {
 	logger     *zap.Logger
 	modelName  string
 
-	mu         sync.RWMutex
-	loaded     bool
-	hasVision  *bool // nil = not checked yet, true/false = cached result
+	mu            sync.RWMutex
+	loaded        bool
+	hasVision     *bool // nil = not checked yet, true/false = cached result
+	contextWindow int   // 0 = not fetched yet, cached from /v1/models or /props
 }
 
 // LLMClientConfig holds configuration for creating an LLMClient.
@@ -224,6 +225,116 @@ func (e *LLMClient) checkVision() bool {
 	// Phase 2: Check /v1/models (OpenAI-compatible fallback).
 	// Some servers (vLLM, TGI, SGLang) expose model metadata through this endpoint.
 	return e.checkVisionViaModels(ctx)
+}
+
+// ContextWindow returns the model's maximum context length.
+// Fetches from /v1/models (OpenAI-compatible) or /props (llama-server) on first call, then caches.
+// Returns 0 if the value cannot be determined.
+func (e *LLMClient) ContextWindow() int {
+	e.mu.RLock()
+	if e.contextWindow > 0 {
+		cw := e.contextWindow
+		e.mu.RUnlock()
+		return cw
+	}
+	e.mu.RUnlock()
+
+	cw := e.fetchContextWindow()
+	if cw > 0 {
+		e.mu.Lock()
+		e.contextWindow = cw
+		e.mu.Unlock()
+	}
+	return cw
+}
+
+// fetchContextWindow tries multiple endpoints to discover the model's context length.
+func (e *LLMClient) fetchContextWindow() int {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Phase 1: Try /props (llama-server specific — has total_slots.context_length)
+	req, err := http.NewRequestWithContext(ctx, "GET", e.baseURL+"/props", nil)
+	if err == nil {
+		if e.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+e.apiKey)
+		}
+		resp, err := e.client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			var props struct {
+				TotalSlots struct {
+					ContextLength int `json:"context_length"`
+				} `json:"total_slots"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&props) == nil && props.TotalSlots.ContextLength > 0 {
+				e.logger.Info("ContextWindow: from /props", zap.Int("ctx", props.TotalSlots.ContextLength))
+				return props.TotalSlots.ContextLength
+			}
+		}
+	}
+
+	// Phase 2: Try /v1/models (OpenAI-compatible — returns context_length or max_model_len)
+	return e.fetchContextViaModels(ctx)
+}
+
+// fetchContextViaModels probes /v1/models for context_length metadata.
+func (e *LLMClient) fetchContextViaModels(ctx context.Context) int {
+	req, err := http.NewRequestWithContext(ctx, "GET", e.baseURL+"/v1/models", nil)
+	if err != nil {
+		return 0
+	}
+	if e.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+e.apiKey)
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		e.logger.Debug("ContextWindow: /v1/models not reachable", zap.Error(err))
+		return 0
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0
+	}
+
+	// Parse response — context_length may be at top level or per-model.
+	// OpenRouter: each model has "context_length"
+	// vLLM/SGLang: top-level "max_model_len" or per-model "max_model_len"
+	// llama-server: no context in /v1/models (only in /props)
+	var raw json.RawMessage
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return 0
+	}
+
+	// Try per-model: find our model and extract context_length
+	var result struct {
+		Data []struct {
+			ID            string `json:"id"`
+			ContextLength int    `json:"context_length"`
+			MaxModelLen   int    `json:"max_model_len"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err == nil {
+		for _, m := range result.Data {
+			if m.ID == e.modelName || m.ContextLength > 0 || m.MaxModelLen > 0 {
+				cl := m.ContextLength
+				if cl == 0 {
+					cl = m.MaxModelLen
+				}
+				if cl > 0 {
+					e.logger.Info("ContextWindow: from /v1/models", zap.String("model", m.ID), zap.Int("ctx", cl))
+					return cl
+				}
+			}
+		}
+	}
+
+	return 0
 }
 
 // checkVisionViaModels probes /v1/models for vision-capable model IDs.

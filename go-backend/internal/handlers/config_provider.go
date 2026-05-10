@@ -221,7 +221,7 @@ func (h *ConfigHandler) saveProviderKey(providerID, apiKey string) error {
 			"id": m.ID, "name": m.Name, "api": "openai-completions",
 			"reasoning": true, "input": []string{"text", "image"},
 			"cost":         map[string]float64{"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-			"contextWindow": 1048576, "maxTokens": 65536,
+			"contextWindow": 0, "maxTokens": 65536,
 		}
 	}
 	providerEntry["models"] = modelsArr

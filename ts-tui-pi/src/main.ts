@@ -53,6 +53,7 @@ try {
         name: m.name,
         provider: m.provider,
         reasoning: false,
+        contextWindow: m.contextWindow || 0,
       };
     }
   }

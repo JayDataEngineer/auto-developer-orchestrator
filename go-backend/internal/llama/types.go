@@ -172,6 +172,7 @@ type AgentEventData struct {
 	Output            float64                `json:"output,omitempty"`
 	Cache             float64                `json:"cache,omitempty"`
 	Model             string                 `json:"model,omitempty"`
+	ContextWindow     int                    `json:"contextWindow,omitempty"`
 	Streaming         bool                   `json:"streaming,omitempty"`
 	CompactedMessages int                    `json:"compactedMessages,omitempty"`
 	KeptMessages      int                    `json:"keptMessages,omitempty"`
