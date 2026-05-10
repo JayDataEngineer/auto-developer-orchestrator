@@ -19,6 +19,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/plan"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
 	"go.uber.org/zap"
 )
@@ -84,6 +85,9 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 
 	// Use per-agentId session path for history continuity
 	sessionPath := fmt.Sprintf("%s/.pux/sessions/%s.jsonl", projectPath, req.AgentId)
+
+	// Create event channel early so the ask_user tool can emit events to the TUI
+	events := make(chan core.AgentEvent, 256)
 
 	cfg := orchestrator.Config{
 		ProjectDir:    projectPath,
@@ -187,6 +191,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	}
 	cfg.VisionChain = visionChain
 	cfg.MCPClient = h.mcpMulti
+	cfg.Subscriber = events // ask_user tool emits to TUI via this channel
 
 	// Model resolver — lets sub-agents use role-specific models
 	cfg.ModelResolver = func(modelID string) core.LLMProvider {
@@ -276,10 +281,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	orchMsg := memoryPrefix + "User request: " + req.Message
+	// Inject active plan if one exists (survives context compaction)
+	planPrefix := plan.InjectActivePlan(projectPath)
 
-	// Event channel
-	events := make(chan core.AgentEvent, 256)
+	orchMsg := memoryPrefix + planPrefix + "User request: " + req.Message
+
+	// Event channel (created earlier in function, passed to orchestrator Config)
 
 	// Detached context
 	ctx, cancel := context.WithCancel(context.Background())

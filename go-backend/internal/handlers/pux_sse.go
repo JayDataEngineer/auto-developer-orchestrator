@@ -143,7 +143,15 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 		return &sseEvent{Type: "artifact_updated", Data: event.Data}
 
 	case llamaeng.EventTypePlanCreated:
-		return &sseEvent{Type: "plan_created", Data: event.Data}
+		return &sseEvent{
+			Type: "plan_created",
+			Data: map[string]interface{}{
+				"planId":    event.Data.ToolArgs["planId"],
+				"name":      event.Data.ToolArgs["name"],
+				"content":   event.Data.ToolArgs["content"],
+				"filePath":  event.Data.ToolArgs["filePath"],
+			},
+		}
 
 	case llamaeng.EventTypePlanUpdated:
 		return &sseEvent{Type: "plan_updated", Data: event.Data}

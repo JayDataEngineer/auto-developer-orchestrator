@@ -20,6 +20,7 @@ import (
 	mcptools "github.com/auto-developer-orchestrator/backend/internal/tools/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
+	plantool "github.com/auto-developer-orchestrator/backend/internal/tools/plan"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/nlp"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
@@ -92,6 +93,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// Register ask_user tool if subscriber channel is available (human-in-the-loop)
 	if cfg.Subscriber != nil {
 		ctoTools = append(ctoTools, asktool.NewAskUserTool(cfg.Subscriber))
+		ctoTools = append(ctoTools, plantool.NewPlanTool(cfg.Subscriber, cfg.ProjectDir))
 	}
 
 	if cfg.MemoryStore != nil {

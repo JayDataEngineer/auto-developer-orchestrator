@@ -489,6 +489,17 @@ export class PuxAgentSession {
         break;
       }
 
+      case "plan_created": {
+        this.emit({
+          type: "plan_created" as any,
+          planId: payload.planId || "",
+          name: payload.name || "",
+          content: payload.content || "",
+          filePath: payload.filePath || "",
+        } as any);
+        break;
+      }
+
       case "agent_spawned":
         if (payload?.agentId) {
           this.agentId = payload.agentId;
@@ -726,6 +737,19 @@ export class PuxAgentSession {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ questionId, response }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async submitPlanResponse(planId: string, action: string, feedback?: string): Promise<boolean> {
+    try {
+      const res = await this._fetch(`${this.serverUrl}/api/pux/plan-response`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planId, action, feedback: feedback || "" }),
       });
       return res.ok;
     } catch {

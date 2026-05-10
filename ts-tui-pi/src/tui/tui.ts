@@ -229,6 +229,8 @@ export class TUI extends Container {
 	private previousViewportTop = 0; // Track previous viewport top for resize-aware cursor moves
 	private fullRedrawCount = 0;
 	private stopped = false;
+	private chatScrollOffset = 0; // How many lines scrolled up from bottom (0 = at bottom)
+	private lastRenderedLineCount = 0; // Track content growth to reset scroll
 
 	// Overlay stack for modal components rendered on top of base content
 	private focusOrderCounter = 0;
@@ -494,6 +496,18 @@ export class TUI extends Container {
 			data = current;
 		}
 
+		// Handle mouse scroll events (SGR mode: \x1b[<64;X;YM = scroll up, \x1b[<65;X;YM = scroll down)
+		const scrollMatch = data.match(/^\x1b\[<(64|65);\d+;\d+[Mm]$/);
+		if (scrollMatch) {
+			const button = parseInt(scrollMatch[1]!, 10);
+			if (button === 64) {
+				this.scrollChat(-3); // Scroll up 3 lines
+			} else if (button === 65) {
+				this.scrollChat(3); // Scroll down 3 lines
+			}
+			return;
+		}
+
 		// Consume terminal cell size responses without blocking unrelated input.
 		if (this.consumeCellSizeResponse(data)) {
 			return;
@@ -549,6 +563,31 @@ export class TUI extends Container {
 		this.invalidate();
 		this.requestRender();
 		return true;
+	}
+
+	/** Scroll chat viewport by delta lines (negative = up, positive = down) */
+	scrollChat(delta: number): void {
+		const height = this.terminal.rows;
+		const contentLines = this.lastRenderedLineCount;
+		const maxScroll = Math.max(0, contentLines - height);
+		const newOffset = Math.max(0, Math.min(maxScroll, this.chatScrollOffset - delta));
+		if (newOffset !== this.chatScrollOffset) {
+			this.chatScrollOffset = newOffset;
+			this.requestRender();
+		}
+	}
+
+	/** Reset scroll offset to bottom (called when new content arrives or user types) */
+	resetScroll(): void {
+		if (this.chatScrollOffset > 0) {
+			this.chatScrollOffset = 0;
+			this.requestRender();
+		}
+	}
+
+	/** Get current scroll offset (for external consumers like interactive-mode) */
+	getScrollOffset(): number {
+		return this.chatScrollOffset;
 	}
 
 	/**
@@ -861,6 +900,27 @@ export class TUI extends Container {
 
 		// Render all components to get new lines
 		let newLines = this.render(width);
+
+		// Reset scroll offset if new content was added (content grew)
+		if (newLines.length > this.lastRenderedLineCount) {
+			this.chatScrollOffset = 0;
+		}
+		this.lastRenderedLineCount = newLines.length;
+
+		// Apply scroll offset: show lines shifted up from bottom
+		if (this.chatScrollOffset > 0 && newLines.length > height) {
+			const effectiveOffset = Math.min(this.chatScrollOffset, newLines.length - height);
+			if (effectiveOffset > 0) {
+				const scrollIndicator = `\x1b[2m─── ↑ ${effectiveOffset} line${effectiveOffset > 1 ? "s" : ""} above ───\x1b[0m`;
+				const startIdx = Math.max(0, newLines.length - height - effectiveOffset);
+				const visibleLines = newLines.slice(startIdx, startIdx + height);
+				// Replace first line with scroll indicator
+				if (visibleLines.length > 0) {
+					visibleLines[0] = scrollIndicator;
+				}
+				newLines = visibleLines;
+			}
+		}
 
 		// Composite overlays into the rendered lines (before differential compare)
 		if (this.overlayStack.length > 0) {

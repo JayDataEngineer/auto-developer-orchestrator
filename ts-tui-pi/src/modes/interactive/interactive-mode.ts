@@ -2019,6 +2019,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
+		this.defaultEditor.onAction("app.task.background", () => this.handleBackgroundTask());
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -2230,6 +2231,9 @@ export class InteractiveMode {
 			// First, move any pending bash components to chat
 			this.flushPendingBashComponents();
 
+			// Reset scroll to bottom when user sends a message
+			this.ui.resetScroll();
+
 			if (this.onInputCallback) {
 				this.onInputCallback(text);
 			}
@@ -2384,6 +2388,30 @@ export class InteractiveMode {
 				break;
 
 			case "tool_execution_start": {
+				// Sub-agent tool calls are rendered with agent name prefix
+				if ((event as any).agentName) {
+					const agentName = (event as any).agentName;
+					let component = this.pendingTools.get(event.toolCallId);
+					if (!component) {
+						component = new ToolExecutionComponent(
+							`[${agentName}] ${event.toolName}`,
+							event.toolCallId,
+							event.args,
+							{
+								showImages: this.settingsManager.getShowImages(),
+							},
+							this.getRegisteredToolDefinition(event.toolName),
+							this.ui,
+							this.sessionManager.getCwd(),
+						);
+						component.setExpanded(this.toolOutputExpanded);
+						this.chatContainer.addChild(component);
+						this.pendingTools.set(event.toolCallId, component);
+					}
+					component.markExecutionStarted();
+					this.ui.requestRender();
+					break;
+				}
 				let component = this.pendingTools.get(event.toolCallId);
 				if (!component) {
 					component = new ToolExecutionComponent(
@@ -2422,6 +2450,64 @@ export class InteractiveMode {
 					this.pendingTools.delete(event.toolCallId);
 					this.ui.requestRender();
 				}
+				break;
+			}
+
+			case "task_backgrounded": {
+				// Ctrl+B was pressed — clean up streaming state
+				// agent_end will follow immediately after this event
+				if (this.loadingAnimation) {
+					this.loadingAnimation.stop();
+					this.loadingAnimation = undefined;
+					this.statusContainer.clear();
+				}
+				this.pendingTools.clear();
+				this.ui.requestRender();
+				break;
+			}
+
+			case "user_question": {
+				// AI asked a question — show interactive overlay
+				await this.handleUserQuestion(event as any);
+				break;
+			}
+
+			case "plan_created": {
+				await this.handlePlanCreated(event as any);
+				break;
+			}
+
+			case "subagent_start": {
+				// Sub-agent started — show delegation status in status bar
+				const agentName = (event as any).agentName || "agent";
+				const task = (event as any).task || "";
+				const taskPreview = task.length > 60 ? task.slice(0, 60) + "..." : task;
+				if (this.statusContainer) {
+					this.statusContainer.clear();
+					const delegateText = new Text(theme.fg("accent", `  Delegating to ${theme.bold(agentName)}...`) + (taskPreview ? theme.fg("muted", ` ${taskPreview}`) : ""));
+					this.statusContainer.addChild(delegateText);
+				}
+				this.ui.requestRender();
+				break;
+			}
+
+			case "subagent_end": {
+				// Sub-agent finished — update status
+				const agentName = (event as any).agentName || "agent";
+				const status = (event as any).status || "completed";
+				if (this.statusContainer && status === "completed") {
+					this.statusContainer.clear();
+					const doneText = new Text(theme.fg("success", `  ${agentName} completed`));
+					this.statusContainer.addChild(doneText);
+					// Clear after brief display
+					setTimeout(() => {
+						if (this.statusContainer && !this.session.isStreaming) {
+							this.statusContainer.clear();
+							this.ui.requestRender();
+						}
+					}, 1500);
+				}
+				this.ui.requestRender();
 				break;
 			}
 
@@ -2785,7 +2871,12 @@ export class InteractiveMode {
 		if (now - this.lastSigintTime < 500) {
 			void this.shutdown();
 		} else {
+			// If agent is streaming, abort it on first Ctrl+C
+			if (this.session.isStreaming) {
+				this.session.abort();
+			}
 			this.clearEditor();
+			this.ui.resetScroll();
 			this.lastSigintTime = now;
 		}
 	}
@@ -2896,6 +2987,293 @@ export class InteractiveMode {
 		} else {
 			this.showStatus(`Restored ${restored} queued message${restored > 1 ? "s" : ""} to editor`);
 		}
+	}
+
+	/**
+	 * Handle Ctrl+B — send current streaming task to background.
+	 * The backend continues processing (uses context.Background()),
+	 * but the SSE reader is closed and the TUI returns to input mode.
+	 */
+	private handleBackgroundTask(): void {
+		if (!this.session.isStreaming) {
+			this.showStatus("No task running to background");
+			return;
+		}
+
+		// Clean up streaming state
+		if (this.loadingAnimation) {
+			this.loadingAnimation.stop();
+			this.loadingAnimation = undefined;
+		}
+
+		// Show status in chat before backgrounding
+		if (this.streamingComponent) {
+			this.streamingComponent = undefined;
+			this.streamingMessage = undefined;
+		}
+		this.statusContainer.clear();
+
+		// Add background indicator to chat
+		const bgText = new Text(theme.fg("warning", "Task moved to background (Ctrl+B). Backend continues processing."));
+		this.chatContainer.addChild(bgText);
+		this.showStatus("Task backgrounded — backend continues. Start a new prompt or wait.");
+
+		// Call background() on session — aborts SSE reader, emits events
+		(this.session as any).background?.();
+		this.ui.requestRender();
+	}
+
+	/**
+	 * Handle user_question event from ask_user tool.
+	 * Shows a SelectList overlay with options (if any) or enables editor for free-text.
+	 * Submits the response back to the backend via POST /api/pux/user-response.
+	 */
+	private async handleUserQuestion(event: {
+		questionId: string;
+		question: string;
+		options: string[];
+		allowFreeText: boolean;
+		defaultAnswer: string;
+	}): Promise<void> {
+		const { questionId, question, options, allowFreeText, defaultAnswer } = event;
+
+		// Pause the loading animation while we wait for user input
+		if (this.loadingAnimation) {
+			this.loadingAnimation.stop();
+			this.loadingAnimation = undefined;
+		}
+		this.statusContainer.clear();
+
+		// Show question in chat
+		const questionText = new Text(theme.fg("accent", `? ${question}`), 0, 0);
+		this.chatContainer.addChild(questionText);
+
+		if (options.length > 0) {
+			// Multiple choice — show SelectList overlay
+			const items: SelectItem[] = options.map((opt, i) => ({
+				value: opt,
+				label: `  ${i + 1}. ${opt}`,
+				description: defaultAnswer === opt ? "(default)" : undefined,
+			}));
+			if (allowFreeText) {
+				items.push({
+					value: "__free_text__",
+					label: "  Type custom answer...",
+					description: "Enter your own response",
+				});
+			}
+
+			const list = new SelectList(items, Math.min(options.length + 2, 8), {
+				selectedPrefix: (text: string) => theme.fg("accent", text),
+				selectedText: (text: string) => theme.fg("accent", text),
+				description: (text: string) => theme.fg("dim", text),
+				scrollInfo: (text: string) => theme.fg("dim", text),
+				noMatch: (text: string) => theme.fg("dim", text),
+			});
+
+			const overlay = this.ui.showOverlay(list, {
+				position: "bottom",
+				borderStyle: "single",
+				borderColor: theme.getAccentColor?.() ?? "\x1b[36m",
+			});
+
+			let resolved = false;
+
+			const cleanup = () => {
+				if (!resolved) {
+					resolved = true;
+					overlay.close();
+					this.ui.requestRender();
+				}
+			};
+
+			list.onSelect = async (item: SelectItem) => {
+				cleanup();
+				if (item.value === "__free_text__") {
+					// Switch to free-text mode
+					await this.handleUserQuestionFreeText(questionId, question);
+				} else {
+					const response = item.value;
+					const answerText = new Text(theme.fg("success", `  → ${response}`), 0, 0);
+					this.chatContainer.addChild(answerText);
+					this.ui.requestRender();
+					await (this.session as any).submitUserResponse?.(questionId, response);
+				}
+			};
+
+			list.onCancel = async () => {
+				cleanup();
+				// Cancel = use default or empty
+				const response = defaultAnswer || "(cancelled)";
+				const answerText = new Text(theme.fg("dim", `  → ${response}`), 0, 0);
+				this.chatContainer.addChild(answerText);
+				this.ui.requestRender();
+				await (this.session as any).submitUserResponse?.(questionId, response);
+			};
+
+			this.ui.requestRender();
+		} else {
+			// No options — free text only
+			await this.handleUserQuestionFreeText(questionId, question);
+		}
+	}
+
+	/**
+	 * Show editor for free-text answer to an ask_user question.
+	 * Sets the editor placeholder and waits for Enter to submit.
+	 */
+	private async handleUserQuestionFreeText(questionId: string, question: string): Promise<void> {
+		// Show prompt for the user to type
+		const promptText = new Text(theme.fg("dim", `  Type your answer (Enter to submit):`), 0, 0);
+		this.chatContainer.addChild(promptText);
+		this.ui.requestRender();
+
+		// Focus the editor and wait for submission
+		return new Promise((resolve) => {
+			const originalOnSubmit = this.editor.onSubmit;
+			const originalOnEscape = this.defaultEditor.onEscape;
+
+			this.editor.onSubmit = async (text: string) => {
+				this.editor.onSubmit = originalOnSubmit;
+				this.defaultEditor.onEscape = originalOnEscape;
+
+				const response = text.trim() || "(no answer)";
+				const answerText = new Text(theme.fg("success", `  → ${response}`), 0, 0);
+				this.chatContainer.addChild(answerText);
+				this.editor.setText("");
+				this.ui.requestRender();
+
+				await (this.session as any).submitUserResponse?.(questionId, response);
+				resolve();
+			};
+
+			this.defaultEditor.onEscape = () => {
+				this.editor.onSubmit = originalOnSubmit;
+				this.defaultEditor.onEscape = originalOnEscape;
+
+				const answerText = new Text(theme.fg("dim", `  → (skipped)`), 0, 0);
+				this.chatContainer.addChild(answerText);
+				this.ui.requestRender();
+
+				(this.session as any).submitUserResponse?.(questionId, "(skipped)").catch(() => {});
+				resolve();
+			};
+		});
+	}
+
+	/**
+	 * Handle plan_created event — render plan markdown and show approve/refine/cancel selector.
+	 */
+	private async handlePlanCreated(event: {
+		planId: string;
+		name: string;
+		content: string;
+		filePath: string;
+	}): Promise<void> {
+		const { planId, name, content, filePath } = event;
+
+		// Pause loading animation while waiting for approval
+		if (this.loadingAnimation) {
+			this.loadingAnimation.stop();
+		}
+
+		// Render plan in chat area
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new DynamicBorder((t) => theme.fg("accent", t)));
+		this.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", `Plan: ${name}`)), 1, 0));
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Markdown(content, 1, 1, this.getMarkdownThemeWithSettings()));
+		this.chatContainer.addChild(new DynamicBorder((t) => theme.fg("accent", t)));
+		this.chatContainer.addChild(new Text(theme.fg("dim", `  Saved: ${filePath}`), 1, 0));
+		this.chatContainer.addChild(new Spacer(1));
+		this.ui.requestRender();
+
+		// Show approve/refine/cancel selector
+		const puxSession = this.session as any;
+		if (!puxSession.submitPlanResponse) return;
+
+		await new Promise<void>((resolve) => {
+			const items = [
+				{ value: "approve", label: "  Approve Plan", description: "Execute the plan as written" },
+				{ value: "refine", label: "  Refine Plan", description: "Provide feedback to revise the plan" },
+				{ value: "cancel", label: "  Cancel Plan", description: "Discard the plan and stop" },
+			];
+
+			const list = new SelectList(items, items.length, {
+				selectedPrefix: () => theme.fg("accent", "→"),
+				selectedText: (t) => theme.inverse(t),
+				description: (t) => theme.fg("dim", t),
+				scrollInfo: (t) => theme.fg("dim", t),
+				noMatch: (t) => theme.fg("dim", t),
+			});
+
+			list.onSelect = async (item) => {
+				this.ui.hideOverlay();
+
+				const action = item.value;
+				let feedback = "";
+
+				if (action === "refine") {
+					// Let user type feedback in editor
+					feedback = await this.promptForRefineFeedback();
+				}
+
+				// Show selected action in chat
+				const actionLabels: Record<string, string> = {
+					approve: "Approved",
+					refine: "Refining",
+					cancel: "Cancelled",
+				};
+				const actionLabel = actionLabels[action] || action;
+				this.chatContainer.addChild(new Text(theme.fg("accent", `  ${actionLabel}${feedback ? `: ${feedback.slice(0, 80)}` : ""}`), 1, 0));
+				this.ui.requestRender();
+
+				await puxSession.submitPlanResponse(planId, action, feedback);
+				resolve();
+			};
+
+			list.onCancel = async () => {
+				this.ui.hideOverlay();
+				this.chatContainer.addChild(new Text(theme.fg("dim", `  Plan cancelled`), 1, 0));
+				this.ui.requestRender();
+				await puxSession.submitPlanResponse(planId, "cancel", "");
+				resolve();
+			};
+
+			this.ui.showOverlay(list, {
+				anchor: "bottom-center",
+				margin: { top: 0, bottom: 6 },
+			});
+			this.ui.setFocus(list);
+		});
+	}
+
+	/**
+	 * Prompt user for refine feedback using the editor.
+	 */
+	private async promptForRefineFeedback(): Promise<string> {
+		return new Promise<string>((resolve) => {
+			const promptText = new Text(theme.fg("dim", `  Type your feedback for the plan (Enter to submit):`), 0, 0);
+			this.chatContainer.addChild(promptText);
+			this.ui.requestRender();
+
+			const originalOnSubmit = this.editor.onSubmit;
+			const originalOnEscape = this.defaultEditor.onEscape;
+
+			this.editor.onSubmit = (text: string) => {
+				this.editor.onSubmit = originalOnSubmit;
+				this.defaultEditor.onEscape = originalOnEscape;
+				this.editor.setText("");
+				resolve(text.trim() || "Please revise the plan");
+			};
+
+			this.defaultEditor.onEscape = () => {
+				this.editor.onSubmit = originalOnSubmit;
+				this.defaultEditor.onEscape = originalOnEscape;
+				this.editor.setText("");
+				resolve("Please revise the plan");
+			};
+		});
 	}
 
 	private updateEditorBorderColor(): void {
@@ -3075,6 +3453,8 @@ export class InteractiveMode {
 				this.ui.hideOverlay();
 				if (item.value === "__new__") {
 					puxSession.agentId = undefined;
+					this.chatContainer.clear();
+					this.ui.requestRender();
 					this.showStatus("Starting new session.");
 				} else {
 					const sess = sessionMap.get(item.value);
@@ -3244,7 +3624,9 @@ export class InteractiveMode {
 	 * Clears both session queue and compaction queue.
 	 */
 	private clearAllQueues(): { steering: string[]; followUp: string[] } {
-		const { steering, followUp } = this.session.clearQueue();
+		const cleared = this.session.clearQueue?.();
+		const steering = (cleared as any)?.steering ?? [];
+		const followUp = (cleared as any)?.followUp ?? [];
 		const compactionSteering = this.compactionQueuedMessages
 			.filter((msg) => msg.mode === "steer")
 			.map((msg) => msg.text);

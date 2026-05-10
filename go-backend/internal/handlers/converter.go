@@ -22,6 +22,9 @@ func convertCoreEventToLlama(evt core.AgentEvent) llama.AgentEvent {
 			Model:             evt.Data.Model,
 			CompactedMessages: evt.Data.CompactedMessages,
 			KeptMessages:      evt.Data.KeptMessages,
+			AgentName:         evt.Data.AgentName,
+			Task:              evt.Data.Task,
+			Status:            evt.Data.Status,
 		},
 	}
 }

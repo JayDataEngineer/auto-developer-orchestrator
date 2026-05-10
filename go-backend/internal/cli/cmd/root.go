@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	serverURL string
-	outputFmt string
+	serverURL   string
+	outputFmt   string
 	projectName string
+	orgName     string
 )
 
 // rootCmd is the base command. Running `orch` with no subcommand launches chat TUI.
@@ -27,6 +28,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&serverURL, "server", envOr("ORCH_SERVER_URL", "http://localhost:3847"), "Backend URL")
 	rootCmd.PersistentFlags().StringVarP(&outputFmt, "output", "o", "text", "Output format: text|json")
 	rootCmd.PersistentFlags().StringVarP(&projectName, "project", "p", envOr("ORCH_PROJECT", ""), "Project name")
+	rootCmd.PersistentFlags().StringVar(&orgName, "org", "", "Organization to use (directory name under ~/Documents/programs/dev/ with pux.yaml)")
 
 	// Register 'chat' as an alias for the default TUI mode
 	rootCmd.AddCommand(&cobra.Command{

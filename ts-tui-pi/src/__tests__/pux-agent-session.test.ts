@@ -684,4 +684,90 @@ describe("PuxAgentSession", () => {
     const agentEnds = events.filter((e: any) => e.type === "agent_end");
     expect(agentEnds.length).toBe(1);
   });
+
+  // ---- Sub-agent event handling ----
+
+  test("handles subagent_start events", async () => {
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        sseResponse(
+          sseEvent("subagent_start", JSON.stringify({ agentName: "sarah", task: "research AI papers", toolName: "delegate_to" })),
+          sseTextDelta("Done"),
+          sseAgentEnd(),
+        )
+      )
+    );
+
+    const events: any[] = [];
+    session.subscribe((e: any) => events.push(e));
+
+    await session.prompt("Do research");
+
+    const subStarts = events.filter((e: any) => e.type === "subagent_start");
+    expect(subStarts.length).toBe(1);
+    expect(subStarts[0].agentName).toBe("sarah");
+    expect(subStarts[0].task).toBe("research AI papers");
+  });
+
+  test("handles subagent_end events", async () => {
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        sseResponse(
+          sseEvent("subagent_start", JSON.stringify({ agentName: "jake", task: "browse web" })),
+          sseEvent("subagent_end", JSON.stringify({ agentName: "jake", status: "completed", error: "" })),
+          sseTextDelta("Here's what I found"),
+          sseAgentEnd(),
+        )
+      )
+    );
+
+    const events: any[] = [];
+    session.subscribe((e: any) => events.push(e));
+
+    await session.prompt("Search web");
+
+    const subEnds = events.filter((e: any) => e.type === "subagent_end");
+    expect(subEnds.length).toBe(1);
+    expect(subEnds[0].agentName).toBe("jake");
+    expect(subEnds[0].status).toBe("completed");
+  });
+
+  test("sub-agent tool events carry agentName", async () => {
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        sseResponse(
+          sseEvent("subagent_start", JSON.stringify({ agentName: "sarah", task: "research" })),
+          sseEvent("tool_execution_start", JSON.stringify({
+            toolName: "mcp__research__search",
+            toolId: "sub_001",
+            args: { query: "AI papers 2025" },
+            agentName: "sarah",
+          })),
+          sseEvent("tool_execution_end", JSON.stringify({
+            toolName: "mcp__research__search",
+            toolId: "sub_001",
+            result: "found 5 papers",
+            agentName: "sarah",
+          })),
+          sseEvent("subagent_end", JSON.stringify({ agentName: "sarah", status: "completed" })),
+          sseTextDelta("Here are the papers"),
+          sseAgentEnd(),
+        )
+      )
+    );
+
+    const events: any[] = [];
+    session.subscribe((e: any) => events.push(e));
+
+    await session.prompt("Find papers");
+
+    const toolStarts = events.filter((e: any) => e.type === "tool_execution_start" && (e as any).agentName);
+    expect(toolStarts.length).toBe(1);
+    expect(toolStarts[0].agentName).toBe("sarah");
+    expect(toolStarts[0].toolName).toBe("mcp__research__search");
+
+    const toolEnds = events.filter((e: any) => e.type === "tool_execution_end" && (e as any).agentName);
+    expect(toolEnds.length).toBe(1);
+    expect(toolEnds[0].agentName).toBe("sarah");
+  });
 });

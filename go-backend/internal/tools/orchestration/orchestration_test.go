@@ -1,12 +1,14 @@
 package orchestration
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
+	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
 
 // makeRole is a helper to create a single-entry role map.
@@ -192,5 +194,89 @@ func TestResolveRole_DefaultOverrides(t *testing.T) {
 	}
 	if temp2 != 0.7 {
 		t.Errorf("expected explicit temp 0.7, got %f", temp2)
+	}
+}
+
+// ---- Tests for sub-agent event forwarding helpers ----
+
+func TestExtractAgentName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"sarah", "sarah"},
+		{"jake", "jake"},
+		{"marcus", "marcus"},
+		{"", "agent"},
+		{"You are a helpful assistant that researches topics", "You are a helpful as..."},
+		{"short", "short"},
+	}
+	for _, tt := range tests {
+		got := extractAgentName(tt.input)
+		if got != tt.expected {
+			t.Errorf("extractAgentName(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestTruncateTask(t *testing.T) {
+	short := "search the web for recent AI papers"
+	if got := truncateTask(short, 120); got != short {
+		t.Errorf("expected short task unchanged, got %q", got)
+	}
+	long := string(make([]byte, 200))
+	if got := truncateTask(long, 120); len(got) != 123 { // 120 + "..."
+		t.Errorf("expected 123 chars, got %d", len(got))
+	}
+}
+
+func TestRunDelegate_EmitsSubAgentEvents(t *testing.T) {
+	// Verify that RunDelegate emits subagent_start and subagent_end events
+	// to the subscriber channel when a subscriber is set.
+	events := make(chan core.AgentEvent, 32)
+
+	runner := &ParallelRunner{
+		provider:   nil, // will fail but events should still emit
+		toolSpecs:  []core.OpenAITool{},
+		tasks:      make(map[string]*asyncTask),
+		subscriber: events,
+	}
+	runner.SetLogger(func(format string, args ...interface{}) {})
+
+	// RunDelegate with no tools should still emit start+end events
+	_, err := runner.RunDelegate(context.Background(), "test task", "sarah", []string{"nonexistent_tool"}, 5, 0.4, "")
+
+	// Should get subagent_start
+	evt := <-events
+	if evt.Type != core.EventTypeSubAgentStart {
+		t.Errorf("expected subagent_start, got %q", evt.Type)
+	}
+	if evt.Data.AgentName != "sarah" {
+		t.Errorf("expected agentName 'sarah', got %q", evt.Data.AgentName)
+	}
+
+	// Should get subagent_end
+	evt = <-events
+	if evt.Type != core.EventTypeSubAgentEnd {
+		t.Errorf("expected subagent_end, got %q", evt.Type)
+	}
+	if evt.Data.Status != "error" {
+		t.Errorf("expected status 'error' for no-tools case, got %q", evt.Data.Status)
+	}
+
+	if err == nil {
+		t.Error("expected error from RunDelegate with no matching tools")
+	}
+}
+
+func TestSetSubscriber(t *testing.T) {
+	runner := NewParallelRunner(nil, nil, nil, nil, 0, nil)
+	if runner.subscriber != nil {
+		t.Error("expected nil subscriber initially")
+	}
+	ch := make(chan core.AgentEvent, 16)
+	runner.SetSubscriber(ch)
+	if runner.subscriber != ch {
+		t.Error("expected subscriber to be set")
 	}
 }

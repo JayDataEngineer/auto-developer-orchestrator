@@ -96,6 +96,9 @@ export class ProcessTerminal implements Terminal {
 		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
 		process.stdout.write("\x1b[?2004h");
 
+		// Enable mouse scroll reporting (button 4/5 only in SGR mode)
+		process.stdout.write("\x1b[?1000h\x1b[?1006h");
+
 		// Switch to alternate screen buffer to preserve terminal history on exit
 		if (this._alternateScreen) {
 			process.stdout.write("\x1b[?1049h");
@@ -267,6 +270,9 @@ export class ProcessTerminal implements Terminal {
 	}
 
 	stop(): void {
+		// Disable mouse scroll reporting
+		process.stdout.write("\x1b[?1006l\x1b[?1000l");
+
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
 

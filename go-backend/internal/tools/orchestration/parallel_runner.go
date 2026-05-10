@@ -46,6 +46,9 @@ type ParallelRunner struct {
 	depth               int
 	maxDepth            int // default 3
 
+	// Parent SSE subscriber — sub-agent events are forwarded here for TUI visibility
+	subscriber chan<- core.AgentEvent
+
 	mu      sync.Mutex
 	tasks   map[string]*asyncTask
 	wg      sync.WaitGroup
@@ -100,9 +103,25 @@ func (r *ParallelRunner) SetDepth(depth int) {
 	}
 }
 
+// SetSubscriber sets the parent SSE subscriber channel for forwarding sub-agent events.
+func (r *ParallelRunner) SetSubscriber(ch chan<- core.AgentEvent) {
+	r.subscriber = ch
+}
+
 // RunDelegate runs a synchronous sub-agent.
 func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
-	r.logger("SYNC_DELEGATE: task=%q tools=%v model=%q", task, toolNames, modelID)
+	agentName := extractAgentName(instructions)
+	r.logger("SYNC_DELEGATE: task=%q agent=%s tools=%v model=%q", task, agentName, toolNames, modelID)
+
+	// Emit subagent_start to parent subscriber
+	core.SendEvent(r.subscriber, core.AgentEvent{
+		Type: core.EventTypeSubAgentStart,
+		Data: core.AgentEventData{
+			AgentName: agentName,
+			Task:      truncateTask(task, 120),
+			ToolName:  "delegate_to",
+		},
+	})
 
 	// Filter tools to only those requested
 	var selectedTools []core.OpenAITool
@@ -116,6 +135,10 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		}
 	}
 	if len(selectedTools) == 0 {
+		core.SendEvent(r.subscriber, core.AgentEvent{
+			Type: core.EventTypeSubAgentEnd,
+			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames)},
+		})
 		return nil, core.NewToolError("delegate_to", fmt.Sprintf("none of the requested tools were found: %v", toolNames))
 	}
 
@@ -157,7 +180,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		runErr = loop.Run(ctx, task, events)
 	}()
 
-	// Drain events and build result
+	// Drain events: accumulate text result + forward tool events to parent subscriber
 	var finalText string
 	evtDone := false
 	for !evtDone {
@@ -178,8 +201,28 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 				finalText += evt.Data.Text
 			}
+			// Forward tool events to parent subscriber with agent context
+			if r.subscriber != nil && (evt.Type == core.EventTypeToolStart || evt.Type == core.EventTypeToolEnd || evt.Type == core.EventTypeToolUpdate) {
+				forwarded := evt
+				forwarded.Data.AgentName = agentName
+				core.SendEvent(r.subscriber, forwarded)
+			}
 		}
 	}
+
+	// Emit subagent_end
+	endStatus := "completed"
+	if runErr != nil {
+		endStatus = "error"
+	}
+	core.SendEvent(r.subscriber, core.AgentEvent{
+		Type: core.EventTypeSubAgentEnd,
+		Data: core.AgentEventData{
+			AgentName: agentName,
+			Status:    endStatus,
+			Task:      truncateTask(task, 120),
+		},
+	})
 
 	if runErr != nil {
 		return map[string]any{"error": runErr.Error(), "partial_result": finalText}, runErr
@@ -198,6 +241,8 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 		return nil, fmt.Errorf("max delegation depth (%d) reached", r.maxDepth)
 	}
 
+	agentName := filepath.Base(divisionPath)
+
 	// Resolve division path relative to project root
 	absPath := divisionPath
 	if !filepath.IsAbs(absPath) {
@@ -212,6 +257,16 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 
 	r.logger("DIVISION_DELEGATE: path=%s depth=%d model=%q", absPath, r.depth+1, modelID)
 
+	// Emit subagent_start
+	core.SendEvent(r.subscriber, core.AgentEvent{
+		Type: core.EventTypeSubAgentStart,
+		Data: core.AgentEventData{
+			AgentName: agentName,
+			Task:      truncateTask(task, 120),
+			ToolName:  "delegate_to",
+		},
+	})
+
 	subOrch, err := r.orchestratorFactory(ctx, SubOrchestratorConfig{
 		DivisionPath: absPath,
 		ProjectDir:   r.projectDir,
@@ -220,6 +275,10 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 		ModelID:      modelID,
 	})
 	if err != nil {
+		core.SendEvent(r.subscriber, core.AgentEvent{
+			Type: core.EventTypeSubAgentEnd,
+			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: err.Error()},
+		})
 		return nil, fmt.Errorf("failed to create division orchestrator: %w", err)
 	}
 	defer subOrch.Close()
@@ -254,8 +313,28 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 				finalText += evt.Data.Text
 			}
+			// Forward tool events to parent subscriber with agent context
+			if r.subscriber != nil && (evt.Type == core.EventTypeToolStart || evt.Type == core.EventTypeToolEnd || evt.Type == core.EventTypeToolUpdate) {
+				forwarded := evt
+				forwarded.Data.AgentName = agentName
+				core.SendEvent(r.subscriber, forwarded)
+			}
 		}
 	}
+
+	// Emit subagent_end
+	endStatus := "completed"
+	if runErr != nil {
+		endStatus = "error"
+	}
+	core.SendEvent(r.subscriber, core.AgentEvent{
+		Type: core.EventTypeSubAgentEnd,
+		Data: core.AgentEventData{
+			AgentName: agentName,
+			Status:    endStatus,
+			Task:      truncateTask(task, 120),
+		},
+	})
 
 	if runErr != nil {
 		return map[string]any{"error": runErr.Error(), "partial_result": finalText}, runErr
@@ -393,3 +472,46 @@ func (s *subSession) Fork(nodeID string) (core.Session, error) { return nil, fmt
 func (s *subSession) Compact(ctx context.Context, llmProvider interface{}) (string, error) { return "", nil }
 func (s *subSession) TruncateToolResults(keep int) (int, error) { return 0, nil } // no-op for ephemeral sub-sessions
 func (s *subSession) GetCurrentNode() string { return s.parent.ID() + "-sub" }
+
+// extractAgentName derives a display name from the instructions/role.
+// For role-based delegation, the instructions IS the role name (e.g. "sarah").
+// For custom instructions, returns the first word or "agent".
+func extractAgentName(instructions string) string {
+	if instructions == "" {
+		return "agent"
+	}
+	// If it looks like a role name (single word, lowercase), use it directly
+	if len(instructions) <= 30 && !containsSpace(instructions) {
+		return instructions
+	}
+	// Otherwise truncate to first line or first 20 chars
+	for i, c := range instructions {
+		if c == '\n' {
+			return truncateStr(instructions[:i], 20)
+		}
+	}
+	return truncateStr(instructions, 20)
+}
+
+func containsSpace(s string) bool {
+	for _, c := range s {
+		if c == ' ' || c == '\t' || c == '\n' {
+			return true
+		}
+	}
+	return false
+}
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
+func truncateTask(task string, maxLen int) string {
+	if len(task) <= maxLen {
+		return task
+	}
+	return task[:maxLen] + "..."
+}

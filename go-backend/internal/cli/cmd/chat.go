@@ -27,17 +27,35 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ts-tui-pi not found. Expected at %s or relative to repo root.", tuiDir)
 	}
 
+	// Resolve --org to project path
+	effectiveProject := projectName
+	effectiveCwd := ""
+	if orgName != "" {
+		orgPath, err := resolveOrgPath(orgName)
+		if err != nil {
+			return err
+		}
+		// Use org directory as both project name and cwd
+		effectiveProject = filepath.Base(orgPath)
+		effectiveCwd = orgPath
+	}
+
 	// Pass through --server and --project flags
 	tuiArgs := []string{"run", "src/main.ts"}
 	if serverURL != "" && serverURL != "http://localhost:3847" {
 		tuiArgs = append(tuiArgs, "--server", serverURL)
 	}
-	if projectName != "" {
-		tuiArgs = append(tuiArgs, "--project", projectName)
+	if effectiveProject != "" {
+		tuiArgs = append(tuiArgs, "--project", effectiveProject)
 	}
-	// Forward any additional positional args as --cwd
+	if effectiveCwd != "" {
+		tuiArgs = append(tuiArgs, "--cwd", effectiveCwd)
+	}
+	// Forward any additional positional args as --cwd (only if no --org)
 	for _, arg := range args {
-		tuiArgs = append(tuiArgs, "--cwd", arg)
+		if effectiveCwd == "" {
+			tuiArgs = append(tuiArgs, "--cwd", arg)
+		}
 	}
 
 	tuiCmd := exec.Command("bun", tuiArgs...)
@@ -73,4 +91,37 @@ func findRepoRoot(binPath string) string {
 		}
 		dir = parent
 	}
+}
+
+// resolveOrgPath finds the directory for a named organization.
+// Searches in order:
+// 1. ~/Documents/programs/dev/<name>/ (primary location)
+// 2. Relative to current working directory
+// The directory must contain pux.yaml to be valid.
+func resolveOrgPath(name string) (string, error) {
+	// Alias mapping: --org code → dev-bot, etc.
+	aliases := map[string]string{"code": "dev-bot", "dev": "dev-bot"}
+	if resolved, ok := aliases[name]; ok {
+		name = resolved
+	}
+
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		filepath.Join(home, "Documents", "programs", "dev", name),
+		filepath.Join(home, "Documents", "programs", "dev", name+"-bot"),
+	}
+	// Also check relative to cwd
+	cwd, _ := os.Getwd()
+	candidates = append(candidates,
+		filepath.Join(cwd, name),
+		filepath.Join(cwd, "..", name),
+	)
+
+	for _, dir := range candidates {
+		puxYaml := filepath.Join(dir, "pux.yaml")
+		if _, err := os.Stat(puxYaml); err == nil {
+			return dir, nil
+		}
+	}
+	return "", fmt.Errorf("organization '%s' not found. Looked for pux.yaml in: %s", name, strings.Join(candidates, ", "))
 }

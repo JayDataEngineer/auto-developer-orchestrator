@@ -117,6 +117,18 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private createCallFallback(): Component {
+		// Special rendering for delegation tools — show role + task
+		if (this.toolName === "delegate_to" || this.toolName === "delegate_async") {
+			const role = this.args?.instructions || this.args?.step || "agent";
+			const task = this.args?.task || "";
+			const taskPreview = task.length > 80 ? task.slice(0, 80) + "..." : task;
+			return new Text(
+				theme.fg("toolTitle", theme.bold(this.toolName)) +
+				theme.fg("accent", ` → ${role}`) +
+				(taskPreview ? theme.fg("muted", `: ${taskPreview}`) : ""),
+				0, 0,
+			);
+		}
 		return new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0);
 	}
 

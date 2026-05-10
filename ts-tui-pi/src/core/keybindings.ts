@@ -39,6 +39,7 @@ export interface AppKeybindings {
 	"app.session.rename": true;
 	"app.session.delete": true;
 	"app.session.deleteNoninvasive": true;
+	"app.task.background": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
@@ -131,6 +132,10 @@ export const KEYBINDINGS = {
 		defaultKeys: "ctrl+backspace",
 		description: "Delete session when query is empty",
 	},
+	"app.task.background": {
+		defaultKeys: "ctrl+b",
+		description: "Send current task to background",
+	},
 } as const satisfies KeybindingDefinitions;
 
 const KEYBINDING_NAME_MIGRATIONS = {
@@ -193,6 +198,7 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	renameSession: "app.session.rename",
 	deleteSession: "app.session.delete",
 	deleteSessionNoninvasive: "app.session.deleteNoninvasive",
+	taskBackground: "app.task.background",
 } as const satisfies Record<string, Keybinding>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

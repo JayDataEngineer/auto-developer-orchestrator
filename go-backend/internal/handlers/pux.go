@@ -18,6 +18,8 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/ask"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/plan"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
@@ -134,6 +136,8 @@ func (h *PuxHandler) SetLangfuse(lf *observability.LangfuseClient) {
 func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/prompt", h.Prompt)
 	r.Post("/respond", h.Respond)
+	r.Post("/user-response", h.UserResponse)
+	r.Post("/plan-response", h.PlanResponse)
 	r.Get("/tool-permissions", h.GetToolPermissions)
 	r.Put("/tool-permissions", h.SetToolPermission)
 	r.Get("/history", h.GetHistory)
@@ -197,7 +201,79 @@ func (h *PuxHandler) Respond(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// promptRequest is the request body for the prompt endpoint.
+// UserResponse handles responses to ask_user questions from the TUI.
+// POST /api/pux/user-response
+func (h *PuxHandler) UserResponse(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		QuestionID string `json:"questionId"`
+		Response   string `json:"response"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Invalid request body",
+		})
+		return
+	}
+	if req.QuestionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "questionId is required",
+		})
+		return
+	}
+
+	if ok := ask.PendingQuestions.Resolve(req.QuestionID, req.Response); !ok {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "No pending question found for this ID (may have timed out)",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+	})
+}
+
+// PlanResponse handles responses to create_plan approval requests from the TUI.
+// POST /api/pux/plan-response
+func (h *PuxHandler) PlanResponse(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PlanID   string `json:"planId"`
+		Action   string `json:"action"`   // "approve", "refine", "cancel"
+		Feedback string `json:"feedback"` // optional, for refine
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "Invalid request body",
+		})
+		return
+	}
+	if req.PlanID == "" || req.Action == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "planId and action are required",
+		})
+		return
+	}
+	if req.Action != "approve" && req.Action != "refine" && req.Action != "cancel" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "error": "action must be 'approve', 'refine', or 'cancel'",
+		})
+		return
+	}
+
+	if ok := plan.PendingPlans.Resolve(req.PlanID, plan.PlanResponse{
+		Action:   req.Action,
+		Feedback: req.Feedback,
+	}); !ok {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"success": false, "error": "No pending plan found for this ID (may have timed out)",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+	})
+}
 type promptRequest struct {
 	Message       string `json:"message"`
 	Project       string `json:"project"`
