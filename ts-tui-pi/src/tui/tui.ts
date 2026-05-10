@@ -497,6 +497,8 @@ export class TUI extends Container {
 		}
 
 		// Handle mouse scroll events (SGR mode: \x1b[<64;X;YM = scroll up, \x1b[<65;X;YM = scroll down)
+		// These come from ?1000h mouse tracking. With ?1007h (alternate scroll), scroll wheel
+		// sends Up/Down arrow keys instead — handled in the normal key path below.
 		const scrollMatch = data.match(/^\x1b\[<(64|65);\d+;\d+[Mm]$/);
 		if (scrollMatch) {
 			const button = parseInt(scrollMatch[1]!, 10);
@@ -506,6 +508,23 @@ export class TUI extends Container {
 				this.scrollChat(3); // Scroll down 3 lines
 			}
 			return;
+		}
+
+		// Handle scroll wheel via ?1007h alternate scroll mode.
+		// ?1007h converts scroll wheel to repeated Up/Down arrow keys.
+		// Only intercept when the chat area is actively scrolled (offset > 0).
+		// When not scrolled, arrows pass through to editor/components normally.
+		if (this.chatScrollOffset > 0) {
+			if (data === "\x1b[B" || data === "\x1bOB") { // Arrow Down
+				this.scrollChat(3);
+				return;
+			}
+		}
+		if (this.chatScrollOffset > 0) {
+			if (data === "\x1b[A" || data === "\x1bOA") { // Arrow Up
+				this.scrollChat(-3);
+				return;
+			}
 		}
 
 		// Consume terminal cell size responses without blocking unrelated input.
