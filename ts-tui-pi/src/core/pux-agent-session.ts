@@ -84,6 +84,7 @@ export class PuxAgentSession {
   public thinkingLevel: ThinkingLevel = "none";
   public scopedModels: Array<{ model: any; thinkingLevel?: ThinkingLevel }> = [];
   private _availableModels: any[] = [];
+  private _pendingQueue: Array<{ text: string; options?: any }> = [];
   public resourceLoader: any = {
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getExtensions: () => ({ extensions: [], errors: [], diagnostics: [] }),
@@ -177,7 +178,15 @@ export class PuxAgentSession {
 
   // ---- prompt (called from the main event loop: line 641) ----
 
-  async prompt(text: string, options?: { images?: any[] }): Promise<void> {
+  async prompt(text: string, options?: { images?: any[]; streamingBehavior?: string }): Promise<void> {
+    // If streaming and steer/followUp requested, queue the message
+    if (this.streaming && options?.streamingBehavior) {
+      this._pendingQueue.push({ text, options });
+      // Emit queue_update so TUI refreshes pending messages display
+      this.emit({ type: "queue_update" } as any);
+      return;
+    }
+
     // 1. Emit user message so TUI renders it
     const usrMsg = userMessage(text);
     this.emit({ type: "message_start", message: usrMsg });
@@ -284,8 +293,22 @@ export class PuxAgentSession {
         this.emit({ type: "message_end", message: errMsg });
       }
     } finally {
-      this.emit({ type: "agent_end", messages: [...this.messages] });
-      this.streaming = false;
+      if (this._backgrounded) {
+        // Task was backgrounded — emit backgrounded event, skip normal agent_end
+        this._backgrounded = false;
+        this.streaming = false;
+        this.emit({ type: "task_backgrounded" } as any);
+        this.emit({ type: "agent_end", messages: [...this.messages] });
+      } else {
+        this.emit({ type: "agent_end", messages: [...this.messages] });
+        this.streaming = false;
+        // Process pending queue — send next queued message
+        if (this._pendingQueue.length > 0) {
+          const next = this._pendingQueue.shift()!;
+          // Fire-and-forget: the next prompt runs in its own promise
+          this.prompt(next.text, next.options).catch(() => {});
+        }
+      }
     }
   }
 
@@ -319,29 +342,48 @@ export class PuxAgentSession {
           name: payload.toolName || "unknown",
           arguments: payload.args || {},
         };
-        this.emitMessageUpdate([toolCall]);
+        // If this tool event comes from a sub-agent, emit it with agentName context
+        if (payload.agentName) {
+          this.emit({
+            type: "tool_execution_start",
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            args: toolCall.arguments,
+            agentName: payload.agentName,
+          } as any);
+        } else {
+          this.emitMessageUpdate([toolCall]);
+        }
         break;
       }
 
       case "tool_execution_end": {
-        this.emit({
+        const endEvent: any = {
           type: "tool_execution_end",
           toolCallId: payload.toolId || "",
           toolName: payload.toolName || "",
           result: payload.result !== undefined ? payload.result : payload.error || "",
           isError: !!payload.error,
-        });
+        };
+        if (payload.agentName) {
+          endEvent.agentName = payload.agentName;
+        }
+        this.emit(endEvent);
         break;
       }
 
       case "tool_update": {
-        this.emit({
+        const updateEvent: any = {
           type: "tool_execution_update",
           toolCallId: payload.toolId || "",
           toolName: payload.toolName || "",
           args: {},
           partialResult: payload.text || "",
-        });
+        };
+        if (payload.agentName) {
+          updateEvent.agentName = payload.agentName;
+        }
+        this.emit(updateEvent);
         break;
       }
 
@@ -406,10 +448,46 @@ export class PuxAgentSession {
       case "artifact_updated":
       case "plan_created":
       case "plan_updated":
-      case "subagent_start":
-      case "subagent_end":
       case "approval_request":
         break;
+
+      case "subagent_start": {
+        const agentName = payload.agentName || "agent";
+        const task = payload.task || "";
+        this._activeSubAgents.set(agentName, { agentName, task, startTime: Date.now() });
+        this.emit({
+          type: "subagent_start" as any,
+          agentName,
+          task,
+          toolName: payload.toolName || "delegate_to",
+        } as any);
+        break;
+      }
+
+      case "subagent_end": {
+        const name = payload.agentName || "agent";
+        this._activeSubAgents.delete(name);
+        this.emit({
+          type: "subagent_end" as any,
+          agentName: name,
+          status: payload.status || "completed",
+          error: payload.error || "",
+        } as any);
+        break;
+      }
+
+      case "user_question": {
+        // AI asks the user a question — emit to TUI for overlay
+        this.emit({
+          type: "user_question" as any,
+          questionId: payload.questionId || "",
+          question: payload.question || "",
+          options: payload.options || [],
+          allowFreeText: payload.allowFreeText !== false,
+          defaultAnswer: payload.default || "",
+        } as any);
+        break;
+      }
 
       case "agent_spawned":
         if (payload?.agentId) {
@@ -418,6 +496,35 @@ export class PuxAgentSession {
           (this as any)._sessionId = payload.agentId;
         }
         break;
+
+      case "grind_attempt": {
+        this.emit({
+          type: "grind_attempt" as any,
+          agentName: payload.agentName || "",
+          task: payload.task || "",
+          status: payload.status || "running",
+        } as any);
+        break;
+      }
+
+      case "grind_verify": {
+        this.emit({
+          type: "grind_verify" as any,
+          agentName: payload.agentName || "",
+          task: payload.task || "",
+          status: payload.status || "fail",
+        } as any);
+        break;
+      }
+
+      case "grind_end": {
+        this.emit({
+          type: "grind_end" as any,
+          status: payload.status || "failed",
+          task: payload.task || "",
+        } as any);
+        break;
+      }
 
       default:
         break;
@@ -437,6 +544,26 @@ export class PuxAgentSession {
         // silently ignore handler errors
       }
     }
+  }
+
+  // ---- Background task support ----
+
+  private _backgrounded = false;
+
+  // Track active sub-agents for TUI visibility
+  private _activeSubAgents = new Map<string, { agentName: string; task: string; startTime: number }>();
+
+  /**
+   * Send the current streaming task to the background.
+   * Aborts the SSE reader (backend continues via context.Background()),
+   * then emits a backgrounded event so the TUI can return to input mode.
+   */
+  background(): void {
+    if (!this.streaming) return;
+    this._backgrounded = true;
+    // Abort the SSE reader — backend continues independently
+    // The prompt() catch/finally will see _backgrounded and skip agent_end
+    this.abortCtrl?.abort();
   }
 
   // ---- AgentSession stubs (no-ops for SSE-driven TUI) ----
@@ -585,6 +712,20 @@ export class PuxAgentSession {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project, agentId, title }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Submit a response to an ask_user question */
+  async submitUserResponse(questionId: string, response: string): Promise<boolean> {
+    try {
+      const res = await this._fetch(`${this.serverUrl}/api/pux/user-response`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionId, response }),
       });
       return res.ok;
     } catch {

@@ -13,6 +13,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/session"
 	"github.com/auto-developer-orchestrator/backend/internal/skills"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
+	asktool "github.com/auto-developer-orchestrator/backend/internal/tools/ask"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/face"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/graph"
@@ -48,6 +49,7 @@ type Config struct {
 	OrgRoles         map[string]*common.AgentRole // optional: org-specific employee roles
 	DBProvider       common.DBProvider          // optional: if set, registers graph/face tools for employees
 	LLMProvider      core.LLMProvider           // optional: if set, registers NLP tools for employees
+	Subscriber      chan<- core.AgentEvent      // optional: if set, ask_user tool can emit events to TUI
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -85,6 +87,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		file.NewGlobTool(cfg.FileOps),
 		meta.NewWaitTool(),
 		meta.NewYieldArtifactToolWithDB(cfg.ArtifactDB, cfg.ProjectDir, cfg.SandboxID),
+	}
+
+	// Register ask_user tool if subscriber channel is available (human-in-the-loop)
+	if cfg.Subscriber != nil {
+		ctoTools = append(ctoTools, asktool.NewAskUserTool(cfg.Subscriber))
 	}
 
 	if cfg.MemoryStore != nil {
@@ -163,6 +170,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		pr.SetProjectDir(cfg.ProjectDir)
 		pr.SetDepth(0)
 		pr.SetOrchestratorFactory(makeOrchestratorFactory(provider, cfg))
+		pr.SetSubscriber(cfg.Subscriber)
 		runner = pr
 	}
 
@@ -173,6 +181,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			orchestration.NewCollectResultsTool(runner),
 			orchestration.NewPlanTool(),
 			orchestration.NewSynthesizeTool(),
+			orchestration.NewGrindLoopTool(runner, cfg.BashExecutor, mcpResolver, cfg.OrgRoles, cfg.ModelResolver),
 		)
 		ctoToolReg = core.NewToolRegistry(ctoTools)
 		ctoToolReg.RegisterCommonAliases()

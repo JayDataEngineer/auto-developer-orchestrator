@@ -52,34 +52,46 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 		}
 
 	case llamaeng.EventTypeToolStart:
+		data := map[string]interface{}{
+			"toolName": event.Data.ToolName,
+			"args":     event.Data.ToolArgs,
+			"toolId":   event.Data.ToolID,
+		}
+		if event.Data.AgentName != "" {
+			data["agentName"] = event.Data.AgentName
+		}
 		return &sseEvent{
 			Type: "tool_execution_start",
-			Data: map[string]interface{}{
-				"toolName": event.Data.ToolName,
-				"args":     event.Data.ToolArgs,
-				"toolId":   event.Data.ToolID,
-			},
+			Data: data,
 		}
 
 	case llamaeng.EventTypeToolEnd:
+		data := map[string]interface{}{
+			"toolName": event.Data.ToolName,
+			"toolId":   event.Data.ToolID,
+			"result":   event.Data.Result,
+			"error":    event.Data.Error,
+		}
+		if event.Data.AgentName != "" {
+			data["agentName"] = event.Data.AgentName
+		}
 		return &sseEvent{
 			Type: "tool_execution_end",
-			Data: map[string]interface{}{
-				"toolName": event.Data.ToolName,
-				"toolId":   event.Data.ToolID,
-				"result":   event.Data.Result,
-				"error":    event.Data.Error,
-			},
+			Data: data,
 		}
 
 	case llamaeng.EventTypeToolUpdate:
+		data := map[string]interface{}{
+			"toolName": event.Data.ToolName,
+			"toolId":   event.Data.ToolID,
+			"text":     event.Data.Text,
+		}
+		if event.Data.AgentName != "" {
+			data["agentName"] = event.Data.AgentName
+		}
 		return &sseEvent{
 			Type: "tool_update",
-			Data: map[string]interface{}{
-				"toolName": event.Data.ToolName,
-				"toolId":   event.Data.ToolID,
-				"text":     event.Data.Text,
-			},
+			Data: data,
 		}
 
 	case llamaeng.EventTypeAgentStart:
@@ -137,10 +149,54 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 		return &sseEvent{Type: "plan_updated", Data: event.Data}
 
 	case llamaeng.EventTypeSubAgentStart:
-		return &sseEvent{Type: "subagent_start", Data: event.Data}
+		return &sseEvent{
+			Type: "subagent_start",
+			Data: map[string]interface{}{
+				"agentName": event.Data.AgentName,
+				"task":      event.Data.Task,
+				"toolName":  event.Data.ToolName,
+			},
+		}
 
 	case llamaeng.EventTypeSubAgentEnd:
-		return &sseEvent{Type: "subagent_end", Data: event.Data}
+		return &sseEvent{
+			Type: "subagent_end",
+			Data: map[string]interface{}{
+				"agentName": event.Data.AgentName,
+				"status":    event.Data.Status,
+				"task":      event.Data.Task,
+				"error":     event.Data.Error,
+			},
+		}
+
+	case llamaeng.EventTypeGrindAttempt:
+		return &sseEvent{
+			Type: "grind_attempt",
+			Data: map[string]interface{}{
+				"agentName": event.Data.AgentName,
+				"task":      event.Data.Task,
+				"status":    event.Data.Status,
+			},
+		}
+
+	case llamaeng.EventTypeGrindVerify:
+		return &sseEvent{
+			Type: "grind_verify",
+			Data: map[string]interface{}{
+				"agentName": event.Data.AgentName,
+				"task":      event.Data.Task,
+				"status":    event.Data.Status,
+			},
+		}
+
+	case llamaeng.EventTypeGrindEnd:
+		return &sseEvent{
+			Type: "grind_end",
+			Data: map[string]interface{}{
+				"status": event.Data.Status,
+				"task":   event.Data.Task,
+			},
+		}
 
 	case llamaeng.EventTypeApprovalRequest:
 		result, _ := event.Data.Result.(map[string]interface{})
@@ -148,6 +204,18 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 			return &sseEvent{Type: "approval_request", Data: result}
 		}
 		return nil
+
+	case llamaeng.AgentEventType("user_question"):
+		return &sseEvent{
+			Type: "user_question",
+			Data: map[string]interface{}{
+				"questionId":    event.Data.ToolID,
+				"question":      event.Data.ToolArgs["question"],
+				"options":       event.Data.ToolArgs["options"],
+				"allowFreeText": event.Data.ToolArgs["allowFreeText"],
+				"default":       event.Data.ToolArgs["default"],
+			},
+		}
 
 	default:
 		return nil

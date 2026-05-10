@@ -497,7 +497,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 // executeTool runs a single tool call with timeout and optional streaming.
 func (l *AgentLoop) executeTool(ctx context.Context, subscriber chan<- AgentEvent, tc ToolCall, state *LoopState) (any, error) {
 	timeout := time.Duration(l.config.ToolExecTimeoutSec) * time.Second
-	if tc.Name == "delegate_to" || tc.Name == "delegate_async" {
+	if tc.Name == "delegate_to" || tc.Name == "delegate_async" || tc.Name == "grind_loop" {
 		timeout = 30 * time.Minute
 	}
 

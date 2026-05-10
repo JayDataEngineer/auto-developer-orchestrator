@@ -44,6 +44,9 @@ const (
 	EventTypeToolUpdate      AgentEventType = "tool_update"
 	EventTypeAgentSpawned    AgentEventType = "agent_spawned"
 	EventTypeStateUpdate     AgentEventType = "state_update"
+	EventTypeGrindAttempt    AgentEventType = "grind_attempt"
+	EventTypeGrindVerify     AgentEventType = "grind_verify"
+	EventTypeGrindEnd        AgentEventType = "grind_end"
 )
 
 // AgentEvent is an event emitted by the agent loop.
@@ -66,6 +69,12 @@ type AgentEventData struct {
 	ContextWindow     int            `json:"contextWindow,omitempty"`
 	CompactedMessages int            `json:"compactedMessages,omitempty"`
 	KeptMessages      int            `json:"keptMessages,omitempty"`
+
+	// Sub-agent context — set when events come from delegated sub-agents.
+	AgentName    string `json:"agentName,omitempty"`    // e.g. "sarah", "jake"
+	ParentToolID string `json:"parentToolId,omitempty"` // ID of the delegate_to call
+	Task         string `json:"task,omitempty"`         // task description
+	Status       string `json:"status,omitempty"`       // e.g. "running", "completed", "error"
 }
 
 // SubscriberKey is a context key for injecting the SSE subscriber channel.
