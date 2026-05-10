@@ -535,7 +535,7 @@ export class PuxAgentSession {
   /** Fetch all available sessions from the backend */
   async getSessions(): Promise<Array<{ project: string; agentId: string; title: string; lastMessage: string; lastAt: string; messageCount: number }>> {
     try {
-      const res = await this._fetch(`${this.serverUrl}/api/pux/conversations`);
+      const res = await this._fetch(`${this.serverUrl}/api/pux/conversations?project=${encodeURIComponent(this.project)}`);
       if (!res.ok) return [];
       const data = await res.json();
       return data.map((s: any) => ({
