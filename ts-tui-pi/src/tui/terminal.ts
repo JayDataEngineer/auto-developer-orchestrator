@@ -59,6 +59,7 @@ export class ProcessTerminal implements Terminal {
 	private resizeHandler?: () => void;
 	private _kittyProtocolActive = false;
 	private _modifyOtherKeysActive = false;
+	private _alternateScreen = !process.env.PI_NO_ALT_SCREEN;
 	private stdinBuffer?: StdinBuffer;
 	private stdinDataHandler?: (data: string) => void;
 	private writeLogPath = (() => {
@@ -94,6 +95,11 @@ export class ProcessTerminal implements Terminal {
 
 		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
 		process.stdout.write("\x1b[?2004h");
+
+		// Switch to alternate screen buffer to preserve terminal history on exit
+		if (this._alternateScreen) {
+			process.stdout.write("\x1b[?1049h");
+		}
 
 		// Set up resize handler immediately
 		process.stdout.on("resize", this.resizeHandler);
@@ -290,6 +296,11 @@ export class ProcessTerminal implements Terminal {
 		if (this.resizeHandler) {
 			process.stdout.removeListener("resize", this.resizeHandler);
 			this.resizeHandler = undefined;
+		}
+
+		// Restore main screen buffer — swaps back to preserve terminal history
+		if (this._alternateScreen) {
+			process.stdout.write("\x1b[?1049l");
 		}
 
 		// Pause stdin to prevent any buffered input (e.g., Ctrl+D) from being

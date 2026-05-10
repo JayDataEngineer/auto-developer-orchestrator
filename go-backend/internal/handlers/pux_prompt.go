@@ -82,9 +82,13 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	// Approval handler via central approval manager (Respond endpoint)
 	approvalHandler := &adapters.ApprovalHandler{Mgr: h.approvalMgr}
 
+	// Use per-agentId session path for history continuity
+	sessionPath := fmt.Sprintf("%s/.pux/sessions/%s.jsonl", projectPath, req.AgentId)
+
 	cfg := orchestrator.Config{
 		ProjectDir:    projectPath,
 		SandboxID:     sandboxID,
+		SessionPath:   sessionPath,
 		ContextSize:   32768,
 		MaxToolRounds: 50,
 		WorkDir:       "/sandbox",
@@ -203,6 +207,46 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer orch.Close()
+
+	// Rehydrate session tree from SQL history for context continuity
+	var historyLen int
+	if h.db != nil {
+		history, err := h.db.GetConversationHistory(r.Context(), req.Project, req.AgentId, 200)
+		if err != nil {
+			h.log.Warn("Failed to load conversation history", zap.Error(err))
+		} else {
+			historyLen = len(history)
+			for _, stored := range history {
+				msg := core.Message{Role: stored.Role}
+				switch stored.Role {
+				case "user":
+					msg.Content = stored.Content
+				case "assistant":
+					msg.Content = stored.Text
+					msg.ReasoningContent = stored.Thinking
+				}
+				if err := orch.Session.AppendMessage(msg); err != nil {
+					h.log.Warn("Failed to append history message", zap.Error(err))
+				}
+			}
+			if historyLen > 0 {
+				h.log.Info("Session rehydrated from SQL history",
+					zap.String("agentId", req.AgentId),
+					zap.Int("messages", historyLen))
+			}
+		}
+	}
+
+	// Auto-title conversation from first user message
+	if h.db != nil && historyLen == 0 {
+		title := req.Message
+		if len(title) > 60 {
+			title = title[:60] + "..."
+		}
+		if err := h.db.SetConversationTitle(r.Context(), req.Project, req.AgentId, title); err != nil {
+			h.log.Warn("Failed to set auto-title", zap.Error(err))
+		}
+	}
 
 	// Inject project memory prefix into the message
 	var memoryPrefix string
