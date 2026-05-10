@@ -92,6 +92,12 @@ func (a *Adapter) StreamChat(ctx context.Context, messages []core.Message, tools
 		llamaMsgs = append(llamaMsgs, lm)
 	}
 
+	// Ensure system messages are at the beginning.
+	// Session rehydration can load messages out of order (e.g. user messages
+	// from history before the system prompt). Many GGUF chat templates
+	// (including Qwen, Gemma) enforce "system message must be first".
+	llamaMsgs = reorderSystemFirst(llamaMsgs)
+
 	// Always set messages from core and trigger generation.
 	// For cloud providers this is required (no KV cache).
 	// For local llama-server, the session_id still enables KV cache reuse.
@@ -178,4 +184,42 @@ func convertEvents(ch <-chan llama.ChatEvent) <-chan core.ChatEvent {
 		}
 	}()
 	return out
+}
+
+// reorderSystemFirst moves all system-role messages to the front of the slice.
+// Many GGUF chat templates (Qwen, Gemma, etc.) require the system message at
+// position 0. Session rehydration from SQL history can load messages where a
+// user message appears before the system prompt, breaking strict templates.
+func reorderSystemFirst(msgs []llama.Message) []llama.Message {
+	if len(msgs) <= 1 {
+		return msgs
+	}
+	// Fast path: already correct
+	if msgs[0].Role == "system" {
+		// Check if any other system messages are out of place
+		hasMisplaced := false
+		for i := 1; i < len(msgs); i++ {
+			if msgs[i].Role == "system" {
+				hasMisplaced = true
+				break
+			}
+		}
+		if !hasMisplaced {
+			return msgs
+		}
+	}
+
+	// Collect system messages first, then everything else
+	var system, rest []llama.Message
+	for _, m := range msgs {
+		if m.Role == "system" {
+			system = append(system, m)
+		} else {
+			rest = append(rest, m)
+		}
+	}
+	if len(system) == 0 {
+		return msgs
+	}
+	return append(system, rest...)
 }
