@@ -236,7 +236,6 @@ func TestRunDelegate_EmitsSubAgentEvents(t *testing.T) {
 	events := make(chan core.AgentEvent, 32)
 
 	runner := &ParallelRunner{
-		provider:   nil, // will fail but events should still emit
 		toolSpecs:  []core.OpenAITool{},
 		tasks:      make(map[string]*asyncTask),
 		subscriber: events,
@@ -270,7 +269,7 @@ func TestRunDelegate_EmitsSubAgentEvents(t *testing.T) {
 }
 
 func TestSetSubscriber(t *testing.T) {
-	runner := NewParallelRunner(nil, nil, nil, nil, 0, nil)
+	runner := NewParallelRunner(nil, nil, nil, 0, nil)
 	if runner.subscriber != nil {
 		t.Error("expected nil subscriber initially")
 	}

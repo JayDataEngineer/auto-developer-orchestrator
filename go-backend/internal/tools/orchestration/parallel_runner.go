@@ -3,8 +3,10 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,13 +34,13 @@ type OrchestratorFactory func(ctx context.Context, cfg SubOrchestratorConfig) (S
 // ParallelRunner implements DelegateRunner with goroutine-based parallelism.
 // delegate_async spawns independent sub-agents; collect_results waits for all.
 type ParallelRunner struct {
-	provider      core.LLMProvider           // default provider for sub-agents
-	executor      core.ToolExecutor          // for executing sub-agent tools
-	toolSpecs     []core.OpenAITool          // all available tool definitions
-	baseSession   core.Session               // parent session for context inheritance
-	ctxSize       int                        // context size for sub-agent
-	modelResolver ModelResolver              // resolves model ID to provider (nil = use default)
-	logger        func(format string, args ...interface{})
+	providerFactory ProviderFactory           // creates isolated providers per sub-agent
+	executor        core.ToolExecutor          // for executing sub-agent tools
+	toolSpecs       []core.OpenAITool          // all available tool definitions
+	baseSession     core.Session               // parent session for context inheritance
+	ctxSize         int                        // context size for sub-agent
+	modelResolver   ModelResolver              // resolves model ID to provider (nil = use default)
+	logger          func(format string, args ...interface{})
 
 	// Recursive delegation
 	orchestratorFactory OrchestratorFactory
@@ -67,9 +69,8 @@ type asyncTask struct {
 }
 
 // NewParallelRunner creates a runner that fans out sub-agents in parallel.
-func NewParallelRunner(provider core.LLMProvider, executor core.ToolExecutor, toolSpecs []core.OpenAITool, baseSession core.Session, ctxSize int, modelResolver ModelResolver) *ParallelRunner {
+func NewParallelRunner(executor core.ToolExecutor, toolSpecs []core.OpenAITool, baseSession core.Session, ctxSize int, modelResolver ModelResolver) *ParallelRunner {
 	return &ParallelRunner{
-		provider:      provider,
 		executor:      executor,
 		toolSpecs:     toolSpecs,
 		baseSession:   baseSession,
@@ -78,6 +79,64 @@ func NewParallelRunner(provider core.LLMProvider, executor core.ToolExecutor, to
 		logger:        func(format string, args ...interface{}) {},
 		tasks:         make(map[string]*asyncTask),
 	}
+}
+
+// SetProviderFactory sets the factory for creating isolated providers per sub-agent.
+func (r *ParallelRunner) SetProviderFactory(factory ProviderFactory) {
+	r.providerFactory = factory
+}
+
+// enrichTask prepends relevant context from the parent session to the task.
+// This gives sub-agents faithful context (original user request + CTO delegation reasoning)
+// instead of just a paraphrased task description.
+func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
+	if r.baseSession == nil {
+		return task
+	}
+	msgs, err := r.baseSession.BuildContext(ctx)
+	if err != nil || len(msgs) == 0 {
+		return task
+	}
+
+	// Find the first user message (non-system, non-tool)
+	var originalRequest string
+	for _, msg := range msgs {
+		if msg.Role == "user" {
+			originalRequest = msg.Content
+			break
+		}
+	}
+
+	// Find the last assistant message before delegation (CTO's reasoning context)
+	var lastAssistantContext string
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" {
+			lastAssistantContext = msgs[i].Content
+			break
+		}
+	}
+
+	// Build enriched task
+	var b strings.Builder
+	if originalRequest != "" && len(originalRequest) < 500 {
+		b.WriteString("<original_request>\n")
+		b.WriteString(originalRequest)
+		b.WriteString("\n</original_request>\n\n")
+	}
+	if lastAssistantContext != "" && len(lastAssistantContext) < 300 {
+		b.WriteString("<cto_context>\n")
+		b.WriteString(lastAssistantContext)
+		b.WriteString("\n</cto_context>\n\n")
+	}
+	b.WriteString("<task>\n")
+	b.WriteString(task)
+	b.WriteString("\n</task>")
+
+	enriched := b.String()
+	if len(enriched) > 2000 {
+		enriched = enriched[:2000] + "...\n</task>"
+	}
+	return enriched
 }
 
 // SetLogger sets the logger function.
@@ -142,14 +201,29 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		return nil, core.NewToolError("delegate_to", fmt.Sprintf("none of the requested tools were found: %v", toolNames))
 	}
 
-	// Resolve provider for this sub-agent (role-specific model or default)
-	provider := r.provider
+	// Create isolated provider for this sub-agent via factory.
+	// Each sub-agent gets its own Adapter → own session → own llama-server slot.
+	// If modelID is specified, use the model resolver to pick the right engine instead.
+	provider := r.providerFactory()
 	if modelID != "" && r.modelResolver != nil {
 		if resolved := r.modelResolver(modelID); resolved != nil {
+			// Close the factory-created provider, use the resolved model-specific one instead
+			if closer, ok := provider.(io.Closer); ok {
+				closer.Close()
+			}
 			provider = resolved
 			r.logger("MODEL_OVERRIDE: using %s for sub-agent", modelID)
 		}
 	}
+	defer func() {
+		if closer, ok := provider.(io.Closer); ok {
+			closer.Close()
+		}
+	}()
+
+	// Rewrite delegation context: include original user request + CTO's delegation reasoning.
+	// This gives the sub-agent faithful context instead of a paraphrased task.
+	enrichedTask := r.enrichTask(ctx, task)
 
 	// Create sub-agent with a very minimal loop config
 	cfg := core.AgentLoopConfig{
@@ -177,7 +251,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	go func() {
 		defer close(done)
 		defer close(events)
-		runErr = loop.Run(ctx, task, events)
+		runErr = loop.Run(ctx, enrichedTask, events)
 	}()
 
 	// Drain events: accumulate text result + forward tool events to parent subscriber

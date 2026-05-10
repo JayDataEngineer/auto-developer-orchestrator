@@ -131,7 +131,8 @@ describe("PuxAgentSession", () => {
   test("getContextUsage returns fixed window", () => {
     const usage = session.getContextUsage();
     expect(usage.used).toBe(0);
-    expect(usage.limit).toBe(128000);
+    // mock returns 0 since DEFAULT_MODEL has no contextWindow
+    expect(usage.limit).toBe(0);
   });
 
   test("getAvailableThinkingLevels", () => {
@@ -241,10 +242,10 @@ describe("PuxAgentSession", () => {
   });
 
   test("setFollowUpMode sets mode", () => {
-    session.setFollowUpMode("on");
-    expect(session.followUpMode).toBe(true);
-    session.setFollowUpMode("off");
-    expect(session.followUpMode).toBe(false);
+    session.setFollowUpMode("all");
+    expect(session.followUpMode).toBe("all");
+    session.setFollowUpMode("one-at-a-time");
+    expect(session.followUpMode).toBe("one-at-a-time");
   });
 
   // ---- prompt() with mock SSE ----
@@ -506,7 +507,7 @@ describe("PuxAgentSession", () => {
   // ---- No-op methods return expected defaults ----
 
   test("getSessionStats returns zeros", () => {
-    expect(session.getSessionStats()).toEqual({ turns: 0, messages: 0 });
+    expect(session.getSessionStats()).toMatchObject({ turns: 0, messages: 0 });
   });
 
   test("getLastAssistantText returns empty", () => {

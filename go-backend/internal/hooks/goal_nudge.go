@@ -65,6 +65,8 @@ func (h *GoalNudgeHook) OnBeforeTurn(ctx context.Context, state *core.LoopState)
 	return nudges, nil
 }
 
+func (h *GoalNudgeHook) OnBeforeModel(_ context.Context, _ *core.LoopState, msgs []core.Message) ([]core.Message, error) { return msgs, nil }
+func (h *GoalNudgeHook) OnAfterModel(_ context.Context, _ *core.LoopState, _ *core.GenerateResponse) error { return nil }
 func (h *GoalNudgeHook) OnAfterToolCall(ctx context.Context, state *core.LoopState, toolName string, args map[string]any, result string, err error) error {
 	if err != nil {
 		return nil

@@ -22,6 +22,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	plantool "github.com/auto-developer-orchestrator/backend/internal/tools/plan"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/nlp"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/todo"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
 )
@@ -37,8 +38,9 @@ type Config struct {
 	MemoryStore     *memory.Store
 	BashExecutor    bash.Executor
 	FileOps         file.SandboxFileOps
-	DelegateRunner  orchestration.DelegateRunner
-	Skills          *skills.Store
+	DelegateRunner   orchestration.DelegateRunner
+	ProviderFactory  orchestration.ProviderFactory  // creates isolated providers per sub-agent (own session/slot)
+	Skills           *skills.Store
 	ApprovalHandler  hooks.ApprovalHandler     // optional: if set, create_plan requires user approval
 	GitExecutor      hooks.GitExecutor         // optional: if set, git checkpoints are created
 	ExtraHooks       []core.LoopHook           // optional: add-on hooks (Langfuse, etc.)
@@ -99,6 +101,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if cfg.MemoryStore != nil {
 		ctoTools = append(ctoTools, memory.NewTool(cfg.MemoryStore))
 	}
+
+	// Todo list — always available (created internally)
+	todoStore := todo.NewStore()
+	ctoTools = append(ctoTools, todo.NewTool(todoStore))
 
 	// Register skills (auto-load from standard paths if not provided)
 	skillStore := cfg.Skills
@@ -165,7 +171,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 
 	if runner == nil && provider != nil {
-		pr := orchestration.NewParallelRunner(provider, allToolReg, allToolSpecs, sess, cfg.ContextSize, cfg.ModelResolver)
+		pr := orchestration.NewParallelRunner(allToolReg, allToolSpecs, sess, cfg.ContextSize, cfg.ModelResolver)
+		pr.SetProviderFactory(cfg.ProviderFactory)
 		pr.SetLogger(func(format string, args ...interface{}) {
 			logger.Printf("PARALLEL_RUNNER: "+format, args...)
 		})
@@ -177,9 +184,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 
 	if runner != nil {
+		validAgentNames := common.AgentNames(cfg.OrgRoles)
 		ctoTools = append(ctoTools,
-			orchestration.NewDelegateToTool(runner, mcpResolver, cfg.OrgRoles),
-			orchestration.NewDelegateAsyncTool(runner, mcpResolver, cfg.OrgRoles),
+			orchestration.NewDelegateToTool(runner, mcpResolver, cfg.OrgRoles, validAgentNames),
+			orchestration.NewDelegateAsyncTool(runner, mcpResolver, cfg.OrgRoles, validAgentNames),
 			orchestration.NewCollectResultsTool(runner),
 			orchestration.NewPlanTool(),
 			orchestration.NewSynthesizeTool(),
@@ -215,6 +223,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 	// Add extra hooks from add-ons (Langfuse, etc.)
 	loopHooks = append(loopHooks, cfg.ExtraHooks...)
+
+	// Todo hook — injects todo state before each model call
+	todoHook := hooks.NewTodoHook(todoStore)
+	loopHooks = append(loopHooks, todoHook)
 
 	var skillsStr string
 	if skillStore.Count() > 0 {
@@ -320,6 +332,7 @@ func makeOrchestratorFactory(provider core.LLMProvider, parentCfg Config) orches
 			OrgRoles:      orgRoles,
 			MCPClient:     parentCfg.MCPClient,
 			VisionChain:   parentCfg.VisionChain,
+			ProviderFactory: parentCfg.ProviderFactory,
 			ModelResolver: parentCfg.ModelResolver,
 			ArtifactDB:    parentCfg.ArtifactDB,
 			ExtraHooks:    parentCfg.ExtraHooks,

@@ -47,6 +47,8 @@ const (
 	EventTypeGrindAttempt    AgentEventType = "grind_attempt"
 	EventTypeGrindVerify     AgentEventType = "grind_verify"
 	EventTypeGrindEnd        AgentEventType = "grind_end"
+	EventTypeStepStart       AgentEventType = "step_start"
+	EventTypeStepEnd         AgentEventType = "step_end"
 )
 
 // AgentEvent is an event emitted by the agent loop.
@@ -69,6 +71,10 @@ type AgentEventData struct {
 	ContextWindow     int            `json:"contextWindow,omitempty"`
 	CompactedMessages int            `json:"compactedMessages,omitempty"`
 	KeptMessages      int            `json:"keptMessages,omitempty"`
+
+	// Step-level context
+	Round    int    `json:"round,omitempty"`    // current tool round
+	Decision string `json:"decision,omitempty"` // step end decision: "respond", "delegate", "ask", "error"
 
 	// Sub-agent context — set when events come from delegated sub-agents.
 	AgentName    string `json:"agentName,omitempty"`    // e.g. "sarah", "jake"

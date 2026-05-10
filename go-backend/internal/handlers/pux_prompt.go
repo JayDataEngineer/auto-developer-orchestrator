@@ -202,6 +202,13 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		return llm.NewAdapter(eng, 0)
 	}
 
+	// ProviderFactory — creates isolated providers per sub-agent.
+	// Each sub-agent gets its own Adapter → own session → own llama-server slot.
+	// This prevents KV cache thrashing and enables true concurrent execution.
+	cfg.ProviderFactory = func() core.LLMProvider {
+		return llm.NewAdapter(engine, 0)
+	}
+
 	orch, err := orchestrator.New(provider, cfg)
 	if err != nil {
 		h.log.Error("Failed to create orchestrator", zap.Error(err))

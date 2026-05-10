@@ -40,6 +40,8 @@ func (h *JournalCheckpointHook) OnBeforeTurn(ctx context.Context, state *core.Lo
 	return nil, nil
 }
 
+func (h *JournalCheckpointHook) OnBeforeModel(_ context.Context, _ *core.LoopState, msgs []core.Message) ([]core.Message, error) { return msgs, nil }
+func (h *JournalCheckpointHook) OnAfterModel(_ context.Context, _ *core.LoopState, _ *core.GenerateResponse) error { return nil }
 func (h *JournalCheckpointHook) OnAfterToolCall(ctx context.Context, state *core.LoopState, toolName string, args map[string]any, result string, err error) error {
 	// Don't checkpoint after delegation tools — sub-agents manage their own state
 	if toolName == "delegate_to" || toolName == "delegate_async" || toolName == "collect_results" {

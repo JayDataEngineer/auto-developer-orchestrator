@@ -65,6 +65,8 @@ func (h *ApprovalHook) OnBeforeTurn(ctx context.Context, state *core.LoopState) 
 	return nil, nil
 }
 
+func (h *ApprovalHook) OnBeforeModel(_ context.Context, _ *core.LoopState, msgs []core.Message) ([]core.Message, error) { return msgs, nil }
+func (h *ApprovalHook) OnAfterModel(_ context.Context, _ *core.LoopState, _ *core.GenerateResponse) error { return nil }
 func (h *ApprovalHook) OnAfterToolCall(ctx context.Context, state *core.LoopState, toolName string, args map[string]any, result string, err error) error {
 	if toolName != "create_plan" {
 		return nil

@@ -224,6 +224,9 @@ export class InteractiveMode {
 	// Extension UI state
 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
+
+	// Sub-agent tracking for terminal-within-terminal summary
+	private _subAgentSummary = new Map<string, { agentName: string; task: string; status: string; lastAction: string }>();
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputUnsubscribers = new Set<() => void>();
 
@@ -2391,6 +2394,12 @@ export class InteractiveMode {
 				// Sub-agent tool calls are rendered with agent name prefix
 				if ((event as any).agentName) {
 					const agentName = (event as any).agentName;
+					// Update sub-agent summary last action
+					const subEntry = this._subAgentSummary.get(agentName);
+					if (subEntry) {
+						subEntry.lastAction = `${event.toolName}(...)`;
+						this.renderSubAgentSummary();
+					}
 					let component = this.pendingTools.get(event.toolCallId);
 					if (!component) {
 						component = new ToolExecutionComponent(
@@ -2478,35 +2487,35 @@ export class InteractiveMode {
 			}
 
 			case "subagent_start": {
-				// Sub-agent started — show delegation status in status bar
 				const agentName = (event as any).agentName || "agent";
 				const task = (event as any).task || "";
-				const taskPreview = task.length > 60 ? task.slice(0, 60) + "..." : task;
-				if (this.statusContainer) {
-					this.statusContainer.clear();
-					const delegateText = new Text(theme.fg("accent", `  Delegating to ${theme.bold(agentName)}...`) + (taskPreview ? theme.fg("muted", ` ${taskPreview}`) : ""));
-					this.statusContainer.addChild(delegateText);
-				}
+				this._subAgentSummary.set(agentName, { agentName, task, status: "running", lastAction: "starting..." });
+				this.renderSubAgentSummary();
 				this.ui.requestRender();
 				break;
 			}
 
 			case "subagent_end": {
-				// Sub-agent finished — update status
 				const agentName = (event as any).agentName || "agent";
 				const status = (event as any).status || "completed";
-				if (this.statusContainer && status === "completed") {
-					this.statusContainer.clear();
-					const doneText = new Text(theme.fg("success", `  ${agentName} completed`));
-					this.statusContainer.addChild(doneText);
-					// Clear after brief display
-					setTimeout(() => {
-						if (this.statusContainer && !this.session.isStreaming) {
-							this.statusContainer.clear();
-							this.ui.requestRender();
-						}
-					}, 1500);
+				const err = (event as any).error || "";
+				const entry = this._subAgentSummary.get(agentName);
+				if (entry) {
+					entry.status = status === "error" ? "failed" : "completed";
+					entry.lastAction = err || "done";
 				}
+				// Keep completed agents visible briefly, then remove
+				setTimeout(() => {
+					this._subAgentSummary.delete(agentName);
+					if (this._subAgentSummary.size === 0) {
+						this.statusContainer?.clear();
+						this.ui.requestRender();
+					} else {
+						this.renderSubAgentSummary();
+						this.ui.requestRender();
+					}
+				}, 2000);
+				this.renderSubAgentSummary();
 				this.ui.requestRender();
 				break;
 			}
@@ -3159,6 +3168,24 @@ export class InteractiveMode {
 				resolve();
 			};
 		});
+	}
+
+	/**
+	 * Render the sub-agent summary panel in the status container.
+	 * Shows all active sub-agents with their status and last action.
+	 */
+	private renderSubAgentSummary(): void {
+		if (!this.statusContainer || this._subAgentSummary.size === 0) return;
+		this.statusContainer.clear();
+		for (const entry of this._subAgentSummary.values()) {
+			const icon = entry.status === "running" ? "●" : entry.status === "failed" ? "✗" : "✓";
+			const iconColor = entry.status === "running" ? "accent" : entry.status === "failed" ? "error" : "success";
+			const taskPreview = entry.task.length > 55 ? entry.task.slice(0, 55) + "..." : entry.task;
+			const actionText = entry.lastAction ? ` ${entry.lastAction}` : "";
+			this.statusContainer.addChild(
+				new Text(theme.fg(iconColor as any, `  ${icon} `) + theme.bold(entry.agentName) + theme.fg("muted", `: ${taskPreview}${actionText}`)),
+			);
+		}
 	}
 
 	/**

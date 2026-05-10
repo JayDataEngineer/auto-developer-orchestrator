@@ -229,7 +229,8 @@ describe("E2E: HTTP contract", () => {
     expect(pr).toBeTruthy();
     expect(pr!.body.message).toBe("test request body");
     expect(pr!.body.project).toBe("my-project");
-    expect(pr!.body.agentId).toBe("default");
+    // agentId is omitted when empty (not "default")
+    expect(pr!.body.agentId).toBeUndefined();
     expect(pr!.body.model).toBe("claude/sonnet");
     expect(pr!.body.thinkingLevel).toBe("high");
   });

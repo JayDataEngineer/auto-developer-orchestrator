@@ -154,6 +154,10 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 	round := 0
 
 	for {
+		SendEvent(subscriber, AgentEvent{
+			Type: EventTypeStepStart,
+			Data: AgentEventData{Round: round + 1},
+		})
 		// Check hook-injected messages before each turn
 		for _, h := range l.config.Hooks {
 			nudges, err := h.OnBeforeTurn(ctx, state)
@@ -199,6 +203,16 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
 				SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 				return err
+			}
+
+			// Run hooks: OnBeforeModel — modify messages before sending to LLM
+			for _, h := range l.config.Hooks {
+				modified, err := h.OnBeforeModel(ctx, state, sessCtx)
+				if err != nil {
+					l.logger.Printf("Hook %s OnBeforeModel error: %v", h.Name(), err)
+				} else if modified != nil {
+					sessCtx = modified
+				}
 			}
 
 			chatCh, err := l.provider.StreamChat(ctx, sessCtx, l.config.Tools, l.config.Opts)
@@ -297,6 +311,27 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				return streamErr
 			}
 
+			// Run hooks: OnAfterModel — after successful model response
+			genResp := &GenerateResponse{
+				Content:   contentBuf.String(),
+				Thinking:  thinkingBuf.String(),
+				ToolCalls: func() []ToolCallResponse {
+					indices := make([]int, 0, len(toolCallAccum))
+					for idx := range toolCallAccum { indices = append(indices, idx) }
+					sort.Ints(indices)
+					result := make([]ToolCallResponse, 0, len(indices))
+					for _, idx := range indices { result = append(result, *toolCallAccum[idx]) }
+					return result
+				}(),
+				Finish: finishReason,
+				Usage:  lastUsage,
+			}
+			for _, h := range l.config.Hooks {
+				if err := h.OnAfterModel(ctx, state, genResp); err != nil {
+					l.logger.Printf("Hook %s OnAfterModel error: %v", h.Name(), err)
+				}
+			}
+
 			// Success — break out of retry loop
 			break providerRetry
 		}
@@ -369,13 +404,20 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			round, len(toolCalls), string(finishReason), contentBuf.Len(), thinkingBuf.Len(), l.provider.ModelName())
 
 		if stoppedNaturally || hitMaxRounds || circuitBroken {
+			decision := "respond"
 			if circuitBroken {
+				decision = "error"
 				l.logger.Printf("Circuit breaker tripped: %d consecutive failures", state.ConsecutiveFails)
 				SendEvent(subscriber, AgentEvent{
 					Type: EventTypeError,
 					Data: AgentEventData{Error: fmt.Sprintf("Circuit breaker: %d consecutive tool failures", state.ConsecutiveFails)},
 				})
 			}
+
+			SendEvent(subscriber, AgentEvent{
+				Type: EventTypeStepEnd,
+				Data: AgentEventData{Round: round + 1, Decision: decision},
+			})
 
 			for _, h := range l.config.Hooks {
 				h.OnAgentEnd(ctx, state)
@@ -392,6 +434,12 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			})
 			return nil
 		}
+
+		// Emit step end (continuing with tool execution)
+		SendEvent(subscriber, AgentEvent{
+			Type: EventTypeStepEnd,
+			Data: AgentEventData{Round: round + 1, Decision: "delegate"},
+		})
 
 		// Phase 2: Execute tool calls with retry, timeout, and streaming
 		round++
@@ -431,14 +479,28 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			}
 
 			// Execute with timeout, streaming, and retry
-			result, resultErr := l.executeTool(ctx, subscriber, tc, state)
+			// Wrapped by any hooks that implement ToolCallWrapper
+			executeFn := func(ctx context.Context, name string, args map[string]any) (any, error) {
+				return l.executeTool(ctx, subscriber, tc, state)
+			}
+			for _, h := range l.config.Hooks {
+				if w, ok := h.(ToolCallWrapper); ok {
+					outer := executeFn
+					hookName := h.Name()
+					executeFn = func(ctx context.Context, name string, args map[string]any) (any, error) {
+						return w.WrapToolCall(ctx, name, args, outer)
+					}
+					_ = hookName
+				}
+			}
+			result, resultErr := executeFn(ctx, tc.Name, tc.Args)
 
 			// Classify error and retry transient failures once
 			if resultErr != nil && ClassifyError(resultErr) == ErrorTransient {
 				backoff := time.Duration(500 * time.Millisecond)
 				l.logger.Printf("Transient error on %s, retrying after %v: %v", tc.Name, backoff, resultErr)
 				time.Sleep(backoff)
-				result, resultErr = l.executeTool(ctx, subscriber, tc, state)
+				result, resultErr = executeFn(ctx, tc.Name, tc.Args)
 			}
 
 			var resultStr string

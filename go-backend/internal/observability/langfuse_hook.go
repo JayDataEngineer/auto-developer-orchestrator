@@ -110,6 +110,8 @@ func (h *LangfuseHook) OnBeforeTurn(ctx context.Context, state *core.LoopState) 
 	return nil, nil
 }
 
+func (h *LangfuseHook) OnBeforeModel(_ context.Context, _ *core.LoopState, msgs []core.Message) ([]core.Message, error) { return msgs, nil }
+func (h *LangfuseHook) OnAfterModel(_ context.Context, _ *core.LoopState, _ *core.GenerateResponse) error { return nil }
 func (h *LangfuseHook) OnAfterToolCall(ctx context.Context, state *core.LoopState, toolName string, args map[string]any, result string, err error) error {
 	if h.trace == nil {
 		return nil

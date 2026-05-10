@@ -508,6 +508,16 @@ export class PuxAgentSession {
         }
         break;
 
+      case "step_start": {
+        // Step boundary — optionally track for UI rendering
+        break;
+      }
+
+      case "step_end": {
+        // Step boundary — optionally track for UI rendering
+        break;
+      }
+
       case "grind_attempt": {
         this.emit({
           type: "grind_attempt" as any,

@@ -1,0 +1,19 @@
+# HarnessProfile — model-specific behavior profiles (STUB)
+# 
+# This file is a placeholder for the model-specific profile system.
+# When implemented, each model can have:
+#   - middleware: additional loop-level middleware to activate
+#   - prompt_overrides: per-section prompt adjustments
+#   - tool_description_overrides: per-tool description overrides
+#
+# Models are configured in models.json. Profiles extend that with
+# behavioral tweaks for different model strengths/weaknesses.
+#
+# Example:
+# deepseek-v4-flash:
+#   prompt_suffix: "IMPORTANT: Only use tool names from the provided list."
+#   tool_description_overrides:
+#     delegate_to: "Available members: {{.Agents}}"
+#
+# gemma-4-26b:
+#   prompt_suffix: "Keep responses short and direct."

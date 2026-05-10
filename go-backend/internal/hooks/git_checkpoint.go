@@ -39,6 +39,8 @@ func (h *GitCheckpointHook) OnBeforeTurn(ctx context.Context, state *core.LoopSt
 	return nil, nil
 }
 
+func (h *GitCheckpointHook) OnBeforeModel(_ context.Context, _ *core.LoopState, msgs []core.Message) ([]core.Message, error) { return msgs, nil }
+func (h *GitCheckpointHook) OnAfterModel(_ context.Context, _ *core.LoopState, _ *core.GenerateResponse) error { return nil }
 func (h *GitCheckpointHook) OnAfterToolCall(ctx context.Context, state *core.LoopState, toolName string, args map[string]any, result string, err error) error {
 	if h.git == nil {
 		return nil

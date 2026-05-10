@@ -374,6 +374,23 @@ func formatRolesList(roles map[string]*AgentRole) string {
 	return b.String()
 }
 
+// AgentNames returns sorted agent name list from kernel roles plus org-specific roles.
+func AgentNames(orgRoles map[string]*AgentRole) []string {
+	seen := make(map[string]bool)
+	for name := range LoadAgentRoles() {
+		seen[name] = true
+	}
+	for name := range orgRoles {
+		seen[name] = true
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // BuildOrchestratorPrompt builds the full system prompt using the template.
 func BuildOrchestratorPrompt(tools []core.Tool, sandboxID string, projectContext string, examples string) string {
 	tmpl, err := loadPromptTemplate()

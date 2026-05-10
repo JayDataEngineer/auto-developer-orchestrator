@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -23,6 +24,10 @@ type MCPResolver func(prefix string) []string
 // ModelResolver resolves a model ID to a core.LLMProvider.
 // Returns nil if the model can't be resolved (caller falls back to default).
 type ModelResolver func(modelID string) core.LLMProvider
+
+// ProviderFactory creates a fresh LLMProvider for each sub-agent invocation.
+// Each call returns an isolated provider with its own session/slot on llama-server.
+type ProviderFactory func() core.LLMProvider
 
 // resolveRole checks if instructions matches a role name from config/roles/.
 // If it does, returns the role's prompt, tools, and defaults.
@@ -67,32 +72,39 @@ func resolveRole(instructions string, toolNames []string, maxRounds int, tempera
 
 // DelegateToTool implements core.Tool for synchronous sub-agent delegation.
 type DelegateToTool struct {
-	runner      DelegateRunner
-	mcpResolver MCPResolver
-	roleMap     map[string]*common.AgentRole
+	runner           DelegateRunner
+	mcpResolver      MCPResolver
+	roleMap          map[string]*common.AgentRole
+	validAgentNames  []string
 }
 
-func NewDelegateToTool(r DelegateRunner, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole) *DelegateToTool {
-	return &DelegateToTool{runner: r, mcpResolver: mcpResolver, roleMap: roleMap}
+func NewDelegateToTool(r DelegateRunner, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole, validAgentNames []string) *DelegateToTool {
+	return &DelegateToTool{runner: r, mcpResolver: mcpResolver, roleMap: roleMap, validAgentNames: validAgentNames}
 }
 
 func (t *DelegateToTool) Name() string { return "delegate_to" }
 func (t *DelegateToTool) Description() string {
-	return "Delegate a task to an employee. Use a role name (sarah, jake, marcus, elena, alex, ryan) as instructions, or write custom instructions."
+	return "Delegate a task to an employee. Use a role name as instructions, or write custom instructions."
 }
 
 func (t *DelegateToTool) Schema() json.RawMessage {
-	return json.RawMessage(`{
+	enumJSON := "[]"
+	if len(t.validAgentNames) > 0 {
+		names, _ := json.Marshal(t.validAgentNames)
+		enumJSON = string(names)
+	}
+	schema := fmt.Sprintf(`{
 		"type": "object",
 		"properties": {
 			"task": {"type": "string", "description": "Description of the task for the sub-agent"},
-			"instructions": {"type": "string", "description": "Employee role name (sarah, jake, marcus, elena, alex, ryan) or custom instructions"},
+			"instructions": {"type": "string", "description": "Employee role name or custom instructions", "enum": %s},
 			"tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names the sub-agent can use (optional if using a role name)"},
 			"max_rounds": {"type": "integer", "description": "Maximum tool rounds (default: from role or 15)"},
 			"temperature": {"type": "number", "description": "Temperature for generation (default: from role or 0.4)"}
 		},
 		"required": ["task", "instructions"]
-	}`)
+	}`, enumJSON)
+	return json.RawMessage(schema)
 }
 
 func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any, error) {
@@ -144,13 +156,14 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 
 // DelegateAsyncTool implements core.Tool for async sub-agent delegation.
 type DelegateAsyncTool struct {
-	runner      DelegateRunner
-	mcpResolver MCPResolver
-	roleMap     map[string]*common.AgentRole
+	runner           DelegateRunner
+	mcpResolver      MCPResolver
+	roleMap          map[string]*common.AgentRole
+	validAgentNames  []string
 }
 
-func NewDelegateAsyncTool(r DelegateRunner, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole) *DelegateAsyncTool {
-	return &DelegateAsyncTool{runner: r, mcpResolver: mcpResolver, roleMap: roleMap}
+func NewDelegateAsyncTool(r DelegateRunner, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole, validAgentNames []string) *DelegateAsyncTool {
+	return &DelegateAsyncTool{runner: r, mcpResolver: mcpResolver, roleMap: roleMap, validAgentNames: validAgentNames}
 }
 
 func (t *DelegateAsyncTool) Name() string { return "delegate_async" }
@@ -159,16 +172,22 @@ func (t *DelegateAsyncTool) Description() string {
 }
 
 func (t *DelegateAsyncTool) Schema() json.RawMessage {
-	return json.RawMessage(`{
+	enumJSON := "[]"
+	if len(t.validAgentNames) > 0 {
+		names, _ := json.Marshal(t.validAgentNames)
+		enumJSON = string(names)
+	}
+	schema := fmt.Sprintf(`{
 		"type": "object",
 		"properties": {
 			"task_id": {"type": "string", "description": "Unique ID for this async task"},
 			"task": {"type": "string", "description": "Description of the task"},
-			"instructions": {"type": "string", "description": "Employee role name or custom instructions"},
+			"instructions": {"type": "string", "description": "Employee role name or custom instructions", "enum": %s},
 			"tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names (optional if using a role name)"}
 		},
 		"required": ["task_id", "task", "instructions"]
-	}`)
+	}`, enumJSON)
+	return json.RawMessage(schema)
 }
 
 func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (any, error) {

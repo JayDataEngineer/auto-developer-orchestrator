@@ -66,6 +66,8 @@ func (h *CompactionHook) OnBeforeTurn(ctx context.Context, state *core.LoopState
 	return nil, nil // no messages to inject
 }
 
+func (h *CompactionHook) OnBeforeModel(_ context.Context, _ *core.LoopState, msgs []core.Message) ([]core.Message, error) { return msgs, nil }
+func (h *CompactionHook) OnAfterModel(_ context.Context, _ *core.LoopState, _ *core.GenerateResponse) error { return nil }
 func (h *CompactionHook) OnAfterToolCall(ctx context.Context, state *core.LoopState, toolName string, args map[string]any, result string, err error) error {
 	return nil
 }

@@ -10,7 +10,8 @@
       "thinking": true,
       "parallel": 2,
       "cache_ram": 2048,
-      "mmproj_ram": false
+      "mmproj_ram": false,
+      "profile": "default"
     },
     "gemma4-ram": {
       "name": "Gemma 4 26B-A4B — mmproj in RAM (saves 1.1GB VRAM)",

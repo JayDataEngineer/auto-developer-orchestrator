@@ -15,12 +15,13 @@ import (
 // It creates fresh sub-agents for each attempt, verifies work via a bash command,
 // and optionally escalates to a larger model for review when all attempts fail.
 type GrindLoopTool struct {
-	runner      DelegateRunner
-	bashExec    bashExecutor
-	mcpResolver MCPResolver
-	roleMap     map[string]*common.AgentRole
-	modelResolver ModelResolver
-	subscriber  chan<- core.AgentEvent
+	runner          DelegateRunner
+	bashExec        bashExecutor
+	mcpResolver     MCPResolver
+	roleMap         map[string]*common.AgentRole
+	modelResolver   ModelResolver
+	validAgentNames []string
+	subscriber      chan<- core.AgentEvent
 }
 
 // bashExecutor is a local interface matching bash.Executor to avoid import cycle.
@@ -54,6 +55,7 @@ func NewGrindLoopTool(r DelegateRunner, bashExec bashExecutor, mcpResolver MCPRe
 		mcpResolver:   mcpResolver,
 		roleMap:       roleMap,
 		modelResolver: modelResolver,
+		validAgentNames: common.AgentNames(roleMap),
 	}
 }
 
@@ -68,17 +70,23 @@ func (t *GrindLoopTool) Description() string {
 }
 
 func (t *GrindLoopTool) Schema() json.RawMessage {
-	return json.RawMessage(`{
+	enumJSON := "[]"
+	if len(t.validAgentNames) > 0 {
+		names, _ := json.Marshal(t.validAgentNames)
+		enumJSON = string(names)
+	}
+	schema := fmt.Sprintf(`{
 		"type": "object",
 		"properties": {
 			"task": {"type": "string", "description": "The task to iteratively execute and verify"},
-			"role": {"type": "string", "description": "Employee role name (marcus, alex, etc.) or custom instructions"},
+			"role": {"type": "string", "description": "Employee role name or custom instructions", "enum": %s},
 			"verify_command": {"type": "string", "description": "Bash command to verify the work (e.g. 'go test ./...', 'npm run build')"},
 			"max_attempts": {"type": "integer", "description": "Maximum grind attempts (default: 5)"},
 			"verifier_model": {"type": "string", "description": "Model ID for final review if all attempts fail (optional)"}
 		},
 		"required": ["task", "role", "verify_command"]
-	}`)
+	}`, enumJSON)
+	return json.RawMessage(schema)
 }
 
 func (t *GrindLoopTool) Execute(ctx context.Context, args map[string]any) (any, error) {
