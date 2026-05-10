@@ -74,11 +74,13 @@ export class FooterComponent implements Component {
 
 		for (const entry of this.session.sessionManager.getEntries()) {
 			if (entry.type === "message" && entry.message.role === "assistant") {
-				totalInput += entry.message.usage.input;
-				totalOutput += entry.message.usage.output;
-				totalCacheRead += entry.message.usage.cacheRead;
-				totalCacheWrite += entry.message.usage.cacheWrite;
-				totalCost += entry.message.usage.cost.total;
+				const usage = entry.message.usage;
+				if (!usage) continue;
+				totalInput += usage.input || 0;
+				totalOutput += usage.output || 0;
+				totalCacheRead += usage.cacheRead || 0;
+				totalCacheWrite += usage.cacheWrite || 0;
+				totalCost += usage.cost?.total || 0;
 			}
 		}
 
