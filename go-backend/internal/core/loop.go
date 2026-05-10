@@ -205,6 +205,9 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				return err
 			}
 
+			// Ensure system messages are first (strict Jinja templates require it)
+			sessCtx = reorderSystemFirst(sessCtx)
+
 			// Run hooks: OnBeforeModel — modify messages before sending to LLM
 			for _, h := range l.config.Hooks {
 				modified, err := h.OnBeforeModel(ctx, state, sessCtx)
@@ -643,6 +646,20 @@ func (l *AgentLoop) IsRunning() bool {
 // Session returns the underlying session.
 func (l *AgentLoop) Session() Session {
 	return l.session
+}
+
+// reorderSystemFirst moves all system messages to the front while preserving
+// relative order. Some models (Qwen, Gemma) require system messages first.
+func reorderSystemFirst(msgs []Message) []Message {
+	var system, rest []Message
+	for _, m := range msgs {
+		if m.Role == "system" {
+			system = append(system, m)
+		} else {
+			rest = append(rest, m)
+		}
+	}
+	return append(system, rest...)
 }
 
 // deduplicateToolCalls removes duplicate tool calls that have the same function
