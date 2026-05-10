@@ -380,6 +380,7 @@ func (h *PuxHandler) GetConversations(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []interface{}{})
 		return
 	}
+	project := r.URL.Query().Get("project")
 	summaries, err := h.db.GetConversationSummaries(r.Context())
 	if err != nil {
 		JSONError(w, "Failed to get conversations", http.StatusInternalServerError)
@@ -387,6 +388,16 @@ func (h *PuxHandler) GetConversations(w http.ResponseWriter, r *http.Request) {
 	}
 	if summaries == nil {
 		summaries = []storage.ConversationSummary{}
+	}
+	// Filter by project if specified
+	if project != "" {
+		filtered := make([]storage.ConversationSummary, 0, len(summaries))
+		for _, s := range summaries {
+			if s.Project == project {
+				filtered = append(filtered, s)
+			}
+		}
+		summaries = filtered
 	}
 	writeJSON(w, http.StatusOK, summaries)
 }

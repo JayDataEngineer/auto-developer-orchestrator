@@ -48,6 +48,7 @@ export class SelectList implements Component {
 	public onSelect?: (item: SelectItem) => void;
 	public onCancel?: () => void;
 	public onSelectionChange?: (item: SelectItem) => void;
+	public onKey?: (key: string, item: SelectItem) => void;
 
 	constructor(items: SelectItem[], maxVisible: number, theme: SelectListTheme, layout: SelectListLayoutOptions = {}) {
 		this.items = items;
@@ -133,6 +134,11 @@ export class SelectList implements Component {
 			if (this.onCancel) {
 				this.onCancel();
 			}
+		}
+		// Custom key handler (delete, rename, etc.)
+		else if (this.onKey) {
+			const selectedItem = this.filteredItems[this.selectedIndex];
+			this.onKey(keyData, selectedItem);
 		}
 	}
 

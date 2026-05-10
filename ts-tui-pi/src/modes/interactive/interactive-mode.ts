@@ -2113,6 +2113,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text.startsWith("/rename ")) {
+				await this.handleRenameCommand(text);
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
@@ -3043,13 +3048,19 @@ export class InteractiveMode {
 			return;
 		}
 
+		// Map agentId → full session data for lookup on select
+		const sessionMap = new Map<string, any>();
 		const items: SelectItem[] = [
 			{ value: "__new__", label: "  New Session", description: "Start a fresh conversation" },
-			...sessions.map((s: any) => ({
-				value: s.agentId,
-				label: `  ${s.title || "Untitled"}`,
-				description: `${s.messageCount} msgs · ${s.lastAt ? new Date(s.lastAt).toLocaleDateString() : ""}`,
-			})),
+			...sessions.map((s: any) => {
+				const key = `${s.project}::${s.agentId}`;
+				sessionMap.set(key, s);
+				return {
+					value: key,
+					label: `  ${s.title || "Untitled"}`,
+					description: `${s.messageCount} msgs · ${s.project} · ${s.lastAt ? new Date(s.lastAt).toLocaleDateString() : ""}`,
+				};
+			}),
 		];
 
 		return new Promise<void>((resolve) => {
@@ -3066,11 +3077,14 @@ export class InteractiveMode {
 					puxSession.agentId = undefined;
 					this.showStatus("Starting new session.");
 				} else {
-					puxSession.agentId = item.value;
+					const sess = sessionMap.get(item.value);
+					const agentId = sess?.agentId || item.value;
+					const project = sess?.project;
+					puxSession.agentId = agentId;
 					const label = items.find(i => i.value === item.value)?.label?.trim() || "Untitled";
 					this.showStatus(`Resumed: ${label}`);
 					// Load and render history from backend
-					const history = await puxSession.loadHistory(item.value);
+					const history = await puxSession.loadHistory(agentId, project);
 					if (history && history.length > 0) {
 						this.chatContainer.clear();
 						for (const msg of history) {
@@ -3085,6 +3099,19 @@ export class InteractiveMode {
 								if (msg.thinking) content.push({ type: "thinking", thinking: msg.thinking });
 								const text = msg.text || msg.content || "";
 								if (text) content.push({ type: "text", text });
+								// Parse tool calls from JSON string
+								let toolCalls: any[] = [];
+								if (msg.toolCalls) {
+									try { toolCalls = JSON.parse(msg.toolCalls); } catch {}
+								}
+								for (const tc of toolCalls) {
+									content.push({
+										type: "toolCall",
+										id: tc.id || `tc-${Math.random().toString(36).slice(2)}`,
+										name: tc.name || tc.function?.name || "unknown",
+										arguments: tc.arguments || tc.function?.arguments || "{}",
+									});
+								}
 								const assistantMsg = {
 									role: "assistant" as const,
 									content,
@@ -3102,6 +3129,24 @@ export class InteractiveMode {
 									this.hiddenThinkingLabel,
 								);
 								this.chatContainer.addChild(component);
+								// Render tool call components inline
+								for (const tc of toolCalls) {
+									const tcComponent = new ToolExecutionComponent(
+										tc.name || tc.function?.name || "unknown",
+										tc.id || `tc-${Math.random().toString(36).slice(2)}`,
+										tc.arguments || tc.function?.arguments || "{}",
+										{ showImages: this.settingsManager.getShowImages() },
+										this.getRegisteredToolDefinition(tc.name || tc.function?.name),
+										this.ui,
+										this.sessionManager.getCwd(),
+									);
+									tcComponent.setExpanded(this.toolOutputExpanded);
+									tcComponent.updateResult({
+										content: [{ type: "text", text: tc.result || "(result from history)" }],
+										isError: false,
+									});
+									this.chatContainer.addChild(tcComponent);
+								}
 							}
 						}
 						this.ui.requestRender();
@@ -3112,6 +3157,26 @@ export class InteractiveMode {
 			list.onCancel = () => {
 				this.ui.hideOverlay();
 				resolve();
+			};
+			// Custom key handler: 'd' to delete, 'e' to rename
+			list.onKey = async (key, item) => {
+				if (!item || item.value === "__new__") return;
+				const sess = sessionMap.get(item.value);
+				if (!sess) return;
+				if (key === "d") {
+					await puxSession.deleteSession(sess.project, sess.agentId);
+					this.ui.hideOverlay();
+					this.showStatus(`Deleted: ${item.label?.trim()}`);
+					resolve();
+					setTimeout(() => this.showSessionPicker(), 100);
+				} else if (key === "e") {
+					// Pre-fill editor with rename command
+					this.ui.hideOverlay();
+					this.editor.setText(`/rename ${sess.project} ${sess.agentId} `);
+					this.editor.focus();
+					this.ui.requestRender();
+					resolve();
+				}
 			};
 			this.ui.showOverlay(list, { anchor: "center", width: "70%", maxHeight: "60%" });
 		});
@@ -4303,6 +4368,24 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("dim", `Session name set: ${name}`), 1, 0));
 		this.ui.requestRender();
+	}
+
+	private async handleRenameCommand(text: string): Promise<void> {
+		const puxSession = this.session as any;
+		// Format: /rename <project> <agentId> <new title>
+		const parts = text.replace(/^\/rename\s*/, "").trim().split(/\s+/);
+		if (parts.length < 3) {
+			this.showStatus("Usage: /rename <project> <agentId> <title>");
+			return;
+		}
+		const [project, agentId, ...titleParts] = parts;
+		const title = titleParts.join(" ");
+		const ok = await puxSession.renameSession?.(project, agentId, title);
+		if (ok) {
+			this.showStatus(`Renamed to: ${title}`);
+		} else {
+			this.showStatus("Failed to rename session.");
+		}
 	}
 
 	private handleSessionCommand(): void {

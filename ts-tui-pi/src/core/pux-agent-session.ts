@@ -533,13 +533,13 @@ export class PuxAgentSession {
   // ---- Session listing / resuming ----
 
   /** Fetch all available sessions from the backend */
-  async getSessions(): Promise<Array<{ agentId: string; title: string; lastMessage: string; lastAt: string; messageCount: number }>> {
+  async getSessions(): Promise<Array<{ project: string; agentId: string; title: string; lastMessage: string; lastAt: string; messageCount: number }>> {
     try {
       const res = await this._fetch(`${this.serverUrl}/api/pux/conversations`);
       if (!res.ok) return [];
       const data = await res.json();
-      // The backend returns ConversationSummary with agentId, title, lastMessage, lastAt, messageCount
       return data.map((s: any) => ({
+        project: s.project || "",
         agentId: s.agentId || "",
         title: s.title || s.lastMessage?.slice(0, 60) || "Untitled",
         lastMessage: s.lastMessage || "",
@@ -552,15 +552,43 @@ export class PuxAgentSession {
   }
 
   /** Load message history for a given session and emit them for display */
-  async loadHistory(agentId: string): Promise<any[]> {
+  async loadHistory(agentId: string, project?: string): Promise<any[]> {
     this.agentId = agentId;
     try {
-      const res = await this._fetch(`${this.serverUrl}/api/pux/history?project=${encodeURIComponent(this.project)}&agentId=${encodeURIComponent(agentId)}`);
+      const proj = project || this.project;
+      const res = await this._fetch(`${this.serverUrl}/api/pux/history?project=${encodeURIComponent(proj)}&agentId=${encodeURIComponent(agentId)}`);
       if (!res.ok) return [];
       const msgs = await res.json();
       return msgs;
     } catch {
       return [];
+    }
+  }
+
+  /** Delete a conversation from the backend */
+  async deleteSession(project: string, agentId: string): Promise<boolean> {
+    try {
+      const res = await this._fetch(
+        `${this.serverUrl}/api/pux/conversation?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`,
+        { method: "DELETE" },
+      );
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Rename a conversation in the backend */
+  async renameSession(project: string, agentId: string, title: string): Promise<boolean> {
+    try {
+      const res = await this._fetch(`${this.serverUrl}/api/pux/conversation/rename`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project, agentId, title }),
+      });
+      return res.ok;
+    } catch {
+      return false;
     }
   }
 }
