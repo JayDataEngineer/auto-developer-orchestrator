@@ -628,7 +628,13 @@ export class PuxAgentSession {
   getLastAssistantText(): string { return ""; }
   getFollowUpMessages(): string[] { return []; }
   getSteeringMessages(): string[] { return []; }
-  getToolDefinition(_name: string) { return null; }
+  getToolDefinition(name: string) {
+    if (this.extensionRunner) {
+      const toolDef = this.extensionRunner.getToolDefinition(name);
+      if (toolDef) return toolDef;
+    }
+    return null;
+  }
   getUserMessagesForForking() { return []; }
   setModel(model: any): void {
     this.model = model;

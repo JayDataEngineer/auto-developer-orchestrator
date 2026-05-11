@@ -2,13 +2,16 @@
 // pux-tui — minimal entry point for testing SSE bridge in full TUI
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { InteractiveMode } from "./modes/interactive/interactive-mode.js";
 import { AgentSessionRuntime } from "./core/agent-session-runtime.js";
 import { SessionManager, getDefaultSessionDir } from "./core/session-manager.js";
 import { SettingsManager } from "./core/settings-manager.js";
 import { PuxAgentSession } from "./core/pux-agent-session.js";
+import { discoverAndLoadExtensions } from "./core/extensions/loader.js";
+import { ExtensionRunner } from "./core/extensions/runner.js";
 import { parseArgs } from "node:util";
+import { readFileSync } from "node:fs";
 
 const { values: opts } = parseArgs({
   options: {
@@ -113,11 +116,38 @@ if (modelMeta) {
   session.agent.model = modelMeta;
 }
 
+// Discover and load extensions from pi.extensions in package.json
+const tuiRoot = resolve(import.meta.dir);
+const extensionPaths: string[] = [];
+try {
+  const pkg = JSON.parse(readFileSync(join(tuiRoot, "package.json"), "utf-8"));
+  if (pkg.pi?.extensions) {
+    for (const ext of pkg.pi.extensions) {
+      extensionPaths.push(resolve(tuiRoot, ext));
+    }
+  }
+} catch {}
+const extensionsResult = await discoverAndLoadExtensions(extensionPaths, cwd, agentDir);
+
+// Create extension runner if extensions loaded
+let extensionRunner: ExtensionRunner | undefined;
+if (extensionsResult.extensions.length > 0) {
+  extensionRunner = new ExtensionRunner(
+    extensionsResult.extensions,
+    extensionsResult.runtime,
+    cwd,
+    sessionManager,
+    { get: () => undefined, getAll: () => [], getAvailable: () => [] } as any,
+  );
+  // Wire extension runner to session for tool definition lookups
+  session.extensionRunner = extensionRunner;
+}
+
 const services = {
   cwd, agentDir, settingsManager, sessionManager,
   modelRegistry: null as any,
   resourceLoader: {
-    getExtensions: () => ({ extensions: [], diagnostics: [] }),
+    getExtensions: () => extensionsResult,
     getSkills: () => ({ skills: [] }),
     getPrompts: () => ({ prompts: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
@@ -129,7 +159,7 @@ const services = {
 
 const createRuntime: any = async () => ({
   session, services,
-  extensionsResult: { extensions: [], diagnostics: [] },
+  extensionsResult,
   diagnostics: [],
 });
 

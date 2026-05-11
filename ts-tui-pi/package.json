@@ -6,6 +6,9 @@
     "name": "pux",
     "configDir": ".pi"
   },
+  "pi": {
+    "extensions": ["./extensions/pux-core/index.ts"]
+  },
   "scripts": {
     "dev": "bun run src/main.ts",
     "build": "bun build src/main.ts --outdir dist --target bun",

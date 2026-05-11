@@ -1,5 +1,5 @@
 import { Container, getCapabilities, Image, Spacer, Text, type TUI } from "@mariozechner/pi-tui";
-import type { ToolDefinition } from "../../../core/extensions/types.js";
+import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.js";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.js";
 import { convertToPng } from "../../../utils/image-convert.js";
 import { theme } from "../theme/theme.js";
@@ -29,13 +29,16 @@ export class ToolExecutionComponent extends Container {
 	};
 	private convertedImages: Map<number, { data: string; mimeType: string }> = new Map();
 	private hideComponent = false;
+	private toolDefinition: ToolDefinition<any, any> | undefined;
+	private renderState: any = {};
+	private customComponent?: import("@mariozechner/pi-tui").Component;
 
 	constructor(
 		toolName: string,
 		toolCallId: string,
 		args: any,
 		options: ToolExecutionOptions = {},
-		_toolDefinition: ToolDefinition<any, any> | undefined,
+		toolDefinition: ToolDefinition<any, any> | undefined,
 		ui: TUI,
 		cwd: string = process.cwd(),
 	) {
@@ -44,6 +47,7 @@ export class ToolExecutionComponent extends Container {
 		this.toolCallId = toolCallId;
 		this.args = args;
 		this.showImages = options.showImages ?? true;
+		this.toolDefinition = toolDefinition;
 		this.ui = ui;
 		this.cwd = cwd;
 
@@ -136,13 +140,100 @@ export class ToolExecutionComponent extends Container {
 		return super.render(width);
 	}
 
+	private createRenderContext(): ToolRenderContext {
+		return {
+			args: this.args,
+			toolCallId: this.toolCallId,
+			invalidate: () => { this.updateDisplay(); this.ui.requestRender(); },
+			lastComponent: this.customComponent,
+			state: this.renderState,
+			cwd: this.cwd,
+			executionStarted: this.executionStarted,
+			argsComplete: this.argsComplete,
+			isPartial: this.isPartial,
+			expanded: this.expanded,
+			showImages: this.showImages,
+			isError: this.result?.isError ?? false,
+		};
+	}
+
+	private removeCustomComponent(): void {
+		if (this.customComponent) {
+			this.removeChild(this.customComponent);
+			this.customComponent = undefined;
+		}
+	}
+
 	private updateDisplay(): void {
 		let hasContent = false;
 		this.hideComponent = false;
 
+		// Try custom renderResult first (when we have a result)
+		if (this.result && this.toolDefinition?.renderResult) {
+			try {
+				const component = this.toolDefinition.renderResult(
+					{ content: this.result.content as any[], details: this.result.details, isError: this.result.isError },
+					{ expanded: this.expanded, isPartial: this.isPartial },
+					theme,
+					this.createRenderContext(),
+				);
+				if (component) {
+					this.removeCustomComponent();
+					this.contentText.setText("");
+					this.customComponent = component;
+					this.addChild(component);
+					hasContent = true;
+
+					// Still handle images from result
+					this.updateImageComponents();
+					if (!hasContent && this.imageComponents.length === 0) {
+						this.hideComponent = true;
+					}
+					return;
+				}
+			} catch {
+				// Fall through to default rendering
+			}
+		}
+
+		// Try custom renderCall (when no result yet, or result rendering fell through)
+		if (!this.result && this.toolDefinition?.renderCall) {
+			try {
+				const component = this.toolDefinition.renderCall(
+					this.args,
+					theme,
+					this.createRenderContext(),
+				);
+				if (component) {
+					this.removeCustomComponent();
+					this.contentText.setText("");
+					this.customComponent = component;
+					this.addChild(component);
+					hasContent = true;
+
+					this.updateImageComponents();
+					if (!hasContent && this.imageComponents.length === 0) {
+						this.hideComponent = true;
+					}
+					return;
+				}
+			} catch {
+				// Fall through to default rendering
+			}
+		}
+
+		// Default rendering
+		this.removeCustomComponent();
 		this.contentText.setText(this.formatToolExecution());
 		hasContent = true;
 
+		this.updateImageComponents();
+		if (!hasContent && this.imageComponents.length === 0) {
+			this.hideComponent = true;
+		}
+	}
+
+	private updateImageComponents(): void {
 		for (const img of this.imageComponents) {
 			this.removeChild(img);
 		}
@@ -176,10 +267,6 @@ export class ToolExecutionComponent extends Container {
 					this.addChild(imageComponent);
 				}
 			}
-		}
-
-		if (!hasContent && this.imageComponents.length === 0) {
-			this.hideComponent = true;
 		}
 	}
 

@@ -636,3 +636,131 @@ Items 1-3 can be built entirely in Go as middleware in the agent loop. Items 4-6
 - Agent-as-markdown format support
 - Content-hash dedup
 - Production readiness checks for code output
+
+---
+
+## Part C: TUI Improvements from Pi-Subagents
+
+**Key finding**: Pi-subagents' TUI is NOT a standalone TUI — it's a Pi extension that plugs into the base Pi TUI via `ctx.ui.setWidget()` and `ctx.ui.custom()`. It only adds sub-agent-specific rendering on top of the same `@earendil-works/pi-tui` framework we use (`@mariozechner/pi-tui` fork). Our TUI base is fine. What we need are specific rendering components for delegation results.
+
+### What Pi-Subagents' TUI Does (render.ts — 1249 lines)
+
+**`renderSubagentResult()`** — Main delegation result renderer:
+- Status glyphs: spinner/ok/failed/detached/warning per agent
+- Agent name + `[fork]` context badge
+- Live progress: tool count, tokens, duration
+- Last 3 tool calls with args preview
+- Last 5 lines of output
+- Artifacts paths, session files, model fallback chain
+- Compact vs expanded (Ctrl+O) views
+
+**`renderWidget()`** — Persistent async job status bar:
+- Animated spinner (80ms) for running background agents
+- Running/queued/finished grouping with tree-style `├─/└─` connectors
+- Line budget fitting (adapts to terminal height)
+- Chain vs parallel mode rendering
+
+**`ChainClarifyComponent`** (chain-clarify.ts — 1333 lines) — Pre-flight editor:
+- Full-screen boxed overlay with `╭─╮│╰─╯` borders
+- Three modes: single, parallel, chain
+- Per-step editing: task template, output path, reads, model, thinking level, skills
+- Inline text editor with cursor, word navigation, scrolling
+- Model selector with fuzzy search + thinking level selector
+- Skill selector with checkboxes
+- Output propagation: changing step N's output auto-updates step N+1's reads
+- Background toggle (`[b]`)
+
+**Control notices** — Watchdog alerts:
+- Idle (60s), long-running (240s), failed tools (3 attempts)
+- Debounced foreground delivery (1s)
+
+### Our Current Gap
+
+Our `ToolExecutionComponent` (tool-execution.ts) renders delegation as:
+```
+● delegate_to: marcus: fix the bug in auth.go
+  [output text]
+```
+
+No sub-agent tree. No progress tracking. No chain visualization. No parallel display. No async job widget.
+
+### What to Add to Our TUI
+
+#### 1. Sub-Agent Result Tree in `ToolExecutionComponent`
+
+When `delegate_to` or `delegate_async` returns, detect if the result contains sub-agent details and render a tree:
+
+```
+✓ chain · scout → planner → worker · 3 steps · 47 tools · 12.4k tok · 2m14s
+  ✓ Step 1: scout · ok · 12 tools · 34s
+    ⎿  Found 8 files related to authentication...
+  ✓ Step 2: planner · ok · 5 tools · 28s
+    ⎿  Plan written to plan.md
+  ✓ Step 3: worker · ok · 30 tools · 1m12s
+    ⎿  Fixed auth bug, added test, all passing
+```
+
+Implementation: Extend `ToolExecutionComponent.updateResult()` to detect delegation results with structured `details` containing agent status/progress. Add a `renderSubagentTree()` method.
+
+#### 2. Async Job Widget
+
+A persistent widget showing `delegate_async` background tasks:
+
+```
+● Async agents · background
+  ├─ ⠋ chain (research → write) · running · 23 tools · 45s
+  │    ⎿  Running: web_search("auth patterns")
+  └─ ✓ single (worker) · done · 14 tools · 1m02s
+       ⎿  Output: /tmp/artifacts/output.md
+```
+
+Implementation: Add to the TUI footer/header area or a collapsible sidebar. Track async jobs in state, update via SSE events.
+
+#### 3. Chain Visualization for Pipeline Results
+
+When using `delegate_chain` (proposed in Phase 2), show the pipeline flow:
+
+```
+scout → planner → worker → reviewer
+done    done      running   pending
+```
+
+Implementation: Part of the sub-agent tree rendering above, with horizontal flow display for chain mode.
+
+#### 4. Pre-Flight Confirmation (Optional, Later)
+
+Before running a chain/pipeline, show a confirmation overlay:
+
+```
+╭─ Chain: scout → planner → worker ───────────────────────────╮
+│ Original Task: Fix the auth bug in login.go                  │
+│                                                              │
+│ ▶ Step 1: scout                                              │
+│     task: Survey the codebase for auth-related files         │
+│     model: default                                           │
+│                                                              │
+│   Step 2: planner                                            │
+│     task: Create implementation plan based on {previous}     │
+│     model: default                                           │
+│                                                              │
+│   Step 3: worker                                             │
+│     task: Implement the plan from {previous}                 │
+│     model: default                                           │
+│                                                              │
+╰─ [Enter] Run • [Esc] Cancel • ↑↓ Navigate ─────────────────╯
+```
+
+This is the `ChainClarifyComponent` pattern — adapt to our Go backend's configuration.
+
+### What NOT to Add
+
+- **Model/thinking/skill selectors** — We don't expose per-step model selection to users
+- **Reads/writes path editing** — Our chain steps don't have explicit file dependencies
+- **Fork context badges** — We don't have the fork/fresh context distinction yet
+
+### TUI Implementation Priority
+
+1. **High**: Sub-agent result tree (extends existing `ToolExecutionComponent`)
+2. **High**: Async job widget (new component, tracks `delegate_async` state)
+3. **Medium**: Chain flow visualization (when delegate_chain lands)
+4. **Low**: Pre-flight confirmation overlay (nice-to-have, requires UX design)
