@@ -921,9 +921,16 @@ export class TUI extends Container {
 		// Render all components to get new lines
 		let newLines = this.render(width);
 
-		// Reset scroll offset if new content was added (content grew)
-		if (newLines.length > this.lastRenderedLineCount) {
-			this.chatScrollOffset = 0;
+		// When content grows, keep the user's scroll position stable.
+		// Only auto-scroll to bottom if the user is already at the bottom (offset === 0).
+		// If scrolled up, adjust offset so the same content stays in view.
+		if (newLines.length > this.lastRenderedLineCount && this.lastRenderedLineCount > 0) {
+			if (this.chatScrollOffset === 0) {
+				// At bottom — stay at bottom (new content flows in naturally)
+			} else {
+				// Scrolled up — grow offset to keep the same content visible
+				this.chatScrollOffset += newLines.length - this.lastRenderedLineCount;
+			}
 		}
 		this.lastRenderedLineCount = newLines.length;
 
