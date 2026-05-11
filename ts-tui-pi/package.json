@@ -7,7 +7,7 @@
     "configDir": ".pi"
   },
   "pi": {
-    "extensions": ["./extensions/pux-core/index.ts"]
+    "extensions": ["./extensions/pux-core/index.ts", "./extensions/pux-subagents/index.ts"]
   },
   "scripts": {
     "dev": "bun run src/main.ts",
