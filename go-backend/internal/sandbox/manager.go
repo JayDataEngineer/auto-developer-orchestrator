@@ -244,8 +244,44 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		Name: containerName,
 	})
 	if err != nil {
-		m.mu.Unlock()
-		return nil, fmt.Errorf("failed to create container %s: %w", containerName, err)
+		// Container name conflict — remove stale stopped container and retry
+		if strings.Contains(err.Error(), "already in use") || strings.Contains(err.Error(), "Conflict") {
+			m.logger.Info("removing stale container", zap.String("name", containerName))
+			m.dockerClient.ContainerRemove(ctx, containerName, client.ContainerRemoveOptions{Force: true})
+			createResp, err = m.dockerClient.ContainerCreate(ctx, client.ContainerCreateOptions{
+				Config: &container.Config{
+					Image:  image,
+					Env:    envVars,
+					Labels: map[string]string{
+						"openshell.policy":       policy,
+						"openshell.sandbox-id":   opts.ID,
+						"openshell.project-path": projectPath,
+					},
+				},
+				HostConfig: &container.HostConfig{
+					Binds: []string{
+						projectPath + ":/sandbox/workspace",
+						policiesDir + ":/etc/openshell/policies:ro",
+						"/tmp:/sandbox/tmp",
+						volumeName + ":/sandbox/persist",
+					},
+					Resources: resources,
+				},
+				NetworkingConfig: &network.NetworkingConfig{
+					EndpointsConfig: map[string]*network.EndpointSettings{
+						networkName: {},
+					},
+				},
+				Name: containerName,
+			})
+			if err != nil {
+				m.mu.Unlock()
+				return nil, fmt.Errorf("failed to create container %s (retry): %w", containerName, err)
+			}
+		} else {
+			m.mu.Unlock()
+			return nil, fmt.Errorf("failed to create container %s: %w", containerName, err)
+		}
 	}
 
 	// Start the container
@@ -523,6 +559,7 @@ var envVarRegex = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
 // FindSandboxByProject finds a sandbox by project path basename or project path.
 // Returns the first running sandbox whose ProjectPath ends with name, or whose ID matches name.
 // Verifies the Docker container is actually running before returning.
+// If a stopped container is found, it is started and recovered automatically.
 func (m *Manager) FindSandboxByProject(name string) *Sandbox {
 	m.mu.RLock()
 
@@ -559,6 +596,42 @@ func (m *Manager) FindSandboxByProject(name string) *Sandbox {
 		}
 		return sb
 	}
+
+	// No in-memory match — try to find a stopped Docker container by project name
+	if m.dockerClient != nil {
+		containerName := "orchestrator-sandbox-" + name
+		result, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
+		if err == nil && result.Container.State != nil && !result.Container.State.Running {
+			m.logger.Info("found stopped sandbox container, restarting", zap.String("name", containerName))
+			if _, err := m.dockerClient.ContainerStart(ctx, result.Container.ID, client.ContainerStartOptions{}); err != nil {
+				m.logger.Warn("failed to start stopped container", zap.Error(err))
+				return nil
+			}
+			// Recover into in-memory map
+			projectPath := ""
+			policy := "developer"
+			if result.Container.Config != nil && result.Container.Config.Labels != nil {
+				projectPath = result.Container.Config.Labels["openshell.project-path"]
+				if p := result.Container.Config.Labels["openshell.policy"]; p != "" {
+					policy = p
+				}
+			}
+			sb := &Sandbox{
+				ID:          name,
+				ContainerID: result.Container.ID,
+				ProjectPath: projectPath,
+				Policy:      policy,
+				Mode:        ModeCLI,
+				Status:      StatusRunning,
+				CreatedAt:   time.Now(),
+			}
+			m.mu.Lock()
+			m.sandboxes[name] = sb
+			m.mu.Unlock()
+			return sb
+		}
+	}
+
 	return nil
 }
 
