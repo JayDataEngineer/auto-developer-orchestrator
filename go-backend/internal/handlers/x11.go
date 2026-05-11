@@ -144,7 +144,7 @@ func (h *X11Handler) Keyboard(w http.ResponseWriter, r *http.Request) {
 		}
 		// Unicode text via clipboard paste (Agent-S pattern): xdotool type fails on
 		// special characters. Try xclip paste first, fall back to xdotool type.
-		escaped := shellEscape(req.Text)
+		escaped := sandbox.ShellEscape(req.Text)
 		if containsNonASCII(req.Text) {
 			// Clipboard paste for any non-ASCII text
 			_, err := h.exec(r, sandboxID, display, []string{

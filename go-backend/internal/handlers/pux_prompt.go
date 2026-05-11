@@ -18,6 +18,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/llm"
 	"github.com/auto-developer-orchestrator/backend/internal/observability"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
+	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/plan"
@@ -151,7 +152,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			Project:   req.Project,
 			ModelName: modelName,
 			SandboxID: sandboxID,
-			Message:   truncateStr(req.Message, 200),
+			Message:   util.Truncate(req.Message, 200),
 			Tags:      observability.ClassifyTags(req.Message),
 			Release:   h.langfuse.Release(),
 			Env:       h.langfuse.Environment(),
@@ -386,13 +387,6 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			h.writeLlamaSSE(w, evt, canFlush, flusher)
 		}
 	}
-}
-
-func truncateStr(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
 }
 
 // readAgentsMD reads AGENTS.md from the project root (like Claude Code's CLAUDE.md).

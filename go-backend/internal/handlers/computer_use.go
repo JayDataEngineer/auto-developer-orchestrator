@@ -486,7 +486,7 @@ func (h *ComputerUseHandler) writeLandingPage(ctx context.Context, sandboxID str
 	landingHTML := `<!DOCTYPE html><html><head><title>Sandbox Desktop</title><style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%)}.container{text-align:center;background:#fff;padding:48px 56px;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.15)}.ready{color:#4CAF50;font-size:28px;margin:0 0 12px}.hint{color:#888;font-size:16px;margin:0}</style></head><body><div class="container"><p class="ready">Desktop Ready</p><p class="hint">Use computer_use tools to navigate and interact</p></div></body></html>`
 
 	// Write landing page file (for manual VNC access)
-	escaped := shellEscape(landingHTML)
+	escaped := sandbox.ShellEscape(landingHTML)
 	cmd := fmt.Sprintf("echo '%s' > /tmp/landing.html", escaped)
 	_, _ = h.manager.ExecInSandbox(ctx, sandboxID, []string{"sh", "-c", cmd})
 

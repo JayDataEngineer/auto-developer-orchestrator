@@ -9,6 +9,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/util"
 )
 
 // GrindLoopTool implements core.Tool for iterative delegation with verification.
@@ -133,7 +134,7 @@ func (t *GrindLoopTool) Execute(ctx context.Context, args map[string]any) (any, 
 			Type: core.EventTypeGrindAttempt,
 			Data: core.AgentEventData{
 				AgentName: extractAgentName(role),
-				Task:      truncateTask(fmt.Sprintf("Attempt %d/%d", attempt, maxAttempts), 80),
+				Task:      util.TruncateEllipsis(fmt.Sprintf("Attempt %d/%d", attempt, maxAttempts), 80),
 				Status:    "running",
 			},
 		})
@@ -171,8 +172,8 @@ func (t *GrindLoopTool) Execute(ctx context.Context, args map[string]any) (any, 
 
 		record := AttemptRecord{
 			Attempt:       attempt,
-			ResultSnippet: truncateStr(lastResult, 500),
-			VerifyOutput:  truncateStr(exitOutput, 500),
+		ResultSnippet: util.TruncateEllipsis(lastResult, 500),
+		VerifyOutput:  util.TruncateEllipsis(exitOutput, 500),
 			Pass:          verifyPass,
 		}
 		history = append(history, record)

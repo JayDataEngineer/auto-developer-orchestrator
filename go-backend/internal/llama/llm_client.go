@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/auto-developer-orchestrator/backend/internal/util"
 )
 
 // ChatProvider is the interface that LLMClient implements.
@@ -606,7 +608,7 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 					zap.Int("chunk", chunkCount),
 					zap.Bool("hasToolCalls", hasToolCalls),
 					zap.Bool("hasFinish", hasFinish),
-					zap.String("data", truncateStr(jsonStr, 500)),
+					zap.String("data", util.TruncateEllipsis(jsonStr, 500)),
 				)
 			}
 		}
@@ -619,7 +621,7 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 			Usage *StreamUsage `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(jsonStr), &event); err != nil {
-			e.logger.Debug("Cloud SSE parse error", zap.String("data", truncateStr(jsonStr, 200)), zap.Error(err))
+			e.logger.Debug("Cloud SSE parse error", zap.String("data", util.TruncateEllipsis(jsonStr, 200)), zap.Error(err))
 			continue
 		}
 
@@ -644,10 +646,3 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 	return scanner.Err()
 }
 
-// truncateStr truncates a string to maxLen characters with "..." suffix.
-func truncateStr(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}

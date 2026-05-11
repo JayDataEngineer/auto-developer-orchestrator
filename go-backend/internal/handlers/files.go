@@ -62,7 +62,7 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, "path is required", http.StatusBadRequest)
 		return
 	}
-	if err := validateSandboxPath(req.Path); err != nil {
+	if err := sandbox.ValidatePath(req.Path); err != nil {
 		JSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -90,7 +90,7 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	// echo BASE64 | base64 -d > /path
 	encoded := base64.StdEncoding.EncodeToString(data)
 	// Shell-escape: the encoded string is ASCII-safe (A-Za-z0-9+/=) so no escaping needed.
-	cmd := fmt.Sprintf("echo '%s' | base64 -d > '%s'", encoded, shellEscape(req.Path))
+	cmd := fmt.Sprintf("echo '%s' | base64 -d > '%s'", encoded, sandbox.ShellEscape(req.Path))
 	if _, err := h.manager.ExecInSandbox(r.Context(), sandboxID, []string{"bash", "-c", cmd}); err != nil {
 		JSONError(w, fmt.Sprintf("write failed: %v", err), http.StatusInternalServerError)
 		return
@@ -111,7 +111,7 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, "path query parameter is required", http.StatusBadRequest)
 		return
 	}
-	if err := validateSandboxPath(path); err != nil {
+	if err := sandbox.ValidatePath(path); err != nil {
 		JSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -119,7 +119,7 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 	// Read file as base64 to safely transfer binary data through Docker exec.
 	output, err := h.manager.ExecInSandbox(r.Context(), sandboxID, []string{
 		"bash", "-c",
-		fmt.Sprintf("if [ -f '%s' ]; then base64 -w0 '%s'; else echo 'FILE_NOT_FOUND'; fi", shellEscape(path), shellEscape(path)),
+		fmt.Sprintf("if [ -f '%s' ]; then base64 -w0 '%s'; else echo 'FILE_NOT_FOUND'; fi", sandbox.ShellEscape(path), sandbox.ShellEscape(path)),
 	})
 	if err != nil {
 		JSONError(w, fmt.Sprintf("read failed: %v", err), http.StatusInternalServerError)
@@ -159,7 +159,7 @@ func (h *FileHandler) List(w http.ResponseWriter, r *http.Request) {
 	if path == "" {
 		path = "/sandbox/workspace"
 	}
-	if err := validateSandboxPath(path); err != nil {
+	if err := sandbox.ValidatePath(path); err != nil {
 		JSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -167,7 +167,7 @@ func (h *FileHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Use stat to get structured output: name\tsize\tis_dir
 	output, err := h.manager.ExecInSandbox(r.Context(), sandboxID, []string{
 		"bash", "-c",
-		fmt.Sprintf("find '%s' -maxdepth 1 -printf '%%f\\t%%s\\t%%y\\n' 2>/dev/null | tail -n +2", shellEscape(path)),
+		fmt.Sprintf("find '%s' -maxdepth 1 -printf '%%f\\t%%s\\t%%y\\n' 2>/dev/null | tail -n +2", sandbox.ShellEscape(path)),
 	})
 	if err != nil {
 		JSONError(w, fmt.Sprintf("list failed: %v", err), http.StatusInternalServerError)
@@ -213,7 +213,7 @@ func (h *FileHandler) Stat(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, "path query parameter is required", http.StatusBadRequest)
 		return
 	}
-	if err := validateSandboxPath(path); err != nil {
+	if err := sandbox.ValidatePath(path); err != nil {
 		JSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -246,12 +246,4 @@ func (h *FileHandler) Stat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// validateSandboxPath ensures the path is under allowed directories.
-func validateSandboxPath(path string) error {
-	return sandbox.ValidatePath(path)
-}
 
-// shellEscape wraps a string in single quotes, escaping embedded single quotes.
-func shellEscape(s string) string {
-	return sandbox.ShellEscape(s)
-}

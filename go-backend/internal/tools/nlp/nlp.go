@@ -24,20 +24,13 @@ Items:
 
 Output JSON:`
 
-// LLMProvider wraps the core LLMProvider interface.
-type LLMProvider interface {
-	StreamChat(ctx context.Context, messages []core.Message, tools []core.OpenAITool, opts core.GenerateOptions) (<-chan core.ChatEvent, error)
-	ModelName() string
-	ContextSize() int
-}
-
 // ExtractEntitiesTool extracts named entities using LLM.
 type ExtractEntitiesTool struct {
-	provider LLMProvider
+	provider core.LLMProvider
 }
 
 // NewExtractEntitiesTool creates a new entity extraction tool.
-func NewExtractEntitiesTool(provider LLMProvider) *ExtractEntitiesTool {
+func NewExtractEntitiesTool(provider core.LLMProvider) *ExtractEntitiesTool {
 	return &ExtractEntitiesTool{provider: provider}
 }
 
@@ -113,11 +106,11 @@ func (t *ExtractEntitiesTool) parseEntities(content string) []map[string]any {
 
 // ClusterContentTool clusters content items using LLM.
 type ClusterContentTool struct {
-	provider LLMProvider
+	provider core.LLMProvider
 }
 
 // NewClusterContentTool creates a new content clustering tool.
-func NewClusterContentTool(provider LLMProvider) *ClusterContentTool {
+func NewClusterContentTool(provider core.LLMProvider) *ClusterContentTool {
 	return &ClusterContentTool{provider: provider}
 }
 
@@ -215,7 +208,7 @@ func replaceTemplate(template, key, value string) string {
 	return strings.Replace(template, "{{."+key+"}}", value, 1)
 }
 
-func RegisterAll(tools []core.Tool, provider LLMProvider) []core.Tool {
+func RegisterAll(tools []core.Tool, provider core.LLMProvider) []core.Tool {
 	if provider == nil {
 		return tools
 	}

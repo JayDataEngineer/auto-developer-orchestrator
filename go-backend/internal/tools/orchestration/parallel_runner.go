@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/util"
 )
 
 // SubOrchestratorConfig holds config for creating a division sub-orchestrator.
@@ -561,10 +562,10 @@ func extractAgentName(instructions string) string {
 	// Otherwise truncate to first line or first 20 chars
 	for i, c := range instructions {
 		if c == '\n' {
-			return truncateStr(instructions[:i], 20)
+			return util.TruncateEllipsis(instructions[:i], 20)
 		}
 	}
-	return truncateStr(instructions, 20)
+	return util.TruncateEllipsis(instructions, 20)
 }
 
 func containsSpace(s string) bool {
@@ -576,16 +577,6 @@ func containsSpace(s string) bool {
 	return false
 }
 
-func truncateStr(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
 func truncateTask(task string, maxLen int) string {
-	if len(task) <= maxLen {
-		return task
-	}
-	return task[:maxLen] + "..."
+	return util.TruncateEllipsis(task, maxLen)
 }
