@@ -71,8 +71,11 @@ func TestToolRegistry_Alias_SelfReference(t *testing.T) {
 func TestToolRegistry_RegisterCommonAliases(t *testing.T) {
 	reg := NewToolRegistry([]Tool{
 		&stubTool{name: "bash"},
-		&stubTool{name: "read_file"},
-		&stubTool{name: "write_file"},
+		&stubTool{name: "file_read"},
+		&stubTool{name: "file_write"},
+		&stubTool{name: "file_edit"},
+		&stubTool{name: "file_grep"},
+		&stubTool{name: "file_glob"},
 		&stubTool{name: "click_element"},
 		&stubTool{name: "type"},
 		&stubTool{name: "search_web"},
@@ -87,8 +90,11 @@ func TestToolRegistry_RegisterCommonAliases(t *testing.T) {
 		{"execute_bash", "bash"},
 		{"execute_command", "bash"},
 		{"run_command", "bash"},
-		{"file_read", "read_file"},
-		{"file_write", "write_file"},
+		{"read_file", "file_read"},
+		{"write_file", "file_write"},
+		{"edit_file", "file_edit"},
+		{"grep", "file_grep"},
+		{"glob", "file_glob"},
 		{"click", "click_element"},
 		{"type_text", "type"},
 		{"search", "search_web"},
@@ -96,6 +102,12 @@ func TestToolRegistry_RegisterCommonAliases(t *testing.T) {
 	for _, a := range aliases {
 		if reg.Get(a.alias) == nil {
 			t.Errorf("alias %q should resolve to %q", a.alias, a.canonical)
+		}
+	}
+	// Also verify direct canonical names still work
+	for _, name := range []string{"bash", "file_read", "file_write", "file_edit", "file_grep", "file_glob"} {
+		if reg.Get(name) == nil {
+			t.Errorf("canonical tool %q should be accessible directly", name)
 		}
 	}
 }

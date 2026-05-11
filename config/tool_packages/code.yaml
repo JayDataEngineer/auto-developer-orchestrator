@@ -1,3 +1,9 @@
 description: "Code operations — file editing, search, and build"
 mcp_servers: []
-tools: *shell_tools
+tools:
+  - bash
+  - file_read
+  - file_write
+  - file_edit
+  - file_glob
+  - file_grep
