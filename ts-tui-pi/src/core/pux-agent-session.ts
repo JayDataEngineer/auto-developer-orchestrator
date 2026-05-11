@@ -147,6 +147,7 @@ export class PuxAgentSession {
   private _totalCacheTokens = 0;
   private _lastAssistantText = "";
   private _accText = "";  // current turn text accumulator
+  private _pendingHooks = new Map<string, { hookId: string; hookPoint: string }>();
 
 	public agentId: string = "";
 	private serverUrl: string;
@@ -564,6 +565,29 @@ export class PuxAgentSession {
         break;
       }
 
+      case "hook_request": {
+        // Agent loop is paused waiting for a hook response.
+        // Forward to extension system — extensions can allow/block/modify.
+        this.emit({
+          type: "hook_request" as any,
+          hookId: payload.hookId || "",
+          hookPoint: payload.hookPoint || "",
+          toolName: payload.toolName || "",
+          args: payload.args || {},
+          result: payload.result,
+        } as any);
+
+        // If no extension handles it, auto-allow after a short delay
+        // Extensions call submitHookResponse() to respond explicitly
+        setTimeout(() => {
+          if (this._pendingHooks.has(payload.hookId)) {
+            this._pendingHooks.delete(payload.hookId);
+            this.submitHookResponse(payload.hookId, "allow").catch(() => {});
+          }
+        }, 5000);
+        break;
+      }
+
       case "grind_attempt": {
         this.emit({
           type: "grind_attempt" as any,
@@ -842,6 +866,52 @@ export class PuxAgentSession {
       return res.ok;
     } catch {
       return false;
+    }
+  }
+
+  /** Respond to a hook_request — allows the TUI/extensions to allow/block/modify agent loop actions */
+  async submitHookResponse(hookId: string, action: "allow" | "block" | "modify", data?: Record<string, any>, reason?: string): Promise<boolean> {
+    this._pendingHooks.delete(hookId);
+    try {
+      const res = await this._fetch(`${this.serverUrl}/api/pux/hook-response`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hookId, action, data, reason }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Get the session tree for navigation */
+  async getTree(project?: string): Promise<{ sessionId: string; currentNode: string; nodes: any[] } | null> {
+    try {
+      const proj = project || this.project;
+      const res = await this._fetch(`${this.serverUrl}/api/pux/tree?project=${encodeURIComponent(proj)}&agentId=${encodeURIComponent(this.agentId || "default")}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  /** Fork the session at a given node */
+  async forkSession(nodeId: string, project?: string): Promise<{ forkPath: string; forkId: string } | null> {
+    try {
+      const res = await this._fetch(`${this.serverUrl}/api/pux/fork`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project: project || this.project,
+          agentId: this.agentId || "default",
+          nodeId,
+        }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
     }
   }
 }
