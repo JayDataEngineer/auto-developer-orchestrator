@@ -120,17 +120,18 @@ func main() {
 	}
 
 	// Connect to the Ray cluster LLM (optional, falls back to local).
-	// Cluster has Qwen3.6-27B at 30080/llm — always on GPU server.
+	// Cluster has Qwen3.6-27B at 30080 — always on GPU server.
 	clusterURL := os.Getenv("CLUSTER_LLM_URL")
 	if clusterURL == "" {
-		clusterURL = services.HubBase() + "/llm"
+		clusterURL = services.HubBase()
 	}
 	var clusterEngine *llamaeng.LLMClient
 	if os.Getenv("CLUSTER_LLM_DISABLE") != "true" {
 		clusterEngine = llamaeng.NewLLMClient(llamaeng.LLMClientConfig{
-			BaseURL:   clusterURL,
-			ModelName: "qwen3.6-27b",
-			Logger:    logger,
+			BaseURL:          clusterURL,
+			ModelName:        "qwen3.6-27b-q5_k_s",
+			DisableStreaming: true,
+			Logger:           logger,
 		})
 		if err := clusterEngine.LoadModel(); err != nil {
 			logger.Warn("Ray cluster LLM not reachable — will not use cluster engine",

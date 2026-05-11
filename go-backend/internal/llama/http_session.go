@@ -115,11 +115,34 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 		acc := newStreamAccumulator(s.thinkingBudget)
 
 		t0 := time.Now()
-		err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool {
-			return acc.processChunk(ch, delta, finish, usage, s)
-		})
-		elapsed := time.Since(t0)
 
+		// Some proxy backends (e.g. MCP hub at 30080) don't support SSE streaming.
+		// Fall back to non-streaming and convert the response into streaming events.
+		if llm, ok := s.engine.(*LLMClient); ok && llm.StreamingDisabled() {
+			req.Stream = false
+			resp, err := s.engine.chatComplete(req)
+			if err == nil && len(resp.Choices) > 0 {
+				choice := resp.Choices[0]
+				delta := streamDeltaFromResponse(choice)
+				usage := &StreamUsage{
+					PromptTokens:     resp.Usage.PromptTokens,
+					CompletionTokens: resp.Usage.CompletionTokens,
+				}
+				acc.processChunk(ch, delta, choice.FinishReason, usage, s)
+			}
+			if err != nil {
+				ch <- ChatEvent{Type: ChatEventError, Err: err}
+			}
+		} else {
+			err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool {
+				return acc.processChunk(ch, delta, finish, usage, s)
+			})
+			if err != nil {
+				ch <- ChatEvent{Type: ChatEventError, Err: err}
+			}
+		}
+
+		elapsed := time.Since(t0)
 		acc.finalize(ch, s)
 
 		zap.L().Debug("Chat generation complete",
@@ -128,13 +151,31 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 			zap.Duration("duration", elapsed),
 			zap.Float64("tok_per_sec", tokPerSec(acc.tokenCount, elapsed)),
 		)
-
-		if err != nil {
-			ch <- ChatEvent{Type: ChatEventError, Err: err}
-		}
 	}()
 
 	return ch
+}
+
+// streamDeltaFromResponse converts a non-streaming ChatChoice into a StreamDelta
+// so it can be fed through the same streaming accumulator pipeline.
+func streamDeltaFromResponse(choice ChatChoice) StreamDelta {
+	msg := choice.Message
+	delta := StreamDelta{
+		Content:          msg.Content,
+		ReasoningContent: msg.ReasoningContent,
+	}
+	for i, tc := range msg.ToolCalls {
+		delta.ToolCalls = append(delta.ToolCalls, ToolCallDelta{
+			Index: i,
+			ID:    tc.ID,
+			Type:  tc.Type,
+			Function: FunctionCallDelta{
+				Name:      tc.Function.Name,
+				Arguments: tc.Function.Arguments,
+			},
+		})
+	}
+	return delta
 }
 
 // buildRequest constructs a ChatCompletionRequest from session state and options.

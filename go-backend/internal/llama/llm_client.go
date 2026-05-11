@@ -35,11 +35,12 @@ type ChatProvider interface {
 // Works with llama-server, Google Gemini (OpenAI compat), or any compatible endpoint.
 // Uses /v1/chat/completions with native OpenAI-style tool calling.
 type LLMClient struct {
-	baseURL    string
-	apiKey     string // optional — set for cloud providers (Gemini, OpenAI, etc.)
-	client     *http.Client
-	logger     *zap.Logger
-	modelName  string
+	baseURL          string
+	apiKey           string // optional — set for cloud providers (Gemini, OpenAI, etc.)
+	client           *http.Client
+	logger           *zap.Logger
+	modelName        string
+	disableStreaming bool // proxies without SSE support use non-streaming API
 
 	mu            sync.RWMutex
 	loaded        bool
@@ -49,10 +50,11 @@ type LLMClient struct {
 
 // LLMClientConfig holds configuration for creating an LLMClient.
 type LLMClientConfig struct {
-	BaseURL   string // e.g. "http://localhost:8001" or "https://generativelanguage.googleapis.com/v1beta/openai"
-	APIKey    string // optional Bearer token for cloud providers
-	ModelName string // model ID sent in requests and used for logs/events
-	Logger    *zap.Logger
+	BaseURL          string // e.g. "http://localhost:8001" or "https://generativelanguage.googleapis.com/v1beta/openai"
+	APIKey           string // optional Bearer token for cloud providers
+	ModelName        string // model ID sent in requests and used for logs/events
+	DisableStreaming bool   // use non-streaming API (for proxies that don't support SSE)
+	Logger           *zap.Logger
 }
 
 // NewLLMClient creates a new HTTP engine (does NOT load the model — llama-server does that).
@@ -67,11 +69,12 @@ func NewLLMClient(cfg LLMClientConfig) *LLMClient {
 		cfg.ModelName = "gemma-4-26b"
 	}
 	return &LLMClient{
-		baseURL:   cfg.BaseURL,
-		apiKey:    cfg.APIKey,
-		client:    &http.Client{Timeout: 5 * time.Minute},
-		logger:    cfg.Logger,
-		modelName: cfg.ModelName,
+		baseURL:          cfg.BaseURL,
+		apiKey:           cfg.APIKey,
+		client:           &http.Client{Timeout: 5 * time.Minute},
+		logger:           cfg.Logger,
+		modelName:        cfg.ModelName,
+		disableStreaming: cfg.DisableStreaming,
 	}
 }
 
@@ -137,6 +140,11 @@ func (e *LLMClient) NewSession(ctxSize int) (*Session, error) {
 		ctxSize:   ctxSize,
 		messages:  []Message{},
 	}, nil
+}
+
+// StreamingDisabled returns true if this engine uses non-streaming API.
+func (e *LLMClient) StreamingDisabled() bool {
+	return e.disableStreaming
 }
 
 // IsLoaded returns whether the engine is connected.
