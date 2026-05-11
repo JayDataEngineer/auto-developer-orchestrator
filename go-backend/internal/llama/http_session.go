@@ -252,18 +252,10 @@ func (a *streamAccumulator) accumulateToolCalls(delta StreamDelta) {
 			if tc.Type != "" {
 				existing.Type = tc.Type
 			}
-			if tc.ExtraContent != nil && tc.ExtraContent.Google != nil && tc.ExtraContent.Google.ThoughtSignature != "" {
-				existing.ThoughtSignature = tc.ExtraContent.Google.ThoughtSignature
-			}
 		} else {
-			sig := ""
-			if tc.ExtraContent != nil && tc.ExtraContent.Google != nil {
-				sig = tc.ExtraContent.Google.ThoughtSignature
-			}
 			a.toolCallAccum[tc.Index] = &ToolCallResponse{
-				ID:               tc.ID,
-				Type:             tc.Type,
-				ThoughtSignature: sig,
+				ID:   tc.ID,
+				Type: tc.Type,
 				Function: FunctionCallData{
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,

@@ -17,10 +17,9 @@ type Message struct {
 
 // ToolCallResponse is a structured tool call returned by the server.
 type ToolCallResponse struct {
-	ID               string           `json:"id"`
-	Type             string           `json:"type"` // always "function"
-	Function         FunctionCallData `json:"function"`
-	ThoughtSignature string           `json:"thought_signature,omitempty"` // Gemini 3 requirement — must echo back
+	ID       string           `json:"id"`
+	Type     string           `json:"type"` // always "function"
+	Function FunctionCallData `json:"function"`
 }
 
 // FunctionCallData holds the function name and arguments.
@@ -53,22 +52,10 @@ type StreamDelta struct {
 
 // ToolCallDelta is a partial tool call in a streaming chunk.
 type ToolCallDelta struct {
-	Index       int               `json:"index"`
-	ID          string            `json:"id,omitempty"`
-	Type        string            `json:"type,omitempty"`
-	Function    FunctionCallDelta `json:"function,omitempty"`
-	ExtraContent *ExtraContent    `json:"extra_content,omitempty"`
-}
-
-// ExtraContent captures provider-specific fields in streaming tool call chunks.
-// Gemini 3 returns thought_signature via extra_content.google.thought_signature.
-type ExtraContent struct {
-	Google *GoogleExtra `json:"google,omitempty"`
-}
-
-// GoogleExtra holds Google-specific extra fields in streaming tool call chunks.
-type GoogleExtra struct {
-	ThoughtSignature string `json:"thought_signature,omitempty"`
+	Index    int               `json:"index"`
+	ID       string            `json:"id,omitempty"`
+	Type     string            `json:"type,omitempty"`
+	Function FunctionCallDelta `json:"function,omitempty"`
 }
 
 // FunctionCallDelta holds partial function call data in streaming.
