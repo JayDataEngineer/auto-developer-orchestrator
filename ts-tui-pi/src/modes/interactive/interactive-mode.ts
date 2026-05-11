@@ -3168,7 +3168,12 @@ export class InteractiveMode {
 	 */
 	private renderSubAgentSummary(): void {
 		if (!this.statusContainer || this._subAgentSummary.size === 0) return;
+		// Keep the loading animation alive — only clear non-spinner children
+		const savedLoader = this.loadingAnimation;
 		this.statusContainer.clear();
+		if (savedLoader) {
+			this.statusContainer.addChild(savedLoader);
+		}
 
 		const entries = [...this._subAgentSummary.values()];
 		const running = entries.filter(e => e.status === "running").length;
