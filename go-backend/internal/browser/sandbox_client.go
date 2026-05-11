@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
@@ -285,6 +286,7 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 
 	// Step 3: Navigate using chromedp (waits for page load event) then collect data.
 	err = chromedp.Run(tabCtx,
+		network.Enable(),                      // required for GetCookies, SetCookie, etc.
 		chromedp.Navigate(url),
 		chromedp.Sleep(500*time.Millisecond), // brief settle for dynamic content
 		chromedp.Title(&title),

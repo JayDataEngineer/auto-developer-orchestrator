@@ -12,6 +12,7 @@ import (
 	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"go.uber.org/zap"
 )
 
 const a11yElementCap = 80
@@ -31,7 +32,9 @@ func (sbc *SandboxBrowserClient) GetAccessibilityTree(ctx context.Context) (*A11
 				if err != nil {
 					return err
 				}
+				sbc.logger.Info("a11y raw nodes", zap.Int("count", len(nodes)))
 				selectors = resolveSelectors(ctx, nodes)
+				sbc.logger.Info("a11y selectors resolved", zap.Int("count", len(selectors)))
 				return nil
 			}),
 		)
@@ -41,6 +44,23 @@ func (sbc *SandboxBrowserClient) GetAccessibilityTree(ctx context.Context) (*A11
 	}
 
 	elems := buildAccessibleElements(nodes, selectors)
+	// Debug: log first few non-interactive roles
+	seen := map[string]bool{}
+	for _, n := range nodes {
+		if n.Ignored {
+			continue
+		}
+		r := stringFromValue(n.Role)
+		if !seen[r] {
+			seen[r] = true
+		}
+	}
+	roles := make([]string, 0, len(seen))
+	for r := range seen {
+		roles = append(roles, r)
+	}
+	sbc.logger.Info("a11y all roles", zap.Strings("roles", roles))
+	sbc.logger.Info("a11y interactive elements", zap.Int("count", len(elems)))
 	if len(elems) > a11yElementCap {
 		elems = elems[:a11yElementCap]
 	}
@@ -206,10 +226,15 @@ func buildAccessibleElements(nodes []*accessibility.Node, selectors map[accessib
 }
 
 func stringFromValue(v *accessibility.Value) string {
-	if v == nil {
+	if v == nil || len(v.Value) == 0 {
 		return ""
 	}
-	return string(v.Value)
+	// v.Value is a jsontext.Value (raw JSON). Unmarshal to strip quotes.
+	var s string
+	if err := json.Unmarshal([]byte(v.Value), &s); err == nil {
+		return s
+	}
+	return strings.Trim(string(v.Value), `"`)
 }
 
 func propertyValue(props []*accessibility.Property, name string) string {
@@ -425,13 +450,14 @@ func (sbc *SandboxBrowserClient) typeBySelector(ctx context.Context, selector, t
 	typeJS := fmt.Sprintf(`(function(){
 		var el=document.querySelector('%s');
 		if(!el)return false;
-		var ns=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
-		ns.call(el,'%s');
+		var proto=el.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;
+		var ns=Object.getOwnPropertyDescriptor(proto,'value');
+		if(ns&&ns.set){ns.set.call(el,'%s');}else{el.value='%s';}
 		el.dispatchEvent(new Event('input',{bubbles:true}));
 		el.dispatchEvent(new Event('change',{bubbles:true}));
 		%s
 		return true;
-	})()`, escapedSel, escaped, submitPart)
+	})()`, escapedSel, escaped, escaped, submitPart)
 
 	timeout := defaultTimeout
 	if submit {
