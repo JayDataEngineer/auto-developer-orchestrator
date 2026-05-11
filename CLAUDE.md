@@ -168,3 +168,18 @@ python3 -m pytest test_sse_contract.py -v          # SSE event validation
 ```
 
 Tests auto-skip when required services are unreachable.
+
+## TUI Visual Testing
+
+```bash
+task tui-visual                                          # Start visual testing server on :9877
+curl http://localhost:9877/screenshot > /tmp/tui.png     # Take PNG screenshot
+curl http://localhost:9877/screen                         # Get terminal buffer as JSON text
+curl http://localhost:9877/observe                        # Combined: screenshot + text + logs
+curl -X POST http://localhost:9877/input -d '{"text":"hello\n","wait":2}'  # Send input
+curl -X POST http://localhost:9877/key -d '{"key":"escape"}'                # Send special key
+```
+
+**ALWAYS use visual testing when changing TUI rendering.** Unit tests do not catch display bugs.
+The visual server runs the real TUI in a pty, captures the screen buffer, and serves PNG screenshots.
+Use `/screenshot` to verify layout, `/screen` for text content, `/observe` for full state.

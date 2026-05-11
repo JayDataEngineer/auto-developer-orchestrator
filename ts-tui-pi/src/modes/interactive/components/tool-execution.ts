@@ -58,16 +58,11 @@ export class ToolExecutionComponent extends Container {
 
 		this.addChild(new Spacer(1));
 
-		// Always create both. contentBox is used for tools with renderer-based call/result composition.
-		// contentText is reserved for generic fallback rendering when no tool definition exists.
 		this.contentBox = new Box(1, 1, (text: string) => theme.bg("toolPendingBg", text));
 		this.contentText = new Text("", 1, 1, (text: string) => theme.bg("toolPendingBg", text));
 
-		if (this.hasRendererDefinition()) {
-			this.addChild(this.contentBox);
-		} else {
-			this.addChild(this.contentText);
-		}
+		// Always use simple text rendering — function name + args + output as plain text
+		this.addChild(this.contentText);
 
 		this.updateDisplay();
 	}
@@ -232,61 +227,11 @@ export class ToolExecutionComponent extends Container {
 
 		let hasContent = false;
 		this.hideComponent = false;
-		if (this.hasRendererDefinition()) {
-			this.contentBox.setBgFn(bgFn);
-			this.contentBox.clear();
 
-			const callRenderer = this.getCallRenderer();
-			if (!callRenderer) {
-				this.contentBox.addChild(this.createCallFallback());
-				hasContent = true;
-			} else {
-				try {
-					const component = callRenderer(this.args, theme, this.getRenderContext(this.callRendererComponent));
-					this.callRendererComponent = component;
-					this.contentBox.addChild(component);
-					hasContent = true;
-				} catch {
-					this.callRendererComponent = undefined;
-					this.contentBox.addChild(this.createCallFallback());
-					hasContent = true;
-				}
-			}
-
-			if (this.result) {
-				const resultRenderer = this.getResultRenderer();
-				if (!resultRenderer) {
-					const component = this.createResultFallback();
-					if (component) {
-						this.contentBox.addChild(component);
-						hasContent = true;
-					}
-				} else {
-					try {
-						const component = resultRenderer(
-							{ content: (this.result.content || []) as any, details: this.result.details },
-							{ expanded: this.expanded, isPartial: this.isPartial },
-							theme,
-							this.getRenderContext(this.resultRendererComponent),
-						);
-						this.resultRendererComponent = component;
-						this.contentBox.addChild(component);
-						hasContent = true;
-					} catch {
-						this.resultRendererComponent = undefined;
-						const component = this.createResultFallback();
-						if (component) {
-							this.contentBox.addChild(component);
-							hasContent = true;
-						}
-					}
-				}
-			}
-		} else {
-			this.contentText.setCustomBgFn(bgFn);
-			this.contentText.setText(this.formatToolExecution());
-			hasContent = true;
-		}
+		// Always use simple text rendering for all tools
+		this.contentText.setCustomBgFn(bgFn);
+		this.contentText.setText(this.formatToolExecution());
+		hasContent = true;
 
 		for (const img of this.imageComponents) {
 			this.removeChild(img);
@@ -323,7 +268,7 @@ export class ToolExecutionComponent extends Container {
 			}
 		}
 
-		if (this.hasRendererDefinition() && !hasContent && this.imageComponents.length === 0) {
+		if (!hasContent && this.imageComponents.length === 0) {
 			this.hideComponent = true;
 		}
 	}
@@ -333,15 +278,56 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private formatToolExecution(): string {
-		let text = theme.fg("toolTitle", theme.bold(this.toolName));
-		const content = JSON.stringify(this.args, null, 2);
-		if (content) {
-			text += `\n\n${content}`;
-		}
+		const name = theme.fg("toolTitle", theme.bold(this.toolName));
+		const argsSummary = this.formatArgsSummary();
+		let text = argsSummary ? `${name}: ${argsSummary}` : name;
+
 		const output = this.getTextOutput();
 		if (output) {
-			text += `\n${output}`;
+			text += `\n${theme.fg("toolOutput", output)}`;
 		}
 		return text;
+	}
+
+	/** Extract a one-line summary of the args — command, file path, pattern, etc. */
+	private formatArgsSummary(): string {
+		const a = this.args;
+		if (!a || typeof a !== "object") return String(a ?? "");
+
+		// bash/sh — show the command
+		if (this.toolName === "bash" || this.toolName === "shell_exec") {
+			const cmd = a.command || a.cmd || "";
+			return cmd.length > 120 ? cmd.slice(0, 120) + "..." : cmd;
+		}
+
+		// file operations — show the path
+		if (this.toolName === "file_read" || this.toolName === "read" ||
+			this.toolName === "file_write" || this.toolName === "write" ||
+			this.toolName === "file_edit" || this.toolName === "edit" ||
+			this.toolName === "file_glob" || this.toolName === "find" ||
+			this.toolName === "file_grep" || this.toolName === "grep") {
+			return a.file_path || a.path || a.pattern || a.query || "";
+		}
+
+		// delegation — show role + task preview
+		if (this.toolName === "delegate_to" || this.toolName === "delegate_async") {
+			const role = a.instructions || a.step || a.agent_name || "agent";
+			const task = a.task || "";
+			const preview = task.length > 60 ? task.slice(0, 60) + "..." : task;
+			return `${role}${preview ? `: ${preview}` : ""}`;
+		}
+
+		// memory — show key
+		if (this.toolName === "memory" || this.toolName === "save_memory") {
+			return a.key || a.action || "";
+		}
+
+		// generic — first string value under 80 chars
+		for (const v of Object.values(a)) {
+			if (typeof v === "string" && v.length > 0) {
+				return v.length > 120 ? v.slice(0, 120) + "..." : v;
+			}
+		}
+		return "";
 	}
 }
