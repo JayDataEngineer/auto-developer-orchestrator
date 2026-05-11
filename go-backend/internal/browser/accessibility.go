@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/chromedp/cdproto/accessibility"
+	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 )
@@ -17,6 +19,7 @@ const a11yElementCap = 80
 func (sbc *SandboxBrowserClient) GetAccessibilityTree(ctx context.Context) (*A11ySnapshot, error) {
 	var nodes []*accessibility.Node
 	var title, currentURL string
+	var selectors map[accessibility.NodeID]string
 
 	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx,
@@ -25,7 +28,11 @@ func (sbc *SandboxBrowserClient) GetAccessibilityTree(ctx context.Context) (*A11
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				var err error
 				nodes, err = accessibility.GetFullAXTree().Do(ctx)
-				return err
+				if err != nil {
+					return err
+				}
+				selectors = resolveSelectors(ctx, nodes)
+				return nil
 			}),
 		)
 	})
@@ -33,7 +40,7 @@ func (sbc *SandboxBrowserClient) GetAccessibilityTree(ctx context.Context) (*A11
 		return nil, fmt.Errorf("get accessibility tree: %w", err)
 	}
 
-	elems := buildAccessibleElements(nodes)
+	elems := buildAccessibleElements(nodes, selectors)
 	if len(elems) > a11yElementCap {
 		elems = elems[:a11yElementCap]
 	}
@@ -49,12 +56,105 @@ func (sbc *SandboxBrowserClient) GetAccessibilityTree(ctx context.Context) (*A11
 	}, nil
 }
 
-func buildAccessibleElements(nodes []*accessibility.Node) []AccessibleElement {
-	nodeMap := make(map[accessibility.NodeID]*accessibility.Node, len(nodes))
-	for _, n := range nodes {
-		nodeMap[n.NodeID] = n
+// resolveSelectors maps each accessibility node's BackendDOMNodeID to a real
+// CSS selector using dom.DescribeNode. This runs inside the CDP session.
+func resolveSelectors(ctx context.Context, nodes []*accessibility.Node) map[accessibility.NodeID]string {
+	result := make(map[accessibility.NodeID]string, len(nodes))
+	for _, node := range nodes {
+		if node.Ignored || node.BackendDOMNodeID == 0 {
+			continue
+		}
+		domNode, err := dom.DescribeNode().
+			WithBackendNodeID(cdp.BackendNodeID(node.BackendDOMNodeID)).
+			WithDepth(0).
+			Do(ctx)
+		if err != nil {
+			continue
+		}
+		sel := selectorFromDOMNode(domNode)
+		if sel != "" {
+			result[node.NodeID] = sel
+		}
+	}
+	return result
+}
+
+// selectorFromDOMNode builds a CSS selector from a real DOM node.
+// Prefers id > name > type+placeholder > tag with attribute.
+func selectorFromDOMNode(n *cdp.Node) string {
+	if n == nil {
+		return ""
+	}
+	tag := strings.ToLower(n.LocalName)
+	if tag == "" {
+		return ""
 	}
 
+	attrs := attrMap(n.Attributes)
+
+	// Best: unique id
+	if id, ok := attrs["id"]; ok && id != "" {
+		return "#" + cssEscape(id)
+	}
+
+	// Good: name attribute (common on inputs)
+	if name, ok := attrs["name"]; ok && name != "" {
+		return fmt.Sprintf("%s[name='%s']", tag, cssEscape(name))
+	}
+
+	// OK: placeholder-based for inputs
+	if ph, ok := attrs["placeholder"]; ok && ph != "" {
+		return fmt.Sprintf("%s[placeholder='%s']", tag, cssEscape(ph))
+	}
+
+	// OK: aria-label
+	if al, ok := attrs["aria-label"]; ok && al != "" {
+		return fmt.Sprintf("%s[aria-label='%s']", tag, cssEscape(al))
+	}
+
+	// OK: href for links
+	if tag == "a" {
+		if href, ok := attrs["href"]; ok && href != "" {
+			return fmt.Sprintf("a[href='%s']", cssEscape(href))
+		}
+	}
+
+	// OK: type for inputs
+	if tag == "input" {
+		if typ, ok := attrs["type"]; ok && typ != "" {
+			if val, ok2 := attrs["value"]; ok2 && val != "" {
+				return fmt.Sprintf("input[type='%s'][value='%s']", cssEscape(typ), cssEscape(val))
+			}
+			return fmt.Sprintf("input[type='%s']", cssEscape(typ))
+		}
+	}
+
+	// Fallback: role attribute
+	if role, ok := attrs["role"]; ok && role != "" {
+		return fmt.Sprintf("%s[role='%s']", tag, cssEscape(role))
+	}
+
+	// Last resort: just the tag
+	return tag
+}
+
+// attrMap converts flat [k1,v1,k2,v2,...] attribute slice to a map.
+func attrMap(flat []string) map[string]string {
+	m := make(map[string]string, len(flat)/2+1)
+	for i := 0; i+1 < len(flat); i += 2 {
+		m[flat[i]] = flat[i+1]
+	}
+	return m
+}
+
+// cssEscape does minimal escaping for CSS selector string values inside single quotes.
+func cssEscape(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
+	return s
+}
+
+func buildAccessibleElements(nodes []*accessibility.Node, selectors map[accessibility.NodeID]string) []AccessibleElement {
 	var elements []AccessibleElement
 	refID := 1
 
@@ -80,6 +180,8 @@ func buildAccessibleElements(nodes []*accessibility.Node) []AccessibleElement {
 			continue
 		}
 
+		selector := selectors[node.NodeID]
+
 		desc := stringFromValue(node.Description)
 		placeholder := propertyValue(node.Properties, "placeholder")
 		level := 0
@@ -93,7 +195,7 @@ func buildAccessibleElements(nodes []*accessibility.Node) []AccessibleElement {
 			Name:        name,
 			Description: desc,
 			Tag:         resolveTag(role),
-			Selector:    buildNodeSelector(node),
+			Selector:    selector,
 			Value:       stringFromValue(node.Value),
 			Placeholder: placeholder,
 			Level:       level,
@@ -138,13 +240,6 @@ func resolveTag(role string) string {
 	}
 }
 
-func buildNodeSelector(node *accessibility.Node) string {
-	if node.BackendDOMNodeID != 0 {
-		return fmt.Sprintf("[data-a11y-backend='%d']", node.BackendDOMNodeID)
-	}
-	return fmt.Sprintf("[data-a11y-id='%s']", node.NodeID.String())
-}
-
 func (sbc *SandboxBrowserClient) FindElement(ctx context.Context, criteria FindCriteria) (*FoundElement, error) {
 	if criteria.Selector != "" {
 		return sbc.findBySelector(ctx, criteria)
@@ -180,17 +275,22 @@ func (sbc *SandboxBrowserClient) FindElement(ctx context.Context, criteria FindC
 
 func (sbc *SandboxBrowserClient) getAccessibleElements(ctx context.Context) ([]AccessibleElement, error) {
 	var nodes []*accessibility.Node
+	var selectors map[accessibility.NodeID]string
 	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 			var err error
 			nodes, err = accessibility.GetFullAXTree().Do(ctx)
-			return err
+			if err != nil {
+				return err
+			}
+			selectors = resolveSelectors(ctx, nodes)
+			return nil
 		}))
 	})
 	if err != nil {
 		return nil, err
 	}
-	return buildAccessibleElements(nodes), nil
+	return buildAccessibleElements(nodes, selectors), nil
 }
 
 func matchesCriteria(el AccessibleElement, c FindCriteria) bool {

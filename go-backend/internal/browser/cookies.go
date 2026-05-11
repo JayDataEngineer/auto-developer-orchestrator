@@ -61,14 +61,20 @@ func (sbc *SandboxBrowserClient) SetCookie(ctx context.Context, cookie Cookie) e
 }
 
 func (sbc *SandboxBrowserClient) ClearCookies(ctx context.Context) error {
+	return sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
+		return network.ClearBrowserCookies().Do(actCtx)
+	})
+}
+
+func (sbc *SandboxBrowserClient) ClearCookiesForURL(ctx context.Context, url string) error {
 	var cookies []*network.Cookie
 	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
 		var err error
-		cookies, err = network.GetCookies().Do(actCtx)
+		cookies, err = network.GetCookies().WithURLs([]string{url}).Do(actCtx)
 		return err
 	})
 	if err != nil {
-		return fmt.Errorf("clear cookies: %w", err)
+		return fmt.Errorf("clear cookies for url: %w", err)
 	}
 
 	for _, c := range cookies {
@@ -83,12 +89,6 @@ func (sbc *SandboxBrowserClient) ClearCookies(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func (sbc *SandboxBrowserClient) ClearCookiesForURL(ctx context.Context, url string) error {
-	return sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
-		return network.ClearBrowserCookies().Do(actCtx)
-	})
 }
 
 func (sbc *SandboxBrowserClient) GetLocalStorage(ctx context.Context) (map[string]string, error) {
