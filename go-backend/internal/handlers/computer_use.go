@@ -42,12 +42,21 @@ func (h *ComputerUseHandler) VisionClient() *browser.VisionClient {
 func (h *ComputerUseHandler) RegisterRoutes(r interface {
 	Post(string, http.HandlerFunc)
 	Get(string, http.HandlerFunc)
+	Delete(string, http.HandlerFunc)
 }) {
 	r.Post("/enable", h.Enable)
 	r.Post("/disable", h.Disable)
 	r.Get("/screenshot", h.Screenshot)
 	r.Get("/snapshot", h.Snapshot)
 	r.Post("/act", h.Act)
+	r.Post("/find", h.FindElement)
+	r.Get("/a11y-snapshot", h.A11ySnapshot)
+	r.Get("/cookies", h.GetCookies)
+	r.Post("/cookies", h.SetCookie)
+	r.Delete("/cookies", h.ClearCookies)
+	r.Get("/storage", h.GetStorage)
+	r.Post("/storage", h.SetStorage)
+	r.Delete("/storage", h.ClearStorage)
 }
 
 // Enable enables computer use mode on a sandbox: creates desktop mode (VNC + Chrome) + SandboxBrowserClient
@@ -488,4 +497,267 @@ func (h *ComputerUseHandler) writeLandingPage(ctx context.Context, sandboxID str
 
 	// NOTE: Do NOT navigate Chrome here. The agent will navigate on its first
 	// tool call. Navigating here races with the agent and corrupts tab state.
+}
+
+// FindRequest is the request body for the find endpoint.
+type FindRequest struct {
+	Role        string `json:"role,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Label       string `json:"label,omitempty"`
+	Text        string `json:"text,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+	Alt         string `json:"alt,omitempty"`
+	TitleAttr   string `json:"title,omitempty"`
+	TestID      string `json:"test_id,omitempty"`
+	Selector    string `json:"selector,omitempty"`
+	Action      string `json:"action,omitempty"` // click, type, or empty for find-only
+	TypeText    string `json:"type_text,omitempty"`
+	Submit      bool   `json:"submit,omitempty"`
+}
+
+// FindElement finds an element by semantic criteria and optionally performs an action.
+// POST /api/sandbox/{id}/computer-use/find
+func (h *ComputerUseHandler) FindElement(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	var req FindRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getClient(sandboxID)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	criteria := browser.FindCriteria{
+		Role:        req.Role,
+		Name:        req.Name,
+		Label:       req.Label,
+		Text:        req.Text,
+		Placeholder: req.Placeholder,
+		Alt:         req.Alt,
+		Title:       req.TitleAttr,
+		TestID:      req.TestID,
+		Selector:    req.Selector,
+	}
+
+	switch req.Action {
+	case "click":
+		info, found, err := client.FindAndClick(r.Context(), criteria)
+		if err != nil {
+			JSONError(w, fmt.Sprintf("find+click failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"action":       "clicked",
+			"found_element": found,
+			"page_info":    info,
+		})
+	case "type":
+		if req.TypeText == "" {
+			JSONError(w, "type_text is required when action=type", http.StatusBadRequest)
+			return
+		}
+		info, found, err := client.FindAndType(r.Context(), criteria, req.TypeText, req.Submit)
+		if err != nil {
+			JSONError(w, fmt.Sprintf("find+type failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"action":       "typed",
+			"found_element": found,
+			"page_info":    info,
+		})
+	default:
+		found, err := client.FindElement(r.Context(), criteria)
+		if err != nil {
+			JSONError(w, fmt.Sprintf("find failed: %v", err), http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, found)
+	}
+}
+
+// A11ySnapshot returns the accessibility tree snapshot.
+// GET /api/sandbox/{id}/computer-use/a11y-snapshot
+func (h *ComputerUseHandler) A11ySnapshot(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	client, err := h.getClient(sandboxID)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	snapshot, err := client.GetAccessibilityTree(r.Context())
+	if err != nil {
+		JSONError(w, fmt.Sprintf("a11y snapshot failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+// CookieRequest represents a cookie operation.
+type CookieRequest struct {
+	Name   string  `json:"name"`
+	Value  string  `json:"value,omitempty"`
+	Domain string  `json:"domain,omitempty"`
+	Path   string  `json:"path,omitempty"`
+	Secure bool    `json:"secure,omitempty"`
+	HTTPOnly bool  `json:"http_only,omitempty"`
+	URLs   []string `json:"urls,omitempty"`
+}
+
+// GetCookies returns all cookies or cookies filtered by URL.
+// GET /api/sandbox/{id}/computer-use/cookies?url=https://example.com
+func (h *ComputerUseHandler) GetCookies(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	client, err := h.getClient(sandboxID)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	urls := r.URL.Query()["url"]
+	cookies, err := client.GetCookies(r.Context(), urls)
+	if err != nil {
+		JSONError(w, fmt.Sprintf("get cookies failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"cookies": cookies,
+	})
+}
+
+// SetCookie sets a browser cookie.
+// POST /api/sandbox/{id}/computer-use/cookies
+func (h *ComputerUseHandler) SetCookie(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	var req CookieRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" || req.Value == "" || req.Domain == "" {
+		JSONError(w, "name, value, and domain are required", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getClient(sandboxID)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	cookie := browser.Cookie{
+		Name:   req.Name,
+		Value:  req.Value,
+		Domain: req.Domain,
+		Path:   req.Path,
+		Secure: req.Secure,
+		HTTPOnly: req.HTTPOnly,
+	}
+	if cookie.Path == "" {
+		cookie.Path = "/"
+	}
+	if err := client.SetCookie(r.Context(), cookie); err != nil {
+		JSONError(w, fmt.Sprintf("set cookie failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"set": true})
+}
+
+// ClearCookies clears all cookies for the current page.
+// DELETE /api/sandbox/{id}/computer-use/cookies
+func (h *ComputerUseHandler) ClearCookies(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	client, err := h.getClient(sandboxID)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := client.ClearCookies(r.Context()); err != nil {
+		JSONError(w, fmt.Sprintf("clear cookies failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
+}
+
+// StorageRequest for localStorage/sessionStorage operations.
+type StorageRequest struct {
+	Key   string `json:"key,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
+// GetStorage returns localStorage contents.
+// GET /api/sandbox/{id}/computer-use/storage
+func (h *ComputerUseHandler) GetStorage(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	client, err := h.getClient(sandboxID)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	data, err := client.GetLocalStorage(r.Context())
+	if err != nil {
+		JSONError(w, fmt.Sprintf("get storage failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"localStorage": data,
+	})
+}
+
+// SetStorage sets a localStorage item.
+// POST /api/sandbox/{id}/computer-use/storage
+func (h *ComputerUseHandler) SetStorage(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	var req StorageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Key == "" || req.Value == "" {
+		JSONError(w, "key and value are required", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getClient(sandboxID)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := client.SetLocalStorageItem(r.Context(), req.Key, req.Value); err != nil {
+		JSONError(w, fmt.Sprintf("set storage failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"set": true})
+}
+
+// ClearStorage clears all localStorage data.
+// DELETE /api/sandbox/{id}/computer-use/storage
+func (h *ComputerUseHandler) ClearStorage(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	client, err := h.getClient(sandboxID)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := client.ClearLocalStorage(r.Context()); err != nil {
+		JSONError(w, fmt.Sprintf("clear storage failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
 }

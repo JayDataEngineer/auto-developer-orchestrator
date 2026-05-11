@@ -74,10 +74,11 @@ type SandboxBrowserClient struct {
 	keepAliveCancel context.CancelFunc
 
 	// Cached state from last action
-	lastURL        string
-	lastTitle      string
-	lastElements   []LabeledElement
-	lastScreenshot []byte
+	lastURL          string
+	lastTitle        string
+	lastElements     []LabeledElement
+	lastScreenshot   []byte
+	lastA11yElements []AccessibleElement
 
 	mu sync.RWMutex
 }
@@ -228,6 +229,7 @@ func (sbc *SandboxBrowserClient) Screenshot(ctx context.Context) ([]byte, error)
 
 // Navigate navigates to a URL, labels elements, and takes a screenshot.
 // Creates a new Chrome tab for the navigation and keeps it alive for subsequent actions.
+// Also enriches results with accessibility tree elements when available.
 func (sbc *SandboxBrowserClient) Navigate(ctx context.Context, url string) (*PageInfo, error) {
 	info, err := sbc.navigateInner(ctx, url)
 	if err != nil {
@@ -236,6 +238,9 @@ func (sbc *SandboxBrowserClient) Navigate(ctx context.Context, url string) (*Pag
 			return nil, fmt.Errorf("navigate failed and recovery also failed: %w (recovery: %v)", err, recErr)
 		}
 		info, err = sbc.navigateInner(ctx, url)
+	}
+	if info != nil {
+		sbc.enrichA11yBackground(ctx, info)
 	}
 	return info, err
 }
@@ -698,4 +703,47 @@ func (sbc *SandboxBrowserClient) selectorForElement(elementID int) string {
 		}
 	}
 	return ""
+}
+
+// enrichA11yBackground attempts to enrich page info with accessibility tree data.
+// Runs in a background goroutine — best-effort, does not block the caller.
+func (sbc *SandboxBrowserClient) enrichA11yBackground(parentCtx context.Context, info *PageInfo) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sbc.EnrichWithA11y(ctx)
+		sbc.mu.RLock()
+		elems := sbc.lastA11yElements
+		sbc.mu.RUnlock()
+		if len(elems) > 0 {
+			info.A11yElements = elems
+		}
+	}()
+}
+
+// GetA11ySnapshot returns the accessibility tree elements from cache or fetches them.
+func (sbc *SandboxBrowserClient) GetA11ySnapshot(ctx context.Context) (*A11ySnapshot, error) {
+	sbc.mu.RLock()
+	cached := sbc.lastA11yElements
+	url := sbc.lastURL
+	title := sbc.lastTitle
+	sbc.mu.RUnlock()
+
+	if len(cached) > 0 {
+		return &A11ySnapshot{URL: url, Title: title, Elements: cached}, nil
+	}
+
+	return sbc.GetAccessibilityTree(ctx)
+}
+
+// GetPageInfo returns a full PageInfo including both SoM and accessibility elements.
+func (sbc *SandboxBrowserClient) GetPageInfo() *PageInfo {
+	sbc.mu.RLock()
+	defer sbc.mu.RUnlock()
+	return &PageInfo{
+		URL:         sbc.lastURL,
+		Title:       sbc.lastTitle,
+		Elements:    sbc.lastElements,
+		A11yElements: sbc.lastA11yElements,
+	}
 }

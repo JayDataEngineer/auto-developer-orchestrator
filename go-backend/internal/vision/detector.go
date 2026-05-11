@@ -27,6 +27,8 @@ var browserTools = map[string]bool{
 	"scroll_page":    true,
 	"search_web":     true,
 	"scrape":         true,
+	"find_element":   true,
+	"snapshot_a11y":  true,
 }
 
 // desktopTools produce DesktopFrame results with image_b64.

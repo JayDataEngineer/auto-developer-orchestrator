@@ -375,6 +375,14 @@ func TestComputerUseHandlerRegisterRoutes(t *testing.T) {
 		{"GET", "/screenshot"},
 		{"GET", "/snapshot"},
 		{"POST", "/act"},
+		{"POST", "/find"},
+		{"GET", "/a11y-snapshot"},
+		{"GET", "/cookies"},
+		{"POST", "/cookies"},
+		{"DELETE", "/cookies"},
+		{"GET", "/storage"},
+		{"POST", "/storage"},
+		{"DELETE", "/storage"},
 	}
 
 	if len(router.routes) != len(expectedRoutes) {
@@ -418,4 +426,11 @@ func (m *mockRouter) Get(path string, handler http.HandlerFunc) {
 		method string
 		path   string
 	}{"GET", path})
+}
+
+func (m *mockRouter) Delete(path string, handler http.HandlerFunc) {
+	m.routes = append(m.routes, struct {
+		method string
+		path   string
+	}{"DELETE", path})
 }

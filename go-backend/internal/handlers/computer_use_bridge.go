@@ -145,3 +145,48 @@ func (b *ComputerUseBridge) ExtractPageContent(ctx context.Context, sandboxID st
 	}
 	return client.ExtractPageContent(ctx, rawHTML)
 }
+
+// FindElement performs a semantic find and optional action.
+func (b *ComputerUseBridge) FindElement(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error) {
+	return callHandler(ctx, b.CU.FindElement, http.MethodPost, "/api/sandbox/{id}/computer-use/find", req, sandboxID)
+}
+
+// A11ySnapshot returns the accessibility tree.
+func (b *ComputerUseBridge) A11ySnapshot(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	return callHandler(ctx, b.CU.A11ySnapshot, http.MethodGet, "/api/sandbox/{id}/computer-use/a11y-snapshot", nil, sandboxID)
+}
+
+// GetCookies returns browser cookies.
+func (b *ComputerUseBridge) GetCookies(ctx context.Context, sandboxID string, urls []string) (map[string]interface{}, error) {
+	path := "/api/sandbox/{id}/computer-use/cookies"
+	if len(urls) > 0 {
+		path += "?url=" + urls[0]
+	}
+	return callHandler(ctx, b.CU.GetCookies, http.MethodGet, path, nil, sandboxID)
+}
+
+// SetCookie sets a browser cookie.
+func (b *ComputerUseBridge) SetCookie(ctx context.Context, sandboxID string, cookie map[string]interface{}) (map[string]interface{}, error) {
+	return callHandler(ctx, b.CU.SetCookie, http.MethodPost, "/api/sandbox/{id}/computer-use/cookies", cookie, sandboxID)
+}
+
+// ClearCookies clears browser cookies.
+func (b *ComputerUseBridge) ClearCookies(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	return callHandler(ctx, b.CU.ClearCookies, http.MethodDelete, "/api/sandbox/{id}/computer-use/cookies", nil, sandboxID)
+}
+
+// GetStorage returns localStorage data.
+func (b *ComputerUseBridge) GetStorage(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	return callHandler(ctx, b.CU.GetStorage, http.MethodGet, "/api/sandbox/{id}/computer-use/storage", nil, sandboxID)
+}
+
+// SetStorage sets a localStorage item.
+func (b *ComputerUseBridge) SetStorage(ctx context.Context, sandboxID string, key, value string) (map[string]interface{}, error) {
+	return callHandler(ctx, b.CU.SetStorage, http.MethodPost, "/api/sandbox/{id}/computer-use/storage",
+		map[string]interface{}{"key": key, "value": value}, sandboxID)
+}
+
+// ClearStorage clears localStorage.
+func (b *ComputerUseBridge) ClearStorage(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	return callHandler(ctx, b.CU.ClearStorage, http.MethodDelete, "/api/sandbox/{id}/computer-use/storage", nil, sandboxID)
+}
