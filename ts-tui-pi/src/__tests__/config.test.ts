@@ -10,7 +10,7 @@ describe("config", () => {
   test("APP_NAME is defined", async () => {
     const { APP_NAME } = await import("../config.js");
     expect(APP_NAME).toBeString();
-    expect(APP_NAME).toBe("pi");
+    expect(APP_NAME).toBe("pux");
   });
 
   test("VERSION is defined", async () => {

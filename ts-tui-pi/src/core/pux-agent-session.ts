@@ -358,11 +358,18 @@ export class PuxAgentSession {
       }
 
       case "tool_execution_end": {
+        // Normalize result to { content: [...] } format expected by TUI
+        const rawResult = payload.result !== undefined ? payload.result : payload.error || "";
+        const normalizedResult = typeof rawResult === "string"
+          ? { content: [{ type: "text" as const, text: rawResult }] }
+          : rawResult && typeof rawResult === "object" && !Array.isArray(rawResult) && !(rawResult as any).content
+            ? { content: [{ type: "text" as const, text: JSON.stringify(rawResult) }] }
+            : rawResult;
         const endEvent: any = {
           type: "tool_execution_end",
           toolCallId: payload.toolId || "",
           toolName: payload.toolName || "",
-          result: payload.result !== undefined ? payload.result : payload.error || "",
+          result: normalizedResult,
           isError: !!payload.error,
         };
         if (payload.agentName) {
@@ -373,12 +380,14 @@ export class PuxAgentSession {
       }
 
       case "tool_update": {
+        // Normalize partialResult to { content: [...] } format expected by TUI
+        const rawPartial = payload.text || "";
         const updateEvent: any = {
           type: "tool_execution_update",
           toolCallId: payload.toolId || "",
           toolName: payload.toolName || "",
           args: {},
-          partialResult: payload.text || "",
+          partialResult: { content: [{ type: "text", text: rawPartial }] },
         };
         if (payload.agentName) {
           updateEvent.agentName = payload.agentName;

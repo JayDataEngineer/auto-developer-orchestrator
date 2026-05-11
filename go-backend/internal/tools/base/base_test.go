@@ -119,9 +119,11 @@ func TestStringArgDefault(t *testing.T) {
 }
 
 func TestMapArg(t *testing.T) {
-	val, ok := MapArg(map[string]any{"m": map[string]any{"a": 1}}, "m")
-	if !ok || val["a"] != float64(1) {
-		t.Errorf("MapArg() = (%v, %t), want map with a=1", val, ok)
+	val, ok := MapArg(map[string]any{"m": map[string]any{"a": float64(1)}}, "m")
+	if !ok {
+		t.Errorf("MapArg() = (%v, %t), want ok=true", val, ok)
+	} else if v, exists := val["a"]; !exists || v != float64(1) {
+		t.Errorf("MapArg() val[%q] = %v, want float64(1)", "a", v)
 	}
 
 	_, ok = MapArg(map[string]any{}, "missing")

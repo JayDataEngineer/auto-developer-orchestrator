@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { InteractiveMode } from "./modes/interactive/interactive-mode.js";
 import { AgentSessionRuntime } from "./core/agent-session-runtime.js";
-import { SessionManager } from "./core/session-manager.js";
+import { SessionManager, getDefaultSessionDir } from "./core/session-manager.js";
 import { SettingsManager } from "./core/settings-manager.js";
 import { PuxAgentSession } from "./core/pux-agent-session.js";
 import { parseArgs } from "node:util";
@@ -17,6 +17,7 @@ const { values: opts } = parseArgs({
     model: { type: "string", default: "deepseek/deepseek-v4-flash" },
     cwd: { type: "string", default: process.cwd() },
     org: { type: "string" },
+    c: { type: "boolean", default: false },
   },
 });
 
@@ -80,9 +81,11 @@ if (opts.org && backendOnline) {
 }
 
 const settingsManager = SettingsManager.create(cwd, agentDir);
-// Resume most recent session for this project, or create new one.
+// Default: fresh session. Use -c to continue most recent session for this project.
 // Sessions persist to ~/.pi/agent/sessions/<encoded-cwd>/*.jsonl
-const sessionManager = SessionManager.continueRecent(cwd);
+const sessionManager = opts.c
+  ? SessionManager.continueRecent(cwd)
+  : new SessionManager(cwd, getDefaultSessionDir(cwd), undefined, true);
 
 // Fetch models for footer display only
 let modelMeta: any = null;

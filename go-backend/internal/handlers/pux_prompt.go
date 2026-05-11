@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/adapters"
@@ -42,13 +43,26 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 				InitialMode: sandbox.ModeBrowser,
 			})
 			if err != nil {
-				h.log.Warn("Failed to auto-create sandbox", zap.Error(err))
-			} else {
-				sandboxID = sb.ID
-				h.log.Info("Auto-created sandbox for prompt",
-					zap.String("project", req.Project),
-					zap.String("sandbox_id", sb.ID))
+				// Fail fast: no sandbox = every tool call will fail.
+				// Return error immediately instead of proceeding to broken execution.
+				h.log.Error("Failed to auto-create sandbox — cannot execute tools", zap.Error(err))
+				setSSEHeaders(w)
+				flusher, canFlush := w.(http.Flusher)
+				errData, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("Sandbox unavailable: %s. Start Docker or run 'task dev' first.", err)})
+				fmt.Fprintf(w, "event: error\ndata: %s\n\n", string(errData))
+				if canFlush {
+					flusher.Flush()
+				}
+				fmt.Fprintf(w, "data: [DONE]\n\n")
+				if canFlush {
+					flusher.Flush()
+				}
+				return
 			}
+			sandboxID = sb.ID
+			h.log.Info("Auto-created sandbox for prompt",
+				zap.String("project", req.Project),
+				zap.String("sandbox_id", sb.ID))
 		}
 	}
 
@@ -271,6 +285,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	// Read AGENTS.md from project root (like Claude Code's CLAUDE.md)
+	var agentsMDPrefix string
+	if agentsContent := readAgentsMD(projectPath); agentsContent != "" {
+		agentsMDPrefix = "<agents-md>\n" + agentsContent + "\n</agents-md>\n\n"
+	}
+
 	// Set up SSE
 	setSSEHeaders(w)
 	flusher, canFlush := w.(http.Flusher)
@@ -291,7 +311,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	// Inject active plan if one exists (survives context compaction)
 	planPrefix := plan.InjectActivePlan(projectPath)
 
-	orchMsg := memoryPrefix + planPrefix + "User request: " + req.Message
+	orchMsg := agentsMDPrefix + memoryPrefix + planPrefix + "User request: " + req.Message
 
 	// Event channel (created earlier in function, passed to orchestrator Config)
 
@@ -372,4 +392,14 @@ func truncateStr(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// readAgentsMD reads AGENTS.md from the project root (like Claude Code's CLAUDE.md).
+// Returns empty string if the file doesn't exist.
+func readAgentsMD(projectPath string) string {
+	data, err := os.ReadFile(filepath.Join(projectPath, "AGENTS.md"))
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }

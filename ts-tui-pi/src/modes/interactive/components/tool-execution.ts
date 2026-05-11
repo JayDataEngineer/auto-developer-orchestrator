@@ -167,14 +167,21 @@ export class ToolExecutionComponent extends Container {
 	): void {
 		this.result = result;
 		this.isPartial = isPartial;
-		this.updateDisplay();
+		try {
+			this.updateDisplay();
+		} catch (e) {
+			// Prevent render errors from crashing the TUI
+			// Fallback: show raw error as text
+			this.result = { content: [{ type: "text", text: String(result ?? "") }], isError: true };
+			this.updateDisplay();
+		}
 		this.maybeConvertImagesForKitty();
 	}
 
 	private maybeConvertImagesForKitty(): void {
 		const caps = getCapabilities();
 		if (caps.images !== "kitty") return;
-		if (!this.result) return;
+		if (!this.result || !this.result.content) return;
 
 		const imageBlocks = this.result.content.filter((c) => c.type === "image");
 		for (let i = 0; i < imageBlocks.length; i++) {
@@ -257,7 +264,7 @@ export class ToolExecutionComponent extends Container {
 				} else {
 					try {
 						const component = resultRenderer(
-							{ content: this.result.content as any, details: this.result.details },
+							{ content: (this.result.content || []) as any, details: this.result.details },
 							{ expanded: this.expanded, isPartial: this.isPartial },
 							theme,
 							this.getRenderContext(this.resultRendererComponent),
@@ -290,7 +297,7 @@ export class ToolExecutionComponent extends Container {
 		}
 		this.imageSpacers = [];
 
-		if (this.result) {
+		if (this.result && this.result.content) {
 			const imageBlocks = this.result.content.filter((c) => c.type === "image");
 			const caps = getCapabilities();
 			for (let i = 0; i < imageBlocks.length; i++) {

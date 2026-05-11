@@ -226,7 +226,8 @@ export class InteractiveMode {
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
 
 	// Sub-agent tracking for terminal-within-terminal summary
-	private _subAgentSummary = new Map<string, { agentName: string; task: string; status: string; lastAction: string }>();
+	private _subAgentSummary = new Map<string, { agentName: string; task: string; status: string; lastAction: string; toolCount: number }>();
+	private _subAgentToolCount = new Map<string, number>();
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputUnsubscribers = new Set<() => void>();
 
@@ -562,9 +563,9 @@ export class InteractiveMode {
 		const cwdBasename = path.basename(this.sessionManager.getCwd());
 		const sessionName = this.sessionManager.getSessionName();
 		if (sessionName) {
-			this.ui.terminal.setTitle(`π - ${sessionName} - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`pux - ${sessionName} - ${cwdBasename}`);
 		} else {
-			this.ui.terminal.setTitle(`π - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`pux - ${cwdBasename}`);
 		}
 	}
 
@@ -2391,7 +2392,10 @@ export class InteractiveMode {
 				break;
 
 			case "tool_execution_start": {
-				// Sub-agent tool calls are rendered with agent name prefix
+				// Sub-agent tool calls are NOT added to chat — they're tracked
+				// in the sub-agent summary panel instead. Only the parent delegate_to
+				// result is shown in the chat. This prevents sub-agent tools from
+				// cluttering the chat with flat ungrouped items.
 				if ((event as any).agentName) {
 					const agentName = (event as any).agentName;
 					// Update sub-agent summary last action
@@ -2400,24 +2404,11 @@ export class InteractiveMode {
 						subEntry.lastAction = `${event.toolName}(...)`;
 						this.renderSubAgentSummary();
 					}
-					let component = this.pendingTools.get(event.toolCallId);
-					if (!component) {
-						component = new ToolExecutionComponent(
-							`[${agentName}] ${event.toolName}`,
-							event.toolCallId,
-							event.args,
-							{
-								showImages: this.settingsManager.getShowImages(),
-							},
-							this.getRegisteredToolDefinition(event.toolName),
-							this.ui,
-							this.sessionManager.getCwd(),
-						);
-						component.setExpanded(this.toolOutputExpanded);
-						this.chatContainer.addChild(component);
-						this.pendingTools.set(event.toolCallId, component);
+					// Track tool count for the summary but don't add to chat
+					this._subAgentToolCount.set(agentName, (this._subAgentToolCount.get(agentName) || 0) + 1);
+					if (subEntry) {
+						subEntry.toolCount = this._subAgentToolCount.get(agentName) || 0;
 					}
-					component.markExecutionStarted();
 					this.ui.requestRender();
 					break;
 				}
@@ -2489,7 +2480,7 @@ export class InteractiveMode {
 			case "subagent_start": {
 				const agentName = (event as any).agentName || "agent";
 				const task = (event as any).task || "";
-				this._subAgentSummary.set(agentName, { agentName, task, status: "running", lastAction: "starting..." });
+				this._subAgentSummary.set(agentName, { agentName, task, status: "running", lastAction: "starting...", toolCount: 0 });
 				this.renderSubAgentSummary();
 				this.ui.requestRender();
 				break;
@@ -2507,6 +2498,7 @@ export class InteractiveMode {
 				// Keep completed agents visible briefly, then remove
 				setTimeout(() => {
 					this._subAgentSummary.delete(agentName);
+					this._subAgentToolCount.delete(agentName);
 					if (this._subAgentSummary.size === 0) {
 						this.statusContainer?.clear();
 						this.ui.requestRender();
@@ -3177,14 +3169,45 @@ export class InteractiveMode {
 	private renderSubAgentSummary(): void {
 		if (!this.statusContainer || this._subAgentSummary.size === 0) return;
 		this.statusContainer.clear();
-		for (const entry of this._subAgentSummary.values()) {
+
+		const entries = [...this._subAgentSummary.values()];
+		const running = entries.filter(e => e.status === "running").length;
+		const total = entries.length;
+
+		// Header line: "Running 4 Explore agents…"
+		if (running > 0) {
+			this.statusContainer.addChild(
+				new Text(theme.fg("accent", `  Running ${running} agent${running > 1 ? "s" : ""}…`), 0, 0),
+			);
+		}
+
+		for (let i = 0; i < entries.length; i++) {
+			const entry = entries[i];
+			const isLast = i === entries.length - 1;
+			const prefix = isLast ? "  └ " : "  ├ ";
 			const icon = entry.status === "running" ? "●" : entry.status === "failed" ? "✗" : "✓";
 			const iconColor = entry.status === "running" ? "accent" : entry.status === "failed" ? "error" : "success";
-			const taskPreview = entry.task.length > 55 ? entry.task.slice(0, 55) + "..." : entry.task;
-			const actionText = entry.lastAction ? ` ${entry.lastAction}` : "";
+			const taskPreview = entry.task.length > 50 ? entry.task.slice(0, 50) + "…" : entry.task;
+			const toolInfo = entry.toolCount > 0 ? ` · ${entry.toolCount} tool${entry.toolCount > 1 ? "s" : ""}` : "";
+
 			this.statusContainer.addChild(
-				new Text(theme.fg(iconColor as any, `  ${icon} `) + theme.bold(entry.agentName) + theme.fg("muted", `: ${taskPreview}${actionText}`)),
+				new Text(
+					theme.fg("muted", prefix) +
+					theme.fg(iconColor as any, `${icon} `) +
+					theme.bold(entry.agentName) +
+					theme.fg("muted", `: ${taskPreview}${toolInfo}`),
+					0, 0,
+				),
 			);
+
+			// Sub-line showing last action (like "│ ⎿  Searching for 7 patterns…")
+			if (entry.lastAction && entry.lastAction !== "starting..." && entry.lastAction !== "done") {
+				const subPrefix = isLast ? "    ⎿  " : "  │ ⎿  ";
+				const actionPreview = entry.lastAction.length > 60 ? entry.lastAction.slice(0, 60) + "…" : entry.lastAction;
+				this.statusContainer.addChild(
+					new Text(theme.fg("dim", `${subPrefix}${actionPreview}`), 0, 0),
+				);
+			}
 		}
 	}
 

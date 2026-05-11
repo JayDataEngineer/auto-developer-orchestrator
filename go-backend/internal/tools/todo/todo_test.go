@@ -2,6 +2,7 @@ package todo
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"

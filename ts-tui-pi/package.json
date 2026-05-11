@@ -1,7 +1,11 @@
 {
   "name": "pux-tui",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "type": "module",
+  "piConfig": {
+    "name": "pux",
+    "configDir": ".pi"
+  },
   "scripts": {
     "dev": "bun run src/main.ts",
     "build": "bun build src/main.ts --outdir dist --target bun",

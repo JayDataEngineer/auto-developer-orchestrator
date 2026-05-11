@@ -633,7 +633,10 @@ func (l *AgentLoop) Close() error {
 	if l.cancel != nil {
 		l.cancel()
 	}
-	return l.session.Close()
+	if l.session != nil {
+		return l.session.Close()
+	}
+	return nil
 }
 
 // IsRunning returns whether the loop is currently active.

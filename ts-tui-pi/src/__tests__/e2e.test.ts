@@ -20,11 +20,14 @@ function thinkingDelta(text: string): string { return evt("thinking_delta", { te
 function toolStart(name: string, toolId: string, args: any): string {
   return evt("tool_execution_start", { toolName: name, toolId, args });
 }
-function toolEnd(toolId: string, toolName: string, result?: string, error?: string): string {
+function toolEnd(toolId: string, toolName: string, result?: any, error?: string): string {
   const p: any = { toolId, toolName };
   if (result !== undefined) p.result = result;
   if (error) p.error = error;
   return evt("tool_execution_end", p);
+}
+function toolUpdate(toolId: string, toolName: string, text: string): string {
+  return evt("tool_update", { toolId, toolName, text });
 }
 function agentEnd(input?: number, output?: number): string {
   return evt("agent_end", { input: input ?? 100, output: output ?? 50 });
@@ -109,6 +112,35 @@ beforeAll(async () => {
         textDelta("Processing..."),
         errEvent("Internal server error: nil pointer dereference"),
       );
+      // Tool result as raw object (not {content:[...]})
+      if (msg === "e2e:object-result") return sseOK(
+        toolStart("bash", "call_obj", { cmd: "ls" }),
+        toolEnd("call_obj", "bash", { files: ["a.go", "b.go"] }),
+        agentEnd(),
+      );
+      // Tool result as null
+      if (msg === "e2e:null-result") return sseOK(
+        toolStart("bash", "call_null", { cmd: "true" }),
+        toolEnd("call_null", "bash", null),
+        agentEnd(),
+      );
+      // Sub-agent tool events
+      if (msg === "e2e:subagent") return sseOK(
+        evt("subagent_start", { agentName: "sarah", task: "Research AI" }),
+        toolStart("bash", "sa_001", { cmd: "curl api" }),
+        toolUpdate("sa_001", "bash", "downloading..."),
+        toolEnd("sa_001", "bash", "results here"),
+        evt("subagent_end", { agentName: "sarah", status: "completed" }),
+        agentEnd(),
+      );
+      // Tool with streaming updates
+      if (msg === "e2e:streaming-tool") return sseOK(
+        toolStart("bash", "call_stream", { cmd: "long-running" }),
+        toolUpdate("call_stream", "bash", "Step 1 done\n"),
+        toolUpdate("call_stream", "bash", "Step 2 done\n"),
+        toolEnd("call_stream", "bash", "All steps completed"),
+        agentEnd(),
+      );
       return sseOK(textDelta("ok"), agentEnd());
     },
   });
@@ -164,7 +196,10 @@ describe("E2E: Tool calls", () => {
     expect(tes.length).toBe(1);
     expect(tes[0].toolName).toBe("bash");
     expect(tes[0].isError).toBe(false);
-    expect(tes[0].result).toContain("total");
+    const resultText = typeof tes[0].result === "string"
+      ? tes[0].result
+      : tes[0].result?.content?.[0]?.text || JSON.stringify(tes[0].result);
+    expect(resultText).toContain("total");
   });
   test("multiple tools in one turn", async () => {
     const s = new PuxAgentSession(stubSettings(), stubSessions(), serverUrl, "e2e", "test/a");
@@ -177,7 +212,11 @@ describe("E2E: Tool calls", () => {
     const tes = e.filter((x: any) => x.type === "tool_execution_end");
     expect(tes.length).toBe(1);
     expect(tes[0].isError).toBe(true);
-    expect(tes[0].result).toContain("timeout");
+    // Result is normalized to { content: [{ type: "text", text: "..." }] }
+    const resultText = typeof tes[0].result === "string"
+      ? tes[0].result
+      : tes[0].result?.content?.[0]?.text || JSON.stringify(tes[0].result);
+    expect(resultText).toContain("timeout");
   });
 });
 
@@ -242,5 +281,68 @@ describe("E2E: HTTP contract", () => {
     const mp = capturedRequests.find((r: any) => r.url === "/api/pux/model" && r.method === "PUT");
     expect(mp).toBeTruthy();
     expect(mp!.body.provider).toBe("test");
+  });
+});
+
+// Tests that verify SSE bridge normalization — the exact scenarios that crashed the TUI
+describe("E2E: SSE bridge normalization (crash regression)", () => {
+  test("tool result as object (not {content:[...]}) gets normalized", async () => {
+    const s = new PuxAgentSession(stubSettings(), stubSessions(), serverUrl, "e2e", "test/a");
+    const e = await collect(s, "e2e:object-result");
+    const tes = e.find((x: any) => x.type === "tool_execution_end");
+    expect(tes).toBeTruthy();
+    // Result should be normalized to { content: [{ type: "text", text: ... }] }
+    expect(typeof tes.result).toBe("object");
+    expect(tes.result.content).toBeDefined();
+    expect(Array.isArray(tes.result.content)).toBe(true);
+    expect(tes.result.content[0].type).toBe("text");
+  });
+
+  test("tool result as null does not crash", async () => {
+    const s = new PuxAgentSession(stubSettings(), stubSessions(), serverUrl, "e2e", "test/a");
+    const e = await collect(s, "e2e:null-result");
+    const tes = e.find((x: any) => x.type === "tool_execution_end");
+    expect(tes).toBeTruthy();
+    // Should have some result without crashing
+    expect(tes.result).toBeDefined();
+  });
+
+  test("sub-agent tool events are emitted with agentName", async () => {
+    const s = new PuxAgentSession(stubSettings(), stubSessions(), serverUrl, "e2e", "test/a");
+    const e = await collect(s, "e2e:subagent");
+    const start = e.find((x: any) => x.type === "subagent_start");
+    expect(start).toBeTruthy();
+    expect(start.agentName).toBe("sarah");
+    const end = e.find((x: any) => x.type === "subagent_end");
+    expect(end).toBeTruthy();
+    expect(end.agentName).toBe("sarah");
+    // Sub-agent tool events should also be present
+    const toolEnds = e.filter((x: any) => x.type === "tool_execution_end");
+    expect(toolEnds.length).toBe(1);
+  });
+
+  test("tool_update events have normalized partialResult", async () => {
+    const s = new PuxAgentSession(stubSettings(), stubSessions(), serverUrl, "e2e", "test/a");
+    const e = await collect(s, "e2e:streaming-tool");
+    const updates = e.filter((x: any) => x.type === "tool_execution_update");
+    expect(updates.length).toBe(2);
+    // Each partialResult should be { content: [{ type: "text", text: ... }] }
+    for (const u of updates) {
+      expect(typeof u.partialResult).toBe("object");
+      expect(u.partialResult.content).toBeDefined();
+      expect(Array.isArray(u.partialResult.content)).toBe(true);
+      expect(u.partialResult.content[0].type).toBe("text");
+    }
+  });
+
+  test("raw string tool result is normalized to content array", async () => {
+    const s = new PuxAgentSession(stubSettings(), stubSessions(), serverUrl, "e2e", "test/a");
+    const e = await collect(s, "e2e:bash-tool");
+    const tes = e.find((x: any) => x.type === "tool_execution_end");
+    expect(tes).toBeTruthy();
+    // Must have content array, not a raw string
+    expect(typeof tes.result).toBe("object");
+    expect(tes.result.content).toBeDefined();
+    expect(tes.result.content[0].text).toContain("total");
   });
 });

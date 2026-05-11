@@ -38,6 +38,12 @@ export function getTextOutput(
 
 	let output = textBlocks.map((c) => sanitizeBinaryOutput(stripAnsi(c.text || "")).replace(/\r/g, "")).join("\n");
 
+	// Truncate very long tool output to prevent flooding the terminal
+	const MAX_DISPLAY = 4000;
+	if (output.length > MAX_DISPLAY) {
+		output = output.slice(0, MAX_DISPLAY) + "\n...[truncated]";
+	}
+
 	const caps = getCapabilities();
 	if (imageBlocks.length > 0 && (!caps.images || !showImages)) {
 		const imageIndicators = imageBlocks
