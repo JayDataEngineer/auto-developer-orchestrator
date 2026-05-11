@@ -116,6 +116,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		ApprovalHandler: approvalHandler,
 		GitExecutor:     nil, // disabled — git auto-commits on session start are unwanted
 		ArtifactDB:      h.db,
+		BrowserProvider: h.cuBridge, // wire accessibility/cookie/storage tools to employees
 	}
 
 	// Detect org mode — if project contains pux.yaml, load org overlay

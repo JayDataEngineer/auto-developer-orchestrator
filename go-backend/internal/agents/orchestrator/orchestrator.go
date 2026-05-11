@@ -12,6 +12,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/session"
 	"github.com/auto-developer-orchestrator/backend/internal/skills"
+	browsertools "github.com/auto-developer-orchestrator/backend/internal/tools/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	asktool "github.com/auto-developer-orchestrator/backend/internal/tools/ask"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/face"
@@ -52,6 +53,7 @@ type Config struct {
 	OrgRoles         map[string]*common.AgentRole // optional: org-specific employee roles
 	DBProvider       common.DBProvider          // optional: if set, registers graph/face tools for employees
 	LLMProvider      core.LLMProvider           // optional: if set, registers NLP tools for employees
+	BrowserProvider browsertools.BrowserProvider // optional: if set, registers browser a11y/cookie/storage tools for employees
 	Subscriber      chan<- core.AgentEvent      // optional: if set, ask_user tool can emit events to TUI
 }
 
@@ -141,6 +143,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if cfg.LLMProvider != nil {
 		employeeTools = nlp.RegisterAll(employeeTools, cfg.LLMProvider)
 		logger.Printf("NLP tools loaded for employees: 2 tools")
+	}
+
+	if cfg.BrowserProvider != nil {
+		sandboxIDFn := func() string { return cfg.SandboxID }
+		employeeTools = browsertools.RegisterBrowserTools(employeeTools, cfg.BrowserProvider, sandboxIDFn)
+		logger.Printf("Browser a11y/cookie/storage tools loaded for employees: 8 tools")
 	}
 
 	// Build MCP server resolver for role-based delegation

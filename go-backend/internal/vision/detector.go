@@ -29,6 +29,12 @@ var browserTools = map[string]bool{
 	"scrape":         true,
 	"find_element":   true,
 	"snapshot_a11y":  true,
+	"get_cookies":    true,
+	"set_cookie":     true,
+	"clear_cookies":  true,
+	"get_storage":    true,
+	"set_storage":    true,
+	"clear_storage":  true,
 }
 
 // desktopTools produce DesktopFrame results with image_b64.
