@@ -2392,6 +2392,10 @@ export class InteractiveMode {
 				break;
 
 			case "tool_execution_start": {
+				// Forward to extensions so pux-subagents can track sub-agent progress
+				if (this.session.extensionRunner) {
+					this.session.extensionRunner.emit(event as any).catch(() => {});
+				}
 				// Sub-agent tool calls are NOT added to chat — they're tracked
 				// in the sub-agent summary panel instead. Only the parent delegate_to
 				// result is shown in the chat. This prevents sub-agent tools from
@@ -2444,6 +2448,10 @@ export class InteractiveMode {
 			}
 
 			case "tool_execution_end": {
+				// Forward to extensions
+				if (this.session.extensionRunner) {
+					this.session.extensionRunner.emit(event as any).catch(() => {});
+				}
 				const component = this.pendingTools.get(event.toolCallId);
 				if (component) {
 					component.updateResult({ ...event.result, isError: event.isError });

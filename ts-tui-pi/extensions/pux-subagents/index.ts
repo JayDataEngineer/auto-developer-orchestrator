@@ -5,18 +5,31 @@
  * Overrides pux-core's basic delegate rendering with richer visuals:
  *   - Status glyphs, tool counts, duration
  *   - Chain visualization for sequential delegations
- *   - Live sub-agent tracker widget below the editor
+ *   - Live sub-agent tracker widget with current tool, recent tools, output
  *
  * Render-only — the Go backend handles actual tool execution.
  */
 
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "../../src/core/extensions/types.js";
-import { renderDelegateCall, renderDelegateResult, renderChainVisualization } from "./tools/delegate.js";
+import { renderDelegateCall, renderDelegateResult } from "./tools/delegate.js";
 import { renderSubAgentWidget } from "./widget.js";
-import { createSubAgentState, type SubAgentState, type SubAgentInfo } from "./types.js";
+import { createSubAgentState, addRecentTool, addRecentOutput, type SubAgentInfo } from "./types.js";
 
 const WIDGET_KEY = "pux-subagents";
+
+/** Extract a short preview of tool args for display */
+function argsPreview(args: any): string {
+	if (!args || typeof args !== "object") return "";
+	// Pick the most useful arg for preview
+	const cmd = args.command || args.path || args.query || args.task || args.key || args.action || "";
+	if (typeof cmd === "string") return truncArgs(cmd, 35);
+	return "";
+}
+
+function truncArgs(s: string, max: number): string {
+	return s.length <= max ? s : s.slice(0, max - 1) + "…";
+}
 
 export default function registerPuxSubagentsExtension(pi: ExtensionAPI): void {
 	// ── Shared state ──────────────────────────────────────────
@@ -32,6 +45,14 @@ export default function registerPuxSubagentsExtension(pi: ExtensionAPI): void {
 		ctx.ui.setWidget(WIDGET_KEY, (_tui: any, theme: any) =>
 			renderSubAgentWidget(state, theme),
 		);
+	}
+
+	/** Find a tracked agent by name */
+	function findAgent(agentName: string): SubAgentInfo | undefined {
+		for (const info of state.agents.values()) {
+			if (info.agentName === agentName) return info;
+		}
+		return undefined;
 	}
 
 	// ── Enhanced delegate_to ───────────────────────────────────
@@ -55,8 +76,11 @@ export default function registerPuxSubagentsExtension(pi: ExtensionAPI): void {
 			return renderDelegateCall(typedArgs, theme, chainPos);
 		},
 		renderResult: (result, options, theme) => {
-			const agentName = (result as any)?._meta?.agentName;
-			const info = agentName ? state.agents.get(agentName) : undefined;
+			// Try to find agent info from state
+			let info: SubAgentInfo | undefined;
+			for (const agent of state.agents.values()) {
+				if (agent.endedAt) { info = agent; break; }
+			}
 			return renderDelegateResult(
 				result as any,
 				options as any,
@@ -90,25 +114,25 @@ export default function registerPuxSubagentsExtension(pi: ExtensionAPI): void {
 
 	// ── Event hooks for sub-agent tracking ─────────────────────
 
-	// Track when a sub-agent starts (from SSE subagent_start event)
+	// 1) Track delegate_to/delegate_async calls — register the agent
 	pi.on("tool_execution_start" as any, (event: any, ctx: any) => {
-		// Only track delegate_to / delegate_async calls
 		if (event.toolName !== "delegate_to" && event.toolName !== "delegate_async") return;
+		if ((event as any).agentName) return; // This is a sub-agent's own tool, not the parent delegate
 
 		const agentName = event.args?.agent_name || event.args?.role || "agent";
 		const task = event.args?.task || "";
 
-		// Add to state
 		state.agents.set(event.toolCallId || agentName, {
 			agentName,
 			task,
 			status: "running",
 			toolCount: 0,
+			recentTools: [],
+			recentOutput: [],
 			lastAction: "starting...",
 			startedAt: Date.now(),
 		});
 
-		// Track chain order
 		if (!state.chain.includes(agentName)) {
 			state.chain.push(agentName);
 		}
@@ -116,51 +140,79 @@ export default function registerPuxSubagentsExtension(pi: ExtensionAPI): void {
 		refreshWidget(ctx);
 	});
 
-	// Track tool calls from within sub-agents (agentName field on SSE events)
+	// 2) Track sub-agent's own tool calls (events with agentName)
 	pi.on("tool_execution_start" as any, (event: any, ctx: any) => {
-		if (!event.agentName) return;
-		// Find the sub-agent entry (could be keyed by name or toolCallId)
-		for (const [key, info] of state.agents) {
-			if (info.agentName === event.agentName) {
-				info.toolCount++;
-				info.lastAction = `${event.toolName}(...)`;
-				refreshWidget(ctx);
-				break;
-			}
-		}
+		const agentName = (event as any).agentName;
+		if (!agentName) return;
+		if (event.toolName === "delegate_to" || event.toolName === "delegate_async") return;
+
+		const info = findAgent(agentName);
+		if (!info) return;
+
+		info.toolCount++;
+		info.currentTool = event.toolName;
+		info.currentToolArgs = argsPreview(event.args);
+		info.lastAction = `${event.toolName}(${info.currentToolArgs || "..."})`;
+
+		refreshWidget(ctx);
 	});
 
-	// Track when a sub-agent finishes
+	// 3) Track sub-agent tool completions
 	pi.on("tool_execution_end" as any, (event: any, ctx: any) => {
-		if (event.toolName !== "delegate_to" && event.toolName !== "delegate_async") return;
+		const agentName = (event as any).agentName;
+		if (!agentName) {
+			// This might be the delegate_to tool itself ending
+			if (event.toolName === "delegate_to" || event.toolName === "delegate_async") {
+				// Find agent by toolCallId
+				const entry = state.agents.get(event.toolCallId);
+				if (entry) {
+					entry.status = event.isError ? "failed" : "completed";
+					entry.endedAt = Date.now();
+					entry.error = event.isError ? "error" : undefined;
+					entry.currentTool = undefined;
+					entry.currentToolArgs = undefined;
+					if (event.isError) state.failed++;
+					else state.completed++;
+					refreshWidget(ctx);
 
-		const agentName = event.args?.agent_name || event.args?.role || "agent";
-		const key = event.toolCallId || agentName;
-		const entry = state.agents.get(key);
+					// Auto-cleanup after delay
+					clearTimeout(widgetCleanupTimer);
+					widgetCleanupTimer = setTimeout(() => {
+						state.agents.delete(event.toolCallId);
+						if (state.agents.size === 0) {
+							state.chain = [];
+							state.completed = 0;
+							state.failed = 0;
+							ctx.ui.setWidget(WIDGET_KEY, undefined);
+						} else {
+							refreshWidget(ctx);
+						}
+					}, 3000);
+				}
+			}
+			return;
+		}
 
-		if (entry) {
-			entry.status = event.isError ? "failed" : "completed";
-			entry.endedAt = Date.now();
-			entry.error = event.isError ? "error" : undefined;
-			if (event.isError) state.failed++;
-			else state.completed++;
+		// Sub-agent tool completion
+		const info = findAgent(agentName);
+		if (!info) return;
+
+		if (info.currentTool) {
+			addRecentTool(info, info.currentTool, info.currentToolArgs || "");
+		}
+		info.currentTool = undefined;
+		info.currentToolArgs = undefined;
+
+		// Capture output from the tool result for the widget
+		if (event.result?.content) {
+			const text = event.result.content
+				.filter((b: any) => b.type === "text" && b.text)
+				.map((b: any) => b.text)
+				.join("\n");
+			if (text) addRecentOutput(info, text);
 		}
 
 		refreshWidget(ctx);
-
-		// Auto-cleanup after delay
-		clearTimeout(widgetCleanupTimer);
-		widgetCleanupTimer = setTimeout(() => {
-			state.agents.delete(key);
-			if (state.agents.size === 0) {
-				state.chain = [];
-				state.completed = 0;
-				state.failed = 0;
-				ctx.ui.setWidget(WIDGET_KEY, undefined);
-			} else {
-				refreshWidget(ctx);
-			}
-		}, 3000);
 	});
 
 	// Reset state on new agent turn
