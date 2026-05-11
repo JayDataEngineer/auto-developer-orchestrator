@@ -3,6 +3,7 @@ package common
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -252,6 +253,211 @@ func TestLoadDREOrg(t *testing.T) {
 	}
 	if cf.APIKeyEnv != "COMPREFACE_API_KEY" {
 		t.Errorf("compreface api_key_env: expected COMPREFACE_API_KEY, got %q", cf.APIKeyEnv)
+	}
+}
+
+func TestTechNoirOrg(t *testing.T) {
+	techNoirPath := "/home/ubuntu/Documents/programs/creative/tech-noir"
+	if _, err := os.Stat(techNoirPath); os.IsNotExist(err) {
+		t.Skip("tech-noir not found at", techNoirPath)
+	}
+
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
+	os.Setenv("PROJECT_ROOT", repoRoot)
+
+	org := LoadOrgManifest(techNoirPath)
+	if org == nil {
+		t.Fatal("expected org to be loaded from tech-noir")
+	}
+
+	if org.Name != "tech-noir" {
+		t.Errorf("expected name 'tech-noir', got %q", org.Name)
+	}
+
+	if org.RolesDir() == "" {
+		t.Error("expected RolesDir to be set")
+	}
+
+	if org.ToolPkgsDir() == "" {
+		t.Error("expected ToolPkgsDir to be set")
+	}
+
+	if manifesto := org.ManifestoContent(); manifesto == "" {
+		t.Error("expected manifesto content")
+	} else if !contains(manifesto, "Tech Noir Studio") {
+		t.Errorf("manifesto missing 'Tech Noir Studio', got:\n%s", manifesto[:100])
+	}
+
+	// Load all 5 roles
+	roles := LoadAgentRolesFrom(org.RolesDir())
+	if len(roles) != 5 {
+		t.Fatalf("expected 5 roles, got %d", len(roles))
+	}
+
+	expectedRoles := []string{
+		"technical_artist",
+		"narrative_designer",
+		"gameplay_programmer",
+		"qa_tester",
+		"design_researcher",
+	}
+	for _, name := range expectedRoles {
+		role := roles[name]
+		if role == nil {
+			t.Errorf("missing role: %s", name)
+			continue
+		}
+		if role.Description == "" {
+			t.Errorf("%s: description is empty", name)
+		}
+		if len(role.Imports) == 0 {
+			t.Errorf("%s: no imports configured", name)
+		}
+		if role.Prompt == "" {
+			t.Errorf("%s: prompt is empty", name)
+		}
+		if role.MaxRounds == 0 {
+			t.Errorf("%s: max_rounds is zero", name)
+		}
+	}
+
+	// Verify specific role properties
+	ta := roles["technical_artist"]
+	if ta.SandboxTier != "native" {
+		t.Errorf("technical_artist: expected sandbox 'native', got %q", ta.SandboxTier)
+	}
+	if ta.Temperature != 0.2 {
+		t.Errorf("technical_artist: expected temperature 0.2, got %f", ta.Temperature)
+	}
+	hasArtImport := false
+	for _, imp := range ta.Imports {
+		if imp == "tech_noir_art" {
+			hasArtImport = true
+		}
+	}
+	if !hasArtImport {
+		t.Error("technical_artist should import 'tech_noir_art'")
+	}
+
+	nd := roles["narrative_designer"]
+	if nd.SandboxTier != "isolated" {
+		t.Errorf("narrative_designer: expected sandbox 'isolated', got %q", nd.SandboxTier)
+	}
+	if nd.Temperature != 0.7 {
+		t.Errorf("narrative_designer: expected temperature 0.7, got %f", nd.Temperature)
+	}
+
+	gp := roles["gameplay_programmer"]
+	if gp.SandboxTier != "native" {
+		t.Errorf("gameplay_programmer: expected sandbox 'native', got %q", gp.SandboxTier)
+	}
+	hasGodotImport := false
+	hasCodeImport := false
+	for _, imp := range gp.Imports {
+		if imp == "godot" {
+			hasGodotImport = true
+		}
+		if imp == "code" {
+			hasCodeImport = true
+		}
+	}
+	if !hasGodotImport {
+		t.Error("gameplay_programmer should import 'godot'")
+	}
+	if !hasCodeImport {
+		t.Error("gameplay_programmer should import 'code'")
+	}
+
+	qt := roles["qa_tester"]
+	if qt.SandboxTier != "native" {
+		t.Errorf("qa_tester: expected sandbox 'native', got %q", qt.SandboxTier)
+	}
+	if qt.MaxRounds != 10 {
+		t.Errorf("qa_tester: expected max_rounds 10, got %d", qt.MaxRounds)
+	}
+
+	dr := roles["design_researcher"]
+	if dr.SandboxTier != "isolated" {
+		t.Errorf("design_researcher: expected sandbox 'isolated', got %q", dr.SandboxTier)
+	}
+	if dr.Temperature != 0.3 {
+		t.Errorf("design_researcher: expected temperature 0.3, got %f", dr.Temperature)
+	}
+
+	// Verify org tool packages are resolvable via imports
+	// Simulate pux_prompt.go flow: warm kernel cache → merge org packages → load roles
+	_ = LoadToolPackages() // ensure kernel packages are cached first
+	dir := org.ToolPkgsDir()
+	if dir == "" {
+		t.Fatal("ToolPkgsDir is empty")
+	}
+	MergeToolPackages(dir)
+
+	// Reload roles so they pick up the merged packages
+	roles = LoadAgentRolesFrom(org.RolesDir())
+
+	// technical_artist imports tech_noir_art + comfyui + studio_vision + code
+	// Should have MCP servers: tech_noir, comfyui, qwen-vision
+	ta = roles["technical_artist"]
+	if ta == nil {
+		t.Fatal("technical_artist role not found after reload")
+	}
+	hasTechNoirMCP := false
+	hasComfyuiMCP := false
+	hasQwenVisionMCP := false
+	for _, s := range ta.MCPServers {
+		switch s {
+		case "tech_noir":
+			hasTechNoirMCP = true
+		case "comfyui":
+			hasComfyuiMCP = true
+		case "qwen-vision":
+			hasQwenVisionMCP = true
+		}
+	}
+	if !hasTechNoirMCP {
+		t.Error("technical_artist missing 'tech_noir' MCP server from tech_noir_art package")
+	}
+	if !hasComfyuiMCP {
+		t.Error("technical_artist missing 'comfyui' MCP server from comfyui package")
+	}
+	if !hasQwenVisionMCP {
+		t.Error("technical_artist missing 'qwen-vision' MCP server from studio_vision package")
+	}
+
+	// gameplay_programmer imports godot + code
+	// Should have MCP server: godot
+	gp = roles["gameplay_programmer"]
+	if gp == nil {
+		t.Fatal("gameplay_programmer role not found after reload")
+	}
+	hasGodotMCP := false
+	for _, s := range gp.MCPServers {
+		if s == "godot" {
+			hasGodotMCP = true
+		}
+	}
+	if !hasGodotMCP {
+		t.Error("gameplay_programmer missing 'godot' MCP server from godot package")
+	}
+
+	// Verify non-imported MCP servers are NOT present
+	for _, s := range gp.MCPServers {
+		if s == "comfyui" || s == "tech_noir" || s == "qwen-vision" {
+			t.Errorf("gameplay_programmer should NOT have %q MCP server", s)
+		}
+	}
+
+	// Verify kernel packages still resolve alongside org packages
+	hasBash := false
+	for _, t := range gp.Tools {
+		if t == "bash" {
+			hasBash = true
+		}
+	}
+	if !hasBash {
+		t.Error("gameplay_programmer missing 'bash' tool from kernel code package")
 	}
 }
 

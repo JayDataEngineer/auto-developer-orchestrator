@@ -127,6 +127,14 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			zap.String("path", projectPath),
 		)
 		cfg.Org = org
+
+		// Merge org tool packages into kernel cache BEFORE loading roles,
+		// so that role imports like tech_noir_art, godot, comfyui resolve
+		if org.ToolPkgsDir() != "" {
+			common.MergeToolPackages(org.ToolPkgsDir())
+			h.log.Info("Org tool packages merged", zap.String("dir", org.ToolPkgsDir()))
+		}
+
 		if org.RolesDir() != "" {
 			cfg.OrgRoles = common.LoadAgentRolesFrom(org.RolesDir())
 			h.log.Info("Org roles loaded", zap.Int("count", len(cfg.OrgRoles)))

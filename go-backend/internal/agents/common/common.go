@@ -181,6 +181,22 @@ func loadPromptTemplate() (*template.Template, error) {
 	return promptTmpl, promptLoadErr
 }
 
+// MergeToolPackages loads tool packages from a directory and merges them into the
+// global kernel cache. Used by org mode to make org-specific tool packages (e.g.,
+// tech_noir_art, godot, comfyui, studio_vision) resolvable via ResolveImports.
+// Must be called before loading org roles so that their imports resolve correctly.
+func MergeToolPackages(dir string) {
+	pkgs := LoadToolPackagesFrom(dir)
+	toolPkgMu.Lock()
+	defer toolPkgMu.Unlock()
+	if toolPackages == nil {
+		toolPackages = make(map[string]*ToolPackage)
+	}
+	for name, pkg := range pkgs {
+		toolPackages[name] = pkg
+	}
+}
+
 // ReloadPromptTemplate forces a reload of all prompt templates (for development).
 func ReloadPromptTemplate() {
 	promptMu.Lock()
