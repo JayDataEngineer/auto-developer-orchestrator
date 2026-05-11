@@ -114,7 +114,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		FileOps:       &fileOps,
 		MemoryStore:   memStore,
 		ApprovalHandler: approvalHandler,
-		GitExecutor:     &adapters.GitExecutor{Git: h.git, RepoDir: projectPath},
+		GitExecutor:     nil, // disabled — git auto-commits on session start are unwanted
 		ArtifactDB:      h.db,
 	}
 

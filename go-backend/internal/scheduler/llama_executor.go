@@ -90,7 +90,7 @@ func (e *LlamaExecutor) Execute(ctx context.Context, jobID, jobName, projectPath
 		BashExecutor:  &bashExec,
 		FileOps:       &fileOps,
 		Skills:        skillStore,
-		GitExecutor:   &adapters.GitExecutor{},
+		GitExecutor:   nil, // disabled — git auto-commits on session start are unwanted
 	})
 	if err != nil {
 		return &JobResult{
