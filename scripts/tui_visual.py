@@ -505,6 +505,8 @@ def main():
     parser.add_argument("--font-size", type=int, default=14)
     parser.add_argument("--server", type=str, default="http://localhost:3847")
     parser.add_argument("--project", type=str, default="ts-tui-pi")
+    parser.add_argument("--model", type=str, default="deepseek/deepseek-v4-flash")
+    parser.add_argument("--extra-args", type=str, default="", help="Extra CLI args passed to TUI")
     args = parser.parse_args()
 
     tui_dir = Path(__file__).parent.parent / "ts-tui-pi"
@@ -514,7 +516,9 @@ def main():
 
     renderer = TerminalRenderer(cols=args.cols, rows=args.rows, font_size=args.font_size)
     log_buffer = RingBuffer(500)
-    cmd = ["bun", "run", "src/main.ts", "--project", args.project, "--server", args.server]
+    cmd = ["bun", "run", "src/main.ts", "--project", args.project, "--server", args.server, "--model", args.model]
+    if args.extra_args:
+        cmd.extend(args.extra_args.split())
     tui = TUIProcess(cmd, str(tui_dir), renderer, log_buffer)
 
     TUIVisualHandler.tui = tui
