@@ -1,6 +1,5 @@
-import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@mariozechner/pi-tui";
-import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.js";
-import { allToolDefinitions } from "../../../core/tools/index.js";
+import { Container, getCapabilities, Image, Spacer, Text, type TUI } from "@mariozechner/pi-tui";
+import type { ToolDefinition } from "../../../core/extensions/types.js";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.js";
 import { convertToPng } from "../../../utils/image-convert.js";
 import { theme } from "../theme/theme.js";
@@ -10,11 +9,7 @@ export interface ToolExecutionOptions {
 }
 
 export class ToolExecutionComponent extends Container {
-	private contentBox: Box;
 	private contentText: Text;
-	private callRendererComponent?: Component;
-	private resultRendererComponent?: Component;
-	private rendererState: any = {};
 	private imageComponents: Image[] = [];
 	private imageSpacers: Spacer[] = [];
 	private toolName: string;
@@ -23,8 +18,6 @@ export class ToolExecutionComponent extends Container {
 	private expanded = false;
 	private showImages: boolean;
 	private isPartial = true;
-	private toolDefinition?: ToolDefinition<any, any>;
-	private builtInToolDefinition?: ToolDefinition<any, any>;
 	private ui: TUI;
 	private cwd: string;
 	private executionStarted = false;
@@ -42,7 +35,7 @@ export class ToolExecutionComponent extends Container {
 		toolCallId: string,
 		args: any,
 		options: ToolExecutionOptions = {},
-		toolDefinition: ToolDefinition<any, any> | undefined,
+		_toolDefinition: ToolDefinition<any, any> | undefined,
 		ui: TUI,
 		cwd: string = process.cwd(),
 	) {
@@ -50,89 +43,16 @@ export class ToolExecutionComponent extends Container {
 		this.toolName = toolName;
 		this.toolCallId = toolCallId;
 		this.args = args;
-		this.toolDefinition = toolDefinition;
-		this.builtInToolDefinition = allToolDefinitions[toolName as keyof typeof allToolDefinitions];
 		this.showImages = options.showImages ?? true;
 		this.ui = ui;
 		this.cwd = cwd;
 
 		this.addChild(new Spacer(1));
 
-		this.contentBox = new Box(1, 1, (text: string) => theme.bg("toolPendingBg", text));
 		this.contentText = new Text("", 1, 1, (text: string) => theme.bg("toolPendingBg", text));
-
-		// Always use simple text rendering — function name + args + output as plain text
 		this.addChild(this.contentText);
 
 		this.updateDisplay();
-	}
-
-	private getCallRenderer(): ToolDefinition<any, any>["renderCall"] | undefined {
-		if (!this.builtInToolDefinition) {
-			return this.toolDefinition?.renderCall;
-		}
-		if (!this.toolDefinition) {
-			return this.builtInToolDefinition.renderCall;
-		}
-		return this.toolDefinition.renderCall ?? this.builtInToolDefinition.renderCall;
-	}
-
-	private getResultRenderer(): ToolDefinition<any, any>["renderResult"] | undefined {
-		if (!this.builtInToolDefinition) {
-			return this.toolDefinition?.renderResult;
-		}
-		if (!this.toolDefinition) {
-			return this.builtInToolDefinition.renderResult;
-		}
-		return this.toolDefinition.renderResult ?? this.builtInToolDefinition.renderResult;
-	}
-
-	private hasRendererDefinition(): boolean {
-		return this.builtInToolDefinition !== undefined || this.toolDefinition !== undefined;
-	}
-
-	private getRenderContext(lastComponent: Component | undefined): ToolRenderContext {
-		return {
-			args: this.args,
-			toolCallId: this.toolCallId,
-			invalidate: () => {
-				this.invalidate();
-				this.ui.requestRender();
-			},
-			lastComponent,
-			state: this.rendererState,
-			cwd: this.cwd,
-			executionStarted: this.executionStarted,
-			argsComplete: this.argsComplete,
-			isPartial: this.isPartial,
-			expanded: this.expanded,
-			showImages: this.showImages,
-			isError: this.result?.isError ?? false,
-		};
-	}
-
-	private createCallFallback(): Component {
-		// Special rendering for delegation tools — show role + task
-		if (this.toolName === "delegate_to" || this.toolName === "delegate_async") {
-			const role = this.args?.instructions || this.args?.step || "agent";
-			const task = this.args?.task || "";
-			const taskPreview = task.length > 80 ? task.slice(0, 80) + "..." : task;
-			return new Text(
-				theme.fg("toolTitle", theme.bold(this.toolName)) +
-				theme.fg("accent", ` → ${role}`) +
-				(taskPreview ? theme.fg("muted", `: ${taskPreview}`) : ""),
-				0, 0,
-			);
-		}
-		return new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0);
-	}
-
-	private createResultFallback(): Component | undefined {
-		const output = this.getTextOutput();
-		if (!output) {
-			return undefined;
-		}
-		return new Text(theme.fg("toolOutput", output), 0, 0);
 	}
 
 	updateArgs(args: any): void {
