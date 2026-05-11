@@ -213,6 +213,18 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 		}
 		return nil
 
+	case llamaeng.EventTypeHookRequest:
+		return &sseEvent{
+			Type: "hook_request",
+			Data: map[string]interface{}{
+				"hookId":    event.Data.HookID,
+				"hookPoint": event.Data.HookPoint,
+				"toolName":  event.Data.ToolName,
+				"args":      event.Data.ToolArgs,
+				"result":    event.Data.Result,
+			},
+		}
+
 	case llamaeng.AgentEventType("user_question"):
 		return &sseEvent{
 			Type: "user_question",

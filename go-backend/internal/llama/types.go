@@ -69,4 +69,5 @@ const (
 	EventTypeGrindAttempt    = core.EventTypeGrindAttempt
 	EventTypeGrindVerify     = core.EventTypeGrindVerify
 	EventTypeGrindEnd        = core.EventTypeGrindEnd
+	EventTypeHookRequest     = core.EventTypeHookRequest
 )

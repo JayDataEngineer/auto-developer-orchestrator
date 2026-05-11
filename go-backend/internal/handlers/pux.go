@@ -8,13 +8,16 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/approval"
+	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
+	"github.com/auto-developer-orchestrator/backend/internal/hooks"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/observability"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
+	"github.com/auto-developer-orchestrator/backend/internal/session"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -42,6 +45,7 @@ type PuxHandler struct {
 	visionClient   *browser.VisionClient // local llama.cpp vision (second fallback tier)
 	eventStore     *storage.EventStore
 	approvalMgr    *approval.Manager // central approval manager for Respond endpoint
+	hookBridge     *hooks.SSEHookBridge // SSE hook bridge for TUI interception
 
 	metrics  *observability.Metrics
 	langfuse *observability.LangfuseClient
@@ -143,6 +147,9 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/models", h.GetModels)
 	r.Put("/model", h.SetModel)
 	r.Post("/compact", h.Compact)
+	r.Post("/hook-response", h.HookResponse)
+	r.Get("/tree", h.GetTree)
+	r.Post("/fork", h.Fork)
 }
 
 // resolveAgent reads ?agentId= from the query string, defaulting to "default".
@@ -335,4 +342,158 @@ func (h *PuxHandler) Compact(w http.ResponseWriter, r *http.Request) {
 		"status":            "ok",
 		"compactedMessages": compacted,
 	})
+}
+
+// SetHookBridge sets the SSE hook bridge for TUI interception.
+func (h *PuxHandler) SetHookBridge(bridge *hooks.SSEHookBridge) {
+	h.hookBridge = bridge
+}
+
+// HookResponse handles POST /api/pux/hook-response — the TUI's response to a hook_request.
+func (h *PuxHandler) HookResponse(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		HookID string         `json:"hookId"`
+		Action string         `json:"action"` // "allow", "block", "modify"
+		Data   map[string]any `json:"data,omitempty"`
+		Reason string         `json:"reason,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.HookID == "" || req.Action == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hookId and action are required"})
+		return
+	}
+
+	if h.hookBridge == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no hook bridge active"})
+		return
+	}
+
+	resp := hooks.HookResponse{
+		Action:       req.Action,
+		ModifiedData: req.Data,
+		Reason:       req.Reason,
+	}
+	if ok := h.hookBridge.Respond(req.HookID, resp); !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no pending hook with that ID"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// GetTree handles GET /api/pux/tree — returns the session tree for navigation.
+func (h *PuxHandler) GetTree(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	agentID := r.URL.Query().Get("agentId")
+	if project == "" {
+		project = "default"
+	}
+	if agentID == "" {
+		agentID = "default"
+	}
+
+	// Load existing session file
+	sessionPath := fmt.Sprintf("%s/.pux/sessions/%s.jsonl", project, agentID)
+	tree, err := session.Load(sessionPath)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		return
+	}
+	defer tree.Close()
+
+	// Serialize tree nodes
+	root := tree.GetTree()
+	nodes := serializeTree(root)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sessionId":   tree.ID(),
+		"currentNode": tree.GetCurrentNode(),
+		"nodes":       nodes,
+	})
+}
+
+// Fork handles POST /api/pux/fork — forks the session at a given node.
+func (h *PuxHandler) Fork(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+		AgentID string `json:"agentId"`
+		NodeID  string `json:"nodeId"`
+		Label   string `json:"label,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.Project == "" {
+		req.Project = "default"
+	}
+	if req.AgentID == "" {
+		req.AgentID = "default"
+	}
+	if req.NodeID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "nodeId is required"})
+		return
+	}
+
+	sessionPath := fmt.Sprintf("%s/.pux/sessions/%s.jsonl", req.Project, req.AgentID)
+	tree, err := session.Load(sessionPath)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		return
+	}
+	defer tree.Close()
+
+	forked, err := tree.Fork(req.NodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer forked.Close()
+
+	forkPath := forked.(*session.SessionTree).FilePath()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":   "ok",
+		"forkPath": forkPath,
+		"forkId":   forked.ID(),
+	})
+}
+
+// serializeTree converts a TreeNode tree into a flat list for JSON serialization.
+func serializeTree(node *core.TreeNode) []map[string]interface{} {
+	if node == nil {
+		return nil
+	}
+	var result []map[string]interface{}
+
+	var walk func(n *core.TreeNode)
+	walk = func(n *core.TreeNode) {
+		entry := map[string]interface{}{
+			"id":        n.Entry.ID,
+			"parentId":  n.Entry.ParentID,
+			"type":      string(n.Entry.Type),
+			"timestamp": n.Entry.Timestamp,
+			"label":     n.Entry.Label,
+		}
+		// Extract message preview
+		if n.Entry.Data != nil {
+			var msg core.Message
+			if json.Unmarshal(n.Entry.Data, &msg) == nil {
+				preview := msg.Content
+				if len(preview) > 100 {
+					preview = preview[:100] + "..."
+				}
+				entry["role"] = msg.Role
+				entry["preview"] = preview
+			}
+		}
+		result = append(result, entry)
+		for _, child := range n.Children {
+			walk(child)
+		}
+	}
+	walk(node)
+	return result
 }

@@ -51,6 +51,7 @@ const (
 	EventTypeGrindEnd        AgentEventType = "grind_end"
 	EventTypeStepStart       AgentEventType = "step_start"
 	EventTypeStepEnd         AgentEventType = "step_end"
+	EventTypeHookRequest     AgentEventType = "hook_request"
 )
 
 // AgentEvent is an event emitted by the agent loop.
@@ -86,6 +87,10 @@ type AgentEventData struct {
 	ParentToolID string `json:"parentToolId,omitempty"` // ID of the delegate_to call
 	Task         string `json:"task,omitempty"`         // task description
 	Status       string `json:"status,omitempty"`       // e.g. "running", "completed", "error"
+
+	// Hook interception — set for hook_request events.
+	HookPoint string `json:"hookPoint,omitempty"` // "tool_call", "tool_result", "context"
+	HookID    string `json:"hookId,omitempty"`    // unique ID to match request → response
 }
 
 // SubscriberKey is a context key for injecting the SSE subscriber channel.
