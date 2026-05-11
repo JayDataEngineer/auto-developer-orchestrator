@@ -33,6 +33,8 @@ type SandboxOptions struct {
 	// InitialMode sets the sandbox mode after creation (cli, browser, desktop).
 	// Default is "browser" — the OpenShell image already runs Chrome via supervisord.
 	InitialMode SandboxMode
+	// Tier controls sandbox isolation: "isolated" (default), "bridged", "native"
+	Tier SandboxTier
 }
 
 // Sandbox represents an OpenShell sandbox instance
@@ -45,6 +47,7 @@ type Sandbox struct {
 	Status         SandboxStatus   `json:"status"`
 	CreatedAt      time.Time       `json:"created_at"`
 	DesktopSession *DesktopSession `json:"desktop_session,omitempty"`
+	Tier           SandboxTier     `json:"tier,omitempty"`
 }
 
 // SandboxStatus is the current state of a sandbox

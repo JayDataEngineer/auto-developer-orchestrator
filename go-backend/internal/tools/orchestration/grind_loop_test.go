@@ -25,7 +25,7 @@ type delegateCall struct {
 	modelID      string
 }
 
-func (m *mockRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
+func (m *mockRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error) {
 	m.calls = append(m.calls, delegateCall{task, instructions, toolNames, maxRounds, temperature, modelID})
 	i := m.idx
 	m.idx++
@@ -59,8 +59,8 @@ func (m *mockRunner) RunDivisionDelegate(ctx context.Context, task, divisionPath
 	return nil, nil
 }
 
-func (m *mockRunner) RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
-	return m.RunDelegate(ctx, task, instructions, toolNames, maxRounds, temperature, modelID)
+func (m *mockRunner) RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error) {
+	return m.RunDelegate(ctx, task, instructions, toolNames, maxRounds, temperature, modelID, sandboxTier)
 }
 
 // mockBashExec tracks bash exec calls.

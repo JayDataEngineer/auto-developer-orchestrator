@@ -112,7 +112,7 @@ func (t *GrindLoopTool) Execute(ctx context.Context, args map[string]any) (any, 
 	verifierModel, _ := args["verifier_model"].(string)
 
 	// Resolve role
-	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, _ := resolveRole(role, nil, 15, 0.4, t.mcpResolver, t.roleMap)
+	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, _, sandboxTier := resolveRole(role, nil, 15, 0.4, t.mcpResolver, t.roleMap)
 
 	if len(resolvedTools) == 0 {
 		return nil, core.NewToolError("grind_loop", "role '"+role+"' has no tools and no explicit tools provided")
@@ -140,7 +140,7 @@ func (t *GrindLoopTool) Execute(ctx context.Context, args map[string]any) (any, 
 		})
 
 		// GRIND: Create fresh sub-agent
-		result, err := t.runner.RunDelegate(ctx, taskPrompt, resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel)
+		result, err := t.runner.RunDelegate(ctx, taskPrompt, resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, sandboxTier)
 
 		if err != nil {
 			// Sub-agent error — treat as failed attempt

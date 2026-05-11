@@ -29,6 +29,11 @@ type AgentLoopConfig struct {
 	MaxConsecutiveFails  int // circuit breaker: force yield after N consecutive failures (0 = 5)
 	ToolExecTimeoutSec   int // seconds before a tool call times out (0 = 300, delegation gets 30m)
 	MaxProviderRetries   int // max retries when the LLM provider fails mid-stream (0 = 2)
+
+	// ToolResultProcessor intercepts tool result strings before they enter context.
+	// When set, replaces the hardcoded 6000-char truncation.
+	// Return the processed string the agent should see.
+	ToolResultProcessor func(ctx context.Context, toolName, toolCallID, result string) string
 }
 
 // AgentLoop runs the full agent loop: generate → parse tool calls → execute → feed back.
@@ -522,7 +527,9 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				state.ConsecutiveFails = 0
 				resultBytes, _ := json.Marshal(result)
 				resultStr = string(resultBytes)
-				if len(resultStr) > 6000 {
+				if l.config.ToolResultProcessor != nil {
+					resultStr = l.config.ToolResultProcessor(ctx, tc.Name, tcr.ID, resultStr)
+				} else if len(resultStr) > 6000 {
 					resultStr = resultStr[:6000] + "...[truncated]"
 				}
 			}

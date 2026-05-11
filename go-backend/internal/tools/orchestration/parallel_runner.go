@@ -55,6 +55,9 @@ type ParallelRunner struct {
 	// Parent SSE subscriber — sub-agent events are forwarded here for TUI visibility
 	subscriber chan<- core.AgentEvent
 
+	// Per-tier executor override: when set, uses this instead of r.executor
+	executorFactory func(tier string) core.ToolExecutor
+
 	mu         sync.Mutex
 	tasks      map[string]*asyncTask
 	wg         sync.WaitGroup
@@ -107,6 +110,13 @@ func (r *ParallelRunner) SetProviderFactory(factory ProviderFactory) {
 // SetSnapshotter sets the git-based snapshotter for change tracking.
 func (r *ParallelRunner) SetSnapshotter(s Snapshotter) {
 	r.snapshotter = s
+}
+
+// SetExecutorFactory sets a per-tier executor override.
+// When set, the factory is called with the role's sandbox tier to produce
+// an appropriate executor (e.g., HostExecutor for native tier).
+func (r *ParallelRunner) SetExecutorFactory(f func(tier string) core.ToolExecutor) {
+	r.executorFactory = f
 }
 
 // enrichTask prepends relevant context from the parent session to the task.
@@ -191,7 +201,7 @@ func (r *ParallelRunner) SetSubscriber(ch chan<- core.AgentEvent) {
 }
 
 // RunDelegate runs a synchronous sub-agent.
-func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
+func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error) {
 	agentName := extractAgentName(instructions)
 	r.logger("SYNC_DELEGATE: task=%q agent=%s tools=%v model=%q", task, agentName, toolNames, modelID)
 
@@ -264,7 +274,11 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	}
 
 	sess := &subSession{parent: r.baseSession, msgCount: 0}
-	loop := core.NewAgentLoop(provider, r.executor, sess, cfg)
+	executor := r.executor
+	if r.executorFactory != nil && sandboxTier != "" {
+		executor = r.executorFactory(sandboxTier)
+	}
+	loop := core.NewAgentLoop(provider, executor, sess, cfg)
 
 	// Collect events into result
 	events := make(chan core.AgentEvent, 128)
@@ -444,7 +458,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 
 // RunDelegateTracked runs a sub-agent with file change tracking.
 // Returns the result, an agent reference for continuation, and file changes.
-func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
+func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error) {
 	// Take pre-snapshot
 	var snapshotID string
 	if r.snapshotter != nil && r.projectDir != "" {
@@ -456,7 +470,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	}
 
 	// Run the delegate normally
-	result, err := r.RunDelegate(ctx, task, instructions, toolNames, maxRounds, temperature, modelID)
+	result, err := r.RunDelegate(ctx, task, instructions, toolNames, maxRounds, temperature, modelID, sandboxTier)
 	if err != nil {
 		return result, err
 	}
@@ -767,7 +781,7 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
-		result, err := r.RunDelegate(bgCtx, task, instructions, toolNames, 15, 0.4, "")
+		result, err := r.RunDelegate(bgCtx, task, instructions, toolNames, 15, 0.4, "", "")
 
 		r.mu.Lock()
 		t.Result = result

@@ -44,6 +44,7 @@ type AgentRole struct {
 	Temperature float32
 	Model       string
 	Division    string // non-empty = division head, points to sub-dir with pux.yaml
+	SandboxTier string // "isolated" (default), "bridged", "native"
 }
 
 // agentConfig is the YAML structure for config/roles/<name>/config.yaml
@@ -56,6 +57,7 @@ type agentConfig struct {
 	Temperature float64  `yaml:"temperature"`
 	Model       string   `yaml:"model"`
 	Division    string   `yaml:"division"`
+	Sandbox     string   `yaml:"sandbox"`
 }
 
 // ToolPackage is a shared tool group from config/tool_packages/<name>.yaml
@@ -380,6 +382,7 @@ func loadRoleFromFolder(folder string) *AgentRole {
 		Temperature: temp,
 		Model:       ac.Model,
 		Division:    ac.Division,
+		SandboxTier: ac.Sandbox,
 	}
 }
 
@@ -426,6 +429,9 @@ func formatRolesList(roles map[string]*AgentRole) string {
 				}
 				capability += "mcp:" + strings.Join(role.MCPServers, ", mcp:")
 			}
+		}
+		if role.SandboxTier != "" && role.SandboxTier != "isolated" {
+			capability += ", sandbox:" + role.SandboxTier
 		}
 		fmt.Fprintf(&b, "### %s\n%s\nCapabilities: %s\n\n", role.Name, role.Description, capability)
 	}

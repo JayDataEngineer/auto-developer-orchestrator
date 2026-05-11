@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
+	"github.com/auto-developer-orchestrator/backend/internal/adapters"
+	ctxpkg "github.com/auto-developer-orchestrator/backend/internal/context"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/hooks"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
@@ -119,6 +122,23 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		logger.Printf("Skills loaded: %d skills discovered", skillStore.Count())
 	}
 
+	// ── Context management add-on ──
+	ctxConfig := ctxpkg.DefaultConfig()
+	ctxConfig.ContextSize = cfg.ContextSize
+	if ctxConfig.ContextSize <= 0 {
+		ctxConfig.ContextSize = 32768
+	}
+	ctxConfig.SpillDir = filepath.Join(cfg.ProjectDir, ".pux", "spill", sess.ID())
+	ctxMgr := ctxpkg.Factory(sess, ctxConfig)
+
+	scratchStore := ctxpkg.NewScratchStore()
+	ctoTools = append(ctoTools,
+		ctxpkg.NewScratchWriteTool(scratchStore),
+		ctxpkg.NewScratchReadTool(scratchStore),
+		ctxpkg.NewScratchClearTool(scratchStore),
+		ctxpkg.NewLoadSpilledTool(ctxMgr),
+	)
+
 	// ── Employee tools: NOT registered on the CTO ──
 	// These are collected into allTools for sub-agent toolSpecs only.
 	employeeTools := []core.Tool{}
@@ -192,6 +212,25 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		if cfg.BashExecutor != nil {
 			pr.SetSnapshotter(orchestration.NewGitSnapshotter(cfg.BashExecutor))
 		}
+		// Per-role sandbox tier: native roles use host executor, others use sandbox
+		pr.SetExecutorFactory(func(tier string) core.ToolExecutor {
+			if tier == "native" {
+				hostExec := &adapters.HostExecutor{WorkDir: cfg.ProjectDir}
+				hostFileOps := &file.SimpleSandboxOps{BasePath: cfg.ProjectDir}
+				nativeReg := core.NewToolRegistry([]core.Tool{
+					bash.New(hostExec),
+					file.NewReadTool(hostFileOps),
+					file.NewWriteTool(hostFileOps),
+					file.NewEditTool(hostFileOps),
+					file.NewGrepTool(hostFileOps),
+					file.NewGlobTool(hostFileOps),
+				})
+				nativeReg.RegisterCommonAliases()
+				return nativeReg
+			}
+			// isolated + bridged both use the sandbox executor
+			return allToolReg
+		})
 		runner = pr
 	}
 
@@ -216,10 +255,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		maxRounds = 50
 	}
 
-	compactionHook := hooks.NewCompactionHook(sess, 0.55, 0.75, 4)
+	// Context manager handles compaction now — no more CompactionHook
 	goalNudgeHook := hooks.NewGoalNudgeHook(maxRounds)
 	journalHook := hooks.NewJournalCheckpointHook(sess)
-	loopHooks := []core.LoopHook{compactionHook, goalNudgeHook, journalHook}
+	scratchpadHook := hooks.NewScratchpadHook(scratchStore)
+	loopHooks := []core.LoopHook{goalNudgeHook, journalHook, scratchpadHook}
 
 	// Add git checkpoint hook if executor provided
 	if cfg.GitExecutor != nil {
@@ -256,6 +296,16 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		ContextSize:    cfg.ContextSize,
 		ThinkingBudget: 4096,
 		Tools:          ctoToolSpecs,
+		ToolResultProcessor: func(procCtx context.Context, toolName, toolCallID, result string) string {
+			processed, err := ctxMgr.ProcessToolResult(procCtx, toolName, toolCallID, result)
+			if err != nil {
+				if len(result) > 6000 {
+					return result[:6000] + "...[truncated]"
+				}
+				return result
+			}
+			return processed
+		},
 		Opts: core.GenerateOptions{
 			MaxTokens:   16384,
 			Temperature: 0.7,

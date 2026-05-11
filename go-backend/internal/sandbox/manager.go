@@ -216,6 +216,34 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		resources.NanoCPUs = int64(opts.CPULimit * 1e9) // cores to nanocpus
 	}
 
+	// Build bind mounts
+	binds := []string{
+		projectPath + ":/sandbox/workspace",
+		policiesDir + ":/etc/openshell/policies:ro",
+		"/tmp:/sandbox/tmp",
+		volumeName + ":/sandbox/persist",
+	}
+	hostConfig := &container.HostConfig{
+		Binds:     binds,
+		Resources: resources,
+	}
+	netConfig := &network.NetworkingConfig{
+		EndpointsConfig: map[string]*network.EndpointSettings{
+			networkName: {},
+		},
+	}
+
+	// Bridged mode: mount host X11 socket + use host network
+	if opts.Tier == TierBridged {
+		hostDisplay := os.Getenv("DISPLAY")
+		if hostDisplay != "" {
+			binds = append(binds, "/tmp/.X11-unix:/tmp/.X11-unix")
+			envVars = append(envVars, "DISPLAY="+hostDisplay)
+		}
+		hostConfig.NetworkMode = "host"
+		netConfig = nil // host network mode is incompatible with endpoint config
+	}
+
 	// Create the container
 	createResp, err := m.dockerClient.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
@@ -227,21 +255,9 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 				"openshell.project-path": projectPath,
 			},
 		},
-		HostConfig: &container.HostConfig{
-			Binds: []string{
-				projectPath + ":/sandbox/workspace",
-				policiesDir + ":/etc/openshell/policies:ro",
-				"/tmp:/sandbox/tmp",
-				volumeName + ":/sandbox/persist",
-			},
-			Resources: resources,
-		},
-		NetworkingConfig: &network.NetworkingConfig{
-			EndpointsConfig: map[string]*network.EndpointSettings{
-				networkName: {},
-			},
-		},
-		Name: containerName,
+		HostConfig:       hostConfig,
+		NetworkingConfig: netConfig,
+		Name:            containerName,
 	})
 	if err != nil {
 		// Container name conflict — remove stale stopped container and retry
@@ -258,21 +274,9 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 						"openshell.project-path": projectPath,
 					},
 				},
-				HostConfig: &container.HostConfig{
-					Binds: []string{
-						projectPath + ":/sandbox/workspace",
-						policiesDir + ":/etc/openshell/policies:ro",
-						"/tmp:/sandbox/tmp",
-						volumeName + ":/sandbox/persist",
-					},
-					Resources: resources,
-				},
-				NetworkingConfig: &network.NetworkingConfig{
-					EndpointsConfig: map[string]*network.EndpointSettings{
-						networkName: {},
-					},
-				},
-				Name: containerName,
+				HostConfig:       hostConfig,
+				NetworkingConfig: netConfig,
+				Name:            containerName,
 			})
 			if err != nil {
 				m.mu.Unlock()
@@ -306,6 +310,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		Mode:        ModeCLI,
 		Status:      StatusRunning,
 		CreatedAt:   time.Now(),
+		Tier:        opts.Tier,
 	}
 
 	m.sandboxes[opts.ID] = sandbox
