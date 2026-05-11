@@ -47,9 +47,7 @@ export class ToolExecutionComponent extends Container {
 		this.ui = ui;
 		this.cwd = cwd;
 
-		this.addChild(new Spacer(1));
-
-		this.contentText = new Text("", 1, 1, (text: string) => theme.bg("toolPendingBg", text));
+		this.contentText = new Text("", 1, 1, (text: string) => text);
 		this.addChild(this.contentText);
 
 		this.updateDisplay();
@@ -139,17 +137,9 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private updateDisplay(): void {
-		const bgFn = this.isPartial
-			? (text: string) => theme.bg("toolPendingBg", text)
-			: this.result?.isError
-				? (text: string) => theme.bg("toolErrorBg", text)
-				: (text: string) => theme.bg("toolSuccessBg", text);
-
 		let hasContent = false;
 		this.hideComponent = false;
 
-		// Always use simple text rendering for all tools
-		this.contentText.setCustomBgFn(bgFn);
 		this.contentText.setText(this.formatToolExecution());
 		hasContent = true;
 
@@ -198,15 +188,22 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private formatToolExecution(): string {
-		const name = theme.fg("toolTitle", theme.bold(this.toolName));
+		// Status dot: green=success, red=error, yellow=pending
+		const dot = this.isPartial
+			? theme.fg("warning", "●")
+			: this.result?.isError
+				? theme.fg("error", "●")
+				: theme.fg("success", "●");
+
 		const argsSummary = this.formatArgsSummary();
-		let text = argsSummary ? `${name}: ${argsSummary}` : name;
+		let text = argsSummary ? `${this.toolName}: ${argsSummary}` : this.toolName;
 
 		const output = this.getTextOutput();
 		if (output) {
-			text += `\n${theme.fg("toolOutput", output)}`;
+			text += `\n  ${output}`;
 		}
-		return text;
+
+		return `${dot} ${text}`;
 	}
 
 	/** Extract a one-line summary of the args — command, file path, pattern, etc. */
