@@ -14,13 +14,15 @@ func (sbc *SandboxBrowserClient) GetCookies(ctx context.Context, urls []string) 
 	var cookies []*network.Cookie
 
 	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
-		params := network.GetCookies()
-		if len(urls) > 0 {
-			params = params.WithURLs(urls)
-		}
-		var err error
-		cookies, err = params.Do(actCtx)
-		return err
+		return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			params := network.GetCookies()
+			if len(urls) > 0 {
+				params = params.WithURLs(urls)
+			}
+			var err error
+			cookies, err = params.Do(ctx)
+			return err
+		}))
 	})
 	if err != nil {
 		return nil, fmt.Errorf("get cookies: %w", err)
@@ -44,15 +46,17 @@ func (sbc *SandboxBrowserClient) GetCookies(ctx context.Context, urls []string) 
 
 func (sbc *SandboxBrowserClient) SetCookie(ctx context.Context, cookie Cookie) error {
 	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
-		params := network.SetCookie(cookie.Name, cookie.Value).
-			WithDomain(cookie.Domain).
-			WithPath(cookie.Path).
-			WithSecure(cookie.Secure).
-			WithHTTPOnly(cookie.HTTPOnly)
-		if cookie.URL() != "" {
-			params = params.WithURL(cookie.URL())
-		}
-		return params.Do(actCtx)
+		return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			params := network.SetCookie(cookie.Name, cookie.Value).
+				WithDomain(cookie.Domain).
+				WithPath(cookie.Path).
+				WithSecure(cookie.Secure).
+				WithHTTPOnly(cookie.HTTPOnly)
+			if cookie.URL() != "" {
+				params = params.WithURL(cookie.URL())
+			}
+			return params.Do(ctx)
+		}))
 	})
 	if err != nil {
 		return fmt.Errorf("set cookie: %w", err)
@@ -62,16 +66,20 @@ func (sbc *SandboxBrowserClient) SetCookie(ctx context.Context, cookie Cookie) e
 
 func (sbc *SandboxBrowserClient) ClearCookies(ctx context.Context) error {
 	return sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
-		return network.ClearBrowserCookies().Do(actCtx)
+		return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			return network.ClearBrowserCookies().Do(ctx)
+		}))
 	})
 }
 
 func (sbc *SandboxBrowserClient) ClearCookiesForURL(ctx context.Context, url string) error {
 	var cookies []*network.Cookie
 	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
-		var err error
-		cookies, err = network.GetCookies().WithURLs([]string{url}).Do(actCtx)
-		return err
+		return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			var err error
+			cookies, err = network.GetCookies().WithURLs([]string{url}).Do(ctx)
+			return err
+		}))
 	})
 	if err != nil {
 		return fmt.Errorf("clear cookies for url: %w", err)
@@ -79,10 +87,12 @@ func (sbc *SandboxBrowserClient) ClearCookiesForURL(ctx context.Context, url str
 
 	for _, c := range cookies {
 		err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
-			return network.DeleteCookies(c.Name).
-				WithDomain(c.Domain).
-				WithPath(c.Path).
-				Do(actCtx)
+			return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+				return network.DeleteCookies(c.Name).
+					WithDomain(c.Domain).
+					WithPath(c.Path).
+					Do(ctx)
+			}))
 		})
 		if err != nil {
 			return fmt.Errorf("delete cookie %s: %w", c.Name, err)

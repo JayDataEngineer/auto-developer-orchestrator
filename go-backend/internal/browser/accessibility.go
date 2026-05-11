@@ -12,7 +12,6 @@ import (
 	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
-	"go.uber.org/zap"
 )
 
 const a11yElementCap = 80
@@ -32,9 +31,7 @@ func (sbc *SandboxBrowserClient) GetAccessibilityTree(ctx context.Context) (*A11
 				if err != nil {
 					return err
 				}
-				sbc.logger.Info("a11y raw nodes", zap.Int("count", len(nodes)))
 				selectors = resolveSelectors(ctx, nodes)
-				sbc.logger.Info("a11y selectors resolved", zap.Int("count", len(selectors)))
 				return nil
 			}),
 		)
@@ -44,23 +41,6 @@ func (sbc *SandboxBrowserClient) GetAccessibilityTree(ctx context.Context) (*A11
 	}
 
 	elems := buildAccessibleElements(nodes, selectors)
-	// Debug: log first few non-interactive roles
-	seen := map[string]bool{}
-	for _, n := range nodes {
-		if n.Ignored {
-			continue
-		}
-		r := stringFromValue(n.Role)
-		if !seen[r] {
-			seen[r] = true
-		}
-	}
-	roles := make([]string, 0, len(seen))
-	for r := range seen {
-		roles = append(roles, r)
-	}
-	sbc.logger.Info("a11y all roles", zap.Strings("roles", roles))
-	sbc.logger.Info("a11y interactive elements", zap.Int("count", len(elems)))
 	if len(elems) > a11yElementCap {
 		elems = elems[:a11yElementCap]
 	}
