@@ -44,6 +44,11 @@ func NewFallbackChain(providers ...Provider) *FallbackChain {
 	}
 }
 
+// Providers returns the list of providers in the chain.
+func (c *FallbackChain) Providers() []Provider {
+	return c.providers
+}
+
 // SetTimeout configures the per-provider timeout.
 func (c *FallbackChain) SetTimeout(d time.Duration) {
 	c.timeout = d
