@@ -451,6 +451,22 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 	req.MinP = 0
 	req.CachePrompt = false
 	req.SessionID = ""
+
+	// Gemini 3 requires thought_signature on tool calls in conversation history.
+	// Inject a dummy signature for any that lack one.
+	if strings.Contains(strings.ToLower(e.modelName), "gemini") {
+		for i := range req.Messages {
+			m := &req.Messages[i]
+			if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+				for j := range m.ToolCalls {
+					if m.ToolCalls[j].ThoughtSignature == "" {
+						m.ToolCalls[j].ThoughtSignature = "c2tpcF90aG91Z2h0X3NpZ25hdHVyZV92YWxpZGF0b3I="
+					}
+				}
+			}
+		}
+	}
+
 	return req
 }
 
