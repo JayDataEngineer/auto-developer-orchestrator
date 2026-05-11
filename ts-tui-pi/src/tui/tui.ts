@@ -496,17 +496,18 @@ export class TUI extends Container {
 			data = current;
 		}
 
-		// Handle mouse scroll events (SGR mode: \x1b[<64;X;YM = scroll up, \x1b[<65;X;YM = scroll down)
-		// These come from ?1000h mouse tracking. With ?1007h (alternate scroll), scroll wheel
-		// sends Up/Down arrow keys instead — handled in the normal key path below.
-		const scrollMatch = data.match(/^\x1b\[<(64|65);\d+;\d+[Mm]$/);
-		if (scrollMatch) {
-			const button = parseInt(scrollMatch[1]!, 10);
+		// Handle mouse events (SGR mode: \x1b[<BUTTON;X;YM)
+		// With ?1000h + ?1006h, mouse clicks and scroll wheel send SGR-encoded events.
+		// Scroll wheel: button 64 = up, 65 = down. Other buttons (0-3) are clicks — consume silently.
+		const mouseMatch = data.match(/^\x1b\[<(\d+);\d+;\d+[Mm]$/);
+		if (mouseMatch) {
+			const button = parseInt(mouseMatch[1]!, 10);
 			if (button === 64) {
 				this.scrollChat(-3); // Scroll up 3 lines
 			} else if (button === 65) {
 				this.scrollChat(3); // Scroll down 3 lines
 			}
+			// Consume all other mouse events silently (clicks, releases)
 			return;
 		}
 

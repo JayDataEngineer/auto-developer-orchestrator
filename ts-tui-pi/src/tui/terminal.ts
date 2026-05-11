@@ -96,9 +96,11 @@ export class ProcessTerminal implements Terminal {
 		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
 		process.stdout.write("\x1b[?2004h");
 
-		// Enable alternate scroll mode — terminal converts scroll wheel to arrow keys
-		// This preserves native mouse drag-to-select (unlike ?1000h which captures ALL mouse events)
-		process.stdout.write("\x1b[?1007h");
+		// Enable mouse button-event tracking + SGR encoding for scroll wheel.
+		// ?1000h = button press/release reporting (no motion tracking — preserves text selection)
+		// ?1006h = SGR mouse encoding (clean parsing, works with scroll wheel)
+		// Also enable ?1007h as fallback for terminals that prefer alternate scroll.
+		process.stdout.write("\x1b[?1000h\x1b[?1006h\x1b[?1007h");
 
 		// Switch to alternate screen buffer to preserve terminal history on exit
 		if (this._alternateScreen) {
@@ -271,8 +273,8 @@ export class ProcessTerminal implements Terminal {
 	}
 
 	stop(): void {
-		// Disable alternate scroll mode
-		process.stdout.write("\x1b[?1007l");
+		// Disable mouse tracking and alternate scroll mode
+		process.stdout.write("\x1b[?1007l\x1b[?1006l\x1b[?1000l");
 
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
