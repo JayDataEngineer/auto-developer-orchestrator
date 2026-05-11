@@ -278,6 +278,41 @@ func (d *Database) ClearConversationHistory(ctx context.Context, project, agentI
 	return nil
 }
 
+// CompactSession removes old tool-result messages for a project+agent, keeping the most recent ones.
+// Returns the number of messages compacted.
+func (d *Database) CompactSession(ctx context.Context, project, agentID string) (int, error) {
+	// Get total message count
+	var total int
+	err := d.db.QueryRowContext(ctx,
+		Rebind(d.dialect, `SELECT COUNT(*) FROM conversation_messages WHERE project = ? AND agent_id = ?`),
+		project, agentID).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+
+	// Keep the most recent 20 messages, delete older ones
+	keep := 20
+	if total <= keep {
+		return 0, nil
+	}
+
+	result, err := d.db.ExecContext(ctx, Rebind(d.dialect, `
+		DELETE FROM conversation_messages
+		WHERE project = ? AND agent_id = ?
+		  AND id NOT IN (
+		    SELECT id FROM conversation_messages
+		    WHERE project = ? AND agent_id = ?
+		    ORDER BY created_at DESC
+		    LIMIT ?
+		  )`),
+		project, agentID, project, agentID, keep)
+	if err != nil {
+		return 0, err
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
+}
+
 // SetConversationTitle sets a custom title for a conversation.
 func (d *Database) SetConversationTitle(ctx context.Context, project, agentID, title string) error {
 	_, err := d.db.ExecContext(ctx, Rebind(d.dialect, `

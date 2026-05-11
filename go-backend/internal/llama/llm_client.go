@@ -480,19 +480,6 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 	return req
 }
 
-// OpenAITool represents a tool definition in the OpenAI function calling format.
-type OpenAITool struct {
-	Type     string      `json:"type"` // always "function"
-	Function FunctionDef `json:"function"`
-}
-
-// FunctionDef describes a function's name, description, and parameter schema.
-type FunctionDef struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"` // JSON Schema object
-}
-
 // ChatCompletionResponse maps to the non-streaming /v1/chat/completions response.
 type ChatCompletionResponse struct {
 	Choices []ChatChoice `json:"choices"`

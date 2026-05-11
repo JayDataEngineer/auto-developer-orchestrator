@@ -17,7 +17,6 @@ type Adapter struct {
 	ctxSize int
 	mu      sync.Mutex
 	session *llama.Session
-	tools   []llama.OpenAITool
 }
 
 // NewAdapter creates an adapter wrapping an LLMClient.
@@ -33,25 +32,6 @@ func (a *Adapter) StreamChat(ctx context.Context, messages []core.Message, tools
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	llamaTools := make([]llama.OpenAITool, len(tools))
-	for i, t := range tools {
-		llamaTools[i] = llama.OpenAITool{
-			Type: t.Type,
-			Function: llama.FunctionDef{
-				Name:        t.Function.Name,
-				Description: t.Function.Description,
-				Parameters:  t.Function.Parameters,
-			},
-		}
-	}
-
-	llamaOpts := llama.GenerateOptions{
-		MaxTokens:   opts.MaxTokens,
-		Temperature: opts.Temperature,
-		TopP:        opts.TopP,
-		TopK:        opts.TopK,
-	}
-
 	// Create session if needed
 	if a.session == nil {
 		sess, err := a.engine.NewSession(a.ctxSize)
@@ -59,51 +39,20 @@ func (a *Adapter) StreamChat(ctx context.Context, messages []core.Message, tools
 			return nil, fmt.Errorf("adapter: failed to create session: %w", err)
 		}
 		a.session = sess
-		a.tools = llamaTools
-	}
-
-	// Convert all core messages to llama messages.
-	// This ensures the session always has the exact same view as the core session,
-	// including after compaction or any other modification.
-	llamaMsgs := make([]llama.Message, 0, len(messages))
-	for _, m := range messages {
-		lm := llama.Message{
-			Role:    m.Role,
-			Content: m.Content,
-		}
-		if m.ToolCallID != "" {
-			lm.ToolCallID = m.ToolCallID
-		}
-		if m.Name != "" {
-			lm.Name = m.Name
-		}
-		if len(m.ToolCalls) > 0 {
-			for _, tc := range m.ToolCalls {
-				lm.ToolCalls = append(lm.ToolCalls, llama.ToolCallResponse{
-					ID:   tc.ID,
-					Type: tc.Type,
-					Function: llama.FunctionCallData{
-						Name:      tc.Function.Name,
-						Arguments: tc.Function.Arguments,
-					},
-				})
-			}
-		}
-		llamaMsgs = append(llamaMsgs, lm)
 	}
 
 	// Ensure system messages are at the beginning.
 	// Session rehydration can load messages out of order (e.g. user messages
 	// from history before the system prompt). Many GGUF chat templates
 	// (including Qwen, Gemma) enforce "system message must be first".
-	llamaMsgs = reorderSystemFirst(llamaMsgs)
+	reordered := reorderSystemFirst(messages)
 
 	// Always set messages from core and trigger generation.
 	// For cloud providers this is required (no KV cache).
 	// For local llama-server, the session_id still enables KV cache reuse.
-	a.session.SetMessages(llamaMsgs)
-	a.session.SetTools(llamaTools)
-	ch := a.session.GenerateStream(llamaOpts)
+	a.session.SetMessages(reordered)
+	a.session.SetTools(tools)
+	ch := a.session.GenerateStream(opts)
 
 	return convertEvents(ch), nil
 }
@@ -129,41 +78,18 @@ func (a *Adapter) Close() {
 	}
 }
 
-func convertEvents(ch <-chan llama.ChatEvent) <-chan core.ChatEvent {
+func convertEvents(ch <-chan core.ChatEvent) <-chan core.ChatEvent {
 	out := make(chan core.ChatEvent, 256)
 	go func() {
 		defer close(out)
 		for evt := range ch {
-			coreEvt := core.ChatEvent{
-				Type:    core.ChatEventType(evt.Type),
-				Content: evt.Content,
-				Finish:  core.FinishReason(evt.Finish),
-				Err:     evt.Err,
-			}
-			if evt.Usage != nil {
-				coreEvt.Usage = &core.StreamUsage{
-					PromptTokens:     evt.Usage.PromptTokens,
-					CompletionTokens: evt.Usage.CompletionTokens,
-				}
-			}
-			if evt.Delta != nil {
-				coreEvt.Deltas = []core.ToolCallDelta{{
-					Index:    evt.Delta.Index,
-					ID:       evt.Delta.ID,
-					Type:     evt.Delta.Type,
-					Function: core.FunctionCallDelta{
-						Name:      evt.Delta.Function.Name,
-						Arguments: evt.Delta.Function.Arguments,
-					},
-				}}
-			}
 			// The session accumulates tool calls internally and sends the
 			// serialized JSON in the ChatEventDone's Content field.
 			// Parse them back into Deltas so the core agent loop can see them.
 			// Note: Gemini sends finish_reason="stop" even with tool calls,
 			// so we check for Content (serialized calls) regardless of finish reason.
-			if evt.Type == llama.ChatEventDone && evt.Content != "" {
-				var calls []llama.ToolCallResponse
+			if evt.Type == core.ChatEventDone && evt.Content != "" {
+				var calls []core.ToolCallResponse
 				if err := json.Unmarshal([]byte(evt.Content), &calls); err == nil {
 					deltas := make([]core.ToolCallDelta, len(calls))
 					for i, tc := range calls {
@@ -177,10 +103,10 @@ func convertEvents(ch <-chan llama.ChatEvent) <-chan core.ChatEvent {
 							},
 						}
 					}
-					coreEvt.Deltas = deltas
+					evt.Deltas = deltas
 				}
 			}
-			out <- coreEvt
+			out <- evt
 		}
 	}()
 	return out
@@ -190,7 +116,7 @@ func convertEvents(ch <-chan llama.ChatEvent) <-chan core.ChatEvent {
 // Many GGUF chat templates (Qwen, Gemma, etc.) require the system message at
 // position 0. Session rehydration from SQL history can load messages where a
 // user message appears before the system prompt, breaking strict templates.
-func reorderSystemFirst(msgs []llama.Message) []llama.Message {
+func reorderSystemFirst(msgs []core.Message) []core.Message {
 	if len(msgs) <= 1 {
 		return msgs
 	}
@@ -210,7 +136,7 @@ func reorderSystemFirst(msgs []llama.Message) []llama.Message {
 	}
 
 	// Collect system messages first, then everything else
-	var system, rest []llama.Message
+	var system, rest []core.Message
 	for _, m := range msgs {
 		if m.Role == "system" {
 			system = append(system, m)

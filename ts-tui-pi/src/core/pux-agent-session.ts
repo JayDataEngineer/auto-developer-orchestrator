@@ -134,6 +134,20 @@ export class PuxAgentSession {
   public pendingMessageCount = 0;
   public sessionFile: string | undefined;
 
+  // ---- Tracked session state (updated from SSE events) ----
+  private _isCompacting = false;
+  private _turnCount = 0;
+  private _messageCount = 0;
+  private _userMessageCount = 0;
+  private _assistantMessageCount = 0;
+  private _toolCallCount = 0;
+  private _toolResultCount = 0;
+  private _totalInputTokens = 0;
+  private _totalOutputTokens = 0;
+  private _totalCacheTokens = 0;
+  private _lastAssistantText = "";
+  private _accText = "";  // current turn text accumulator
+
 	public agentId: string = "";
 	private serverUrl: string;
 	private project: string;
@@ -191,10 +205,14 @@ export class PuxAgentSession {
     const usrMsg = userMessage(text);
     this.emit({ type: "message_start", message: usrMsg });
     this.sessionManager?.appendMessage?.(usrMsg);
+    this._messageCount++;
+    this._userMessageCount++;
 
     // 2. Emit agent_start (TUI shows loader)
     this.emit({ type: "agent_start" });
     this.streaming = true;
+    this._accText = "";
+    this._turnCount++;
 
     // 3. Emit message_start for assistant (creates streaming component)
     const assistantMsg = mkAssistant();
@@ -259,6 +277,7 @@ export class PuxAgentSession {
                 // Update accumulators
                 if (currentEvent === "text_delta") {
                   accText += payload.text || "";
+                  this._accText = accText;
                 }
                 if (currentEvent === "thinking_delta") {
                   accThinking += payload.text || "";
@@ -336,6 +355,7 @@ export class PuxAgentSession {
       }
 
       case "tool_execution_start": {
+        this._toolCallCount++;
         const toolCall: ToolCall = {
           type: "toolCall",
           id: payload.toolId || `tool_${Date.now()}`,
@@ -358,6 +378,7 @@ export class PuxAgentSession {
       }
 
       case "tool_execution_end": {
+        this._toolResultCount++;
         // Normalize result to { content: [...] } format expected by TUI
         const rawResult = payload.result !== undefined ? payload.result : payload.error || "";
         const normalizedResult = typeof rawResult === "string"
@@ -401,14 +422,28 @@ export class PuxAgentSession {
         const content: any[] = [];
         if (acc.accThinking) content.push({ type: "thinking", thinking: acc.accThinking });
         if (acc.accText) content.push({ type: "text", text: acc.accText });
+
+        // Track token counts from backend
+        const inputTokens = Number(payload.input) || 0;
+        const outputTokens = Number(payload.output) || 0;
+        const cacheTokens = Number(payload.cache) || 0;
+        this._totalInputTokens += inputTokens;
+        this._totalOutputTokens += outputTokens;
+        this._totalCacheTokens += cacheTokens;
+
+        // Track message counts
+        this._messageCount++;
+        this._assistantMessageCount++;
+        if (acc.accText) this._lastAssistantText = acc.accText;
+
         const msg = mkAssistant({
           content,
           usage: {
-            input: Number(payload.input) || 0,
-            output: Number(payload.output) || 0,
-            cacheRead: 0,
+            input: inputTokens,
+            output: outputTokens,
+            cacheRead: cacheTokens,
             cacheWrite: 0,
-            totalTokens: (Number(payload.input) || 0) + (Number(payload.output) || 0),
+            totalTokens: inputTokens + outputTokens,
           },
           stopReason: "stop",
         });
@@ -440,10 +475,12 @@ export class PuxAgentSession {
       }
 
       case "compaction_start":
+        this._isCompacting = true;
         this.emit({ type: "compaction_start", reason: "manual" as any });
         break;
 
       case "compaction_end":
+        this._isCompacting = false;
         this.emit({
           type: "compaction_end",
           reason: "manual" as any,
@@ -602,30 +639,37 @@ export class PuxAgentSession {
   dispose(): void { this.abort(); }
   cancelPendingRequests(): void { this.abort(); }
   get isStreaming(): boolean { return this.streaming; }
-  get isCompacting(): boolean { return false; }
+  get isCompacting(): boolean { return this._isCompacting; }
   get isBashRunning(): boolean { return false; }
   getCwd(): string { return this.sessionManager?.getCwd?.() || process.cwd(); }
   getContextUsage() {
     const cw = (this.model as any)?.contextWindow || 0;
-    return { used: 0, limit: cw, contextWindow: cw, percent: cw > 0 ? 0 : null };
+    const used = this._totalInputTokens + this._totalOutputTokens;
+    return { used, limit: cw, contextWindow: cw, percent: cw > 0 ? Math.min(used / cw, 1) : null };
   }
   getAvailableThinkingLevels(): ThinkingLevel[] { return ["none", "low", "high"]; }
   getSessionStats() {
     return {
-      turns: 0,
-      messages: 0,
-      userMessages: 0,
-      assistantMessages: 0,
-      toolCalls: 0,
-      toolResults: 0,
-      totalMessages: 0,
-      sessionFile: undefined as string | undefined,
-      sessionId: "pux-session",
-      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      turns: this._turnCount,
+      messages: this._messageCount,
+      userMessages: this._userMessageCount,
+      assistantMessages: this._assistantMessageCount,
+      toolCalls: this._toolCallCount,
+      toolResults: this._toolResultCount,
+      totalMessages: this._messageCount,
+      sessionFile: this.sessionFile,
+      sessionId: this.agentId || "pux-session",
+      tokens: {
+        input: this._totalInputTokens,
+        output: this._totalOutputTokens,
+        cacheRead: this._totalCacheTokens,
+        cacheWrite: 0,
+        total: this._totalInputTokens + this._totalOutputTokens,
+      },
       cost: 0,
     };
   }
-  getLastAssistantText(): string { return ""; }
+  getLastAssistantText(): string { return this._lastAssistantText; }
   getFollowUpMessages(): string[] { return []; }
   getSteeringMessages(): string[] { return []; }
   getToolDefinition(name: string) {
@@ -676,7 +720,22 @@ export class PuxAgentSession {
     return { model: next, thinkingLevel: this.thinkingLevel };
   }
   async cycleThinkingLevel(): Promise<void> {}
-  async compact(_opts?: any): Promise<any> { return undefined; }
+  async compact(_opts?: any): Promise<any> {
+    try {
+      const res = await this._fetch(`${this.serverUrl}/api/pux/compact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project: this.project,
+          agentId: this.agentId || "default",
+        }),
+      });
+      if (!res.ok) return undefined;
+      return await res.json();
+    } catch {
+      return undefined;
+    }
+  }
   async reload(): Promise<void> {}
   async steer(text: string): Promise<void> { await this.prompt(text); }
   async followUp(text: string): Promise<void> { await this.prompt(text); }
@@ -690,7 +749,11 @@ export class PuxAgentSession {
   abortBranchSummary(): void {}
   abortRetry(): void {}
   async clearQueue(): Promise<void> {}
-  async bindExtensions(_opts?: any): Promise<void> {}
+  async bindExtensions(opts?: any): Promise<void> {
+    if (this.extensionRunner && opts?.uiContext) {
+      this.extensionRunner.setUIContext(opts.uiContext);
+    }
+  }
   async saveMessages(): Promise<void> {}
 
   // ---- Session listing / resuming ----

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"gopkg.in/yaml.v3"
@@ -84,13 +85,16 @@ type promptData struct {
 var (
 	promptTmpl    *template.Template
 	promptLoadErr error
-	promptOnce    sync.Once
+	promptMu      sync.RWMutex
+	promptModTime = make(map[string]time.Time)
 
 	agentRoles    map[string]*AgentRole
-	agentLoadOnce sync.Once
+	agentMu       sync.RWMutex
+	agentModTime  = make(map[string]time.Time)
 
-	toolPackages    map[string]*ToolPackage
-	toolPkgLoadOnce sync.Once
+	toolPackages   map[string]*ToolPackage
+	toolPkgMu      sync.RWMutex
+	toolPkgModTime = make(map[string]time.Time)
 )
 
 // findKernelConfigDir resolves the kernel config/ directory by searching
@@ -140,43 +144,84 @@ func findKernelConfigDir() string {
 }
 
 // loadPromptTemplate loads and parses config/prompt.md as a Go text/template.
+// Auto-reloads when the file changes on disk — no server restart needed.
 func loadPromptTemplate() (*template.Template, error) {
-	promptOnce.Do(func() {
-		configDir := findKernelConfigDir()
-		path := "config/prompt.md"
-		if configDir != "" {
-			path = filepath.Join(configDir, "prompt.md")
-		}
+	promptMu.RLock()
+	if promptTmpl != nil && !fileChanged("prompt", promptModTime) {
+		tmpl, err := promptTmpl, promptLoadErr
+		promptMu.RUnlock()
+		return tmpl, err
+	}
+	promptMu.RUnlock()
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			// Use embedded fallback
-			promptTmpl, promptLoadErr = template.New("system").Parse(defaultPrompt)
-			return
-		}
-		promptTmpl, promptLoadErr = template.New("system").Parse(string(data))
-	})
+	promptMu.Lock()
+	defer promptMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if promptTmpl != nil && !fileChanged("prompt", promptModTime) {
+		return promptTmpl, promptLoadErr
+	}
+
+	configDir := findKernelConfigDir()
+	path := "config/prompt.md"
+	if configDir != "" {
+		path = filepath.Join(configDir, "prompt.md")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		promptTmpl, promptLoadErr = template.New("system").Parse(defaultPrompt)
+		return promptTmpl, promptLoadErr
+	}
+
+	promptTmpl, promptLoadErr = template.New("system").Parse(string(data))
+	updateModTime("prompt", path, promptModTime)
 	return promptTmpl, promptLoadErr
 }
 
 // ReloadPromptTemplate forces a reload of all prompt templates (for development).
 func ReloadPromptTemplate() {
-	promptOnce = sync.Once{}
-	agentLoadOnce = sync.Once{}
-	toolPkgLoadOnce = sync.Once{}
+	promptMu.Lock()
+	promptTmpl = nil
+	promptModTime = map[string]time.Time{}
+	promptMu.Unlock()
+
+	agentMu.Lock()
+	agentRoles = nil
+	agentModTime = map[string]time.Time{}
+	agentMu.Unlock()
+
+	toolPkgMu.Lock()
+	toolPackages = nil
+	toolPkgModTime = map[string]time.Time{}
+	toolPkgMu.Unlock()
 }
 
 // LoadToolPackages reads all .yaml files from the kernel's config/tool_packages/ directory.
-// Cached after first call. Use LoadToolPackagesFrom for org-specific directories.
+// Auto-reloads when files change on disk.
 func LoadToolPackages() map[string]*ToolPackage {
-	toolPkgLoadOnce.Do(func() {
-		configDir := findKernelConfigDir()
-		dir := "config/tool_packages"
-		if configDir != "" {
-			dir = filepath.Join(configDir, "tool_packages")
-		}
-		toolPackages = LoadToolPackagesFrom(dir)
-	})
+	toolPkgMu.RLock()
+	if toolPackages != nil && !dirChanged("tool_packages", toolPkgModTime) {
+		pkgs := toolPackages
+		toolPkgMu.RUnlock()
+		return pkgs
+	}
+	toolPkgMu.RUnlock()
+
+	toolPkgMu.Lock()
+	defer toolPkgMu.Unlock()
+
+	if toolPackages != nil && !dirChanged("tool_packages", toolPkgModTime) {
+		return toolPackages
+	}
+
+	configDir := findKernelConfigDir()
+	dir := "config/tool_packages"
+	if configDir != "" {
+		dir = filepath.Join(configDir, "tool_packages")
+	}
+	toolPackages = LoadToolPackagesFrom(dir)
+	updateModTime("tool_packages", dir, toolPkgModTime)
 	return toolPackages
 }
 
@@ -239,17 +284,30 @@ func ResolveImports(imports []string) (tools []string, mcpServers []string) {
 }
 
 // LoadAgentRoles reads role folders from the kernel's config/roles/ directory.
-// Cached after first call. Use LoadAgentRolesFrom for org-specific directories.
-// Uses findKernelConfigDir to locate config/ regardless of PROJECT_ROOT.
+// Auto-reloads when files change on disk. Use LoadAgentRolesFrom for org-specific directories.
 func LoadAgentRoles() map[string]*AgentRole {
-	agentLoadOnce.Do(func() {
-		configDir := findKernelConfigDir()
-		dir := "config/roles"
-		if configDir != "" {
-			dir = filepath.Join(configDir, "roles")
-		}
-		agentRoles = LoadAgentRolesFrom(dir)
-	})
+	agentMu.RLock()
+	if agentRoles != nil && !dirChanged("roles", agentModTime) {
+		roles := agentRoles
+		agentMu.RUnlock()
+		return roles
+	}
+	agentMu.RUnlock()
+
+	agentMu.Lock()
+	defer agentMu.Unlock()
+
+	if agentRoles != nil && !dirChanged("roles", agentModTime) {
+		return agentRoles
+	}
+
+	configDir := findKernelConfigDir()
+	dir := "config/roles"
+	if configDir != "" {
+		dir = filepath.Join(configDir, "roles")
+	}
+	agentRoles = LoadAgentRolesFrom(dir)
+	updateModTime("roles", dir, agentModTime)
 	return agentRoles
 }
 
@@ -533,4 +591,56 @@ func defaultPromptText(tools []core.Tool, sandboxID string) string {
 		b.WriteString("\nSandbox ID: " + sandboxID + "\n")
 	}
 	return b.String()
+}
+
+// fileChanged checks if a tracked file has been modified since last load.
+// Returns true if the file is newer than the cached modTime.
+func fileChanged(key string, modTimes map[string]time.Time) bool {
+	t, ok := modTimes[key]
+	if !ok {
+		return true // never loaded
+	}
+	configDir := findKernelConfigDir()
+	path := "config/" + key + ".md"
+	if configDir != "" {
+		path = filepath.Join(configDir, key+".md")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false // can't stat → keep cached
+	}
+	return info.ModTime().After(t)
+}
+
+// dirChanged checks if any file in a tracked directory has been modified.
+// Returns true if any file is newer than the cached modTime.
+func dirChanged(key string, modTimes map[string]time.Time) bool {
+	t, ok := modTimes[key]
+	if !ok {
+		return true // never loaded
+	}
+	configDir := findKernelConfigDir()
+	dir := "config/" + key
+	if configDir != "" {
+		dir = filepath.Join(configDir, key)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false // can't read → keep cached
+	}
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// updateModTime records the current time as the last load time for a key.
+func updateModTime(key string, path string, modTimes map[string]time.Time) {
+	modTimes[key] = time.Now()
 }

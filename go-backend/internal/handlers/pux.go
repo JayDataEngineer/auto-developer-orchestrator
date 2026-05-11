@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
-	"path/filepath"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/approval"
@@ -18,8 +16,6 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
-	"github.com/auto-developer-orchestrator/backend/internal/tools/ask"
-	"github.com/auto-developer-orchestrator/backend/internal/tools/plan"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
@@ -146,6 +142,7 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Put("/conversation/rename", h.RenameConversation)
 	r.Get("/models", h.GetModels)
 	r.Put("/model", h.SetModel)
+	r.Post("/compact", h.Compact)
 }
 
 // resolveAgent reads ?agentId= from the query string, defaulting to "default".
@@ -157,123 +154,6 @@ func resolveAgent(r *http.Request) string {
 	return aid
 }
 
-// respondRequest is the request body for the approval response endpoint.
-type respondRequest struct {
-	Project   string `json:"project"`
-	AgentId   string `json:"agentId"`
-	RequestID string `json:"requestId"`
-	Action    string `json:"action"` // "approve", "deny", "answer"
-	Message   string `json:"message,omitempty"`
-}
-
-// Respond handles user approval/denial responses for pending agent approvals.
-func (h *PuxHandler) Respond(w http.ResponseWriter, r *http.Request) {
-	var req respondRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "Invalid request body",
-		})
-		return
-	}
-
-	if req.RequestID == "" || req.Action == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "requestId and action are required",
-		})
-		return
-	}
-
-	resp := llamaeng.ApprovalResponse{
-		Action:  req.Action,
-		Message: req.Message,
-	}
-
-	// Use the decoupled approval manager (works with both Pi and orchestrator paths)
-	if ok := h.approvalMgr.Resolve(req.RequestID, resp); !ok {
-		writeJSON(w, http.StatusNotFound, map[string]interface{}{
-			"success": false, "error": "No pending approval found for this request",
-		})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-	})
-}
-
-// UserResponse handles responses to ask_user questions from the TUI.
-// POST /api/pux/user-response
-func (h *PuxHandler) UserResponse(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		QuestionID string `json:"questionId"`
-		Response   string `json:"response"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "Invalid request body",
-		})
-		return
-	}
-	if req.QuestionID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "questionId is required",
-		})
-		return
-	}
-
-	if ok := ask.PendingQuestions.Resolve(req.QuestionID, req.Response); !ok {
-		writeJSON(w, http.StatusNotFound, map[string]interface{}{
-			"success": false, "error": "No pending question found for this ID (may have timed out)",
-		})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-	})
-}
-
-// PlanResponse handles responses to create_plan approval requests from the TUI.
-// POST /api/pux/plan-response
-func (h *PuxHandler) PlanResponse(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		PlanID   string `json:"planId"`
-		Action   string `json:"action"`   // "approve", "refine", "cancel"
-		Feedback string `json:"feedback"` // optional, for refine
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "Invalid request body",
-		})
-		return
-	}
-	if req.PlanID == "" || req.Action == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "planId and action are required",
-		})
-		return
-	}
-	if req.Action != "approve" && req.Action != "refine" && req.Action != "cancel" {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "action must be 'approve', 'refine', or 'cancel'",
-		})
-		return
-	}
-
-	if ok := plan.PendingPlans.Resolve(req.PlanID, plan.PlanResponse{
-		Action:   req.Action,
-		Feedback: req.Feedback,
-	}); !ok {
-		writeJSON(w, http.StatusNotFound, map[string]interface{}{
-			"success": false, "error": "No pending plan found for this ID (may have timed out)",
-		})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-	})
-}
 type promptRequest struct {
 	Message       string `json:"message"`
 	Project       string `json:"project"`
@@ -420,316 +300,39 @@ func (h *PuxHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetHistory returns conversation history for a project+agent.
-// GET /api/pux/history?project=...&agentId=...&limit=...
-func (h *PuxHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	agentID := r.URL.Query().Get("agentId")
-	if project == "" {
-		JSONError(w, "project query parameter is required", http.StatusBadRequest)
-		return
-	}
-	limit := 200
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := fmt.Sscanf(l, "%d", &limit); err != nil || n != 1 {
-			limit = 200
-		}
-	}
-
-	if h.db == nil {
-		writeJSON(w, http.StatusOK, []interface{}{})
-		return
-	}
-
-	msgs, err := h.db.GetConversationHistory(r.Context(), project, agentID, limit)
-	if err != nil {
-		JSONError(w, "Failed to get history", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, msgs)
-}
-
-// GetConversations returns a summary list of all conversations.
-// GET /api/pux/conversations
-func (h *PuxHandler) GetConversations(w http.ResponseWriter, r *http.Request) {
-	if h.db == nil {
-		writeJSON(w, http.StatusOK, []interface{}{})
-		return
-	}
-	project := r.URL.Query().Get("project")
-	summaries, err := h.db.GetConversationSummaries(r.Context())
-	if err != nil {
-		JSONError(w, "Failed to get conversations", http.StatusInternalServerError)
-		return
-	}
-	if summaries == nil {
-		summaries = []storage.ConversationSummary{}
-	}
-	// Filter by project if specified
-	if project != "" {
-		filtered := make([]storage.ConversationSummary, 0, len(summaries))
-		for _, s := range summaries {
-			if s.Project == project {
-				filtered = append(filtered, s)
-			}
-		}
-		summaries = filtered
-	}
-	writeJSON(w, http.StatusOK, summaries)
-}
-
-// DeleteConversation deletes all messages for a project+agent.
-// DELETE /api/pux/conversation?project=...&agentId=...
-func (h *PuxHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	agentID := r.URL.Query().Get("agentId")
-	if project == "" {
-		JSONError(w, "project query parameter is required", http.StatusBadRequest)
-		return
-	}
-
-	if h.db == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
-		return
-	}
-
-	if err := h.db.ClearConversationHistory(r.Context(), project, agentID); err != nil {
-		JSONError(w, "Failed to delete conversation", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
-}
-
-// RenameConversation sets a custom title for a conversation.
-// PUT /api/pux/conversation/rename
-func (h *PuxHandler) RenameConversation(w http.ResponseWriter, r *http.Request) {
+// Compact triggers a manual context compaction for the given agent session.
+// This is a lightweight operation — it clears old tool results (micro-compact).
+// Full LLM-based compaction happens automatically via the CompactionHook during the agent loop.
+func (h *PuxHandler) Compact(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project string `json:"project"`
 		AgentID string `json:"agentId"`
-		Title   string `json:"title"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if req.Project == "" || req.Title == "" {
-		JSONError(w, "project and title are required", http.StatusBadRequest)
-		return
+	if req.Project == "" {
+		req.Project = "default"
+	}
+	if req.AgentID == "" {
+		req.AgentID = "default"
 	}
 
-	if h.db == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
-		return
-	}
-
-	if err := h.db.SetConversationTitle(r.Context(), req.Project, req.AgentID, req.Title); err != nil {
-		JSONError(w, "Failed to rename conversation", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
-}
-
-// GetModels returns available models from settings.json.
-// GET /api/pux/models
-func (h *PuxHandler) GetModels(w http.ResponseWriter, r *http.Request) {
-	type modelInfo struct {
-		ID            string `json:"id"`
-		Name          string `json:"name"`
-		Provider      string `json:"provider,omitempty"`
-		ContextWindow int    `json:"contextWindow,omitempty"`
-	}
-
-	models := []modelInfo{}
-
-	// Read settings.json to discover all providers/models
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		settingsPath := filepath.Join(homeDir, ".pi", "agent", "settings.json")
-		if data, err := os.ReadFile(settingsPath); err == nil {
-			var settings struct {
-				Providers map[string]struct {
-					Models []struct {
-						ID            string `json:"id"`
-						Name          string `json:"name"`
-						ContextWindow int    `json:"contextWindow"`
-					} `json:"models"`
-				} `json:"providers"`
-			}
-			if json.Unmarshal(data, &settings) == nil {
-				for providerName, provider := range settings.Providers {
-					for _, m := range provider.Models {
-						models = append(models, modelInfo{
-							ID:            m.ID,
-							Name:          m.Name,
-							Provider:      providerName,
-							ContextWindow: m.ContextWindow,
-						})
-					}
-				}
-			}
-		}
-	}
-
-	// If no models found from settings, add the engine's current model
-	if len(models) == 0 && h.llamaEngine != nil {
-		models = append(models, modelInfo{
-			ID:       h.llamaEngine.ModelName(),
-			Name:     h.llamaEngine.ModelName(),
-			Provider: "llamacpp",
+	// Micro-compact: trim old messages from the database
+	// The session tree handles full compaction internally during the agent loop
+	compacted, err := h.db.CompactSession(r.Context(), req.Project, req.AgentID)
+	if err != nil {
+		h.log.Warn("manual compact failed", zap.String("project", req.Project), zap.Error(err))
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":  "error",
+			"message": err.Error(),
 		})
-	}
-
-	writeJSON(w, http.StatusOK, models)
-}
-
-// SetModel switches the active engine for a specific agent.
-// PUT /api/pux/model
-func (h *PuxHandler) SetModel(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Project  string `json:"project"`
-		Provider string `json:"provider"`
-		ModelID  string `json:"modelId"`
-		AgentID  string `json:"agentId"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
-	// Resolve which engine to use based on provider/model
-	var engine *llamaeng.LLMClient
-	switch {
-	case req.ModelID == "gemini-3-flash-preview" && h.geminiEngine != nil:
-		engine = h.geminiEngine
-	case strings.Contains(req.ModelID, "deepseek") && h.openrouterEngine != nil:
-		engine = h.openrouterEngine
-	default:
-		// For cloud models, try to create an engine from settings.json
-		if req.Provider != "llamacpp" && req.Provider != "" {
-			if eng := h.engineFromSettings(req.Provider, req.ModelID); eng != nil {
-				engine = eng
-			}
-		}
-		// Fall back to local llama engine
-		if engine == nil {
-			engine = h.llamaEngine
-		}
-	}
-
-	if engine == nil {
-		JSONError(w, "No engine available for the requested model", http.StatusServiceUnavailable)
-		return
-	}
-
-	// Resolve project path to build the orchestrator key
-	projectPath := resolveProjectPath(req.Project, h.db)
-	key := compositeAgentKey(projectPath, req.AgentID)
-
-	// Store the engine selection for this agent (next prompt uses it)
-	h.selectedEngines[key] = engine
-
-	h.log.Info("Model switched",
-		zap.String("model", req.ModelID),
-		zap.String("provider", req.Provider),
-		zap.String("agent", req.AgentID),
-		zap.String("engine_model", engine.ModelName()),
-	)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"model":   engine.ModelName(),
+		"status":            "ok",
+		"compactedMessages": compacted,
 	})
-}
-
-// engineFromSettings reads a provider's apiKey and baseUrl from settings.json
-// and creates a temporary LLMClient for it.
-func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.LLMClient {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-
-	data, err := os.ReadFile(homeDir + "/.pi/agent/settings.json")
-	if err != nil {
-		return nil
-	}
-
-	var settings struct {
-		Providers map[string]struct {
-			BaseURL string `json:"baseUrl"`
-			APIKey  string `json:"apiKey"`
-		} `json:"providers"`
-	}
-	if json.Unmarshal(data, &settings) != nil {
-		return nil
-	}
-
-	p, ok := settings.Providers[providerID]
-	if !ok || p.APIKey == "" || p.BaseURL == "" {
-		return nil
-	}
-
-	eng := llamaeng.NewLLMClient(llamaeng.LLMClientConfig{
-		BaseURL:   p.BaseURL,
-		APIKey:    p.APIKey,
-		ModelName: modelID,
-		Logger:    h.log,
-	})
-	if err := eng.LoadModel(); err != nil {
-		h.log.Warn("Failed to create engine from settings", zap.String("provider", providerID), zap.Error(err))
-		return nil
-	}
-	return eng
-}
-
-// resolveEngineForModel finds the provider for a model ID in settings.json
-// and creates an LLMClient. Returns nil if the model is not found.
-func (h *PuxHandler) resolveEngineForModel(modelID string) *llamaeng.LLMClient {
-	// Check pre-built engines first
-	switch {
-	case modelID == "gemini-3-flash-preview" && h.geminiEngine != nil:
-		return h.geminiEngine
-	case strings.Contains(modelID, "deepseek") && h.openrouterEngine != nil:
-		return h.openrouterEngine
-	case strings.Contains(modelID, "qwen") && h.clusterEngine != nil:
-		return h.clusterEngine
-	}
-
-	// Scan settings.json for matching model
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	data, err := os.ReadFile(filepath.Join(homeDir, ".pi", "agent", "settings.json"))
-	if err != nil {
-		return nil
-	}
-
-	var settings struct {
-		Providers map[string]struct {
-			BaseURL string `json:"baseUrl"`
-			APIKey  string `json:"apiKey"`
-			Models  []struct {
-				ID string `json:"id"`
-			} `json:"models"`
-		} `json:"providers"`
-	}
-	if json.Unmarshal(data, &settings) != nil {
-		return nil
-	}
-
-	for providerName, provider := range settings.Providers {
-		for _, m := range provider.Models {
-			if m.ID == modelID {
-				return h.engineFromSettings(providerName, modelID)
-			}
-		}
-	}
-
-	// Try as local model name (llamacpp)
-	if h.llamaEngine != nil && h.llamaEngine.ModelName() == modelID {
-		return h.llamaEngine
-	}
-
-	return nil
 }
