@@ -203,27 +203,6 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	} else if engineHasVision {
 		h.log.Debug("LLM has native vision, skipping fallback chain", zap.String("engine", engine.ModelName()))
 	}
-
-	// OpenAI-compatible remote vision provider (e.g., MCP hub qwen3.6 with vision)
-	// Always add as highest-priority tier if env vars are set.
-	remoteVisionURL := os.Getenv("VISION_REMOTE_URL")
-	remoteVisionModel := os.Getenv("VISION_REMOTE_MODEL")
-	if remoteVisionURL != "" && remoteVisionModel != "" {
-		remoteProvider := vision.NewOpenAIProvider(remoteVisionURL, remoteVisionModel)
-		if visionChain == nil {
-			visionChain = vision.NewFallbackChain(remoteProvider)
-		} else {
-			// Prepend so remote vision takes priority
-			providers := []vision.Provider{remoteProvider}
-			providers = append(providers, visionChain.Providers()...)
-			visionChain = vision.NewFallbackChain(providers...)
-		}
-		h.log.Info("Remote vision provider configured",
-			zap.String("url", remoteVisionURL),
-			zap.String("model", remoteVisionModel),
-		)
-	}
-
 	cfg.VisionChain = visionChain
 	cfg.MCPClient = h.mcpMulti
 	cfg.Subscriber = events // ask_user tool emits to TUI via this channel
