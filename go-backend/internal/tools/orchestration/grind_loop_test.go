@@ -59,6 +59,10 @@ func (m *mockRunner) RunDivisionDelegate(ctx context.Context, task, divisionPath
 	return nil, nil
 }
 
+func (m *mockRunner) RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
+	return m.RunDelegate(ctx, task, instructions, toolNames, maxRounds, temperature, modelID)
+}
+
 // mockBashExec tracks bash exec calls.
 type mockBashExec struct {
 	outputs []string // outputs for each call

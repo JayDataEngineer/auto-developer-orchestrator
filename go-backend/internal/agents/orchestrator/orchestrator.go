@@ -188,6 +188,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		pr.SetDepth(0)
 		pr.SetOrchestratorFactory(makeOrchestratorFactory(provider, cfg))
 		pr.SetSubscriber(cfg.Subscriber)
+		// Wire git-based change tracking for delegate_to / delegate_continue / delegate_revert
+		if cfg.BashExecutor != nil {
+			pr.SetSnapshotter(orchestration.NewGitSnapshotter(cfg.BashExecutor))
+		}
 		runner = pr
 	}
 
@@ -196,10 +200,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		ctoTools = append(ctoTools,
 			orchestration.NewDelegateToTool(runner, mcpResolver, cfg.OrgRoles, validAgentNames),
 			orchestration.NewDelegateAsyncTool(runner, mcpResolver, cfg.OrgRoles, validAgentNames),
+			orchestration.NewDelegateContinueTool(runner),
+			orchestration.NewDelegateAcceptTool(runner),
+			orchestration.NewDelegateRevertTool(runner),
 			orchestration.NewCollectResultsTool(runner),
 			orchestration.NewPlanTool(),
 			orchestration.NewSynthesizeTool(),
-			orchestration.NewGrindLoopTool(runner, cfg.BashExecutor, mcpResolver, cfg.OrgRoles, cfg.ModelResolver),
 		)
 		ctoToolReg = core.NewToolRegistry(ctoTools)
 		ctoToolReg.RegisterCommonAliases()

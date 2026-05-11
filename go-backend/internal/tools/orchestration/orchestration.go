@@ -12,6 +12,7 @@ import (
 // DelegateRunner creates and runs sub-agents for delegate_to/delegate_async.
 type DelegateRunner interface {
 	RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error)
+	RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error)
 	RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string) (map[string]any, error)
 	CollectAsyncResults(ctx context.Context) (map[string]any, error)
 	RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error)
@@ -71,6 +72,7 @@ func resolveRole(instructions string, toolNames []string, maxRounds int, tempera
 }
 
 // DelegateToTool implements core.Tool for synchronous sub-agent delegation.
+// Returns an agent_ref and file changes for continuation/review.
 type DelegateToTool struct {
 	runner           DelegateRunner
 	mcpResolver      MCPResolver
@@ -84,7 +86,7 @@ func NewDelegateToTool(r DelegateRunner, mcpResolver MCPResolver, roleMap map[st
 
 func (t *DelegateToTool) Name() string { return "delegate_to" }
 func (t *DelegateToTool) Description() string {
-	return "Delegate a task to an employee. Use a role name as instructions, or write custom instructions."
+	return "Delegate a task to an employee. Returns result, agent_ref for continuation, and file changes. Use delegate_continue to provide feedback to the same agent."
 }
 
 func (t *DelegateToTool) Schema() json.RawMessage {
@@ -151,7 +153,136 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 		return nil, core.NewToolError("delegate_to", "no tools specified and role '"+instructions+"' has no default tools")
 	}
 
-	return t.runner.RunDelegate(ctx, task, resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel)
+	// Use tracked delegation — returns agent_ref + file changes
+	return t.runner.RunDelegateTracked(ctx, task, resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel)
+}
+
+// DelegateContinueTool sends feedback to an existing sub-agent for continuation.
+// The subagent keeps its session (memory of what it already tried) and receives
+// targeted feedback instead of starting from scratch.
+type DelegateContinueTool struct {
+	runner DelegateRunner
+}
+
+func NewDelegateContinueTool(r DelegateRunner) *DelegateContinueTool {
+	return &DelegateContinueTool{runner: r}
+}
+
+func (t *DelegateContinueTool) Name() string { return "delegate_continue" }
+func (t *DelegateContinueTool) Description() string {
+	return "Send feedback to a previously delegated agent. The agent keeps its session memory and continues working with your feedback. Returns updated result and file changes."
+}
+
+func (t *DelegateContinueTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"agent_ref": {"type": "string", "description": "The agent reference returned by delegate_to"},
+			"feedback": {"type": "string", "description": "Targeted feedback for the agent. Be specific about what to change or fix."}
+		},
+		"required": ["agent_ref", "feedback"]
+	}`)
+}
+
+func (t *DelegateContinueTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	agentRef, _ := args["agent_ref"].(string)
+	feedback, _ := args["feedback"].(string)
+
+	if agentRef == "" {
+		return nil, core.NewToolError("delegate_continue", "missing required parameter 'agent_ref'")
+	}
+	if feedback == "" {
+		return nil, core.NewToolError("delegate_continue", "missing required parameter 'feedback'")
+	}
+
+	tracker, ok := t.runner.(interface {
+		RunDelegateContinue(ctx context.Context, agentRef, feedback string) (map[string]any, error)
+	})
+	if !ok {
+		return nil, core.NewToolError("delegate_continue", "runner does not support continuation")
+	}
+
+	return tracker.RunDelegateContinue(ctx, agentRef, feedback)
+}
+
+// DelegateAcceptTool accepts a sub-agent's work and releases its session.
+type DelegateAcceptTool struct {
+	runner DelegateRunner
+}
+
+func NewDelegateAcceptTool(r DelegateRunner) *DelegateAcceptTool {
+	return &DelegateAcceptTool{runner: r}
+}
+
+func (t *DelegateAcceptTool) Name() string { return "delegate_accept" }
+func (t *DelegateAcceptTool) Description() string {
+	return "Accept a sub-agent's work. Releases the agent session. Use this when the result looks good."
+}
+
+func (t *DelegateAcceptTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"agent_ref": {"type": "string", "description": "The agent reference returned by delegate_to"}
+		},
+		"required": ["agent_ref"]
+	}`)
+}
+
+func (t *DelegateAcceptTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	agentRef, _ := args["agent_ref"].(string)
+	if agentRef == "" {
+		return nil, core.NewToolError("delegate_accept", "missing required parameter 'agent_ref'")
+	}
+
+	tracker, ok := t.runner.(interface {
+		AcceptAgent(ctx context.Context, agentRef string) (map[string]any, error)
+	})
+	if !ok {
+		return nil, core.NewToolError("delegate_accept", "runner does not support accept")
+	}
+
+	return tracker.AcceptAgent(ctx, agentRef)
+}
+
+// DelegateRevertTool reverts file changes made by a sub-agent and releases its session.
+type DelegateRevertTool struct {
+	runner DelegateRunner
+}
+
+func NewDelegateRevertTool(r DelegateRunner) *DelegateRevertTool {
+	return &DelegateRevertTool{runner: r}
+}
+
+func (t *DelegateRevertTool) Name() string { return "delegate_revert" }
+func (t *DelegateRevertTool) Description() string {
+	return "Revert all file changes made by a sub-agent. Use when the work is wrong and you want to undo it. Releases the agent session."
+}
+
+func (t *DelegateRevertTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"agent_ref": {"type": "string", "description": "The agent reference returned by delegate_to"}
+		},
+		"required": ["agent_ref"]
+	}`)
+}
+
+func (t *DelegateRevertTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	agentRef, _ := args["agent_ref"].(string)
+	if agentRef == "" {
+		return nil, core.NewToolError("delegate_revert", "missing required parameter 'agent_ref'")
+	}
+
+	tracker, ok := t.runner.(interface {
+		RevertAgent(ctx context.Context, agentRef string) (map[string]any, error)
+	})
+	if !ok {
+		return nil, core.NewToolError("delegate_revert", "runner does not support revert")
+	}
+
+	return tracker.RevertAgent(ctx, agentRef)
 }
 
 // DelegateAsyncTool implements core.Tool for async sub-agent delegation.

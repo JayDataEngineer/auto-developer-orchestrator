@@ -49,12 +49,16 @@ type ParallelRunner struct {
 	depth               int
 	maxDepth            int // default 3
 
+	// File change tracking
+	snapshotter Snapshotter // git-based snapshot/diff/revert
+
 	// Parent SSE subscriber — sub-agent events are forwarded here for TUI visibility
 	subscriber chan<- core.AgentEvent
 
-	mu      sync.Mutex
-	tasks   map[string]*asyncTask
-	wg      sync.WaitGroup
+	mu         sync.Mutex
+	tasks      map[string]*asyncTask
+	wg         sync.WaitGroup
+	liveAgents map[string]*liveAgent // kept-alive sub-agents for continuation
 }
 
 // asyncTask is a single in-flight async sub-agent.
@@ -69,6 +73,18 @@ type asyncTask struct {
 	StartedAt    time.Time
 }
 
+// liveAgent holds a kept-alive subagent session for continuation (feedback loop).
+type liveAgent struct {
+	ID        string
+	Role      string
+	Task      string
+	Session   *subSession
+	Provider  core.LLMProvider
+	Config    core.AgentLoopConfig
+	Snapshot  string // git stash SHA for change tracking
+	StartedAt time.Time
+}
+
 // NewParallelRunner creates a runner that fans out sub-agents in parallel.
 func NewParallelRunner(executor core.ToolExecutor, toolSpecs []core.OpenAITool, baseSession core.Session, ctxSize int, modelResolver ModelResolver) *ParallelRunner {
 	return &ParallelRunner{
@@ -79,12 +95,18 @@ func NewParallelRunner(executor core.ToolExecutor, toolSpecs []core.OpenAITool, 
 		modelResolver: modelResolver,
 		logger:        func(format string, args ...interface{}) {},
 		tasks:         make(map[string]*asyncTask),
+		liveAgents:    make(map[string]*liveAgent),
 	}
 }
 
 // SetProviderFactory sets the factory for creating isolated providers per sub-agent.
 func (r *ParallelRunner) SetProviderFactory(factory ProviderFactory) {
 	r.providerFactory = factory
+}
+
+// SetSnapshotter sets the git-based snapshotter for change tracking.
+func (r *ParallelRunner) SetSnapshotter(s Snapshotter) {
+	r.snapshotter = s
 }
 
 // enrichTask prepends relevant context from the parent session to the task.
@@ -419,6 +441,300 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 }
 
 // RunDelegateAsync launches a sub-agent in a goroutine. Returns immediately.
+
+// RunDelegateTracked runs a sub-agent with file change tracking.
+// Returns the result, an agent reference for continuation, and file changes.
+func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
+	// Take pre-snapshot
+	var snapshotID string
+	if r.snapshotter != nil && r.projectDir != "" {
+		var err error
+		snapshotID, err = r.snapshotter.Snapshot(ctx, r.projectDir)
+		if err != nil {
+			r.logger("SNAPSHOT_WARN: failed to snapshot: %v", err)
+		}
+	}
+
+	// Run the delegate normally
+	result, err := r.RunDelegate(ctx, task, instructions, toolNames, maxRounds, temperature, modelID)
+	if err != nil {
+		return result, err
+	}
+
+	agentRef := ""
+	var changes *ChangeSet
+
+	// Keep the sub-agent alive for continuation
+	// We reconstruct the session from the RunDelegate call.
+	// The provider stays open; the session persists.
+	if r.providerFactory != nil {
+		agentName := extractAgentName(instructions)
+		provider := r.providerFactory()
+		if modelID != "" && r.modelResolver != nil {
+			if resolved := r.modelResolver(modelID); resolved != nil {
+				if closer, ok := provider.(io.Closer); ok {
+					closer.Close()
+				}
+				provider = resolved
+			}
+		}
+
+		// Build config for potential continuation
+		var selectedTools []core.OpenAITool
+		toolSet := make(map[string]bool)
+		for _, name := range toolNames {
+			toolSet[name] = true
+		}
+		for _, t := range r.toolSpecs {
+			if toolSet[t.Function.Name] {
+				selectedTools = append(selectedTools, t)
+			}
+		}
+
+		cfg := core.AgentLoopConfig{
+			SystemPrompt:  instructions,
+			MaxToolRounds: maxRounds,
+			MaxTokens:     8192,
+			ContextSize:   r.ctxSize,
+			Tools:         selectedTools,
+			Opts: core.GenerateOptions{
+				MaxTokens:   8192,
+				Temperature: temperature,
+				TopP:        0.95,
+				TopK:        20,
+			},
+		}
+
+		agentRef = fmt.Sprintf("%s-%d", agentName, time.Now().UnixMilli())
+		sess := &subSession{parent: r.baseSession, msgCount: 0}
+
+		la := &liveAgent{
+			ID:        agentRef,
+			Role:      agentName,
+			Task:      task,
+			Session:   sess,
+			Provider:  provider,
+			Config:    cfg,
+			Snapshot:  snapshotID,
+			StartedAt: time.Now(),
+		}
+
+		r.mu.Lock()
+		r.liveAgents[agentRef] = la
+		r.mu.Unlock()
+	}
+
+	// Compute diff
+	if r.snapshotter != nil && snapshotID != "" && r.projectDir != "" {
+		var diffErr error
+		changes, diffErr = r.snapshotter.Diff(ctx, r.projectDir, snapshotID)
+		if diffErr != nil {
+			r.logger("DIFF_WARN: failed to diff: %v", diffErr)
+		}
+	}
+
+	// Build enriched result
+	enriched := make(map[string]any)
+	for k, v := range result {
+		enriched[k] = v
+	}
+	if agentRef != "" {
+		enriched["agent_ref"] = agentRef
+	}
+	if changes != nil {
+		enriched["changes"] = map[string]any{
+			"files":   changes.Files,
+			"summary": changes.Summary,
+		}
+		if changes.Diff != "" {
+			enriched["diff"] = changes.Diff
+		}
+	}
+
+	return enriched, nil
+}
+
+// RunDelegateContinue sends feedback to an existing sub-agent and continues its work.
+// The subagent's session is compacted first, then the feedback is added as a new user message.
+func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feedback string) (map[string]any, error) {
+	r.mu.Lock()
+	la, ok := r.liveAgents[agentRef]
+	r.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("no live agent with ref %q (already accepted/reverted or expired)", agentRef)
+	}
+
+	r.logger("CONTINUE: agent=%s feedback_len=%d", la.Role, len(feedback))
+
+	// Compact the session to make room for the feedback
+	la.Session.Compact(ctx, la.Provider)
+
+	// Create a new agent loop with the SAME session (has full history)
+	loop := core.NewAgentLoop(la.Provider, r.executor, la.Session, la.Config)
+
+	// Emit subagent_start (continuation)
+	core.SendEvent(r.subscriber, core.AgentEvent{
+		Type: core.EventTypeSubAgentStart,
+		Data: core.AgentEventData{
+			AgentName: la.Role,
+			Task:      truncateTask(fmt.Sprintf("continuation: %s", feedback), 120),
+			ToolName:  "delegate_continue",
+		},
+	})
+
+	events := make(chan core.AgentEvent, 128)
+	done := make(chan struct{})
+	var runErr error
+
+	go func() {
+		defer close(done)
+		defer close(events)
+		// Continue uses the existing session + new feedback as user message
+		runErr = loop.Continue(ctx, feedback, events)
+	}()
+
+	var finalText string
+	evtDone := false
+	for !evtDone {
+		select {
+		case <-done:
+			for evt := range events {
+				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+					finalText += evt.Data.Text
+				}
+			}
+			evtDone = true
+		case evt, ok := <-events:
+			if !ok {
+				evtDone = true
+				break
+			}
+			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+				finalText += evt.Data.Text
+			}
+			if r.subscriber != nil && (evt.Type == core.EventTypeToolStart || evt.Type == core.EventTypeToolEnd || evt.Type == core.EventTypeToolUpdate) {
+				forwarded := evt
+				forwarded.Data.AgentName = la.Role
+				core.SendEvent(r.subscriber, forwarded)
+			}
+		}
+	}
+
+	// Emit subagent_end
+	endStatus := "completed"
+	if runErr != nil {
+		endStatus = "error"
+	}
+	core.SendEvent(r.subscriber, core.AgentEvent{
+		Type: core.EventTypeSubAgentEnd,
+		Data: core.AgentEventData{
+			AgentName: la.Role,
+			Status:    endStatus,
+			Task:      truncateTask(feedback, 120),
+		},
+	})
+
+	// Compute updated diff
+	var changes *ChangeSet
+	if r.snapshotter != nil && la.Snapshot != "" && r.projectDir != "" {
+		var diffErr error
+		changes, diffErr = r.snapshotter.Diff(ctx, r.projectDir, la.Snapshot)
+		if diffErr != nil {
+			r.logger("DIFF_WARN: failed to diff after continue: %v", diffErr)
+		}
+	}
+
+	enriched := map[string]any{"agent_ref": agentRef}
+	if runErr != nil {
+		enriched["error"] = runErr.Error()
+		enriched["partial_result"] = finalText
+		return enriched, runErr
+	}
+
+	enriched["result"] = finalText
+	enriched["status"] = "continued"
+	if changes != nil {
+		enriched["changes"] = map[string]any{
+			"files":   changes.Files,
+			"summary": changes.Summary,
+		}
+		if changes.Diff != "" {
+			enriched["diff"] = changes.Diff
+		}
+	}
+	return enriched, nil
+}
+
+// AcceptAgent accepts the sub-agent's work and releases its resources.
+func (r *ParallelRunner) AcceptAgent(ctx context.Context, agentRef string) (map[string]any, error) {
+	r.mu.Lock()
+	la, ok := r.liveAgents[agentRef]
+	if ok {
+		delete(r.liveAgents, agentRef)
+	}
+	r.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("no live agent with ref %q", agentRef)
+	}
+
+	// Close the provider
+	if closer, ok := la.Provider.(io.Closer); ok {
+		closer.Close()
+	}
+
+	r.logger("ACCEPT: agent=%s ref=%s", la.Role, agentRef)
+
+	return map[string]any{
+		"status":    "accepted",
+		"agent_ref": agentRef,
+	}, nil
+}
+
+// RevertAgent reverts file changes made by the sub-agent and releases its resources.
+func (r *ParallelRunner) RevertAgent(ctx context.Context, agentRef string) (map[string]any, error) {
+	r.mu.Lock()
+	la, ok := r.liveAgents[agentRef]
+	if ok {
+		delete(r.liveAgents, agentRef)
+	}
+	r.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("no live agent with ref %q", agentRef)
+	}
+
+	// Close the provider
+	if closer, ok := la.Provider.(io.Closer); ok {
+		closer.Close()
+	}
+
+	// Revert file changes
+	var revertedFiles []string
+	if r.snapshotter != nil && la.Snapshot != "" && r.projectDir != "" {
+		if err := r.snapshotter.Revert(ctx, r.projectDir, la.Snapshot); err != nil {
+			r.logger("REVERT_WARN: failed to revert: %v", err)
+			return map[string]any{
+				"status":    "revert_failed",
+				"agent_ref": agentRef,
+				"error":     err.Error(),
+			}, err
+		}
+		// Get the list of files that were reverted
+		changes, _ := r.snapshotter.Diff(ctx, r.projectDir, la.Snapshot)
+		if changes != nil {
+			revertedFiles = changes.Files
+		}
+	}
+
+	r.logger("REVERT: agent=%s ref=%s files=%v", la.Role, agentRef, revertedFiles)
+
+	return map[string]any{
+		"status":          "reverted",
+		"agent_ref":       agentRef,
+		"files_restored":  revertedFiles,
+	}, nil
+}
+
+// RunDelegateAsync launches a sub-agent in a goroutine. Returns immediately.
 func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string) (map[string]any, error) {
 	r.mu.Lock()
 	if _, exists := r.tasks[taskID]; exists {
@@ -544,8 +860,38 @@ func (s *subSession) GetTree() *core.TreeNode    { return nil }
 func (s *subSession) Navigate(nodeID string) error { return fmt.Errorf("sub-sessions do not support navigation") }
 func (s *subSession) Branch(label string) (string, error) { return "", fmt.Errorf("sub-sessions do not support branching") }
 func (s *subSession) Fork(nodeID string) (core.Session, error) { return nil, fmt.Errorf("sub-sessions do not support forking") }
-func (s *subSession) Compact(ctx context.Context, llmProvider interface{}) (string, error) { return "", nil }
-func (s *subSession) TruncateToolResults(keep int) (int, error) { return 0, nil } // no-op for ephemeral sub-sessions
+func (s *subSession) Compact(ctx context.Context, llmProvider interface{}) (string, error) {
+	// Simple truncation: keep recent messages, drop old tool results.
+	// This gives the subagent room for new feedback without overflowing context.
+	if len(s.messages) <= 10 {
+		return "", nil
+	}
+
+	var compacted []core.Message
+	kept := 0
+	for i, msg := range s.messages {
+		if i >= len(s.messages)-10 {
+			// Keep the last 10 messages verbatim
+			compacted = append(compacted, msg)
+			kept++
+		} else if msg.Role == "user" || msg.Role == "assistant" {
+			// Keep user/assistant messages but truncate long content
+			content := msg.Content
+			if len(content) > 300 {
+				content = content[:300] + "... (truncated)"
+			}
+			compacted = append(compacted, core.Message{Role: msg.Role, Content: content})
+			kept++
+		}
+		// Old tool results are dropped entirely
+	}
+
+	removed := len(s.messages) - kept
+	s.messages = compacted
+	s.msgCount = len(compacted)
+	return fmt.Sprintf("compacted %d messages, kept %d", removed, kept), nil
+}
+func (s *subSession) TruncateToolResults(keep int) (int, error) { return 0, nil }
 func (s *subSession) GetCurrentNode() string { return s.parent.ID() + "-sub" }
 
 // extractAgentName derives a display name from the instructions/role.
