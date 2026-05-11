@@ -444,7 +444,9 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 	if !e.IsCloud() {
 		return req
 	}
-	// Zero out llama.cpp-only / unsupported fields — omitempty will exclude them
+	// Zero out sampling params — let the server use its own defaults
+	req.Temperature = 0
+	req.TopP = 0
 	req.TopK = 0
 	req.RepeatPenalty = 0
 	req.PresencePenalty = 0
