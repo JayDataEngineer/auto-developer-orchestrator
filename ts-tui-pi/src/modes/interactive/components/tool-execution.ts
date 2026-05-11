@@ -47,7 +47,7 @@ export class ToolExecutionComponent extends Container {
 		this.ui = ui;
 		this.cwd = cwd;
 
-		this.contentText = new Text("", 1, 1, (text: string) => text);
+		this.contentText = new Text("", 1, 0, (text: string) => text);
 		this.addChild(this.contentText);
 
 		this.updateDisplay();
