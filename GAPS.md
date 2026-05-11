@@ -49,6 +49,13 @@ Documented from deep codebase analysis of browser-use (reference/repos/browser-u
 
 ## Remaining Minor Gaps
 
+### 0. Text selection / copy from chat output
+- **Problem**: No way to highlight and copy arbitrary text from the TUI chat area.
+- **Why**: `?1000h` mouse tracking (needed for scroll wheel) consumes mouse events, breaking native terminal drag-to-select. Alternate screen buffer (`?1049h`) also prevents native selection.
+- **Workaround**: `/copy` copies last agent message. Scroll up with mouse wheel, no selection.
+- **Possible solutions**: Tmux-style copy mode (cursor-based selection in scrollback), or toggle mouse tracking off when idle.
+- **Priority**: Medium
+
 ### 1. LLM-powered extraction (vs rule-based)
 - **browser-use**: Uses a separate LLM call to extract structured data from pages
 - **sb_server**: Uses JS-based extraction (headings, paragraphs, tables, forms)
