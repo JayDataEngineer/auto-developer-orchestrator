@@ -117,6 +117,19 @@ tasks:
         silent: true
       - cmd: "{{.TUI_VENV}}/bin/python scripts/tui_visual.py --port 9877 {{.CLI_ARGS}}"
 
+  webui-visual:
+    desc: Start WebUI visual testing server (Playwright + HTTP on :9878)
+    vars:
+      WEBUI_VENV: .venv/webui-visual
+    cmds:
+      - cmd: test -d {{.WEBUI_VENV}} || uv venv {{.WEBUI_VENV}}
+        silent: true
+      - cmd: "uv pip install --python {{.WEBUI_VENV}}/bin/python playwright Pillow 2>/dev/null; true"
+        silent: true
+      - cmd: "{{.WEBUI_VENV}}/bin/python -m playwright install chromium 2>/dev/null; true"
+        silent: true
+      - cmd: "{{.WEBUI_VENV}}/bin/python scripts/webui_visual.py --port 9878 {{.CLI_ARGS}}"
+
   # ── Docker Development ──────────────────────────────────────────────────
   up:
     desc: Start dev environment with hot reload (Docker)

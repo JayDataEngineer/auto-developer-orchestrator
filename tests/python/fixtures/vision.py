@@ -18,6 +18,8 @@ import requests
 
 MCP_VISION_URL = os.environ.get("MCP_VISION_URL", "http://100.86.69.57:30080")
 LOCAL_MODEL_URL = os.environ.get("LOCAL_MODEL_URL", "http://localhost:8001")
+WEBUI_VISUAL_URL = os.environ.get("WEBUI_VISUAL_URL", "http://localhost:9878")
+TUI_VISUAL_URL = os.environ.get("TUI_VISUAL_URL", "http://localhost:9877")
 
 
 def capture_desktop_screenshot(api_url, api_session, sandbox_id, format="json"):
@@ -143,6 +145,124 @@ def assert_ocr_text_not_contains(api_url, api_session, sandbox_id, forbidden_tex
     )
 
 
+# ---------------------------------------------------------------------------
+# WebUI visual testing (via webui_visual.py server on :9878)
+# ---------------------------------------------------------------------------
+
+
+def capture_webui_screenshot(visual_url=None):
+    """Capture a screenshot from the WebUI visual testing server. Returns base64."""
+    visual_url = visual_url or WEBUI_VISUAL_URL
+    resp = requests.get(f"{visual_url}/screenshot", timeout=30)
+    resp.raise_for_status()
+    return base64.b64encode(resp.content).decode("ascii")
+
+
+def observe_webui(visual_url=None):
+    """Call WebUI /observe endpoint. Returns dict with screenshot, text, logs."""
+    visual_url = visual_url or WEBUI_VISUAL_URL
+    resp = requests.get(f"{visual_url}/observe", timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def webui_goto(url, visual_url=None):
+    """Navigate the WebUI to a URL."""
+    visual_url = visual_url or WEBUI_VISUAL_URL
+    resp = requests.post(
+        f"{visual_url}/goto", json={"url": url}, timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def webui_click(selector=None, x=None, y=None, visual_url=None):
+    """Click on the WebUI by selector or coordinates."""
+    visual_url = visual_url or WEBUI_VISUAL_URL
+    body = {}
+    if selector:
+        body["selector"] = selector
+    if x is not None and y is not None:
+        body["x"] = x
+        body["y"] = y
+    resp = requests.post(f"{visual_url}/click", json=body, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def webui_type(text, selector="body", visual_url=None):
+    """Type text into a WebUI element."""
+    visual_url = visual_url or WEBUI_VISUAL_URL
+    resp = requests.post(
+        f"{visual_url}/input", json={"text": text, "selector": selector}, timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def webui_press_key(key, visual_url=None):
+    """Press a key on the WebUI."""
+    visual_url = visual_url or WEBUI_VISUAL_URL
+    resp = requests.post(
+        f"{visual_url}/key", json={"key": key}, timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def assert_webui_visible(prompt, visual_url=None):
+    """AI-powered visual assertion for the WebUI."""
+    img_b64 = capture_webui_screenshot(visual_url)
+    return vision_assert(img_b64, prompt)
+
+
+def assert_webui_text_contains(expected_text, visual_url=None):
+    """Assert expected text appears in the WebUI's visible content."""
+    result = observe_webui(visual_url)
+    screen_text = result.get("screen", "").lower()
+    assert expected_text.lower() in screen_text, (
+        f"Expected text '{expected_text}' not found in WebUI.\n"
+        f"Screen text (first 500 chars): {screen_text[:500]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# TUI visual testing (via tui_visual.py server on :9877)
+# ---------------------------------------------------------------------------
+
+
+def observe_tui(visual_url=None):
+    """Call TUI /observe endpoint. Returns dict with screenshot, screen text, logs."""
+    visual_url = visual_url or TUI_VISUAL_URL
+    resp = requests.get(f"{visual_url}/observe", timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def assert_tui_visible(prompt, visual_url=None):
+    """AI-powered visual assertion for the TUI."""
+    visual_url = visual_url or TUI_VISUAL_URL
+    resp = requests.get(f"{visual_url}/observe", timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    img_b64 = data.get("screenshot_base64")
+    if not img_b64:
+        pytest.skip("TUI visual server returned no screenshot")
+    return vision_assert(img_b64, prompt)
+
+
+def assert_tui_text_contains(expected_text, visual_url=None):
+    """Assert expected text appears in the TUI's screen buffer."""
+    visual_url = visual_url or TUI_VISUAL_URL
+    resp = requests.get(f"{visual_url}/observe", timeout=30)
+    resp.raise_for_status()
+    screen_text = resp.json().get("screen", "").lower()
+    assert expected_text.lower() in screen_text, (
+        f"Expected text '{expected_text}' not found in TUI screen.\n"
+        f"Screen (first 500 chars): {screen_text[:500]}"
+    )
+
+
 @pytest.fixture
 def vision_verifier(api_url, api_session):
     """
@@ -178,5 +298,28 @@ def vision_verifier(api_url, api_session):
             return assert_ocr_text_not_contains(
                 api_url, api_session, sandbox_id, forbidden_text
             )
+
+        # WebUI methods (use webui_visual.py server)
+        def capture_webui(self):
+            return capture_webui_screenshot()
+
+        def observe_webui(self):
+            return observe_webui()
+
+        def assert_webui_visible(self, prompt):
+            return assert_webui_visible(prompt)
+
+        def assert_webui_text(self, expected_text):
+            return assert_webui_text_contains(expected_text)
+
+        # TUI methods (use tui_visual.py server)
+        def observe_tui(self):
+            return observe_tui()
+
+        def assert_tui_visible(self, prompt):
+            return assert_tui_visible(prompt)
+
+        def assert_tui_text(self, expected_text):
+            return assert_tui_text_contains(expected_text)
 
     return VisionVerifier()
