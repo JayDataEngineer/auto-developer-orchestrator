@@ -18,6 +18,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state, query } from "lit/decorators.js";
 import { ChatState } from "../../../ts-tui-pi/src/core/chat-state.js";
 import type { ChatMessage, ChatToolCall } from "../../../ts-tui-pi/src/core/chat-state.js";
+import { SSEParser } from "../../../ts-tui-pi/src/core/sse-parser.js";
 
 @customElement("chat-panel")
 export class ChatPanel extends LitElement {
@@ -48,6 +49,10 @@ export class ChatPanel extends LitElement {
 		.streaming-cursor { display: inline-block; width: 6px; height: 14px; background: var(--accent); animation: blink 1s infinite; vertical-align: text-bottom; margin-left: 2px; }
 		@keyframes blink { 50% { opacity: 0; } }
 		.empty { flex:1; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; }
+		.subagent { font-size: 11px; color: var(--dim); padding: 4px 0 4px 12px; border-left: 2px solid var(--accent); margin: 4px 0; }
+		.subagent .name { color: var(--accent); font-weight: 600; }
+		.subagent .task { color: var(--text); }
+		.compaction { font-size: 11px; color: var(--dim); font-style: italic; padding: 2px 8px; }
 	`;
 
 	@property() serverUrl = "";
@@ -106,6 +111,8 @@ export class ChatPanel extends LitElement {
 
 	private accText = "";
 	private accThinking = "";
+	@state() private subAgents: Array<{ name: string; task: string; status: string }> = [];
+	@state() private compacting = false;
 
 	private async send() {
 		const text = this.inputText.trim();
@@ -137,49 +144,38 @@ export class ChatPanel extends LitElement {
 				signal: this.abortCtrl.signal,
 			});
 
-			if (!resp.ok) throw new Error(`Backend ${resp.status}`);
+			if (!resp.ok) {
+				const errText = await resp.text().catch(() => "");
+				throw new Error(`Backend ${resp.status}${errText ? ": " + errText.slice(0, 200) : ""}`);
+			}
 			if (!resp.body) throw new Error("No response body");
 
+			// Shared SSE parser — same code as TUI
 			const reader = resp.body.getReader();
 			const decoder = new TextDecoder();
-			let buffer = "";
-			let currentEvent = "";
+			const parser = new SSEParser();
 
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
-
-				for (const line of lines) {
-					const t = line.trimEnd();
-					if (t.startsWith("event: ")) {
-						currentEvent = t.slice(7).trim();
-					} else if (t.startsWith("data: ")) {
-						const raw = t.slice(6).trim();
-						if (raw === "[DONE]") { currentEvent = ""; continue; }
-						if (currentEvent) {
-							try {
-								const payload = JSON.parse(raw);
-								this.handleSSE(currentEvent, payload);
-							} catch {}
-						}
-						currentEvent = "";
-					}
-					if (t === "") currentEvent = "";
+				const events = parser.feed(decoder.decode(value, { stream: true }));
+				for (const evt of events) {
+					this.handleSSE(evt.event, evt.data);
 				}
 			}
 		} catch (err: any) {
 			if (err.name !== "AbortError") {
+				let msg = err.message || String(err);
+				if (err.cause?.code === "ECONNREFUSED" || msg.includes("Connection refused")) {
+					msg = `Backend not running at ${this.serverUrl}. Start with: task dev`;
+				}
 				this.chatState.handleEvent({
 					type: "message_end",
 					message: {
 						role: "assistant",
-						content: [{ type: "text", text: `Error: ${err.message}` }],
+						content: [{ type: "text", text: `Error: ${msg}` }],
 						stopReason: "error",
-						errorMessage: err.message,
+						errorMessage: msg,
 					},
 				} as any);
 			}
@@ -189,9 +185,16 @@ export class ChatPanel extends LitElement {
 		}
 	}
 
-	/** Map SSE events to ChatState — accumulate deltas like PuxAgentSession does */
+	/**
+	 * Map SSE events to ChatState — shared event handling logic.
+	 * Covers the same events as PuxAgentSession.handleSSE() in the TUI.
+	 */
 	private handleSSE(eventType: string, payload: any) {
 		switch (eventType) {
+			case "agent_spawned":
+				// Agent ID from backend — track for session continuity
+				break;
+
 			case "text_delta":
 				this.accText += payload.text || "";
 				this.chatState.handleEvent({
@@ -226,6 +229,10 @@ export class ChatPanel extends LitElement {
 				} as any);
 				break;
 
+			case "tool_update":
+				// Partial tool result — update status in place
+				break;
+
 			case "agent_end":
 				this.chatState.handleEvent({
 					type: "message_end",
@@ -245,9 +252,50 @@ export class ChatPanel extends LitElement {
 						role: "assistant",
 						content: [],
 						stopReason: "error",
-						errorMessage: payload.error || "Unknown error",
+						errorMessage: payload.error || payload.message || "Unknown error",
 					},
 				} as any);
+				break;
+
+			case "compaction_start":
+				this.compacting = true;
+				this.requestUpdate();
+				break;
+
+			case "compaction_end":
+				this.compacting = false;
+				this.requestUpdate();
+				break;
+
+			case "subagent_start": {
+				const name = payload.agentName || "agent";
+				this.subAgents = [...this.subAgents, { name, task: payload.task || "", status: "running" }];
+				this.requestUpdate();
+				break;
+			}
+
+			case "subagent_end": {
+				const endName = payload.agentName || "agent";
+				this.subAgents = this.subAgents.map(sa =>
+					sa.name === endName ? { ...sa, status: payload.status || "completed" } : sa
+				);
+				this.requestUpdate();
+				break;
+			}
+
+			case "user_question":
+			case "hook_request":
+			case "grind_attempt":
+			case "grind_verify":
+			case "grind_end":
+			case "step_start":
+			case "step_end":
+			case "artifact_created":
+			case "artifact_updated":
+			case "plan_created":
+			case "plan_updated":
+			case "approval_request":
+				// Forward-compatible: acknowledge without crashing on new event types
 				break;
 		}
 		this.syncFromState();

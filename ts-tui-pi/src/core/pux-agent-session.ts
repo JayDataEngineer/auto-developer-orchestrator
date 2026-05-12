@@ -8,6 +8,7 @@ import type {
   TextContent, ThinkingContent, ToolCall,
 } from "../ai/types.js";
 import type { SettingsManager } from "./settings-manager.js";
+import { SSEParser } from "./sse-parser.js";
 
 // ---------------------------------------------------------------------------
 // Minimal model stub — InteractiveMode reads model.id, model.provider, etc.
@@ -243,11 +244,10 @@ export class PuxAgentSession {
         throw new Error(`Backend ${response.status}: ${errText}`);
       }
 
-      // 5. Parse SSE stream
+      // 5. Parse SSE stream — shared parser with web chat-panel
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEvent = "";
+      const sseParser = new SSEParser();
       let accText = "";
       let accThinking = "";
 
@@ -255,41 +255,17 @@ export class PuxAgentSession {
         const { done, value } = await reader.read();
         if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const t = line.trimEnd();
-          if (t.startsWith("event: ")) {
-            currentEvent = t.slice(7).trim();
-          } else if (t.startsWith("event:")) {
-            currentEvent = t.slice(6).trim();
-          } else if (t.startsWith("data: ")) {
-            const raw = t.slice(6).trim();
-            if (raw === "[DONE]") {
-              currentEvent = "";
-              continue;
-            }
-            if (currentEvent) {
-              try {
-                const payload = JSON.parse(raw);
-                this.handleSSE(currentEvent, payload, { accText, accThinking });
-                // Update accumulators
-                if (currentEvent === "text_delta") {
-                  accText += payload.text || "";
-                  this._accText = accText;
-                }
-                if (currentEvent === "thinking_delta") {
-                  accThinking += payload.text || "";
-                }
-              } catch {
-                // malformed JSON — skip
-              }
-            }
-            currentEvent = "";
+        const events = sseParser.feed(decoder.decode(value, { stream: true }));
+        for (const evt of events) {
+          this.handleSSE(evt.event, evt.data, { accText, accThinking });
+          // Update accumulators
+          if (evt.event === "text_delta") {
+            accText += evt.data.text || "";
+            this._accText = accText;
           }
-          if (t === "") currentEvent = "";
+          if (evt.event === "thinking_delta") {
+            accThinking += evt.data.text || "";
+          }
         }
       }
       // SSE stream ended normally
