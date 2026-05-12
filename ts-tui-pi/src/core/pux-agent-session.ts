@@ -482,6 +482,13 @@ export class PuxAgentSession {
 
       case "compaction_end":
         this._isCompacting = false;
+        // Preserve Go backend context metrics for extensions/footer
+        (this as any)._lastCompactionMetrics = {
+          compactionType: payload.compactionType || null,
+          contextTokens: payload.contextTokens || 0,
+          contextSize: payload.contextSize || 0,
+          contextUtil: payload.contextUtil || 0,
+        };
         this.emit({
           type: "compaction_end",
           reason: "manual" as any,
