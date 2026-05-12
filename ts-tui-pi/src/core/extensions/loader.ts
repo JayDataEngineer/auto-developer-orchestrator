@@ -290,16 +290,11 @@ function createExtensionAPI(
 }
 
 async function loadExtensionModule(extensionPath: string) {
-	const jiti = createJiti(import.meta.url, {
-		moduleCache: false,
-		// In Bun binary: use virtualModules for bundled packages (no filesystem resolution)
-		// Also disable tryNative so jiti handles ALL imports (not just the entry point)
-		// In Node.js/dev: use aliases to resolve to node_modules paths
-		...(isBunBinary ? { virtualModules: VIRTUAL_MODULES, tryNative: false } : { alias: getAliases() }),
-	});
-
-	const module = await jiti.import(extensionPath, { default: true });
-	const factory = module as ExtensionFactory;
+	// pux-tui runs under Bun which natively handles TS imports — no jiti needed.
+	// The @mariozechner/jiti package in this project is a stub that throws,
+	// so we bypass it entirely with a direct dynamic import.
+	const module = await import(extensionPath);
+	const factory = (module.default ?? module) as ExtensionFactory;
 	return typeof factory !== "function" ? undefined : factory;
 }
 

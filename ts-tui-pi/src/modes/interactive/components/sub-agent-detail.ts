@@ -43,7 +43,7 @@ export class SubAgentDetailOverlay extends Container {
 	}
 
 	private rebuild(): void {
-		this.clearChildren();
+		this.clear();
 		const t = this.theme;
 		const s = this.state;
 		const elapsed = s.status === "running" && s.startedAt

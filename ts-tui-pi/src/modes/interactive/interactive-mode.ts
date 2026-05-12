@@ -2211,7 +2211,23 @@ export class InteractiveMode {
 						const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
 						this.editor.addToHistory?.(text);
 						this.editor.setText("");
-						await command.handler(args, extensionRunner.createCommandContext());
+						// Capture stdout from extension command and render in chat
+						const chunks: string[] = [];
+						const origWrite = process.stdout.write.bind(process.stdout);
+						(process.stdout as any).write = (data: any, ...rest: any[]) => {
+							if (typeof data === "string") { chunks.push(data); return true; }
+							return origWrite(data, ...rest);
+						};
+						try {
+							await command.handler(args, extensionRunner.createCommandContext());
+						} finally {
+							(process.stdout as any).write = origWrite;
+						}
+						const output = chunks.join("").replace(/\x1b\[[^a-zA-Z]*[a-zA-Z]/g, "");
+						if (output.trim()) {
+							this.chatContainer.addChild(new Text(output.trimEnd(), 0, 0));
+							this.ui.requestRender();
+						}
 						return;
 					}
 				}
