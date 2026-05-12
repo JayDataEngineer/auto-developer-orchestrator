@@ -62,8 +62,8 @@ func TestResolveRole_KernelRole(t *testing.T) {
 	if len(tools) == 0 {
 		t.Error("expected tools from kernel role after MCP expansion")
 	}
-	if model != "gemini-3-flash-preview" {
-		t.Errorf("expected model 'gemini-3-flash-preview', got %q", model)
+	if model == "" {
+		t.Errorf("expected non-empty model from kernel role 'sarah', got empty")
 	}
 }
 

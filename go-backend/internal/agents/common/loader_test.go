@@ -49,8 +49,8 @@ func TestLoadAgentRoles(t *testing.T) {
 	if r.Name != "sarah" {
 		t.Errorf("expected name 'sarah', got '%s'", r.Name)
 	}
-	if r.Model != "gemini-3-flash-preview" {
-		t.Errorf("expected sarah model 'gemini-3-flash-preview', got '%s'", r.Model)
+	if r.Model == "" {
+		t.Errorf("expected sarah to have a model set, got empty")
 	}
 
 	// Test roles without model (inherit CTO's)

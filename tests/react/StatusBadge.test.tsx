@@ -5,7 +5,7 @@ import { StatusBadge } from '../../src/components/ui/StatusBadge';
 describe('StatusBadge', () => {
   it('renders pending status with zinc dot', () => {
     const { container } = render(<StatusBadge status="pending" />);
-    const dot = container.querySelector('.bg-zinc-600');
+    const dot = container.querySelector('.bg-muted-foreground\\/60');
     expect(dot).toBeInTheDocument();
     expect(screen.getByText('pending')).toBeInTheDocument();
   });

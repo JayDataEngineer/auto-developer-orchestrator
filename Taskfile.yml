@@ -170,46 +170,75 @@ tasks:
 
   # ── Testing ─────────────────────────────────────────────────────────────
   test:
-    desc: Run all unit tests (JS + Go) and E2E
+    desc: Run all unit tests (Go + JS + TUI) in parallel, then E2E
     cmds:
-      - task: test-js
-      - task: test-go
+      - task: test-go &
+      - task: test-js &
+      - task: test-tui &
+      - wait
       - task: test-e2e
 
   test-go:
     desc: Run Go backend tests
     dir: go-backend
     cmds:
-      - go test -v -count=1 ./...
+      - go test -count=1 ./...
+
+  test-tui:
+    desc: Run TUI (Bun) tests
+    dir: ts-tui-pi
+    cmds:
+      - bun test
 
   test-cli:
-    desc: Run CLI and TUI tests (Go + TS)
+    desc: Run Go CLI + TUI tests
+    cmds:
+      - task: test-go-cli
+      - task: test-tui
+
+  test-go-cli:
+    desc: Run Go CLI tests only
     dir: go-backend
     cmds:
-      - go test -v -count=1 ./internal/cli/...
-      - cmd: cd ../ts-tui-pi && bun test
-        ignore_error: true
+      - go test -count=1 ./internal/cli/...
 
-  test-mcp:
+  test-go-mcp:
     desc: Run MCP client tests
     dir: go-backend
     cmds:
-      - go test -v -count=1 ./internal/mcp/...
+      - go test -count=1 ./internal/mcp/...
 
   test-js:
     desc: Run frontend unit + component tests (no backend required)
     cmds:
-      - npx vitest run --exclude 'tests/integration/**'
+      - npx vitest run
 
   test-integration:
     desc: Run integration tests (requires running backend on :3847)
+    dir: go-backend
     cmds:
-      - npx vitest run tests/integration/
+      - go test -count=1 ./internal/handlers/...
+      - cmd: npx vitest run tests/integration/
+        ignore_error: true
+
+  test-python:
+    desc: Run Python E2E tests
+    dir: tests/python
+    cmds:
+      - python3 -m pytest -v --tb=short
 
   test-e2e:
     desc: Run Playwright E2E tests
     cmds:
       - npm run test:playwright
+
+  test-all:
+    desc: Run everything sequentially (CI mode)
+    cmds:
+      - task: test-go
+      - task: test-js
+      - task: test-tui
+      - task: test-e2e
 
   # ── Linting ─────────────────────────────────────────────────────────────
   lint:

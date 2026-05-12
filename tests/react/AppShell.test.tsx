@@ -3,7 +3,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { AppShell } from '../../src/components/AppShell';
 
-// Mock useOrchestrator
 vi.mock('../../src/hooks/useOrchestrator', () => ({
   useOrchestrator: () => ({
     state: {
@@ -16,10 +15,9 @@ vi.mock('../../src/hooks/useOrchestrator', () => ({
   }),
 }));
 
-// Mock PiAgentContext — PiAgentView uses usePiAgentContext
-vi.mock('../../src/contexts/PiAgentContext', () => ({
-  PiAgentProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  usePiAgentContext: () => ({
+vi.mock('../../src/contexts/PuxAgentContext', () => ({
+  PuxAgentProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  usePuxAgentContext: () => ({
     state: {
       messages: [],
       isStreaming: false,
@@ -48,7 +46,6 @@ vi.mock('../../src/contexts/PiAgentContext', () => ({
   }),
 }));
 
-// Mock child components that make API calls
 vi.mock('../../src/components/AgentTab', () => ({
   AgentTab: ({ selectedProject }: any) => (
     <div data-testid="agent-tab">Agent Tab - {selectedProject}</div>
@@ -76,9 +73,9 @@ describe('AppShell', () => {
   it('renders 3 tabs with labels', () => {
     render(<AppShell />);
 
-    expect(screen.getByText('Agent')).toBeInTheDocument();
-    expect(screen.getByText('Tasks')).toBeInTheDocument();
-    expect(screen.getByText('Desktop')).toBeInTheDocument();
+    expect(screen.getByText('Code')).toBeInTheDocument();
+    expect(screen.getByText('Automate')).toBeInTheDocument();
+    expect(screen.getByText('Pilot')).toBeInTheDocument();
   });
 
   it('defaults to Agent tab', () => {
@@ -90,7 +87,7 @@ describe('AppShell', () => {
   it('switches to Tasks tab on click', () => {
     render(<AppShell />);
 
-    fireEvent.click(screen.getByText('Tasks'));
+    fireEvent.click(screen.getByText('Automate'));
     expect(screen.getByTestId('tasks-tab')).toBeInTheDocument();
     expect(screen.queryByTestId('agent-tab')).not.toBeInTheDocument();
   });
@@ -98,28 +95,26 @@ describe('AppShell', () => {
   it('switches to Desktop tab on click', () => {
     render(<AppShell />);
 
-    fireEvent.click(screen.getByText('Desktop'));
+    fireEvent.click(screen.getByText('Pilot'));
     expect(screen.getByTestId('desktop-tab')).toBeInTheDocument();
   });
 
   it('renders project selector with projects', () => {
     render(<AppShell />);
 
-    const select = screen.getByDisplayValue('test-project');
-    expect(select).toBeInTheDocument();
+    expect(screen.getByText('test-project')).toBeInTheDocument();
   });
 
-  it('renders PI branding', () => {
+  it('renders Pux branding', () => {
     render(<AppShell />);
 
-    expect(screen.getByText('PI')).toBeInTheDocument();
+    expect(screen.getByText('Pux')).toBeInTheDocument();
   });
 
   it('shows Settings button', () => {
     render(<AppShell />);
 
-    const settingsButtons = screen.getAllByTitle('Settings');
-    expect(settingsButtons.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Settings')).toBeInTheDocument();
   });
 
   it('opens GitHub modal via custom event', () => {

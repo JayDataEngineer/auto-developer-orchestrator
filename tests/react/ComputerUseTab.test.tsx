@@ -14,6 +14,44 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { ComputerUseTab } from '../../src/components/ComputerUseTab';
 
+vi.mock('../../src/components/ui/tooltip', () => ({
+  Tooltip: ({ children }: any) => <>{children}</>,
+  TooltipTrigger: ({ children }: any) => <>{children}</>,
+  TooltipContent: () => null,
+  TooltipProvider: ({ children }: any) => <>{children}</>,
+}));
+
+vi.mock('../../src/contexts/PuxAgentContext', () => ({
+  PuxAgentProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  usePuxAgentContext: () => ({
+    state: {
+      messages: [],
+      isStreaming: false,
+      text: '',
+      thinking: '',
+      toolCalls: [],
+      model: 'test-model',
+      tokenUsage: { input: 0, output: 0, cache: 0 },
+      error: null,
+      branchName: null,
+      lastPrompt: '',
+      agentId: 'default',
+      prUrl: null,
+      prNumber: null,
+      subAgents: [],
+    },
+    sendPrompt: vi.fn(),
+    abort: vi.fn(),
+    compact: vi.fn(),
+    switchModel: vi.fn(),
+    reset: vi.fn(),
+    hydrateState: vi.fn(),
+    getModels: vi.fn(async () => []),
+    loadHistory: vi.fn(),
+    respondToApproval: vi.fn(),
+  }),
+}));
+
 // ─── Helpers ──────────────────────────────────────────────────
 
 function jsonResponse(data: unknown, status = 200): Response {
@@ -143,7 +181,7 @@ describe('ComputerUseTab — all UI states', () => {
     }, { timeout: 5000 });
   });
 
-  it('shows iframe when session loads successfully', async () => {
+  function mockSessionEndpoints() {
     mockFetch((_input) => {
       const url = typeof _input === 'string' ? _input : '';
       if (url.includes('/viewer')) {
@@ -153,8 +191,15 @@ describe('ComputerUseTab — all UI states', () => {
           cdpUrl: 'http://localhost:19222',
         });
       }
-      return new Response('<html>noVNC</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+      if (url.includes('/vnc-health')) {
+        return jsonResponse({ healthy: true });
+      }
+      return jsonResponse({});
     });
+  }
+
+  it('shows iframe when session loads successfully', async () => {
+    mockSessionEndpoints();
 
     render(
       <ComputerUseTab
@@ -171,13 +216,7 @@ describe('ComputerUseTab — all UI states', () => {
   });
 
   it('shows Desktop label in header when session active', async () => {
-    mockFetch((_input) => {
-      const url = typeof _input === 'string' ? _input : '';
-      if (url.includes('/viewer')) {
-        return jsonResponse({ mode: 'browser', novncUrl: 'http://localhost:6080/vnc.html', cdpUrl: 'http://localhost:19222' });
-      }
-      return new Response('<html>noVNC</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
-    });
+    mockSessionEndpoints();
 
     render(
       <ComputerUseTab
@@ -210,7 +249,10 @@ describe('ComputerUseTab — all UI states', () => {
         }
         return jsonResponse({ mode: 'browser', novncUrl: 'http://localhost:6080/vnc.html', cdpUrl: 'http://localhost:19222' });
       }
-      return new Response('<html>noVNC</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+      if (url.includes('/vnc-health')) {
+        return jsonResponse({ healthy: true });
+      }
+      return jsonResponse({});
     });
 
     render(
@@ -231,13 +273,7 @@ describe('ComputerUseTab — all UI states', () => {
   // ── noVNC URL construction ────────────────────────────────
 
   it('noVNC URL uses correct sandboxId', async () => {
-    mockFetch((_input) => {
-      const url = typeof _input === 'string' ? _input : '';
-      if (url.includes('/viewer')) {
-        return jsonResponse({ mode: 'browser', novncUrl: 'http://localhost:6080/vnc.html', cdpUrl: 'http://localhost:19222' });
-      }
-      return new Response('<html>noVNC</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
-    });
+    mockSessionEndpoints();
 
     render(
       <ComputerUseTab
@@ -254,13 +290,7 @@ describe('ComputerUseTab — all UI states', () => {
   });
 
   it('noVNC URL includes autoconnect and resize params', async () => {
-    mockFetch((_input) => {
-      const url = typeof _input === 'string' ? _input : '';
-      if (url.includes('/viewer')) {
-        return jsonResponse({ mode: 'browser', novncUrl: 'http://localhost:6080/vnc.html', cdpUrl: 'http://localhost:19222' });
-      }
-      return new Response('<html>noVNC</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
-    });
+    mockSessionEndpoints();
 
     render(
       <ComputerUseTab
@@ -278,13 +308,7 @@ describe('ComputerUseTab — all UI states', () => {
   });
 
   it('noVNC URL includes websockify path', async () => {
-    mockFetch((_input) => {
-      const url = typeof _input === 'string' ? _input : '';
-      if (url.includes('/viewer')) {
-        return jsonResponse({ mode: 'browser', novncUrl: 'http://localhost:6080/vnc.html', cdpUrl: 'http://localhost:19222' });
-      }
-      return new Response('<html>noVNC</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
-    });
+    mockSessionEndpoints();
 
     render(
       <ComputerUseTab
@@ -304,15 +328,9 @@ describe('ComputerUseTab — all UI states', () => {
   // ── Fullscreen toggle ─────────────────────────────────────
 
   it('fullscreen toggle adds fixed class', async () => {
-    mockFetch((_input) => {
-      const url = typeof _input === 'string' ? _input : '';
-      if (url.includes('/viewer')) {
-        return jsonResponse({ mode: 'browser', novncUrl: 'http://localhost:6080/vnc.html', cdpUrl: 'http://localhost:19222' });
-      }
-      return new Response('<html>noVNC</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
-    });
+    mockSessionEndpoints();
 
-    render(
+    const { container } = render(
       <ComputerUseTab
         selectedProject="test"
         sandboxId="sb-1"
@@ -324,7 +342,7 @@ describe('ComputerUseTab — all UI states', () => {
       expect(screen.getByTitle('Desktop')).toBeInTheDocument();
     }, { timeout: 10000 });
 
-    const fullscreenBtn = screen.getByTitle('Full screen');
+    const fullscreenBtn = container.querySelector('.lucide-maximize-2')?.closest('button')!;
     fireEvent.click(fullscreenBtn);
 
     // The outer container should now have 'fixed' class
