@@ -73,6 +73,11 @@ type Config struct {
 
 	// EnableSummary enables the LLM summarization decorator.
 	EnableSummary bool
+
+	// LLMProvider is used by the SummarizingContextManager to generate
+	// structured summaries during full compaction. If nil, full compaction
+	// falls back to micro-compaction.
+	LLMProvider core.LLMProvider
 }
 
 // DefaultConfig returns sensible defaults matching current behavior.
@@ -112,7 +117,7 @@ func Factory(sess core.Session, cfg Config) ContextManager {
 	}
 
 	if cfg.EnableSummary {
-		mgr = NewSummarizingContextManager(mgr, cfg, sess)
+		mgr = NewSummarizingContextManager(mgr, cfg, sess, cfg.LLMProvider)
 	}
 
 	return mgr

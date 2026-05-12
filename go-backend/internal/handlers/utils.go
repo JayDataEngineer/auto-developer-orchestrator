@@ -37,6 +37,13 @@ func resolveProjectPath(project string, db *storage.Database) string {
 		return ""
 	}
 
+	// If project is an absolute path that exists, use it directly
+	if filepath.IsAbs(project) {
+		if info, err := os.Stat(project); err == nil && info.IsDir() {
+			return project
+		}
+	}
+
 	// Check custom projects from DB first
 	if db != nil {
 		ctx := context.Background()

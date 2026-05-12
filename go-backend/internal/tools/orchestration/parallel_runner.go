@@ -265,6 +265,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		MaxTokens:      8192,
 		ContextSize:    r.ctxSize,
 		Tools:          selectedTools,
+		ToolResultProcessor: subAgentResultProcessor(),
 		Opts: core.GenerateOptions{
 			MaxTokens:   8192,
 			Temperature: temperature,
@@ -511,6 +512,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 			MaxTokens:     8192,
 			ContextSize:   r.ctxSize,
 			Tools:         selectedTools,
+			ToolResultProcessor: subAgentResultProcessor(),
 			Opts: core.GenerateOptions{
 				MaxTokens:   8192,
 				Temperature: temperature,
@@ -581,7 +583,7 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	r.logger("CONTINUE: agent=%s feedback_len=%d", la.Role, len(feedback))
 
 	// Compact the session to make room for the feedback
-	la.Session.Compact(ctx, la.Provider)
+	la.Session.Compact(ctx, "Context compacted for continuation")
 
 	// Create a new agent loop with the SAME session (has full history)
 	loop := core.NewAgentLoop(la.Provider, r.executor, la.Session, la.Config)
@@ -852,6 +854,18 @@ func (r *ParallelRunner) pendingCount() int {
 	return len(r.tasks)
 }
 
+// subAgentResultProcessor returns a ToolResultProcessor for sub-agents.
+// Sub-agents are short-lived and don't need the full context manager stack,
+// but they do need large results truncated to prevent context overflow.
+func subAgentResultProcessor() func(ctx context.Context, toolName, toolCallID, result string) string {
+	return func(ctx context.Context, toolName, toolCallID, result string) string {
+		if len(result) > 6000 {
+			return result[:6000] + "\n...[truncated by sub-agent context manager]"
+		}
+		return result
+	}
+}
+
 // subSession is a minimal session that stores messages in memory.
 // It wraps a parent session for context inheritance in sub-agents.
 type subSession struct {
@@ -874,7 +888,7 @@ func (s *subSession) GetTree() *core.TreeNode    { return nil }
 func (s *subSession) Navigate(nodeID string) error { return fmt.Errorf("sub-sessions do not support navigation") }
 func (s *subSession) Branch(label string) (string, error) { return "", fmt.Errorf("sub-sessions do not support branching") }
 func (s *subSession) Fork(nodeID string) (core.Session, error) { return nil, fmt.Errorf("sub-sessions do not support forking") }
-func (s *subSession) Compact(ctx context.Context, llmProvider interface{}) (string, error) {
+func (s *subSession) Compact(ctx context.Context, summary string) (string, error) {
 	// Simple truncation: keep recent messages, drop old tool results.
 	// This gives the subagent room for new feedback without overflowing context.
 	if len(s.messages) <= 10 {

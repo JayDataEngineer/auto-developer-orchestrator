@@ -35,8 +35,8 @@ func runChat(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		// Use org directory as both project name and cwd
-		effectiveProject = filepath.Base(orgPath)
+		// Use org directory as absolute path project and cwd
+		effectiveProject = orgPath
 		effectiveCwd = orgPath
 	}
 
@@ -109,6 +109,9 @@ func resolveOrgPath(name string) (string, error) {
 	candidates := []string{
 		filepath.Join(home, "Documents", "programs", "dev", name),
 		filepath.Join(home, "Documents", "programs", "dev", name+"-bot"),
+		filepath.Join(home, "Documents", "programs", "dev", name+"-org"),
+		filepath.Join(home, "Documents", "projects", name, "pux-org"),
+		filepath.Join(home, "Documents", "projects", name),
 	}
 	// Also check relative to cwd
 	cwd, _ := os.Getwd()

@@ -129,6 +129,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		ctxConfig.ContextSize = 32768
 	}
 	ctxConfig.SpillDir = filepath.Join(cfg.ProjectDir, ".pux", "spill", sess.ID())
+	ctxConfig.LLMProvider = provider // enables LLM-powered summarization
 	ctxMgr := ctxpkg.Factory(sess, ctxConfig)
 
 	scratchStore := ctxpkg.NewScratchStore()

@@ -78,6 +78,12 @@ type AgentEventData struct {
 	CompactedMessages int            `json:"compactedMessages,omitempty"`
 	KeptMessages      int            `json:"keptMessages,omitempty"`
 
+	// Context management metrics
+	ContextTokens    int     `json:"contextTokens,omitempty"`
+	ContextSize      int     `json:"contextSize,omitempty"`
+	ContextUtil      float64 `json:"contextUtil,omitempty"`
+	CompactionType   string  `json:"compactionType,omitempty"` // "micro" or "full"
+
 	// Step-level context
 	Round    int    `json:"round,omitempty"`    // current tool round
 	Decision string `json:"decision,omitempty"` // step end decision: "respond", "delegate", "ask", "error"

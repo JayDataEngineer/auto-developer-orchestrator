@@ -344,6 +344,6 @@ func (s *noopSession) GetTree() *core.TreeNode                             { ret
 func (s *noopSession) Navigate(nodeID string) error                        { return nil }
 func (s *noopSession) Branch(label string) (string, error)                 { return "", nil }
 func (s *noopSession) Fork(nodeID string) (core.Session, error)            { return nil, nil }
-func (s *noopSession) Compact(ctx context.Context, llmProvider any) (string, error) { return "", nil }
+func (s *noopSession) Compact(ctx context.Context, summary string) (string, error) { return "", nil }
 func (s *noopSession) TruncateToolResults(keep int) (int, error)           { return 0, nil }
 func (s *noopSession) GetCurrentNode() string                              { return "verifier" }

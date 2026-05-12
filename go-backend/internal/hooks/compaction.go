@@ -97,7 +97,7 @@ func (h *CompactionHook) microCompact() {
 
 // fullCompact creates an LLM-generated summary of old messages.
 func (h *CompactionHook) fullCompact(ctx context.Context) error {
-	_, err := h.session.Compact(ctx, nil)
+	_, err := h.session.Compact(ctx, "Context compacted (legacy hook)")
 	if err != nil {
 		return fmt.Errorf("full compact failed: %w", err)
 	}

@@ -354,10 +354,38 @@ func (t *SessionTree) Fork(nodeID string) (core.Session, error) {
 }
 
 // Compact summarizes older messages to free context space.
-// This is a no-op in the base implementation — hooks handle actual compaction.
-func (t *SessionTree) Compact(ctx context.Context, llmProvider interface{}) (string, error) {
+// The summary replaces the compacted message range in context.
+// All messages from root to the current node (excluding compaction entries
+// and the session header) are marked as compacted. Returns the compaction entry ID.
+func (t *SessionTree) Compact(ctx context.Context, summary string) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	path := t.walkPath(t.session.ID, t.current)
+	if path == nil {
+		return "", fmt.Errorf("cannot compact: no path from root to current")
+	}
+
+	// Collect IDs of all message entries that will be compacted
+	var compactedRange []string
+	for _, node := range path {
+		switch node.Entry.Type {
+		case core.EntryTypeUserMessage, core.EntryTypeAssistantMessage,
+			core.EntryTypeToolResult, core.EntryTypeSystemMessage,
+			core.EntryTypeBranchSummary:
+			compactedRange = append(compactedRange, node.Entry.ID)
+		}
+	}
+
+	if len(compactedRange) == 0 {
+		return "", fmt.Errorf("nothing to compact")
+	}
+
+	compData := CompactionData{
+		Summary:        summary,
+		CompactedRange: compactedRange,
+	}
+	data, _ := json.Marshal(compData)
 
 	compID := newID("comp")
 	entry := core.SessionEntry{
@@ -365,7 +393,7 @@ func (t *SessionTree) Compact(ctx context.Context, llmProvider interface{}) (str
 		ParentID:  t.current,
 		Timestamp: time.Now(),
 		Type:      core.EntryTypeCompaction,
-		Data: json.RawMessage(`{"summary":"Context compacted","compactedRange":[]}`),
+		Data:      data,
 	}
 
 	if err := t.writeEntry(entry); err != nil {

@@ -33,9 +33,19 @@ var agentPromptCmd = &cobra.Command{
 		client := api.NewClient(serverURL)
 		message := args[0]
 
+		effectiveProject := projectName
+		// If --org is set, resolve it and pass as absolute path
+		if orgName != "" {
+			orgPath, err := resolveOrgPath(orgName)
+			if err != nil {
+				return err
+			}
+			effectiveProject = orgPath
+		}
+
 		req := api.PromptRequest{
 			Message:       message,
-			Project:       projectName,
+			Project:       effectiveProject,
 			AgentID:       "default",
 			Model:         agentModel,
 			ThinkingLevel: agentThinking,

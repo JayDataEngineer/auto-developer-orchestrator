@@ -33,8 +33,9 @@ type Session interface {
 	Fork(nodeID string) (Session, error)
 
 	// Compact summarizes older messages to free context space.
+	// The summary string replaces the compacted range in the context.
 	// Returns the compaction entry ID.
-	Compact(ctx context.Context, llmProvider interface{}) (string, error)
+	Compact(ctx context.Context, summary string) (string, error)
 
 	// TruncateToolResults replaces old tool result content with a short placeholder.
 	// Keeps the `keep` most recent tool results intact, truncates older ones.

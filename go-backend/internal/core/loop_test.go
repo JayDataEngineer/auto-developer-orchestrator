@@ -109,7 +109,7 @@ func (m *mockSession) BuildContext(ctx context.Context) ([]Message, error) {
 func (m *mockSession) Navigate(nodeID string) error { return nil }
 func (m *mockSession) Branch(label string) (string, error) { return "branch", nil }
 func (m *mockSession) Fork(nodeID string) (Session, error) { return nil, nil }
-func (m *mockSession) Compact(ctx context.Context, llmProvider interface{}) (string, error) {
+func (m *mockSession) Compact(ctx context.Context, summary string) (string, error) {
 	return "", nil
 }
 func (m *mockSession) TruncateToolResults(keep int) (int, error) { return 0, nil }
