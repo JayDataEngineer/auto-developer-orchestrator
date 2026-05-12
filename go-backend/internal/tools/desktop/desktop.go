@@ -162,6 +162,34 @@ func (t *KeyTool) Execute(ctx context.Context, args map[string]any) (any, error)
 	return t.provider.DesktopKey(ctx, sbID, key)
 }
 
+// ── Observe Tool ──────────────────────────────────────────────────────────
+
+type ObserveTool struct {
+	provider  DesktopProvider
+	sandboxID func() string
+}
+
+func NewObserveTool(p DesktopProvider, sandboxID func() string) *ObserveTool {
+	return &ObserveTool{provider: p, sandboxID: sandboxID}
+}
+
+func (t *ObserveTool) Name() string { return "desktop_observe" }
+func (t *ObserveTool) Description() string {
+	return "Capture screenshot with OCR element detection and window list. Returns image + elements (id, text, x, y, w, h, cx, cy) + windows. Use this instead of desktop_screenshot when you need to identify clickable elements."
+}
+
+func (t *ObserveTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {}}`)
+}
+
+func (t *ObserveTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	if sbID == "" {
+		return nil, core.NewToolError("desktop_observe", "no sandbox available")
+	}
+	return t.provider.DesktopObserve(ctx, sbID)
+}
+
 // ── Registration ───────────────────────────────────────────────────────────
 
 // RegisterDesktopTools creates all desktop tool wrappers and appends to tools slice.
@@ -174,6 +202,7 @@ func RegisterDesktopTools(tools []core.Tool, p DesktopProvider, sandboxID func()
 		NewClickTool(p, sandboxID),
 		NewTypeTool(p, sandboxID),
 		NewKeyTool(p, sandboxID),
+		NewObserveTool(p, sandboxID),
 	)
 }
 

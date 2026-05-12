@@ -40,6 +40,7 @@ func (h *X11Handler) RegisterRoutes(r interface {
 	r.Post("/mouse", h.Mouse)
 	r.Post("/keyboard", h.Keyboard)
 	r.Get("/screenshot", h.Screenshot)
+	r.Get("/observe", h.Observe)
 	r.Get("/resolution", h.Resolution)
 	r.Get("/active-window", h.ActiveWindow)
 }
@@ -69,6 +70,11 @@ func (h *X11Handler) EnsureDesktopMode(ctx context.Context, sandboxID string) er
 	_, _ = h.manager.ExecInSandbox(ctx, sandboxID, []string{
 		"bash", "-c",
 		"dpkg -l | grep -q imagemagick || (apt-get update -qq && apt-get install -y -qq imagemagick scrot xdotool 2>/dev/null) || true",
+	})
+	// Install OCR tools for desktop_observe (graceful: script handles missing tesseract)
+	_, _ = h.manager.ExecInSandbox(ctx, sandboxID, []string{
+		"bash", "-c",
+		"dpkg -l | grep -q tesseract-ocr || (apt-get update -qq && apt-get install -y -qq tesseract-ocr tesseract-ocr-eng 2>/dev/null) || true",
 	})
 
 	_, err := h.manager.EnableDesktopMode(ctx, sandboxID)
@@ -270,11 +276,43 @@ func (h *X11Handler) Screenshot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
-		"image": b64,
+		"image_b64": b64,
 	})
 }
 
-// ── Resolution ───────────────────────────────────────────────────────────
+// ── Observe (OCR + Elements) ────────────────────────────────────────────
+
+// GET /api/sandbox/{id}/x11/observe
+func (h *X11Handler) Observe(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	if err := h.EnsureDesktopMode(r.Context(), sandboxID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	display := h.displayForSandbox(sandboxID)
+
+	output, err := h.exec(r, sandboxID, display, []string{
+		"python3", "/usr/local/bin/desktop_observe.py",
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Script outputs JSON — parse and re-emit
+	output = cleanOutput(output)
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to parse observe output: " + err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
 
 // GET /api/sandbox/{id}/x11/resolution
 func (h *X11Handler) Resolution(w http.ResponseWriter, r *http.Request) {

@@ -43,6 +43,7 @@ var desktopTools = map[string]bool{
 	"desktop_click":      true,
 	"desktop_type":       true,
 	"desktop_key":        true,
+	"desktop_observe":    true,
 }
 
 // DetectImage scans a tool result for embedded image data.

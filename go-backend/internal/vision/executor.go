@@ -70,6 +70,9 @@ func promptForTool(toolName string) string {
 	if browserTools[toolName] {
 		return "Describe the web page shown in this screenshot. Focus on: page title, main content, navigation, forms, buttons, and any important text or data visible. Be concise but thorough."
 	}
+	if toolName == "desktop_observe" {
+		return "Describe the desktop shown in this screenshot. Focus on: open windows, applications, dialogs, menus, buttons, and UI elements. Element coordinates are provided separately. Be concise."
+	}
 	if desktopTools[toolName] {
 		return "Describe what you see in this desktop screenshot. Focus on: open windows, applications, dialogs, and any important text or UI elements visible. Be concise."
 	}

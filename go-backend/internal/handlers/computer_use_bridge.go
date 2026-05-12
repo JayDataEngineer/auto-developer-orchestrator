@@ -156,6 +156,11 @@ func (b *ComputerUseBridge) Resolution(ctx context.Context, sandboxID string) (m
 	return callHandler(ctx, b.X11.Resolution, http.MethodGet, "/api/sandbox/{id}/x11/resolution", nil, sandboxID)
 }
 
+// DesktopObserve captures screenshot + OCR elements + window list in one call.
+func (b *ComputerUseBridge) DesktopObserve(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	return callHandler(ctx, b.X11.Observe, http.MethodGet, "/api/sandbox/{id}/x11/observe", nil, sandboxID)
+}
+
 // ExtractPageContent gets the page content from the active browser tab via CDP JavaScript evaluation.
 // rawHTML=true returns document.documentElement.outerHTML for processing by MCP process_html.
 // rawHTML=false returns document.body.innerText for quick text extraction.

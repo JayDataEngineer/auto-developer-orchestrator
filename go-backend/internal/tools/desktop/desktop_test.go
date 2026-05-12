@@ -15,6 +15,7 @@ type mockProvider struct {
 	typeFn       func(ctx context.Context, sandboxID string, text string) (map[string]interface{}, error)
 	keyFn        func(ctx context.Context, sandboxID string, key string) (map[string]interface{}, error)
 	resolutionFn func(ctx context.Context, sandboxID string) (map[string]interface{}, error)
+	observeFn    func(ctx context.Context, sandboxID string) (map[string]interface{}, error)
 }
 
 func (m *mockProvider) DesktopScreenshot(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
@@ -37,10 +38,14 @@ func (m *mockProvider) Resolution(ctx context.Context, sandboxID string) (map[st
 	return m.resolutionFn(ctx, sandboxID)
 }
 
+func (m *mockProvider) DesktopObserve(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	return m.observeFn(ctx, sandboxID)
+}
+
 func defaultProvider() *mockProvider {
 	return &mockProvider{
 		screenshotFn: func(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
-			return map[string]interface{}{"image": "img"}, nil
+			return map[string]interface{}{"image_b64": "img"}, nil
 		},
 		clickFn: func(ctx context.Context, sandboxID string, x, y float64, button int) (map[string]interface{}, error) {
 			return map[string]interface{}{"success": true}, nil
@@ -53,6 +58,15 @@ func defaultProvider() *mockProvider {
 		},
 		resolutionFn: func(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
 			return map[string]interface{}{"width": "1920", "height": "1080"}, nil
+		},
+		observeFn: func(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"image_b64": "img",
+				"elements":  []interface{}{},
+				"windows":   []interface{}{},
+				"resolution": map[string]interface{}{"width": 1280, "height": 720},
+				"ocr_available": true,
+			}, nil
 		},
 	}
 }
@@ -71,8 +85,8 @@ func TestScreenshotTool(t *testing.T) {
 	result, err := tool.Execute(context.Background(), nil)
 	testutil.AssertNoError(t, err)
 	m := result.(map[string]interface{})
-	if m["image"] != "img" {
-		t.Errorf("expected image in result, got %v", m)
+	if m["image_b64"] != "img" {
+		t.Errorf("expected image_b64 in result, got %v", m)
 	}
 }
 
@@ -219,15 +233,15 @@ func TestKeyTool_EmptyKey(t *testing.T) {
 func TestRegisterDesktopTools(t *testing.T) {
 	tools := []core.Tool{}
 	result := RegisterDesktopTools(tools, defaultProvider(), sandboxIDFn)
-	if len(result) != 4 {
-		t.Fatalf("expected 4 tools, got %d", len(result))
+	if len(result) != 5 {
+		t.Fatalf("expected 5 tools, got %d", len(result))
 	}
 
 	names := map[string]bool{}
 	for _, tool := range result {
 		names[tool.Name()] = true
 	}
-	for _, name := range []string{"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key"} {
+	for _, name := range []string{"desktop_screenshot", "desktop_click", "desktop_type", "desktop_key", "desktop_observe"} {
 		if !names[name] {
 			t.Errorf("expected tool %q in registered tools", name)
 		}
@@ -239,6 +253,46 @@ func TestRegisterDesktopTools_NilProvider(t *testing.T) {
 	result := RegisterDesktopTools(tools, nil, sandboxIDFn)
 	if len(result) != 0 {
 		t.Fatalf("expected 0 tools with nil provider, got %d", len(result))
+	}
+}
+
+func TestObserveTool(t *testing.T) {
+	tool := NewObserveTool(defaultProvider(), sandboxIDFn)
+	testutil.AssertValidSchema(t, tool)
+
+	if tool.Name() != "desktop_observe" {
+		t.Errorf("Name() = %q, want %q", tool.Name(), "desktop_observe")
+	}
+
+	result, err := tool.Execute(context.Background(), nil)
+	testutil.AssertNoError(t, err)
+	m := result.(map[string]interface{})
+	if _, ok := m["image_b64"]; !ok {
+		t.Errorf("expected image_b64 in result, got %v", m)
+	}
+	if _, ok := m["elements"]; !ok {
+		t.Errorf("expected elements in result, got %v", m)
+	}
+}
+
+func TestObserveTool_Error(t *testing.T) {
+	p := defaultProvider()
+	p.observeFn = func(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+		return nil, errors.New("observe failed")
+	}
+	tool := NewObserveTool(p, sandboxIDFn)
+
+	_, err := tool.Execute(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestObserveTool_NoSandbox(t *testing.T) {
+	tool := NewObserveTool(defaultProvider(), func() string { return "" })
+	_, err := tool.Execute(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for no sandbox")
 	}
 }
 

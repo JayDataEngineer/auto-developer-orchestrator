@@ -10,4 +10,5 @@ type DesktopProvider interface {
 	DesktopType(ctx context.Context, sandboxID string, text string) (map[string]interface{}, error)
 	DesktopKey(ctx context.Context, sandboxID string, key string) (map[string]interface{}, error)
 	Resolution(ctx context.Context, sandboxID string) (map[string]interface{}, error)
+	DesktopObserve(ctx context.Context, sandboxID string) (map[string]interface{}, error)
 }

@@ -177,7 +177,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if cfg.DesktopProvider != nil {
 		sandboxIDFn := func() string { return cfg.SandboxID }
 		employeeTools = desktoptools.RegisterDesktopTools(employeeTools, cfg.DesktopProvider, sandboxIDFn)
-		logger.Printf("Desktop tools loaded for employees: 4 tools")
+		logger.Printf("Desktop tools loaded for employees: 5 tools")
 	}
 
 	// Build MCP server resolver for role-based delegation

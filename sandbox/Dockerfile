@@ -56,6 +56,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wmctrl \
     xdotool \
     xclip \
+    tesseract-ocr \
+    tesseract-ocr-eng \
     fonts-liberation \
     fonts-noto-cjk \
     libappindicator3-1 \
@@ -99,7 +101,8 @@ COPY supervisord.conf /etc/supervisor/conf.d/sandbox.conf
 # Stealth browser helper scripts
 COPY scripts/sb_agent.py /usr/local/bin/sb_agent.py
 COPY scripts/sb_server.py /usr/local/bin/sb_server.py
-RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py
+COPY scripts/desktop_observe.py /usr/local/bin/desktop_observe.py
+RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py
 
 # Working directory — must match the sandbox mount point so files
 # saved by sb_server/download land on the host filesystem.
