@@ -105,12 +105,20 @@ func (b *ComputerUseBridge) Act(ctx context.Context, sandboxID string, action st
 }
 
 // DesktopScreenshot takes a full X11 desktop screenshot.
+// Auto-escalates sandbox to desktop mode if needed.
 func (b *ComputerUseBridge) DesktopScreenshot(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	if err := b.X11.EnsureDesktopMode(ctx, sandboxID); err != nil {
+		return nil, fmt.Errorf("desktop mode: %w", err)
+	}
 	return callHandler(ctx, b.X11.Screenshot, http.MethodGet, "/api/sandbox/{id}/x11/screenshot?format=json", nil, sandboxID)
 }
 
 // DesktopClick clicks at absolute coordinates on the desktop.
+// Auto-escalates sandbox to desktop mode if needed.
 func (b *ComputerUseBridge) DesktopClick(ctx context.Context, sandboxID string, x, y float64, button int) (map[string]interface{}, error) {
+	if err := b.X11.EnsureDesktopMode(ctx, sandboxID); err != nil {
+		return nil, fmt.Errorf("desktop mode: %w", err)
+	}
 	return callHandler(ctx, b.X11.Mouse, http.MethodPost, "/api/sandbox/{id}/x11/mouse", map[string]interface{}{
 		"action": "click",
 		"x":      int(x),
@@ -120,7 +128,11 @@ func (b *ComputerUseBridge) DesktopClick(ctx context.Context, sandboxID string, 
 }
 
 // DesktopType types text into the focused window.
+// Auto-escalates sandbox to desktop mode if needed.
 func (b *ComputerUseBridge) DesktopType(ctx context.Context, sandboxID string, text string) (map[string]interface{}, error) {
+	if err := b.X11.EnsureDesktopMode(ctx, sandboxID); err != nil {
+		return nil, fmt.Errorf("desktop mode: %w", err)
+	}
 	return callHandler(ctx, b.X11.Keyboard, http.MethodPost, "/api/sandbox/{id}/x11/keyboard", map[string]interface{}{
 		"action": "type",
 		"text":   text,
@@ -128,7 +140,11 @@ func (b *ComputerUseBridge) DesktopType(ctx context.Context, sandboxID string, t
 }
 
 // DesktopKey presses a special key or key combination.
+// Auto-escalates sandbox to desktop mode if needed.
 func (b *ComputerUseBridge) DesktopKey(ctx context.Context, sandboxID string, key string) (map[string]interface{}, error) {
+	if err := b.X11.EnsureDesktopMode(ctx, sandboxID); err != nil {
+		return nil, fmt.Errorf("desktop mode: %w", err)
+	}
 	return callHandler(ctx, b.X11.Keyboard, http.MethodPost, "/api/sandbox/{id}/x11/keyboard", map[string]interface{}{
 		"action": "key",
 		"key":    key,

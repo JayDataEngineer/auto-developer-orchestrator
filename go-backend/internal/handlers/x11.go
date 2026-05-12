@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -50,6 +51,31 @@ func (h *X11Handler) displayForSandbox(sandboxID string) string {
 		return fmt.Sprintf(":%d", session.DisplayNum)
 	}
 	return ":99"
+}
+
+// EnsureDesktopMode ensures the sandbox has a full X11 desktop session running.
+// If the sandbox is already in desktop mode, this is a no-op. If it's in browser
+// or CLI mode, it escalates to desktop mode (starts Xvfb + window manager + VNC).
+// Also installs X11 screenshot tools (imagemagick, scrot) if missing.
+func (h *X11Handler) EnsureDesktopMode(ctx context.Context, sandboxID string) error {
+	// Check if already in desktop mode — idempotent
+	if session, err := h.manager.GetDesktopSession(sandboxID); err == nil && session.Mode == "desktop" {
+		return nil
+	}
+
+	h.logger.Info("auto-escalating sandbox to desktop mode", zap.String("sandbox_id", sandboxID))
+
+	// Install X11 screenshot tools if missing (apt is cached, fast on 2nd call)
+	_, _ = h.manager.ExecInSandbox(ctx, sandboxID, []string{
+		"bash", "-c",
+		"dpkg -l | grep -q imagemagick || (apt-get update -qq && apt-get install -y -qq imagemagick scrot xdotool 2>/dev/null) || true",
+	})
+
+	_, err := h.manager.EnableDesktopMode(ctx, sandboxID)
+	if err != nil {
+		return fmt.Errorf("failed to enable desktop mode for %s: %w", sandboxID, err)
+	}
+	return nil
 }
 
 // exec runs a command in the sandbox with DISPLAY set.
