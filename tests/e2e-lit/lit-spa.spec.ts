@@ -243,3 +243,87 @@ test.describe('Lit SPA — scheduler expand/collapse', () => {
     await expect(page.locator('.job-list')).not.toBeAttached();
   });
 });
+
+test.describe('Lit SPA — conversation history sidebar', () => {
+  test('shows empty state when no conversations', async ({ page }) => {
+    await page.route('**/api/pux/conversations**', route =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+    );
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    await expect(page.locator('.sidebar-chat-history .empty')).toBeVisible();
+    await expect(page.locator('text=No conversations yet')).toBeVisible();
+  });
+
+  test('renders conversation list from API', async ({ page }) => {
+    await page.route('**/api/pux/conversations**', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { project: 'test', agentId: 'a1', title: 'Build a website', lastMessage: 'Sure I can help', lastAt: new Date().toISOString(), messageCount: 5 },
+          { project: 'test', agentId: 'a2', title: 'Fix the bug', lastMessage: 'Fixed in commit abc', lastAt: new Date().toISOString(), messageCount: 3 },
+        ]),
+      })
+    );
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    const convs = page.locator('.conv');
+    await expect(convs).toHaveCount(2);
+    await expect(convs.nth(0).locator('.conv-title')).toHaveText('Build a website');
+    await expect(convs.nth(1).locator('.conv-title')).toHaveText('Fix the bug');
+  });
+
+  test('clicking conversation loads history into chat', async ({ page }) => {
+    await page.route('**/api/pux/conversations**', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { project: 'test', agentId: 'a1', title: 'Hello chat', lastMessage: 'Hi there', lastAt: new Date().toISOString(), messageCount: 2 },
+        ]),
+      })
+    );
+    await page.route('**/api/pux/history**', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { role: 'user', content: 'Hello' },
+          { role: 'assistant', content: 'Hi there!' },
+        ]),
+      })
+    );
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    // Click the conversation
+    await page.locator('.conv').first().click();
+    await page.waitForTimeout(300);
+    // Chat panel should now show the loaded messages
+    const msgs = page.locator('.msg');
+    await expect(msgs).toHaveCount(2);
+    await expect(msgs.nth(0)).toHaveClass(/user/);
+    await expect(msgs.nth(1)).toHaveClass(/assistant/);
+  });
+
+  test('active conversation is highlighted', async ({ page }) => {
+    await page.route('**/api/pux/conversations**', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { project: 'test', agentId: 'a1', title: 'First', lastMessage: 'msg', lastAt: new Date().toISOString(), messageCount: 1 },
+          { project: 'test', agentId: 'a2', title: 'Second', lastMessage: 'msg2', lastAt: new Date().toISOString(), messageCount: 1 },
+        ]),
+      })
+    );
+    await page.route('**/api/pux/history**', route =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+    );
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    await page.locator('.conv').nth(1).click();
+    await expect(page.locator('.conv.active')).toHaveCount(1);
+    await expect(page.locator('.conv.active .conv-title')).toHaveText('Second');
+  });
+});

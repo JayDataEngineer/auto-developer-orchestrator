@@ -314,4 +314,23 @@ export class ChatPanel extends LitElement {
 			if (el) el.scrollTop = el.scrollHeight;
 		});
 	}
+
+	/** Load conversation history from backend (called by parent on sidebar click) */
+	loadHistory(msgs: any[]) {
+		// Reset state and rebuild from history
+		this.chatState = new ChatState();
+		this.accText = "";
+		this.accThinking = "";
+
+		for (const m of msgs) {
+			const role = m.role === "user" ? "user" : "assistant";
+			const text = m.content || "";
+			this.chatState.messages.push({
+				role,
+				text,
+				tools: [],
+			});
+		}
+		this.syncFromState();
+	}
 }

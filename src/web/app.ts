@@ -18,10 +18,19 @@
  */
 
 import { LitElement, html, css } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import "./components/chat-panel.js";
 import "./components/browser-panel.js";
 import "./components/scheduler-panel.js";
+
+interface ConversationSummary {
+	project: string;
+	agentId: string;
+	title: string;
+	lastMessage: string;
+	lastAt: string;
+	messageCount: number;
+}
 
 @customElement("pux-app")
 export class PuxApp extends LitElement {
@@ -55,6 +64,16 @@ export class PuxApp extends LitElement {
 			text-align: center;
 			padding: 24px 8px;
 		}
+		.conv {
+			padding: 8px;
+			border-bottom: 1px solid var(--border);
+			cursor: pointer;
+		}
+		.conv:hover { background: var(--border); }
+		.conv.active { background: var(--border); border-left: 2px solid var(--accent); }
+		.conv .conv-title { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+		.conv .conv-preview { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+		.conv .conv-meta { font-size: 10px; color: var(--dim); margin-top: 2px; }
 		.sidebar-bottom {
 			border-top: 1px solid var(--border);
 			flex-shrink: 0;
@@ -102,6 +121,11 @@ export class PuxApp extends LitElement {
 
 	@state() private sidebarWidth = 220;
 	@state() private browserHeight = 220;
+	@state() private conversations: ConversationSummary[] = [];
+	@state() private activeAgentId = "";
+	@property() serverUrl = "";
+	@property() project = "ts-tui-pi";
+	private pollTimer: ReturnType<typeof setInterval> | undefined;
 
 	render() {
 		return html`
@@ -110,10 +134,20 @@ export class PuxApp extends LitElement {
 					<span class="name">Pux</span>
 				</div>
 				<div class="sidebar-chat-history">
-					<div class="empty">Sessions appear here</div>
+					${this.conversations.length === 0
+						? html`<div class="empty">No conversations yet</div>`
+						: this.conversations.map(c => html`
+							<div class="conv ${c.agentId === this.activeAgentId ? 'active' : ''}"
+								@click=${() => this.loadConversation(c)}>
+								<div class="conv-title">${c.title || c.lastMessage.slice(0, 40) || 'Untitled'}</div>
+								<div class="conv-preview">${c.lastMessage.slice(0, 60)}</div>
+								<div class="conv-meta">${c.messageCount} msgs · ${this.fmtTime(c.lastAt)}</div>
+							</div>
+						`)
+					}
 				</div>
 				<div class="sidebar-bottom">
-					<scheduler-panel></scheduler-panel>
+					<scheduler-panel .serverUrl=${this.serverUrl}></scheduler-panel>
 				</div>
 			</div>
 			<div class="resize-h" @mousedown=${this.startH}></div>
@@ -123,7 +157,7 @@ export class PuxApp extends LitElement {
 				</div>
 				<div class="resize-v" @mousedown=${this.startV}></div>
 				<div class="chat-area">
-					<chat-panel></chat-panel>
+					<chat-panel id="chat" .serverUrl=${this.serverUrl} .project=${this.project}></chat-panel>
 				</div>
 			</div>
 		`;
@@ -167,5 +201,60 @@ export class PuxApp extends LitElement {
 		};
 		document.addEventListener("mousemove", move);
 		document.addEventListener("mouseup", up);
+	}
+
+	connectedCallback() {
+		super.connectedCallback();
+		this.fetchConversations();
+		this.pollTimer = setInterval(() => this.fetchConversations(), 10000);
+	}
+
+	disconnectedCallback() {
+		super.disconnectedCallback();
+		if (this.pollTimer) clearInterval(this.pollTimer);
+	}
+
+	private async fetchConversations() {
+		try {
+			const url = `${this.serverUrl || ""}/api/pux/conversations?project=${encodeURIComponent(this.project)}`;
+			const res = await fetch(url);
+			if (!res.ok) return;
+			const data = await res.json();
+			this.conversations = data.map((s: any) => ({
+				project: s.project || "",
+				agentId: s.agentId || "",
+				title: s.title || s.lastMessage?.slice(0, 60) || "Untitled",
+				lastMessage: s.lastMessage || "",
+				lastAt: s.lastAt || "",
+				messageCount: s.messageCount || 0,
+			}));
+		} catch { /* backend not running */ }
+	}
+
+	private async loadConversation(c: ConversationSummary) {
+		this.activeAgentId = c.agentId;
+		try {
+			const url = `${this.serverUrl || ""}/api/pux/history?project=${encodeURIComponent(c.project)}&agentId=${encodeURIComponent(c.agentId)}`;
+			const res = await fetch(url);
+			if (!res.ok) return;
+			const msgs = await res.json();
+			const chat = this.shadowRoot?.getElementById("chat") as any;
+			if (chat?.loadHistory) chat.loadHistory(msgs);
+		} catch { /* ignore */ }
+	}
+
+	private fmtTime(iso: string): string {
+		if (!iso) return "";
+		try {
+			const d = new Date(iso);
+			const now = new Date();
+			const diffMs = now.getTime() - d.getTime();
+			const diffMin = Math.floor(diffMs / 60000);
+			if (diffMin < 1) return "just now";
+			if (diffMin < 60) return `${diffMin}m ago`;
+			const diffHr = Math.floor(diffMin / 60);
+			if (diffHr < 24) return `${diffHr}h ago`;
+			return d.toLocaleDateString();
+		} catch { return ""; }
 	}
 }
