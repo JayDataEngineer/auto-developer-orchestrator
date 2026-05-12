@@ -104,12 +104,29 @@ export class ChatPanel extends LitElement {
 		`;
 	}
 
+	private accText = "";
+	private accThinking = "";
+
 	private async send() {
 		const text = this.inputText.trim();
 		if (!text || this.streaming) return;
 		this.inputText = "";
 		this.requestUpdate();
 
+		// Emit user message into ChatState (same lifecycle as PuxAgentSession)
+		this.chatState.handleEvent({
+			type: "message_start",
+			message: { role: "user", content: [{ type: "text", text }] },
+		} as any);
+		// Emit assistant message start
+		this.chatState.handleEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] },
+		} as any);
+		this.syncFromState();
+
+		this.accText = "";
+		this.accThinking = "";
 		this.abortCtrl = new AbortController();
 
 		try {
@@ -156,7 +173,6 @@ export class ChatPanel extends LitElement {
 			}
 		} catch (err: any) {
 			if (err.name !== "AbortError") {
-				// Push error into shared ChatState
 				this.chatState.handleEvent({
 					type: "message_end",
 					message: {
@@ -173,26 +189,22 @@ export class ChatPanel extends LitElement {
 		}
 	}
 
-	/** Map SSE events to ChatState — same event types PuxAgentSession uses */
+	/** Map SSE events to ChatState — accumulate deltas like PuxAgentSession does */
 	private handleSSE(eventType: string, payload: any) {
 		switch (eventType) {
 			case "text_delta":
+				this.accText += payload.text || "";
 				this.chatState.handleEvent({
 					type: "message_update",
-					message: {
-						role: "assistant",
-						content: [{ type: "text", text: (payload.text || "") }],
-					},
+					message: { role: "assistant", content: [{ type: "text", text: this.accText }] },
 				} as any);
 				break;
 
 			case "thinking_delta":
+				this.accThinking += payload.text || "";
 				this.chatState.handleEvent({
 					type: "message_update",
-					message: {
-						role: "assistant",
-						content: [{ type: "thinking", thinking: (payload.text || "") }],
-					},
+					message: { role: "assistant", content: [{ type: "thinking", thinking: this.accThinking }] },
 				} as any);
 				break;
 
