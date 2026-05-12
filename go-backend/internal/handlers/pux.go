@@ -309,7 +309,7 @@ func (h *PuxHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
 
 // Compact triggers a manual context compaction for the given agent session.
 // This is a lightweight operation — it clears old tool results (micro-compact).
-// Full LLM-based compaction happens automatically via the CompactionHook during the agent loop.
+// Full LLM-based compaction happens automatically via the SummarizingContextManager during BuildContext.
 func (h *PuxHandler) Compact(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project string `json:"project"`

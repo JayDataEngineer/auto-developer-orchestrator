@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/adapters"
@@ -32,14 +33,17 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	key := compositeAgentKey(projectPath, req.AgentId)
 
 	// Resolve sandbox — find existing or auto-create
-	sandboxID := req.Project // use project name as default sandbox ID
+	// Sanitize sandbox ID: Docker requires [a-zA-Z0-9][a-zA-Z0-9_.-]
+	sandboxID := strings.ReplaceAll(req.Project, "/", "-")
+	sandboxID = strings.ReplaceAll(sandboxID, "_", "-")
+	sandboxID = strings.Trim(sandboxID, "-")
 	if h.sandboxMgr != nil {
 		if sb := h.sandboxMgr.FindSandboxByProject(projectPath); sb != nil {
 			sandboxID = sb.ID
 		} else {
 			// No sandbox for this project — auto-create one
 			sb, err := h.sandboxMgr.CreateSandbox(r.Context(), sandbox.SandboxOptions{
-				ID:          req.Project,
+				ID:          sandboxID,
 				ProjectPath: projectPath,
 				InitialMode: sandbox.ModeBrowser,
 			})
@@ -98,8 +102,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	// Approval handler via central approval manager (Respond endpoint)
 	approvalHandler := &adapters.ApprovalHandler{Mgr: h.approvalMgr}
 
-	// Use per-agentId session path for history continuity
-	sessionPath := fmt.Sprintf("%s/.pux/sessions/%s.jsonl", projectPath, req.AgentId)
+	// Use per-agentId session path for history continuity.
+	// Sessions live under ~/.pi/agent/sessions/ (always user-writable),
+	// not inside the project directory (which may have restricted perms).
+	home, _ := os.UserHomeDir()
+	sessionDir := filepath.Join(home, ".pi", "agent", "sessions", sandboxID)
+	sessionPath := filepath.Join(sessionDir, req.AgentId+".jsonl")
 
 	// Create event channel early so the ask_user tool can emit events to the TUI
 	events := make(chan core.AgentEvent, 256)

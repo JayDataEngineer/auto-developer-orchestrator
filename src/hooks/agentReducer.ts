@@ -40,6 +40,12 @@ export interface PuxAgentState {
   lastCommit: { message: string; branch: string } | null;
   lastPush: { branch: string } | null;
   pendingApproval: PuxApprovalRequest | null;
+  contextMetrics: {
+    tokens: number;
+    contextSize: number;
+    utilization: number;
+    compactionType: string | null;
+  } | null;
 }
 
 export const initialAgentState: PuxAgentState = {
@@ -63,6 +69,7 @@ export const initialAgentState: PuxAgentState = {
   lastCommit: null,
   lastPush: null,
   pendingApproval: null,
+  contextMetrics: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -252,8 +259,18 @@ export function agentReducer(
     }
 
     case 'compaction_start':
-    case 'compaction_end':
       return state;
+
+    case 'compaction_end':
+      return {
+        ...state,
+        contextMetrics: {
+          tokens: event.data.contextTokens ?? 0,
+          contextSize: event.data.contextSize ?? 0,
+          utilization: event.data.contextUtil ?? 0,
+          compactionType: event.data.compactionType ?? null,
+        },
+      };
 
     case 'error':
       return {

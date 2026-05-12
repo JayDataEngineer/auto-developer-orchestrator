@@ -63,6 +63,10 @@ export interface PuxAgentEnd {
 export interface PuxCompactionEnd {
   compactedMessages: number;
   keptMessages: number;
+  compactionType?: string;  // "micro" or "full"
+  contextTokens?: number;
+  contextSize?: number;
+  contextUtil?: number;     // 0-1 utilization ratio
 }
 
 export interface PuxError {
