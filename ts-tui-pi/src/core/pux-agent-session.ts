@@ -316,18 +316,36 @@ export class PuxAgentSession {
         break;
 
       case "thinking_delta": {
-        const content: any[] = [];
-        if (acc.accThinking || payload.text) content.push({ type: "thinking", thinking: (acc.accThinking || "") + (payload.text || "") });
-        if (acc.accText) content.push({ type: "text", text: acc.accText });
-        if (content.length > 0) this.emitMessageUpdate(content);
+        if (payload.agentName) {
+          // Sub-agent thinking — emit as dedicated event for SubAgentTracker
+          this.emit({
+            type: "subagent_thinking_delta",
+            agentName: payload.agentName,
+            text: payload.text || "",
+          } as any);
+        } else {
+          const content: any[] = [];
+          if (acc.accThinking || payload.text) content.push({ type: "thinking", thinking: (acc.accThinking || "") + (payload.text || "") });
+          if (acc.accText) content.push({ type: "text", text: acc.accText });
+          if (content.length > 0) this.emitMessageUpdate(content);
+        }
         break;
       }
 
       case "text_delta": {
-        const content: any[] = [];
-        if (acc.accThinking) content.push({ type: "thinking", thinking: acc.accThinking });
-        if (acc.accText || payload.text) content.push({ type: "text", text: (acc.accText || "") + (payload.text || "") });
-        if (content.length > 0) this.emitMessageUpdate(content);
+        if (payload.agentName) {
+          // Sub-agent text — emit as dedicated event for SubAgentTracker
+          this.emit({
+            type: "subagent_text_delta",
+            agentName: payload.agentName,
+            text: payload.text || "",
+          } as any);
+        } else {
+          const content: any[] = [];
+          if (acc.accThinking) content.push({ type: "thinking", thinking: acc.accThinking });
+          if (acc.accText || payload.text) content.push({ type: "text", text: (acc.accText || "") + (payload.text || "") });
+          if (content.length > 0) this.emitMessageUpdate(content);
+        }
         break;
       }
 

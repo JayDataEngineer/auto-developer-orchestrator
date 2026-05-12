@@ -313,11 +313,15 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 				finalText += evt.Data.Text
 			}
-			// Forward tool events to parent subscriber with agent context
-			if r.subscriber != nil && (evt.Type == core.EventTypeToolStart || evt.Type == core.EventTypeToolEnd || evt.Type == core.EventTypeToolUpdate) {
-				forwarded := evt
-				forwarded.Data.AgentName = agentName
-				core.SendEvent(r.subscriber, forwarded)
+			// Forward tool + text/thinking events to parent subscriber with agent context
+			if r.subscriber != nil {
+				switch evt.Type {
+				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
+					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+					forwarded := evt
+					forwarded.Data.AgentName = agentName
+					core.SendEvent(r.subscriber, forwarded)
+				}
 			}
 		}
 	}
@@ -425,11 +429,15 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 				finalText += evt.Data.Text
 			}
-			// Forward tool events to parent subscriber with agent context
-			if r.subscriber != nil && (evt.Type == core.EventTypeToolStart || evt.Type == core.EventTypeToolEnd || evt.Type == core.EventTypeToolUpdate) {
-				forwarded := evt
-				forwarded.Data.AgentName = agentName
-				core.SendEvent(r.subscriber, forwarded)
+			// Forward tool + text/thinking events to parent subscriber with agent context
+			if r.subscriber != nil {
+				switch evt.Type {
+				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
+					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+					forwarded := evt
+					forwarded.Data.AgentName = agentName
+					core.SendEvent(r.subscriber, forwarded)
+				}
 			}
 		}
 	}
@@ -628,10 +636,14 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 				finalText += evt.Data.Text
 			}
-			if r.subscriber != nil && (evt.Type == core.EventTypeToolStart || evt.Type == core.EventTypeToolEnd || evt.Type == core.EventTypeToolUpdate) {
-				forwarded := evt
-				forwarded.Data.AgentName = la.Role
-				core.SendEvent(r.subscriber, forwarded)
+			if r.subscriber != nil {
+				switch evt.Type {
+				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
+					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+					forwarded := evt
+					forwarded.Data.AgentName = la.Role
+					core.SendEvent(r.subscriber, forwarded)
+				}
 			}
 		}
 	}

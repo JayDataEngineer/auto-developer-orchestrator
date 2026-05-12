@@ -40,15 +40,23 @@ func writeSSE(w http.ResponseWriter, eventType string, data interface{}, canFlus
 func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 	switch event.Type {
 	case llamaeng.EventTypeTextDelta:
+		data := map[string]interface{}{"text": event.Data.Text}
+		if event.Data.AgentName != "" {
+			data["agentName"] = event.Data.AgentName
+		}
 		return &sseEvent{
 			Type: "text_delta",
-			Data: map[string]string{"text": event.Data.Text},
+			Data: data,
 		}
 
 	case llamaeng.EventTypeThinkingDelta:
+		data := map[string]interface{}{"text": event.Data.Text}
+		if event.Data.AgentName != "" {
+			data["agentName"] = event.Data.AgentName
+		}
 		return &sseEvent{
 			Type: "thinking_delta",
-			Data: map[string]string{"text": event.Data.Text},
+			Data: data,
 		}
 
 	case llamaeng.EventTypeToolStart:

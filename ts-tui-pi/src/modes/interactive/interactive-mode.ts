@@ -50,6 +50,8 @@ import {
 } from "../../config.js";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
+import { SubAgentTracker } from "../../core/sub-agent-tracker.js";
+import { SubAgentDetailOverlay } from "./components/sub-agent-detail.js";
 import type {
 	ExtensionContext,
 	ExtensionRunner,
@@ -167,6 +169,8 @@ export class InteractiveMode {
 	private onInputCallback?: (text: string) => void;
 	private loadingAnimation: Loader | undefined = undefined;
 	private pendingWorkingMessage: string | undefined = undefined;
+	private subAgentTracker = new SubAgentTracker();
+	private subAgentDetailHandle: any = undefined;
 	private readonly defaultWorkingMessage = "Working...";
 	private readonly defaultHiddenThinkingLabel = "Thinking...";
 	private hiddenThinkingLabel = this.defaultHiddenThinkingLabel;
@@ -2010,6 +2014,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
+		this.defaultEditor.onAction("app.subagent.detail", () => this.showSubAgentDetail());
 
 		// Global debug handler on TUI (works regardless of focus)
 		this.ui.onDebug = () => this.handleDebugCommand();
@@ -2260,6 +2265,9 @@ export class InteractiveMode {
 		if (!this.isInitialized) {
 			await this.init();
 		}
+
+		// Route sub-agent events to tracker
+		this.subAgentTracker.onEvent(event);
 
 		this.footer.invalidate();
 
@@ -5276,5 +5284,79 @@ export class InteractiveMode {
 			this.ui.stop();
 			this.isInitialized = false;
 		}
+	}
+
+	// ── Sub-agent detail view ──────────────────────────────────────
+
+	private showSubAgentDetail(): void {
+		const agents = this.subAgentTracker.getAllAgents();
+		if (agents.length === 0) {
+			this.showStatus("No sub-agents in this session");
+			return;
+		}
+
+		// If only one agent, open directly
+		if (agents.length === 1) {
+			this.openSubAgentOverlay(agents[0]);
+			return;
+		}
+
+		// Multiple agents — show picker
+		const items = agents.map(a => ({
+			label: `${a.agentName} (${a.status}, ${a.toolCount} tools)`,
+			description: a.task.slice(0, 60),
+			value: a.agentName,
+		}));
+
+		const t = theme;
+		const list = new SelectList(items, Math.min(items.length + 2, 8), {
+			selectedPrefix: (text: string) => t.fg("accent", text),
+			selectedText: (text: string) => t.fg("accent", text),
+			description: (text: string) => t.fg("dim", text),
+			scrollInfo: (text: string) => t.fg("dim", text),
+			noMatch: (text: string) => t.fg("dim", text),
+		});
+
+		const handle = this.ui.showOverlay(list, {
+			position: "bottom",
+			borderStyle: "single",
+			borderColor: t.getAccentColor?.() ?? "\x1b[36m",
+			title: "Sub-agents",
+		});
+
+		list.onSelect = (item: any) => {
+			handle.close();
+			const agent = this.subAgentTracker.getAgent(item.value);
+			if (agent) this.openSubAgentOverlay(agent);
+		};
+		list.onCancel = () => handle.close();
+	}
+
+	private openSubAgentOverlay(state: any): void {
+		const overlay = new SubAgentDetailOverlay(state, theme);
+		const handle = this.ui.showOverlay(overlay, {
+			position: "center",
+			width: "80%",
+			maxHeight: "70%",
+			borderStyle: "single",
+			borderColor: theme.getAccentColor?.() ?? "\x1b[36m",
+			title: `Sub-agent: ${state.agentName}`,
+		});
+
+		this.subAgentDetailHandle = handle;
+
+		// Subscribe to tracker updates to refresh the overlay
+		const unsub = this.subAgentTracker.onChange(() => {
+			const updated = this.subAgentTracker.getAgent(state.agentName);
+			if (updated) overlay.update(updated);
+		});
+
+		// Clean up on close
+		const originalClose = handle.close.bind(handle);
+		handle.close = () => {
+			unsub();
+			this.subAgentDetailHandle = undefined;
+			originalClose();
+		};
 	}
 }

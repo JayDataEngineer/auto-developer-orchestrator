@@ -40,6 +40,7 @@ export interface AppKeybindings {
 	"app.session.delete": true;
 	"app.session.deleteNoninvasive": true;
 	"app.task.background": true;
+	"app.subagent.detail": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
@@ -136,6 +137,10 @@ export const KEYBINDINGS = {
 		defaultKeys: "ctrl+b",
 		description: "Send current task to background",
 	},
+	"app.subagent.detail": {
+		defaultKeys: "ctrl+j",
+		description: "Open sub-agent detail view",
+	},
 } as const satisfies KeybindingDefinitions;
 
 const KEYBINDING_NAME_MIGRATIONS = {
@@ -199,6 +204,7 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	deleteSession: "app.session.delete",
 	deleteSessionNoninvasive: "app.session.deleteNoninvasive",
 	taskBackground: "app.task.background",
+	subagentDetail: "app.subagent.detail",
 } as const satisfies Record<string, Keybinding>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
