@@ -254,5 +254,5 @@ func (t *LoadSpilledTool) Execute(_ context.Context, args map[string]any) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"ref": ref, "content": content}, nil
+	return content, nil
 }
