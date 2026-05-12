@@ -2103,6 +2103,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/copy-session") {
+				await this.handleCopySessionCommand();
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/name" || text.startsWith("/name ")) {
 				this.handleNameCommand(text);
 				this.editor.setText("");
@@ -4792,6 +4797,42 @@ export class InteractiveMode {
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
 		}
+	}
+
+	private async handleCopySessionCommand(): Promise<void> {
+		const messages = this.session.agent.state.messages;
+		if (!messages || messages.length === 0) {
+			this.showError("No messages in this session yet.");
+			return;
+		}
+
+		const lines: string[] = [];
+		for (const msg of messages) {
+			const role = msg.role === "user" ? "User" : msg.role === "assistant" ? "Pux" : msg.role;
+			const text = this.extractTextFromMessage(msg);
+			if (!text) continue;
+			lines.push(`--- ${role} ---`);
+			lines.push(text);
+			lines.push("");
+		}
+
+		try {
+			await copyToClipboard(lines.join("\n"));
+			this.showStatus(`Copied full session (${messages.length} messages) to clipboard`);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private extractTextFromMessage(msg: any): string {
+		if (typeof msg.content === "string") return msg.content;
+		if (Array.isArray(msg.content)) {
+			return msg.content
+				.filter((c: any) => c.type === "text" && c.text)
+				.map((c: any) => c.text)
+				.join("\n");
+		}
+		return "";
 	}
 
 	private handleNameCommand(text: string): void {
