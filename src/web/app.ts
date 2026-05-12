@@ -1,9 +1,20 @@
 /**
- * Pux Web SPA — single page, all panels visible at once.
+ * Pux Web SPA — sidebar + main layout.
  *
- * Layout: chat fills the main area, browser panel slides in from the
- * right when a sandbox is active, scheduler lives in a collapsible
- * bottom drawer. No tabs — everything on one page.
+ * Layout (from design plan):
+ *
+ * ┌──────────┬───────────────────────────────────────────┐
+ * │  Pux     │  Browser / Desktop Visual (top strip)     │
+ * │          ├───────────────────────────────────────────┤
+ * │  Chat    │                                           │
+ * │  History │  Chat messages + tool calls               │
+ * │          │  (scrollable, fills remaining space)      │
+ * │          ├───────────────────────────────────────────┤
+ * │  ⚙ Jobs  │  Input: ask me anything...                │
+ * └──────────┴───────────────────────────────────────────┘
+ *
+ * Left sidebar: branding + scheduler summary
+ * Right main:   browser visual (top) → chat (middle) → input (bottom)
  */
 
 import { LitElement, html, css } from "lit";
@@ -15,43 +26,85 @@ import "./components/scheduler-panel.js";
 @customElement("pux-app")
 export class PuxApp extends LitElement {
 	static styles = css`
-		:host { display: flex; flex-direction: column; height: 100vh; }
-		.topbar { height: 36px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; gap: 8px; }
-		.topbar .brand { font-weight: 700; font-size: 13px; color: var(--accent); }
-		.topbar .spacer { flex: 1; }
-		.topbar button { background: none; border: 1px solid var(--border); color: var(--dim); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 11px; }
-		.topbar button:hover { color: var(--text); background: var(--border); }
-		.topbar button.active { color: var(--accent); border-color: var(--accent); }
-		.body { flex: 1; display: flex; overflow: hidden; }
-		.chat-area { flex: 1; min-width: 0; }
-		.browser-area { width: 380px; border-left: 1px solid var(--border); flex-shrink: 0; transition: width 0.2s; overflow: hidden; }
-		.browser-area.hidden { width: 0; border: none; }
-		.drawer { border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0; overflow: hidden; transition: height 0.2s; }
-		.drawer.open { height: 240px; }
-		.drawer.closed { height: 0; }
-	`;
+		:host { display: flex; height: 100vh; overflow: hidden; }
 
-	@state() private showBrowser = false;
-	@state() private showScheduler = false;
+		/* Left sidebar */
+		.sidebar {
+			width: 220px;
+			flex-shrink: 0;
+			display: flex;
+			flex-direction: column;
+			border-right: 1px solid var(--border);
+			background: var(--surface);
+		}
+		.sidebar-brand {
+			height: 36px;
+			display: flex;
+			align-items: center;
+			padding: 0 14px;
+			border-bottom: 1px solid var(--border);
+			flex-shrink: 0;
+		}
+		.sidebar-brand .name { font-weight: 700; font-size: 14px; color: var(--accent); }
+		.sidebar-chat-history {
+			flex: 1;
+			overflow-y: auto;
+			padding: 8px;
+		}
+		.sidebar-chat-history .empty {
+			color: var(--dim);
+			font-size: 12px;
+			text-align: center;
+			padding: 24px 8px;
+		}
+		.sidebar-bottom {
+			border-top: 1px solid var(--border);
+			flex-shrink: 0;
+		}
+
+		/* Right main area */
+		.main {
+			flex: 1;
+			min-width: 0;
+			display: flex;
+			flex-direction: column;
+		}
+
+		/* Browser strip at top of main */
+		.browser-strip {
+			height: 220px;
+			flex-shrink: 0;
+			border-bottom: 1px solid var(--border);
+			overflow: hidden;
+		}
+
+		/* Chat fills remaining space */
+		.chat-area {
+			flex: 1;
+			min-height: 0;
+		}
+	`;
 
 	render() {
 		return html`
-			<div class="topbar">
-				<span class="brand">Pux</span>
-				<div class="spacer"></div>
-				<button class="${this.showBrowser ? "active" : ""}" @click=${() => { this.showBrowser = !this.showBrowser; }}>Browser</button>
-				<button class="${this.showScheduler ? "active" : ""}" @click=${() => { this.showScheduler = !this.showScheduler; }}>Scheduler</button>
+			<div class="sidebar">
+				<div class="sidebar-brand">
+					<span class="name">Pux</span>
+				</div>
+				<div class="sidebar-chat-history">
+					<div class="empty">Sessions appear here</div>
+				</div>
+				<div class="sidebar-bottom">
+					<scheduler-panel></scheduler-panel>
+				</div>
 			</div>
-			<div class="body">
+			<div class="main">
+				<div class="browser-strip">
+					<browser-panel></browser-panel>
+				</div>
 				<div class="chat-area">
 					<chat-panel></chat-panel>
 				</div>
-				<div class="browser-area ${this.showBrowser ? "" : "hidden"}">
-					<browser-panel></browser-panel>
-				</div>
-			</div>
-			<div class="drawer ${this.showScheduler ? "open" : "closed"}">
-				<scheduler-panel></scheduler-panel>
 			</div>
 		`;
 	}

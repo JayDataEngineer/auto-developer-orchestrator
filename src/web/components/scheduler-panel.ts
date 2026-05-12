@@ -8,42 +8,42 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { SchedulerClient } from "../../../ts-tui-pi/extensions/pux-scheduler/api.js";
-import { formatSchedule } from "../../../ts-tui-pi/extensions/pux-scheduler/render.js";
 import type { SchedulerJob } from "../../../ts-tui-pi/extensions/pux-scheduler/types.js";
 
 @customElement("scheduler-panel")
 export class SchedulerPanel extends LitElement {
 	static styles = css`
-		:host { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
-		.header { height: 32px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--surface); gap: 8px; flex-shrink: 0; }
-		.header .title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); }
-		.header .count { font-size: 12px; color: var(--accent); }
-		.header button { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--dim); border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; }
-		.header button:hover { color: var(--text); background: var(--border); }
-		.jobs { flex: 1; overflow-y: auto; padding: 8px; }
-		.job { display: flex; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; gap: 10px; cursor: pointer; }
-		.job:hover { background: var(--surface); }
-		.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-		.dot.idle { background: var(--success); }
-		.dot.running { background: var(--warn); animation: pulse 1s infinite; }
-		.dot.error { background: var(--error); }
-		.dot.disabled { background: var(--dim); }
+		:host { display: block; background: var(--surface); }
+		.scheduler-summary {
+			padding: 8px 12px;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			cursor: pointer;
+		}
+		.scheduler-summary:hover { background: var(--border); }
+		.scheduler-summary .icon { font-size: 13px; }
+		.scheduler-summary .label { font-size: 12px; color: var(--dim); flex: 1; }
+		.scheduler-summary .count { font-size: 12px; color: var(--accent); font-weight: 600; }
+		.scheduler-summary .running-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); animation: pulse 1s infinite; }
 		@keyframes pulse { 50% { opacity: 0.4; } }
-		.job-info { flex: 1; min-width: 0; }
-		.job-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-		.job-meta { font-size: 11px; color: var(--dim); margin-top: 2px; }
-		.job-actions { display: flex; gap: 4px; }
-		.job-actions button { background: none; border: 1px solid var(--border); color: var(--dim); border-radius: 4px; padding: 3px 6px; cursor: pointer; font-size: 11px; }
-		.job-actions button:hover { color: var(--text); background: var(--border); }
-		.job-actions button.run:hover { color: var(--success); border-color: var(--success); }
-		.error-banner { padding: 8px 12px; background: rgba(239,68,68,0.1); color: var(--error); font-size: 12px; }
-		.empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 13px; }
+		.job-list { max-height: 180px; overflow-y: auto; border-top: 1px solid var(--border); }
+		.job { display: flex; align-items: center; padding: 6px 12px; gap: 8px; font-size: 12px; }
+		.job:hover { background: var(--border); }
+		.job .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+		.job .dot.idle { background: var(--success); }
+		.job .dot.running { background: var(--warn); }
+		.job .dot.error { background: var(--error); }
+		.job .dot.disabled { background: var(--dim); }
+		.job .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+		.job .status-text { color: var(--dim); font-size: 11px; }
 	`;
 
 	@property() serverUrl = "";
 	@state() private jobs: SchedulerJob[] = [];
 	@state() private error = "";
 	@state() private loading = true;
+	@state() private expanded = false;
 	private client!: SchedulerClient;
 	private pollTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -70,56 +70,31 @@ export class SchedulerPanel extends LitElement {
 		}
 	}
 
-	private async triggerJob(job: SchedulerJob) {
-		try {
-			await this.client.triggerJob(job.id);
-			this.fetchJobs();
-		} catch (err: any) {
-			this.error = err.message;
-		}
-	}
-
-	private async deleteJob(job: SchedulerJob) {
-		try {
-			await this.client.deleteJob(job.id);
-			this.fetchJobs();
-		} catch (err: any) {
-			this.error = err.message;
-		}
-	}
-
 	render() {
+		const running = this.jobs.filter(j => j.status === "running").length;
 		return html`
-			${this.error ? html`<div class="error-banner">${this.error}</div>` : nothing}
-			<div class="header">
-				<span class="title">Scheduled Jobs</span>
-				<span class="count">${this.jobs.length}</span>
-				<button @click=${this.fetchJobs}>Refresh</button>
+			<div class="scheduler-summary" @click=${() => { this.expanded = !this.expanded; }}>
+				<span class="icon">⚙</span>
+				<span class="label">Jobs</span>
+				${running > 0 ? html`<span class="running-dot"></span>` : nothing}
+				<span class="count">${this.jobs.length} total</span>
 			</div>
-			<div class="jobs">
-				${this.loading && this.jobs.length === 0
-					? html`<div class="empty">Loading...</div>`
-					: this.jobs.length === 0
-						? html`<div class="empty">No jobs. Create one with the CLI: orch scheduler create</div>`
-						: this.jobs.map(j => this.renderJob(j))
-				}
-			</div>
-		`;
-	}
-
-	private renderJob(job: SchedulerJob) {
-		return html`
-			<div class="job">
-				<div class="dot ${job.status}"></div>
-				<div class="job-info">
-					<div class="job-name">${job.name}</div>
-					<div class="job-meta">${formatSchedule(job)} · ${job.status}${job.lastError ? " · error" : ""}</div>
+			${this.expanded ? html`
+				<div class="job-list">
+					${this.loading && this.jobs.length === 0
+						? html`<div class="job"><span style="color:var(--dim)">Loading...</span></div>`
+						: this.jobs.length === 0
+							? html`<div class="job"><span style="color:var(--dim)">No jobs</span></div>`
+							: this.jobs.map(j => html`
+								<div class="job">
+									<div class="dot ${j.status}"></div>
+									<span class="name">${j.name}</span>
+									<span class="status-text">${j.status}</span>
+								</div>
+							`)
+					}
 				</div>
-				<div class="job-actions">
-					<button class="run" @click=${() => this.triggerJob(job)} ?disabled=${job.status === "running"}>Run</button>
-					<button @click=${() => this.deleteJob(job)}>Del</button>
-				</div>
-			</div>
+			` : nothing}
 		`;
 	}
 }

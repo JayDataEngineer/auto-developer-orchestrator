@@ -1,12 +1,25 @@
 /**
  * Lit SPA E2E tests — verify shared code renders in the browser.
  *
- * These test that:
- * 1. The page loads (no import/compile errors)
+ * Layout (sidebar + main):
+ *
+ * ┌──────────┬───────────────────────────────────────────┐
+ * │  Pux     │  Browser / Desktop Visual (top strip)     │
+ * │          ├───────────────────────────────────────────┤
+ * │  Chat    │                                           │
+ * │  History │  Chat messages + tool calls               │
+ * │          │  (scrollable, fills remaining space)      │
+ * │          ├───────────────────────────────────────────┤
+ * │  ⚙ Jobs  │  Input: ask me anything...                │
+ * └──────────┴───────────────────────────────────────────┘
+ *
+ * Tests verify:
+ * 1. Page loads without errors
  * 2. Custom elements render (pux-app, chat-panel, scheduler-panel, browser-panel)
- * 3. Chat input works
- * 4. Scheduler panel loads
- * 5. Browser/Scheduler toggles work
+ * 3. Sidebar + main layout structure
+ * 4. Chat input works
+ * 5. Scheduler panel loads in sidebar
+ * 6. Browser panel loads in main area
  */
 
 import { test, expect } from '@playwright/test';
@@ -16,7 +29,6 @@ test.describe('Lit SPA — page load', () => {
     const errors: string[] = [];
     page.on('pageerror', err => errors.push(err.message));
     await page.goto('/');
-    // Wait for custom elements to define
     await page.waitForTimeout(1000);
     expect(errors).toEqual([]);
   });
@@ -47,44 +59,63 @@ test.describe('Lit SPA — page load', () => {
   });
 });
 
-test.describe('Lit SPA — toggle buttons', () => {
-  test('Browser toggle exists', async ({ page }) => {
+test.describe('Lit SPA — sidebar + main layout', () => {
+  test('sidebar exists with correct structure', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('button:has-text("Browser")')).toBeVisible();
+    await page.waitForTimeout(800);
+    const sidebar = page.locator('.sidebar');
+    await expect(sidebar).toBeAttached();
+    // Pux branding
+    await expect(sidebar.locator('.sidebar-brand')).toBeAttached();
+    // Chat history area
+    await expect(sidebar.locator('.sidebar-chat-history')).toBeAttached();
+    // Bottom section (scheduler)
+    await expect(sidebar.locator('.sidebar-bottom')).toBeAttached();
   });
 
-  test('Scheduler toggle exists', async ({ page }) => {
+  test('main area exists with correct structure', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('button:has-text("Scheduler")')).toBeVisible();
+    await page.waitForTimeout(800);
+    const main = page.locator('.main');
+    await expect(main).toBeAttached();
+    // Browser strip at top
+    await expect(main.locator('.browser-strip')).toBeAttached();
+    // Chat area below
+    await expect(main.locator('.chat-area')).toBeAttached();
   });
 
-  test('clicking Browser shows browser-panel', async ({ page }) => {
+  test('scheduler-panel is in sidebar bottom', async ({ page }) => {
     await page.goto('/');
-    // Browser area starts with .hidden class (width: 0)
-    const browserArea = page.locator('.browser-area');
-    await expect(browserArea).toHaveClass(/hidden/);
-    // Click Browser toggle
-    await page.locator('button:has-text("Browser")').click();
-    // Hidden class removed
-    await expect(browserArea).not.toHaveClass(/hidden/);
-    // Browser panel now visible inside
-    await expect(page.locator('browser-panel')).toBeAttached();
+    await page.waitForTimeout(800);
+    const scheduler = page.locator('.sidebar-bottom scheduler-panel');
+    await expect(scheduler).toBeAttached();
   });
 
-  test('clicking Scheduler shows scheduler-panel', async ({ page }) => {
+  test('browser-panel is in main browser strip', async ({ page }) => {
     await page.goto('/');
-    expect(await page.locator('scheduler-panel').isVisible()).toBe(false);
-    await page.locator('button:has-text("Scheduler")').click();
-    await expect(page.locator('scheduler-panel')).toBeVisible();
+    await page.waitForTimeout(800);
+    const browser = page.locator('.browser-strip browser-panel');
+    await expect(browser).toBeAttached();
   });
 
-  test('clicking Scheduler twice hides it', async ({ page }) => {
+  test('chat-panel is in main chat area', async ({ page }) => {
     await page.goto('/');
-    const btn = page.locator('button:has-text("Scheduler")');
-    await btn.click();
-    await expect(page.locator('scheduler-panel')).toBeVisible();
-    await btn.click();
-    await expect(page.locator('scheduler-panel')).not.toBeVisible();
+    await page.waitForTimeout(800);
+    const chat = page.locator('.chat-area chat-panel');
+    await expect(chat).toBeAttached();
+  });
+
+  test('sidebar is left of main (horizontal layout)', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    const sidebarBox = await page.locator('.sidebar').boundingBox();
+    const mainBox = await page.locator('.main').boundingBox();
+    expect(sidebarBox).toBeTruthy();
+    expect(mainBox).toBeTruthy();
+    // Sidebar right edge ≈ main left edge
+    expect(Math.abs(sidebarBox!.x + sidebarBox!.width - mainBox!.x)).toBeLessThan(2);
+    // Same top
+    expect(Math.abs(sidebarBox!.y - mainBox!.y)).toBeLessThan(2);
   });
 });
 
@@ -99,5 +130,29 @@ test.describe('Lit SPA — chat input', () => {
   test('empty state shows placeholder text', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('text=Send a message to start')).toBeVisible();
+  });
+});
+
+test.describe('Lit SPA — scheduler expand/collapse', () => {
+  test('clicking scheduler summary expands job list', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    const summary = page.locator('.scheduler-summary');
+    await expect(summary).toBeAttached();
+    // Click to expand
+    await summary.click();
+    // Job list should now be visible
+    await expect(page.locator('.job-list')).toBeAttached();
+  });
+
+  test('clicking scheduler summary twice collapses job list', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    const summary = page.locator('.scheduler-summary');
+    await summary.click();
+    await expect(page.locator('.job-list')).toBeAttached();
+    await summary.click();
+    // Job list removed from DOM
+    await expect(page.locator('.job-list')).not.toBeAttached();
   });
 });
