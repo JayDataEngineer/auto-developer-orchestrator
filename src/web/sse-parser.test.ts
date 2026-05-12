@@ -7,9 +7,8 @@
 
 import { describe, test, expect } from "bun:test";
 import { ChatState } from "../../ts-tui-pi/src/core/chat-state.js";
-import type { AgentSessionEvent } from "../../ts-tui-pi/src/core/agent-session.js";
 
-function emit(state: ChatState, event: AgentSessionEvent): void {
+function emit(state: ChatState, event: any): void {
 	state.handleEvent(event);
 }
 

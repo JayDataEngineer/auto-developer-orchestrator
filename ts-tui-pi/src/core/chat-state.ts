@@ -11,7 +11,6 @@
  *   // Read state.messages, state.streaming, etc.
  */
 
-import type { AgentSessionEvent } from "./agent-session.js";
 
 export interface ChatToolCall {
 	id: string;
@@ -38,7 +37,7 @@ export class ChatState {
 	private accThinking = "";
 	private toolIndex = new Map<string, ChatToolCall>();
 
-	handleEvent(event: AgentSessionEvent): void {
+	handleEvent(event: any): void {
 		switch (event.type) {
 			case "message_start": {
 				const msg = (event as any).message;

@@ -1,16 +1,22 @@
 /**
- * Chat panel — thin HTML render layer over PuxAgentSession + ChatState.
+ * Chat panel — uses ChatState from TUI core (shared code).
  *
- * Uses the exact same session and state accumulator as the TUI.
- * Only rendering differs (HTML vs terminal).
+ * ChatState is the shared event→message accumulator used by both TUI and web.
+ * The SSE transport is browser-native fetch (vs Node.js in TUI), but the
+ * state model and event types are identical.
+ *
+ * What's shared with TUI:
+ *   - ChatState (event accumulator)
+ *   - ChatMessage/ChatToolCall types
+ *   - AgentSessionEvent types
+ *
+ * What's browser-specific:
+ *   - SSE transport (fetch + ReadableStream)
  */
 
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state, query } from "lit/decorators.js";
-import { PuxAgentSession } from "../../../ts-tui-pi/src/core/pux-agent-session.js";
 import { ChatState } from "../../../ts-tui-pi/src/core/chat-state.js";
-import { SettingsManager } from "../../../ts-tui-pi/src/core/settings-manager.js";
-import type { AgentSessionEvent } from "../../../ts-tui-pi/src/core/agent-session.js";
 import type { ChatMessage, ChatToolCall } from "../../../ts-tui-pi/src/core/chat-state.js";
 
 @customElement("chat-panel")
@@ -51,30 +57,8 @@ export class ChatPanel extends LitElement {
 	@state() private inputText = "";
 	@query("input") private inputEl!: HTMLInputElement;
 
-	private session!: PuxAgentSession;
 	private chatState = new ChatState();
-
-	connectedCallback() {
-		super.connectedCallback();
-		const settings = SettingsManager.inMemory();
-		this.session = new PuxAgentSession(settings, {}, this.serverUrl, this.project, "");
-		this.session.subscribe((event: AgentSessionEvent) => {
-			this.chatState.handleEvent(event);
-			this.syncFromState();
-		});
-	}
-
-	disconnectedCallback() {
-		super.disconnectedCallback();
-		this.session.dispose();
-	}
-
-	private syncFromState() {
-		this.messages = [...this.chatState.messages];
-		this.streaming = this.chatState.streaming;
-		this.requestUpdate();
-		this.scrollToBottom();
-	}
+	private abortCtrl: AbortController | undefined;
 
 	render() {
 		return html`
@@ -120,12 +104,148 @@ export class ChatPanel extends LitElement {
 		`;
 	}
 
-	private send() {
+	private async send() {
 		const text = this.inputText.trim();
 		if (!text || this.streaming) return;
 		this.inputText = "";
 		this.requestUpdate();
-		this.session.prompt(text);
+
+		this.abortCtrl = new AbortController();
+
+		try {
+			const resp = await fetch(`${this.serverUrl}/api/pux/prompt`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ message: text, project: this.project }),
+				signal: this.abortCtrl.signal,
+			});
+
+			if (!resp.ok) throw new Error(`Backend ${resp.status}`);
+			if (!resp.body) throw new Error("No response body");
+
+			const reader = resp.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = "";
+			let currentEvent = "";
+
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+
+				buffer += decoder.decode(value, { stream: true });
+				const lines = buffer.split("\n");
+				buffer = lines.pop() || "";
+
+				for (const line of lines) {
+					const t = line.trimEnd();
+					if (t.startsWith("event: ")) {
+						currentEvent = t.slice(7).trim();
+					} else if (t.startsWith("data: ")) {
+						const raw = t.slice(6).trim();
+						if (raw === "[DONE]") { currentEvent = ""; continue; }
+						if (currentEvent) {
+							try {
+								const payload = JSON.parse(raw);
+								this.handleSSE(currentEvent, payload);
+							} catch {}
+						}
+						currentEvent = "";
+					}
+					if (t === "") currentEvent = "";
+				}
+			}
+		} catch (err: any) {
+			if (err.name !== "AbortError") {
+				// Push error into shared ChatState
+				this.chatState.handleEvent({
+					type: "message_end",
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: `Error: ${err.message}` }],
+						stopReason: "error",
+						errorMessage: err.message,
+					},
+				} as any);
+			}
+		} finally {
+			this.chatState.handleEvent({ type: "agent_end", messages: [] } as any);
+			this.syncFromState();
+		}
+	}
+
+	/** Map SSE events to ChatState — same event types PuxAgentSession uses */
+	private handleSSE(eventType: string, payload: any) {
+		switch (eventType) {
+			case "text_delta":
+				this.chatState.handleEvent({
+					type: "message_update",
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: (payload.text || "") }],
+					},
+				} as any);
+				break;
+
+			case "thinking_delta":
+				this.chatState.handleEvent({
+					type: "message_update",
+					message: {
+						role: "assistant",
+						content: [{ type: "thinking", thinking: (payload.text || "") }],
+					},
+				} as any);
+				break;
+
+			case "tool_execution_start":
+				this.chatState.handleEvent({
+					type: "tool_execution_start",
+					toolCallId: payload.toolId || `t_${Date.now()}`,
+					toolName: payload.toolName || "tool",
+					args: payload.args,
+				} as any);
+				break;
+
+			case "tool_execution_end":
+				this.chatState.handleEvent({
+					type: "tool_execution_end",
+					toolCallId: payload.toolId || "",
+					isError: !!payload.error,
+					result: payload.result,
+				} as any);
+				break;
+
+			case "agent_end":
+				this.chatState.handleEvent({
+					type: "message_end",
+					message: {
+						role: "assistant",
+						content: [],
+						stopReason: "stop",
+						usage: { input: Number(payload.input) || 0, output: Number(payload.output) || 0 },
+					},
+				} as any);
+				break;
+
+			case "error":
+				this.chatState.handleEvent({
+					type: "message_end",
+					message: {
+						role: "assistant",
+						content: [],
+						stopReason: "error",
+						errorMessage: payload.error || "Unknown error",
+					},
+				} as any);
+				break;
+		}
+		this.syncFromState();
+	}
+
+	private syncFromState() {
+		this.messages = [...this.chatState.messages];
+		this.streaming = this.chatState.streaming;
+		this.requestUpdate();
+		this.scrollToBottom();
 	}
 
 	private scrollToBottom() {
