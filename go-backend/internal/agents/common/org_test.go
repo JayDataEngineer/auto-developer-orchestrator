@@ -257,9 +257,9 @@ func TestLoadDREOrg(t *testing.T) {
 }
 
 func TestTechNoirOrg(t *testing.T) {
-	techNoirPath := "/home/ubuntu/Documents/programs/creative/tech-noir"
+	techNoirPath := "/home/ubuntu/Documents/projects/creative/tech-noir/pux-org"
 	if _, err := os.Stat(techNoirPath); os.IsNotExist(err) {
-		t.Skip("tech-noir not found at", techNoirPath)
+		t.Skip("tech-noir pux-org not found at", techNoirPath)
 	}
 
 	_, thisFile, _, _ := runtime.Caller(0)
