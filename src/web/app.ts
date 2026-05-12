@@ -51,8 +51,16 @@ export class PuxApp extends LitElement {
 			padding: 0 14px;
 			border-bottom: 1px solid var(--border);
 			flex-shrink: 0;
+			gap: 8px;
 		}
 		.sidebar-brand .name { font-weight: 700; font-size: 14px; color: var(--accent); }
+		.sidebar-brand .spacer { flex: 1; }
+		.btn-new {
+			background: none; border: 1px solid var(--border); border-radius: 6px;
+			color: var(--dim); font-size: 11px; padding: 2px 8px; cursor: pointer;
+			line-height: 18px; white-space: nowrap;
+		}
+		.btn-new:hover { border-color: var(--accent); color: var(--accent); }
 		.sidebar-chat-history {
 			flex: 1;
 			overflow-y: auto;
@@ -132,6 +140,8 @@ export class PuxApp extends LitElement {
 			<div class="sidebar" style="width:${this.sidebarWidth}px">
 				<div class="sidebar-brand">
 					<span class="name">Pux</span>
+					<span class="spacer"></span>
+					<button class="btn-new" @click=${this.newChat}>+ New</button>
 				</div>
 				<div class="sidebar-chat-history">
 					${this.conversations.length === 0
@@ -241,6 +251,12 @@ export class PuxApp extends LitElement {
 			const chat = this.shadowRoot?.getElementById("chat") as any;
 			if (chat?.loadHistory) chat.loadHistory(msgs);
 		} catch { /* ignore */ }
+	}
+
+	private newChat() {
+		this.activeAgentId = "";
+		const chat = this.shadowRoot?.getElementById("chat") as any;
+		if (chat?.reset) chat.reset();
 	}
 
 	private fmtTime(iso: string): string {

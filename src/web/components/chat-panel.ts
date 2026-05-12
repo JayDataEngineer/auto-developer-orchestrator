@@ -49,6 +49,17 @@ export class ChatPanel extends LitElement {
 		.streaming-cursor { display: inline-block; width: 6px; height: 14px; background: var(--accent); animation: blink 1s infinite; vertical-align: text-bottom; margin-left: 2px; }
 		@keyframes blink { 50% { opacity: 0; } }
 		.empty { flex:1; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; }
+		.slash-list {
+			position: absolute; bottom: 100%; left: 12px; right: 12px;
+			background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+			max-height: 240px; overflow-y: auto; z-index: 10;
+			box-shadow: 0 -4px 12px rgba(0,0,0,0.3);
+		}
+		.slash-item { padding: 6px 12px; cursor: pointer; display: flex; gap: 10px; font-size: 13px; }
+		.slash-item:hover, .slash-item.active { background: var(--border); }
+		.slash-item .cmd { color: var(--accent); font-weight: 600; min-width: 90px; }
+		.slash-item .desc { color: var(--dim); }
+		.input-wrap { position: relative; flex: 1; }
 		.subagent { font-size: 11px; color: var(--dim); padding: 4px 0 4px 12px; border-left: 2px solid var(--accent); margin: 4px 0; }
 		.subagent .name { color: var(--accent); font-weight: 600; }
 		.subagent .task { color: var(--text); }
@@ -60,12 +71,26 @@ export class ChatPanel extends LitElement {
 	@state() private messages: ChatMessage[] = [];
 	@state() private streaming = false;
 	@state() private inputText = "";
+	@state() private slashOpen = false;
+	@state() private slashIndex = 0;
 	@query("input") private inputEl!: HTMLInputElement;
+
+	private slashFilter = "";
 
 	private chatState = new ChatState();
 	private abortCtrl: AbortController | undefined;
 
+	private static COMMANDS = [
+		{ name: "new", desc: "Start a new session" },
+		{ name: "compact", desc: "Compact the session context" },
+		{ name: "session", desc: "Show session info and stats" },
+		{ name: "export", desc: "Export session as HTML" },
+		{ name: "model", desc: "Show current model" },
+		{ name: "help", desc: "Show available commands" },
+	];
+
 	render() {
+		const filtered = this.getFilteredCommands();
 		return html`
 			<div class="messages">
 				${this.messages.length === 0
@@ -74,14 +99,27 @@ export class ChatPanel extends LitElement {
 				}
 			</div>
 			<div class="input-bar">
-				<input
-					type="text"
-					placeholder="Ask Pux anything..."
-					.value=${this.inputText}
-					@input=${(e: Event) => { this.inputText = (e.target as HTMLInputElement).value; }}
-					@keydown=${(e: KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey) this.send(); }}
-					?disabled=${this.streaming}
-				/>
+				<div class="input-wrap">
+					${this.slashOpen && filtered.length > 0 ? html`
+						<div class="slash-list">
+							${filtered.map((c, i) => html`
+								<div class="slash-item ${i === this.slashIndex ? 'active' : ''}"
+									@click=${() => this.pickCommand(c.name)}>
+									<span class="cmd">/${c.name}</span>
+									<span class="desc">${c.desc}</span>
+								</div>
+							`)}
+						</div>
+					` : nothing}
+					<input
+						type="text"
+						placeholder="Message Pux..."
+						.value=${this.inputText}
+						@input=${this.onInput}
+						@keydown=${this.onKeyDown}
+						?disabled=${this.streaming}
+					/>
+				</div>
 				<button @click=${this.send} ?disabled=${this.streaming || !this.inputText.trim()}>
 					${this.streaming ? "..." : "Send"}
 				</button>
@@ -113,6 +151,143 @@ export class ChatPanel extends LitElement {
 	private accThinking = "";
 	@state() private subAgents: Array<{ name: string; task: string; status: string }> = [];
 	@state() private compacting = false;
+
+	private getFilteredCommands() {
+		if (!this.slashOpen) return [];
+		const q = this.slashFilter.toLowerCase();
+		return ChatPanel.COMMANDS.filter(c => c.name.includes(q));
+	}
+
+	private onInput(e: Event) {
+		this.inputText = (e.target as HTMLInputElement).value;
+		if (this.inputText.startsWith("/")) {
+			this.slashOpen = true;
+			this.slashFilter = this.inputText.slice(1);
+			this.slashIndex = 0;
+		} else {
+			this.slashOpen = false;
+		}
+	}
+
+	private onKeyDown(e: KeyboardEvent) {
+		const filtered = this.getFilteredCommands();
+		if (this.slashOpen && filtered.length > 0) {
+			if (e.key === "ArrowDown") {
+				e.preventDefault();
+				this.slashIndex = (this.slashIndex + 1) % filtered.length;
+				return;
+			}
+			if (e.key === "ArrowUp") {
+				e.preventDefault();
+				this.slashIndex = (this.slashIndex - 1 + filtered.length) % filtered.length;
+				return;
+			}
+			if (e.key === "Enter" || e.key === "Tab") {
+				e.preventDefault();
+				this.pickCommand(filtered[this.slashIndex].name);
+				return;
+			}
+			if (e.key === "Escape") {
+				this.slashOpen = false;
+				return;
+			}
+		}
+		if (e.key === "Enter" && !e.shiftKey) this.send();
+	}
+
+	private pickCommand(name: string) {
+		this.slashOpen = false;
+		this.inputText = "";
+		switch (name) {
+			case "new":
+				this.reset();
+				break;
+			case "compact":
+				this.sendBackendCommand("compact");
+				break;
+			case "export":
+				this.sendBackendCommand("export");
+				break;
+			case "session":
+				this.sendBackendCommand("session");
+				break;
+			case "model":
+				this.sendBackendCommand("model");
+				break;
+			case "help":
+				this.showHelp();
+				break;
+		}
+	}
+
+	private showHelp() {
+		this.chatState.messages.push({
+			role: "assistant",
+			text: ChatPanel.COMMANDS.map(c => `/${c.name} — ${c.desc}`).join("\n"),
+			tools: [],
+		});
+		this.syncFromState();
+	}
+
+	private async sendBackendCommand(cmd: string) {
+		const text = `/${cmd}`;
+		this.chatState.handleEvent({
+			type: "message_start",
+			message: { role: "user", content: [{ type: "text", text }] },
+		} as any);
+		this.chatState.handleEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [] },
+		} as any);
+		this.syncFromState();
+
+		this.accText = "";
+		this.accThinking = "";
+		this.abortCtrl = new AbortController();
+
+		try {
+			const resp = await fetch(`${this.serverUrl}/api/pux/prompt`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ message: text, project: this.project }),
+				signal: this.abortCtrl.signal,
+			});
+			if (!resp.ok) throw new Error(`Backend ${resp.status}`);
+			if (!resp.body) throw new Error("No response body");
+
+			const reader = resp.body.getReader();
+			const decoder = new TextDecoder();
+			const parser = new SSEParser();
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				const events = parser.feed(decoder.decode(value, { stream: true }));
+				for (const evt of events) this.handleSSE(evt.event, evt.data);
+			}
+		} catch (err: any) {
+			if (err.name !== "AbortError") {
+				this.chatState.handleEvent({
+					type: "message_end",
+					message: { role: "assistant", content: [{ type: "text", text: `Error: ${err.message}` }], stopReason: "error", errorMessage: err.message },
+				} as any);
+			}
+		} finally {
+			this.chatState.handleEvent({ type: "agent_end", messages: [] } as any);
+			this.syncFromState();
+		}
+	}
+
+	/** Reset to a fresh session state */
+	reset() {
+		this.chatState = new ChatState();
+		this.accText = "";
+		this.accThinking = "";
+		this.subAgents = [];
+		this.compacting = false;
+		this.abortCtrl?.abort();
+		this.abortCtrl = undefined;
+		this.syncFromState();
+	}
 
 	private async send() {
 		const text = this.inputText.trim();

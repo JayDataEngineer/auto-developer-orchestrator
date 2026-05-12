@@ -79,6 +79,8 @@ SPECIAL_KEYS = {
     "ctrl+n":      "\x0e",
     "shift+tab":   "\x1b[Z",
     "shift+ctrl+p": "\x1b[20;5~",
+    "ctrl+j":      "\x0a",
+    "ctrl+b":      "\x02",
     "alt+enter":   "\x1b\r",
     "alt+up":      "\x1b\x1b[A",
 }
