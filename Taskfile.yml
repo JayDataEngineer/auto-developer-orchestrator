@@ -222,10 +222,46 @@ tasks:
         ignore_error: true
 
   test-python:
-    desc: Run Python E2E tests
+    desc: Run Python E2E tests (all domains)
     dir: tests/python
     cmds:
-      - python3 -m pytest -v --tb=short
+      - python3 -m pytest -v --tb=short {{.CLI_ARGS}}
+
+  test-python-api:
+    desc: Run Python API tests only
+    dir: tests/python
+    cmds:
+      - python3 -m pytest api/ -v --tb=short {{.CLI_ARGS}}
+
+  test-python-sse:
+    desc: Run Python SSE contract tests
+    dir: tests/python
+    cmds:
+      - python3 -m pytest sse/ -v --tb=short {{.CLI_ARGS}}
+
+  test-python-agent:
+    desc: Run Python agent loop tests (requires LLM)
+    dir: tests/python
+    cmds:
+      - python3 -m pytest agent/ -v --tb=short {{.CLI_ARGS}}
+
+  test-python-browser:
+    desc: Run Python browser automation tests
+    dir: tests/python
+    cmds:
+      - python3 -m pytest browser/ -v --tb=short {{.CLI_ARGS}}
+
+  test-python-desktop:
+    desc: Run Python desktop automation tests
+    dir: tests/python
+    cmds:
+      - python3 -m pytest desktop/ -v --tb=short {{.CLI_ARGS}}
+
+  test-python-vision:
+    desc: Run tests that use vision verification
+    dir: tests/python
+    cmds:
+      - python3 -m pytest -v --tb=short -m vision {{.CLI_ARGS}}
 
   test-e2e:
     desc: Run Playwright E2E tests

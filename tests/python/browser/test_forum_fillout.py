@@ -21,9 +21,12 @@ import pytest
 import time
 import json
 
+from conftest import API_BASE_URL
+from fixtures.sandbox import cleanup_sandbox
+
 pytestmark = [pytest.mark.sandbox]
 
-API_URL = "http://localhost:3847"
+API_URL = API_BASE_URL
 SANDBOX_ID = "test-forum-fillout"
 TIMEOUT = 60
 
@@ -61,27 +64,6 @@ FORM_HTML = """<!DOCTYPE html>
 # Encode as data URI
 import base64
 FORM_DATA_URI = "data:text/html;base64," + base64.b64encode(FORM_HTML.encode()).decode()
-
-
-def _cleanup(api_session):
-    """Best-effort cleanup via API, then Docker CLI as fallback."""
-    try:
-        api_session.post(f"{API_URL}/api/sandbox/{SANDBOX_ID}/computer-use/disable", timeout=10)
-    except Exception:
-        pass
-    try:
-        api_session.delete(f"{API_URL}/api/sandbox/{SANDBOX_ID}", timeout=10)
-    except Exception:
-        pass
-    # Fallback: remove container directly via Docker (handles orphaned containers)
-    import subprocess
-    try:
-        subprocess.run(
-            ["docker", "rm", "-f", f"orchestrator-sandbox-{SANDBOX_ID}"],
-            timeout=15, capture_output=True,
-        )
-    except Exception:
-        pass
 
 
 def _wait_for_ready(api_session, timeout=60):
@@ -160,7 +142,7 @@ def setup_sandbox(api_session):
     )
     if resp.status_code not in (200, 201, 409):
         # If container name conflict, try removing and recreating
-        _cleanup(api_session)
+        cleanup_sandbox(API_URL, api_session, SANDBOX_ID)
         time.sleep(2)
         resp = api_session.post(
             f"{API_URL}/api/sandbox/",
@@ -186,7 +168,7 @@ def setup_sandbox(api_session):
 
     yield
 
-    _cleanup(api_session)
+    cleanup_sandbox(API_URL, api_session, SANDBOX_ID)
 
 
 class TestFormFillout:

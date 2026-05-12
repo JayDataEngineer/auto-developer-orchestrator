@@ -4,7 +4,7 @@ USER EXPERIENCE integration tests.
 These test what the user ACTUALLY SEES — not API response codes.
 If these fail, the app is broken for the user regardless of what the API returns.
 
-Run: cd tests/python && uv run pytest test_real_user_experience.py -v --tb=long
+Run: cd tests/python && uv run pytest agent/test_real_user.py -v --tb=long
 """
 
 import json
@@ -13,7 +13,8 @@ import time
 import pytest
 import requests
 
-from conftest import post_and_stream, API_BASE_URL
+from conftest import API_BASE_URL
+from utils.sse import post_and_stream
 
 pytestmark = [pytest.mark.api, pytest.mark.slow]
 

@@ -15,7 +15,7 @@ interface PiWebUpdate {
 Vision model availability is checked at runtime — tests skip gracefully
 if no vision-capable model is reachable.
 
-Run: cd tests/python && uv run pytest test_vision_web.py -v --tb=long
+Run: cd tests/python && uv run pytest browser/test_vision_web.py -v --tb=long
 """
 
 import base64
@@ -25,7 +25,8 @@ import os
 import pytest
 import requests
 
-from conftest import API_BASE_URL, VALID_SSE_EVENT_TYPES
+from conftest import API_BASE_URL
+from utils.contract import VALID_SSE_EVENT_TYPES, SSE_EVENT_REQUIRED_FIELDS, validate_sse_event
 
 pytestmark = [pytest.mark.api, pytest.mark.slow]
 
@@ -127,7 +128,6 @@ class TestWebUpdateContract:
         """
         # This tests the contract definition, not a live event
         required_fields = {"url", "title", "screenshot", "elements"}
-        from conftest import SSE_EVENT_REQUIRED_FIELDS
 
         web_fields = SSE_EVENT_REQUIRED_FIELDS.get("web_update", set())
         assert web_fields == required_fields, (
@@ -144,8 +144,6 @@ class TestWebUpdateContract:
         - screenshot: string (base64)
         - elements: array
         """
-        from conftest import validate_sse_event
-
         # Valid web_update event
         valid_event = {
             "url": "https://example.com",

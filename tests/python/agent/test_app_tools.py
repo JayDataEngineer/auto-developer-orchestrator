@@ -5,38 +5,9 @@ import time
 
 import requests
 
-API = "http://localhost:3847"
+from utils.sse import post_and_stream
 
-def post_and_stream(url, payload, timeout=300):
-    """Yield (event_type, data_dict) tuples from SSE."""
-    s = requests.Session()
-    resp = s.post(url, json=payload, stream=True, timeout=timeout)
-    resp.raise_for_status()
-    event_type = None
-    data_buf = ""
-    for raw_line in resp.iter_lines(decode_unicode=True):
-        if raw_line is None:
-            continue
-        line = raw_line.strip()
-        if line.startswith("event:"):
-            event_type = line[len("event:"):].strip()
-        elif line.startswith("data:"):
-            data_buf += line[len("data:"):].strip()
-        elif line == "":
-            if data_buf:
-                try:
-                    data = json.loads(data_buf)
-                except json.JSONDecodeError:
-                    data = {"raw": data_buf}
-                yield (event_type or "message", data)
-                event_type = None
-                data_buf = ""
-    if data_buf:
-        try:
-            data = json.loads(data_buf)
-        except json.JSONDecodeError:
-            data = {"raw": data_buf}
-        yield (event_type or "message", data)
+API = "http://localhost:3847"
 
 
 def main():
@@ -48,6 +19,7 @@ def main():
     print("-" * 60)
 
     events = list(post_and_stream(
+        requests.Session(),
         f"{API}/api/pux/prompt",
         {
             "message": 'Call the tool app_deep_research with query "test query". Just call it once and report what happened.',

@@ -6,24 +6,9 @@ Tests against the REAL backend — no mocking.
 
 import pytest
 
+from fixtures.browser import goto_frontend
+
 pytestmark = pytest.mark.playwright
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _goto(page, frontend_url):
-    """Navigate to the frontend and wait for it to be ready."""
-    page.goto(frontend_url, wait_until="networkidle", timeout=30000)
-    # Wait for the top bar to render (proves backend responded)
-    try:
-        page.wait_for_selector(".h-10.border-b", timeout=20000)
-    except Exception:
-        # May not render if backend is slow — check if page has any content
-        content = page.content()
-        if len(content) < 100:
-            pytest.skip("Frontend page not rendering — backend may be unreachable")
 
 
 # ---------------------------------------------------------------------------
@@ -33,7 +18,7 @@ def _goto(page, frontend_url):
 
 class TestAppLoads:
     def test_page_renders(self, page, frontend_url):
-        _goto(page, frontend_url)
+        goto_frontend(page, frontend_url)
         # Page should have content, not be blank
         body = page.locator("body")
         assert body.is_visible()
@@ -42,7 +27,7 @@ class TestAppLoads:
         assert top_bar.is_visible()
 
     def test_tabs_visible(self, page, frontend_url):
-        _goto(page, frontend_url)
+        goto_frontend(page, frontend_url)
         # All 4 tabs should be visible: Agent, Tasks, Desktop, Scheduler
         # Use exact=True to avoid matching sidebar session buttons that contain "Agent"
         for tab_name in ["Agent", "Tasks", "Desktop", "Scheduler"]:
@@ -50,7 +35,7 @@ class TestAppLoads:
             assert btn.is_visible(timeout=5000), f"Tab '{tab_name}' not visible"
 
     def test_project_selector_visible(self, page, frontend_url):
-        _goto(page, frontend_url)
+        goto_frontend(page, frontend_url)
         # Project selector dropdown should be visible
         selector = page.locator("select").first
         assert selector.is_visible(timeout=5000)
@@ -66,7 +51,7 @@ class TestAppLoads:
 class TestTabNavigation:
     @pytest.fixture(autouse=True)
     def _load(self, page, frontend_url):
-        _goto(page, frontend_url)
+        goto_frontend(page, frontend_url)
 
     def test_agent_tab(self, page):
         page.get_by_role("button", name="Agent", exact=True).click()
@@ -107,7 +92,7 @@ class TestTabNavigation:
 class TestPiAgentView:
     @pytest.fixture(autouse=True)
     def _load_agent_tab(self, page, frontend_url):
-        _goto(page, frontend_url)
+        goto_frontend(page, frontend_url)
         page.get_by_role("button", name="Agent", exact=True).click()
         page.wait_for_timeout(1000)
 
@@ -130,7 +115,7 @@ class TestPiAgentView:
 class TestAgentPrompt:
     @pytest.fixture(autouse=True)
     def _load_agent_tab(self, page, frontend_url):
-        _goto(page, frontend_url)
+        goto_frontend(page, frontend_url)
         page.get_by_role("button", name="Agent", exact=True).click()
         page.wait_for_timeout(1000)
 
@@ -159,7 +144,7 @@ class TestAgentPrompt:
 class TestDesktopTab:
     @pytest.fixture(autouse=True)
     def _load_desktop(self, page, frontend_url):
-        _goto(page, frontend_url)
+        goto_frontend(page, frontend_url)
         page.get_by_role("button", name="Desktop", exact=True).click()
         page.wait_for_timeout(2000)
 

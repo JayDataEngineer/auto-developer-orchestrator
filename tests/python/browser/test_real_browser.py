@@ -18,6 +18,8 @@ Tests:
 
 import pytest
 
+from utils.sse import stream_prompt
+
 pytestmark = [pytest.mark.playwright]
 
 FRONTEND_URL = "http://localhost:5174"
@@ -129,7 +131,6 @@ class TestAgentTabSidebar:
     def test_rename_conversation(self, page, api_url, api_session):
         """Rename a conversation through the UI context menu and verify via API."""
         # First ensure there's a conversation to rename
-        from conftest import stream_prompt
         agent_id = "ui-rename-test"
         try:
             stream_prompt(api_url, api_session, "test-repo", "hello", agent_id=agent_id)
@@ -177,7 +178,6 @@ class TestAgentTabSidebar:
 
     def test_delete_conversation(self, page, api_url, api_session):
         """Delete a conversation through the UI context menu and verify via API."""
-        from conftest import stream_prompt
         agent_id = "ui-delete-test"
         try:
             stream_prompt(api_url, api_session, "test-repo", "hello", agent_id=agent_id)

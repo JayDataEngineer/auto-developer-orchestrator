@@ -5,7 +5,7 @@ Automated tests for every capability category defined in GOALS.md.
 Uses the Pux agent endpoint (POST /api/pux/prompt) with SSE streaming.
 Each test sends a prompt, collects events, and asserts pass criteria.
 
-Run: cd tests/python && uv run pytest test_goals.py -v --tb=long
+Run: cd tests/python && uv run pytest agent/test_goals.py -v --tb=long
 """
 
 import json
@@ -14,12 +14,9 @@ import uuid
 
 import pytest
 
-from conftest import (
-    API_BASE_URL,
-    post_and_stream,
-    stream_pux_prompt,
-    validate_sse_event,
-)
+from conftest import API_BASE_URL
+from utils.sse import post_and_stream, stream_pux_prompt
+from utils.contract import validate_sse_event
 
 pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow]
 

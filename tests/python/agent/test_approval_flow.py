@@ -17,7 +17,7 @@ Frontend interface (from pi-events.ts):
     risk: 'low' | 'medium' | 'high';
   }
 
-Run: cd tests/python && uv run pytest test_approval_flow.py -v --tb=long
+Run: cd tests/python && uv run pytest agent/test_approval_flow.py -v --tb=long
 """
 
 import json
@@ -25,15 +25,10 @@ import time
 
 import pytest
 
-from conftest import (
-    API_BASE_URL,
-    VALID_APPROVAL_TYPES,
-    VALID_RISK_LEVELS,
-    destroy_agent,
-    spawn_agent,
-    stream_prompt,
-    post_and_stream,
-)
+from conftest import API_BASE_URL
+from utils.contract import VALID_APPROVAL_TYPES, VALID_RISK_LEVELS
+from fixtures.agent import spawn_agent, destroy_agent
+from utils.sse import post_and_stream
 
 pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow]
 

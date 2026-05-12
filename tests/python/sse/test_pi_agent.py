@@ -4,7 +4,7 @@ Pi agent tests: models, spawn, state, prompt SSE stream, messages, destroy.
 
 import pytest
 
-from conftest import post_and_stream
+from utils.sse import post_and_stream
 
 pytestmark = [pytest.mark.api, pytest.mark.sse]
 

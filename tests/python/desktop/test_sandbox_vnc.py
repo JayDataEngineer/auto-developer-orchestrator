@@ -9,8 +9,8 @@ They require:
   - (Optional) llama-server for ID resolution tests
 
 Run:
-  pytest tests/python/test_sandbox_vnc_integration.py -v
-  pytest tests/python/test_sandbox_vnc_integration.py -v -k "test_vnc" --sandbox
+  pytest tests/python/desktop/test_sandbox_vnc.py -v
+  pytest tests/python/desktop/test_sandbox_vnc.py -v -k "test_vnc" --sandbox
 """
 
 import json
@@ -19,6 +19,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
+
+from fixtures.sandbox import create_sandbox, cleanup_sandbox
 
 pytestmark = pytest.mark.sandbox
 
@@ -29,49 +31,17 @@ pytestmark = pytest.mark.sandbox
 _CREATED: list[str] = []
 
 
-def _cleanup(api_url, api_session, sandbox_id):
-    """Best-effort cleanup of a sandbox."""
-    try:
-        api_session.delete(f"{api_url}/api/sandbox/{sandbox_id}", timeout=15)
-    except Exception:
-        pass
-
-
-def _ensure_sandbox(api_url, api_session, sid, project_path="/tmp", policy="developer", timeout=120):
-    """
-    Create a sandbox, cleaning up any leftover container with the same ID first.
-    Returns the response. Raises pytest.skip on Docker unavailability.
-    """
-    resp = api_session.post(
-        f"{api_url}/api/sandbox/",
-        json={"id": sid, "project_path": project_path, "policy": policy},
-        timeout=timeout,
-    )
-    if resp.status_code in (200, 201):
-        _CREATED.append(sid)
-        return resp
-    # 500 with container conflict — nuke and retry
-    if resp.status_code == 500:
-        _cleanup(api_url, api_session, sid)
-        time.sleep(1)
-        resp = api_session.post(
-            f"{api_url}/api/sandbox/",
-            json={"id": sid, "project_path": project_path, "policy": policy},
-            timeout=timeout,
-        )
-        if resp.status_code in (200, 201):
-            _CREATED.append(sid)
-            return resp
-        pytest.skip(f"Sandbox creation failed (Docker unavailable): {resp.text[:200]}")
-    return resp
-
-
 @pytest.fixture(autouse=True, scope="module")
 def _module_cleanup(api_url, api_session):
     yield
     for sid in _CREATED:
-        _cleanup(api_url, api_session, sid)
+        cleanup_sandbox(api_url, api_session, sid)
     _CREATED.clear()
+
+
+def _ensure_tracked(sid):
+    """Track a created sandbox ID for module-level cleanup."""
+    _CREATED.append(sid)
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +57,8 @@ class TestSandboxPersistence:
         sid = "e2e-persist-test"
         project_path = f"/tmp/e2e-project-{int(time.time())}"
 
-        _ensure_sandbox(api_url, api_session, sid, project_path=project_path, policy="strict")
+        create_sandbox(api_url, api_session, sid, project_path=project_path, policy="strict")
+        _ensure_tracked(sid)
 
         get_resp = api_session.get(f"{api_url}/api/sandbox/{sid}", timeout=10)
         assert get_resp.status_code == 200
@@ -98,7 +69,8 @@ class TestSandboxPersistence:
     def test_create_with_policy_stored(self, api_url, api_session):
         """Policy label must persist in sandbox metadata."""
         sid = "e2e-policy-test"
-        _ensure_sandbox(api_url, api_session, sid, project_path="/tmp", policy="read-only")
+        create_sandbox(api_url, api_session, sid, project_path="/tmp", policy="read-only")
+        _ensure_tracked(sid)
 
         get_resp = api_session.get(f"{api_url}/api/sandbox/{sid}", timeout=10)
         assert get_resp.status_code == 200
@@ -109,7 +81,8 @@ class TestSandboxPersistence:
     def test_default_policy_is_developer(self, api_url, api_session):
         """When no policy is specified, it defaults to 'developer'."""
         sid = f"e2e-default-policy-{int(time.time())}"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         get_resp = api_session.get(f"{api_url}/api/sandbox/{sid}", timeout=10)
         assert get_resp.status_code == 200
@@ -129,7 +102,8 @@ class TestReadiness:
     def test_ready_after_creation(self, api_url, api_session):
         """A freshly created sandbox in CLI mode should be ready."""
         sid = "e2e-ready-test"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         ready_resp = api_session.get(f"{api_url}/api/sandbox/{sid}/ready", timeout=10)
         assert ready_resp.status_code == 200
@@ -147,7 +121,8 @@ class TestReadiness:
     def test_ready_after_browser_mode(self, api_url, api_session):
         """Sandbox in browser mode should be ready after enable completes."""
         sid = "e2e-ready-browser"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         enable_resp = api_session.post(
             f"{api_url}/api/sandbox/{sid}/browser-mode",
@@ -178,7 +153,8 @@ class TestRecovery:
         """
         sid = "e2e-recovery-test"
         project_path = "/tmp/recovery-project"
-        _ensure_sandbox(api_url, api_session, sid, project_path=project_path)
+        create_sandbox(api_url, api_session, sid, project_path=project_path)
+        _ensure_tracked(sid)
 
         resp = api_session.get(f"{api_url}/api/sandbox/{sid}", timeout=10)
         assert resp.status_code == 200
@@ -192,7 +168,8 @@ class TestRecovery:
         Verify by listing sandboxes — our test sandbox should appear.
         """
         sid = f"e2e-startup-{int(time.time())}"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         list_resp = api_session.get(f"{api_url}/api/sandbox/", timeout=10)
         assert list_resp.status_code == 200
@@ -216,7 +193,8 @@ class TestIDResolution:
     def test_resolve_by_exact_id(self, api_url, api_session):
         """Sandbox lookup by exact ID should work."""
         sid = "e2e-resolve-exact"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         get_resp = api_session.get(f"{api_url}/api/sandbox/{sid}", timeout=10)
         assert get_resp.status_code == 200
@@ -232,7 +210,8 @@ class TestIDResolution:
         # Create the directory so Docker can bind-mount it
         import os
         os.makedirs(project_path, exist_ok=True)
-        _ensure_sandbox(api_url, api_session, sid, project_path=project_path)
+        create_sandbox(api_url, api_session, sid, project_path=project_path)
+        _ensure_tracked(sid)
 
         list_resp = api_session.get(f"{api_url}/api/sandbox/", timeout=10)
         assert list_resp.status_code == 200
@@ -273,7 +252,8 @@ class TestVNCProxy:
         can be queried (may or may not have active connections).
         """
         sid = "e2e-vnc-stats"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         enable_resp = api_session.post(
             f"{api_url}/api/sandbox/{sid}/browser-mode",
@@ -298,7 +278,8 @@ class TestVNCProxy:
         The VNC proxy HTTP endpoint should serve the noVNC HTML page.
         """
         sid = "e2e-vnc-http"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         enable_resp = api_session.post(
             f"{api_url}/api/sandbox/{sid}/browser-mode",
@@ -340,7 +321,8 @@ class TestModeLifecycle:
     def test_browser_mode_lifecycle(self, api_url, api_session):
         """Full browser mode lifecycle: enable -> verify -> disable -> verify."""
         sid = "e2e-lifecycle-browser"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         # 1. Enable browser mode
         enable_resp = api_session.post(
@@ -372,7 +354,8 @@ class TestModeLifecycle:
     def test_browser_mode_idempotent(self, api_url, api_session):
         """Enabling browser mode twice should return the same session."""
         sid = "e2e-idempotent"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         resp1 = api_session.post(
             f"{api_url}/api/sandbox/{sid}/browser-mode",
@@ -397,7 +380,8 @@ class TestModeLifecycle:
     def test_exec_in_browser_mode_sandbox(self, api_url, api_session):
         """Command execution should still work when browser mode is active."""
         sid = "e2e-exec-browser"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         api_session.post(
             f"{api_url}/api/sandbox/{sid}/browser-mode",
@@ -428,7 +412,8 @@ class TestMultiSandbox:
         """Creating multiple sandboxes should all appear in the list."""
         ids = [f"e2e-multi-{i}" for i in range(3)]
         for sid in ids:
-            _ensure_sandbox(api_url, api_session, sid, project_path=f"/tmp/multi-{sid}")
+            create_sandbox(api_url, api_session, sid, project_path=f"/tmp/multi-{sid}")
+            _ensure_tracked(sid)
 
         list_resp = api_session.get(f"{api_url}/api/sandbox/", timeout=10)
         assert list_resp.status_code == 200
@@ -454,7 +439,8 @@ class TestDesktopMode:
     def test_enable_desktop_mode(self, api_url, api_session):
         """POST /{id}/desktop-mode should return a desktop session."""
         sid = "e2e-desktop-mode"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         resp = api_session.post(
             f"{api_url}/api/sandbox/{sid}/desktop-mode",
@@ -475,7 +461,8 @@ class TestDesktopMode:
     def test_desktop_viewer_urls(self, api_url, api_session):
         """GET /{id}/viewer should return desktop mode with VNC URLs."""
         sid = "e2e-desktop-viewer"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         enable_resp = api_session.post(
             f"{api_url}/api/sandbox/{sid}/desktop-mode",
@@ -498,7 +485,8 @@ class TestDesktopMode:
     def test_desktop_ready(self, api_url, api_session):
         """Sandbox should be ready after desktop mode is enabled."""
         sid = "e2e-desktop-ready"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         enable_resp = api_session.post(
             f"{api_url}/api/sandbox/{sid}/desktop-mode",
@@ -519,7 +507,8 @@ class TestDesktopMode:
     def test_desktop_disable(self, api_url, api_session):
         """Disabling desktop mode should return sandbox to CLI mode."""
         sid = "e2e-desktop-disable"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         enable_resp = api_session.post(
             f"{api_url}/api/sandbox/{sid}/desktop-mode",
@@ -580,7 +569,8 @@ class TestBackendRecovery:
         sid = f"e2e-recovery-meta-{int(time.time())}"
         project_path = f"/tmp/recovery-test-{int(time.time())}"
         os.makedirs(project_path, exist_ok=True)
-        _ensure_sandbox(api_url, api_session, sid, project_path=project_path)
+        create_sandbox(api_url, api_session, sid, project_path=project_path)
+        _ensure_tracked(sid)
 
         # Verify via GET
         get_resp = api_session.get(f"{api_url}/api/sandbox/{sid}", timeout=10)
@@ -633,7 +623,8 @@ class TestConcurrency:
         The second call hits the idempotent path (same mode, return existing session).
         """
         sid = "e2e-concurrent"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         def enable_browser():
             return api_session.post(
@@ -665,7 +656,8 @@ class TestConcurrency:
         Tests that Docker exec doesn't race on the same container.
         """
         sid = "e2e-concurrent-exec"
-        _ensure_sandbox(api_url, api_session, sid)
+        create_sandbox(api_url, api_session, sid)
+        _ensure_tracked(sid)
 
         def run_command(cmd_str):
             return api_session.post(

@@ -13,7 +13,7 @@ responds via the approval system. Verifies:
 
 Requires: llama-server running with model loaded (GPU).
 
-Run: cd tests/python && uv run pytest test_ask_user.py -v --tb=long
+Run: cd tests/python && uv run pytest agent/test_ask_user.py -v --tb=long
 """
 
 import threading
@@ -21,10 +21,8 @@ import time
 
 import pytest
 
-from conftest import (
-    API_BASE_URL,
-    post_and_stream,
-)
+from conftest import API_BASE_URL
+from utils.sse import post_and_stream
 
 pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow]
 

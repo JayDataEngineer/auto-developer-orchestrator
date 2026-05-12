@@ -18,14 +18,10 @@ import time
 
 import pytest
 
-from conftest import (
-    API_BASE_URL,
-    destroy_agent,
-    spawn_agent,
-    stream_prompt,
-    post_and_stream,
-    validate_sse_event,
-)
+from conftest import API_BASE_URL
+from fixtures.agent import spawn_agent, destroy_agent
+from utils.sse import stream_prompt, post_and_stream
+from utils.contract import validate_sse_event
 
 pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow]
 

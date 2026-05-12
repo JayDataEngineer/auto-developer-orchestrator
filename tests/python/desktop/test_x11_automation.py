@@ -17,50 +17,21 @@ import base64
 import time
 import struct
 
+from utils.png import is_valid_png
+from fixtures.sandbox import wait_for_desktop_ready, cleanup_sandbox
+
 pytestmark = [pytest.mark.api]
 
 X11_SANDBOX = "test-x11-automation"
 
 
-def _is_valid_png(data: bytes) -> bool:
-    return data[:8] == b'\x89PNG\r\n\x1a\n'
-
-
-def _ensure_sandbox_ready(api_url, api_session):
-    """Ensure sandbox is created and computer use is enabled."""
-    # Try enabling computer use (idempotent)
-    resp = api_session.post(
-        f"{api_url}/api/sandbox/{X11_SANDBOX}/computer-use/enable",
-        timeout=120,
-    )
-    assert resp.status_code == 200, f"Enable failed: {resp.text[:500]}"
-
-    # Wait for background setup to complete (xdotool install etc.)
-    deadline = time.time() + 90
-    while time.time() < deadline:
-        try:
-            r = api_session.get(f"{api_url}/api/sandbox/{X11_SANDBOX}/viewer", timeout=5)
-            if r.status_code == 200:
-                return
-        except Exception:
-            pass
-        time.sleep(2)
-    pytest.skip("Background setup did not complete in time")
-
-
 @pytest.fixture(scope="module", autouse=True)
 def setup_x11_sandbox(api_url, api_session):
     """Module-scoped setup — creates sandbox once for all X11 tests."""
-    _ensure_sandbox_ready(api_url, api_session)
+    wait_for_desktop_ready(api_url, api_session, X11_SANDBOX, timeout=90)
     yield
     # Cleanup
-    try:
-        api_session.post(
-            f"{api_url}/api/sandbox/{X11_SANDBOX}/computer-use/disable",
-            timeout=10,
-        )
-    except Exception:
-        pass
+    cleanup_sandbox(api_url, api_session, X11_SANDBOX)
 
 
 class TestX11Resolution:
@@ -105,7 +76,7 @@ class TestX11Screenshot:
         assert "image" in data, f"Missing image field: {data}"
         # Verify it's valid base64
         png_bytes = base64.b64decode(data["image"])
-        assert _is_valid_png(png_bytes), "Screenshot is not valid PNG"
+        assert is_valid_png(png_bytes), "Screenshot is not valid PNG"
 
     def test_png_format_returns_raw_image(self, api_url, api_session):
         resp = api_session.get(
@@ -116,7 +87,7 @@ class TestX11Screenshot:
         assert resp.headers.get("content-type", "").startswith("image/"), (
             f"Expected image content-type, got: {resp.headers.get('content-type')}"
         )
-        assert _is_valid_png(resp.content), "Raw screenshot is not valid PNG"
+        assert is_valid_png(resp.content), "Raw screenshot is not valid PNG"
 
 
 class TestX11Mouse:

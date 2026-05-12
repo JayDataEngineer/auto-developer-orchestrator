@@ -11,44 +11,17 @@ Requires: running Go backend + sandbox container with Chrome.
 """
 
 import pytest
-import time
+
+from fixtures.sandbox import wait_for_browser_ready
 
 pytestmark = [pytest.mark.api]
 
 NAV_SANDBOX = "test-nav-timeout"
 
 
-def _ensure_sandbox_ready(api_url, api_session):
-    """Ensure sandbox is created and computer use is enabled."""
-    resp = api_session.post(
-        f"{api_url}/api/sandbox/{NAV_SANDBOX}/computer-use/enable",
-        timeout=120,
-    )
-    assert resp.status_code == 200, f"Enable failed: {resp.text[:500]}"
-
-    # Wait for background setup (CDP connect + landing page)
-    deadline = time.time() + 120
-    while time.time() < deadline:
-        try:
-            r = api_session.get(f"{api_url}/api/sandbox/{NAV_SANDBOX}/viewer", timeout=5)
-            if r.status_code == 200:
-                # Viewer is ready, but also wait for CDP to connect
-                # by checking if screenshot returns 200 (not "not connected")
-                sr = api_session.get(
-                    f"{api_url}/api/sandbox/{NAV_SANDBOX}/computer-use/screenshot?describe=false",
-                    timeout=10,
-                )
-                if sr.status_code == 200:
-                    return
-        except Exception:
-            pass
-        time.sleep(3)
-    pytest.skip("Background setup did not complete in time")
-
-
 @pytest.fixture(scope="module", autouse=True)
 def setup_nav_sandbox(api_url, api_session):
-    _ensure_sandbox_ready(api_url, api_session)
+    wait_for_browser_ready(api_url, api_session, NAV_SANDBOX)
     yield
     try:
         api_session.post(

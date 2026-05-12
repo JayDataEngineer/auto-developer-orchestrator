@@ -11,10 +11,10 @@ Requires:
   - At least one sandbox with browser mode enabled
 
 Run:
-  pytest tests/python/test_unified_agent_modes.py -v -s
-  pytest tests/python/test_unified_agent_modes.py -v -s -k coding
-  pytest tests/python/test_unified_agent_modes.py -v -s -k browser
-  pytest tests/python/test_unified_agent_modes.py -v -s -k computer
+  pytest tests/python/agent/test_unified_modes.py -v -s
+  pytest tests/python/agent/test_unified_modes.py -v -s -k coding
+  pytest tests/python/agent/test_unified_modes.py -v -s -k browser
+  pytest tests/python/agent/test_unified_modes.py -v -s -k computer
 """
 
 import json
@@ -22,7 +22,8 @@ import time
 
 import pytest
 
-from conftest import post_and_stream, validate_sse_event
+from utils.sse import post_and_stream
+from utils.contract import validate_sse_event
 
 
 # ---------------------------------------------------------------------------

@@ -27,7 +27,7 @@ class TestConversationHistory:
     def test_conversation_summary_has_required_fields(self, api_url, api_session, test_project):
         """Every conversation summary must have project, agentId, lastMessage, lastAt, messageCount, title."""
         # First, ensure there's at least one conversation by sending a prompt
-        from conftest import stream_prompt
+        from utils.sse import stream_prompt
         agent_id = f"test-conv-{__name__}"
         try:
             events = stream_prompt(api_url, api_session, test_project, "say hello", agent_id=agent_id)
@@ -66,7 +66,7 @@ class TestConversationRename:
     def test_rename_sets_title(self, api_url, api_session, test_project):
         """Rename a conversation and verify the title appears in history."""
         # Create a conversation by sending a message
-        from conftest import stream_prompt
+        from utils.sse import stream_prompt
         agent_id = f"test-rename-{__name__}"
         try:
             stream_prompt(api_url, api_session, test_project, "say hello", agent_id=agent_id)
@@ -98,7 +98,7 @@ class TestConversationRename:
 
     def test_rename_overwrites_previous_title(self, api_url, api_session, test_project):
         """Second rename replaces the first title."""
-        from conftest import stream_prompt
+        from utils.sse import stream_prompt
         agent_id = f"test-rename-overwrite-{__name__}"
         try:
             stream_prompt(api_url, api_session, test_project, "say hi", agent_id=agent_id)
@@ -158,7 +158,7 @@ class TestConversationDelete:
 
     def test_delete_removes_conversation(self, api_url, api_session, test_project):
         """Create, rename, then delete a conversation — verify it's gone."""
-        from conftest import stream_prompt
+        from utils.sse import stream_prompt
         agent_id = f"test-delete-{__name__}"
         try:
             stream_prompt(api_url, api_session, test_project, "say hello", agent_id=agent_id)
@@ -202,7 +202,7 @@ class TestConversationDelete:
 
     def test_delete_also_removes_title(self, api_url, api_session, test_project):
         """Verify that deleting a conversation also removes its custom title."""
-        from conftest import stream_prompt
+        from utils.sse import stream_prompt
         agent_id = f"test-delete-title-{__name__}"
         try:
             stream_prompt(api_url, api_session, test_project, "say hello", agent_id=agent_id)
@@ -239,10 +239,10 @@ class TestConversationDelete:
 
 
 class TestConversationRoundTrip:
-    """Full end-to-end: create → rename → verify → delete → verify gone."""
+    """Full end-to-end: create -> rename -> verify -> delete -> verify gone."""
 
     def test_full_lifecycle(self, api_url, api_session, test_project):
-        from conftest import stream_prompt
+        from utils.sse import stream_prompt
         agent_id = f"test-lifecycle-{__name__}"
 
         # Step 1: Create conversation by sending a prompt

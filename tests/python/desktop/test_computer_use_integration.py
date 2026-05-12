@@ -23,33 +23,13 @@ import time
 import base64
 import struct
 
+from utils.png import is_valid_png
+from fixtures.sandbox import cleanup_sandbox
+
 pytestmark = [pytest.mark.api]
 
 FRESH_SANDBOX = "test-cu-integration-fresh"
 REUSED_SANDBOX = "test-cu-integration-reuse"
-
-
-def _cleanup_sandbox(api_url, api_session, sandbox_id):
-    """Best-effort cleanup of a sandbox."""
-    try:
-        api_session.post(
-            f"{api_url}/api/sandbox/{sandbox_id}/computer-use/disable",
-            timeout=10,
-        )
-    except Exception:
-        pass
-    try:
-        api_session.delete(
-            f"{api_url}/api/sandbox/{sandbox_id}",
-            timeout=10,
-        )
-    except Exception:
-        pass
-
-
-def _is_valid_png(data: bytes) -> bool:
-    """Check if bytes start with PNG magic number."""
-    return data[:8] == b'\x89PNG\r\n\x1a\n'
 
 
 class TestEnableFreshSandbox:
@@ -58,7 +38,7 @@ class TestEnableFreshSandbox:
     def test_enable_creates_container(self, api_url, api_session):
         """POST /computer-use/enable with a new sandbox ID should create a container
         and return enabled=true within 15 seconds."""
-        _cleanup_sandbox(api_url, api_session, FRESH_SANDBOX)
+        cleanup_sandbox(api_url, api_session, FRESH_SANDBOX)
 
         start = time.time()
         resp = api_session.post(
@@ -121,7 +101,7 @@ class TestScreenshotAfterEnable:
         assert resp.headers.get("content-type") == "image/png", (
             f"Wrong content type: {resp.headers.get('content-type')}"
         )
-        assert _is_valid_png(resp.content), "Response is not valid PNG data"
+        assert is_valid_png(resp.content), "Response is not valid PNG data"
         assert len(resp.content) > 1000, f"PNG too small ({len(resp.content)} bytes), probably blank"
 
     def test_screenshot_json_format(self, api_url, api_session):
@@ -135,7 +115,7 @@ class TestScreenshotAfterEnable:
 
         assert "image" in data, f"Missing 'image' field: {data}"
         png_bytes = base64.b64decode(data["image"])
-        assert _is_valid_png(png_bytes), "Decoded image is not valid PNG"
+        assert is_valid_png(png_bytes), "Decoded image is not valid PNG"
         assert len(png_bytes) > 1000, "Decoded PNG too small"
 
     def test_snapshot_returns_page_info(self, api_url, api_session):
@@ -229,7 +209,7 @@ class TestReEnable:
         )
 
         # Cleanup
-        _cleanup_sandbox(api_url, api_session, FRESH_SANDBOX)
+        cleanup_sandbox(api_url, api_session, FRESH_SANDBOX)
 
 
 class TestEnableIdempotent:
@@ -238,7 +218,7 @@ class TestEnableIdempotent:
     def test_double_enable_same_sandbox(self, api_url, api_session):
         """Two consecutive enable calls should both succeed."""
         sandbox_id = REUSED_SANDBOX
-        _cleanup_sandbox(api_url, api_session, sandbox_id)
+        cleanup_sandbox(api_url, api_session, sandbox_id)
 
         # First enable
         resp1 = api_session.post(
@@ -268,7 +248,7 @@ class TestEnableIdempotent:
         )
 
         # Cleanup
-        _cleanup_sandbox(api_url, api_session, sandbox_id)
+        cleanup_sandbox(api_url, api_session, sandbox_id)
 
 
 class TestDesktopTabAutoEnable:
@@ -277,7 +257,7 @@ class TestDesktopTabAutoEnable:
     def test_desktop_tab_shows_active_after_auto_enable(self, page, api_url, api_session):
         """Switching to Desktop tab should auto-enable computer use and show Active badge."""
         sandbox_id = "test-auto-enable-ui"
-        _cleanup_sandbox(api_url, api_session, sandbox_id)
+        cleanup_sandbox(api_url, api_session, sandbox_id)
 
         # Navigate to the frontend
         page.goto("http://localhost:5174", wait_until="networkidle", timeout=30000)
@@ -316,12 +296,12 @@ class TestDesktopTabAutoEnable:
         assert active_badge.is_visible(), "Should show 'Active' badge on Desktop tab"
 
         # Cleanup
-        _cleanup_sandbox(api_url, api_session, sandbox_id)
+        cleanup_sandbox(api_url, api_session, sandbox_id)
 
     def test_enable_does_not_show_stuck_spinner(self, page, api_url, api_session):
         """The 'Enabling computer use...' state should resolve within 15 seconds."""
         sandbox_id = "test-spinner-ui"
-        _cleanup_sandbox(api_url, api_session, sandbox_id)
+        cleanup_sandbox(api_url, api_session, sandbox_id)
 
         # First, enable via API to ensure container exists
         resp = api_session.post(
@@ -375,4 +355,4 @@ class TestDesktopTabAutoEnable:
                 f"Took {elapsed:.1f}s to show Active — should be instant for existing sandbox"
             )
         finally:
-            _cleanup_sandbox(api_url, api_session, sandbox_id)
+            cleanup_sandbox(api_url, api_session, sandbox_id)

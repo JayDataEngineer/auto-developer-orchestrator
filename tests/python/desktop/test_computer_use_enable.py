@@ -19,6 +19,8 @@ import pytest
 import time
 import requests
 
+from fixtures.sandbox import cleanup_sandbox, wait_for_desktop_ready
+
 pytestmark = [pytest.mark.playwright]
 
 API_URL = "http://localhost:5174"
@@ -28,41 +30,12 @@ TIMEOUT = 45
 SHARED_SANDBOX = "test-cu-e2e"
 
 
-def _cleanup(api_url, api_session, sandbox_id):
-    """Best-effort cleanup."""
-    try:
-        api_session.post(f"{api_url}/api/sandbox/{sandbox_id}/computer-use/disable", timeout=10)
-    except Exception:
-        pass
-    try:
-        api_session.delete(f"{api_url}/api/sandbox/{sandbox_id}", timeout=10)
-    except Exception:
-        pass
-
-
-def _wait_for_ready(api_url, api_session, sandbox_id, timeout=30):
-    """Wait for the sandbox background setup (Docker + CDP) to complete."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            resp = api_session.get(
-                f"{api_url}/api/sandbox/{sandbox_id}/computer-use/screenshot?format=png",
-                timeout=5,
-            )
-            if resp.status_code == 200:
-                return
-        except Exception:
-            pass
-        time.sleep(2)
-    raise TimeoutError(f"Sandbox {sandbox_id} not ready after {timeout}s")
-
-
 class TestBackendAPI:
     """Test the backend enable/disable API directly."""
 
     def test_enable_creates_container(self, api_url, api_session):
         """POST /computer-use/enable with fresh sandbox creates a container."""
-        _cleanup(api_url, api_session, SHARED_SANDBOX)
+        cleanup_sandbox(api_url, api_session, SHARED_SANDBOX)
 
         start = time.time()
         resp = api_session.post(
@@ -80,7 +53,7 @@ class TestBackendAPI:
     def test_reenable_is_fast(self, api_url, api_session):
         """Second enable reuses existing container (<5s)."""
         # Wait for background Docker setup to complete from first enable
-        _wait_for_ready(api_url, api_session, SHARED_SANDBOX, timeout=30)
+        wait_for_desktop_ready(api_url, api_session, SHARED_SANDBOX, timeout=30)
 
         start = time.time()
         resp = api_session.post(
@@ -95,7 +68,7 @@ class TestBackendAPI:
 
     def test_screenshot_returns_png(self, api_url, api_session):
         """Screenshot returns valid PNG after enable."""
-        _wait_for_ready(api_url, api_session, SHARED_SANDBOX, timeout=30)
+        wait_for_desktop_ready(api_url, api_session, SHARED_SANDBOX, timeout=30)
 
         resp = api_session.get(
             f"{api_url}/api/sandbox/{SHARED_SANDBOX}/computer-use/screenshot?format=png",
@@ -258,4 +231,4 @@ class TestDesktopTabFlow:
 
     def test_cleanup(self, api_url, api_session):
         """Clean up the shared sandbox."""
-        _cleanup(api_url, api_session, SHARED_SANDBOX)
+        cleanup_sandbox(api_url, api_session, SHARED_SANDBOX)

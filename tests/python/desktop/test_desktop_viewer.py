@@ -20,23 +20,13 @@ import pytest
 import time
 import os
 
+from fixtures.sandbox import cleanup_sandbox
+
 pytestmark = [pytest.mark.sandbox]
 
 API_BASE = os.environ.get("API_BASE_URL", "http://localhost:3847")
 FRONTEND_BASE = os.environ.get("FRONTEND_BASE_URL", "http://localhost:5174")
 SHARED_SANDBOX = "test-viewer-e2e"
-
-
-def _cleanup(api_url, api_session, sandbox_id):
-    """Best-effort cleanup."""
-    try:
-        api_session.post(f"{api_url}/api/sandbox/{sandbox_id}/computer-use/disable", timeout=10)
-    except Exception:
-        pass
-    try:
-        api_session.delete(f"{api_url}/api/sandbox/{sandbox_id}", timeout=10)
-    except Exception:
-        pass
 
 
 class TestViewerAfterEnable:
@@ -49,7 +39,7 @@ class TestViewerAfterEnable:
 
         This is EXPECTED behavior — the frontend must poll/retry.
         """
-        _cleanup(api_url, api_session, SHARED_SANDBOX)
+        cleanup_sandbox(api_url, api_session, SHARED_SANDBOX)
 
         # Enable computer use — response comes back immediately
         resp = api_session.post(
@@ -128,7 +118,7 @@ class TestViewerAfterEnable:
 
     def test_cleanup(self, api_url, api_session):
         """Clean up the shared sandbox."""
-        _cleanup(api_url, api_session, SHARED_SANDBOX)
+        cleanup_sandbox(api_url, api_session, SHARED_SANDBOX)
 
 
 class TestViewerThroughProxy:
@@ -147,7 +137,7 @@ class TestViewerThroughProxy:
         proxy_url = FRONTEND_BASE
         sandbox_id = "test-proxy-viewer"
 
-        _cleanup(api_url, api_session, sandbox_id)
+        cleanup_sandbox(api_url, api_session, sandbox_id)
 
         # Step 1: Enable through proxy
         enable_resp = api_session.post(
@@ -184,4 +174,4 @@ class TestViewerThroughProxy:
         assert viewer_data.get("mode") in ("browser", "desktop"), \
             f"Unexpected mode: {viewer_data.get('mode')}"
 
-        _cleanup(api_url, api_session, sandbox_id)
+        cleanup_sandbox(api_url, api_session, sandbox_id)
