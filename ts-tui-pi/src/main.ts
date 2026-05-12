@@ -117,7 +117,7 @@ if (modelMeta) {
 }
 
 // Discover and load extensions from pi.extensions in package.json
-const tuiRoot = resolve(import.meta.dir);
+const tuiRoot = resolve(import.meta.dir, "..");
 const extensionPaths: string[] = [];
 try {
   const pkg = JSON.parse(readFileSync(join(tuiRoot, "package.json"), "utf-8"));
