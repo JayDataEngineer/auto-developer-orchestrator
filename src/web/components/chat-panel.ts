@@ -1,26 +1,17 @@
 /**
- * Chat panel — sends prompts to Go backend SSE, renders streaming responses.
+ * Chat panel — thin HTML render layer over PuxAgentSession + ChatState.
  *
- * Directly consumes the SSE stream from POST /api/pux/prompt.
- * No PuxAgentSession import needed — the Go backend IS the agent.
+ * Uses the exact same session and state accumulator as the TUI.
+ * Only rendering differs (HTML vs terminal).
  */
 
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state, query } from "lit/decorators.js";
-
-interface ChatMessage {
-	role: "user" | "assistant";
-	text: string;
-	thinking?: string;
-	tools?: ToolCall[];
-}
-
-interface ToolCall {
-	name: string;
-	args?: string;
-	result?: string;
-	status: "running" | "done" | "error";
-}
+import { PuxAgentSession } from "../../../ts-tui-pi/src/core/pux-agent-session.js";
+import { ChatState } from "../../../ts-tui-pi/src/core/chat-state.js";
+import { SettingsManager } from "../../../ts-tui-pi/src/core/settings-manager.js";
+import type { AgentSessionEvent } from "../../../ts-tui-pi/src/core/agent-session.js";
+import type { ChatMessage, ChatToolCall } from "../../../ts-tui-pi/src/core/chat-state.js";
 
 @customElement("chat-panel")
 export class ChatPanel extends LitElement {
@@ -54,13 +45,36 @@ export class ChatPanel extends LitElement {
 	`;
 
 	@property() serverUrl = "http://localhost:3847";
+	@property() project = "ts-tui-pi";
 	@state() private messages: ChatMessage[] = [];
 	@state() private streaming = false;
 	@state() private inputText = "";
 	@query("input") private inputEl!: HTMLInputElement;
 
-	private currentAssistant: ChatMessage | null = null;
-	private currentTool: ToolCall | null = null;
+	private session!: PuxAgentSession;
+	private chatState = new ChatState();
+
+	connectedCallback() {
+		super.connectedCallback();
+		const settings = SettingsManager.inMemory();
+		this.session = new PuxAgentSession(settings, {}, this.serverUrl, this.project, "");
+		this.session.subscribe((event: AgentSessionEvent) => {
+			this.chatState.handleEvent(event);
+			this.syncFromState();
+		});
+	}
+
+	disconnectedCallback() {
+		super.disconnectedCallback();
+		this.session.dispose();
+	}
+
+	private syncFromState() {
+		this.messages = [...this.chatState.messages];
+		this.streaming = this.chatState.streaming;
+		this.requestUpdate();
+		this.scrollToBottom();
+	}
 
 	render() {
 		return html`
@@ -90,116 +104,28 @@ export class ChatPanel extends LitElement {
 		return html`
 			<div class="msg ${m.role}">
 				${m.thinking ? html`<div class="thinking">${m.thinking}</div>` : nothing}
-				<div class="text">${m.text}${m.role === "assistant" && this.streaming && m === this.currentAssistant ? html`<span class="streaming-cursor"></span>` : nothing}</div>
-				${m.tools?.map(t => this.renderTool(t)) || nothing}
+				<div class="text">${m.text}${m.role === "assistant" && this.streaming ? html`<span class="streaming-cursor"></span>` : nothing}</div>
+				${m.tools.length > 0 ? m.tools.map(t => this.renderTool(t)) : nothing}
 			</div>
 		`;
 	}
 
-	private renderTool(t: ToolCall) {
+	private renderTool(t: ChatToolCall) {
 		return html`
 			<div class="tool">
 				<span class="name">${t.name}</span>
 				<span class="status ${t.status}">${t.status === "running" ? "⟳" : t.status === "done" ? "✓" : "✗"}</span>
-				${t.args ? html`<div class="args">${t.args.slice(0, 120)}</div>` : nothing}
+				${t.args ? html`<div class="args">${JSON.stringify(t.args).slice(0, 120)}</div>` : nothing}
 			</div>
 		`;
 	}
 
-	private async send() {
+	private send() {
 		const text = this.inputText.trim();
 		if (!text || this.streaming) return;
 		this.inputText = "";
 		this.requestUpdate();
-
-		// Add user message
-		const userMsg: ChatMessage = { role: "user", text };
-		this.messages = [...this.messages, userMsg];
-
-		// Start assistant message
-		const assistantMsg: ChatMessage = { role: "assistant", text: "", tools: [] };
-		this.messages = [...this.messages, assistantMsg];
-		this.currentAssistant = assistantMsg;
-		this.currentTool = null;
-		this.streaming = true;
-
-		try {
-			const resp = await fetch(`${this.serverUrl}/api/pux/prompt`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ message: text, project: "ts-tui-pi" }),
-			});
-
-			if (!resp.body) throw new Error("No response body");
-
-			const reader = resp.body.getReader();
-			const decoder = new TextDecoder();
-			let buffer = "";
-
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
-
-				for (const line of lines) {
-					if (!line.startsWith("data: ")) continue;
-					const data = line.slice(6).trim();
-					if (data === "[DONE]") continue;
-					try {
-						const event = JSON.parse(data);
-						this.handleSSEEvent(event);
-					} catch {}
-				}
-			}
-		} catch (err: any) {
-			if (this.currentAssistant) {
-				this.currentAssistant.text += `\n\nError: ${err.message}`;
-			}
-		} finally {
-			this.streaming = false;
-			this.currentAssistant = null;
-			this.currentTool = null;
-			this.requestUpdate();
-			this.scrollToBottom();
-		}
-	}
-
-	private handleSSEEvent(event: any) {
-		if (!this.currentAssistant) return;
-
-		switch (event.type) {
-			case "text_delta":
-				this.currentAssistant.text += event.text || event.content || "";
-				break;
-
-			case "thinking_delta":
-				if (!this.currentAssistant.thinking) this.currentAssistant.thinking = "";
-				this.currentAssistant.thinking += event.text || event.content || "";
-				break;
-
-			case "tool_execution_start":
-				this.currentTool = { name: event.toolName || event.name || "tool", args: event.args ? JSON.stringify(event.args).slice(0, 200) : undefined, status: "running" };
-				this.currentAssistant.tools = [...(this.currentAssistant.tools || []), this.currentTool];
-				break;
-
-			case "tool_execution_end":
-				if (this.currentTool) {
-					this.currentTool.status = event.isError ? "error" : "done";
-					this.currentTool = null;
-				}
-				break;
-
-			case "compaction_end":
-				// Ignore compaction events in web UI for now
-				break;
-		}
-
-		this.messages = [...this.messages];
-		this.requestUpdate();
-		this.scrollToBottom();
+		this.session.prompt(text);
 	}
 
 	private scrollToBottom() {

@@ -1,232 +1,198 @@
 /**
- * SSE event parser test — validates the chat panel's SSE stream parsing.
+ * ChatState tests — shared message accumulator used by both TUI and web.
  *
- * Tests the core parsing logic extracted from chat-panel.ts handleSSEEvent.
- * This ensures the SSE contract between Go backend and web frontend stays consistent.
+ * Tests the event→message model conversion that PuxAgentSession emits.
+ * Both TUI InteractiveMode and web chat-panel consume these same events.
  */
 
 import { describe, test, expect } from "bun:test";
+import { ChatState } from "../../ts-tui-pi/src/core/chat-state.js";
+import type { AgentSessionEvent } from "../../ts-tui-pi/src/core/agent-session.js";
 
-// ── Types (mirror chat-panel.ts internal types) ──────────────
-
-interface ChatMessage {
-	role: "user" | "assistant";
-	text: string;
-	thinking?: string;
-	tools?: ToolCall[];
+function emit(state: ChatState, event: AgentSessionEvent): void {
+	state.handleEvent(event);
 }
 
-interface ToolCall {
-	name: string;
-	args?: string;
-	result?: string;
-	status: "running" | "done" | "error";
+function userStart(text: string): any {
+	return { type: "message_start", message: { role: "user", content: [{ type: "text", text }] } };
 }
 
-// ── Extracted SSE handler (same logic as chat-panel.ts) ──────
-
-function processSSEEvents(events: any[]): ChatMessage {
-	const msg: ChatMessage = { role: "assistant", text: "", tools: [] };
-	let currentTool: ToolCall | null = null;
-
-	for (const event of events) {
-		switch (event.type) {
-			case "text_delta":
-				msg.text += event.text || event.content || "";
-				break;
-			case "thinking_delta":
-				if (!msg.thinking) msg.thinking = "";
-				msg.thinking += event.text || event.content || "";
-				break;
-			case "tool_execution_start":
-				currentTool = {
-					name: event.toolName || event.name || "tool",
-					args: event.args ? JSON.stringify(event.args).slice(0, 200) : undefined,
-					status: "running",
-				};
-				msg.tools = [...(msg.tools || []), currentTool];
-				break;
-			case "tool_execution_end":
-				if (currentTool) {
-					currentTool.status = event.isError ? "error" : "done";
-					currentTool = null;
-				}
-				break;
-		}
-	}
-
-	return msg;
+function assistantStart(): any {
+	return { type: "message_start", message: { role: "assistant", content: [] } };
 }
 
-// ── SSE stream parser (same logic as chat-panel.ts send()) ──
+function messageUpdate(content: any[]): any {
+	return { type: "message_update", message: { role: "assistant", content } };
+}
 
-function parseSSEStream(rawStream: string): any[] {
-	const events: any[] = [];
-	let buffer = "";
+function messageEnd(content: any[], extra?: Record<string, any>): any {
+	return { type: "message_end", message: { role: "assistant", content, stopReason: "stop", ...extra } };
+}
 
-	const lines = (buffer + rawStream).split("\n");
-	buffer = lines.pop() || "";
+function toolExecStart(id: string, name: string, args?: any): any {
+	return { type: "tool_execution_start", toolCallId: id, toolName: name, args };
+}
 
-	for (const line of lines) {
-		if (!line.startsWith("data: ")) continue;
-		const data = line.slice(6).trim();
-		if (data === "[DONE]") continue;
-		try {
-			events.push(JSON.parse(data));
-		} catch {}
-	}
+function toolExecEnd(id: string, isError?: boolean, result?: any): any {
+	return { type: "tool_execution_end", toolCallId: id, isError: !!isError, result };
+}
 
-	return events;
+function agentEnd(): any {
+	return { type: "agent_end", messages: [] };
 }
 
 // ── Tests ────────────────────────────────────────────────────
 
-describe("SSE event processing", () => {
-	test("text_delta — accumulates text", () => {
-		const msg = processSSEEvents([
-			{ type: "text_delta", text: "Hello" },
-			{ type: "text_delta", text: " world" },
-		]);
-		expect(msg.text).toBe("Hello world");
+describe("ChatState (shared TUI + web accumulator)", () => {
+	test("user message added to messages", () => {
+		const s = new ChatState();
+		emit(s, userStart("hello"));
+		emit(s, agentEnd());
+		expect(s.messages).toHaveLength(1);
+		expect(s.messages[0].role).toBe("user");
+		expect(s.messages[0].text).toBe("hello");
 	});
 
-	test("text_delta — falls back to content field", () => {
-		const msg = processSSEEvents([
-			{ type: "text_delta", content: "via content" },
-		]);
-		expect(msg.text).toBe("via content");
+	test("assistant start creates streaming message", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		expect(s.messages).toHaveLength(1);
+		expect(s.messages[0].role).toBe("assistant");
+		expect(s.streaming).toBe(true);
 	});
 
-	test("thinking_delta — accumulates thinking", () => {
-		const msg = processSSEEvents([
-			{ type: "thinking_delta", text: "Let me" },
-			{ type: "thinking_delta", text: " think..." },
-		]);
-		expect(msg.thinking).toBe("Let me think...");
+	test("message_update accumulates text", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		emit(s, messageUpdate([
+			{ type: "text", text: "Hello world" },
+		]));
+		expect(s.messages[0].text).toBe("Hello world");
 	});
 
-	test("tool_execution_start — creates running tool", () => {
-		const msg = processSSEEvents([
-			{ type: "tool_execution_start", toolName: "bash", args: { cmd: "ls" } },
-		]);
-		expect(msg.tools).toHaveLength(1);
-		expect(msg.tools![0].name).toBe("bash");
-		expect(msg.tools![0].status).toBe("running");
-		expect(msg.tools![0].args).toContain("ls");
+	test("message_update accumulates thinking", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		emit(s, messageUpdate([
+			{ type: "thinking", thinking: "Let me analyze..." },
+		]));
+		expect(s.messages[0].thinking).toBe("Let me analyze...");
 	});
 
-	test("tool_execution_start — falls back to name field", () => {
-		const msg = processSSEEvents([
-			{ type: "tool_execution_start", name: "delegate_to" },
-		]);
-		expect(msg.tools![0].name).toBe("delegate_to");
+	test("message_update tracks tool calls", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		emit(s, messageUpdate([
+			{ type: "toolCall", id: "t1", name: "bash", arguments: { cmd: "ls" } },
+		]));
+		expect(s.messages[0].tools).toHaveLength(1);
+		expect(s.messages[0].tools[0].name).toBe("bash");
+		expect(s.messages[0].tools[0].status).toBe("running");
 	});
 
-	test("tool_execution_start — default name is 'tool'", () => {
-		const msg = processSSEEvents([
-			{ type: "tool_execution_start" },
-		]);
-		expect(msg.tools![0].name).toBe("tool");
+	test("tool_execution_end marks tool done", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		emit(s, messageUpdate([
+			{ type: "toolCall", id: "t1", name: "bash", arguments: {} },
+		]));
+		emit(s, toolExecEnd("t1"));
+		expect(s.messages[0].tools[0].status).toBe("done");
 	});
 
-	test("tool_execution_end — marks tool done", () => {
-		const msg = processSSEEvents([
-			{ type: "tool_execution_start", toolName: "bash" },
-			{ type: "tool_execution_end" },
-		]);
-		expect(msg.tools![0].status).toBe("done");
+	test("tool_execution_end marks tool error", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		emit(s, messageUpdate([
+			{ type: "toolCall", id: "t1", name: "bash", arguments: {} },
+		]));
+		emit(s, toolExecEnd("t1", true));
+		expect(s.messages[0].tools[0].status).toBe("error");
 	});
 
-	test("tool_execution_end — isError marks error", () => {
-		const msg = processSSEEvents([
-			{ type: "tool_execution_start", toolName: "bash" },
-			{ type: "tool_execution_end", isError: true },
-		]);
-		expect(msg.tools![0].status).toBe("error");
+	test("tool_execution_start adds sub-agent tool", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		emit(s, toolExecStart("t2", "delegate_to", { agent: "jake" }));
+		expect(s.messages[0].tools).toHaveLength(1);
+		expect(s.messages[0].tools[0].name).toBe("delegate_to");
 	});
 
-	test("multiple tools — tracks correctly", () => {
-		const msg = processSSEEvents([
-			{ type: "tool_execution_start", toolName: "bash" },
-			{ type: "tool_execution_end" },
-			{ type: "tool_execution_start", toolName: "delegate_to" },
-			{ type: "tool_execution_end", isError: true },
-		]);
-		expect(msg.tools).toHaveLength(2);
-		expect(msg.tools![0].status).toBe("done");
-		expect(msg.tools![1].status).toBe("error");
+	test("message_end finalizes text", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		emit(s, messageUpdate([{ type: "text", text: "partial" }]));
+		emit(s, messageEnd([{ type: "text", text: "final answer" }]));
+		expect(s.messages[0].text).toBe("final answer");
 	});
 
-	test("full flow — text + thinking + tools", () => {
-		const msg = processSSEEvents([
-			{ type: "thinking_delta", text: "Analyzing..." },
-			{ type: "text_delta", text: "I'll check " },
-			{ type: "tool_execution_start", toolName: "bash", args: { cmd: "git status" } },
-			{ type: "text_delta", text: "the repo." },
-			{ type: "tool_execution_end" },
-		]);
-		expect(msg.text).toBe("I'll check the repo.");
-		expect(msg.thinking).toBe("Analyzing...");
-		expect(msg.tools).toHaveLength(1);
-		expect(msg.tools![0].status).toBe("done");
+	test("message_end captures error", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		emit(s, messageEnd([{ type: "text", text: "" }], { stopReason: "error", errorMessage: "Backend 500" }));
+		expect(s.messages[0].errorMessage).toBe("Backend 500");
 	});
 
-	test("compaction_end — ignored", () => {
-		const msg = processSSEEvents([
-			{ type: "text_delta", text: "hi" },
-			{ type: "compaction_end", compactionType: "micro" },
-			{ type: "text_delta", text: " there" },
-		]);
-		expect(msg.text).toBe("hi there");
-	});
-});
-
-describe("SSE stream parser", () => {
-	test("parses single data line", () => {
-		const events = parseSSEStream('data: {"type":"text_delta","text":"hi"}\n\n');
-		expect(events).toHaveLength(1);
-		expect(events[0].type).toBe("text_delta");
-		expect(events[0].text).toBe("hi");
+	test("agent_end sets streaming false", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		expect(s.streaming).toBe(true);
+		emit(s, messageEnd([{ type: "text", text: "done" }]));
+		emit(s, agentEnd());
+		expect(s.streaming).toBe(false);
 	});
 
-	test("skips non-data lines", () => {
-		const events = parseSSEStream('event: ping\ndata: {"type":"text_delta","text":"hi"}\n\n');
-		expect(events).toHaveLength(1);
+	test("full conversation flow", () => {
+		const s = new ChatState();
+
+		// User sends message
+		emit(s, userStart("list files"));
+		// Assistant starts
+		emit(s, assistantStart());
+		// Tool call
+		emit(s, messageUpdate([
+			{ type: "toolCall", id: "t1", name: "bash", arguments: { cmd: "ls" } },
+		]));
+		// Tool result
+		emit(s, toolExecEnd("t1", false, { content: [{ type: "text", text: "file1.txt" }] }));
+		// Final answer
+		emit(s, messageEnd([{ type: "text", text: "Here are the files: file1.txt" }]));
+		emit(s, agentEnd());
+
+		expect(s.messages).toHaveLength(2);
+		expect(s.messages[0].role).toBe("user");
+		expect(s.messages[0].text).toBe("list files");
+		expect(s.messages[1].role).toBe("assistant");
+		expect(s.messages[1].text).toBe("Here are the files: file1.txt");
+		expect(s.messages[1].tools).toHaveLength(1);
+		expect(s.messages[1].tools[0].status).toBe("done");
+		expect(s.streaming).toBe(false);
 	});
 
-	test("skips [DONE] sentinel", () => {
-		const events = parseSSEStream('data: {"type":"text_delta","text":"hi"}\ndata: [DONE]\n\n');
-		expect(events).toHaveLength(1);
+	test("multiple tool calls in sequence", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		emit(s, messageUpdate([{ type: "toolCall", id: "t1", name: "bash", arguments: { cmd: "ls" } }]));
+		emit(s, messageUpdate([
+			{ type: "toolCall", id: "t1", name: "bash", arguments: { cmd: "ls" } },
+			{ type: "toolCall", id: "t2", name: "bash", arguments: { cmd: "pwd" } },
+		]));
+		emit(s, toolExecEnd("t1"));
+		emit(s, toolExecEnd("t2"));
+		emit(s, messageEnd([]));
+		emit(s, agentEnd());
+
+		expect(s.messages[0].tools).toHaveLength(2);
+		expect(s.messages[0].tools[0].status).toBe("done");
+		expect(s.messages[0].tools[1].status).toBe("done");
 	});
 
-	test("handles multiple events", () => {
-		const stream = [
-			'data: {"type":"text_delta","text":"a"}',
-			'',
-			'data: {"type":"text_delta","text":"b"}',
-			'',
-		].join("\n");
-		const events = parseSSEStream(stream);
-		expect(events).toHaveLength(2);
-		expect(events[0].text).toBe("a");
-		expect(events[1].text).toBe("b");
-	});
-
-	test("handles malformed JSON gracefully", () => {
-		const events = parseSSEStream('data: not-json\ndata: {"type":"text_delta","text":"ok"}\n\n');
-		// Malformed line is skipped, valid line parsed
-		expect(events).toHaveLength(1);
-		expect(events[0].text).toBe("ok");
-	});
-
-	test("empty stream returns no events", () => {
-		const events = parseSSEStream("");
-		expect(events).toHaveLength(0);
-	});
-
-	test("whitespace-only data line is skipped", () => {
-		const events = parseSSEStream("data: \n\n");
-		// Empty string after "data: " trimmed → tries JSON.parse("") → fails → skipped
-		expect(events).toHaveLength(0);
+	test("deduplicates tool calls by id", () => {
+		const s = new ChatState();
+		emit(s, assistantStart());
+		// Same tool id sent twice (message_update sends accumulated state)
+		emit(s, messageUpdate([{ type: "toolCall", id: "t1", name: "bash", arguments: { cmd: "ls" } }]));
+		emit(s, messageUpdate([{ type: "toolCall", id: "t1", name: "bash", arguments: { cmd: "ls -la" } }]));
+		expect(s.messages[0].tools).toHaveLength(1);
 	});
 });
