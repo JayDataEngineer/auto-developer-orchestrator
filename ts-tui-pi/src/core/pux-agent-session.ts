@@ -361,7 +361,7 @@ export class PuxAgentSession {
         const normalizedResult = typeof rawResult === "string"
           ? { content: [{ type: "text" as const, text: rawResult }] }
           : rawResult && typeof rawResult === "object" && !Array.isArray(rawResult) && !(rawResult as any).content
-            ? { content: [{ type: "text" as const, text: JSON.stringify(rawResult) }] }
+            ? { content: [{ type: "text" as const, text: this.extractToolResultText(rawResult, payload.toolName) }] }
             : rawResult;
         const endEvent: any = {
           type: "tool_execution_end",
@@ -677,6 +677,47 @@ export class PuxAgentSession {
     };
   }
   getLastAssistantText(): string { return this._lastAssistantText; }
+
+  /** Extract readable text from structured tool results instead of dumping JSON */
+  private extractToolResultText(result: any, toolName?: string): string {
+    // Delegate tools: show summary, not raw JSON
+    if (result.agent_ref || result.agentId) {
+      const parts: string[] = [];
+      if (result.result) parts.push(typeof result.result === "string" ? result.result : this.extractToolResultText(result.result, toolName));
+      if (result.summary) parts.push(result.summary);
+      if (result.output) parts.push(typeof result.output === "string" ? result.output : JSON.stringify(result.output));
+      if (result.error) parts.push(`Error: ${result.error}`);
+      return parts.length > 0 ? parts.join("\n") : `Delegated to ${result.agent_ref || result.agentId || "agent"}`;
+    }
+
+    // Common patterns: { content: "..." } or { text: "..." } or { message: "..." }
+    if (typeof result.content === "string") return result.content;
+    if (typeof result.text === "string") return result.text;
+    if (typeof result.message === "string") return result.message;
+    if (typeof result.output === "string") return result.output;
+    if (typeof result.summary === "string") return result.summary;
+    if (typeof result.error === "string") return `Error: ${result.error}`;
+
+    // Shell/bash results: { stdout, stderr, exit_code }
+    if (result.stdout !== undefined) {
+      let out = result.stdout || "";
+      if (result.stderr) out += (out ? "\n" : "") + result.stderr;
+      if (result.exit_code && result.exit_code !== 0) out += `\n(exit code ${result.exit_code})`;
+      return out || "(no output)";
+    }
+
+    // { path, content } file results
+    if (result.path && result.content) return `${result.path}:\n${result.content}`;
+
+    // Array of items — join them
+    if (Array.isArray(result)) return result.map(r => typeof r === "string" ? r : this.extractToolResultText(r, toolName)).join("\n");
+
+    // Last resort: key=value pairs, sorted, skip empty/internal fields
+    const skip = new Set(["_type", "type", "id", "tool_use_id"]);
+    const entries = Object.entries(result).filter(([k, v]) => !skip.has(k) && v !== undefined && v !== null && v !== "");
+    if (entries.length === 0) return "(empty result)";
+    return entries.map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`).join("\n");
+  }
   getFollowUpMessages(): string[] { return []; }
   getSteeringMessages(): string[] { return []; }
   getToolDefinition(name: string) {
