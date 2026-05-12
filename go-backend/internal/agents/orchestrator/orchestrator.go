@@ -16,6 +16,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/session"
 	"github.com/auto-developer-orchestrator/backend/internal/skills"
 	browsertools "github.com/auto-developer-orchestrator/backend/internal/tools/browser"
+	desktoptools "github.com/auto-developer-orchestrator/backend/internal/tools/desktop"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	asktool "github.com/auto-developer-orchestrator/backend/internal/tools/ask"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/face"
@@ -57,6 +58,7 @@ type Config struct {
 	DBProvider       common.DBProvider          // optional: if set, registers graph/face tools for employees
 	LLMProvider      core.LLMProvider           // optional: if set, registers NLP tools for employees
 	BrowserProvider browsertools.BrowserProvider // optional: if set, registers browser a11y/cookie/storage tools for employees
+	DesktopProvider desktoptools.DesktopProvider // optional: if set, registers desktop screenshot/click/type/key tools for employees
 	Subscriber      chan<- core.AgentEvent      // optional: if set, ask_user tool can emit events to TUI
 }
 
@@ -170,6 +172,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		sandboxIDFn := func() string { return cfg.SandboxID }
 		employeeTools = browsertools.RegisterBrowserTools(employeeTools, cfg.BrowserProvider, sandboxIDFn)
 		logger.Printf("Browser a11y/cookie/storage tools loaded for employees: 8 tools")
+	}
+
+	if cfg.DesktopProvider != nil {
+		sandboxIDFn := func() string { return cfg.SandboxID }
+		employeeTools = desktoptools.RegisterDesktopTools(employeeTools, cfg.DesktopProvider, sandboxIDFn)
+		logger.Printf("Desktop tools loaded for employees: 4 tools")
 	}
 
 	// Build MCP server resolver for role-based delegation
@@ -403,6 +411,7 @@ func makeOrchestratorFactory(provider core.LLMProvider, parentCfg Config) orches
 			ExtraHooks:    parentCfg.ExtraHooks,
 			DBProvider:    parentCfg.DBProvider,
 			LLMProvider:   parentCfg.LLMProvider,
+			DesktopProvider: parentCfg.DesktopProvider,
 		}
 
 		subOrch, err := New(subProvider, cfg)

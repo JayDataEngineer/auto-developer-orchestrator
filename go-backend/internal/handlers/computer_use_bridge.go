@@ -9,10 +9,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 
+	"github.com/auto-developer-orchestrator/backend/internal/tools/desktop"
 	"go.uber.org/zap"
 )
 
 // ComputerUseBridge implements the llama.ComputerUseProvider interface
+// and the desktop.DesktopProvider interface.
+//
+// Compile-time interface assertions:
+var _ desktop.DesktopProvider = (*ComputerUseBridge)(nil)
 // by calling the existing HTTP handlers directly (no network hop).
 //
 // It uses httptest.NewRecorder to capture handler responses. This pattern is

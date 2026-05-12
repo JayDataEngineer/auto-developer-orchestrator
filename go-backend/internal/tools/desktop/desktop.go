@@ -3,34 +3,20 @@ package desktop
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
 
-// Driver abstracts desktop/X11 automation.
-type Driver interface {
-	Screenshot(ctx context.Context) (*DesktopFrame, error)
-	Click(ctx context.Context, x, y float64, button int) (*DesktopFrame, error)
-	Type(ctx context.Context, text string) (*DesktopFrame, error)
-	Key(ctx context.Context, key string) (*DesktopFrame, error)
-	Resolution(ctx context.Context) (int, int, error)
-}
+// ── Screenshot Tool ────────────────────────────────────────────────────────
 
-// DesktopFrame represents the state of a desktop screenshot.
-type DesktopFrame struct {
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
-	ImageB64 string `json:"image_b64,omitempty"`
-	Error    string `json:"error,omitempty"`
-}
-
-// ScreenshotTool implements core.Tool for capturing desktop screenshots.
 type ScreenshotTool struct {
-	driver Driver
+	provider  DesktopProvider
+	sandboxID func() string
 }
 
-func NewScreenshotTool(d Driver) *ScreenshotTool {
-	return &ScreenshotTool{driver: d}
+func NewScreenshotTool(p DesktopProvider, sandboxID func() string) *ScreenshotTool {
+	return &ScreenshotTool{provider: p, sandboxID: sandboxID}
 }
 
 func (t *ScreenshotTool) Name() string        { return "desktop_screenshot" }
@@ -41,20 +27,22 @@ func (t *ScreenshotTool) Schema() json.RawMessage {
 }
 
 func (t *ScreenshotTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	frame, err := t.driver.Screenshot(ctx)
-	if err != nil {
-		return nil, err
+	sbID := t.sandboxID()
+	if sbID == "" {
+		return nil, core.NewToolError("desktop_screenshot", "no sandbox available")
 	}
-	return frame, nil
+	return t.provider.DesktopScreenshot(ctx, sbID)
 }
 
-// ClickTool implements core.Tool for clicking at desktop coordinates.
+// ── Click Tool ─────────────────────────────────────────────────────────────
+
 type ClickTool struct {
-	driver Driver
+	provider  DesktopProvider
+	sandboxID func() string
 }
 
-func NewClickTool(d Driver) *ClickTool {
-	return &ClickTool{driver: d}
+func NewClickTool(p DesktopProvider, sandboxID func() string) *ClickTool {
+	return &ClickTool{provider: p, sandboxID: sandboxID}
 }
 
 func (t *ClickTool) Name() string        { return "desktop_click" }
@@ -73,6 +61,11 @@ func (t *ClickTool) Schema() json.RawMessage {
 }
 
 func (t *ClickTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	if sbID == "" {
+		return nil, core.NewToolError("desktop_click", "no sandbox available")
+	}
+
 	x, _ := args["x"].(float64)
 	y, _ := args["y"].(float64)
 	button := 1
@@ -82,26 +75,28 @@ func (t *ClickTool) Execute(ctx context.Context, args map[string]any) (any, erro
 
 	// Coordinate normalization (CUA pattern): if values are 0-1000, scale to screen resolution
 	if x >= 0 && x <= 1000 && y >= 0 && y <= 1000 {
-		if sw, sh, err := t.driver.Resolution(ctx); err == nil {
-			x = x * float64(sw) / 1000.0
-			y = y * float64(sh) / 1000.0
+		if res, err := t.provider.Resolution(ctx, sbID); err == nil {
+			if sw := parseIntField(res, "width"); sw > 0 {
+				if sh := parseIntField(res, "height"); sh > 0 {
+					x = x * float64(sw) / 1000.0
+					y = y * float64(sh) / 1000.0
+				}
+			}
 		}
 	}
 
-	frame, err := t.driver.Click(ctx, x, y, button)
-	if err != nil {
-		return nil, err
-	}
-	return frame, nil
+	return t.provider.DesktopClick(ctx, sbID, x, y, button)
 }
 
-// TypeTool implements core.Tool for typing text via desktop.
+// ── Type Tool ──────────────────────────────────────────────────────────────
+
 type TypeTool struct {
-	driver Driver
+	provider  DesktopProvider
+	sandboxID func() string
 }
 
-func NewTypeTool(d Driver) *TypeTool {
-	return &TypeTool{driver: d}
+func NewTypeTool(p DesktopProvider, sandboxID func() string) *TypeTool {
+	return &TypeTool{provider: p, sandboxID: sandboxID}
 }
 
 func (t *TypeTool) Name() string        { return "desktop_type" }
@@ -118,24 +113,27 @@ func (t *TypeTool) Schema() json.RawMessage {
 }
 
 func (t *TypeTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	if sbID == "" {
+		return nil, core.NewToolError("desktop_type", "no sandbox available")
+	}
+
 	text, _ := args["text"].(string)
 	if text == "" {
 		return nil, core.NewToolError("desktop_type", "missing required parameter 'text'")
 	}
-	frame, err := t.driver.Type(ctx, text)
-	if err != nil {
-		return nil, err
-	}
-	return frame, nil
+	return t.provider.DesktopType(ctx, sbID, text)
 }
 
-// KeyTool implements core.Tool for pressing keys via desktop.
+// ── Key Tool ───────────────────────────────────────────────────────────────
+
 type KeyTool struct {
-	driver Driver
+	provider  DesktopProvider
+	sandboxID func() string
 }
 
-func NewKeyTool(d Driver) *KeyTool {
-	return &KeyTool{driver: d}
+func NewKeyTool(p DesktopProvider, sandboxID func() string) *KeyTool {
+	return &KeyTool{provider: p, sandboxID: sandboxID}
 }
 
 func (t *KeyTool) Name() string        { return "desktop_key" }
@@ -152,13 +150,50 @@ func (t *KeyTool) Schema() json.RawMessage {
 }
 
 func (t *KeyTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	if sbID == "" {
+		return nil, core.NewToolError("desktop_key", "no sandbox available")
+	}
+
 	key, _ := args["key"].(string)
 	if key == "" {
 		return nil, core.NewToolError("desktop_key", "missing required parameter 'key'")
 	}
-	frame, err := t.driver.Key(ctx, key)
-	if err != nil {
-		return nil, err
+	return t.provider.DesktopKey(ctx, sbID, key)
+}
+
+// ── Registration ───────────────────────────────────────────────────────────
+
+// RegisterDesktopTools creates all desktop tool wrappers and appends to tools slice.
+func RegisterDesktopTools(tools []core.Tool, p DesktopProvider, sandboxID func() string) []core.Tool {
+	if p == nil {
+		return tools
 	}
-	return frame, nil
+	return append(tools,
+		NewScreenshotTool(p, sandboxID),
+		NewClickTool(p, sandboxID),
+		NewTypeTool(p, sandboxID),
+		NewKeyTool(p, sandboxID),
+	)
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+// parseIntField extracts an integer from a map[string]interface{} value.
+// The X11 resolution handler returns string values, so this handles both string and float64.
+func parseIntField(m map[string]interface{}, key string) int {
+	v, ok := m[key]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case string:
+		i, _ := strconv.Atoi(n)
+		return i
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return 0
 }
