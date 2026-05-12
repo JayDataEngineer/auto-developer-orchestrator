@@ -56,9 +56,9 @@ func NewApp() *App {
 	a.initEngines()
 	a.initDatabase()
 	a.initProjectRoot()
+	a.initScheduler()
 	a.initHandlers()
 	a.initMCP()
-	a.initScheduler()
 
 	return a
 }
@@ -264,7 +264,7 @@ func (a *App) initHandlers() {
 
 	// Project handler setup
 	sandboxIniter := handlers.NewSandboxInitializer(sandboxMgr, logger)
-	projectHandler.SetScheduler(nil)          // wired in initScheduler
+	projectHandler.SetScheduler(a.sched)
 	projectHandler.SetSandboxManager(sandboxMgr)
 	projectHandler.SetSandboxInitializer(sandboxIniter)
 

@@ -7,7 +7,7 @@
     "configDir": ".pi"
   },
   "pi": {
-    "extensions": ["./extensions/pux-core/index.ts", "./extensions/pux-subagents/index.ts", "./extensions/pux-context-metrics/index.ts"]
+    "extensions": ["./extensions/pux-core/index.ts", "./extensions/pux-subagents/index.ts", "./extensions/pux-context-metrics/index.ts", "./extensions/pux-scheduler/index.ts"]
   },
   "scripts": {
     "dev": "bun run src/main.ts",
