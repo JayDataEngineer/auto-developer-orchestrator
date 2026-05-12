@@ -1,8 +1,9 @@
 /**
- * Pux Web SPA — minimal Lit app.
+ * Pux Web SPA — single page, all panels visible at once.
  *
- * Imports PuxAgentSession from TUI codebase (shared SSE bridge).
- * Renders chat + browser visual + scheduler panel.
+ * Layout: chat fills the main area, browser panel slides in from the
+ * right when a sandbox is active, scheduler lives in a collapsible
+ * bottom drawer. No tabs — everything on one page.
  */
 
 import { LitElement, html, css } from "lit";
@@ -11,47 +12,47 @@ import "./components/chat-panel.js";
 import "./components/browser-panel.js";
 import "./components/scheduler-panel.js";
 
-type Tab = "chat" | "automate" | "pilot";
-
 @customElement("pux-app")
 export class PuxApp extends LitElement {
 	static styles = css`
 		:host { display: flex; flex-direction: column; height: 100vh; }
-		.topbar { height: 40px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--surface); gap: 4px; flex-shrink: 0; }
-		.topbar .brand { font-weight: 700; font-size: 13px; color: var(--accent); margin-right: 12px; }
-		.tab-btn { background: none; border: none; color: var(--dim); font-size: 12px; padding: 4px 10px; cursor: pointer; border-radius: 4px; }
-		.tab-btn:hover { color: var(--text); background: var(--border); }
-		.tab-btn.active { color: var(--accent); background: rgba(59,130,246,0.1); }
-		.main { flex: 1; overflow: hidden; display: flex; }
-		.sidebar { width: 220px; border-right: 1px solid var(--border); overflow-y: auto; background: var(--surface); flex-shrink: 0; }
-		.content { flex: 1; overflow: hidden; }
-		.sidebar-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); padding: 10px 12px 6px; }
+		.topbar { height: 36px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; gap: 8px; }
+		.topbar .brand { font-weight: 700; font-size: 13px; color: var(--accent); }
+		.topbar .spacer { flex: 1; }
+		.topbar button { background: none; border: 1px solid var(--border); color: var(--dim); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 11px; }
+		.topbar button:hover { color: var(--text); background: var(--border); }
+		.topbar button.active { color: var(--accent); border-color: var(--accent); }
+		.body { flex: 1; display: flex; overflow: hidden; }
+		.chat-area { flex: 1; min-width: 0; }
+		.browser-area { width: 380px; border-left: 1px solid var(--border); flex-shrink: 0; transition: width 0.2s; overflow: hidden; }
+		.browser-area.hidden { width: 0; border: none; }
+		.drawer { border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0; overflow: hidden; transition: height 0.2s; }
+		.drawer.open { height: 240px; }
+		.drawer.closed { height: 0; }
 	`;
 
-	@state() private activeTab: Tab = "chat";
 	@state() private serverUrl = "http://localhost:3847";
+	@state() private showBrowser = false;
+	@state() private showScheduler = false;
 
 	render() {
 		return html`
 			<div class="topbar">
 				<span class="brand">Pux</span>
-				<button class="tab-btn ${this.activeTab === "chat" ? "active" : ""}" @click=${() => { this.activeTab = "chat"; }}>Chat</button>
-				<button class="tab-btn ${this.activeTab === "automate" ? "active" : ""}" @click=${() => { this.activeTab = "automate"; }}>Automate</button>
-				<button class="tab-btn ${this.activeTab === "pilot" ? "active" : ""}" @click=${() => { this.activeTab = "pilot"; }}>Pilot</button>
+				<div class="spacer"></div>
+				<button class="${this.showBrowser ? "active" : ""}" @click=${() => { this.showBrowser = !this.showBrowser; }}>Browser</button>
+				<button class="${this.showScheduler ? "active" : ""}" @click=${() => { this.showScheduler = !this.showScheduler; }}>Scheduler</button>
 			</div>
-			<div class="main">
-				${this.activeTab === "chat" ? html`
+			<div class="body">
+				<div class="chat-area">
 					<chat-panel serverUrl=${this.serverUrl}></chat-panel>
-				` : null}
-				${this.activeTab === "automate" ? html`
-					<scheduler-panel serverUrl=${this.serverUrl}></scheduler-panel>
-				` : null}
-				${this.activeTab === "pilot" ? html`
-					<div style="display:flex;width:100%;height:100%;">
-						<chat-panel serverUrl=${this.serverUrl} style="flex:1;"></chat-panel>
-						<browser-panel serverUrl=${this.serverUrl}></browser-panel>
-					</div>
-				` : null}
+				</div>
+				<div class="browser-area ${this.showBrowser ? "" : "hidden"}">
+					<browser-panel serverUrl=${this.serverUrl}></browser-panel>
+				</div>
+			</div>
+			<div class="drawer ${this.showScheduler ? "open" : "closed"}">
+				<scheduler-panel serverUrl=${this.serverUrl}></scheduler-panel>
 			</div>
 		`;
 	}

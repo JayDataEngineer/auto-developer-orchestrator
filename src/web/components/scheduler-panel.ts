@@ -15,7 +15,7 @@ import type { SchedulerJob } from "../../../ts-tui-pi/extensions/pux-scheduler/t
 export class SchedulerPanel extends LitElement {
 	static styles = css`
 		:host { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
-		.header { height: 40px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--surface); gap: 8px; }
+		.header { height: 32px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--surface); gap: 8px; flex-shrink: 0; }
 		.header .title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); }
 		.header .count { font-size: 12px; color: var(--accent); }
 		.header button { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--dim); border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; }
