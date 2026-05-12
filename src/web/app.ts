@@ -31,7 +31,6 @@ export class PuxApp extends LitElement {
 		.drawer.closed { height: 0; }
 	`;
 
-	@state() private serverUrl = "http://localhost:3847";
 	@state() private showBrowser = false;
 	@state() private showScheduler = false;
 
@@ -45,14 +44,14 @@ export class PuxApp extends LitElement {
 			</div>
 			<div class="body">
 				<div class="chat-area">
-					<chat-panel serverUrl=${this.serverUrl}></chat-panel>
+					<chat-panel></chat-panel>
 				</div>
 				<div class="browser-area ${this.showBrowser ? "" : "hidden"}">
-					<browser-panel serverUrl=${this.serverUrl}></browser-panel>
+					<browser-panel></browser-panel>
 				</div>
 			</div>
 			<div class="drawer ${this.showScheduler ? "open" : "closed"}">
-				<scheduler-panel serverUrl=${this.serverUrl}></scheduler-panel>
+				<scheduler-panel></scheduler-panel>
 			</div>
 		`;
 	}

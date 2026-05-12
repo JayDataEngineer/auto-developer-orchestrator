@@ -40,7 +40,7 @@ export class SchedulerPanel extends LitElement {
 		.empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 13px; }
 	`;
 
-	@property() serverUrl = "http://localhost:3847";
+	@property() serverUrl = "";
 	@state() private jobs: SchedulerJob[] = [];
 	@state() private error = "";
 	@state() private loading = true;

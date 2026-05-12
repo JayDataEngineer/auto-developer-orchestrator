@@ -50,7 +50,7 @@ export class ChatPanel extends LitElement {
 		.empty { flex:1; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; }
 	`;
 
-	@property() serverUrl = "http://localhost:3847";
+	@property() serverUrl = "";
 	@property() project = "ts-tui-pi";
 	@state() private messages: ChatMessage[] = [];
 	@state() private streaming = false;

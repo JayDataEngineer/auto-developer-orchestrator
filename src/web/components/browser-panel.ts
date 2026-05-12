@@ -27,7 +27,7 @@ export class BrowserPanel extends LitElement {
 		.actions button:hover { background: var(--dim); }
 	`;
 
-	@property() serverUrl = "http://localhost:3847";
+	@property() serverUrl = "";
 	@state() private screenshot: string | null = null;
 	@state() private currentUrl = "";
 	@state() private sandboxId = "";
