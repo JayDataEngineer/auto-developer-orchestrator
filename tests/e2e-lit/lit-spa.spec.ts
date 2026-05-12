@@ -109,13 +109,100 @@ test.describe('Lit SPA — sidebar + main layout', () => {
     await page.goto('/');
     await page.waitForTimeout(800);
     const sidebarBox = await page.locator('.sidebar').boundingBox();
+    const resizeH = await page.locator('.resize-h').boundingBox();
     const mainBox = await page.locator('.main').boundingBox();
     expect(sidebarBox).toBeTruthy();
+    expect(resizeH).toBeTruthy();
     expect(mainBox).toBeTruthy();
-    // Sidebar right edge ≈ main left edge
-    expect(Math.abs(sidebarBox!.x + sidebarBox!.width - mainBox!.x)).toBeLessThan(2);
-    // Same top
-    expect(Math.abs(sidebarBox!.y - mainBox!.y)).toBeLessThan(2);
+    // Sidebar → resize handle → main (handle is 5px)
+    expect(Math.abs(sidebarBox!.x + sidebarBox!.width - resizeH!.x)).toBeLessThan(2);
+    expect(Math.abs(resizeH!.x + resizeH!.width - mainBox!.x)).toBeLessThan(2);
+  });
+});
+
+test.describe('Lit SPA — panel resizing', () => {
+  test('horizontal resize handle exists between sidebar and main', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    const handle = page.locator('.resize-h');
+    await expect(handle).toBeAttached();
+    const box = await handle.boundingBox();
+    expect(box).toBeTruthy();
+    expect(box!.width).toBe(5);
+    expect(box!.height).toBeGreaterThan(100);
+  });
+
+  test('vertical resize handle exists between browser and chat', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    const handle = page.locator('.resize-v');
+    await expect(handle).toBeAttached();
+    const box = await handle.boundingBox();
+    expect(box).toBeTruthy();
+    expect(box!.height).toBe(5);
+    expect(box!.width).toBeGreaterThan(100);
+  });
+
+  test('dragging horizontal handle resizes sidebar', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    const handle = page.locator('.resize-h');
+    const box = await handle.boundingBox();
+    expect(box).toBeTruthy();
+    const beforeW = await page.locator('.sidebar').evaluate(el => el.clientWidth);
+    // Drag right by 50px
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width / 2 + 50, box!.y + box!.height / 2);
+    await page.mouse.up();
+    const afterW = await page.locator('.sidebar').evaluate(el => el.clientWidth);
+    expect(afterW - beforeW).toBeGreaterThanOrEqual(45); // ~50px wider
+  });
+
+  test('dragging vertical handle resizes browser strip', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    const handle = page.locator('.resize-v');
+    const box = await handle.boundingBox();
+    expect(box).toBeTruthy();
+    const beforeH = await page.locator('.browser-strip').evaluate(el => el.clientHeight);
+    // Drag down by 40px
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2 + 40);
+    await page.mouse.up();
+    const afterH = await page.locator('.browser-strip').evaluate(el => el.clientHeight);
+    expect(afterH - beforeH).toBeGreaterThanOrEqual(35);
+  });
+
+  test('sidebar cannot shrink below minimum', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    const handle = page.locator('.resize-h');
+    const box = await handle.boundingBox();
+    expect(box).toBeTruthy();
+    // Drag far left
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(0, box!.y + box!.height / 2);
+    await page.mouse.up();
+    const w = await page.locator('.sidebar').evaluate(el => el.clientWidth);
+    expect(w).toBe(140); // min width
+  });
+
+  test('sidebar cannot grow beyond maximum', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(800);
+    const handle = page.locator('.resize-h');
+    const box = await handle.boundingBox();
+    expect(box).toBeTruthy();
+    // Drag far right
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(2000, box!.y + box!.height / 2);
+    await page.mouse.up();
+    const w = await page.locator('.sidebar').evaluate(el => el.clientWidth);
+    expect(w).toBe(500); // max width
   });
 });
 

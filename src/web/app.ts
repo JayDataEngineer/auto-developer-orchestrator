@@ -30,11 +30,9 @@ export class PuxApp extends LitElement {
 
 		/* Left sidebar */
 		.sidebar {
-			width: 220px;
-			flex-shrink: 0;
 			display: flex;
 			flex-direction: column;
-			border-right: 1px solid var(--border);
+			border-right: none;
 			background: var(--surface);
 		}
 		.sidebar-brand {
@@ -62,6 +60,24 @@ export class PuxApp extends LitElement {
 			flex-shrink: 0;
 		}
 
+		/* Resize handles */
+		.resize-h {
+			width: 5px;
+			cursor: col-resize;
+			background: transparent;
+			flex-shrink: 0;
+			transition: background 0.15s;
+		}
+		.resize-h:hover, .resize-h.active { background: var(--accent); }
+		.resize-v {
+			height: 5px;
+			cursor: row-resize;
+			background: transparent;
+			flex-shrink: 0;
+			transition: background 0.15s;
+		}
+		.resize-v:hover, .resize-v.active { background: var(--accent); }
+
 		/* Right main area */
 		.main {
 			flex: 1;
@@ -72,9 +88,8 @@ export class PuxApp extends LitElement {
 
 		/* Browser strip at top of main */
 		.browser-strip {
-			height: 220px;
 			flex-shrink: 0;
-			border-bottom: 1px solid var(--border);
+			border-bottom: none;
 			overflow: hidden;
 		}
 
@@ -85,9 +100,12 @@ export class PuxApp extends LitElement {
 		}
 	`;
 
+	@state() private sidebarWidth = 220;
+	@state() private browserHeight = 220;
+
 	render() {
 		return html`
-			<div class="sidebar">
+			<div class="sidebar" style="width:${this.sidebarWidth}px">
 				<div class="sidebar-brand">
 					<span class="name">Pux</span>
 				</div>
@@ -98,14 +116,56 @@ export class PuxApp extends LitElement {
 					<scheduler-panel></scheduler-panel>
 				</div>
 			</div>
+			<div class="resize-h" @mousedown=${this.startH}></div>
 			<div class="main">
-				<div class="browser-strip">
+				<div class="browser-strip" style="height:${this.browserHeight}px">
 					<browser-panel></browser-panel>
 				</div>
+				<div class="resize-v" @mousedown=${this.startV}></div>
 				<div class="chat-area">
 					<chat-panel></chat-panel>
 				</div>
 			</div>
 		`;
+	}
+
+	private startH(e: MouseEvent) {
+		e.preventDefault();
+		const startX = e.clientX;
+		const startW = this.sidebarWidth;
+		const handle = e.target as HTMLElement;
+		handle.classList.add("active");
+
+		const move = (ev: MouseEvent) => {
+			const w = startW + (ev.clientX - startX);
+			this.sidebarWidth = Math.max(140, Math.min(500, w));
+		};
+		const up = () => {
+			handle.classList.remove("active");
+			document.removeEventListener("mousemove", move);
+			document.removeEventListener("mouseup", up);
+		};
+		document.addEventListener("mousemove", move);
+		document.addEventListener("mouseup", up);
+	}
+
+	private startV(e: MouseEvent) {
+		e.preventDefault();
+		const startY = e.clientY;
+		const startH = this.browserHeight;
+		const handle = e.target as HTMLElement;
+		handle.classList.add("active");
+
+		const move = (ev: MouseEvent) => {
+			const h = startH + (ev.clientY - startY);
+			this.browserHeight = Math.max(0, Math.min(600, h));
+		};
+		const up = () => {
+			handle.classList.remove("active");
+			document.removeEventListener("mousemove", move);
+			document.removeEventListener("mouseup", up);
+		};
+		document.addEventListener("mousemove", move);
+		document.addEventListener("mouseup", up);
 	}
 }

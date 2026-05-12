@@ -90,8 +90,8 @@ test.describe('Layout — sidebar + main structure', () => {
     const mainBox = await main.boundingBox();
     expect(sidebarBox).toBeTruthy();
     expect(mainBox).toBeTruthy();
-    // Sidebar right edge ≈ main left edge
-    expect(Math.abs(sidebarBox!.x + sidebarBox!.width - mainBox!.x)).toBeLessThan(2);
+    // Sidebar right edge → resize handle (5px) → main left edge
+    expect(Math.abs(sidebarBox!.x + sidebarBox!.width - mainBox!.x)).toBeLessThanOrEqual(7);
   });
 });
 
