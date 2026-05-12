@@ -59,7 +59,7 @@ export class ChatPanel extends LitElement {
 		.slash-item:hover, .slash-item.active { background: var(--border); }
 		.slash-item .cmd { color: var(--accent); font-weight: 600; min-width: 90px; }
 		.slash-item .desc { color: var(--dim); }
-		.input-wrap { position: relative; flex: 1; }
+		.input-wrap { position: relative; flex: 1; display: flex; }
 		.subagent { font-size: 11px; color: var(--dim); padding: 4px 0 4px 12px; border-left: 2px solid var(--accent); margin: 4px 0; }
 		.subagent .name { color: var(--accent); font-weight: 600; }
 		.subagent .task { color: var(--text); }
