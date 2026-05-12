@@ -2200,6 +2200,23 @@ export class InteractiveMode {
 				return;
 			}
 
+			// Extension commands (e.g. /scheduler list)
+			if (this.isExtensionCommand(text)) {
+				const extensionRunner = this.session.extensionRunner;
+				if (extensionRunner) {
+					const spaceIndex = text.indexOf(" ");
+					const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+					const command = extensionRunner.getCommand(commandName);
+					if (command) {
+						const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
+						this.editor.addToHistory?.(text);
+						this.editor.setText("");
+						await command.handler(args, extensionRunner.createCommandContext());
+						return;
+					}
+				}
+			}
+
 			// Handle bash command (! for normal, !! for excluded from context)
 			if (text.startsWith("!")) {
 				const isExcluded = text.startsWith("!!");
