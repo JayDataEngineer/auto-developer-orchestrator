@@ -11,21 +11,33 @@ import (
 // between the client and server event types.
 func TestSSEConsistency(t *testing.T) {
 	tests := []struct {
-		local    string
+		local     string
 		canonical llama.AgentEventType
 	}{
 		{EventTextDelta, llama.EventTypeTextDelta},
 		{EventThinkingDelta, llama.EventTypeThinkingDelta},
 		{EventToolStart, llama.EventTypeToolStart},
 		{EventToolEnd, llama.EventTypeToolEnd},
+		{EventToolUpdate, llama.EventTypeToolUpdate},
+		{EventAgentStart, llama.EventTypeAgentStart},
 		{EventAgentEnd, llama.EventTypeAgentEnd},
+		{EventAgentSpawned, llama.EventTypeAgentSpawned},
 		{EventError, llama.EventTypeError},
-		{EventStateUpdate, llama.EventTypeStateUpdate},
+		{EventCompactionStart, llama.EventTypeCompactionStart},
+		{EventCompactionEnd, llama.EventTypeCompactionEnd},
 		{EventApprovalRequest, llama.EventTypeApprovalRequest},
 		{EventArtifactCreated, llama.EventTypeArtifactCreated},
 		{EventArtifactUpdated, llama.EventTypeArtifactUpdated},
+		{EventPlanCreated, llama.EventTypePlanCreated},
+		{EventPlanUpdated, llama.EventTypePlanUpdated},
 		{EventSubagentStart, llama.EventTypeSubAgentStart},
 		{EventSubagentEnd, llama.EventTypeSubAgentEnd},
+		{EventGrindAttempt, llama.EventTypeGrindAttempt},
+		{EventGrindVerify, llama.EventTypeGrindVerify},
+		{EventGrindEnd, llama.EventTypeGrindEnd},
+		{EventHookRequest, llama.EventTypeHookRequest},
+		{EventStepStart, llama.EventTypeStepStart},
+		{EventStepEnd, llama.EventTypeStepEnd},
 	}
 
 	for _, tt := range tests {

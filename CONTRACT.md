@@ -135,6 +135,15 @@ Response: `POST /api/pux/respond` with `{requestId: string, response: string}`.
 | `grind_verify` | `{agentName: string, task: string, status: string}` | QA verification |
 | `grind_end` | `{status: string, task: string}` | QA cycle done |
 
+### 2.11 Step Lifecycle
+
+| Event | Payload | When |
+|-------|---------|------|
+| `step_start` | `{round: int}` | Agent loop iteration begins |
+| `step_end` | `{round: int, decision: string}` | Agent loop iteration completes |
+
+Decision values: `"respond"`, `"delegate"`, `"ask"`, `"error"`.
+
 ## Contract 3: Tool Interface
 
 **Direction**: Kernel ↔ Capabilities

@@ -121,7 +121,7 @@ func streamText(body io.Reader) error {
 				fmt.Print(rendered)
 			}
 		case api.EventThinkingDelta:
-			var d api.TextDeltaData
+			var d api.ThinkingDeltaData
 			if err := json.Unmarshal(event.Data, &d); err == nil {
 				fmt.Fprintf(os.Stderr, "\033[2m%s\033[0m", d.Text)
 			}
@@ -139,6 +139,73 @@ func streamText(body io.Reader) error {
 					fmt.Fprintf(os.Stderr, "\033[32m  ✓\033[0m\n")
 				}
 			}
+		case api.EventToolUpdate:
+			var d api.ToolUpdateData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[2m  %s\033[0m\n", d.Text)
+			}
+		case api.EventSubagentStart:
+			var d api.SubagentStartData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[36m→ delegating to %s: %s\033[0m\n", d.AgentName, d.Task)
+			}
+		case api.EventSubagentEnd:
+			var d api.SubagentEndData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[32m✓ %s done (%s)\033[0m\n", d.AgentName, d.Status)
+			}
+		case api.EventCompactionStart:
+			fmt.Fprintf(os.Stderr, "\033[2mcompressing context...\033[0m\n")
+		case api.EventCompactionEnd:
+			var d api.CompactionEndData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[2mcontext: %.0f%% (%s)\033[0m\n", d.ContextUtil*100, d.CompactionType)
+			}
+		case api.EventApprovalRequest:
+			var d api.ApprovalData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[33m⚠ Approval: %s\033[0m\n", d.Title)
+			}
+		case api.EventUserQuestion:
+			var d api.UserQuestionData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\n%s\n", d.Question)
+				for _, opt := range d.Options {
+					fmt.Fprintf(os.Stderr, "  - %s\n", opt)
+				}
+			}
+		case api.EventAgentSpawned:
+			// Capture silently — session continuity info
+		case api.EventArtifactCreated:
+			fmt.Fprintf(os.Stderr, "\033[2martifact created\033[0m\n")
+		case api.EventArtifactUpdated:
+			// Silent
+		case api.EventPlanCreated:
+			var d api.PlanCreatedData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[2mplan: %s\033[0m\n", d.Name)
+			}
+		case api.EventPlanUpdated:
+			// Silent
+		case api.EventGrindAttempt, api.EventGrindVerify:
+			var d api.GrindData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[2m%s: %s\033[0m\n", d.Status, d.Task)
+			}
+		case api.EventGrindEnd:
+			var d api.GrindEndData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[2mgrind: %s\033[0m\n", d.Status)
+			}
+		case api.EventHookRequest:
+			var d api.HookRequestData
+			if err := json.Unmarshal(event.Data, &d); err == nil {
+				fmt.Fprintf(os.Stderr, "\033[2mhook: %s\033[0m\n", d.HookPoint)
+			}
+		case api.EventStepStart, api.EventStepEnd:
+			// Silent — internal loop tracking
+		case api.EventAgentStart:
+			// Silent
 		case api.EventError:
 			var d struct {
 				Error string `json:"error"`
@@ -149,7 +216,7 @@ func streamText(body io.Reader) error {
 		case api.EventAgentEnd:
 			var d api.AgentEndData
 			if err := json.Unmarshal(event.Data, &d); err == nil {
-				fmt.Fprintf(os.Stderr, "\033[2mTokens: %d in / %d out\033[0m\n", d.InputTokens, d.OutputTokens)
+				fmt.Fprintf(os.Stderr, "\033[2mTokens: %d in / %d out\033[0m\n", d.Input, d.Output)
 			}
 		}
 	}

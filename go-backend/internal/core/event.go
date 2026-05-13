@@ -45,7 +45,6 @@ const (
 	EventTypeCompactionEnd   AgentEventType = "compaction_end"
 	EventTypeToolUpdate      AgentEventType = "tool_update"
 	EventTypeAgentSpawned    AgentEventType = "agent_spawned"
-	EventTypeStateUpdate     AgentEventType = "state_update"
 	EventTypeGrindAttempt    AgentEventType = "grind_attempt"
 	EventTypeGrindVerify     AgentEventType = "grind_verify"
 	EventTypeGrindEnd        AgentEventType = "grind_end"

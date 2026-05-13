@@ -135,6 +135,10 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 			Data: map[string]interface{}{
 				"compactedMessages": event.Data.CompactedMessages,
 				"keptMessages":      event.Data.KeptMessages,
+				"contextTokens":     event.Data.ContextTokens,
+				"contextSize":       event.Data.ContextSize,
+				"contextUtil":       event.Data.ContextUtil,
+				"compactionType":    event.Data.CompactionType,
 			},
 		}
 
@@ -242,6 +246,23 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 				"options":       event.Data.ToolArgs["options"],
 				"allowFreeText": event.Data.ToolArgs["allowFreeText"],
 				"default":       event.Data.ToolArgs["default"],
+			},
+		}
+
+	case llamaeng.EventTypeStepStart:
+		return &sseEvent{
+			Type: "step_start",
+			Data: map[string]interface{}{
+				"round": event.Data.Round,
+			},
+		}
+
+	case llamaeng.EventTypeStepEnd:
+		return &sseEvent{
+			Type: "step_end",
+			Data: map[string]interface{}{
+				"round":    event.Data.Round,
+				"decision": event.Data.Decision,
 			},
 		}
 

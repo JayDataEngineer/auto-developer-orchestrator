@@ -82,7 +82,7 @@ func TestStreamSSEToolEnd(t *testing.T) {
 }
 
 func TestStreamSSEAgentEnd(t *testing.T) {
-	input := "event: agent_end\ndata: {\"inputTokens\":100,\"outputTokens\":200}\n\n"
+	input := "event: agent_end\ndata: {\"input\":100,\"output\":200,\"cache\":50,\"model\":\"test\"}\n\n"
 	ch := make(chan SSEEvent, 10)
 
 	go StreamSSE(strings.NewReader(input), ch)
@@ -95,8 +95,8 @@ func TestStreamSSEAgentEnd(t *testing.T) {
 	if err := json.Unmarshal(event.Data, &d); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-	if d.InputTokens != 100 || d.OutputTokens != 200 {
-		t.Errorf("expected 100/200, got %d/%d", d.InputTokens, d.OutputTokens)
+	if d.Input != 100 || d.Output != 200 {
+		t.Errorf("expected 100/200, got %d/%d", d.Input, d.Output)
 	}
 }
 

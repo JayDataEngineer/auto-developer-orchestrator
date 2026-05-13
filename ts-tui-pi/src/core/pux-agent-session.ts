@@ -9,6 +9,7 @@ import type {
 } from "../ai/types.js";
 import type { SettingsManager } from "./settings-manager.js";
 import { SSEParser } from "./sse-parser.js";
+import { ChatState } from "./chat-state.js";
 
 // ---------------------------------------------------------------------------
 // Minimal model stub — InteractiveMode reads model.id, model.provider, etc.
@@ -136,6 +137,7 @@ export class PuxAgentSession {
   public sessionFile: string | undefined;
 
   // ---- Tracked session state (updated from SSE events) ----
+  public chatState = new ChatState();  // Contract 4: canonical client state
   private _isCompacting = false;
   private _turnCount = 0;
   private _messageCount = 0;
@@ -216,6 +218,9 @@ export class PuxAgentSession {
     this._accText = "";
     this._turnCount++;
 
+    // 2b. Start ChatState tracking for this turn
+    this.chatState.handleEvent({ type: "message_start", message: { role: "assistant", content: [] } });
+
     // 3. Emit message_start for assistant (creates streaming component)
     const assistantMsg = mkAssistant();
     this.emit({ type: "message_start", message: assistantMsg });
@@ -266,6 +271,8 @@ export class PuxAgentSession {
           if (evt.event === "thinking_delta") {
             accThinking += evt.data.text || "";
           }
+          // Feed to ChatState (Contract 4 compliance)
+          this.feedChatState(evt.event, evt.data, accText, accThinking);
         }
       }
       // SSE stream ended normally
@@ -694,7 +701,57 @@ export class PuxAgentSession {
       cost: 0,
     };
   }
-  getLastAssistantText(): string { return this._lastAssistantText; }
+  getLastAssistantText(): string {
+    // Contract 4: prefer ChatState as canonical source
+    const msgs = this.chatState.messages;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "assistant" && msgs[i].text) return msgs[i].text;
+    }
+    return this._lastAssistantText;  // fallback
+  }
+
+  /** Feed raw SSE events into ChatState for contract-compliant state tracking */
+  private feedChatState(eventType: string, payload: any, accText: string, accThinking: string): void {
+    switch (eventType) {
+      case "text_delta": {
+        const content: any[] = [];
+        if (accThinking) content.push({ type: "thinking", thinking: accThinking });
+        content.push({ type: "text", text: accText });
+        this.chatState.handleEvent({ type: "message_update", message: { content } });
+        break;
+      }
+      case "thinking_delta": {
+        const content: any[] = [];
+        content.push({ type: "thinking", thinking: accThinking });
+        if (accText) content.push({ type: "text", text: accText });
+        this.chatState.handleEvent({ type: "message_update", message: { content } });
+        break;
+      }
+      case "tool_execution_start":
+        this.chatState.handleEvent({
+          type: "tool_execution_start",
+          toolCallId: payload.toolId || `ext_${Date.now()}`,
+          toolName: payload.toolName || "tool",
+          args: payload.args,
+        });
+        break;
+      case "tool_execution_end":
+        this.chatState.handleEvent({
+          type: "tool_execution_end",
+          toolCallId: payload.toolId || "",
+          result: payload.result,
+          isError: !!payload.error,
+        });
+        break;
+      case "agent_end":
+        this.chatState.handleEvent({ type: "message_end", message: { content: [] } });
+        this.chatState.handleEvent({ type: "agent_end" });
+        break;
+      case "error":
+        this.chatState.handleEvent({ type: "message_end", message: { stopReason: "error", errorMessage: payload.error } });
+        break;
+    }
+  }
 
   /** Extract readable text from structured tool results instead of dumping JSON */
   private extractToolResultText(result: any, toolName?: string): string {
