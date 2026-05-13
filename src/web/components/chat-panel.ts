@@ -24,10 +24,29 @@ import { SSEParser } from "../../../ts-tui-pi/src/core/sse-parser.js";
 export class ChatPanel extends LitElement {
 	static styles = css`
 		:host { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
-		.messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-		.msg { max-width: 85%; }
-		.msg.user { align-self: flex-end; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px 14px; }
-		.msg.assistant { align-self: flex-start; }
+
+		/* Single scroll container for messages + sticky input */
+		.scroll-area {
+			flex: 1; overflow-y: auto; display: flex; flex-direction: column;
+			padding: 0 16px;
+		}
+
+		/* Messages column — grows to fill space, pushes input to bottom */
+		.messages { flex: 1; display: flex; flex-direction: column; gap: 12px; padding-top: 16px; }
+
+		/* Centered empty state */
+		.empty-state {
+			flex: 1; display: flex; flex-direction: column;
+			align-items: center; justify-content: center; gap: 8px;
+			padding-bottom: 48px;
+		}
+		.empty-state h2 { font-size: 22px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+		.empty-state p { font-size: 14px; color: var(--dim); }
+
+		/* Message bubbles — fixed max-width for readability */
+		.msg { max-width: 48rem; width: 100%; margin: 0 auto; }
+		.msg.user { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px 14px; }
+		.msg.assistant {}
 		.msg .role { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--dim); margin-bottom: 4px; }
 		.msg .text { font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 		.msg .text code { background: var(--surface); padding: 2px 5px; border-radius: 3px; font-size: 13px; }
@@ -41,7 +60,13 @@ export class ChatPanel extends LitElement {
 		.tool .status.done { color: var(--success); }
 		.tool .status.error { color: var(--error); }
 		.tool .args { color: var(--dim); margin-top: 2px; max-height: 60px; overflow: hidden; }
-		.input-bar { padding: 12px 16px 16px; background: transparent; }
+
+		/* Sticky input — floats at bottom of scroll container */
+		.input-dock {
+			position: sticky; bottom: 0; padding: 8px 0 16px;
+			background: linear-gradient(transparent 0%, var(--bg) 24px);
+		}
+		.input-dock-inner { position: relative; max-width: 48rem; margin: 0 auto; }
 		.input-box {
 			display: flex; align-items: flex-end; gap: 0;
 			background: var(--surface); border: 1px solid var(--border);
@@ -66,18 +91,20 @@ export class ChatPanel extends LitElement {
 		.send-btn svg { width: 16px; height: 16px; }
 		.streaming-cursor { display: inline-block; width: 6px; height: 14px; background: var(--accent); animation: blink 1s infinite; vertical-align: text-bottom; margin-left: 2px; }
 		@keyframes blink { 50% { opacity: 0; } }
-		.empty { flex:1; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; }
+
+		/* Slash command popup */
 		.slash-list {
-			position: absolute; bottom: 100%; left: 12px; right: 12px;
+			position: absolute; bottom: 100%; left: 0; right: 0;
 			background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
 			max-height: 240px; overflow-y: auto; z-index: 10;
 			box-shadow: 0 -4px 12px rgba(0,0,0,0.3);
+			margin-bottom: 4px;
 		}
 		.slash-item { padding: 6px 12px; cursor: pointer; display: flex; gap: 10px; font-size: 13px; }
 		.slash-item:hover, .slash-item.active { background: var(--border); }
 		.slash-item .cmd { color: var(--accent); font-weight: 600; min-width: 90px; }
 		.slash-item .desc { color: var(--dim); }
-		.input-wrap { position: relative; flex: 1; display: flex; }
+
 		.subagent { font-size: 11px; color: var(--dim); padding: 4px 0 4px 12px; border-left: 2px solid var(--accent); margin: 4px 0; }
 		.subagent .name { color: var(--accent); font-weight: 600; }
 		.subagent .task { color: var(--text); }
@@ -110,44 +137,52 @@ export class ChatPanel extends LitElement {
 
 	render() {
 		const filtered = this.getFilteredCommands();
+		const isEmpty = this.messages.length === 0 && !this.streaming;
 		return html`
-			<div class="messages">
-				${this.messages.length === 0
-					? html`<div class="empty">Send a message to start</div>`
-					: this.messages.map(m => this.renderMessage(m))
-				}
-			</div>
-			<div class="input-bar">
-				<div class="input-wrap">
-					${this.slashOpen && filtered.length > 0 ? html`
-						<div class="slash-list">
-							${filtered.map((c, i) => html`
-								<div class="slash-item ${i === this.slashIndex ? 'active' : ''}"
-									@click=${() => this.pickCommand(c.name)}>
-									<span class="cmd">/${c.name}</span>
-									<span class="desc">${c.desc}</span>
-								</div>
-							`)}
+			<div class="scroll-area">
+				${isEmpty ? html`
+					<div class="empty-state">
+						<h2>What can I help with?</h2>
+						<p>Type a message to start</p>
+					</div>
+				` : html`
+					<div class="messages">
+						${this.messages.map(m => this.renderMessage(m))}
+					</div>
+				`}
+
+				<div class="input-dock">
+					<div class="input-dock-inner">
+						${this.slashOpen && filtered.length > 0 ? html`
+							<div class="slash-list">
+								${filtered.map((c, i) => html`
+									<div class="slash-item ${i === this.slashIndex ? 'active' : ''}"
+										@click=${() => this.pickCommand(c.name)}>
+										<span class="cmd">/${c.name}</span>
+										<span class="desc">${c.desc}</span>
+									</div>
+								`)}
+							</div>
+						` : nothing}
+						<div class="input-box">
+							<textarea
+								placeholder="Message Pux..."
+								rows="1"
+								.value=${this.inputText}
+								@input=${this.onInput}
+								@keydown=${this.onKeyDown}
+								?disabled=${this.streaming}
+							></textarea>
+							<button class="send-btn" @click=${this.send} ?disabled=${this.streaming || !this.inputText.trim()}>
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									${this.streaming
+										? html`<rect x="6" y="6" width="12" height="12" rx="1"/>`
+										: html`<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>`
+									}
+								</svg>
+							</button>
 						</div>
-					` : nothing}
-				</div>
-				<div class="input-box">
-					<textarea
-						placeholder="Message Pux..."
-						rows="1"
-						.value=${this.inputText}
-						@input=${this.onInput}
-						@keydown=${this.onKeyDown}
-						?disabled=${this.streaming}
-					></textarea>
-					<button class="send-btn" @click=${this.send} ?disabled=${this.streaming || !this.inputText.trim()}>
-						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							${this.streaming
-								? html`<rect x="6" y="6" width="12" height="12" rx="1"/>`
-								: html`<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>`
-							}
-						</svg>
-					</button>
+					</div>
 				</div>
 			</div>
 		`;
@@ -238,19 +273,37 @@ export class ChatPanel extends LitElement {
 			case "compact":
 				this.sendBackendCommand("compact");
 				break;
-			case "export":
-				this.sendBackendCommand("export");
+			case "model":
+				this.showLocalMessage(`Current model: ${this.project}\nUse the sidebar to switch projects.`);
 				break;
 			case "session":
-				this.sendBackendCommand("session");
+				this.showLocalMessage(`Session: ${this.messages.length} messages\nStreaming: ${this.streaming}`);
 				break;
-			case "model":
-				this.sendBackendCommand("model");
+			case "export":
+				this.exportChat();
 				break;
 			case "help":
 				this.showHelp();
 				break;
 		}
+	}
+
+	private showLocalMessage(text: string) {
+		this.chatState.messages.push({ role: "assistant", text, tools: [] });
+		this.syncFromState();
+	}
+
+	private exportChat() {
+		const lines = this.messages.map(m => {
+			const prefix = m.role === "user" ? "You" : "Pux";
+			return `${prefix}: ${m.text}`;
+		}).join("\n\n");
+		const blob = new Blob([lines], { type: "text/plain" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url; a.download = `pux-chat-${Date.now()}.txt`;
+		a.click();
+		URL.revokeObjectURL(url);
 	}
 
 	private showHelp() {
@@ -263,21 +316,15 @@ export class ChatPanel extends LitElement {
 	}
 
 	private async sendBackendCommand(cmd: string) {
+		// Only used by /compact — sends to backend and streams SSE
 		const text = `/${cmd}`;
-		this.chatState.handleEvent({
-			type: "message_start",
-			message: { role: "user", content: [{ type: "text", text }] },
-		} as any);
-		this.chatState.handleEvent({
-			type: "message_start",
-			message: { role: "assistant", content: [] },
-		} as any);
+		this._sending = true;
+		this.chatState.handleEvent({ type: "message_start", message: { role: "user", content: [{ type: "text", text }] } } as any);
+		this.chatState.handleEvent({ type: "message_start", message: { role: "assistant", content: [] } } as any);
 		this.syncFromState();
-
 		this.accText = "";
 		this.accThinking = "";
 		this.abortCtrl = new AbortController();
-
 		try {
 			const resp = await fetch(`${this.serverUrl}/api/pux/prompt`, {
 				method: "POST",
@@ -287,15 +334,20 @@ export class ChatPanel extends LitElement {
 			});
 			if (!resp.ok) throw new Error(`Backend ${resp.status}`);
 			if (!resp.body) throw new Error("No response body");
-
 			const reader = resp.body.getReader();
 			const decoder = new TextDecoder();
 			const parser = new SSEParser();
+			const READ_TIMEOUT = 60_000;
 			while (true) {
-				const { done, value } = await reader.read();
+				const readPromise = reader.read();
+				const timeout = new Promise<never>((_, reject) =>
+					setTimeout(() => reject(new Error("Stream timeout")), READ_TIMEOUT)
+				);
+				const { done, value } = await Promise.race([readPromise, timeout]);
 				if (done) break;
-				const events = parser.feed(decoder.decode(value, { stream: true }));
-				for (const evt of events) this.handleSSE(evt.event, evt.data);
+				for (const evt of parser.feed(decoder.decode(value, { stream: true }))) {
+					this.handleSSE(evt.event, evt.data);
+				}
 			}
 		} catch (err: any) {
 			if (err.name !== "AbortError") {
@@ -542,7 +594,7 @@ export class ChatPanel extends LitElement {
 
 	private scrollToBottom() {
 		requestAnimationFrame(() => {
-			const el = this.shadowRoot?.querySelector(".messages");
+			const el = this.shadowRoot?.querySelector(".scroll-area");
 			if (el) el.scrollTop = el.scrollHeight;
 		});
 	}
