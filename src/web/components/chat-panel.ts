@@ -104,6 +104,32 @@ export class ChatPanel extends LitElement {
 		}
 		.send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 		.send-btn svg { width: 16px; height: 16px; }
+
+		/* Model picker overlay */
+		.model-overlay {
+			position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+			background: rgba(0,0,0,0.5); z-index: 100;
+			display: flex; align-items: center; justify-content: center;
+		}
+		.model-picker {
+			background: var(--surface); border: 1px solid var(--border);
+			border-radius: 12px; width: 400px; max-height: 400px;
+			overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+		}
+		.model-picker-title {
+			font-size: 13px; font-weight: 600; color: var(--dim);
+			padding: 12px 16px 8px; border-bottom: 1px solid var(--border);
+			text-transform: uppercase; letter-spacing: 0.05em;
+		}
+		.model-item {
+			padding: 10px 16px; cursor: pointer; display: flex;
+			justify-content: space-between; align-items: center;
+			border-bottom: 1px solid var(--border);
+		}
+		.model-item:last-child { border-bottom: none; }
+		.model-item:hover, .model-item.active { background: var(--border); }
+		.model-item .model-name { font-size: 14px; font-weight: 500; color: var(--text); }
+		.model-item .model-provider { font-size: 11px; color: var(--dim); }
 		.streaming-dots {
 			display: inline-flex; gap: 3px; margin-left: 4px; vertical-align: middle;
 		}
@@ -145,6 +171,10 @@ export class ChatPanel extends LitElement {
 	@state() private slashOpen = false;
 	@state() private slashIndex = 0;
 	@state() private thinkingExpanded = new Set<number>();
+	@state() private modelPickerOpen = false;
+	@state() private modelList: Array<{ id: string; name: string; provider: string }> = [];
+	@state() private modelIndex = 0;
+	@state() private currentModel = "";
 	@query("textarea") private textareaEl!: HTMLTextAreaElement;
 
 	private slashFilter = "";
@@ -213,6 +243,20 @@ export class ChatPanel extends LitElement {
 					</div>
 				</div>
 			</div>
+			${this.modelPickerOpen ? html`
+				<div class="model-overlay" @click=${() => { this.modelPickerOpen = false; }}>
+					<div class="model-picker" @click=${(e: Event) => e.stopPropagation()}>
+						<div class="model-picker-title">Select Model</div>
+						${this.modelList.map((m, i) => html`
+							<div class="model-item ${i === this.modelIndex ? 'active' : ''}"
+								@click=${() => this.selectModel(i)}>
+								<span class="model-name">${m.name || m.id}</span>
+								<span class="model-provider">${m.provider}</span>
+							</div>
+						`)}
+					</div>
+				</div>
+			` : nothing}
 		`;
 	}
 
@@ -318,7 +362,7 @@ export class ChatPanel extends LitElement {
 				this.sendBackendCommand("compact");
 				break;
 			case "model":
-				this.showLocalMessage(`Current model: ${this.project}\nUse the sidebar to switch projects.`);
+				this.openModelPicker();
 				break;
 			case "session":
 				this.showLocalMessage(`Session: ${this.messages.length} messages\nStreaming: ${this.streaming}`);
@@ -335,6 +379,47 @@ export class ChatPanel extends LitElement {
 	private showLocalMessage(text: string) {
 		this.chatState.messages.push({ role: "assistant", text, tools: [] });
 		this.syncFromState();
+	}
+
+	private async openModelPicker() {
+		try {
+			const res = await fetch(`${this.serverUrl}/api/pux/models`);
+			if (!res.ok) throw new Error(`Backend ${res.status}`);
+			const models = await res.json();
+			if (!models || models.length === 0) {
+				this.showLocalMessage("No models available. Is the model server running?");
+				return;
+			}
+			this.modelList = models;
+			this.modelIndex = 0;
+			this.modelPickerOpen = true;
+		} catch (err: any) {
+			this.showLocalMessage(`Error loading models: ${err.message}`);
+		}
+	}
+
+	private async selectModel(idx: number) {
+		const m = this.modelList[idx];
+		this.modelPickerOpen = false;
+		if (!m) return;
+		try {
+			const res = await fetch(`${this.serverUrl}/api/pux/model`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					project: this.project,
+					provider: m.provider,
+					modelId: `${m.provider}/${m.id}`,
+					agentId: this._agentId || "default",
+				}),
+			});
+			if (!res.ok) throw new Error(`Backend ${res.status}`);
+			const data = await res.json();
+			this.currentModel = data.model || m.name || m.id;
+			this.showLocalMessage(`Model switched to: ${this.currentModel}`);
+		} catch (err: any) {
+			this.showLocalMessage(`Error switching model: ${err.message}`);
+		}
 	}
 
 	private exportChat() {
