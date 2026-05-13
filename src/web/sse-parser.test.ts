@@ -5,7 +5,7 @@
  * Both TUI InteractiveMode and web chat-panel consume these same events.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { ChatState } from "../../ts-tui-pi/src/core/chat-state.js";
 
 function emit(state: ChatState, event: any): void {

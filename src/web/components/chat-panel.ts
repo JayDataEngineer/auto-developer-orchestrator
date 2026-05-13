@@ -276,6 +276,7 @@ export class ChatPanel extends LitElement {
 				} as any);
 			}
 		} finally {
+			this._sending = false;
 			this.chatState.handleEvent({ type: "agent_end", messages: [] } as any);
 			this.syncFromState();
 		}
@@ -293,9 +294,11 @@ export class ChatPanel extends LitElement {
 		this.syncFromState();
 	}
 
+	private _sending = false;
 	private async send() {
 		const text = this.inputText.trim();
-		if (!text || this.streaming) return;
+		if (!text || this.streaming || this._sending) return;
+		this._sending = true;
 		this.inputText = "";
 		this.requestUpdate();
 
@@ -334,8 +337,14 @@ export class ChatPanel extends LitElement {
 			const decoder = new TextDecoder();
 			const parser = new SSEParser();
 
+			// Read timeout: if no data for 60s, assume stuck (model down, etc.)
+			const READ_TIMEOUT = 60_000;
 			while (true) {
-				const { done, value } = await reader.read();
+				const readPromise = reader.read();
+				const timeout = new Promise<never>((_, reject) =>
+					setTimeout(() => reject(new Error("Stream timeout — no data from backend. Is the model running?")), READ_TIMEOUT)
+				);
+				const { done, value } = await Promise.race([readPromise, timeout]);
 				if (done) break;
 				const events = parser.feed(decoder.decode(value, { stream: true }));
 				for (const evt of events) {
@@ -359,6 +368,7 @@ export class ChatPanel extends LitElement {
 				} as any);
 			}
 		} finally {
+			this._sending = false;
 			this.chatState.handleEvent({ type: "agent_end", messages: [] } as any);
 			this.syncFromState();
 		}
