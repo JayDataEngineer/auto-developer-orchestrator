@@ -14,6 +14,13 @@ import { toast } from "./toast-container.js";
 
 type View = "list" | "detail" | "create" | "runs";
 
+// 6-field cron validator (with seconds), matches TUI isValidCron
+function isValidCron(expr: string): boolean {
+	const parts = expr.trim().split(/\s+/);
+	if (parts.length !== 6) return false;
+	return parts.every(p => /^(\d+|\*|\?|\/\d+|\d+-\d+|\d+\/\d+|L|W|#\d+|MON|TUE|WED|THU|FRI|SAT|SUN)$/.test(p));
+}
+
 @customElement("scheduler-panel")
 export class SchedulerPanel extends LitElement {
 	static styles = css`
@@ -293,6 +300,10 @@ export class SchedulerPanel extends LitElement {
 		};
 
 		if (this.formScheduleType === "cron") {
+			if (!this.formCron || !isValidCron(this.formCron)) {
+				toast("Invalid cron. Need 6 fields with seconds, e.g. '0 0 9 * * *'", "err");
+				return;
+			}
 			req.cronExpr = this.formCron;
 		} else if (this.formScheduleType === "every") {
 			req.everySeconds = this.parseEvery(this.formEvery);

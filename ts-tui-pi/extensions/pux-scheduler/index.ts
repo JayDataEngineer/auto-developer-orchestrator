@@ -394,7 +394,106 @@ export default function registerPuxSchedulerExtension(pi: ExtensionAPI): void {
 			model: Type.Optional(Type.String({ description: "Model override" })),
 			enabled: Type.Optional(Type.Boolean({ description: "Enable/disable the job" })),
 		}),
-		execute: async () => ({ content: [] }),
+		execute: async (args: any) => {
+			const a = args as {
+				action: string; name?: string; project?: string; message?: string;
+				scheduleType?: string; cronExpr?: string; everySeconds?: number;
+				atTime?: string; description?: string; model?: string; enabled?: boolean;
+			};
+			try {
+				const c = getClient();
+				switch (a.action) {
+					case "list": {
+						const jobs = await c.listJobs();
+						const lines = jobs.map(j =>
+							`- ${j.name} (${j.id.slice(0,8)}) schedule=${j.scheduleType} enabled=${j.enabled} status=${j.status}`
+						);
+						return { content: [{ type: "text", text: lines.length ? lines.join("\n") : "No jobs found." }] };
+					}
+					case "detail": {
+						if (!a.name) return { content: [{ type: "text", text: "Error: name or ID required for detail" }] };
+						const jobs = await c.listJobs();
+						const job = resolveJob(jobs, a.name);
+						if (!job) return { content: [{ type: "text", text: `Job '${a.name}' not found` }] };
+						const detail = [
+							`Name: ${job.name} (${job.id})`,
+							`Project: ${job.project}`,
+							`Schedule: ${job.scheduleType} ${job.cronExpr || job.everySeconds ? job.cronExpr || `every ${job.everySeconds}s` : ""}`,
+							`Enabled: ${job.enabled}  Status: ${job.status}`,
+							`Message: ${job.message.slice(0, 200)}`,
+							job.lastRunAt ? `Last run: ${job.lastRunAt} (${job.lastRunStatus})` : "No runs yet",
+						].join("\n");
+						return { content: [{ type: "text", text: detail }] };
+					}
+					case "create": {
+						if (!a.name || !a.project || !a.message)
+							return { content: [{ type: "text", text: "Error: name, project, and message required for create" }] };
+						const req: CreateJobRequest = {
+							name: a.name, project: a.project, message: a.message,
+							scheduleType: (a.scheduleType as ScheduleType) || "manual",
+							cronExpr: a.cronExpr, everySeconds: a.everySeconds,
+							atTime: a.atTime, description: a.description, model: a.model,
+							enabled: a.enabled !== false,
+						};
+						const job = await c.createJob(req);
+						return { content: [{ type: "text", text: `Created job '${job.name}' (${job.id})` }] };
+					}
+					case "edit": {
+						if (!a.name) return { content: [{ type: "text", text: "Error: name or ID required for edit" }] };
+						const jobs = await c.listJobs();
+						const existing = resolveJob(jobs, a.name);
+						if (!existing) return { content: [{ type: "text", text: `Job '${a.name}' not found` }] };
+						const update: Record<string, any> = {};
+						if (a.message) update.message = a.message;
+						if (a.project) update.project = a.project;
+						if (a.model) update.model = a.model;
+						if (a.description !== undefined) update.description = a.description;
+						if (a.enabled !== undefined) update.enabled = a.enabled;
+						if (a.scheduleType) update.scheduleType = a.scheduleType;
+						if (a.cronExpr) update.cronExpr = a.cronExpr;
+						if (a.everySeconds) update.everySeconds = a.everySeconds;
+						if (a.atTime) update.atTime = a.atTime;
+						const updated = await c.updateJob(existing.id, update);
+						return { content: [{ type: "text", text: `Updated job '${updated.name}'` }] };
+					}
+					case "delete": {
+						if (!a.name) return { content: [{ type: "text", text: "Error: name or ID required for delete" }] };
+						const jobs = await c.listJobs();
+						const job = resolveJob(jobs, a.name);
+						if (!job) return { content: [{ type: "text", text: `Job '${a.name}' not found` }] };
+						await c.deleteJob(job.id);
+						return { content: [{ type: "text", text: `Deleted job '${job.name}'` }] };
+					}
+					case "trigger": {
+						if (!a.name) return { content: [{ type: "text", text: "Error: name or ID required for trigger" }] };
+						const jobs = await c.listJobs();
+						const job = resolveJob(jobs, a.name);
+						if (!job) return { content: [{ type: "text", text: `Job '${a.name}' not found` }] };
+						const msg = await c.triggerJob(job.id);
+						return { content: [{ type: "text", text: msg }] };
+					}
+					case "runs": {
+						let jobId: string | undefined;
+						if (a.name) {
+							const jobs = await c.listJobs();
+							const job = resolveJob(jobs, a.name);
+							jobId = job?.id;
+						}
+						const runs = await c.listRuns(jobId, 10);
+						if (runs.length === 0) return { content: [{ type: "text", text: "No runs found." }] };
+						const lines = runs.map(r => {
+							const ts = new Date(r.ts * 1000).toISOString().slice(0, 19);
+							return `- ${ts} ${r.status || "?"} ${r.summary?.slice(0, 80) || r.error?.slice(0, 80) || ""}`;
+						});
+						return { content: [{ type: "text", text: lines.join("\n") }] };
+					}
+					default:
+						return { content: [{ type: "text", text: `Unknown action: ${a.action}` }] };
+				}
+			} catch (err: any) {
+				return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+			}
+		},
 		renderCall: (args, _theme) => {
 			const a = args as { action: string; name?: string };
 			const target = a.name ? ` ${a.name}` : "";

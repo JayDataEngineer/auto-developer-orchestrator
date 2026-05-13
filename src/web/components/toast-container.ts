@@ -35,7 +35,6 @@ export class ToastContainer extends LitElement {
 			padding: 8px 14px;
 			border-radius: 6px;
 			font-size: 12px;
-			color: white;
 			background: var(--surface);
 			border: 1px solid var(--border);
 			color: var(--text);
@@ -54,13 +53,16 @@ export class ToastContainer extends LitElement {
 
 	@state() private toasts: Toast[] = [];
 	private nextId = 0;
+	private static MAX = 5;
 
 	connectedCallback() {
 		super.connectedCallback();
 		this._handler = ((e: CustomEvent) => {
 			const { text, type = "info" } = e.detail;
 			const id = this.nextId++;
-			this.toasts = [...this.toasts, { id, text, type }];
+			let next = [...this.toasts, { id, text, type }];
+			if (next.length > ToastContainer.MAX) next = next.slice(-ToastContainer.MAX);
+			this.toasts = next;
 			setTimeout(() => {
 				this.toasts = this.toasts.filter(t => t.id !== id);
 			}, 3000);

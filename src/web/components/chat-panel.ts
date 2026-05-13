@@ -259,7 +259,6 @@ export class ChatPanel extends LitElement {
 	private accThinking = "";
 	private _sending = false;
 	@state() private subAgents: Array<{ name: string; task: string; status: string }> = [];
-	@state() private compacting = false;
 
 	// Track per-message usage (stored by message index)
 	private messageUsage = new Map<number, TokenUsage>();
@@ -728,7 +727,6 @@ export class ChatPanel extends LitElement {
 		this.contextMetrics = null;
 		this.messageUsage.clear();
 		this.subAgents = [];
-		this.compacting = false;
 		this.abortCtrl?.abort();
 		this.abortCtrl = undefined;
 		this.syncFromState();
@@ -920,12 +918,9 @@ export class ChatPanel extends LitElement {
 				break;
 
 			case "compaction_start":
-				this.compacting = true;
-				this.requestUpdate();
 				break;
 
 			case "compaction_end":
-				this.compacting = false;
 				if (payload) {
 					this.contextMetrics = {
 						contextTokens: Number(payload.contextTokens) || 0,
