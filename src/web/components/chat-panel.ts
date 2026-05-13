@@ -9,9 +9,12 @@
  *   - ChatState (event accumulator)
  *   - ChatMessage/ChatToolCall types
  *   - AgentSessionEvent types
+ *   - SSE event mapping (handleSSE mirrors PuxAgentSession.handleSSE)
+ *   - API endpoints (prompt, models, model, user-response, plan-response)
  *
  * What's browser-specific:
  *   - SSE transport (fetch + ReadableStream)
+ *   - Lit rendering (HTML/CSS instead of terminal components)
  */
 
 import { LitElement, html, css, nothing } from "lit";
@@ -19,6 +22,38 @@ import { customElement, property, state, query } from "lit/decorators.js";
 import { ChatState } from "../../../ts-tui-pi/src/core/chat-state.js";
 import type { ChatMessage, ChatToolCall } from "../../../ts-tui-pi/src/core/chat-state.js";
 import { SSEParser } from "../../../ts-tui-pi/src/core/sse-parser.js";
+
+interface PendingQuestion {
+	questionId: string;
+	question: string;
+	options: string[];
+	allowFreeText: boolean;
+}
+
+interface PendingApproval {
+	requestId: string;
+	title: string;
+	description: string;
+}
+
+interface PendingPlan {
+	planId: string;
+	name: string;
+	content: string;
+}
+
+interface TokenUsage {
+	input: number;
+	output: number;
+	cache: number;
+}
+
+interface ContextMetrics {
+	contextTokens: number;
+	contextSize: number;
+	contextUtil: number;
+	compactionType: string;
+}
 
 @customElement("chat-panel")
 export class ChatPanel extends LitElement {
@@ -52,6 +87,7 @@ export class ChatPanel extends LitElement {
 		.msg .text code { background: var(--surface); padding: 2px 5px; border-radius: 3px; font-size: 13px; }
 		.msg .text pre { background: var(--surface); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
 		.msg .text pre code { background: none; padding: 0; }
+
 		/* Collapsible thinking block */
 		.thinking-block { margin: 4px 0; }
 		.thinking-toggle {
@@ -68,13 +104,19 @@ export class ChatPanel extends LitElement {
 			border-left: 2px solid var(--border); padding-left: 8px; margin: 6px 0 2px;
 			max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
 		}
+
+		/* Tool calls */
 		.tool { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 4px 0; font-size: 12px; }
 		.tool .name { font-weight: 600; color: var(--accent); }
+		.tool .agent { color: var(--dim); font-size: 11px; margin-left: 6px; }
 		.tool .status { float: right; }
 		.tool .status.running { color: var(--warn); }
 		.tool .status.done { color: var(--success); }
 		.tool .status.error { color: var(--error); }
 		.tool .args { color: var(--dim); margin-top: 2px; max-height: 60px; overflow: hidden; }
+
+		/* Token usage badge */
+		.usage { font-size: 11px; color: var(--dim); margin-top: 4px; }
 
 		/* Sticky input — floats at bottom of scroll container */
 		.input-dock {
@@ -105,31 +147,7 @@ export class ChatPanel extends LitElement {
 		.send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 		.send-btn svg { width: 16px; height: 16px; }
 
-		/* Model picker overlay */
-		.model-overlay {
-			position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-			background: rgba(0,0,0,0.5); z-index: 100;
-			display: flex; align-items: center; justify-content: center;
-		}
-		.model-picker {
-			background: var(--surface); border: 1px solid var(--border);
-			border-radius: 12px; width: 400px; max-height: 400px;
-			overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-		}
-		.model-picker-title {
-			font-size: 13px; font-weight: 600; color: var(--dim);
-			padding: 12px 16px 8px; border-bottom: 1px solid var(--border);
-			text-transform: uppercase; letter-spacing: 0.05em;
-		}
-		.model-item {
-			padding: 10px 16px; cursor: pointer; display: flex;
-			justify-content: space-between; align-items: center;
-			border-bottom: 1px solid var(--border);
-		}
-		.model-item:last-child { border-bottom: none; }
-		.model-item:hover, .model-item.active { background: var(--border); }
-		.model-item .model-name { font-size: 14px; font-weight: 500; color: var(--text); }
-		.model-item .model-provider { font-size: 11px; color: var(--dim); }
+		/* Streaming dots */
 		.streaming-dots {
 			display: inline-flex; gap: 3px; margin-left: 4px; vertical-align: middle;
 		}
@@ -157,10 +175,53 @@ export class ChatPanel extends LitElement {
 		.slash-item .cmd { color: var(--accent); font-weight: 600; min-width: 90px; }
 		.slash-item .desc { color: var(--dim); }
 
+		/* Sub-agent */
 		.subagent { font-size: 11px; color: var(--dim); padding: 4px 0 4px 12px; border-left: 2px solid var(--accent); margin: 4px 0; }
 		.subagent .name { color: var(--accent); font-weight: 600; }
 		.subagent .task { color: var(--text); }
 		.compaction { font-size: 11px; color: var(--dim); font-style: italic; padding: 2px 8px; }
+
+		/* Overlay — shared by model picker, question prompt, approval dialog */
+		.overlay {
+			position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+			background: rgba(0,0,0,0.5); z-index: 100;
+			display: flex; align-items: center; justify-content: center;
+		}
+		.overlay-card {
+			background: var(--surface); border: 1px solid var(--border);
+			border-radius: 12px; width: 440px; max-width: 90vw; max-height: 80vh;
+			overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+		}
+		.overlay-title {
+			font-size: 13px; font-weight: 600; color: var(--dim);
+			padding: 12px 16px 8px; border-bottom: 1px solid var(--border);
+			text-transform: uppercase; letter-spacing: 0.05em;
+		}
+		.overlay-body { padding: 12px 16px; font-size: 14px; color: var(--text); white-space: pre-wrap; }
+		.overlay-input {
+			width: 100%; background: var(--bg); border: 1px solid var(--border);
+			border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 14px;
+			font-family: inherit; margin-top: 8px;
+		}
+		.overlay-input:focus { outline: none; border-color: var(--accent); }
+		.overlay-actions {
+			display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border);
+			justify-content: flex-end;
+		}
+		.btn {
+			padding: 6px 16px; border-radius: 6px; border: 1px solid var(--border);
+			background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
+		}
+		.btn:hover { border-color: var(--dim); }
+		.btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+		.btn-primary:hover { opacity: 0.9; }
+		.btn-danger { color: var(--error); border-color: var(--error); }
+		.option-btn {
+			display: block; width: 100%; text-align: left; padding: 8px 12px;
+			border: 1px solid var(--border); border-radius: 6px; margin-top: 6px;
+			background: var(--bg); color: var(--text); font-size: 13px; cursor: pointer;
+		}
+		.option-btn:hover { border-color: var(--accent); }
 	`;
 
 	@property() serverUrl = "";
@@ -171,25 +232,47 @@ export class ChatPanel extends LitElement {
 	@state() private slashOpen = false;
 	@state() private slashIndex = 0;
 	@state() private thinkingExpanded = new Set<number>();
+
+	// Model picker
 	@state() private modelPickerOpen = false;
 	@state() private modelList: Array<{ id: string; name: string; provider: string }> = [];
 	@state() private modelIndex = 0;
 	@state() private currentModel = "";
+
+	// Pending interactions from agent
+	@state() private pendingQuestion: PendingQuestion | null = null;
+	@state() private pendingApproval: PendingApproval | null = null;
+	@state() private pendingPlan: PendingPlan | null = null;
+	@state() private questionInput = "";
+
+	// Metrics
+	@state() private lastUsage: TokenUsage | null = null;
+	@state() private contextMetrics: ContextMetrics | null = null;
+
 	@query("textarea") private textareaEl!: HTMLTextAreaElement;
 
 	private slashFilter = "";
-
 	private chatState = new ChatState();
 	private abortCtrl: AbortController | undefined;
 	private _agentId = "";
+	private accText = "";
+	private accThinking = "";
+	private _sending = false;
+	@state() private subAgents: Array<{ name: string; task: string; status: string }> = [];
+	@state() private compacting = false;
+
+	// Track per-message usage (stored by message index)
+	private messageUsage = new Map<number, TokenUsage>();
 
 	private static COMMANDS = [
 		{ name: "scheduler", desc: "Open scheduler panel" },
 		{ name: "new", desc: "Start a new session" },
 		{ name: "compact", desc: "Compact the session context" },
+		{ name: "model", desc: "Select model" },
 		{ name: "session", desc: "Show session info and stats" },
-		{ name: "export", desc: "Export session as HTML" },
-		{ name: "model", desc: "Show current model" },
+		{ name: "name", desc: "Rename current session" },
+		{ name: "copy", desc: "Copy last AI response" },
+		{ name: "export", desc: "Export session as text" },
 		{ name: "help", desc: "Show available commands" },
 	];
 
@@ -243,25 +326,18 @@ export class ChatPanel extends LitElement {
 					</div>
 				</div>
 			</div>
-			${this.modelPickerOpen ? html`
-				<div class="model-overlay" @click=${() => { this.modelPickerOpen = false; }}>
-					<div class="model-picker" @click=${(e: Event) => e.stopPropagation()}>
-						<div class="model-picker-title">Select Model</div>
-						${this.modelList.map((m, i) => html`
-							<div class="model-item ${i === this.modelIndex ? 'active' : ''}"
-								@click=${() => this.selectModel(i)}>
-								<span class="model-name">${m.name || m.id}</span>
-								<span class="model-provider">${m.provider}</span>
-							</div>
-						`)}
-					</div>
-				</div>
-			` : nothing}
+			${this.modelPickerOpen ? this.renderModelPicker() : nothing}
+			${this.pendingQuestion ? this.renderQuestionPrompt() : nothing}
+			${this.pendingApproval ? this.renderApprovalDialog() : nothing}
+			${this.pendingPlan ? this.renderPlanDialog() : nothing}
 		`;
 	}
 
+	// ── Message rendering ──
+
 	private renderMessage(m: ChatMessage, idx: number) {
 		const isOpen = this.thinkingExpanded.has(idx);
+		const usage = this.messageUsage.get(idx);
 		return html`
 			<div class="msg ${m.role}">
 				${m.thinking ? html`
@@ -275,6 +351,9 @@ export class ChatPanel extends LitElement {
 				` : nothing}
 				<div class="text">${m.text}${m.role === "assistant" && this.streaming ? html`<span class="streaming-dots"><span></span><span></span><span></span></span>` : nothing}</div>
 				${m.tools.length > 0 ? m.tools.map(t => this.renderTool(t)) : nothing}
+				${usage ? html`
+					<div class="usage">${usage.input} in · ${usage.output} out${usage.cache ? ` · ${usage.cache} cache` : ""}</div>
+				` : nothing}
 			</div>
 		`;
 	}
@@ -296,10 +375,95 @@ export class ChatPanel extends LitElement {
 		`;
 	}
 
-	private accText = "";
-	private accThinking = "";
-	@state() private subAgents: Array<{ name: string; task: string; status: string }> = [];
-	@state() private compacting = false;
+	// ── Model picker overlay ──
+
+	private renderModelPicker() {
+		return html`
+			<div class="overlay" @click=${() => { this.modelPickerOpen = false; }}>
+				<div class="overlay-card" @click=${(e: Event) => e.stopPropagation()}>
+					<div class="overlay-title">Select Model</div>
+					${this.modelList.map((m, i) => html`
+						<div class="option-btn" style="border-radius:0; margin:0; padding:10px 16px; display:flex; justify-content:space-between; border-bottom:1px solid var(--border)"
+							@click=${() => this.selectModel(i)}>
+							<span>${m.name || m.id}</span>
+							<span style="color:var(--dim); font-size:11px">${m.provider}</span>
+						</div>
+					`)}
+				</div>
+			</div>
+		`;
+	}
+
+	// ── User question prompt ──
+
+	private renderQuestionPrompt() {
+		const q = this.pendingQuestion!;
+		return html`
+			<div class="overlay">
+				<div class="overlay-card">
+					<div class="overlay-title">Agent asks</div>
+					<div class="overlay-body">${q.question}</div>
+					<div style="padding: 0 16px 8px">
+						${q.options.map(opt => html`
+							<button class="option-btn" @click=${() => this.answerQuestion(opt)}>${opt}</button>
+						`)}
+						${q.allowFreeText ? html`
+							<input class="overlay-input" placeholder="Or type your answer..."
+								.value=${this.questionInput}
+								@input=${(e: Event) => { this.questionInput = (e.target as HTMLInputElement).value; }}
+								@keydown=${(e: KeyboardEvent) => { if (e.key === "Enter" && this.questionInput.trim()) this.answerQuestion(this.questionInput.trim()); }}
+							/>
+						` : nothing}
+					</div>
+					<div class="overlay-actions">
+						<button class="btn" @click=${() => { this.pendingQuestion = null; }}>Dismiss</button>
+						${q.allowFreeText ? html`
+							<button class="btn btn-primary" @click=${() => this.answerQuestion(this.questionInput.trim() || q.defaultAnswer || "")}>Send</button>
+						` : nothing}
+					</div>
+				</div>
+			</div>
+		`;
+	}
+
+	// ── Approval dialog ──
+
+	private renderApprovalDialog() {
+		const a = this.pendingApproval!;
+		return html`
+			<div class="overlay">
+				<div class="overlay-card">
+					<div class="overlay-title">Approval Required</div>
+					<div class="overlay-body">${a.title}${a.description ? `\n\n${a.description}` : ""}</div>
+					<div class="overlay-actions">
+						<button class="btn btn-danger" @click=${() => this.respondApproval("deny")}>Deny</button>
+						<button class="btn btn-primary" @click=${() => this.respondApproval("approve")}>Approve</button>
+					</div>
+				</div>
+			</div>
+		`;
+	}
+
+	// ── Plan dialog ──
+
+	private renderPlanDialog() {
+		const p = this.pendingPlan!;
+		return html`
+			<div class="overlay">
+				<div class="overlay-card">
+					<div class="overlay-title">Plan: ${p.name}</div>
+					<div class="overlay-body" style="max-height:300px; overflow-y:auto">${p.content}</div>
+					<div class="overlay-actions">
+						<button class="btn btn-danger" @click=${() => this.respondPlan("cancel")}>Cancel</button>
+						<button class="btn" @click=${() => this.respondPlan("refine")}>Refine</button>
+						<button class="btn btn-primary" @click=${() => this.respondPlan("approve")}>Approve</button>
+					</div>
+				</div>
+			</div>
+		`;
+	}
+
+	// ── Slash command routing ──
 
 	private getFilteredCommands() {
 		if (!this.slashOpen) return [];
@@ -310,7 +474,6 @@ export class ChatPanel extends LitElement {
 	private onInput(e: Event) {
 		const el = e.target as HTMLTextAreaElement;
 		this.inputText = el.value;
-		// Auto-grow textarea
 		el.style.height = "auto";
 		el.style.height = el.scrollHeight + "px";
 		if (this.inputText.startsWith("/")) {
@@ -325,25 +488,10 @@ export class ChatPanel extends LitElement {
 	private onKeyDown(e: KeyboardEvent) {
 		const filtered = this.getFilteredCommands();
 		if (this.slashOpen && filtered.length > 0) {
-			if (e.key === "ArrowDown") {
-				e.preventDefault();
-				this.slashIndex = (this.slashIndex + 1) % filtered.length;
-				return;
-			}
-			if (e.key === "ArrowUp") {
-				e.preventDefault();
-				this.slashIndex = (this.slashIndex - 1 + filtered.length) % filtered.length;
-				return;
-			}
-			if (e.key === "Enter" || e.key === "Tab") {
-				e.preventDefault();
-				this.pickCommand(filtered[this.slashIndex].name);
-				return;
-			}
-			if (e.key === "Escape") {
-				this.slashOpen = false;
-				return;
-			}
+			if (e.key === "ArrowDown") { e.preventDefault(); this.slashIndex = (this.slashIndex + 1) % filtered.length; return; }
+			if (e.key === "ArrowUp") { e.preventDefault(); this.slashIndex = (this.slashIndex - 1 + filtered.length) % filtered.length; return; }
+			if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); this.pickCommand(filtered[this.slashIndex].name); return; }
+			if (e.key === "Escape") { this.slashOpen = false; return; }
 		}
 		if (e.key === "Enter" && !e.shiftKey) this.send();
 	}
@@ -365,7 +513,13 @@ export class ChatPanel extends LitElement {
 				this.openModelPicker();
 				break;
 			case "session":
-				this.showLocalMessage(`Session: ${this.messages.length} messages\nStreaming: ${this.streaming}`);
+				this.showSessionInfo();
+				break;
+			case "name":
+				this.renameSession();
+				break;
+			case "copy":
+				this.copyLastResponse();
 				break;
 			case "export":
 				this.exportChat();
@@ -376,9 +530,59 @@ export class ChatPanel extends LitElement {
 		}
 	}
 
+	// ── Command implementations ──
+
 	private showLocalMessage(text: string) {
 		this.chatState.messages.push({ role: "assistant", text, tools: [] });
 		this.syncFromState();
+	}
+
+	private showSessionInfo() {
+		const lines = [
+			`Session: ${this.messages.length} messages`,
+			`Agent ID: ${this._agentId || "none"}`,
+			`Model: ${this.currentModel || "default"}`,
+			`Streaming: ${this.streaming}`,
+		];
+		if (this.contextMetrics) {
+			lines.push(`Context: ${this.contextMetrics.contextTokens}/${this.contextMetrics.contextSize} tokens (${Math.round(this.contextMetrics.contextUtil * 100)}%)`);
+		}
+		if (this.lastUsage) {
+			lines.push(`Last usage: ${this.lastUsage.input} in · ${this.lastUsage.output} out · ${this.lastUsage.cache} cache`);
+		}
+		if (this.subAgents.length > 0) {
+			lines.push(`Sub-agents: ${this.subAgents.map(s => `${s.name} (${s.status})`).join(", ")}`);
+		}
+		this.showLocalMessage(lines.join("\n"));
+	}
+
+	private async renameSession() {
+		const title = prompt("Session name:");
+		if (!title || !this._agentId) return;
+		try {
+			await fetch(`${this.serverUrl}/api/pux/conversation/rename`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ project: this.project, agentId: this._agentId, title }),
+			});
+			this.showLocalMessage(`Session renamed to: ${title}`);
+		} catch (err: any) {
+			this.showLocalMessage(`Error renaming: ${err.message}`);
+		}
+	}
+
+	private copyLastResponse() {
+		for (let i = this.messages.length - 1; i >= 0; i--) {
+			if (this.messages[i].role === "assistant" && this.messages[i].text) {
+				navigator.clipboard.writeText(this.messages[i].text).then(() => {
+					this.showLocalMessage("Copied last response to clipboard.");
+				}).catch(() => {
+					this.showLocalMessage("Failed to copy to clipboard.");
+				});
+				return;
+			}
+		}
+		this.showLocalMessage("No assistant response to copy.");
 	}
 
 	private async openModelPicker() {
@@ -444,8 +648,51 @@ export class ChatPanel extends LitElement {
 		this.syncFromState();
 	}
 
+	// ── Agent interaction responses ──
+
+	private async answerQuestion(answer: string) {
+		const q = this.pendingQuestion;
+		this.pendingQuestion = null;
+		this.questionInput = "";
+		if (!q || !answer) return;
+		try {
+			await fetch(`${this.serverUrl}/api/pux/user-response`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ questionId: q.questionId, response: answer }),
+			});
+		} catch { /* agent will timeout and continue */ }
+	}
+
+	private async respondApproval(action: "approve" | "deny") {
+		const a = this.pendingApproval;
+		this.pendingApproval = null;
+		if (!a) return;
+		try {
+			await fetch(`${this.serverUrl}/api/pux/approval`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ requestId: a.requestId, action, project: this.project, agentId: this._agentId }),
+			});
+		} catch { /* ignore */ }
+	}
+
+	private async respondPlan(action: "approve" | "refine" | "cancel") {
+		const p = this.pendingPlan;
+		this.pendingPlan = null;
+		if (!p) return;
+		try {
+			await fetch(`${this.serverUrl}/api/pux/plan-response`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ planId: p.planId, action }),
+			});
+		} catch { /* ignore */ }
+	}
+
+	// ── Backend SSE stream ──
+
 	private async sendBackendCommand(cmd: string) {
-		// Only used by /compact — sends to backend and streams SSE
 		const text = `/${cmd}`;
 		this._sending = true;
 		this.chatState.handleEvent({ type: "message_start", message: { role: "user", content: [{ type: "text", text }] } } as any);
@@ -455,29 +702,7 @@ export class ChatPanel extends LitElement {
 		this.accThinking = "";
 		this.abortCtrl = new AbortController();
 		try {
-			const resp = await fetch(`${this.serverUrl}/api/pux/prompt`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ message: text, project: this.project, agentId: this._agentId || undefined }),
-				signal: this.abortCtrl.signal,
-			});
-			if (!resp.ok) throw new Error(`Backend ${resp.status}`);
-			if (!resp.body) throw new Error("No response body");
-			const reader = resp.body.getReader();
-			const decoder = new TextDecoder();
-			const parser = new SSEParser();
-			const READ_TIMEOUT = 60_000;
-			while (true) {
-				const readPromise = reader.read();
-				const timeout = new Promise<never>((_, reject) =>
-					setTimeout(() => reject(new Error("Stream timeout")), READ_TIMEOUT)
-				);
-				const { done, value } = await Promise.race([readPromise, timeout]);
-				if (done) break;
-				for (const evt of parser.feed(decoder.decode(value, { stream: true }))) {
-					this.handleSSE(evt.event, evt.data);
-				}
-			}
+			await this.streamPrompt(text);
 		} catch (err: any) {
 			if (err.name !== "AbortError") {
 				this.chatState.handleEvent({
@@ -499,6 +724,9 @@ export class ChatPanel extends LitElement {
 		this.accText = "";
 		this.accThinking = "";
 		this._agentId = "";
+		this.lastUsage = null;
+		this.contextMetrics = null;
+		this.messageUsage.clear();
 		this.subAgents = [];
 		this.compacting = false;
 		this.abortCtrl?.abort();
@@ -506,7 +734,6 @@ export class ChatPanel extends LitElement {
 		this.syncFromState();
 	}
 
-	private _sending = false;
 	private async send() {
 		const text = this.inputText.trim();
 		if (!text || this.streaming || this._sending) return;
@@ -525,7 +752,6 @@ export class ChatPanel extends LitElement {
 		this._sending = true;
 		this.inputText = "";
 		this.requestUpdate();
-		// Reset textarea height
 		requestAnimationFrame(() => { if (this.textareaEl) this.textareaEl.style.height = "auto"; });
 
 		// Emit user message into ChatState (same lifecycle as PuxAgentSession)
@@ -545,38 +771,7 @@ export class ChatPanel extends LitElement {
 		this.abortCtrl = new AbortController();
 
 		try {
-			const resp = await fetch(`${this.serverUrl}/api/pux/prompt`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ message: text, project: this.project, agentId: this._agentId || undefined }),
-				signal: this.abortCtrl.signal,
-			});
-
-			if (!resp.ok) {
-				const errText = await resp.text().catch(() => "");
-				throw new Error(`Backend ${resp.status}${errText ? ": " + errText.slice(0, 200) : ""}`);
-			}
-			if (!resp.body) throw new Error("No response body");
-
-			// Shared SSE parser — same code as TUI
-			const reader = resp.body.getReader();
-			const decoder = new TextDecoder();
-			const parser = new SSEParser();
-
-			// Read timeout: if no data for 60s, assume stuck (model down, etc.)
-			const READ_TIMEOUT = 60_000;
-			while (true) {
-				const readPromise = reader.read();
-				const timeout = new Promise<never>((_, reject) =>
-					setTimeout(() => reject(new Error("Stream timeout — no data from backend. Is the model running?")), READ_TIMEOUT)
-				);
-				const { done, value } = await Promise.race([readPromise, timeout]);
-				if (done) break;
-				const events = parser.feed(decoder.decode(value, { stream: true }));
-				for (const evt of events) {
-					this.handleSSE(evt.event, evt.data);
-				}
-			}
+			await this.streamPrompt(text);
 		} catch (err: any) {
 			if (err.name !== "AbortError") {
 				let msg = err.message || String(err);
@@ -601,9 +796,42 @@ export class ChatPanel extends LitElement {
 		}
 	}
 
+	/** Shared SSE streaming logic for both send() and sendBackendCommand() */
+	private async streamPrompt(text: string) {
+		const resp = await fetch(`${this.serverUrl}/api/pux/prompt`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ message: text, project: this.project, agentId: this._agentId || undefined }),
+			signal: this.abortCtrl!.signal,
+		});
+
+		if (!resp.ok) {
+			const errText = await resp.text().catch(() => "");
+			throw new Error(`Backend ${resp.status}${errText ? ": " + errText.slice(0, 200) : ""}`);
+		}
+		if (!resp.body) throw new Error("No response body");
+
+		const reader = resp.body.getReader();
+		const decoder = new TextDecoder();
+		const parser = new SSEParser();
+		const READ_TIMEOUT = 60_000;
+
+		while (true) {
+			const readPromise = reader.read();
+			const timeout = new Promise<never>((_, reject) =>
+				setTimeout(() => reject(new Error("Stream timeout — no data from backend. Is the model running?")), READ_TIMEOUT)
+			);
+			const { done, value } = await Promise.race([readPromise, timeout]);
+			if (done) break;
+			for (const evt of parser.feed(decoder.decode(value, { stream: true }))) {
+				this.handleSSE(evt.event, evt.data);
+			}
+		}
+	}
+
 	/**
-	 * Map SSE events to ChatState — shared event handling logic.
-	 * Covers the same events as PuxAgentSession.handleSSE() in the TUI.
+	 * Map SSE events to ChatState — mirrors PuxAgentSession.handleSSE() in TUI.
+	 * Every event type the TUI handles is handled here.
 	 */
 	private handleSSE(eventType: string, payload: any) {
 		switch (eventType) {
@@ -653,20 +881,31 @@ export class ChatPanel extends LitElement {
 				break;
 
 			case "tool_update":
-				// Partial tool result — update status in place
 				break;
 
-			case "agent_end":
+			case "agent_end": {
+				const usage: TokenUsage = {
+					input: Number(payload.input) || 0,
+					output: Number(payload.output) || 0,
+					cache: Number(payload.cache) || 0,
+				};
+				this.lastUsage = usage;
+				// Attach usage to the last assistant message
+				const lastIdx = this.messages.length - 1;
+				if (lastIdx >= 0 && this.messages[lastIdx].role === "assistant") {
+					this.messageUsage.set(lastIdx, usage);
+				}
 				this.chatState.handleEvent({
 					type: "message_end",
 					message: {
 						role: "assistant",
 						content: [],
 						stopReason: "stop",
-						usage: { input: Number(payload.input) || 0, output: Number(payload.output) || 0 },
+						usage,
 					},
 				} as any);
 				break;
+			}
 
 			case "error":
 				this.chatState.handleEvent({
@@ -687,6 +926,14 @@ export class ChatPanel extends LitElement {
 
 			case "compaction_end":
 				this.compacting = false;
+				if (payload) {
+					this.contextMetrics = {
+						contextTokens: Number(payload.contextTokens) || 0,
+						contextSize: Number(payload.contextSize) || 0,
+						contextUtil: Number(payload.contextUtil) || 0,
+						compactionType: payload.compactionType || "unknown",
+					};
+				}
 				this.requestUpdate();
 				break;
 
@@ -707,18 +954,43 @@ export class ChatPanel extends LitElement {
 			}
 
 			case "user_question":
+				this.pendingQuestion = {
+					questionId: payload.questionId || "",
+					question: payload.question || "",
+					options: payload.options || [],
+					allowFreeText: payload.allowFreeText !== false,
+				};
+				this.questionInput = payload.default || "";
+				break;
+
+			case "approval_request":
+				this.pendingApproval = {
+					requestId: payload.requestId || "",
+					title: payload.title || payload.toolName || "Approval required",
+					description: payload.description || payload.args ? JSON.stringify(payload.args, null, 2) : "",
+				};
+				break;
+
+			case "plan_created":
+			case "plan_updated":
+				if (payload.planId) {
+					this.pendingPlan = {
+						planId: payload.planId,
+						name: payload.name || "Untitled plan",
+						content: payload.content || "",
+					};
+				}
+				break;
+
+			case "artifact_created":
+			case "artifact_updated":
 			case "hook_request":
 			case "grind_attempt":
 			case "grind_verify":
 			case "grind_end":
 			case "step_start":
 			case "step_end":
-			case "artifact_created":
-			case "artifact_updated":
-			case "plan_created":
-			case "plan_updated":
-			case "approval_request":
-				// Forward-compatible: acknowledge without crashing on new event types
+				// Forward-compatible: acknowledge without crashing
 				break;
 		}
 		this.syncFromState();
@@ -740,19 +1012,35 @@ export class ChatPanel extends LitElement {
 
 	/** Load conversation history from backend (called by parent on sidebar click) */
 	loadHistory(msgs: any[]) {
-		// Reset state and rebuild from history
 		this.chatState = new ChatState();
 		this.accText = "";
 		this.accThinking = "";
+		this._agentId = "";
+		this.messageUsage.clear();
+		this.lastUsage = null;
+		this.contextMetrics = null;
 
 		for (const m of msgs) {
 			const role = m.role === "user" ? "user" : "assistant";
-			const text = m.content || "";
-			this.chatState.messages.push({
-				role,
-				text,
-				tools: [],
-			});
+			// Backend StoredMessage: content (user) or text (assistant), thinking, toolCalls
+			const text = m.text || m.content || "";
+			const thinking = m.thinking || undefined;
+			// Parse toolCalls JSON if present
+			let tools: ChatToolCall[] = [];
+			if (m.toolCalls) {
+				try {
+					const parsed = typeof m.toolCalls === "string" ? JSON.parse(m.toolCalls) : m.toolCalls;
+					if (Array.isArray(parsed)) {
+						tools = parsed.map((t: any, i: number) => ({
+							id: t.id || `hist_${i}`,
+							name: t.name || "tool",
+							args: t.args,
+							status: "done" as const,
+						}));
+					}
+				} catch { /* ignore malformed JSON */ }
+			}
+			this.chatState.messages.push({ role, text, thinking, tools });
 		}
 		this.syncFromState();
 	}
