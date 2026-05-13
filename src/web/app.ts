@@ -22,6 +22,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import "./components/chat-panel.js";
 import "./components/browser-panel.js";
 import "./components/scheduler-panel.js";
+import "./components/toast-container.js";
 
 interface ConversationSummary {
 	project: string;
@@ -171,6 +172,7 @@ export class PuxApp extends LitElement {
 					<chat-panel id="chat" .serverUrl=${this.serverUrl} .project=${this.project} @toggle-scheduler=${this.toggleScheduler}></chat-panel>
 				</div>
 			</div>
+			<toast-container></toast-container>
 		`;
 	}
 

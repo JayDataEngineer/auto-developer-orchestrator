@@ -10,6 +10,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { SchedulerClient } from "../../../ts-tui-pi/extensions/pux-scheduler/api.js";
 import type { SchedulerJob, RunLogEntry, CreateJobRequest, ScheduleType } from "../../../ts-tui-pi/extensions/pux-scheduler/types.js";
+import { toast } from "./toast-container.js";
 
 type View = "list" | "detail" | "create" | "runs";
 
@@ -113,13 +114,6 @@ export class SchedulerPanel extends LitElement {
 		.form textarea { resize: vertical; min-height: 40px; font-family: inherit; }
 		.form .row { display: flex; gap: 6px; }
 		.form .row > * { flex: 1; }
-
-		/* Status message */
-		.status-msg {
-			padding: 6px 12px; font-size: 11px;
-		}
-		.status-msg.ok { color: var(--success); }
-		.status-msg.err { color: var(--error); }
 	`;
 
 	@property() serverUrl = "";
@@ -130,8 +124,6 @@ export class SchedulerPanel extends LitElement {
 	@state() private expanded = false;
 	@state() private view: View = "list";
 	@state() private selectedJob: SchedulerJob | null = null;
-	@state() private statusMsg = "";
-	@state() private statusOk = true;
 	@state() private working = false;
 
 	// Create form state
@@ -141,6 +133,7 @@ export class SchedulerPanel extends LitElement {
 	@state() private formScheduleType: ScheduleType = "manual";
 	@state() private formCron = "";
 	@state() private formEvery = "5m";
+	@state() private formModel = "";
 	@state() private formEnabled = true;
 
 	private client!: SchedulerClient;
@@ -171,12 +164,6 @@ export class SchedulerPanel extends LitElement {
 		} catch { /* backend down */ } finally {
 			this.loading = false;
 		}
-	}
-
-	private showMsg(msg: string, ok = true) {
-		this.statusMsg = msg;
-		this.statusOk = ok;
-		setTimeout(() => { this.statusMsg = ""; this.requestUpdate(); }, 3000);
 	}
 
 	// ── Scheduling helpers ──────────────────────────────
@@ -231,10 +218,10 @@ export class SchedulerPanel extends LitElement {
 		this.working = true;
 		try {
 			await this.client.triggerJob(job.id);
-			this.showMsg(`Triggered '${job.name}'`, true);
+			toast(`Triggered '${job.name}'`, "ok");
 			this.fetchJobs();
 		} catch (err: any) {
-			this.showMsg(err.message || "Trigger failed", false);
+			toast(err.message || "Trigger failed", "err");
 		} finally {
 			this.working = false;
 		}
@@ -244,12 +231,12 @@ export class SchedulerPanel extends LitElement {
 		this.working = true;
 		try {
 			await this.client.deleteJob(job.id);
-			this.showMsg(`Deleted '${job.name}'`, true);
+			toast(`Deleted '${job.name}'`, "ok");
 			this.selectedJob = null;
 			this.view = "list";
 			this.fetchJobs();
 		} catch (err: any) {
-			this.showMsg(err.message || "Delete failed", false);
+			toast(err.message || "Delete failed", "err");
 		} finally {
 			this.working = false;
 		}
@@ -259,13 +246,13 @@ export class SchedulerPanel extends LitElement {
 		this.working = true;
 		try {
 			await this.client.updateJob(job.id, { enabled: !job.enabled });
-			this.showMsg(job.enabled ? `Disabled '${job.name}'` : `Enabled '${job.name}'`, true);
+			toast(job.enabled ? `Disabled '${job.name}'` : `Enabled '${job.name}'`, "ok");
 			this.fetchJobs();
 			// Refresh selected job
 			const updated = this.jobs.find(j => j.id === job.id);
 			if (updated) this.selectedJob = updated;
 		} catch (err: any) {
-			this.showMsg(err.message || "Toggle failed", false);
+			toast(err.message || "Toggle failed", "err");
 		} finally {
 			this.working = false;
 		}
@@ -283,7 +270,7 @@ export class SchedulerPanel extends LitElement {
 
 	private async createJob() {
 		if (!this.formName || !this.formMessage) {
-			this.showMsg("Name and message are required", false);
+			toast("Name and message are required", "err");
 			return;
 		}
 
@@ -291,6 +278,7 @@ export class SchedulerPanel extends LitElement {
 			name: this.formName,
 			project: this.formProject || "default",
 			message: this.formMessage,
+			model: this.formModel || undefined,
 			scheduleType: this.formScheduleType,
 			enabled: this.formEnabled,
 		};
@@ -300,7 +288,7 @@ export class SchedulerPanel extends LitElement {
 		} else if (this.formScheduleType === "every") {
 			req.everySeconds = this.parseEvery(this.formEvery);
 			if (req.everySeconds <= 0) {
-				this.showMsg("Invalid interval. Use 30s, 5m, 1h", false);
+				toast("Invalid interval. Use 30s, 5m, 1h", "err");
 				return;
 			}
 		}
@@ -308,7 +296,7 @@ export class SchedulerPanel extends LitElement {
 		this.working = true;
 		try {
 			await this.client.createJob(req);
-			this.showMsg(`Created '${this.formName}'`, true);
+			toast(`Created '${this.formName}'`, "ok");
 			this.view = "list";
 			this.formName = "";
 			this.formProject = "";
@@ -316,10 +304,11 @@ export class SchedulerPanel extends LitElement {
 			this.formScheduleType = "manual";
 			this.formCron = "";
 			this.formEvery = "5m";
+			this.formModel = "";
 			this.formEnabled = true;
 			this.fetchJobs();
 		} catch (err: any) {
-			this.showMsg(err.message || "Create failed", false);
+			toast(err.message || "Create failed", "err");
 		} finally {
 			this.working = false;
 		}
@@ -344,15 +333,6 @@ export class SchedulerPanel extends LitElement {
 	}
 
 	private renderBody() {
-		if (this.statusMsg) {
-			return html`
-				${this.view !== "list" ? html`<div class="back" @click=${() => { this.view = "list"; this.selectedJob = null; }}>← Back</div>` : nothing}
-				<div class="body">
-					<div class="status-msg ${this.statusOk ? "ok" : "err"}">${this.statusMsg}</div>
-				</div>
-			`;
-		}
-
 		switch (this.view) {
 			case "list": return this.renderList();
 			case "detail": return this.renderDetail();
@@ -403,6 +383,12 @@ export class SchedulerPanel extends LitElement {
 						<span class="label">Project:</span>
 						<span class="value">${job.project}</span>
 					</div>
+					${job.model ? html`
+						<div class="field">
+							<span class="label">Model:</span>
+							<span class="value">${job.model}</span>
+						</div>
+					` : nothing}
 					<div class="field">
 						<span class="label">Schedule:</span>
 						<span class="value">${this.formatSchedule(job)}</span>
@@ -475,6 +461,10 @@ export class SchedulerPanel extends LitElement {
 					<div>
 						<label>Prompt *</label>
 						<textarea .value=${this.formMessage} @input=${(e: Event) => { this.formMessage = (e.target as HTMLTextAreaElement).value; }} placeholder="What should this job do?"></textarea>
+					</div>
+					<div>
+						<label>Model</label>
+						<input type="text" .value=${this.formModel} @input=${(e: Event) => { this.formModel = (e.target as HTMLInputElement).value; }} placeholder="default" />
 					</div>
 					<div class="row">
 						<div>
