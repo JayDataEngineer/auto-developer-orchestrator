@@ -125,6 +125,7 @@ export class SchedulerPanel extends LitElement {
 	@state() private view: View = "list";
 	@state() private selectedJob: SchedulerJob | null = null;
 	@state() private working = false;
+	@state() private models: Array<{ id: string; name: string; provider?: string }> = [];
 
 	// Create form state
 	@state() private formName = "";
@@ -143,6 +144,7 @@ export class SchedulerPanel extends LitElement {
 		super.connectedCallback();
 		this.client = new SchedulerClient(this.serverUrl);
 		this.fetchJobs();
+		this.fetchModels();
 		this.pollTimer = setInterval(() => this.fetchJobs(), 10000);
 	}
 
@@ -164,6 +166,13 @@ export class SchedulerPanel extends LitElement {
 		} catch { /* backend down */ } finally {
 			this.loading = false;
 		}
+	}
+
+	private async fetchModels() {
+		try {
+			const res = await fetch(`${this.serverUrl}/api/pux/models`);
+			if (res.ok) this.models = await res.json();
+		} catch { /* backend down */ }
 	}
 
 	// ── Scheduling helpers ──────────────────────────────
@@ -464,7 +473,10 @@ export class SchedulerPanel extends LitElement {
 					</div>
 					<div>
 						<label>Model</label>
-						<input type="text" .value=${this.formModel} @input=${(e: Event) => { this.formModel = (e.target as HTMLInputElement).value; }} placeholder="default" />
+						<select .value=${this.formModel} @change=${(e: Event) => { this.formModel = (e.target as HTMLSelectElement).value; }}>
+							<option value="">Default</option>
+							${this.models.map(m => html`<option value=${m.id}>${m.name || m.id}${m.provider ? ` (${m.provider})` : ""}</option>`)}
+						</select>
 					</div>
 					<div class="row">
 						<div>
