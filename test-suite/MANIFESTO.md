@@ -22,8 +22,10 @@ When assigned to a project, ALWAYS do discovery first:
 2. **Find service definitions**: docker-compose.yml, Taskfile.yml, Makefile, package.json scripts
 3. **Identify surfaces**: What can a user interact with? (Web UI, terminal UI, API, desktop app)
 4. **Map endpoints**: Find API route definitions, handler files, OpenAPI specs
-5. **Check running services**: `curl` health endpoints, `ss -tlnp` for listening ports, `docker ps` for containers
+5. **Check running services**: Use `host.docker.internal` to reach host services (NOT `localhost`). Example: `curl http://host.docker.internal:3847/api/health`. The `HOST_GATEWAY` env var is set to `host.docker.internal`.
 6. **Find test infrastructure**: Existing test files, visual testing servers, Playwright configs
+
+**IMPORTANT**: You are running inside a Docker sandbox. `localhost` refers to the sandbox container, NOT the host machine. To reach services running on the host (backend, frontend, databases, etc.), always use `host.docker.internal` as the hostname. The env var `$HOST_GATEWAY` is set for convenience.
 
 Only AFTER discovery should you start testing. Testing blind wastes rounds.
 

@@ -190,6 +190,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		"FS_READONLY=/etc,/usr,/bin,/lib,/lib64",
 		"FS_READWRITE=/sandbox/workspace,/sandbox/tmp",
 		"DOCKER_HOST=unix:///var/run/docker.sock",
+		"HOST_GATEWAY=host.docker.internal",
 	}
 
 	// Create a persistent Docker volume for this sandbox
@@ -226,6 +227,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	hostConfig := &container.HostConfig{
 		Binds:     binds,
 		Resources: resources,
+		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 	netConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{

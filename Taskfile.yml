@@ -298,16 +298,18 @@ tasks:
         task test-ai PROMPT="smoke test"      quick health check
         task test-ai PROJECT=/path/to/proj    test a different project
     deps: [build]
+    vars:
+      TEST_PROJECT: '{{.PROJECT}}'
     cmds:
       - |
         PROMPT="{{.PROMPT}}"
-        PROJECT="{{.PROJECT}}"
+        PROJECT="{{.TEST_PROJECT}}"
         [ -z "$PROMPT" ] && PROMPT="run full regression test on this project"
-        ORG_ARGS="--org test-suite"
-        if [ -n "$PROJECT" ]; then
-          ORG_ARGS="--org test-suite -p $PROJECT"
+        # Default: test the orchestrator project itself (not the org dir)
+        if [ -z "$PROJECT" ]; then
+          PROJECT="{{.USER_WORKING_DIR}}"
         fi
-        cd go-backend && ./orch agent prompt "$PROMPT" $ORG_ARGS
+        cd go-backend && ./orch agent prompt "$PROMPT" --org test-suite -p "$PROJECT"
 
   # ── Linting ─────────────────────────────────────────────────────────────
   lint:

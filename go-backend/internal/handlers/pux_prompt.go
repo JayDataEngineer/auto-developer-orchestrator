@@ -159,31 +159,43 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		cfg.VisualContext = &streamerVisualContext{cu: h.cuBridge.CU, sandboxID: sandboxID}
 	}
 
-	// Detect org mode — if project contains pux.yaml, load org overlay
-	if org := common.LoadOrgManifest(projectPath); org != nil {
-		h.log.Info("Org mode detected",
-			zap.String("org", org.Name),
-			zap.String("path", projectPath),
-		)
-		cfg.Org = org
+	// Detect org mode — explicit org path takes priority, then check project dir
+	orgPath := ""
+	if req.Org != "" {
+		orgPath = req.Org
+	} else if org := common.LoadOrgManifest(projectPath); org != nil {
+		orgPath = projectPath
+		_ = orgPath // loaded below
+	}
 
-		// Merge org tool packages into kernel cache BEFORE loading roles,
-		// so that role imports like tech_noir_art, godot, comfyui resolve
-		if org.ToolPkgsDir() != "" {
-			common.MergeToolPackages(org.ToolPkgsDir())
-			h.log.Info("Org tool packages merged", zap.String("dir", org.ToolPkgsDir()))
-		}
+	if orgPath != "" {
+		org := common.LoadOrgManifest(orgPath)
+		if org != nil {
+			h.log.Info("Org mode detected",
+				zap.String("org", org.Name),
+				zap.String("orgPath", orgPath),
+				zap.String("projectPath", projectPath),
+			)
+			cfg.Org = org
 
-		if org.RolesDir() != "" {
-			cfg.OrgRoles = common.LoadAgentRolesFrom(org.RolesDir())
-			h.log.Info("Org roles loaded", zap.Int("count", len(cfg.OrgRoles)))
-		}
-		// Create DBProvider from org databases config (Neo4j, Postgres, CompreFace)
-		if len(org.Databases) > 0 {
-			dbProvider := common.NewOrgDBProvider(org.Databases)
-			cfg.DBProvider = dbProvider
-			h.log.Info("DBProvider created from org config",
-				zap.Int("databases", len(org.Databases)))
+			// Merge org tool packages into kernel cache BEFORE loading roles,
+			// so that role imports like tech_noir_art, godot, comfyui resolve
+			if org.ToolPkgsDir() != "" {
+				common.MergeToolPackages(org.ToolPkgsDir())
+				h.log.Info("Org tool packages merged", zap.String("dir", org.ToolPkgsDir()))
+			}
+
+			if org.RolesDir() != "" {
+				cfg.OrgRoles = common.LoadAgentRolesFrom(org.RolesDir())
+				h.log.Info("Org roles loaded", zap.Int("count", len(cfg.OrgRoles)))
+			}
+			// Create DBProvider from org databases config (Neo4j, Postgres, CompreFace)
+			if len(org.Databases) > 0 {
+				dbProvider := common.NewOrgDBProvider(org.Databases)
+				cfg.DBProvider = dbProvider
+				h.log.Info("DBProvider created from org config",
+					zap.Int("databases", len(org.Databases)))
+			}
 		}
 	}
 

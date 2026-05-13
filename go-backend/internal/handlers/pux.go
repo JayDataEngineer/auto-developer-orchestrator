@@ -170,6 +170,7 @@ func resolveAgent(r *http.Request) string {
 type promptRequest struct {
 	Message       string `json:"message"`
 	Project       string `json:"project"`
+	Org           string `json:"org,omitempty"`
 	AgentId       string `json:"agentId,omitempty"`
 	Model         string `json:"model,omitempty"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
