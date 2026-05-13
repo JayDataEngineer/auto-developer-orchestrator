@@ -104,8 +104,19 @@ export class ChatPanel extends LitElement {
 		}
 		.send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 		.send-btn svg { width: 16px; height: 16px; }
-		.streaming-cursor { display: inline-block; width: 6px; height: 14px; background: var(--accent); animation: blink 1s infinite; vertical-align: text-bottom; margin-left: 2px; }
-		@keyframes blink { 50% { opacity: 0; } }
+		.streaming-dots {
+			display: inline-flex; gap: 3px; margin-left: 4px; vertical-align: middle;
+		}
+		.streaming-dots span {
+			width: 4px; height: 4px; border-radius: 50%; background: var(--accent);
+			animation: dot-bounce 1.2s infinite ease-in-out;
+		}
+		.streaming-dots span:nth-child(2) { animation-delay: 0.15s; }
+		.streaming-dots span:nth-child(3) { animation-delay: 0.3s; }
+		@keyframes dot-bounce {
+			0%, 60%, 100% { opacity: 0.2; transform: scale(0.8); }
+			30% { opacity: 1; transform: scale(1.1); }
+		}
 
 		/* Slash command popup */
 		.slash-list {
@@ -140,6 +151,7 @@ export class ChatPanel extends LitElement {
 
 	private chatState = new ChatState();
 	private abortCtrl: AbortController | undefined;
+	private _agentId = "";
 
 	private static COMMANDS = [
 		{ name: "scheduler", desc: "Open scheduler panel" },
@@ -217,7 +229,7 @@ export class ChatPanel extends LitElement {
 						${isOpen ? html`<div class="thinking-content">${m.thinking}</div>` : nothing}
 					</div>
 				` : nothing}
-				<div class="text">${m.text}${m.role === "assistant" && this.streaming ? html`<span class="streaming-cursor"></span>` : nothing}</div>
+				<div class="text">${m.text}${m.role === "assistant" && this.streaming ? html`<span class="streaming-dots"><span></span><span></span><span></span></span>` : nothing}</div>
 				${m.tools.length > 0 ? m.tools.map(t => this.renderTool(t)) : nothing}
 			</div>
 		`;
@@ -361,7 +373,7 @@ export class ChatPanel extends LitElement {
 			const resp = await fetch(`${this.serverUrl}/api/pux/prompt`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ message: text, project: this.project }),
+				body: JSON.stringify({ message: text, project: this.project, agentId: this._agentId || undefined }),
 				signal: this.abortCtrl.signal,
 			});
 			if (!resp.ok) throw new Error(`Backend ${resp.status}`);
@@ -392,6 +404,7 @@ export class ChatPanel extends LitElement {
 			this._sending = false;
 			this.chatState.handleEvent({ type: "agent_end", messages: [] } as any);
 			this.syncFromState();
+			requestAnimationFrame(() => this.textareaEl?.focus());
 		}
 	}
 
@@ -400,6 +413,7 @@ export class ChatPanel extends LitElement {
 		this.chatState = new ChatState();
 		this.accText = "";
 		this.accThinking = "";
+		this._agentId = "";
 		this.subAgents = [];
 		this.compacting = false;
 		this.abortCtrl?.abort();
@@ -449,7 +463,7 @@ export class ChatPanel extends LitElement {
 			const resp = await fetch(`${this.serverUrl}/api/pux/prompt`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ message: text, project: this.project }),
+				body: JSON.stringify({ message: text, project: this.project, agentId: this._agentId || undefined }),
 				signal: this.abortCtrl.signal,
 			});
 
@@ -498,6 +512,7 @@ export class ChatPanel extends LitElement {
 			this._sending = false;
 			this.chatState.handleEvent({ type: "agent_end", messages: [] } as any);
 			this.syncFromState();
+			requestAnimationFrame(() => this.textareaEl?.focus());
 		}
 	}
 
@@ -508,7 +523,7 @@ export class ChatPanel extends LitElement {
 	private handleSSE(eventType: string, payload: any) {
 		switch (eventType) {
 			case "agent_spawned":
-				// Agent ID from backend — track for session continuity
+				if (payload?.agentId) this._agentId = payload.agentId;
 				break;
 
 			case "text_delta":
