@@ -218,9 +218,9 @@ func (t *SchedulerTool) actionDetail(args map[string]any) (any, error) {
 	lines = append(lines, fmt.Sprintf("  Message: %s", job.Message))
 	if !job.LastRunAt.IsZero() {
 		lines = append(lines, fmt.Sprintf("  Last Run: %s (%s)", job.LastRunAt.Format(time.RFC3339), job.LastRunStatus))
-		if job.LastError != "" {
-			lines = append(lines, fmt.Sprintf("  Last Error: %s", job.LastError))
-		}
+	}
+	if job.LastError != "" {
+		lines = append(lines, fmt.Sprintf("  Last Error: %s", job.LastError))
 	}
 	if !job.NextRunAt.IsZero() {
 		lines = append(lines, fmt.Sprintf("  Next Run: %s", job.NextRunAt.Format(time.RFC3339)))

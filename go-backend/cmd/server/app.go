@@ -360,6 +360,9 @@ type schedulerBackend struct {
 	inner *scheduler.Scheduler
 }
 
+// Compile-time check that schedulerBackend implements schedulertool.Backend.
+var _ schedulertool.Backend = (*schedulerBackend)(nil)
+
 func (b *schedulerBackend) ListJobsInfo() []*schedulertool.JobInfo {
 	jobs := b.inner.ListJobs()
 	result := make([]*schedulertool.JobInfo, len(jobs))
