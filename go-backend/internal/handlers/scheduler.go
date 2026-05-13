@@ -49,6 +49,7 @@ type createJobRequest struct {
 	AgentID      string `json:"agentId,omitempty"`
 	Message      string `json:"message"`
 	Model        string `json:"model,omitempty"`
+	Org          string `json:"org,omitempty"`
 	ScheduleType string `json:"scheduleType"`
 	CronExpr     string `json:"cronExpr,omitempty"`
 	Timezone     string `json:"timezone,omitempty"`
@@ -87,6 +88,7 @@ func (h *SchedulerHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		AgentID:                req.AgentID,
 		Message:                req.Message,
 		Model:                  req.Model,
+		Org:                    req.Org,
 		Schedule:               scheduler.ScheduleType(req.ScheduleType),
 		CronExpr:               req.CronExpr,
 		Timezone:               req.Timezone,
@@ -157,6 +159,7 @@ func (h *SchedulerHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 		AgentID:                req.AgentID,
 		Message:                req.Message,
 		Model:                  req.Model,
+		Org:                    req.Org,
 		Schedule:               scheduler.ScheduleType(req.ScheduleType),
 		CronExpr:               req.CronExpr,
 		Timezone:               req.Timezone,

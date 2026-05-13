@@ -46,44 +46,16 @@ func (s *Scheduler) executeJob(jobID string) {
 		zap.String("project", job.Project),
 	)
 
-	// Use llama engine if configured (preferred path — no Pi subprocess)
+	// Execute via PromptSender — calls /api/pux/prompt (same as orch agent prompt)
 	var output string
 	var err error
-	var result *JobResult
-	if s.llamaExec != nil {
-		projectPath := s.resolveProjectPath(job.Project)
-		if job.Project != "" && projectPath == "" {
-			err = fmt.Errorf("project %s not found", job.Project)
-		} else {
-			result = s.llamaExec.Execute(ctx, jobID, job.Name, projectPath, job.Message, job.Model, 0)
-			if result.Error != "" {
-				err = fmt.Errorf("%s", result.Error)
-			}
-			output = result.Output
-			job.InputTokens = result.InputTokens
-			job.OutputTokens = result.OutputTokens
-		}
-	} else if s.isolated != nil {
-		projectPath := s.resolveProjectPath(job.Project)
-		if job.Project != "" && projectPath == "" {
-			err = fmt.Errorf("project %s not found", job.Project)
-		} else {
-			result = s.isolated.Execute(ctx, jobID, job.Name, projectPath, job.Message, job.Model, 0)
-			if result.Error != "" {
-				err = fmt.Errorf("%s", result.Error)
-			}
-			output = result.Output
-			job.InputTokens = result.InputTokens
-			job.OutputTokens = result.OutputTokens
-		}
-	} else if s.promptSender != nil {
-		// Fallback to prompt sender
+	if s.promptSender != nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		output, err = s.promptSender(ctx, job.Project, job.AgentID, job.Message, job.Model, job.AutoBranch, job.AutoMerge)
+		output, err = s.promptSender(ctx, job.Project, job.AgentID, job.Message, job.Model, job.Org, job.AutoBranch, job.AutoMerge)
 	} else {
-		err = fmt.Errorf("no executor configured for scheduled jobs")
+		err = fmt.Errorf("no PromptSender configured for scheduled jobs")
 	}
 
 	execution.EndedAt = time.Now()

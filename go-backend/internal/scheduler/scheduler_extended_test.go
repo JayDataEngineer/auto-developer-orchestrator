@@ -179,12 +179,11 @@ func TestSchedulerStartStop(t *testing.T) {
 	s.Stop()
 }
 
-// ── SetIsolatedExecutor / SetSessionInjector ──────────────────
+// ── SetRunLogManager / SetSessionInjector ──────────────────
 
-func TestSetIsolatedExecutorMethod(t *testing.T) {
+func TestSetRunLogManagerMethod(t *testing.T) {
 	s := newExtScheduler(t)
-	// SetIsolatedExecutor takes (*IsolatedExecutor, *RunLogManager, string)
-	s.SetIsolatedExecutor(nil, nil, "/tmp/test")
+	s.SetRunLogManager(nil, "/tmp/test")
 	if s.projectRoot != "/tmp/test" {
 		t.Errorf("expected projectRoot=/tmp/test, got %q", s.projectRoot)
 	}

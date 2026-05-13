@@ -107,6 +107,7 @@ type CreateJobRequest struct {
 	AutoMerge     bool   `json:"autoMerge,omitempty"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 	Model         string `json:"model,omitempty"`
+	Org           string `json:"org,omitempty"`
 	Enabled       bool   `json:"enabled,omitempty"`
 	Webhook       bool   `json:"webhook,omitempty"`
 }

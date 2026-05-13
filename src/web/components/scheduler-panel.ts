@@ -142,6 +142,7 @@ export class SchedulerPanel extends LitElement {
 	@state() private formCron = "";
 	@state() private formEvery = "5m";
 	@state() private formModel = "";
+	@state() private formOrg = "";
 	@state() private formEnabled = true;
 
 	private client!: SchedulerClient;
@@ -295,6 +296,7 @@ export class SchedulerPanel extends LitElement {
 			project: this.formProject || "default",
 			message: this.formMessage,
 			model: this.formModel || undefined,
+			org: this.formOrg || undefined,
 			scheduleType: this.formScheduleType,
 			enabled: this.formEnabled,
 		};
@@ -325,6 +327,7 @@ export class SchedulerPanel extends LitElement {
 			this.formCron = "";
 			this.formEvery = "5m";
 			this.formModel = "";
+			this.formOrg = "";
 			this.formEnabled = true;
 			this.fetchJobs();
 		} catch (err: any) {
@@ -403,6 +406,12 @@ export class SchedulerPanel extends LitElement {
 						<span class="label">Project:</span>
 						<span class="value">${job.project}</span>
 					</div>
+					${job.org ? html`
+						<div class="field">
+							<span class="label">Org:</span>
+							<span class="value">${job.org}</span>
+						</div>
+					` : nothing}
 					${job.model ? html`
 						<div class="field">
 							<span class="label">Model:</span>
@@ -477,6 +486,10 @@ export class SchedulerPanel extends LitElement {
 					<div>
 						<label>Project</label>
 						<input type="text" .value=${this.formProject} @input=${(e: Event) => { this.formProject = (e.target as HTMLInputElement).value; }} placeholder="my-project" />
+					</div>
+					<div>
+						<label>Org (optional)</label>
+						<input type="text" .value=${this.formOrg} @input=${(e: Event) => { this.formOrg = (e.target as HTMLInputElement).value; }} placeholder="tech-noir" />
 					</div>
 					<div>
 						<label>Prompt *</label>

@@ -18,7 +18,7 @@ func newTestScheduler(t *testing.T) (*Scheduler, string) {
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "scheduler.json")
 	logger := zap.NewNop()
-	s := NewScheduler(storePath, func(ctx context.Context, project, agentID, message, model string, autoBranch, autoMerge bool) (string, error) {
+	s := NewScheduler(storePath, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge bool) (string, error) {
 		return "test output", nil
 	}, logger)
 	return s, dir
@@ -313,7 +313,7 @@ func TestTriggerJobExecutes(t *testing.T) {
 	storePath := filepath.Join(dir, "scheduler.json")
 	logger := zap.NewNop()
 
-	s := NewScheduler(storePath, func(ctx context.Context, project, agentID, message, model string, autoBranch, autoMerge bool) (string, error) {
+	s := NewScheduler(storePath, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge bool) (string, error) {
 		called.Add(1)
 		return "done", nil
 	}, logger)

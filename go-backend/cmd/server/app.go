@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -345,25 +349,17 @@ func (a *App) initScheduler() {
 		storePath = "../data/scheduler/jobs.json"
 	}
 
-	a.sched = scheduler.NewScheduler(storePath, nil, a.logger)
+	// Create PromptSender that calls the local /api/pux/prompt endpoint
+	projectRoot := os.Getenv("PROJECT_ROOT")
+	promptSender := makeLocalPromptSender("http://localhost:3847", projectRoot, a.logger)
 
-	if a.engines.Active != nil {
-		llamaExec := scheduler.NewLlamaExecutor(a.engines.Active, nil, os.Getenv("PROJECT_ROOT"), a.logger)
-		// MCP and sandbox are wired after initMCP; the scheduler executor accesses them via the pux handler
-		a.sched.SetLlamaExecutor(llamaExec)
-		a.logger.Info("Scheduler configured for direct llama engine execution")
-	} else {
-		isolatedExec, err := scheduler.NewIsolatedExecutor(os.Getenv("PROJECT_ROOT"), a.logger)
-		if err != nil {
-			a.logger.Warn("Failed to create isolated executor", zap.Error(err))
-		} else {
-			runLogMgr, err := scheduler.NewRunLogManager("")
-			if err != nil {
-				a.logger.Warn("Failed to create run log manager", zap.Error(err))
-			}
-			a.sched.SetIsolatedExecutor(isolatedExec, runLogMgr, os.Getenv("PROJECT_ROOT"))
-		}
+	a.sched = scheduler.NewScheduler(storePath, promptSender, a.logger)
+
+	runLogMgr, err := scheduler.NewRunLogManager("")
+	if err != nil {
+		a.logger.Warn("Failed to create run log manager", zap.Error(err))
 	}
+	a.sched.SetRunLogManager(runLogMgr, projectRoot)
 
 	if err := a.sched.Start(context.Background()); err != nil {
 		a.logger.Warn("Failed to start scheduler", zap.Error(err))
@@ -665,4 +661,124 @@ func (a *App) buildRouter(
 
 	r.Handle("/*", http.FileServer(http.Dir("../dist")))
 	return r
+}
+
+// makeLocalPromptSender creates a PromptSender that calls the local /api/pux/prompt endpoint.
+// The scheduler uses this to execute jobs — same path as orch agent prompt, web UI, and TUI.
+func makeLocalPromptSender(baseURL, projectRoot string, logger *zap.Logger) scheduler.PromptSender {
+	return func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge bool) (string, error) {
+		// If org is set, resolve it to a project path (same as CLI --org)
+		effectiveProject := project
+		if org != "" {
+			if resolved, err := resolveOrgPathLocal(org); err == nil {
+				effectiveProject = resolved
+			} else {
+				logger.Warn("failed to resolve org, using project as-is", zap.String("org", org), zap.Error(err))
+			}
+		}
+
+		payload := map[string]interface{}{
+			"message":    message,
+			"project":    effectiveProject,
+			"autoBranch": autoBranch,
+			"autoMerge":  autoMerge,
+		}
+		if agentID != "" {
+			payload["agentId"] = agentID
+		}
+		if model != "" {
+			payload["model"] = model
+		}
+
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return "", fmt.Errorf("marshal prompt request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/pux/prompt", bytes.NewReader(data))
+		if err != nil {
+			return "", fmt.Errorf("create prompt request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("send prompt request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			var errBody struct {
+				Error string `json:"error"`
+			}
+			if jsonErr := json.NewDecoder(resp.Body).Decode(&errBody); jsonErr == nil && errBody.Error != "" {
+				return "", fmt.Errorf("prompt returned %d: %s", resp.StatusCode, errBody.Error)
+			}
+			return "", fmt.Errorf("prompt returned %d", resp.StatusCode)
+		}
+
+		// Parse SSE stream — collect text_delta events into combined output
+		var output strings.Builder
+		scanner := bufio.NewScanner(resp.Body)
+		var currentEvent string
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			if strings.HasPrefix(line, "event: ") {
+				currentEvent = strings.TrimPrefix(line, "event: ")
+				continue
+			}
+
+			if strings.HasPrefix(line, "data: ") {
+				dataStr := strings.TrimPrefix(line, "data: ")
+
+				// Stream end
+				if dataStr == "[DONE]" {
+					break
+				}
+
+				// Collect text deltas
+				if currentEvent == "text_delta" {
+					var evt struct {
+						Text string `json:"text"`
+					}
+					if json.Unmarshal([]byte(dataStr), &evt) == nil && evt.Text != "" {
+						output.WriteString(evt.Text)
+					}
+				}
+
+				// Check for error events
+				if currentEvent == "error" {
+					var errEvt struct {
+						Error string `json:"error"`
+					}
+					if json.Unmarshal([]byte(dataStr), &errEvt) == nil && errEvt.Error != "" {
+						return output.String(), fmt.Errorf("agent error: %s", errEvt.Error)
+					}
+				}
+			}
+		}
+
+		return output.String(), scanner.Err()
+	}
+}
+
+// resolveOrgPathLocal resolves an org name to its directory path.
+// Mirrors the CLI's resolveOrgPath logic — searches standard locations for pux.yaml.
+func resolveOrgPathLocal(name string) (string, error) {
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		filepath.Join(home, "Documents", "programs", "dev", name),
+		filepath.Join(home, "Documents", "programs", "dev", name+"-org"),
+		filepath.Join(home, "Documents", "projects", name, "pux-org"),
+		filepath.Join(home, "Documents", "projects", name),
+	}
+	for _, dir := range candidates {
+		if _, err := os.Stat(filepath.Join(dir, "pux.yaml")); err == nil {
+			return dir, nil
+		}
+	}
+	return "", fmt.Errorf("organization '%s' not found", name)
 }

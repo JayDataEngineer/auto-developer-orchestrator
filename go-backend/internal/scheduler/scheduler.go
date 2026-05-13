@@ -67,6 +67,7 @@ type Job struct {
 	AgentID     string       `json:"agentId,omitempty"`
 	Message     string       `json:"message"`
 	Model       string       `json:"model,omitempty"`
+	Org         string       `json:"org,omitempty"` // --org flag equivalent
 	Schedule    ScheduleType `json:"scheduleType"`
 	// Cron expression (e.g. "0 9 * * *" for daily at 9am)
 	CronExpr string `json:"cronExpr,omitempty"`
@@ -122,8 +123,8 @@ type JobExecution struct {
 	Output    string    `json:"output,omitempty"`
 }
 
-// PromptSender is a function that sends a prompt to a Pi agent and returns the response text.
-type PromptSender func(ctx context.Context, project, agentID, message, model string, autoBranch, autoMerge bool) (string, error)
+// PromptSender is a function that sends a prompt to the /api/pux/prompt endpoint and returns the response text.
+type PromptSender func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge bool) (string, error)
 
 // SessionInjector injects text into the main agent session.
 type SessionInjector func(project, agentID, text string) error
@@ -139,15 +140,11 @@ type Scheduler struct {
 	mu            sync.RWMutex
 	stopCh        chan struct{}
 
-	// Phase 1: Isolated execution + run logs
-	isolated    *IsolatedExecutor
+	// Run log manager
 	runLogMgr   *RunLogManager
 	projectRoot string
 
-	// Phase 3: Direct llama engine execution (preferred over isolated + promptSender)
-	llamaExec *LlamaExecutor
-
-	// Phase 4: Session delivery
+	// Session delivery
 	sessionInjector SessionInjector
 
 	// Event subscriber for failure notifications (optional)
@@ -180,18 +177,10 @@ func NewScheduler(storePath string, sender PromptSender, logger *zap.Logger) *Sc
 	}
 }
 
-// SetIsolatedExecutor configures the scheduler to use isolated Pi subprocesses
-// for job execution instead of the main agent pool.
-func (s *Scheduler) SetIsolatedExecutor(executor *IsolatedExecutor, runLogMgr *RunLogManager, projectRoot string) {
-	s.isolated = executor
+// SetRunLogManager configures the run log manager and project root.
+func (s *Scheduler) SetRunLogManager(runLogMgr *RunLogManager, projectRoot string) {
 	s.runLogMgr = runLogMgr
 	s.projectRoot = projectRoot
-}
-
-// SetLlamaExecutor configures the scheduler to use the llama HTTP engine directly.
-// This is the preferred path — no Pi subprocess or pool needed.
-func (s *Scheduler) SetLlamaExecutor(executor *LlamaExecutor) {
-	s.llamaExec = executor
 }
 
 // Start loads persisted jobs and starts the scheduler.

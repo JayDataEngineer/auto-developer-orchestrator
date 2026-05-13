@@ -14,6 +14,7 @@ export interface SchedulerJob {
 	agentId?: string;
 	message: string;
 	model?: string;
+	org?: string;
 	scheduleType: ScheduleType;
 	cronExpr?: string;
 	timezone?: string;
@@ -63,6 +64,7 @@ export interface CreateJobRequest {
 	agentId?: string;
 	message: string;
 	model?: string;
+	org?: string;
 	scheduleType: ScheduleType;
 	cronExpr?: string;
 	timezone?: string;

@@ -54,6 +54,7 @@ var (
 	schedThinking    string
 	schedModel       string
 	schedWebhook     bool
+	schedOrg         string
 )
 
 var schedulerCreateCmd = &cobra.Command{
@@ -72,6 +73,7 @@ var schedulerCreateCmd = &cobra.Command{
 			AutoBranch:    schedAutoBranch,
 			ThinkingLevel: schedThinking,
 			Model:         schedModel,
+			Org:           schedOrg,
 			Webhook:       schedWebhook,
 		}
 		client := api.NewClient(serverURL)
@@ -118,6 +120,7 @@ var schedulerUpdateCmd = &cobra.Command{
 			AutoBranch:    schedAutoBranch,
 			ThinkingLevel: schedThinking,
 			Model:         schedModel,
+			Org:           schedOrg,
 		}
 		client := api.NewClient(serverURL)
 		var result api.SchedulerJob
@@ -212,6 +215,7 @@ func init() {
 	schedulerCreateCmd.Flags().BoolVar(&schedAutoBranch, "auto-branch", false, "Auto-create branch")
 	schedulerCreateCmd.Flags().StringVar(&schedThinking, "thinking-level", "", "Thinking level")
 	schedulerCreateCmd.Flags().StringVar(&schedModel, "model", "", "Model override")
+	schedulerCreateCmd.Flags().StringVar(&schedOrg, "org", "", "Organization name (resolves to org project path)")
 	schedulerCreateCmd.Flags().BoolVar(&schedWebhook, "webhook", false, "Generate webhook token")
 	schedulerCreateCmd.MarkFlagRequired("name")
 	schedulerCreateCmd.MarkFlagRequired("message")
