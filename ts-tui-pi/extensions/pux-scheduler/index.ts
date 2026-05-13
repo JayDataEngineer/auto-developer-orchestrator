@@ -12,7 +12,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "../../src/core/exten
 import { SchedulerClient, isConnectionError } from "./api.js";
 import {
 	renderJobList, renderJobDetail, renderRunLog, renderStatusWidget,
-	formatSchedule, hasRunningJobs,
+	hasRunningJobs,
 } from "./render.js";
 import type { SchedulerJob, CreateJobRequest, ScheduleType } from "./types.js";
 
@@ -45,10 +45,10 @@ function parseDuration(s: string): number | null {
 	}
 }
 
-// ── Cron expression validator ─────────────────────────────────
+// ── Cron expression validator (6-field with seconds) ──────────
 function isValidCron(expr: string): boolean {
 	const parts = expr.trim().split(/\s+/);
-	if (parts.length < 5 || parts.length > 6) return false;
+	if (parts.length !== 6) return false;
 	const re = /^(\d+|\*|\?|\/\d+|\d+-\d+|\d+\/\d+|L|W|#\d+|MON|TUE|WED|THU|FRI|SAT|SUN)$/;
 	return parts.every(p => re.test(p));
 }
@@ -61,7 +61,7 @@ const CREATE_USAGE = [
 	"\x1b[33m  Usage: /scheduler create name=\"Job Name\" project=<project> message=\"prompt\" [options]\x1b[0m",
 	"",
 	"  Required:  name, project, message",
-	"  Schedule:  cron=\"0 9 * * *\" | every=1h | every=30m | at=\"2026-06-01T09:00:00Z\" | manual",
+	"  Schedule:  cron=\"0 0 9 * * *\" | every=1h | every=30m | at=\"2026-06-01T09:00:00Z\" | manual",
 	"  Optional:  model=<model> enabled=true description=\"...\" timezone=\"America/New_York\"",
 	"",
 ].join("\n");
@@ -72,7 +72,7 @@ const EDIT_USAGE = [
 	"  Editable fields: name, message, project, cron, every, model, enabled, description, timezone",
 	"  Intervals: every=30s | every=5m | every=1h",
 	"  Example:",
-	"    \x1b[36m/scheduler edit \"Daily Report\" cron=\"0 10 * * *\" message=\"New prompt\"\x1b[0m",
+	"    \x1b[36m/scheduler edit \"Daily Report\" cron=\"0 0 10 * * *\" message=\"New prompt\"\x1b[0m",
 	"    \x1b[36m/scheduler edit \"Health Check\" every=10m\x1b[0m",
 	"",
 ].join("\n");
@@ -228,7 +228,7 @@ export default function registerPuxSchedulerExtension(pi: ExtensionAPI): void {
 							scheduleType = "cron";
 							cronExpr = kv.cron;
 							if (!isValidCron(cronExpr)) {
-								process.stdout.write(`\x1b[31m  Invalid cron: ${cronExpr}. Need 5 fields like '0 9 * * *'\x1b[0m\n`);
+								process.stdout.write(`\x1b[31m  Invalid cron: ${cronExpr}. Need 6 fields (with seconds) like '0 0 9 * * *'\x1b[0m\n`);
 								break;
 							}
 						} else if (kv.every) {
@@ -293,7 +293,7 @@ export default function registerPuxSchedulerExtension(pi: ExtensionAPI): void {
 						if (kv.enabled !== undefined) update.enabled = kv.enabled !== "false";
 						if (kv.cron) {
 							if (!isValidCron(kv.cron)) {
-								process.stdout.write(`\x1b[31m  Invalid cron: ${kv.cron}\x1b[0m\n`);
+								process.stdout.write(`\x1b[31m  Invalid cron: ${kv.cron}. Need 6 fields (with seconds) like '0 0 9 * * *'\x1b[0m\n`);
 								break;
 							}
 							update.scheduleType = "cron"; update.cronExpr = kv.cron;

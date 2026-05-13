@@ -23,7 +23,7 @@ function makeJob(overrides: Partial<SchedulerJob> = {}): SchedulerJob {
 		project: "myapp",
 		message: "run the test suite",
 		scheduleType: "cron",
-		cronExpr: "0 * * * *",
+		cronExpr: "0 * * * * *",
 		enabled: true,
 		status: "idle",
 		consecutiveErrors: 0,
@@ -56,7 +56,7 @@ describe("renderJobList", () => {
 	test("single idle job — shows name and schedule", () => {
 		const out = renderJobList([makeJob()]);
 		expect(out).toContain("test-job");
-		expect(out).toContain("0 * * * *");
+		expect(out).toContain("0 * * * * *");
 		expect(out).toContain("Scheduled Jobs (1)");
 	});
 
@@ -146,7 +146,7 @@ describe("renderJobDetail", () => {
 
 	test("shows schedule type and cron", () => {
 		const out = renderJobDetail(makeJob());
-		expect(out).toContain("0 * * * *");
+		expect(out).toContain("0 * * * * *");
 	});
 
 	test("shows enabled status", () => {
