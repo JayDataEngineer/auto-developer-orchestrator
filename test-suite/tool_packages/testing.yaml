@@ -1,0 +1,6 @@
+description: "Testing utilities — HTTP probing, shell access for test execution, file I/O for results"
+mcp_servers: []
+tools:
+  - bash
+  - file_read
+  - file_write

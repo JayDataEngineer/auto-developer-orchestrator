@@ -1,0 +1,5 @@
+description: "API Auditor — endpoint probing, schema validation, contract testing, error handling"
+imports:
+  - testing
+max_rounds: 25
+temperature: 0.1

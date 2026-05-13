@@ -50,7 +50,7 @@ func envOr(key, fallback string) string {
 }
 
 func requireProject() error {
-	if projectName == "" {
+	if projectName == "" && orgName == "" {
 		return fmt.Errorf("project is required: use --project or set ORCH_PROJECT")
 	}
 	return nil

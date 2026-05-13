@@ -1,0 +1,6 @@
+description: "Interaction Tester — end-to-end UI flow testing, input validation, edge case probing"
+imports:
+  - testing
+  - browser
+max_rounds: 30
+temperature: 0.2

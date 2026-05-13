@@ -1,0 +1,5 @@
+name: test-suite
+description: "AI-powered test & debug suite — visual auditing, interaction testing, API probing, regression hunting"
+manifesto: MANIFESTO.md
+staff_root: roles
+tool_packages_root: tool_packages

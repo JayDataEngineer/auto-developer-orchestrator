@@ -289,6 +289,26 @@ tasks:
       - task: test-tui
       - task: test-e2e
 
+  # ── AI Test Suite (Pux Org) ─────────────────────────────────────────────
+  test-ai:
+    desc: |
+      Run AI-powered test suite (generic Pux org).
+        task test-ai                          run full regression
+        task test-ai PROMPT="visual audit"    run specific test
+        task test-ai PROMPT="smoke test"      quick health check
+        task test-ai PROJECT=/path/to/proj    test a different project
+    deps: [build]
+    cmds:
+      - |
+        PROMPT="{{.PROMPT}}"
+        PROJECT="{{.PROJECT}}"
+        [ -z "$PROMPT" ] && PROMPT="run full regression test on this project"
+        ORG_ARGS="--org test-suite"
+        if [ -n "$PROJECT" ]; then
+          ORG_ARGS="--org test-suite -p $PROJECT"
+        fi
+        cd go-backend && ./orch agent prompt "$PROMPT" $ORG_ARGS
+
   # ── Linting ─────────────────────────────────────────────────────────────
   lint:
     desc: Run all linters
