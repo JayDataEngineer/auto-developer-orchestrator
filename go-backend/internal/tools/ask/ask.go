@@ -46,12 +46,14 @@ func (r *pendingRegistry) Resolve(id, response string) bool {
 // AskUserTool lets the AI ask the user a question and wait for a response.
 // Supports multiple choice options or free-text input.
 // Blocks until the user responds via the /api/pux/user-response endpoint.
-type AskUserTool struct {
-	subscriber chan<- core.AgentEvent // injected at creation time
-}
+//
+// Contract 3 compliance: does NOT take an SSE subscriber in the constructor.
+// Instead, retrieves it from the context (set by AgentLoop) when needed.
+// Tools must not have direct dependencies on the event stream.
+type AskUserTool struct{}
 
-func NewAskUserTool(subscriber chan<- core.AgentEvent) *AskUserTool {
-	return &AskUserTool{subscriber: subscriber}
+func NewAskUserTool() *AskUserTool {
+	return &AskUserTool{}
 }
 
 func (t *AskUserTool) Name() string { return "ask_user" }
@@ -100,21 +102,25 @@ func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (any, er
 	// Register pending question
 	responseCh := PendingQuestions.Register(questionID)
 
-	// Emit SSE event to the TUI
-	core.SendEvent(t.subscriber, core.AgentEvent{
-		Type: "user_question",
-		Data: core.AgentEventData{
-			ToolID:   questionID,
-			ToolName: "ask_user",
-			ToolArgs: map[string]any{
-				"questionId":      questionID,
-				"question":        question,
-				"options":         options,
-				"allowFreeText":   allowFreeText,
-				"default":         defaultAnswer,
+	// Contract 3: emit user_question event via context-provided subscriber.
+	// The agent loop injects the subscriber into context (SubscriberKey).
+	// Tools do NOT hold direct references to the event stream.
+	if sub, ok := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent); ok && sub != nil {
+		core.SendEvent(sub, core.AgentEvent{
+			Type: "user_question",
+			Data: core.AgentEventData{
+				ToolID:   questionID,
+				ToolName: "ask_user",
+				ToolArgs: map[string]any{
+					"questionId":    questionID,
+					"question":      question,
+					"options":       options,
+					"allowFreeText": allowFreeText,
+					"default":       defaultAnswer,
+				},
 			},
-		},
-	})
+		})
+	}
 
 	// Block until response arrives or context cancels (5 minute timeout)
 	select {

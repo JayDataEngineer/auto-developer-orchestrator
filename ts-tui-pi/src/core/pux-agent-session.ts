@@ -137,7 +137,7 @@ export class PuxAgentSession {
   public sessionFile: string | undefined;
 
   // ---- Tracked session state (updated from SSE events) ----
-  public chatState = new ChatState();  // Contract 4: canonical client state
+  public chatState = new ChatState();  // Contract 4: SOLE state. No other accumulators.
   private _isCompacting = false;
   private _turnCount = 0;
   private _messageCount = 0;
@@ -148,8 +148,8 @@ export class PuxAgentSession {
   private _totalInputTokens = 0;
   private _totalOutputTokens = 0;
   private _totalCacheTokens = 0;
-  private _lastAssistantText = "";
-  private _accText = "";  // current turn text accumulator
+  // Contract 4 compliance: _accText, _lastAssistantText REMOVED.
+  // ChatState is the single source of truth. Session metrics are derived counters.
   private _pendingHooks = new Map<string, { hookId: string; hookPoint: string }>();
 
 	public agentId: string = "";
@@ -215,11 +215,7 @@ export class PuxAgentSession {
     // 2. Emit agent_start (TUI shows loader)
     this.emit({ type: "agent_start" });
     this.streaming = true;
-    this._accText = "";
     this._turnCount++;
-
-    // 2b. Start ChatState tracking for this turn
-    this.chatState.handleEvent({ type: "message_start", message: { role: "assistant", content: [] } });
 
     // 3. Emit message_start for assistant (creates streaming component)
     const assistantMsg = mkAssistant();
@@ -266,13 +262,10 @@ export class PuxAgentSession {
           // Update accumulators
           if (evt.event === "text_delta") {
             accText += evt.data.text || "";
-            this._accText = accText;
           }
           if (evt.event === "thinking_delta") {
             accThinking += evt.data.text || "";
           }
-          // Feed to ChatState (Contract 4 compliance)
-          this.feedChatState(evt.event, evt.data, accText, accThinking);
         }
       }
       // SSE stream ended normally
@@ -301,9 +294,9 @@ export class PuxAgentSession {
         this._backgrounded = false;
         this.streaming = false;
         this.emit({ type: "task_backgrounded" } as any);
-        this.emit({ type: "agent_end", messages: [...this.messages] });
+        this.emit({ type: "agent_end", messages: [...this.chatState.messages] });
       } else {
-        this.emit({ type: "agent_end", messages: [...this.messages] });
+        this.emit({ type: "agent_end", messages: [...this.chatState.messages] });
         this.streaming = false;
         // Process pending queue — send next queued message
         if (this._pendingQueue.length > 0) {
@@ -436,7 +429,6 @@ export class PuxAgentSession {
         // Track message counts
         this._messageCount++;
         this._assistantMessageCount++;
-        if (acc.accText) this._lastAssistantText = acc.accText;
 
         const msg = mkAssistant({
           content,
@@ -638,6 +630,9 @@ export class PuxAgentSession {
   }
 
   private emit(event: AgentSessionEvent): void {
+    // Contract 4: ChatState is the canonical state consumer.
+    // ALL events flow through here — one source of truth, zero duplication.
+    this.chatState.handleEvent(event);
     for (const l of this.listeners) {
       try { l(event); } catch (e) {
         // silently ignore handler errors
@@ -702,55 +697,12 @@ export class PuxAgentSession {
     };
   }
   getLastAssistantText(): string {
-    // Contract 4: prefer ChatState as canonical source
+    // Contract 4: ChatState is the SOLE source of truth — no fallbacks
     const msgs = this.chatState.messages;
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === "assistant" && msgs[i].text) return msgs[i].text;
     }
-    return this._lastAssistantText;  // fallback
-  }
-
-  /** Feed raw SSE events into ChatState for contract-compliant state tracking */
-  private feedChatState(eventType: string, payload: any, accText: string, accThinking: string): void {
-    switch (eventType) {
-      case "text_delta": {
-        const content: any[] = [];
-        if (accThinking) content.push({ type: "thinking", thinking: accThinking });
-        content.push({ type: "text", text: accText });
-        this.chatState.handleEvent({ type: "message_update", message: { content } });
-        break;
-      }
-      case "thinking_delta": {
-        const content: any[] = [];
-        content.push({ type: "thinking", thinking: accThinking });
-        if (accText) content.push({ type: "text", text: accText });
-        this.chatState.handleEvent({ type: "message_update", message: { content } });
-        break;
-      }
-      case "tool_execution_start":
-        this.chatState.handleEvent({
-          type: "tool_execution_start",
-          toolCallId: payload.toolId || `ext_${Date.now()}`,
-          toolName: payload.toolName || "tool",
-          args: payload.args,
-        });
-        break;
-      case "tool_execution_end":
-        this.chatState.handleEvent({
-          type: "tool_execution_end",
-          toolCallId: payload.toolId || "",
-          result: payload.result,
-          isError: !!payload.error,
-        });
-        break;
-      case "agent_end":
-        this.chatState.handleEvent({ type: "message_end", message: { content: [] } });
-        this.chatState.handleEvent({ type: "agent_end" });
-        break;
-      case "error":
-        this.chatState.handleEvent({ type: "message_end", message: { stopReason: "error", errorMessage: payload.error } });
-        break;
-    }
+    return "";
   }
 
   /** Extract readable text from structured tool results instead of dumping JSON */

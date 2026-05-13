@@ -192,10 +192,19 @@ Large results (>4096 bytes) are automatically spilled to disk by the context man
 ### 3.4 No Bypass
 
 Tools MUST NOT:
-- Write directly to the SSE stream
+- Hold direct references to the SSE subscriber channel
 - Access interface state
 - Import rendering logic
 - Depend on a specific interface being connected
+
+Tools that need to emit events (e.g., `user_question`, `plan_created`) retrieve the subscriber from the execution context (`core.SubscriberKey`), injected by the agent loop. The tool is a pure `Tool` interface implementation — no special constructor parameters for event streams.
+
+### 3.5 Organization Overlay Boundary
+
+Org roles are strictly additive:
+- Org can ADD new roles
+- Org CANNOT replace kernel roles (jake, ryan, sarah, marcus, elena, alex)
+- Name collision with a kernel role is silently ignored — the kernel role wins
 
 ## Contract 4: Client State
 

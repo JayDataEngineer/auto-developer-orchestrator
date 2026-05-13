@@ -102,10 +102,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		meta.NewYieldArtifactToolWithDB(cfg.ArtifactDB, cfg.ProjectDir, cfg.SandboxID),
 	}
 
-	// Register ask_user tool if subscriber channel is available (human-in-the-loop)
+	// Register ask_user tool (Contract 3: no subscriber injection — uses context)
 	if cfg.Subscriber != nil {
-		ctoTools = append(ctoTools, asktool.NewAskUserTool(cfg.Subscriber))
-		ctoTools = append(ctoTools, plantool.NewPlanTool(cfg.Subscriber, cfg.ProjectDir))
+		ctoTools = append(ctoTools, asktool.NewAskUserTool())
+		ctoTools = append(ctoTools, plantool.NewPlanTool(cfg.ProjectDir))
 	}
 
 	if cfg.MemoryStore != nil {

@@ -533,12 +533,17 @@ func BuildOrchestratorPromptWithOrg(tools []core.Tool, sandboxID string, project
 		fmt.Fprintf(&header, "## Manifesto\n%s\n\n", manifesto)
 	}
 
-	// Merge roles: kernel as base, org overlays (org wins on name collision).
-	// Kernel staff (jake, ryan, sarah, etc.) are always available to any org.
+	// Contract 6: Org roles MERGE with kernel roles — never replace.
+	// Kernel staff (jake, ryan, sarah, etc.) are immutable. Orgs can only ADD
+	// new roles. Name collisions with kernel roles are silently ignored.
 	agents := FormatAgentList()
 	if len(orgRoles) > 0 {
 		merged := LoadAgentRoles()
 		for name, role := range orgRoles {
+			if _, isKernel := merged[name]; isKernel {
+				// Kernel role — org cannot override. Skip.
+				continue
+			}
 			merged[name] = role
 		}
 		agents = formatRolesList(merged)

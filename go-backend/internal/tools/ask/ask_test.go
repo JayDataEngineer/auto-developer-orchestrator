@@ -51,18 +51,18 @@ func TestPendingRegistry_Resolve_Twice(t *testing.T) {
 }
 
 func TestAskUserTool_Name(t *testing.T) {
-	tool := NewAskUserTool(nil)
+	tool := NewAskUserTool()
 	if tool.Name() != "ask_user" {
 		t.Errorf("Name() = %q, want %q", tool.Name(), "ask_user")
 	}
 }
 
 func TestAskUserTool_Schema(t *testing.T) {
-	testutil.AssertValidSchema(t, NewAskUserTool(nil))
+	testutil.AssertValidSchema(t, NewAskUserTool())
 }
 
 func TestAskUserTool_Execute_EmptyQuestion(t *testing.T) {
-	tool := NewAskUserTool(nil)
+	tool := NewAskUserTool()
 	_, err := tool.Execute(context.Background(), map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for empty question")
@@ -71,7 +71,7 @@ func TestAskUserTool_Execute_EmptyQuestion(t *testing.T) {
 
 func TestAskUserTool_Execute_WithResponse(t *testing.T) {
 	subscriber := make(chan core.AgentEvent, 10)
-	tool := NewAskUserTool(subscriber)
+	tool := NewAskUserTool()
 
 	type result struct {
 		val any
@@ -81,6 +81,8 @@ func TestAskUserTool_Execute_WithResponse(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// Contract 3: subscriber injected via context (like the agent loop does)
+	ctx = context.WithValue(ctx, core.SubscriberKey{}, subscriber)
 
 	go func() {
 		val, err := tool.Execute(ctx, map[string]any{
@@ -120,7 +122,7 @@ func TestAskUserTool_Execute_WithResponse(t *testing.T) {
 
 func TestAskUserTool_Execute_ContextCancel(t *testing.T) {
 	subscriber := make(chan core.AgentEvent, 10)
-	tool := NewAskUserTool(subscriber)
+	tool := NewAskUserTool()
 
 	type result struct {
 		val any
@@ -129,6 +131,7 @@ func TestAskUserTool_Execute_ContextCancel(t *testing.T) {
 	done := make(chan result, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = context.WithValue(ctx, core.SubscriberKey{}, subscriber)
 
 	go func() {
 		val, err := tool.Execute(ctx, map[string]any{

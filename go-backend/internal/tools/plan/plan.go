@@ -55,13 +55,15 @@ func (r *planRegistry) Resolve(id string, response PlanResponse) bool {
 
 // PlanTool lets the AI create an execution plan that must be approved by the user.
 // The plan is persisted to .pux/plans/{name}.md and blocks until the user responds.
+//
+// Contract 3 compliance: does NOT take an SSE subscriber in the constructor.
+// Retrieves it from context (set by AgentLoop) when needed.
 type PlanTool struct {
-	subscriber chan<- core.AgentEvent
 	projectDir string
 }
 
-func NewPlanTool(subscriber chan<- core.AgentEvent, projectDir string) *PlanTool {
-	return &PlanTool{subscriber: subscriber, projectDir: projectDir}
+func NewPlanTool(projectDir string) *PlanTool {
+	return &PlanTool{projectDir: projectDir}
 }
 
 func (t *PlanTool) Name() string { return "create_plan" }
@@ -116,20 +118,24 @@ func (t *PlanTool) Execute(ctx context.Context, args map[string]any) (any, error
 	// Register pending plan
 	responseCh := PendingPlans.Register(planID)
 
-	// Emit SSE event to the TUI
-	core.SendEvent(t.subscriber, core.AgentEvent{
-		Type: core.EventTypePlanCreated,
-		Data: core.AgentEventData{
-			ToolID:   planID,
-			ToolName: "create_plan",
-			ToolArgs: map[string]any{
-				"planId":   planID,
-				"name":     name,
-				"content":  content,
-				"filePath": planPath,
+	// Contract 3: emit plan_created event via context-provided subscriber.
+	// The agent loop injects the subscriber into context (SubscriberKey).
+	// Tools do NOT hold direct references to the event stream.
+	if sub, ok := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent); ok && sub != nil {
+		core.SendEvent(sub, core.AgentEvent{
+			Type: core.EventTypePlanCreated,
+			Data: core.AgentEventData{
+				ToolID:   planID,
+				ToolName: "create_plan",
+				ToolArgs: map[string]any{
+					"planId":   planID,
+					"name":     name,
+					"content":  content,
+					"filePath": planPath,
+				},
 			},
-		},
-	})
+		})
+	}
 
 	// Block until response arrives or context cancels (10 minute timeout)
 	select {
