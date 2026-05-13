@@ -22,7 +22,6 @@ export type PuxEventType =
   | 'commit_created'
   | 'push_complete'
   | 'pr_created'
-  | 'web_update'
   | 'approval_request'
   | 'question_asked'
   | 'artifact_created'
@@ -101,16 +100,6 @@ export interface PuxPRCreated {
   url: string;
   number: number;
   title: string;
-}
-
-// Web browser automation events
-export type { LabeledElement };
-
-export interface PuxWebUpdate {
-  url: string;
-  title: string;
-  screenshot: string; // base64
-  elements: LabeledElement[];
 }
 
 // Orchestrator artifact events
@@ -195,7 +184,6 @@ export type PuxSSEEvent =
   | { type: 'commit_created'; data: PuxCommitCreated }
   | { type: 'push_complete'; data: PuxPushComplete }
   | { type: 'pr_created'; data: PuxPRCreated }
-  | { type: 'web_update'; data: PuxWebUpdate }
   | { type: 'approval_request'; data: PuxApprovalRequest }
   | { type: 'question_asked'; data: PuxApprovalRequest }
   | { type: 'artifact_created'; data: PuxArtifactCreated }

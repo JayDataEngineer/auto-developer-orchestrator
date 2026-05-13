@@ -8,7 +8,6 @@ import type {
   ToolCall,
   ConversationMessage,
   AssistantMessage,
-  PuxWebUpdate,
   PuxApprovalRequest,
   PuxArtifact,
   PuxPlanStep,
@@ -36,7 +35,6 @@ export interface PuxAgentState {
   subAgents: SubAgentInfo[];
   artifacts: PuxArtifact[];
   plan: { artifactId: string; steps: PuxPlanStep[] } | null;
-  webUpdate: PuxWebUpdate | null;
   lastCommit: { message: string; branch: string } | null;
   lastPush: { branch: string } | null;
   pendingApproval: PuxApprovalRequest | null;
@@ -65,7 +63,6 @@ export const initialAgentState: PuxAgentState = {
   subAgents: [],
   artifacts: [],
   plan: null,
-  webUpdate: null,
   lastCommit: null,
   lastPush: null,
   pendingApproval: null,
@@ -339,11 +336,6 @@ export function agentReducer(
         prNumber: prData.number,
         messages: updateLastAssistant(state.messages, msg => ({ ...msg })),
       };
-    }
-
-    case 'web_update': {
-      const webData = event.data as PuxWebUpdate;
-      return { ...state, webUpdate: webData };
     }
 
     case 'approval_request':

@@ -228,6 +228,14 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		if cfg.BashExecutor != nil {
 			pr.SetSnapshotter(orchestration.NewGitSnapshotter(cfg.BashExecutor))
 		}
+
+		// Auto-director: raise Chrome window for VNC visibility when browser agent starts
+		if cfg.BashExecutor != nil && cfg.SandboxID != "" {
+			bashExec := cfg.BashExecutor
+			pr.SetRaiseBrowserFunc(func(ctx context.Context) {
+				_, _ = bashExec.Exec(ctx, "DISPLAY=:99 wmctrl -a 'Google Chrome' 2>/dev/null || true")
+			})
+		}
 		// Per-role sandbox tier: native roles use host executor, others use sandbox
 		pr.SetExecutorFactory(func(tier string) core.ToolExecutor {
 			if tier == "native" {

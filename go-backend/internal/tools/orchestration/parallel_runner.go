@@ -58,6 +58,9 @@ type ParallelRunner struct {
 	// Per-tier executor override: when set, uses this instead of r.executor
 	executorFactory func(tier string) core.ToolExecutor
 
+	// Auto-director: raise browser window for VNC visibility when browser agent starts
+	raiseBrowserFunc func(ctx context.Context) // injected by orchestrator if sandbox available
+
 	mu         sync.Mutex
 	tasks      map[string]*asyncTask
 	wg         sync.WaitGroup
@@ -117,6 +120,13 @@ func (r *ParallelRunner) SetSnapshotter(s Snapshotter) {
 // an appropriate executor (e.g., HostExecutor for native tier).
 func (r *ParallelRunner) SetExecutorFactory(f func(tier string) core.ToolExecutor) {
 	r.executorFactory = f
+}
+
+// SetRaiseBrowserFunc sets a callback that raises Chrome to the foreground
+// in the sandbox. Called automatically when browser tools are detected
+// in a delegation, so the VNC stream shows the browser.
+func (r *ParallelRunner) SetRaiseBrowserFunc(f func(ctx context.Context)) {
+	r.raiseBrowserFunc = f
 }
 
 // enrichTask prepends relevant context from the parent session to the task.
@@ -257,6 +267,11 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	// Rewrite delegation context: include original user request + CTO's delegation reasoning.
 	// This gives the sub-agent faithful context instead of a paraphrased task.
 	enrichedTask := r.enrichTask(ctx, task)
+
+	// Auto-director: raise Chrome for VNC visibility when browser tools are detected.
+	if r.raiseBrowserFunc != nil && hasBrowserTools(toolNames) {
+		r.raiseBrowserFunc(ctx)
+	}
 
 	// Create sub-agent with a very minimal loop config
 	cfg := core.AgentLoopConfig{
@@ -933,6 +948,40 @@ func (s *subSession) Compact(ctx context.Context, summary string) (string, error
 }
 func (s *subSession) TruncateToolResults(keep int) (int, error) { return 0, nil }
 func (s *subSession) GetCurrentNode() string { return s.parent.ID() + "-sub" }
+
+// hasBrowserTools checks if the tool list contains browser/web automation tools.
+// Used by the auto-director to decide whether to raise Chrome for VNC visibility.
+func hasBrowserTools(toolNames []string) bool {
+	browserTools := map[string]bool{
+		"sb_server":         true,
+		"browser_navigate":  true,
+		"browser_click":     true,
+		"browser_type":      true,
+		"browser_snapshot":  true,
+		"browser_screenshot": true,
+		"web_navigate":      true,
+		"web_click":         true,
+		"web_type":          true,
+		"web_snapshot":      true,
+		"web_screenshot":    true,
+		"fill_form":         true,
+		"find_element":      true,
+		"click_element":     true,
+		"navigate_url":      true,
+		"get_page_text":     true,
+		"execute_js":        true,
+	}
+	for _, name := range toolNames {
+		if browserTools[name] {
+			return true
+		}
+		// Match patterns like "sb_*" for SeleniumBase tools
+		if len(name) > 3 && name[:3] == "sb_" {
+			return true
+		}
+	}
+	return false
+}
 
 // extractAgentName derives a display name from the instructions/role.
 // For role-based delegation, the instructions IS the role name (e.g. "sarah").
