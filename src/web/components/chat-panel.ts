@@ -81,6 +81,7 @@ export class ChatPanel extends LitElement {
 	private abortCtrl: AbortController | undefined;
 
 	private static COMMANDS = [
+		{ name: "scheduler", desc: "Open scheduler panel" },
 		{ name: "new", desc: "Start a new session" },
 		{ name: "compact", desc: "Compact the session context" },
 		{ name: "session", desc: "Show session info and stats" },
@@ -199,6 +200,9 @@ export class ChatPanel extends LitElement {
 		this.slashOpen = false;
 		this.inputText = "";
 		switch (name) {
+			case "scheduler":
+				this.dispatchEvent(new CustomEvent("toggle-scheduler", { bubbles: true, composed: true }));
+				break;
 			case "new":
 				this.reset();
 				break;

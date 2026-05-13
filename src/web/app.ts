@@ -131,6 +131,7 @@ export class PuxApp extends LitElement {
 	@state() private browserHeight = 220;
 	@state() private conversations: ConversationSummary[] = [];
 	@state() private activeAgentId = "";
+	@state() private schedulerOpen = false;
 	@property() serverUrl = "";
 	@property() project = "ts-tui-pi";
 	private pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -157,7 +158,7 @@ export class PuxApp extends LitElement {
 					}
 				</div>
 				<div class="sidebar-bottom">
-					<scheduler-panel .serverUrl=${this.serverUrl}></scheduler-panel>
+					<scheduler-panel .serverUrl=${this.serverUrl} .forceOpen=${this.schedulerOpen} @toggle-request=${() => { this.schedulerOpen = !this.schedulerOpen; }}></scheduler-panel>
 				</div>
 			</div>
 			<div class="resize-h" @mousedown=${this.startH}></div>
@@ -167,7 +168,7 @@ export class PuxApp extends LitElement {
 				</div>
 				<div class="resize-v" @mousedown=${this.startV}></div>
 				<div class="chat-area">
-					<chat-panel id="chat" .serverUrl=${this.serverUrl} .project=${this.project}></chat-panel>
+					<chat-panel id="chat" .serverUrl=${this.serverUrl} .project=${this.project} @toggle-scheduler=${this.toggleScheduler}></chat-panel>
 				</div>
 			</div>
 		`;
@@ -257,6 +258,10 @@ export class PuxApp extends LitElement {
 		this.activeAgentId = "";
 		const chat = this.shadowRoot?.getElementById("chat") as any;
 		if (chat?.reset) chat.reset();
+	}
+
+	private toggleScheduler() {
+		this.schedulerOpen = !this.schedulerOpen;
 	}
 
 	private fmtTime(iso: string): string {
