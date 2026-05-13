@@ -4,23 +4,21 @@
  * Layout (from design plan):
  *
  * ┌──────────┬───────────────────────────────────────────┐
- * │  Pux     │  Browser / Desktop Visual (top strip)     │
- * │          ├───────────────────────────────────────────┤
- * │  Chat    │                                           │
- * │  History │  Chat messages + tool calls               │
- * │          │  (scrollable, fills remaining space)      │
- * │          ├───────────────────────────────────────────┤
- * │  ⚙ Jobs  │  Input: ask me anything...                │
+ * │  Pux     │                                           │
+ * │          │  Chat messages + tool calls               │
+ * │  Chat    │  (scrollable, fills remaining space)      │
+ * │  History │                                           │
+ * │          │  Input: ask me anything...                │
+ * │  ⚙ Jobs  │                                           │
  * └──────────┴───────────────────────────────────────────┘
  *
  * Left sidebar: branding + scheduler summary
- * Right main:   browser visual (top) → chat (middle) → input (bottom)
+ * Right main:   chat panel (messages + sticky input)
  */
 
 import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import "./components/chat-panel.js";
-import "./components/browser-panel.js";
 import "./components/scheduler-panel.js";
 import "./components/toast-container.js";
 
@@ -88,7 +86,7 @@ export class PuxApp extends LitElement {
 			flex-shrink: 0;
 		}
 
-		/* Resize handles */
+		/* Resize handle */
 		.resize-h {
 			width: 5px;
 			cursor: col-resize;
@@ -97,14 +95,6 @@ export class PuxApp extends LitElement {
 			transition: background 0.15s;
 		}
 		.resize-h:hover, .resize-h.active { background: var(--accent); }
-		.resize-v {
-			height: 5px;
-			cursor: row-resize;
-			background: transparent;
-			flex-shrink: 0;
-			transition: background 0.15s;
-		}
-		.resize-v:hover, .resize-v.active { background: var(--accent); }
 
 		/* Right main area */
 		.main {
@@ -112,13 +102,6 @@ export class PuxApp extends LitElement {
 			min-width: 0;
 			display: flex;
 			flex-direction: column;
-		}
-
-		/* Browser strip at top of main */
-		.browser-strip {
-			flex-shrink: 0;
-			border-bottom: none;
-			overflow: hidden;
 		}
 
 		/* Chat fills remaining space */
@@ -129,7 +112,6 @@ export class PuxApp extends LitElement {
 	`;
 
 	@state() private sidebarWidth = 220;
-	@state() private browserHeight = 220;
 	@state() private conversations: ConversationSummary[] = [];
 	@state() private activeAgentId = "";
 	@state() private schedulerOpen = false;
@@ -164,10 +146,6 @@ export class PuxApp extends LitElement {
 			</div>
 			<div class="resize-h" @mousedown=${this.startH}></div>
 			<div class="main">
-				<div class="browser-strip" style="height:${this.browserHeight}px">
-					<browser-panel></browser-panel>
-				</div>
-				<div class="resize-v" @mousedown=${this.startV}></div>
 				<div class="chat-area">
 					<chat-panel id="chat" .serverUrl=${this.serverUrl} .project=${this.project} @toggle-scheduler=${this.toggleScheduler}></chat-panel>
 				</div>
@@ -186,26 +164,6 @@ export class PuxApp extends LitElement {
 		const move = (ev: MouseEvent) => {
 			const w = startW + (ev.clientX - startX);
 			this.sidebarWidth = Math.max(140, Math.min(500, w));
-		};
-		const up = () => {
-			handle.classList.remove("active");
-			document.removeEventListener("mousemove", move);
-			document.removeEventListener("mouseup", up);
-		};
-		document.addEventListener("mousemove", move);
-		document.addEventListener("mouseup", up);
-	}
-
-	private startV(e: MouseEvent) {
-		e.preventDefault();
-		const startY = e.clientY;
-		const startH = this.browserHeight;
-		const handle = e.target as HTMLElement;
-		handle.classList.add("active");
-
-		const move = (ev: MouseEvent) => {
-			const h = startH + (ev.clientY - startY);
-			this.browserHeight = Math.max(0, Math.min(600, h));
 		};
 		const up = () => {
 			handle.classList.remove("active");

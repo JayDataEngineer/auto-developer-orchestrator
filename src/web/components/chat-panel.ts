@@ -52,7 +52,22 @@ export class ChatPanel extends LitElement {
 		.msg .text code { background: var(--surface); padding: 2px 5px; border-radius: 3px; font-size: 13px; }
 		.msg .text pre { background: var(--surface); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
 		.msg .text pre code { background: none; padding: 0; }
-		.thinking { font-size: 12px; color: var(--dim); font-style: italic; border-left: 2px solid var(--border); padding-left: 8px; margin: 4px 0; }
+		/* Collapsible thinking block */
+		.thinking-block { margin: 4px 0; }
+		.thinking-toggle {
+			display: inline-flex; align-items: center; gap: 4px;
+			background: none; border: 1px solid var(--border); border-radius: 4px;
+			color: var(--dim); font-size: 11px; padding: 2px 8px; cursor: pointer;
+			transition: color 0.15s, border-color 0.15s;
+		}
+		.thinking-toggle:hover { color: var(--text); border-color: var(--dim); }
+		.thinking-toggle .chevron { display: inline-block; transition: transform 0.15s; font-size: 10px; }
+		.thinking-toggle .chevron.open { transform: rotate(90deg); }
+		.thinking-content {
+			font-size: 12px; color: var(--dim); font-style: italic;
+			border-left: 2px solid var(--border); padding-left: 8px; margin: 6px 0 2px;
+			max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+		}
 		.tool { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 4px 0; font-size: 12px; }
 		.tool .name { font-weight: 600; color: var(--accent); }
 		.tool .status { float: right; }
@@ -118,6 +133,7 @@ export class ChatPanel extends LitElement {
 	@state() private inputText = "";
 	@state() private slashOpen = false;
 	@state() private slashIndex = 0;
+	@state() private thinkingExpanded = new Set<number>();
 	@query("textarea") private textareaEl!: HTMLTextAreaElement;
 
 	private slashFilter = "";
@@ -147,7 +163,7 @@ export class ChatPanel extends LitElement {
 					</div>
 				` : html`
 					<div class="messages">
-						${this.messages.map(m => this.renderMessage(m))}
+						${this.messages.map((m, i) => this.renderMessage(m, i))}
 					</div>
 				`}
 
@@ -188,14 +204,30 @@ export class ChatPanel extends LitElement {
 		`;
 	}
 
-	private renderMessage(m: ChatMessage) {
+	private renderMessage(m: ChatMessage, idx: number) {
+		const isOpen = this.thinkingExpanded.has(idx);
 		return html`
 			<div class="msg ${m.role}">
-				${m.thinking ? html`<div class="thinking">${m.thinking}</div>` : nothing}
+				${m.thinking ? html`
+					<div class="thinking-block">
+						<button class="thinking-toggle" @click=${() => this.toggleThinking(idx)}>
+							<span class="chevron ${isOpen ? 'open' : ''}">▸</span>
+							Thinking${this.streaming && m.role === "assistant" && idx === this.messages.length - 1 ? "..." : ""}
+						</button>
+						${isOpen ? html`<div class="thinking-content">${m.thinking}</div>` : nothing}
+					</div>
+				` : nothing}
 				<div class="text">${m.text}${m.role === "assistant" && this.streaming ? html`<span class="streaming-cursor"></span>` : nothing}</div>
 				${m.tools.length > 0 ? m.tools.map(t => this.renderTool(t)) : nothing}
 			</div>
 		`;
+	}
+
+	private toggleThinking(idx: number) {
+		const next = new Set(this.thinkingExpanded);
+		if (next.has(idx)) next.delete(idx);
+		else next.add(idx);
+		this.thinkingExpanded = next;
 	}
 
 	private renderTool(t: ChatToolCall) {
@@ -493,6 +525,13 @@ export class ChatPanel extends LitElement {
 					type: "message_update",
 					message: { role: "assistant", content: [{ type: "thinking", thinking: this.accThinking }] },
 				} as any);
+				// Auto-expand thinking while streaming
+				{
+					const lastIdx = this.messages.length - 1;
+					if (lastIdx >= 0 && !this.thinkingExpanded.has(lastIdx)) {
+						this.thinkingExpanded = new Set(this.thinkingExpanded).add(lastIdx);
+					}
+				}
 				break;
 
 			case "tool_execution_start":
