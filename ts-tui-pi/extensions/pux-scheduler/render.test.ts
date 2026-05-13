@@ -49,7 +49,7 @@ describe("renderJobList", () => {
 	test("empty jobs — shows empty message", () => {
 		const out = renderJobList([]);
 		expect(out).toContain("No scheduled jobs");
-		expect(out).toContain("orch scheduler create");
+		expect(out).toContain("/scheduler create");
 	});
 
 	test("single idle job — shows name and schedule", () => {

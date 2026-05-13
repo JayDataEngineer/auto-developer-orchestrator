@@ -2,15 +2,15 @@
  * Terminal rendering helpers for scheduler data.
  */
 
-import type { SchedulerJob, RunLogEntry, ScheduleType } from "./types.js";
+import type { SchedulerJob, RunLogEntry } from "./types.js";
 
 // ── Status glyphs ──────────────────────────────────────────
 
 const STATUS_GLYPH: Record<string, string> = {
-	running: "\x1b[33m●\x1b[0m",   // yellow dot
-	idle:    "\x1b[32m○\x1b[0m",    // green circle
-	error:   "\x1b[31m✗\x1b[0m",    // red X
-	disabled:"\x1b[90m⊘\x1b[0m",    // gray slashed circle
+	running: "\x1b[33m●\x1b[0m",
+	idle:    "\x1b[32m○\x1b[0m",
+	error:   "\x1b[31m✗\x1b[0m",
+	disabled:"\x1b[90m⊘\x1b[0m",
 };
 
 function statusGlyph(job: SchedulerJob): string {
@@ -61,11 +61,58 @@ function formatRelative(iso?: string): string {
 	return `${Math.ceil(diff / 86400000)}d`;
 }
 
-// ── Renderers ──────────────────────────────────────────────
+function formatRelativeAgo(iso?: string): string {
+	if (!iso) return "";
+	const d = new Date(iso);
+	if (isNaN(d.getTime())) return "";
+	const diff = Date.now() - d.getTime();
+	if (diff < 0) return "just now";
+	if (diff < 60000) return "just now";
+	if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+	if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+	return `${Math.floor(diff / 86400000)}d ago`;
+}
+
+// ── Status Bar Widget ─────────────────────────────────────
+
+export function renderStatusWidget(jobs: SchedulerJob[]): string {
+	if (jobs.length === 0) return "";
+	const running = jobs.filter(j => j.status === "running").length;
+	const errors = jobs.filter(j => j.status === "error").length;
+	const idle = jobs.filter(j => j.enabled && j.status === "idle").length;
+
+	const parts: string[] = [`${jobs.length} jobs`];
+	if (running > 0) parts.push(`\x1b[33m● ${running} running\x1b[0m`);
+	if (errors > 0) parts.push(`\x1b[31m⚠ ${errors} error${errors > 1 ? "s" : ""}\x1b[0m`);
+	if (idle > 0 && running === 0 && errors === 0) parts.push(`\x1b[32m✓ ${idle} idle\x1b[0m`);
+
+	return `⚙ ${parts.join("  ")}`;
+}
+
+/** Returns true if any jobs are currently running (for adaptive polling). */
+export function hasRunningJobs(jobs: SchedulerJob[]): boolean {
+	return jobs.some(j => j.status === "running");
+}
+
+// ── Interactive Picker Labels ──────────────────────────────
+
+/** Format a job as a one-line select option for pickers. */
+export function formatJobOption(job: SchedulerJob): string {
+	const statusIcon = !job.enabled ? "⊘"
+		: job.status === "running" ? "●"
+		: job.status === "error" ? "✗"
+		: "○";
+	const sched = formatSchedule(job);
+	const last = formatRelativeAgo(job.lastRunAt);
+	const suffix = last ? ` — ${last}` : "";
+	return `${statusIcon} ${job.name}  (${sched})${suffix}`;
+}
+
+// ── Text Renderers ─────────────────────────────────────────
 
 export function renderJobList(jobs: SchedulerJob[]): string {
 	if (jobs.length === 0) {
-		return "\x1b[90m  No scheduled jobs.\x1b[0m\n  Create one with: \x1b[36morch scheduler create\x1b[0m\n";
+		return "\x1b[90m  No scheduled jobs.\x1b[0m\n  Create one with: \x1b[36m/scheduler create\x1b[0m\n";
 	}
 
 	const lines: string[] = [
@@ -73,7 +120,6 @@ export function renderJobList(jobs: SchedulerJob[]): string {
 		"",
 	];
 
-	// Sort: running first, then by nextRunAt
 	const sorted = [...jobs].sort((a, b) => {
 		if (a.status === "running" && b.status !== "running") return -1;
 		if (b.status === "running" && a.status !== "running") return 1;
@@ -164,16 +210,6 @@ export function renderRunLog(runs: RunLogEntry[]): string {
 	}
 
 	return lines.join("\n");
-}
-
-export function renderStatusWidget(jobs: SchedulerJob[]): string {
-	if (jobs.length === 0) return "";
-	const running = jobs.filter(j => j.status === "running").length;
-	const errors = jobs.filter(j => j.status === "error").length;
-	const parts = [`${jobs.length} jobs`];
-	if (running > 0) parts.push(`\x1b[33m${running} running\x1b[0m`);
-	if (errors > 0) parts.push(`\x1b[31m${errors} error\x1b[0m`);
-	return `⚙ ${parts.join(", ")}`;
 }
 
 export function formatJobSummary(job: SchedulerJob): string {
