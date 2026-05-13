@@ -225,6 +225,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	cfg.VisionChain = visionChain
 	cfg.MCPClient = h.mcpMulti
 	cfg.Subscriber = events // ask_user tool emits to TUI via this channel
+	cfg.Scheduler = h.schedulerTool // scheduler tool for LLM
 
 	// Model resolver — lets sub-agents use role-specific models
 	cfg.ModelResolver = func(modelID string) core.LLMProvider {

@@ -175,3 +175,10 @@ export function renderStatusWidget(jobs: SchedulerJob[]): string {
 	if (errors > 0) parts.push(`\x1b[31m${errors} error\x1b[0m`);
 	return `⚙ ${parts.join(", ")}`;
 }
+
+export function formatJobSummary(job: SchedulerJob): string {
+	const sched = formatSchedule(job);
+	const status = job.enabled ? job.status : "disabled";
+	const icon = status === "running" ? "\u25CF" : status === "error" ? "\u2717" : "\u2713";
+	return `${icon} ${job.name} (${sched}) — ${status}`;
+}

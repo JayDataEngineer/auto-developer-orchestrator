@@ -27,6 +27,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	plantool "github.com/auto-developer-orchestrator/backend/internal/tools/plan"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/nlp"
+	schedulertool "github.com/auto-developer-orchestrator/backend/internal/tools/scheduler"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/todo"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
@@ -60,6 +61,7 @@ type Config struct {
 	BrowserProvider browsertools.BrowserProvider // optional: if set, registers browser a11y/cookie/storage tools for employees
 	DesktopProvider desktoptools.DesktopProvider // optional: if set, registers desktop screenshot/click/type/key tools for employees
 	Subscriber      chan<- core.AgentEvent      // optional: if set, ask_user tool can emit events to TUI
+	Scheduler       any                         // optional: *scheduler.Scheduler — passed through to scheduler tool
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -107,6 +109,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 	if cfg.MemoryStore != nil {
 		ctoTools = append(ctoTools, memory.NewTool(cfg.MemoryStore))
+	}
+
+	// Scheduler tool — lets the LLM manage scheduled jobs
+	if cfg.Scheduler != nil {
+		ctoTools = append(ctoTools, schedulertool.NewSchedulerToolFromAny(cfg.Scheduler, cfg.ProjectDir))
 	}
 
 	// Todo list — always available (created internally)

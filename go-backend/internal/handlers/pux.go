@@ -45,6 +45,7 @@ type PuxHandler struct {
 	visionClient   *browser.VisionClient // local llama.cpp vision (second fallback tier)
 	eventStore     *storage.EventStore
 	approvalMgr    *approval.Manager // central approval manager for Respond endpoint
+	schedulerTool  any               // schedulertool.Backend — scheduler tool for LLM
 	hookBridge     *hooks.SSEHookBridge // SSE hook bridge for TUI interception
 
 	metrics  *observability.Metrics
@@ -81,6 +82,11 @@ func (h *PuxHandler) SetLlamaEngine(engine *llamaeng.LLMClient, sandboxMgr *sand
 // SetClusterEngine configures the Ray cluster LLM (Qwen3.6, always-on).
 func (h *PuxHandler) SetClusterEngine(engine *llamaeng.LLMClient) {
 	h.clusterEngine = engine
+}
+
+// SetSchedulerTool wires the scheduler tool backend for LLM access.
+func (h *PuxHandler) SetSchedulerTool(backend any) {
+	h.schedulerTool = backend
 }
 
 // SetGeminiEngine configures the optional Gemini cloud engine.

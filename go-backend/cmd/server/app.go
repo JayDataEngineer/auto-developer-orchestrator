@@ -22,6 +22,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/scheduler"
+	schedulertool "github.com/auto-developer-orchestrator/backend/internal/tools/scheduler"
 	"github.com/auto-developer-orchestrator/backend/internal/services"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 
@@ -347,6 +348,133 @@ func (a *App) initScheduler() {
 	if err := a.sched.Start(context.Background()); err != nil {
 		a.logger.Warn("Failed to start scheduler", zap.Error(err))
 	}
+
+	// Wire scheduler backend for LLM tool access (adapter avoids import cycle)
+	if a.puxHandler != nil {
+		a.puxHandler.SetSchedulerTool(&schedulerBackend{inner: a.sched})
+	}
+}
+
+// schedulerBackend adapts *scheduler.Scheduler to schedulertool.Backend.
+type schedulerBackend struct {
+	inner *scheduler.Scheduler
+}
+
+func (b *schedulerBackend) ListJobsInfo() []*schedulertool.JobInfo {
+	jobs := b.inner.ListJobs()
+	result := make([]*schedulertool.JobInfo, len(jobs))
+	for i, j := range jobs {
+		result[i] = &schedulertool.JobInfo{
+			ID:               j.ID,
+			Name:             j.Name,
+			Description:      j.Description,
+			Project:          j.Project,
+			Message:          j.Message,
+			Model:            j.Model,
+			Schedule:         string(j.Schedule),
+			CronExpr:         j.CronExpr,
+			EverySeconds:     j.EverySeconds,
+			AtTime:           j.AtTime,
+			Enabled:          j.Enabled,
+			Status:           string(j.Status),
+			LastRunAt:        j.LastRunAt,
+			LastRunStatus:    j.LastRunStatus,
+			LastError:        j.LastError,
+			NextRunAt:        j.NextRunAt,
+			ConsecutiveErrors: j.ConsecutiveErrors,
+			InputTokens:      j.InputTokens,
+			OutputTokens:     j.OutputTokens,
+			DurationMs:       j.DurationMs,
+		}
+	}
+	return result
+}
+
+func (b *schedulerBackend) FindJobByNameOrID(nameOrID string) *schedulertool.JobInfo {
+	jobs := b.inner.ListJobs()
+	for _, j := range jobs {
+		if j.Name == nameOrID || j.ID == nameOrID {
+			return &schedulertool.JobInfo{
+				ID: j.ID, Name: j.Name, Description: j.Description,
+				Project: j.Project, Message: j.Message, Model: j.Model,
+				Schedule: string(j.Schedule), CronExpr: j.CronExpr,
+				EverySeconds: j.EverySeconds, AtTime: j.AtTime,
+				Enabled: j.Enabled, Status: string(j.Status),
+				LastRunAt: j.LastRunAt, LastRunStatus: j.LastRunStatus,
+				LastError: j.LastError, NextRunAt: j.NextRunAt,
+				ConsecutiveErrors: j.ConsecutiveErrors,
+				InputTokens: j.InputTokens, OutputTokens: j.OutputTokens,
+				DurationMs: j.DurationMs,
+			}
+		}
+	}
+	return nil
+}
+
+func (b *schedulerBackend) CreateJobParams(name, project, message, scheduleType, cronExpr, atTime, description, model string, everySeconds int64, enabled bool) (string, error) {
+	job := &scheduler.Job{
+		Name: name, Project: project, Message: message,
+		Schedule: scheduler.ScheduleType(scheduleType),
+		CronExpr: cronExpr, AtTime: atTime, Description: description,
+		Model: model, EverySeconds: everySeconds, Enabled: enabled,
+	}
+	if err := b.inner.CreateJob(job); err != nil {
+		return "", err
+	}
+	return job.ID, nil
+}
+
+func (b *schedulerBackend) UpdateJobParams(id, name, message, project, model, description, scheduleType, cronExpr, atTime string, everySeconds int64, enabled *bool) error {
+	updates := &scheduler.Job{}
+	if name != "" {
+		updates.Name = name
+	}
+	if message != "" {
+		updates.Message = message
+	}
+	if project != "" {
+		updates.Project = project
+	}
+	if model != "" {
+		updates.Model = model
+	}
+	if description != "" {
+		updates.Description = description
+	}
+	if scheduleType != "" {
+		updates.Schedule = scheduler.ScheduleType(scheduleType)
+	}
+	if cronExpr != "" {
+		updates.CronExpr = cronExpr
+	}
+	if atTime != "" {
+		updates.AtTime = atTime
+	}
+	if everySeconds > 0 {
+		updates.EverySeconds = everySeconds
+	}
+	if enabled != nil {
+		updates.Enabled = *enabled
+	}
+	return b.inner.UpdateJob(id, updates)
+}
+
+func (b *schedulerBackend) DeleteJob(id string) error             { return b.inner.DeleteJob(id) }
+func (b *schedulerBackend) TriggerJob(id string) error            { return b.inner.TriggerJob(id) }
+
+func (b *schedulerBackend) ListRunsInfo(jobID string, limit int) []schedulertool.RunInfo {
+	entries, err := b.inner.ListRuns(jobID, limit, "")
+	if err != nil {
+		return nil
+	}
+	result := make([]schedulertool.RunInfo, len(entries))
+	for i, e := range entries {
+		result[i] = schedulertool.RunInfo{
+			Ts: e.Ts, Status: e.Status, Summary: e.Summary,
+			Error: e.Error, JobName: e.JobName,
+		}
+	}
+	return result
 }
 
 // ── Router ────────────────────────────────────────────────────────────

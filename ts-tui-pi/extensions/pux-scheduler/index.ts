@@ -28,6 +28,33 @@ function parseKVArgs(raw: string): Record<string, string> {
 	return result;
 }
 
+// ── Human-friendly duration parser ────────────────────────────
+// "5m" → 300, "1h" → 3600, "2d" → 172800, "30s" → 30, "90" → 90
+function parseDuration(s: string): number | null {
+	const match = s.match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)?$/);
+	if (!match) return null;
+	const val = parseFloat(match[1]);
+	const unit = match[2] || "s";
+	switch (unit) {
+		case "ms": return Math.round(val / 1000);
+		case "s": return Math.round(val);
+		case "m": return Math.round(val * 60);
+		case "h": return Math.round(val * 3600);
+		case "d": return Math.round(val * 86400);
+		default: return null;
+	}
+}
+
+// ── Cron expression validator ─────────────────────────────────
+// Basic check: 5 or 6 fields with standard cron syntax
+function isValidCron(expr: string): boolean {
+	const parts = expr.trim().split(/\s+/);
+	if (parts.length < 5 || parts.length > 6) return false;
+	// Each field should be a valid cron token
+	const re = /^(\d+|\*|\?|\/\d+|\d+-\d+|\d+\/\d+|L|W|#\d+|MON|TUE|WED|THU|FRI|SAT|SUN)$/;
+	return parts.every(p => re.test(p));
+}
+
 function resolveJob(jobs: SchedulerJob[], nameOrId: string): SchedulerJob | undefined {
 	return jobs.find(j => j.name === nameOrId || j.id === nameOrId);
 }
@@ -36,10 +63,11 @@ const CREATE_USAGE = [
 	"\x1b[33m  Usage: /scheduler create name=\"Job Name\" project=<project> message=\"prompt\" [options]\x1b[0m",
 	"",
 	"  Required:  name, project, message",
-	"  Schedule:  cron=\"0 9 * * *\" | every=3600 | at=\"2026-06-01T09:00:00Z\" | manual",
+	"  Schedule:  cron=\"0 9 * * *\" | every=1h | every=30m | at=\"2026-06-01T09:00:00Z\" | manual",
 	"  Optional:  model=<model> enabled=true description=\"...\" timezone=\"America/New_York\"",
-	"  Example:",
-	"    \x1b[36m/scheduler create name=\"Daily Report\" project=myapp message=\"Summarize issues\" cron=\"0 9 * * *\"\x1b[0m",
+	"  Examples:",
+	"    \x1b[36m/scheduler create name=\"Daily Report\" project=myapp message=\"Summarize\" cron=\"0 9 * * *\"\x1b[0m",
+	"    \x1b[36m/scheduler create name=\"Health Check\" project=myapp message=\"Run tests\" every=5m\x1b[0m",
 	"",
 ].join("\n");
 
@@ -47,8 +75,10 @@ const EDIT_USAGE = [
 	"\x1b[33m  Usage: /scheduler edit <name> [key=value ...]\x1b[0m",
 	"",
 	"  Editable fields: name, message, project, cron, every, model, enabled, description, timezone",
+	"  Intervals: every=30s | every=5m | every=1h",
 	"  Example:",
 	"    \x1b[36m/scheduler edit \"Daily Report\" cron=\"0 10 * * *\" message=\"New prompt\"\x1b[0m",
+	"    \x1b[36m/scheduler edit \"Health Check\" every=10m\x1b[0m",
 	"",
 ].join("\n");
 
@@ -165,9 +195,27 @@ export default function registerPuxSchedulerExtension(pi: ExtensionAPI): void {
 						let cronExpr: string | undefined;
 						let everySeconds: number | undefined;
 						let atTime: string | undefined;
-						if (kv.cron) { scheduleType = "cron"; cronExpr = kv.cron; }
-						else if (kv.every) { scheduleType = "every"; everySeconds = parseInt(kv.every, 10); }
-						else if (kv.at) { scheduleType = "at"; atTime = kv.at; }
+						if (kv.cron) {
+							scheduleType = "cron";
+							cronExpr = kv.cron;
+							if (!isValidCron(cronExpr)) {
+								process.stdout.write(`\x1b[31m  Invalid cron expression: ${cronExpr}\x1b[0m\n`);
+								process.stdout.write("  Expected 5 fields: min hour day month weekday (e.g. \"0 9 * * *\")\n");
+								break;
+							}
+						} else if (kv.every) {
+							scheduleType = "every";
+							const parsed = parseDuration(kv.every);
+							if (parsed === null || parsed <= 0) {
+								process.stdout.write(`\x1b[31m  Invalid interval: ${kv.every}\x1b[0m\n`);
+								process.stdout.write("  Use format: 30s, 5m, 1h, 2d\n");
+								break;
+							}
+							everySeconds = parsed;
+						} else if (kv.at) {
+							scheduleType = "at";
+							atTime = kv.at;
+						}
 
 						const req: CreateJobRequest = {
 							name: kv.name,
@@ -219,9 +267,20 @@ export default function registerPuxSchedulerExtension(pi: ExtensionAPI): void {
 						if (kv.timezone) update.timezone = kv.timezone;
 						if (kv.enabled !== undefined) update.enabled = kv.enabled !== "false";
 						// Schedule changes
-						if (kv.cron) { update.scheduleType = "cron"; update.cronExpr = kv.cron; }
-						else if (kv.every) { update.scheduleType = "every"; update.everySeconds = parseInt(kv.every, 10); }
-						else if (kv.at) { update.scheduleType = "at"; update.atTime = kv.at; }
+						if (kv.cron) {
+							if (!isValidCron(kv.cron)) {
+								process.stdout.write(`\x1b[31m  Invalid cron expression: ${kv.cron}\x1b[0m\n`);
+								break;
+							}
+							update.scheduleType = "cron"; update.cronExpr = kv.cron;
+						} else if (kv.every) {
+							const parsed = parseDuration(kv.every);
+							if (parsed === null || parsed <= 0) {
+								process.stdout.write(`\x1b[31m  Invalid interval: ${kv.every}. Use 30s, 5m, 1h, 2d\x1b[0m\n`);
+								break;
+							}
+							update.scheduleType = "every"; update.everySeconds = parsed;
+						} else if (kv.at) { update.scheduleType = "at"; update.atTime = kv.at; }
 
 						const updated = await getClient().updateJob(existing.id, update);
 						process.stdout.write(`  \x1b[32m✓ Updated job '${updated.name}'\x1b[0m\n`);
@@ -280,30 +339,50 @@ export default function registerPuxSchedulerExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "scheduler",
 		label: "Scheduler",
-		description: "Manage scheduled jobs: list, trigger, create, delete. The Go backend handles execution.",
+		description: "Manage scheduled jobs: list, create, edit, delete, trigger, view details and run history. The Go backend handles execution.",
 		parameters: Type.Object({
 			action: Type.Union([
 				Type.Literal("list"),
-				Type.Literal("trigger"),
 				Type.Literal("detail"),
+				Type.Literal("create"),
+				Type.Literal("edit"),
+				Type.Literal("delete"),
+				Type.Literal("trigger"),
 				Type.Literal("runs"),
 			]),
-			name: Type.Optional(Type.String({ description: "Job name or ID (for trigger/detail/runs)" })),
+			name: Type.Optional(Type.String({ description: "Job name or ID (for detail/edit/delete/trigger/runs)" })),
+			project: Type.Optional(Type.String({ description: "Project name (defaults to current project)" })),
+			message: Type.Optional(Type.String({ description: "Prompt message (for create/edit)" })),
+			scheduleType: Type.Optional(Type.Union([
+				Type.Literal("cron"),
+				Type.Literal("every"),
+				Type.Literal("at"),
+				Type.Literal("manual"),
+			])),
+			cronExpr: Type.Optional(Type.String({ description: "Cron expression e.g. '0 9 * * *'" })),
+			everySeconds: Type.Optional(Type.Number({ description: "Interval in seconds" })),
+			atTime: Type.Optional(Type.String({ description: "One-shot time (RFC3339)" })),
+			description: Type.Optional(Type.String({ description: "Job description" })),
+			model: Type.Optional(Type.String({ description: "Model override" })),
+			enabled: Type.Optional(Type.Boolean({ description: "Enable/disable the job" })),
 		}),
 		execute: async () => ({ content: [] }),
 		renderCall: (args, _theme) => {
 			const a = args as { action: string; name?: string };
 			const target = a.name ? ` ${a.name}` : "";
 			const glyphs: Record<string, string> = {
-				list: "📋",
-				trigger: "▶",
-				detail: "🔍",
-				runs: "📜",
+				list: "\u{1F4CB}",
+				trigger: "\u25B6",
+				detail: "\u{1F50D}",
+				runs: "\u{1F4DC}",
+				create: "\u2795",
+				edit: "\u270F",
+				delete: "\u{1F5D1}",
 			};
-			return `${glyphs[a.action] || "⚙"} scheduler ${a.action}${target}`;
+			return `${glyphs[a.action] || "\u2699"} scheduler ${a.action}${target}`;
 		},
 		renderResult: (_result, _options, _theme) => {
-			return undefined; // Let default tool result rendering handle it
+			return undefined;
 		},
 	});
 }
