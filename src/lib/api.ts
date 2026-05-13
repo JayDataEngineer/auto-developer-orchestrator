@@ -3,8 +3,15 @@
  * Typed wrapper for the Go backend REST API
  */
 
+export interface ProjectInfo {
+  name: string;
+  has_manifest?: boolean;
+  description?: string;
+  version?: string;
+}
+
 export interface ProjectResponse {
-  projects: string[];
+  projects: ProjectInfo[];
 }
 
 export interface Task {

@@ -48,12 +48,13 @@ export const useOrchestrator = (addLog: (msg: string, type?: any) => void) => {
           api.config.getGitHub()
         ]);
         
-        setProjects(projRes.projects);
+        setProjects(projRes.projects.map(p => typeof p === 'string' ? p : p.name));
         setAiConfig(aiRes);
         setGithubUser(githubRes);
 
-        if (projRes.projects.length > 0) {
-          setSelectedProject(projRes.projects[0]);
+        const names = projRes.projects.map(p => typeof p === 'string' ? p : p.name);
+        if (names.length > 0) {
+          setSelectedProject(names[0]);
         }
       } catch (e) {
         addLog(`Initialization failed: ${e instanceof Error ? e.message : String(e)}`, 'ERROR');
