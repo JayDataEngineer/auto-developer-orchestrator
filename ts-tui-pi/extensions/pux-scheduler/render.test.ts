@@ -11,6 +11,7 @@ import {
 	renderRunLog,
 	renderStatusWidget,
 } from "./render.js";
+import { isConnectionError } from "./api.js";
 import type { SchedulerJob, RunLogEntry } from "./types.js";
 
 // ── Fixtures ─────────────────────────────────────────────────
@@ -275,5 +276,60 @@ describe("renderStatusWidget", () => {
 		expect(out).toContain("3 jobs");
 		expect(out).toContain("1 running");
 		expect(out).toContain("1 error");
+	});
+});
+
+// ── isConnectionError ──────────────────────────────────────
+
+describe("isConnectionError", () => {
+	test("detects 'Unable to connect' message", () => {
+		const err = new Error("Unable to connect. Is the computer able to access the url?");
+		expect(isConnectionError(err)).toBe(true);
+	});
+
+	test("detects 'fetch failed' message", () => {
+		const err = new Error("fetch failed");
+		expect(isConnectionError(err)).toBe(true);
+	});
+
+	test("detects ECONNREFUSED code", () => {
+		const err: any = new Error("connection refused");
+		err.code = "ECONNREFUSED";
+		expect(isConnectionError(err)).toBe(true);
+	});
+
+	test("detects ENOTFOUND code", () => {
+		const err: any = new Error("not found");
+		err.code = "ENOTFOUND";
+		expect(isConnectionError(err)).toBe(true);
+	});
+
+	test("detects 'econnrefused' in message", () => {
+		const err = new Error("connect ECONNREFUSED 127.0.0.1:3847");
+		expect(isConnectionError(err)).toBe(true);
+	});
+
+	test("detects 'connect' in message", () => {
+		const err = new Error("connect ENETUNREACH");
+		expect(isConnectionError(err)).toBe(true);
+	});
+
+	test("returns false for normal API error", () => {
+		const err = new Error("scheduler list: 500");
+		expect(isConnectionError(err)).toBe(false);
+	});
+
+	test("returns false for 'not found' error", () => {
+		const err = new Error("scheduler get: 404");
+		expect(isConnectionError(err)).toBe(false);
+	});
+
+	test("returns false for null/undefined", () => {
+		expect(isConnectionError(null)).toBe(false);
+		expect(isConnectionError(undefined)).toBe(false);
+	});
+
+	test("returns false for empty error", () => {
+		expect(isConnectionError(new Error(""))).toBe(false);
 	});
 });

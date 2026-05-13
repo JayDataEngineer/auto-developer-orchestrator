@@ -68,3 +68,11 @@ export class SchedulerClient {
 		return data.runs || [];
 	}
 }
+
+/** Check if an error is a network/connection failure (backend unreachable). */
+export function isConnectionError(err: any): boolean {
+	const msg = (err?.message || "").toLowerCase();
+	return msg.includes("connect") || msg.includes("econnrefused")
+		|| msg.includes("fetch failed") || msg.includes("unable to connect")
+		|| err?.code === "ECONNREFUSED" || err?.code === "ENOTFOUND";
+}
