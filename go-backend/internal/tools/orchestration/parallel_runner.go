@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
+	"github.com/auto-developer-orchestrator/backend/internal/vision"
 )
 
 // SubOrchestratorConfig holds config for creating a division sub-orchestrator.
@@ -57,6 +59,12 @@ type ParallelRunner struct {
 
 	// Per-tier executor override: when set, uses this instead of r.executor
 	executorFactory func(tier string) core.ToolExecutor
+
+	// Visual context for vision caching: when set, sub-agent executors are wrapped
+	// with VisionAwareExecutor to skip vision calls when the page hasn't changed.
+	visualContext   vision.VisualContext
+	visionChain     *vision.FallbackChain
+	visionLogger    func(format string, args ...interface{})
 
 	// Auto-director: raise browser window for VNC visibility when browser agent starts
 	raiseBrowserFunc func(ctx context.Context) // injected by orchestrator if sandbox available
@@ -127,6 +135,15 @@ func (r *ParallelRunner) SetExecutorFactory(f func(tier string) core.ToolExecuto
 // in a delegation, so the VNC stream shows the browser.
 func (r *ParallelRunner) SetRaiseBrowserFunc(f func(ctx context.Context)) {
 	r.raiseBrowserFunc = f
+}
+
+// SetVisualContext enables frame-based vision caching for sub-agent executors.
+// When set, sub-agents that produce screenshots will have their vision calls
+// skipped if the page hasn't changed since the last description.
+func (r *ParallelRunner) SetVisualContext(vc vision.VisualContext, chain *vision.FallbackChain, logger func(format string, args ...interface{})) {
+	r.visualContext = vc
+	r.visionChain = chain
+	r.visionLogger = logger
 }
 
 // enrichTask prepends relevant context from the parent session to the task.
@@ -293,6 +310,17 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	executor := r.executor
 	if r.executorFactory != nil && sandboxTier != "" {
 		executor = r.executorFactory(sandboxTier)
+	}
+	// Wrap sub-agent executor with vision caching when visual context is available
+	if r.visualContext != nil && r.visionChain != nil {
+		var vLogger *log.Logger
+		if r.visionLogger != nil {
+			vLogger = log.New(io.Discard, "", 0)
+			_ = vLogger
+		}
+		vExec := vision.NewVisionAwareExecutor(executor, r.visionChain, vLogger)
+		vExec.SetVisualContext(r.visualContext)
+		executor = vExec
 	}
 	loop := core.NewAgentLoop(provider, executor, sess, cfg)
 
@@ -609,7 +637,13 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	la.Session.Compact(ctx, "Context compacted for continuation")
 
 	// Create a new agent loop with the SAME session (has full history)
-	loop := core.NewAgentLoop(la.Provider, r.executor, la.Session, la.Config)
+	continueExecutor := core.ToolExecutor(r.executor)
+	if r.visualContext != nil && r.visionChain != nil {
+		vExec := vision.NewVisionAwareExecutor(continueExecutor, r.visionChain, log.New(io.Discard, "", 0))
+		vExec.SetVisualContext(r.visualContext)
+		continueExecutor = vExec
+	}
+	loop := core.NewAgentLoop(la.Provider, continueExecutor, la.Session, la.Config)
 
 	// Emit subagent_start (continuation)
 	core.SendEvent(r.subscriber, core.AgentEvent{

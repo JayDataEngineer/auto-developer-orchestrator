@@ -27,6 +27,31 @@ import (
 	"go.uber.org/zap"
 )
 
+// streamerVisualContext adapts a ComputerUseHandler + sandbox ID to the
+// vision.VisualContext interface. It reads the streamer's last frame change score.
+type streamerVisualContext struct {
+	cu        *ComputerUseHandler
+	sandboxID string
+}
+
+func (vc *streamerVisualContext) LastChangeScore() float64 {
+	vc.cu.mu.RLock()
+	client, ok := vc.cu.clients[vc.sandboxID]
+	vc.cu.mu.RUnlock()
+	if !ok {
+		return -1
+	}
+	streamer := client.GetStreamer()
+	if streamer == nil {
+		return -1
+	}
+	frame := streamer.LastFrame()
+	if frame == nil {
+		return -1
+	}
+	return frame.ChangeScore
+}
+
 // promptWithOrchestrator handles prompt requests using the orchestrator agent.
 // This is the default and only path for /api/pux/prompt.
 func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
@@ -127,6 +152,11 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		ArtifactDB:      h.db,
 		BrowserProvider: h.cuBridge, // wire accessibility/cookie/storage tools to employees
 		DesktopProvider: h.cuBridge, // wire desktop screenshot/click/type/key tools to employees
+	}
+
+	// Wire visual context for frame-based vision caching (skips vision API when page hasn't changed)
+	if h.cuBridge != nil && sandboxID != "" {
+		cfg.VisualContext = &streamerVisualContext{cu: h.cuBridge.CU, sandboxID: sandboxID}
 	}
 
 	// Detect org mode — if project contains pux.yaml, load org overlay

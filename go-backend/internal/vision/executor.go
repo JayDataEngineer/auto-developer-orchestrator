@@ -5,9 +5,20 @@ import (
 	"encoding/json"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
+
+// VisualContext provides streaming frame data for vision optimization.
+// When set on a VisionAwareExecutor, it enables caching: if the page hasn't
+// changed since the last vision call, the cached description is reused
+// instead of making another expensive API call.
+type VisualContext interface {
+	// LastChangeScore returns 0-1 (0 = identical, 1 = completely different).
+	// Returns -1 if no frames are available.
+	LastChangeScore() float64
+}
 
 // VisionAwareExecutor wraps a ToolExecutor and post-processes results
 // that contain image data, injecting text descriptions from the vision chain.
@@ -15,6 +26,12 @@ type VisionAwareExecutor struct {
 	inner  core.ToolExecutor
 	chain  *FallbackChain
 	logger *log.Logger
+
+	vc              VisualContext // optional: enables frame-based caching
+	changeThreshold float64       // skip vision if score < this (default 0.05)
+
+	mu       sync.Mutex
+	lastDesc string // cached description from last vision call
 }
 
 // NewVisionAwareExecutor wraps the given executor with automatic vision descriptions.
@@ -22,7 +39,25 @@ func NewVisionAwareExecutor(inner core.ToolExecutor, chain *FallbackChain, logge
 	if logger == nil {
 		logger = log.Default()
 	}
-	return &VisionAwareExecutor{inner: inner, chain: chain, logger: logger}
+	return &VisionAwareExecutor{
+		inner:           inner,
+		chain:           chain,
+		logger:          logger,
+		changeThreshold: 0.05,
+	}
+}
+
+// SetVisualContext enables frame-based vision caching. When the page hasn't
+// changed since the last vision call (change score < threshold), the cached
+// description is reused instead of calling the vision API again.
+func (e *VisionAwareExecutor) SetVisualContext(vc VisualContext) {
+	e.vc = vc
+}
+
+// SetChangeThreshold sets the change score below which vision calls are skipped.
+// Default is 0.05 (5% pixel difference).
+func (e *VisionAwareExecutor) SetChangeThreshold(threshold float64) {
+	e.changeThreshold = threshold
 }
 
 // Execute delegates to the inner executor, then enhances results with vision if images are found.
@@ -49,6 +84,20 @@ func (e *VisionAwareExecutor) Execute(ctx context.Context, toolName string, args
 		return result, nil
 	}
 
+	// Check if page hasn't changed — reuse cached description
+	if e.vc != nil {
+		score := e.vc.LastChangeScore()
+		if score >= 0 && score < e.changeThreshold {
+			e.mu.Lock()
+			cached := e.lastDesc
+			e.mu.Unlock()
+			if cached != "" {
+				e.logger.Printf("vision: skipping %s — page unchanged (score=%.4f, cached)", toolName, score)
+				return injectDescription(result, cached), nil
+			}
+		}
+	}
+
 	// Describe the image
 	desc, descErr := e.chain.Describe(ctx, ImageInput{
 		Base64:   detection.Base64Data,
@@ -60,6 +109,11 @@ func (e *VisionAwareExecutor) Execute(ctx context.Context, toolName string, args
 		e.logger.Printf("vision: failed to describe image from %s: %v", toolName, descErr)
 		return result, nil // graceful — return without vision
 	}
+
+	// Cache the description for future reuse
+	e.mu.Lock()
+	e.lastDesc = desc.Text
+	e.mu.Unlock()
 
 	// Inject description into the result
 	return injectDescription(result, desc.Text), nil

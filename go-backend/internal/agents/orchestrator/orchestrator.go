@@ -51,6 +51,7 @@ type Config struct {
 	GitExecutor      hooks.GitExecutor         // optional: if set, git checkpoints are created
 	ExtraHooks       []core.LoopHook           // optional: add-on hooks (Langfuse, etc.)
 	VisionChain      *vision.FallbackChain     // optional: if set, auto-describes images in tool results
+	VisualContext    vision.VisualContext      // optional: if set, enables frame-based vision caching
 	MCPClient        *mcp.MultiClient          // optional: if set, registers MCP tools (search, analyze_image, etc.)
 	ModelResolver    orchestration.ModelResolver // optional: if set, sub-agents can use role-specific models
 	ArtifactDB       meta.ArtifactStore         // optional: if set, yield_artifact persists to DB
@@ -224,6 +225,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		pr.SetDepth(0)
 		pr.SetOrchestratorFactory(makeOrchestratorFactory(provider, cfg))
 		pr.SetSubscriber(cfg.Subscriber)
+		// Wire visual context for sub-agent vision caching
+		if cfg.VisualContext != nil && cfg.VisionChain != nil {
+			pr.SetVisualContext(cfg.VisualContext, cfg.VisionChain, func(format string, args ...interface{}) {
+				logger.Printf("SUB_VISION: "+format, args...)
+			})
+		}
 		// Wire git-based change tracking for delegate_to / delegate_continue / delegate_revert
 		if cfg.BashExecutor != nil {
 			pr.SetSnapshotter(orchestration.NewGitSnapshotter(cfg.BashExecutor))
@@ -345,8 +352,14 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// Sub-agents use allToolReg via ParallelRunner (has everything)
 	executor := core.ToolExecutor(ctoToolReg)
 	if cfg.VisionChain != nil {
-		executor = vision.NewVisionAwareExecutor(ctoToolReg, cfg.VisionChain, logger)
-		logger.Printf("Vision-aware executor enabled (wrapping CTO tool registry)")
+		vExec := vision.NewVisionAwareExecutor(ctoToolReg, cfg.VisionChain, logger)
+		if cfg.VisualContext != nil {
+			vExec.SetVisualContext(cfg.VisualContext)
+			logger.Printf("Vision-aware executor enabled with frame caching (wrapping CTO tool registry)")
+		} else {
+			logger.Printf("Vision-aware executor enabled (wrapping CTO tool registry)")
+		}
+		executor = vExec
 	}
 
 	loop := core.NewAgentLoop(provider, executor, sess, loopCfg)
@@ -420,6 +433,7 @@ func makeOrchestratorFactory(provider core.LLMProvider, parentCfg Config) orches
 			OrgRoles:      orgRoles,
 			MCPClient:     parentCfg.MCPClient,
 			VisionChain:   parentCfg.VisionChain,
+			VisualContext: parentCfg.VisualContext,
 			ProviderFactory: parentCfg.ProviderFactory,
 			ModelResolver: parentCfg.ModelResolver,
 			ArtifactDB:    parentCfg.ArtifactDB,

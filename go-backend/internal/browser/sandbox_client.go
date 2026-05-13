@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/framestream"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/target"
@@ -80,6 +81,9 @@ type SandboxBrowserClient struct {
 	lastElements     []LabeledElement
 	lastScreenshot   []byte
 	lastA11yElements []AccessibleElement
+
+	// Frame streamer for continuous visual monitoring
+	streamer *framestream.Streamer
 
 	mu sync.RWMutex
 }
@@ -226,6 +230,62 @@ func (sbc *SandboxBrowserClient) Screenshot(ctx context.Context) ([]byte, error)
 	sbc.mu.Unlock()
 
 	return screenshotBuf, nil
+}
+
+// ScreenshotRaw captures raw PNG bytes via CDP without updating cached state.
+// Used by the frame streamer for lightweight background captures.
+func (sbc *SandboxBrowserClient) ScreenshotRaw(ctx context.Context) ([]byte, error) {
+	var buf []byte
+	err := sbc.runOnActiveTab(10*time.Second, func(actCtx context.Context) error {
+		return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			var err error
+			buf, err = page.CaptureScreenshot().Do(ctx)
+			return err
+		}))
+	})
+	return buf, err
+}
+
+// StartStream begins continuous frame capture at the configured FPS.
+func (sbc *SandboxBrowserClient) StartStream(ctx context.Context, cfg framestream.Config) {
+	sbc.mu.Lock()
+	defer sbc.mu.Unlock()
+
+	if sbc.streamer != nil && sbc.streamer.IsRunning() {
+		return
+	}
+
+	capture := func(capCtx context.Context) ([]byte, error) {
+		return sbc.ScreenshotRaw(capCtx)
+	}
+
+	sbc.streamer = framestream.NewStreamer(cfg, capture)
+	if err := sbc.streamer.Start(ctx); err != nil {
+		sbc.logger.Warn("frame stream failed to start", zap.Error(err))
+		sbc.streamer = nil
+		return
+	}
+	sbc.logger.Info("frame stream started", zap.Float64("fps", cfg.FPS))
+}
+
+// StopStream stops the frame streamer if running.
+func (sbc *SandboxBrowserClient) StopStream() {
+	sbc.mu.Lock()
+	s := sbc.streamer
+	sbc.streamer = nil
+	sbc.mu.Unlock()
+
+	if s != nil {
+		s.Stop()
+		sbc.logger.Info("frame stream stopped")
+	}
+}
+
+// GetStreamer returns the active frame streamer, or nil.
+func (sbc *SandboxBrowserClient) GetStreamer() *framestream.Streamer {
+	sbc.mu.RLock()
+	defer sbc.mu.RUnlock()
+	return sbc.streamer
 }
 
 // Navigate navigates to a URL, labels elements, and takes a screenshot.
@@ -582,6 +642,9 @@ func (sbc *SandboxBrowserClient) GetSnapshot() (*PageInfo, error) {
 
 // Close releases the allocator connection and closes the active tab.
 func (sbc *SandboxBrowserClient) Close() {
+	// Stop frame streamer first (outside lock since Stop blocks)
+	sbc.StopStream()
+
 	sbc.mu.Lock()
 	defer sbc.mu.Unlock()
 
