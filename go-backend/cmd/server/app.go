@@ -14,6 +14,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/engines"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
+	"github.com/auto-developer-orchestrator/backend/internal/extensions"
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
 	"github.com/auto-developer-orchestrator/backend/internal/manifest"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
@@ -46,6 +47,7 @@ type App struct {
 	computerUseHandler *handlers.ComputerUseHandler
 	sched              *scheduler.Scheduler
 	promPusher         *observability.MetricsPusher
+	extMgr             *extensions.Manager
 }
 
 // NewApp initializes all components and assembles the application.
@@ -103,6 +105,9 @@ func (a *App) shutdown() {
 	}
 	if a.sched != nil {
 		a.sched.Stop()
+	}
+	if a.extMgr != nil {
+		a.extMgr.StopAll()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -306,6 +311,21 @@ func (a *App) initMCP() {
 
 	mediaAnalysisClient := mcp.NewClient(hubBase+"/mcp/media", a.logger)
 	mcpMulti.AddClient("media", mediaAnalysisClient)
+
+	// Start extension subprocesses
+	a.extMgr = extensions.NewManager(a.logger)
+	projectRoot := os.Getenv("PROJECT_ROOT")
+	extDirs := []string{
+		filepath.Join(projectRoot, "extensions"),
+		filepath.Join(os.Getenv("HOME"), ".pux", "extensions"),
+	}
+	started := a.extMgr.StartAll(context.Background(), extDirs...)
+	if started > 0 {
+		for prefix, client := range a.extMgr.Clients() {
+			mcpMulti.AddClient(prefix, client)
+		}
+		a.logger.Info("Extension servers started", zap.Int("count", started))
+	}
 
 	if mcpMulti.IsAvailable() {
 		if err := mcpMulti.InitializeAll(context.Background()); err != nil {

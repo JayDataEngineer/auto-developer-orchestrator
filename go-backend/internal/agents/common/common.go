@@ -283,6 +283,11 @@ func ResolveImports(imports []string) (tools []string, mcpServers []string) {
 	for _, name := range imports {
 		pkg, ok := pkgs[name]
 		if !ok {
+			// Not a known tool package — treat as extension MCP server name
+			if !seenServers[name] {
+				seenServers[name] = true
+				mcpServers = append(mcpServers, name)
+			}
 			continue
 		}
 		for _, t := range pkg.Tools {
