@@ -170,6 +170,14 @@ test.describe('Lit Web SPA', () => {
 			promptCalled = true;
 			await route.fulfill({ status: 200, contentType: 'text/event-stream', body: SSE_SIMPLE });
 		});
+		// Mock models endpoint for /model picker
+		await page.route('**/api/pux/models', async route => {
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([{ id: 'test-model', name: 'Test Model', provider: 'test' }]),
+			});
+		});
 
 		const textarea = page.locator('textarea');
 		await textarea.fill('/mod');
@@ -181,8 +189,8 @@ test.describe('Lit Web SPA', () => {
 		await textarea.press('Tab');
 		await page.waitForTimeout(500);
 
-		// Should show model info (local), not hit backend
-		await expect(page.locator('.msg.assistant .text')).toContainText('Current model');
+		// Should open model picker overlay, not hit prompt endpoint
+		await expect(page.locator('.overlay')).toBeVisible({ timeout: 3000 });
 		expect(promptCalled).toBe(false);
 	});
 
