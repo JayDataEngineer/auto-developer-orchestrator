@@ -461,6 +461,52 @@ func TestTechNoirOrg(t *testing.T) {
 	}
 }
 
+func TestOrgPromptMergesKernelRoles(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
+	os.Setenv("PROJECT_ROOT", repoRoot)
+
+	testSuitePath := "/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator/test-suite"
+	if _, err := os.Stat(testSuitePath); os.IsNotExist(err) {
+		t.Skip("test-suite not found at", testSuitePath)
+	}
+
+	org := LoadOrgManifest(testSuitePath)
+	if org == nil {
+		t.Fatal("expected org to be loaded from test-suite")
+	}
+
+	// Load org roles
+	orgRoles := LoadAgentRolesFrom(org.RolesDir())
+	if len(orgRoles) == 0 {
+		t.Fatal("expected org roles to be loaded")
+	}
+
+	// Build prompt with org
+	prompt := BuildOrchestratorPromptWithOrg(nil, "", "", "", org, orgRoles)
+
+	// Verify kernel roles (jake, ryan, sarah) appear in the merged prompt
+	kernelNames := []string{"jake", "ryan", "sarah", "marcus", "alex", "elena"}
+	for _, name := range kernelNames {
+		if !contains(prompt, name) {
+			t.Errorf("kernel role %q missing from merged prompt — org should add to kernel, not replace", name)
+		}
+	}
+
+	// Verify org roles also appear
+	orgNames := []string{"api_auditor", "interaction_tester", "visual_auditor", "regression_hunter"}
+	for _, name := range orgNames {
+		if !contains(prompt, name) {
+			t.Errorf("org role %q missing from merged prompt", name)
+		}
+	}
+
+	// Verify manifesto is prepended
+	if !contains(prompt, "AI QA Organization") {
+		t.Error("manifesto content not found in prompt")
+	}
+}
+
 func TestLoadInvestSubDivisionRoles(t *testing.T) {
 	investPath := "/home/ubuntu/Documents/programs/dev/invest"
 	if _, err := os.Stat(investPath); os.IsNotExist(err) {

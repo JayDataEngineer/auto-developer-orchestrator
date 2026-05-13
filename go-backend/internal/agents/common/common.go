@@ -478,6 +478,11 @@ func AgentNames(orgRoles map[string]*AgentRole) []string {
 
 // BuildOrchestratorPrompt builds the full system prompt using the template.
 func BuildOrchestratorPrompt(tools []core.Tool, sandboxID string, projectContext string, examples string) string {
+	return buildPrompt(tools, sandboxID, projectContext, examples, FormatAgentList())
+}
+
+// buildPrompt is the shared builder — accepts a custom agents list so org mode can pass merged roles.
+func buildPrompt(tools []core.Tool, sandboxID string, projectContext string, examples string, agents string) string {
 	tmpl, err := loadPromptTemplate()
 	if err != nil {
 		// Should not happen with fallback, but just in case
@@ -493,7 +498,7 @@ func BuildOrchestratorPrompt(tools []core.Tool, sandboxID string, projectContext
 
 	data := promptData{
 		Tools:          toolSection.String(),
-		Agents:         FormatAgentList(),
+		Agents:         agents,
 		SandboxID:      sandboxID,
 		ProjectContext: projectContext,
 	}
@@ -512,14 +517,11 @@ func BuildOrchestratorPrompt(tools []core.Tool, sandboxID string, projectContext
 }
 
 // BuildOrchestratorPromptWithOrg builds the system prompt with an org overlay.
-// Prepends the org manifesto and uses org-specific roles if available.
+// Prepends the org manifesto and merges org roles with kernel roles.
 func BuildOrchestratorPromptWithOrg(tools []core.Tool, sandboxID string, projectContext string, examples string, org *OrgManifest, orgRoles map[string]*AgentRole) string {
-	// Build the base prompt
-	base := BuildOrchestratorPrompt(tools, sandboxID, projectContext, examples)
-
-	// If no org, return base as-is
+	// If no org, return standard prompt
 	if org == nil {
-		return base
+		return BuildOrchestratorPrompt(tools, sandboxID, projectContext, examples)
 	}
 
 	// Build org header
@@ -531,17 +533,19 @@ func BuildOrchestratorPromptWithOrg(tools []core.Tool, sandboxID string, project
 		fmt.Fprintf(&header, "## Manifesto\n%s\n\n", manifesto)
 	}
 
-	// If org has custom roles, replace the Employees section
+	// Merge roles: kernel as base, org overlays (org wins on name collision).
+	// Kernel staff (jake, ryan, sarah, etc.) are always available to any org.
+	agents := FormatAgentList()
 	if len(orgRoles) > 0 {
-		// Rebuild agent list from org roles
-		agentList := formatRolesList(orgRoles)
-		// Replace the {{.Agents}} section in the base prompt
-		// The base already expanded the template, so we replace the kernel's agent list
-		kernelAgents := FormatAgentList()
-		if kernelAgents != "" && agentList != "" {
-			base = strings.Replace(base, kernelAgents, agentList, 1)
+		merged := LoadAgentRoles()
+		for name, role := range orgRoles {
+			merged[name] = role
 		}
+		agents = formatRolesList(merged)
 	}
+
+	// Build the prompt with merged agents
+	base := buildPrompt(tools, sandboxID, projectContext, examples, agents)
 
 	return header.String() + base
 }
