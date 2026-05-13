@@ -41,11 +41,29 @@ export class ChatPanel extends LitElement {
 		.tool .status.done { color: var(--success); }
 		.tool .status.error { color: var(--error); }
 		.tool .args { color: var(--dim); margin-top: 2px; max-height: 60px; overflow: hidden; }
-		.input-bar { display: flex; padding: 12px; border-top: 1px solid var(--border); background: var(--surface); gap: 8px; }
-		.input-bar input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 14px; outline: none; }
-		.input-bar input:focus { border-color: var(--accent); }
-		.input-bar button { background: var(--accent); color: white; border: none; border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 13px; font-weight: 600; }
-		.input-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+		.input-bar { padding: 12px 16px 16px; background: transparent; }
+		.input-box {
+			display: flex; align-items: flex-end; gap: 0;
+			background: var(--surface); border: 1px solid var(--border);
+			border-radius: 16px; padding: 8px 8px 8px 16px;
+			transition: border-color 0.15s;
+		}
+		.input-box:focus-within { border-color: var(--dim); }
+		.input-box textarea {
+			flex: 1; background: none; border: none; outline: none;
+			color: var(--text); font-size: 14px; line-height: 1.5;
+			resize: none; overflow-y: auto; max-height: 200px;
+			padding: 4px 0; font-family: inherit;
+		}
+		.input-box textarea::placeholder { color: var(--dim); }
+		.send-btn {
+			background: var(--accent); color: white; border: none;
+			border-radius: 10px; width: 32px; height: 32px; min-width: 32px;
+			display: flex; align-items: center; justify-content: center;
+			cursor: pointer; transition: opacity 0.15s;
+		}
+		.send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+		.send-btn svg { width: 16px; height: 16px; }
 		.streaming-cursor { display: inline-block; width: 6px; height: 14px; background: var(--accent); animation: blink 1s infinite; vertical-align: text-bottom; margin-left: 2px; }
 		@keyframes blink { 50% { opacity: 0; } }
 		.empty { flex:1; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; }
@@ -73,7 +91,7 @@ export class ChatPanel extends LitElement {
 	@state() private inputText = "";
 	@state() private slashOpen = false;
 	@state() private slashIndex = 0;
-	@query("input") private inputEl!: HTMLInputElement;
+	@query("textarea") private textareaEl!: HTMLTextAreaElement;
 
 	private slashFilter = "";
 
@@ -112,18 +130,25 @@ export class ChatPanel extends LitElement {
 							`)}
 						</div>
 					` : nothing}
-					<input
-						type="text"
+				</div>
+				<div class="input-box">
+					<textarea
 						placeholder="Message Pux..."
+						rows="1"
 						.value=${this.inputText}
 						@input=${this.onInput}
 						@keydown=${this.onKeyDown}
 						?disabled=${this.streaming}
-					/>
+					></textarea>
+					<button class="send-btn" @click=${this.send} ?disabled=${this.streaming || !this.inputText.trim()}>
+						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							${this.streaming
+								? html`<rect x="6" y="6" width="12" height="12" rx="1"/>`
+								: html`<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>`
+							}
+						</svg>
+					</button>
 				</div>
-				<button @click=${this.send} ?disabled=${this.streaming || !this.inputText.trim()}>
-					${this.streaming ? "..." : "Send"}
-				</button>
 			</div>
 		`;
 	}
@@ -160,7 +185,11 @@ export class ChatPanel extends LitElement {
 	}
 
 	private onInput(e: Event) {
-		this.inputText = (e.target as HTMLInputElement).value;
+		const el = e.target as HTMLTextAreaElement;
+		this.inputText = el.value;
+		// Auto-grow textarea
+		el.style.height = "auto";
+		el.style.height = el.scrollHeight + "px";
 		if (this.inputText.startsWith("/")) {
 			this.slashOpen = true;
 			this.slashFilter = this.inputText.slice(1);
@@ -301,6 +330,8 @@ export class ChatPanel extends LitElement {
 		this._sending = true;
 		this.inputText = "";
 		this.requestUpdate();
+		// Reset textarea height
+		requestAnimationFrame(() => { if (this.textareaEl) this.textareaEl.style.height = "auto"; });
 
 		// Emit user message into ChatState (same lifecycle as PuxAgentSession)
 		this.chatState.handleEvent({
