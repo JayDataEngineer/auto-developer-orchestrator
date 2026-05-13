@@ -327,6 +327,18 @@ export class ChatPanel extends LitElement {
 	private async send() {
 		const text = this.inputText.trim();
 		if (!text || this.streaming || this._sending) return;
+
+		// Slash command — route to pickCommand instead of backend
+		if (text.startsWith("/")) {
+			const name = text.slice(1).split(/\s/)[0];
+			this.inputText = "";
+			this.slashOpen = false;
+			this.requestUpdate();
+			requestAnimationFrame(() => { if (this.textareaEl) this.textareaEl.style.height = "auto"; });
+			this.pickCommand(name);
+			return;
+		}
+
 		this._sending = true;
 		this.inputText = "";
 		this.requestUpdate();
