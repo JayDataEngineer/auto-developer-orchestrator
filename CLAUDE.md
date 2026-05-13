@@ -70,21 +70,35 @@ task down              # Stop everything (backend, frontend, sandboxes)
 ## Architecture
 
 ```
-User → Vite (5174) → Go Backend (3847) → llama-server (8001)
-                         ↓
-                    Docker Sandboxes (OpenShell)
-                         ↓
-                    Chrome CDP (19222) → Browser Automation
-                    X11 xdotool → Desktop Automation
+                    ┌─ TUI (pi-mono, bun)     ─┐
+                    │  CLI (Cobra, Go)          │  Contract: SSE events
+User ───────────────┤                           ├──→ ChatState (TS) → render
+                    │  Web (Vite, any framework)│
+                    └───────────────────────────┘
+                                 │
+                          POST /api/pux/prompt
+                                 │
+                                 ▼
+                    Go Kernel (3847) ──────── llama-server (8001)
+                         │                        │
+                    Docker Sandboxes         MCP Servers
+                    ┌────┴────┐              ┌────┴────┐
+                    Chrome CDP  xdotool      web       media
+                    (browser)  (desktop)    (research) (vision)
 ```
+
+The kernel's job is to manage contracts: agent loop, tool execution, sandbox lifecycle.
+Each interface (TUI, CLI, web) is a VIEW of the same SSE stream. They share `ChatState`
+and `SSEParser` from `ts-tui-pi/src/core/`. Rendering is the only thing that differs.
 
 ### Design Principles
 
-1. **Kernel-based architecture.** The system is a kernel + add-ons, like pi-mono. The kernel is `config/prompt.md` (CTO system prompt template). Employees are add-ons in `config/roles/`. Shared capabilities are DRY packages in `config/tool_packages/`. Everything is template-driven, separated, and composable. New employees = new folder, new capabilities = new tool package.
-2. **One agent, one loop, one model.** The orchestrator IS the agent. There is no separate "generalist mode" vs "orchestrator mode." Every prompt goes through the same agent loop. The model calls tools, reads results, calls more tools, then responds. The user sees one thinking block + one response.
-3. **CTO/Employee split.** Pux (the CTO) only has delegation tools + basic bash/file ops. Browser, desktop, MCP, and vision tools live exclusively on employees. This forces the model to delegate instead of doing work itself. Employees have distinct, non-overlapping capabilities so the CTO picks the right person for the job.
-4. **Simple over clever.** Flat agent loops beat deep hierarchies (Agent-S S3 proved this — 72.6% on OSWorld by removing DAG planning). One loop with reflection > nested orchestration.
-5. **Pull from the best.** Reference repos in `reference/` contain proven patterns. Port the best ideas, don't reinvent.
+1. **Pux is a contract system.** Pux is not a monolithic app like Pi-Mono. It is a Go kernel (a port of Pi-Mono concepts) that forms contracts with extensions, tools, the TUI, CLI, and web interface. Cleanliness comes from managing these contracts well, not from writing everything in one language. The primary contract is SSE events → `ChatState` → render. Any consumer that respects this contract is a valid interface.
+2. **Kernel-based architecture.** The kernel is `config/prompt.md` (CTO system prompt template). Employees are add-ons in `config/roles/`. Shared capabilities are DRY packages in `config/tool_packages/`. Everything is template-driven, separated, and composable. New employees = new folder, new capabilities = new tool package.
+3. **One agent, one loop, one model.** The orchestrator IS the agent. There is no separate "generalist mode" vs "orchestrator mode." Every prompt goes through the same agent loop. The model calls tools, reads results, calls more tools, then responds. The user sees one thinking block + one response.
+4. **CTO/Employee split.** Pux (the CTO) only has delegation tools + basic bash/file ops. Browser, desktop, MCP, and vision tools live exclusively on employees. This forces the model to delegate instead of doing work itself. Employees have distinct, non-overlapping capabilities so the CTO picks the right person for the job.
+5. **Simple over clever.** Flat agent loops beat deep hierarchies (Agent-S S3 proved this — 72.6% on OSWorld by removing DAG planning). One loop with reflection > nested orchestration.
+6. **Pull from the best.** Reference repos in `reference/` contain proven patterns. Port the best ideas, don't reinvent.
 
 ### Kernel Config Structure
 
