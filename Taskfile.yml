@@ -11,7 +11,7 @@ version: "3"
 
 vars:
   GO_PORT: 3847
-  JS_PORT: 5174
+  JS_PORT: 5175
   MODELS_DIR:
     sh: echo "${MODELS_DIR:-/home/ubuntu/Documents/programs/shared-docker-infra/models/llm}"
   VISION_DIR:
