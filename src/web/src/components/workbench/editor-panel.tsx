@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import Editor, { type OnMount } from "@monaco-editor/react";
+import Editor, { DiffEditor, type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import {
 	Collapsible,
@@ -17,6 +17,10 @@ import {
 	PlusIcon,
 	PanelLeftCloseIcon,
 	PanelLeftOpenIcon,
+	GitCompareIcon,
+	FilePlus2Icon,
+	FileMinusIcon,
+	RefreshCwIcon,
 } from "lucide-react";
 import {
 	ContextMenu,
@@ -39,6 +43,13 @@ interface FileEntry {
 interface Tab {
 	path: string;
 	name: string;
+}
+
+interface FileDiff {
+	path: string;
+	status: string; // M, A, D, ?
+	original: string;
+	modified: string;
 }
 
 // ── Helpers ──
@@ -266,6 +277,10 @@ export function EditorPanel() {
 	const newFileInputRef = useRef<HTMLInputElement>(null);
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const [showFileTree, setShowFileTree] = useState(true);
+	const [diffMode, setDiffMode] = useState(false);
+	const [diffs, setDiffs] = useState<FileDiff[]>([]);
+	const [diffLoading, setDiffLoading] = useState(false);
+	const [activeDiffPath, setActiveDiffPath] = useState("");
 
 	// Refresh file tree
 	const refreshTree = useCallback(() => {
@@ -278,6 +293,27 @@ export function EditorPanel() {
 			})
 			.catch(() => {});
 	}, [activeProject]);
+
+	// Load git diffs
+	const loadDiffs = useCallback(() => {
+		if (!activeProject) return;
+		setDiffLoading(true);
+		fetch(`/api/pux/git/diff?project=${encodeURIComponent(activeProject)}`)
+			.then((r) => (r.ok ? r.json() : []))
+			.then((data: FileDiff[]) => {
+				setDiffs(data);
+				if (data.length > 0 && !data.some((d) => d.path === activeDiffPath)) {
+					setActiveDiffPath(data[0].path);
+				}
+			})
+			.catch(() => setDiffs([]))
+			.finally(() => setDiffLoading(false));
+	}, [activeProject, activeDiffPath]);
+
+	// Refresh diffs when entering diff mode
+	useEffect(() => {
+		if (diffMode && activeProject) loadDiffs();
+	}, [diffMode, activeProject, loadDiffs]);
 
 	// Load file tree
 	useEffect(() => {
@@ -536,7 +572,8 @@ export function EditorPanel() {
 					{/* Tree header */}
 					<div className="flex h-7 items-center justify-between border-b border-border px-2">
 						<div className="flex items-center gap-1">
-							<span className="text-[11px] font-medium text-muted-foreground">Files</span>
+							<span className="text-[11px] font-medium text-muted-foreground">{diffMode ? "Changes" : "Files"}</span>
+							{!diffMode && (
 							<button
 								onClick={() => {
 									setIsCreating(true);
@@ -548,14 +585,36 @@ export function EditorPanel() {
 							>
 								<PlusIcon size={12} />
 							</button>
+							)}
+							{diffMode && (
+							<button
+								onClick={loadDiffs}
+								className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+								title="Refresh diffs"
+							>
+								<RefreshCwIcon size={12} className={diffLoading ? "animate-spin" : ""} />
+							</button>
+							)}
 						</div>
-						<button
-							onClick={() => setShowFileTree(false)}
-							className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-							title="Hide file tree"
-						>
-							<PanelLeftCloseIcon size={12} />
-						</button>
+						<div className="flex items-center gap-0.5">
+							<button
+								onClick={() => setDiffMode((v) => !v)}
+								className={cn(
+									"rounded p-0.5 hover:bg-accent hover:text-accent-foreground",
+									diffMode ? "text-accent-foreground" : "text-muted-foreground",
+								)}
+								title={diffMode ? "Show file tree" : "Show git changes"}
+							>
+								<GitCompareIcon size={12} />
+							</button>
+							<button
+								onClick={() => setShowFileTree(false)}
+								className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+								title="Hide file tree"
+							>
+								<PanelLeftCloseIcon size={12} />
+							</button>
+						</div>
 					</div>
 					{/* Inline new file input */}
 					{isCreating && (
@@ -588,7 +647,36 @@ export function EditorPanel() {
 						</div>
 					)}
 					<div className="flex-1 overflow-y-auto py-1">
-					{files.length === 0 ? (
+					{diffMode ? (
+						diffs.length === 0 ? (
+							<div className="flex h-full items-center justify-center">
+								<span className="px-2 text-center text-[11px] text-muted-foreground">
+									{diffLoading ? "Loading..." : "No changes"}
+								</span>
+							</div>
+						) : (
+							diffs.map((d) => (
+								<button
+									key={d.path}
+									onClick={() => setActiveDiffPath(d.path)}
+									className={cn(
+										"flex w-full items-center gap-1 rounded-sm px-1 py-0.5 text-xs hover:bg-accent",
+										activeDiffPath === d.path && "bg-accent text-accent-foreground",
+									)}
+									style={{ paddingLeft: "8px" }}
+								>
+									{d.status === "A" || d.status === "?" ? (
+										<FilePlus2Icon size={12} className="shrink-0 text-green-500" />
+									) : d.status === "D" ? (
+										<FileMinusIcon size={12} className="shrink-0 text-red-500" />
+									) : (
+										<FileCodeIcon size={12} className="shrink-0 text-yellow-500" />
+									)}
+									<span className="truncate">{d.path}</span>
+								</button>
+							))
+						)
+					) : files.length === 0 ? (
 						<div className="flex h-full items-center justify-center">
 							<span className="px-2 text-center text-[11px] text-muted-foreground">
 								Empty project
@@ -629,88 +717,137 @@ export function EditorPanel() {
 				)}
 				{/* Editor area */}
 				<div className="flex min-w-0 flex-1 flex-col">
-					{/* Tab bar */}
-					{tabs.length > 0 && (
-						<div className="flex h-8 items-end overflow-x-auto border-b border-border bg-muted/30">
-							{tabs.map((tab) => (
-								<div
-									key={tab.path}
-									className={cn(
-										"group/tab flex h-7 shrink-0 cursor-pointer items-center gap-1 border-r border-border px-2 text-xs transition-colors",
-										tab.path === activePath
-											? "border-b-2 border-b-primary bg-background text-foreground"
-											: "text-muted-foreground hover:bg-accent/50",
-									)}
-									onClick={() => openFile(tab.path)}
-								>
-									<span className="max-w-28 truncate">
-										{dirty.has(tab.path) && (
-											<span className="mr-0.5 text-[10px] text-orange-400">●</span>
-										)}
-										{tab.name}
-									</span>
-									<button
-										onClick={(e) => {
-											e.stopPropagation();
-											closeTab(tab.path);
-										}}
-										className="rounded p-0.5 opacity-0 hover:bg-accent group-hover/tab:opacity-100"
-									>
-										<XIcon size={10} />
-									</button>
-								</div>
-							))}
-						</div>
-					)}
-					{/* Breadcrumb */}
-					{activePath && (
-						<div className="flex h-6 items-center gap-0.5 border-b border-border bg-muted/20 px-2 text-[11px] text-muted-foreground">
-							{pathSegments(activePath).map((seg, i, arr) => (
-								<span key={i} className="flex items-center gap-0.5">
-									{i > 0 && (
-										<span className="text-muted-foreground/50">
-											/
+					{diffMode ? (
+						/* Diff view — no tabs, full-height DiffEditor */
+						<>
+							{activeDiffPath && (
+								<div className="flex h-6 items-center gap-1 border-b border-border bg-muted/20 px-2 text-[11px] text-muted-foreground">
+									{activeDiffPath.split("/").map((seg, i, arr) => (
+										<span key={i} className="flex items-center gap-0.5">
+											{i > 0 && <span className="text-muted-foreground/50">/</span>}
+											<span className={cn(i === arr.length - 1 && "text-foreground")}>{seg}</span>
 										</span>
-									)}
-									<span
-										className={cn(
-											i === arr.length - 1 &&
-												"text-foreground",
-										)}
-									>
-										{seg}
-									</span>
-								</span>
-							))}
-						</div>
-					)}
-					{/* Monaco editor */}
-					<div className="flex-1">
-						{activePath ? (
-							<Editor
-								key={activePath}
-								path={activePath}
-								defaultLanguage={lang}
-								defaultValue={content}
-								theme="vs-dark"
-								onMount={handleEditorMount}
-								options={{
-									minimap: { enabled: false },
-									fontSize: 13,
-									lineNumbers: "on",
-									scrollBeyondLastLine: false,
-									wordWrap: "on",
-									padding: { top: 4 },
-								}}
-							/>
-						) : (
-							<div className="flex h-full items-center justify-center">
-								<span className="text-xs text-muted-foreground">
-									Select a file to view
-								</span>
+									))}
+									{(() => {
+										const d = diffs.find((d) => d.path === activeDiffPath);
+										if (!d) return null;
+										const label = d.status === "A" || d.status === "?" ? "Added" : d.status === "D" ? "Deleted" : "Modified";
+										const color = d.status === "A" || d.status === "?" ? "text-green-500" : d.status === "D" ? "text-red-500" : "text-yellow-500";
+										return <span className={`ml-auto ${color}`}>{label}</span>;
+									})()}
+								</div>
+							)}
+							<div className="flex-1">
+								{activeDiffPath && diffs.find((d) => d.path === activeDiffPath) ? (
+									<DiffEditor
+										key={activeDiffPath}
+										original={diffs.find((d) => d.path === activeDiffPath)!.original}
+										modified={diffs.find((d) => d.path === activeDiffPath)!.modified}
+										language={getLang(activeDiffPath.split("/").pop() || "")}
+										theme="vs-dark"
+										options={{
+											renderSideBySide: true,
+											minimap: { enabled: false },
+											fontSize: 13,
+											scrollBeyondLastLine: false,
+											readOnly: true,
+										}}
+									/>
+								) : (
+									<div className="flex h-full items-center justify-center">
+										<span className="text-xs text-muted-foreground">
+											{diffs.length === 0 ? "No changes" : "Select a file to diff"}
+										</span>
+									</div>
+								)}
 							</div>
-						)}
-					</div>
+						</>
+					) : (
+						<>
+							{/* Tab bar */}
+							{tabs.length > 0 && (
+								<div className="flex h-8 items-end overflow-x-auto border-b border-border bg-muted/30">
+									{tabs.map((tab) => (
+										<div
+											key={tab.path}
+											className={cn(
+												"group/tab flex h-7 shrink-0 cursor-pointer items-center gap-1 border-r border-border px-2 text-xs transition-colors",
+												tab.path === activePath
+													? "border-b-2 border-b-primary bg-background text-foreground"
+													: "text-muted-foreground hover:bg-accent/50",
+											)}
+											onClick={() => openFile(tab.path)}
+										>
+											<span className="max-w-28 truncate">
+												{dirty.has(tab.path) && (
+													<span className="mr-0.5 text-[10px] text-orange-400">●</span>
+												)}
+												{tab.name}
+											</span>
+											<button
+												onClick={(e) => {
+													e.stopPropagation();
+													closeTab(tab.path);
+												}}
+												className="rounded p-0.5 opacity-0 hover:bg-accent group-hover/tab:opacity-100"
+											>
+												<XIcon size={10} />
+											</button>
+										</div>
+									))}
+								</div>
+							)}
+							{/* Breadcrumb */}
+							{activePath && (
+								<div className="flex h-6 items-center gap-0.5 border-b border-border bg-muted/20 px-2 text-[11px] text-muted-foreground">
+									{pathSegments(activePath).map((seg, i, arr) => (
+										<span key={i} className="flex items-center gap-0.5">
+											{i > 0 && (
+												<span className="text-muted-foreground/50">
+													/
+												</span>
+											)}
+											<span
+												className={cn(
+													i === arr.length - 1 &&
+														"text-foreground",
+												)}
+											>
+												{seg}
+											</span>
+										</span>
+									))}
+								</div>
+							)}
+							{/* Monaco editor */}
+							<div className="flex-1">
+								{activePath ? (
+									<Editor
+										key={activePath}
+										path={activePath}
+										defaultLanguage={lang}
+										defaultValue={content}
+										theme="vs-dark"
+										onMount={handleEditorMount}
+										options={{
+											minimap: { enabled: false },
+											fontSize: 13,
+											lineNumbers: "on",
+											scrollBeyondLastLine: false,
+											wordWrap: "on",
+											padding: { top: 4 },
+										}}
+									/>
+								) : (
+									<div className="flex h-full items-center justify-center">
+										<span className="text-xs text-muted-foreground">
+											Select a file to view
+										</span>
+									</div>
+								)}
+							</div>
+						</>
+					)}
 				</div>
 			</div>
 			{/* Status bar */}

@@ -163,6 +163,7 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/file/move", h.MoveProjectFile)
 	r.Delete("/file", h.DeleteProjectFile)
 	r.Post("/file/restore", h.RestoreProjectFile)
+	r.Get("/git/diff", h.GetGitDiff)
 }
 
 // resolveAgent reads ?agentId= from the query string, defaulting to "default".
