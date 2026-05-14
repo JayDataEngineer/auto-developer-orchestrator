@@ -7,6 +7,8 @@ import { Panel, Group, Separator } from "react-resizable-panels";
 import { usePuxStore } from "@/lib/pux-store";
 import { puxChatAdapter } from "@/lib/pux-chat-adapter";
 import { Thread } from "@/components/assistant-ui/thread";
+import { VNCViewer } from "@/components/workbench/vnc-viewer";
+import { EditorPanel } from "@/components/workbench/editor-panel";
 import {
 	Sidebar,
 	SidebarContent,
@@ -24,7 +26,15 @@ import {
 	SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { PanelRightOpen, PanelRightClose, Zap } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+	PanelRightOpen,
+	PanelRightClose,
+	Zap,
+	Monitor,
+	Code2,
+	MessageSquare,
+} from "lucide-react";
 
 function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	const runtime = useLocalRuntime(puxChatAdapter);
@@ -35,7 +45,23 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	);
 }
 
+function relativeTime(iso: string): string {
+	if (!iso) return "";
+	const diff = Date.now() - new Date(iso).getTime();
+	const mins = Math.floor(diff / 60000);
+	if (mins < 1) return "now";
+	if (mins < 60) return `${mins}m`;
+	const hrs = Math.floor(mins / 60);
+	if (hrs < 24) return `${hrs}h`;
+	const days = Math.floor(hrs / 24);
+	return `${days}d`;
+}
+
 function AppSidebar() {
+	const conversations = usePuxStore((s) => s.conversations);
+	const activeProject = usePuxStore((s) => s.activeProject);
+	const setProject = usePuxStore((s) => s.setProject);
+
 	return (
 		<Sidebar collapsible="icon">
 			<SidebarHeader>
@@ -55,7 +81,33 @@ function AppSidebar() {
 			<SidebarContent>
 				<SidebarGroup>
 					<SidebarGroupLabel>History</SidebarGroupLabel>
-					<SidebarGroupContent />
+					<SidebarGroupContent>
+						<SidebarMenu>
+							{conversations.length === 0 && (
+								<div className="px-2 py-4 text-center text-xs text-muted-foreground">
+									No conversations yet
+								</div>
+							)}
+							{conversations.map((c) => (
+								<SidebarMenuItem key={`${c.project}-${c.agentId}`}>
+									<SidebarMenuButton
+										tooltip={c.title || c.lastMessage}
+										isActive={activeProject === c.project}
+										onClick={() => setProject(c.project)}
+										className="flex-col items-start gap-0.5"
+									>
+										<span className="truncate text-sm">
+											{c.title || c.lastMessage || "Untitled"}
+										</span>
+										<span className="text-[11px] text-muted-foreground">
+											{relativeTime(c.lastAt)}
+											{c.messageCount > 0 && ` · ${c.messageCount} msgs`}
+										</span>
+									</SidebarMenuButton>
+								</SidebarMenuItem>
+							))}
+						</SidebarMenu>
+					</SidebarGroupContent>
 				</SidebarGroup>
 			</SidebarContent>
 			<SidebarFooter>
@@ -72,8 +124,45 @@ function AppSidebar() {
 	);
 }
 
+type WorkbenchTab = "vnc" | "editor";
+
+function Workbench() {
+	const [tab, setTab] = useState<WorkbenchTab>("vnc");
+
+	const tabButton = (id: WorkbenchTab, icon: React.ReactNode, label: string) => (
+		<button
+			onClick={() => setTab(id)}
+			className={cn(
+				"inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+				tab === id
+					? "bg-accent text-accent-foreground"
+					: "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
+			)}
+			aria-label={label}
+		>
+			{icon}
+		</button>
+	);
+
+	return (
+		<div className="flex h-full flex-col bg-background">
+			<div className="flex h-9 items-center gap-0.5 border-b border-border px-1">
+				{tabButton("vnc", <Monitor size={14} />, "Sandbox")}
+				{tabButton("editor", <Code2 size={14} />, "Editor")}
+				<span className="ml-2 text-sm font-semibold text-foreground">
+					{tab === "vnc" ? "Sandbox" : "Editor"}
+				</span>
+			</div>
+			<div className="flex-1 overflow-hidden">
+				{tab === "vnc" ? <VNCViewer /> : <EditorPanel />}
+			</div>
+		</div>
+	);
+}
+
 export function App() {
 	const loadModels = usePuxStore((s) => s.loadModels);
+	const loadConversations = usePuxStore((s) => s.loadConversations);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
 
 	const toggleWorkbench = useCallback(() => {
@@ -82,7 +171,8 @@ export function App() {
 
 	useEffect(() => {
 		loadModels();
-	}, [loadModels]);
+		loadConversations();
+	}, [loadModels, loadConversations]);
 
 	return (
 		<PuxRuntimeProvider>
@@ -112,12 +202,7 @@ export function App() {
 							</Panel>
 							<Separator className="w-px bg-border hover:bg-ring/50 active:bg-ring transition-colors cursor-col-resize" />
 							<Panel defaultSize={45} minSize={15}>
-								<div className="flex h-full flex-col bg-background">
-									<div className="flex h-9 items-center border-b border-border px-3">
-										<span className="text-sm font-semibold text-foreground">Workbench</span>
-									</div>
-									<div className="flex-1" />
-								</div>
+								<Workbench />
 							</Panel>
 						</Group>
 					) : (

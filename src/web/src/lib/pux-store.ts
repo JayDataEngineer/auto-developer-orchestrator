@@ -43,6 +43,15 @@ export interface PendingPlan {
 	content: string;
 }
 
+export interface Conversation {
+	project: string;
+	agentId: string;
+	lastMessage: string;
+	lastAt: string;
+	messageCount: number;
+	title: string;
+}
+
 // ── State ──
 
 interface PuxState {
@@ -65,6 +74,9 @@ interface PuxState {
 	// Model
 	modelList: Array<{ id: string; name: string; provider: string }>;
 
+	// Conversations
+	conversations: Conversation[];
+
 	// Error
 	lastError: string | null;
 
@@ -73,6 +85,7 @@ interface PuxState {
 	respondToApproval: (approved: boolean) => Promise<void>;
 	respondToPlan: (action: string, feedback?: string) => Promise<void>;
 	loadModels: () => Promise<void>;
+	loadConversations: () => Promise<void>;
 	setProject: (project: string) => void;
 	clearError: () => void;
 }
@@ -89,6 +102,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	activeProject: "",
 	activeAgentId: "",
 	modelList: [],
+	conversations: [],
 	lastError: null,
 
 	respondToQuestion: async (response) => {
@@ -150,6 +164,17 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	setProject: (project) => set({ activeProject: project }),
+
+	loadConversations: async () => {
+		try {
+			const resp = await fetch("/api/pux/conversations");
+			if (!resp.ok) return;
+			const data = await resp.json();
+			set({ conversations: Array.isArray(data) ? data : [] });
+		} catch {
+			// ignore
+		}
+	},
 
 	clearError: () => set({ lastError: null }),
 }));
