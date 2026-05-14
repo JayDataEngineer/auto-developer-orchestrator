@@ -13,7 +13,14 @@ import {
 	ChevronRightIcon,
 	FileCodeIcon,
 	XIcon,
+	Trash2Icon,
 } from "lucide-react";
+import {
+	ContextMenu,
+	ContextMenuTrigger,
+	ContextMenuContent,
+	ContextMenuItem,
+} from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { usePuxStore } from "@/lib/pux-store";
 
@@ -102,11 +109,13 @@ function FileTreeItem({
 	depth,
 	onSelect,
 	selectedPath,
+	onDelete,
 }: {
 	entry: FileEntry;
 	depth: number;
 	onSelect: (path: string) => void;
 	selectedPath: string;
+	onDelete: (path: string) => void;
 }) {
 	if (entry.type === "dir") {
 		return (
@@ -141,6 +150,7 @@ function FileTreeItem({
 							depth={depth + 1}
 							onSelect={onSelect}
 							selectedPath={selectedPath}
+							onDelete={onDelete}
 						/>
 					))}
 				</CollapsibleContent>
@@ -149,17 +159,30 @@ function FileTreeItem({
 	}
 
 	return (
-		<button
-			onClick={() => onSelect(entry.path)}
-			className={cn(
-				"flex w-full items-center gap-1 rounded-sm px-1 py-0.5 text-xs hover:bg-accent",
-				selectedPath === entry.path && "bg-accent text-accent-foreground",
-			)}
-			style={{ paddingLeft: `${depth * 12 + 4 + 16}px` }}
-		>
-			{getFileIcon(entry.name)}
-			<span className="truncate">{entry.name}</span>
-		</button>
+		<ContextMenu>
+			<ContextMenuTrigger asChild>
+				<button
+					onClick={() => onSelect(entry.path)}
+					className={cn(
+						"flex w-full items-center gap-1 rounded-sm px-1 py-0.5 text-xs hover:bg-accent",
+						selectedPath === entry.path && "bg-accent text-accent-foreground",
+					)}
+					style={{ paddingLeft: `${depth * 12 + 4 + 16}px` }}
+				>
+					{getFileIcon(entry.name)}
+					<span className="truncate">{entry.name}</span>
+				</button>
+			</ContextMenuTrigger>
+			<ContextMenuContent>
+				<ContextMenuItem
+					onClick={() => onDelete(entry.path)}
+					className="text-red-500 focus:text-red-500"
+				>
+					<Trash2Icon size={12} className="mr-1.5" />
+					Delete
+				</ContextMenuItem>
+			</ContextMenuContent>
+		</ContextMenu>
 	);
 }
 
@@ -412,6 +435,11 @@ export function EditorPanel() {
 								depth={0}
 								onSelect={openFile}
 								selectedPath={activePath}
+								onDelete={(path) => {
+									if (confirm(`Delete ${path.split("/").pop()}? (Can be undone from .pux/trash/)`)) {
+										deleteFile(path);
+									}
+								}}
 							/>
 						))
 					)}
