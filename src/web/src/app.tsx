@@ -15,6 +15,7 @@ import { Thread } from "@/components/assistant-ui/thread";
 import { VNCViewer } from "@/components/workbench/vnc-viewer";
 import { EditorPanel } from "@/components/workbench/editor-panel";
 import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
+import { TerminalPanel } from "@/components/workbench/terminal-panel";
 import {
 	Sidebar,
 	SidebarContent,
@@ -51,6 +52,8 @@ import {
 	FolderOpen,
 	Folder,
 	MessageSquare,
+	TerminalIcon,
+	XIcon,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -294,10 +297,24 @@ export function App() {
 	const loadConversations = usePuxStore((s) => s.loadConversations);
 	const loadProjects = usePuxStore((s) => s.loadProjects);
 	const conversationKey = usePuxStore((s) => s.conversationKey);
+	const activeProject = usePuxStore((s) => s.activeProject);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
+	const [showTerminal, setShowTerminal] = useState(false);
 
 	const toggleWorkbench = useCallback(() => {
 		setWorkbenchVisible((prev) => !prev);
+	}, []);
+
+	// Ctrl+` to toggle terminal
+	useEffect(() => {
+		const handler = (e: KeyboardEvent) => {
+			if (e.key === "`" && (e.ctrlKey || e.metaKey)) {
+				e.preventDefault();
+				setShowTerminal((prev) => !prev);
+			}
+		};
+		window.addEventListener("keydown", handler);
+		return () => window.removeEventListener("keydown", handler);
 	}, []);
 
 	useEffect(() => {
@@ -312,6 +329,15 @@ export function App() {
 			<SidebarInset className="flex h-svh flex-col overflow-hidden">
 				<header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
 					<SidebarTrigger />
+					<Button
+						variant="ghost"
+						size="icon"
+						className="ml-1 h-7 w-7"
+						onClick={() => setShowTerminal((v) => !v)}
+						aria-label="Toggle terminal"
+					>
+						<TerminalIcon className="size-4" />
+					</Button>
 					<Button
 						variant="ghost"
 						size="icon"
@@ -337,7 +363,27 @@ export function App() {
 							className="flex-1 overflow-hidden"
 						>
 							<Panel defaultSize={55} minSize={30}>
-								<Thread />
+								<div className="flex h-full flex-col">
+									<div className="flex-1 overflow-hidden">
+										<Thread />
+									</div>
+									{showTerminal && (
+										<div className="flex h-56 shrink-0 flex-col border-t border-border">
+											<div className="flex h-7 items-center justify-between border-b border-border bg-muted/20 px-2">
+												<span className="text-[11px] font-medium text-muted-foreground">Terminal</span>
+												<button
+													onClick={() => setShowTerminal(false)}
+													className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+												>
+													<XIcon size={12} />
+												</button>
+											</div>
+											<div className="flex-1 overflow-hidden">
+												<TerminalPanel cwd={activeProject} />
+											</div>
+										</div>
+									)}
+								</div>
 							</Panel>
 							<Separator className="w-px bg-border hover:bg-ring/50 active:bg-ring transition-colors cursor-col-resize" />
 							<Panel defaultSize={45} minSize={15}>
@@ -345,7 +391,27 @@ export function App() {
 							</Panel>
 						</Group>
 					) : (
-						<Thread />
+						<div className="flex h-full flex-col">
+							<div className="flex-1 overflow-hidden">
+								<Thread />
+							</div>
+							{showTerminal && (
+								<div className="flex h-56 shrink-0 flex-col border-t border-border">
+									<div className="flex h-7 items-center justify-between border-b border-border bg-muted/20 px-2">
+										<span className="text-[11px] font-medium text-muted-foreground">Terminal</span>
+										<button
+											onClick={() => setShowTerminal(false)}
+											className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+										>
+											<XIcon size={12} />
+										</button>
+									</div>
+									<div className="flex-1 overflow-hidden">
+										<TerminalPanel cwd={activeProject} />
+									</div>
+								</div>
+							)}
+						</div>
 					)}
 				</PuxRuntimeProvider>
 			</SidebarInset>

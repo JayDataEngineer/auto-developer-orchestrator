@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
-import { TerminalPanel } from "@/components/workbench/terminal-panel";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -16,6 +15,8 @@ import {
 	XIcon,
 	Trash2Icon,
 	PlusIcon,
+	PanelLeftCloseIcon,
+	PanelLeftOpenIcon,
 } from "lucide-react";
 import {
 	ContextMenu,
@@ -127,76 +128,81 @@ function FileTreeItem({
 
 	if (entry.type === "dir") {
 		return (
-			<ContextMenu>
-				<Collapsible className="group/tree">
-					<ContextMenuTrigger asChild>
-						<CollapsibleTrigger asChild>
-							<button
-								className={cn(
-									"flex w-full items-center gap-1 rounded-sm px-1 py-0.5 text-xs hover:bg-accent",
-									dragOver && "bg-accent ring-1 ring-primary",
-								)}
-								style={{ paddingLeft: `${depth * 12 + 4}px` }}
-								onDragOver={(e) => {
-									e.preventDefault();
-									setDragOver(true);
-								}}
-								onDragLeave={() => setDragOver(false)}
-								onDrop={(e) => {
-									e.preventDefault();
-									setDragOver(false);
-									const fromPath = e.dataTransfer.getData("text/plain");
-									if (fromPath && fromPath !== entry.path) {
-										const name = fromPath.split("/").pop() || fromPath;
-										onMoveFile(fromPath, entry.path + "/" + name);
-									}
-								}}
-							>
-								<ChevronRightIcon
-									size={12}
-									className="shrink-0 transition-transform group-data-[state=open]/tree:rotate-90"
-								/>
-								<FolderOpenIcon
-									size={14}
-									className="shrink-0 text-yellow-500 group-data-[state=closed]/tree:hidden"
-								/>
-								<FolderIcon
-									size={14}
-									className="shrink-0 text-yellow-500 group-data-[state=open]/tree:hidden"
-								/>
-								<span className="truncate">{entry.name}</span>
-							</button>
-						</CollapsibleTrigger>
-					</ContextMenuTrigger>
-					<ContextMenuContent>
-						<ContextMenuItem onClick={() => onCreateFile(entry.path)}>
-							<PlusIcon size={12} className="mr-1.5" />
-							New File
-						</ContextMenuItem>
-						<ContextMenuItem
-							onClick={() => onDelete(entry.path)}
-							className="text-red-500 focus:text-red-500"
+			<Collapsible className="group/tree">
+				<div className="flex w-full items-center">
+					<CollapsibleTrigger asChild>
+						<button
+							className={cn(
+								"flex flex-1 items-center gap-1 rounded-sm px-1 py-0.5 text-xs hover:bg-accent",
+								dragOver && "bg-accent ring-1 ring-primary",
+							)}
+							style={{ paddingLeft: `${depth * 12 + 4}px` }}
+							onDragOver={(e) => {
+								e.preventDefault();
+								setDragOver(true);
+							}}
+							onDragLeave={() => setDragOver(false)}
+							onDrop={(e) => {
+								e.preventDefault();
+								setDragOver(false);
+								const fromPath = e.dataTransfer.getData("text/plain");
+								if (fromPath && fromPath !== entry.path) {
+									const name = fromPath.split("/").pop() || fromPath;
+									onMoveFile(fromPath, entry.path + "/" + name);
+								}
+							}}
 						>
-							<Trash2Icon size={12} className="mr-1.5" />
-							Delete
-						</ContextMenuItem>
-					</ContextMenuContent>
-					<CollapsibleContent>
-						{entry.children?.map((child) => (
-							<FileTreeItem
-								key={child.path}
-								entry={child}
-								depth={depth + 1}
-								onSelect={onSelect}
-								selectedPath={selectedPath}
-								onDelete={onDelete}
-								onCreateFile={onCreateFile}
-								onMoveFile={onMoveFile}
+							<ChevronRightIcon
+								size={12}
+								className="shrink-0 transition-transform group-data-[state=open]/tree:rotate-90"
 							/>
-						))}
-					</CollapsibleContent>
-				</Collapsible>
-			</ContextMenu>
+							<FolderOpenIcon
+								size={14}
+								className="shrink-0 text-yellow-500 group-data-[state=closed]/tree:hidden"
+							/>
+							<FolderIcon
+								size={14}
+								className="shrink-0 text-yellow-500 group-data-[state=open]/tree:hidden"
+							/>
+							<span className="truncate">{entry.name}</span>
+						</button>
+					</CollapsibleTrigger>
+					<ContextMenu>
+						<ContextMenuTrigger asChild>
+							<button className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-accent group-hover/tree:opacity-100">
+								<svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><circle cx="5" cy="2" r="1"/><circle cx="5" cy="5" r="1"/><circle cx="5" cy="8" r="1"/></svg>
+							</button>
+						</ContextMenuTrigger>
+						<ContextMenuContent>
+							<ContextMenuItem onClick={() => onCreateFile(entry.path)}>
+								<PlusIcon size={12} className="mr-1.5" />
+								New File
+							</ContextMenuItem>
+							<ContextMenuItem
+								onClick={() => onDelete(entry.path)}
+								className="text-red-500 focus:text-red-500"
+							>
+								<Trash2Icon size={12} className="mr-1.5" />
+								Delete
+							</ContextMenuItem>
+						</ContextMenuContent>
+					</ContextMenu>
+				</div>
+				<CollapsibleContent>
+					{entry.children?.map((child) => (
+						<FileTreeItem
+							key={child.path}
+							entry={child}
+							depth={depth + 1}
+							onSelect={onSelect}
+							selectedPath={selectedPath}
+							onDelete={onDelete}
+							onCreateFile={onCreateFile}
+							onMoveFile={onMoveFile}
+						/>
+					))}
+				</CollapsibleContent>
+			</Collapsible>
 		);
 	}
 
@@ -259,20 +265,7 @@ export function EditorPanel() {
 	const [isCreating, setIsCreating] = useState(false);
 	const newFileInputRef = useRef<HTMLInputElement>(null);
 	const activeProject = usePuxStore((s) => s.activeProject);
-	const [showTerminal, setShowTerminal] = useState(false);
-
-	// Ctrl+` to toggle terminal
-	useEffect(() => {
-		const handler = (e: KeyboardEvent) => {
-			// Ctrl+` or Cmd+`
-			if (e.key === "`" && (e.ctrlKey || e.metaKey)) {
-				e.preventDefault();
-				setShowTerminal((prev) => !prev);
-			}
-		};
-		window.addEventListener("keydown", handler);
-		return () => window.removeEventListener("keydown", handler);
-	}, []);
+	const [showFileTree, setShowFileTree] = useState(true);
 
 	// Refresh file tree
 	const refreshTree = useCallback(() => {
@@ -538,20 +531,30 @@ export function EditorPanel() {
 		<div className="relative flex h-full flex-col">
 			<div className="flex flex-1 overflow-hidden">
 				{/* File tree sidebar */}
+				{showFileTree ? (
 				<div className="flex w-48 shrink-0 flex-col border-r border-border">
-					{/* Tree header with new file button */}
+					{/* Tree header */}
 					<div className="flex h-7 items-center justify-between border-b border-border px-2">
-						<span className="text-[11px] font-medium text-muted-foreground">Files</span>
+						<div className="flex items-center gap-1">
+							<span className="text-[11px] font-medium text-muted-foreground">Files</span>
+							<button
+								onClick={() => {
+									setIsCreating(true);
+									setNewFileName("");
+									setTimeout(() => newFileInputRef.current?.focus(), 0);
+								}}
+								className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+								title="New file"
+							>
+								<PlusIcon size={12} />
+							</button>
+						</div>
 						<button
-							onClick={() => {
-								setIsCreating(true);
-								setNewFileName("");
-								setTimeout(() => newFileInputRef.current?.focus(), 0);
-							}}
+							onClick={() => setShowFileTree(false)}
 							className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-							title="New file"
+							title="Hide file tree"
 						>
-							<PlusIcon size={12} />
+							<PanelLeftCloseIcon size={12} />
 						</button>
 					</div>
 					{/* Inline new file input */}
@@ -615,6 +618,15 @@ export function EditorPanel() {
 					)}
 					</div>
 				</div>
+				) : (
+				<button
+					onClick={() => setShowFileTree(true)}
+					className="flex w-7 shrink-0 items-center justify-center border-r border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+					title="Show file tree"
+				>
+					<PanelLeftOpenIcon size={14} />
+				</button>
+				)}
 				{/* Editor area */}
 				<div className="flex min-w-0 flex-1 flex-col">
 					{/* Tab bar */}
@@ -701,23 +713,6 @@ export function EditorPanel() {
 					</div>
 				</div>
 			</div>
-			{/* Terminal panel */}
-			{showTerminal && (
-				<div className="flex h-56 shrink-0 flex-col border-t border-border">
-					<div className="flex h-7 items-center justify-between border-b border-border bg-muted/20 px-2">
-						<span className="text-[11px] font-medium text-muted-foreground">Terminal</span>
-						<button
-							onClick={() => setShowTerminal(false)}
-							className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-						>
-							<XIcon size={12} />
-						</button>
-					</div>
-					<div className="flex-1 overflow-hidden">
-						<TerminalPanel cwd={activeProject} />
-					</div>
-				</div>
-			)}
 			{/* Status bar */}
 			{activePath && (
 				<div className="flex h-6 items-center justify-between border-t border-border bg-muted/30 px-3 text-[11px] text-muted-foreground">
