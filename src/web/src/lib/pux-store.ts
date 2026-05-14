@@ -52,6 +52,8 @@ export interface Conversation {
 	title: string;
 }
 
+export type WorkbenchTab = "vnc" | "editor" | "scheduler";
+
 // ── State ──
 
 interface PuxState {
@@ -77,6 +79,9 @@ interface PuxState {
 	// Conversations
 	conversations: Conversation[];
 
+	// Workbench (auto-driven by SSE tool events)
+	activeWorkbenchTab: WorkbenchTab;
+
 	// Error
 	lastError: string | null;
 
@@ -88,6 +93,7 @@ interface PuxState {
 	loadConversations: () => Promise<void>;
 	setProject: (project: string) => void;
 	clearError: () => void;
+	setWorkbenchTab: (tab: WorkbenchTab) => void;
 }
 
 // ── Store ──
@@ -103,6 +109,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	activeAgentId: "",
 	modelList: [],
 	conversations: [],
+	activeWorkbenchTab: "vnc",
 	lastError: null,
 
 	respondToQuestion: async (response) => {
@@ -177,4 +184,6 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	clearError: () => set({ lastError: null }),
+
+	setWorkbenchTab: (tab) => set({ activeWorkbenchTab: tab }),
 }));

@@ -30,6 +30,47 @@ interface RunningTool {
 
 // ── Meta event dispatcher → Zustand ──
 
+/** Map tool/agent signals to workbench tabs */
+function inferTabFromTool(toolName: string, toolArgs: Record<string, unknown>): void {
+	const store = usePuxStore.getState();
+
+	// Delegate tools — check which employee
+	if (toolName === "delegate_to" || toolName === "delegate_async") {
+		const agent = (toolArgs.agent as string) || "";
+		if (["jake", "ryan"].includes(agent)) {
+			store.setWorkbenchTab("vnc");
+			return;
+		}
+		if (agent === "marcus") {
+			store.setWorkbenchTab("editor");
+			return;
+		}
+		// Sarah, Alex, Elena, etc — don't switch
+		return;
+	}
+
+	// Scheduler tool
+	if (toolName === "scheduler") {
+		store.setWorkbenchTab("scheduler");
+		return;
+	}
+
+	// File/code tools
+	if (["file_read", "file_write", "file_edit"].includes(toolName)) {
+		store.setWorkbenchTab("editor");
+		return;
+	}
+
+	// Bash with file-like args — could be editing
+	if (toolName === "bash") {
+		const cmd = (toolArgs.command as string) || "";
+		if (/\b(vim|nano|cat|head|tail|sed|awk)\b/.test(cmd) || /\.(ts|tsx|go|py|rs|js|jsx|md|json|yaml|yml|css|html)\b/.test(cmd)) {
+			store.setWorkbenchTab("editor");
+		}
+		return;
+	}
+}
+
 function handleMetaEvent(eventType: string, data: Record<string, unknown>) {
 	switch (eventType) {
 		case "agent_spawned": {
@@ -280,6 +321,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 							const toolId = (parsed.toolId as string) || `tc_${Date.now()}`;
 							const toolName = (parsed.toolName as string) || "unknown";
 							const toolArgs = (parsed.toolArgs || parsed.args || {}) as Record<string, unknown>;
+							inferTabFromTool(toolName, toolArgs);
 							tools.set(toolId, {
 								toolCallId: toolId,
 								toolName,
@@ -307,7 +349,17 @@ export const puxChatAdapter: ChatModelAdapter = {
 							break;
 						}
 
-						case "subagent_start":
+						case "subagent_start": {
+							const agentName = (parsed as Record<string, unknown>).agentName as string | undefined;
+							if (agentName) {
+								if (["jake", "ryan"].includes(agentName)) {
+									usePuxStore.getState().setWorkbenchTab("vnc");
+								} else if (agentName === "marcus") {
+									usePuxStore.getState().setWorkbenchTab("editor");
+								}
+							}
+							break;
+						}
 						case "subagent_end":
 						case "subagent_thinking_delta":
 						case "subagent_text_delta": {

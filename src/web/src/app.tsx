@@ -4,7 +4,7 @@ import {
 	AssistantRuntimeProvider,
 } from "@assistant-ui/react";
 import { Panel, Group, Separator } from "react-resizable-panels";
-import { usePuxStore } from "@/lib/pux-store";
+import { usePuxStore, type WorkbenchTab } from "@/lib/pux-store";
 import { puxChatAdapter } from "@/lib/pux-chat-adapter";
 import { Thread } from "@/components/assistant-ui/thread";
 import { VNCViewer } from "@/components/workbench/vnc-viewer";
@@ -128,10 +128,10 @@ function AppSidebar() {
 	);
 }
 
-type WorkbenchTab = "vnc" | "editor" | "scheduler";
-
 function Workbench() {
-	const [tab, setTab] = useState<WorkbenchTab>("vnc");
+	const storeTab = usePuxStore((s) => s.activeWorkbenchTab);
+	const setStoreTab = usePuxStore((s) => s.setWorkbenchTab);
+	const tab = storeTab;
 
 	const tabs: { id: WorkbenchTab; icon: React.ReactNode; label: string }[] = [
 		{ id: "vnc", icon: <Monitor size={14} />, label: "Sandbox" },
@@ -145,7 +145,7 @@ function Workbench() {
 				{tabs.map((t) => (
 					<button
 						key={t.id}
-						onClick={() => setTab(t.id)}
+						onClick={() => setStoreTab(t.id)}
 						className={cn(
 							"inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors",
 							tab === t.id

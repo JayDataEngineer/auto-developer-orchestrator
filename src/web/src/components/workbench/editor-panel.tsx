@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Editor from "@monaco-editor/react";
 import {
 	FileIcon,
@@ -7,7 +7,6 @@ import {
 	ChevronRightIcon,
 	ChevronDownIcon,
 	FileCodeIcon,
-	FileTextIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -113,6 +112,9 @@ function FileTreeItem({
 	);
 }
 
+// Cache file contents so switching files preserves content
+const fileCache = new Map<string, string>();
+
 export function EditorPanel() {
 	const [files, setFiles] = useState<FileEntry[]>([]);
 	const [selectedPath, setSelectedPath] = useState("");
@@ -125,11 +127,8 @@ export function EditorPanel() {
 			.then((data) => {
 				if (Array.isArray(data) && data.length > 0) {
 					setFiles(data);
-					// Auto-select first file
 					const firstFile = findFirstFile(data);
-					if (firstFile) {
-						selectFile(firstFile.path);
-					}
+					if (firstFile) selectFile(firstFile.path);
 				}
 			})
 			.catch(() => {});
@@ -146,13 +145,21 @@ export function EditorPanel() {
 		return null;
 	}
 
-	function selectFile(path: string) {
+	const selectFile = useCallback((path: string) => {
 		setSelectedPath(path);
+		// Check cache first
+		if (fileCache.has(path)) {
+			setContent(fileCache.get(path)!);
+			return;
+		}
 		fetch(`/api/pux/file?path=${encodeURIComponent(path)}`)
 			.then((r) => (r.ok ? r.text() : ""))
-			.then(setContent)
+			.then((text) => {
+				fileCache.set(path, text);
+				setContent(text);
+			})
 			.catch(() => setContent(""));
-	}
+	}, []);
 
 	const filename = selectedPath.split("/").pop() || "";
 
@@ -178,13 +185,15 @@ export function EditorPanel() {
 					))
 				)}
 			</div>
-			{/* Monaco editor */}
+			{/* Monaco editor — uses path prop for proper Model management */}
 			<div className="flex-1">
 				{selectedPath ? (
 					<Editor
+						key={selectedPath}
+						path={selectedPath}
+						defaultLanguage={getLang(filename)}
+						defaultValue={content}
 						theme="vs-dark"
-						language={getLang(filename)}
-						value={content}
 						options={{
 							minimap: { enabled: false },
 							fontSize: 13,
