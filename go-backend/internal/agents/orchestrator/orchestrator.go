@@ -116,9 +116,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		ctoTools = append(ctoTools, memory.NewTool(cfg.MemoryStore))
 	}
 
-	// Scheduler tool — lets the LLM manage scheduled jobs
+	// Scheduler tool — via autoconfig contract (ArtifactStore)
 	if cfg.Scheduler != nil {
-		ctoTools = append(ctoTools, schedulertool.NewSchedulerToolFromAny(cfg.Scheduler, cfg.ProjectDir))
+		if backend, ok := cfg.Scheduler.(schedulertool.Backend); ok {
+			scheduleStore := autoconfig.NewScheduleStore(backend)
+			ctoTools = append(ctoTools, autoconfig.NewScheduleTool(scheduleStore))
+		}
 	}
 
 	// Todo list — always available (created internally)
