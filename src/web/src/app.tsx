@@ -9,6 +9,7 @@ import { puxChatAdapter } from "@/lib/pux-chat-adapter";
 import { Thread } from "@/components/assistant-ui/thread";
 import { VNCViewer } from "@/components/workbench/vnc-viewer";
 import { EditorPanel } from "@/components/workbench/editor-panel";
+import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
 import {
 	Sidebar,
 	SidebarContent,
@@ -33,6 +34,7 @@ import {
 	Zap,
 	Monitor,
 	Code2,
+	Calendar,
 	MessageSquare,
 } from "lucide-react";
 
@@ -71,7 +73,7 @@ function AppSidebar() {
 							<div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
 								<Zap className="size-4" />
 							</div>
-							<div className="flex flex-col gap-0.5 leading-none">
+							<div className="flex flex-col gap-0.5 leading-none group-data-[collapsible=icon]:hidden">
 								<span className="font-semibold">Pux</span>
 							</div>
 						</SidebarMenuButton>
@@ -82,31 +84,33 @@ function AppSidebar() {
 				<SidebarGroup>
 					<SidebarGroupLabel>History</SidebarGroupLabel>
 					<SidebarGroupContent>
-						<SidebarMenu>
-							{conversations.length === 0 && (
-								<div className="px-2 py-4 text-center text-xs text-muted-foreground">
-									No conversations yet
-								</div>
-							)}
-							{conversations.map((c) => (
-								<SidebarMenuItem key={`${c.project}-${c.agentId}`}>
-									<SidebarMenuButton
-										tooltip={c.title || c.lastMessage}
-										isActive={activeProject === c.project}
+						{conversations.length === 0 ? (
+							<div className="px-2 py-3 text-center text-xs text-muted-foreground">
+								No conversations yet
+							</div>
+						) : (
+							<div className="flex flex-col gap-0.5 px-1">
+								{conversations.map((c) => (
+									<button
+										key={`${c.project}-${c.agentId}`}
 										onClick={() => setProject(c.project)}
-										className="flex-col items-start gap-0.5"
+										className={cn(
+											"flex w-full flex-col items-start gap-0 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+											activeProject === c.project &&
+												"bg-sidebar-accent font-medium text-sidebar-accent-foreground",
+										)}
 									>
-										<span className="truncate text-sm">
+										<span className="w-full truncate">
 											{c.title || c.lastMessage || "Untitled"}
 										</span>
 										<span className="text-[11px] text-muted-foreground">
 											{relativeTime(c.lastAt)}
 											{c.messageCount > 0 && ` · ${c.messageCount} msgs`}
 										</span>
-									</SidebarMenuButton>
-								</SidebarMenuItem>
-							))}
-						</SidebarMenu>
+									</button>
+								))}
+							</div>
+						)}
 					</SidebarGroupContent>
 				</SidebarGroup>
 			</SidebarContent>
@@ -124,37 +128,43 @@ function AppSidebar() {
 	);
 }
 
-type WorkbenchTab = "vnc" | "editor";
+type WorkbenchTab = "vnc" | "editor" | "scheduler";
 
 function Workbench() {
 	const [tab, setTab] = useState<WorkbenchTab>("vnc");
 
-	const tabButton = (id: WorkbenchTab, icon: React.ReactNode, label: string) => (
-		<button
-			onClick={() => setTab(id)}
-			className={cn(
-				"inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors",
-				tab === id
-					? "bg-accent text-accent-foreground"
-					: "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-			)}
-			aria-label={label}
-		>
-			{icon}
-		</button>
-	);
+	const tabs: { id: WorkbenchTab; icon: React.ReactNode; label: string }[] = [
+		{ id: "vnc", icon: <Monitor size={14} />, label: "Sandbox" },
+		{ id: "editor", icon: <Code2 size={14} />, label: "Editor" },
+		{ id: "scheduler", icon: <Calendar size={14} />, label: "Scheduler" },
+	];
 
 	return (
 		<div className="flex h-full flex-col bg-background">
 			<div className="flex h-9 items-center gap-0.5 border-b border-border px-1">
-				{tabButton("vnc", <Monitor size={14} />, "Sandbox")}
-				{tabButton("editor", <Code2 size={14} />, "Editor")}
+				{tabs.map((t) => (
+					<button
+						key={t.id}
+						onClick={() => setTab(t.id)}
+						className={cn(
+							"inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+							tab === t.id
+								? "bg-accent text-accent-foreground"
+								: "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
+						)}
+						aria-label={t.label}
+					>
+						{t.icon}
+					</button>
+				))}
 				<span className="ml-2 text-sm font-semibold text-foreground">
-					{tab === "vnc" ? "Sandbox" : "Editor"}
+					{tabs.find((t) => t.id === tab)?.label}
 				</span>
 			</div>
 			<div className="flex-1 overflow-hidden">
-				{tab === "vnc" ? <VNCViewer /> : <EditorPanel />}
+				{tab === "vnc" && <VNCViewer />}
+				{tab === "editor" && <EditorPanel />}
+				{tab === "scheduler" && <SchedulerPanel />}
 			</div>
 		</div>
 	);
