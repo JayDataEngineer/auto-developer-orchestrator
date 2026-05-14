@@ -2,7 +2,6 @@
 
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
-	Reasoning,
 	ReasoningContent,
 	ReasoningRoot,
 	ReasoningText,
@@ -246,7 +245,7 @@ const AssistantMessage: FC = () => {
 							case "text":
 								return <MarkdownText />;
 							case "reasoning":
-								return <Reasoning {...part} />;
+								return <>{part.text}</>;
 							case "tool-call":
 								return part.toolUI ?? <ToolFallback {...part} />;
 							default:
