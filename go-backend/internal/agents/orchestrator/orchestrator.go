@@ -9,6 +9,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/adapters"
+	"github.com/auto-developer-orchestrator/backend/internal/autoconfig"
 	ctxpkg "github.com/auto-developer-orchestrator/backend/internal/context"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/hooks"
@@ -69,11 +70,12 @@ type Config struct {
 
 // Agent is the full orchestrator agent with all tools.
 type Agent struct {
-	Loop    *core.AgentLoop
-	Session *session.SessionTree
-	Memory  *memory.Store
-	config  Config
-	logger  *log.Logger
+	Loop     *core.AgentLoop
+	Session  *session.SessionTree
+	Memory   *memory.Store
+	config   Config
+	logger   *log.Logger
+	jitStore *autoconfig.WorkerStore // session-scoped workers, cleaned up on Close
 }
 
 // New creates a new orchestrator agent.
@@ -272,11 +274,44 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		runner = pr
 	}
 
+	// JIT worker store — session-scoped workers, cleaned up on Close
+	sessionDir := filepath.Dir(cfg.SessionPath)
+	var jitStore *autoconfig.WorkerStore
+
 	if runner != nil {
-		validAgentNames := common.AgentNames(cfg.OrgRoles)
+		// Worker management tool — lets the CTO compose workers from capabilities
+		// Persistent store: workers written to project dir
+		projectWorkersDir := filepath.Join(cfg.ProjectDir, "workers")
+		persistentStore := autoconfig.NewWorkerStore(projectWorkersDir)
+		// JIT store: session-scoped workers, cleaned up on session end
+		jitStore = autoconfig.NewJITWorkerStore(sessionDir)
+
+		ctoTools = append(ctoTools, autoconfig.NewWorkerTool(persistentStore, jitStore))
+		logger.Printf("Worker management tool loaded (persistent: %s, JIT: %s)", projectWorkersDir, jitStore.Dir())
+
+		// Dynamic role provider — merges kernel + org + JIT workers on each call
+		roleProvider := func() map[string]*common.AgentRole {
+			roles := common.LoadAgentRoles()
+			// Merge org roles
+			for name, role := range cfg.OrgRoles {
+				if _, isKernel := roles[name]; !isKernel {
+					roles[name] = role
+				}
+			}
+			// Merge JIT workers from session dir
+			jitRoles := common.LoadWorkersFrom(jitStore.Dir())
+			for name, role := range jitRoles {
+				roles[name] = role
+			}
+			return roles
+		}
+		nameProvider := func() []string {
+			return common.AgentNames(cfg.OrgRoles)
+		}
+
 		ctoTools = append(ctoTools,
-			orchestration.NewDelegateToTool(runner, mcpResolver, cfg.OrgRoles, validAgentNames),
-			orchestration.NewDelegateAsyncTool(runner, mcpResolver, cfg.OrgRoles, validAgentNames),
+			orchestration.NewDelegateToToolDynamic(runner, mcpResolver, roleProvider, nameProvider),
+			orchestration.NewDelegateAsyncToolDynamic(runner, mcpResolver, roleProvider, nameProvider),
 			orchestration.NewDelegateContinueTool(runner),
 			orchestration.NewDelegateAcceptTool(runner),
 			orchestration.NewDelegateRevertTool(runner),
@@ -373,11 +408,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	loop.SetLogger(logger)
 
 	return &Agent{
-		Loop:    loop,
-		Session: sess,
-		Memory:  cfg.MemoryStore,
-		config:  cfg,
-		logger:  logger,
+		Loop:     loop,
+		Session:  sess,
+		Memory:   cfg.MemoryStore,
+		config:   cfg,
+		logger:   logger,
+		jitStore: jitStore,
 	}, nil
 }
 
@@ -393,6 +429,10 @@ func (a *Agent) Continue(ctx context.Context, userMsg string, subscriber chan<- 
 
 // Close releases resources.
 func (a *Agent) Close() error {
+	// Clean up session-scoped JIT workers
+	if a.jitStore != nil {
+		_ = a.jitStore.Cleanup()
+	}
 	return a.Loop.Close()
 }
 

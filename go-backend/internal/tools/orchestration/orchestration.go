@@ -30,6 +30,12 @@ type ModelResolver func(modelID string) core.LLMProvider
 // Each call returns an isolated provider with its own session/slot on llama-server.
 type ProviderFactory func() core.LLMProvider
 
+// RoleProvider returns the current role map (may include JIT workers).
+type RoleProvider func() map[string]*common.AgentRole
+
+// NameProvider returns the current list of valid agent names.
+type NameProvider func() []string
+
 // resolveRole checks if instructions matches a role name from config/roles/.
 // If it does, returns the role's prompt, tools, and defaults.
 // If not, returns the raw instructions as-is (custom delegation).
@@ -75,14 +81,28 @@ func resolveRole(instructions string, toolNames []string, maxRounds int, tempera
 // DelegateToTool implements core.Tool for synchronous sub-agent delegation.
 // Returns an agent_ref and file changes for continuation/review.
 type DelegateToTool struct {
-	runner           DelegateRunner
-	mcpResolver      MCPResolver
-	roleMap          map[string]*common.AgentRole
-	validAgentNames  []string
+	runner        DelegateRunner
+	mcpResolver   MCPResolver
+	roleProvider  RoleProvider
+	nameProvider  NameProvider
 }
 
 func NewDelegateToTool(r DelegateRunner, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole, validAgentNames []string) *DelegateToTool {
-	return &DelegateToTool{runner: r, mcpResolver: mcpResolver, roleMap: roleMap, validAgentNames: validAgentNames}
+	// Wrap static args in provider functions for backwards compat
+	staticRoles := roleMap
+	staticNames := validAgentNames
+	return &DelegateToTool{
+		runner:       r,
+		mcpResolver:  mcpResolver,
+		roleProvider: func() map[string]*common.AgentRole { return staticRoles },
+		nameProvider: func() []string { return staticNames },
+	}
+}
+
+// NewDelegateToToolDynamic creates a DelegateToTool with dynamic providers.
+// The providers are called on each Execute/Schema call, enabling JIT workers.
+func NewDelegateToToolDynamic(r DelegateRunner, mcpResolver MCPResolver, roleProvider RoleProvider, nameProvider NameProvider) *DelegateToTool {
+	return &DelegateToTool{runner: r, mcpResolver: mcpResolver, roleProvider: roleProvider, nameProvider: nameProvider}
 }
 
 func (t *DelegateToTool) Name() string { return "delegate_to" }
@@ -92,9 +112,12 @@ func (t *DelegateToTool) Description() string {
 
 func (t *DelegateToTool) Schema() json.RawMessage {
 	enumJSON := "[]"
-	if len(t.validAgentNames) > 0 {
-		names, _ := json.Marshal(t.validAgentNames)
-		enumJSON = string(names)
+	if t.nameProvider != nil {
+		names := t.nameProvider()
+		if len(names) > 0 {
+			encoded, _ := json.Marshal(names)
+			enumJSON = string(encoded)
+		}
 	}
 	schema := fmt.Sprintf(`{
 		"type": "object",
@@ -143,7 +166,8 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	// Resolve role name → prompt + defaults
-	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, division, sandboxTier := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver, t.roleMap)
+	roleMap := t.roleProvider()
+	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, division, sandboxTier := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
 
 	// Division head: delegate to a full sub-orchestrator
 	if division != "" {
@@ -288,14 +312,26 @@ func (t *DelegateRevertTool) Execute(ctx context.Context, args map[string]any) (
 
 // DelegateAsyncTool implements core.Tool for async sub-agent delegation.
 type DelegateAsyncTool struct {
-	runner           DelegateRunner
-	mcpResolver      MCPResolver
-	roleMap          map[string]*common.AgentRole
-	validAgentNames  []string
+	runner        DelegateRunner
+	mcpResolver   MCPResolver
+	roleProvider  RoleProvider
+	nameProvider  NameProvider
 }
 
 func NewDelegateAsyncTool(r DelegateRunner, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole, validAgentNames []string) *DelegateAsyncTool {
-	return &DelegateAsyncTool{runner: r, mcpResolver: mcpResolver, roleMap: roleMap, validAgentNames: validAgentNames}
+	staticRoles := roleMap
+	staticNames := validAgentNames
+	return &DelegateAsyncTool{
+		runner:       r,
+		mcpResolver:  mcpResolver,
+		roleProvider: func() map[string]*common.AgentRole { return staticRoles },
+		nameProvider: func() []string { return staticNames },
+	}
+}
+
+// NewDelegateAsyncToolDynamic creates a DelegateAsyncTool with dynamic providers.
+func NewDelegateAsyncToolDynamic(r DelegateRunner, mcpResolver MCPResolver, roleProvider RoleProvider, nameProvider NameProvider) *DelegateAsyncTool {
+	return &DelegateAsyncTool{runner: r, mcpResolver: mcpResolver, roleProvider: roleProvider, nameProvider: nameProvider}
 }
 
 func (t *DelegateAsyncTool) Name() string { return "delegate_async" }
@@ -305,9 +341,12 @@ func (t *DelegateAsyncTool) Description() string {
 
 func (t *DelegateAsyncTool) Schema() json.RawMessage {
 	enumJSON := "[]"
-	if len(t.validAgentNames) > 0 {
-		names, _ := json.Marshal(t.validAgentNames)
-		enumJSON = string(names)
+	if t.nameProvider != nil {
+		names := t.nameProvider()
+		if len(names) > 0 {
+			encoded, _ := json.Marshal(names)
+			enumJSON = string(encoded)
+		}
 	}
 	schema := fmt.Sprintf(`{
 		"type": "object",
@@ -341,7 +380,8 @@ func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (a
 	}
 
 	// Resolve role name → prompt + defaults
-	resolvedInstructions, resolvedTools, _, _, _, _, _ := resolveRole(instructions, toolNames, 15, 0.4, t.mcpResolver, t.roleMap)
+	roleMap := t.roleProvider()
+	resolvedInstructions, resolvedTools, _, _, _, _, _ := resolveRole(instructions, toolNames, 15, 0.4, t.mcpResolver, roleMap)
 
 	if len(resolvedTools) == 0 {
 		return nil, core.NewToolError("delegate_async", "no tools specified and role '"+instructions+"' has no default tools")
