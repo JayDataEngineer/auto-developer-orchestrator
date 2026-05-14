@@ -17,8 +17,8 @@
     "baseUrl": ".",
 	"paths": {
 		"@/*": ["./src/*"],
-		"@tui-core/*": ["../ts-tui-pi/src/core/*"]
+		"@tui-core/*": ["../../ts-tui-pi/src/core/*"]
 	}
   },
-  "include": ["src", "../ts-tui-pi/src/core"]
+  "include": ["src"]
 }

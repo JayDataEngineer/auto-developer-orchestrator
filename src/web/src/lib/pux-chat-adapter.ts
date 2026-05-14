@@ -1,15 +1,11 @@
 /**
- * PuxChatAdapter — bridges Contract 2 SSE events to @assistant-ui/react runtime.
+ * PuxChatAdapter — Contract 2 SSE → @assistant-ui/react runtime.
  *
- * This is our "Unsloth pattern": a custom ChatModelAdapter whose run() method
- * POSTs to /api/pux/prompt, parses the SSE stream, and yields ChatModelRunResult
- * snapshots that assistant-ui's useLocalRuntime renders automatically.
+ * POSTs to /api/pux/prompt, parses SSE events, yields ChatModelRunResult
+ * snapshots that useLocalRuntime renders via the styled Thread component.
  *
- * Non-message events (HITL, metrics, compaction) are dispatched to Zustand store.
- *
- * Contract 4 compliance: uses ChatState as the canonical event accumulator.
- * Raw SSE deltas are translated to ChatState events and all content is read
- * from ChatState.messages when building snapshots.
+ * Content events (text_delta, thinking_delta, tool_execution_*) → message parts.
+ * Meta events (user_question, approval_request, compaction, agent_end) → Zustand.
  */
 
 import type {
@@ -19,10 +15,20 @@ import type {
 	ReasoningMessagePart,
 	ToolCallMessagePart,
 } from "@assistant-ui/react";
-import { ChatState } from "@tui-core/chat-state";
 import { usePuxStore } from "./pux-store";
 
-// ── Meta event dispatcher (non-message events → Zustand) ──
+// ── Types ──
+
+type Part = TextMessagePart | ReasoningMessagePart | ToolCallMessagePart;
+
+interface RunningTool {
+	toolCallId: string;
+	toolName: string;
+	args: Record<string, any>;
+	argsText: string;
+}
+
+// ── Meta event dispatcher → Zustand ──
 
 function handleMetaEvent(eventType: string, data: Record<string, unknown>) {
 	switch (eventType) {
@@ -99,53 +105,74 @@ function handleMetaEvent(eventType: string, data: Record<string, unknown>) {
 	}
 }
 
-// ── ChatState-based content builder ──
+// ── Snapshot builder ──
 
-type Part = TextMessagePart | ReasoningMessagePart | ToolCallMessagePart;
-
-function* buildContent(chatState: ChatState): Generator<ChatModelRunResult, void, undefined> {
-	const lastMsg = chatState.messages[chatState.messages.length - 1];
-	if (!lastMsg) {
-		yield { content: [], status: { type: "running" as const } };
-		return;
-	}
-
+function buildSnapshot(
+	accText: string,
+	accThinking: string,
+	tools: Map<string, RunningTool & { result?: unknown; isError?: boolean }>,
+	status: "running" | "complete",
+): ChatModelRunResult {
 	const parts: Part[] = [];
 
-	if (lastMsg.thinking) {
-		parts.push({ type: "reasoning" as const, text: lastMsg.thinking });
+	// Thinking always first (if present)
+	if (accThinking) {
+		parts.push({ type: "reasoning", text: accThinking });
 	}
 
-	for (const tc of lastMsg.tools) {
-		parts.push({
-			type: "tool-call" as const,
-			toolCallId: tc.id,
-			toolName: tc.name,
-			args: (tc.args as Record<string, string>) || {},
-			argsText: JSON.stringify(tc.args || {}),
-			...(tc.result !== undefined ? { result: tc.result } : {}),
-			...(tc.status === "error" ? { isError: true } : {}),
-		} as ToolCallMessagePart);
+	// Tool calls in order they were started
+	for (const tool of tools.values()) {
+		const part: ToolCallMessagePart = {
+			type: "tool-call",
+			toolCallId: tool.toolCallId,
+			toolName: tool.toolName,
+			args: tool.args,
+			argsText: tool.argsText,
+			...(tool.result !== undefined ? { result: tool.result } : {}),
+			...(tool.isError ? { isError: true } : {}),
+		};
+		parts.push(part);
 	}
 
-	if (lastMsg.text) {
-		parts.push({ type: "text" as const, text: lastMsg.text });
+	// Text last (matches Contract 2 ordering: thinking → tools → text)
+	if (accText) {
+		parts.push({ type: "text", text: accText });
 	}
 
-	yield { content: parts, status: { type: "running" as const } };
+	return {
+		content: parts,
+		status: status === "complete"
+			? { type: "complete", reason: "stop" }
+			: { type: "running" },
+	};
 }
 
-function flushToChatState(
-	chatState: ChatState,
-	text: string,
-	thinking: string,
-): void {
-	const content: { type: string; text?: string; thinking?: string }[] = [];
-	if (thinking) content.push({ type: "thinking", thinking });
-	if (text) content.push({ type: "text", text });
-	if (content.length > 0) {
-		chatState.handleEvent({ type: "message_update", message: { content } });
+// ── SSE Parser ──
+
+function parseSSE(
+	buffer: string,
+): { events: Array<{ event: string; data: string }>; remaining: string } {
+	const events: Array<{ event: string; data: string }> = [];
+	const lines = buffer.split("\n");
+	const remaining = lines.pop() || "";
+
+	let currentEvent = "";
+	let currentData = "";
+
+	for (const line of lines) {
+		if (line.startsWith("event: ")) {
+			currentEvent = line.slice(7).trim();
+		} else if (line.startsWith("data: ")) {
+			currentData = line.slice(6);
+			events.push({ event: currentEvent, data: currentData });
+			currentEvent = "";
+			currentData = "";
+		} else if (line === "") {
+			// SSE boundary — already handled above
+		}
 	}
+
+	return { events, remaining };
 }
 
 // ── ChatModelAdapter ──
@@ -159,7 +186,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		// Extract text from user message
 		const content = lastMsg.content;
-		const text =
+		const userText =
 			typeof content === "string"
 				? content
 				: Array.isArray(content)
@@ -169,6 +196,8 @@ export const puxChatAdapter: ChatModelAdapter = {
 							.join("")
 					: "";
 
+		if (!userText) return;
+
 		const project = store.activeProject || "auto-developer-orchestrator";
 
 		// POST to Pux backend
@@ -176,7 +205,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				message: text,
+				message: userText,
 				project,
 				agentId: store.activeAgentId || undefined,
 			}),
@@ -185,11 +214,10 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		if (!resp.ok) {
 			const errText = await resp.text().catch(() => "");
-			const result: ChatModelRunResult = {
+			yield {
 				content: [{ type: "text" as const, text: `Error: ${resp.status} ${errText}` }],
 				status: { type: "incomplete" as const, reason: "error" as const },
 			};
-			yield result;
 			return;
 		}
 
@@ -198,17 +226,13 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		const decoder = new TextDecoder();
 		let buffer = "";
-		let currentEvent = "";
 
-		// ChatState is the canonical event accumulator (Contract 4).
-		// Raw SSE deltas are translated to ChatState events via flushToChatState.
-		const chatState = new ChatState();
-
-		// Accumulator for building complete text before flushing to ChatState.
+		// Accumulators — the source of truth for building snapshots
 		let accText = "";
 		let accThinking = "";
+		const tools = new Map<string, RunningTool & { result?: unknown; isError?: boolean }>();
 
-		// Initial yield — running
+		// Initial yield — empty, running
 		yield { content: [], status: { type: "running" as const } };
 
 		try {
@@ -217,91 +241,87 @@ export const puxChatAdapter: ChatModelAdapter = {
 				if (done) break;
 
 				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
+				const { events, remaining } = parseSSE(buffer);
+				buffer = remaining;
 
-				for (const line of lines) {
-					if (line.startsWith("event: ")) {
-						currentEvent = line.slice(7).trim();
-					} else if (line.startsWith("data: ")) {
-						const raw = line.slice(6);
-						if (raw === "[DONE]") {
-							flushToChatState(chatState, accText, accThinking);
-							yield* buildContent(chatState);
-							return;
+				for (const { event, data } of events) {
+					if (data === "[DONE]") {
+						yield buildSnapshot(accText, accThinking, tools, "complete");
+						return;
+					}
+
+					if (event === "keepalive") continue;
+
+					let parsed: Record<string, unknown>;
+					try {
+						parsed = JSON.parse(data);
+					} catch {
+						continue;
+					}
+
+					switch (event) {
+						// ── Content events → message parts ──
+
+						case "thinking_delta": {
+							accThinking += (parsed.text as string) || "";
+							yield buildSnapshot(accText, accThinking, tools, "running");
+							break;
 						}
-						if (currentEvent === "keepalive") {
-							currentEvent = "";
-							continue;
+
+						case "text_delta": {
+							// Skip sub-agent text (we only show CTO text)
+							if (parsed.agentName) break;
+							accText += (parsed.text as string) || "";
+							yield buildSnapshot(accText, accThinking, tools, "running");
+							break;
 						}
 
-						try {
-							const data = JSON.parse(raw);
+						case "tool_execution_start": {
+							const toolId = (parsed.toolId as string) || `tc_${Date.now()}`;
+							const toolName = (parsed.toolName as string) || "unknown";
+							const toolArgs = (parsed.toolArgs || parsed.args || {}) as Record<string, unknown>;
+							tools.set(toolId, {
+								toolCallId: toolId,
+								toolName,
+								args: toolArgs as any,
+								argsText: JSON.stringify(toolArgs, null, 2),
+							});
+							yield buildSnapshot(accText, accThinking, tools, "running");
+							break;
+						}
 
-							switch (currentEvent) {
-								case "agent_start": {
-									chatState.handleEvent({
-										type: "message_start",
-										message: { role: "assistant", content: [] },
-									});
-									break;
-								}
-								case "thinking_delta": {
-									accThinking += (data.text as string) || "";
-									flushToChatState(chatState, accText, accThinking);
-									yield* buildContent(chatState);
-									break;
-								}
-								case "text_delta": {
-									if (!data.agentName) {
-										accText += (data.text as string) || "";
-										flushToChatState(chatState, accText, accThinking);
-										yield* buildContent(chatState);
-									}
-									break;
-								}
-								case "tool_execution_start": {
-									flushToChatState(chatState, accText, accThinking);
-									chatState.handleEvent({
-										type: "tool_execution_start",
-										toolCallId: (data.toolId as string) || `tc_${Date.now()}`,
-										toolName: (data.toolName as string) || "unknown",
-										args: data.toolArgs || data.args || {},
-									});
-									yield* buildContent(chatState);
-									break;
-								}
-								case "tool_execution_end": {
-									flushToChatState(chatState, accText, accThinking);
-									chatState.handleEvent({
-										type: "tool_execution_end",
-										toolCallId: (data.toolId as string),
-										result: data.result,
-										isError: !!data.error,
-									});
-									yield* buildContent(chatState);
-									break;
-								}
-								case "agent_end": {
-									flushToChatState(chatState, accText, accThinking);
-									chatState.handleEvent({ type: "agent_end" });
-									chatState.handleEvent({
-										type: "message_end",
-										message: { stopReason: "stop" },
-									});
-									break;
-								}
-								default: {
-									// Meta events → Zustand
-									handleMetaEvent(currentEvent, data);
-									break;
-								}
+						case "tool_execution_end": {
+							const toolId = parsed.toolId as string;
+							const existing = toolId ? tools.get(toolId) : null;
+							if (existing) {
+								existing.result = parsed.result;
+								existing.isError = !!parsed.error;
 							}
-						} catch {
-							// Malformed JSON — skip
+							yield buildSnapshot(accText, accThinking, tools, "running");
+							break;
 						}
 
-						currentEvent = "";
+						case "tool_execution_update": {
+							// Live progress text from a running tool — not a separate part
+							// Could be used for partial result display in future
+							break;
+						}
+
+						case "subagent_start":
+						case "subagent_end":
+						case "subagent_thinking_delta":
+						case "subagent_text_delta": {
+							// Sub-agent events — we don't render these as separate parts
+							// They're tracked by Zustand if needed for a sub-agent panel
+							break;
+						}
+
+						// ── Meta events → Zustand ──
+
+						default: {
+							handleMetaEvent(event, parsed);
+							break;
+						}
 					}
 				}
 			}
@@ -314,8 +334,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 			return;
 		}
 
-		// Stream ended without [DONE] — final yield
-		flushToChatState(chatState, accText, accThinking);
-		yield* buildContent(chatState);
+		// Stream ended without [DONE] — yield final snapshot
+		yield buildSnapshot(accText, accThinking, tools, "complete");
 	},
 };
