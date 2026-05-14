@@ -111,51 +111,91 @@ function FileTreeItem({
 	onSelect,
 	selectedPath,
 	onDelete,
+	onCreateFile,
+	onMoveFile,
 }: {
 	entry: FileEntry;
 	depth: number;
 	onSelect: (path: string) => void;
 	selectedPath: string;
 	onDelete: (path: string) => void;
+	onCreateFile: (dirPath: string) => void;
+	onMoveFile: (from: string, to: string) => void;
 }) {
+	const [dragOver, setDragOver] = useState(false);
+
 	if (entry.type === "dir") {
 		return (
-			<Collapsible className="group/tree">
-				<CollapsibleTrigger asChild>
-					<button
-						className={cn(
-							"flex w-full items-center gap-1 rounded-sm px-1 py-0.5 text-xs hover:bg-accent",
-						)}
-						style={{ paddingLeft: `${depth * 12 + 4}px` }}
-					>
-						<ChevronRightIcon
-							size={12}
-							className="shrink-0 transition-transform group-data-[state=open]/tree:rotate-90"
-						/>
-						<FolderOpenIcon
-							size={14}
-							className="shrink-0 text-yellow-500 group-data-[state=closed]/tree:hidden"
-						/>
-						<FolderIcon
-							size={14}
-							className="shrink-0 text-yellow-500 group-data-[state=open]/tree:hidden"
-						/>
-						<span className="truncate">{entry.name}</span>
-					</button>
-				</CollapsibleTrigger>
-				<CollapsibleContent>
-					{entry.children?.map((child) => (
-						<FileTreeItem
-							key={child.path}
-							entry={child}
-							depth={depth + 1}
-							onSelect={onSelect}
-							selectedPath={selectedPath}
-							onDelete={onDelete}
-						/>
-					))}
-				</CollapsibleContent>
-			</Collapsible>
+			<ContextMenu>
+				<Collapsible className="group/tree">
+					<ContextMenuTrigger asChild>
+						<CollapsibleTrigger asChild>
+							<button
+								className={cn(
+									"flex w-full items-center gap-1 rounded-sm px-1 py-0.5 text-xs hover:bg-accent",
+									dragOver && "bg-accent ring-1 ring-primary",
+								)}
+								style={{ paddingLeft: `${depth * 12 + 4}px` }}
+								onDragOver={(e) => {
+									e.preventDefault();
+									setDragOver(true);
+								}}
+								onDragLeave={() => setDragOver(false)}
+								onDrop={(e) => {
+									e.preventDefault();
+									setDragOver(false);
+									const fromPath = e.dataTransfer.getData("text/plain");
+									if (fromPath && fromPath !== entry.path) {
+										const name = fromPath.split("/").pop() || fromPath;
+										onMoveFile(fromPath, entry.path + "/" + name);
+									}
+								}}
+							>
+								<ChevronRightIcon
+									size={12}
+									className="shrink-0 transition-transform group-data-[state=open]/tree:rotate-90"
+								/>
+								<FolderOpenIcon
+									size={14}
+									className="shrink-0 text-yellow-500 group-data-[state=closed]/tree:hidden"
+								/>
+								<FolderIcon
+									size={14}
+									className="shrink-0 text-yellow-500 group-data-[state=open]/tree:hidden"
+								/>
+								<span className="truncate">{entry.name}</span>
+							</button>
+						</CollapsibleTrigger>
+					</ContextMenuTrigger>
+					<ContextMenuContent>
+						<ContextMenuItem onClick={() => onCreateFile(entry.path)}>
+							<PlusIcon size={12} className="mr-1.5" />
+							New File
+						</ContextMenuItem>
+						<ContextMenuItem
+							onClick={() => onDelete(entry.path)}
+							className="text-red-500 focus:text-red-500"
+						>
+							<Trash2Icon size={12} className="mr-1.5" />
+							Delete
+						</ContextMenuItem>
+					</ContextMenuContent>
+					<CollapsibleContent>
+						{entry.children?.map((child) => (
+							<FileTreeItem
+								key={child.path}
+								entry={child}
+								depth={depth + 1}
+								onSelect={onSelect}
+								selectedPath={selectedPath}
+								onDelete={onDelete}
+								onCreateFile={onCreateFile}
+								onMoveFile={onMoveFile}
+							/>
+						))}
+					</CollapsibleContent>
+				</Collapsible>
+			</ContextMenu>
 		);
 	}
 
@@ -164,6 +204,11 @@ function FileTreeItem({
 			<ContextMenuTrigger asChild>
 				<button
 					onClick={() => onSelect(entry.path)}
+					draggable
+					onDragStart={(e) => {
+						e.dataTransfer.setData("text/plain", entry.path);
+						e.dataTransfer.effectAllowed = "move";
+					}}
 					className={cn(
 						"flex w-full items-center gap-1 rounded-sm px-1 py-0.5 text-xs hover:bg-accent",
 						selectedPath === entry.path && "bg-accent text-accent-foreground",
@@ -403,6 +448,26 @@ export function EditorPanel() {
 		[activeProject, refreshTree, openFile],
 	);
 
+	// Move file (drag-and-drop)
+	const moveFile = useCallback(
+		async (from: string, to: string) => {
+			if (!activeProject) return;
+			const resp = await fetch("/api/pux/file/move", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ project: activeProject, from, to }),
+			});
+			if (resp.ok) {
+				fileCache.delete(from);
+				dirtyFiles.delete(from);
+				setDirty(new Set(dirtyFiles));
+				closeTab(from);
+				refreshTree();
+			}
+		},
+		[activeProject, closeTab, refreshTree],
+	);
+
 	const handleEditorMount: OnMount = (editor) => {
 		editorRef.current = editor;
 		editor.onDidChangeCursorPosition((e) => {
@@ -520,6 +585,16 @@ export function EditorPanel() {
 								onSelect={openFile}
 								selectedPath={activePath}
 								onDelete={(path) => deleteFile(path)}
+								onCreateFile={(dir) => {
+									setIsCreating(true);
+									setNewFileName(dir ? dir + "/" : "");
+									setTimeout(() => {
+										newFileInputRef.current?.focus();
+										const len = newFileInputRef.current?.value.length || 0;
+										newFileInputRef.current?.setSelectionRange(len, len);
+									}, 0);
+								}}
+								onMoveFile={moveFile}
 							/>
 						))
 					)}
