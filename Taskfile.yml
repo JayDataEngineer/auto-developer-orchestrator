@@ -322,7 +322,7 @@ tasks:
   clean:
     desc: Remove build artifacts and all docker resources
     cmds:
-      - rm -rf dist go-backend/bin go-backend/orch go-backend/server
+      - rm -rf dist dist-web go-backend/bin go-backend/orch go-backend/server
       - docker compose -f docker-compose.dev.yml down -v --remove-orphans
       - cmd: docker compose -f docker-compose.yml down -v
         ignore_error: true

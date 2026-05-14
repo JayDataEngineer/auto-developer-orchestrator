@@ -659,7 +659,7 @@ func (a *App) buildRouter(
 		})
 	})
 
-	r.Handle("/*", http.FileServer(http.Dir("../dist")))
+	r.Handle("/*", http.FileServer(http.Dir("../dist-web")))
 	return r
 }
 
