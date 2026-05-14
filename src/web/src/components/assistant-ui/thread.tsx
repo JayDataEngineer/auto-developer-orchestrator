@@ -1,6 +1,6 @@
 "use client";
 
-import { MarkdownText } from "@/components/assistant-ui/markdown-text";
+import { MarkdownTextContent } from "@/components/assistant-ui/markdown-text";
 import {
 	ReasoningContent,
 	ReasoningRoot,
@@ -243,7 +243,7 @@ const AssistantMessage: FC = () => {
 									</ToolGroupRoot>
 								);
 							case "text":
-								return <MarkdownText />;
+								return <MarkdownTextContent text={part.text} />;
 							case "reasoning":
 								return <>{part.text}</>;
 							case "tool-call":

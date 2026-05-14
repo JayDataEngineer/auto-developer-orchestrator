@@ -6,8 +6,8 @@ import {
 	type CodeHeaderProps,
 	MarkdownTextPrimitive,
 	unstable_memoizeMarkdownComponents as memoizeMarkdownComponents,
-	useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
+import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { type FC, memo, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
@@ -15,17 +15,35 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { cn } from "@/lib/utils";
 
+// Context-dependent version — only works inside MessagePrimitive.Parts or similar
 const MarkdownTextImpl = () => {
 	return (
 		<MarkdownTextPrimitive
 			remarkPlugins={[remarkGfm]}
 			className="aui-md"
-			components={defaultComponents}
+			components={markdownComponents}
 		/>
 	);
 };
 
 export const MarkdownText = memo(MarkdownTextImpl);
+
+// Standalone version — accepts text directly, no context needed.
+// Use this inside GroupedParts callbacks where part context isn't available.
+const MarkdownTextContentImpl = ({ text }: { text: string }) => {
+	return (
+		<div className="aui-md">
+			<ReactMarkdown
+				remarkPlugins={[remarkGfm]}
+				components={markdownComponents}
+			>
+				{text}
+			</ReactMarkdown>
+		</div>
+	);
+};
+
+export const MarkdownTextContent = memo(MarkdownTextContentImpl);
 
 const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
 	const { isCopied, copyToClipboard } = useCopyToClipboard();
@@ -66,7 +84,7 @@ const useCopyToClipboard = ({
 	return { isCopied, copyToClipboard };
 };
 
-const defaultComponents = memoizeMarkdownComponents({
+const markdownComponents = memoizeMarkdownComponents({
 	h1: ({ className, ...props }) => (
 		<h1
 			className={cn(
@@ -202,18 +220,14 @@ const defaultComponents = memoizeMarkdownComponents({
 			{...props}
 		/>
 	),
-	code: function Code({ className, ...props }) {
-		const isCodeBlock = useIsMarkdownCodeBlock();
-		return (
-			<code
-				className={cn(
-					!isCodeBlock &&
-						"aui-md-inline-code rounded-md border border-border/50 bg-muted/50 px-1.5 py-0.5 font-mono text-[0.85em]",
-					className,
-				)}
-				{...props}
-			/>
-		);
-	},
+	code: ({ className, ...props }) => (
+		<code
+			className={cn(
+				"aui-md-inline-code rounded-md border border-border/50 bg-muted/50 px-1.5 py-0.5 font-mono text-[0.85em]",
+				className,
+			)}
+			{...props}
+		/>
+	),
 	CodeHeader,
 });
