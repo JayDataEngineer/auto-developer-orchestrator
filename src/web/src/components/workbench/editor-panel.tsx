@@ -163,9 +163,10 @@ function FileTreeItem({
 	);
 }
 
-// ── Cache ──
+// ── Cache & dirty tracking ──
 
 const fileCache = new Map<string, string>();
+const dirtyFiles = new Set<string>();
 
 // ── Panel ──
 
@@ -176,8 +177,22 @@ export function EditorPanel() {
 	const [content, setContent] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [cursorPos, setCursorPos] = useState({ ln: 1, col: 1 });
+	const [dirty, setDirty] = useState<Set<string>>(new Set());
+	const [saving, setSaving] = useState(false);
 	const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 	const activeProject = usePuxStore((s) => s.activeProject);
+
+	// Refresh file tree
+	const refreshTree = useCallback(() => {
+		if (!activeProject) return;
+		fetch(`/api/pux/files?project=${encodeURIComponent(activeProject)}`)
+			.then((r) => (r.ok ? r.json() : []))
+			.then((data) => {
+				const tree = Array.isArray(data) ? data : [];
+				setFiles(tree);
+			})
+			.catch(() => {});
+	}, [activeProject]);
 
 	// Load file tree
 	useEffect(() => {
@@ -191,6 +206,8 @@ export function EditorPanel() {
 		}
 
 		fileCache.clear();
+		dirtyFiles.clear();
+		setDirty(new Set());
 		setTabs([]);
 		setActivePath("");
 		setLoading(true);
@@ -262,11 +279,91 @@ export function EditorPanel() {
 		[activePath, openFile],
 	);
 
+	// Save current file
+	const saveFile = useCallback(async () => {
+		if (!activeProject || !activePath || !editorRef.current) return;
+		const editorContent = editorRef.current.getValue();
+		setSaving(true);
+		try {
+			const resp = await fetch("/api/pux/file", {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					project: activeProject,
+					path: activePath,
+					content: editorContent,
+				}),
+			});
+			if (resp.ok) {
+				fileCache.set(activePath, editorContent);
+				dirtyFiles.delete(activePath);
+				setDirty(new Set(dirtyFiles));
+			}
+		} finally {
+			setSaving(false);
+		}
+	}, [activeProject, activePath]);
+
+	// Delete file (moves to .pux/trash for undo)
+	const deleteFile = useCallback(
+		async (path: string) => {
+			if (!activeProject) return;
+			const resp = await fetch(
+				`/api/pux/file?project=${encodeURIComponent(activeProject)}&path=${encodeURIComponent(path)}`,
+				{ method: "DELETE" },
+			);
+			if (resp.ok) {
+				const data = await resp.json();
+				fileCache.delete(path);
+				dirtyFiles.delete(path);
+				setDirty(new Set(dirtyFiles));
+				closeTab(path);
+				refreshTree();
+				return data.trashPath as string;
+			}
+			return "";
+		},
+		[activeProject, closeTab, refreshTree],
+	);
+
+	// Restore file from trash
+	const restoreFile = useCallback(
+		async (trashPath: string) => {
+			if (!activeProject) return;
+			const resp = await fetch("/api/pux/file/restore", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ project: activeProject, trashPath }),
+			});
+			if (resp.ok) {
+				refreshTree();
+			}
+		},
+		[activeProject, refreshTree],
+	);
+
 	const handleEditorMount: OnMount = (editor) => {
 		editorRef.current = editor;
 		editor.onDidChangeCursorPosition((e) => {
 			setCursorPos({ ln: e.position.lineNumber, col: e.position.column });
 		});
+		editor.onDidChangeModelContent(() => {
+			if (!activePath) return;
+			const current = editor.getValue();
+			const original = fileCache.get(activePath);
+			if (current !== original) {
+				dirtyFiles.add(activePath);
+			} else {
+				dirtyFiles.delete(activePath);
+			}
+			setDirty(new Set(dirtyFiles));
+		});
+		// Ctrl+S / Cmd+S to save
+		editor.addCommand(
+			// Monaco.KeyMod.CtrlCmd | Monaco.KeyCode.KeyS
+			2048 | 49, // KeyMod.CtrlCmd=2048, KeyCode.KeyS=49
+			() => saveFile(),
+		);
 	};
 
 	const filename = activePath.split("/").pop() || "";
@@ -336,6 +433,9 @@ export function EditorPanel() {
 									onClick={() => openFile(tab.path)}
 								>
 									<span className="max-w-28 truncate">
+										{dirty.has(tab.path) && (
+											<span className="mr-0.5 text-[10px] text-orange-400">●</span>
+										)}
 										{tab.name}
 									</span>
 									<button
@@ -390,7 +490,6 @@ export function EditorPanel() {
 									scrollBeyondLastLine: false,
 									wordWrap: "on",
 									padding: { top: 4 },
-									readOnly: true,
 								}}
 							/>
 						) : (
@@ -409,8 +508,15 @@ export function EditorPanel() {
 					<span>
 						{LANG_LABELS[lang] || lang}
 					</span>
-					<span>
-						Ln {cursorPos.ln}, Col {cursorPos.col}
+					<span className="flex items-center gap-3">
+						{dirty.has(activePath) && (
+							<span className="text-orange-400">
+								{saving ? "Saving..." : "Modified"}
+							</span>
+						)}
+						<span>
+							Ln {cursorPos.ln}, Col {cursorPos.col}
+						</span>
 					</span>
 				</div>
 			)}
