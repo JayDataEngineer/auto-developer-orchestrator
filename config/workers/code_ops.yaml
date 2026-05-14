@@ -1,0 +1,6 @@
+persona: "Senior Developer — write, modify, and test code."
+capabilities:
+  - code
+model: deepseek/deepseek-v4-flash
+max_rounds: 25
+temperature: 0.2

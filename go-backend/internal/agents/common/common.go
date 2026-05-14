@@ -32,14 +32,15 @@ func ToOpenAITools(tools []core.Tool) []core.OpenAITool {
 	return result
 }
 
-// AgentRole holds a loaded role definition from config/roles/<name>/
+// AgentRole holds a loaded role/worker definition.
 type AgentRole struct {
 	Name        string
 	Description string
 	Prompt      string
 	Tools       []string
 	MCPServers  []string
-	Imports     []string
+	Imports     []string // legacy: from roles/<name>/config.yaml
+	Capabilities []string // new: from workers/<name>.yaml
 	MaxRounds   int
 	Temperature float32
 	Model       string
@@ -47,7 +48,7 @@ type AgentRole struct {
 	SandboxTier string // "isolated" (default), "bridged", "native"
 }
 
-// agentConfig is the YAML structure for config/roles/<name>/config.yaml
+// agentConfig is the YAML structure for config/roles/<name>/config.yaml (legacy)
 type agentConfig struct {
 	Description string   `yaml:"description"`
 	Tools       []string `yaml:"tools"`
@@ -60,19 +61,35 @@ type agentConfig struct {
 	Sandbox     string   `yaml:"sandbox"`
 }
 
-// ToolPackage is a shared tool group from config/tool_packages/<name>.yaml
+// workerConfig is the YAML structure for config/workers/<name>.yaml (new)
+type workerConfig struct {
+	Persona      string   `yaml:"persona"`
+	Capabilities []string `yaml:"capabilities"`
+	Tools        []string `yaml:"tools,omitempty"`
+	MCPServers   []string `yaml:"mcp_servers,omitempty"`
+	MaxRounds    int      `yaml:"max_rounds"`
+	Temperature  float64  `yaml:"temperature"`
+	Model        string   `yaml:"model"`
+	Sandbox      string   `yaml:"sandbox"`
+	Division     string   `yaml:"division,omitempty"`
+}
+
+// ToolPackage is a shared tool group (legacy name, still used internally).
 type ToolPackage struct {
 	Name        string
 	Description string
 	Tools       []string
 	MCPServers  []string
+	Skill       string // SKILL.md content from capability folder
 }
 
-// toolPackageConfig is the YAML structure for config/tool_packages/<name>.yaml
+// toolPackageConfig is the YAML structure for config/tool_packages/<name>.yaml (legacy)
+// and config/capabilities/<name>/capability.yaml (new).
 type toolPackageConfig struct {
-	Description string   `yaml:"description"`
-	Tools       []string `yaml:"tools"`
-	MCPServers  []string `yaml:"mcp_servers"`
+	Description  string   `yaml:"description"`
+	Tools        []string `yaml:"tools"`
+	MCPServers   []string `yaml:"mcp_servers"`
+	SandboxTier  string   `yaml:"sandbox_tier"`
 }
 
 // promptData holds template variables for the main system prompt.
@@ -213,13 +230,16 @@ func ReloadPromptTemplate() {
 	toolPackages = nil
 	toolPkgModTime = map[string]time.Time{}
 	toolPkgMu.Unlock()
+
+	// Also invalidate capabilities cache
+	_ = dirChanged("capabilities", toolPkgModTime)
 }
 
-// LoadToolPackages reads all .yaml files from the kernel's config/tool_packages/ directory.
-// Auto-reloads when files change on disk.
+// LoadToolPackages reads capabilities from config/capabilities/ (new) then
+// config/tool_packages/ (legacy), then org-specific dirs. Auto-reloads on change.
 func LoadToolPackages() map[string]*ToolPackage {
 	toolPkgMu.RLock()
-	if toolPackages != nil && !dirChanged("tool_packages", toolPkgModTime) {
+	if toolPackages != nil && !dirChanged("tool_packages", toolPkgModTime) && !dirChanged("capabilities", toolPkgModTime) {
 		pkgs := toolPackages
 		toolPkgMu.RUnlock()
 		return pkgs
@@ -229,21 +249,35 @@ func LoadToolPackages() map[string]*ToolPackage {
 	toolPkgMu.Lock()
 	defer toolPkgMu.Unlock()
 
-	if toolPackages != nil && !dirChanged("tool_packages", toolPkgModTime) {
+	if toolPackages != nil && !dirChanged("tool_packages", toolPkgModTime) && !dirChanged("capabilities", toolPkgModTime) {
 		return toolPackages
 	}
 
 	configDir := findKernelConfigDir()
-	dir := "config/tool_packages"
+
+	// Start with legacy tool_packages (flat YAML files)
+	legacyDir := "config/tool_packages"
 	if configDir != "" {
-		dir = filepath.Join(configDir, "tool_packages")
+		legacyDir = filepath.Join(configDir, "tool_packages")
 	}
-	toolPackages = LoadToolPackagesFrom(dir)
-	updateModTime("tool_packages", dir, toolPkgModTime)
+	toolPackages = LoadToolPackagesFrom(legacyDir)
+
+	// Overlay with new capabilities (folders with capability.yaml + SKILL.md)
+	capDir := "config/capabilities"
+	if configDir != "" {
+		capDir = filepath.Join(configDir, "capabilities")
+	}
+	capabilities := LoadCapabilitiesFrom(capDir)
+	for name, pkg := range capabilities {
+		toolPackages[name] = pkg // new overrides legacy
+	}
+
+	updateModTime("tool_packages", legacyDir, toolPkgModTime)
+	updateModTime("capabilities", capDir, toolPkgModTime)
 	return toolPackages
 }
 
-// LoadToolPackagesFrom scans a directory for .yaml tool package files.
+// LoadToolPackagesFrom scans a directory for .yaml tool package files (legacy flat format).
 func LoadToolPackagesFrom(dir string) map[string]*ToolPackage {
 	pkgs := make(map[string]*ToolPackage)
 
@@ -273,6 +307,73 @@ func LoadToolPackagesFrom(dir string) map[string]*ToolPackage {
 		}
 	}
 	return pkgs
+}
+
+// LoadCapabilitiesFrom scans a directory for capability folders (new format).
+// Each subfolder should contain capability.yaml and optionally SKILL.md.
+func LoadCapabilitiesFrom(dir string) map[string]*ToolPackage {
+	pkgs := make(map[string]*ToolPackage)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return pkgs
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		cfgPath := filepath.Join(dir, name, "capability.yaml")
+		data, err := os.ReadFile(cfgPath)
+		if err != nil {
+			continue
+		}
+		var pc toolPackageConfig
+		if err := yaml.Unmarshal(data, &pc); err != nil {
+			continue
+		}
+
+		// Load SKILL.md if present
+		skill := ""
+		if skillData, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md")); err == nil {
+			skill = string(skillData)
+		}
+
+		pkgs[name] = &ToolPackage{
+			Name:        name,
+			Description: pc.Description,
+			Tools:       pc.Tools,
+			MCPServers:  pc.MCPServers,
+			Skill:       skill,
+		}
+	}
+	return pkgs
+}
+
+// GetCapabilitySkill returns the SKILL.md content for a capability by name.
+func GetCapabilitySkill(name string) string {
+	pkgs := LoadToolPackages()
+	if pkg, ok := pkgs[name]; ok {
+		return pkg.Skill
+	}
+	return ""
+}
+
+// BuildWorkerPrompt assembles a worker's full prompt from persona + capability skills.
+func BuildWorkerPrompt(persona string, capabilities []string) string {
+	var sb strings.Builder
+	if persona != "" {
+		sb.WriteString(persona)
+		sb.WriteString("\n\n")
+	}
+	for _, capName := range capabilities {
+		skill := GetCapabilitySkill(capName)
+		if skill != "" {
+			fmt.Fprintf(&sb, "--- %s capability ---\n%s\n\n", capName, skill)
+		}
+	}
+	return sb.String()
 }
 
 // ResolveImports expands a list of tool package names into concrete tools + mcp_servers.
@@ -306,11 +407,11 @@ func ResolveImports(imports []string) (tools []string, mcpServers []string) {
 	return tools, mcpServers
 }
 
-// LoadAgentRoles reads role folders from the kernel's config/roles/ directory.
-// Auto-reloads when files change on disk. Use LoadAgentRolesFrom for org-specific directories.
+// LoadAgentRoles reads workers from config/workers/ (new) then config/roles/ (legacy).
+// Auto-reloads when files change on disk.
 func LoadAgentRoles() map[string]*AgentRole {
 	agentMu.RLock()
-	if agentRoles != nil && !dirChanged("roles", agentModTime) {
+	if agentRoles != nil && !dirChanged("roles", agentModTime) && !dirChanged("workers", agentModTime) {
 		roles := agentRoles
 		agentMu.RUnlock()
 		return roles
@@ -320,17 +421,31 @@ func LoadAgentRoles() map[string]*AgentRole {
 	agentMu.Lock()
 	defer agentMu.Unlock()
 
-	if agentRoles != nil && !dirChanged("roles", agentModTime) {
+	if agentRoles != nil && !dirChanged("roles", agentModTime) && !dirChanged("workers", agentModTime) {
 		return agentRoles
 	}
 
 	configDir := findKernelConfigDir()
-	dir := "config/roles"
+
+	// Start with legacy roles (folder format)
+	legacyDir := "config/roles"
 	if configDir != "" {
-		dir = filepath.Join(configDir, "roles")
+		legacyDir = filepath.Join(configDir, "roles")
 	}
-	agentRoles = LoadAgentRolesFrom(dir)
-	updateModTime("roles", dir, agentModTime)
+	agentRoles = LoadAgentRolesFrom(legacyDir)
+
+	// Overlay with new workers (flat YAML format)
+	workersDir := "config/workers"
+	if configDir != "" {
+		workersDir = filepath.Join(configDir, "workers")
+	}
+	workers := LoadWorkersFrom(workersDir)
+	for name, role := range workers {
+		agentRoles[name] = role // new overrides legacy
+	}
+
+	updateModTime("roles", legacyDir, agentModTime)
+	updateModTime("workers", workersDir, agentModTime)
 	return agentRoles
 }
 
@@ -405,6 +520,122 @@ func loadRoleFromFolder(folder string) *AgentRole {
 		Division:    ac.Division,
 		SandboxTier: ac.Sandbox,
 	}
+}
+
+// LoadWorkersFrom scans a directory for flat worker YAML files (new format).
+// Each file is config/workers/<name>.yaml with persona + capabilities fields.
+// Capabilities are resolved into tools + mcp_servers, and SKILL.md content
+// from each capability is stitched into the worker's prompt.
+func LoadWorkersFrom(dir string) map[string]*AgentRole {
+	roles := make(map[string]*AgentRole)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return roles
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".yaml")
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		var wc workerConfig
+		if err := yaml.Unmarshal(data, &wc); err != nil {
+			continue
+		}
+		if wc.Persona == "" && len(wc.Capabilities) == 0 {
+			continue
+		}
+
+		maxRounds := wc.MaxRounds
+		if maxRounds == 0 {
+			maxRounds = 15
+		}
+		temp := float32(0.4)
+		if wc.Temperature != 0 {
+			temp = float32(wc.Temperature)
+		}
+
+		// Resolve capabilities → tools + mcp_servers + skills
+		var tools, mcpServers []string
+		if len(wc.Capabilities) > 0 {
+			resolvedTools, resolvedMCP := ResolveImports(wc.Capabilities)
+			tools = append(tools, resolvedTools...)
+			mcpServers = append(mcpServers, resolvedMCP...)
+		}
+		// Also allow direct tools/mcp_servers in worker YAML
+		tools = append(tools, wc.Tools...)
+		mcpServers = append(mcpServers, wc.MCPServers...)
+
+		// Build prompt from persona + capability skills
+		prompt := BuildWorkerPrompt(wc.Persona, wc.Capabilities)
+
+		// Determine sandbox tier: worker override > highest capability requirement
+		sandboxTier := wc.Sandbox
+		if sandboxTier == "" {
+			sandboxTier = highestSandboxTier(wc.Capabilities)
+		}
+
+		roles[name] = &AgentRole{
+			Name:         name,
+			Description:  wc.Persona,
+			Prompt:       prompt,
+			Tools:        tools,
+			MCPServers:   mcpServers,
+			Capabilities: wc.Capabilities,
+			Imports:      wc.Capabilities, // for FormatAgentList compat
+			MaxRounds:    maxRounds,
+			Temperature:  temp,
+			Model:        wc.Model,
+			Division:     wc.Division,
+			SandboxTier:  sandboxTier,
+		}
+	}
+	return roles
+}
+
+// highestSandboxTier returns the most privileged sandbox tier required by the given capabilities.
+func highestSandboxTier(capabilities []string) string {
+	pkgs := LoadToolPackages()
+	highest := ""
+	for _, name := range capabilities {
+		if _, ok := pkgs[name]; ok {
+			// Read sandbox_tier from the raw capability config
+			tier := capabilitySandboxTier(name)
+			switch {
+			case tier == "bridged":
+				return "bridged" // highest
+			case tier == "native" && highest != "bridged":
+				highest = "native"
+			case highest == "":
+				highest = tier
+			}
+		}
+	}
+	return highest
+}
+
+// capabilitySandboxTier reads the sandbox_tier field from a capability folder.
+func capabilitySandboxTier(name string) string {
+	configDir := findKernelConfigDir()
+	capDir := "config/capabilities"
+	if configDir != "" {
+		capDir = filepath.Join(configDir, "capabilities")
+	}
+	cfgPath := filepath.Join(capDir, name, "capability.yaml")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return ""
+	}
+	var pc toolPackageConfig
+	if err := yaml.Unmarshal(data, &pc); err != nil {
+		return ""
+	}
+	return pc.SandboxTier
 }
 
 // GetAgentRole returns a specific agent role by name.

@@ -1,0 +1,5 @@
+persona: "General-purpose worker — handle basic tasks when no specialist matches."
+capabilities:
+  - shell
+max_rounds: 15
+temperature: 0.4

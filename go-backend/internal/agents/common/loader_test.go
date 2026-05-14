@@ -19,57 +19,67 @@ func TestLoadAgentRoles(t *testing.T) {
 		t.Fatal("no roles loaded")
 	}
 
-	// Verify expected roles exist (employee names)
-	expected := []string{"jake", "sarah", "alex", "marcus", "elena", "ryan"}
-	for _, name := range expected {
+	// Verify new worker names exist (from config/workers/)
+	newWorkers := []string{"browser_ops", "code_ops", "desktop_ops", "researcher", "vision_ops", "shell_ops", "general"}
+	for _, name := range newWorkers {
 		role := roles[name]
 		if role == nil {
-			t.Errorf("missing role: %s", name)
+			t.Errorf("missing worker: %s", name)
 			continue
-		}
-		if role.Description == "" {
-			t.Errorf("%s: description is empty", name)
-		}
-		if len(role.Tools) == 0 && len(role.MCPServers) == 0 && len(role.Imports) == 0 {
-			t.Errorf("%s: no tools, mcp_servers, or imports configured", name)
 		}
 		if role.Prompt == "" {
 			t.Errorf("%s: prompt is empty", name)
+		}
+		if len(role.Tools) == 0 && len(role.MCPServers) == 0 && len(role.Capabilities) == 0 {
+			t.Errorf("%s: no tools, mcp_servers, or capabilities configured", name)
 		}
 		if role.MaxRounds == 0 {
 			t.Errorf("%s: max_rounds is zero", name)
 		}
 	}
 
-	// Test GetAgentRole resolves
-	r := GetAgentRole("sarah")
-	if r == nil {
-		t.Fatal("GetAgentRole(\"sarah\") returned nil")
-	}
-	if r.Name != "sarah" {
-		t.Errorf("expected name 'sarah', got '%s'", r.Name)
-	}
-	if r.Model == "" {
-		t.Errorf("expected sarah to have a model set, got empty")
-	}
-
-	// Test roles without model (inherit CTO's)
-	jake := GetAgentRole("jake")
-	if jake == nil {
-		t.Fatal("jake role not found")
-	}
-	if jake.Model != "" {
-		t.Errorf("expected jake model to be empty (inherit), got '%s'", jake.Model)
+	// Verify legacy role names still work (from config/roles/)
+	legacyNames := []string{"jake", "sarah", "alex", "marcus", "elena", "ryan"}
+	for _, name := range legacyNames {
+		role := roles[name]
+		if role == nil {
+			t.Errorf("missing legacy role: %s", name)
+			continue
+		}
+		if role.Prompt == "" {
+			t.Errorf("%s: prompt is empty", name)
+		}
 	}
 
-	// Test FormatAgentList
+	// Test new workers have capability skills stitched in
+	desktopOps := GetAgentRole("desktop_ops")
+	if desktopOps == nil {
+		t.Fatal("desktop_ops worker not found")
+	}
+	if !contains(desktopOps.Prompt, "desktop_observe") {
+		t.Errorf("desktop_ops prompt missing capability skill — expected 'desktop_observe' from SKILL.md, got:\n%s", desktopOps.Prompt[:200])
+	}
+	if desktopOps.SandboxTier != "bridged" {
+		t.Errorf("desktop_ops: expected sandbox 'bridged', got %q", desktopOps.SandboxTier)
+	}
+
+	// Test researcher model override
+	researcher := GetAgentRole("researcher")
+	if researcher == nil {
+		t.Fatal("researcher worker not found")
+	}
+	if researcher.Model != "qwen3.6-27b-q5_k_s" {
+		t.Errorf("researcher: expected model 'qwen3.6-27b-q5_k_s', got %q", researcher.Model)
+	}
+
+	// Test FormatAgentList includes both new and legacy
 	list := FormatAgentList()
 	if list == "" {
 		t.Error("FormatAgentList returned empty string")
 	}
-	for _, name := range expected {
+	for _, name := range newWorkers {
 		if !contains(list, name) {
-			t.Errorf("FormatAgentList missing role: %s", name)
+			t.Errorf("FormatAgentList missing worker: %s", name)
 		}
 	}
 }
@@ -86,10 +96,19 @@ func TestToolPackages(t *testing.T) {
 		t.Fatal("no tool packages loaded")
 	}
 
+	// Verify both legacy and new capabilities are loaded
 	expected := []string{"browser", "research", "vision", "shell", "desktop", "code"}
 	for _, name := range expected {
 		if pkgs[name] == nil {
-			t.Errorf("missing tool package: %s", name)
+			t.Errorf("missing tool package/capability: %s", name)
+		}
+	}
+
+	// Verify new capabilities have SKILL.md content
+	for _, name := range expected {
+		pkg := pkgs[name]
+		if pkg.Skill == "" {
+			t.Errorf("capability %q has no SKILL.md content", name)
 		}
 	}
 
@@ -120,23 +139,20 @@ func TestToolPackages(t *testing.T) {
 		t.Error("ResolveImports missing 'bash' tool from shell package")
 	}
 
-	// Test imports are resolved in roles
-	jake := GetAgentRole("jake")
-	if jake == nil {
-		t.Fatal("jake role not found")
+	// Test new workers resolve capabilities into tools
+	browserOps := GetAgentRole("browser_ops")
+	if browserOps == nil {
+		t.Fatal("browser_ops worker not found")
 	}
-	if len(jake.Imports) == 0 {
-		t.Error("jake has no imports")
-	}
-	// Jake imports browser — should have bash tool resolved
+	// browser_ops imports browser → should have bash tool
 	hasBash = false
-	for _, t := range jake.Tools {
+	for _, t := range browserOps.Tools {
 		if t == "bash" {
 			hasBash = true
 		}
 	}
 	if !hasBash {
-		t.Error("jake missing 'bash' tool from browser import")
+		t.Error("browser_ops missing 'bash' tool from browser capability")
 	}
 }
 

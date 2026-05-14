@@ -1,0 +1,5 @@
+persona: "Web Operations — browse the web, find things, download files, fill forms."
+capabilities:
+  - browser
+max_rounds: 15
+temperature: 0.3

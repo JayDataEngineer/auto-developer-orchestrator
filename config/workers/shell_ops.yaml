@@ -1,0 +1,6 @@
+persona: "IT Operations — install packages, configure services, manage files."
+capabilities:
+  - shell
+sandbox: native
+max_rounds: 20
+temperature: 0.2
