@@ -52,6 +52,14 @@ export interface Conversation {
 	title: string;
 }
 
+export interface Project {
+	name: string;
+	path: string;
+	description?: string;
+	version?: string;
+	hasManifest?: boolean;
+}
+
 export type WorkbenchTab = "vnc" | "editor" | "scheduler";
 
 // ── State ──
@@ -79,6 +87,9 @@ interface PuxState {
 	// Conversations
 	conversations: Conversation[];
 
+	// Projects
+	projects: Project[];
+
 	// Workbench (auto-driven by SSE tool events)
 	activeWorkbenchTab: WorkbenchTab;
 
@@ -91,6 +102,7 @@ interface PuxState {
 	respondToPlan: (action: string, feedback?: string) => Promise<void>;
 	loadModels: () => Promise<void>;
 	loadConversations: () => Promise<void>;
+	loadProjects: () => Promise<void>;
 	setProject: (project: string) => void;
 	clearError: () => void;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
@@ -109,6 +121,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	activeAgentId: "",
 	modelList: [],
 	conversations: [],
+	projects: [],
 	activeWorkbenchTab: "vnc",
 	lastError: null,
 
@@ -178,6 +191,22 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			if (!resp.ok) return;
 			const data = await resp.json();
 			set({ conversations: Array.isArray(data) ? data : [] });
+		} catch {
+			// ignore
+		}
+	},
+
+	loadProjects: async () => {
+		try {
+			const resp = await fetch("/api/pux/projects");
+			if (!resp.ok) return;
+			const data = await resp.json();
+			const projects = Array.isArray(data) ? data : [];
+			set({ projects });
+			// Auto-select first project if none active
+			if (!get().activeProject && projects.length > 0) {
+				set({ activeProject: projects[0].name || projects[0].path });
+			}
 		} catch {
 			// ignore
 		}

@@ -4,7 +4,7 @@ import {
 	AssistantRuntimeProvider,
 } from "@assistant-ui/react";
 import { Panel, Group, Separator } from "react-resizable-panels";
-import { usePuxStore, type WorkbenchTab } from "@/lib/pux-store";
+import { usePuxStore, type WorkbenchTab, type Conversation } from "@/lib/pux-store";
 import { puxChatAdapter } from "@/lib/pux-chat-adapter";
 import { Thread } from "@/components/assistant-ui/thread";
 import { VNCViewer } from "@/components/workbench/vnc-viewer";
@@ -35,7 +35,10 @@ import {
 	Monitor,
 	Code2,
 	Calendar,
-	MessageSquare,
+	ChevronRight,
+	ChevronDown,
+	FolderOpen,
+	Folder,
 } from "lucide-react";
 
 function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
@@ -59,10 +62,97 @@ function relativeTime(iso: string): string {
 	return `${days}d`;
 }
 
+function ProjectGroup({
+	projectKey,
+	project,
+	conversations,
+	isActive,
+	onSelect,
+}: {
+	projectKey: string;
+	project: { name: string; path: string; description?: string; hasManifest?: boolean } | undefined;
+	conversations: Conversation[];
+	isActive: boolean;
+	onSelect: (project: string) => void;
+}) {
+	const [expanded, setExpanded] = useState(true);
+	const displayName = projectKey.split("/").pop() || projectKey;
+
+	return (
+		<SidebarGroup>
+			<button
+				onClick={() => {
+					onSelect(projectKey);
+					setExpanded(!expanded);
+				}}
+				className={cn(
+					"flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+					isActive && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
+				)}
+			>
+				{expanded ? (
+					<ChevronDown size={12} className="shrink-0" />
+				) : (
+					<ChevronRight size={12} className="shrink-0" />
+				)}
+				{isActive ? (
+					<FolderOpen size={13} className="shrink-0 text-yellow-500" />
+				) : (
+					<Folder size={13} className="shrink-0 text-yellow-500" />
+				)}
+				<span className="truncate">{displayName}</span>
+				{project?.hasManifest && (
+					<span className="ml-auto shrink-0 rounded bg-sidebar-primary/20 px-1 text-[9px] text-sidebar-primary">org</span>
+				)}
+			</button>
+			{expanded && conversations.length > 0 && (
+				<SidebarGroupContent>
+					<div className="flex flex-col gap-0.5 px-1 pt-0.5">
+						{conversations.map((c) => (
+							<button
+								key={`${c.project}-${c.agentId}`}
+								onClick={() => onSelect(c.project)}
+								className={cn(
+									"flex w-full flex-col items-start gap-0 rounded-md px-2 py-1 text-left text-[12px] transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+									isActive && "text-sidebar-accent-foreground",
+								)}
+							>
+								<span className="w-full truncate">
+									{c.title || c.lastMessage || "Untitled"}
+								</span>
+								<span className="text-[10px] text-muted-foreground">
+									{relativeTime(c.lastAt)}
+									{c.messageCount > 0 && ` · ${c.messageCount} msgs`}
+								</span>
+							</button>
+						))}
+					</div>
+				</SidebarGroupContent>
+			)}
+		</SidebarGroup>
+	);
+}
+
 function AppSidebar() {
 	const conversations = usePuxStore((s) => s.conversations);
+	const projects = usePuxStore((s) => s.projects);
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const setProject = usePuxStore((s) => s.setProject);
+
+	// Group conversations by project
+	const convsByProject = new Map<string, Conversation[]>();
+	for (const c of conversations) {
+		const existing = convsByProject.get(c.project) || [];
+		existing.push(c);
+		convsByProject.set(c.project, existing);
+	}
+
+	// All project keys: known projects first, then any projects only in conversations
+	const knownNames = new Set(projects.map((p) => p.name));
+	const allProjectKeys = [
+		...projects.map((p) => p.name),
+		...Array.from(convsByProject.keys()).filter((k) => !knownNames.has(k)),
+	];
 
 	return (
 		<Sidebar collapsible="icon">
@@ -81,38 +171,26 @@ function AppSidebar() {
 				</SidebarMenu>
 			</SidebarHeader>
 			<SidebarContent>
-				<SidebarGroup>
-					<SidebarGroupLabel>History</SidebarGroupLabel>
-					<SidebarGroupContent>
-						{conversations.length === 0 ? (
+				{allProjectKeys.length === 0 ? (
+					<SidebarGroup>
+						<SidebarGroupContent>
 							<div className="px-2 py-3 text-center text-xs text-muted-foreground">
-								No conversations yet
+								No projects yet
 							</div>
-						) : (
-							<div className="flex flex-col gap-0.5 px-1">
-								{conversations.map((c) => (
-									<button
-										key={`${c.project}-${c.agentId}`}
-										onClick={() => setProject(c.project)}
-										className={cn(
-											"flex w-full flex-col items-start gap-0 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-											activeProject === c.project &&
-												"bg-sidebar-accent font-medium text-sidebar-accent-foreground",
-										)}
-									>
-										<span className="w-full truncate">
-											{c.title || c.lastMessage || "Untitled"}
-										</span>
-										<span className="text-[11px] text-muted-foreground">
-											{relativeTime(c.lastAt)}
-											{c.messageCount > 0 && ` · ${c.messageCount} msgs`}
-										</span>
-									</button>
-								))}
-							</div>
-						)}
-					</SidebarGroupContent>
-				</SidebarGroup>
+						</SidebarGroupContent>
+					</SidebarGroup>
+				) : (
+					allProjectKeys.map((projectKey) => (
+						<ProjectGroup
+							key={projectKey}
+							projectKey={projectKey}
+							project={projects.find((p) => p.name === projectKey)}
+							conversations={convsByProject.get(projectKey) || []}
+							isActive={activeProject === projectKey}
+							onSelect={setProject}
+						/>
+					))
+				)}
 			</SidebarContent>
 			<SidebarFooter>
 				<SidebarMenu>
@@ -173,6 +251,7 @@ function Workbench() {
 export function App() {
 	const loadModels = usePuxStore((s) => s.loadModels);
 	const loadConversations = usePuxStore((s) => s.loadConversations);
+	const loadProjects = usePuxStore((s) => s.loadProjects);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
 
 	const toggleWorkbench = useCallback(() => {
@@ -181,8 +260,9 @@ export function App() {
 
 	useEffect(() => {
 		loadModels();
+		loadProjects();
 		loadConversations();
-	}, [loadModels, loadConversations]);
+	}, [loadModels, loadConversations, loadProjects]);
 
 	return (
 		<PuxRuntimeProvider>
