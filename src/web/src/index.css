@@ -87,6 +87,25 @@ body {
   height: 100vh;
 }
 
+/* Sidebar width utilities — Tailwind v4 doesn't generate w-[--css-var] */
+.w-\[--sidebar-width\] {
+  width: var(--sidebar-width);
+}
+.w-\[--sidebar-width-icon\] {
+  width: var(--sidebar-width-icon);
+}
+
+/* Sidebar collapsed icon width (left side: icon + padding) */
+[data-collapsible="icon"] > .w-\[--sidebar-width\],
+.group[data-collapsible="icon"] .w-\[--sidebar-width\] {
+  width: var(--sidebar-width-icon);
+}
+
+/* Floating/inset variant: icon width with padding */
+.group[data-collapsible="icon"] .group-data-\[collapsible\=icon\]\:w-\[--sidebar-width-icon\] {
+  width: var(--sidebar-width-icon);
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }

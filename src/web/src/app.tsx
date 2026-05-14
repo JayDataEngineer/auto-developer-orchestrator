@@ -86,7 +86,7 @@ export function App() {
 
 	return (
 		<PuxRuntimeProvider>
-			<SidebarProvider className="h-svh overflow-hidden">
+			<SidebarProvider className="h-svh overflow-hidden" defaultOpen={true}>
 				<AppSidebar />
 				<SidebarInset className="flex h-svh flex-col overflow-hidden">
 					<header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
@@ -111,7 +111,7 @@ export function App() {
 								<Thread />
 							</Panel>
 							<Separator className="w-px bg-border hover:bg-ring/50 active:bg-ring transition-colors cursor-col-resize" />
-							<Panel defaultSize={45} minSize={20} maxSize={65} collapsible>
+							<Panel defaultSize={45} minSize={15}>
 								<div className="flex h-full flex-col bg-background">
 									<div className="flex h-9 items-center border-b border-border px-3">
 										<span className="text-sm font-semibold text-foreground">Workbench</span>

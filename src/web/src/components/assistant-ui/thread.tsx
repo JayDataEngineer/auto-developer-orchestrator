@@ -58,7 +58,7 @@ export const Thread: FC = () => {
 				data-slot="aui_thread-viewport"
 				className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
 			>
-				<div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pt-4">
+				<div className="mx-auto flex w-full max-w-none flex-1 flex-col px-4 pt-4">
 					<AuiIf condition={(s) => s.thread.isEmpty}>
 						<ThreadWelcome />
 					</AuiIf>
