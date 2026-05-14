@@ -242,44 +242,50 @@ function AppSidebar() {
 	);
 }
 
-// ── Workbench ──
+// ── Workbench tabs (rendered in the main navbar) ──
 
-function Workbench() {
+function WorkbenchTabs() {
 	const storeTab = usePuxStore((s) => s.activeWorkbenchTab);
 	const setStoreTab = usePuxStore((s) => s.setWorkbenchTab);
 
 	const tabs: { id: WorkbenchTab; icon: React.ReactNode; label: string }[] = [
 		{ id: "vnc", icon: <Monitor size={14} />, label: "Sandbox" },
 		{ id: "editor", icon: <Code2 size={14} />, label: "Editor" },
-		{
-			id: "scheduler",
-			icon: <Calendar size={14} />,
-			label: "Scheduler",
-		},
+		{ id: "scheduler", icon: <Calendar size={14} />, label: "Scheduler" },
 	];
 
 	return (
+		<>
+			<div className="mx-2 h-5 w-px bg-border" />
+			{tabs.map((t) => (
+				<button
+					key={t.id}
+					onClick={() => setStoreTab(t.id)}
+					className={cn(
+						"inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+						storeTab === t.id
+							? "bg-accent text-accent-foreground"
+							: "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
+					)}
+					aria-label={t.label}
+				>
+					{t.icon}
+				</button>
+			))}
+			<span className="ml-1 text-xs font-medium text-muted-foreground">
+				{tabs.find((t) => t.id === storeTab)?.label}
+			</span>
+		</>
+	);
+}
+
+// ── Workbench content (no header — tabs are in the navbar) ──
+
+function Workbench() {
+	const storeTab = usePuxStore((s) => s.activeWorkbenchTab);
+
+	return (
 		<div className="flex h-full flex-col bg-background">
-			<div className="flex h-9 items-center gap-0.5 border-b border-border px-1">
-				{tabs.map((t) => (
-					<button
-						key={t.id}
-						onClick={() => setStoreTab(t.id)}
-						className={cn(
-							"inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors",
-							storeTab === t.id
-								? "bg-accent text-accent-foreground"
-								: "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-						)}
-						aria-label={t.label}
-					>
-						{t.icon}
-					</button>
-				))}
-				<span className="ml-2 text-sm font-semibold text-foreground">
-					{tabs.find((t) => t.id === storeTab)?.label}
-				</span>
-			</div>
 			<div className="flex-1 overflow-hidden">
 				{storeTab === "vnc" && <VNCViewer />}
 				{storeTab === "editor" && <EditorPanel />}
@@ -337,6 +343,8 @@ export function App() {
 					>
 						<TerminalIcon className="size-4" />
 					</Button>
+					{/* Workbench tabs — shown in navbar when workbench is open */}
+					{workbenchVisible && <WorkbenchTabs />}
 					<Button
 						variant="ghost"
 						size="icon"
