@@ -109,7 +109,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// Register ask_user tool (Contract 3: no subscriber injection — uses context)
 	if cfg.Subscriber != nil {
 		ctoTools = append(ctoTools, asktool.NewAskUserTool())
-		ctoTools = append(ctoTools, plantool.NewPlanTool(cfg.ProjectDir))
+
+		// Plan tool uses PlanStore (ArtifactStore contract) for file I/O
+		plansDir := filepath.Join(cfg.ProjectDir, ".pux", "plans")
+		planStore := autoconfig.NewPlanStore(plansDir)
+		ctoTools = append(ctoTools, plantool.NewPlanTool(cfg.ProjectDir, planStore))
 	}
 
 	if cfg.MemoryStore != nil {
@@ -189,13 +193,18 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		logger.Printf("Browser a11y/cookie/storage tools loaded for employees: 8 tools")
 	}
 
+	// Application profiles — shared between CTO (manage_profile) and employees (app_profile)
+	profileStore := profiles.NewStore(cfg.ProjectDir)
+	profileAdapter := autoconfig.NewProfileStore(profileStore)
+	ctoTools = append(ctoTools, autoconfig.NewProfileTool(profileAdapter))
+	logger.Printf("Profile management tool loaded for CTO: manage_profile")
+
 	if cfg.DesktopProvider != nil {
 		sandboxIDFn := func() string { return cfg.SandboxID }
 		employeeTools = desktoptools.RegisterDesktopTools(employeeTools, cfg.DesktopProvider, sandboxIDFn)
 		logger.Printf("Desktop tools loaded for employees: 5 tools")
 
 		// Application profiles — semantic interaction layer on top of desktop tools
-		profileStore := profiles.NewStore(cfg.ProjectDir)
 		employeeTools = appprofile.RegisterAll(employeeTools, profileStore, cfg.DesktopProvider, sandboxIDFn)
 		logger.Printf("App profile tools loaded for employees: app_interact, app_profile")
 	}

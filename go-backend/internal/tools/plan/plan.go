@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/autoconfig"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
 
@@ -55,15 +56,17 @@ func (r *planRegistry) Resolve(id string, response PlanResponse) bool {
 
 // PlanTool lets the AI create an execution plan that must be approved by the user.
 // The plan is persisted to .pux/plans/{name}.md and blocks until the user responds.
+// File I/O goes through PlanStore (ArtifactStore contract) for path safety and consistency.
 //
 // Contract 3 compliance: does NOT take an SSE subscriber in the constructor.
 // Retrieves it from context (set by AgentLoop) when needed.
 type PlanTool struct {
 	projectDir string
+	store      *autoconfig.PlanStore
 }
 
-func NewPlanTool(projectDir string) *PlanTool {
-	return &PlanTool{projectDir: projectDir}
+func NewPlanTool(projectDir string, store *autoconfig.PlanStore) *PlanTool {
+	return &PlanTool{projectDir: projectDir, store: store}
 }
 
 func (t *PlanTool) Name() string { return "create_plan" }
@@ -99,21 +102,21 @@ func (t *PlanTool) Execute(ctx context.Context, args map[string]any) (any, error
 		return nil, fmt.Errorf("create_plan: invalid name (use lowercase letters, numbers, dashes)")
 	}
 
-	// Write plan to .pux/plans/{name}.md
-	plansDir := filepath.Join(t.projectDir, ".pux", "plans")
-	if err := os.MkdirAll(plansDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create_plan: failed to create plans directory: %w", err)
+	// Write plan through PlanStore (ArtifactStore contract — path safety, name validation)
+	header := fmt.Sprintf("# Plan: %s\n\nCreated: %s\n\n", name, time.Now().Format("2006-01-02 15:04:05"))
+	spec := map[string]any{"content": header + content}
+	result, err := t.store.Put(context.Background(), safeName, spec)
+	if err != nil {
+		return nil, fmt.Errorf("create_plan: %w", err)
 	}
 
+	// Derive plan path for event emission
+	plansDir := filepath.Join(t.projectDir, ".pux", "plans")
 	planPath := filepath.Join(plansDir, safeName+".md")
-	// Prepend timestamp header
-	header := fmt.Sprintf("# Plan: %s\n\nCreated: %s\n\n", name, time.Now().Format("2006-01-02 15:04:05"))
-	if err := os.WriteFile(planPath, []byte(header+content), 0o644); err != nil {
-		return nil, fmt.Errorf("create_plan: failed to write plan file: %w", err)
-	}
 
 	// Generate unique plan ID
 	planID := fmt.Sprintf("p_%d_%s", time.Now().UnixNano(), safeName)
+	_ = result // result message used implicitly
 
 	// Register pending plan
 	responseCh := PendingPlans.Register(planID)
