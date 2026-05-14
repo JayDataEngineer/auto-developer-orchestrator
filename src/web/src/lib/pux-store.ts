@@ -77,9 +77,10 @@ interface PuxState {
 	// Compaction (Contract 2.5)
 	compacting: boolean;
 
-	// Project
+	// Conversation
 	activeProject: string;
 	activeAgentId: string;
+	conversationKey: string;
 
 	// Model
 	modelList: Array<{ id: string; name: string; provider: string }>;
@@ -104,6 +105,7 @@ interface PuxState {
 	loadConversations: () => Promise<void>;
 	loadProjects: () => Promise<void>;
 	setProject: (project: string) => void;
+	setConversation: (project: string, agentId: string) => void;
 	clearError: () => void;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 }
@@ -119,6 +121,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	compacting: false,
 	activeProject: "",
 	activeAgentId: "",
+	conversationKey: "",
 	modelList: [],
 	conversations: [],
 	projects: [],
@@ -184,6 +187,13 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	setProject: (project) => set({ activeProject: project }),
+
+	setConversation: (project, agentId) =>
+		set({
+			activeProject: project,
+			activeAgentId: agentId || "",
+			conversationKey: `${project}:${agentId || "default"}`,
+		}),
 
 	loadConversations: async () => {
 		try {
