@@ -1,0 +1,131 @@
+import { useEffect, useRef, useCallback } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
+
+interface TerminalPanelProps {
+	cwd?: string;
+}
+
+export function TerminalPanel({ cwd }: TerminalPanelProps) {
+	const containerRef = useRef<HTMLDivElement>(null);
+	const termRef = useRef<Terminal | null>(null);
+	const wsRef = useRef<WebSocket | null>(null);
+	const fitRef = useRef<FitAddon | null>(null);
+
+	const connect = useCallback(() => {
+		if (!containerRef.current) return;
+
+		// Clean up previous
+		if (termRef.current) {
+			termRef.current.dispose();
+		}
+		if (wsRef.current) {
+			wsRef.current.close();
+		}
+
+		const term = new Terminal({
+			cursorBlink: true,
+			fontSize: 13,
+			fontFamily: "Menlo, Monaco, 'Courier New', monospace",
+			theme: {
+				background: "#1a1a2e",
+				foreground: "#e0e0e0",
+				cursor: "#e0e0e0",
+				selectionBackground: "#444466",
+				black: "#1a1a2e",
+				red: "#e74c3c",
+				green: "#2ecc71",
+				yellow: "#f1c40f",
+				blue: "#3498db",
+				magenta: "#9b59b6",
+				cyan: "#1abc9c",
+				white: "#ecf0f1",
+				brightBlack: "#555577",
+				brightRed: "#e74c3c",
+				brightGreen: "#2ecc71",
+				brightYellow: "#f1c40f",
+				brightBlue: "#3498db",
+				brightMagenta: "#9b59b6",
+				brightCyan: "#1abc9c",
+				brightWhite: "#ecf0f1",
+			},
+		});
+
+		const fit = new FitAddon();
+		term.loadAddon(fit);
+		term.open(containerRef.current);
+		fit.fit();
+		term.focus();
+
+		termRef.current = term;
+		fitRef.current = fit;
+
+		// Connect WebSocket
+		const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+		let url = `${proto}//${window.location.host}/api/terminal/ws?shell=bash`;
+		if (cwd) url += `&cwd=${encodeURIComponent(cwd)}`;
+
+		const ws = new WebSocket(url);
+		ws.binaryType = "arraybuffer";
+		wsRef.current = ws;
+
+		ws.onmessage = (e) => {
+			const data = e.data instanceof ArrayBuffer
+				? new TextDecoder().decode(e.data)
+				: e.data;
+			term.write(data);
+		};
+
+		ws.onclose = () => {
+			term.write("\r\n\x1b[90m[disconnected — press Enter to reconnect]\x1b[0m");
+		};
+
+		term.onData((data) => {
+			if (ws.readyState === WebSocket.OPEN) {
+				ws.send(new TextEncoder().encode(data));
+			} else if (ws.readyState === WebSocket.CLOSED) {
+				// Reconnect on Enter
+				if (data === "\r") {
+					term.clear();
+					connect();
+				}
+			}
+		});
+
+		// Resize handler
+		const onResize = () => fit.fit();
+		window.addEventListener("resize", onResize);
+
+		return () => {
+			window.removeEventListener("resize", onResize);
+		};
+	}, [cwd]);
+
+	useEffect(() => {
+		const cleanup = connect();
+		return () => {
+			cleanup?.();
+			wsRef.current?.close();
+			termRef.current?.dispose();
+		};
+	}, [connect]);
+
+	// Fit on container resize
+	useEffect(() => {
+		if (!containerRef.current) return;
+		const observer = new ResizeObserver(() => {
+			fitRef.current?.fit();
+		});
+		observer.observe(containerRef.current);
+		return () => observer.disconnect();
+	}, []);
+
+	return (
+		<div
+			ref={containerRef}
+			className="h-full w-full bg-[#1a1a2e]"
+			style={{ padding: "4px 0 0 4px" }}
+		/>
+	);
+}

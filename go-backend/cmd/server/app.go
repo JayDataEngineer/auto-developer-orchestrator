@@ -629,6 +629,9 @@ func (a *App) buildRouter(
 			r.Get("/vnc-stats", a.sandboxHandler.VNCStats)
 		})
 
+		// Terminal WebSocket
+		r.Get("/terminal/ws", a.sandboxHandler.TerminalWS)
+
 		// Artifacts
 		r.Route("/pux/artifacts", func(r chi.Router) {
 			artifactHandler.RegisterRoutes(r)

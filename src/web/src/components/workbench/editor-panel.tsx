@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
+import { TerminalPanel } from "@/components/workbench/terminal-panel";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -258,6 +259,20 @@ export function EditorPanel() {
 	const [isCreating, setIsCreating] = useState(false);
 	const newFileInputRef = useRef<HTMLInputElement>(null);
 	const activeProject = usePuxStore((s) => s.activeProject);
+	const [showTerminal, setShowTerminal] = useState(false);
+
+	// Ctrl+` to toggle terminal
+	useEffect(() => {
+		const handler = (e: KeyboardEvent) => {
+			// Ctrl+` or Cmd+`
+			if (e.key === "`" && (e.ctrlKey || e.metaKey)) {
+				e.preventDefault();
+				setShowTerminal((prev) => !prev);
+			}
+		};
+		window.addEventListener("keydown", handler);
+		return () => window.removeEventListener("keydown", handler);
+	}, []);
 
 	// Refresh file tree
 	const refreshTree = useCallback(() => {
@@ -686,6 +701,23 @@ export function EditorPanel() {
 					</div>
 				</div>
 			</div>
+			{/* Terminal panel */}
+			{showTerminal && (
+				<div className="flex h-56 shrink-0 flex-col border-t border-border">
+					<div className="flex h-7 items-center justify-between border-b border-border bg-muted/20 px-2">
+						<span className="text-[11px] font-medium text-muted-foreground">Terminal</span>
+						<button
+							onClick={() => setShowTerminal(false)}
+							className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+						>
+							<XIcon size={12} />
+						</button>
+					</div>
+					<div className="flex-1 overflow-hidden">
+						<TerminalPanel cwd={activeProject} />
+					</div>
+				</div>
+			)}
 			{/* Status bar */}
 			{activePath && (
 				<div className="flex h-6 items-center justify-between border-t border-border bg-muted/30 px-3 text-[11px] text-muted-foreground">
