@@ -14,6 +14,7 @@ import {
 	FileCodeIcon,
 	XIcon,
 	Trash2Icon,
+	PlusIcon,
 } from "lucide-react";
 import {
 	ContextMenu,
@@ -202,7 +203,15 @@ export function EditorPanel() {
 	const [cursorPos, setCursorPos] = useState({ ln: 1, col: 1 });
 	const [dirty, setDirty] = useState<Set<string>>(new Set());
 	const [saving, setSaving] = useState(false);
+	const [deleteToast, setDeleteToast] = useState<{
+		name: string;
+		trashPath: string;
+	} | null>(null);
+	const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+	const [newFileName, setNewFileName] = useState("");
+	const [isCreating, setIsCreating] = useState(false);
+	const newFileInputRef = useRef<HTMLInputElement>(null);
 	const activeProject = usePuxStore((s) => s.activeProject);
 
 	// Refresh file tree
@@ -337,32 +346,61 @@ export function EditorPanel() {
 			);
 			if (resp.ok) {
 				const data = await resp.json();
+				const trashPath = data.trashPath as string;
 				fileCache.delete(path);
 				dirtyFiles.delete(path);
 				setDirty(new Set(dirtyFiles));
 				closeTab(path);
 				refreshTree();
-				return data.trashPath as string;
+				// Show undo toast
+				if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+				setDeleteToast({ name: path.split("/").pop() || path, trashPath });
+				deleteTimerRef.current = setTimeout(() => setDeleteToast(null), 5000);
 			}
-			return "";
 		},
 		[activeProject, closeTab, refreshTree],
 	);
 
-	// Restore file from trash
-	const restoreFile = useCallback(
-		async (trashPath: string) => {
-			if (!activeProject) return;
-			const resp = await fetch("/api/pux/file/restore", {
+	// Restore file from trash (undo delete)
+	const undoDelete = useCallback(async () => {
+		if (!deleteToast || !activeProject) return;
+		if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+		const { trashPath } = deleteToast;
+		setDeleteToast(null);
+		const resp = await fetch("/api/pux/file/restore", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ project: activeProject, trashPath }),
+		});
+		if (resp.ok) {
+			refreshTree();
+		}
+	}, [activeProject, deleteToast, refreshTree]);
+
+	// Create new file
+	const createFile = useCallback(
+		async (name: string) => {
+			if (!activeProject || !name.trim()) return;
+			const resp = await fetch("/api/pux/file/create", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ project: activeProject, trashPath }),
+				body: JSON.stringify({ project: activeProject, path: name.trim() }),
 			});
 			if (resp.ok) {
-				refreshTree();
+				await new Promise<void>((resolve) => {
+					refreshTree();
+					// Give tree a tick to re-render, then open the new file
+					setTimeout(() => {
+						openFile(name.trim());
+						resolve();
+					}, 100);
+				});
+			} else if (resp.status === 409) {
+				// File exists — just open it
+				openFile(name.trim());
 			}
 		},
-		[activeProject, refreshTree],
+		[activeProject, refreshTree, openFile],
 	);
 
 	const handleEditorMount: OnMount = (editor) => {
@@ -417,10 +455,56 @@ export function EditorPanel() {
 	}
 
 	return (
-		<div className="flex h-full flex-col">
+		<div className="relative flex h-full flex-col">
 			<div className="flex flex-1 overflow-hidden">
 				{/* File tree sidebar */}
-				<div className="w-48 shrink-0 overflow-y-auto border-r border-border py-1">
+				<div className="flex w-48 shrink-0 flex-col border-r border-border">
+					{/* Tree header with new file button */}
+					<div className="flex h-7 items-center justify-between border-b border-border px-2">
+						<span className="text-[11px] font-medium text-muted-foreground">Files</span>
+						<button
+							onClick={() => {
+								setIsCreating(true);
+								setNewFileName("");
+								setTimeout(() => newFileInputRef.current?.focus(), 0);
+							}}
+							className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+							title="New file"
+						>
+							<PlusIcon size={12} />
+						</button>
+					</div>
+					{/* Inline new file input */}
+					{isCreating && (
+						<div className="flex items-center gap-1 border-b border-border px-1 py-0.5">
+							<FileCodeIcon size={12} className="shrink-0 text-blue-400" />
+							<input
+								ref={newFileInputRef}
+								value={newFileName}
+								onChange={(e) => setNewFileName(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter" && newFileName.trim()) {
+										createFile(newFileName);
+										setIsCreating(false);
+										setNewFileName("");
+									} else if (e.key === "Escape") {
+										setIsCreating(false);
+										setNewFileName("");
+									}
+								}}
+								onBlur={() => {
+									if (newFileName.trim()) {
+										createFile(newFileName);
+									}
+									setIsCreating(false);
+									setNewFileName("");
+								}}
+								placeholder="filename.ts"
+								className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
+							/>
+						</div>
+					)}
+					<div className="flex-1 overflow-y-auto py-1">
 					{files.length === 0 ? (
 						<div className="flex h-full items-center justify-center">
 							<span className="px-2 text-center text-[11px] text-muted-foreground">
@@ -435,14 +519,11 @@ export function EditorPanel() {
 								depth={0}
 								onSelect={openFile}
 								selectedPath={activePath}
-								onDelete={(path) => {
-									if (confirm(`Delete ${path.split("/").pop()}? (Can be undone from .pux/trash/)`)) {
-										deleteFile(path);
-									}
-								}}
+								onDelete={(path) => deleteFile(path)}
 							/>
 						))
 					)}
+					</div>
 				</div>
 				{/* Editor area */}
 				<div className="flex min-w-0 flex-1 flex-col">
@@ -546,6 +627,20 @@ export function EditorPanel() {
 							Ln {cursorPos.ln}, Col {cursorPos.col}
 						</span>
 					</span>
+				</div>
+			)}
+			{/* Undo toast */}
+			{deleteToast && (
+				<div className="absolute bottom-8 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-lg animate-in fade-in slide-in-from-bottom-2">
+					<span>
+						Deleted <span className="font-medium">{deleteToast.name}</span>
+					</span>
+					<button
+						onClick={undoDelete}
+						className="font-medium text-primary hover:underline"
+					>
+						Undo
+					</button>
 				</div>
 			)}
 		</div>

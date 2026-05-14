@@ -75,6 +75,7 @@ func (h *PuxHandler) GetProjectFile(w http.ResponseWriter, r *http.Request) {
 
 // SaveProjectFile handles PUT /api/pux/file — writes content to a file.
 // Body: JSON { "project": "...", "path": "...", "content": "..." }
+// Also handles POST /api/pux/file with "create" mode — creates an empty file.
 func (h *PuxHandler) SaveProjectFile(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project string `json:"project"`
@@ -114,6 +115,54 @@ func (h *PuxHandler) SaveProjectFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// CreateProjectFile handles POST /api/pux/file/create — creates a new empty file.
+// Body: JSON { "project": "...", "path": "..." }
+func (h *PuxHandler) CreateProjectFile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+		Path    string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.Project == "" || req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project and path are required"})
+		return
+	}
+
+	projectPath := resolveProjectPath(req.Project, h.db)
+	if projectPath == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+
+	absPath := filepath.Join(projectPath, req.Path)
+	absPath, err := filepath.Abs(absPath)
+	if err != nil || !strings.HasPrefix(absPath, projectPath) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path escapes project directory"})
+		return
+	}
+
+	// Check if already exists
+	if _, err := os.Stat(absPath); err == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "file already exists"})
+		return
+	}
+
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if err := os.WriteFile(absPath, []byte{}, 0o644); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
 }
 
 // DeleteProjectFile handles DELETE /api/pux/file — moves file to .pux/trash/ for undo.
