@@ -86,9 +86,9 @@ export function App() {
 
 	return (
 		<PuxRuntimeProvider>
-			<SidebarProvider>
+			<SidebarProvider className="h-svh overflow-hidden">
 				<AppSidebar />
-				<SidebarInset>
+				<SidebarInset className="flex h-svh flex-col overflow-hidden">
 					<header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
 						<SidebarTrigger />
 						<Button
@@ -106,7 +106,7 @@ export function App() {
 						</Button>
 					</header>
 					{workbenchVisible ? (
-						<Group orientation="horizontal" className="flex-1">
+						<Group orientation="horizontal" className="flex-1 overflow-hidden">
 							<Panel defaultSize={55} minSize={30}>
 								<Thread />
 							</Panel>
