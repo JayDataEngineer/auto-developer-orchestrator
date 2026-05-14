@@ -31,6 +31,7 @@ import {
 	SidebarProvider,
 	SidebarRail,
 	SidebarTrigger,
+	useSidebar,
 } from "@/components/ui/sidebar";
 import {
 	Collapsible,
@@ -42,6 +43,8 @@ import { cn } from "@/lib/utils";
 import {
 	PanelRightOpen,
 	PanelRightClose,
+	PanelLeftOpen,
+	PanelLeftClose,
 	Zap,
 	Monitor,
 	Code2,
@@ -51,6 +54,7 @@ import {
 	Folder,
 	MessageSquare,
 	TerminalIcon,
+	Trash2,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -70,6 +74,19 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 }
 
 // ── Helpers ──
+
+function SidebarToggle() {
+	const { state } = useSidebar();
+	return (
+		<SidebarTrigger>
+			{state === "expanded" ? (
+				<PanelLeftClose className="size-4" />
+			) : (
+				<PanelLeftOpen className="size-4" />
+			)}
+		</SidebarTrigger>
+	);
+}
 
 function relativeTime(iso: string): string {
 	if (!iso) return "";
@@ -101,16 +118,17 @@ function ProjectGroup({
 	onSelectConversation: (project: string, agentId: string) => void;
 }) {
 	const displayName = projectKey.split("/").pop() || projectKey;
+	const deleteConversation = usePuxStore((s) => s.deleteConversation);
 
 	return (
-		<Collapsible defaultOpen className="group/collapsible">
+		<Collapsible defaultOpen={isActive} className="group/collapsible">
 			<SidebarMenuItem>
 				<CollapsibleTrigger asChild>
 					<SidebarMenuButton
 						isActive={isActive}
 						tooltip={displayName}
 					>
-						<ChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90" />
+						<ChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden" />
 						{isActive ? (
 							<FolderOpen className="text-yellow-500" />
 						) : (
@@ -118,24 +136,24 @@ function ProjectGroup({
 						)}
 						<span>{displayName}</span>
 						{project?.hasManifest && (
-							<span className="ml-auto rounded bg-sidebar-primary/20 px-1 text-[9px] text-sidebar-primary">
+							<span className="ml-auto rounded bg-sidebar-primary/20 px-1 text-[9px] text-sidebar-primary group-data-[collapsible=icon]:hidden">
 								org
 							</span>
 						)}
 					</SidebarMenuButton>
 				</CollapsibleTrigger>
 				{conversations.length > 0 && (
-					<CollapsibleContent>
+					<CollapsibleContent className="group-data-[collapsible=icon]:hidden">
 						<SidebarMenuSub>
 							{conversations.map((c) => (
-								<SidebarMenuSubItem key={`${c.project}-${c.agentId}`}>
+								<SidebarMenuSubItem key={`${c.project}-${c.agentId}`} className="group/sub">
 									<SidebarMenuSubButton
 										onClick={() =>
 											onSelectConversation(c.project, c.agentId)
 										}
 									>
 										<MessageSquare className="size-3" />
-										<div className="flex min-w-0 flex-col">
+										<div className="flex min-w-0 flex-1 flex-col">
 											<span className="truncate text-[12px]">
 												{c.title || c.lastMessage || "Untitled"}
 											</span>
@@ -145,6 +163,16 @@ function ProjectGroup({
 													` · ${c.messageCount} msgs`}
 											</span>
 										</div>
+										<button
+											onClick={(e) => {
+												e.stopPropagation();
+												deleteConversation(c.project, c.agentId);
+											}}
+											className="ml-1 shrink-0 rounded p-0.5 opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/sub:opacity-100"
+											title="Delete chat"
+										>
+											<Trash2 className="size-3" />
+										</button>
 									</SidebarMenuSubButton>
 								</SidebarMenuSubItem>
 							))}
@@ -200,7 +228,7 @@ function AppSidebar() {
 					</SidebarMenuItem>
 				</SidebarMenu>
 			</SidebarHeader>
-			<SidebarContent>
+			<SidebarContent className="group-data-[collapsible=icon]:hidden">
 				<SidebarGroup>
 					<SidebarMenu>
 						{allProjectKeys.length === 0 ? (
@@ -224,7 +252,7 @@ function AppSidebar() {
 					</SidebarMenu>
 				</SidebarGroup>
 			</SidebarContent>
-			<SidebarFooter>
+			<SidebarFooter className="group-data-[collapsible=icon]:hidden">
 				<SidebarMenu>
 					<SidebarMenuItem>
 						<SidebarMenuButton size="sm" tooltip="Settings">
@@ -368,7 +396,7 @@ export function App() {
 			>
 				{/* Navbar */}
 				<header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
-					<SidebarTrigger />
+					<SidebarToggle />
 					<Button
 						variant="ghost"
 						size="icon"

@@ -106,6 +106,7 @@ interface PuxState {
 	loadProjects: () => Promise<void>;
 	setProject: (project: string) => void;
 	setConversation: (project: string, agentId: string) => void;
+	deleteConversation: (project: string, agentId: string) => Promise<void>;
 	clearError: () => void;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 }
@@ -201,6 +202,29 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			if (!resp.ok) return;
 			const data = await resp.json();
 			set({ conversations: Array.isArray(data) ? data : [] });
+		} catch {
+			// ignore
+		}
+	},
+
+	deleteConversation: async (project, agentId) => {
+		try {
+			const resp = await fetch(
+				`/api/pux/conversation?project=${encodeURIComponent(project)}&agentId=${encodeURIComponent(agentId)}`,
+				{ method: "DELETE" },
+			);
+			if (!resp.ok) return;
+			// Remove from local state
+			const { conversations, activeProject, activeAgentId } = get();
+			set({
+				conversations: conversations.filter(
+					(c) => !(c.project === project && c.agentId === agentId),
+				),
+			});
+			// If we deleted the active conversation, clear it
+			if (activeProject === project && activeAgentId === agentId) {
+				set({ conversationKey: `default` });
+			}
 		} catch {
 			// ignore
 		}
