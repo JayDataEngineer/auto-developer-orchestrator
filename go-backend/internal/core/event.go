@@ -45,12 +45,10 @@ const (
 	EventTypeCompactionEnd   AgentEventType = "compaction_end"
 	EventTypeToolUpdate      AgentEventType = "tool_update"
 	EventTypeAgentSpawned    AgentEventType = "agent_spawned"
-	EventTypeGrindAttempt    AgentEventType = "grind_attempt"
-	EventTypeGrindVerify     AgentEventType = "grind_verify"
-	EventTypeGrindEnd        AgentEventType = "grind_end"
 	EventTypeStepStart       AgentEventType = "step_start"
 	EventTypeStepEnd         AgentEventType = "step_end"
 	EventTypeHookRequest     AgentEventType = "hook_request"
+	EventTypeUserQuestion    AgentEventType = "user_question"
 )
 
 // AgentEvent is an event emitted by the agent loop.

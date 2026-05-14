@@ -147,21 +147,7 @@ type Scheduler struct {
 	// Session delivery
 	sessionInjector SessionInjector
 
-	// Event subscriber for failure notifications (optional)
-	subscriber chan<- struct {
-		Type    string
-		JobName string
-		Message string
-	}
-}
-
-// SetSubscriber sets the event subscriber for failure notifications.
-func (s *Scheduler) SetSubscriber(ch chan<- struct {
-	Type    string
-	JobName string
-	Message string
-}) {
-	s.subscriber = ch
+	// (removed: non-contract subscriber)
 }
 
 // NewScheduler creates a new scheduler.

@@ -159,18 +159,12 @@ func (s *Scheduler) executeJob(jobID string) {
 
 	s.save()
 
-	// Emit failure notification to subscriber
-	if execution.Status == "error" && s.subscriber != nil {
-		msg := fmt.Sprintf("Scheduled job '%s' failed: %s", job.Name, util.Truncate(execution.Error, 200))
-		select {
-		case s.subscriber <- struct {
-			Type    string
-			JobName string
-			Message string
-		}{Type: "scheduler_job_failed", JobName: job.Name, Message: msg}:
-		default:
-			// Channel full, drop notification
-		}
+	// Log failure — no SSE event emitted (non-contract events are prohibited)
+	if execution.Status == "error" {
+		s.logger.Warn("scheduled job failed",
+			zap.String("job", job.Name),
+			zap.String("error", execution.Error),
+		)
 	}
 }
 

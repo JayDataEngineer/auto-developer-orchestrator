@@ -65,10 +65,8 @@ const (
 	EventTypeCompactionEnd   = core.EventTypeCompactionEnd
 	EventTypeToolUpdate      = core.EventTypeToolUpdate
 	EventTypeAgentSpawned    = core.EventTypeAgentSpawned
-	EventTypeGrindAttempt    = core.EventTypeGrindAttempt
-	EventTypeGrindVerify     = core.EventTypeGrindVerify
-	EventTypeGrindEnd        = core.EventTypeGrindEnd
 	EventTypeHookRequest     = core.EventTypeHookRequest
 	EventTypeStepStart       = core.EventTypeStepStart
 	EventTypeStepEnd         = core.EventTypeStepEnd
+	EventTypeUserQuestion    = core.EventTypeUserQuestion
 )

@@ -189,35 +189,6 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 			},
 		}
 
-	case llamaeng.EventTypeGrindAttempt:
-		return &sseEvent{
-			Type: "grind_attempt",
-			Data: map[string]interface{}{
-				"agentName": event.Data.AgentName,
-				"task":      event.Data.Task,
-				"status":    event.Data.Status,
-			},
-		}
-
-	case llamaeng.EventTypeGrindVerify:
-		return &sseEvent{
-			Type: "grind_verify",
-			Data: map[string]interface{}{
-				"agentName": event.Data.AgentName,
-				"task":      event.Data.Task,
-				"status":    event.Data.Status,
-			},
-		}
-
-	case llamaeng.EventTypeGrindEnd:
-		return &sseEvent{
-			Type: "grind_end",
-			Data: map[string]interface{}{
-				"status": event.Data.Status,
-				"task":   event.Data.Task,
-			},
-		}
-
 	case llamaeng.EventTypeApprovalRequest:
 		result, _ := event.Data.Result.(map[string]interface{})
 		if result != nil {
@@ -237,7 +208,7 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 			},
 		}
 
-	case llamaeng.AgentEventType("user_question"):
+	case llamaeng.EventTypeUserQuestion:
 		return &sseEvent{
 			Type: "user_question",
 			Data: map[string]interface{}{

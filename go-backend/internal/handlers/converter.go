@@ -7,24 +7,7 @@ import (
 
 // convertCoreEventToLlama maps a new-style core.AgentEvent to the legacy
 // llama.AgentEvent format so the existing SSE streaming works unchanged.
+// Both types are type aliases of the same core types, so direct cast works.
 func convertCoreEventToLlama(evt core.AgentEvent) llama.AgentEvent {
-	return llama.AgentEvent{
-		Type: llama.AgentEventType(evt.Type),
-		Data: llama.AgentEventData{
-			Text:              evt.Data.Text,
-			ToolName:          evt.Data.ToolName,
-			ToolArgs:          evt.Data.ToolArgs,
-			ToolID:            evt.Data.ToolID,
-			Result:            evt.Data.Result,
-			Error:             evt.Data.Error,
-			Input:             evt.Data.Input,
-			Output:            evt.Data.Output,
-			Model:             evt.Data.Model,
-			CompactedMessages: evt.Data.CompactedMessages,
-			KeptMessages:      evt.Data.KeptMessages,
-			AgentName:         evt.Data.AgentName,
-			Task:              evt.Data.Task,
-			Status:            evt.Data.Status,
-		},
-	}
+	return llama.AgentEvent(evt)
 }

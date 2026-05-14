@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+// bashExecutor is a local interface matching bash.Executor to avoid import cycle.
+type bashExecutor interface {
+	Exec(ctx context.Context, command string) (string, error)
+}
+
 // ChangeSet represents file changes detected between snapshot and current state.
 type ChangeSet struct {
 	Files   []string `json:"files"`

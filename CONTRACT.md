@@ -127,15 +127,7 @@ Response: `POST /api/pux/respond` with `{requestId: string, response: string}`.
 - `[DONE]` — Stream terminator. Not an event, a sentinel.
 - `keepalive` — Every 15 seconds. Interfaces ignore.
 
-### 2.10 Testing-Specific
-
-| Event | Payload | When |
-|-------|---------|------|
-| `grind_attempt` | `{agentName: string, task: string, status: string}` | QA test attempt |
-| `grind_verify` | `{agentName: string, task: string, status: string}` | QA verification |
-| `grind_end` | `{status: string, task: string}` | QA cycle done |
-
-### 2.11 Step Lifecycle
+### 2.10 Step Lifecycle
 
 | Event | Payload | When |
 |-------|---------|------|

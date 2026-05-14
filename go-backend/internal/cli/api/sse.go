@@ -34,9 +34,6 @@ const (
 	EventPlanUpdated     = "plan_updated"
 	EventSubagentStart   = "subagent_start"
 	EventSubagentEnd     = "subagent_end"
-	EventGrindAttempt    = "grind_attempt"
-	EventGrindVerify     = "grind_verify"
-	EventGrindEnd        = "grind_end"
 	EventHookRequest     = "hook_request"
 	EventStepStart       = "step_start"
 	EventStepEnd         = "step_end"
@@ -146,19 +143,6 @@ type PlanCreatedData struct {
 	Name     string `json:"name"`
 	Content  string `json:"content"`
 	FilePath string `json:"filePath"`
-}
-
-// GrindData is the payload for grind_attempt/grind_verify events.
-type GrindData struct {
-	AgentName string `json:"agentName"`
-	Task      string `json:"task"`
-	Status    string `json:"status"`
-}
-
-// GrindEndData is the payload for grind_end events.
-type GrindEndData struct {
-	Status string `json:"status"`
-	Task   string `json:"task"`
 }
 
 // HookRequestData is the payload for hook_request events.

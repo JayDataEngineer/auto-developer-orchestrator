@@ -187,16 +187,6 @@ func streamText(body io.Reader) error {
 			}
 		case api.EventPlanUpdated:
 			// Silent
-		case api.EventGrindAttempt, api.EventGrindVerify:
-			var d api.GrindData
-			if err := json.Unmarshal(event.Data, &d); err == nil {
-				fmt.Fprintf(os.Stderr, "\033[2m%s: %s\033[0m\n", d.Status, d.Task)
-			}
-		case api.EventGrindEnd:
-			var d api.GrindEndData
-			if err := json.Unmarshal(event.Data, &d); err == nil {
-				fmt.Fprintf(os.Stderr, "\033[2mgrind: %s\033[0m\n", d.Status)
-			}
 		case api.EventHookRequest:
 			var d api.HookRequestData
 			if err := json.Unmarshal(event.Data, &d); err == nil {

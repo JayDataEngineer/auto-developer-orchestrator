@@ -107,7 +107,7 @@ func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (any, er
 	// Tools do NOT hold direct references to the event stream.
 	if sub, ok := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent); ok && sub != nil {
 		core.SendEvent(sub, core.AgentEvent{
-			Type: "user_question",
+			Type: core.EventTypeUserQuestion,
 			Data: core.AgentEventData{
 				ToolID:   questionID,
 				ToolName: "ask_user",
