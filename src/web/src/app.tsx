@@ -1,9 +1,8 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
 	useLocalRuntime,
 	AssistantRuntimeProvider,
 } from "@assistant-ui/react";
-import { Panel, Group, Separator } from "react-resizable-panels";
 import {
 	usePuxStore,
 	type WorkbenchTab,
@@ -21,7 +20,6 @@ import {
 	SidebarContent,
 	SidebarFooter,
 	SidebarGroup,
-	SidebarGroupContent,
 	SidebarHeader,
 	SidebarInset,
 	SidebarMenu,
@@ -242,9 +240,9 @@ function AppSidebar() {
 	);
 }
 
-// ── Workbench tabs (rendered in the main navbar) ──
+// ── Workbench content with tab bar ──
 
-function WorkbenchTabs() {
+function Workbench() {
 	const storeTab = usePuxStore((s) => s.activeWorkbenchTab);
 	const setStoreTab = usePuxStore((s) => s.setWorkbenchTab);
 
@@ -255,37 +253,26 @@ function WorkbenchTabs() {
 	];
 
 	return (
-		<>
-			<div className="mx-2 h-5 w-px bg-border" />
-			{tabs.map((t) => (
-				<button
-					key={t.id}
-					onClick={() => setStoreTab(t.id)}
-					className={cn(
-						"inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors",
-						storeTab === t.id
-							? "bg-accent text-accent-foreground"
-							: "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-					)}
-					aria-label={t.label}
-				>
-					{t.icon}
-				</button>
-			))}
-			<span className="ml-1 text-xs font-medium text-muted-foreground">
-				{tabs.find((t) => t.id === storeTab)?.label}
-			</span>
-		</>
-	);
-}
-
-// ── Workbench content (no header — tabs are in the navbar) ──
-
-function Workbench() {
-	const storeTab = usePuxStore((s) => s.activeWorkbenchTab);
-
-	return (
-		<div className="flex h-full flex-col bg-background">
+		<div className="flex h-full flex-col bg-sidebar">
+			{/* Tab bar inside the workbench */}
+			<div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-2">
+				{tabs.map((t) => (
+					<button
+						key={t.id}
+						onClick={() => setStoreTab(t.id)}
+						className={cn(
+							"inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
+							storeTab === t.id
+								? "bg-accent text-accent-foreground"
+								: "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
+						)}
+					>
+						{t.icon}
+						{t.label}
+					</button>
+				))}
+			</div>
+			{/* Tab content */}
 			<div className="flex-1 overflow-hidden">
 				{storeTab === "vnc" && <VNCViewer />}
 				{storeTab === "editor" && <EditorPanel />}
@@ -305,6 +292,9 @@ export function App() {
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
 	const [showTerminal, setShowTerminal] = useState(false);
+	const [workbenchWidth, setWorkbenchWidth] = useState(800);
+	const workbenchWidthRef = useRef(800);
+	const workbenchProviderRef = useRef<HTMLDivElement>(null);
 
 	const toggleWorkbench = useCallback(() => {
 		setWorkbenchVisible((prev) => !prev);
@@ -328,10 +318,55 @@ export function App() {
 		loadConversations();
 	}, [loadModels, loadConversations, loadProjects]);
 
+	// Drag-resize handle for workbench sidebar
+	const handleResizeStart = useCallback((e: React.MouseEvent) => {
+		e.preventDefault();
+		const startX = e.clientX;
+		const startWidth = workbenchWidthRef.current;
+
+		const handleMove = (moveEvent: MouseEvent) => {
+			const delta = startX - moveEvent.clientX;
+			const newWidth = Math.max(
+				250,
+				Math.min(window.innerWidth * 0.75, startWidth + delta),
+			);
+			workbenchWidthRef.current = newWidth;
+			// Direct DOM updates — avoids re-renders during drag
+			const el = workbenchProviderRef.current;
+			if (el) el.style.width = `${newWidth}px`;
+			const inset = el?.previousElementSibling as HTMLElement | null;
+			if (inset) inset.style.marginRight = `${newWidth}px`;
+		};
+
+		const handleUp = () => {
+			setWorkbenchWidth(workbenchWidthRef.current);
+			document.removeEventListener("mousemove", handleMove);
+			document.removeEventListener("mouseup", handleUp);
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+		};
+
+		document.body.style.cursor = "col-resize";
+		document.body.style.userSelect = "none";
+		document.addEventListener("mousemove", handleMove);
+		document.addEventListener("mouseup", handleUp);
+	}, []);
+
 	return (
-		<SidebarProvider className="h-svh overflow-hidden" defaultOpen={true}>
+		<SidebarProvider
+			className="relative h-svh overflow-hidden"
+			defaultOpen={true}
+		>
 			<AppSidebar />
-			<SidebarInset className="flex h-svh flex-col overflow-hidden">
+			<SidebarInset
+				className="flex h-svh flex-col overflow-hidden transition-[margin-right] duration-200 ease-linear"
+				style={
+					workbenchVisible
+						? { marginRight: `${workbenchWidth}px` } as React.CSSProperties
+						: undefined
+				}
+			>
+				{/* Navbar */}
 				<header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
 					<SidebarTrigger />
 					<Button
@@ -343,8 +378,15 @@ export function App() {
 					>
 						<TerminalIcon className="size-4" />
 					</Button>
-					{/* Workbench tabs — shown in navbar when workbench is open */}
-					{workbenchVisible && <WorkbenchTabs />}
+					{/* Workbench tab indicator */}
+					{workbenchVisible && (
+						<>
+							<div className="mx-2 h-5 w-px bg-border" />
+							<span className="text-xs font-medium text-muted-foreground">
+								Workbench
+							</span>
+						</>
+					)}
 					<Button
 						variant="ghost"
 						size="icon"
@@ -364,38 +406,35 @@ export function App() {
 					</Button>
 				</header>
 				<PuxRuntimeProvider key={conversationKey}>
-					{workbenchVisible ? (
-						<Group
-							orientation="horizontal"
-							className="flex-1 overflow-hidden"
-						>
-							<Panel defaultSize={55} minSize={30}>
-								<div className="flex h-full flex-col">
-									<div className="flex-1 overflow-hidden">
-										<Thread />
-									</div>
-									{showTerminal && (
-										<TerminalDrawer cwd={activeProject} onClose={() => setShowTerminal(false)} />
-									)}
-								</div>
-							</Panel>
-							<Separator className="w-px bg-border hover:bg-ring/50 active:bg-ring transition-colors cursor-col-resize" />
-							<Panel defaultSize={45} minSize={15}>
-								<Workbench />
-							</Panel>
-						</Group>
-					) : (
-						<div className="flex h-full flex-col">
-							<div className="flex-1 overflow-hidden">
-								<Thread />
-							</div>
-							{showTerminal && (
-								<TerminalDrawer cwd={activeProject} onClose={() => setShowTerminal(false)} />
-							)}
+					<div className="flex h-full flex-col">
+						<div className="flex-1 overflow-hidden">
+							<Thread />
 						</div>
-					)}
+						{showTerminal && (
+							<TerminalDrawer
+								cwd={activeProject}
+								onClose={() => setShowTerminal(false)}
+							/>
+						)}
+					</div>
 				</PuxRuntimeProvider>
 			</SidebarInset>
+			{/* Workbench — fixed right panel with slide animation */}
+			<div
+				ref={workbenchProviderRef}
+				className={cn(
+					"fixed inset-y-0 right-0 z-10 flex flex-col border-l border-border bg-sidebar text-sidebar-foreground transition-transform duration-200 ease-linear",
+					!workbenchVisible && "translate-x-full",
+				)}
+				style={{ width: `${workbenchWidth}px` }}
+			>
+				{/* Drag-resize handle */}
+				<div
+					className="absolute inset-y-0 left-0 z-30 w-1.5 cursor-col-resize hover:bg-ring/50 active:bg-ring transition-colors"
+					onMouseDown={handleResizeStart}
+				/>
+				<Workbench />
+			</div>
 		</SidebarProvider>
 	);
 }
