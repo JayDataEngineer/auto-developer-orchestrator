@@ -12,17 +12,42 @@ export function TerminalPanel({ cwd }: TerminalPanelProps) {
 	const termRef = useRef<Terminal | null>(null);
 	const wsRef = useRef<WebSocket | null>(null);
 	const fitRef = useRef<FitAddon | null>(null);
+	const cwdRef = useRef(cwd);
+	cwdRef.current = cwd;
 
-	const connect = useCallback(() => {
-		if (!containerRef.current) return;
-
-		// Clean up previous
-		if (termRef.current) {
-			termRef.current.dispose();
-		}
+	// Connect WebSocket to existing terminal
+	const connectWS = useCallback(() => {
+		// Close old ws if any
 		if (wsRef.current) {
 			wsRef.current.close();
 		}
+
+		const term = termRef.current;
+		if (!term) return;
+
+		const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+		let url = `${proto}//${window.location.host}/api/terminal/ws?shell=bash`;
+		if (cwdRef.current) url += `&cwd=${encodeURIComponent(cwdRef.current)}`;
+
+		const ws = new WebSocket(url);
+		ws.binaryType = "arraybuffer";
+		wsRef.current = ws;
+
+		ws.onmessage = (e) => {
+			const data = e.data instanceof ArrayBuffer
+				? new TextDecoder().decode(e.data)
+				: e.data;
+			term.write(data);
+		};
+
+		ws.onclose = () => {
+			term.write("\r\n\x1b[90m[disconnected — press Enter to reconnect]\x1b[0m");
+		};
+	}, []);
+
+	// Initialize terminal once
+	useEffect(() => {
+		if (!containerRef.current) return;
 
 		const term = new Terminal({
 			cursorBlink: true,
@@ -61,37 +86,21 @@ export function TerminalPanel({ cwd }: TerminalPanelProps) {
 		termRef.current = term;
 		fitRef.current = fit;
 
-		// Connect WebSocket
-		const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-		let url = `${proto}//${window.location.host}/api/terminal/ws?shell=bash`;
-		if (cwd) url += `&cwd=${encodeURIComponent(cwd)}`;
-
-		const ws = new WebSocket(url);
-		ws.binaryType = "arraybuffer";
-		wsRef.current = ws;
-
-		ws.onmessage = (e) => {
-			const data = e.data instanceof ArrayBuffer
-				? new TextDecoder().decode(e.data)
-				: e.data;
-			term.write(data);
-		};
-
-		ws.onclose = () => {
-			term.write("\r\n\x1b[90m[disconnected — press Enter to reconnect]\x1b[0m");
-		};
-
+		// Single data handler — send to ws or reconnect on Enter
 		term.onData((data) => {
-			if (ws.readyState === WebSocket.OPEN) {
+			const ws = wsRef.current;
+			if (ws && ws.readyState === WebSocket.OPEN) {
 				ws.send(new TextEncoder().encode(data));
-			} else if (ws.readyState === WebSocket.CLOSED) {
-				// Reconnect on Enter
+			} else if (!ws || ws.readyState === WebSocket.CLOSED) {
 				if (data === "\r") {
 					term.clear();
-					connect();
+					connectWS();
 				}
 			}
 		});
+
+		// Initial connection
+		connectWS();
 
 		// Resize handler
 		const onResize = () => fit.fit();
@@ -99,17 +108,10 @@ export function TerminalPanel({ cwd }: TerminalPanelProps) {
 
 		return () => {
 			window.removeEventListener("resize", onResize);
-		};
-	}, [cwd]);
-
-	useEffect(() => {
-		const cleanup = connect();
-		return () => {
-			cleanup?.();
 			wsRef.current?.close();
-			termRef.current?.dispose();
+			term.dispose();
 		};
-	}, [connect]);
+	}, [connectWS]);
 
 	// Fit on container resize
 	useEffect(() => {
