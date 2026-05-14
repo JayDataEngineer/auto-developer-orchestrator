@@ -1,14 +1,21 @@
 import { useEffect, useState, useCallback } from "react";
 import Editor from "@monaco-editor/react";
 import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
 	FileIcon,
 	FolderIcon,
 	FolderOpenIcon,
 	ChevronRightIcon,
-	ChevronDownIcon,
 	FileCodeIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePuxStore } from "@/lib/pux-store";
+
+// ── Types ──
 
 interface FileEntry {
 	name: string;
@@ -16,6 +23,8 @@ interface FileEntry {
 	children?: FileEntry[];
 	path: string;
 }
+
+// ── Helpers ──
 
 const LANG_MAP: Record<string, string> = {
 	ts: "typescript",
@@ -48,6 +57,90 @@ function getFileIcon(name: string) {
 	return <FileIcon size={14} className="shrink-0 text-muted-foreground" />;
 }
 
+// Skip noisy dirs/files
+const SKIP_NAMES = new Set([
+	"node_modules",
+	".git",
+	"__pycache__",
+	".next",
+	"dist",
+	".cache",
+	"vendor",
+]);
+
+// ── Sandbox API ──
+
+async function getSandboxId(): Promise<string | null> {
+	try {
+		const resp = await fetch("/api/sandboxes");
+		if (!resp.ok) return null;
+		const data = await resp.json();
+		const sandboxes = Array.isArray(data) ? data : [];
+		if (sandboxes.length === 0) return null;
+		return sandboxes[0].id || sandboxes[0];
+	} catch {
+		return null;
+	}
+}
+
+async function listDir(
+	sandboxId: string,
+	path: string,
+): Promise<Array<{ name: string; size: number; isDir: boolean }>> {
+	try {
+		const resp = await fetch(
+			`/api/sandbox/${sandboxId}/files/list?path=${encodeURIComponent(path)}`,
+		);
+		if (!resp.ok) return [];
+		const data = await resp.json();
+		return Array.isArray(data.entries) ? data.entries : [];
+	} catch {
+		return [];
+	}
+}
+
+async function buildTree(
+	sandboxId: string,
+	path: string,
+	depth = 0,
+): Promise<FileEntry[]> {
+	if (depth > 6) return [];
+	const entries = await listDir(sandboxId, path);
+
+	const result: FileEntry[] = [];
+	for (const e of entries) {
+		if (e.name.startsWith(".") || SKIP_NAMES.has(e.name)) continue;
+
+		const fullPath = `${path}/${e.name}`;
+		if (e.isDir) {
+			const children = await buildTree(sandboxId, fullPath, depth + 1);
+			result.push({
+				name: e.name,
+				type: "dir",
+				children,
+				path: fullPath,
+			});
+		} else {
+			result.push({ name: e.name, type: "file", path: fullPath });
+		}
+	}
+	return result;
+}
+
+async function readFile(sandboxId: string, path: string): Promise<string> {
+	try {
+		const resp = await fetch(
+			`/api/sandbox/${sandboxId}/files/download?path=${encodeURIComponent(path)}`,
+		);
+		if (!resp.ok) return "";
+		return await resp.text();
+	} catch {
+		return "";
+	}
+}
+
+// ── File Tree Item (using shadcn Collapsible) ──
+
 function FileTreeItem({
 	entry,
 	depth,
@@ -59,32 +152,33 @@ function FileTreeItem({
 	onSelect: (path: string) => void;
 	selectedPath: string;
 }) {
-	const [expanded, setExpanded] = useState(true);
-
 	if (entry.type === "dir") {
 		return (
-			<div>
-				<button
-					onClick={() => setExpanded(!expanded)}
-					className={cn(
-						"flex w-full items-center gap-1 rounded-sm px-1 py-0.5 text-xs hover:bg-accent",
-					)}
-					style={{ paddingLeft: `${depth * 12 + 4}px` }}
-				>
-					{expanded ? (
-						<ChevronDownIcon size={12} className="shrink-0" />
-					) : (
-						<ChevronRightIcon size={12} className="shrink-0" />
-					)}
-					{expanded ? (
-						<FolderOpenIcon size={14} className="shrink-0 text-yellow-500" />
-					) : (
-						<FolderIcon size={14} className="shrink-0 text-yellow-500" />
-					)}
-					<span className="truncate">{entry.name}</span>
-				</button>
-				{expanded &&
-					entry.children?.map((child) => (
+			<Collapsible defaultOpen className="group/tree">
+				<CollapsibleTrigger asChild>
+					<button
+						className={cn(
+							"flex w-full items-center gap-1 rounded-sm px-1 py-0.5 text-xs hover:bg-accent",
+						)}
+						style={{ paddingLeft: `${depth * 12 + 4}px` }}
+					>
+						<ChevronRightIcon
+							size={12}
+							className="shrink-0 transition-transform group-data-[state=open]/tree:rotate-90"
+						/>
+						<FolderOpenIcon
+							size={14}
+							className="shrink-0 text-yellow-500 group-data-[state=closed]/tree:hidden"
+						/>
+						<FolderIcon
+							size={14}
+							className="shrink-0 text-yellow-500 group-data-[state=open]/tree:hidden"
+						/>
+						<span className="truncate">{entry.name}</span>
+					</button>
+				</CollapsibleTrigger>
+				<CollapsibleContent>
+					{entry.children?.map((child) => (
 						<FileTreeItem
 							key={child.path}
 							entry={child}
@@ -93,7 +187,8 @@ function FileTreeItem({
 							selectedPath={selectedPath}
 						/>
 					))}
-			</div>
+				</CollapsibleContent>
+			</Collapsible>
 		);
 	}
 
@@ -112,27 +207,46 @@ function FileTreeItem({
 	);
 }
 
-// Cache file contents so switching files preserves content
+// ── Cache ──
+
 const fileCache = new Map<string, string>();
+
+// ── Panel ──
 
 export function EditorPanel() {
 	const [files, setFiles] = useState<FileEntry[]>([]);
 	const [selectedPath, setSelectedPath] = useState("");
 	const [content, setContent] = useState("");
+	const [sandboxId, setSandboxId] = useState<string | null>(null);
+	const [loading, setLoading] = useState(true);
+	const activeProject = usePuxStore((s) => s.activeProject);
 
-	// Load project file tree
+	// Resolve sandbox ID
 	useEffect(() => {
-		fetch("/api/pux/files")
-			.then((r) => (r.ok ? r.json() : []))
-			.then((data) => {
-				if (Array.isArray(data) && data.length > 0) {
-					setFiles(data);
-					const firstFile = findFirstFile(data);
-					if (firstFile) selectFile(firstFile.path);
+		fileCache.clear();
+		setFiles([]);
+		setSelectedPath("");
+		setContent("");
+		setLoading(true);
+
+		getSandboxId()
+			.then((id) => {
+				setSandboxId(id);
+				if (!id) {
+					setLoading(false);
+					return;
 				}
+				// Build file tree from sandbox workspace
+				return buildTree(id, "/sandbox/workspace").then((tree) => {
+					setFiles(tree);
+					// Auto-select first file
+					const first = findFirstFile(tree);
+					if (first) loadFile(id, first.path);
+				});
 			})
-			.catch(() => {});
-	}, []);
+			.catch(() => {})
+			.finally(() => setLoading(false));
+	}, [activeProject]);
 
 	function findFirstFile(entries: FileEntry[]): FileEntry | null {
 		for (const e of entries) {
@@ -145,23 +259,52 @@ export function EditorPanel() {
 		return null;
 	}
 
-	const selectFile = useCallback((path: string) => {
-		setSelectedPath(path);
-		// Check cache first
-		if (fileCache.has(path)) {
-			setContent(fileCache.get(path)!);
-			return;
-		}
-		fetch(`/api/pux/file?path=${encodeURIComponent(path)}`)
-			.then((r) => (r.ok ? r.text() : ""))
-			.then((text) => {
+	const loadFile = useCallback(
+		(sbId: string | null, path: string) => {
+			if (!sbId) return;
+			setSelectedPath(path);
+			if (fileCache.has(path)) {
+				setContent(fileCache.get(path)!);
+				return;
+			}
+			readFile(sbId, path).then((text) => {
 				fileCache.set(path, text);
 				setContent(text);
-			})
-			.catch(() => setContent(""));
-	}, []);
+			});
+		},
+		[],
+	);
+
+	const selectFile = useCallback(
+		(path: string) => loadFile(sandboxId, path),
+		[sandboxId, loadFile],
+	);
 
 	const filename = selectedPath.split("/").pop() || "";
+
+	if (loading) {
+		return (
+			<div className="flex h-full items-center justify-center">
+				<span className="text-xs text-muted-foreground">
+					Loading project files...
+				</span>
+			</div>
+		);
+	}
+
+	if (!sandboxId) {
+		return (
+			<div className="flex h-full flex-col items-center justify-center gap-2">
+				<FileIcon className="size-8 text-muted-foreground/50" />
+				<span className="text-xs text-muted-foreground">
+					No sandbox running
+				</span>
+				<span className="text-[11px] text-muted-foreground/70">
+					Start a sandbox to browse project files
+				</span>
+			</div>
+		);
+	}
 
 	return (
 		<div className="flex h-full">
@@ -170,7 +313,7 @@ export function EditorPanel() {
 				{files.length === 0 ? (
 					<div className="flex h-full items-center justify-center">
 						<span className="px-2 text-center text-[11px] text-muted-foreground">
-							No project loaded
+							Empty workspace
 						</span>
 					</div>
 				) : (
@@ -185,7 +328,7 @@ export function EditorPanel() {
 					))
 				)}
 			</div>
-			{/* Monaco editor — uses path prop for proper Model management */}
+			{/* Monaco editor */}
 			<div className="flex-1">
 				{selectedPath ? (
 					<Editor
