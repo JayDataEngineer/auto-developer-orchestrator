@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
-import Editor from "@monaco-editor/react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import Editor, { type OnMount } from "@monaco-editor/react";
+import type { editor } from "monaco-editor";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -11,6 +12,7 @@ import {
 	FolderOpenIcon,
 	ChevronRightIcon,
 	FileCodeIcon,
+	XIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePuxStore } from "@/lib/pux-store";
@@ -22,6 +24,11 @@ interface FileEntry {
 	type: "file" | "dir";
 	children?: FileEntry[];
 	path: string;
+}
+
+interface Tab {
+	path: string;
+	name: string;
 }
 
 // ── Helpers ──
@@ -43,6 +50,22 @@ const LANG_MAP: Record<string, string> = {
 	sql: "sql",
 	sh: "shell",
 	toml: "toml",
+};
+
+const LANG_LABELS: Record<string, string> = {
+	typescript: "TypeScript",
+	javascript: "JavaScript",
+	go: "Go",
+	python: "Python",
+	rust: "Rust",
+	markdown: "Markdown",
+	json: "JSON",
+	yaml: "YAML",
+	css: "CSS",
+	html: "HTML",
+	sql: "SQL",
+	shell: "Shell",
+	toml: "TOML",
 };
 
 function getLang(filename: string): string {
@@ -68,7 +91,11 @@ function findFirstFile(entries: FileEntry[]): FileEntry | null {
 	return null;
 }
 
-// ── File Tree Item (using shadcn Collapsible) ──
+function pathSegments(path: string): string[] {
+	return path.split("/").filter(Boolean);
+}
+
+// ── File Tree Item ──
 
 function FileTreeItem({
 	entry,
@@ -83,7 +110,7 @@ function FileTreeItem({
 }) {
 	if (entry.type === "dir") {
 		return (
-			<Collapsible defaultOpen className="group/tree">
+			<Collapsible className="group/tree">
 				<CollapsibleTrigger asChild>
 					<button
 						className={cn(
@@ -144,22 +171,28 @@ const fileCache = new Map<string, string>();
 
 export function EditorPanel() {
 	const [files, setFiles] = useState<FileEntry[]>([]);
-	const [selectedPath, setSelectedPath] = useState("");
+	const [tabs, setTabs] = useState<Tab[]>([]);
+	const [activePath, setActivePath] = useState("");
 	const [content, setContent] = useState("");
 	const [loading, setLoading] = useState(true);
+	const [cursorPos, setCursorPos] = useState({ ln: 1, col: 1 });
+	const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 	const activeProject = usePuxStore((s) => s.activeProject);
 
-	// Load file tree from local filesystem via backend
+	// Load file tree
 	useEffect(() => {
 		if (!activeProject) {
 			setFiles([]);
-			setSelectedPath("");
+			setTabs([]);
+			setActivePath("");
 			setContent("");
 			setLoading(false);
 			return;
 		}
 
 		fileCache.clear();
+		setTabs([]);
+		setActivePath("");
 		setLoading(true);
 
 		fetch(`/api/pux/files?project=${encodeURIComponent(activeProject)}`)
@@ -169,16 +202,26 @@ export function EditorPanel() {
 				setFiles(tree);
 				if (tree.length > 0) {
 					const first = findFirstFile(tree);
-					if (first) selectFile(first.path);
+					if (first) openFile(first.path);
 				}
 			})
 			.catch(() => setFiles([]))
 			.finally(() => setLoading(false));
 	}, [activeProject]);
 
-	const selectFile = useCallback(
+	const openFile = useCallback(
 		(path: string) => {
-			setSelectedPath(path);
+			const name = path.split("/").pop() || path;
+
+			// Add tab if not already open
+			setTabs((prev) => {
+				if (prev.some((t) => t.path === path)) return prev;
+				return [...prev, { path, name }];
+			});
+
+			setActivePath(path);
+
+			// Load content
 			if (fileCache.has(path)) {
 				setContent(fileCache.get(path)!);
 				return;
@@ -190,14 +233,44 @@ export function EditorPanel() {
 				.then((r) => (r.ok ? r.text() : ""))
 				.then((text) => {
 					fileCache.set(path, text);
-					setContent(text);
+					// Only set if this path is still active
+					setActivePath((current) => {
+						if (current === path) setContent(text);
+						return current;
+					});
 				})
-				.catch(() => setContent(""));
+				.catch(() => {});
 		},
 		[activeProject],
 	);
 
-	const filename = selectedPath.split("/").pop() || "";
+	const closeTab = useCallback(
+		(path: string) => {
+			setTabs((prev) => {
+				const next = prev.filter((t) => t.path !== path);
+				// If closing the active tab, switch to the last remaining
+				if (path === activePath && next.length > 0) {
+					const switchTo = next[next.length - 1];
+					openFile(switchTo.path);
+				} else if (next.length === 0) {
+					setActivePath("");
+					setContent("");
+				}
+				return next;
+			});
+		},
+		[activePath, openFile],
+	);
+
+	const handleEditorMount: OnMount = (editor) => {
+		editorRef.current = editor;
+		editor.onDidChangeCursorPosition((e) => {
+			setCursorPos({ ln: e.position.lineNumber, col: e.position.column });
+		});
+	};
+
+	const filename = activePath.split("/").pop() || "";
+	const lang = getLang(filename);
 
 	if (loading) {
 		return (
@@ -224,54 +297,123 @@ export function EditorPanel() {
 	}
 
 	return (
-		<div className="flex h-full">
-			{/* File tree sidebar */}
-			<div className="w-48 shrink-0 overflow-y-auto border-r border-border py-1">
-				{files.length === 0 ? (
-					<div className="flex h-full items-center justify-center">
-						<span className="px-2 text-center text-[11px] text-muted-foreground">
-							Empty project
-						</span>
+		<div className="flex h-full flex-col">
+			<div className="flex flex-1 overflow-hidden">
+				{/* File tree sidebar */}
+				<div className="w-48 shrink-0 overflow-y-auto border-r border-border py-1">
+					{files.length === 0 ? (
+						<div className="flex h-full items-center justify-center">
+							<span className="px-2 text-center text-[11px] text-muted-foreground">
+								Empty project
+							</span>
+						</div>
+					) : (
+						files.map((entry) => (
+							<FileTreeItem
+								key={entry.path}
+								entry={entry}
+								depth={0}
+								onSelect={openFile}
+								selectedPath={activePath}
+							/>
+						))
+					)}
+				</div>
+				{/* Editor area */}
+				<div className="flex min-w-0 flex-1 flex-col">
+					{/* Tab bar */}
+					{tabs.length > 0 && (
+						<div className="flex h-8 items-end overflow-x-auto border-b border-border bg-muted/30">
+							{tabs.map((tab) => (
+								<div
+									key={tab.path}
+									className={cn(
+										"group/tab flex h-7 shrink-0 cursor-pointer items-center gap-1 border-r border-border px-2 text-xs transition-colors",
+										tab.path === activePath
+											? "border-b-2 border-b-primary bg-background text-foreground"
+											: "text-muted-foreground hover:bg-accent/50",
+									)}
+									onClick={() => openFile(tab.path)}
+								>
+									<span className="max-w-28 truncate">
+										{tab.name}
+									</span>
+									<button
+										onClick={(e) => {
+											e.stopPropagation();
+											closeTab(tab.path);
+										}}
+										className="rounded p-0.5 opacity-0 hover:bg-accent group-hover/tab:opacity-100"
+									>
+										<XIcon size={10} />
+									</button>
+								</div>
+							))}
+						</div>
+					)}
+					{/* Breadcrumb */}
+					{activePath && (
+						<div className="flex h-6 items-center gap-0.5 border-b border-border bg-muted/20 px-2 text-[11px] text-muted-foreground">
+							{pathSegments(activePath).map((seg, i, arr) => (
+								<span key={i} className="flex items-center gap-0.5">
+									{i > 0 && (
+										<span className="text-muted-foreground/50">
+											/
+										</span>
+									)}
+									<span
+										className={cn(
+											i === arr.length - 1 &&
+												"text-foreground",
+										)}
+									>
+										{seg}
+									</span>
+								</span>
+							))}
+						</div>
+					)}
+					{/* Monaco editor */}
+					<div className="flex-1">
+						{activePath ? (
+							<Editor
+								key={activePath}
+								path={activePath}
+								defaultLanguage={lang}
+								defaultValue={content}
+								theme="vs-dark"
+								onMount={handleEditorMount}
+								options={{
+									minimap: { enabled: false },
+									fontSize: 13,
+									lineNumbers: "on",
+									scrollBeyondLastLine: false,
+									wordWrap: "on",
+									padding: { top: 4 },
+									readOnly: true,
+								}}
+							/>
+						) : (
+							<div className="flex h-full items-center justify-center">
+								<span className="text-xs text-muted-foreground">
+									Select a file to view
+								</span>
+							</div>
+						)}
 					</div>
-				) : (
-					files.map((entry) => (
-						<FileTreeItem
-							key={entry.path}
-							entry={entry}
-							depth={0}
-							onSelect={selectFile}
-							selectedPath={selectedPath}
-						/>
-					))
-				)}
+				</div>
 			</div>
-			{/* Monaco editor */}
-			<div className="flex-1">
-				{selectedPath ? (
-					<Editor
-						key={selectedPath}
-						path={selectedPath}
-						defaultLanguage={getLang(filename)}
-						defaultValue={content}
-						theme="vs-dark"
-						options={{
-							minimap: { enabled: false },
-							fontSize: 13,
-							lineNumbers: "on",
-							scrollBeyondLastLine: false,
-							wordWrap: "on",
-							padding: { top: 8 },
-							readOnly: true,
-						}}
-					/>
-				) : (
-					<div className="flex h-full items-center justify-center">
-						<span className="text-xs text-muted-foreground">
-							Select a file to view
-						</span>
-					</div>
-				)}
-			</div>
+			{/* Status bar */}
+			{activePath && (
+				<div className="flex h-6 items-center justify-between border-t border-border bg-muted/30 px-3 text-[11px] text-muted-foreground">
+					<span>
+						{LANG_LABELS[lang] || lang}
+					</span>
+					<span>
+						Ln {cursorPos.ln}, Col {cursorPos.col}
+					</span>
+				</div>
+			)}
 		</div>
 	);
 }
