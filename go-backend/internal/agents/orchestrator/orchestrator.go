@@ -13,8 +13,10 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/hooks"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
+	"github.com/auto-developer-orchestrator/backend/internal/profiles"
 	"github.com/auto-developer-orchestrator/backend/internal/session"
 	"github.com/auto-developer-orchestrator/backend/internal/skills"
+	appprofile "github.com/auto-developer-orchestrator/backend/internal/tools/appprofile"
 	browsertools "github.com/auto-developer-orchestrator/backend/internal/tools/browser"
 	desktoptools "github.com/auto-developer-orchestrator/backend/internal/tools/desktop"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
@@ -186,6 +188,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		sandboxIDFn := func() string { return cfg.SandboxID }
 		employeeTools = desktoptools.RegisterDesktopTools(employeeTools, cfg.DesktopProvider, sandboxIDFn)
 		logger.Printf("Desktop tools loaded for employees: 5 tools")
+
+		// Application profiles — semantic interaction layer on top of desktop tools
+		profileStore := profiles.NewStore(cfg.ProjectDir)
+		employeeTools = appprofile.RegisterAll(employeeTools, profileStore, cfg.DesktopProvider, sandboxIDFn)
+		logger.Printf("App profile tools loaded for employees: app_interact, app_profile")
 	}
 
 	// Build MCP server resolver for role-based delegation
