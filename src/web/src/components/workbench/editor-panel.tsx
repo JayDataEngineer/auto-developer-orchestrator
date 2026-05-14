@@ -57,86 +57,15 @@ function getFileIcon(name: string) {
 	return <FileIcon size={14} className="shrink-0 text-muted-foreground" />;
 }
 
-// Skip noisy dirs/files
-const SKIP_NAMES = new Set([
-	"node_modules",
-	".git",
-	"__pycache__",
-	".next",
-	"dist",
-	".cache",
-	"vendor",
-]);
-
-// ── Sandbox API ──
-
-async function getSandboxId(): Promise<string | null> {
-	try {
-		const resp = await fetch("/api/sandboxes");
-		if (!resp.ok) return null;
-		const data = await resp.json();
-		const sandboxes = Array.isArray(data) ? data : [];
-		if (sandboxes.length === 0) return null;
-		return sandboxes[0].id || sandboxes[0];
-	} catch {
-		return null;
-	}
-}
-
-async function listDir(
-	sandboxId: string,
-	path: string,
-): Promise<Array<{ name: string; size: number; isDir: boolean }>> {
-	try {
-		const resp = await fetch(
-			`/api/sandbox/${sandboxId}/files/list?path=${encodeURIComponent(path)}`,
-		);
-		if (!resp.ok) return [];
-		const data = await resp.json();
-		return Array.isArray(data.entries) ? data.entries : [];
-	} catch {
-		return [];
-	}
-}
-
-async function buildTree(
-	sandboxId: string,
-	path: string,
-	depth = 0,
-): Promise<FileEntry[]> {
-	if (depth > 6) return [];
-	const entries = await listDir(sandboxId, path);
-
-	const result: FileEntry[] = [];
+function findFirstFile(entries: FileEntry[]): FileEntry | null {
 	for (const e of entries) {
-		if (e.name.startsWith(".") || SKIP_NAMES.has(e.name)) continue;
-
-		const fullPath = `${path}/${e.name}`;
-		if (e.isDir) {
-			const children = await buildTree(sandboxId, fullPath, depth + 1);
-			result.push({
-				name: e.name,
-				type: "dir",
-				children,
-				path: fullPath,
-			});
-		} else {
-			result.push({ name: e.name, type: "file", path: fullPath });
+		if (e.type === "file") return e;
+		if (e.children) {
+			const f = findFirstFile(e.children);
+			if (f) return f;
 		}
 	}
-	return result;
-}
-
-async function readFile(sandboxId: string, path: string): Promise<string> {
-	try {
-		const resp = await fetch(
-			`/api/sandbox/${sandboxId}/files/download?path=${encodeURIComponent(path)}`,
-		);
-		if (!resp.ok) return "";
-		return await resp.text();
-	} catch {
-		return "";
-	}
+	return null;
 }
 
 // ── File Tree Item (using shadcn Collapsible) ──
@@ -217,67 +146,55 @@ export function EditorPanel() {
 	const [files, setFiles] = useState<FileEntry[]>([]);
 	const [selectedPath, setSelectedPath] = useState("");
 	const [content, setContent] = useState("");
-	const [sandboxId, setSandboxId] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 	const activeProject = usePuxStore((s) => s.activeProject);
 
-	// Resolve sandbox ID
+	// Load file tree from local filesystem via backend
 	useEffect(() => {
+		if (!activeProject) {
+			setFiles([]);
+			setSelectedPath("");
+			setContent("");
+			setLoading(false);
+			return;
+		}
+
 		fileCache.clear();
-		setFiles([]);
-		setSelectedPath("");
-		setContent("");
 		setLoading(true);
 
-		getSandboxId()
-			.then((id) => {
-				setSandboxId(id);
-				if (!id) {
-					setLoading(false);
-					return;
-				}
-				// Build file tree from sandbox workspace
-				return buildTree(id, "/sandbox/workspace").then((tree) => {
-					setFiles(tree);
-					// Auto-select first file
+		fetch(`/api/pux/files?project=${encodeURIComponent(activeProject)}`)
+			.then((r) => (r.ok ? r.json() : []))
+			.then((data) => {
+				const tree = Array.isArray(data) ? data : [];
+				setFiles(tree);
+				if (tree.length > 0) {
 					const first = findFirstFile(tree);
-					if (first) loadFile(id, first.path);
-				});
+					if (first) selectFile(first.path);
+				}
 			})
-			.catch(() => {})
+			.catch(() => setFiles([]))
 			.finally(() => setLoading(false));
 	}, [activeProject]);
 
-	function findFirstFile(entries: FileEntry[]): FileEntry | null {
-		for (const e of entries) {
-			if (e.type === "file") return e;
-			if (e.children) {
-				const f = findFirstFile(e.children);
-				if (f) return f;
-			}
-		}
-		return null;
-	}
-
-	const loadFile = useCallback(
-		(sbId: string | null, path: string) => {
-			if (!sbId) return;
+	const selectFile = useCallback(
+		(path: string) => {
 			setSelectedPath(path);
 			if (fileCache.has(path)) {
 				setContent(fileCache.get(path)!);
 				return;
 			}
-			readFile(sbId, path).then((text) => {
-				fileCache.set(path, text);
-				setContent(text);
-			});
+			if (!activeProject) return;
+			fetch(
+				`/api/pux/file?project=${encodeURIComponent(activeProject)}&path=${encodeURIComponent(path)}`,
+			)
+				.then((r) => (r.ok ? r.text() : ""))
+				.then((text) => {
+					fileCache.set(path, text);
+					setContent(text);
+				})
+				.catch(() => setContent(""));
 		},
-		[],
-	);
-
-	const selectFile = useCallback(
-		(path: string) => loadFile(sandboxId, path),
-		[sandboxId, loadFile],
+		[activeProject],
 	);
 
 	const filename = selectedPath.split("/").pop() || "";
@@ -292,15 +209,15 @@ export function EditorPanel() {
 		);
 	}
 
-	if (!sandboxId) {
+	if (!activeProject) {
 		return (
 			<div className="flex h-full flex-col items-center justify-center gap-2">
 				<FileIcon className="size-8 text-muted-foreground/50" />
 				<span className="text-xs text-muted-foreground">
-					No sandbox running
+					No project selected
 				</span>
 				<span className="text-[11px] text-muted-foreground/70">
-					Start a sandbox to browse project files
+					Select a project from the sidebar
 				</span>
 			</div>
 		);
@@ -313,7 +230,7 @@ export function EditorPanel() {
 				{files.length === 0 ? (
 					<div className="flex h-full items-center justify-center">
 						<span className="px-2 text-center text-[11px] text-muted-foreground">
-							Empty workspace
+							Empty project
 						</span>
 					</div>
 				) : (

@@ -156,6 +156,8 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/hook-response", h.HookResponse)
 	r.Get("/tree", h.GetTree)
 	r.Post("/fork", h.Fork)
+	r.Get("/files", h.GetProjectFiles)
+	r.Get("/file", h.GetProjectFile)
 }
 
 // resolveAgent reads ?agentId= from the query string, defaulting to "default".
