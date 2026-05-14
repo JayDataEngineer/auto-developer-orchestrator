@@ -15,7 +15,7 @@ import { Thread } from "@/components/assistant-ui/thread";
 import { VNCViewer } from "@/components/workbench/vnc-viewer";
 import { EditorPanel } from "@/components/workbench/editor-panel";
 import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
-import { TerminalPanel } from "@/components/workbench/terminal-panel";
+import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
 import {
 	Sidebar,
 	SidebarContent,
@@ -53,7 +53,6 @@ import {
 	Folder,
 	MessageSquare,
 	TerminalIcon,
-	XIcon,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -368,20 +367,7 @@ export function App() {
 										<Thread />
 									</div>
 									{showTerminal && (
-										<div className="flex h-56 shrink-0 flex-col border-t border-border">
-											<div className="flex h-7 items-center justify-between border-b border-border bg-muted/20 px-2">
-												<span className="text-[11px] font-medium text-muted-foreground">Terminal</span>
-												<button
-													onClick={() => setShowTerminal(false)}
-													className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-												>
-													<XIcon size={12} />
-												</button>
-											</div>
-											<div className="flex-1 overflow-hidden">
-												<TerminalPanel cwd={activeProject} />
-											</div>
-										</div>
+										<TerminalDrawer cwd={activeProject} onClose={() => setShowTerminal(false)} />
 									)}
 								</div>
 							</Panel>
@@ -396,20 +382,7 @@ export function App() {
 								<Thread />
 							</div>
 							{showTerminal && (
-								<div className="flex h-56 shrink-0 flex-col border-t border-border">
-									<div className="flex h-7 items-center justify-between border-b border-border bg-muted/20 px-2">
-										<span className="text-[11px] font-medium text-muted-foreground">Terminal</span>
-										<button
-											onClick={() => setShowTerminal(false)}
-											className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-										>
-											<XIcon size={12} />
-										</button>
-									</div>
-									<div className="flex-1 overflow-hidden">
-										<TerminalPanel cwd={activeProject} />
-									</div>
-								</div>
+								<TerminalDrawer cwd={activeProject} onClose={() => setShowTerminal(false)} />
 							)}
 						</div>
 					)}
