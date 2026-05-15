@@ -19,6 +19,7 @@ markers = [
     "desktop: Desktop automation tests (xdotool)",
     "agent: Agent loop tests (requires LLM)",
     "playwright: Playwright frontend UI tests",
+    "tui: TUI visual tests (requires task tui-visual)",
     "slow: Slow tests (LLM-dependent)",
     "vision: Tests using vision/AI verification",
 ]

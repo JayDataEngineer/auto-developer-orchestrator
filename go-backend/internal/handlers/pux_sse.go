@@ -154,14 +154,18 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 	case llamaeng.EventTypeArtifactUpdated:
 		return &sseEvent{Type: "artifact_updated", Data: event.Data}
 
-	case llamaeng.EventTypePlanCreated:
+	case llamaeng.EventTypeDecisionRequest:
 		return &sseEvent{
-			Type: "plan_created",
+			Type: "decision_request",
 			Data: map[string]interface{}{
-				"planId":    event.Data.ToolArgs["planId"],
-				"name":      event.Data.ToolArgs["name"],
-				"content":   event.Data.ToolArgs["content"],
-				"filePath":  event.Data.ToolArgs["filePath"],
+				"decisionId":   event.Data.ToolArgs["decisionId"],
+				"sourceTool":   event.Data.ToolArgs["sourceTool"],
+				"title":        event.Data.ToolArgs["title"],
+				"description":  event.Data.ToolArgs["description"],
+				"hint":         event.Data.ToolArgs["hint"],
+				"options":      event.Data.ToolArgs["options"],
+				"allowFreeText": event.Data.ToolArgs["allowFreeText"],
+				"metadata":     event.Data.ToolArgs["metadata"],
 			},
 		}
 
@@ -189,13 +193,6 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 			},
 		}
 
-	case llamaeng.EventTypeApprovalRequest:
-		result, _ := event.Data.Result.(map[string]interface{})
-		if result != nil {
-			return &sseEvent{Type: "approval_request", Data: result}
-		}
-		return nil
-
 	case llamaeng.EventTypeHookRequest:
 		return &sseEvent{
 			Type: "hook_request",
@@ -205,18 +202,6 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 				"toolName":  event.Data.ToolName,
 				"args":      event.Data.ToolArgs,
 				"result":    event.Data.Result,
-			},
-		}
-
-	case llamaeng.EventTypeUserQuestion:
-		return &sseEvent{
-			Type: "user_question",
-			Data: map[string]interface{}{
-				"questionId":    event.Data.ToolID,
-				"question":      event.Data.ToolArgs["question"],
-				"options":       event.Data.ToolArgs["options"],
-				"allowFreeText": event.Data.ToolArgs["allowFreeText"],
-				"default":       event.Data.ToolArgs["default"],
 			},
 		}
 

@@ -2,15 +2,15 @@ import { useState } from "react";
 import { MessageCircleQuestion } from "lucide-react";
 import { usePuxStore } from "@/lib/pux-store";
 
-export function QuestionDialog() {
-	const pending = usePuxStore((s) => s.pendingQuestion);
-	const respond = usePuxStore((s) => s.respondToQuestion);
+export function DecisionQuestion() {
+	const pending = usePuxStore((s) => s.pendingDecision);
+	const respond = usePuxStore((s) => s.respondToDecision);
 	const [input, setInput] = useState("");
 
 	if (!pending) return null;
 
-	const handleSubmit = (response: string) => {
-		respond(response);
+	const handleSubmit = (value: string) => {
+		respond("answer", value);
 		setInput("");
 	};
 
@@ -24,13 +24,12 @@ export function QuestionDialog() {
 					</span>
 				</div>
 				<div className="px-4 py-3 text-sm whitespace-pre-wrap text-text">
-					{pending.question}
+					{pending.title}
 				</div>
 
-				{/* Options */}
-				{pending.options.length > 0 && (
+				{(pending.options?.length ?? 0) > 0 && (
 					<div className="px-4 pb-2 space-y-1.5">
-						{pending.options.map((opt) => (
+						{pending.options!.map((opt) => (
 							<button
 								key={opt}
 								onClick={() => handleSubmit(opt)}
@@ -42,8 +41,7 @@ export function QuestionDialog() {
 					</div>
 				)}
 
-				{/* Free text */}
-				{pending.allowFreeText && (
+				{pending.allowFreeText !== false && (
 					<div className="border-t border-border px-4 py-3 space-y-2">
 						<input
 							value={input}

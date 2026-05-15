@@ -8,51 +8,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/autoconfig"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
-
-// PendingPlans is a global registry of plans waiting for user approval.
-// The create_plan tool registers here, and the HTTP handler for /api/pux/plan-response resolves.
-var PendingPlans = &planRegistry{
-	entries: make(map[string]chan PlanResponse),
-}
-
-// PlanResponse is the user's response to a plan approval request.
-type PlanResponse struct {
-	Action   string // "approve", "refine", "cancel"
-	Feedback string // Optional user feedback (for refine)
-}
-
-type planRegistry struct {
-	mu      sync.Mutex
-	entries map[string]chan PlanResponse // key = planID, value = response channel
-}
-
-func (r *planRegistry) Register(id string) chan PlanResponse {
-	ch := make(chan PlanResponse, 1)
-	r.mu.Lock()
-	r.entries[id] = ch
-	r.mu.Unlock()
-	return ch
-}
-
-func (r *planRegistry) Resolve(id string, response PlanResponse) bool {
-	r.mu.Lock()
-	ch, ok := r.entries[id]
-	if ok {
-		delete(r.entries, id)
-	}
-	r.mu.Unlock()
-	if !ok {
-		return false
-	}
-	ch <- response
-	return true
-}
 
 // PlanTool lets the AI create an execution plan that must be approved by the user.
 // The plan is persisted to .pux/plans/{name}.md and blocks until the user responds.
@@ -113,69 +73,49 @@ func (t *PlanTool) Execute(ctx context.Context, args map[string]any) (any, error
 	// Derive plan path for event emission
 	plansDir := filepath.Join(t.projectDir, ".pux", "plans")
 	planPath := filepath.Join(plansDir, safeName+".md")
+	_ = result
 
-	// Generate unique plan ID
 	planID := fmt.Sprintf("p_%d_%s", time.Now().UnixNano(), safeName)
-	_ = result // result message used implicitly
 
-	// Register pending plan
-	responseCh := PendingPlans.Register(planID)
-
-	// Contract 3: emit plan_created event via context-provided subscriber.
-	// The agent loop injects the subscriber into context (SubscriberKey).
-	// Tools do NOT hold direct references to the event stream.
-	if sub, ok := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent); ok && sub != nil {
-		core.SendEvent(sub, core.AgentEvent{
-			Type: core.EventTypePlanCreated,
-			Data: core.AgentEventData{
-				ToolID:   planID,
-				ToolName: "create_plan",
-				ToolArgs: map[string]any{
-					"planId":   planID,
-					"name":     name,
-					"content":  content,
-					"filePath": planPath,
-				},
-			},
-		})
+	subscriber, _ := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent)
+	resp, err := core.GlobalDecisions.WaitForDecision(ctx, core.DecisionRequest{
+		ID:          planID,
+		SourceTool:  "create_plan",
+		Title:       fmt.Sprintf("Plan: %s", name),
+		Description: content,
+		Hint:        core.HintPlanReview,
+		Metadata:    map[string]any{"filePath": planPath},
+	}, subscriber, 10*time.Minute)
+	if err != nil {
+		return nil, fmt.Errorf("create_plan: %w", err)
 	}
 
-	// Block until response arrives or context cancels (10 minute timeout)
-	select {
-	case response := <-responseCh:
-		switch response.Action {
-		case "approve":
-			return map[string]any{
-				"approved": true,
-				"message":  "Plan approved by user. Proceed with execution.",
-				"filePath": planPath,
-			}, nil
-		case "refine":
-			return map[string]any{
-				"approved": false,
-				"refine":   true,
-				"feedback": response.Feedback,
-				"message":  fmt.Sprintf("User wants plan refined: %s", response.Feedback),
-				"filePath": planPath,
-			}, nil
-		case "cancel":
-			return map[string]any{
-				"approved": false,
-				"cancelled": true,
-				"message":  "Plan cancelled by user.",
-			}, nil
-		default:
-			return map[string]any{
-				"approved": false,
-				"message":  fmt.Sprintf("Unknown action: %s", response.Action),
-			}, nil
-		}
-	case <-ctx.Done():
-		PendingPlans.Resolve(planID, PlanResponse{Action: "cancel"}) // cleanup
-		return nil, fmt.Errorf("create_plan: cancelled (user did not respond)")
-	case <-time.After(10 * time.Minute):
-		PendingPlans.Resolve(planID, PlanResponse{Action: "cancel"}) // cleanup
-		return nil, fmt.Errorf("create_plan: timed out after 10 minutes waiting for user approval")
+	switch resp.Action {
+	case "approve":
+		return map[string]any{
+			"approved": true,
+			"message":  "Plan approved by user. Proceed with execution.",
+			"filePath": planPath,
+		}, nil
+	case "refine":
+		return map[string]any{
+			"approved": false,
+			"refine":   true,
+			"feedback": resp.Value,
+			"message":  fmt.Sprintf("User wants plan refined: %s", resp.Value),
+			"filePath": planPath,
+		}, nil
+	case "cancel":
+		return map[string]any{
+			"approved": false,
+			"cancelled": true,
+			"message":  "Plan cancelled by user.",
+		}, nil
+	default:
+		return map[string]any{
+			"approved": false,
+			"message":  fmt.Sprintf("Unknown action: %s", resp.Action),
+		}, nil
 	}
 }
 

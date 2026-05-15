@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/auto-developer-orchestrator/backend/internal/approval"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
@@ -44,7 +43,6 @@ type PuxHandler struct {
 
 	visionClient   *browser.VisionClient // local llama.cpp vision (second fallback tier)
 	eventStore     *storage.EventStore
-	approvalMgr    *approval.Manager // central approval manager for Respond endpoint
 	schedulerTool  any               // schedulertool.Backend — scheduler tool for LLM
 	hookBridge     *hooks.SSEHookBridge // SSE hook bridge for TUI interception
 
@@ -64,7 +62,6 @@ func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, 
 		litellmURL:    os.Getenv("LITELLM_PROXY_URL"),
 		litellmKey:    os.Getenv("LITELLM_MASTER_KEY"),
 		toolPerms:     perms.NewToolPermissionConfig(logger),
-		approvalMgr:   approval.NewManager(5 * time.Minute),
 		selectedEngines: make(map[string]*llamaeng.LLMClient),
 	}
 }
@@ -141,9 +138,7 @@ func (h *PuxHandler) SetLangfuse(lf *observability.LangfuseClient) {
 // RegisterRoutes registers all Pux routes on the given router.
 func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/prompt", h.Prompt)
-	r.Post("/respond", h.Respond)
-	r.Post("/user-response", h.UserResponse)
-	r.Post("/plan-response", h.PlanResponse)
+	r.Post("/decision", h.Decision)
 	r.Get("/tool-permissions", h.GetToolPermissions)
 	r.Put("/tool-permissions", h.SetToolPermission)
 	r.Get("/history", h.GetHistory)

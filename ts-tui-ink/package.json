@@ -9,6 +9,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@assistant-ui/monorepo": "github:assistant-ui/assistant-ui#main",
     "@assistant-ui/react-ink": "^0.0.16",
     "@assistant-ui/react-ink-markdown": "^0.0.15",
     "@pux/shared": "file:../shared",

@@ -121,6 +121,9 @@ def pytest_collection_modifyitems(config, items):
             f"{API_BASE_URL}/api/sandbox", expect_lt=500
         )
 
+    # Probe TUI visual server
+    _SERVICES_AVAILABLE["tui_visual"] = _probe("http://localhost:9877/health")
+
     skip_map = {
         "api": "API server unreachable",
         "sse": "API server unreachable",
@@ -129,6 +132,7 @@ def pytest_collection_modifyitems(config, items):
         "desktop": "Sandbox service unreachable",
         "agent": "API server unreachable",
         "playwright": "Frontend server unreachable",
+        "tui": "TUI visual server unreachable (start: task tui-visual)",
     }
 
     for item in items:
@@ -140,6 +144,8 @@ def pytest_collection_modifyitems(config, items):
                     service_key = "api"
                 elif marker_name in ("browser", "desktop"):
                     service_key = "sandbox"
+                elif marker_name == "tui":
+                    service_key = "tui_visual"
                 if not _SERVICES_AVAILABLE.get(service_key, True):
                     reason = skip_map[marker_name]
                     item.add_marker(pytest.mark.skip(reason=reason))

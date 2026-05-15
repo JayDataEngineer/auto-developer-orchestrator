@@ -124,8 +124,8 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		credStore.Set("github", "token", ghToken)
 	}
 
-	// Approval handler via central approval manager (Respond endpoint)
-	approvalHandler := &adapters.ApprovalHandler{Mgr: h.approvalMgr}
+	// Approval handler via unified decision registry (Decision endpoint)
+	approvalHandler := &adapters.ApprovalHandler{Registry: core.GlobalDecisions}
 
 	// Use per-agentId session path for history continuity.
 	// Sessions live under ~/.pi/agent/sessions/ (always user-writable),

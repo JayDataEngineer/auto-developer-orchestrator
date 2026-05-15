@@ -24,7 +24,7 @@ export function DecisionDialog() {
 			if (key.backspace || key.delete) {
 				setFeedback((prev) => prev.slice(0, -1));
 			} else if (key.return) {
-				respond("revise", feedback.trim() || "Please revise");
+				respond("refine", feedback.trim() || "Please revise");
 			} else if (key.escape) {
 				setFeedbackMode(false);
 			} else if (ch && !key.ctrl && !key.meta) {
@@ -43,7 +43,7 @@ export function DecisionDialog() {
 			if (ch === "a" || ch === "A") {
 				respond("approve", "");
 			} else if (ch === "r" || ch === "R") {
-				respond("reject", "");
+				respond("cancel", "");
 			} else if (ch === "f" || ch === "F") {
 				setFeedbackMode(true);
 			}

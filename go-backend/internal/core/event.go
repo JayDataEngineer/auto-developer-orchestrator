@@ -48,7 +48,8 @@ const (
 	EventTypeStepStart       AgentEventType = "step_start"
 	EventTypeStepEnd         AgentEventType = "step_end"
 	EventTypeHookRequest     AgentEventType = "hook_request"
-	EventTypeUserQuestion    AgentEventType = "user_question"
+	EventTypeDecisionRequest AgentEventType = "decision_request" // unified HITL
+	EventTypeUserQuestion    AgentEventType = "user_question"    // legacy, replaced by decision_request
 )
 
 // AgentEvent is an event emitted by the agent loop.

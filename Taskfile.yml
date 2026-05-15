@@ -190,6 +190,8 @@ tasks:
       - task: test-tui &
       - wait
       - task: test-e2e
+      - task: test-tui-e2e
+      - task: test-webui-e2e
 
   test-go:
     desc: Run Go backend tests
@@ -280,6 +282,18 @@ tasks:
     desc: Run Playwright E2E tests
     cmds:
       - npm run test:playwright
+
+  test-tui-e2e:
+    desc: Run TUI visual E2E tests (requires task tui-visual)
+    dir: tests/python
+    cmds:
+      - python3 -m pytest tui/ -v --tb=short {{.CLI_ARGS}}
+
+  test-webui-e2e:
+    desc: Run WebUI E2E tests (Playwright with route mocking)
+    dir: tests/python
+    cmds:
+      - python3 -m pytest frontend/test_webui_chat.py -v --tb=short {{.CLI_ARGS}}
 
   test-all:
     desc: Run everything sequentially (CI mode)

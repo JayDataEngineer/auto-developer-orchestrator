@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/auto-developer-orchestrator/backend/internal/approval"
+	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/hooks"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
@@ -105,16 +105,16 @@ func (g *GitExecutor) Commit(ctx context.Context, message string) error {
 
 // ── Approval adapter ─────────────────────────────────────────────────
 
-// ApprovalHandler wraps *approval.Manager to implement hooks.ApprovalHandler.
-// This bridges the central approval.Manager (HTTP Respond endpoint) to the
+// ApprovalHandler wraps *core.DecisionRegistry to implement hooks.ApprovalHandler.
+// This bridges the unified DecisionRegistry (HTTP Decision endpoint) to the
 // agent's approval hook.
 type ApprovalHandler struct {
-	Mgr *approval.Manager
+	Registry *core.DecisionRegistry
 }
 
 func (a *ApprovalHandler) RequestApproval(ctx context.Context, requestID string, data map[string]any) (hooks.ApprovalResponse, error) {
-	ch := a.Mgr.Register(requestID)
-	defer a.Mgr.Cleanup(requestID)
+	ch := a.Registry.Register(requestID)
+	defer a.Registry.Cleanup(requestID)
 
 	select {
 	case <-ctx.Done():
@@ -122,7 +122,7 @@ func (a *ApprovalHandler) RequestApproval(ctx context.Context, requestID string,
 	case resp := <-ch:
 		return hooks.ApprovalResponse{
 			Approved: resp.Action == "approve",
-			Feedback: resp.Message,
+			Feedback: resp.Value,
 		}, nil
 	}
 }

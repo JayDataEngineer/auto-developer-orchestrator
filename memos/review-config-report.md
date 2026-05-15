@@ -10,8 +10,8 @@
 
 ### 🔴 `.env` — Hardcoded Production Secrets (Security Breach)
 - **File:** `.env`  
-- **Line 1:** `GITHUB_TOKEN="REDACTED"` — Real GitHub PAT in plaintext. Rotate immediately.  
-- **Line 2:** `JULES_API_KEY="REDACTED"` — Hardcoded Jules API key.  
+- **Line 1:** `GITHUB_TOKEN="REDACTED_GITHUB_PAT"` — Real GitHub PAT in plaintext. Rotate immediately.  
+- **Line 2:** `JULES_API_KEY="REDACTED_JULES_API_KEY"` — Hardcoded Jules API key.  
 - `.env` is tracked in `.gitignore` (wisely), but these should never have been committed. Remove from git history / rotate.
 
 ### 🔴 `.env.example` — Missing `JULES_API_KEY` Documentation

@@ -5,7 +5,7 @@
  * snapshots that useLocalRuntime renders via the styled Thread component.
  *
  * Content events (text_delta, thinking_delta, tool_execution_*) → message parts.
- * Meta events (user_question, approval_request, compaction, agent_end) → Zustand.
+ * Meta events (decision_request, compaction, agent_end) → Zustand.
  *
  * Shared between Web (React DOM) and TUI (Ink).
  */
@@ -83,42 +83,21 @@ function handleMetaEvent(eventType: string, data: Record<string, unknown>, statu
 			if (agentId) usePuxStore.setState({ activeAgentId: agentId });
 			break;
 		}
-		case "user_question": {
+		case "decision_request": {
+			const metadata = data.metadata;
 			usePuxStore.setState({
-				pendingQuestion: {
-					questionId: data.questionId as string,
-					question: data.question as string,
-					options: (data.options as string[]) || [],
-					allowFreeText: (data.allowFreeText as boolean) ?? true,
-				},
-			});
-			// Signal requires-action natively to assistant-ui
-			statusRef[0] = "requires-action";
-			break;
-		}
-		case "approval_request": {
-			usePuxStore.setState({
-				pendingApproval: {
-					requestId: data.requestId as string,
-					title: (data.title as string) || "",
+				pendingDecision: {
+					decisionId: data.decisionId as string,
+					sourceTool: data.sourceTool as string,
+					title: data.title as string,
 					description: (data.description as string) || "",
+					hint: data.hint as "question" | "approval" | "plan_review",
+					options: (data.options as string[]) || undefined,
+					allowFreeText: (data.allowFreeText as boolean) || undefined,
+					metadata: (typeof metadata === "object" && metadata !== null ? metadata : undefined) as Record<string, unknown> | undefined,
 				},
 			});
-			// Signal requires-action natively to assistant-ui
 			statusRef[0] = "requires-action";
-			break;
-		}
-		case "plan_created": {
-			const toolArgs = data.toolArgs as Record<string, unknown> | undefined;
-			if (toolArgs) {
-				usePuxStore.setState({
-					pendingPlan: {
-						planId: toolArgs.planId as string,
-						name: toolArgs.name as string,
-						content: toolArgs.content as string,
-					},
-				});
-			}
 			break;
 		}
 		case "compaction_start": {

@@ -69,4 +69,5 @@ const (
 	EventTypeStepStart       = core.EventTypeStepStart
 	EventTypeStepEnd         = core.EventTypeStepEnd
 	EventTypeUserQuestion    = core.EventTypeUserQuestion
+	EventTypeDecisionRequest = core.EventTypeDecisionRequest
 )

@@ -4,48 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
 
-// PendingQuestions is a global registry of questions waiting for user responses.
-// The ask_user tool registers here, and the HTTP handler for /api/pux/user-response resolves.
-var PendingQuestions = &pendingRegistry{
-	entries: make(map[string]chan string),
-}
-
-type pendingRegistry struct {
-	mu      sync.Mutex
-	entries map[string]chan string // key = questionID, value = response channel
-}
-
-func (r *pendingRegistry) Register(id string) chan string {
-	ch := make(chan string, 1)
-	r.mu.Lock()
-	r.entries[id] = ch
-	r.mu.Unlock()
-	return ch
-}
-
-func (r *pendingRegistry) Resolve(id, response string) bool {
-	r.mu.Lock()
-	ch, ok := r.entries[id]
-	if ok {
-		delete(r.entries, id)
-	}
-	r.mu.Unlock()
-	if !ok {
-		return false
-	}
-	ch <- response
-	return true
-}
-
 // AskUserTool lets the AI ask the user a question and wait for a response.
 // Supports multiple choice options or free-text input.
-// Blocks until the user responds via the /api/pux/user-response endpoint.
+// Blocks until the user responds via the POST /api/pux/decision endpoint.
 //
 // Contract 3 compliance: does NOT take an SSE subscriber in the constructor.
 // Instead, retrieves it from the context (set by AgentLoop) when needed.
@@ -94,45 +60,21 @@ func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (any, er
 	if v, ok := args["allow_free_text"].(bool); ok {
 		allowFreeText = v
 	}
-	defaultAnswer, _ := args["default"].(string)
 
-	// Generate unique question ID
 	questionID := fmt.Sprintf("q_%d", time.Now().UnixNano())
 
-	// Register pending question
-	responseCh := PendingQuestions.Register(questionID)
-
-	// Contract 3: emit user_question event via context-provided subscriber.
-	// The agent loop injects the subscriber into context (SubscriberKey).
-	// Tools do NOT hold direct references to the event stream.
-	if sub, ok := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent); ok && sub != nil {
-		core.SendEvent(sub, core.AgentEvent{
-			Type: core.EventTypeUserQuestion,
-			Data: core.AgentEventData{
-				ToolID:   questionID,
-				ToolName: "ask_user",
-				ToolArgs: map[string]any{
-					"questionId":    questionID,
-					"question":      question,
-					"options":       options,
-					"allowFreeText": allowFreeText,
-					"default":       defaultAnswer,
-				},
-			},
-		})
+	subscriber, _ := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent)
+	resp, err := core.GlobalDecisions.WaitForDecision(ctx, core.DecisionRequest{
+		ID:            questionID,
+		SourceTool:    "ask_user",
+		Title:         question,
+		Hint:          core.HintQuestion,
+		Options:       options,
+		AllowFreeText: allowFreeText,
+	}, subscriber, 5*time.Minute)
+	if err != nil {
+		return nil, fmt.Errorf("ask_user: %w", err)
 	}
 
-	// Block until response arrives or context cancels (5 minute timeout)
-	select {
-	case response := <-responseCh:
-		return map[string]any{
-			"response": response,
-		}, nil
-	case <-ctx.Done():
-		PendingQuestions.Resolve(questionID, "") // cleanup
-		return nil, fmt.Errorf("ask_user: cancelled (user did not respond)")
-	case <-time.After(5 * time.Minute):
-		PendingQuestions.Resolve(questionID, "") // cleanup
-		return nil, fmt.Errorf("ask_user: timed out after 5 minutes waiting for user response")
-	}
+	return map[string]any{"response": resp.Value}, nil
 }
