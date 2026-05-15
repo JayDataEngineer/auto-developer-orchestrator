@@ -102,6 +102,10 @@ type liveAgent struct {
 
 // NewParallelRunner creates a runner that fans out sub-agents in parallel.
 func NewParallelRunner(executor core.ToolExecutor, toolSpecs []core.OpenAITool, baseSession core.Session, ctxSize int, modelResolver ModelResolver) *ParallelRunner {
+	// Enforce minimum context size for sub-agents
+	if ctxSize < 50000 {
+		ctxSize = 50000
+	}
 	return &ParallelRunner{
 		executor:      executor,
 		toolSpecs:     toolSpecs,
@@ -1038,12 +1042,12 @@ func (r *ParallelRunner) pendingCount() int {
 }
 
 // subAgentResultProcessor returns a ToolResultProcessor for sub-agents.
-// Sub-agents are short-lived and don't need the full context manager stack,
-// but they do need large results truncated to prevent context overflow.
+// Truncates very large results to prevent context overflow while keeping
+// enough detail for the agent to work effectively.
 func subAgentResultProcessor() func(ctx context.Context, toolName, toolCallID, result string) string {
 	return func(ctx context.Context, toolName, toolCallID, result string) string {
-		if len(result) > 6000 {
-			return result[:6000] + "\n...[truncated by sub-agent context manager]"
+		if len(result) > 12000 {
+			return result[:12000] + "\n...[truncated — full result available via load_spilled if needed]"
 		}
 		return result
 	}
@@ -1072,8 +1076,9 @@ func (s *subSession) Navigate(nodeID string) error { return fmt.Errorf("sub-sess
 func (s *subSession) Branch(label string) (string, error) { return "", fmt.Errorf("sub-sessions do not support branching") }
 func (s *subSession) Fork(nodeID string) (core.Session, error) { return nil, fmt.Errorf("sub-sessions do not support forking") }
 func (s *subSession) Compact(ctx context.Context, summary string) (string, error) {
-	// Simple truncation: keep recent messages, drop old tool results.
-	// This gives the subagent room for new feedback without overflowing context.
+	// Keep recent messages verbatim, summarize older ones.
+	// Tool results get truncated to 2000 chars (not dropped).
+	// User/assistant messages get truncated to 4000 chars.
 	if len(s.messages) <= 10 {
 		return "", nil
 	}
@@ -1085,16 +1090,31 @@ func (s *subSession) Compact(ctx context.Context, summary string) (string, error
 			// Keep the last 10 messages verbatim
 			compacted = append(compacted, msg)
 			kept++
-		} else if msg.Role == "user" || msg.Role == "assistant" {
-			// Keep user/assistant messages but truncate long content
+		} else {
+			// Older messages: truncate but don't drop
 			content := msg.Content
-			if len(content) > 300 {
-				content = content[:300] + "... (truncated)"
+			switch msg.Role {
+			case "tool":
+				// Tool results: keep first 2000 chars
+				if len(content) > 2000 {
+					content = content[:2000] + "\n...[compacted]"
+				}
+			case "user", "assistant":
+				// User/assistant: keep first 4000 chars
+				if len(content) > 4000 {
+					content = content[:4000] + "\n...[compacted]"
+				}
 			}
-			compacted = append(compacted, core.Message{Role: msg.Role, Content: content})
-			kept++
+			if content != "" {
+				compacted = append(compacted, core.Message{
+					Role:       msg.Role,
+					Content:    content,
+					ToolCallID: msg.ToolCallID,
+					Name:       msg.Name,
+				})
+				kept++
+			}
 		}
-		// Old tool results are dropped entirely
 	}
 
 	removed := len(s.messages) - kept
