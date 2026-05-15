@@ -182,6 +182,7 @@ function CommandComposer({
 	return (
 		<ComposerPrimitive.Input
 			submitOnEnter
+			multiLine
 			placeholder="Message... (type / for commands)"
 			autoFocus
 			onSubmit={(value) => {
