@@ -8,6 +8,7 @@
 import React, { useState, useMemo } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import { useAuiState } from "@assistant-ui/react-ink";
+import { formatToolResult, getToolArgPreview } from "@pux/shared";
 import { colors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 
 interface ToolCallEntry {
@@ -130,7 +131,7 @@ export function ToolsView() {
 							</Text>
 							<Text color="gray">
 								{" "}
-								{getArgsPreview(tc.toolName, tc.args)}
+								{getToolArgPreview(tc.toolName, tc.args as Record<string, unknown>)}
 							</Text>
 						</Box>
 
@@ -150,7 +151,7 @@ export function ToolsView() {
 								{tc.result !== undefined && (
 									<Box flexDirection="column" marginTop={0}>
 										<Text dimColor bold>Result:</Text>
-										{formatResult(tc.result).map((line: string, j: number) => (
+										{formatToolResult(tc.result, 8).map((line: string, j: number) => (
 											<Text key={j} dimColor>
 												{BLOCKQUOTE_BAR} {line.slice(0, 120)}
 											</Text>
@@ -178,42 +179,3 @@ export function ToolsView() {
 	);
 }
 
-function getArgsPreview(toolName: string, args?: unknown): string {
-	if (!args || typeof args !== "object") return "";
-	const a = args as Record<string, unknown>;
-	const entries = Object.entries(a);
-	if (entries.length === 0) return "";
-
-	// Tool-specific previews
-	if (["bash", "shell"].includes(toolName)) {
-		const cmd = (a.command as string) || (a.cmd as string) || "";
-		return cmd.slice(0, 50);
-	}
-	if (["delegate_to", "delegate_async"].includes(toolName)) {
-		return (a.agent as string) || "";
-	}
-	if (["file_read", "file_write", "file_edit"].includes(toolName)) {
-		return (a.path as string) || (a.file_path as string) || "";
-	}
-
-	// Generic
-	const firstVal = entries[0]?.[1];
-	if (typeof firstVal === "string") return firstVal.slice(0, 50);
-	return `${entries.length} args`;
-}
-
-function formatResult(result: unknown): string[] {
-	if (result === undefined || result === null) return [];
-	let text: string;
-	if (typeof result === "string") {
-		text = result;
-	} else if (typeof result === "object") {
-		const obj = result as Record<string, unknown>;
-		text = (obj.output as string) || (obj.text as string) || JSON.stringify(result);
-	} else {
-		text = JSON.stringify(result);
-	}
-	text = text.replace(/\r\n/g, "\n");
-	const lines = text.split("\n").filter((l) => l.trim());
-	return lines.slice(0, 8);
-}

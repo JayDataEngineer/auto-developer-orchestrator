@@ -16,7 +16,10 @@ import {
 	AssistantRuntimeProvider,
 	useLocalRuntime,
 } from "@assistant-ui/react-ink";
+import type { FeedbackAdapter } from "@assistant-ui/react-ink";
 import { puxChatAdapter, createPuxHistoryAdapter, usePuxStore } from "@pux/shared";
+import { getFetch } from "@pux/shared";
+import { apiUrl } from "@pux/shared";
 import { Thread } from "./components/thread.js";
 import { StatusBar } from "./components/status-bar.js";
 import { TabBar } from "./components/tab-bar.js";
@@ -33,8 +36,27 @@ import { executeCommand, type CommandContext } from "./commands.js";
 
 function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	const historyAdapter = useMemo(() => createPuxHistoryAdapter(), []);
+	const feedbackAdapter = useMemo<FeedbackAdapter>(
+		() => ({
+			submit: ({ message, type }) => {
+				const fetch = getFetch();
+				fetch(apiUrl("/api/pux/feedback"), {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						messageId: message.id,
+						type,
+						role: message.role,
+					}),
+				}).catch(() => {
+					// Endpoint may not exist yet — silent no-op
+				});
+			},
+		}),
+		[],
+	);
 	const runtime = useLocalRuntime(puxChatAdapter, {
-		adapters: { history: historyAdapter },
+		adapters: { history: historyAdapter, feedback: feedbackAdapter },
 	});
 	return (
 		<AssistantRuntimeProvider runtime={runtime}>

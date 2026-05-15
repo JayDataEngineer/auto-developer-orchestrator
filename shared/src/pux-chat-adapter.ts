@@ -1,11 +1,18 @@
 /**
- * PuxChatAdapter — Contract 2 SSE → @assistant-ui runtime.
+ * PuxChatAdapter — native SSE → @assistant-ui runtime.
  *
  * POSTs to /api/pux/prompt, parses SSE events, yields ChatModelRunResult
  * snapshots that useLocalRuntime renders via the styled Thread component.
  *
  * Content events (text_delta, thinking_delta, tool_execution_*) → message parts.
- * Meta events (decision_request, compaction, agent_end) → Zustand.
+ * Meta events (decision_request, compaction, agent_end) → Zustand + snapshot metadata.
+ *
+ * Populates native assistant-ui fields:
+ *   - metadata.timing: streamStartTime, firstTokenTime, totalStreamTime, etc.
+ *   - metadata.steps: per-turn token usage from agent_end
+ *   - metadata.custom: model, contextUtil, agentId
+ *   - ToolCallMessagePart.interrupt: set on tools that trigger decision_request
+ *   - Status: incomplete/cancelled on abort, requires-action on decisions
  *
  * Shared between Web (React DOM) and TUI (Ink).
  */
@@ -33,13 +40,27 @@ interface RunningTool {
 	interrupt?: { type: "human"; payload: unknown };
 }
 
-// ── Meta event dispatcher → Zustand ──
+/** Timing accumulator — populated during streaming for metadata.timing */
+interface TimingAccum {
+	streamStartTime: number;
+	firstTokenTime: number | null;
+	totalStreamTime: number | null;
+	chunkCount: number;
+	tokenCount: number | null;
+}
+
+/** Usage step — populated from agent_end for metadata.steps */
+interface UsageStep {
+	inputTokens: number;
+	outputTokens: number;
+}
+
+// ── Meta event dispatcher → Zustand + timing + steps ──
 
 /** Map tool/agent signals to workbench tabs */
 function inferTabFromTool(toolName: string, toolArgs: Record<string, unknown>): void {
 	const store = usePuxStore.getState();
 
-	// Delegate tools — check which employee
 	if (toolName === "delegate_to" || toolName === "delegate_async") {
 		const agent = (toolArgs.agent as string) || "";
 		if (["jake", "ryan", "browser_ops", "desktop_ops"].includes(agent)) {
@@ -50,23 +71,19 @@ function inferTabFromTool(toolName: string, toolArgs: Record<string, unknown>): 
 			store.setWorkbenchTab("editor");
 			return;
 		}
-		// Sarah, Alex, Elena, researcher, etc — don't switch
 		return;
 	}
 
-	// Scheduler tool
 	if (toolName === "scheduler") {
 		store.setWorkbenchTab("scheduler");
 		return;
 	}
 
-	// File/code tools
 	if (["file_read", "file_write", "file_edit"].includes(toolName)) {
 		store.setWorkbenchTab("editor");
 		return;
 	}
 
-	// Bash with file-like args — could be editing
 	if (toolName === "bash") {
 		const cmd = (toolArgs.command as string) || "";
 		if (/\b(vim|nano|cat|head|tail|sed|awk)\b/.test(cmd) || /\.(ts|tsx|go|py|rs|js|jsx|md|json|yaml|yml|css|html)\b/.test(cmd)) {
@@ -76,7 +93,13 @@ function inferTabFromTool(toolName: string, toolArgs: Record<string, unknown>): 
 	}
 }
 
-function handleMetaEvent(eventType: string, data: Record<string, unknown>, statusRef: string[]) {
+function handleMetaEvent(
+	eventType: string,
+	data: Record<string, unknown>,
+	statusRef: string[],
+	tools: Map<string, RunningTool & { result?: unknown; isError?: boolean }>,
+	stepsRef: UsageStep[],
+): void {
 	switch (eventType) {
 		case "agent_spawned": {
 			const agentId = data.agentId as string | undefined;
@@ -98,6 +121,18 @@ function handleMetaEvent(eventType: string, data: Record<string, unknown>, statu
 				},
 			});
 			statusRef[0] = "requires-action";
+
+			// Gap 6: Set interrupt on the tool that triggered this decision.
+			// The backend sends sourceTool — find it in the running tools map.
+			const sourceToolName = data.sourceTool as string;
+			if (sourceToolName) {
+				for (const tool of tools.values()) {
+					if (tool.toolName === sourceToolName && tool.result === undefined) {
+						(tool as any).interrupt = { type: "human" as const, payload: data };
+						break;
+					}
+				}
+			}
 			break;
 		}
 		case "compaction_start": {
@@ -117,10 +152,15 @@ function handleMetaEvent(eventType: string, data: Record<string, unknown>, statu
 			break;
 		}
 		case "agent_end": {
+			// Gap 2: Record per-step usage
+			const inputTokens = (data.input as number) || 0;
+			const outputTokens = (data.output as number) || 0;
+			stepsRef.push({ inputTokens, outputTokens });
+
 			usePuxStore.setState({
 				lastUsage: {
-					input: (data.input as number) || 0,
-					output: (data.output as number) || 0,
+					input: inputTokens,
+					output: outputTokens,
 					cache: (data.cache as number) || 0,
 					model: data.model as string | undefined,
 				},
@@ -136,11 +176,15 @@ function handleMetaEvent(eventType: string, data: Record<string, unknown>, statu
 
 // ── Snapshot builder ──
 
+type SnapshotStatus = "running" | "complete" | "requires-action";
+
 function buildSnapshot(
 	accText: string,
 	accThinking: string,
-	tools: Map<string, RunningTool & { result?: unknown; isError?: boolean; interrupt?: string }>,
-	status: "running" | "complete" | "requires-action",
+	tools: Map<string, RunningTool & { result?: unknown; isError?: boolean }>,
+	status: SnapshotStatus,
+	timing: TimingAccum,
+	steps: UsageStep[],
 ): ChatModelRunResult {
 	const parts: Part[] = [];
 
@@ -150,7 +194,9 @@ function buildSnapshot(
 	}
 
 	// Tool calls in order they were started
+	let toolCallCount = 0;
 	for (const tool of tools.values()) {
+		toolCallCount++;
 		const part: ToolCallMessagePart = {
 			type: "tool-call",
 			toolCallId: tool.toolCallId,
@@ -179,9 +225,42 @@ function buildSnapshot(
 		runStatus = { type: "running" };
 	}
 
+	// Gap 1: Build metadata.timing
+	const now = Date.now();
+	const totalStreamTime = timing.streamStartTime ? now - timing.streamStartTime : 0;
+	const tokenCount = timing.tokenCount;
+	const tokensPerSecond = totalStreamTime > 0 && tokenCount
+		? Math.round((tokenCount / totalStreamTime) * 1000)
+		: undefined;
+
+	// Gap 2: Build metadata.steps from accumulated usage
+	const stepsMeta = steps.length > 0
+		? steps.map((s) => ({ usage: { inputTokens: s.inputTokens, outputTokens: s.outputTokens } }))
+		: undefined;
+
+	// Gap 4: Build metadata.custom
+	const store = usePuxStore.getState();
+	const customMeta: Record<string, unknown> = {};
+	if (store.activeModel) customMeta.model = store.activeModel;
+	if (store.activeAgentId) customMeta.agentId = store.activeAgentId;
+	if (store.activeProject) customMeta.project = store.activeProject;
+
 	return {
 		content: parts,
 		status: runStatus,
+		metadata: {
+			timing: {
+				streamStartTime: timing.streamStartTime,
+				firstTokenTime: timing.firstTokenTime ?? undefined,
+				totalStreamTime: status === "complete" ? totalStreamTime : undefined,
+				tokenCount: tokenCount ?? undefined,
+				tokensPerSecond,
+				totalChunks: timing.chunkCount,
+				toolCallCount,
+			},
+			...(stepsMeta ? { steps: stepsMeta } : {}),
+			...(Object.keys(customMeta).length > 0 ? { custom: customMeta } : {}),
+		},
 	};
 }
 
@@ -206,7 +285,7 @@ function parseSSE(
 			currentEvent = "";
 			currentData = "";
 		} else if (line === "") {
-			// SSE boundary — already handled above
+			// SSE boundary
 		}
 	}
 
@@ -270,12 +349,25 @@ export const puxChatAdapter: ChatModelAdapter = {
 		// Accumulators — the source of truth for building snapshots
 		let accText = "";
 		let accThinking = "";
-		const tools = new Map<string, RunningTool & { result?: unknown; isError?: boolean; interrupt?: string }>();
+		const tools = new Map<string, RunningTool & { result?: unknown; isError?: boolean }>();
+
 		// Mutable status ref so handleMetaEvent can update it
-		const snapshotStatusRef: ("running" | "complete" | "requires-action")[] = ["running"];
+		const statusRef: SnapshotStatus[] = ["running"];
+
+		// Gap 1: Timing accumulator
+		const timing: TimingAccum = {
+			streamStartTime: Date.now(),
+			firstTokenTime: null,
+			totalStreamTime: null,
+			chunkCount: 0,
+			tokenCount: null,
+		};
+
+		// Gap 2: Steps accumulator
+		const stepsRef: UsageStep[] = [];
 
 		// Initial yield — empty, running
-		yield { content: [], status: { type: "running" as const } };
+		yield buildSnapshot(accText, accThinking, tools, "running", timing, stepsRef);
 
 		try {
 			while (true) {
@@ -288,11 +380,14 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 				for (const { event, data } of events) {
 					if (data === "[DONE]") {
-						yield buildSnapshot(accText, accThinking, tools, "complete");
+						timing.totalStreamTime = Date.now() - timing.streamStartTime;
+						yield buildSnapshot(accText, accThinking, tools, "complete", timing, stepsRef);
 						return;
 					}
 
 					if (event === "keepalive") continue;
+
+					timing.chunkCount++;
 
 					let parsed: Record<string, unknown>;
 					try {
@@ -305,16 +400,24 @@ export const puxChatAdapter: ChatModelAdapter = {
 						// ── Content events → message parts ──
 
 						case "thinking_delta": {
+							// Track first token time
+							if (timing.firstTokenTime === null) {
+								timing.firstTokenTime = Date.now();
+							}
 							accThinking += (parsed.text as string) || "";
-							yield buildSnapshot(accText, accThinking, tools, snapshotStatusRef[0]);
+							yield buildSnapshot(accText, accThinking, tools, statusRef[0], timing, stepsRef);
 							break;
 						}
 
 						case "text_delta": {
 							// Skip sub-agent text (we only show CTO text)
 							if (parsed.agentName) break;
+							// Track first token time
+							if (timing.firstTokenTime === null) {
+								timing.firstTokenTime = Date.now();
+							}
 							accText += (parsed.text as string) || "";
-							yield buildSnapshot(accText, accThinking, tools, snapshotStatusRef[0]);
+							yield buildSnapshot(accText, accThinking, tools, statusRef[0], timing, stepsRef);
 							break;
 						}
 
@@ -329,7 +432,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 								args: toolArgs as any,
 								argsText: JSON.stringify(toolArgs, null, 2),
 							});
-							yield buildSnapshot(accText, accThinking, tools, snapshotStatusRef[0]);
+							yield buildSnapshot(accText, accThinking, tools, statusRef[0], timing, stepsRef);
 							break;
 						}
 
@@ -340,27 +443,25 @@ export const puxChatAdapter: ChatModelAdapter = {
 								existing.result = parsed.result;
 								existing.isError = !!parsed.error;
 							}
-							yield buildSnapshot(accText, accThinking, tools, snapshotStatusRef[0]);
+							yield buildSnapshot(accText, accThinking, tools, statusRef[0], timing, stepsRef);
 							break;
 						}
 
 						case "tool_execution_update": {
 							// Live progress text from a running tool — not a separate part
-							// Could be used for partial result display in future
 							break;
 						}
 
 						case "subagent_start": {
-							const agentName = (parsed as Record<string, unknown>).agentName as string | undefined;
-							const agentId = (parsed as Record<string, unknown>).agentId as string | undefined;
-							const task = (parsed as Record<string, unknown>).task as string || (parsed as Record<string, unknown>).prompt as string || "";
+							const agentName = parsed.agentName as string | undefined;
+							const agentId = parsed.agentId as string | undefined;
+							const task = parsed.task as string || parsed.prompt as string || "";
 							if (agentName) {
 								if (["jake", "ryan", "browser_ops", "desktop_ops"].includes(agentName)) {
 									usePuxStore.getState().setWorkbenchTab("vnc");
 								} else if (["marcus", "code_ops"].includes(agentName)) {
 									usePuxStore.getState().setWorkbenchTab("editor");
 								}
-								// Phase 3: Track subagent in store
 								usePuxStore.getState().addAgent({
 									agentId: agentId || `${agentName}_${Date.now()}`,
 									agentName,
@@ -373,33 +474,29 @@ export const puxChatAdapter: ChatModelAdapter = {
 							break;
 						}
 						case "subagent_end": {
-							const agentId = (parsed as Record<string, unknown>).agentId as string | undefined;
-							const agentName = (parsed as Record<string, unknown>).agentName as string | undefined;
+							const agentId = parsed.agentId as string | undefined;
+							const agentName = parsed.agentName as string | undefined;
+							const result = typeof parsed.result === "string"
+								? parsed.result
+								: parsed.result ? JSON.stringify(parsed.result) : undefined;
 							if (agentId) {
-								const result = typeof parsed.result === "string"
-									? parsed.result
-									: parsed.result ? JSON.stringify(parsed.result) : undefined;
 								usePuxStore.getState().updateAgentStatus(agentId, "complete", result);
 							} else if (agentName) {
-								// Fallback: find by name
 								const agents = usePuxStore.getState().agents;
 								const match = [...agents.values()].find(
-									(a) => a.agentName === agentName && a.status === "running"
+									(a) => a.agentName === agentName && a.status === "running",
 								);
 								if (match) {
-									const result = typeof parsed.result === "string"
-										? parsed.result
-										: parsed.result ? JSON.stringify(parsed.result) : undefined;
 									usePuxStore.getState().updateAgentStatus(match.agentId, "complete", result);
 								}
 							}
 							break;
 						}
 						case "subagent_tool_start": {
-							const agentId = (parsed as Record<string, unknown>).agentId as string | undefined;
-							const agentName = (parsed as Record<string, unknown>).agentName as string | undefined;
-							const toolName = (parsed as Record<string, unknown>).toolName as string;
-							const toolArgs = (parsed as Record<string, unknown>).toolArgs || (parsed as Record<string, unknown>).args;
+							const agentId = parsed.agentId as string | undefined;
+							const agentName = parsed.agentName as string | undefined;
+							const toolName = parsed.toolName as string;
+							const toolArgs = parsed.toolArgs || parsed.args;
 							if (agentId && toolName) {
 								usePuxStore.getState().addAgentToolCall(agentId, {
 									toolName,
@@ -407,10 +504,9 @@ export const puxChatAdapter: ChatModelAdapter = {
 									timestamp: Date.now(),
 								});
 							} else if (agentName && toolName) {
-								// Fallback: find by name
 								const agents = usePuxStore.getState().agents;
 								const match = [...agents.values()].find(
-									(a) => a.agentName === agentName && a.status === "running"
+									(a) => a.agentName === agentName && a.status === "running",
 								);
 								if (match) {
 									usePuxStore.getState().addAgentToolCall(match.agentId, {
@@ -424,21 +520,28 @@ export const puxChatAdapter: ChatModelAdapter = {
 						}
 						case "subagent_thinking_delta":
 						case "subagent_text_delta": {
-							// Sub-agent text events — tracked in store for agents view
 							break;
 						}
 
-						// ── Meta events → Zustand ──
+						// ── Meta events → Zustand + timing + steps ──
 
 						default: {
-							handleMetaEvent(event, parsed, snapshotStatusRef);
+							handleMetaEvent(event, parsed, statusRef, tools, stepsRef);
 							break;
 						}
 					}
 				}
 			}
 		} catch (err) {
-			if (err instanceof Error && err.name === "AbortError") return;
+			if (err instanceof Error && err.name === "AbortError") {
+				// Gap 5: Yield cancelled status instead of silent return
+				timing.totalStreamTime = Date.now() - timing.streamStartTime;
+				yield {
+					...buildSnapshot(accText, accThinking, tools, "running", timing, stepsRef),
+					status: { type: "incomplete" as const, reason: "cancelled" as const },
+				};
+				return;
+			}
 			yield {
 				content: [{ type: "text" as const, text: `Stream error: ${err}` }],
 				status: { type: "incomplete" as const, reason: "error" as const },
@@ -447,6 +550,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 		}
 
 		// Stream ended without [DONE] — yield final snapshot
-		yield buildSnapshot(accText, accThinking, tools, "complete");
+		timing.totalStreamTime = Date.now() - timing.streamStartTime;
+		yield buildSnapshot(accText, accThinking, tools, "complete", timing, stepsRef);
 	},
 };

@@ -13,6 +13,11 @@ export { usePuxStore } from "./pux-store";
 export { puxChatAdapter } from "./pux-chat-adapter";
 export { createPuxHistoryAdapter } from "./pux-history-adapter";
 
+// Utilities
+export { formatToolResult } from "./format-tool-result";
+export { getToolArgPreview } from "./tool-arg-preview";
+export { relativeTime } from "./relative-time";
+
 // Types
 export type {
 	TokenUsage,

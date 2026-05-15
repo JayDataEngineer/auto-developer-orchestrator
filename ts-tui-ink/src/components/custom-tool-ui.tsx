@@ -17,7 +17,7 @@ import {
 	makeAssistantTool,
 	useAuiState,
 } from "@assistant-ui/react-ink";
-import { usePuxStore } from "@pux/shared";
+import { usePuxStore, formatToolResult } from "@pux/shared";
 import { colors, symbols, BLACK_CIRCLE, BLOCKQUOTE_BAR } from "../theme.js";
 
 // ── Bash execution tool UI ──
@@ -28,12 +28,7 @@ export const BashToolUI = makeAssistantToolUI({
 		const command = (args as any)?.command || (args as any)?.cmd || "";
 		const isDone = status.type === "complete";
 		const isRunning = status.type === "running";
-		const output =
-			typeof result === "string"
-				? result
-				: result
-					? JSON.stringify(result, null, 2)
-					: "";
+		const resultLines = formatToolResult(result, 10);
 
 		return (
 			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
@@ -54,21 +49,13 @@ export const BashToolUI = makeAssistantToolUI({
 					</Text>
 					<Text color="gray"> {command.slice(0, 60)}</Text>
 				</Box>
-				{output && !isRunning && (
+				{resultLines.length > 0 && !isRunning && (
 					<Box paddingLeft={2} flexDirection="column">
-						{output
-							.split("\n")
-							.slice(0, 10)
-							.map((line: string, i: number) => (
-								<Text key={i} dimColor={isError} color={isError ? colors.error : undefined}>
-									{line}
-								</Text>
-							))}
-						{output.split("\n").length > 10 && (
-							<Text dimColor color="gray">
-								{"  "}...{output.split("\n").length - 10} more lines
+						{resultLines.map((line: string, i: number) => (
+							<Text key={i} dimColor={isError} color={isError ? colors.error : undefined}>
+								{line}
 							</Text>
-						)}
+						))}
 					</Box>
 				)}
 			</Box>
@@ -135,6 +122,7 @@ function DelegateRenderer({
 			: result
 				? JSON.stringify(result, null, 2)
 				: "";
+	const resultLines = formatToolResult(result, 6);
 
 	// Count sub-agent tool calls
 	const subToolCount = agentState?.toolCalls.length ?? 0;
@@ -192,19 +180,11 @@ function DelegateRenderer({
 				</Box>
 			)}
 
-			{output && isDone && !agentState && (
+			{resultLines.length > 0 && isDone && !agentState && (
 				<Box paddingLeft={2} flexDirection="column" marginTop={1}>
-					<Text dimColor>
-						{output
-							.split("\n")
-							.slice(0, 6)
-							.join("\n")}
-					</Text>
-					{output.split("\n").length > 6 && (
-						<Text dimColor color="gray">
-							{"  "}...{output.split("\n").length - 6} more lines
-						</Text>
-					)}
+					{resultLines.map((line: string, i: number) => (
+						<Text key={i} dimColor>{line}</Text>
+					))}
 				</Box>
 			)}
 		</Box>
