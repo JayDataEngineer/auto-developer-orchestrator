@@ -134,7 +134,7 @@ function Welcome() {
 			</Box>
 			<Box marginTop={1} flexDirection="column">
 				<Text dimColor>
-					<Text bold>Enter</Text> Send   <Text bold>Alt+Enter</Text> Newline   <Text bold>Ctrl+C x2</Text> Quit
+					<Text bold>Enter</Text> Send   <Text bold>Shift+Enter</Text> Newline   <Text bold>Ctrl+C x2</Text> Quit
 				</Text>
 			</Box>
 		</Box>
@@ -177,9 +177,7 @@ function CommandComposer({
 
 	useInput(useCallback((_input: string, key: any) => {
 		if (key.return) {
-			// Debug: log what Ink reports for Enter variants
-			process.stderr.write(`[DEBUG] return=${!!key.return} shift=${!!key.shift} meta=${!!key.meta} ctrl=${!!key.ctrl}\n`);
-			// Alt+Enter or Shift+Enter (Kitty) → insert newline
+			// Alt+Enter or Shift+Enter → insert newline
 			if (key.meta || key.shift) {
 				aui.composer().setText(text + "\n");
 				return;
@@ -207,7 +205,7 @@ function CommandComposer({
 	return (
 		<ComposerPrimitive.Input
 			submitOnEnter={false}
-			placeholder="Message... (Alt+Enter for newline)"
+			placeholder="Message... (Shift+Enter for newline)"
 			autoFocus
 		/>
 	);

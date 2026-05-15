@@ -41,6 +41,42 @@ process.stdin.read = function (size?: number) {
 	return chunk;
 } as typeof process.stdin.read;
 
+// ── Kitty keyboard protocol ──
+// Enables enhanced key reporting so Shift+Enter sends CSI 13;2 u
+// (with modifier flags) instead of just CR. Also enables modifyOtherKeys
+// for xterm/tmux. Restore both on exit.
+// Whitelist from Claude Code — only terminals known to support extended keys.
+
+const ENABLE_KITTY_KEYBOARD = "\x1b[>1u";
+const DISABLE_KITTY_KEYBOARD = "\x1b[<u";
+const ENABLE_MODIFY_OTHER_KEYS = "\x1b[>4;2m";
+const DISABLE_MODIFY_OTHER_KEYS = "\x1b[>4m";
+
+const EXTENDED_KEYS_TERMINALS = [
+	"iTerm.app", "kitty", "WezTerm", "ghostty", "tmux", "windows-terminal",
+	"xterm-kitty", "xterm-ghostty",
+];
+
+function supportsExtendedKeys(): boolean {
+	const term = process.env.TERM_PROGRAM ?? process.env.TERM ?? "";
+	return EXTENDED_KEYS_TERMINALS.some((t) => term.includes(t));
+}
+
+const hasExtendedKeys = supportsExtendedKeys();
+if (hasExtendedKeys) {
+	process.stdout.write(ENABLE_KITTY_KEYBOARD + ENABLE_MODIFY_OTHER_KEYS);
+}
+
+function restoreTerminal() {
+	if (hasExtendedKeys) {
+		const { writeSync } = require("node:fs") as { writeSync: (fd: number, data: string) => void };
+		writeSync(1, DISABLE_MODIFY_OTHER_KEYS + DISABLE_KITTY_KEYBOARD);
+	}
+}
+process.on("exit", restoreTerminal);
+process.on("SIGINT", () => { restoreTerminal(); process.exit(0); });
+process.on("SIGTERM", () => { restoreTerminal(); process.exit(0); });
+
 // ── CLI Args ──
 
 const { values: opts } = parseArgs({
