@@ -182,7 +182,8 @@ const { waitUntilExit } = render(
 		model: modelName,
 		project: projectName,
 		cwd: cwdName,
-	})
+	}),
+	{ exitOnCtrlC: false }
 );
 
 await waitUntilExit();
