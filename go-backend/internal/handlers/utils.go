@@ -64,21 +64,25 @@ func resolveProjectPath(project string, db *storage.Database) string {
 		}
 	}
 
-	// Fall back to PROJECT_ROOT/<project>
+	// Fall back to PROJECT_ROOT/<project> and PROJECT_ROOT/projects/<project>
 	projectsDir := os.Getenv("PROJECT_ROOT")
 	if projectsDir == "" {
 		projectsDir = "/app/projects"
 	}
 
-	candidate := filepath.Join(projectsDir, project)
+	// Only check subdirectories — never return PROJECT_ROOT itself
+	// (prevents "deep-research-test" from resolving to the ADO root)
+	candidate := filepath.Join(projectsDir, "projects", project)
 	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 		return candidate
 	}
 
-	// Try under projects/ subdirectory
-	candidate = filepath.Join(projectsDir, "projects", project)
-	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-		return candidate
+	// Also check PROJECT_ROOT/<project> (but skip if it equals PROJECT_ROOT)
+	candidate = filepath.Join(projectsDir, project)
+	if candidate != projectsDir {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
 	}
 
 	return ""

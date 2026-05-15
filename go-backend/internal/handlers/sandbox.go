@@ -50,8 +50,9 @@ func (h *SandboxHandler) CreateSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve project name to full path if not already a valid directory
-	if req.ProjectPath != "" {
+	// Resolve bare project names to full paths.
+	// If project_path is already an absolute path, use it as-is.
+	if req.ProjectPath != "" && !strings.HasPrefix(req.ProjectPath, "/") {
 		if sb := h.manager.FindSandboxByProject(req.ProjectPath); sb != nil {
 			req.ProjectPath = sb.ProjectPath
 		}

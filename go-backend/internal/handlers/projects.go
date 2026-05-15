@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -191,12 +192,30 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		Description  string `json:"description,omitempty"`
 		Version      string `json:"version,omitempty"`
 	}
+	// Resolve paths and deduplicate — only keep one project per unique path
+	seenPaths := make(map[string]string) // path → first project name
 	projects := make([]projectInfo, 0, len(projectSet))
 	for project := range projectSet {
 		dir := resolveProjectPath(project, h.db)
 		if dir == "" {
 			continue
 		}
+		// Skip if another project already claims this path
+		if existing, ok := seenPaths[dir]; ok {
+			// Prefer the project whose name matches the directory basename
+			if filepath.Base(dir) == project {
+				// Remove the existing entry and replace with this one
+				for i := range projects {
+					if projects[i].Name == existing {
+						projects[i].Name = project
+						seenPaths[dir] = project
+						break
+					}
+				}
+			}
+			continue
+		}
+		seenPaths[dir] = project
 		info := projectInfo{Name: project, Path: dir}
 		mf, _ := manifest.LoadManifest(dir)
 		if mf != nil {
@@ -206,6 +225,17 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		projects = append(projects, info)
 	}
+
+	// Sort: project whose path matches PROJECT_ROOT first, then alphabetical
+	projectRoot := os.Getenv("PROJECT_ROOT")
+	sort.Slice(projects, func(i, j int) bool {
+		iPrimary := projects[i].Path == projectRoot
+		jPrimary := projects[j].Path == projectRoot
+		if iPrimary != jPrimary {
+			return iPrimary
+		}
+		return projects[i].Name < projects[j].Name
+	})
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"projects": projects,
