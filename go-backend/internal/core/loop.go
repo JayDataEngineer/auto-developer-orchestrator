@@ -537,10 +537,12 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			SendEvent(subscriber, AgentEvent{
 				Type: EventTypeToolEnd,
 				Data: AgentEventData{
-					ToolName: tc.Name,
-					ToolID:   tc.ID,
-					Result:   result,
-					Error:    func() string { if resultErr != nil { return resultErr.Error() }; return "" }(),
+					ToolName:     tc.Name,
+					ToolID:       tc.ID,
+					Result:       result,
+					Error:        func() string { if resultErr != nil { return resultErr.Error() }; return "" }(),
+					Artifact:     extractArtifact(tc.Name, result),
+					ModelContent: extractModelContent(resultStr, tc.Name),
 				},
 			})
 
@@ -696,4 +698,42 @@ func deduplicateToolCalls(calls []ToolCallResponse) []ToolCallResponse {
 		result = append(result, tc)
 	}
 	return result
+}
+
+// extractArtifact extracts structured artifact data from tool results.
+// Returns nil if the result doesn't contain a structured artifact.
+func extractArtifact(toolName string, result any) any {
+	if result == nil {
+		return nil
+	}
+	// Check if the result is a map with an "artifact" key
+	if m, ok := result.(map[string]any); ok {
+		if artifact, exists := m["artifact"]; exists {
+			return artifact
+		}
+		// Delegate tools: the diff is an artifact
+		if diff, exists := m["diff"]; exists && diff != "" {
+			return map[string]any{"type": "diff", "content": diff}
+		}
+		// Changes summary is an artifact
+		if changes, exists := m["changes"]; exists {
+			return changes
+		}
+	}
+	return nil
+}
+
+// extractModelContent produces a model-visible content string from a tool result.
+// For display-heavy results (like file contents), returns a shortened version
+// that the model sees in the next turn, while the full result goes to the display.
+func extractModelContent(resultStr, toolName string) string {
+	// File tools: the full content is already truncated by ToolResultProcessor.
+	// The model sees the same content as the display — no separation needed.
+	// Delegate tools: model sees the summary, display gets full text.
+	if toolName == "delegate_to" || toolName == "delegate_async" || toolName == "delegate_continue" {
+		if len(resultStr) > 2000 {
+			return resultStr[:2000] + "\n...[summary for model]"
+		}
+	}
+	return ""
 }

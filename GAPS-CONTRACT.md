@@ -12,137 +12,119 @@ every field the runtime expects.
 
 ---
 
-## Gap 1: No timing metadata (HIGH — adapter only)
+## Status: ALL GAPS FIXED
 
-**What assistant-ui expects:** `metadata.timing` with 7 fields:
-- `streamStartTime` (number) — ms when first chunk arrives
-- `firstTokenTime` (number?) — ms when first text/thinking delta arrives
-- `totalStreamTime` (number?) — ms from start to completion
-- `tokenCount` (number?) — total tokens generated
-- `tokensPerSecond` (number?) — derived
-- `totalChunks` (number) — count of SSE events
-- `toolCallCount` (number) — count of tool calls
-
-**What we do:** Never built. All data is trivially available during streaming.
-
-**Fix:** Track timestamps in the generator loop, build `metadata.timing` in `buildSnapshot`.
+All 12 gaps have been implemented. The contract between the Go backend SSE stream and the
+@assistant-ui runtime is now complete and native.
 
 ---
 
-## Gap 2: No per-step usage (HIGH — adapter only)
+## Gap 1: Timing metadata (FIXED — adapter)
 
-**What assistant-ui expects:** `metadata.steps` array of `{ usage: { inputTokens, outputTokens } }`.
+**What:** `metadata.timing` with streamStartTime, firstTokenTime, totalStreamTime, tokenCount,
+tokensPerSecond, totalChunks, toolCallCount.
 
-**What we do:** Backend sends `agent_end` with token counts. We write it to Zustand but never to the snapshot.
-
-**Fix:** Wire `agent_end` usage into a `steps` array.
-
----
-
-## Gap 3: No feedback adapter (HIGH — adapter only)
-
-**What assistant-ui expects:** `adapters.feedback` implementing `FeedbackAdapter`.
-Enables `ActionBarPrimitive.FeedbackPositive/Negative`. Without it, `capabilities.feedback` is `false`.
-
-**What we do:** Not provided. Buttons render but are no-ops.
-
-**Fix:** Implement adapter that POSTs to backend.
+**Implementation:** `TimingAccum` accumulator tracked in the generator loop, built in `buildSnapshot`.
 
 ---
 
-## Gap 4: No custom metadata (HIGH — adapter only)
+## Gap 2: Per-step usage (FIXED — adapter)
 
-**What assistant-ui expects:** `metadata.custom: Record<string,unknown>` — arbitrary per-message data.
+**What:** `metadata.steps` array of `{ usage: { inputTokens, outputTokens } }`.
 
-**What we do:** Never built.
-
-**Fix:** Add `custom` with model, contextUtil, agentId.
+**Implementation:** `stepsRef` accumulator populated from `agent_end` events.
 
 ---
 
-## Gap 5: Cancel yields nothing (HIGH — adapter only)
+## Gap 3: Feedback adapter (FIXED — adapter)
 
-**What assistant-ui expects:** `{ type: "incomplete", reason: "cancelled" }` on abort.
+**What:** `adapters.feedback` implementing `FeedbackAdapter`.
 
-**What we do:** Silently `return` on AbortError.
-
-**Fix:** Yield incomplete status before returning.
+**Implementation:** POSTs to `/api/pux/feedback` in app.tsx runtime setup.
 
 ---
 
-## Gap 6: interrupt not set on tools (HIGH — adapter only)
+## Gap 4: Custom metadata (FIXED — adapter)
 
-**What assistant-ui expects:** `ToolCallMessagePart.interrupt = { type: "human", payload }` on the
-specific tool that triggered the decision request.
+**What:** `metadata.custom: Record<string,unknown>` — model, agentId, project.
 
-**What we do:** `decision_request` sets global `requires-action` but never marks which tool.
-Tool-level interrupt UI (`requires-action` with reason `interrupt`) can't render.
-
-**Fix:** Track which tool triggered the decision, set its `interrupt` field.
+**Implementation:** Built in `buildSnapshot` from Zustand store state.
 
 ---
 
-## Gap 7: No suggestion adapter (MEDIUM — adapter only)
+## Gap 5: Cancel yields incomplete (FIXED — adapter)
 
-**What assistant-ui expects:** `adapters.suggestion` implementing `SuggestionAdapter`.
+**What:** `{ type: "incomplete", reason: "cancelled" }` on abort.
 
-**What we do:** Not provided. `ThreadPrimitive.Suggestion` renders static chips from our component,
-not from the runtime's suggestion system.
-
-**Fix:** Implement adapter or leave as static chips (lower priority).
+**Implementation:** Catch AbortError, yield incomplete/cancelled before returning.
 
 ---
 
-## Gap 8: No runConfig usage (MEDIUM — adapter only)
+## Gap 6: Tool interrupt (FIXED — adapter)
 
-**What assistant-ui expects:** `run({ runConfig })` carries user preferences (model, temperature).
+**What:** `ToolCallMessagePart.interrupt = { type: "human", payload }` on decision-triggering tools.
 
-**What we do:** Read model from Zustand store instead of from the runtime's config.
-
-**Fix:** Read model from `runConfig.custom` or keep Zustand (lower priority, works fine).
+**Implementation:** `decision_request.sourceTool` used to find and mark the specific running tool.
 
 ---
 
-## Gap 9: No sub-agent messages (LOW — requires backend)
+## Gap 7: Suggestion adapter (FIXED — adapter)
 
-**What assistant-ui expects:** `ToolCallMessagePart.messages: ThreadMessage[]` — nested conversation
-threads inside tool calls.
+**What:** `adapters.suggestion` implementing `SuggestionAdapter`.
 
-**What we do:** Not populated. Sub-agents tracked in Zustand store separately.
-
-**Fix:** Backend would need to emit structured sub-conversation data per delegate call.
+**Implementation:** `generate()` fetches from `/api/pux/suggestions` or falls back to defaults.
+Wired in app.tsx runtime setup.
 
 ---
 
-## Gap 10: No source/citation parts (LOW — requires backend)
+## Gap 8: runConfig usage (FIXED — adapter)
 
-**What assistant-ui expects:** `SourceMessagePart` with URL, title, providerMetadata.
+**What:** `run({ runConfig })` carries user preferences (model, temperature).
 
-**What we do:** Not produced.
-
-**Fix:** Backend would need to emit source events.
-
----
-
-## Gap 11: No artifact data (LOW — requires backend)
-
-**What assistant-ui expects:** `ToolCallMessagePart.artifact` — structured data for rich rendering
-(e.g., diff previews, rendered HTML).
-
-**What we do:** Not populated.
-
-**Fix:** Backend would need to emit artifact payloads in `tool_execution_end`.
+**Implementation:** Reads `runConfig.custom.model` and `runConfig.custom.temperature` first,
+falls back to Zustand store.
 
 ---
 
-## Gap 12: No model content separation (LOW — requires backend)
+## Gap 9: Sub-agent messages (FIXED — backend + adapter)
 
-**What assistant-ui expects:** `ToolCallMessagePart.modelContent` — content fed back to the model
-in subsequent turns, separate from what's shown to the user.
+**What:** `ToolCallMessagePart.messages` — nested conversation threads inside delegate tool calls.
 
-**What we do:** Backend doesn't separate display content from model-visible content.
+**Implementation:** Sub-agent `text_delta` and `thinking_delta` events (with `agentName`) are
+collected into `subAgentMessageAccum[]`. When the delegate tool's `tool_execution_end` fires,
+the accumulated messages are flushed into the tool's `messages` field.
 
-**Fix:** Backend would need to emit both display and model-visible results.
+---
+
+## Gap 10: Source/citation parts (FIXED — backend + adapter)
+
+**What:** `SourceMessagePart` with URL, title, sourceType.
+
+**Implementation:** New `source` SSE event type in Go backend (`EventTypeSource`). Adapter creates
+`SourceMessagePart` objects and adds them to the content array (between tools and text).
+
+Backend fields: `AgentEventData.SourceType`, `SourceURL`, `SourceID`, `Text` (title).
+
+---
+
+## Gap 11: Artifact data (FIXED — backend + adapter)
+
+**What:** `ToolCallMessagePart.artifact` — structured data for rich rendering.
+
+**Implementation:** `AgentEventData.Artifact` field on `tool_execution_end`. Go backend extracts
+artifacts from tool results via `extractArtifact()` (detects `artifact` key, `diff` key, `changes`
+key in result maps). Adapter reads `parsed.artifact` and sets it on the tool part.
+
+---
+
+## Gap 12: Model content separation (FIXED — backend + adapter)
+
+**What:** `ToolCallMessagePart.modelContent` — content fed back to the model separately.
+
+**Implementation:** `AgentEventData.ModelContent` field on `tool_execution_end`. Go backend
+produces shortened model-visible content via `extractModelContent()` (delegates get summary,
+other tools use same content). Adapter reads `parsed.modelContent` and wraps in
+`ToolModelContentPart[]`.
 
 ---
 
@@ -151,11 +133,3 @@ in subsequent turns, separate from what's shown to the user.
 - `speech`, `dictation`, `voice` adapters — terminal context
 - `attachments` adapter — Ink has no File API
 - `parentId` on parts — branching not used
-
----
-
-## Implementation Priority
-
-1. **Gaps 1-6** — adapter only, high impact, no backend changes
-2. **Gap 7-8** — adapter only, medium impact
-3. **Gaps 9-12** — require backend changes, plan separately

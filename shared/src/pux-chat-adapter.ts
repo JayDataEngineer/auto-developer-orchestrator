@@ -23,6 +23,7 @@ import type {
 	TextMessagePart,
 	ReasoningMessagePart,
 	ToolCallMessagePart,
+	SourceMessagePart,
 } from "@assistant-ui/react";
 import { usePuxStore } from "./pux-store";
 import { getFetch } from "./fetch-provider";
@@ -30,7 +31,7 @@ import { apiUrl } from "./server-url";
 
 // ── Types ──
 
-type Part = TextMessagePart | ReasoningMessagePart | ToolCallMessagePart;
+type Part = TextMessagePart | ReasoningMessagePart | ToolCallMessagePart | SourceMessagePart;
 
 interface RunningTool {
 	toolCallId: string;
@@ -38,6 +39,12 @@ interface RunningTool {
 	args: Record<string, any>;
 	argsText: string;
 	interrupt?: { type: "human"; payload: unknown };
+	artifact?: unknown;
+	modelContent?: readonly { type: "text"; text: string }[];
+	messages?: Array<{
+		role: "user" | "assistant";
+		content: Array<{ type: "text"; text: string } | { type: "reasoning"; text: string }>;
+	}>;
 }
 
 /** Timing accumulator — populated during streaming for metadata.timing */
@@ -182,6 +189,7 @@ function buildSnapshot(
 	accText: string,
 	accThinking: string,
 	tools: Map<string, RunningTool & { result?: unknown; isError?: boolean }>,
+	sources: SourceMessagePart[],
 	status: SnapshotStatus,
 	timing: TimingAccum,
 	steps: UsageStep[],
@@ -206,11 +214,19 @@ function buildSnapshot(
 			...(tool.result !== undefined ? { result: tool.result } : {}),
 			...(tool.isError ? { isError: true } : {}),
 			...(tool.interrupt ? { interrupt: tool.interrupt } : {}),
+			...(tool.artifact !== undefined ? { artifact: tool.artifact } : {}),
+			...(tool.modelContent ? { modelContent: tool.modelContent } : {}),
+			...(tool.messages && tool.messages.length > 0 ? { messages: tool.messages as any } : {}),
 		};
 		parts.push(part);
 	}
 
-	// Text last (matches Contract 2 ordering: thinking → tools → text)
+	// Source/citation parts after tools
+	for (const src of sources) {
+		parts.push(src);
+	}
+
+	// Text last (matches ordering: thinking → tools → sources → text)
 	if (accText) {
 		parts.push({ type: "text", text: accText });
 	}
@@ -295,7 +311,7 @@ function parseSSE(
 // ── ChatModelAdapter ──
 
 export const puxChatAdapter: ChatModelAdapter = {
-	async *run({ messages, abortSignal }) {
+	async *run({ messages, abortSignal, runConfig }) {
 		const store = usePuxStore.getState();
 		const lastMsg = messages[messages.length - 1];
 
@@ -315,6 +331,11 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		if (!userText) return;
 
+		// Gap 8: Read model from runConfig.custom first, fall back to Zustand store
+		const custom = runConfig?.custom as Record<string, unknown> | undefined;
+		const model = (custom?.model as string) || store.activeModel || undefined;
+		const temperature = (custom?.temperature as number) || undefined;
+
 		const project = store.activeProject || "auto-developer-orchestrator";
 		const fetch = getFetch();
 
@@ -326,7 +347,8 @@ export const puxChatAdapter: ChatModelAdapter = {
 				message: userText,
 				project,
 				agentId: store.activeAgentId || undefined,
-				model: store.activeModel || undefined,
+				model,
+				temperature,
 			}),
 			signal: abortSignal,
 		});
@@ -350,6 +372,11 @@ export const puxChatAdapter: ChatModelAdapter = {
 		let accText = "";
 		let accThinking = "";
 		const tools = new Map<string, RunningTool & { result?: unknown; isError?: boolean }>();
+		const sources: SourceMessagePart[] = [];
+
+		// Sub-agent message tracking — accumulates into the current delegate tool's messages
+		let activeSubAgentToolId: string | null = null;
+		let subAgentMessageAccum: Array<{ role: "assistant"; content: Array<{ type: "text"; text: string } | { type: "reasoning"; text: string }> }> = [];
 
 		// Mutable status ref so handleMetaEvent can update it
 		const statusRef: SnapshotStatus[] = ["running"];
@@ -367,7 +394,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 		const stepsRef: UsageStep[] = [];
 
 		// Initial yield — empty, running
-		yield buildSnapshot(accText, accThinking, tools, "running", timing, stepsRef);
+		yield buildSnapshot(accText, accThinking, tools, sources, "running", timing, stepsRef);
 
 		try {
 			while (true) {
@@ -381,7 +408,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 				for (const { event, data } of events) {
 					if (data === "[DONE]") {
 						timing.totalStreamTime = Date.now() - timing.streamStartTime;
-						yield buildSnapshot(accText, accThinking, tools, "complete", timing, stepsRef);
+						yield buildSnapshot(accText, accThinking, tools, sources, "complete", timing, stepsRef);
 						return;
 					}
 
@@ -400,24 +427,50 @@ export const puxChatAdapter: ChatModelAdapter = {
 						// ── Content events → message parts ──
 
 						case "thinking_delta": {
+							const thinkingText = (parsed.text as string) || "";
+							// Sub-agent thinking → accumulate into sub-agent messages (Gap 9)
+							if (parsed.agentName) {
+								if (thinkingText && subAgentMessageAccum.length > 0) {
+									const last = subAgentMessageAccum[subAgentMessageAccum.length - 1];
+									last.content.push({ type: "reasoning" as const, text: thinkingText });
+								}
+								break;
+							}
 							// Track first token time
 							if (timing.firstTokenTime === null) {
 								timing.firstTokenTime = Date.now();
 							}
-							accThinking += (parsed.text as string) || "";
-							yield buildSnapshot(accText, accThinking, tools, statusRef[0], timing, stepsRef);
+							accThinking += thinkingText;
+							yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
 							break;
 						}
 
 						case "text_delta": {
-							// Skip sub-agent text (we only show CTO text)
-							if (parsed.agentName) break;
+							// Sub-agent text → accumulate into sub-agent messages (Gap 9)
+							if (parsed.agentName) {
+								const text = (parsed.text as string) || "";
+								if (text && subAgentMessageAccum.length > 0) {
+									const last = subAgentMessageAccum[subAgentMessageAccum.length - 1];
+									const lastPart = last.content[last.content.length - 1];
+									if (lastPart && lastPart.type === "text") {
+										lastPart.text += text;
+									} else {
+										last.content.push({ type: "text" as const, text });
+									}
+								} else if (text) {
+									subAgentMessageAccum.push({
+										role: "assistant",
+										content: [{ type: "text" as const, text }],
+									});
+								}
+								break;
+							}
 							// Track first token time
 							if (timing.firstTokenTime === null) {
 								timing.firstTokenTime = Date.now();
 							}
 							accText += (parsed.text as string) || "";
-							yield buildSnapshot(accText, accThinking, tools, statusRef[0], timing, stepsRef);
+							yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
 							break;
 						}
 
@@ -432,7 +485,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 								args: toolArgs as any,
 								argsText: JSON.stringify(toolArgs, null, 2),
 							});
-							yield buildSnapshot(accText, accThinking, tools, statusRef[0], timing, stepsRef);
+							yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
 							break;
 						}
 
@@ -442,8 +495,22 @@ export const puxChatAdapter: ChatModelAdapter = {
 							if (existing) {
 								existing.result = parsed.result;
 								existing.isError = !!parsed.error;
+								// Gap 11: Artifact data
+								if (parsed.artifact !== undefined) {
+									existing.artifact = parsed.artifact;
+								}
+								// Gap 12: Model content separation
+								if (parsed.modelContent) {
+									existing.modelContent = [{ type: "text" as const, text: parsed.modelContent as string }];
+								}
+								// Flush accumulated sub-agent messages into delegate tools
+								if (activeSubAgentToolId === toolId && subAgentMessageAccum.length > 0) {
+									existing.messages = subAgentMessageAccum;
+									subAgentMessageAccum = [];
+									activeSubAgentToolId = null;
+								}
 							}
-							yield buildSnapshot(accText, accThinking, tools, statusRef[0], timing, stepsRef);
+							yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
 							break;
 						}
 
@@ -452,10 +519,39 @@ export const puxChatAdapter: ChatModelAdapter = {
 							break;
 						}
 
+						// Gap 10: Source/citation events
+						case "source": {
+							const sourceType = (parsed.sourceType as string) || "url";
+							const sourceId = (parsed.id as string) || `src_${Date.now()}`;
+							if (sourceType === "url") {
+								sources.push({
+									type: "source",
+									sourceType: "url",
+									id: sourceId,
+									url: (parsed.url as string) || "",
+									title: (parsed.title as string) || undefined,
+								});
+							} else {
+								sources.push({
+									type: "source",
+									sourceType: "document",
+									id: sourceId,
+									title: (parsed.title as string) || "",
+									mediaType: (parsed.mediaType as string) || "text/plain",
+									filename: (parsed.filename as string) || undefined,
+								});
+							}
+							yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
+							break;
+						}
+
 						case "subagent_start": {
 							const agentName = parsed.agentName as string | undefined;
 							const agentId = parsed.agentId as string | undefined;
 							const task = parsed.task as string || parsed.prompt as string || "";
+							// Gap 9: Track which delegate tool this sub-agent belongs to
+							// so we can collect its messages
+							subAgentMessageAccum = [];
 							if (agentName) {
 								if (["jake", "ryan", "browser_ops", "desktop_ops"].includes(agentName)) {
 									usePuxStore.getState().setWorkbenchTab("vnc");
@@ -537,7 +633,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 				// Gap 5: Yield cancelled status instead of silent return
 				timing.totalStreamTime = Date.now() - timing.streamStartTime;
 				yield {
-					...buildSnapshot(accText, accThinking, tools, "running", timing, stepsRef),
+					...buildSnapshot(accText, accThinking, tools, sources, "running", timing, stepsRef),
 					status: { type: "incomplete" as const, reason: "cancelled" as const },
 				};
 				return;
@@ -551,6 +647,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		// Stream ended without [DONE] — yield final snapshot
 		timing.totalStreamTime = Date.now() - timing.streamStartTime;
-		yield buildSnapshot(accText, accThinking, tools, "complete", timing, stepsRef);
+		yield buildSnapshot(accText, accThinking, tools, sources, "complete", timing, stepsRef);
 	},
 };

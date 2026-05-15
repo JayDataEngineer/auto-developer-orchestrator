@@ -16,7 +16,7 @@ import {
 	AssistantRuntimeProvider,
 	useLocalRuntime,
 } from "@assistant-ui/react-ink";
-import type { FeedbackAdapter } from "@assistant-ui/react-ink";
+import type { FeedbackAdapter, SuggestionAdapter } from "@assistant-ui/react-ink";
 import { puxChatAdapter, createPuxHistoryAdapter, usePuxStore } from "@pux/shared";
 import { getFetch } from "@pux/shared";
 import { apiUrl } from "@pux/shared";
@@ -55,8 +55,43 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 		}),
 		[],
 	);
+	const suggestionAdapter = useMemo<SuggestionAdapter>(
+		() => ({
+			generate: async ({ messages }) => {
+				const isEmpty = messages.length === 0;
+				if (!isEmpty) {
+					// After conversation: contextual follow-ups from backend
+					const fetch = getFetch();
+					try {
+						const resp = await fetch(apiUrl("/api/pux/suggestions"), {
+							method: "POST",
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({ messages: messages.slice(-4) }),
+						});
+						if (resp.ok) {
+							const data = await resp.json() as { suggestions?: string[] };
+							if (data.suggestions?.length) {
+								return data.suggestions.map((prompt) => ({ prompt }));
+							}
+						}
+					} catch { /* fallback below */ }
+				}
+				// Empty thread or backend unavailable — return defaults
+				return [
+					{ prompt: "What can you do? What tools and agents do you have available?" },
+					{ prompt: "Show me the project structure and explain the architecture" },
+					{ prompt: "Run the tests and show me the results" },
+				];
+			},
+		}),
+		[],
+	);
 	const runtime = useLocalRuntime(puxChatAdapter, {
-		adapters: { history: historyAdapter, feedback: feedbackAdapter },
+		adapters: {
+			history: historyAdapter,
+			feedback: feedbackAdapter,
+			suggestion: suggestionAdapter,
+		},
 	});
 	return (
 		<AssistantRuntimeProvider runtime={runtime}>

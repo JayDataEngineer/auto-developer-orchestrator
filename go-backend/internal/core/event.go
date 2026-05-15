@@ -50,6 +50,7 @@ const (
 	EventTypeHookRequest     AgentEventType = "hook_request"
 	EventTypeDecisionRequest AgentEventType = "decision_request" // unified HITL
 	EventTypeUserQuestion    AgentEventType = "user_question"    // legacy, replaced by decision_request
+	EventTypeSource          AgentEventType = "source"            // citation/reference link
 )
 
 // AgentEvent is an event emitted by the agent loop.
@@ -95,6 +96,15 @@ type AgentEventData struct {
 	// Hook interception — set for hook_request events.
 	HookPoint string `json:"hookPoint,omitempty"` // "tool_call", "tool_result", "context"
 	HookID    string `json:"hookId,omitempty"`    // unique ID to match request → response
+
+	// Rich tool result fields — set on tool_execution_end events
+	Artifact     any    `json:"artifact,omitempty"`     // structured data for rich rendering (diffs, HTML, etc.)
+	ModelContent string `json:"modelContent,omitempty"` // content fed back to the model, separate from display result
+
+	// Source/citation fields — set on source events
+	SourceType string `json:"sourceType,omitempty"` // "url" or "document"
+	SourceURL  string `json:"sourceUrl,omitempty"`  // URL for "url" sources
+	SourceID   string `json:"sourceId,omitempty"`   // unique ID for the source
 }
 
 // SubscriberKey is a context key for injecting the SSE subscriber channel.

@@ -70,4 +70,5 @@ const (
 	EventTypeStepEnd         = core.EventTypeStepEnd
 	EventTypeUserQuestion    = core.EventTypeUserQuestion
 	EventTypeDecisionRequest = core.EventTypeDecisionRequest
+	EventTypeSource          = core.EventTypeSource
 )

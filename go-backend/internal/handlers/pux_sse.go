@@ -80,6 +80,12 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 			"result":   event.Data.Result,
 			"error":    event.Data.Error,
 		}
+		if event.Data.Artifact != nil {
+			data["artifact"] = event.Data.Artifact
+		}
+		if event.Data.ModelContent != "" {
+			data["modelContent"] = event.Data.ModelContent
+		}
 		if event.Data.AgentName != "" {
 			data["agentName"] = event.Data.AgentName
 		}
@@ -191,6 +197,22 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 				"task":      event.Data.Task,
 				"error":     event.Data.Error,
 			},
+		}
+
+	case llamaeng.EventTypeSource:
+		data := map[string]interface{}{
+			"sourceType": event.Data.SourceType,
+			"id":         event.Data.SourceID,
+		}
+		if event.Data.SourceURL != "" {
+			data["url"] = event.Data.SourceURL
+		}
+		if event.Data.Text != "" {
+			data["title"] = event.Data.Text
+		}
+		return &sseEvent{
+			Type: "source",
+			Data: data,
 		}
 
 	case llamaeng.EventTypeHookRequest:
