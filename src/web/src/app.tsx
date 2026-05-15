@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils";
 import {
 	PanelRightOpen,
 	PanelRightClose,
+	PanelRight,
 	PanelLeftOpen,
 	PanelLeftClose,
 	Zap,
@@ -427,9 +428,9 @@ export function App() {
 						}
 					>
 						{workbenchVisible ? (
-							<PanelRightClose className="size-4" />
+							<PanelRight className="size-4" />
 						) : (
-							<PanelRightOpen className="size-4" />
+							<PanelRight className="size-4" />
 						)}
 					</Button>
 				</header>

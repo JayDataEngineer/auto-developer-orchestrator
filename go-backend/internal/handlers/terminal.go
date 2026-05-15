@@ -38,8 +38,16 @@ func (h *SandboxHandler) TerminalWS(w http.ResponseWriter, r *http.Request) {
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
 	// Try to set working directory to project path
-	if h := r.URL.Query().Get("cwd"); h != "" {
-		cmd.Dir = h
+	// cwd may be a project name (e.g. "auto-developer-orchestrator") or a full path.
+	// Resolve project names via sandbox manager first.
+	if cwd := r.URL.Query().Get("cwd"); cwd != "" {
+		dir := cwd
+		if sb := h.manager.FindSandboxByProject(cwd); sb != nil {
+			dir = sb.ProjectPath
+		}
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			cmd.Dir = dir
+		}
 	}
 
 	ptmx, err := pty.Start(cmd)
