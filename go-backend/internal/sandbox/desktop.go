@@ -3,11 +3,27 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/moby/moby/client"
 	"go.uber.org/zap"
 )
+
+// detectVNCBackend checks the container's VNC_BACKEND env var to determine
+// whether it runs standard (noVNC/websockify) or KasmVNC.
+func (m *Manager) detectVNCBackend(ctx context.Context, containerName string) VNCBackend {
+	output, err := m.execInContainer(ctx, containerName, []string{
+		"sh", "-c", "echo $VNC_BACKEND",
+	}, false)
+	if err == nil {
+		trimmed := strings.TrimSpace(output)
+		if trimmed == "kasm" {
+			return BackendKasm
+		}
+	}
+	return BackendStandard
+}
 
 // EnableBrowserMode enables lightweight browser mode for a sandbox.
 // The sandbox container image already runs Xvfb + Chrome + VNC + socat via supervisord.
@@ -66,9 +82,20 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 	displayNum := 99
 	vncPort := 5900
 	cdpPort := 19222 // External port (socat-forwarded)
-	novncPort := 6080
 
 	containerName := m.getContainerName(sandboxID)
+
+	// Detect VNC backend — KasmVNC uses port 8444, standard uses 6080
+	backend := m.detectVNCBackend(ctx, containerName)
+	var novncPort int
+	if backend == BackendKasm {
+		novncPort = 8444
+	} else {
+		novncPort = 6080
+	}
+
+	// Store backend info on sandbox
+	sandbox.VNCBackend = backend
 
 	// Wait for Chrome to be ready (supervisord starts it at container boot)
 	for i := range 10 {
@@ -96,6 +123,7 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 		ViewerURL:  fmt.Sprintf("/sandbox/%s/viewer", sandboxID),
 		IsActive:   true,
 		StartedAt:  time.Now(),
+		Backend:    backend,
 	}
 
 	sandbox.Mode = ModeBrowser
@@ -142,6 +170,10 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	containerName := m.getContainerName(sandboxID)
 	display := fmt.Sprintf(":%d", displayNum)
 
+	// Detect VNC backend — affects how we start the VNC server
+	backend := m.detectVNCBackend(ctx, containerName)
+	sandbox.VNCBackend = backend
+
 	// Step 1: Start Xvfb
 	_, err := m.execInContainer(ctx, containerName, []string{
 		"Xvfb", display, "-screen", "0", "1920x1080x24", "-ac", "+extension", "RANDR",
@@ -163,18 +195,32 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		m.logger.Warn("window manager start warning", zap.Error(err))
 	}
 
-	// Step 3: Start x11vnc
-	_, err = m.execInContainer(ctx, containerName, []string{
-		"x11vnc", "-display", display, "-rfbport", fmt.Sprintf("%d", vncPort),
-		"-forever", "-shared", "-nopw", "-bg",
-	}, true)
-	if err != nil {
-		m.logger.Warn("x11vnc start warning", zap.Error(err))
-	}
+	// Step 3: Start VNC server — KasmVNC or standard x11vnc
+	if backend == BackendKasm {
+		// KasmVNC — built-in web server with H.264/WebRTC
+		_, err = m.execInContainer(ctx, containerName, []string{
+			"vncserver", display,
+			"-geometry", "1280x720",
+			"-websocketPort", fmt.Sprintf("%d", novncPort),
+			"-config", "/root/.vnc/kasmvnc.yaml",
+		}, true)
+		if err != nil {
+			m.logger.Warn("KasmVNC start warning", zap.Error(err))
+		}
+	} else {
+		// Standard — x11vnc + websockify + noVNC
+		_, err = m.execInContainer(ctx, containerName, []string{
+			"x11vnc", "-display", display, "-rfbport", fmt.Sprintf("%d", vncPort),
+			"-forever", "-shared", "-nopw", "-bg",
+		}, true)
+		if err != nil {
+			m.logger.Warn("x11vnc start warning", zap.Error(err))
+		}
 
-	// Step 4: Start noVNC
-	if novncErr := m.startNoVNC(ctx, containerName, novncPort, vncPort); novncErr != nil {
-		m.logger.Warn("noVNC start failed", zap.Error(novncErr))
+		// Step 4: Start noVNC
+		if novncErr := m.startNoVNC(ctx, containerName, novncPort, vncPort); novncErr != nil {
+			m.logger.Warn("noVNC start failed", zap.Error(novncErr))
+		}
 	}
 
 	// Step 5: Start Chrome with CDP
@@ -210,6 +256,7 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		ViewerURL:  fmt.Sprintf("/sandbox/%s/viewer", sandboxID),
 		IsActive:   true,
 		StartedAt:  time.Now(),
+		Backend:    backend,
 	}
 
 	sandbox.Mode = ModeDesktop

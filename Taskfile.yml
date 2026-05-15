@@ -318,6 +318,17 @@ tasks:
       - cmd: cd go-backend && go fmt ./... && go vet ./...
       - npm run lint
 
+  # ── Sandbox images ───────────────────────────────────────────────────────
+  sandbox-build:
+    desc: Build sandbox Docker image (standard = noVNC, lightweight)
+    cmds:
+      - docker build -t pux-sandbox:latest sandbox/
+
+  sandbox-build-kasm:
+    desc: Build sandbox Docker image with KasmVNC (H.264/WebRTC, low latency)
+    cmds:
+      - docker build --target kasm -t pux-sandbox:kasm sandbox/
+
   # ── Maintenance ─────────────────────────────────────────────────────────
   clean:
     desc: Remove build artifacts and all docker resources

@@ -1,12 +1,28 @@
-FROM ubuntu:22.04
+# ─────────────────────────────────────────────────────────────────────────────
+# Pux Sandbox — multi-target Dockerfile
+#
+# Two VNC backends:
+#   standard  — TigerVNC + noVNC + websockify (lightweight, ~200MB)
+#   kasm      — KasmVNC with H.264/WebRTC (low latency, ~400MB)
+#
+# Build:
+#   docker build -t pux-sandbox          sandbox/             # default = standard
+#   docker build --target kasm -t pux-sandbox-kasm sandbox/
+#
+# Run:
+#   docker run -p 6080:6080 -p 9222:9222 pux-sandbox
+#   docker run -p 8444:8444 -p 9222:9222 pux-sandbox-kasm
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Shared base: all common packages ────────────────────────────────────────
+FROM ubuntu:22.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:99
 ENV RESOLUTION=1280x720x24
 ENV CHROME_REMOTE_DEBUGGING_PORT=9222
-ENV NOVNC_PORT=6080
 
-# Install core dependencies — everything a dev sandbox needs
+# Core dependencies — everything a dev sandbox needs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
@@ -47,15 +63,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     netcat-openbsd \
     xvfb \
-    x11vnc \
     fluxbox \
-    novnc \
-    websockify \
     supervisor \
     socat \
     wmctrl \
     xdotool \
     xclip \
+    xterm \
+    imagemagick \
+    scrot \
     tesseract-ocr \
     tesseract-ocr-eng \
     fonts-liberation \
@@ -81,9 +97,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python packages for web scraping, image processing, and stealth browsing
+# Python packages for web scraping, image processing, and stealth browsing
 RUN python3 -m pip install seleniumbase requests beautifulsoup4 Pillow httpx \
     && rm -rf /root/.cache/pip
+
+# Chrome
 RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get update \
     && apt-get install -y --no-install-recommends /tmp/chrome.deb \
@@ -91,23 +109,100 @@ RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/google-chrome-stable /usr/bin/google-chrome
 
-# Set up noVNC
-RUN ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html
+# Bun runtime
+RUN curl -fsSL https://bun.sh/install | bash \
+    && ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+ENV BUN_INSTALL="/root/.bun"
 
-# Supervisor config to manage all services
-RUN mkdir -p /var/log/supervisor
-COPY supervisord.conf /etc/supervisor/conf.d/sandbox.conf
-
-# Stealth browser helper scripts
+# Shared scripts
 COPY scripts/sb_agent.py /usr/local/bin/sb_agent.py
 COPY scripts/sb_server.py /usr/local/bin/sb_server.py
 COPY scripts/desktop_observe.py /usr/local/bin/desktop_observe.py
 RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py
 
-# Working directory — must match the sandbox mount point so files
-# saved by sb_server/download land on the host filesystem.
+# Supervisor + log dir
+RUN mkdir -p /var/log/supervisor
+
+# VNC backend marker — overwritten by each target
+ARG VNC_BACKEND=standard
+ENV VNC_BACKEND=${VNC_BACKEND}
+
 WORKDIR /sandbox/workspace
+
+
+# ── Target: standard (TigerVNC + noVNC + websockify) ────────────────────────
+FROM base AS standard
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    x11vnc \
+    novnc \
+    websockify \
+    && rm -rf /var/lib/apt/lists/*
+
+# noVNC symlink for index.html
+RUN ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html
+
+ENV NOVNC_PORT=6080
+
+COPY supervisord.conf /etc/supervisor/conf.d/sandbox.conf
 
 EXPOSE 9222 6080
 
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+
+
+# ── Target: kasm (KasmVNC with H.264 encoding) ─────────────────────────────
+FROM base AS kasm
+
+# KasmVNC dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libx11-6 \
+    libxext6 \
+    libxrandr2 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxshmfence1 \
+    libdrm2 \
+    libgbm1 \
+    libasound2 \
+    libpulse0 \
+    libopus0 \
+    libvpx6 \
+    libx264-160 \
+    libc6 \
+    libssl3 \
+    locales \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install KasmVNC from official release
+ARG KASMVNC_VERSION=1.3.2
+RUN wget -q "https://github.com/kasmtech/KasmVNC/releases/download/v${KASMVNC_VERSION}/kasmvncserver_jammy_${KASMVNC_VERSION}_amd64.deb" -O /tmp/kasmvnc.deb \
+    && apt-get update \
+    && apt-get install -y /tmp/kasmvnc.deb \
+    && rm /tmp/kasmvnc.deb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Generate locale (KasmVNC needs UTF-8)
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
+
+# KasmVNC config directory
+RUN mkdir -p /root/.vnc /tmp/.vnc
+
+# KasmVNC default config — software H.264 encoding, no GPU required
+COPY kasmvnc.yaml /root/.vnc/kasmvnc.yaml
+
+ENV KASMVNC_PORT=8444
+
+# KasmVNC supervisord config (replaces x11vnc + websockify + novnc)
+COPY supervisord-kasm.conf /etc/supervisor/conf.d/sandbox.conf
+
+EXPOSE 9222 8444
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+
+# Default target
+FROM standard

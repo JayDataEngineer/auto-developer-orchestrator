@@ -16,6 +16,16 @@ const (
 	ModeDesktop SandboxMode = "desktop"
 )
 
+// VNCBackend identifies which VNC server the sandbox container uses.
+type VNCBackend string
+
+const (
+	// BackendStandard uses TigerVNC + noVNC + websockify (default, lightweight)
+	BackendStandard VNCBackend = "standard"
+	// BackendKasm uses KasmVNC with H.264/WebRTC (low latency)
+	BackendKasm VNCBackend = "kasm"
+)
+
 // SandboxOptions configures a new sandbox instance
 type SandboxOptions struct {
 	// ID is the unique sandbox identifier
@@ -48,6 +58,7 @@ type Sandbox struct {
 	CreatedAt      time.Time       `json:"created_at"`
 	DesktopSession *DesktopSession `json:"desktop_session,omitempty"`
 	Tier           SandboxTier     `json:"tier,omitempty"`
+	VNCBackend     VNCBackend      `json:"vnc_backend,omitempty"`
 }
 
 // SandboxStatus is the current state of a sandbox
@@ -63,14 +74,15 @@ const (
 // DesktopSession represents an active desktop/browser mode session
 type DesktopSession struct {
 	SandboxID  string      `json:"sandbox_id"`
-	Mode       SandboxMode `json:"mode"`        // "browser" or "desktop"
-	DisplayNum int         `json:"display_num"` // :1, :2, etc. (desktop only)
-	VNCPort    int         `json:"vnc_port"`    // 5901, 5902, etc. (desktop only)
-	CDPPort    int         `json:"cdp_port"`    // 9222, 9223, etc.
-	NoVNCPort  int         `json:"novnc_port"`  // 6081, 6082, etc. (desktop only)
-	ViewerURL  string      `json:"viewer_url"`  // URL for the desktop viewer popup
+	Mode       SandboxMode `json:"mode"`           // "browser" or "desktop"
+	DisplayNum int         `json:"display_num"`    // :1, :2, etc. (desktop only)
+	VNCPort    int         `json:"vnc_port"`       // 5901, 5902, etc. (desktop only)
+	CDPPort    int         `json:"cdp_port"`       // 9222, 9223, etc.
+	NoVNCPort  int         `json:"novnc_port"`     // 6081/8444, web viewer port
+	ViewerURL  string      `json:"viewer_url"`     // URL for the desktop viewer popup
 	IsActive   bool        `json:"is_active"`
 	StartedAt  time.Time   `json:"started_at"`
+	Backend    VNCBackend  `json:"backend,omitempty"` // "standard" or "kasm"
 }
 
 // PortAllocator manages dynamic port allocation for desktop sessions

@@ -1,0 +1,30 @@
+network:
+  protocol: http
+  websocket_port: 8444
+  ssl:
+    require_ssl: false
+  udp:
+    public_ip: auto
+
+desktop:
+  resolution:
+    width: 1280
+    height: 720
+  allow_resize: true
+
+encoding:
+  max_frame_rate: 30
+  send_full_frame_per_focus: 1
+  send_full_frame_on_clipboard_change: true
+  cpu:
+    priority: 40
+
+# Software H.264 encoding — works without GPU
+# GPU-accelerated encoding (NVENC/VAAPI) is auto-detected when available
+video:
+  encoder: software
+  h264:
+    enabled: true
+
+command_line:
+  prompt: false
