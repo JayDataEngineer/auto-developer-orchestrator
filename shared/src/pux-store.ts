@@ -13,6 +13,7 @@ import type {
 	TokenUsage,
 	ContextMetrics,
 	PendingDecision,
+	DecisionHint,
 	Conversation,
 	Project,
 	WorkbenchTab,
@@ -160,9 +161,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		set({
 			activeAgentId: "",
 			conversationKey: `${get().activeProject}:default`,
-			pendingQuestion: null,
-			pendingApproval: null,
-			pendingPlan: null,
+			pendingDecision: null,
 			lastUsage: null,
 			contextMetrics: null,
 			compacting: false,
@@ -273,4 +272,4 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 }));
 
 // Re-export types for convenience
-export type { TokenUsage, ContextMetrics, PendingQuestion, PendingApproval, PendingPlan, Conversation, Project, WorkbenchTab, AgentState, ToolCallRecord, TuiView };
+export type { TokenUsage, ContextMetrics, PendingDecision, DecisionHint, Conversation, Project, WorkbenchTab, AgentState, ToolCallRecord, TuiView };

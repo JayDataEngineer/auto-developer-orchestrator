@@ -25,7 +25,7 @@ import { ToolsView } from "./components/tools-view.js";
 import { FilesView } from "./components/files-view.js";
 import { ConversationsView } from "./components/conversations-view.js";
 import { QuestionDialog } from "./components/question-dialog.js";
-import { ApprovalDialog } from "./components/approval-dialog.js";
+import { DecisionDialog } from "./components/decision-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
 import { executeCommand, type CommandContext } from "./commands.js";
 
@@ -115,11 +115,10 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 
 function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<string | null> }) {
 	const activeView = usePuxStore((s) => s.activeTuiView);
-	const pendingQuestion = usePuxStore((s) => s.pendingQuestion);
-	const pendingApproval = usePuxStore((s) => s.pendingApproval);
+	const pendingDecision = usePuxStore((s) => s.pendingDecision);
 
-	// HITL dialogs take priority over everything
-	if (pendingApproval || pendingQuestion) {
+	// HITL decision dialog takes priority over everything
+	if (pendingDecision) {
 		return (
 			<Box
 				flexDirection="column"
@@ -127,7 +126,11 @@ function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<stri
 				paddingX={1}
 				flexGrow={1}
 			>
-				{pendingApproval ? <ApprovalDialog /> : <QuestionDialog />}
+				{pendingDecision.hint === "question" ? (
+					<QuestionDialog />
+				) : (
+					<DecisionDialog />
+				)}
 			</Box>
 		);
 	}

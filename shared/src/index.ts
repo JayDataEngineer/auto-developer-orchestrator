@@ -17,9 +17,8 @@ export { createPuxHistoryAdapter } from "./pux-history-adapter";
 export type {
 	TokenUsage,
 	ContextMetrics,
-	PendingQuestion,
-	PendingApproval,
-	PendingPlan,
+	PendingDecision,
+	DecisionHint,
 	Conversation,
 	Project,
 	WorkbenchTab,
