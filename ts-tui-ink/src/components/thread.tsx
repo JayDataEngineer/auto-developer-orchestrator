@@ -29,6 +29,7 @@ interface ThreadProps {
 
 export function Thread({ onCommand }: ThreadProps) {
 	const [commandOutput, setCommandOutput] = useState<string | null>(null);
+	const [selectedIdx, setSelectedIdx] = useState(0);
 	const { stdout } = useStdout();
 	const cols = stdout?.columns ?? 80;
 
@@ -63,14 +64,19 @@ export function Thread({ onCommand }: ThreadProps) {
 			</Box>
 
 			{/* Slash command autocomplete */}
-			<CommandPalette />
+			<CommandPalette selectedIdx={selectedIdx} onSelectIdx={setSelectedIdx} />
 
 			{/* Input area */}
 			<Text color="gray">{"─".repeat(cols)}</Text>
 			<Box paddingX={1}>
 				<Text color={colors.brand} bold>{">"}</Text>
 				<Text> </Text>
-				<CommandComposer onCommand={onCommand} onOutput={setCommandOutput} />
+				<CommandComposer
+					onCommand={onCommand}
+					onOutput={setCommandOutput}
+					selectedIdx={selectedIdx}
+					onSelectIdx={setSelectedIdx}
+				/>
 			</Box>
 			<Text color="gray">{"─".repeat(cols)}</Text>
 		</Box>
@@ -79,9 +85,13 @@ export function Thread({ onCommand }: ThreadProps) {
 
 // ── Command palette — filtered autocomplete overlay ──
 
-function CommandPalette() {
+function CommandPalette({
+	selectedIdx,
+}: {
+	selectedIdx: number;
+	onSelectIdx: (i: number) => void;
+}) {
 	const text = useAuiState((s) => s.composer.text);
-	const selectedIdx = useAuiState((s) => s.composer.text); // re-render on text change
 
 	const matches = useMemo(() => {
 		if (!text || !text.startsWith("/")) return [];
@@ -98,7 +108,7 @@ function CommandPalette() {
 		<Box flexDirection="column" paddingX={1}>
 			{matches.map((c, i) => (
 				<Text key={c.name}>
-					{i === 0 ? (
+					{i === selectedIdx ? (
 						<Text bold color={colors.brand}>/{c.name}</Text>
 					) : (
 						<Text>/{c.name}</Text>
@@ -106,7 +116,7 @@ function CommandPalette() {
 					<Text color="gray"> {symbols.dot} {c.desc}</Text>
 				</Text>
 			))}
-			<Text dimColor color="gray"> Tab to autocomplete</Text>
+			<Text dimColor color="gray"> ↑↓ Navigate   Tab to autocomplete</Text>
 		</Box>
 	);
 }
@@ -141,24 +151,21 @@ function Welcome() {
 	);
 }
 
-// ── Command-aware composer with Tab autocomplete ──
-//
-// We handle Enter ourselves (submitOnEnter=false) so we can distinguish:
-//   Enter       → submit message (or execute slash command)
-//   Alt+Enter   → insert newline (works on all terminals)
-//   Shift+Enter → insert newline (Kitty protocol only)
-//   Tab         → autocomplete slash commands
+// ── Command-aware composer with Tab/Arrow autocomplete ──
 
 function CommandComposer({
 	onCommand,
 	onOutput,
+	selectedIdx,
+	onSelectIdx,
 }: {
 	onCommand: (input: string) => Promise<string | null>;
 	onOutput: (out: string | null) => void;
+	selectedIdx: number;
+	onSelectIdx: (i: number) => void;
 }) {
 	const aui = useAui();
 	const text = useAuiState((s) => s.composer.text);
-	const tabIdx = useRef(0);
 
 	// Slash command matches for autocomplete
 	const matches = useMemo(() => {
@@ -170,19 +177,32 @@ function CommandComposer({
 			.map((c) => c.name);
 	}, [text]);
 
+	// Clamp selection when matches change
 	useEffect(() => {
-		if (matches.length === 0) { tabIdx.current = 0; return; }
-		if (tabIdx.current >= matches.length) tabIdx.current = 0;
-	}, [matches.length]);
+		if (matches.length === 0) { onSelectIdx(0); return; }
+		if (selectedIdx >= matches.length) onSelectIdx(0);
+	}, [matches.length, selectedIdx, onSelectIdx]);
 
-	// Tab → autocomplete slash commands
+	// Up/Down/Tab → navigate or autocomplete slash commands
 	useInput(useCallback((_input: string, key: any) => {
-		if (!key.tab) return;
 		if (matches.length === 0) return;
-		const chosen = matches[tabIdx.current];
-		aui.composer().setText("/" + chosen + " ");
-		tabIdx.current = (tabIdx.current + 1) % matches.length;
-	}, [matches, aui]));
+
+		if (key.upArrow) {
+			const next = selectedIdx <= 0 ? matches.length - 1 : selectedIdx - 1;
+			onSelectIdx(next);
+			return;
+		}
+		if (key.downArrow) {
+			const next = (selectedIdx + 1) % matches.length;
+			onSelectIdx(next);
+			return;
+		}
+		if (key.tab) {
+			const chosen = matches[selectedIdx];
+			aui.composer().setText("/" + chosen + " ");
+			return;
+		}
+	}, [matches, aui, selectedIdx, onSelectIdx]));
 
 	return (
 		<ComposerPrimitive.Input
