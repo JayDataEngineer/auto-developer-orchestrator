@@ -102,6 +102,9 @@ function ToolCallDisplay({
 	// Format result preview
 	const resultPreview = isDone ? formatResult(result) : null;
 
+	// Max width for result lines to prevent terminal wrapping garble
+	const maxResultWidth = 90;
+
 	return (
 		<Box flexDirection="column">
 			<Box>
@@ -121,7 +124,7 @@ function ToolCallDisplay({
 					<Text color="gray">{BLOCKQUOTE_BAR} </Text>
 					{resultPreview.map((line, i) => (
 						<Text key={i} dimColor>
-							{"  "}{BLOCKQUOTE_BAR} {line}
+							{"  "}{BLOCKQUOTE_BAR} {line.length > maxResultWidth ? line.slice(0, maxResultWidth - 3) + "..." : line}
 						</Text>
 					))}
 				</Box>
