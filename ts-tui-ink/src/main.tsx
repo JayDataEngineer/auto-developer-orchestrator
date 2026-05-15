@@ -13,22 +13,33 @@ import { setBaseUrl, setFetch, usePuxStore } from "@pux/shared";
 import React from "react";
 import { App } from "./app.js";
 
-// ── Linux backspace fix ──
-// Ink's parseKeypress maps \x7f (DEL) to key.delete but Linux terminals
-// send \x7f for the backspace key. Ink reads stdin via stdin.read() which
-// returns utf8 strings (setEncoding('utf8') in setRawMode). We patch
-// stdin.read() to rewrite \x7f → \b before Ink's input parser sees it.
+// ── Stdin fixes (runs before Ink processes any input) ──
+//
+// 1. Linux backspace: Ink maps \x7f (DEL) to key.delete but Linux terminals
+//    send \x7f for backspace. Rewrite → \b so Ink maps it to key.backspace.
+//
+// 2. Ctrl+J newline: Ink's ComposerInput inserts \n as a regular character
+//    (it falls through to the catch-all insert path). Rewrite \n → \r so
+//    Ctrl+J acts like Enter (submit) instead of inserting a newline.
+//
+// Both fixes patch stdin.read() since Ink reads via that method in utf8
+// string mode (setEncoding('utf8') in setRawMode).
 
-if (process.platform !== "darwin") {
-	const origRead = process.stdin.read.bind(process.stdin);
-	process.stdin.read = function (size?: number) {
-		const chunk = origRead(size);
-		if (typeof chunk === "string" && chunk.includes("\x7f")) {
-			return chunk.replaceAll("\x7f", "\b");
+const origRead = process.stdin.read.bind(process.stdin);
+process.stdin.read = function (size?: number) {
+	const chunk = origRead(size);
+	if (typeof chunk === "string") {
+		let fixed = chunk;
+		if (process.platform !== "darwin" && fixed.includes("\x7f")) {
+			fixed = fixed.replaceAll("\x7f", "\b");
 		}
-		return chunk;
-	} as typeof process.stdin.read;
-}
+		if (fixed.includes("\n")) {
+			fixed = fixed.replaceAll("\n", "\r");
+		}
+		return fixed;
+	}
+	return chunk;
+} as typeof process.stdin.read;
 
 // ── CLI Args ──
 
