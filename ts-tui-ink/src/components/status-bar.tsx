@@ -1,24 +1,22 @@
 /**
- * StatusBar — compact status line at the bottom.
- *
- * Uses inverse text so it stands out on all terminals.
+ * StatusBar — bottom status bar with project info and token usage.
  */
 
 import React from "react";
 import { Box, Text } from "ink";
 import { usePuxStore } from "@pux/shared";
-import { symbols } from "../theme.js";
+import { symbols, BLACK_CIRCLE } from "../theme.js";
 
 interface StatusBarProps {
 	model: string;
+	project: string;
 }
 
-export function StatusBar({ model }: StatusBarProps) {
+export function StatusBar({ model, project }: StatusBarProps) {
 	const lastUsage = usePuxStore((s) => s.lastUsage);
 	const contextMetrics = usePuxStore((s) => s.contextMetrics);
 	const compacting = usePuxStore((s) => s.compacting);
 
-	// Build a single status string
 	let status = model;
 	if (lastUsage) {
 		const inK = lastUsage.input > 1000 ? `${(lastUsage.input / 1000).toFixed(1)}k` : String(lastUsage.input);
@@ -35,7 +33,8 @@ export function StatusBar({ model }: StatusBarProps) {
 
 	return (
 		<Box paddingX={1}>
-			<Text inverse>{` ${status} `}</Text>
+			<Text inverse bold>{` ${BLACK_CIRCLE} Pux `}</Text>
+			<Text inverse>{` ${project} ${symbols.dot} ${status} `}</Text>
 		</Box>
 	);
 }

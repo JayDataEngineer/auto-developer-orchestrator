@@ -86,22 +86,13 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 
 	return (
 		<Box flexDirection="column" height={rows} width={cols}>
-			{/* Header */}
-			<Box paddingX={1}>
-				<Text inverse bold> {BLACK_CIRCLE} Pux </Text>
-				<Text> {symbols.dot} </Text>
-				<Text bold>{project}</Text>
-				<Text> {symbols.dot} </Text>
-				<Text color="gray">{model}</Text>
-			</Box>
-
 			{/* Content */}
 			<Box flexGrow={1} flexDirection="column">
 				<ContentArea onCommand={handleCommand} />
 			</Box>
 
 			{/* Status bar */}
-			<StatusBar model={model} />
+			<StatusBar model={model} project={project} />
 		</Box>
 	);
 }
