@@ -30,6 +30,14 @@ process.stdin.read = function (size?: number) {
 	const chunk = origRead(size);
 	if (typeof chunk === "string") {
 		let fixed = chunk;
+		// Kitty protocol rewrites — normalize enhanced sequences to raw bytes
+		// so Ink handles them with its standard key parsing.
+		if (fixed.includes("\x1b[")) {
+			// Ctrl+C: CSI 99;5u → \x03 (Kitty sends this instead of raw ETX)
+			fixed = fixed.replace(/\x1b\[99;5u/g, "\x03");
+			// Ctrl+Backspace: CSI 127;5u or CSI 8;5u → Ctrl+W (\x17)
+			fixed = fixed.replace(/\x1b\[(?:127|8);5u/g, "\x17");
+		}
 		// Linux backspace: \x7f → \b (DEL → BS)
 		if (process.platform !== "darwin" && fixed.includes("\x7f")) {
 			fixed = fixed.replaceAll("\x7f", "\b");
@@ -37,11 +45,6 @@ process.stdin.read = function (size?: number) {
 		// Ctrl+J: \n → \r (prevents newline insertion, acts as Enter)
 		if (fixed.includes("\n")) {
 			fixed = fixed.replaceAll("\n", "\r");
-		}
-		// Ctrl+Backspace (Kitty protocol): CSI 127;5u or CSI 8;5u → Ctrl+W (\x17)
-		// ComposerInput handles Ctrl+W as kill-word-backward (delete word)
-		if (fixed.includes("\x1b[")) {
-			fixed = fixed.replace(/\x1b\[(?:127|8);5u/g, "\x17");
 		}
 		return fixed;
 	}
