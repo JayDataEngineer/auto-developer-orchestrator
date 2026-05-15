@@ -284,14 +284,14 @@ class BrowserState:
         try:
             if self.stealth:
                 from seleniumbase import SB
-                ctx = SB(uc=True, test=True, locale="en", xvfb=True)
+                ctx = SB(uc=True, test=True, locale="en", xvfb=False)
                 ctx.__enter__()
                 self.sb = ctx.sb
                 self._ctx = ctx
                 self.sb.activate_cdp_mode("about:blank")
             else:
                 from seleniumbase import sb_cdp
-                self.sb = sb_cdp.Chrome("about:blank", xvfb=True)
+                self.sb = sb_cdp.Chrome("about:blank", xvfb=False)
                 self._ctx = None
             self._setup_cdp_downloads()
         except Exception as e:

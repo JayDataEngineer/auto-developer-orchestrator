@@ -349,12 +349,15 @@ export function App() {
 	}, [loadModels, loadConversations, loadProjects]);
 
 	// Drag-resize handle for workbench sidebar
+	const [dragging, setDragging] = useState(false);
 	const handleResizeStart = useCallback((e: React.MouseEvent) => {
 		e.preventDefault();
 		const startX = e.clientX;
 		const startWidth = workbenchWidthRef.current;
+		setDragging(true);
 
 		const handleMove = (moveEvent: MouseEvent) => {
+			moveEvent.preventDefault();
 			const delta = startX - moveEvent.clientX;
 			const newWidth = Math.max(
 				250,
@@ -374,10 +377,13 @@ export function App() {
 			document.removeEventListener("mouseup", handleUp);
 			document.body.style.cursor = "";
 			document.body.style.userSelect = "";
+			document.body.style.pointerEvents = "";
+			setDragging(false);
 		};
 
 		document.body.style.cursor = "col-resize";
 		document.body.style.userSelect = "none";
+		document.body.style.pointerEvents = "auto";
 		document.addEventListener("mousemove", handleMove);
 		document.addEventListener("mouseup", handleUp);
 	}, []);
@@ -453,14 +459,15 @@ export function App() {
 			<div
 				ref={workbenchProviderRef}
 				className={cn(
-					"fixed inset-y-0 right-0 z-10 flex flex-col border-l border-border bg-sidebar text-sidebar-foreground transition-transform duration-200 ease-linear",
+					"fixed inset-y-0 right-0 z-10 flex flex-col border-l border-border bg-sidebar text-sidebar-foreground",
+					!dragging && "transition-transform duration-200 ease-linear",
 					!workbenchVisible && "translate-x-full",
 				)}
 				style={{ width: `${workbenchWidth}px` }}
 			>
-				{/* Drag-resize handle */}
+				{/* Drag-resize handle — wider hit area for reliable grabbing */}
 				<div
-					className="absolute inset-y-0 left-0 z-30 w-1.5 cursor-col-resize hover:bg-ring/50 active:bg-ring transition-colors"
+					className="absolute inset-y-0 -left-1.5 z-30 w-4 cursor-col-resize hover:bg-ring/30 active:bg-ring"
 					onMouseDown={handleResizeStart}
 				/>
 				<Workbench />
