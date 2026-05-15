@@ -6,7 +6,7 @@
  * ActionBarPrimitive, DiffPrimitive.
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Box, Text } from "ink";
 import {
 	ThreadPrimitive,
@@ -18,6 +18,7 @@ import { AssistantMessage } from "./assistant-message.js";
 import { UserMessage } from "./user-message.js";
 import { ActionBar } from "./action-bar.js";
 import { BranchPicker } from "./branch-picker.js";
+import { getCommands } from "../commands.js";
 import { colors, BLACK_CIRCLE, BLOCKQUOTE_BAR, symbols } from "../theme.js";
 
 // ── Thread ──
@@ -55,9 +56,12 @@ export function Thread({ onCommand }: ThreadProps) {
 					<Welcome />
 				</ThreadPrimitive.Empty>
 				<ThreadPrimitive.Messages>
-					{() => <MessageWrapper onCommand={onCommand} setCommandOutput={setCommandOutput} />}
+					{() => <MessageWrapper />}
 				</ThreadPrimitive.Messages>
 			</Box>
+
+			{/* Slash command autocomplete */}
+			<CommandPalette />
 
 			{/* Input area */}
 			<Box borderStyle="round" borderColor="gray" paddingX={1}>
@@ -69,15 +73,36 @@ export function Thread({ onCommand }: ThreadProps) {
 	);
 }
 
+// ── Command palette — filtered autocomplete overlay ──
+
+function CommandPalette() {
+	const text = useAuiState((s) => s.composer.text);
+
+	const matches = useMemo(() => {
+		if (!text || !text.startsWith("/")) return [];
+		const query = text.slice(1).toLowerCase();
+		return getCommands()
+			.filter((c) => c.name.startsWith(query))
+			.map((c) => ({ name: c.name, desc: c.description }));
+	}, [text]);
+
+	if (matches.length === 0) return null;
+
+	return (
+		<Box flexDirection="column" paddingX={1}>
+			{matches.map((c) => (
+				<Text key={c.name}>
+					<Text bold color={colors.brand}>/{c.name}</Text>
+					<Text color="gray"> {symbols.dot} {c.desc}</Text>
+				</Text>
+			))}
+		</Box>
+	);
+}
+
 // ── Message wrapper with branching and action bar ──
 
-function MessageWrapper({
-	onCommand,
-	setCommandOutput,
-}: {
-	onCommand: (input: string) => Promise<string | null>;
-	setCommandOutput: (out: string | null) => void;
-}) {
+function MessageWrapper() {
 	const role = useAuiState((s) => s.message.role);
 	return (
 		<Box flexDirection="column">
@@ -129,8 +154,6 @@ function CommandComposer({
 					});
 					return false;
 				}
-				// onSubmit with a return value means the default send() is
-				// skipped — we need to call send() ourselves.
 				aui.composer().send();
 				return true;
 			}}

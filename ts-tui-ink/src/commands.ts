@@ -170,3 +170,7 @@ export async function executeCommand(
 export function getCommandNames(): string[] {
 	return commands.map((c) => c.name);
 }
+
+export function getCommands(): Command[] {
+	return commands;
+}
