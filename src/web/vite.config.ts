@@ -9,7 +9,7 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": resolve(__dirname, "src"),
-			"@tui-core": resolve(__dirname, "../../ts-tui-pi/src/core"),
+			"@pux/shared": resolve(__dirname, "../../shared/src/index.ts"),
 		},
 	},
 	server: {

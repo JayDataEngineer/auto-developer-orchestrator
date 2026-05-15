@@ -1,0 +1,12 @@
+{
+  "name": "@pux/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@assistant-ui/react": "^0.14.5",
+    "zustand": "^5.0.0"
+  }
+}

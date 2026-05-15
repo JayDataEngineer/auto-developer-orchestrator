@@ -202,7 +202,7 @@ Org roles are strictly additive:
 
 **Direction**: Interface internal
 
-`ChatState` (`ts-tui-pi/src/core/chat-state.ts`) is the canonical client-side event consumer. Every interface MUST use it or an equivalent that:
+`ChatState` (`shared/src/pux-chat-adapter.ts`) is the canonical client-side event consumer. Every interface MUST use it or an equivalent that:
 
 1. Subscribes to the SSE stream
 2. Accumulates `text_delta` and `thinking_delta` into messages

@@ -47,11 +47,12 @@ task down              # Stop everything (backend, frontend, sandboxes)
 ## Interfaces — THREE ways to use the system
 
 ### 1. TUI (Terminal UI) — `task chat` or `orch`
-- TypeScript pi-mono TUI via bun (`ts-tui-pi/`), spawned by `orch` chat command
+- React 19 + Ink 6 + `@assistant-ui/react-ink` TUI via bun (`ts-tui-ink/`)
+- Shares `PuxChatAdapter` and `usePuxStore` with web UI via `shared/` package
 - Streams SSE from Go backend, renders thinking/tool calls/assistant text in terminal
-- Files: `ts-tui-pi/src/` (core/pux-agent-session.ts is the SSE bridge, modes/interactive/ is the TUI)
-- Run: `task chat` or `cd ts-tui-pi && bun run src/main.ts --project myproject`
-- Tests: `cd ts-tui-pi && bun test`
+- Files: `ts-tui-ink/src/` (app.tsx is root, components/ are Ink components)
+- Run: `task chat` or `cd ts-tui-ink && bun run src/main.tsx --project myproject`
+- Tests: `cd ts-tui-ink && bun test`
 
 ### 2. CLI (scripting) — `orch agent prompt "message"`
 - Cobra subcommands for scripting/CI: `orch agent prompt`, `orch agent history`, `orch sandbox`, `orch project`, etc.
@@ -70,10 +71,10 @@ task down              # Stop everything (backend, frontend, sandboxes)
 ## Architecture
 
 ```
-                    ┌─ TUI (pi-mono, bun)     ─┐
+                    ┌─ TUI (Ink, bun)          ─┐
                     │  CLI (Cobra, Go)          │  Contract: SSE events
-User ───────────────┤                           ├──→ ChatState (TS) → render
-                    │  Web (Vite, any framework)│
+User ───────────────┤                           ├──→ @pux/shared → render
+                    │  Web (Vite, React)        │
                     └───────────────────────────┘
                                  │
                           POST /api/pux/prompt
@@ -88,8 +89,8 @@ User ───────────────┤                           
 ```
 
 The kernel's job is to manage contracts: agent loop, tool execution, sandbox lifecycle.
-Each interface (TUI, CLI, web) is a VIEW of the same SSE stream. They share `ChatState`
-and `SSEParser` from `ts-tui-pi/src/core/`. Rendering is the only thing that differs.
+Each interface (TUI, CLI, web) is a VIEW of the same SSE stream. They share `PuxChatAdapter`
+and `usePuxStore` from `shared/`. Rendering is the only thing that differs.
 
 ### Design Principles
 

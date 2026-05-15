@@ -1,0 +1,26 @@
+{
+  "name": "pux-tui-ink",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/main.tsx",
+    "start": "bun run src/main.tsx",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@pux/shared": "file:../shared",
+    "@assistant-ui/react-ink": "^0.0.16",
+    "@assistant-ui/react-ink-markdown": "^0.0.15",
+    "ink": "^6.0.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.1.0",
+    "zustand": "^5.0.0",
+    "markdansi": "^0.2.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "bun-types": "latest"
+  }
+}

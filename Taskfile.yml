@@ -90,21 +90,21 @@ tasks:
       - go run ./cmd/cli/ {{.CLI_ARGS}}
 
   chat:
-    desc: Launch the interactive TUI (ts-tui-pi via bun)
-    dir: ts-tui-pi
+    desc: Launch the interactive TUI (ts-tui-ink via bun)
+    dir: ts-tui-ink
     cmds:
-      - bun run src/main.ts {{.CLI_ARGS}}
+      - bun run src/main.tsx {{.CLI_ARGS}}
 
   code:
     desc: Launch TUI in code mode (current repo, DeepSeek V4 Flash)
-    dir: ts-tui-pi
+    dir: ts-tui-ink
     cmds:
       - |
         curl -sf http://localhost:3847/api/projects 2>/dev/null | grep -q auto-developer-orchestrator || \
           curl -sf -X POST http://localhost:3847/api/projects/add \
             -H "Content-Type: application/json" \
             -d "{\"name\":\"auto-developer-orchestrator\",\"path\":\"$(cd .. && pwd)\"}" 2>/dev/null || true
-      - bun run src/main.ts --project auto-developer-orchestrator --cwd .. --model deepseek/deepseek-v4-flash
+      - bun run src/main.tsx --project auto-developer-orchestrator --cwd .. --model deepseek/deepseek-v4-flash
 
   tui-visual:
     desc: Start TUI visual testing server (autonomous dev loop)
@@ -199,7 +199,7 @@ tasks:
 
   test-tui:
     desc: Run TUI (Bun) tests
-    dir: ts-tui-pi
+    dir: ts-tui-ink
     cmds:
       - bun test
 

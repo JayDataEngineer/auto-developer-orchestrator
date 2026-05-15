@@ -3,6 +3,7 @@
   "private": true,
   "version": "3.0.0",
   "type": "module",
+  "workspaces": ["shared", "ts-tui-ink"],
   "scripts": {
     "dev": "vite --config src/web/vite.config.ts --host 0.0.0.0",
     "build": "vite build --config src/web/vite.config.ts",

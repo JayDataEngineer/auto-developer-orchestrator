@@ -275,9 +275,9 @@ function Workbench() {
 	const setStoreTab = usePuxStore((s) => s.setWorkbenchTab);
 
 	const tabs: { id: WorkbenchTab; icon: React.ReactNode; label: string }[] = [
-		{ id: "vnc", icon: <Monitor size={14} />, label: "Sandbox" },
-		{ id: "editor", icon: <Code2 size={14} />, label: "Editor" },
-		{ id: "scheduler", icon: <Calendar size={14} />, label: "Scheduler" },
+		{ id: "vnc", icon: <Monitor className="size-4" />, label: "Sandbox" },
+		{ id: "editor", icon: <Code2 className="size-4" />, label: "Editor" },
+		{ id: "scheduler", icon: <Calendar className="size-4" />, label: "Scheduler" },
 	];
 
 	return (
