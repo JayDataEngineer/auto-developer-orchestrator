@@ -41,15 +41,15 @@ function inferTabFromTool(toolName: string, toolArgs: Record<string, unknown>): 
 	// Delegate tools — check which employee
 	if (toolName === "delegate_to" || toolName === "delegate_async") {
 		const agent = (toolArgs.agent as string) || "";
-		if (["jake", "ryan"].includes(agent)) {
+		if (["jake", "ryan", "browser_ops", "desktop_ops"].includes(agent)) {
 			store.setWorkbenchTab("vnc");
 			return;
 		}
-		if (agent === "marcus") {
+		if (["marcus", "code_ops"].includes(agent)) {
 			store.setWorkbenchTab("editor");
 			return;
 		}
-		// Sarah, Alex, Elena, etc — don't switch
+		// Sarah, Alex, Elena, researcher, etc — don't switch
 		return;
 	}
 
@@ -358,9 +358,9 @@ export const puxChatAdapter: ChatModelAdapter = {
 						case "subagent_start": {
 							const agentName = (parsed as Record<string, unknown>).agentName as string | undefined;
 							if (agentName) {
-								if (["jake", "ryan"].includes(agentName)) {
+								if (["jake", "ryan", "browser_ops", "desktop_ops"].includes(agentName)) {
 									usePuxStore.getState().setWorkbenchTab("vnc");
-								} else if (agentName === "marcus") {
+								} else if (["marcus", "code_ops"].includes(agentName)) {
 									usePuxStore.getState().setWorkbenchTab("editor");
 								}
 							}

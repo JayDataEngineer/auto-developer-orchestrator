@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Monitor, PowerIcon, MonitorSmartphone } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Monitor, PowerIcon } from "lucide-react";
 import { usePuxStore } from "@pux/shared";
 
 interface DesktopSession {
@@ -59,9 +59,27 @@ export function VNCViewer() {
 			});
 	}, [activeProject, activeProjectPath]);
 
+	// Initial detection on mount + project change
 	useEffect(() => {
 		detectSandbox();
 	}, [detectSandbox]);
+
+	// Auto-poll while sandbox isn't ready (no sandbox yet, or session not active)
+	const isActive = sandbox?.desktop_session?.is_active ?? false;
+	useEffect(() => {
+		if (isActive) return;
+		const interval = setInterval(detectSandbox, 3000);
+		return () => clearInterval(interval);
+	}, [isActive, detectSandbox]);
+
+	// Auto-switch to VNC tab when sandbox becomes ready
+	const prevActive = useRef(false);
+	useEffect(() => {
+		if (isActive && !prevActive.current) {
+			usePuxStore.getState().setWorkbenchTab("vnc");
+		}
+		prevActive.current = isActive;
+	}, [isActive]);
 
 	const startSandbox = async () => {
 		if (!activeProject) return;
@@ -83,17 +101,17 @@ export function VNCViewer() {
 		}
 	};
 
-	const enableBrowserMode = async () => {
+	const enableDesktop = async () => {
 		if (!sandbox) return;
 		setEnabling(true);
 		try {
-			const resp = await fetch(`/api/sandbox/${sandbox.id}/browser-mode`, {
+			const resp = await fetch(`/api/sandbox/${sandbox.id}/desktop-mode`, {
 				method: "POST",
 			});
 			if (resp.ok) {
 				const session = await resp.json();
 				setSandbox((prev) =>
-					prev ? { ...prev, mode: "browser", desktop_session: session } : prev,
+					prev ? { ...prev, mode: "desktop", desktop_session: session } : prev,
 				);
 			}
 		} catch {
@@ -130,20 +148,24 @@ export function VNCViewer() {
 		);
 	}
 
-	// Sandbox exists but no desktop session (CLI mode)
+	// Sandbox exists but no desktop session — auto-polling will catch when it becomes ready
 	if (!sandbox.desktop_session?.is_active) {
 		return (
 			<div className="flex h-full flex-col items-center justify-center gap-3">
-				<MonitorSmartphone className="size-8 text-muted-foreground/50" />
-				<span className="text-xs text-muted-foreground">Sandbox running in CLI mode</span>
-				<button
-					onClick={enableBrowserMode}
-					disabled={enabling}
-					className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-				>
-					<Monitor className="size-3" />
-					{enabling ? "Enabling..." : "Enable desktop"}
-				</button>
+				<Monitor className="size-8 animate-pulse text-muted-foreground/50" />
+				<span className="text-xs text-muted-foreground">
+					{sandbox.mode === "cli" ? "Sandbox starting..." : "Connecting..."}
+				</span>
+				{sandbox.mode === "cli" && (
+					<button
+						onClick={enableDesktop}
+						disabled={enabling}
+						className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+					>
+						<Monitor className="size-3" />
+						{enabling ? "Enabling..." : "Enable desktop"}
+					</button>
+				)}
 			</div>
 		);
 	}
