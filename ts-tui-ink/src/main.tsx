@@ -13,6 +13,25 @@ import { setBaseUrl, setFetch, usePuxStore } from "@pux/shared";
 import React from "react";
 import { App } from "./app.js";
 
+// ── Linux backspace fix ──
+// Ink's parseKeypress maps \x7f (DEL, 127) to "delete" but Linux terminals
+// send \x7f for the backspace key. This causes backspace to do delete-forward
+// (nothing visible when cursor is at end). Patch: rewrite \x7f → \b before
+// Ink parses it.
+
+if (process.platform !== "darwin") {
+	const origEmit = process.stdin.emit.bind(process.stdin);
+	process.stdin.emit = function (event: string, ...args: unknown[]) {
+		if (event === "data" && args[0] instanceof Buffer) {
+			const buf = args[0] as Buffer;
+			for (let i = 0; i < buf.length; i++) {
+				if (buf[i] === 0x7f) buf[i] = 0x08; // DEL → BS
+			}
+		}
+		return origEmit(event, ...args);
+	} as typeof process.stdin.emit;
+}
+
 // ── CLI Args ──
 
 const { values: opts } = parseArgs({
