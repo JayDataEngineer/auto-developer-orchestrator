@@ -6,12 +6,13 @@
  * ActionBarPrimitive, DiffPrimitive.
  */
 
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect } from "react";
+import { Box, Text } from "ink";
 import {
 	ThreadPrimitive,
 	ComposerPrimitive,
 	useAuiState,
+	useAui,
 } from "@assistant-ui/react-ink";
 import { AssistantMessage } from "./assistant-message.js";
 import { UserMessage } from "./user-message.js";
@@ -28,11 +29,12 @@ interface ThreadProps {
 export function Thread({ onCommand }: ThreadProps) {
 	const [commandOutput, setCommandOutput] = useState<string | null>(null);
 
-	useInput((_ch, key) => {
-		if (key.escape && commandOutput) {
-			setCommandOutput(null);
-		}
-	});
+	// Auto-dismiss command output after 5s
+	useEffect(() => {
+		if (!commandOutput) return;
+		const timer = setTimeout(() => setCommandOutput(null), 5000);
+		return () => clearTimeout(timer);
+	}, [commandOutput]);
 
 	return (
 		<Box flexDirection="column" flexGrow={1}>
@@ -112,6 +114,8 @@ function CommandComposer({
 	onCommand: (input: string) => Promise<string | null>;
 	onOutput: (out: string | null) => void;
 }) {
+	const aui = useAui();
+
 	return (
 		<ComposerPrimitive.Input
 			submitOnEnter
@@ -125,6 +129,9 @@ function CommandComposer({
 					});
 					return false;
 				}
+				// onSubmit with a return value means the default send() is
+				// skipped — we need to call send() ourselves.
+				aui.composer().send();
 				return true;
 			}}
 		/>
