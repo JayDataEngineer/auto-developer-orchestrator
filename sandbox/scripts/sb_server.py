@@ -53,6 +53,7 @@ API — POST unless noted:
 """
 
 import sys
+import types
 import json
 import os
 import io
@@ -66,6 +67,23 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 os.environ["SB_NO_BORING_RC"] = "1"
+
+# ── Prevent SeleniumBase from creating a hidden Xvfb ──
+# Mock sbvirtualdisplay (SeleniumBase's fork of pyvirtualdisplay) so that
+# Chrome uses the existing DISPLAY (:99) which is VNC-visible.
+# Combined with headed=True, xvfb=False in the SB/sb_cdp constructors.
+class _NoopDisplay:
+    def __init__(self, *a, **kw): pass
+    def start(self): return self
+    def stop(self): pass
+
+for _mod_name in ("pyvirtualdisplay", "sbvirtualdisplay"):
+    _m = types.ModuleType(_mod_name)
+    _m.Display = _NoopDisplay
+    sys.modules[_mod_name] = _m
+
+if "DISPLAY" not in os.environ or not os.environ["DISPLAY"]:
+    os.environ["DISPLAY"] = ":99"
 
 MAX_TEXT = 4000
 MAX_IMAGES = 50
@@ -281,17 +299,21 @@ class BrowserState:
 
     def _init_browser(self):
         self._close_browser()
+        # pyvirtualdisplay is mocked at module level (noop), so SeleniumBase
+        # cannot create a hidden Xvfb. Chrome uses DISPLAY from environment
+        # (:99 by default), making browser automation visible via VNC.
+        os.environ.setdefault("DISPLAY", ":99")
         try:
             if self.stealth:
                 from seleniumbase import SB
-                ctx = SB(uc=True, test=True, locale="en", xvfb=False)
+                ctx = SB(uc=True, test=True, locale="en", headed=True, xvfb=False)
                 ctx.__enter__()
                 self.sb = ctx.sb
                 self._ctx = ctx
                 self.sb.activate_cdp_mode("about:blank")
             else:
                 from seleniumbase import sb_cdp
-                self.sb = sb_cdp.Chrome("about:blank", xvfb=False)
+                self.sb = sb_cdp.Chrome("about:blank", xvfb=False, headed=True)
                 self._ctx = None
             self._setup_cdp_downloads()
         except Exception as e:
