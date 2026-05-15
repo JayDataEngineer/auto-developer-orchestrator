@@ -33,8 +33,7 @@ export function StatusBar({ model, project }: StatusBarProps) {
 
 	return (
 		<Box paddingX={1}>
-			<Text inverse bold>{` ${BLACK_CIRCLE} Pux `}</Text>
-			<Text inverse>{` ${project} ${symbols.dot} ${status} `}</Text>
+			<Text dimColor>{` ${BLACK_CIRCLE} ${project} ${symbols.dot} ${status} `}</Text>
 		</Box>
 	);
 }
