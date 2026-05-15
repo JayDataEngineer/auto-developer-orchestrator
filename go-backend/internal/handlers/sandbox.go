@@ -252,6 +252,7 @@ var vncUpgrader = websocket.Upgrader{
 	ReadBufferSize:  8192,
 	WriteBufferSize: 8192,
 	CheckOrigin:     func(r *http.Request) bool { return true },
+	Subprotocols:    []string{"binary"}, // noVNC requires "binary" subprotocol
 }
 
 // vncConn tracks a single VNC proxy connection for lifecycle management.

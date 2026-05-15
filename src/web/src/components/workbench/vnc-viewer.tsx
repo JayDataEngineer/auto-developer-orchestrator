@@ -148,9 +148,11 @@ export function VNCViewer() {
 		);
 	}
 
+	const wsPath = `api/sandbox/vnc/${sandbox.id}/websockify`;
+
 	return (
 		<iframe
-			src={`/api/sandbox/vnc/${sandbox.id}/vnc.html?autoconnect=true&resize=scale`}
+			src={`/api/sandbox/vnc/${sandbox.id}/vnc.html?autoconnect=true&resize=scale&path=${encodeURIComponent(wsPath)}`}
 			className="h-full w-full border-0"
 			title="Sandbox VNC"
 		/>
