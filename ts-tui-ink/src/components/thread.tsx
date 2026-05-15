@@ -177,6 +177,8 @@ function CommandComposer({
 
 	useInput(useCallback((_input: string, key: any) => {
 		if (key.return) {
+			// Debug: log what Ink reports for Enter variants
+			process.stderr.write(`[DEBUG] return=${!!key.return} shift=${!!key.shift} meta=${!!key.meta} ctrl=${!!key.ctrl}\n`);
 			// Alt+Enter or Shift+Enter (Kitty) → insert newline
 			if (key.meta || key.shift) {
 				aui.composer().setText(text + "\n");
