@@ -69,10 +69,11 @@ type ParallelRunner struct {
 	// Auto-director: raise browser window for VNC visibility when browser agent starts
 	raiseBrowserFunc func(ctx context.Context) // injected by orchestrator if sandbox available
 
-	mu         sync.Mutex
-	tasks      map[string]*asyncTask
-	wg         sync.WaitGroup
-	liveAgents map[string]*liveAgent // kept-alive sub-agents for continuation
+	mu                sync.Mutex
+	tasks             map[string]*asyncTask
+	wg                sync.WaitGroup
+	liveAgents        map[string]*liveAgent // kept-alive sub-agents for continuation
+	completedSnapshots map[string]string    // agentRef → snapshotID for auto-accepted delegates (enables revert)
 }
 
 // asyncTask is a single in-flight async sub-agent.
@@ -108,8 +109,9 @@ func NewParallelRunner(executor core.ToolExecutor, toolSpecs []core.OpenAITool, 
 		ctxSize:       ctxSize,
 		modelResolver: modelResolver,
 		logger:        func(format string, args ...interface{}) {},
-		tasks:         make(map[string]*asyncTask),
-		liveAgents:    make(map[string]*liveAgent),
+		tasks:             make(map[string]*asyncTask),
+		liveAgents:        make(map[string]*liveAgent),
+		completedSnapshots: make(map[string]string),
 	}
 }
 
@@ -530,64 +532,17 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	agentRef := ""
 	var changes *ChangeSet
 
-	// Keep the sub-agent alive for continuation
-	// We reconstruct the session from the RunDelegate call.
-	// The provider stays open; the session persists.
-	if r.providerFactory != nil {
-		agentName := extractAgentName(instructions)
-		provider := r.providerFactory()
-		if modelID != "" && r.modelResolver != nil {
-			if resolved := r.modelResolver(modelID); resolved != nil {
-				if closer, ok := provider.(io.Closer); ok {
-					closer.Close()
-				}
-				provider = resolved
-			}
-		}
+	// Auto-accept: generate an agent_ref for tracking, but don't keep the
+	// sub-agent alive. The provider is NOT created here since the delegate
+	// already ran inside RunDelegate. We only need the ref + snapshot for
+	// potential revert.
+	agentName := extractAgentName(instructions)
+	agentRef = fmt.Sprintf("%s-%d", agentName, time.Now().UnixMilli())
 
-		// Build config for potential continuation
-		var selectedTools []core.OpenAITool
-		toolSet := make(map[string]bool)
-		for _, name := range toolNames {
-			toolSet[name] = true
-		}
-		for _, t := range r.toolSpecs {
-			if toolSet[t.Function.Name] {
-				selectedTools = append(selectedTools, t)
-			}
-		}
-
-		cfg := core.AgentLoopConfig{
-			SystemPrompt:  instructions,
-			MaxToolRounds: maxRounds,
-			MaxTokens:     8192,
-			ContextSize:   r.ctxSize,
-			Tools:         selectedTools,
-			ToolResultProcessor: subAgentResultProcessor(),
-			Opts: core.GenerateOptions{
-				MaxTokens:   8192,
-				Temperature: temperature,
-				TopP:        0.95,
-				TopK:        20,
-			},
-		}
-
-		agentRef = fmt.Sprintf("%s-%d", agentName, time.Now().UnixMilli())
-		sess := &subSession{parent: r.baseSession, msgCount: 0}
-
-		la := &liveAgent{
-			ID:        agentRef,
-			Role:      agentName,
-			Task:      task,
-			Session:   sess,
-			Provider:  provider,
-			Config:    cfg,
-			Snapshot:  snapshotID,
-			StartedAt: time.Now(),
-		}
-
+	// Store snapshot for potential revert (delegate_revert uses this)
+	if snapshotID != "" {
 		r.mu.Lock()
-		r.liveAgents[agentRef] = la
+		r.completedSnapshots[agentRef] = snapshotID
 		r.mu.Unlock()
 	}
 
@@ -628,7 +583,7 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	la, ok := r.liveAgents[agentRef]
 	r.mu.Unlock()
 	if !ok {
-		return nil, fmt.Errorf("no live agent with ref %q (already accepted/reverted or expired)", agentRef)
+		return nil, fmt.Errorf("no live agent with ref %q — delegates are auto-accepted on completion. Use delegate_to to start a new delegation instead", agentRef)
 	}
 
 	r.logger("CONTINUE: agent=%s feedback_len=%d", la.Role, len(feedback))
@@ -742,52 +697,43 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	return enriched, nil
 }
 
-// AcceptAgent accepts the sub-agent's work and releases its resources.
-func (r *ParallelRunner) AcceptAgent(ctx context.Context, agentRef string) (map[string]any, error) {
-	r.mu.Lock()
-	la, ok := r.liveAgents[agentRef]
-	if ok {
-		delete(r.liveAgents, agentRef)
-	}
-	r.mu.Unlock()
-	if !ok {
-		return nil, fmt.Errorf("no live agent with ref %q", agentRef)
-	}
-
-	// Close the provider
-	if closer, ok := la.Provider.(io.Closer); ok {
-		closer.Close()
-	}
-
-	r.logger("ACCEPT: agent=%s ref=%s", la.Role, agentRef)
-
-	return map[string]any{
-		"status":    "accepted",
-		"agent_ref": agentRef,
-	}, nil
-}
-
-// RevertAgent reverts file changes made by the sub-agent and releases its resources.
+// RevertAgent reverts file changes made by a sub-agent.
+// Works with auto-accepted delegates via completedSnapshots.
 func (r *ParallelRunner) RevertAgent(ctx context.Context, agentRef string) (map[string]any, error) {
+	// Try live agents first (for delegate_continue sessions still alive)
 	r.mu.Lock()
-	la, ok := r.liveAgents[agentRef]
-	if ok {
+	la, isLive := r.liveAgents[agentRef]
+	snapshotID := ""
+	agentRole := ""
+	if isLive {
+		snapshotID = la.Snapshot
+		agentRole = la.Role
 		delete(r.liveAgents, agentRef)
+	} else {
+		// Try completed snapshots (auto-accepted delegates)
+		snapshotID, isLive = r.completedSnapshots[agentRef]
+		if isLive {
+			delete(r.completedSnapshots, agentRef)
+			agentRole = extractAgentName(agentRef)
+		}
 	}
 	r.mu.Unlock()
-	if !ok {
-		return nil, fmt.Errorf("no live agent with ref %q", agentRef)
+
+	if !isLive {
+		return nil, fmt.Errorf("no agent with ref %q (already reverted or expired)", agentRef)
 	}
 
-	// Close the provider
-	if closer, ok := la.Provider.(io.Closer); ok {
-		closer.Close()
+	// Close the provider if live agent
+	if la != nil {
+		if closer, ok := la.Provider.(io.Closer); ok {
+			closer.Close()
+		}
 	}
 
 	// Revert file changes
 	var revertedFiles []string
-	if r.snapshotter != nil && la.Snapshot != "" && r.projectDir != "" {
-		if err := r.snapshotter.Revert(ctx, r.projectDir, la.Snapshot); err != nil {
+	if r.snapshotter != nil && snapshotID != "" && r.projectDir != "" {
+		if err := r.snapshotter.Revert(ctx, r.projectDir, snapshotID); err != nil {
 			r.logger("REVERT_WARN: failed to revert: %v", err)
 			return map[string]any{
 				"status":    "revert_failed",
@@ -796,18 +742,18 @@ func (r *ParallelRunner) RevertAgent(ctx context.Context, agentRef string) (map[
 			}, err
 		}
 		// Get the list of files that were reverted
-		changes, _ := r.snapshotter.Diff(ctx, r.projectDir, la.Snapshot)
+		changes, _ := r.snapshotter.Diff(ctx, r.projectDir, snapshotID)
 		if changes != nil {
 			revertedFiles = changes.Files
 		}
 	}
 
-	r.logger("REVERT: agent=%s ref=%s files=%v", la.Role, agentRef, revertedFiles)
+	r.logger("REVERT: agent=%s ref=%s files=%v", agentRole, agentRef, revertedFiles)
 
 	return map[string]any{
-		"status":          "reverted",
-		"agent_ref":       agentRef,
-		"files_restored":  revertedFiles,
+		"status":         "reverted",
+		"agent_ref":      agentRef,
+		"files_restored": revertedFiles,
 	}, nil
 }
 

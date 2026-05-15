@@ -107,7 +107,7 @@ func NewDelegateToToolDynamic(r DelegateRunner, mcpResolver MCPResolver, rolePro
 
 func (t *DelegateToTool) Name() string { return "delegate_to" }
 func (t *DelegateToTool) Description() string {
-	return "Delegate a task to an employee. Returns result, agent_ref for continuation, and file changes. Use delegate_continue to provide feedback to the same agent."
+	return "Delegate a task to an employee. Work is auto-accepted on completion. Returns result and file changes. Use delegate_revert to undo if the work is wrong. Use delegate_continue to give feedback to a still-running agent."
 }
 
 func (t *DelegateToTool) Schema() json.RawMessage {
@@ -195,7 +195,7 @@ func NewDelegateContinueTool(r DelegateRunner) *DelegateContinueTool {
 
 func (t *DelegateContinueTool) Name() string { return "delegate_continue" }
 func (t *DelegateContinueTool) Description() string {
-	return "Send feedback to a previously delegated agent. The agent keeps its session memory and continues working with your feedback. Returns updated result and file changes."
+	return "Send feedback to a still-running delegated agent. Only works if the agent is still active. If the agent has already completed, use delegate_to to start a new delegation."
 }
 
 func (t *DelegateContinueTool) Schema() json.RawMessage {
@@ -230,46 +230,6 @@ func (t *DelegateContinueTool) Execute(ctx context.Context, args map[string]any)
 	return tracker.RunDelegateContinue(ctx, agentRef, feedback)
 }
 
-// DelegateAcceptTool accepts a sub-agent's work and releases its session.
-type DelegateAcceptTool struct {
-	runner DelegateRunner
-}
-
-func NewDelegateAcceptTool(r DelegateRunner) *DelegateAcceptTool {
-	return &DelegateAcceptTool{runner: r}
-}
-
-func (t *DelegateAcceptTool) Name() string { return "delegate_accept" }
-func (t *DelegateAcceptTool) Description() string {
-	return "Accept a sub-agent's work. Releases the agent session. Use this when the result looks good."
-}
-
-func (t *DelegateAcceptTool) Schema() json.RawMessage {
-	return json.RawMessage(`{
-		"type": "object",
-		"properties": {
-			"agent_ref": {"type": "string", "description": "The agent reference returned by delegate_to"}
-		},
-		"required": ["agent_ref"]
-	}`)
-}
-
-func (t *DelegateAcceptTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	agentRef, _ := args["agent_ref"].(string)
-	if agentRef == "" {
-		return nil, core.NewToolError("delegate_accept", "missing required parameter 'agent_ref'")
-	}
-
-	tracker, ok := t.runner.(interface {
-		AcceptAgent(ctx context.Context, agentRef string) (map[string]any, error)
-	})
-	if !ok {
-		return nil, core.NewToolError("delegate_accept", "runner does not support accept")
-	}
-
-	return tracker.AcceptAgent(ctx, agentRef)
-}
-
 // DelegateRevertTool reverts file changes made by a sub-agent and releases its session.
 type DelegateRevertTool struct {
 	runner DelegateRunner
@@ -281,7 +241,7 @@ func NewDelegateRevertTool(r DelegateRunner) *DelegateRevertTool {
 
 func (t *DelegateRevertTool) Name() string { return "delegate_revert" }
 func (t *DelegateRevertTool) Description() string {
-	return "Revert all file changes made by a sub-agent. Use when the work is wrong and you want to undo it. Releases the agent session."
+	return "Revert all file changes made by a completed sub-agent. Use when delegated work is wrong and needs to be undone."
 }
 
 func (t *DelegateRevertTool) Schema() json.RawMessage {

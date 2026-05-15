@@ -325,7 +325,6 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			orchestration.NewDelegateToToolDynamic(runner, mcpResolver, roleProvider, nameProvider),
 			orchestration.NewDelegateAsyncToolDynamic(runner, mcpResolver, roleProvider, nameProvider),
 			orchestration.NewDelegateContinueTool(runner),
-			orchestration.NewDelegateAcceptTool(runner),
 			orchestration.NewDelegateRevertTool(runner),
 			orchestration.NewCollectResultsTool(runner),
 			orchestration.NewPlanTool(),
