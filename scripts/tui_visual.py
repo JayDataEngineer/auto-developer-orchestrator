@@ -513,7 +513,7 @@ def main():
     parser.add_argument("--rows", type=int, default=40)
     parser.add_argument("--font-size", type=int, default=14)
     parser.add_argument("--server", type=str, default="http://localhost:3847")
-    parser.add_argument("--project", type=str, default="ts-tui-pi")
+    parser.add_argument("--project", type=str, default="auto-developer-orchestrator")
     parser.add_argument("--model", type=str, default="deepseek/deepseek-v4-flash")
     parser.add_argument("--extra-args", type=str, default="", help="Extra CLI args passed to TUI")
     args = parser.parse_args()
