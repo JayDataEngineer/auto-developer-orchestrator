@@ -1,11 +1,12 @@
 /**
  * Pux TUI App — root component.
  *
- * Layout: full-height flex column with header, content, and status bar.
- * Header uses inverse text for visual weight on all terminals.
+ * Layout: fullscreen flex column with header, content, and status bar.
+ * Wires: slash commands, keybindings (Ctrl+P model cycle, Ctrl+Q quit),
+ * and assistant-ui runtime.
  */
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import {
 	AssistantRuntimeProvider,
@@ -16,6 +17,7 @@ import { Thread } from "./components/thread.js";
 import { StatusBar } from "./components/status-bar.js";
 import { QuestionDialog } from "./components/question-dialog.js";
 import { ApprovalDialog } from "./components/approval-dialog.js";
+import { executeCommand, type CommandContext } from "./commands.js";
 import { symbols, BLACK_CIRCLE } from "./theme.js";
 
 // ── Runtime Provider ──
@@ -40,17 +42,18 @@ interface AppProps {
 	cwd: string;
 }
 
-export function App({ model, project }: AppProps) {
+export function App({ model: initialModel, project }: AppProps) {
 	return (
 		<PuxRuntimeProvider>
-			<PuxApp model={model} project={project} />
+			<PuxApp initialModel={initialModel} project={project} />
 		</PuxRuntimeProvider>
 	);
 }
 
-function PuxApp({ model, project }: { model: string; project: string }) {
+function PuxApp({ initialModel, project }: { initialModel: string; project: string }) {
 	const { exit } = useApp();
 	const { stdout } = useStdout();
+	const [model, setModel] = useState(initialModel);
 
 	useInput((input, key) => {
 		if (input === "q" && key.ctrl) {
@@ -58,22 +61,31 @@ function PuxApp({ model, project }: { model: string; project: string }) {
 		}
 	});
 
-	// Use actual terminal dimensions for fullscreen
 	const rows = stdout?.rows ?? 24;
 	const cols = stdout?.columns ?? 80;
 
+	// Command handler
+	const handleCommand = useCallback(async (input: string): Promise<string | null> => {
+		const ctx: CommandContext = { model, project, exit, setModel };
+		const result = await executeCommand(input, ctx);
+		if (result.type === "handled") return result.message ?? null;
+		return null;
+	}, [model, project, exit]);
+
 	return (
 		<Box flexDirection="column" height={rows} width={cols} borderStyle="round" borderColor="gray">
-			{/* Header bar */}
+			{/* Header */}
 			<Box paddingX={1}>
 				<Text inverse bold> {BLACK_CIRCLE} Pux </Text>
 				<Text> {symbols.dot} </Text>
 				<Text bold>{project}</Text>
+				<Text> {symbols.dot} </Text>
+				<Text color="gray">{model}</Text>
 			</Box>
 
-			{/* Content: thread or HITL dialog — fills remaining space */}
+			{/* Content */}
 			<Box flexGrow={1} flexDirection="column">
-				<ContentArea />
+				<ContentArea onCommand={handleCommand} />
 			</Box>
 
 			{/* Status bar */}
@@ -84,11 +96,11 @@ function PuxApp({ model, project }: { model: string; project: string }) {
 
 // ── Content Area ──
 
-function ContentArea() {
+function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<string | null> }) {
 	const pendingQuestion = usePuxStore((s) => s.pendingQuestion);
 	const pendingApproval = usePuxStore((s) => s.pendingApproval);
 
 	if (pendingApproval) return <ApprovalDialog />;
 	if (pendingQuestion) return <QuestionDialog />;
-	return <Thread />;
+	return <Thread onCommand={onCommand} />;
 }

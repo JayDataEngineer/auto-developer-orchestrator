@@ -80,6 +80,11 @@ docs/tsconfig.json
 
 # Agent session files (all nested directories)
 **/.pux/sessions/
+**/.pux/spill/
+
+# Bun lockfiles in workspace packages (root manages deps)
+shared/bun.lock
+ts-tui-ink/bun.lock
 
 # Test artifacts from sandbox/agent use case runs
 makima*.jpg

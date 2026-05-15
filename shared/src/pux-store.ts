@@ -38,6 +38,7 @@ interface PuxState {
 	// Conversation
 	activeProject: string;
 	activeAgentId: string;
+	activeConversationId: string;
 	conversationKey: string;
 
 	// Model
@@ -65,6 +66,7 @@ interface PuxState {
 	setProject: (project: string) => void;
 	setConversation: (project: string, agentId: string) => void;
 	deleteConversation: (project: string, agentId: string) => Promise<void>;
+	clearConversation: () => void;
 	clearError: () => void;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 }
@@ -80,6 +82,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	compacting: false,
 	activeProject: "",
 	activeAgentId: "",
+	activeConversationId: "",
 	conversationKey: "",
 	modelList: [],
 	conversations: [],
@@ -156,6 +159,19 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			activeProject: project,
 			activeAgentId: agentId || "",
 			conversationKey: `${project}:${agentId || "default"}`,
+		}),
+
+	clearConversation: () =>
+		set({
+			activeAgentId: "",
+			conversationKey: `${get().activeProject}:default`,
+			pendingQuestion: null,
+			pendingApproval: null,
+			pendingPlan: null,
+			lastUsage: null,
+			contextMetrics: null,
+			compacting: false,
+			lastError: null,
 		}),
 
 	loadConversations: async () => {
