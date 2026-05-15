@@ -190,3 +190,5 @@ const { waitUntilExit } = render(
 );
 
 await waitUntilExit();
+restoreTerminal();
+process.exit(0);

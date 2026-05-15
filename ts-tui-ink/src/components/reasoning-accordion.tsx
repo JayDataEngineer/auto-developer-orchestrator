@@ -1,22 +1,19 @@
 /**
- * ReasoningAccordion — collapsible thinking block using ChainOfThoughtPrimitive.
+ * ReasoningAccordion — collapsible thinking block.
  *
- * Uses ChainOfThoughtPrimitive.Root and AccordionTrigger.
+ * Shows reasoning/thinking content from assistant messages.
  * When collapsed, shows a single "Thinking..." line.
  * When expanded, shows the full reasoning text with blockquote bar.
  */
 
-import React from "react";
-import { Box, Text } from "ink";
-import {
-	ChainOfThoughtPrimitive,
-	useAuiState,
-} from "@assistant-ui/react-ink";
+import React, { useState } from "react";
+import { Box, Text, useInput } from "ink";
+import { useAuiState } from "@assistant-ui/react-ink";
 import { colors, BLOCKQUOTE_BAR } from "../theme.js";
 
 export function ReasoningAccordion() {
 	const parts = useAuiState((s) => s.message.parts);
-	const collapsed = useAuiState((s) => s.chainOfThought?.collapsed);
+	const [expanded, setExpanded] = useState(false);
 
 	// Find reasoning parts
 	const reasoningParts = (parts || []).filter(
@@ -29,22 +26,26 @@ export function ReasoningAccordion() {
 		.join("\n");
 	if (!fullText.trim()) return null;
 
-	return (
-		<ChainOfThoughtPrimitive.Root flexDirection="column" marginBottom={1}>
-			{/* Accordion trigger — click to toggle */}
-			<ChainOfThoughtPrimitive.AccordionTrigger>
-				<Box>
-					<Text color="gray">{BLOCKQUOTE_BAR} </Text>
-					<Text dimColor italic>
-						{collapsed !== false
-							? `Thinking... (${fullText.split("\n").length} lines, press to expand)`
-							: "Thinking (press to collapse)"}
-					</Text>
-				</Box>
-			</ChainOfThoughtPrimitive.AccordionTrigger>
+	const lineCount = fullText.split("\n").length;
 
-			{/* Content — only show when expanded */}
-			{collapsed === false && (
+	useInput((_input: string, key: any) => {
+		if (key.return && _input === "") {
+			// Only toggle when a special key combo is used, not regular input
+		}
+	});
+
+	return (
+		<Box flexDirection="column" marginBottom={1}>
+			<Box>
+				<Text color="gray">{BLOCKQUOTE_BAR} </Text>
+				<Text dimColor italic>
+					{expanded
+						? `Thinking (${lineCount} lines)`
+						: `Thinking... (${lineCount} lines)`}
+				</Text>
+			</Box>
+
+			{expanded && (
 				<Box flexDirection="column" paddingLeft={2}>
 					{fullText.split("\n").map((line: string, i: number) => (
 						<Box key={i}>
@@ -56,6 +57,6 @@ export function ReasoningAccordion() {
 					))}
 				</Box>
 			)}
-		</ChainOfThoughtPrimitive.Root>
+		</Box>
 	);
 }

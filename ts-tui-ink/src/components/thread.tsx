@@ -175,37 +175,31 @@ function CommandComposer({
 		if (tabIdx.current >= matches.length) tabIdx.current = 0;
 	}, [matches.length]);
 
+	// Tab → autocomplete slash commands
 	useInput(useCallback((_input: string, key: any) => {
-		if (key.return) {
-			// Alt+Enter or Shift+Enter → insert newline
-			if (key.meta || key.shift) {
-				aui.composer().setText(text + "\n");
-				return;
-			}
-			// Plain Enter → submit or slash command
-			const trimmed = text.trim();
-			if (trimmed.startsWith("/")) {
-				onCommand(trimmed).then((output) => {
-					if (output) onOutput(output);
-				});
-				aui.composer().setText("");
-			} else if (trimmed.length > 0) {
-				aui.composer().send();
-			}
-			return;
-		}
-		// Tab → autocomplete slash commands
 		if (!key.tab) return;
 		if (matches.length === 0) return;
 		const chosen = matches[tabIdx.current];
 		aui.composer().setText("/" + chosen + " ");
 		tabIdx.current = (tabIdx.current + 1) % matches.length;
-	}, [matches, aui, text, onCommand, onOutput]));
+	}, [matches, aui]));
 
 	return (
 		<ComposerPrimitive.Input
-			submitOnEnter={false}
-			placeholder="Message... (Shift+Enter for newline)"
+			submitOnEnter={true}
+			multiLine={true}
+			onSubmit={(submittedText: string) => {
+				const trimmed = submittedText.trim();
+				if (trimmed.startsWith("/")) {
+					onCommand(trimmed).then((output) => {
+						if (output) onOutput(output);
+					});
+					aui.composer().setText("");
+				} else if (trimmed.length > 0) {
+					aui.composer().send();
+				}
+			}}
+			placeholder="Message..."
 			autoFocus
 		/>
 	);

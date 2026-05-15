@@ -441,7 +441,14 @@ class TUIVisualHandler(BaseHTTPRequestHandler):
             req = json.loads(body)
             text = req.get("text", "")
             if text:
-                self.tui.write(text)
+                # Send characters one at a time with a tiny delay so Ink's
+                # input parser treats each as a separate keypress event.
+                # Without this, "hello\r" arrives as a single chunk and
+                # Ink treats it as one big text input instead of individual
+                # keystrokes + Enter.
+                for char in text:
+                    self.tui.write(char)
+                    time.sleep(0.01)  # 10ms between characters
                 self.log_buffer.append(f"[input] {repr(text)}")
                 wait = float(req.get("wait", 0.3))
                 time.sleep(min(wait, 5))
@@ -511,14 +518,14 @@ def main():
     parser.add_argument("--extra-args", type=str, default="", help="Extra CLI args passed to TUI")
     args = parser.parse_args()
 
-    tui_dir = Path(__file__).parent.parent / "ts-tui-pi"
+    tui_dir = Path(__file__).parent.parent / "ts-tui-ink"
     if not tui_dir.exists():
         print(f"TUI directory not found: {tui_dir}")
         sys.exit(1)
 
     renderer = TerminalRenderer(cols=args.cols, rows=args.rows, font_size=args.font_size)
     log_buffer = RingBuffer(500)
-    cmd = ["bun", "run", "src/main.ts", "--project", args.project, "--server", args.server, "--model", args.model]
+    cmd = ["bun", "run", "src/main.tsx", "--project", args.project, "--server", args.server, "--model", args.model]
     if args.extra_args:
         cmd.extend(args.extra_args.split())
     tui = TUIProcess(cmd, str(tui_dir), renderer, log_buffer)
