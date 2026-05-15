@@ -101,7 +101,7 @@ function CommandPalette() {
 					{i === 0 ? (
 						<Text bold color={colors.brand}>/{c.name}</Text>
 					) : (
-						<Text>/{" " + c.name}</Text>
+						<Text>/{c.name}</Text>
 					)}
 					<Text color="gray"> {symbols.dot} {c.desc}</Text>
 				</Text>
