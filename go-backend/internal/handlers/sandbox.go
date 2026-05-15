@@ -50,6 +50,13 @@ func (h *SandboxHandler) CreateSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve project name to full path if not already a valid directory
+	if req.ProjectPath != "" {
+		if sb := h.manager.FindSandboxByProject(req.ProjectPath); sb != nil {
+			req.ProjectPath = sb.ProjectPath
+		}
+	}
+
 	sandbox, err := h.manager.CreateSandbox(r.Context(), sandbox.SandboxOptions{
 		ID:          req.ID,
 		ProjectPath: req.ProjectPath,
