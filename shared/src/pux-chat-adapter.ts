@@ -42,8 +42,12 @@ interface RunningTool {
 	artifact?: unknown;
 	modelContent?: readonly { type: "text"; text: string }[];
 	messages?: Array<{
-		role: "user" | "assistant";
+		id: string;
+		role: "assistant";
 		content: Array<{ type: "text"; text: string } | { type: "reasoning"; text: string }>;
+		createdAt: Date;
+		status: { type: "complete"; reason: "stop" };
+		metadata: Record<string, unknown>;
 	}>;
 }
 
@@ -376,7 +380,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		// Sub-agent message tracking — accumulates into the current delegate tool's messages
 		let activeSubAgentToolId: string | null = null;
-		let subAgentMessageAccum: Array<{ role: "assistant"; content: Array<{ type: "text"; text: string } | { type: "reasoning"; text: string }> }> = [];
+		let subAgentMessageAccum: RunningTool["messages"] extends infer T | undefined ? NonNullable<T> : never = [];
 
 		// Mutable status ref so handleMetaEvent can update it
 		const statusRef: SnapshotStatus[] = ["running"];
@@ -459,8 +463,12 @@ export const puxChatAdapter: ChatModelAdapter = {
 									}
 								} else if (text) {
 									subAgentMessageAccum.push({
+										id: `submsg_${Date.now()}_${subAgentMessageAccum.length}`,
 										role: "assistant",
 										content: [{ type: "text" as const, text }],
+										createdAt: new Date(),
+										status: { type: "complete" as const, reason: "stop" as const },
+										metadata: {},
 									});
 								}
 								break;

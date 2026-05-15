@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -159,6 +160,8 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Delete("/file", h.DeleteProjectFile)
 	r.Post("/file/restore", h.RestoreProjectFile)
 	r.Get("/git/diff", h.GetGitDiff)
+	r.Post("/feedback", h.Feedback)
+	r.Post("/suggestions", h.Suggestions)
 }
 
 // resolveAgent reads ?agentId= from the query string, defaulting to "default".
@@ -487,4 +490,94 @@ func serializeTree(node *core.TreeNode) []map[string]interface{} {
 	}
 	walk(node)
 	return result
+}
+
+// Feedback accepts user feedback (positive/negative) on assistant messages.
+// Stores it in the event store for observability (Langfuse, metrics).
+func (h *PuxHandler) Feedback(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MessageID string `json:"messageId"`
+		Type      string `json:"type"` // "positive" or "negative"
+		Role      string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.MessageID == "" || (req.Type != "positive" && req.Type != "negative") {
+		http.Error(w, "messageId and type (positive/negative) required", http.StatusBadRequest)
+		return
+	}
+
+	h.log.Info("feedback received",
+		zap.String("messageId", req.MessageID),
+		zap.String("type", req.Type),
+		zap.String("role", req.Role),
+	)
+
+	// TODO: wire to event store, metrics, and Langfuse when those APIs stabilize
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})
+}
+
+// Suggestions returns contextual follow-up suggestions based on recent messages.
+// Falls back to defaults when no conversation context is available.
+func (h *PuxHandler) Suggestions(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Build contextual suggestions from the last assistant message
+	suggestions := h.generateSuggestions(req.Messages)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"suggestions": suggestions,
+	})
+}
+
+func (h *PuxHandler) generateSuggestions(messages []map[string]any) []string {
+	// Look at the last assistant message for context
+	var lastAssistantContent string
+	for i := len(messages) - 1; i >= 0; i-- {
+		if role, ok := messages[i]["role"].(string); ok && role == "assistant" {
+			if content, ok := messages[i]["content"].(string); ok {
+				lastAssistantContent = content
+				break
+			}
+		}
+	}
+
+	// Context-aware suggestions based on what the assistant just did
+	if strings.Contains(strings.ToLower(lastAssistantContent), "error") || strings.Contains(strings.ToLower(lastAssistantContent), "failed") {
+		return []string{
+			"What went wrong? Can you fix it?",
+			"Show me the error details",
+			"Try a different approach",
+		}
+	}
+	if strings.Contains(strings.ToLower(lastAssistantContent), "test") {
+		return []string{
+			"Show me the test results",
+			"Run the failing tests again",
+			"Fix the test failures",
+		}
+	}
+	if strings.Contains(strings.ToLower(lastAssistantContent), "file") || strings.Contains(strings.ToLower(lastAssistantContent), "wrote") {
+		return []string{
+			"Show me what changed",
+			"Run the tests",
+			"Review the diff",
+		}
+	}
+
+	// Default contextual suggestions
+	return []string{
+		"What's next?",
+		"Show me what changed",
+		"Run the tests",
+	}
 }

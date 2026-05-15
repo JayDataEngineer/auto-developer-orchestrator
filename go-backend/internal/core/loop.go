@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -546,6 +547,16 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				},
 			})
 
+			// Emit source events for URLs found in tool results
+			if resultErr == nil {
+				for _, src := range extractSources(resultStr) {
+					SendEvent(subscriber, AgentEvent{
+						Type: EventTypeSource,
+						Data: src,
+					})
+				}
+			}
+
 			// Notify hooks after each tool call
 			for _, h := range l.config.Hooks {
 				h.OnAfterToolCall(ctx, state, tc.Name, tc.Args, resultStr, resultErr)
@@ -701,39 +712,158 @@ func deduplicateToolCalls(calls []ToolCallResponse) []ToolCallResponse {
 }
 
 // extractArtifact extracts structured artifact data from tool results.
-// Returns nil if the result doesn't contain a structured artifact.
+// Returns structured data suitable for rich rendering (diffs, file listings, command output).
 func extractArtifact(toolName string, result any) any {
 	if result == nil {
 		return nil
 	}
-	// Check if the result is a map with an "artifact" key
-	if m, ok := result.(map[string]any); ok {
-		if artifact, exists := m["artifact"]; exists {
+	m, ok := result.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	// Explicit artifact key takes precedence
+	if artifact, exists := m["artifact"]; exists {
+		return artifact
+	}
+
+	switch toolName {
+	case "delegate_to", "delegate_async", "delegate_continue":
+		// Delegate artifacts: diff + file changes
+		artifact := map[string]any{}
+		if diff, exists := m["diff"]; exists && diff != "" {
+			artifact["type"] = "diff"
+			artifact["content"] = diff
+		}
+		if changes, exists := m["changes"]; exists {
+			artifact["changes"] = changes
+		}
+		if len(artifact) > 0 {
 			return artifact
 		}
-		// Delegate tools: the diff is an artifact
-		if diff, exists := m["diff"]; exists && diff != "" {
-			return map[string]any{"type": "diff", "content": diff}
+
+	case "file_read", "read_file":
+		// File read artifact: file path + snippet
+		if path, exists := m["path"]; exists {
+			content, _ := m["content"].(string)
+			if content == "" {
+				content, _ = m["result"].(string)
+			}
+			snippet := content
+			if len(snippet) > 500 {
+				snippet = snippet[:500] + "..."
+			}
+			return map[string]any{
+				"type": "file_content",
+				"path": path,
+				"snippet": snippet,
+				"size": len(content),
+			}
 		}
-		// Changes summary is an artifact
-		if changes, exists := m["changes"]; exists {
-			return changes
+
+	case "file_write", "write_file", "file_edit":
+		// File write artifact: path + line count
+		if path, exists := m["path"]; exists {
+			return map[string]any{
+				"type": "file_write",
+				"path": path,
+			}
+		}
+
+	case "bash":
+		// Bash artifact: command + structured output
+		if cmd, exists := m["command"]; exists {
+			output, _ := m["output"].(string)
+			if output == "" {
+				output, _ = m["result"].(string)
+			}
+			lines := strings.Count(output, "\n") + 1
+			return map[string]any{
+				"type": "command_output",
+				"command": cmd,
+				"lines": lines,
+			}
 		}
 	}
+
+	// Fallback: check for diff/changes in any result
+	if diff, exists := m["diff"]; exists && diff != "" {
+		return map[string]any{"type": "diff", "content": diff}
+	}
+	if changes, exists := m["changes"]; exists {
+		return changes
+	}
+
 	return nil
 }
 
 // extractModelContent produces a model-visible content string from a tool result.
-// For display-heavy results (like file contents), returns a shortened version
-// that the model sees in the next turn, while the full result goes to the display.
+// This is what gets fed back to the LLM in subsequent turns — a condensed version
+// of the display result. The display shows the full result; the model gets a summary.
 func extractModelContent(resultStr, toolName string) string {
-	// File tools: the full content is already truncated by ToolResultProcessor.
-	// The model sees the same content as the display — no separation needed.
-	// Delegate tools: model sees the summary, display gets full text.
-	if toolName == "delegate_to" || toolName == "delegate_async" || toolName == "delegate_continue" {
+	switch toolName {
+	case "delegate_to", "delegate_async", "delegate_continue":
+		// Delegates: model gets a summary, not the full sub-agent text
+		if len(resultStr) > 1500 {
+			// Find the last meaningful paragraph
+			idx := strings.LastIndex(resultStr[:1500], "\n\n")
+			if idx > 500 {
+				return resultStr[:idx] + "\n\n...[condensed for model context]"
+			}
+			return resultStr[:1500] + "\n...[condensed for model context]"
+		}
+
+	case "file_read", "read_file":
+		// File reads: model gets path + size hint, not full content
+		// (the full content is already in the session context via tool result)
+		if len(resultStr) > 3000 {
+			return resultStr[:3000] + "\n...[file content continues]"
+		}
+
+	case "bash":
+		// Bash: model gets output up to 2000 chars
 		if len(resultStr) > 2000 {
-			return resultStr[:2000] + "\n...[summary for model]"
+			return resultStr[:2000] + "\n...[output truncated for model]"
+		}
+
+	case "web_search", "web_fetch", "research":
+		// Research: model gets the first 2000 chars (most relevant findings)
+		if len(resultStr) > 2000 {
+			return resultStr[:2000] + "\n...[research results condensed]"
 		}
 	}
+
+	// For small results, model sees the same as display — no separation needed
 	return ""
+}
+
+// urlRegex matches http/https URLs in text.
+var urlRegex = regexp.MustCompile(`https?://[^\s)<>"']+`)
+
+// extractSources finds URLs in tool results and returns source events.
+// Limits to 5 sources per tool result to avoid flooding.
+func extractSources(resultStr string) []AgentEventData {
+	urls := urlRegex.FindAllString(resultStr, 10)
+	if len(urls) == 0 {
+		return nil
+	}
+
+	// Deduplicate
+	seen := make(map[string]bool)
+	var sources []AgentEventData
+	for _, u := range urls {
+		if seen[u] {
+			continue
+		}
+		seen[u] = true
+		if len(sources) >= 5 {
+			break
+		}
+		sources = append(sources, AgentEventData{
+			SourceType: "url",
+			SourceURL:  u,
+			SourceID:   fmt.Sprintf("src_%d", len(sources)+1),
+		})
+	}
+	return sources
 }
