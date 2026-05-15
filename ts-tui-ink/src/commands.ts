@@ -94,8 +94,10 @@ const commands: Command[] = [
 			if (!args.trim()) {
 				return { type: "handled", message: `Current model: ${ctx.model}` };
 			}
-			ctx.setModel(args.trim());
-			return { type: "handled", message: `Model set to: ${args.trim()}` };
+			const newModel = args.trim();
+			ctx.setModel(newModel);
+			usePuxStore.getState().setModel(newModel);
+			return { type: "handled", message: `Model set to: ${newModel}` };
 		},
 	},
 	{

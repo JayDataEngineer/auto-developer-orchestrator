@@ -1,21 +1,20 @@
 /**
  * ReasoningAccordion — collapsible thinking block.
  *
- * Shows reasoning/thinking content from assistant messages.
- * When collapsed, shows a single "Thinking..." line.
- * When expanded, shows the full reasoning text with blockquote bar.
+ * Collapsed: single dim line "▎ Thinking..."
+ * Expanded: full reasoning with blockquote bars.
+ * Always collapsed when message is complete.
  */
 
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect } from "react";
+import { Box, Text } from "ink";
 import { useAuiState } from "@assistant-ui/react-ink";
-import { colors, BLOCKQUOTE_BAR } from "../theme.js";
+import { BLOCKQUOTE_BAR } from "../theme.js";
 
 export function ReasoningAccordion() {
 	const parts = useAuiState((s) => s.message.parts);
-	const [expanded, setExpanded] = useState(false);
+	const isRunning = useAuiState((s) => s.message.status?.type === "running");
 
-	// Find reasoning parts
 	const reasoningParts = (parts || []).filter(
 		(p: any) => p.type === "reasoning",
 	);
@@ -26,36 +25,44 @@ export function ReasoningAccordion() {
 		.join("\n");
 	if (!fullText.trim()) return null;
 
-	const lineCount = fullText.split("\n").length;
+	const lines = fullText.split("\n").filter((l: string) => l.trim());
 
-	useInput((_input: string, key: any) => {
-		if (key.return && _input === "") {
-			// Only toggle when a special key combo is used, not regular input
-		}
-	});
+	// Auto-collapse when message completes
+	const [expanded, setExpanded] = useState(false);
+	useEffect(() => {
+		if (!isRunning) setExpanded(false);
+	}, [isRunning]);
+
+	// Collapsed: show a short preview of the first line
+	if (!expanded) {
+		const preview = lines[0]?.slice(0, 80) || "";
+		return (
+			<Box marginBottom={1}>
+				<Text color="gray">{BLOCKQUOTE_BAR} </Text>
+				{isRunning ? (
+					<Text dimColor italic>Thinking... {preview}</Text>
+				) : (
+					<Text dimColor italic>Thought ({lines.length} lines)</Text>
+				)}
+			</Box>
+		);
+	}
+
+	// Expanded: show all lines with blockquote bars
+	const maxLines = 8;
+	const truncated = lines.length > maxLines;
+	const displayLines = truncated ? lines.slice(0, maxLines) : lines;
 
 	return (
 		<Box flexDirection="column" marginBottom={1}>
-			<Box>
-				<Text color="gray">{BLOCKQUOTE_BAR} </Text>
-				<Text dimColor italic>
-					{expanded
-						? `Thinking (${lineCount} lines)`
-						: `Thinking... (${lineCount} lines)`}
-				</Text>
-			</Box>
-
-			{expanded && (
-				<Box flexDirection="column" paddingLeft={2}>
-					{fullText.split("\n").map((line: string, i: number) => (
-						<Box key={i}>
-							<Text color="gray">{BLOCKQUOTE_BAR} </Text>
-							<Text dimColor italic>
-								{line || " "}
-							</Text>
-						</Box>
-					))}
+			{displayLines.map((line: string, i: number) => (
+				<Box key={i}>
+					<Text color="gray">{BLOCKQUOTE_BAR} </Text>
+					<Text dimColor italic>{line}</Text>
 				</Box>
+			))}
+			{truncated && (
+				<Text dimColor color="gray">  ... +{lines.length - maxLines} more</Text>
 			)}
 		</Box>
 	);

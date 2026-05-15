@@ -254,6 +254,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 				message: userText,
 				project,
 				agentId: store.activeAgentId || undefined,
+				model: store.activeModel || undefined,
 			}),
 			signal: abortSignal,
 		});

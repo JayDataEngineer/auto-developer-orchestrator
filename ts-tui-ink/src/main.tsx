@@ -169,11 +169,12 @@ if (opts.org && typeof opts.org === "string" && backendOnline) {
 	} catch {}
 }
 
-// Set active project in store
+// Set active project and model in store
 const projectName = opts.project as string;
 const modelName = opts.model as string;
 const cwdName = opts.cwd as string;
 
+usePuxStore.getState().setModel(modelName);
 usePuxStore.getState().setProject(projectName);
 await usePuxStore.getState().loadProjects();
 await usePuxStore.getState().loadConversations();

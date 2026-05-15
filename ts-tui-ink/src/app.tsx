@@ -24,7 +24,6 @@ import { QuestionDialog } from "./components/question-dialog.js";
 import { ApprovalDialog } from "./components/approval-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
 import { executeCommand, type CommandContext } from "./commands.js";
-import { symbols, BLACK_CIRCLE } from "./theme.js";
 
 // ── Runtime Provider ──
 
@@ -103,7 +102,21 @@ function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<stri
 	const pendingQuestion = usePuxStore((s) => s.pendingQuestion);
 	const pendingApproval = usePuxStore((s) => s.pendingApproval);
 
-	if (pendingApproval) return <ApprovalDialog />;
-	if (pendingQuestion) return <QuestionDialog />;
-	return <Thread onCommand={onCommand} />;
+	return (
+		<Box flexDirection="column" flexGrow={1}>
+			{!(pendingApproval || pendingQuestion) && (
+				<Thread onCommand={onCommand} />
+			)}
+			{(pendingApproval || pendingQuestion) && (
+				<Box
+					flexDirection="column"
+					justifyContent="flex-end"
+					paddingX={1}
+					flexGrow={1}
+				>
+					{pendingApproval ? <ApprovalDialog /> : <QuestionDialog />}
+				</Box>
+			)}
+		</Box>
+	);
 }

@@ -1,14 +1,12 @@
 /**
  * UserMessage — renders user messages.
  *
- * Style: bold green "You:" label on first line, then the text body.
- * Matches the two-line pattern common in chat CLIs.
+ * Style: grey "> text" inline, matching Claude Code CLI.
  */
 
 import React from "react";
 import { Box, Text } from "ink";
 import { useAuiState } from "@assistant-ui/react-ink";
-import { colors, BLACK_CIRCLE } from "../theme.js";
 
 export function UserMessage() {
 	const text = useAuiState((s) => {
@@ -19,12 +17,19 @@ export function UserMessage() {
 
 	if (!text) return null;
 
+	// Show first line inline, subsequent lines below
+	const lines = text.split("\n");
+	const firstLine = lines[0];
+
 	return (
 		<Box flexDirection="column" marginTop={1} paddingX={1}>
-			<Text color={colors.user} bold>You</Text>
-			<Box>
-				<Text>{text}</Text>
-			</Box>
+			<Text>
+				<Text color="gray">{">"} </Text>
+				<Text color="gray">{firstLine}</Text>
+			</Text>
+			{lines.slice(1).map((line: string, i: number) => (
+				<Text key={i} color="gray">  {line}</Text>
+			))}
 		</Box>
 	);
 }

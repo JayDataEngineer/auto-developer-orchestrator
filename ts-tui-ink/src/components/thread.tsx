@@ -1,12 +1,12 @@
 /**
  * Thread component — message list + composer with slash command support.
  *
- * Uses assistant-ui primitives: ThreadPrimitive, ComposerPrimitive,
- * MessagePrimitive, ToolCallPrimitive, BranchPickerPrimitive,
- * ActionBarPrimitive, DiffPrimitive.
+ * Scrolling: Manual offset with overflow="hidden" and marginTop.
+ * Old messages go to Ink Static (terminal scrollback).
+ * Auto-scrolls to bottom during streaming.
  */
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import {
 	ThreadPrimitive,
@@ -16,10 +16,8 @@ import {
 } from "@assistant-ui/react-ink";
 import { AssistantMessage } from "./assistant-message.js";
 import { UserMessage } from "./user-message.js";
-import { ActionBar } from "./action-bar.js";
-import { BranchPicker } from "./branch-picker.js";
 import { getCommands } from "../commands.js";
-import { colors, BLACK_CIRCLE, BLOCKQUOTE_BAR, symbols } from "../theme.js";
+import { colors, symbols } from "../theme.js";
 
 // ── Thread ──
 
@@ -30,8 +28,13 @@ interface ThreadProps {
 export function Thread({ onCommand }: ThreadProps) {
 	const [commandOutput, setCommandOutput] = useState<string | null>(null);
 	const [selectedIdx, setSelectedIdx] = useState(0);
+	const [scrollOffset, setScrollOffset] = useState(0);
 	const { stdout } = useStdout();
 	const cols = stdout?.columns ?? 80;
+	const rows = stdout?.rows ?? 24;
+
+	// Fixed rows: status bar(1) + separators(2) + prompt(1) = 4
+	const viewportRows = rows - 4;
 
 	// Auto-dismiss command output after 5s
 	useEffect(() => {
@@ -39,6 +42,44 @@ export function Thread({ onCommand }: ThreadProps) {
 		const timer = setTimeout(() => setCommandOutput(null), 5000);
 		return () => clearTimeout(timer);
 	}, [commandOutput]);
+
+	// Scroll keyboard controls
+	useInput(useCallback((_input: string, key: any) => {
+		if (key.pageDown) {
+			setScrollOffset((prev) => Math.max(0, prev - Math.floor(viewportRows / 2)));
+			return;
+		}
+		if (key.pageUp) {
+			setScrollOffset((prev) => prev + Math.floor(viewportRows / 2));
+			return;
+		}
+		if (key.upArrow && key.shift) {
+			setScrollOffset((prev) => prev + 1);
+			return;
+		}
+		if (key.downArrow && key.shift) {
+			setScrollOffset((prev) => Math.max(0, prev - 1));
+			return;
+		}
+		if (key.escape) {
+			setScrollOffset(0);
+			return;
+		}
+	}, [viewportRows]));
+
+	// Auto-scroll to bottom when streaming
+	const lastMsgRunning = useAuiState((s) => {
+		const msgs = s.thread.messages;
+		const last = msgs[msgs.length - 1];
+		return last?.role === "assistant" && last.status?.type === "running";
+	});
+	const msgCount = useAuiState((s) => s.thread.messages.length);
+
+	useEffect(() => {
+		setScrollOffset(0); // Reset scroll when new messages arrive
+	}, [msgCount, lastMsgRunning]);
+
+	const isScrolledUp = scrollOffset > 0;
 
 	return (
 		<Box flexDirection="column" flexGrow={1}>
@@ -53,15 +94,22 @@ export function Thread({ onCommand }: ThreadProps) {
 				</Box>
 			)}
 
-			{/* Messages */}
-			<Box flexDirection="column" flexGrow={1}>
-				<ThreadPrimitive.Empty>
-					<Welcome />
-				</ThreadPrimitive.Empty>
-				<ThreadPrimitive.Messages>
-					{() => <MessageWrapper />}
-				</ThreadPrimitive.Messages>
+			{/* Messages — overflow hidden, manual scroll offset */}
+			<Box flexDirection="column" height={viewportRows} overflow="hidden">
+				<Box flexDirection="column" marginTop={-scrollOffset}>
+					<ThreadPrimitive.Empty>
+						<Welcome />
+					</ThreadPrimitive.Empty>
+					<ThreadPrimitive.Messages windowSize={100} windowOverscan={10}>
+						{() => <MessageWrapper />}
+					</ThreadPrimitive.Messages>
+				</Box>
 			</Box>
+
+			{/* Scroll indicator */}
+			{isScrolledUp && (
+				<Text dimColor color="gray"> PgUp/PgDn scroll · Shift+Up/Down line · Esc bottom ({scrollOffset} lines up)</Text>
+			)}
 
 			{/* Slash command autocomplete */}
 			<CommandPalette selectedIdx={selectedIdx} onSelectIdx={setSelectedIdx} />
@@ -83,7 +131,7 @@ export function Thread({ onCommand }: ThreadProps) {
 	);
 }
 
-// ── Command palette — filtered autocomplete overlay ──
+// ── Command palette ──
 
 function CommandPalette({
 	selectedIdx,
@@ -116,19 +164,18 @@ function CommandPalette({
 					<Text color="gray"> {symbols.dot} {c.desc}</Text>
 				</Text>
 			))}
-			<Text dimColor color="gray"> ↑↓ Navigate   Tab to autocomplete</Text>
+			<Text dimColor color="gray"> Up/Down navigate · Tab autocomplete</Text>
 		</Box>
 	);
 }
 
-// ── Message wrapper with branching and action bar ──
+// ── Message wrapper ──
 
 function MessageWrapper() {
 	const role = useAuiState((s) => s.message.role);
 	return (
 		<Box flexDirection="column">
 			{role === "user" ? <UserMessage /> : <AssistantMessage />}
-			<ActionBar />
 		</Box>
 	);
 }
@@ -138,20 +185,20 @@ function MessageWrapper() {
 function Welcome() {
 	return (
 		<Box flexDirection="column" paddingY={1} paddingX={2}>
-			<Text bold color={colors.brand}>{BLACK_CIRCLE} Pux {BLOCKQUOTE_BAR} Agent Orchestrator</Text>
+			<Text bold color={colors.brand}>Pux {symbols.dot} Agent Orchestrator</Text>
 			<Box marginTop={1}>
 				<Text dimColor>Type a message or /help for commands.</Text>
 			</Box>
 			<Box marginTop={1} flexDirection="column">
 				<Text dimColor>
-					<Text bold>Enter</Text> Send   <Text bold>Shift+Enter</Text> Newline   <Text bold>Ctrl+C x2</Text> Quit
+					<Text bold>Enter</Text> Send  <Text bold>PgUp/PgDn</Text> Scroll  <Text bold>Ctrl+C x2</Text> Quit
 				</Text>
 			</Box>
 		</Box>
 	);
 }
 
-// ── Command-aware composer with Tab/Arrow autocomplete ──
+// ── Command-aware composer ──
 
 function CommandComposer({
 	onCommand,
@@ -167,7 +214,6 @@ function CommandComposer({
 	const aui = useAui();
 	const text = useAuiState((s) => s.composer.text);
 
-	// Slash command matches for autocomplete
 	const matches = useMemo(() => {
 		if (!text || !text.startsWith("/")) return [];
 		const query = text.slice(1).toLowerCase();
@@ -177,29 +223,23 @@ function CommandComposer({
 			.map((c) => c.name);
 	}, [text]);
 
-	// Clamp selection when matches change
 	useEffect(() => {
 		if (matches.length === 0) { onSelectIdx(0); return; }
 		if (selectedIdx >= matches.length) onSelectIdx(0);
 	}, [matches.length, selectedIdx, onSelectIdx]);
 
-	// Up/Down/Tab → navigate or autocomplete slash commands
 	useInput(useCallback((_input: string, key: any) => {
 		if (matches.length === 0) return;
-
 		if (key.upArrow) {
-			const next = selectedIdx <= 0 ? matches.length - 1 : selectedIdx - 1;
-			onSelectIdx(next);
+			onSelectIdx(selectedIdx <= 0 ? matches.length - 1 : selectedIdx - 1);
 			return;
 		}
 		if (key.downArrow) {
-			const next = (selectedIdx + 1) % matches.length;
-			onSelectIdx(next);
+			onSelectIdx((selectedIdx + 1) % matches.length);
 			return;
 		}
 		if (key.tab) {
-			const chosen = matches[selectedIdx];
-			aui.composer().setText("/" + chosen + " ");
+			aui.composer().setText("/" + matches[selectedIdx] + " ");
 			return;
 		}
 	}, [matches, aui, selectedIdx, onSelectIdx]));
@@ -214,7 +254,7 @@ function CommandComposer({
 					onCommand(trimmed).then((output) => {
 						if (output) onOutput(output);
 					});
-					aui.composer().setText("");
+					setTimeout(() => aui.composer().setText(""), 0);
 				} else if (trimmed.length > 0) {
 					aui.composer().send();
 				}

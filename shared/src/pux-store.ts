@@ -43,6 +43,7 @@ interface PuxState {
 	conversationKey: string;
 
 	// Model
+	activeModel: string;
 	modelList: Array<{ id: string; name: string; provider: string }>;
 
 	// Conversations
@@ -64,6 +65,7 @@ interface PuxState {
 	loadModels: () => Promise<void>;
 	loadConversations: () => Promise<void>;
 	loadProjects: () => Promise<void>;
+	setModel: (model: string) => void;
 	setProject: (project: string) => void;
 	setConversation: (project: string, agentId: string) => void;
 	deleteConversation: (project: string, agentId: string) => Promise<void>;
@@ -84,6 +86,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	activeProject: "",
 	activeProjectPath: "",
 	activeAgentId: "",
+	activeModel: "",
 	activeConversationId: "",
 	conversationKey: "",
 	modelList: [],
@@ -153,6 +156,8 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			// ignore
 		}
 	},
+
+	setModel: (model) => set({ activeModel: model }),
 
 	setProject: (project) => {
 		const projects = get().projects as Array<{ name: string; path?: string }>;
