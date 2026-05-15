@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"sync"
 
@@ -77,13 +76,10 @@ func (h *ConfigHandler) SetAI(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	var newConfig Config
-	if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	newConfig, ok := decodeReq[Config](w, r)
+	if !ok { return }
 
-	h.config = &newConfig
+	h.config = newConfig
 
 	h.logger.Info("AI Config updated", zap.Any("config", h.config))
 
@@ -103,13 +99,10 @@ func (h *ConfigHandler) GetSystem(w http.ResponseWriter, r *http.Request) {
 
 // SetSystem updates the system configuration
 func (h *ConfigHandler) SetSystem(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		ProjectsDir string `json:"projectsDir"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	h.logger.Info("System config updated", zap.String("projectsDir", req.ProjectsDir))
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":      true,

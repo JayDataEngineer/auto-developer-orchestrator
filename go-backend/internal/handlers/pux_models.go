@@ -65,16 +65,13 @@ func (h *PuxHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 // SetModel switches the active engine for a specific agent.
 // PUT /api/pux/model
 func (h *PuxHandler) SetModel(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Project  string `json:"project"`
 		Provider string `json:"provider"`
 		ModelID  string `json:"modelId"`
 		AgentID  string `json:"agentId"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 
 	var engine *llamaeng.LLMClient
 	switch {

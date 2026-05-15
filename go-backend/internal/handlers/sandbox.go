@@ -44,11 +44,8 @@ type CreateSandboxRequest struct {
 // CreateSandbox creates a new sandbox
 // POST /api/sandbox
 func (h *SandboxHandler) CreateSandbox(w http.ResponseWriter, r *http.Request) {
-	var req CreateSandboxRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[CreateSandboxRequest](w, r)
+	if !ok { return }
 
 	// Resolve bare project names to full paths.
 	// If project_path is already an absolute path, use it as-is.
@@ -121,13 +118,10 @@ func (h *SandboxHandler) DestroySandbox(w http.ResponseWriter, r *http.Request) 
 func (h *SandboxHandler) ExecCommand(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	var req struct {
+	req, ok := decodeReq[struct {
 		Cmd []string `json:"cmd"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 
 	output, err := h.manager.ExecInSandbox(r.Context(), id, req.Cmd)
 	if err != nil {

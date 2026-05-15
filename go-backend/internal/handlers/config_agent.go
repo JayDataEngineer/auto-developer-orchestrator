@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/auto-developer-orchestrator/backend/internal/llama"
@@ -37,13 +36,10 @@ func (h *ConfigHandler) SetProjectSettings(w http.ResponseWriter, r *http.Reques
 		JSONError(w, "Project not found", http.StatusNotFound)
 		return
 	}
-	var updates map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	updates, ok := decodeReq[map[string]interface{}](w, r)
+	if !ok { return }
 	ps := models.LoadProjectSettings(projectPath, h.logger)
-	if err := ps.Update(updates); err != nil {
+	if err := ps.Update(*updates); err != nil {
 		h.logger.Error("Failed to save project settings", zap.Error(err))
 		JSONError(w, "Failed to save settings", http.StatusInternalServerError)
 		return
@@ -94,11 +90,8 @@ func (h *ConfigHandler) GetAgent(w http.ResponseWriter, r *http.Request) {
 
 // SetAgent updates the agent tuning configuration.
 func (h *ConfigHandler) SetAgent(w http.ResponseWriter, r *http.Request) {
-	var req AgentConfigDTO
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[AgentConfigDTO](w, r)
+	if !ok { return }
 	cfg := llama.GetModelConfig()
 	if req.DefaultContextSize > 0 {
 		cfg.DefaultContextSize = req.DefaultContextSize

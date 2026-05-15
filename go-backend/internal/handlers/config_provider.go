@@ -75,14 +75,11 @@ func (h *ConfigHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 
 // SetModels updates the main and/or tool model configuration.
 func (h *ConfigHandler) SetModels(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		MainModel *models.ModelEntry `json:"mainModel,omitempty"`
 		ToolModel *models.ModelEntry `json:"toolModel,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if h.modelCfg == nil {
 		JSONError(w, "Model config not available", http.StatusInternalServerError)
 		return
@@ -124,14 +121,11 @@ func (h *ConfigHandler) GetProviders(w http.ResponseWriter, r *http.Request) {
 
 // SetProviderKey saves an API key for a provider and persists to settings.json.
 func (h *ConfigHandler) SetProviderKey(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Provider string `json:"provider"`
 		APIKey   string `json:"apiKey"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	found := false
 	for _, p := range knownProviders {
 		if p.ID == req.Provider {

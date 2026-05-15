@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -52,11 +51,8 @@ type UploadRequest struct {
 func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
 
-	var req UploadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[UploadRequest](w, r)
+	if !ok { return }
 
 	if req.Path == "" {
 		JSONError(w, "path is required", http.StatusBadRequest)

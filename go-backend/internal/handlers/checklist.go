@@ -106,15 +106,11 @@ func (h *ChecklistHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // Update updates the checklist for a project
 func (h *ChecklistHandler) Update(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Tasks   []Task `json:"tasks"`
 		Project string `json:"project"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 
 	if req.Project == "" {
 		JSONError(w, "Project name is required", http.StatusBadRequest)
@@ -158,14 +154,10 @@ func (h *ChecklistHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Merge marks the current task as completed and adds a test task
 func (h *ChecklistHandler) Merge(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Project string `json:"project"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 
 	if req.Project == "" {
 		JSONError(w, "Project name is required", http.StatusBadRequest)
@@ -244,15 +236,11 @@ func (h *ChecklistHandler) Merge(w http.ResponseWriter, r *http.Request) {
 // Scans the project for basic structure and generates a task list.
 // For full LLM-powered analysis, use Pux (/api/pux/prompt).
 func (h *ChecklistHandler) GenerateChecklistStream(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Project string `json:"project"`
 		Prompt  string `json:"prompt"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 
 	if req.Project == "" {
 		JSONError(w, "Project name is required", http.StatusBadRequest)

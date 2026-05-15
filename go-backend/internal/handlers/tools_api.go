@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -45,11 +44,8 @@ type toolsExecRequest struct {
 
 // ExecTool handles POST /api/tools/exec — direct tool execution.
 func (h *ToolsHandler) ExecTool(w http.ResponseWriter, r *http.Request) {
-	var req toolsExecRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[toolsExecRequest](w, r)
+	if !ok { return }
 
 	if req.Tool == "" {
 		JSONError(w, "missing 'tool' field", http.StatusBadRequest)

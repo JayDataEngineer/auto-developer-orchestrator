@@ -110,11 +110,8 @@ type mouseRequest struct {
 // POST /api/sandbox/{id}/x11/mouse
 func (h *X11Handler) Mouse(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
-	var req mouseRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
-		return
-	}
+	req, ok := decodeReq[mouseRequest](w, r)
+	if !ok { return }
 
 	display := h.displayForSandbox(sandboxID)
 
@@ -160,11 +157,8 @@ type keyboardRequest struct {
 // POST /api/sandbox/{id}/x11/keyboard
 func (h *X11Handler) Keyboard(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
-	var req keyboardRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
-		return
-	}
+	req, ok := decodeReq[keyboardRequest](w, r)
+	if !ok { return }
 
 	display := h.displayForSandbox(sandboxID)
 

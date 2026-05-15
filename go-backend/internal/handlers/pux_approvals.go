@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -10,21 +9,14 @@ import (
 // Decision handles all HITL responses.
 // POST /api/pux/decision
 func (h *PuxHandler) Decision(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		DecisionID string `json:"decisionId"`
 		Action     string `json:"action"` // "answer", "approve", "reject", "refine", "cancel"
 		Value      string `json:"value"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "Invalid request body",
-		})
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.DecisionID == "" || req.Action == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "decisionId and action are required",
-		})
+		JSONError(w, "decisionId and action are required", http.StatusBadRequest)
 		return
 	}
 

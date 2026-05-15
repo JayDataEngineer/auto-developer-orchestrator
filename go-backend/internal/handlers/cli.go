@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
@@ -54,11 +53,8 @@ type CLIResponse struct {
 
 // ExecuteCommand executes a safe CLI command
 func (h *CLIHandler) ExecuteCommand(w http.ResponseWriter, r *http.Request) {
-	var req CLIRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[CLIRequest](w, r)
+	if !ok { return }
 
 	// Validate command is allowed
 	if !h.allowedCmds[req.Command] {

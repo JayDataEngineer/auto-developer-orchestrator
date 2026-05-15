@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"sync"
 	"time"
@@ -57,11 +56,8 @@ type CreateOrUpdateArtifactRequest struct {
 // CreateOrUpdate creates or updates an artifact
 // POST /api/pux/artifacts
 func (h *ArtifactHandler) CreateOrUpdate(w http.ResponseWriter, r *http.Request) {
-	var req CreateOrUpdateArtifactRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[CreateOrUpdateArtifactRequest](w, r)
+	if !ok { return }
 
 	if req.AgentID == "" || req.Type == "" {
 		JSONError(w, "agentId and type are required", http.StatusBadRequest)

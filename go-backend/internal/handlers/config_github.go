@@ -72,13 +72,10 @@ func (h *ConfigHandler) GetGitHubUser(w http.ResponseWriter, r *http.Request) {
 
 // ConnectGitHub connects a GitHub account via token
 func (h *ConfigHandler) ConnectGitHub(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Token == "" {
 		JSONError(w, "Token is required", http.StatusBadRequest)
 		return
