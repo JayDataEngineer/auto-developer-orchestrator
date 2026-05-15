@@ -6,8 +6,8 @@
  * ActionBarPrimitive, DiffPrimitive.
  */
 
-import React, { useState, useEffect, useMemo } from "react";
-import { Box, Text } from "ink";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { Box, Text, useInput } from "ink";
 import {
 	ThreadPrimitive,
 	ComposerPrimitive,
@@ -77,10 +77,12 @@ export function Thread({ onCommand }: ThreadProps) {
 
 function CommandPalette() {
 	const text = useAuiState((s) => s.composer.text);
+	const selectedIdx = useAuiState((s) => s.composer.text); // re-render on text change
 
 	const matches = useMemo(() => {
 		if (!text || !text.startsWith("/")) return [];
 		const query = text.slice(1).toLowerCase();
+		if (query.includes(" ")) return [];
 		return getCommands()
 			.filter((c) => c.name.startsWith(query))
 			.map((c) => ({ name: c.name, desc: c.description }));
@@ -90,12 +92,17 @@ function CommandPalette() {
 
 	return (
 		<Box flexDirection="column" paddingX={1}>
-			{matches.map((c) => (
+			{matches.map((c, i) => (
 				<Text key={c.name}>
-					<Text bold color={colors.brand}>/{c.name}</Text>
+					{i === 0 ? (
+						<Text bold color={colors.brand}>/{c.name}</Text>
+					) : (
+						<Text>/{" " + c.name}</Text>
+					)}
 					<Text color="gray"> {symbols.dot} {c.desc}</Text>
 				</Text>
 			))}
+			<Text dimColor color="gray"> Tab to autocomplete</Text>
 		</Box>
 	);
 }
@@ -130,7 +137,7 @@ function Welcome() {
 	);
 }
 
-// ── Command-aware composer ──
+// ── Command-aware composer with Tab autocomplete ──
 
 function CommandComposer({
 	onCommand,
@@ -140,6 +147,33 @@ function CommandComposer({
 	onOutput: (out: string | null) => void;
 }) {
 	const aui = useAui();
+	const text = useAuiState((s) => s.composer.text);
+	const tabIdx = useRef(0);
+
+	// Reset tab index when text changes to something not matching
+	const matches = useMemo(() => {
+		if (!text || !text.startsWith("/")) return [];
+		const query = text.slice(1).toLowerCase();
+		// Only match while still typing the command name (no space yet)
+		if (query.includes(" ")) return [];
+		return getCommands()
+			.filter((c) => c.name.startsWith(query))
+			.map((c) => c.name);
+	}, [text]);
+
+	// Keep tabIdx in range
+	useEffect(() => {
+		if (matches.length === 0) { tabIdx.current = 0; return; }
+		if (tabIdx.current >= matches.length) tabIdx.current = 0;
+	}, [matches.length]);
+
+	useInput(useCallback((_input: string, key: any) => {
+		if (!key.tab) return;
+		if (matches.length === 0) return;
+		const chosen = matches[tabIdx.current];
+		aui.composer().setText("/" + chosen + " ");
+		tabIdx.current = (tabIdx.current + 1) % matches.length;
+	}, [matches, aui]));
 
 	return (
 		<ComposerPrimitive.Input
