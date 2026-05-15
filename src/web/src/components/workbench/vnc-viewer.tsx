@@ -2,28 +2,43 @@ import { useCallback, useEffect, useState } from "react";
 import { Monitor, PowerIcon } from "lucide-react";
 import { usePuxStore } from "@pux/shared";
 
+interface SandboxInfo {
+	id: string;
+	project_path: string;
+	status: string;
+	mode: string;
+}
+
 export function VNCViewer() {
-	const [sandboxId, setSandboxId] = useState<string | null>(null);
+	const [sandbox, setSandbox] = useState<SandboxInfo | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [starting, setStarting] = useState(false);
 	const activeProject = usePuxStore((s) => s.activeProject);
 
 	const detectSandbox = useCallback(() => {
+		if (!activeProject) {
+			setSandbox(null);
+			setLoading(false);
+			return;
+		}
 		setLoading(true);
-		fetch("/api/sandboxes")
+		fetch("/api/sandbox/")
 			.then((r) => r.json())
-			.then((data) => {
-				const sandboxes = Array.isArray(data) ? data : [];
-				if (sandboxes.length > 0) {
-					setSandboxId(sandboxes[0].id || sandboxes[0]);
-				} else {
-					setSandboxId(null);
-				}
+			.then((data: SandboxInfo[]) => {
+				// Find sandbox matching current project by id or project_path basename
+				const match = data.find(
+					(sb) =>
+						sb.id === activeProject ||
+						sb.project_path?.endsWith("/" + activeProject) ||
+						sb.project_path === activeProject,
+				);
+				setSandbox(match || null);
 			})
-			.catch(() => setSandboxId(null))
+			.catch(() => setSandbox(null))
 			.finally(() => setLoading(false));
-	}, []);
+	}, [activeProject]);
 
+	// Re-detect when project changes
 	useEffect(() => {
 		detectSandbox();
 	}, [detectSandbox]);
@@ -32,14 +47,14 @@ export function VNCViewer() {
 		if (!activeProject) return;
 		setStarting(true);
 		try {
-			const resp = await fetch("/api/sandbox", {
+			const resp = await fetch("/api/sandbox/", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ project_path: activeProject }),
 			});
 			if (resp.ok) {
 				const data = await resp.json();
-				setSandboxId(data.id);
+				setSandbox(data);
 			}
 		} catch {
 			// ignore
@@ -56,11 +71,11 @@ export function VNCViewer() {
 		);
 	}
 
-	if (!sandboxId) {
+	if (!sandbox) {
 		return (
 			<div className="flex h-full flex-col items-center justify-center gap-3">
 				<Monitor className="size-8 text-muted-foreground/50" />
-				<span className="text-xs text-muted-foreground">No sandbox running</span>
+				<span className="text-xs text-muted-foreground">No sandbox for this project</span>
 				{activeProject && (
 					<button
 						onClick={startSandbox}
@@ -77,7 +92,7 @@ export function VNCViewer() {
 
 	return (
 		<iframe
-			src={`/api/sandbox/vnc/${sandboxId}/vnc.html?autoconnect=true&resize=scale`}
+			src={`/api/sandbox/vnc/${sandbox.id}/vnc.html?autoconnect=true&resize=scale`}
 			className="h-full w-full border-0"
 			title="Sandbox VNC"
 		/>
