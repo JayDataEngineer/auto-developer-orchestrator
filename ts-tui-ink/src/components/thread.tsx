@@ -172,17 +172,22 @@ function CommandComposer({
 	}, [matches.length]);
 
 	useInput(useCallback((_input: string, key: any) => {
+		// Shift+Enter → insert newline (Kitty protocol reports shift flag)
+		if (key.return && key.shift) {
+			aui.composer().setText(text + "\n");
+			return;
+		}
+		// Tab → autocomplete slash commands
 		if (!key.tab) return;
 		if (matches.length === 0) return;
 		const chosen = matches[tabIdx.current];
 		aui.composer().setText("/" + chosen + " ");
 		tabIdx.current = (tabIdx.current + 1) % matches.length;
-	}, [matches, aui]));
+	}, [matches, aui, text]));
 
 	return (
 		<ComposerPrimitive.Input
 			submitOnEnter
-			multiLine
 			placeholder="Message... (type / for commands)"
 			autoFocus
 			onSubmit={(value) => {
