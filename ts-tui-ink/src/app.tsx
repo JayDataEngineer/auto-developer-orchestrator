@@ -85,7 +85,7 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 	}, [model, project, exit]);
 
 	return (
-		<Box flexDirection="column" height={rows} width={cols} borderStyle="round" borderColor="gray">
+		<Box flexDirection="column" height={rows} width={cols}>
 			{/* Header */}
 			<Box paddingX={1}>
 				<Text inverse bold> {BLACK_CIRCLE} Pux </Text>

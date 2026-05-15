@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import {
 	ThreadPrimitive,
 	ComposerPrimitive,
@@ -29,6 +29,8 @@ interface ThreadProps {
 
 export function Thread({ onCommand }: ThreadProps) {
 	const [commandOutput, setCommandOutput] = useState<string | null>(null);
+	const { stdout } = useStdout();
+	const cols = stdout?.columns ?? 80;
 
 	// Auto-dismiss command output after 5s
 	useEffect(() => {
@@ -64,11 +66,13 @@ export function Thread({ onCommand }: ThreadProps) {
 			<CommandPalette />
 
 			{/* Input area */}
-			<Box borderStyle="round" borderColor="gray" paddingX={1}>
+			<Text color="gray">{"─".repeat(cols)}</Text>
+			<Box paddingX={1}>
 				<Text color={colors.brand} bold>{">"}</Text>
 				<Text> </Text>
 				<CommandComposer onCommand={onCommand} onOutput={setCommandOutput} />
 			</Box>
+			<Text color="gray">{"─".repeat(cols)}</Text>
 		</Box>
 	);
 }
