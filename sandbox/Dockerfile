@@ -118,7 +118,8 @@ ENV BUN_INSTALL="/root/.bun"
 COPY scripts/sb_agent.py /usr/local/bin/sb_agent.py
 COPY scripts/sb_server.py /usr/local/bin/sb_server.py
 COPY scripts/desktop_observe.py /usr/local/bin/desktop_observe.py
-RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py
+COPY scripts/start-kasmvnc.sh /usr/local/bin/start-kasmvnc.sh
+RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py /usr/local/bin/start-kasmvnc.sh
 
 # Supervisor + log dir
 RUN mkdir -p /var/log/supervisor
@@ -154,25 +155,15 @@ CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 # ── Target: kasm (KasmVNC with H.264 encoding) ─────────────────────────────
 FROM base AS kasm
 
-# KasmVNC dependencies
+# KasmVNC dependencies — only packages not already in base
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libx11-6 \
-    libxext6 \
-    libxrandr2 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxshmfence1 \
-    libdrm2 \
-    libgbm1 \
-    libasound2 \
     libpulse0 \
     libopus0 \
-    libvpx6 \
-    libx264-160 \
-    libc6 \
+    libvpx7 \
+    libx264-163 \
     libssl3 \
     locales \
+    xfonts-base \
     && rm -rf /var/lib/apt/lists/*
 
 # Install KasmVNC from official release
@@ -189,11 +180,16 @@ ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
-# KasmVNC config directory
-RUN mkdir -p /root/.vnc /tmp/.vnc
+# KasmVNC config directory + desktop selection marker
+RUN mkdir -p /root/.vnc /tmp/.vnc \
+    && touch /root/.vnc/.de-was-selected
 
 # KasmVNC default config — software H.264 encoding, no GPU required
 COPY kasmvnc.yaml /root/.vnc/kasmvnc.yaml
+
+# Xstartup script — KasmVNC launches fluxbox via this
+COPY scripts/xstartup.sh /root/.vnc/xstartup
+RUN chmod +x /root/.vnc/xstartup
 
 ENV KASMVNC_PORT=8444
 
