@@ -2,7 +2,7 @@
  * Thread component — message list + composer with slash command support.
  *
  * Scrolling: Manual offset with overflow="hidden" and marginTop.
- * Old messages go to Ink Static (terminal scrollback).
+ * Content height is estimated from messages to cap the scroll offset.
  * Auto-scrolls to bottom during streaming.
  */
 
@@ -18,6 +18,58 @@ import { AssistantMessage } from "./assistant-message.js";
 import { UserMessage } from "./user-message.js";
 import { getCommands } from "../commands.js";
 import { colors, symbols } from "../theme.js";
+
+// ── Content height estimation ──
+
+/** Count visual lines for text, accounting for terminal wrapping. */
+function wrappedLineCount(text: string, maxWidth: number): number {
+	if (!text) return 0;
+	let count = 0;
+	for (const line of text.split("\n")) {
+		// Strip ANSI escape sequences for width calculation
+		const clean = line.replace(/\x1b\[[0-9;]*m/g, "");
+		count += Math.max(1, Math.ceil((clean.length + 1) / maxWidth));
+	}
+	return count;
+}
+
+/** Estimate rendered line height of a message (for scroll cap). */
+function estimateMessageHeight(msg: any, cols: number): number {
+	// Effective width for text: cols minus padding (2 chars from paddingLeft)
+	const textWidth = Math.max(20, cols - 2);
+
+	if (msg.role === "user") {
+		const text = typeof msg.content === "string"
+			? msg.content
+			: Array.isArray(msg.content)
+				? msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("")
+				: "";
+		const lines = text ? wrappedLineCount(text, textWidth) : 1;
+		return 2 + lines; // marginTop + padding + text lines
+	}
+
+	// Assistant message
+	const parts = msg.parts || [];
+	let height = 2; // marginTop + message padding
+	for (const part of parts) {
+		switch (part.type) {
+			case "reasoning":
+				height += 3; // collapsed accordion + spacing + blank
+				break;
+			case "tool-call":
+				height += 2; // tool name line + spacing
+				if (part.result !== undefined) height += 4; // result preview + borders
+				if (part.isError) height += 1;
+				break;
+			case "text":
+				if (part.text?.trim()) {
+					height += wrappedLineCount(part.text, textWidth) + 1; // +1 spacing
+				}
+				break;
+		}
+	}
+	return height;
+}
 
 // ── Thread ──
 
@@ -36,6 +88,26 @@ export function Thread({ onCommand }: ThreadProps) {
 	// Fixed rows: status bar(1) + separators(2) + prompt(1) = 4
 	const viewportRows = rows - 4;
 
+	// Estimate total content height from messages (accounts for line wrapping)
+	const contentHeight = useAuiState((s) => {
+		const msgs = s.thread.messages;
+		if (msgs.length === 0) return 0; // welcome screen handled separately
+		let h = 0;
+		for (const msg of msgs) {
+			h += estimateMessageHeight(msg, cols);
+		}
+		// Generous safety margin: Ink adds unpredictable spacing between
+		// components (padding, borders, blank lines between parts, Yoga
+		// layout rounding).  Empirically the estimate is off by 5-10 lines
+		// per message, so we add 8 per message to ensure scrolling works.
+		h += msgs.length * 8;
+		return h;
+	});
+
+	// Max scroll offset — don't scroll past the content
+	const contentOverhang = Math.max(0, contentHeight - viewportRows);
+	const maxScrollOffset = contentOverhang;
+
 	// Auto-dismiss command output after 5s
 	useEffect(() => {
 		if (!commandOutput) return;
@@ -43,18 +115,22 @@ export function Thread({ onCommand }: ThreadProps) {
 		return () => clearTimeout(timer);
 	}, [commandOutput]);
 
-	// Scroll keyboard controls
+	// Scroll keyboard controls — capped to content height
+	// scrollOffset=0 shows bottom (most recent), scrollOffset=max shows top
 	useInput(useCallback((_input: string, key: any) => {
+		const pageStep = Math.floor(viewportRows / 2);
 		if (key.pageDown) {
-			setScrollOffset((prev) => Math.max(0, prev - Math.floor(viewportRows / 2)));
+			// PageDown → toward bottom → decrease offset
+			setScrollOffset((prev) => Math.max(0, prev - pageStep));
 			return;
 		}
 		if (key.pageUp) {
-			setScrollOffset((prev) => prev + Math.floor(viewportRows / 2));
+			// PageUp → toward top → increase offset
+			setScrollOffset((prev) => Math.min(maxScrollOffset, prev + pageStep));
 			return;
 		}
 		if (key.upArrow && key.shift) {
-			setScrollOffset((prev) => prev + 1);
+			setScrollOffset((prev) => Math.min(maxScrollOffset, prev + 1));
 			return;
 		}
 		if (key.downArrow && key.shift) {
@@ -65,7 +141,7 @@ export function Thread({ onCommand }: ThreadProps) {
 			setScrollOffset(0);
 			return;
 		}
-	}, [viewportRows]));
+	}, [viewportRows, maxScrollOffset]));
 
 	// Auto-scroll to bottom when streaming
 	const lastMsgRunning = useAuiState((s) => {
@@ -76,10 +152,18 @@ export function Thread({ onCommand }: ThreadProps) {
 	const msgCount = useAuiState((s) => s.thread.messages.length);
 
 	useEffect(() => {
-		setScrollOffset(0); // Reset scroll when new messages arrive
+		setScrollOffset(0); // Reset to bottom when new messages arrive
 	}, [msgCount, lastMsgRunning]);
 
-	const isScrolledUp = scrollOffset > 0;
+	// Clamp offset if content shrinks
+	const clampedOffset = Math.min(scrollOffset, maxScrollOffset);
+	const isScrolledUp = clampedOffset > 0;
+
+	// marginTop: 0 = content starts at top (shows top).
+	// We want to show the bottom by default.
+	// Base shift = contentOverhang (shifts content up to show bottom).
+	// Scrolling up decreases the shift (reveals older content above).
+	const marginTop = -(contentOverhang - clampedOffset);
 
 	return (
 		<Box flexDirection="column" flexGrow={1}>
@@ -96,7 +180,7 @@ export function Thread({ onCommand }: ThreadProps) {
 
 			{/* Messages — overflow hidden, manual scroll offset */}
 			<Box flexDirection="column" height={viewportRows} overflow="hidden">
-				<Box flexDirection="column" marginTop={-scrollOffset}>
+				<Box flexDirection="column" marginTop={marginTop}>
 					<ThreadPrimitive.Empty>
 						<Welcome />
 					</ThreadPrimitive.Empty>
@@ -108,7 +192,7 @@ export function Thread({ onCommand }: ThreadProps) {
 
 			{/* Scroll indicator */}
 			{isScrolledUp && (
-				<Text dimColor color="gray"> PgUp/PgDn scroll · Shift+Up/Down line · Esc bottom ({scrollOffset} lines up)</Text>
+				<Text dimColor color="gray"> PgUp/PgDn scroll · Shift+Up/Down line · Esc bottom ({clampedOffset} lines up)</Text>
 			)}
 
 			{/* Slash command autocomplete */}
