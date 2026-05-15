@@ -14,6 +14,7 @@ export function VNCViewer() {
 	const [loading, setLoading] = useState(true);
 	const [starting, setStarting] = useState(false);
 	const activeProject = usePuxStore((s) => s.activeProject);
+	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
 
 	const detectSandbox = useCallback(() => {
 		if (!activeProject) {
@@ -25,10 +26,9 @@ export function VNCViewer() {
 		fetch("/api/sandbox/")
 			.then((r) => r.json())
 			.then((data: SandboxInfo[]) => {
-				// Prefer exact id match, then exact project_path match,
-				// then basename match — avoid partial path matches
+				// Prefer exact id match, then exact project_path match
 				const byId = data.find((sb) => sb.id === activeProject);
-				const byPath = data.find((sb) => sb.project_path === activeProject);
+				const byPath = data.find((sb) => sb.project_path === activeProjectPath);
 				const byBasename = data.find(
 					(sb) => sb.project_path && sb.project_path.split("/").pop() === activeProject,
 				);
@@ -50,7 +50,7 @@ export function VNCViewer() {
 			const resp = await fetch("/api/sandbox/", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ project_path: activeProject }),
+				body: JSON.stringify({ project_path: activeProjectPath || activeProject }),
 			});
 			if (resp.ok) {
 				const data = await resp.json();

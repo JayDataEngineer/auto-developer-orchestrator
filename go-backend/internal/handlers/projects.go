@@ -186,6 +186,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Filter to only projects that resolve to an actual directory
 	type projectInfo struct {
 		Name         string `json:"name"`
+		Path         string `json:"path,omitempty"`
 		HasManifest  bool   `json:"has_manifest"`
 		Description  string `json:"description,omitempty"`
 		Version      string `json:"version,omitempty"`
@@ -196,7 +197,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		if dir == "" {
 			continue
 		}
-		info := projectInfo{Name: project}
+		info := projectInfo{Name: project, Path: dir}
 		mf, _ := manifest.LoadManifest(dir)
 		if mf != nil {
 			info.HasManifest = true

@@ -319,6 +319,7 @@ export function App() {
 	const loadProjects = usePuxStore((s) => s.loadProjects);
 	const conversationKey = usePuxStore((s) => s.conversationKey);
 	const activeProject = usePuxStore((s) => s.activeProject);
+	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
 	const [showTerminal, setShowTerminal] = useState(false);
 	const [workbenchWidth, setWorkbenchWidth] = useState(800);
@@ -441,7 +442,7 @@ export function App() {
 						</div>
 						{showTerminal && (
 							<TerminalDrawer
-								cwd={activeProject}
+								cwd={activeProjectPath || activeProject}
 								onClose={() => setShowTerminal(false)}
 							/>
 						)}

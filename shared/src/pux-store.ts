@@ -37,6 +37,7 @@ interface PuxState {
 
 	// Conversation
 	activeProject: string;
+	activeProjectPath: string;
 	activeAgentId: string;
 	activeConversationId: string;
 	conversationKey: string;
@@ -81,6 +82,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	contextMetrics: null,
 	compacting: false,
 	activeProject: "",
+	activeProjectPath: "",
 	activeAgentId: "",
 	activeConversationId: "",
 	conversationKey: "",
@@ -152,14 +154,22 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		}
 	},
 
-	setProject: (project) => set({ activeProject: project }),
+	setProject: (project) => {
+		const projects = get().projects as Array<{ name: string; path?: string }>;
+		const p = projects.find((pr) => pr.name === project);
+		set({ activeProject: project, activeProjectPath: p?.path || "" });
+	},
 
-	setConversation: (project, agentId) =>
+	setConversation: (project, agentId) => {
+		const projects = get().projects as Array<{ name: string; path?: string }>;
+		const p = projects.find((pr) => pr.name === project);
 		set({
 			activeProject: project,
+			activeProjectPath: p?.path || "",
 			activeAgentId: agentId || "",
 			conversationKey: `${project}:${agentId || "default"}`,
-		}),
+		});
+	},
 
 	clearConversation: () =>
 		set({
@@ -220,7 +230,8 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			set({ projects });
 			// Auto-select first project if none active
 			if (!get().activeProject && projects.length > 0) {
-				set({ activeProject: projects[0].name || projects[0].path });
+				const first = projects[0];
+				set({ activeProject: first.name || first.path, activeProjectPath: first.path || "" });
 			}
 		} catch {
 			// ignore
