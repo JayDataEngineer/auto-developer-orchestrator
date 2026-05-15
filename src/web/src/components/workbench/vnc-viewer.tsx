@@ -25,14 +25,14 @@ export function VNCViewer() {
 		fetch("/api/sandbox/")
 			.then((r) => r.json())
 			.then((data: SandboxInfo[]) => {
-				// Find sandbox matching current project by id or project_path basename
-				const match = data.find(
-					(sb) =>
-						sb.id === activeProject ||
-						sb.project_path?.endsWith("/" + activeProject) ||
-						sb.project_path === activeProject,
+				// Prefer exact id match, then exact project_path match,
+				// then basename match — avoid partial path matches
+				const byId = data.find((sb) => sb.id === activeProject);
+				const byPath = data.find((sb) => sb.project_path === activeProject);
+				const byBasename = data.find(
+					(sb) => sb.project_path && sb.project_path.split("/").pop() === activeProject,
 				);
-				setSandbox(match || null);
+				setSandbox(byId || byPath || byBasename || null);
 			})
 			.catch(() => setSandbox(null))
 			.finally(() => setLoading(false));
