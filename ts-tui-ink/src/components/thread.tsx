@@ -134,7 +134,7 @@ function Welcome() {
 			</Box>
 			<Box marginTop={1} flexDirection="column">
 				<Text dimColor>
-					<Text bold>Ctrl+C x2</Text> Quit   <Text bold>Ctrl+P</Text> Model   <Text bold>Enter</Text> Send
+					<Text bold>Enter</Text> Send   <Text bold>Alt+Enter</Text> Newline   <Text bold>Ctrl+C x2</Text> Quit
 				</Text>
 			</Box>
 		</Box>
@@ -142,6 +142,12 @@ function Welcome() {
 }
 
 // ── Command-aware composer with Tab autocomplete ──
+//
+// We handle Enter ourselves (submitOnEnter=false) so we can distinguish:
+//   Enter       → submit message (or execute slash command)
+//   Alt+Enter   → insert newline (works on all terminals)
+//   Shift+Enter → insert newline (Kitty protocol only)
+//   Tab         → autocomplete slash commands
 
 function CommandComposer({
 	onCommand,
@@ -154,27 +160,38 @@ function CommandComposer({
 	const text = useAuiState((s) => s.composer.text);
 	const tabIdx = useRef(0);
 
-	// Reset tab index when text changes to something not matching
+	// Slash command matches for autocomplete
 	const matches = useMemo(() => {
 		if (!text || !text.startsWith("/")) return [];
 		const query = text.slice(1).toLowerCase();
-		// Only match while still typing the command name (no space yet)
 		if (query.includes(" ")) return [];
 		return getCommands()
 			.filter((c) => c.name.startsWith(query))
 			.map((c) => c.name);
 	}, [text]);
 
-	// Keep tabIdx in range
 	useEffect(() => {
 		if (matches.length === 0) { tabIdx.current = 0; return; }
 		if (tabIdx.current >= matches.length) tabIdx.current = 0;
 	}, [matches.length]);
 
 	useInput(useCallback((_input: string, key: any) => {
-		// Shift+Enter → insert newline (Kitty protocol reports shift flag)
-		if (key.return && key.shift) {
-			aui.composer().setText(text + "\n");
+		if (key.return) {
+			// Alt+Enter or Shift+Enter (Kitty) → insert newline
+			if (key.meta || key.shift) {
+				aui.composer().setText(text + "\n");
+				return;
+			}
+			// Plain Enter → submit or slash command
+			const trimmed = text.trim();
+			if (trimmed.startsWith("/")) {
+				onCommand(trimmed).then((output) => {
+					if (output) onOutput(output);
+				});
+				aui.composer().setText("");
+			} else if (trimmed.length > 0) {
+				aui.composer().send();
+			}
 			return;
 		}
 		// Tab → autocomplete slash commands
@@ -183,24 +200,13 @@ function CommandComposer({
 		const chosen = matches[tabIdx.current];
 		aui.composer().setText("/" + chosen + " ");
 		tabIdx.current = (tabIdx.current + 1) % matches.length;
-	}, [matches, aui, text]));
+	}, [matches, aui, text, onCommand, onOutput]));
 
 	return (
 		<ComposerPrimitive.Input
-			submitOnEnter
-			placeholder="Message... (type / for commands)"
+			submitOnEnter={false}
+			placeholder="Message... (Alt+Enter for newline)"
 			autoFocus
-			onSubmit={(value) => {
-				const trimmed = value?.trim() ?? "";
-				if (trimmed.startsWith("/")) {
-					onCommand(trimmed).then((output) => {
-						if (output) onOutput(output);
-					});
-					return false;
-				}
-				aui.composer().send();
-				return true;
-			}}
 		/>
 	);
 }
