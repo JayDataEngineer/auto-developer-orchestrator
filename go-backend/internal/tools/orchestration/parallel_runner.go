@@ -229,6 +229,19 @@ func (r *ParallelRunner) SetSubscriber(ch chan<- core.AgentEvent) {
 	r.subscriber = ch
 }
 
+// Close cleans up all live agents and pending async tasks.
+func (r *ParallelRunner) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for ref, la := range r.liveAgents {
+		if closer, ok := la.Provider.(io.Closer); ok {
+			closer.Close()
+		}
+		delete(r.liveAgents, ref)
+	}
+}
+
 // RunDelegate runs a synchronous sub-agent.
 func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error) {
 	agentName := extractAgentName(instructions)
@@ -523,30 +536,148 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 	}
 
-	// Run the delegate normally
-	result, err := r.RunDelegate(ctx, task, instructions, toolNames, maxRounds, temperature, modelID, sandboxTier)
-	if err != nil {
-		return result, err
-	}
-
-	agentRef := ""
-	var changes *ChangeSet
-
-	// Auto-accept: generate an agent_ref for tracking, but don't keep the
-	// sub-agent alive. The provider is NOT created here since the delegate
-	// already ran inside RunDelegate. We only need the ref + snapshot for
-	// potential revert.
 	agentName := extractAgentName(instructions)
-	agentRef = fmt.Sprintf("%s-%d", agentName, time.Now().UnixMilli())
 
-	// Store snapshot for potential revert (delegate_revert uses this)
-	if snapshotID != "" {
-		r.mu.Lock()
-		r.completedSnapshots[agentRef] = snapshotID
-		r.mu.Unlock()
+	// Emit subagent_start to parent subscriber
+	core.SendEvent(r.subscriber, core.AgentEvent{
+		Type: core.EventTypeSubAgentStart,
+		Data: core.AgentEventData{
+			AgentName: agentName,
+			Task:      truncateTask(task, 120),
+			ToolName:  "delegate_to",
+		},
+	})
+
+	// Filter tools to only those requested
+	var selectedTools []core.OpenAITool
+	toolSet := make(map[string]bool)
+	for _, name := range toolNames {
+		toolSet[name] = true
 	}
+	for _, t := range r.toolSpecs {
+		if toolSet[t.Function.Name] {
+			selectedTools = append(selectedTools, t)
+		}
+	}
+	if len(selectedTools) == 0 {
+		core.SendEvent(r.subscriber, core.AgentEvent{
+			Type: core.EventTypeSubAgentEnd,
+			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames)},
+		})
+		return nil, core.NewToolError("delegate_to", fmt.Sprintf("none of the requested tools were found: %v", toolNames))
+	}
+
+	// Create isolated provider — kept alive for delegate_continue
+	provider := r.providerFactory()
+	if modelID != "" && r.modelResolver != nil {
+		if resolved := r.modelResolver(modelID); resolved != nil {
+			if closer, ok := provider.(io.Closer); ok {
+				closer.Close()
+			}
+			provider = resolved
+			r.logger("MODEL_OVERRIDE: using %s for sub-agent", modelID)
+		}
+	}
+
+	// Enrich task with parent context
+	enrichedTask := r.enrichTask(ctx, task)
+
+	// Auto-director: raise Chrome for VNC visibility when browser tools are detected.
+	if r.raiseBrowserFunc != nil && hasBrowserTools(toolNames) {
+		r.raiseBrowserFunc(ctx)
+	}
+
+	// Build sub-agent config
+	cfg := core.AgentLoopConfig{
+		SystemPrompt:   instructions,
+		MaxToolRounds:  maxRounds,
+		MaxTokens:      8192,
+		ContextSize:    r.ctxSize,
+		Tools:          selectedTools,
+		ToolResultProcessor: subAgentResultProcessor(),
+		Opts: core.GenerateOptions{
+			MaxTokens:   8192,
+			Temperature: temperature,
+			TopP:        0.95,
+			TopK:        20,
+		},
+	}
+
+	sess := &subSession{parent: r.baseSession, msgCount: 0}
+	executor := r.executor
+	if r.executorFactory != nil && sandboxTier != "" {
+		executor = r.executorFactory(sandboxTier)
+	}
+	// Wrap sub-agent executor with vision caching when visual context is available
+	if r.visualContext != nil && r.visionChain != nil {
+		vExec := vision.NewVisionAwareExecutor(executor, r.visionChain, log.New(io.Discard, "", 0))
+		vExec.SetVisualContext(r.visualContext)
+		executor = vExec
+	}
+	loop := core.NewAgentLoop(provider, executor, sess, cfg)
+
+	// Run the loop
+	events := make(chan core.AgentEvent, 128)
+	done := make(chan struct{})
+	var runErr error
+
+	go func() {
+		defer close(done)
+		defer close(events)
+		runErr = loop.Run(ctx, enrichedTask, events)
+	}()
+
+	// Drain events: accumulate text result + forward tool events to parent subscriber
+	var finalText string
+	evtDone := false
+	for !evtDone {
+		select {
+		case <-done:
+			for evt := range events {
+				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+					finalText += evt.Data.Text
+				}
+			}
+			evtDone = true
+		case evt, ok := <-events:
+			if !ok {
+				evtDone = true
+				break
+			}
+			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+				finalText += evt.Data.Text
+			}
+			if r.subscriber != nil {
+				switch evt.Type {
+				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
+					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+					forwarded := evt
+					forwarded.Data.AgentName = agentName
+					core.SendEvent(r.subscriber, forwarded)
+				}
+			}
+		}
+	}
+
+	// Emit subagent_end
+	endStatus := "completed"
+	if runErr != nil {
+		endStatus = "error"
+	}
+	core.SendEvent(r.subscriber, core.AgentEvent{
+		Type: core.EventTypeSubAgentEnd,
+		Data: core.AgentEventData{
+			AgentName: agentName,
+			Status:    endStatus,
+			Task:      truncateTask(task, 120),
+		},
+	})
+
+	// Generate agent_ref
+	agentRef := fmt.Sprintf("%s-%d", agentName, time.Now().UnixMilli())
 
 	// Compute diff
+	var changes *ChangeSet
 	if r.snapshotter != nil && snapshotID != "" && r.projectDir != "" {
 		var diffErr error
 		changes, diffErr = r.snapshotter.Diff(ctx, r.projectDir, snapshotID)
@@ -555,14 +686,41 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 	}
 
-	// Build enriched result
-	enriched := make(map[string]any)
-	for k, v := range result {
-		enriched[k] = v
+	// Store in liveAgents for delegate_continue, and completedSnapshots for delegate_revert
+	r.mu.Lock()
+	r.completedSnapshots[agentRef] = snapshotID
+	if runErr == nil {
+		r.liveAgents[agentRef] = &liveAgent{
+			ID:        agentRef,
+			Role:      agentName,
+			Task:      task,
+			Session:   sess,
+			Provider:  provider,
+			Config:    cfg,
+			Snapshot:  snapshotID,
+			StartedAt: time.Now(),
+		}
+	} else {
+		// On error, don't keep alive — close the provider
+		if closer, ok := provider.(io.Closer); ok {
+			closer.Close()
+		}
 	}
-	if agentRef != "" {
-		enriched["agent_ref"] = agentRef
+	r.mu.Unlock()
+
+	// Build result
+	if runErr != nil {
+		result := map[string]any{"error": runErr.Error(), "partial_result": finalText, "agent_ref": agentRef}
+		if changes != nil {
+			result["changes"] = map[string]any{
+				"files":   changes.Files,
+				"summary": changes.Summary,
+			}
+		}
+		return result, runErr
 	}
+
+	enriched := map[string]any{"result": finalText, "status": "completed", "agent_ref": agentRef}
 	if changes != nil {
 		enriched["changes"] = map[string]any{
 			"files":   changes.Files,
@@ -583,7 +741,7 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	la, ok := r.liveAgents[agentRef]
 	r.mu.Unlock()
 	if !ok {
-		return nil, fmt.Errorf("no live agent with ref %q — delegates are auto-accepted on completion. Use delegate_to to start a new delegation instead", agentRef)
+		return nil, fmt.Errorf("no live agent with ref %q — agent may have been reverted or expired. Use delegate_to to start a new delegation instead", agentRef)
 	}
 
 	r.logger("CONTINUE: agent=%s feedback_len=%d", la.Role, len(feedback))
@@ -758,7 +916,11 @@ func (r *ParallelRunner) RevertAgent(ctx context.Context, agentRef string) (map[
 }
 
 // RunDelegateAsync launches a sub-agent in a goroutine. Returns immediately.
-func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string) (map[string]any, error) {
+func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
+	if r.depth >= r.maxDepth {
+		return nil, fmt.Errorf("max delegation depth (%d) reached", r.maxDepth)
+	}
+
 	r.mu.Lock()
 	if _, exists := r.tasks[taskID]; exists {
 		r.mu.Unlock()
@@ -790,7 +952,21 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
-		result, err := r.RunDelegate(bgCtx, task, instructions, toolNames, 15, 0.4, "", "")
+		// Use tracked delegation for file change tracking + agent_ref
+		result, err := r.RunDelegateTracked(bgCtx, task, instructions, toolNames, maxRounds, temperature, modelID, "")
+
+		// Async delegates don't need to stay alive for continuation.
+		// Clean up the live agent but keep the completedSnapshot for revert.
+		if agentRef, ok := result["agent_ref"].(string); ok && agentRef != "" {
+			r.mu.Lock()
+			if la, isLive := r.liveAgents[agentRef]; isLive {
+				if closer, ok := la.Provider.(io.Closer); ok {
+					closer.Close()
+				}
+				delete(r.liveAgents, agentRef)
+			}
+			r.mu.Unlock()
+		}
 
 		r.mu.Lock()
 		t.Result = result

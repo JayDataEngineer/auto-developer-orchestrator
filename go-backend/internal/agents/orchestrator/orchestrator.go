@@ -75,7 +75,8 @@ type Agent struct {
 	Memory   *memory.Store
 	config   Config
 	logger   *log.Logger
-	jitStore *autoconfig.WorkerStore // session-scoped workers, cleaned up on Close
+	jitStore *autoconfig.WorkerStore          // session-scoped workers, cleaned up on Close
+	runner   *orchestration.ParallelRunner    // nil if external DelegateRunner provided
 }
 
 // New creates a new orchestrator agent.
@@ -232,12 +233,13 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 	// Add delegation tools to CTO
 	var runner orchestration.DelegateRunner
+	var pr *orchestration.ParallelRunner
 	if cfg.DelegateRunner != nil {
 		runner = cfg.DelegateRunner
 	}
 
 	if runner == nil && provider != nil {
-		pr := orchestration.NewParallelRunner(allToolReg, allToolSpecs, sess, cfg.ContextSize, cfg.ModelResolver)
+		pr = orchestration.NewParallelRunner(allToolReg, allToolSpecs, sess, cfg.ContextSize, cfg.ModelResolver)
 		pr.SetProviderFactory(cfg.ProviderFactory)
 		pr.SetLogger(func(format string, args ...interface{}) {
 			logger.Printf("PARALLEL_RUNNER: "+format, args...)
@@ -425,6 +427,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		config:   cfg,
 		logger:   logger,
 		jitStore: jitStore,
+		runner:   pr,
 	}, nil
 }
 
@@ -440,6 +443,10 @@ func (a *Agent) Continue(ctx context.Context, userMsg string, subscriber chan<- 
 
 // Close releases resources.
 func (a *Agent) Close() error {
+	// Clean up live sub-agents (providers kept alive for delegate_continue)
+	if a.runner != nil {
+		a.runner.Close()
+	}
 	// Clean up session-scoped JIT workers
 	if a.jitStore != nil {
 		_ = a.jitStore.Cleanup()

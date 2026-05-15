@@ -13,7 +13,7 @@ import (
 type DelegateRunner interface {
 	RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error)
 	RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error)
-	RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string) (map[string]any, error)
+	RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error)
 	CollectAsyncResults(ctx context.Context) (map[string]any, error)
 	RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error)
 }
@@ -339,15 +339,24 @@ func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (a
 		}
 	}
 
+	maxRounds := 15
+	if v, ok := args["max_rounds"].(float64); ok && v > 0 {
+		maxRounds = int(v)
+	}
+	temperature := float32(0.4)
+	if v, ok := args["temperature"].(float64); ok {
+		temperature = float32(v)
+	}
+
 	// Resolve role name → prompt + defaults
 	roleMap := t.roleProvider()
-	resolvedInstructions, resolvedTools, _, _, _, _, _ := resolveRole(instructions, toolNames, 15, 0.4, t.mcpResolver, roleMap)
+	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, _, _ := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
 
 	if len(resolvedTools) == 0 {
 		return nil, core.NewToolError("delegate_async", "no tools specified and role '"+instructions+"' has no default tools")
 	}
 
-	return t.runner.RunDelegateAsync(ctx, taskID, task, resolvedInstructions, resolvedTools)
+	return t.runner.RunDelegateAsync(ctx, taskID, task, resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel)
 }
 
 // CollectResultsTool waits for all pending async delegates to complete.
