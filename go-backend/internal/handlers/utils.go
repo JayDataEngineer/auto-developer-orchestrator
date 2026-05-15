@@ -117,6 +117,17 @@ func (s *GitHubTokenStore) Set(token string) {
 	os.Setenv("GITHUB_TOKEN", token)
 }
 
+// decodeReq decodes JSON from the request body into T.
+// On failure, writes a standardized 400 error and returns false.
+func decodeReq[T any](w http.ResponseWriter, r *http.Request) (*T, bool) {
+	var req T
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONError(w, "Invalid request body", http.StatusBadRequest)
+		return nil, false
+	}
+	return &req, true
+}
+
 // parseOwnerRepo extracts owner and repo from a git remote URL.
 // Supports: https://github.com/owner/repo.git, git@github.com:owner/repo.git
 func parseOwnerRepo(remoteURL string) (owner, repo string, err error) {

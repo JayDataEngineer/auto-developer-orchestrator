@@ -17,8 +17,8 @@ func TestEventTypeConstants(t *testing.T) {
 	if EventTypeToolEnd != "tool_execution_end" {
 		t.Errorf("EventTypeToolEnd = %q, want %q", EventTypeToolEnd, "tool_execution_end")
 	}
-	if EventTypeApprovalRequest != "approval_request" {
-		t.Errorf("EventTypeApprovalRequest = %q, want %q", EventTypeApprovalRequest, "approval_request")
+	if EventTypeDecisionRequest != "decision_request" {
+		t.Errorf("EventTypeDecisionRequest = %q, want %q", EventTypeDecisionRequest, "decision_request")
 	}
 	if EventTypeError != "error" {
 		t.Errorf("EventTypeError = %q, want %q", EventTypeError, "error")

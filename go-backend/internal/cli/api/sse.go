@@ -26,8 +26,9 @@ const (
 	EventError           = "error"
 	EventCompactionStart = "compaction_start"
 	EventCompactionEnd   = "compaction_end"
-	EventApprovalRequest = "approval_request"
-	EventUserQuestion    = "user_question"
+	EventApprovalRequest  = "approval_request"  // legacy
+	EventUserQuestion     = "user_question"     // legacy
+	EventDecisionRequest  = "decision_request"  // unified HITL
 	EventArtifactCreated = "artifact_created"
 	EventArtifactUpdated = "artifact_updated"
 	EventPlanCreated     = "plan_created"

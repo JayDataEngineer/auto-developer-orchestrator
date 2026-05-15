@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -245,16 +244,12 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 // Add registers a new custom project. If repoUrl is provided without a local
 // path, the repo is cloned first then registered.
 func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Name    string `json:"name"`
 		Path    string `json:"path"`
 		RepoURL string `json:"repoUrl"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 
 	if req.Name == "" {
 		JSONError(w, "Name is required", http.StatusBadRequest)
@@ -453,14 +448,10 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 
 // Clone clones a repository via git CLI
 func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		URL string `json:"url"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 
 	if req.URL == "" {
 		JSONError(w, "URL is required", http.StatusBadRequest)
@@ -528,11 +519,8 @@ type CheckoutBranchRequest struct {
 
 // CheckoutBranch checks out a branch in a project
 func (h *ProjectHandler) CheckoutBranch(w http.ResponseWriter, r *http.Request) {
-	var req CheckoutBranchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[CheckoutBranchRequest](w, r)
+	if !ok { return }
 
 	if req.Project == "" || req.Branch == "" {
 		JSONError(w, "Project and branch are required", http.StatusBadRequest)
@@ -646,15 +634,11 @@ func (h *ProjectHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 
 // SetMode toggles automation mode for a project
 func (h *ProjectHandler) SetMode(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Mode    string `json:"mode"`
 		Project string `json:"project"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 
 	if req.Project == "" {
 		JSONError(w, "Project name is required", http.StatusBadRequest)

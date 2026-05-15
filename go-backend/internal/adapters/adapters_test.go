@@ -3,9 +3,8 @@ package adapters
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/auto-developer-orchestrator/backend/internal/approval"
+	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
 
 func TestShQ(t *testing.T) {
@@ -85,8 +84,7 @@ func TestFileOps_Glob_NilManager(t *testing.T) {
 }
 
 func TestApprovalHandler_RequestApproval_CtxCancelled(t *testing.T) {
-	mgr := approval.NewManager(5 * time.Minute)
-	h := &ApprovalHandler{Mgr: mgr}
+	h := &ApprovalHandler{Registry: core.GlobalDecisions}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

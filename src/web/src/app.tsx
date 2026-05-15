@@ -8,6 +8,7 @@ import {
 	type WorkbenchTab,
 	type Conversation,
 } from "@/lib/pux-store";
+import { relativeTime } from "@pux/shared";
 import { puxChatAdapter } from "@/lib/pux-chat-adapter";
 import { createPuxHistoryAdapter } from "@/lib/pux-history-adapter";
 import { Thread } from "@/components/assistant-ui/thread";
@@ -15,6 +16,7 @@ import { VNCViewer } from "@/components/workbench/vnc-viewer";
 import { EditorPanel } from "@/components/workbench/editor-panel";
 import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
 import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
+import { DecisionDialog } from "@/components/decision-dialog";
 import {
 	Sidebar,
 	SidebarContent,
@@ -89,18 +91,6 @@ function SidebarToggle() {
 	);
 }
 
-function relativeTime(iso: string): string {
-	if (!iso) return "";
-	const diff = Date.now() - new Date(iso).getTime();
-	const mins = Math.floor(diff / 60000);
-	if (mins < 1) return "now";
-	if (mins < 60) return `${mins}m`;
-	const hrs = Math.floor(mins / 60);
-	if (hrs < 24) return `${hrs}h`;
-	const days = Math.floor(hrs / 24);
-	return `${days}d`;
-}
-
 // ── Project Group (collapsible) ──
 
 function ProjectGroup({
@@ -159,7 +149,7 @@ function ProjectGroup({
 												{c.title || c.lastMessage || "Untitled"}
 											</span>
 											<span className="text-[10px] text-muted-foreground">
-												{relativeTime(c.lastAt)}
+												{relativeTime(c.lastAt, { now: "now" })}
 												{c.messageCount > 0 &&
 													` · ${c.messageCount} msgs`}
 											</span>
@@ -472,6 +462,8 @@ export function App() {
 				/>
 				<Workbench />
 			</div>
+			{/* HITL Decision overlay */}
+			<DecisionDialog />
 		</SidebarProvider>
 	);
 }

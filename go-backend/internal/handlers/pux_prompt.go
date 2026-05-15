@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -78,15 +77,8 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 				h.log.Error("Failed to auto-create sandbox — cannot execute tools", zap.Error(err))
 				setSSEHeaders(w)
 				flusher, canFlush := w.(http.Flusher)
-				errData, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("Sandbox unavailable: %s. Start Docker or run 'task dev' first.", err)})
-				fmt.Fprintf(w, "event: error\ndata: %s\n\n", string(errData))
-				if canFlush {
-					flusher.Flush()
-				}
-				fmt.Fprintf(w, "data: [DONE]\n\n")
-				if canFlush {
-					flusher.Flush()
-				}
+				writeSSE(w, "error", map[string]string{"error": fmt.Sprintf("Sandbox unavailable: %s. Start Docker or run 'task dev' first.", err)}, canFlush, flusher)
+				writeSSE(w, "done", map[string]bool{"done": true}, canFlush, flusher)
 				return
 			}
 			sandboxID = sb.ID
@@ -357,11 +349,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	setSSEHeaders(w)
 	flusher, canFlush := w.(http.Flusher)
 
-	spawnData, _ := json.Marshal(map[string]string{"agentId": req.AgentId})
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", string(core.EventTypeAgentSpawned), string(spawnData))
-	if canFlush {
-		flusher.Flush()
-	}
+	writeSSE(w, string(core.EventTypeAgentSpawned), map[string]string{"agentId": req.AgentId}, canFlush, flusher)
 
 	// Save user message
 	if h.db != nil {

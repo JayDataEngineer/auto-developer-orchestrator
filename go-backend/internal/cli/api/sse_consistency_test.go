@@ -33,6 +33,7 @@ func TestSSEConsistency(t *testing.T) {
 		{EventSubagentStart, llama.EventTypeSubAgentStart},
 		{EventSubagentEnd, llama.EventTypeSubAgentEnd},
 		{EventUserQuestion, llama.EventTypeUserQuestion},
+		{EventDecisionRequest, llama.EventTypeDecisionRequest},
 		{EventHookRequest, llama.EventTypeHookRequest},
 		{EventStepStart, llama.EventTypeStepStart},
 		{EventStepEnd, llama.EventTypeStepEnd},

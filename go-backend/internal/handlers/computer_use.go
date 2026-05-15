@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -264,75 +263,63 @@ type ScreenshotResponse struct {
 // Screenshot takes a screenshot and optionally describes it via vision model
 // GET /api/sandbox/{id}/computer-use/screenshot?describe=true&format=json
 func (h *ComputerUseHandler) Screenshot(w http.ResponseWriter, r *http.Request) {
-	sandboxID := r.PathValue("id")
 	describe := r.URL.Query().Get("describe") == "true"
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "json"
 	}
 
-	client, err := h.getClient(sandboxID)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	pngBytes, err := client.Screenshot(r.Context())
-	if err != nil {
-		h.logger.Error("screenshot failed", zap.Error(err))
-		JSONError(w, fmt.Sprintf("screenshot failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Return raw PNG if format=png
-	if format == "png" {
-		w.Header().Set("Content-Type", "image/png")
-		w.Write(pngBytes)
-		return
-	}
-
-	resp := ScreenshotResponse{
-		Image: base64.StdEncoding.EncodeToString(pngBytes),
-	}
-
-	// Optionally describe via vision model
-	if describe && h.visionClient != nil {
-		description, err := h.visionClient.DescribePage(r.Context(), pngBytes)
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		pngBytes, err := client.Screenshot(r.Context())
 		if err != nil {
-			h.logger.Warn("vision description failed", zap.Error(err))
-			resp.Description = fmt.Sprintf("(vision description failed: %v)", err)
-		} else {
-			resp.Description = description
+			h.logger.Error("screenshot failed", zap.Error(err))
+			JSONError(w, fmt.Sprintf("screenshot failed: %v", err), http.StatusInternalServerError)
+			return
 		}
-	}
 
-	// Include page state
-	if snapshot, _ := client.GetSnapshot(); snapshot != nil {
-		resp.URL = snapshot.URL
-		resp.Title = snapshot.Title
-	}
+		// Return raw PNG if format=png
+		if format == "png" {
+			w.Header().Set("Content-Type", "image/png")
+			w.Write(pngBytes)
+			return
+		}
 
-	writeJSON(w, http.StatusOK, resp)
+		resp := ScreenshotResponse{
+			Image: base64.StdEncoding.EncodeToString(pngBytes),
+		}
+
+		// Optionally describe via vision model
+		if describe && h.visionClient != nil {
+			description, err := h.visionClient.DescribePage(r.Context(), pngBytes)
+			if err != nil {
+				h.logger.Warn("vision description failed", zap.Error(err))
+				resp.Description = fmt.Sprintf("(vision description failed: %v)", err)
+			} else {
+				resp.Description = description
+			}
+		}
+
+		// Include page state
+		if snapshot, _ := client.GetSnapshot(); snapshot != nil {
+			resp.URL = snapshot.URL
+			resp.Title = snapshot.Title
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	})
 }
 
 // Snapshot returns accessibility snapshot (elements list + URL + title)
 // GET /api/sandbox/{id}/computer-use/snapshot
 func (h *ComputerUseHandler) Snapshot(w http.ResponseWriter, r *http.Request) {
-	sandboxID := r.PathValue("id")
-
-	client, err := h.getClient(sandboxID)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	info, err := client.GetSnapshot()
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, info)
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		info, err := client.GetSnapshot()
+		if err != nil {
+			JSONError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, info)
+	})
 }
 
 // ActRequest is the request body for the act endpoint
@@ -351,11 +338,8 @@ type ActRequest struct {
 func (h *ComputerUseHandler) Act(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
 
-	var req ActRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[ActRequest](w, r)
+	if !ok { return }
 
 	client, err := h.getClient(sandboxID)
 	if err != nil {
@@ -446,6 +430,18 @@ func (h *ComputerUseHandler) getClient(sandboxID string) (*browser.SandboxBrowse
 	return client, nil
 }
 
+// withClient extracts the sandbox ID from the URL path, resolves the browser
+// client, and calls fn. Writes a 404 error if the client is not found.
+func (h *ComputerUseHandler) withClient(w http.ResponseWriter, r *http.Request, fn func(*browser.SandboxBrowserClient)) {
+	sandboxID := r.PathValue("id")
+	client, err := h.getClient(sandboxID)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	fn(client)
+}
+
 // getOrCreateClient returns an existing client or creates a new one
 func (h *ComputerUseHandler) getOrCreateClient(sandboxID string, cdpPort int) (*browser.SandboxBrowserClient, error) {
 	h.mu.Lock()
@@ -521,11 +517,8 @@ type FindRequest struct {
 // POST /api/sandbox/{id}/computer-use/find
 func (h *ComputerUseHandler) FindElement(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
-	var req FindRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[FindRequest](w, r)
+	if !ok { return }
 
 	client, err := h.getClient(sandboxID)
 	if err != nil {
@@ -585,20 +578,14 @@ func (h *ComputerUseHandler) FindElement(w http.ResponseWriter, r *http.Request)
 // A11ySnapshot returns the accessibility tree snapshot.
 // GET /api/sandbox/{id}/computer-use/a11y-snapshot
 func (h *ComputerUseHandler) A11ySnapshot(w http.ResponseWriter, r *http.Request) {
-	sandboxID := r.PathValue("id")
-	client, err := h.getClient(sandboxID)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	snapshot, err := client.GetAccessibilityTree(r.Context())
-	if err != nil {
-		JSONError(w, fmt.Sprintf("a11y snapshot failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, snapshot)
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		snapshot, err := client.GetAccessibilityTree(r.Context())
+		if err != nil {
+			JSONError(w, fmt.Sprintf("a11y snapshot failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, snapshot)
+	})
 }
 
 // CookieRequest represents a cookie operation.
@@ -615,22 +602,16 @@ type CookieRequest struct {
 // GetCookies returns all cookies or cookies filtered by URL.
 // GET /api/sandbox/{id}/computer-use/cookies?url=https://example.com
 func (h *ComputerUseHandler) GetCookies(w http.ResponseWriter, r *http.Request) {
-	sandboxID := r.PathValue("id")
-	client, err := h.getClient(sandboxID)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	urls := r.URL.Query()["url"]
-	cookies, err := client.GetCookies(r.Context(), urls)
-	if err != nil {
-		JSONError(w, fmt.Sprintf("get cookies failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"cookies": cookies,
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		urls := r.URL.Query()["url"]
+		cookies, err := client.GetCookies(r.Context(), urls)
+		if err != nil {
+			JSONError(w, fmt.Sprintf("get cookies failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"cookies": cookies,
+		})
 	})
 }
 
@@ -638,11 +619,8 @@ func (h *ComputerUseHandler) GetCookies(w http.ResponseWriter, r *http.Request) 
 // POST /api/sandbox/{id}/computer-use/cookies
 func (h *ComputerUseHandler) SetCookie(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
-	var req CookieRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[CookieRequest](w, r)
+	if !ok { return }
 	if req.Name == "" || req.Value == "" || req.Domain == "" {
 		JSONError(w, "name, value, and domain are required", http.StatusBadRequest)
 		return
@@ -676,19 +654,13 @@ func (h *ComputerUseHandler) SetCookie(w http.ResponseWriter, r *http.Request) {
 // ClearCookies clears all cookies for the current page.
 // DELETE /api/sandbox/{id}/computer-use/cookies
 func (h *ComputerUseHandler) ClearCookies(w http.ResponseWriter, r *http.Request) {
-	sandboxID := r.PathValue("id")
-	client, err := h.getClient(sandboxID)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	if err := client.ClearCookies(r.Context()); err != nil {
-		JSONError(w, fmt.Sprintf("clear cookies failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		if err := client.ClearCookies(r.Context()); err != nil {
+			JSONError(w, fmt.Sprintf("clear cookies failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
+	})
 }
 
 // StorageRequest for localStorage/sessionStorage operations.
@@ -700,21 +672,15 @@ type StorageRequest struct {
 // GetStorage returns localStorage contents.
 // GET /api/sandbox/{id}/computer-use/storage
 func (h *ComputerUseHandler) GetStorage(w http.ResponseWriter, r *http.Request) {
-	sandboxID := r.PathValue("id")
-	client, err := h.getClient(sandboxID)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	data, err := client.GetLocalStorage(r.Context())
-	if err != nil {
-		JSONError(w, fmt.Sprintf("get storage failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"localStorage": data,
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		data, err := client.GetLocalStorage(r.Context())
+		if err != nil {
+			JSONError(w, fmt.Sprintf("get storage failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"localStorage": data,
+		})
 	})
 }
 
@@ -722,11 +688,8 @@ func (h *ComputerUseHandler) GetStorage(w http.ResponseWriter, r *http.Request) 
 // POST /api/sandbox/{id}/computer-use/storage
 func (h *ComputerUseHandler) SetStorage(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("id")
-	var req StorageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[StorageRequest](w, r)
+	if !ok { return }
 	if req.Key == "" || req.Value == "" {
 		JSONError(w, "key and value are required", http.StatusBadRequest)
 		return
@@ -749,59 +712,40 @@ func (h *ComputerUseHandler) SetStorage(w http.ResponseWriter, r *http.Request) 
 // ClearStorage clears all localStorage data.
 // DELETE /api/sandbox/{id}/computer-use/storage
 func (h *ComputerUseHandler) ClearStorage(w http.ResponseWriter, r *http.Request) {
-	sandboxID := r.PathValue("id")
-	client, err := h.getClient(sandboxID)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	if err := client.ClearLocalStorage(r.Context()); err != nil {
-		JSONError(w, fmt.Sprintf("clear storage failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		if err := client.ClearLocalStorage(r.Context()); err != nil {
+			JSONError(w, fmt.Sprintf("clear storage failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
+	})
 }
 
 // StreamStart starts continuous frame capture on a sandbox browser.
 // POST /api/sandbox/{id}/computer-use/stream/start
 func (h *ComputerUseHandler) StreamStart(w http.ResponseWriter, r *http.Request) {
-	sandboxID := r.PathValue("id")
-
-	client, err := h.getClient(sandboxID)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	cfg := framestream.DefaultConfig()
-	if fps := r.URL.Query().Get("fps"); fps != "" {
-		if f, err := strconv.ParseFloat(fps, 64); err == nil && f > 0 && f <= 10 {
-			cfg.FPS = f
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		cfg := framestream.DefaultConfig()
+		if fps := r.URL.Query().Get("fps"); fps != "" {
+			if f, err := strconv.ParseFloat(fps, 64); err == nil && f > 0 && f <= 10 {
+				cfg.FPS = f
+			}
 		}
-	}
-
-	client.StartStream(r.Context(), cfg)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"streaming": true,
-		"fps":       cfg.FPS,
+		client.StartStream(r.Context(), cfg)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"streaming": true,
+			"fps":       cfg.FPS,
+		})
 	})
 }
 
 // StreamStop stops continuous frame capture.
 // POST /api/sandbox/{id}/computer-use/stream/stop
 func (h *ComputerUseHandler) StreamStop(w http.ResponseWriter, r *http.Request) {
-	sandboxID := r.PathValue("id")
-
-	client, err := h.getClient(sandboxID)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	client.StopStream()
-	writeJSON(w, http.StatusOK, map[string]bool{"streaming": false})
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		client.StopStream()
+		writeJSON(w, http.StatusOK, map[string]bool{"streaming": false})
+	})
 }
 
 // frameSummary is a lightweight frame representation for the API.
@@ -816,41 +760,35 @@ type frameSummary struct {
 // StreamFrames returns recent captured frames metadata.
 // GET /api/sandbox/{id}/computer-use/stream/frames?seconds=5
 func (h *ComputerUseHandler) StreamFrames(w http.ResponseWriter, r *http.Request) {
-	sandboxID := r.PathValue("id")
-
-	client, err := h.getClient(sandboxID)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	streamer := client.GetStreamer()
-	if streamer == nil {
-		JSONError(w, "frame stream not active", http.StatusNotFound)
-		return
-	}
-
-	seconds := 5
-	if s := r.URL.Query().Get("seconds"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 60 {
-			seconds = n
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		streamer := client.GetStreamer()
+		if streamer == nil {
+			JSONError(w, "frame stream not active", http.StatusNotFound)
+			return
 		}
-	}
 
-	frames := streamer.RecentFrames(time.Now().Add(-time.Duration(seconds) * time.Second))
-	summaries := make([]frameSummary, len(frames))
-	for i, f := range frames {
-		summaries[i] = frameSummary{
-			CapturedAt:  f.CapturedAt,
-			Width:       f.Width,
-			Height:      f.Height,
-			ChangeScore: f.ChangeScore,
-			Size:        len(f.Data),
+		seconds := 5
+		if s := r.URL.Query().Get("seconds"); s != "" {
+			if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 60 {
+				seconds = n
+			}
 		}
-	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"frames": summaries,
-		"count":  len(summaries),
+		frames := streamer.RecentFrames(time.Now().Add(-time.Duration(seconds) * time.Second))
+		summaries := make([]frameSummary, len(frames))
+		for i, f := range frames {
+			summaries[i] = frameSummary{
+				CapturedAt:  f.CapturedAt,
+				Width:       f.Width,
+				Height:      f.Height,
+				ChangeScore: f.ChangeScore,
+				Size:        len(f.Data),
+			}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"frames": summaries,
+			"count":  len(summaries),
+		})
 	})
 }

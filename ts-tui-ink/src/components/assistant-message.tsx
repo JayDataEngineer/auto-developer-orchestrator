@@ -10,6 +10,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useAuiState } from "@assistant-ui/react-ink";
+import { formatToolResult, getToolArgPreview } from "@pux/shared";
 import { ReasoningAccordion } from "./reasoning-accordion.js";
 import { BranchPicker } from "./branch-picker.js";
 import { colors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
@@ -97,10 +98,10 @@ function ToolCallDisplay({
 	const isRunning = !isDone && !isError;
 
 	// Extract a useful arg preview
-	const argPreview = getArgPreview(toolName, args as Record<string, unknown> | undefined);
+	const argPreview = getToolArgPreview(toolName, args as Record<string, unknown> | undefined);
 
 	// Format result preview
-	const resultPreview = isDone ? formatResult(result) : null;
+	const resultPreview = isDone ? formatToolResult(result, 3) : [];
 
 	// Max width for result lines to prevent terminal wrapping garble
 	const maxResultWidth = 90;
@@ -119,7 +120,7 @@ function ToolCallDisplay({
 					<Text color="gray">({argPreview})</Text>
 				)}
 			</Box>
-			{resultPreview && !isError && (
+			{resultPreview.length > 0 && !isError && (
 				<Box paddingLeft={2} flexDirection="column">
 					<Text color="gray">{BLOCKQUOTE_BAR} </Text>
 					{resultPreview.map((line, i) => (
@@ -138,69 +139,3 @@ function ToolCallDisplay({
 	);
 }
 
-/** Get a compact arg preview for common tools */
-function getArgPreview(toolName: string, args?: Record<string, unknown>): string {
-	if (!args) return "";
-	const entries = Object.entries(args);
-	if (entries.length === 0) return "";
-
-	// For bash/shell tools, show the command
-	if (["bash", "shell", "run_command"].includes(toolName)) {
-		const cmd = (args.command as string) || (args.cmd as string) || "";
-		if (cmd) return cmd.length > 60 ? cmd.slice(0, 57) + "..." : cmd;
-	}
-
-	// For delegate tools, show the agent name
-	if (["delegate_to", "delegate_async"].includes(toolName)) {
-		return (args.agent as string) || "";
-	}
-
-	// For file tools, show the path
-	if (["file_read", "file_write", "file_edit"].includes(toolName)) {
-		const path = (args.path as string) || (args.file_path as string) || "";
-		if (path) return path.length > 60 ? path.slice(0, 57) + "..." : path;
-	}
-
-	// Generic: show first arg value
-	const firstVal = entries[0]?.[1];
-	if (firstVal && typeof firstVal === "string") {
-		return firstVal.length > 60 ? firstVal.slice(0, 57) + "..." : firstVal;
-	}
-
-	// Fallback: count
-	return entries.length <= 2
-		? entries.map(([k, v]) => {
-			const val = typeof v === "string" ? v.slice(0, 30) : JSON.stringify(v)?.slice(0, 30);
-			return `${k}: ${val}`;
-		}).join(", ")
-		: `${entries.length} args`;
-}
-
-/** Format result into preview lines */
-function formatResult(result: unknown): string[] | null {
-	if (result === undefined || result === null) return null;
-
-	let text: string;
-	if (typeof result === "string") {
-		text = result;
-	} else if (typeof result === "object") {
-		const obj = result as Record<string, unknown>;
-		// Extract output from tool result objects like {"output": "..."}
-		text = (obj.output as string) || (obj.text as string) || (obj.result as string) || "";
-		if (!text) text = JSON.stringify(result);
-	} else {
-		text = JSON.stringify(result);
-	}
-
-	if (!text || text.trim().length === 0) return null;
-
-	// Clean up \r\n to \n
-	text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-
-	const lines = text.split("\n").filter((l: string) => l.trim());
-	if (lines.length === 0) return null;
-
-	// Show max 3 lines, with "+N more" indicator
-	if (lines.length <= 3) return lines;
-	return [...lines.slice(0, 3), `... +${lines.length - 3} more lines`];
-}

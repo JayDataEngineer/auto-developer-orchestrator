@@ -70,11 +70,8 @@ type TTSRequest struct {
 
 // SynthesizeSpeech handles POST /api/cluster/tts/synthesize.
 func (h *ClusterHandler) SynthesizeSpeech(w http.ResponseWriter, r *http.Request) {
-	var req TTSRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	req, ok := decodeReq[TTSRequest](w, r)
+	if !ok { return }
 	if req.Text == "" {
 		JSONError(w, "missing 'text' field", http.StatusBadRequest)
 		return
@@ -122,13 +119,10 @@ func (h *ClusterHandler) ASRStatus(w http.ResponseWriter, r *http.Request) {
 
 // TranscribeAudio handles POST /api/cluster/asr/transcribe.
 func (h *ClusterHandler) TranscribeAudio(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		AudioB64 string `json:"audio_b64"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.AudioB64 == "" {
 		JSONError(w, "missing 'audio_b64' field", http.StatusBadRequest)
 		return
@@ -174,15 +168,12 @@ func (h *ClusterHandler) ForgeStatus(w http.ResponseWriter, r *http.Request) {
 
 // ForgeGenerate handles POST /api/cluster/forge/generate — generate via Forge.
 func (h *ClusterHandler) ForgeGenerate(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Mode   string          `json:"mode"`
 		Prompt string          `json:"prompt"`
 		Params json.RawMessage `json:"params,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Mode == "" || req.Prompt == "" {
 		JSONError(w, "missing 'mode' and/or 'prompt' fields", http.StatusBadRequest)
 		return
@@ -331,16 +322,13 @@ func (h *ClusterHandler) StorageListObjects(w http.ResponseWriter, r *http.Reque
 // StorageUpload handles POST /api/cluster/storage/upload — upload an object.
 // Accepts JSON with fields: bucket, object_name, content (base64), content_type (optional).
 func (h *ClusterHandler) StorageUpload(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Bucket      string `json:"bucket"`
 		ObjectName  string `json:"object_name"`
 		Content     string `json:"content"` // base64-encoded
 		ContentType string `json:"content_type,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Bucket == "" || req.ObjectName == "" || req.Content == "" {
 		JSONError(w, "missing required fields: bucket, object_name, content", http.StatusBadRequest)
 		return
@@ -426,14 +414,11 @@ func (h *ClusterHandler) StorageDownload(w http.ResponseWriter, r *http.Request)
 
 // StorageDelete handles DELETE /api/cluster/storage/delete — delete an object from a bucket.
 func (h *ClusterHandler) StorageDelete(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Bucket     string `json:"bucket"`
 		ObjectName string `json:"object_name"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Bucket == "" || req.ObjectName == "" {
 		JSONError(w, "missing required fields: bucket, object_name", http.StatusBadRequest)
 		return

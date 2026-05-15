@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -77,15 +76,12 @@ func (h *PuxHandler) GetProjectFile(w http.ResponseWriter, r *http.Request) {
 // Body: JSON { "project": "...", "path": "...", "content": "..." }
 // Also handles POST /api/pux/file with "create" mode — creates an empty file.
 func (h *PuxHandler) SaveProjectFile(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Project string `json:"project"`
 		Path    string `json:"path"`
 		Content string `json:"content"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Project == "" || req.Path == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project and path are required"})
 		return
@@ -120,14 +116,11 @@ func (h *PuxHandler) SaveProjectFile(w http.ResponseWriter, r *http.Request) {
 // CreateProjectFile handles POST /api/pux/file/create — creates a new empty file.
 // Body: JSON { "project": "...", "path": "..." }
 func (h *PuxHandler) CreateProjectFile(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Project string `json:"project"`
 		Path    string `json:"path"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Project == "" || req.Path == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project and path are required"})
 		return
@@ -168,15 +161,12 @@ func (h *PuxHandler) CreateProjectFile(w http.ResponseWriter, r *http.Request) {
 // MoveProjectFile handles POST /api/pux/file/move — moves/renames a file.
 // Body: JSON { "project": "...", "from": "...", "to": "..." }
 func (h *PuxHandler) MoveProjectFile(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Project string `json:"project"`
 		From    string `json:"from"`
 		To      string `json:"to"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Project == "" || req.From == "" || req.To == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project, from, and to are required"})
 		return
@@ -269,14 +259,11 @@ func (h *PuxHandler) DeleteProjectFile(w http.ResponseWriter, r *http.Request) {
 // RestoreProjectFile handles POST /api/pux/file/restore — restores from .pux/trash/.
 // Body: JSON { "project": "...", "trashPath": "..." }
 func (h *PuxHandler) RestoreProjectFile(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Project   string `json:"project"`
 		TrashPath string `json:"trashPath"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Project == "" || req.TrashPath == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project and trashPath are required"})
 		return

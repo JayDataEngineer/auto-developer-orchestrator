@@ -68,13 +68,8 @@ type createJobRequest struct {
 
 // CreateJob creates a new scheduled job.
 func (h *SchedulerHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
-	var req createJobRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "Invalid request body",
-		})
-		return
-	}
+	req, ok := decodeReq[createJobRequest](w, r)
+	if !ok { return }
 
 	enabled := true
 	if req.Enabled != nil {
@@ -144,13 +139,8 @@ func (h *SchedulerHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 func (h *SchedulerHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 
-	var req createJobRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "Invalid request body",
-		})
-		return
-	}
+	req, ok := decodeReq[createJobRequest](w, r)
+	if !ok { return }
 
 	updates := &scheduler.Job{
 		Name:                   req.Name,
@@ -305,13 +295,8 @@ type setDepsRequest struct {
 func (h *SchedulerHandler) SetDependencies(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 
-	var req setDepsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "Invalid request body",
-		})
-		return
-	}
+	req, ok := decodeReq[setDepsRequest](w, r)
+	if !ok { return }
 
 	if err := h.scheduler.SetDependencies(jobID, req.Blocks, req.BlockedBy); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{

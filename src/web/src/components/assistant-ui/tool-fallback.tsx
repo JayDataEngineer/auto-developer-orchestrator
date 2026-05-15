@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
+import { memo } from "react";
 import {
 	AlertCircleIcon,
 	CheckIcon,
@@ -9,7 +9,6 @@ import {
 	XCircleIcon,
 } from "lucide-react";
 import {
-	useScrollLock,
 	type ToolCallMessagePartStatus,
 	type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
@@ -19,8 +18,7 @@ import {
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-
-const ANIMATION_DURATION = 200;
+import { useCollapsibleRoot } from "./use-collapsible";
 
 export type ToolFallbackRootProps = Omit<
 	React.ComponentPropsWithRef<typeof Collapsible>,
@@ -39,25 +37,8 @@ function ToolFallbackRoot({
 	children,
 	...props
 }: ToolFallbackRootProps) {
-	const collapsibleRef = useRef<HTMLDivElement>(null);
-	const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
-	const lockScroll = useScrollLock(collapsibleRef, ANIMATION_DURATION);
-
-	const isControlled = controlledOpen !== undefined;
-	const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
-
-	const handleOpenChange = useCallback(
-		(open: boolean) => {
-			if (!open) {
-				lockScroll();
-			}
-			if (!isControlled) {
-				setUncontrolledOpen(open);
-			}
-			controlledOnOpenChange?.(open);
-		},
-		[lockScroll, isControlled, controlledOnOpenChange],
-	);
+	const { collapsibleRef, isOpen, handleOpenChange, animationStyle } =
+		useCollapsibleRoot(defaultOpen, controlledOpen, controlledOnOpenChange);
 
 	return (
 		<Collapsible
@@ -69,11 +50,7 @@ function ToolFallbackRoot({
 				"aui-tool-fallback-root group/tool-fallback-root w-full rounded-lg border py-3",
 				className,
 			)}
-			style={
-				{
-					"--animation-duration": `${ANIMATION_DURATION}ms`,
-				} as React.CSSProperties
-			}
+			style={animationStyle}
 			{...props}
 		>
 			{children}

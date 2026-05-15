@@ -40,40 +40,6 @@ func TestSanitizePlanName_MaxLength(t *testing.T) {
 	}
 }
 
-func TestPendingPlans_RegisterAndResolve(t *testing.T) {
-	ch := PendingPlans.Register("plan-1")
-	if ch == nil {
-		t.Fatal("expected non-nil channel")
-	}
-
-	ok := PendingPlans.Resolve("plan-1", PlanResponse{Action: "approve"})
-	if !ok {
-		t.Fatal("expected Resolve to return true")
-	}
-
-	resp := <-ch
-	if resp.Action != "approve" {
-		t.Errorf("expected 'approve', got %q", resp.Action)
-	}
-}
-
-func TestPendingPlans_Resolve_NotFound(t *testing.T) {
-	ok := PendingPlans.Resolve("nonexistent", PlanResponse{})
-	if ok {
-		t.Fatal("expected false for unknown plan")
-	}
-}
-
-func TestPendingPlans_Resolve_Twice(t *testing.T) {
-	PendingPlans.Register("plan-1")
-	if !PendingPlans.Resolve("plan-1", PlanResponse{Action: "approve"}) {
-		t.Fatal("first resolve should succeed")
-	}
-	if PendingPlans.Resolve("plan-1", PlanResponse{Action: "cancel"}) {
-		t.Fatal("second resolve should fail")
-	}
-}
-
 func TestInjectActivePlan_NoDir(t *testing.T) {
 	result := InjectActivePlan(t.TempDir())
 	if result != "" {

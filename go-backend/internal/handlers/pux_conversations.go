@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -90,13 +89,12 @@ func (h *PuxHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) 
 // RenameConversation sets a custom title for a conversation.
 // PUT /api/pux/conversation/rename
 func (h *PuxHandler) RenameConversation(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Project string `json:"project"`
 		AgentID string `json:"agentId"`
 		Title   string `json:"title"`
-	}
-	if err := decodeJSON(r, &req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
+	}](w, r)
+	if !ok {
 		return
 	}
 	if req.Project == "" || req.Title == "" {
@@ -114,9 +112,4 @@ func (h *PuxHandler) RenameConversation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
-}
-
-// decodeJSON is a helper to decode JSON from request body.
-func decodeJSON(r *http.Request, v interface{}) error {
-	return json.NewDecoder(r.Body).Decode(v)
 }

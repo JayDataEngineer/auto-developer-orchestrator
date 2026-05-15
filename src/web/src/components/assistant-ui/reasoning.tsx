@@ -1,10 +1,9 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
+import { memo } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import {
-	useScrollLock,
 	useAuiState,
 	type ReasoningMessagePartComponent,
 } from "@assistant-ui/react";
@@ -14,8 +13,7 @@ import {
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-
-const ANIMATION_DURATION = 200;
+import { useCollapsibleRoot } from "./use-collapsible";
 
 const reasoningVariants = cva("aui-reasoning-root mb-4 w-full", {
 	variants: {
@@ -49,25 +47,8 @@ function ReasoningRoot({
 	children,
 	...props
 }: ReasoningRootProps) {
-	const collapsibleRef = useRef<HTMLDivElement>(null);
-	const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
-	const lockScroll = useScrollLock(collapsibleRef, ANIMATION_DURATION);
-
-	const isControlled = controlledOpen !== undefined;
-	const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
-
-	const handleOpenChange = useCallback(
-		(open: boolean) => {
-			if (!open) {
-				lockScroll();
-			}
-			if (!isControlled) {
-				setUncontrolledOpen(open);
-			}
-			controlledOnOpenChange?.(open);
-		},
-		[lockScroll, isControlled, controlledOnOpenChange],
-	);
+	const { collapsibleRef, isOpen, handleOpenChange, animationStyle } =
+		useCollapsibleRoot(defaultOpen, controlledOpen, controlledOnOpenChange);
 
 	return (
 		<Collapsible
@@ -80,11 +61,7 @@ function ReasoningRoot({
 				"group/reasoning-root",
 				reasoningVariants({ variant, className }),
 			)}
-			style={
-				{
-					"--animation-duration": `${ANIMATION_DURATION}ms`,
-				} as React.CSSProperties
-			}
+			style={animationStyle}
 			{...props}
 		>
 			{children}

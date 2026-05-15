@@ -9,47 +9,6 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/core/testutil"
 )
 
-func TestPendingRegistry_Register(t *testing.T) {
-	ch := PendingQuestions.Register("q-1")
-	if ch == nil {
-		t.Fatal("expected non-nil channel")
-	}
-}
-
-func TestPendingRegistry_Resolve(t *testing.T) {
-	ch := PendingQuestions.Register("q-1")
-	ok := PendingQuestions.Resolve("q-1", "yes")
-	if !ok {
-		t.Fatal("expected Resolve to return true")
-	}
-
-	select {
-	case resp := <-ch:
-		if resp != "yes" {
-			t.Errorf("expected 'yes', got %q", resp)
-		}
-	default:
-		t.Fatal("expected response on channel")
-	}
-}
-
-func TestPendingRegistry_Resolve_NotFound(t *testing.T) {
-	ok := PendingQuestions.Resolve("nonexistent", "")
-	if ok {
-		t.Fatal("expected Resolve to return false for unknown ID")
-	}
-}
-
-func TestPendingRegistry_Resolve_Twice(t *testing.T) {
-	PendingQuestions.Register("q-1")
-	if !PendingQuestions.Resolve("q-1", "first") {
-		t.Fatal("first resolve should succeed")
-	}
-	if PendingQuestions.Resolve("q-1", "second") {
-		t.Fatal("second resolve should fail (already resolved)")
-	}
-}
-
 func TestAskUserTool_Name(t *testing.T) {
 	tool := NewAskUserTool()
 	if tool.Name() != "ask_user" {
@@ -81,7 +40,6 @@ func TestAskUserTool_Execute_WithResponse(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	// Contract 3: subscriber injected via context (like the agent loop does)
 	ctx = context.WithValue(ctx, core.SubscriberKey{}, subscriber)
 
 	go func() {
@@ -92,22 +50,28 @@ func TestAskUserTool_Execute_WithResponse(t *testing.T) {
 		done <- result{val, err}
 	}()
 
-	// Wait for the question to be registered and event emitted
-	var questionID string
+	// Wait for the decision_request event
+	var decisionID string
 	select {
 	case evt := <-subscriber:
-		if evt.Data.ToolName != "ask_user" {
-			t.Fatalf("expected ask_user event, got %q", evt.Data.ToolName)
+		if evt.Type != core.EventTypeDecisionRequest {
+			t.Fatalf("expected decision_request event, got %q", evt.Type)
 		}
-		questionID = evt.Data.ToolID
+		if evt.Data.ToolName != "ask_user" {
+			t.Fatalf("expected ask_user source tool, got %q", evt.Data.ToolName)
+		}
+		decisionID = evt.Data.ToolID
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for event")
 	}
 
-	// Resolve the question
-	ok := PendingQuestions.Resolve(questionID, "Alice")
+	// Resolve via the unified decision registry
+	ok := core.GlobalDecisions.Resolve(decisionID, core.DecisionResponse{
+		Action: "answer",
+		Value:  "Alice",
+	})
 	if !ok {
-		t.Fatal("failed to resolve question")
+		t.Fatal("failed to resolve decision")
 	}
 
 	select {
@@ -141,10 +105,10 @@ func TestAskUserTool_Execute_ContextCancel(t *testing.T) {
 	}()
 
 	// Wait for registration
-	var questionID string
+	var decisionID string
 	select {
 	case evt := <-subscriber:
-		questionID = evt.Data.ToolID
+		decisionID = evt.Data.ToolID
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for event")
 	}
@@ -157,10 +121,10 @@ func TestAskUserTool_Execute_ContextCancel(t *testing.T) {
 		if r.err == nil {
 			t.Fatal("expected error after context cancel")
 		}
-		// Verify cleanup removed the pending question
-		ok := PendingQuestions.Resolve(questionID, "")
+		// Verify cleanup removed the pending decision
+		ok := core.GlobalDecisions.Resolve(decisionID, core.DecisionResponse{Action: "answer", Value: ""})
 		if ok {
-			t.Fatal("question should have been cleaned up after cancel")
+			t.Fatal("decision should have been cleaned up after cancel")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for tool to complete")

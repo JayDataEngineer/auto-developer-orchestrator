@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { relativeTime } from "@pux/shared";
 import { cn } from "@/lib/utils";
 import {
 	Play,
@@ -63,19 +64,6 @@ function formatSchedule(job: Job): string {
 	return "manual";
 }
 
-function relativeTime(iso?: string): string {
-	if (!iso) return "never";
-	const diff = Date.now() - new Date(iso).getTime();
-	if (isNaN(diff)) return "—";
-	const mins = Math.floor(diff / 60000);
-	if (mins < 1) return "just now";
-	if (mins < 60) return `${mins}m ago`;
-	const hrs = Math.floor(mins / 60);
-	if (hrs < 24) return `${hrs}h ago`;
-	const days = Math.floor(hrs / 24);
-	return `${days}d ago`;
-}
-
 function JobRow({
 	job,
 	onTrigger,
@@ -113,7 +101,7 @@ function JobRow({
 					{job.lastRunAt && job.lastRunAt !== "0001-01-01T00:00:00Z" && (
 						<span className="flex items-center gap-1">
 							{RESULT_ICON[job.lastRunStatus || "success"]}
-							{relativeTime(job.lastRunAt)}
+							{relativeTime(job.lastRunAt, { never: "never", now: "just now", suffix: " ago" })}
 						</span>
 					)}
 					{job.durationMs != null && job.durationMs > 0 && (

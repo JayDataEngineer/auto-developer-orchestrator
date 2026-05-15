@@ -183,18 +183,11 @@ type promptRequest struct {
 
 // Prompt sends a coding task to Pux and streams events back via SSE.
 func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
-	var req promptRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "Invalid request body",
-		})
-		return
-	}
+	req, ok := decodeReq[promptRequest](w, r)
+	if !ok { return }
 
 	if req.Message == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"success": false, "error": "Message is required",
-		})
+		JSONError(w, "Message is required", http.StatusBadRequest)
 		return
 	}
 
@@ -230,7 +223,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 
 	// Library-mode path: always use orchestrator + ephemeral sub-agents
 	if h.llamaEngine != nil && h.llamaEngine.IsLoaded() {
-		h.promptWithOrchestrator(w, r, req, projectPath)
+		h.promptWithOrchestrator(w, r, *req, projectPath)
 		return
 	}
 
@@ -239,7 +232,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		h.llamaEngine = eng
 		h.selectedEngines[key] = eng
 		h.log.Info("Bootstrapped cloud engine (no local model)", zap.String("model", eng.ModelName()))
-		h.promptWithOrchestrator(w, r, req, projectPath)
+		h.promptWithOrchestrator(w, r, *req, projectPath)
 		return
 	}
 
@@ -290,15 +283,12 @@ func (h *PuxHandler) GetToolPermissions(w http.ResponseWriter, r *http.Request) 
 // SetToolPermission updates a single tool's permission level.
 // PUT /api/pux/tool-permissions
 func (h *PuxHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Tool   string `json:"tool"`
 		Level  string `json:"level"` // "auto", "confirm", "deny"
 		Reason string `json:"reason,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Tool == "" || req.Level == "" {
 		JSONError(w, "tool and level are required", http.StatusBadRequest)
 		return
@@ -321,14 +311,11 @@ func (h *PuxHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
 // This is a lightweight operation — it clears old tool results (micro-compact).
 // Full LLM-based compaction happens automatically via the SummarizingContextManager during BuildContext.
 func (h *PuxHandler) Compact(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Project string `json:"project"`
 		AgentID string `json:"agentId"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Project == "" {
 		req.Project = "default"
 	}
@@ -361,16 +348,13 @@ func (h *PuxHandler) SetHookBridge(bridge *hooks.SSEHookBridge) {
 
 // HookResponse handles POST /api/pux/hook-response — the TUI's response to a hook_request.
 func (h *PuxHandler) HookResponse(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		HookID string         `json:"hookId"`
 		Action string         `json:"action"` // "allow", "block", "modify"
 		Data   map[string]any `json:"data,omitempty"`
 		Reason string         `json:"reason,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.HookID == "" || req.Action == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hookId and action are required"})
 		return
@@ -427,16 +411,13 @@ func (h *PuxHandler) GetTree(w http.ResponseWriter, r *http.Request) {
 
 // Fork handles POST /api/pux/fork — forks the session at a given node.
 func (h *PuxHandler) Fork(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeReq[struct {
 		Project string `json:"project"`
 		AgentID string `json:"agentId"`
 		NodeID  string `json:"nodeId"`
 		Label   string `json:"label,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
+	}](w, r)
+	if !ok { return }
 	if req.Project == "" {
 		req.Project = "default"
 	}
