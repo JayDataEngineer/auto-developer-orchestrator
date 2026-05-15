@@ -120,10 +120,12 @@ const commands: Command[] = [
 		description: "Show session status",
 		handler: async (_, ctx) => {
 			const store = usePuxStore.getState();
+			const agents = [...store.agents.values()];
 			const lines = [
 				`  Project:   ${ctx.project}`,
 				`  Model:     ${ctx.model}`,
 				`  Conversation: ${store.activeConversationId || "(new)"}`,
+				`  View:      ${store.activeTuiView}`,
 			];
 			if (store.lastUsage) {
 				lines.push(`  Tokens:    in:${store.lastUsage.input} out:${store.lastUsage.output}`);
@@ -131,7 +133,52 @@ const commands: Command[] = [
 			if (store.contextMetrics) {
 				lines.push(`  Context:   ${Math.round(store.contextMetrics.contextUtil * 100)}%`);
 			}
+			if (agents.length > 0) {
+				const running = agents.filter((a) => a.status === "running").length;
+				lines.push(`  Agents:    ${running} running, ${agents.length} total`);
+			}
 			return { type: "handled", message: lines.join("\n") };
+		},
+	},
+	// ── View switching commands ──
+	{
+		name: "chat",
+		description: "Switch to chat view",
+		handler: async () => {
+			usePuxStore.getState().setTuiView("chat");
+			return { type: "handled" };
+		},
+	},
+	{
+		name: "agents",
+		description: "Switch to agents view",
+		handler: async () => {
+			usePuxStore.getState().setTuiView("agents");
+			return { type: "handled" };
+		},
+	},
+	{
+		name: "tools",
+		description: "Switch to tools view",
+		handler: async () => {
+			usePuxStore.getState().setTuiView("tools");
+			return { type: "handled" };
+		},
+	},
+	{
+		name: "files",
+		description: "Switch to files view",
+		handler: async () => {
+			usePuxStore.getState().setTuiView("files");
+			return { type: "handled" };
+		},
+	},
+	{
+		name: "conversations",
+		description: "Switch to conversations view",
+		handler: async () => {
+			usePuxStore.getState().setTuiView("conversations");
+			return { type: "handled" };
 		},
 	},
 ];

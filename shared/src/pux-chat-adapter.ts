@@ -30,6 +30,7 @@ interface RunningTool {
 	toolName: string;
 	args: Record<string, any>;
 	argsText: string;
+	interrupt?: { type: "human"; payload: unknown };
 }
 
 // ── Meta event dispatcher → Zustand ──
@@ -75,7 +76,7 @@ function inferTabFromTool(toolName: string, toolArgs: Record<string, unknown>): 
 	}
 }
 
-function handleMetaEvent(eventType: string, data: Record<string, unknown>) {
+function handleMetaEvent(eventType: string, data: Record<string, unknown>, statusRef: string[]) {
 	switch (eventType) {
 		case "agent_spawned": {
 			const agentId = data.agentId as string | undefined;
@@ -91,6 +92,8 @@ function handleMetaEvent(eventType: string, data: Record<string, unknown>) {
 					allowFreeText: (data.allowFreeText as boolean) ?? true,
 				},
 			});
+			// Signal requires-action natively to assistant-ui
+			statusRef[0] = "requires-action";
 			break;
 		}
 		case "approval_request": {
@@ -101,6 +104,8 @@ function handleMetaEvent(eventType: string, data: Record<string, unknown>) {
 					description: (data.description as string) || "",
 				},
 			});
+			// Signal requires-action natively to assistant-ui
+			statusRef[0] = "requires-action";
 			break;
 		}
 		case "plan_created": {
@@ -155,8 +160,8 @@ function handleMetaEvent(eventType: string, data: Record<string, unknown>) {
 function buildSnapshot(
 	accText: string,
 	accThinking: string,
-	tools: Map<string, RunningTool & { result?: unknown; isError?: boolean }>,
-	status: "running" | "complete",
+	tools: Map<string, RunningTool & { result?: unknown; isError?: boolean; interrupt?: string }>,
+	status: "running" | "complete" | "requires-action",
 ): ChatModelRunResult {
 	const parts: Part[] = [];
 
@@ -175,6 +180,7 @@ function buildSnapshot(
 			argsText: tool.argsText,
 			...(tool.result !== undefined ? { result: tool.result } : {}),
 			...(tool.isError ? { isError: true } : {}),
+			...(tool.interrupt ? { interrupt: tool.interrupt } : {}),
 		};
 		parts.push(part);
 	}
@@ -184,11 +190,19 @@ function buildSnapshot(
 		parts.push({ type: "text", text: accText });
 	}
 
+	// Determine status natively
+	let runStatus: ChatModelRunResult["status"];
+	if (status === "complete") {
+		runStatus = { type: "complete", reason: "stop" };
+	} else if (status === "requires-action") {
+		runStatus = { type: "requires-action", reason: "tool-calls" };
+	} else {
+		runStatus = { type: "running" };
+	}
+
 	return {
 		content: parts,
-		status: status === "complete"
-			? { type: "complete", reason: "stop" }
-			: { type: "running" },
+		status: runStatus,
 	};
 }
 
@@ -277,7 +291,9 @@ export const puxChatAdapter: ChatModelAdapter = {
 		// Accumulators — the source of truth for building snapshots
 		let accText = "";
 		let accThinking = "";
-		const tools = new Map<string, RunningTool & { result?: unknown; isError?: boolean }>();
+		const tools = new Map<string, RunningTool & { result?: unknown; isError?: boolean; interrupt?: string }>();
+		// Mutable status ref so handleMetaEvent can update it
+		const snapshotStatusRef: ("running" | "complete" | "requires-action")[] = ["running"];
 
 		// Initial yield — empty, running
 		yield { content: [], status: { type: "running" as const } };
@@ -311,7 +327,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 						case "thinking_delta": {
 							accThinking += (parsed.text as string) || "";
-							yield buildSnapshot(accText, accThinking, tools, "running");
+							yield buildSnapshot(accText, accThinking, tools, snapshotStatusRef[0]);
 							break;
 						}
 
@@ -319,7 +335,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 							// Skip sub-agent text (we only show CTO text)
 							if (parsed.agentName) break;
 							accText += (parsed.text as string) || "";
-							yield buildSnapshot(accText, accThinking, tools, "running");
+							yield buildSnapshot(accText, accThinking, tools, snapshotStatusRef[0]);
 							break;
 						}
 
@@ -334,7 +350,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 								args: toolArgs as any,
 								argsText: JSON.stringify(toolArgs, null, 2),
 							});
-							yield buildSnapshot(accText, accThinking, tools, "running");
+							yield buildSnapshot(accText, accThinking, tools, snapshotStatusRef[0]);
 							break;
 						}
 
@@ -345,7 +361,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 								existing.result = parsed.result;
 								existing.isError = !!parsed.error;
 							}
-							yield buildSnapshot(accText, accThinking, tools, "running");
+							yield buildSnapshot(accText, accThinking, tools, snapshotStatusRef[0]);
 							break;
 						}
 
@@ -357,27 +373,86 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 						case "subagent_start": {
 							const agentName = (parsed as Record<string, unknown>).agentName as string | undefined;
+							const agentId = (parsed as Record<string, unknown>).agentId as string | undefined;
+							const task = (parsed as Record<string, unknown>).task as string || (parsed as Record<string, unknown>).prompt as string || "";
 							if (agentName) {
 								if (["jake", "ryan", "browser_ops", "desktop_ops"].includes(agentName)) {
 									usePuxStore.getState().setWorkbenchTab("vnc");
 								} else if (["marcus", "code_ops"].includes(agentName)) {
 									usePuxStore.getState().setWorkbenchTab("editor");
 								}
+								// Phase 3: Track subagent in store
+								usePuxStore.getState().addAgent({
+									agentId: agentId || `${agentName}_${Date.now()}`,
+									agentName,
+									task,
+									status: "running",
+									startedAt: Date.now(),
+									toolCalls: [],
+								});
 							}
 							break;
 						}
-						case "subagent_end":
+						case "subagent_end": {
+							const agentId = (parsed as Record<string, unknown>).agentId as string | undefined;
+							const agentName = (parsed as Record<string, unknown>).agentName as string | undefined;
+							if (agentId) {
+								const result = typeof parsed.result === "string"
+									? parsed.result
+									: parsed.result ? JSON.stringify(parsed.result) : undefined;
+								usePuxStore.getState().updateAgentStatus(agentId, "complete", result);
+							} else if (agentName) {
+								// Fallback: find by name
+								const agents = usePuxStore.getState().agents;
+								const match = [...agents.values()].find(
+									(a) => a.agentName === agentName && a.status === "running"
+								);
+								if (match) {
+									const result = typeof parsed.result === "string"
+										? parsed.result
+										: parsed.result ? JSON.stringify(parsed.result) : undefined;
+									usePuxStore.getState().updateAgentStatus(match.agentId, "complete", result);
+								}
+							}
+							break;
+						}
+						case "subagent_tool_start": {
+							const agentId = (parsed as Record<string, unknown>).agentId as string | undefined;
+							const agentName = (parsed as Record<string, unknown>).agentName as string | undefined;
+							const toolName = (parsed as Record<string, unknown>).toolName as string;
+							const toolArgs = (parsed as Record<string, unknown>).toolArgs || (parsed as Record<string, unknown>).args;
+							if (agentId && toolName) {
+								usePuxStore.getState().addAgentToolCall(agentId, {
+									toolName,
+									args: toolArgs,
+									timestamp: Date.now(),
+								});
+							} else if (agentName && toolName) {
+								// Fallback: find by name
+								const agents = usePuxStore.getState().agents;
+								const match = [...agents.values()].find(
+									(a) => a.agentName === agentName && a.status === "running"
+								);
+								if (match) {
+									usePuxStore.getState().addAgentToolCall(match.agentId, {
+										toolName,
+										args: toolArgs,
+										timestamp: Date.now(),
+									});
+								}
+							}
+							break;
+						}
 						case "subagent_thinking_delta":
 						case "subagent_text_delta": {
-							// Sub-agent events — we don't render these as separate parts
-							// They're tracked by Zustand if needed for a sub-agent panel
+							// Sub-agent text events — tracked in store for agents view
 							break;
 						}
 
 						// ── Meta events → Zustand ──
 
 						default: {
-							handleMetaEvent(event, parsed);
+							handleMetaEvent(event, parsed, snapshotStatusRef);
 							break;
 						}
 					}

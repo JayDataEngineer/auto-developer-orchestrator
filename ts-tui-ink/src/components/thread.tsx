@@ -4,6 +4,8 @@
  * Scrolling: Manual offset with overflow="hidden" and marginTop.
  * Content height is estimated from messages to cap the scroll offset.
  * Auto-scrolls to bottom during streaming.
+ *
+ * Phase 1 additions: Cancel button, suggestion chips, composer queue.
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
@@ -13,9 +15,12 @@ import {
 	ComposerPrimitive,
 	useAuiState,
 	useAui,
+	useAuiEvent,
 } from "@assistant-ui/react-ink";
 import { AssistantMessage } from "./assistant-message.js";
 import { UserMessage } from "./user-message.js";
+import { SuggestionChips } from "./suggestion-chips.js";
+import { ComposerQueue } from "./composer-queue.js";
 import { getCommands } from "../commands.js";
 import { colors, symbols } from "../theme.js";
 
@@ -85,8 +90,8 @@ export function Thread({ onCommand }: ThreadProps) {
 	const cols = stdout?.columns ?? 80;
 	const rows = stdout?.rows ?? 24;
 
-	// Fixed rows: status bar(1) + separators(2) + prompt(1) = 4
-	const viewportRows = rows - 4;
+	// Fixed rows: status bar(1) + tab bar(1) + separators(2) + prompt(1) = 5
+	const viewportRows = rows - 5;
 
 	// Estimate total content height from messages (accounts for line wrapping)
 	const contentHeight = useAuiState((s) => {
@@ -155,6 +160,14 @@ export function Thread({ onCommand }: ThreadProps) {
 		setScrollOffset(0); // Reset to bottom when new messages arrive
 	}, [msgCount, lastMsgRunning]);
 
+	// Phase 1: useAuiEvent lifecycle hooks
+	useAuiEvent("thread.runStart", () => {
+		// Could trigger notification, sound, etc.
+	});
+	useAuiEvent("thread.runEnd", () => {
+		// Auto-scroll is handled by the effect above
+	});
+
 	// Clamp offset if content shrinks
 	const clampedOffset = Math.min(scrollOffset, maxScrollOffset);
 	const isScrolledUp = clampedOffset > 0;
@@ -164,6 +177,9 @@ export function Thread({ onCommand }: ThreadProps) {
 	// Base shift = contentOverhang (shifts content up to show bottom).
 	// Scrolling up decreases the shift (reveals older content above).
 	const marginTop = -(contentOverhang - clampedOffset);
+
+	// Running state for cancel button
+	const isRunning = useAuiState((s) => s.thread.isRunning);
 
 	return (
 		<Box flexDirection="column" flexGrow={1}>
@@ -195,6 +211,9 @@ export function Thread({ onCommand }: ThreadProps) {
 				<Text dimColor color="gray"> PgUp/PgDn scroll · Shift+Up/Down line · Esc bottom ({clampedOffset} lines up)</Text>
 			)}
 
+			{/* Composer queue — queued messages */}
+			<ComposerQueue />
+
 			{/* Slash command autocomplete */}
 			<CommandPalette selectedIdx={selectedIdx} onSelectIdx={setSelectedIdx} />
 
@@ -209,6 +228,12 @@ export function Thread({ onCommand }: ThreadProps) {
 					selectedIdx={selectedIdx}
 					onSelectIdx={setSelectedIdx}
 				/>
+				{/* Phase 1: Cancel button when running */}
+				{isRunning && (
+					<ComposerPrimitive.Cancel>
+						<Text color="red"> {" "}cancel</Text>
+					</ComposerPrimitive.Cancel>
+				)}
 			</Box>
 			<Text color="gray">{"─".repeat(cols)}</Text>
 		</Box>
@@ -275,9 +300,11 @@ function Welcome() {
 			</Box>
 			<Box marginTop={1} flexDirection="column">
 				<Text dimColor>
-					<Text bold>Enter</Text> Send  <Text bold>PgUp/PgDn</Text> Scroll  <Text bold>Ctrl+C x2</Text> Quit
+					<Text bold>Enter</Text> Send  <Text bold>PgUp/PgDn</Text> Scroll  <Text bold>Ctrl+C x2</Text> Quit  <Text bold>Ctrl+T</Text> Switch view
 				</Text>
 			</Box>
+			{/* Phase 1: Suggestion chips on empty thread */}
+			<SuggestionChips />
 		</Box>
 	);
 }

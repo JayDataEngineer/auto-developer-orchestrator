@@ -16,23 +16,19 @@ export interface ContextMetrics {
 	compactionType: string;
 }
 
-export interface PendingQuestion {
-	questionId: string;
-	question: string;
-	options: string[];
-	allowFreeText: boolean;
-}
+// ── HITL Decision (unified) ──
 
-export interface PendingApproval {
-	requestId: string;
+export type DecisionHint = "question" | "approval" | "plan_review";
+
+export interface PendingDecision {
+	decisionId: string;
+	sourceTool: string;
 	title: string;
 	description: string;
-}
-
-export interface PendingPlan {
-	planId: string;
-	name: string;
-	content: string;
+	hint: DecisionHint;
+	options?: string[];
+	allowFreeText?: boolean;
+	metadata?: Record<string, unknown>;
 }
 
 export interface Conversation {
@@ -53,3 +49,29 @@ export interface Project {
 }
 
 export type WorkbenchTab = "vnc" | "editor" | "scheduler";
+
+// ── Agent monitoring ──
+
+export interface AgentState {
+	agentId: string;
+	agentName: string;
+	task: string;
+	status: "running" | "complete" | "error";
+	startedAt: number;
+	endedAt?: number;
+	toolCalls: ToolCallRecord[];
+	result?: string;
+	error?: string;
+}
+
+export interface ToolCallRecord {
+	toolName: string;
+	args?: unknown;
+	result?: unknown;
+	isError?: boolean;
+	timestamp: number;
+}
+
+// ── TUI Views ──
+
+export type TuiView = "chat" | "agents" | "tools" | "files" | "conversations";

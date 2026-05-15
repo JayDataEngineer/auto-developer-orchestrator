@@ -1,14 +1,13 @@
 /**
  * Pux TUI App — root component.
  *
- * Layout: fullscreen flex column with header, content, and status bar.
- * Wires: slash commands, keybindings (Ctrl+P model cycle, Ctrl+Q quit),
- * assistant-ui runtime, and custom tool UIs.
+ * Layout: fullscreen flex column with tab bar, content, and status bar.
+ * Wires: slash commands, keybindings (Ctrl+P model cycle, Ctrl+Q quit,
+ * Ctrl+T view cycle), assistant-ui runtime, and custom tool UIs.
  *
- * Custom tool UIs (bash, delegate, file ops) are registered here
- * via makeAssistantToolUI — they auto-render by tool name match.
- * All assistant-ui primitives (BranchPicker, Diff, ChainOfThought,
- * Error, ToolFallback) are wired in the component tree.
+ * Phase 4: View router switches between Chat, Agents, Tools, Files views.
+ * Phase 1: Full primitive integration (Cancel, Edit, Feedback, Suggestions).
+ * Phase 3: Subagent monitoring via Zustand store + AgentsView.
  */
 
 import React, { useMemo, useState, useCallback, useRef } from "react";
@@ -20,6 +19,11 @@ import {
 import { puxChatAdapter, createPuxHistoryAdapter, usePuxStore } from "@pux/shared";
 import { Thread } from "./components/thread.js";
 import { StatusBar } from "./components/status-bar.js";
+import { TabBar } from "./components/tab-bar.js";
+import { AgentsView } from "./components/agents-view.js";
+import { ToolsView } from "./components/tools-view.js";
+import { FilesView } from "./components/files-view.js";
+import { ConversationsView } from "./components/conversations-view.js";
 import { QuestionDialog } from "./components/question-dialog.js";
 import { ApprovalDialog } from "./components/approval-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
@@ -62,15 +66,23 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 	const [model, setModel] = useState(initialModel);
 	const lastCtrlC = useRef(0);
 
-	useInput((input, key) => {
+	// Phase 4: Global keybindings for view cycling and quit
+	useInput(useCallback((input: string, key: any) => {
+		// Double Ctrl+C to quit
 		if (input === "c" && key.ctrl) {
 			const now = Date.now();
 			if (now - lastCtrlC.current < 1000) {
 				exit();
 			}
 			lastCtrlC.current = now;
+			return;
 		}
-	});
+		// Ctrl+T: cycle views
+		if (input === "t" && key.ctrl) {
+			usePuxStore.getState().cycleTuiView();
+			return;
+		}
+	}, [exit]));
 
 	const rows = stdout?.rows ?? 24;
 	const cols = stdout?.columns ?? 80;
@@ -85,7 +97,10 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 
 	return (
 		<Box flexDirection="column" height={rows} width={cols}>
-			{/* Content */}
+			{/* Tab bar — view switching */}
+			<TabBar />
+
+			{/* Content area — switches based on active view */}
 			<Box flexGrow={1} flexDirection="column">
 				<ContentArea onCommand={handleCommand} />
 			</Box>
@@ -99,24 +114,36 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 // ── Content Area ──
 
 function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<string | null> }) {
+	const activeView = usePuxStore((s) => s.activeTuiView);
 	const pendingQuestion = usePuxStore((s) => s.pendingQuestion);
 	const pendingApproval = usePuxStore((s) => s.pendingApproval);
 
-	return (
-		<Box flexDirection="column" flexGrow={1}>
-			{!(pendingApproval || pendingQuestion) && (
-				<Thread onCommand={onCommand} />
-			)}
-			{(pendingApproval || pendingQuestion) && (
-				<Box
-					flexDirection="column"
-					justifyContent="flex-end"
-					paddingX={1}
-					flexGrow={1}
-				>
-					{pendingApproval ? <ApprovalDialog /> : <QuestionDialog />}
-				</Box>
-			)}
-		</Box>
-	);
+	// HITL dialogs take priority over everything
+	if (pendingApproval || pendingQuestion) {
+		return (
+			<Box
+				flexDirection="column"
+				justifyContent="flex-end"
+				paddingX={1}
+				flexGrow={1}
+			>
+				{pendingApproval ? <ApprovalDialog /> : <QuestionDialog />}
+			</Box>
+		);
+	}
+
+	// View router
+	switch (activeView) {
+		case "agents":
+			return <AgentsView />;
+		case "tools":
+			return <ToolsView />;
+		case "files":
+			return <FilesView />;
+		case "conversations":
+			return <ConversationsView />;
+		case "chat":
+		default:
+			return <Thread onCommand={onCommand} />;
+	}
 }

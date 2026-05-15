@@ -23,4 +23,7 @@ export type {
 	Conversation,
 	Project,
 	WorkbenchTab,
+	AgentState,
+	ToolCallRecord,
+	TuiView,
 } from "./types";

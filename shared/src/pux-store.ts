@@ -12,21 +12,20 @@ import { apiUrl } from "./server-url";
 import type {
 	TokenUsage,
 	ContextMetrics,
-	PendingQuestion,
-	PendingApproval,
-	PendingPlan,
+	PendingDecision,
 	Conversation,
 	Project,
 	WorkbenchTab,
+	AgentState,
+	ToolCallRecord,
+	TuiView,
 } from "./types";
 
 // ── State ──
 
 interface PuxState {
-	// HITL (Contract 2.6 / 2.7)
-	pendingQuestion: PendingQuestion | null;
-	pendingApproval: PendingApproval | null;
-	pendingPlan: PendingPlan | null;
+	// HITL (unified decision protocol)
+	pendingDecision: PendingDecision | null;
 
 	// Metrics (Contract 2.2 agent_end)
 	lastUsage: TokenUsage | null;
@@ -55,13 +54,15 @@ interface PuxState {
 	// Workbench (web only — auto-driven by SSE tool events)
 	activeWorkbenchTab: WorkbenchTab;
 
+	// Agent monitoring (TUI + web)
+	agents: Map<string, AgentState>;
+	activeTuiView: TuiView;
+
 	// Error
 	lastError: string | null;
 
 	// ── Actions ──
-	respondToQuestion: (response: string) => Promise<void>;
-	respondToApproval: (approved: boolean) => Promise<void>;
-	respondToPlan: (action: string, feedback?: string) => Promise<void>;
+	respondToDecision: (action: string, value: string) => Promise<void>;
 	loadModels: () => Promise<void>;
 	loadConversations: () => Promise<void>;
 	loadProjects: () => Promise<void>;
@@ -72,14 +73,18 @@ interface PuxState {
 	clearConversation: () => void;
 	clearError: () => void;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
+	setTuiView: (view: TuiView) => void;
+	cycleTuiView: () => void;
+	addAgent: (agent: AgentState) => void;
+	updateAgentStatus: (agentId: string, status: AgentState["status"], result?: string) => void;
+	addAgentToolCall: (agentId: string, toolCall: ToolCallRecord) => void;
+	clearAgents: () => void;
 }
 
 // ── Store ──
 
 export const usePuxStore = create<PuxState>((set, get) => ({
-	pendingQuestion: null,
-	pendingApproval: null,
-	pendingPlan: null,
+	pendingDecision: null,
 	lastUsage: null,
 	contextMetrics: null,
 	compacting: false,
@@ -93,49 +98,24 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	conversations: [],
 	projects: [],
 	activeWorkbenchTab: "vnc",
+	agents: new Map(),
+	activeTuiView: "chat",
 	lastError: null,
 
-	respondToQuestion: async (response) => {
-		const { pendingQuestion } = get();
-		if (!pendingQuestion) return;
+	respondToDecision: async (action, value) => {
+		const { pendingDecision } = get();
+		if (!pendingDecision) return;
 		const fetch = getFetch();
-		await fetch(apiUrl("/api/pux/respond"), {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ requestId: pendingQuestion.questionId, response }),
-		});
-		set({ pendingQuestion: null });
-	},
-
-	respondToApproval: async (approved) => {
-		const { pendingApproval } = get();
-		if (!pendingApproval) return;
-		const fetch = getFetch();
-		await fetch(apiUrl("/api/pux/respond"), {
+		await fetch(apiUrl("/api/pux/decision"), {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				requestId: pendingApproval.requestId,
-				response: approved ? "approve" : "reject",
-			}),
-		});
-		set({ pendingApproval: null });
-	},
-
-	respondToPlan: async (action, feedback) => {
-		const { pendingPlan } = get();
-		if (!pendingPlan) return;
-		const fetch = getFetch();
-		await fetch(apiUrl("/api/pux/plan-response"), {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				planId: pendingPlan.planId,
+				decisionId: pendingDecision.decisionId,
 				action,
-				feedback: feedback || "",
+				value: value || "",
 			}),
 		});
-		set({ pendingPlan: null });
+		set({ pendingDecision: null });
 	},
 
 	loadModels: async () => {
@@ -246,7 +226,51 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	clearError: () => set({ lastError: null }),
 
 	setWorkbenchTab: (tab) => set({ activeWorkbenchTab: tab }),
+
+	setTuiView: (view) => set({ activeTuiView: view }),
+
+	cycleTuiView: () => {
+		const views: TuiView[] = ["chat", "agents", "tools", "files", "conversations"];
+		const current = get().activeTuiView;
+		const idx = views.indexOf(current);
+		set({ activeTuiView: views[(idx + 1) % views.length] });
+	},
+
+	addAgent: (agent) => {
+		const agents = new Map(get().agents);
+		agents.set(agent.agentId, agent);
+		set({ agents });
+	},
+
+	updateAgentStatus: (agentId, status, result) => {
+		const agents = new Map(get().agents);
+		const existing = agents.get(agentId);
+		if (existing) {
+			agents.set(agentId, {
+				...existing,
+				status,
+				endedAt: status !== "running" ? Date.now() : undefined,
+				result: result || existing.result,
+				error: status === "error" ? result : existing.error,
+			});
+			set({ agents });
+		}
+	},
+
+	addAgentToolCall: (agentId, toolCall) => {
+		const agents = new Map(get().agents);
+		const existing = agents.get(agentId);
+		if (existing) {
+			agents.set(agentId, {
+				...existing,
+				toolCalls: [...existing.toolCalls, toolCall],
+			});
+			set({ agents });
+		}
+	},
+
+	clearAgents: () => set({ agents: new Map() }),
 }));
 
 // Re-export types for convenience
-export type { TokenUsage, ContextMetrics, PendingQuestion, PendingApproval, PendingPlan, Conversation, Project, WorkbenchTab };
+export type { TokenUsage, ContextMetrics, PendingQuestion, PendingApproval, PendingPlan, Conversation, Project, WorkbenchTab, AgentState, ToolCallRecord, TuiView };
