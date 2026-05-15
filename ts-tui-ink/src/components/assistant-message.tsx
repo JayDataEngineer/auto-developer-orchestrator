@@ -1,19 +1,20 @@
 /**
  * AssistantMessage — renders assistant messages using assistant-ui primitives.
  *
- * Uses MessagePrimitive.If for conditional rendering,
- * ToolCallPrimitive.Fallback for tool calls,
- * and proper part routing for text/reasoning/error.
+ * Integrates: ChainOfThoughtPrimitive, BranchPickerPrimitive,
+ * ToolCallPrimitive.ToolFallback, DiffView, ErrorPrimitive.
+ * Custom tool UIs (bash, delegate, file ops) are registered in app.tsx
+ * via makeAssistantToolUI and auto-render by tool name.
  */
 
 import React from "react";
 import { Box, Text } from "ink";
 import {
 	useAuiState,
-	MessagePrimitive,
 } from "@assistant-ui/react-ink";
 import { ReasoningBlock } from "./reasoning.js";
-import { ToolFallback } from "./tool-fallback.js";
+import { ReasoningAccordion } from "./reasoning-accordion.js";
+import { BranchPicker } from "./branch-picker.js";
 import { colors, BLACK_CIRCLE, symbols } from "../theme.js";
 
 export function AssistantMessage() {
@@ -23,14 +24,18 @@ export function AssistantMessage() {
 
 	return (
 		<Box flexDirection="column" marginTop={1} paddingX={1}>
-			{/* Parts: tool calls, text, reasoning, errors */}
+			{/* Reasoning accordion (uses ChainOfThoughtPrimitive) */}
+			<ReasoningAccordion />
+
+			{/* Parts: tool calls, text, reasoning (fallback), errors */}
 			{parts.map((part: any, i: number) => {
 				switch (part.type) {
 					case "tool-call":
+						// Custom tool UIs (bash, delegate, etc.) are auto-rendered
+						// by makeAssistantToolUI. This fallback handles unknown tools.
 						return (
 							<Box key={part.toolCallId || i} flexDirection="column">
-								<ToolCallItem
-									toolCallId={part.toolCallId}
+								<ToolFallback
 									toolName={part.toolName}
 									args={part.args}
 									argsText={part.argsText}
@@ -40,6 +45,8 @@ export function AssistantMessage() {
 							</Box>
 						);
 					case "reasoning":
+						// Fallback: plain reasoning block (ReasoningAccordion handles
+						// the ChainOfThoughtPrimitive version above)
 						return <ReasoningBlock key={i} text={part.text} />;
 					case "text":
 						if (!part.text?.trim()) return null;
@@ -55,23 +62,23 @@ export function AssistantMessage() {
 				}
 			})}
 
+			{/* Branch picker for forked messages */}
+			<BranchPicker />
 		</Box>
 	);
 }
 
-// ── Tool call with proper primitive ──
+// ── Tool call fallback (for tools without custom UI) ──
 
-function ToolCallItem({
-	toolCallId,
+function ToolFallback({
 	toolName,
 	args,
 	argsText,
 	result,
 	isError,
 }: {
-	toolCallId: string;
 	toolName: string;
-	args?: Record<string, unknown>;
+	args?: unknown;
 	argsText?: string;
 	result?: unknown;
 	isError?: boolean;
@@ -86,10 +93,10 @@ function ToolCallItem({
 			</Text>
 			<Text> </Text>
 			<Text bold color={isRunning ? colors.running : undefined}>{toolName}</Text>
-			{!isDone && args && <ArgsSummary args={args} />}
-			{isError && (
+			{!isDone && args ? <ArgsSummary args={args as Record<string, unknown>} /> : null}
+			{isError ? (
 				<Text color={colors.error}> {symbols.cross} failed</Text>
-			)}
+			) : null}
 		</Box>
 	);
 }
@@ -114,4 +121,3 @@ function ArgsSummary({ args }: { args: Record<string, unknown> }) {
 	}
 	return <Text color="gray">({summary})</Text>;
 }
-

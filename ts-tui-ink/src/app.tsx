@@ -3,10 +3,15 @@
  *
  * Layout: fullscreen flex column with header, content, and status bar.
  * Wires: slash commands, keybindings (Ctrl+P model cycle, Ctrl+Q quit),
- * and assistant-ui runtime.
+ * assistant-ui runtime, and custom tool UIs.
+ *
+ * Custom tool UIs (bash, delegate, file ops) are registered here
+ * via makeAssistantToolUI — they auto-render by tool name match.
+ * All assistant-ui primitives (BranchPicker, Diff, ChainOfThought,
+ * Error, ToolFallback) are wired in the component tree.
  */
 
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useRef } from "react";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import {
 	AssistantRuntimeProvider,
@@ -17,6 +22,7 @@ import { Thread } from "./components/thread.js";
 import { StatusBar } from "./components/status-bar.js";
 import { QuestionDialog } from "./components/question-dialog.js";
 import { ApprovalDialog } from "./components/approval-dialog.js";
+import { ToolRegistry } from "./components/custom-tool-ui.js";
 import { executeCommand, type CommandContext } from "./commands.js";
 import { symbols, BLACK_CIRCLE } from "./theme.js";
 
@@ -45,6 +51,7 @@ interface AppProps {
 export function App({ model: initialModel, project }: AppProps) {
 	return (
 		<PuxRuntimeProvider>
+			<ToolRegistry />
 			<PuxApp initialModel={initialModel} project={project} />
 		</PuxRuntimeProvider>
 	);
@@ -54,10 +61,15 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 	const { exit } = useApp();
 	const { stdout } = useStdout();
 	const [model, setModel] = useState(initialModel);
+	const lastCtrlC = useRef(0);
 
 	useInput((input, key) => {
-		if (input === "q" && key.ctrl) {
-			exit();
+		if (input === "c" && key.ctrl) {
+			const now = Date.now();
+			if (now - lastCtrlC.current < 1000) {
+				exit();
+			}
+			lastCtrlC.current = now;
 		}
 	});
 

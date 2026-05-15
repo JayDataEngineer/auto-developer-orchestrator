@@ -16,6 +16,7 @@ import {
 import { AssistantMessage } from "./assistant-message.js";
 import { UserMessage } from "./user-message.js";
 import { ActionBar } from "./action-bar.js";
+import { BranchPicker } from "./branch-picker.js";
 import { colors, BLACK_CIRCLE, BLOCKQUOTE_BAR, symbols } from "../theme.js";
 
 // ── Thread ──
@@ -95,7 +96,7 @@ function Welcome() {
 			</Box>
 			<Box marginTop={1} flexDirection="column">
 				<Text dimColor>
-					<Text bold>Ctrl+Q</Text> Quit   <Text bold>Ctrl+P</Text> Model   <Text bold>Enter</Text> Send
+					<Text bold>Ctrl+C x2</Text> Quit   <Text bold>Ctrl+P</Text> Model   <Text bold>Enter</Text> Send
 				</Text>
 			</Box>
 		</Box>
