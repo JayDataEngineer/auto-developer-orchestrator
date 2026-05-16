@@ -88,23 +88,7 @@ const commands: Command[] = [
 	},
 	{
 		name: "model",
-		description: "Switch model (interactive picker)",
-		handler: async () => {
-			usePuxStore.getState().toggleModelPicker();
-			return { type: "handled" };
-		},
-	},
-	{
-		name: "providers",
-		description: "Browse providers and models (fullscreen)",
-		handler: async () => {
-			usePuxStore.getState().toggleProvidersOverlay();
-			return { type: "handled" };
-		},
-	},
-	{
-		name: "models",
-		description: "Browse models by provider (fullscreen)",
+		description: "Browse providers and switch model",
 		handler: async () => {
 			usePuxStore.getState().toggleProvidersOverlay();
 			return { type: "handled" };

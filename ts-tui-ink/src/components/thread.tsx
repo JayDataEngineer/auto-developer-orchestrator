@@ -20,7 +20,6 @@ import {
 import { AssistantMessage } from "./assistant-message.js";
 import { UserMessage } from "./user-message.js";
 import { SuggestionChips } from "./suggestion-chips.js";
-import { ModelPicker } from "./model-picker.js";
 import { ComposerQueue } from "./composer-queue.js";
 import { getCommands } from "../commands.js";
 import { colors, symbols } from "../theme.js";
@@ -86,9 +85,6 @@ export function Thread({ onCommand }: ThreadProps) {
 
 			{/* Composer queue — queued messages */}
 			<ComposerQueue />
-
-			{/* Model picker overlay */}
-			<ModelPicker />
 
 			{/* Slash command autocomplete */}
 			<CommandPalette selectedIdx={selectedIdx} onSelectIdx={setSelectedIdx} />
