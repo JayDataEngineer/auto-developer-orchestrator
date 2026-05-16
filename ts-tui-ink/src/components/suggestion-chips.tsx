@@ -30,13 +30,13 @@ export function SuggestionChips() {
 }
 
 function SuggestionList() {
-	// This component renders suggestions from the runtime.
-	// The adapter can populate suggestions via the runtime config.
-	// For now, we show a static set on empty thread.
 	const isEmpty = useAuiState((s) => s.thread.isEmpty);
 	const isRunning = useAuiState((s) => s.thread.isRunning);
+	const composerText = useAuiState((s) => s.composer.text);
 
 	if (!isEmpty || isRunning) return null;
+	// Hide suggestions when typing a slash command (Tab conflict)
+	if (composerText && composerText.startsWith("/")) return null;
 
 	return (
 		<Box flexDirection="column" paddingLeft={1}>
