@@ -44,8 +44,16 @@ Search through message history with highlighted matching. No search functionalit
 ## 9. Vim/Emacs Input Modes (Claude Code)
 `VimTextInput` and `BaseTextInput` with vim/emacs keybindings. We have standard `ink-text-input` with basic editing.
 
-## 10. Image Display (OpenCode, Pi TUI)
-Render images in-terminal via Kitty protocol. No image display capability.
+## 10. Image Display ✅ DONE
+Kitty protocol image rendering in the terminal. Supports Kitty and iTerm2 terminals.
+
+- **`TerminalImage` component** (`ts-tui-ink/src/components/terminal-image.tsx`): Renders base64-encoded PNG images inline using the Kitty escape sequence (`\x1b_Ga=T,f=100,...`) or iTerm2's OSC 1337 protocol. Auto-detects terminal support via `KITTY_WINDOW_ID`/`TERM` env vars.
+- **Chunked transmission**: Splits large images into 4KB chunks with the Kitty protocol's `m=1` multiplexing to avoid terminal buffer overflows.
+- **Non-Kitty fallback**: Shows image type, filename, and truncated data URI with "(use Kitty or iTerm2)" hint when terminal doesn't support inline images.
+- **`ImageMessagePart` support**: `AssistantMessage` now handles `"image"` part type (case in parts switch).
+- **`FileMessagePart` support**: Added `"file"` case that shows filename with `▎` blockquote.
+- **Screenshot tool UIs** (`custom-tool-ui.tsx`): `ScreenshotRenderer` registered under all known screenshot tool names (`screenshot`, `desktop_screenshot`, `computer_screenshot`, `take_screenshot`, `browser_screenshot`, `web_screenshot`, `observe`, `desktop_observe`). Extracts data URIs from raw results or JSON `screenshot` fields (e.g. `PageContext.Screenshot` from browser tools).
+- **Data URI detection**: `tryExtractImageDataURI()` scans result strings for `data:image/{png,jpeg,gif,webp};base64,` prefixes. `extractScreenshotURI()` also handles nested objects and raw base64 strings.
 
 ## 11. MCP Server Configuration UI (Claude Code)
 In-TUI MCP server management (add, configure, test, remove). No MCP UI.

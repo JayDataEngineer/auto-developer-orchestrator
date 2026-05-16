@@ -14,6 +14,7 @@ import { formatToolResult, getToolArgPreview } from "@pux/shared";
 import { ReasoningAccordion } from "./reasoning-accordion.js";
 import { BranchPicker } from "./branch-picker.js";
 import { MarkdownText } from "./markdown-text.js";
+import { TerminalImage } from "./terminal-image.js";
 import { colors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 
 export function AssistantMessage() {
@@ -69,6 +70,15 @@ export function AssistantMessage() {
 								<MarkdownText text={part.text} />
 							</Box>
 						);
+					case "image":
+						return (
+							<Box key={i} marginTop={1} paddingLeft={1}>
+								<TerminalImage
+									image={part.image}
+									filename={part.filename}
+								/>
+							</Box>
+						);
 					case "source":
 						return (
 							<Box key={part.id || i} paddingLeft={1}>
@@ -80,6 +90,12 @@ export function AssistantMessage() {
 											: part.url
 										: part.title || "source"}
 								</Text>
+							</Box>
+						);
+					case "file":
+						return (
+							<Box key={i} paddingLeft={1}>
+								<Text dimColor>{BLOCKQUOTE_BAR} file: {part.name || "(unnamed)"}</Text>
 							</Box>
 						);
 					default:

@@ -19,6 +19,7 @@ import {
 	DiffView,
 } from "@assistant-ui/react-ink";
 import { usePuxStore, formatToolResult } from "@pux/shared";
+import { TerminalImage } from "./terminal-image.js";
 import { colors, symbols, BLACK_CIRCLE, BLOCKQUOTE_BAR } from "../theme.js";
 
 // ── Bash execution tool UI ──
@@ -354,6 +355,130 @@ export const ExitTool = makeAssistantTool({
 	},
 });
 
+// ── Image Data URI Detection ──
+
+const DATA_URI_RE = /^data:image\/(png|jpeg|jpg|gif|webp);base64,/;
+
+function tryExtractImageDataURI(result: unknown): string | null {
+  if (typeof result === "string") {
+    const trimmed = result.trim();
+    // Common patterns: standalone data URI, or data URI embedded in backtick block
+    const match = trimmed.match(DATA_URI_RE);
+    if (match) {
+      // Return the full data URI from the start
+      const endIdx = trimmed.indexOf('"', match.index! + match[0].length);
+      return endIdx > 0 ? trimmed.slice(match.index, endIdx) : trimmed;
+    }
+    // Try to find any data URI in the string
+    const anyMatch = trimmed.match(DATA_URI_RE);
+    if (anyMatch) {
+      const start = anyMatch.index!;
+      const end = trimmed.indexOf(" ", start + anyMatch[0].length);
+      return end > 0 ? trimmed.slice(start, end) : trimmed.slice(start);
+    }
+  }
+  if (result && typeof result === "object") {
+    const obj = result as Record<string, unknown>;
+    for (const val of Object.values(obj)) {
+      const uri = tryExtractImageDataURI(val);
+      if (uri) return uri;
+    }
+  }
+  return null;
+}
+
+// ── Screenshot / Image Tool UI ──
+
+function extractScreenshotURI(result: unknown): string | null {
+  // Direct data URI
+  const direct = tryExtractImageDataURI(result);
+  if (direct) return direct;
+
+  // Structured JSON result with screenshot field
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const obj = result as Record<string, unknown>;
+    if (typeof obj.screenshot === "string") {
+      const dataUri = obj.screenshot as string;
+      if (dataUri.startsWith("data:image")) return dataUri;
+      // Maybe it's raw base64 — wrap it as PNG
+      if (/^[A-Za-z0-9+/=]+$/.test(dataUri) && dataUri.length > 100) {
+        return `data:image/png;base64,${dataUri}`;
+      }
+    }
+    // Check nested result object
+    if (obj.result && typeof obj.result === "object") {
+      return extractScreenshotURI(obj.result);
+    }
+  }
+
+  return null;
+}
+
+function ScreenshotRenderer(p: { result?: unknown; isError?: boolean; status: { type: string } }) {
+  const isDone = p.status.type === "complete";
+  const imageUri = isDone && !p.isError ? extractScreenshotURI(p.result) : null;
+  return (
+    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+      <Box>
+        <Text color={p.isError ? colors.error : isDone ? colors.success : colors.running}>
+          {p.isError ? symbols.toolError : isDone ? symbols.toolDone : symbols.toolRunning}
+        </Text>
+        <Text> </Text>
+        <Text bold>screenshot</Text>
+      </Box>
+      {imageUri && !p.isError && (
+        <Box paddingLeft={2} marginTop={1}>
+          <TerminalImage image={imageUri} filename="screenshot.png" />
+        </Box>
+      )}
+      {!imageUri && isDone && !p.isError && (
+        <Box paddingLeft={2}>
+          <Text dimColor>  {BLOCKQUOTE_BAR} (image not available in terminal)</Text>
+        </Box>
+      )}
+      {p.isError && (
+        <Box paddingLeft={2}>
+          <Text color={colors.error}>  {symbols.cross} failed</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+export const ScreenshotToolUI = makeAssistantToolUI({
+  toolName: "screenshot",
+  render: ScreenshotRenderer,
+});
+
+const DesktopScreenshotToolUI = makeAssistantToolUI({
+  toolName: "desktop_screenshot",
+  render: ScreenshotRenderer,
+});
+const ComputerScreenshotToolUI = makeAssistantToolUI({
+  toolName: "computer_screenshot",
+  render: ScreenshotRenderer,
+});
+const TakeScreenshotToolUI = makeAssistantToolUI({
+  toolName: "take_screenshot",
+  render: ScreenshotRenderer,
+});
+const BrowserScreenshotToolUI = makeAssistantToolUI({
+  toolName: "browser_screenshot",
+  render: ScreenshotRenderer,
+});
+const WebScreenshotToolUI = makeAssistantToolUI({
+  toolName: "web_screenshot",
+  render: ScreenshotRenderer,
+});
+const ObserveToolUI = makeAssistantToolUI({
+  toolName: "observe",
+  render: ScreenshotRenderer,
+});
+const DesktopObserveToolUI = makeAssistantToolUI({
+  toolName: "desktop_observe",
+  render: ScreenshotRenderer,
+});
+
 // ── Tool Registry — mount inside AssistantRuntimeProvider ──
 // Each makeAssistantToolUI returns a component that registers
 // itself via hooks when mounted within the runtime context.
@@ -369,6 +494,14 @@ export function ToolRegistry() {
 			{/* Model sometimes calls edit_file instead of file_edit */}
 			<FileEditPatchToolAliasUI />
 			<FileReadToolUI />
+			<ScreenshotToolUI />
+			<DesktopScreenshotToolUI />
+			<ComputerScreenshotToolUI />
+			<TakeScreenshotToolUI />
+			<BrowserScreenshotToolUI />
+			<WebScreenshotToolUI />
+			<ObserveToolUI />
+			<DesktopObserveToolUI />
 		</>
 	);
 }
