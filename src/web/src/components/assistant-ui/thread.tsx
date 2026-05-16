@@ -25,6 +25,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { usePuxStore } from "@/lib/pux-store";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import {
 	ActionBarMorePrimitive,
@@ -81,6 +82,13 @@ export const Thread: FC = () => {
 							{() => <ThreadMessage />}
 						</ThreadPrimitive.Messages>
 					</div>
+
+					<AuiIf condition={(s) => s.thread.isRunning}>
+						<div className="mx-auto flex w-full max-w-[var(--thread-max-width)] items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
+							<Spinner className="size-3.5" />
+							Thinking...
+						</div>
+					</AuiIf>
 
 					<ThreadPrimitive.ViewportFooter className="aui-thread-viewport-footer sticky bottom-0 mt-auto flex flex-col gap-4 overflow-visible rounded-t-3xl bg-background pb-4 md:pb-6">
 						<ThreadScrollToBottom />

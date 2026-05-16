@@ -381,7 +381,6 @@ export function App() {
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
 	const activeAgentId = usePuxStore((s) => s.activeAgentId);
-	const runningAgents = usePuxStore((s) => s.runningAgents);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
 
 	// Poll for running agent status
@@ -508,16 +507,6 @@ export function App() {
 				</header>
 				<PuxRuntimeProvider key={conversationKey}>
 					<div className="flex h-full flex-col">
-						{/* "Still working" banner when viewing a running agent */}
-						{activeProject && activeAgentId && runningAgents.has(`${activeProject}:${activeAgentId}`) && (
-							<div className="flex shrink-0 items-center gap-2 border-b border-blue-500/20 bg-blue-500/10 px-4 py-1.5 text-xs text-blue-400">
-								<span className="relative flex h-2 w-2">
-									<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
-									<span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
-								</span>
-								Agent is still working...
-							</div>
-						)}
 						<div className="flex-1 overflow-hidden">
 							<Thread />
 						</div>
