@@ -1,7 +1,6 @@
 import {
 	Users,
-	Loader2,
-	Clock,
+	RotateCcw,
 } from "lucide-react";
 import { ConfigPanel } from "./config-panel/config-panel";
 import type { FieldConfig } from "./config-panel/types";
@@ -104,14 +103,22 @@ export function WorkersPanel() {
 				id: (w: any) => w.name,
 				label: (w: any) => w.name,
 				description: (w: any) => w.persona,
-				badges: (w: any) => (w.capabilities || []).map((c: string) => ({
-					text: c,
-					variant: "secondary" as const,
-				})),
+				badges: (w: any) => [
+					...(w.isDefault ? [{ text: "default", variant: "outline" as const }] : []),
+					...(w.capabilities || []).map((c: string) => ({
+						text: c,
+						variant: "secondary" as const,
+					})),
+				],
 			}}
 			title="Workers"
 			emptyMessage="No workers configured"
 			emptyIcon={<Users className="size-8 text-muted-foreground/50" />}
+			extraActions={(w: any) =>
+				w.isModified
+					? [{ label: "Revert to default", icon: <RotateCcw size={14} />, url: `/api/workers/${w.name}/revert`, method: "POST" }]
+					: []
+			}
 			askAITemplate={(form, isEdit, editItem) => {
 				const parts: string[] = [isEdit ? `Update the worker "${(editItem as any)?.name}" for me.` : "Create a new worker for me."];
 				if (form.name.trim()) parts.push(`Name: ${form.name.trim()}`);

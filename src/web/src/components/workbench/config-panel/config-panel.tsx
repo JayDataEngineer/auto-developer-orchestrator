@@ -101,6 +101,7 @@ function ItemCard({
 	itemDef,
 	onEdit,
 	onDelete,
+	onAction,
 	enableToggle,
 	extraActions,
 }: {
@@ -108,6 +109,7 @@ function ItemCard({
 	itemDef: ConfigPanelProps<any>["itemDef"];
 	onEdit: (item: any) => void;
 	onDelete: (id: string) => void;
+	onAction?: () => void;
 	enableToggle?: ConfigPanelProps<any>["enableToggle"];
 	extraActions?: (item: any) => ActionButton[];
 }) {
@@ -147,7 +149,7 @@ function ItemCard({
 							variant="ghost"
 							size="icon"
 							className="size-7"
-							onClick={() => fetch(action.url, { method: action.method })}
+							onClick={async () => { await fetch(action.url, { method: action.method }); onAction?.(); }}
 							disabled={action.disabled}
 							title={action.label}
 						>
@@ -343,6 +345,7 @@ export function ConfigPanel<T>({
 							itemDef={itemDef}
 							onEdit={setEditItem}
 							onDelete={deleteItem}
+							onAction={fetchItems}
 							enableToggle={enableToggle}
 							extraActions={extraActions}
 						/>

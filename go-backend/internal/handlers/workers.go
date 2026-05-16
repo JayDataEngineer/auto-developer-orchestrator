@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
@@ -13,13 +15,32 @@ import (
 
 // WorkerHandler handles worker config HTTP endpoints.
 type WorkerHandler struct {
-	store *autoconfig.WorkerStore
-	log   *zap.Logger
+	store    *autoconfig.WorkerStore
+	log      *zap.Logger
+	defaults map[string][]byte // original YAML content by worker name
 }
 
 // NewWorkerHandler creates a new worker handler.
+// Snapshots existing worker files as defaults for revert.
 func NewWorkerHandler(store *autoconfig.WorkerStore, logger *zap.Logger) *WorkerHandler {
-	return &WorkerHandler{store: store, log: logger}
+	h := &WorkerHandler{store: store, log: logger, defaults: make(map[string][]byte)}
+
+	// Snapshot current worker files as defaults
+	if dir := store.Dir(); dir != "" {
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
+				continue
+			}
+			name := e.Name()[:len(e.Name())-5]
+			data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err == nil {
+				h.defaults[name] = data
+			}
+		}
+	}
+
+	return h
 }
 
 // RegisterRoutes registers all worker routes on the given router.
@@ -29,6 +50,7 @@ func (h *WorkerHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/", h.CreateWorker)
 	r.Put("/{name}", h.UpdateWorker)
 	r.Delete("/{name}", h.DeleteWorker)
+	r.Post("/{name}/revert", h.RevertWorker)
 }
 
 // ListWorkers returns all workers.
@@ -55,6 +77,8 @@ func (h *WorkerHandler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if m, ok := detail.(map[string]any); ok {
+			m["isDefault"] = h.defaults[name] != nil
+			m["isModified"] = h.isModified(name)
 			workers = append(workers, m)
 		}
 	}
@@ -173,4 +197,42 @@ func (h *WorkerHandler) DeleteWorker(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"message": "worker deleted"})
+}
+
+// RevertWorker restores a worker to its default content.
+func (h *WorkerHandler) RevertWorker(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if name == "" {
+		http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	original, ok := h.defaults[name]
+	if !ok {
+		http.Error(w, `{"error":"no default for this worker"}`, http.StatusNotFound)
+		return
+	}
+
+	path := filepath.Join(h.store.Dir(), name+".yaml")
+	if err := os.WriteFile(path, original, 0644); err != nil {
+		h.log.Error("worker revert", zap.Error(err))
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	detail, _ := h.store.Get(r.Context(), name)
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// isModified checks if a worker file differs from its default.
+func (h *WorkerHandler) isModified(name string) bool {
+	original, ok := h.defaults[name]
+	if !ok {
+		return false // not a default worker
+	}
+	current, err := os.ReadFile(filepath.Join(h.store.Dir(), name+".yaml"))
+	if err != nil {
+		return true
+	}
+	return string(current) != string(original)
 }
