@@ -15,6 +15,12 @@ export function ReasoningAccordion() {
 	const parts = useAuiState((s) => s.message.parts);
 	const isRunning = useAuiState((s) => s.message.status?.type === "running");
 
+	// Hooks MUST be called before any early returns (React hooks rules)
+	const [expanded, setExpanded] = useState(false);
+	useEffect(() => {
+		if (!isRunning) setExpanded(false);
+	}, [isRunning]);
+
 	const reasoningParts = (parts || []).filter(
 		(p: any) => p.type === "reasoning",
 	);
@@ -26,12 +32,6 @@ export function ReasoningAccordion() {
 	if (!fullText.trim()) return null;
 
 	const lines = fullText.split("\n").filter((l: string) => l.trim());
-
-	// Auto-collapse when message completes
-	const [expanded, setExpanded] = useState(false);
-	useEffect(() => {
-		if (!isRunning) setExpanded(false);
-	}, [isRunning]);
 
 	// Collapsed: show a short preview of the first line
 	if (!expanded) {

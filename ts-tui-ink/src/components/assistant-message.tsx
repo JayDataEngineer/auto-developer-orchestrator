@@ -13,6 +13,7 @@ import { useAuiState } from "@assistant-ui/react-ink";
 import { formatToolResult, getToolArgPreview } from "@pux/shared";
 import { ReasoningAccordion } from "./reasoning-accordion.js";
 import { BranchPicker } from "./branch-picker.js";
+import { MarkdownText } from "./markdown-text.js";
 import { colors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 
 export function AssistantMessage() {
@@ -65,9 +66,7 @@ export function AssistantMessage() {
 						if (!part.text?.trim()) return null;
 						return (
 							<Box key={i} flexDirection="column" paddingLeft={1}>
-								{part.text.split("\n").map((line: string, j: number) => (
-									<Text key={j}>{line || " "}</Text>
-								))}
+								<MarkdownText text={part.text} />
 							</Box>
 						);
 					case "source":
@@ -127,16 +126,18 @@ function ToolCallDisplay({
 					{isRunning ? symbols.toolRunning : isError ? symbols.toolError : symbols.toolDone}
 				</Text>
 				<Text> </Text>
-				<Text bold color={isRunning ? colors.running : undefined}>
+				<Text bold color={isDone ? colors.success : isRunning ? colors.running : undefined}>
 					{toolName}
 				</Text>
 				{argPreview && (
 					<Text color="gray">({argPreview})</Text>
 				)}
+				{isDone && !isError && (
+					<Text color="gray"> done</Text>
+				)}
 			</Box>
 			{resultPreview.length > 0 && !isError && (
 				<Box paddingLeft={2} flexDirection="column">
-					<Text color="gray">{BLOCKQUOTE_BAR} </Text>
 					{resultPreview.map((line, i) => (
 						<Text key={i} dimColor>
 							{"  "}{BLOCKQUOTE_BAR} {line.length > maxResultWidth ? line.slice(0, maxResultWidth - 3) + "..." : line}
