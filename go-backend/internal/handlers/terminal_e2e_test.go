@@ -14,7 +14,7 @@ import (
 // TestTerminalWS_Reconnect verifies that after a WebSocket disconnect,
 // a new connection can be established on the same endpoint.
 func TestTerminalWS_Reconnect(t *testing.T) {
-	handler := NewSandboxHandler(nil, zap.NewNop())
+	handler := NewSandboxHandler(nil, zap.NewNop(), nil)
 
 	server := httptest.NewServer(http.HandlerFunc(handler.TerminalWS))
 	defer server.Close()
@@ -71,7 +71,7 @@ func TestTerminalWS_Reconnect(t *testing.T) {
 // TestTerminalWS_ConcurrentConnections verifies multiple terminals
 // can be open simultaneously.
 func TestTerminalWS_ConcurrentConnections(t *testing.T) {
-	handler := NewSandboxHandler(nil, zap.NewNop())
+	handler := NewSandboxHandler(nil, zap.NewNop(), nil)
 
 	server := httptest.NewServer(http.HandlerFunc(handler.TerminalWS))
 	defer server.Close()

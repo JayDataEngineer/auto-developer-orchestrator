@@ -13,6 +13,7 @@ export function TerminalPanel({ cwd }: TerminalPanelProps) {
 	const wsRef = useRef<WebSocket | null>(null);
 	const fitRef = useRef<FitAddon | null>(null);
 	const cwdRef = useRef(cwd);
+	const prevCwdRef = useRef(cwd);
 	cwdRef.current = cwd;
 
 	// Connect WebSocket to existing terminal
@@ -112,6 +113,20 @@ export function TerminalPanel({ cwd }: TerminalPanelProps) {
 			term.dispose();
 		};
 	}, [connectWS]);
+
+	// Auto-cd when project changes while terminal is open
+	useEffect(() => {
+		if (!cwd || cwd === prevCwdRef.current) return;
+		const ws = wsRef.current;
+		if (!ws || ws.readyState !== WebSocket.OPEN) {
+			prevCwdRef.current = cwd;
+			return;
+		}
+		// Send cd command to switch to the new project directory
+		const cdCmd = `cd '${cwd.replace(/'/g, "'\\''")}'\n`;
+		ws.send(new TextEncoder().encode(cdCmd));
+		prevCwdRef.current = cwd;
+	}, [cwd]);
 
 	// Fit on container resize
 	useEffect(() => {

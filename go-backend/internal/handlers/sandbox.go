@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
+	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
@@ -23,13 +24,15 @@ import (
 type SandboxHandler struct {
 	manager *sandbox.Manager
 	logger  *zap.Logger
+	db      *storage.Database
 }
 
 // NewSandboxHandler creates a new sandbox handler
-func NewSandboxHandler(manager *sandbox.Manager, logger *zap.Logger) *SandboxHandler {
+func NewSandboxHandler(manager *sandbox.Manager, logger *zap.Logger, db *storage.Database) *SandboxHandler {
 	return &SandboxHandler{
 		manager: manager,
 		logger:  logger,
+		db:      db,
 	}
 }
 

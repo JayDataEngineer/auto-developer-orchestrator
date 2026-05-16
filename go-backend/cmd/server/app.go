@@ -240,7 +240,7 @@ func (a *App) initHandlers() {
 	if sandboxMgr != nil {
 		sandboxMgr.RecoverAllSandboxes(context.Background())
 	}
-	a.sandboxHandler = handlers.NewSandboxHandler(sandboxMgr, logger)
+	a.sandboxHandler = handlers.NewSandboxHandler(sandboxMgr, logger, a.db)
 
 	// Vision
 	visionURL := os.Getenv("LITELLM_PROXY_URL")

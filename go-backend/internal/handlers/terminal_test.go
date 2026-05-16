@@ -12,7 +12,7 @@ import (
 )
 
 func TestTerminalWS_UpgradesAndExecutes(t *testing.T) {
-	handler := NewSandboxHandler(nil, zap.NewNop())
+	handler := NewSandboxHandler(nil, zap.NewNop(), nil)
 
 	server := httptest.NewServer(http.HandlerFunc(handler.TerminalWS))
 	defer server.Close()
@@ -59,7 +59,7 @@ func TestTerminalWS_UpgradesAndExecutes(t *testing.T) {
 }
 
 func TestTerminalWS_ClosesGracefully(t *testing.T) {
-	handler := NewSandboxHandler(nil, zap.NewNop())
+	handler := NewSandboxHandler(nil, zap.NewNop(), nil)
 
 	server := httptest.NewServer(http.HandlerFunc(handler.TerminalWS))
 	defer server.Close()

@@ -18,7 +18,7 @@ import (
 func setupSandboxRouter(t *testing.T) (*chi.Mux, *sandbox.Manager) {
 	t.Helper()
 	mgr := sandbox.NewTestManager()
-	handler := NewSandboxHandler(mgr, zap.NewNop())
+	handler := NewSandboxHandler(mgr, zap.NewNop(), nil)
 
 	r := chi.NewRouter()
 	r.Route("/api/sandbox", func(r chi.Router) {
@@ -708,7 +708,7 @@ func setupVNCIntegrationTest(t *testing.T) (*httptest.Server, *chi.Mux, *sandbox
 	})
 	mgr.SetTestContainerIP(sandboxID, host)
 
-	handler := NewSandboxHandler(mgr, zap.NewNop())
+	handler := NewSandboxHandler(mgr, zap.NewNop(), nil)
 	r := chi.NewRouter()
 	r.HandleFunc("/api/sandbox/vnc/{id}/*", handler.VNCProxy)
 
@@ -857,7 +857,7 @@ func TestVNCWebSocketProxyUpstreamUnreachable(t *testing.T) {
 	})
 	mgr.SetTestContainerIP(sandboxID, "127.0.0.1")
 
-	handler := NewSandboxHandler(mgr, zap.NewNop())
+	handler := NewSandboxHandler(mgr, zap.NewNop(), nil)
 	r := chi.NewRouter()
 	r.HandleFunc("/api/sandbox/vnc/{id}/*", handler.VNCProxy)
 	proxySrv := httptest.NewServer(r)
