@@ -355,8 +355,12 @@ func TestScheduleShowViaTool(t *testing.T) {
 		t.Fatalf("show: %v", err)
 	}
 	m := result.(map[string]any)
-	if m["name"] != "show-job" {
-		t.Errorf("name = %q, want show-job", m["name"])
+	if m["operation"] != "show" {
+		t.Errorf("operation = %q, want show", m["operation"])
+	}
+	job := m["job"].(map[string]any)
+	if job["name"] != "show-job" {
+		t.Errorf("name = %q, want show-job", job["name"])
 	}
 }
 

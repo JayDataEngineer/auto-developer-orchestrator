@@ -61,8 +61,9 @@ func TestProfileToolShow(t *testing.T) {
 		t.Fatalf("show: %v", err)
 	}
 	m := result.(map[string]any)
-	if m["name"] != "mygame" {
-		t.Errorf("name = %q, want mygame", m["name"])
+	profile := m["profile"].(map[string]any)
+	if profile["name"] != "mygame" {
+		t.Errorf("name = %q, want mygame", profile["name"])
 	}
 }
 

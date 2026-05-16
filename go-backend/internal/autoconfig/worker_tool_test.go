@@ -129,8 +129,9 @@ func TestWorkerToolShow(t *testing.T) {
 		t.Fatalf("show: %v", err)
 	}
 	m := result.(map[string]any)
-	if m["persona"] != "Show test" {
-		t.Errorf("persona = %q, want %q", m["persona"], "Show test")
+	worker := m["worker"].(map[string]any)
+	if worker["persona"] != "Show test" {
+		t.Errorf("persona = %q, want %q", worker["persona"], "Show test")
 	}
 }
 

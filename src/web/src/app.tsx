@@ -17,6 +17,7 @@ import { EditorPanel } from "@/components/workbench/editor-panel";
 import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
 import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
 import { DecisionDialog } from "@/components/decision-dialog";
+import { WidgetToolUIs } from "@/components/assistant-ui/widget-tool-ui";
 import {
 	Sidebar,
 	SidebarContent,
@@ -71,6 +72,9 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	});
 	return (
 		<AssistantRuntimeProvider runtime={runtime}>
+			{WidgetToolUIs.map((UI, i) => (
+				<UI key={i} />
+			))}
 			{children}
 		</AssistantRuntimeProvider>
 	);

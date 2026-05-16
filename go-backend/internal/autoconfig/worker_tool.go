@@ -158,9 +158,33 @@ func (t *WorkerTool) list(ctx context.Context) (any, error) {
 		}
 	}
 
+	rows := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, map[string]any{
+			"name": e.Name, "jit": e.JIT, "source": e.Source,
+		})
+	}
+
 	return map[string]any{
-		"workers": entries,
-		"count":   len(entries),
+		"operation": "list",
+		"workers":   entries,
+		"count":     len(entries),
+		"widget": core.WidgetResult{
+			Type:  "list",
+			Title: fmt.Sprintf("%d worker%s", len(entries), pluralS(len(entries))),
+			Icon:  "Users",
+			Columns: []core.WidgetColumn{
+				{Key: "name", Label: "Name", Type: core.WidgetColText},
+				{Key: "jit", Label: "JIT", Type: core.WidgetColBoolean},
+				{Key: "source", Label: "Source", Type: core.WidgetColBadge},
+			},
+			Rows:  rows,
+			Empty: "No workers configured",
+			Actions: []core.WidgetAction{
+				{Label: "Delete", Icon: "Trash2", Method: "DELETE", URL: "/api/workers/{name}",
+					Confirm: "Delete this worker?", Variant: "destructive"},
+			},
+		},
 	}, nil
 }
 
@@ -177,7 +201,34 @@ func (t *WorkerTool) show(ctx context.Context, name string) (any, error) {
 			return nil, err
 		}
 	}
-	return result, nil
+
+	item, _ := result.(map[string]any)
+	if item == nil {
+		item = map[string]any{"name": name}
+	}
+
+	return map[string]any{
+		"operation": "show",
+		"worker":    item,
+		"widget": core.WidgetResult{
+			Type:  "detail",
+			Title: name,
+			Icon:  "Users",
+			Columns: []core.WidgetColumn{
+				{Key: "persona", Label: "Persona", Type: core.WidgetColText},
+				{Key: "capabilities", Label: "Capabilities", Type: core.WidgetColBadge},
+				{Key: "model", Label: "Model", Type: core.WidgetColMono},
+				{Key: "sandbox", Label: "Sandbox", Type: core.WidgetColBadge},
+				{Key: "max_rounds", Label: "Max Rounds", Type: core.WidgetColMono},
+				{Key: "jit", Label: "JIT", Type: core.WidgetColBoolean},
+			},
+			Item: item,
+			Actions: []core.WidgetAction{
+				{Label: "Delete", Icon: "Trash2", Method: "DELETE", URL: fmt.Sprintf("/api/workers/%s", name),
+					Confirm: fmt.Sprintf("Delete worker %q?", name), Variant: "destructive"},
+			},
+		},
+	}, nil
 }
 
 func (t *WorkerTool) create(ctx context.Context, args map[string]any, store *WorkerStore) (any, error) {
@@ -207,11 +258,19 @@ func (t *WorkerTool) create(ctx context.Context, args map[string]any, store *Wor
 	if store.IsJIT() {
 		jitLabel = " (session-scoped)"
 	}
+	msg := fmt.Sprintf("Worker %q created%s. Delegate to it by name.", name, jitLabel)
 	return map[string]any{
-		"message":   fmt.Sprintf("Worker %q created%s. Delegate to it by name.", name, jitLabel),
+		"operation": "create",
+		"message":   msg,
 		"name":      name,
 		"jit":       store.IsJIT(),
 		"details":   result,
+		"widget": core.WidgetResult{
+			Type:    "confirm",
+			Title:   "Worker Created",
+			Icon:    "CheckCircle",
+			Message: msg,
+		},
 	}, nil
 }
 
@@ -251,9 +310,17 @@ func (t *WorkerTool) update(ctx context.Context, args map[string]any) (any, erro
 		return nil, err
 	}
 
+	msg := fmt.Sprintf("Worker %q updated.", name)
 	return map[string]any{
-		"message": fmt.Sprintf("Worker %q updated.", name),
-		"details": result,
+		"operation": "update",
+		"message":   msg,
+		"details":   result,
+		"widget": core.WidgetResult{
+			Type:    "confirm",
+			Title:   "Worker Updated",
+			Icon:    "CheckCircle",
+			Message: msg,
+		},
 	}, nil
 }
 
@@ -270,7 +337,17 @@ func (t *WorkerTool) delete(ctx context.Context, name string) (any, error) {
 			return nil, err
 		}
 	}
-	return TextResult(fmt.Sprintf("Worker %q deleted.", name)), nil
+	msg := fmt.Sprintf("Worker %q deleted.", name)
+	return map[string]any{
+		"operation": "delete",
+		"message":   msg,
+		"widget": core.WidgetResult{
+			Type:    "confirm",
+			Title:   "Deleted",
+			Icon:    "Trash2",
+			Message: msg,
+		},
+	}, nil
 }
 
 func (t *WorkerTool) listCapabilities() (any, error) {
@@ -297,9 +374,31 @@ func (t *WorkerTool) listCapabilities() (any, error) {
 		return details[i]["name"] < details[j]["name"]
 	})
 
+	rows := make([]map[string]any, 0, len(details))
+	for _, d := range details {
+		row := make(map[string]any, len(d))
+		for k, v := range d {
+			row[k] = v
+		}
+		rows = append(rows, row)
+	}
+
 	return map[string]any{
+		"operation":    "list_capabilities",
 		"capabilities": details,
 		"count":        len(details),
 		"usage":        "Use capability names in the 'capabilities' array when creating workers.",
+		"widget": core.WidgetResult{
+			Type:  "list",
+			Title: fmt.Sprintf("%d capabilit%s", len(details), pluralIES(len(details))),
+			Icon:  "Package",
+			Columns: []core.WidgetColumn{
+				{Key: "name", Label: "Name", Type: core.WidgetColText},
+				{Key: "description", Label: "Description", Type: core.WidgetColText},
+				{Key: "tools", Label: "Tools", Type: core.WidgetColMono},
+			},
+			Rows:  rows,
+			Empty: "No capabilities found",
+		},
 	}, nil
 }

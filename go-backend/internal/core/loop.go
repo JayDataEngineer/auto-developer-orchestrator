@@ -722,6 +722,11 @@ func extractArtifact(toolName string, result any) any {
 		return nil
 	}
 
+	// Widget key — generic tool-ui contract
+	if widget, exists := m["widget"]; exists {
+		return map[string]any{"type": "widget", "widget": widget}
+	}
+
 	// Explicit artifact key takes precedence
 	if artifact, exists := m["artifact"]; exists {
 		return artifact

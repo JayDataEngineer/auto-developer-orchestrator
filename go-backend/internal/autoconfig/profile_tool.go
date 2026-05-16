@@ -64,47 +64,138 @@ func (t *ProfileTool) Execute(ctx context.Context, args map[string]any) (any, er
 
 	switch op {
 	case "list":
-		return t.store.List(ctx)
+		return t.list(ctx)
 	case "show":
 		name, _ := args["name"].(string)
 		if name == "" {
 			return nil, core.NewToolError("manage_profile", "show requires 'name'")
 		}
-		return t.store.Get(ctx, name)
+		return t.show(ctx, name)
 	case "create":
-		name, _ := args["name"].(string)
-		content, _ := args["content"].(string)
-		if name == "" {
-			return nil, core.NewToolError("manage_profile", "create requires 'name'")
-		}
-		if content == "" {
-			return nil, core.NewToolError("manage_profile", "create requires 'content' (YAML)")
-		}
-		spec := map[string]any{"content": content}
-		return t.store.Put(ctx, name, spec)
+		return t.createOrUpdate(ctx, args, "create")
 	case "update":
-		name, _ := args["name"].(string)
-		content, _ := args["content"].(string)
-		if name == "" {
-			return nil, core.NewToolError("manage_profile", "update requires 'name'")
-		}
-		if content == "" {
-			return nil, core.NewToolError("manage_profile", "update requires 'content' (YAML)")
-		}
-		spec := map[string]any{"content": content}
-		return t.store.Put(ctx, name, spec)
+		return t.createOrUpdate(ctx, args, "update")
 	case "delete":
 		name, _ := args["name"].(string)
 		if name == "" {
 			return nil, core.NewToolError("manage_profile", "delete requires 'name'")
 		}
-		if err := t.store.Delete(ctx, name); err != nil {
-			return nil, err
-		}
-		return TextResult(fmt.Sprintf("Profile %q deleted.", name)), nil
+		return t.delete(ctx, name)
 	default:
 		return nil, core.NewToolError("manage_profile", fmt.Sprintf("unknown operation: %s", op))
 	}
+}
+
+func (t *ProfileTool) list(ctx context.Context) (any, error) {
+	result, err := t.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]string, 0)
+	if m, ok := result.(map[string]any); ok {
+		if list, ok := m["items"].([]string); ok {
+			items = list
+		}
+	}
+	rows := make([]map[string]any, 0, len(items))
+	for _, name := range items {
+		rows = append(rows, map[string]any{"name": name})
+	}
+	return map[string]any{
+		"operation": "list",
+		"items":     items,
+		"count":     len(items),
+		"widget": core.WidgetResult{
+			Type:    "list",
+			Title:   fmt.Sprintf("%d profile%s", len(items), pluralS(len(items))),
+			Icon:    "IdCard",
+			Columns: []core.WidgetColumn{{Key: "name", Label: "Name", Type: core.WidgetColText}},
+			Rows:    rows,
+			Empty:   "No profiles configured",
+			Actions: []core.WidgetAction{
+				{Label: "Delete", Icon: "Trash2", Method: "DELETE", URL: "/api/profiles/{name}",
+					Confirm: "Delete this profile?", Variant: "destructive"},
+			},
+		},
+	}, nil
+}
+
+func (t *ProfileTool) show(ctx context.Context, name string) (any, error) {
+	result, err := t.store.Get(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	item, _ := result.(map[string]any)
+	if item == nil {
+		item = map[string]any{"name": name}
+	}
+	return map[string]any{
+		"operation": "show",
+		"profile":   item,
+		"widget": core.WidgetResult{
+			Type:  "detail",
+			Title: name,
+			Icon:  "IdCard",
+			Columns: []core.WidgetColumn{
+				{Key: "name", Label: "Name", Type: core.WidgetColText},
+				{Key: "type", Label: "Type", Type: core.WidgetColBadge},
+				{Key: "actions", Label: "Actions", Type: core.WidgetColMono},
+			},
+			Item: item,
+			Actions: []core.WidgetAction{
+				{Label: "Delete", Icon: "Trash2", Method: "DELETE", URL: fmt.Sprintf("/api/profiles/%s", name),
+					Confirm: fmt.Sprintf("Delete profile %q?", name), Variant: "destructive"},
+			},
+		},
+	}, nil
+}
+
+func (t *ProfileTool) createOrUpdate(ctx context.Context, args map[string]any, op string) (any, error) {
+	name, _ := args["name"].(string)
+	content, _ := args["content"].(string)
+	if name == "" {
+		return nil, core.NewToolError("manage_profile", fmt.Sprintf("%s requires 'name'", op))
+	}
+	if content == "" {
+		return nil, core.NewToolError("manage_profile", fmt.Sprintf("%s requires 'content' (YAML)", op))
+	}
+	spec := map[string]any{"content": content}
+	_, err := t.store.Put(ctx, name, spec)
+	if err != nil {
+		return nil, err
+	}
+	msg := fmt.Sprintf("Profile %q %sd.", name, op)
+	title := "Profile Created"
+	if op == "update" {
+		title = "Profile Updated"
+	}
+	return map[string]any{
+		"operation": op,
+		"message":   msg,
+		"widget": core.WidgetResult{
+			Type:    "confirm",
+			Title:   title,
+			Icon:    "CheckCircle",
+			Message: msg,
+		},
+	}, nil
+}
+
+func (t *ProfileTool) delete(ctx context.Context, name string) (any, error) {
+	if err := t.store.Delete(ctx, name); err != nil {
+		return nil, err
+	}
+	msg := fmt.Sprintf("Profile %q deleted.", name)
+	return map[string]any{
+		"operation": "delete",
+		"message":   msg,
+		"widget": core.WidgetResult{
+			Type:    "confirm",
+			Title:   "Deleted",
+			Icon:    "Trash2",
+			Message: msg,
+		},
+	}, nil
 }
 
 var _ core.Tool = (*ProfileTool)(nil)

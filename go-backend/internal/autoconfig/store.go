@@ -81,3 +81,19 @@ func TextResult(message string) map[string]any {
 func ListResult(items []string, count int) map[string]any {
 	return map[string]any{"items": items, "count": count}
 }
+
+// pluralS returns "s" for n != 1.
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// pluralIES returns "y" for n == 1, "ies" otherwise (e.g. capability/capabilities).
+func pluralIES(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
+}

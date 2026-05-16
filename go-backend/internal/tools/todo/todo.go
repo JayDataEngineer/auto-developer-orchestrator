@@ -132,7 +132,13 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 		if err := t.store.Add(task); err != nil {
 			return nil, err
 		}
-		return map[string]any{"success": true, "action": "add", "task": task}, nil
+		msg := fmt.Sprintf("Task added: %s", task)
+		return map[string]any{
+			"success": true, "action": "add", "task": task,
+			"widget": core.WidgetResult{
+				Type: "confirm", Title: "Task Added", Icon: "CheckCircle", Message: msg,
+			},
+		}, nil
 
 	case "update":
 		if task == "" {
@@ -144,7 +150,13 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 		if err := t.store.Update(task, status); err != nil {
 			return nil, err
 		}
-		return map[string]any{"success": true, "action": "update", "task": task, "status": status}, nil
+		msg := fmt.Sprintf("Task %q → %s", task, status)
+		return map[string]any{
+			"success": true, "action": "update", "task": task, "status": status,
+			"widget": core.WidgetResult{
+				Type: "confirm", Title: "Task Updated", Icon: "CheckCircle", Message: msg,
+			},
+		}, nil
 
 	case "delete":
 		if task == "" {
@@ -153,16 +165,54 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 		if err := t.store.Delete(task); err != nil {
 			return nil, err
 		}
-		return map[string]any{"success": true, "action": "delete", "task": task}, nil
+		msg := fmt.Sprintf("Task deleted: %s", task)
+		return map[string]any{
+			"success": true, "action": "delete", "task": task,
+			"widget": core.WidgetResult{
+				Type: "confirm", Title: "Deleted", Icon: "Trash2", Message: msg,
+			},
+		}, nil
 
 	case "clear":
 		t.store.Clear()
-		return map[string]any{"success": true, "action": "clear"}, nil
+		return map[string]any{
+			"success": true, "action": "clear",
+			"widget": core.WidgetResult{
+				Type: "confirm", Title: "Cleared", Icon: "Trash2", Message: "All tasks cleared",
+			},
+		}, nil
 
 	case "list":
-		return map[string]any{"todos": t.store.Items}, nil
+		rows := make([]map[string]any, 0, len(t.store.Items))
+		for _, item := range t.store.Items {
+			rows = append(rows, map[string]any{"task": item.Task, "status": item.Status})
+		}
+		return map[string]any{
+			"todos": t.store.Items,
+			"widget": core.WidgetResult{
+				Type:  "list",
+				Title: fmt.Sprintf("%d task%s", len(rows), pluralS(len(rows))),
+				Icon:  "ListTodo",
+				Columns: []core.WidgetColumn{
+					{Key: "task", Label: "Task", Type: core.WidgetColText},
+					{Key: "status", Label: "Status", Type: core.WidgetColStatus, ColorMap: map[string]string{
+						"pending": "text-muted-foreground", "in_progress": "text-blue-400",
+						"done": "text-green-400", "blocked": "text-red-400",
+					}},
+				},
+				Rows:  rows,
+				Empty: "No tasks",
+			},
+		}, nil
 
 	default:
 		return nil, core.NewToolError("todo", "unknown action: "+action)
 	}
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
