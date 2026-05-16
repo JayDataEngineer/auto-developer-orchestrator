@@ -295,3 +295,121 @@ func (h *PuxHandler) resolveEngineForModel(modelID string) *llamaeng.LLMClient {
 
 	return nil
 }
+
+// AddProvider adds or updates a provider in settings.json.
+// POST /api/pux/providers
+func (h *PuxHandler) AddProvider(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeReq[struct {
+		ID       string `json:"id"`
+		BaseURL  string `json:"baseUrl"`
+		APIKey   string `json:"apiKey"`
+		API      string `json:"api"`
+		Models   []struct {
+			ID            string `json:"id"`
+			Name          string `json:"name"`
+			ContextWindow int    `json:"contextWindow"`
+			MaxTokens     int    `json:"maxTokens"`
+		} `json:"models"`
+	}](w, r)
+	if !ok {
+		return
+	}
+
+	if req.ID == "" || req.BaseURL == "" {
+		JSONError(w, "id and baseUrl are required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Models) == 0 {
+		JSONError(w, "at least one model is required", http.StatusBadRequest)
+		return
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		JSONError(w, "cannot determine home directory", http.StatusInternalServerError)
+		return
+	}
+
+	settingsPath := filepath.Join(homeDir, ".pi", "agent", "settings.json")
+
+	// Read existing settings
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		JSONError(w, "cannot read settings.json", http.StatusInternalServerError)
+		return
+	}
+
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &settings); err != nil {
+		JSONError(w, "invalid settings.json", http.StatusInternalServerError)
+		return
+	}
+
+	// Get or create providers map
+	var providers map[string]json.RawMessage
+	if raw, ok := settings["providers"]; ok {
+		if err := json.Unmarshal(raw, &providers); err != nil {
+			JSONError(w, "invalid providers in settings.json", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		providers = make(map[string]json.RawMessage)
+	}
+
+	// Build provider entry
+	api := req.API
+	if api == "" {
+		api = "openai-completions"
+	}
+	modelEntries := make([]map[string]interface{}, 0, len(req.Models))
+	for _, m := range req.Models {
+		entry := map[string]interface{}{
+			"id":            m.ID,
+			"name":          m.Name,
+			"api":           api,
+			"reasoning":     false,
+			"input":         []string{"text"},
+			"cost":          map[string]float64{"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+			"contextWindow": m.ContextWindow,
+			"maxTokens":     m.MaxTokens,
+		}
+		modelEntries = append(modelEntries, entry)
+	}
+
+	providerEntry := map[string]interface{}{
+		"baseUrl": req.BaseURL,
+		"api":     api,
+		"apiKey":  req.APIKey,
+		"compat": map[string]bool{
+			"supportsDeveloperRole":   false,
+			"supportsReasoningEffort": false,
+		},
+		"models": modelEntries,
+	}
+
+	providerJSON, _ := json.Marshal(providerEntry)
+	providers[req.ID] = providerJSON
+	settings["providers"], _ = json.Marshal(providers)
+
+	// Write back
+	output, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		JSONError(w, "failed to marshal settings", http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(settingsPath, output, 0600); err != nil {
+		JSONError(w, "failed to write settings.json", http.StatusInternalServerError)
+		return
+	}
+
+	h.log.Info("Provider added",
+		zap.String("provider", req.ID),
+		zap.String("baseUrl", req.BaseURL),
+		zap.Int("models", len(req.Models)),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":  true,
+		"provider": req.ID,
+	})
+}
