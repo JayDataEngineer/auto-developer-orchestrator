@@ -70,6 +70,20 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	const runtime = useLocalRuntime(puxChatAdapter, {
 		adapters: { history: historyAdapter },
 	});
+
+	// Listen for pux:send-message events from workbench panels
+	useEffect(() => {
+		const handler = (e: Event) => {
+			const text = (e as CustomEvent).detail?.text;
+			if (text) {
+				runtime.thread.composer.setText(text);
+				runtime.thread.composer.send();
+			}
+		};
+		window.addEventListener("pux:send-message", handler);
+		return () => window.removeEventListener("pux:send-message", handler);
+	}, [runtime]);
+
 	return (
 		<AssistantRuntimeProvider runtime={runtime}>
 			{WidgetToolUIs.map((UI, i) => (

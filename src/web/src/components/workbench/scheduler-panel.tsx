@@ -13,7 +13,11 @@ import {
 	Calendar,
 	Trash2,
 	Plus,
+	MessageSquare,
+	X,
 } from "lucide-react";
+
+// ── Types ──
 
 interface Job {
 	id: string;
@@ -34,11 +38,33 @@ interface Job {
 	durationMs?: number;
 }
 
-const STATUS_CONFIG: Record<string, { icon: typeof Clock; color: string; label: string; spin?: boolean }> = {
-	idle: { icon: Clock, color: "text-muted-foreground", label: "Idle" },
-	running: { icon: Loader2, color: "text-blue-400", label: "Running", spin: true },
-	error: { icon: AlertTriangle, color: "text-red-400", label: "Error" },
-	disabled: { icon: Pause, color: "text-muted-foreground", label: "Disabled" },
+type ScheduleType = "manual" | "cron" | "every" | "at";
+
+interface FormData {
+	name: string;
+	message: string;
+	scheduleType: ScheduleType;
+	cronExpr: string;
+	everyMinutes: string;
+	description: string;
+}
+
+const emptyForm: FormData = {
+	name: "",
+	message: "",
+	scheduleType: "manual",
+	cronExpr: "",
+	everyMinutes: "30",
+	description: "",
+};
+
+// ── Helpers ──
+
+const STATUS_CONFIG: Record<string, { icon: typeof Clock; color: string; spin?: boolean }> = {
+	idle: { icon: Clock, color: "text-muted-foreground" },
+	running: { icon: Loader2, color: "text-blue-400", spin: true },
+	error: { icon: AlertTriangle, color: "text-red-400" },
+	disabled: { icon: Pause, color: "text-muted-foreground" },
 };
 
 const RESULT_ICON: Record<string, React.ReactNode> = {
@@ -64,6 +90,8 @@ function formatSchedule(job: Job): string {
 	return "manual";
 }
 
+// ── Job row ──
+
 function JobRow({
 	job,
 	onTrigger,
@@ -75,8 +103,8 @@ function JobRow({
 	onToggle: (id: string, enabled: boolean) => void;
 	onDelete: (id: string) => void;
 }) {
-	const statusCfg = STATUS_CONFIG[job.status] || STATUS_CONFIG.idle;
-	const StatusIcon = statusCfg.icon;
+	const cfg = STATUS_CONFIG[job.status] || STATUS_CONFIG.idle;
+	const Icon = cfg.icon;
 
 	return (
 		<div className={cn(
@@ -84,10 +112,7 @@ function JobRow({
 			!job.enabled && "opacity-60",
 		)}>
 			<div className="mt-0.5">
-				<StatusIcon
-					size={14}
-					className={cn(statusCfg.color, statusCfg.spin && "animate-spin")}
-				/>
+				<Icon size={14} className={cn(cfg.color, cfg.spin && "animate-spin")} />
 			</div>
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
@@ -143,18 +168,137 @@ function JobRow({
 	);
 }
 
+// ── New job form ──
+
+function NewJobForm({
+	onSubmit,
+	onCancel,
+	onAskAI,
+	submitting,
+}: {
+	onSubmit: (data: FormData) => void;
+	onCancel: () => void;
+	onAskAI: (data: FormData) => void;
+	submitting: boolean;
+}) {
+	const [form, setForm] = useState<FormData>(emptyForm);
+	const update = (key: keyof FormData, val: string) => setForm((f) => ({ ...f, [key]: val }));
+
+	const canSubmit = form.name.trim() && form.message.trim();
+
+	return (
+		<div className="flex flex-col gap-3 border-b border-border p-3">
+			<div className="flex items-center justify-between">
+				<span className="text-xs font-medium">New Job</span>
+				<button onClick={onCancel} className="rounded-md p-1 text-muted-foreground hover:bg-accent">
+					<X size={12} />
+				</button>
+			</div>
+
+			<label className="flex flex-col gap-1">
+				<span className="text-[10px] uppercase tracking-wider text-muted-foreground">Name</span>
+				<input
+					value={form.name}
+					onChange={(e) => update("name", e.target.value)}
+					placeholder="daily-standup"
+					className="rounded-md border border-border bg-transparent px-2 py-1.5 text-xs outline-none focus:border-ring"
+				/>
+			</label>
+
+			<label className="flex flex-col gap-1">
+				<span className="text-[10px] uppercase tracking-wider text-muted-foreground">Prompt</span>
+				<textarea
+					value={form.message}
+					onChange={(e) => update("message", e.target.value)}
+					placeholder="What should this job do each time it runs?"
+					rows={3}
+					className="rounded-md border border-border bg-transparent px-2 py-1.5 text-xs outline-none focus:border-ring resize-none"
+				/>
+			</label>
+
+			<label className="flex flex-col gap-1">
+				<span className="text-[10px] uppercase tracking-wider text-muted-foreground">Schedule</span>
+				<select
+					value={form.scheduleType}
+					onChange={(e) => update("scheduleType", e.target.value)}
+					className="rounded-md border border-border bg-transparent px-2 py-1.5 text-xs outline-none focus:border-ring"
+				>
+					<option value="manual">Manual (run on demand)</option>
+					<option value="cron">Cron expression</option>
+					<option value="every">Interval</option>
+				</select>
+			</label>
+
+			{form.scheduleType === "cron" && (
+				<label className="flex flex-col gap-1">
+					<span className="text-[10px] uppercase tracking-wider text-muted-foreground">Cron</span>
+					<input
+						value={form.cronExpr}
+						onChange={(e) => update("cronExpr", e.target.value)}
+						placeholder="0 9 * * *"
+						className="rounded-md border border-border bg-transparent px-2 py-1.5 font-mono text-xs outline-none focus:border-ring"
+					/>
+				</label>
+			)}
+
+			{form.scheduleType === "every" && (
+				<label className="flex flex-col gap-1">
+					<span className="text-[10px] uppercase tracking-wider text-muted-foreground">Every N minutes</span>
+					<input
+						value={form.everyMinutes}
+						onChange={(e) => update("everyMinutes", e.target.value)}
+						placeholder="30"
+						type="number"
+						min="1"
+						className="rounded-md border border-border bg-transparent px-2 py-1.5 text-xs outline-none focus:border-ring"
+					/>
+				</label>
+			)}
+
+			<label className="flex flex-col gap-1">
+				<span className="text-[10px] uppercase tracking-wider text-muted-foreground">Description</span>
+				<input
+					value={form.description}
+					onChange={(e) => update("description", e.target.value)}
+					placeholder="Optional note"
+					className="rounded-md border border-border bg-transparent px-2 py-1.5 text-xs outline-none focus:border-ring"
+				/>
+			</label>
+
+			<div className="flex items-center gap-2 pt-1">
+				<button
+					onClick={() => onSubmit(form)}
+					disabled={!canSubmit || submitting}
+					className="flex-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+				>
+					{submitting ? "Creating..." : "Create Job"}
+				</button>
+				<button
+					onClick={() => onAskAI(form)}
+					className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+				>
+					<MessageSquare size={11} />
+					Ask AI
+				</button>
+			</div>
+		</div>
+	);
+}
+
+// ── Main panel ──
+
 export function SchedulerPanel() {
 	const [jobs, setJobs] = useState<Job[]>([]);
 	const [loading, setLoading] = useState(true);
-	const [creating, setCreating] = useState(false);
+	const [submitting, setSubmitting] = useState(false);
+	const [showForm, setShowForm] = useState(false);
 
 	const fetchJobs = useCallback(async () => {
 		try {
 			const resp = await fetch("/api/scheduler/");
 			if (resp.ok) {
 				const data = await resp.json();
-				const list = Array.isArray(data) ? data : data.jobs ?? [];
-				setJobs(list);
+				setJobs(Array.isArray(data) ? data : data.jobs ?? []);
 			}
 		} catch {
 			// ignore
@@ -171,7 +315,6 @@ export function SchedulerPanel() {
 
 	const triggerJob = async (id: string) => {
 		await fetch(`/api/scheduler/${id}/trigger`, { method: "POST" });
-		// Brief delay then refresh to show "running" status
 		setTimeout(fetchJobs, 500);
 	};
 
@@ -189,47 +332,53 @@ export function SchedulerPanel() {
 		fetchJobs();
 	};
 
-	const createTestJob = async () => {
-		setCreating(true);
+	const submitJob = async (form: FormData) => {
+		setSubmitting(true);
 		try {
+			const body: Record<string, any> = {
+				name: form.name.trim(),
+				message: form.message.trim(),
+				scheduleType: form.scheduleType,
+				project: "default",
+			};
+			if (form.description.trim()) body.description = form.description.trim();
+			if (form.scheduleType === "cron") body.cronExpr = form.cronExpr.trim();
+			if (form.scheduleType === "every") {
+				const mins = parseInt(form.everyMinutes) || 30;
+				body.everySeconds = mins * 60;
+			}
+
 			await fetch("/api/scheduler/", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					name: `test-${Date.now().toString(36)}`,
-					description: "Test job created from scheduler panel",
-					project: "default",
-					message: "Echo hello world. Say the current time.",
-					scheduleType: "manual",
-				}),
+				body: JSON.stringify(body),
 			});
+			setShowForm(false);
 			fetchJobs();
 		} finally {
-			setCreating(false);
+			setSubmitting(false);
 		}
+	};
+
+	const askAI = (form: FormData) => {
+		const parts: string[] = ["Create a scheduled job for me."];
+		if (form.name.trim()) parts.push(`Name: ${form.name.trim()}`);
+		if (form.message.trim()) parts.push(`Prompt: ${form.message.trim()}`);
+		if (form.scheduleType !== "manual") parts.push(`Schedule: ${form.scheduleType}`);
+		if (form.scheduleType === "cron" && form.cronExpr.trim()) parts.push(`Cron: ${form.cronExpr.trim()}`);
+		if (form.scheduleType === "every" && form.everyMinutes) parts.push(`Every ${form.everyMinutes} minutes`);
+		if (form.description.trim()) parts.push(`Description: ${form.description.trim()}`);
+
+		dispatchEvent(new CustomEvent("pux:send-message", {
+			detail: { text: parts.join(" ") },
+		}));
+		setShowForm(false);
 	};
 
 	if (loading) {
 		return (
 			<div className="flex h-full items-center justify-center">
 				<Loader2 className="size-5 animate-spin text-muted-foreground" />
-			</div>
-		);
-	}
-
-	if (jobs.length === 0) {
-		return (
-			<div className="flex h-full flex-col items-center justify-center gap-3">
-				<Calendar className="size-8 text-muted-foreground/50" />
-				<span className="text-xs text-muted-foreground">No scheduled jobs</span>
-				<button
-					onClick={createTestJob}
-					disabled={creating}
-					className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-				>
-					<Plus className="size-3" />
-					{creating ? "Creating..." : "Create test job"}
-				</button>
 			</div>
 		);
 	}
@@ -242,10 +391,12 @@ export function SchedulerPanel() {
 				</span>
 				<div className="flex items-center gap-1">
 					<button
-						onClick={createTestJob}
-						disabled={creating}
-						className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-30"
-						title="Create test job"
+						onClick={() => setShowForm((v) => !v)}
+						className={cn(
+							"rounded-md p-1 hover:bg-accent hover:text-accent-foreground",
+							showForm ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+						)}
+						title="New job"
 					>
 						<Plus size={12} />
 					</button>
@@ -258,17 +409,41 @@ export function SchedulerPanel() {
 					</button>
 				</div>
 			</div>
-			<div className="flex-1 space-y-1.5 overflow-y-auto p-2">
-				{jobs.map((job) => (
-					<JobRow
-						key={job.id}
-						job={job}
-						onTrigger={triggerJob}
-						onToggle={toggleJob}
-						onDelete={deleteJob}
-					/>
-				))}
-			</div>
+
+			{showForm && (
+				<NewJobForm
+					onSubmit={submitJob}
+					onCancel={() => setShowForm(false)}
+					onAskAI={askAI}
+					submitting={submitting}
+				/>
+			)}
+
+			{!showForm && jobs.length === 0 ? (
+				<div className="flex flex-1 flex-col items-center justify-center gap-3">
+					<Calendar className="size-8 text-muted-foreground/50" />
+					<span className="text-xs text-muted-foreground">No scheduled jobs</span>
+					<button
+						onClick={() => setShowForm(true)}
+						className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+					>
+						<Plus className="size-3" />
+						New Job
+					</button>
+				</div>
+			) : (
+				<div className="flex-1 space-y-1.5 overflow-y-auto p-2">
+					{jobs.map((job) => (
+						<JobRow
+							key={job.id}
+							job={job}
+							onTrigger={triggerJob}
+							onToggle={toggleJob}
+							onDelete={deleteJob}
+						/>
+					))}
+				</div>
+			)}
 		</div>
 	);
 }
