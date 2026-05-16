@@ -88,13 +88,39 @@ const commands: Command[] = [
 	},
 	{
 		name: "model",
-		description: "Switch model",
-		usage: "/model <name>",
+		description: "Switch or list models",
+		usage: "/model [name]",
 		handler: async (args, ctx) => {
 			if (!args.trim()) {
-				return { type: "handled", message: `Current model: ${ctx.model}` };
+				// List available models
+				try {
+					const fetch = getFetch();
+					const resp = await fetch(apiUrl("/api/pux/models"));
+					if (resp.ok) {
+						const models = await resp.json() as Array<{ id: string; name: string; provider: string }>;
+						const current = ctx.model || "(default)";
+						const lines = models.map((m) => {
+							const marker = m.id === current ? " ←" : "";
+							return `  ${m.id.padEnd(30)} ${m.name} (${m.provider})${marker}`;
+						});
+						return { type: "handled", message: `Models (current: ${current}):\n${lines.join("\n")}` };
+					}
+				} catch { /* fallback */ }
+				return { type: "handled", message: `Current model: ${ctx.model || "(default)"}` };
 			}
 			const newModel = args.trim();
+			// Validate against backend
+			try {
+				const fetch = getFetch();
+				const resp = await fetch(apiUrl("/api/pux/models"));
+				if (resp.ok) {
+					const models = await resp.json() as Array<{ id: string }>;
+					const ids = models.map((m) => m.id);
+					if (!ids.includes(newModel)) {
+						return { type: "handled", message: `Unknown model: ${newModel}\nAvailable: ${ids.join(", ")}` };
+					}
+				}
+			} catch { /* skip validation if backend unreachable */ }
 			ctx.setModel(newModel);
 			usePuxStore.getState().setModel(newModel);
 			return { type: "handled", message: `Model set to: ${newModel}` };
