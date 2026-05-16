@@ -26,6 +26,8 @@ import { getCommands } from "../commands.js";
 import { PathAutocomplete, getCompletions } from "./path-autocomplete.js";
 import { VimInput } from "./vim-input.js";
 import { useColors, symbols } from "../theme.js";
+import { createRequire } from "node:module";
+const puxVersion = createRequire(import.meta.url)("../../../package.json").version;
 
 // ── Thread ──
 
@@ -212,7 +214,7 @@ function Welcome() {
 					<Text color={colors.brand}>{" ▘▘▝▝ "}</Text>
 				</Box>
 				<Box flexDirection="column" justifyContent="center">
-					<Text bold color={colors.brand}>Pux</Text>
+					<Text bold color={colors.brand}>Pux v{puxVersion}</Text>
 					<Text dimColor>{modelLabel}</Text>
 					<Text dimColor>{shortPath}</Text>
 				</Box>
