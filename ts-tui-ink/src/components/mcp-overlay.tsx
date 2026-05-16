@@ -113,11 +113,9 @@ export function MCPOverlay() {
                 const globalIdx = scrollOffset + vi;
                 const isSelected = globalIdx === selectedIdx;
                 return (
-                  <Box key={tool}>
-                    <Text backgroundColor={isSelected ? "gray" : undefined} bold={isSelected}>
-                      {"  "}{isSelected ? symbols.arrow : " "} {tool}
-                    </Text>
-                  </Box>
+                  <Text key={tool} backgroundColor={isSelected ? "gray" : undefined} bold={isSelected}>
+                    {"  "}{isSelected ? symbols.arrow : " "} {tool}
+                  </Text>
                 );
               })}
               {tools.length > maxVisible - 2 && (
@@ -171,16 +169,14 @@ function ServerRow({ server, isSelected }: { server: MCPServerInfo; isSelected: 
   const statusColor = server.available ? "green" : "red";
 
   return (
-    <Box>
-      <Text backgroundColor={isSelected ? "gray" : undefined} bold={isSelected}>
-        {" "}{isSelected ? symbols.arrow : " "}{" "}
-      </Text>
+    <Text backgroundColor={isSelected ? "gray" : undefined}>
+      {" "}{isSelected ? symbols.arrow : " "}{" "}
       <Text color={statusColor}>{statusIcon} </Text>
       <Text bold={isSelected}>{server.prefix.padEnd(12)}</Text>
       <Text dimColor>{server.endpoint}</Text>
       <Text dimColor>  ({server.toolCount} tool{server.toolCount !== 1 ? "s" : ""})</Text>
       {!server.available && <Text color={colors.warning}> [offline]</Text>}
-    </Box>
+    </Text>
   );
 }
 

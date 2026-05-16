@@ -406,28 +406,24 @@ function ProviderRow({ name, provider, isSelected, activeModel }: {
 	const desc = catalog?.description || name;
 
 	return (
-		<Box>
-			<Text backgroundColor={isSelected ? "gray" : undefined} bold={isSelected}>
-				{" "}{isSelected ? symbols.arrow : " "}{" "}
-			</Text>
+		<Text backgroundColor={isSelected ? "gray" : undefined}>
+			{" "}{isSelected ? symbols.arrow : " "}{" "}
 			<Text color={statusColor}>{statusIcon} </Text>
 			<Text bold={isSelected}>{name.padEnd(14)}</Text>
 			<Text color={typeColor}>{typeLabel.padEnd(12)}</Text>
 			<Text dimColor>{desc}</Text>
 			{hasActive && <Text color={colors.brand}> ←</Text>}
-		</Box>
+		</Text>
 	);
 }
 
 function AddProviderRow({ isSelected }: { isSelected: boolean }) {
 	const colors = useColors();
 	return (
-		<Box>
-			<Text backgroundColor={isSelected ? "gray" : undefined}>
-				{" "}{isSelected ? symbols.arrow : " "}{" "}
-			</Text>
+		<Text backgroundColor={isSelected ? "gray" : undefined}>
+			{" "}{isSelected ? symbols.arrow : " "}{" "}
 			<Text color={colors.brand} bold>+ Add provider...</Text>
-		</Box>
+		</Text>
 	);
 }
 
@@ -469,10 +465,8 @@ function ModelRow({ model, provider, isSelected, isActive }: {
 	const costLabel = isFree ? "free" : `$${model.cost.input}/$${model.cost.output}`;
 
 	return (
-		<Box>
-			<Text backgroundColor={isSelected ? "gray" : undefined}>
-				{"    "}{isSelected ? symbols.arrow : " "}{" "}
-			</Text>
+		<Text backgroundColor={isSelected ? "gray" : undefined}>
+			{"    "}{isSelected ? symbols.arrow : " "}{" "}
 			<Text color={isActive ? colors.brand : undefined} bold={isActive || isSelected}>
 				{model.name}
 			</Text>
@@ -482,7 +476,7 @@ function ModelRow({ model, provider, isSelected, isActive }: {
 			{model.reasoning && <Text color="yellow"> [R]</Text>}
 			<Text dimColor color="gray"> {costLabel}</Text>
 			{isActive && <Text color={colors.brand}> ←</Text>}
-		</Box>
+		</Text>
 	);
 }
 
@@ -493,14 +487,12 @@ function CatalogRow({ id, entry, isSelected }: {
 }) {
 	const typeColor = TYPE_COLORS[entry.type] || "gray";
 	return (
-		<Box>
-			<Text backgroundColor={isSelected ? "gray" : undefined} bold={isSelected}>
-				{" "}{isSelected ? symbols.arrow : " "}{" "}
-			</Text>
+		<Text backgroundColor={isSelected ? "gray" : undefined}>
+			{" "}{isSelected ? symbols.arrow : " "}{" "}
 			<Text bold={isSelected}>{entry.name.padEnd(16)}</Text>
 			<Text color={typeColor}>{TYPE_LABELS[entry.type].padEnd(10)}</Text>
 			<Text dimColor>{entry.description}</Text>
-		</Box>
+		</Text>
 	);
 }
 

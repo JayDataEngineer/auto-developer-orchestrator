@@ -100,12 +100,8 @@ export function SessionSwitcher() {
           const isActive = conv.agentId === activeAgentId && conv.project === activeProject;
           const selected = i === idx;
           return (
-            <Box key={`${conv.project}:${conv.agentId}`}>
-              <Box marginRight={1}>
-                <Text backgroundColor={selected ? "gray" : undefined} bold={selected}>
-                  {" "}{selected ? symbols.arrow : " "}{" "}
-                </Text>
-              </Box>
+            <Text key={`${conv.project}:${conv.agentId}`} backgroundColor={selected ? "gray" : undefined}>
+              {" "}{selected ? symbols.arrow : " "}{" "}
               <Text
                 color={isActive ? colors.brand : undefined}
                 bold={isActive || selected}
@@ -116,7 +112,7 @@ export function SessionSwitcher() {
                 {" "}{conv.messageCount}msgs {symbols.dot} {conv.project}
               </Text>
               {isActive && <Text color={colors.brand}> ←</Text>}
-            </Box>
+            </Text>
           );
         })}
         {filtered.length > 10 && (

@@ -188,10 +188,8 @@ export function FilePicker() {
           const selected = i === selectedIdx;
           const prefix = entry.depth > 0 ? "  ".repeat(entry.depth) : "";
           return (
-            <Box key={entry.fullPath}>
-              <Text backgroundColor={selected ? "gray" : undefined} bold={selected}>
-                {" "}{selected ? symbols.arrow : " "}{" "}
-              </Text>
+            <Text key={entry.fullPath} backgroundColor={selected ? "gray" : undefined}>
+              {" "}{selected ? symbols.arrow : " "}{" "}
               <Text
                 color={entry.isDir ? "cyan" : selected ? colors.brand : undefined}
                 bold={entry.isDir || selected}
@@ -201,7 +199,7 @@ export function FilePicker() {
               {entry.isDir && (
                 <Text dimColor color="cyan">/</Text>
               )}
-            </Box>
+            </Text>
           );
         })}
         {filtered.length > 20 && (
