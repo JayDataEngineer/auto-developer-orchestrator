@@ -21,7 +21,9 @@ import { AssistantMessage } from "./assistant-message.js";
 import { UserMessage } from "./user-message.js";
 import { SuggestionChips } from "./suggestion-chips.js";
 import { ComposerQueue } from "./composer-queue.js";
+import { usePuxStore } from "@pux/shared";
 import { getCommands } from "../commands.js";
+import { PathAutocomplete, getCompletions } from "./path-autocomplete.js";
 import { useColors, symbols } from "../theme.js";
 
 // ── Thread ──
@@ -33,6 +35,7 @@ interface ThreadProps {
 export function Thread({ onCommand }: ThreadProps) {
 	const [commandOutput, setCommandOutput] = useState<string | null>(null);
 	const [selectedIdx, setSelectedIdx] = useState(0);
+	const [pathIdx, setPathIdx] = useState(0);
 	const { stdout } = useStdout();
 	const cols = stdout?.columns ?? 80;
 
@@ -53,6 +56,8 @@ export function Thread({ onCommand }: ThreadProps) {
 
 	// Running state for cancel button
 	const isRunning = useAuiState((s) => s.thread.isRunning);
+	const composerText = useAuiState((s) => s.composer.text);
+	const projectPath = usePuxStore((s) => s.activeProjectPath);
 	const colors = useColors();
 
 	return (
@@ -90,6 +95,13 @@ export function Thread({ onCommand }: ThreadProps) {
 			{/* Slash command autocomplete */}
 			<CommandPalette selectedIdx={selectedIdx} onSelectIdx={setSelectedIdx} />
 
+			{/* Path autocomplete */}
+			<PathAutocomplete
+				text={composerText}
+				cwd={projectPath}
+				selectedIdx={pathIdx}
+			/>
+
 			{/* Input area */}
 			<Text color="gray">{"─".repeat(cols)}</Text>
 			<Box paddingX={1}>
@@ -100,6 +112,9 @@ export function Thread({ onCommand }: ThreadProps) {
 					onOutput={setCommandOutput}
 					selectedIdx={selectedIdx}
 					onSelectIdx={setSelectedIdx}
+					pathIdx={pathIdx}
+					onPathIdx={setPathIdx}
+					projectPath={projectPath}
 				/>
 				{/* Phase 1: Cancel button when running */}
 				{isRunning && (
@@ -197,11 +212,17 @@ function CommandComposer({
 	onOutput,
 	selectedIdx,
 	onSelectIdx,
+	pathIdx,
+	onPathIdx,
+	projectPath,
 }: {
 	onCommand: (input: string) => Promise<string | null>;
 	onOutput: (out: string | null) => void;
 	selectedIdx: number;
 	onSelectIdx: (i: number) => void;
+	pathIdx: number;
+	onPathIdx: (i: number) => void;
+	projectPath: string;
 }) {
 	const aui = useAui();
 	const text = useAuiState((s) => s.composer.text);
@@ -216,10 +237,20 @@ function CommandComposer({
 			.map((c) => c.name);
 	}, [text]);
 
+	const pathCompletions = useMemo(() => {
+		if (matches.length > 0) return []; // Don't show path completions when command palette is active
+		return getCompletions(text || "", projectPath);
+	}, [text, matches.length, projectPath]);
+
 	useEffect(() => {
 		if (matches.length === 0) { onSelectIdx(0); return; }
 		if (selectedIdx >= matches.length) onSelectIdx(0);
 	}, [matches.length, selectedIdx, onSelectIdx]);
+
+	useEffect(() => {
+		if (pathCompletions.length === 0) { onPathIdx(0); return; }
+		if (pathIdx >= pathCompletions.length) onPathIdx(0);
+	}, [pathCompletions.length, pathIdx, onPathIdx]);
 
 	useInput(useCallback((_input: string, key: any) => {
 		if (matches.length > 0) {
@@ -234,6 +265,30 @@ function CommandComposer({
 			}
 			if (key.tab) {
 				aui.composer().setText("/" + matches[selectedIdx] + " ");
+				return;
+			}
+			return;
+		}
+
+		if (pathCompletions.length > 0) {
+			// Path autocomplete navigation
+			if (key.upArrow) {
+				onPathIdx(pathIdx <= 0 ? pathCompletions.length - 1 : pathIdx - 1);
+				return;
+			}
+			if (key.downArrow) {
+				onPathIdx((pathIdx + 1) % pathCompletions.length);
+				return;
+			}
+			if (key.tab) {
+				// Replace the path prefix with the selected completion
+				const completion = pathCompletions[pathIdx];
+				const pathMatch = text?.match(/((?:\.\.?\/|[~/])(?:[^\s"'`|;]*)?)$/);
+				if (pathMatch && completion) {
+					const before = text?.slice(0, pathMatch.index);
+					const newText = (before || "") + completion.display;
+					aui.composer().setText(newText);
+				}
 				return;
 			}
 			return;
@@ -265,7 +320,7 @@ function CommandComposer({
 			}
 			return;
 		}
-	}, [matches, text, aui, selectedIdx, onSelectIdx]));
+	}, [matches, text, aui, selectedIdx, onSelectIdx, pathIdx, onPathIdx, pathCompletions]));
 
 	const handleSubmit = useCallback((submittedText: string) => {
 		const trimmed = submittedText.trim();

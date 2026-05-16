@@ -70,8 +70,14 @@ Kitty protocol image rendering in the terminal. Supports Kitty and iTerm2 termin
 ## 11. MCP Server Configuration UI (Claude Code)
 In-TUI MCP server management (add, configure, test, remove). No MCP UI.
 
-## 12. Autocomplete on File Paths (Claude Code, OpenCode)
-Context-aware file path autocomplete in the composer/editor. We have slash command palette but no path autocomplete.
+## 12. Autocomplete on File Paths ✅ DONE
+Tab-triggered file path autocomplete in the composer, integrating with the slash command palette.
+
+- **`PathAutocomplete`** (`ts-tui-ink/src/components/path-autocomplete.tsx`): Detects path patterns (`./`, `../`, `/`, `~/`) at word boundaries using regex. Reads directory contents via `fs.readdirSync` relative to the project root (`activeProjectPath` from the store).
+- **`getCompletions()`** hook: Shared helper used by both the render component and the key handler. Sorts results with directories first, maps file extensions for type hints. Returns up to 20 matches.
+- **Tab integration**: When a path prefix is detected (no command palette active), Tab replaces the prefix with the selected completion. Up/Down navigate completions.
+- **Layered priority**: Command palette takes precedence → path autocomplete → history navigation. All three coexist without conflicts.
+- **Directory markers**: Directories shown with cyan `dir` label and trailing `/` on display name.
 
 ## 13. Session Switching ✅ DONE
 Quick conversation switching overlay with `/sessions` slash command.
