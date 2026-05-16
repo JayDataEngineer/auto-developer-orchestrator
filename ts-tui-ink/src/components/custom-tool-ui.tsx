@@ -16,6 +16,7 @@ import {
 	makeAssistantToolUI,
 	makeAssistantTool,
 	useAuiState,
+	DiffView,
 } from "@assistant-ui/react-ink";
 import { usePuxStore, formatToolResult } from "@pux/shared";
 import { colors, symbols, BLACK_CIRCLE, BLOCKQUOTE_BAR } from "../theme.js";
@@ -191,17 +192,75 @@ function DelegateRenderer({
 	);
 }
 
-// ── File write/edit tool UI ──
+// ── File write tool UI (shows full-file diff) ──
 
 export const FileEditToolUI = makeAssistantToolUI({
 	toolName: "write_file",
 	render: ({ args, isError, status }) => {
 		const path = (args as any)?.path || (args as any)?.file_path || "";
+		const content = (args as any)?.content || "";
 		const isDone = status.type === "complete";
 		const isRunning = status.type === "running";
 
 		return (
-			<Box paddingLeft={2} marginBottom={1}>
+			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+				<Box>
+					<Text
+						color={
+							isError
+								? colors.error
+								: isDone
+									? colors.success
+									: colors.running
+						}
+					>
+						{BLACK_CIRCLE}{" "}
+					</Text>
+					<Text bold color={isRunning ? colors.running : undefined}>
+						write
+					</Text>
+					<Text color="gray"> {path.slice(0, 60)}</Text>
+					{isDone && !isError && (
+						<Text color={colors.success}> {symbols.check}</Text>
+					)}
+				</Box>
+				{isDone && !isError && content && (
+					<Box paddingLeft={0} marginTop={1}>
+						<DiffView
+							newFile={{ content, name: path }}
+							showLineNumbers={true}
+							contextLines={3}
+							maxLines={50}
+						/>
+					</Box>
+				)}
+			</Box>
+		);
+	},
+});
+
+// ── File edit tool UI (shows old→new replacement diff) ──
+
+function EditDiffRenderer({
+	args,
+	isError,
+	status,
+}: {
+	args: unknown;
+	isError?: boolean;
+	status: { type: string };
+}) {
+	const path = (args as any)?.path || (args as any)?.file_path || "";
+	const oldStr = (args as any)?.old_string || "";
+	const newStr = (args as any)?.new_string || "";
+	const isDone = status.type === "complete";
+	const isRunning = status.type === "running";
+	const oldLines = oldStr.split("\n");
+	const newLines = newStr.split("\n");
+
+	return (
+		<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+			<Box>
 				<Text
 					color={
 						isError
@@ -214,15 +273,49 @@ export const FileEditToolUI = makeAssistantToolUI({
 					{BLACK_CIRCLE}{" "}
 				</Text>
 				<Text bold color={isRunning ? colors.running : undefined}>
-					write
+					edit
 				</Text>
 				<Text color="gray"> {path.slice(0, 60)}</Text>
 				{isDone && !isError && (
 					<Text color={colors.success}> {symbols.check}</Text>
 				)}
 			</Box>
-		);
-	},
+			{isDone && !isError && (oldStr || newStr) && (
+				<Box flexDirection="column" paddingLeft={0} marginTop={1}>
+					{oldStr && (
+						<Box flexDirection="column">
+							{oldLines.slice(0, 8).map((line: string, i: number) => (
+								<Text key={i} color="red">
+									{BLOCKQUOTE_BAR}- {line}
+								</Text>
+							))}
+						</Box>
+					)}
+					{newStr && (
+						<Box flexDirection="column">
+							{newLines.slice(0, 8).map((line: string, i: number) => (
+								<Text key={i} color="green">
+									{BLOCKQUOTE_BAR}+ {line}
+								</Text>
+							))}
+						</Box>
+					)}
+					{(oldLines.length > 8 || newLines.length > 8) && (
+						<Text dimColor color="gray">
+							{"  "}... diff truncated
+						</Text>
+					)}
+				</Box>
+			)}
+		</Box>
+	);
+}
+
+export const FileEditPatchToolUI = makeAssistantToolUI({
+	toolName: "file_edit",
+	render: ({ args, isError, status }) => (
+		<EditDiffRenderer args={args} isError={isError} status={status} />
+	),
 });
 
 // ── File read tool UI ──
@@ -272,7 +365,18 @@ export function ToolRegistry() {
 			<DelegateToolUI />
 			<DelegateAsyncToolUI />
 			<FileEditToolUI />
+			<FileEditPatchToolUI />
+			{/* Model sometimes calls edit_file instead of file_edit */}
+			<FileEditPatchToolAliasUI />
 			<FileReadToolUI />
 		</>
 	);
 }
+
+// Also register under the "edit_file" alias that some models call
+const FileEditPatchToolAliasUI = makeAssistantToolUI({
+	toolName: "edit_file",
+	render: ({ args, isError, status }) => (
+		<EditDiffRenderer args={args} isError={isError} status={status} />
+	),
+});
