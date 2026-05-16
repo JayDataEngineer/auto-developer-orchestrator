@@ -9,7 +9,7 @@
 
 import React from "react";
 import { Text } from "ink";
-import { colors, BLOCKQUOTE_BAR } from "../theme.js";
+import { colors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 
 interface Segment {
 	text: string;
@@ -161,9 +161,11 @@ export function MarkdownText({ text, dim }: MarkdownTextProps) {
 
 		// Blockquote
 		if (line.startsWith("> ")) {
+			const content = line.slice(2);
+			const isError = content.startsWith("**Error:**");
 			elements.push(
-				<Text key={i} dimColor color="gray">
-					{BLOCKQUOTE_BAR} {line.slice(2)}
+				<Text key={i} color={isError ? colors.error : "gray"} dimColor={!isError}>
+					{isError ? symbols.toolError : BLOCKQUOTE_BAR} {isError ? content.replace(/^\*\*Error:\*\*\s*/, "") : content}
 				</Text>,
 			);
 			continue;

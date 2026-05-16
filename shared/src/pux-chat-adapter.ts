@@ -631,7 +631,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 						case "error": {
 							const errMsg = (parsed.error as string) || "Unknown error";
-							accText += `\n\n**Error:** ${errMsg}`;
+							accText += `\n\n> **Error:** ${errMsg}`;
 							statusRef[0] = "complete";
 							usePuxStore.setState({ lastError: errMsg });
 							break;
