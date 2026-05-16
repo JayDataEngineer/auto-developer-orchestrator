@@ -1,6 +1,0 @@
-description: "Ryan — Desktop Support. Controls the GUI — screenshots, clicks, typing, key presses."
-imports:
-  - desktop
-sandbox: bridged
-max_rounds: 15
-temperature: 0.2

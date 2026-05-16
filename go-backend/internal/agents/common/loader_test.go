@@ -38,19 +38,6 @@ func TestLoadAgentRoles(t *testing.T) {
 		}
 	}
 
-	// Verify legacy role names still work (from config/roles/)
-	legacyNames := []string{"jake", "sarah", "alex", "marcus", "elena", "ryan"}
-	for _, name := range legacyNames {
-		role := roles[name]
-		if role == nil {
-			t.Errorf("missing legacy role: %s", name)
-			continue
-		}
-		if role.Prompt == "" {
-			t.Errorf("%s: prompt is empty", name)
-		}
-	}
-
 	// Test new workers have capability skills stitched in
 	desktopOps := GetAgentRole("desktop_ops")
 	if desktopOps == nil {
@@ -72,7 +59,7 @@ func TestLoadAgentRoles(t *testing.T) {
 		t.Errorf("researcher: expected model 'qwen3.6-27b-q5_k_s', got %q", researcher.Model)
 	}
 
-	// Test FormatAgentList includes both new and legacy
+	// Test FormatAgentList includes all workers
 	list := FormatAgentList()
 	if list == "" {
 		t.Error("FormatAgentList returned empty string")

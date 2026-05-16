@@ -24,7 +24,6 @@ func (e *errDBProvider) PostgresPool() (*pgxpool.Pool, error)  { return nil, err
 func (e *errDBProvider) Close() error                           { return nil }
 func (e *errDBProvider) Neo4jConfig() (string, string, string, bool) { return "", "", "", false }
 func (e *errDBProvider) PostgresURL() (string, bool)                 { return "", false }
-func (e *errDBProvider) FaceConfig() (string, string, bool)          { return "", "", false }
 
 func TestRegisterAll_NilProvider(t *testing.T) {
 	result := RegisterAll(nil, nil)

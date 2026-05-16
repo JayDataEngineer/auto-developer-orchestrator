@@ -1,8 +1,0 @@
-description: "Face recognition via CompreFace"
-mcp_servers: []
-tools:
-  - face_recognize
-  - face_batch_recognize
-  - face_cluster_identities
-  - face_add_subject
-  - face_list_subjects

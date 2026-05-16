@@ -1,6 +1,0 @@
-description: "Marcus — Senior Developer. Writes, edits, tests, and ships code."
-imports:
-  - code
-model: deepseek/deepseek-v4-flash
-max_rounds: 25
-temperature: 0.2

@@ -1,5 +1,0 @@
-description: "General-purpose worker. Handles basic bash, file ops, and simple tasks when no specialist matches."
-imports:
-  - shell
-max_rounds: 15
-temperature: 0.4

@@ -312,6 +312,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			return common.AgentNames(cfg.OrgRoles)
 		}
 
+		// Wire role providers into ParallelRunner for scoped delegation
+		if pr != nil {
+			pr.SetRoleProviders(roleProvider, mcpResolver)
+		}
+
 		ctoTools = append(ctoTools,
 			orchestration.NewDelegateToToolDynamic(runner, mcpResolver, roleProvider, nameProvider),
 			orchestration.NewDelegateAsyncToolDynamic(runner, mcpResolver, roleProvider, nameProvider),

@@ -485,8 +485,8 @@ func TestOrgPromptMergesKernelRoles(t *testing.T) {
 	// Build prompt with org
 	prompt := BuildOrchestratorPromptWithOrg(nil, "", "", "", org, orgRoles)
 
-	// Verify kernel roles (jake, ryan, sarah) appear in the merged prompt
-	kernelNames := []string{"jake", "ryan", "sarah", "marcus", "alex", "elena"}
+	// Verify kernel workers appear in the merged prompt
+	kernelNames := []string{"browser_ops", "desktop_ops", "researcher", "code_ops", "vision_ops", "shell_ops"}
 	for _, name := range kernelNames {
 		if !contains(prompt, name) {
 			t.Errorf("kernel role %q missing from merged prompt — org should add to kernel, not replace", name)

@@ -46,6 +46,7 @@ type AgentRole struct {
 	Model       string
 	Division    string // non-empty = division head, points to sub-dir with pux.yaml
 	SandboxTier string // "isolated" (default), "bridged", "native"
+	DelegatesTo []string // if non-empty, this worker gets scoped delegation tools
 }
 
 // agentConfig is the YAML structure for config/roles/<name>/config.yaml (legacy)
@@ -72,6 +73,7 @@ type workerConfig struct {
 	Model        string   `yaml:"model"`
 	Sandbox      string   `yaml:"sandbox"`
 	Division     string   `yaml:"division,omitempty"`
+	DelegatesTo  []string `yaml:"delegates_to,omitempty"`
 }
 
 // ToolPackage is a shared tool group (legacy name, still used internally).
@@ -407,11 +409,11 @@ func ResolveImports(imports []string) (tools []string, mcpServers []string) {
 	return tools, mcpServers
 }
 
-// LoadAgentRoles reads workers from config/workers/ (new) then config/roles/ (legacy).
+// LoadAgentRoles reads workers from config/workers/.
 // Auto-reloads when files change on disk.
 func LoadAgentRoles() map[string]*AgentRole {
 	agentMu.RLock()
-	if agentRoles != nil && !dirChanged("roles", agentModTime) && !dirChanged("workers", agentModTime) {
+	if agentRoles != nil && !dirChanged("workers", agentModTime) {
 		roles := agentRoles
 		agentMu.RUnlock()
 		return roles
@@ -421,30 +423,19 @@ func LoadAgentRoles() map[string]*AgentRole {
 	agentMu.Lock()
 	defer agentMu.Unlock()
 
-	if agentRoles != nil && !dirChanged("roles", agentModTime) && !dirChanged("workers", agentModTime) {
+	if agentRoles != nil && !dirChanged("workers", agentModTime) {
 		return agentRoles
 	}
 
 	configDir := FindKernelConfigDir()
 
-	// Start with legacy roles (folder format)
-	legacyDir := "config/roles"
-	if configDir != "" {
-		legacyDir = filepath.Join(configDir, "roles")
-	}
-	agentRoles = LoadAgentRolesFrom(legacyDir)
-
-	// Overlay with new workers (flat YAML format)
+	// Load workers (flat YAML format)
 	workersDir := "config/workers"
 	if configDir != "" {
 		workersDir = filepath.Join(configDir, "workers")
 	}
-	workers := LoadWorkersFrom(workersDir)
-	for name, role := range workers {
-		agentRoles[name] = role // new overrides legacy
-	}
+	agentRoles = LoadWorkersFrom(workersDir)
 
-	updateModTime("roles", legacyDir, agentModTime)
 	updateModTime("workers", workersDir, agentModTime)
 	return agentRoles
 }
@@ -593,6 +584,7 @@ func LoadWorkersFrom(dir string) map[string]*AgentRole {
 			Model:        wc.Model,
 			Division:     wc.Division,
 			SandboxTier:  sandboxTier,
+			DelegatesTo:  wc.DelegatesTo,
 		}
 	}
 	return roles
@@ -648,7 +640,7 @@ func GetAgentRole(name string) *AgentRole {
 func FormatAgentList() string {
 	roles := LoadAgentRoles()
 	if len(roles) == 0 {
-		return "No roles loaded from config/roles/"
+		return "No roles loaded from config/workers/"
 	}
 	return formatRolesList(roles)
 }
@@ -765,7 +757,7 @@ func BuildOrchestratorPromptWithOrg(tools []core.Tool, sandboxID string, project
 	}
 
 	// Contract 6: Org roles MERGE with kernel roles — never replace.
-	// Kernel staff (jake, ryan, sarah, etc.) are immutable. Orgs can only ADD
+	// Kernel workers (browser_ops, desktop_ops, etc.) are immutable. Orgs can only ADD
 	// new roles. Name collisions with kernel roles are silently ignored.
 	agents := FormatAgentList()
 	if len(orgRoles) > 0 {
@@ -842,7 +834,7 @@ You do NOT do the work yourself. Delegate using delegate_to and delegate_async.
 
 # Rules
 1. DELEGATE first, do yourself second
-2. Use delegate_to with employee role names (jake, sarah, alex, marcus, elena, ryan)
+2. Use delegate_to with employee role names (browser_ops, researcher, shell_ops, code_ops, vision_ops, desktop_ops)
 3. Synthesize results and respond concisely
 
 {{if .SandboxID}}Sandbox ID: {{.SandboxID}}{{end}}

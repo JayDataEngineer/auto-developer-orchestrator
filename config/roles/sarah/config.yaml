@@ -1,6 +1,0 @@
-description: "Sarah — Research Lead. Searches the web, crawls pages, synthesizes reports. No browser, no image tools."
-imports:
-  - research
-model: qwen3.6-27b-q5_k_s
-max_rounds: 15
-temperature: 0.3

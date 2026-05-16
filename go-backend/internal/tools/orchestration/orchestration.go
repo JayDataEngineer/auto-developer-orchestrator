@@ -12,7 +12,7 @@ import (
 // DelegateRunner creates and runs sub-agents for delegate_to/delegate_async.
 type DelegateRunner interface {
 	RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error)
-	RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error)
+	RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string) (map[string]any, error)
 	RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error)
 	CollectAsyncResults(ctx context.Context) (map[string]any, error)
 	RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error)
@@ -36,14 +36,14 @@ type RoleProvider func() map[string]*common.AgentRole
 // NameProvider returns the current list of valid agent names.
 type NameProvider func() []string
 
-// resolveRole checks if instructions matches a role name from config/roles/.
+// resolveRole checks if instructions matches a role name from config/workers/.
 // If it does, returns the role's prompt, tools, and defaults.
 // If not, returns the raw instructions as-is (custom delegation).
 // mcpResolver is called to expand mcp_servers entries into concrete tool names.
 // roleMap is checked first (org-specific roles), then kernel defaults.
 // The 6th return value is the division path (non-empty = division head).
 // The 7th return value is the sandbox tier ("" = isolated/default).
-func resolveRole(instructions string, toolNames []string, maxRounds int, temperature float32, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole) (string, []string, int, float32, string, string, string) {
+func resolveRole(instructions string, toolNames []string, maxRounds int, temperature float32, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole) (string, []string, int, float32, string, string, string, []string) {
 	// Try org-specific roles first, then kernel defaults
 	var role *common.AgentRole
 	if roleMap != nil {
@@ -73,9 +73,9 @@ func resolveRole(instructions string, toolNames []string, maxRounds int, tempera
 		if temp == 0.4 && role.Temperature != 0.4 {
 			temp = role.Temperature
 		}
-		return prompt, tools, rounds, temp, role.Model, role.Division, role.SandboxTier
+		return prompt, tools, rounds, temp, role.Model, role.Division, role.SandboxTier, role.DelegatesTo
 	}
-	return instructions, toolNames, maxRounds, temperature, "", "", ""
+	return instructions, toolNames, maxRounds, temperature, "", "", "", nil
 }
 
 // DelegateToTool implements core.Tool for synchronous sub-agent delegation.
@@ -167,7 +167,7 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 
 	// Resolve role name → prompt + defaults
 	roleMap := t.roleProvider()
-	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, division, sandboxTier := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
+	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, division, sandboxTier, delegatesTo := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
 
 	// Division head: delegate to a full sub-orchestrator
 	if division != "" {
@@ -179,7 +179,7 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	// Use tracked delegation — returns agent_ref + file changes
-	return t.runner.RunDelegateTracked(ctx, task, resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, sandboxTier)
+	return t.runner.RunDelegateTracked(ctx, task, resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, sandboxTier, delegatesTo)
 }
 
 // DelegateContinueTool sends feedback to an existing sub-agent for continuation.
@@ -350,7 +350,7 @@ func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (a
 
 	// Resolve role name → prompt + defaults
 	roleMap := t.roleProvider()
-	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, _, _ := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
+	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, _, _, _ := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
 
 	if len(resolvedTools) == 0 {
 		return nil, core.NewToolError("delegate_async", "no tools specified and role '"+instructions+"' has no default tools")
@@ -377,95 +377,6 @@ func (t *CollectResultsTool) Schema() json.RawMessage {
 
 func (t *CollectResultsTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return t.runner.CollectAsyncResults(ctx)
-}
-
-// PlanTool creates execution plans.
-type PlanTool struct{}
-
-func NewPlanTool() *PlanTool { return &PlanTool{} }
-
-func (t *PlanTool) Name() string        { return "create_plan" }
-func (t *PlanTool) Description() string { return "Create a multi-step execution plan with optional parallel dependencies" }
-
-func (t *PlanTool) Schema() json.RawMessage {
-	return json.RawMessage(`{
-		"type": "object",
-		"properties": {
-			"steps": {
-				"type": "array",
-				"items": {
-					"oneOf": [
-						{"type": "string"},
-						{
-							"type": "object",
-							"properties": {
-								"id": {"type": "string"},
-								"task": {"type": "string"},
-								"depends_on": {"type": "array", "items": {"type": "string"}}
-							},
-							"required": ["id", "task"]
-						}
-					]
-				}
-			}
-		},
-		"required": ["steps"]
-	}`)
-}
-
-func (t *PlanTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	rawSteps, ok := args["steps"].([]any)
-	if !ok || len(rawSteps) == 0 {
-		return nil, core.NewToolError("create_plan", "missing required parameter 'steps'")
-	}
-
-	hasObjects := false
-	hasStrings := false
-	for _, s := range rawSteps {
-		if _, isObj := s.(map[string]any); isObj {
-			hasObjects = true
-		} else if _, isStr := s.(string); isStr {
-			hasStrings = true
-		}
-	}
-
-	if hasObjects && hasStrings {
-		return nil, core.NewToolError("create_plan", "mixed step formats")
-	}
-
-	if hasStrings {
-		var steps []string
-		for _, s := range rawSteps {
-			if step, ok := s.(string); ok {
-				steps = append(steps, step)
-			}
-		}
-		return map[string]any{"steps": steps, "created": true, "count": len(steps)}, nil
-	}
-
-	var planSteps []map[string]any
-	for _, s := range rawSteps {
-		obj, ok := s.(map[string]any)
-		if !ok {
-			continue
-		}
-		id, _ := obj["id"].(string)
-		task, _ := obj["task"].(string)
-		if id == "" || task == "" {
-			continue
-		}
-		var deps []string
-		if depRaw, ok := obj["depends_on"].([]any); ok {
-			for _, d := range depRaw {
-				if depID, ok := d.(string); ok {
-					deps = append(deps, depID)
-				}
-			}
-		}
-		planSteps = append(planSteps, map[string]any{"id": id, "task": task, "depends_on": deps})
-	}
-
-	return map[string]any{"steps": planSteps, "created": true, "count": len(planSteps)}, nil
 }
 
 // SynthesizeTool signals completion.

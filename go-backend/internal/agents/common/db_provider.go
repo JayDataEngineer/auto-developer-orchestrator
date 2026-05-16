@@ -16,14 +16,7 @@ type DBProvider interface {
 	PostgresPool() (*pgxpool.Pool, error)
 	Neo4jConfig() (uri, username, password string, ok bool)
 	PostgresURL() (url string, ok bool)
-	FaceConfig() (baseURL, apiKey string, ok bool)
 	Close() error
-}
-
-// FaceConfig holds CompreFace configuration.
-type FaceConfig struct {
-	BaseURL string
-	APIKey  string
 }
 
 // OrgDBProvider holds database connections for an organization.
@@ -71,17 +64,6 @@ func (p *OrgDBProvider) PostgresURL() (url string, ok bool) {
 		return "", false
 	}
 	return resolveEnv(cfg.URL, cfg.PasswordEnv), true
-}
-
-// FaceConfig returns the CompreFace configuration.
-func (p *OrgDBProvider) FaceConfig() (baseURL, apiKey string, ok bool) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	cfg, exists := p.dbs["compreface"]
-	if !exists {
-		return "", "", false
-	}
-	return cfg.BaseURL, resolveEnv("", cfg.APIKeyEnv), true
 }
 
 // Neo4jDriver returns a lazy-initialized Neo4j driver.
