@@ -6,7 +6,19 @@ export function formatToolResult(result: unknown, maxLines = 3): string[] {
     if (result === undefined || result === null) return [];
     let text: string;
     if (typeof result === "string") {
-        text = result;
+        // Try parsing JSON strings (e.g. load_spilled returns JSON-encoded content)
+        try {
+            const parsed = JSON.parse(result);
+            if (typeof parsed === "object" && parsed !== null) {
+                const obj = parsed as Record<string, unknown>;
+                text = (obj.output as string) || (obj.content as string) || (obj.text as string) || (obj.result as string) || "";
+                if (!text) text = result; // fallback to raw string
+            } else {
+                text = result;
+            }
+        } catch {
+            text = result;
+        }
     } else if (typeof result === "object") {
         const obj = result as Record<string, unknown>;
         text = (obj.output as string) || (obj.content as string) || (obj.text as string) || (obj.result as string) || "";
