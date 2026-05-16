@@ -246,6 +246,7 @@ export function ProvidersOverlay() {
 								provider={providers[item.name]}
 								isSelected={isSelected}
 								activeModel={activeModel}
+								cols={cols}
 							/>
 						);
 					})}
@@ -280,6 +281,7 @@ export function ProvidersOverlay() {
 									provider={expandedProvider}
 									isSelected={isSelected}
 									isActive={item.model.id === activeModel}
+									cols={cols}
 								/>
 							);
 						})}
@@ -307,7 +309,7 @@ export function ProvidersOverlay() {
 							const globalIdx = scrollOffset + vi;
 							const isSelected = globalIdx === selectedIdx;
 							return (
-								<CatalogRow key={entry.id} id={entry.id} entry={entry} isSelected={isSelected} />
+								<CatalogRow key={entry.id} id={entry.id} entry={entry} isSelected={isSelected} cols={cols} />
 							);
 						})}
 						{(showCustom || selectedIdx === availableCatalog.length) && (
@@ -315,6 +317,7 @@ export function ProvidersOverlay() {
 								id="custom"
 								entry={{ name: "Custom", description: "Any OpenAI-compatible endpoint", type: "local" as ProviderType }}
 								isSelected={selectedIdx === availableCatalog.length}
+								cols={cols}
 							/>
 						)}
 					</Box>
@@ -390,11 +393,12 @@ function Footer({ cols, hint }: { cols: number; hint: string }) {
 	);
 }
 
-function ProviderRow({ name, provider, isSelected, activeModel }: {
+function ProviderRow({ name, provider, isSelected, activeModel, cols }: {
 	name: string;
 	provider: { status: string; models: ModelInfo[] };
 	isSelected: boolean;
 	activeModel: string;
+	cols: number;
 }) {
 	const colors = useColors();
 	const catalog = PROVIDER_CATALOG[name];
@@ -404,6 +408,9 @@ function ProviderRow({ name, provider, isSelected, activeModel }: {
 	const typeColor = catalog ? TYPE_COLORS[catalog.type] : "gray";
 	const typeLabel = catalog ? TYPE_LABELS[catalog.type] : "";
 	const desc = catalog?.description || name;
+	// Fixed columns: 3 (arrow+spaces) + 2 (icon) + 14 (name) + 12 (type) = 31
+	// Available = (cols - 4 paddingX) - 31 fixed - (← if active)
+	const descMax = cols - 4 - 31 - (hasActive ? 3 : 0);
 
 	return (
 		<Text backgroundColor={isSelected ? "gray" : undefined}>
@@ -411,7 +418,7 @@ function ProviderRow({ name, provider, isSelected, activeModel }: {
 			<Text color={statusColor}>{statusIcon} </Text>
 			<Text bold={isSelected}>{name.padEnd(14)}</Text>
 			<Text color={typeColor}>{typeLabel.padEnd(12)}</Text>
-			<Text dimColor>{desc}</Text>
+			<Text dimColor>{clip(desc, descMax)}</Text>
 			{hasActive && <Text color={colors.brand}> ←</Text>}
 		</Text>
 	);
@@ -451,11 +458,12 @@ function ProviderDetailHeader({ name, provider, catalog }: {
 	);
 }
 
-function ModelRow({ model, provider, isSelected, isActive }: {
+function ModelRow({ model, provider, isSelected, isActive, cols }: {
 	model: ModelInfo;
 	provider: string;
 	isSelected: boolean;
 	isActive: boolean;
+	cols: number;
 }) {
 	const colors = useColors();
 	const ctxLabel = formatTokenCount(model.contextWindow);
@@ -480,23 +488,33 @@ function ModelRow({ model, provider, isSelected, isActive }: {
 	);
 }
 
-function CatalogRow({ id, entry, isSelected }: {
+function CatalogRow({ id, entry, isSelected, cols }: {
 	id: string;
 	entry: { name: string; description: string; type: ProviderType };
 	isSelected: boolean;
+	cols: number;
 }) {
 	const typeColor = TYPE_COLORS[entry.type] || "gray";
+	// Fixed: 3 (arrow) + 16 (name) + 10 (type) = 29
+	const descMax = cols - 4 - 29;
 	return (
 		<Text backgroundColor={isSelected ? "gray" : undefined}>
 			{" "}{isSelected ? symbols.arrow : " "}{" "}
 			<Text bold={isSelected}>{entry.name.padEnd(16)}</Text>
 			<Text color={typeColor}>{TYPE_LABELS[entry.type].padEnd(10)}</Text>
-			<Text dimColor>{entry.description}</Text>
+			<Text dimColor>{clip(entry.description, descMax)}</Text>
 		</Text>
 	);
 }
 
 // ── Helpers ──
+
+/** Clip a string to fit within `maxLen` visible characters, appending … if truncated. */
+function clip(s: string, maxLen: number): string {
+	if (maxLen <= 0) return "";
+	if (s.length <= maxLen) return s;
+	return maxLen <= 1 ? "…" : s.slice(0, maxLen - 1) + "…";
+}
 
 function formatTokenCount(n: number): string {
 	if (n >= 1_000_000) {
