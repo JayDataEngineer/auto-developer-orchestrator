@@ -33,6 +33,7 @@ import { SessionSwitcher } from "./components/session-switcher.js";
 import { LogViewer } from "./components/log-viewer.js";
 import { FilePicker } from "./components/file-picker.js";
 import { SearchOverlay } from "./components/search-overlay.js";
+import { MCPOverlay } from "./components/mcp-overlay.js";
 import { QuestionDialog } from "./components/question-dialog.js";
 import { DecisionDialog } from "./components/decision-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
@@ -181,10 +182,11 @@ function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<stri
 	const pendingDecision = usePuxStore((s) => s.pendingDecision);
 	const showProviders = usePuxStore((s) => s.showProvidersOverlay);
 	const showSettings = usePuxStore((s) => s.showSettingsOverlay);
-const showSwitcher = usePuxStore((s) => s.showSessionSwitcher);
-const showLogs = usePuxStore((s) => s.showLogViewer);
-const showFilePicker = usePuxStore((s) => s.showFilePicker);
-const showSearch = usePuxStore((s) => s.showSearchOverlay);
+	const showSwitcher = usePuxStore((s) => s.showSessionSwitcher);
+	const showLogs = usePuxStore((s) => s.showLogViewer);
+	const showFilePicker = usePuxStore((s) => s.showFilePicker);
+	const showSearch = usePuxStore((s) => s.showSearchOverlay);
+	const showMCP = usePuxStore((s) => s.showMCPOverlay);
 
 	// HITL decision dialog takes priority over everything
 	if (pendingDecision) {
@@ -207,6 +209,11 @@ const showSearch = usePuxStore((s) => s.showSearchOverlay);
 	// Search overlay
 	if (showSearch) {
 		return <SearchOverlay />;
+	}
+
+	// MCP server overlay
+	if (showMCP) {
+		return <MCPOverlay />;
 	}
 
 	// File picker

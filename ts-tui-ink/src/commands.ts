@@ -127,6 +127,14 @@ const commands: Command[] = [
 		},
 	},
 	{
+		name: "mcp",
+		description: "View MCP server status and registered tools",
+		handler: async () => {
+			usePuxStore.getState().toggleMCPOverlay();
+			return { type: "handled" };
+		},
+	},
+	{
 		name: "model",
 		description: "Browse providers and switch model",
 		handler: async () => {

@@ -32,6 +32,14 @@ export interface RunningAgentInfo {
 	lastEventAt: number;
 }
 
+export interface MCPServerInfo {
+	prefix: string;
+	endpoint: string;
+	available: boolean;
+	toolCount: number;
+	tools: string[];
+}
+
 interface PuxState {
 	// HITL (unified decision protocol)
 	pendingDecision: PendingDecision | null;
@@ -93,6 +101,10 @@ interface PuxState {
 	// Search overlay
 	showSearchOverlay: boolean;
 
+	// MCP server overlay
+	showMCPOverlay: boolean;
+	mcpServers: MCPServerInfo[];
+
 	// Theme
 	theme: string;
 
@@ -137,6 +149,32 @@ interface PuxState {
 	closeFilePicker: () => void;
 	toggleSearchOverlay: () => void;
 	closeSearchOverlay: () => void;
+	toggleMCPOverlay: () => void;
+	closeMCPOverlay: () => void;
+	loadMCPServers: () => Promise<void>;
+}
+
+// ── Overlay helpers ──
+
+const overlayKeys = [
+	"showModelPicker",
+	"showProvidersOverlay",
+	"showSettingsOverlay",
+	"showSessionSwitcher",
+	"showLogViewer",
+	"showFilePicker",
+	"showSearchOverlay",
+	"showMCPOverlay",
+] as const;
+
+function closeAllOverlays(): Partial<PuxState> {
+	const reset: Record<string, boolean> = {};
+	for (const k of overlayKeys) reset[k] = false;
+	return reset as unknown as Partial<PuxState>;
+}
+
+function openOverlay(key: (typeof overlayKeys)[number], extra?: Partial<PuxState>): Partial<PuxState> {
+	return { ...closeAllOverlays(), [key]: true, ...extra };
 }
 
 // ── Store ──
@@ -161,6 +199,8 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	showLogViewer: false,
 	showFilePicker: false,
 	showSearchOverlay: false,
+	showMCPOverlay: false,
+	mcpServers: [],
 	theme: (() => {
 		try {
 			return typeof localStorage !== "undefined" ? localStorage.getItem("pux:theme") || "default" : "default";
@@ -220,7 +260,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	toggleModelPicker: () => {
 		const show = !get().showModelPicker;
 		if (show) get().loadModels();
-		set({ showModelPicker: show });
+		set(show ? openOverlay("showModelPicker") : { showModelPicker: false });
 	},
 
 	setProject: (project) => {
@@ -416,7 +456,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			get().loadProviders();
 			get().loadModels();
 		}
-		set({ showProvidersOverlay: show, showModelPicker: false });
+		set(show ? openOverlay("showProvidersOverlay") : { showProvidersOverlay: false });
 	},
 
 	closeProvidersOverlay: () => set({ showProvidersOverlay: false }),
@@ -440,8 +480,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		}
 		set({
 			activeModel: modelId,
-			showProvidersOverlay: false,
-			showModelPicker: false,
+			...closeAllOverlays(),
 		});
 	},
 
@@ -463,31 +502,51 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 
 	toggleSessionSwitcher: () => {
 		const show = !get().showSessionSwitcher;
-		set({ showSessionSwitcher: show, showModelPicker: false, showProvidersOverlay: false, showSettingsOverlay: false });
+		set(show ? openOverlay("showSessionSwitcher") : { showSessionSwitcher: false });
 	},
 
 	closeSessionSwitcher: () => set({ showSessionSwitcher: false }),
 
 	toggleLogViewer: () => {
 		const show = !get().showLogViewer;
-		set({ showLogViewer: show, showModelPicker: false, showProvidersOverlay: false, showSettingsOverlay: false, showSessionSwitcher: false });
+		set(show ? openOverlay("showLogViewer") : { showLogViewer: false });
 	},
 
 	closeLogViewer: () => set({ showLogViewer: false }),
 
 	toggleFilePicker: () => {
 		const show = !get().showFilePicker;
-		set({ showFilePicker: show, showModelPicker: false, showProvidersOverlay: false, showSettingsOverlay: false, showSessionSwitcher: false, showLogViewer: false });
+		set(show ? openOverlay("showFilePicker") : { showFilePicker: false });
 	},
 
 	closeFilePicker: () => set({ showFilePicker: false }),
 
 	toggleSearchOverlay: () => {
 		const show = !get().showSearchOverlay;
-		set({ showSearchOverlay: show, showModelPicker: false, showProvidersOverlay: false, showSettingsOverlay: false, showSessionSwitcher: false, showLogViewer: false, showFilePicker: false });
+		set(show ? openOverlay("showSearchOverlay") : { showSearchOverlay: false });
 	},
 
 	closeSearchOverlay: () => set({ showSearchOverlay: false }),
+
+	toggleMCPOverlay: () => {
+		const show = !get().showMCPOverlay;
+		if (show) get().loadMCPServers();
+		set(show ? openOverlay("showMCPOverlay") : { showMCPOverlay: false });
+	},
+
+	closeMCPOverlay: () => set({ showMCPOverlay: false }),
+
+	loadMCPServers: async () => {
+		try {
+			const fetch = getFetch();
+			const resp = await fetch(apiUrl("/api/pux/mcp-servers"));
+			if (!resp.ok) return;
+			const data = await resp.json();
+			set({ mcpServers: Array.isArray(data) ? data : [] });
+		} catch {
+			// ignore
+		}
+	},
 
 	toggleSettingsOverlay: () => {
 		const show = !get().showSettingsOverlay;
@@ -495,7 +554,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			get().loadProviders();
 			get().loadModels();
 		}
-		set({ showSettingsOverlay: show, showProvidersOverlay: false });
+		set(show ? openOverlay("showSettingsOverlay") : { showSettingsOverlay: false });
 	},
 
 	closeSettingsOverlay: () => set({ showSettingsOverlay: false }),

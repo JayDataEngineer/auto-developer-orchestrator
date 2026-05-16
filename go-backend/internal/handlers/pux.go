@@ -167,6 +167,7 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/git/diff", h.GetGitDiff)
 	r.Post("/feedback", h.Feedback)
 	r.Post("/suggestions", h.Suggestions)
+	r.Get("/mcp-servers", h.GetMCPServers)
 }
 
 // GetAgentStatus returns running agent status.
@@ -406,6 +407,15 @@ func (h *PuxHandler) HookResponse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// GetMCPServers handles GET /api/pux/mcp-servers — returns registered MCP server info.
+func (h *PuxHandler) GetMCPServers(w http.ResponseWriter, r *http.Request) {
+	if h.mcpMulti == nil {
+		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+		return
+	}
+	writeJSON(w, http.StatusOK, h.mcpMulti.ServersInfo())
 }
 
 // GetTree handles GET /api/pux/tree — returns the session tree for navigation.

@@ -24,6 +24,7 @@ import { ComposerQueue } from "./composer-queue.js";
 import { usePuxStore } from "@pux/shared";
 import { getCommands } from "../commands.js";
 import { PathAutocomplete, getCompletions } from "./path-autocomplete.js";
+import { VimInput } from "./vim-input.js";
 import { useColors, symbols } from "../theme.js";
 
 // ── Thread ──
@@ -189,9 +190,8 @@ function Welcome() {
 				<Text dimColor>Type a message or /help for commands.</Text>
 			</Box>
 			<Box marginTop={1} flexDirection="column">
-				<Text dimColor>
-					<Text bold>Enter</Text> Send  <Text bold>Scroll</Text> Mouse wheel  <Text bold>Ctrl+C x2</Text> Quit  <Text bold>Ctrl+T</Text> Switch view
-				</Text>
+				<Text dimColor><Text bold>Enter</Text> Send  <Text bold>Scroll</Text> Mouse wheel  <Text bold>Ctrl+C x2</Text> Quit  <Text bold>Ctrl+T</Text> View</Text>
+				<Text dimColor><Text bold>Esc</Text> Vim normal  <Text bold>i</Text> Insert  <Text bold>h/j/k/l</Text> Move</Text>
 			</Box>
 			{/* Phase 1: Suggestion chips on empty thread */}
 			<SuggestionChips />
@@ -342,7 +342,7 @@ function CommandComposer({
 	}, [aui, onCommand, onOutput]);
 
 	return (
-		<ComposerPrimitive.Input
+		<VimInput
 			submitOnEnter={true}
 			multiLine={true}
 			onSubmit={handleSubmit}

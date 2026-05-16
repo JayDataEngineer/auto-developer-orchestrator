@@ -8,7 +8,7 @@ export { setBaseUrl, apiUrl } from "./server-url";
 
 // State
 export { usePuxStore } from "./pux-store";
-export type { RunningAgentInfo } from "./pux-store";
+export type { RunningAgentInfo, MCPServerInfo } from "./pux-store";
 
 // Adapters
 export { puxChatAdapter } from "./pux-chat-adapter";

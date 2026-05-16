@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"time"
 
 	"go.uber.org/zap"
@@ -461,4 +462,31 @@ func (m *MultiClient) PrimaryClient() *Client {
 		return c
 	}
 	return nil
+}
+
+// MCPServerInfo describes a registered MCP server for the management UI.
+type MCPServerInfo struct {
+	Prefix    string   `json:"prefix"`
+	Endpoint  string   `json:"endpoint"`
+	Available bool     `json:"available"`
+	ToolCount int      `json:"toolCount"`
+	Tools     []string `json:"tools"`
+}
+
+// ServersInfo returns metadata about all registered MCP servers.
+func (m *MultiClient) ServersInfo() []MCPServerInfo {
+	var servers []MCPServerInfo
+	for prefix, client := range m.clients {
+		info := MCPServerInfo{
+			Prefix:    prefix,
+			Endpoint:  client.Endpoint(),
+			Available: client.IsAvailable(),
+			Tools:     m.ServerToolNames(prefix),
+		}
+		info.ToolCount = len(info.Tools)
+		servers = append(servers, info)
+	}
+	// Sort by prefix for deterministic output
+	sort.Slice(servers, func(i, j int) bool { return servers[i].Prefix < servers[j].Prefix })
+	return servers
 }

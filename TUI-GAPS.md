@@ -72,8 +72,17 @@ Case-insensitive search through conversation messages with `/search` slash comma
 - **Coverage**: Searches user messages (`content[0].text`) and all assistant text parts. Tool call content is not searched. "text" and "reasoning" parts are included.
 - **Slash command**: `/search` toggles the overlay.
 
-## 9. Vim/Emacs Input Modes (Claude Code)
-`VimTextInput` and `BaseTextInput` with vim/emacs keybindings. We have standard `ink-text-input` with basic editing.
+## 9. Vim Input Modes ✅ DONE
+Custom `VimInput` component replaces `ComposerPrimitive.Input` with full vim modal editing and emacs/readline keybindings.
+
+- **`VimInput`** (`ts-tui-ink/src/components/vim-input.tsx`): Self-contained text input component with:
+  - **Vim normal mode** (Esc): `h/j/k/l` cursor movement, `w/b` word navigation, `0`/`$`/`^` line start/end/first-nonblank, `x`/`X` delete char, `dd` delete line (with kill ring), `D` delete to end of line, `C` change to end of line (delete + insert mode), `i`/`a`/`I`/`A` enter insert mode, `o`/`O` open new line, `p`/`P` paste, `u` kill-to-start-of-line, `-- NORMAL --` mode indicator
+  - **Emacs/readline keybindings** (insert mode): `Ctrl+A`/`Ctrl+E` start/end, `Ctrl+W` kill word backward, `Ctrl+U` kill to start, `Ctrl+K` kill to end, `Ctrl+D` delete forward, `Alt+B`/`Alt+F` word navigation, `Alt+D` kill word forward
+  - **Self-managed text buffer**: Replicates the `textBufferReducer` pattern from `@assistant-ui/react-ink` with full grapheme-aware cursor movement, word segmentation via `Intl.Segmenter`, and vertical movement with preferred column tracking
+  - **Store sync**: Bidirectional sync with `aui.composer().setText()` / `useAuiState(s → s.composer.text)` with dedup tracking to prevent echo loops
+  - **Same rendering**: Before-cursor + inverse-video cursor char + after-cursor, matching original `ComposerInput` look
+- **Integration**: Wired directly in `CommandComposer` replacing `ComposerPrimitive.Input`. Compatible with command palette, path autocomplete, and command history (those operate at a higher level and their handlers run first).
+- **Slash command**: No new command — mode is controlled by `Esc`/`i` directly. Welcome screen updated with keybinding hints.
 
 ## 10. Image Display ✅ DONE
 Kitty protocol image rendering in the terminal. Supports Kitty and iTerm2 terminals.
@@ -86,8 +95,14 @@ Kitty protocol image rendering in the terminal. Supports Kitty and iTerm2 termin
 - **Screenshot tool UIs** (`custom-tool-ui.tsx`): `ScreenshotRenderer` registered under all known screenshot tool names (`screenshot`, `desktop_screenshot`, `computer_screenshot`, `take_screenshot`, `browser_screenshot`, `web_screenshot`, `observe`, `desktop_observe`). Extracts data URIs from raw results or JSON `screenshot` fields (e.g. `PageContext.Screenshot` from browser tools).
 - **Data URI detection**: `tryExtractImageDataURI()` scans result strings for `data:image/{png,jpeg,gif,webp};base64,` prefixes. `extractScreenshotURI()` also handles nested objects and raw base64 strings.
 
-## 11. MCP Server Configuration UI (Claude Code)
-In-TUI MCP server management (add, configure, test, remove). No MCP UI.
+## 11. MCP Server Configuration UI ✅ DONE
+Overlay showing configured MCP servers and their registered tools, with `/mcp` slash command.
+
+- **`MCPOverlay`** (`ts-tui-ink/src/components/mcp-overlay.tsx`): Full-screen overlay listing registered MCP servers with prefix, endpoint, availability status (●/○), and tool count. Enter to expand a server and see its registered tools.
+- **Backend endpoint**: `GET /api/pux/mcp-servers` returns server info from `MultiClient.ServersInfo()`. Exposes prefix, endpoint, available status, and tool list per server.
+- **Store integration**: `showMCPOverlay`, `toggleMCPOverlay()`, `closeMCPOverlay()`, `loadMCPServers()` in Zustand store. Closes other overlays when opened.
+- **Read-only UI**: Displays current MCP configuration — servers are configured at backend startup (extensions, web research, media analysis). No add/remove in TUI (backend manages lifecycle).
+- **Slash command**: `/mcp` toggles the overlay. Follows Pux conventions.
 
 ## 12. Autocomplete on File Paths ✅ DONE
 Tab-triggered file path autocomplete in the composer, integrating with the slash command palette.
