@@ -232,18 +232,20 @@ func TestTruncateTask(t *testing.T) {
 
 func TestRunDelegate_EmitsSubAgentEvents(t *testing.T) {
 	// Verify that RunDelegate emits subagent_start and subagent_end events
-	// to the subscriber channel when a subscriber is set.
+	// to the subscriber channel injected via context (Contract 3.4 compliance).
 	events := make(chan core.AgentEvent, 32)
 
 	runner := &ParallelRunner{
-		toolSpecs:  []core.OpenAITool{},
-		tasks:      make(map[string]*asyncTask),
-		subscriber: events,
+		toolSpecs: []core.OpenAITool{},
+		tasks:     make(map[string]*asyncTask),
 	}
 	runner.SetLogger(func(format string, args ...interface{}) {})
 
+	// Inject subscriber via context (Contract 3.4 pattern)
+	ctx := context.WithValue(context.Background(), core.SubscriberKey{}, events)
+
 	// RunDelegate with no tools should still emit start+end events
-	_, err := runner.RunDelegate(context.Background(), "test task", "sarah", []string{"nonexistent_tool"}, 5, 0.4, "", "")
+	_, err := runner.RunDelegate(ctx, "test task", "sarah", []string{"nonexistent_tool"}, 5, 0.4, "", "")
 
 	// Should get subagent_start
 	evt := <-events
@@ -268,14 +270,20 @@ func TestRunDelegate_EmitsSubAgentEvents(t *testing.T) {
 	}
 }
 
-func TestSetSubscriber(t *testing.T) {
-	runner := NewParallelRunner(nil, nil, nil, 0, nil)
-	if runner.subscriber != nil {
-		t.Error("expected nil subscriber initially")
+func TestSubscriberFromCtx(t *testing.T) {
+	// Contract 3.4: subscriber is retrieved from context, not struct field
+
+	// No subscriber in background context
+	ch := subscriberFromCtx(context.Background())
+	if ch != nil {
+		t.Error("expected nil subscriber from empty context")
 	}
-	ch := make(chan core.AgentEvent, 16)
-	runner.SetSubscriber(ch)
-	if runner.subscriber != ch {
-		t.Error("expected subscriber to be set")
+
+	// Inject subscriber via context
+	events := make(chan core.AgentEvent, 16)
+	ctx := context.WithValue(context.Background(), core.SubscriberKey{}, events)
+	ch = subscriberFromCtx(ctx)
+	if ch == nil {
+		t.Error("expected subscriber from context with SubscriberKey")
 	}
 }

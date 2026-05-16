@@ -100,13 +100,15 @@ Sub-agents emit their own `text_delta`, `thinking_delta`, and `tool_execution_*`
 
 | Event | Payload | When |
 |-------|---------|------|
-| `user_question` | `{questionId: string, question: string, options?: string[], allowFreeText?: boolean, default?: string}` | Agent asks user |
-| `approval_request` | `{requestId: string, title?: string, description?: string, toolName?: string, args?: any}` | Agent needs approval |
+| `decision_request` | `{decisionId: string, sourceTool: string, title?: string, description?: string, hint?: string, options?: string[], allowFreeText?: boolean, metadata?: any}` | Agent needs user decision (question, approval, plan review) |
 
-Interface MUST handle these by presenting UI and sending the response back.
-Response: `POST /api/pux/respond` with `{requestId: string, response: string}`.
+Unified human-in-the-loop event. Replaces the former separate `user_question` and `approval_request` events. Actions include question answering, approval/rejection, plan refinement, etc.
 
-### 2.7 Artifacts & Plans
+Interface MUST handle this by presenting UI and sending the response back.
+Response: `POST /api/pux/decision` with `{decisionId: string, action: string, value: string}`.
+Action values: `"answer"`, `"approve"`, `"reject"`, `"refine"`, `"cancel"`.
+
+### 2.7 Artifacts, Plans & Sources
 
 | Event | Payload | When |
 |-------|---------|------|
@@ -114,6 +116,7 @@ Response: `POST /api/pux/respond` with `{requestId: string, response: string}`.
 | `artifact_updated` | `{type: string, content: any}` | Artifact modified |
 | `plan_created` | `{planId: string, name: string, content: string, filePath: string}` | Plan document created |
 | `plan_updated` | `{planId: string, content: string}` | Plan document modified |
+| `source` | `{sourceType: string, id: string, url?: string, title?: string}` | Citation/reference link from research tools |
 
 ### 2.8 System
 

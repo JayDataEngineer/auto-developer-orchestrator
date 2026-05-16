@@ -77,7 +77,21 @@ func (t *PlanTool) Execute(ctx context.Context, args map[string]any) (any, error
 
 	planID := fmt.Sprintf("p_%d_%s", time.Now().UnixNano(), safeName)
 
+	// Emit plan_created event (Contract 2.7 compliance)
 	subscriber, _ := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent)
+	if subscriber != nil {
+		core.SendEvent(subscriber, core.AgentEvent{
+			Type: core.EventTypePlanCreated,
+			Data: core.AgentEventData{
+				ToolArgs: map[string]any{
+					"planId":   planID,
+					"name":     safeName,
+					"content":  header + content,
+					"filePath": planPath,
+				},
+			},
+		})
+	}
 	resp, err := core.GlobalDecisions.WaitForDecision(ctx, core.DecisionRequest{
 		ID:          planID,
 		SourceTool:  "create_plan",

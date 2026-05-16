@@ -54,9 +54,6 @@ type ParallelRunner struct {
 	// File change tracking
 	snapshotter Snapshotter // git-based snapshot/diff/revert
 
-	// Parent SSE subscriber — sub-agent events are forwarded here for TUI visibility
-	subscriber chan<- core.AgentEvent
-
 	// Per-tier executor override: when set, uses this instead of r.executor
 	executorFactory func(tier string) core.ToolExecutor
 
@@ -68,6 +65,10 @@ type ParallelRunner struct {
 
 	// Auto-director: raise browser window for VNC visibility when browser agent starts
 	raiseBrowserFunc func(ctx context.Context) // injected by orchestrator if sandbox available
+
+	// Scoped delegation: when set, sub-agents with delegates_to get scoped delegation tools
+	roleProvider RoleProvider
+	mcpResolver  MCPResolver
 
 	mu                sync.Mutex
 	tasks             map[string]*asyncTask
@@ -228,9 +229,20 @@ func (r *ParallelRunner) SetDepth(depth int) {
 	}
 }
 
-// SetSubscriber sets the parent SSE subscriber channel for forwarding sub-agent events.
-func (r *ParallelRunner) SetSubscriber(ch chan<- core.AgentEvent) {
-	r.subscriber = ch
+// SetRoleProviders configures role resolution for scoped delegation.
+// When set, sub-agents whose roles have DelegatesTo will get scoped delegation tools.
+func (r *ParallelRunner) SetRoleProviders(roleProvider RoleProvider, mcpResolver MCPResolver) {
+	r.roleProvider = roleProvider
+	r.mcpResolver = mcpResolver
+}
+
+// subscriberFromCtx extracts the SSE subscriber channel from the context.
+// Contract 3.4 compliance: subscriber is retrieved from context (set by AgentLoop),
+// not held as a struct field. This keeps ParallelRunner a pure tool with no direct
+// reference to the event stream.
+func subscriberFromCtx(ctx context.Context) chan<- core.AgentEvent {
+	ch, _ := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent)
+	return ch
 }
 
 // Close cleans up all live agents and pending async tasks.
@@ -249,10 +261,11 @@ func (r *ParallelRunner) Close() {
 // RunDelegate runs a synchronous sub-agent.
 func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error) {
 	agentName := extractAgentName(instructions)
+	subscriber := subscriberFromCtx(ctx)
 	r.logger("SYNC_DELEGATE: task=%q agent=%s tools=%v model=%q", task, agentName, toolNames, modelID)
 
 	// Emit subagent_start to parent subscriber
-	core.SendEvent(r.subscriber, core.AgentEvent{
+	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
 		Data: core.AgentEventData{
 			AgentName: agentName,
@@ -273,7 +286,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		}
 	}
 	if len(selectedTools) == 0 {
-		core.SendEvent(r.subscriber, core.AgentEvent{
+		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
 			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames)},
 		})
@@ -376,13 +389,13 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 				finalText += evt.Data.Text
 			}
 			// Forward tool + text/thinking events to parent subscriber with agent context
-			if r.subscriber != nil {
+			if subscriber != nil {
 				switch evt.Type {
 				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
 					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
 					forwarded := evt
 					forwarded.Data.AgentName = agentName
-					core.SendEvent(r.subscriber, forwarded)
+					core.SendEvent(subscriber, forwarded)
 				}
 			}
 		}
@@ -393,7 +406,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	if runErr != nil {
 		endStatus = "error"
 	}
-	core.SendEvent(r.subscriber, core.AgentEvent{
+	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
 			AgentName: agentName,
@@ -412,6 +425,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 // RunDivisionDelegate creates a full sub-orchestrator for a division head.
 // The division path points to a sub-directory with its own pux.yaml, roles, etc.
 func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error) {
+	subscriber := subscriberFromCtx(ctx)
 	if r.orchestratorFactory == nil {
 		return nil, fmt.Errorf("recursive delegation not available: no orchestrator factory configured")
 	}
@@ -436,7 +450,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	r.logger("DIVISION_DELEGATE: path=%s depth=%d model=%q", absPath, r.depth+1, modelID)
 
 	// Emit subagent_start
-	core.SendEvent(r.subscriber, core.AgentEvent{
+	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
 		Data: core.AgentEventData{
 			AgentName: agentName,
@@ -453,7 +467,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 		ModelID:      modelID,
 	})
 	if err != nil {
-		core.SendEvent(r.subscriber, core.AgentEvent{
+		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
 			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: err.Error()},
 		})
@@ -492,13 +506,13 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 				finalText += evt.Data.Text
 			}
 			// Forward tool + text/thinking events to parent subscriber with agent context
-			if r.subscriber != nil {
+			if subscriber != nil {
 				switch evt.Type {
 				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
 					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
 					forwarded := evt
 					forwarded.Data.AgentName = agentName
-					core.SendEvent(r.subscriber, forwarded)
+					core.SendEvent(subscriber, forwarded)
 				}
 			}
 		}
@@ -509,7 +523,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	if runErr != nil {
 		endStatus = "error"
 	}
-	core.SendEvent(r.subscriber, core.AgentEvent{
+	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
 			AgentName: agentName,
@@ -530,6 +544,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 // RunDelegateTracked runs a sub-agent with file change tracking.
 // Returns the result, an agent reference for continuation, and file changes.
 func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error) {
+	subscriber := subscriberFromCtx(ctx)
 	// Take pre-snapshot
 	var snapshotID string
 	if r.snapshotter != nil && r.projectDir != "" {
@@ -543,7 +558,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	agentName := extractAgentName(instructions)
 
 	// Emit subagent_start to parent subscriber
-	core.SendEvent(r.subscriber, core.AgentEvent{
+	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
 		Data: core.AgentEventData{
 			AgentName: agentName,
@@ -564,7 +579,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 	}
 	if len(selectedTools) == 0 {
-		core.SendEvent(r.subscriber, core.AgentEvent{
+		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
 			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames)},
 		})
@@ -651,13 +666,13 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 				finalText += evt.Data.Text
 			}
-			if r.subscriber != nil {
+			if subscriber != nil {
 				switch evt.Type {
 				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
 					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
 					forwarded := evt
 					forwarded.Data.AgentName = agentName
-					core.SendEvent(r.subscriber, forwarded)
+					core.SendEvent(subscriber, forwarded)
 				}
 			}
 		}
@@ -668,7 +683,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	if runErr != nil {
 		endStatus = "error"
 	}
-	core.SendEvent(r.subscriber, core.AgentEvent{
+	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
 			AgentName: agentName,
@@ -741,6 +756,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 // RunDelegateContinue sends feedback to an existing sub-agent and continues its work.
 // The subagent's session is compacted first, then the feedback is added as a new user message.
 func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feedback string) (map[string]any, error) {
+	subscriber := subscriberFromCtx(ctx)
 	r.mu.Lock()
 	la, ok := r.liveAgents[agentRef]
 	r.mu.Unlock()
@@ -763,7 +779,7 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	loop := core.NewAgentLoop(la.Provider, continueExecutor, la.Session, la.Config)
 
 	// Emit subagent_start (continuation)
-	core.SendEvent(r.subscriber, core.AgentEvent{
+	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
 		Data: core.AgentEventData{
 			AgentName: la.Role,
@@ -802,13 +818,13 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 				finalText += evt.Data.Text
 			}
-			if r.subscriber != nil {
+			if subscriber != nil {
 				switch evt.Type {
 				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
 					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
 					forwarded := evt
 					forwarded.Data.AgentName = la.Role
-					core.SendEvent(r.subscriber, forwarded)
+					core.SendEvent(subscriber, forwarded)
 				}
 			}
 		}
@@ -819,7 +835,7 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	if runErr != nil {
 		endStatus = "error"
 	}
-	core.SendEvent(r.subscriber, core.AgentEvent{
+	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
 			AgentName: la.Role,
@@ -921,6 +937,11 @@ func (r *ParallelRunner) RevertAgent(ctx context.Context, agentRef string) (map[
 
 // RunDelegateAsync launches a sub-agent in a goroutine. Returns immediately.
 func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
+	// Capture subscriber from parent ctx before spawning goroutine.
+	// The goroutine uses context.Background() to survive parent cancellation,
+	// so we re-inject the subscriber into the background context.
+	parentSubscriber := subscriberFromCtx(ctx)
+
 	if r.depth >= r.maxDepth {
 		return nil, fmt.Errorf("max delegation depth (%d) reached", r.maxDepth)
 	}
@@ -954,6 +975,10 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 
 		// Wrap in a long timeout for safety (30 minutes per async agent)
 		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		// Re-inject subscriber into background context so RunDelegateTracked can emit events
+		if parentSubscriber != nil {
+			bgCtx = context.WithValue(bgCtx, core.SubscriberKey{}, parentSubscriber)
+		}
 		defer cancel()
 
 		// Use tracked delegation for file change tracking + agent_ref

@@ -22,14 +22,12 @@ import (
 	desktoptools "github.com/auto-developer-orchestrator/backend/internal/tools/desktop"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	asktool "github.com/auto-developer-orchestrator/backend/internal/tools/ask"
-	"github.com/auto-developer-orchestrator/backend/internal/tools/face"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/graph"
 	mcptools "github.com/auto-developer-orchestrator/backend/internal/tools/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	plantool "github.com/auto-developer-orchestrator/backend/internal/tools/plan"
-	"github.com/auto-developer-orchestrator/backend/internal/tools/nlp"
 	schedulertool "github.com/auto-developer-orchestrator/backend/internal/tools/scheduler"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/todo"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
@@ -178,18 +176,6 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		logger.Printf("Graph tools loaded for employees: %d tools", len(employeeTools))
 	}
 
-	if cfg.DBProvider != nil {
-		if baseURL, apiKey, ok := cfg.DBProvider.FaceConfig(); ok {
-			employeeTools = face.RegisterAll(employeeTools, baseURL, apiKey)
-			logger.Printf("Face tools loaded for employees: 5 tools")
-		}
-	}
-
-	if cfg.LLMProvider != nil {
-		employeeTools = nlp.RegisterAll(employeeTools, cfg.LLMProvider)
-		logger.Printf("NLP tools loaded for employees: 2 tools")
-	}
-
 	if cfg.BrowserProvider != nil {
 		sandboxIDFn := func() string { return cfg.SandboxID }
 		employeeTools = browsertools.RegisterBrowserTools(employeeTools, cfg.BrowserProvider, sandboxIDFn)
@@ -249,7 +235,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		pr.SetProjectDir(cfg.ProjectDir)
 		pr.SetDepth(0)
 		pr.SetOrchestratorFactory(makeOrchestratorFactory(provider, cfg))
-		pr.SetSubscriber(cfg.Subscriber)
+		// Subscriber is now injected via context (Contract 3.4 compliance).
+		// No need to call SetSubscriber — subscriberFromCtx() extracts it from ctx.
 		// Wire visual context for sub-agent vision caching
 		if cfg.VisualContext != nil && cfg.VisionChain != nil {
 			pr.SetVisualContext(cfg.VisualContext, cfg.VisionChain, func(format string, args ...interface{}) {
@@ -331,7 +318,6 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			orchestration.NewDelegateContinueTool(runner),
 			orchestration.NewDelegateRevertTool(runner),
 			orchestration.NewCollectResultsTool(runner),
-			orchestration.NewPlanTool(),
 			orchestration.NewSynthesizeTool(),
 		)
 		ctoToolReg = core.NewToolRegistry(ctoTools)
