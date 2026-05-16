@@ -93,7 +93,7 @@ const { values: opts } = parseArgs({
 	options: {
 		server: { type: "string", default: "http://localhost:3847" },
 		project: { type: "string", default: "auto-developer-orchestrator" },
-		model: { type: "string", default: "deepseek/deepseek-v4-flash" },
+		model: { type: "string", default: "" },
 		cwd: { type: "string", default: process.cwd() },
 		org: { type: "string" },
 	},

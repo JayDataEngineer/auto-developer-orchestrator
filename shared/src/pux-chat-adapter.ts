@@ -351,7 +351,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 				message: userText,
 				project,
 				agentId: store.activeAgentId || undefined,
-				model,
+				...(model ? { model } : {}),
 				temperature,
 			}),
 			signal: abortSignal,
@@ -624,6 +624,16 @@ export const puxChatAdapter: ChatModelAdapter = {
 						}
 						case "subagent_thinking_delta":
 						case "subagent_text_delta": {
+							break;
+						}
+
+						// ── Error events → visible error text ──
+
+						case "error": {
+							const errMsg = (parsed.error as string) || "Unknown error";
+							accText += `\n\n**Error:** ${errMsg}`;
+							statusRef[0] = "complete";
+							usePuxStore.setState({ lastError: errMsg });
 							break;
 						}
 
