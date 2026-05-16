@@ -151,9 +151,13 @@ function CommandPalette({
 
 	if (matches.length === 0) return null;
 
+	const MAX_VISIBLE = 5;
+	const visible = matches.slice(0, MAX_VISIBLE);
+	const hasMore = matches.length > MAX_VISIBLE;
+
 	return (
 		<Box flexDirection="column" paddingX={1}>
-			{matches.map((c, i) => (
+			{visible.map((c, i) => (
 				<Text key={c.name}>
 					{i === selectedIdx ? (
 						<Text bold color={colors.brand}>/{c.name}</Text>
@@ -163,6 +167,9 @@ function CommandPalette({
 					<Text color="gray"> {symbols.dot} {c.desc}</Text>
 				</Text>
 			))}
+			{hasMore && (
+				<Text dimColor color="gray">  ... {matches.length - MAX_VISIBLE} more</Text>
+			)}
 			<Text dimColor color="gray"> Up/Down navigate · Tab autocomplete</Text>
 		</Box>
 	);
