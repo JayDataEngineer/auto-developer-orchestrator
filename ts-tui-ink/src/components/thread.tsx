@@ -50,26 +50,29 @@ function estimateMessageHeight(msg: any, cols: number): number {
 				? msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("")
 				: "";
 		const lines = text ? wrappedLineCount(text, textWidth) : 1;
-		return 2 + lines; // marginTop + padding + text lines
+		return 1 + lines; // marginTop + text lines
 	}
 
 	// Assistant message
 	const parts = msg.parts || [];
-	let height = 2; // marginTop + message padding
+	let height = 1; // marginTop
 	for (const part of parts) {
 		switch (part.type) {
 			case "reasoning":
-				height += 3; // collapsed accordion + spacing + blank
+				height += 1; // collapsed accordion (single line)
 				break;
 			case "tool-call":
-				height += 2; // tool name line + spacing
-				if (part.result !== undefined) height += 4; // result preview + borders
+				height += 1; // tool name line
+				if (part.result !== undefined) height += 3; // result preview (max 3 lines)
 				if (part.isError) height += 1;
 				break;
 			case "text":
 				if (part.text?.trim()) {
-					height += wrappedLineCount(part.text, textWidth) + 1; // +1 spacing
+					height += wrappedLineCount(part.text, textWidth);
 				}
+				break;
+			case "source":
+				height += 1; // source URL line
 				break;
 		}
 	}
@@ -101,11 +104,10 @@ export function Thread({ onCommand }: ThreadProps) {
 		for (const msg of msgs) {
 			h += estimateMessageHeight(msg, cols);
 		}
-		// Generous safety margin: Ink adds unpredictable spacing between
-		// components (padding, borders, blank lines between parts, Yoga
-		// layout rounding).  Empirically the estimate is off by 5-10 lines
-		// per message, so we add 8 per message to ensure scrolling works.
-		h += msgs.length * 8;
+		// Small safety margin for Ink spacing between components.
+		// Keep this small — overestimating causes content to be pushed
+		// above the viewport and become invisible.
+		h += msgs.length * 2;
 		return h;
 	});
 

@@ -9,7 +9,7 @@ export function formatToolResult(result: unknown, maxLines = 3): string[] {
         text = result;
     } else if (typeof result === "object") {
         const obj = result as Record<string, unknown>;
-        text = (obj.output as string) || (obj.text as string) || (obj.result as string) || "";
+        text = (obj.output as string) || (obj.content as string) || (obj.text as string) || (obj.result as string) || "";
         if (!text) text = JSON.stringify(result);
     } else {
         text = JSON.stringify(result);

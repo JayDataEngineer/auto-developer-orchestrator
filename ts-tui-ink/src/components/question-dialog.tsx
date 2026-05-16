@@ -27,7 +27,7 @@ export function QuestionDialog() {
 				num <= options.length
 			) {
 				respond("answer", options[num - 1]);
-			} else if (input.trim()) {
+			} else if (input.trim() && (pending.allowFreeText !== false)) {
 				respond("answer", input.trim());
 			}
 		} else if (ch && !key.ctrl && !key.meta) {

@@ -22,7 +22,8 @@ export function AssistantMessage() {
 	const hasContent = parts && parts.some((p: any) =>
 		(p.type === "text" && p.text?.trim()) ||
 		p.type === "tool-call" ||
-		p.type === "reasoning"
+		p.type === "reasoning" ||
+		p.type === "source"
 	);
 
 	// Show spinner while running with no visible content yet
@@ -67,6 +68,19 @@ export function AssistantMessage() {
 								{part.text.split("\n").map((line: string, j: number) => (
 									<Text key={j}>{line || " "}</Text>
 								))}
+							</Box>
+						);
+					case "source":
+						return (
+							<Box key={part.id || i} paddingLeft={1}>
+								<Text color="gray">{BLOCKQUOTE_BAR} </Text>
+								<Text color="blue">
+									{part.url
+										? part.title
+											? `${part.title} — ${part.url}`
+											: part.url
+										: part.title || "source"}
+								</Text>
 							</Box>
 						);
 					default:
