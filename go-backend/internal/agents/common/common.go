@@ -116,11 +116,11 @@ var (
 	toolPkgModTime = make(map[string]time.Time)
 )
 
-// findKernelConfigDir resolves the kernel config/ directory by searching
+// FindKernelConfigDir resolves the kernel config/ directory by searching
 // multiple locations. Returns "" if not found. This works regardless of
 // whether PROJECT_ROOT points at the repo root, a projects parent, or
 // is unset.
-func findKernelConfigDir() string {
+func FindKernelConfigDir() string {
 	root := os.Getenv("PROJECT_ROOT")
 
 	// Candidate base directories to check for config/
@@ -181,7 +181,7 @@ func loadPromptTemplate() (*template.Template, error) {
 		return promptTmpl, promptLoadErr
 	}
 
-	configDir := findKernelConfigDir()
+	configDir := FindKernelConfigDir()
 	path := "config/prompt.md"
 	if configDir != "" {
 		path = filepath.Join(configDir, "prompt.md")
@@ -253,7 +253,7 @@ func LoadToolPackages() map[string]*ToolPackage {
 		return toolPackages
 	}
 
-	configDir := findKernelConfigDir()
+	configDir := FindKernelConfigDir()
 
 	// Start with legacy tool_packages (flat YAML files)
 	legacyDir := "config/tool_packages"
@@ -425,7 +425,7 @@ func LoadAgentRoles() map[string]*AgentRole {
 		return agentRoles
 	}
 
-	configDir := findKernelConfigDir()
+	configDir := FindKernelConfigDir()
 
 	// Start with legacy roles (folder format)
 	legacyDir := "config/roles"
@@ -621,7 +621,7 @@ func highestSandboxTier(capabilities []string) string {
 
 // capabilitySandboxTier reads the sandbox_tier field from a capability folder.
 func capabilitySandboxTier(name string) string {
-	configDir := findKernelConfigDir()
+	configDir := FindKernelConfigDir()
 	capDir := "config/capabilities"
 	if configDir != "" {
 		capDir = filepath.Join(configDir, "capabilities")
@@ -867,7 +867,7 @@ func fileChanged(key string, modTimes map[string]time.Time) bool {
 	if !ok {
 		return true // never loaded
 	}
-	configDir := findKernelConfigDir()
+	configDir := FindKernelConfigDir()
 	path := "config/" + key + ".md"
 	if configDir != "" {
 		path = filepath.Join(configDir, key+".md")
@@ -886,7 +886,7 @@ func dirChanged(key string, modTimes map[string]time.Time) bool {
 	if !ok {
 		return true // never loaded
 	}
-	configDir := findKernelConfigDir()
+	configDir := FindKernelConfigDir()
 	dir := "config/" + key
 	if configDir != "" {
 		dir = filepath.Join(configDir, key)

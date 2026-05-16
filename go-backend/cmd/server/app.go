@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
+	"github.com/auto-developer-orchestrator/backend/internal/autoconfig"
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/engines"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
@@ -641,6 +643,14 @@ func (a *App) buildRouter(
 		schedulerHandler := handlers.NewSchedulerHandler(a.sched, a.logger)
 		r.Route("/scheduler", func(r chi.Router) {
 			schedulerHandler.RegisterRoutes(r)
+		})
+
+		// Workers
+		workersDir := filepath.Join(common.FindKernelConfigDir(), "workers")
+		workersStore := autoconfig.NewWorkerStore(workersDir)
+		workerHandler := handlers.NewWorkerHandler(workersStore, a.logger)
+		r.Route("/workers", func(r chi.Router) {
+			workerHandler.RegisterRoutes(r)
 		})
 
 		// Cluster services

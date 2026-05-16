@@ -7,6 +7,7 @@ import {
 	usePuxStore,
 	type WorkbenchTab,
 	type Conversation,
+	type RunningAgentInfo,
 } from "@/lib/pux-store";
 import { relativeTime } from "@pux/shared";
 import { puxChatAdapter } from "@/lib/pux-chat-adapter";
@@ -15,6 +16,7 @@ import { Thread } from "@/components/assistant-ui/thread";
 import { VNCViewer } from "@/components/workbench/vnc-viewer";
 import { EditorPanel } from "@/components/workbench/editor-panel";
 import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
+import { WorkersPanel } from "@/components/workbench/workers-panel";
 import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
 import { DecisionDialog } from "@/components/decision-dialog";
 import { WidgetToolUIs } from "@/components/assistant-ui/widget-tool-ui";
@@ -59,6 +61,8 @@ import {
 	MessageSquare,
 	TerminalIcon,
 	Trash2,
+	Plus,
+	Users,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -96,6 +100,19 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 
 // ── Helpers ──
 
+function useAgentStatusPolling(intervalMs = 3000) {
+	const update = usePuxStore((s) => s.updateRunningAgents);
+	const loadConversations = usePuxStore((s) => s.loadConversations);
+	useEffect(() => {
+		update();
+		const id = setInterval(() => {
+			update();
+			loadConversations();
+		}, intervalMs);
+		return () => clearInterval(id);
+	}, [update, loadConversations, intervalMs]);
+}
+
 function SidebarToggle() {
 	const { state } = useSidebar();
 	return (
@@ -128,6 +145,8 @@ function ProjectGroup({
 }) {
 	const displayName = projectKey.split("/").pop() || projectKey;
 	const deleteConversation = usePuxStore((s) => s.deleteConversation);
+	const runningAgents = usePuxStore((s) => s.runningAgents);
+	const viewedConversations = usePuxStore((s) => s.viewedConversations);
 
 	return (
 		<Collapsible defaultOpen={isActive} className="group/collapsible">
@@ -154,37 +173,53 @@ function ProjectGroup({
 				{conversations.length > 0 && (
 					<CollapsibleContent className="group-data-[collapsible=icon]:hidden">
 						<SidebarMenuSub>
-							{conversations.map((c) => (
-								<SidebarMenuSubItem key={`${c.project}-${c.agentId}`} className="group/sub">
-									<SidebarMenuSubButton
-										onClick={() =>
-											onSelectConversation(c.project, c.agentId)
-										}
-									>
-										<MessageSquare className="size-3" />
-										<div className="flex min-w-0 flex-1 flex-col">
-											<span className="truncate text-[12px]">
-												{c.title || c.lastMessage || "Untitled"}
-											</span>
-											<span className="text-[10px] text-muted-foreground">
-												{relativeTime(c.lastAt, { now: "now" })}
-												{c.messageCount > 0 &&
-													` · ${c.messageCount} msgs`}
-											</span>
-										</div>
-										<button
-											onClick={(e) => {
-												e.stopPropagation();
-												deleteConversation(c.project, c.agentId);
-											}}
-											className="ml-1 shrink-0 rounded p-0.5 opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/sub:opacity-100"
-											title="Delete chat"
+							{conversations.map((c) => {
+								const convKey = `${c.project}:${c.agentId}`;
+								const isRunning = runningAgents.has(convKey);
+								const isUnviewed = !viewedConversations.has(convKey) && c.messageCount > 0;
+								return (
+									<SidebarMenuSubItem key={`${c.project}-${c.agentId}`} className="group/sub">
+										<SidebarMenuSubButton
+											onClick={() =>
+												onSelectConversation(c.project, c.agentId)
+											}
 										>
-											<Trash2 className="size-3" />
-										</button>
-									</SidebarMenuSubButton>
-								</SidebarMenuSubItem>
-							))}
+											<MessageSquare className="size-3" />
+											<div className="flex min-w-0 flex-1 items-center gap-1.5">
+												{isUnviewed && !isRunning && (
+													<span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-white" />
+												)}
+												{isRunning && (
+													<span className="relative flex h-2 w-2 shrink-0">
+														<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
+														<span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+													</span>
+												)}
+												<div className="flex min-w-0 flex-1 flex-col">
+													<span className="truncate text-[12px]">
+														{c.title || c.lastMessage || "Untitled"}
+													</span>
+													<span className="text-[10px] text-muted-foreground">
+														{relativeTime(c.lastAt, { now: "now" })}
+														{c.messageCount > 0 &&
+															` · ${c.messageCount} msgs`}
+													</span>
+												</div>
+											</div>
+											<button
+												onClick={(e) => {
+													e.stopPropagation();
+													deleteConversation(c.project, c.agentId);
+												}}
+												className="ml-1 shrink-0 rounded p-0.5 opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/sub:opacity-100"
+												title="Delete chat"
+											>
+												<Trash2 className="size-3" />
+											</button>
+										</SidebarMenuSubButton>
+									</SidebarMenuSubItem>
+								);
+							})}
 						</SidebarMenuSub>
 					</CollapsibleContent>
 				)}
@@ -233,6 +268,15 @@ function AppSidebar() {
 							<div className="flex flex-col gap-0.5 leading-none group-data-[collapsible=icon]:hidden">
 								<span className="font-semibold">Pux</span>
 							</div>
+						</SidebarMenuButton>
+					</SidebarMenuItem>
+					<SidebarMenuItem>
+						<SidebarMenuButton
+							onClick={() => usePuxStore.getState().startNewChat()}
+							tooltip="New Chat"
+						>
+							<Plus className="size-4" />
+							<span className="group-data-[collapsible=icon]:hidden">New Chat</span>
 						</SidebarMenuButton>
 					</SidebarMenuItem>
 				</SidebarMenu>
@@ -287,6 +331,7 @@ function Workbench() {
 		{ id: "vnc", icon: <Monitor className="size-4" />, label: "Sandbox" },
 		{ id: "editor", icon: <Code2 className="size-4" />, label: "Editor" },
 		{ id: "scheduler", icon: <Calendar className="size-4" />, label: "Scheduler" },
+		{ id: "workers", icon: <Users className="size-4" />, label: "Workers" },
 	];
 
 	return (
@@ -314,6 +359,7 @@ function Workbench() {
 				{storeTab === "vnc" && <VNCViewer />}
 				{storeTab === "editor" && <EditorPanel />}
 				{storeTab === "scheduler" && <SchedulerPanel />}
+				{storeTab === "workers" && <WorkersPanel />}
 			</div>
 		</div>
 	);
@@ -328,7 +374,12 @@ export function App() {
 	const conversationKey = usePuxStore((s) => s.conversationKey);
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
+	const activeAgentId = usePuxStore((s) => s.activeAgentId);
+	const runningAgents = usePuxStore((s) => s.runningAgents);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
+
+	// Poll for running agent status
+	useAgentStatusPolling();
 	const [showTerminal, setShowTerminal] = useState(false);
 	const [workbenchWidth, setWorkbenchWidth] = useState(800);
 	const workbenchWidthRef = useRef(800);
@@ -451,6 +502,16 @@ export function App() {
 				</header>
 				<PuxRuntimeProvider key={conversationKey}>
 					<div className="flex h-full flex-col">
+						{/* "Still working" banner when viewing a running agent */}
+						{activeProject && activeAgentId && runningAgents.has(`${activeProject}:${activeAgentId}`) && (
+							<div className="flex shrink-0 items-center gap-2 border-b border-blue-500/20 bg-blue-500/10 px-4 py-1.5 text-xs text-blue-400">
+								<span className="relative flex h-2 w-2">
+									<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
+									<span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+								</span>
+								Agent is still working...
+							</div>
+						)}
 						<div className="flex-1 overflow-hidden">
 							<Thread />
 						</div>
