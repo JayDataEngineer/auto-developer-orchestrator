@@ -12,6 +12,7 @@ import { join, basename } from "node:path";
 import { setBaseUrl, setFetch, usePuxStore } from "@pux/shared";
 import React from "react";
 import { App } from "./app.js";
+import { initMouseTracking, disableMouseTracking, filterAndEmitMouseEvents } from "./mouse.js";
 
 // ── Stdin fixes (runs before Ink processes any input) ──
 //
@@ -22,8 +23,9 @@ import { App } from "./app.js";
 //    (it falls through to the catch-all insert path). Rewrite \n → \r so
 //    Ctrl+J acts like Enter (submit) instead of inserting a newline.
 //
-// Both fixes patch stdin.read() since Ink reads via that method in utf8
-// string mode (setEncoding('utf8') in setRawMode).
+// 3. Mouse tracking: SGR mouse sequences (ESC[<btn;col;rowM/m) pass through
+//    stdin alongside keyboard bytes. Filter them out before Ink sees them
+//    and fire mouse event callbacks.
 
 const origRead = process.stdin.read.bind(process.stdin);
 process.stdin.read = function (size?: number) {
@@ -38,6 +40,8 @@ process.stdin.read = function (size?: number) {
 			// Ctrl+Backspace: CSI 127;5u or CSI 8;5u → Ctrl+W (\x17)
 			fixed = fixed.replace(/\x1b\[(?:127|8);5u/g, "\x17");
 		}
+		// Filter SGR mouse sequences before Ink processes them
+		fixed = filterAndEmitMouseEvents(fixed);
 		// Linux backspace: \x7f → \b (DEL → BS)
 		if (process.platform !== "darwin" && fixed.includes("\x7f")) {
 			fixed = fixed.replaceAll("\x7f", "\b");
@@ -78,6 +82,7 @@ if (hasExtendedKeys) {
 }
 
 function restoreTerminal() {
+	disableMouseTracking();
 	if (hasExtendedKeys) {
 		const { writeSync } = require("node:fs") as { writeSync: (fd: number, data: string) => void };
 		writeSync(1, DISABLE_MODIFY_OTHER_KEYS + DISABLE_KITTY_KEYBOARD);
@@ -178,6 +183,10 @@ usePuxStore.getState().setModel(modelName);
 usePuxStore.getState().setProject(projectName);
 await usePuxStore.getState().loadProjects();
 await usePuxStore.getState().loadConversations();
+
+// ── Mouse tracking ──
+
+initMouseTracking();
 
 // ── Render ──
 

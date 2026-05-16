@@ -1,7 +1,13 @@
 # TUI Gaps — Our TUI vs Claude Code & OpenCode
 
-## 1. Mouse Support & Text Selection (Claude Code)
-Full mouse tracking: click-to-focus, text selection via drag, OSC 52 clipboard copy. The #1 UX gap — users can't select/copy text with the mouse.
+## 1. Mouse Support & Text Selection ✅ DONE
+SGR mouse tracking (modes 1000 + 1006) enabled on startup, disabled on exit. Parses `ESC[<btn;col;rowM/m` sequences from stdin before Ink processes them.
+
+- **Native selection preserved**: Mode 1000 (press/release only) does NOT consume drag events, so terminal native text selection still works. Shift+click bypasses mouse reporting entirely.
+- **Wheel → keyboard**: Mouse wheel events (button & 0x40) are converted to `\x1b[A`/`\x1b[B` (arrow up/down) so Ink handles scroll naturally.
+- **`useMouseEvent(cb)` hook**: React components subscribe to click events.
+- **`useLastClick()` hook**: Returns most recent click position for hit testing.
+- **Infrastructure ready**: `onMouseEvent()` and `filterAndEmitMouseEvents()` available for future OSC 52 copy, hit testing, click-on-message.
 
 ## 2. Inline File Diff Viewing ✅ DONE
 - **`write_file`**: Now uses `DiffView` from `@assistant-ui/react-ink` with `newFile={{ content, name }}` — shows every line as a green addition with line numbers, 50-line cap with fold support.
