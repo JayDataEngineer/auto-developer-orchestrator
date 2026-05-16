@@ -87,6 +87,14 @@ const commands: Command[] = [
 		},
 	},
 	{
+		name: "logs",
+		description: "Open diagnostics log viewer",
+		handler: async () => {
+			usePuxStore.getState().toggleLogViewer();
+			return { type: "handled" };
+		},
+	},
+	{
 		name: "sessions",
 		description: "Quick switch between conversations",
 		handler: async () => {

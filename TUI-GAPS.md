@@ -38,8 +38,14 @@ Six built-in themes with reactive color system via React Context.
 ## 5. File Picker Dialog (OpenCode)
 `ctrl+f` → file picker overlay with fuzzy search. Useful for referencing files, attaching context, navigating. We have a files view but no interactive file picker from the composer.
 
-## 6. Log Viewer / Diagnostics (OpenCode, Claude Code)
-OpenCode has `ctrl+l` → dedicated log viewer with table + detail panels. Claude Code has `Doctor.tsx` diagnostics. No centralized log/event viewer.
+## 6. Log Viewer / Diagnostics ✅ DONE
+Tabbed diagnostics overlay with `/logs` slash command. Shows all session diagnostics from existing store data.
+
+- **Four tabs**: Agent Activity (agents with tool call history, duration, status), Token Usage (input/output/cache with model), Context (tokens, size, utilization, last compact), Session Info (project, model, agent ID, conversation, providers count).
+- **Tab navigation**: ← → arrow keys switch tabs. Escape closes. Same overlay pattern as settings/sessions.
+- **Agent log**: Shows each agent with status color (running=cyan, done=green, error=red), duration, task preview, and last 5 tool calls with timestamps.
+- **Session info**: Project path (used for path autocomplete), active model, agent ID, conversation key, provider/model counts.
+- **Slash command**: `/logs` toggles the overlay.
 
 ## 7. Settings UI ✅ DONE
 Full-screen settings overlay with `/settings` slash command.

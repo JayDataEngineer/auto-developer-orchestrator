@@ -84,6 +84,9 @@ interface PuxState {
 	// Session switcher
 	showSessionSwitcher: boolean;
 
+	// Log viewer
+	showLogViewer: boolean;
+
 	// Theme
 	theme: string;
 
@@ -122,6 +125,8 @@ interface PuxState {
 	setTheme: (theme: string) => void;
 	toggleSessionSwitcher: () => void;
 	closeSessionSwitcher: () => void;
+	toggleLogViewer: () => void;
+	closeLogViewer: () => void;
 }
 
 // ── Store ──
@@ -143,6 +148,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	showProvidersOverlay: false,
 	showSettingsOverlay: false,
 	showSessionSwitcher: false,
+	showLogViewer: false,
 	theme: (() => {
 		try {
 			return typeof localStorage !== "undefined" ? localStorage.getItem("pux:theme") || "default" : "default";
@@ -449,6 +455,13 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	closeSessionSwitcher: () => set({ showSessionSwitcher: false }),
+
+	toggleLogViewer: () => {
+		const show = !get().showLogViewer;
+		set({ showLogViewer: show, showModelPicker: false, showProvidersOverlay: false, showSettingsOverlay: false, showSessionSwitcher: false });
+	},
+
+	closeLogViewer: () => set({ showLogViewer: false }),
 
 	toggleSettingsOverlay: () => {
 		const show = !get().showSettingsOverlay;
