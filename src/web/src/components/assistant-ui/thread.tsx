@@ -15,6 +15,16 @@ import {
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
+import {
+	Select,
+	SelectContent,
+	SelectGroup,
+	SelectItem,
+	SelectLabel,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import { usePuxStore } from "@/lib/pux-store";
 import { cn } from "@/lib/utils";
 import {
 	ActionBarMorePrimitive,
@@ -41,7 +51,7 @@ import {
 	RefreshCwIcon,
 	SquareIcon,
 } from "lucide-react";
-import type { FC } from "react";
+import { useMemo, type FC } from "react";
 
 export const Thread: FC = () => {
 	return (
@@ -145,9 +155,46 @@ const Composer: FC = () => {
 };
 
 const ComposerAction: FC = () => {
+	const modelList = usePuxStore((s) => s.modelList);
+	const activeModel = usePuxStore((s) => s.activeModel);
+	const setModel = usePuxStore((s) => s.setModel);
+
+	const grouped = useMemo(() => {
+		const map = new Map<string, typeof modelList>();
+		for (const m of modelList) {
+			const provider = m.provider || "local";
+			if (!map.has(provider)) map.set(provider, []);
+			map.get(provider)!.push(m);
+		}
+		return map;
+	}, [modelList]);
+
+	const currentName = modelList.find((m) => m.id === activeModel)?.name || activeModel || "Default";
+
 	return (
 		<div className="aui-composer-action-wrapper relative flex items-center justify-between">
-			<div />
+			<Select value={activeModel || undefined} onValueChange={setModel}>
+				<SelectTrigger
+					className="h-7 w-auto max-w-48 gap-1 border-none bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-accent/50 focus:ring-0"
+					aria-label="Select model"
+				>
+					<SelectValue placeholder={currentName} />
+				</SelectTrigger>
+				<SelectContent className="max-h-80 min-w-[200px]">
+					{[...grouped.entries()].map(([provider, models]) => (
+						<SelectGroup key={provider}>
+							<SelectLabel className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+								{provider}
+							</SelectLabel>
+							{models.map((m) => (
+								<SelectItem key={m.id} value={m.id} className="text-sm">
+									{m.name}
+								</SelectItem>
+							))}
+						</SelectGroup>
+					))}
+				</SelectContent>
+			</Select>
 			<AuiIf condition={(s) => !s.thread.isRunning}>
 				<ComposerPrimitive.Send asChild>
 					<TooltipIconButton
