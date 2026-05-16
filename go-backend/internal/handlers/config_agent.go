@@ -10,9 +10,8 @@ import (
 
 // GetProjectSettings returns per-project settings overrides.
 func (h *ConfigHandler) GetProjectSettings(w http.ResponseWriter, r *http.Request) {
-	projectName := r.URL.Query().Get("project")
+	projectName := requireProjectName(w, r)
 	if projectName == "" {
-		JSONError(w, "project query param required", http.StatusBadRequest)
 		return
 	}
 	projectPath := resolveProjectPath(projectName, h.db)
@@ -26,9 +25,8 @@ func (h *ConfigHandler) GetProjectSettings(w http.ResponseWriter, r *http.Reques
 
 // SetProjectSettings updates per-project settings overrides.
 func (h *ConfigHandler) SetProjectSettings(w http.ResponseWriter, r *http.Request) {
-	projectName := r.URL.Query().Get("project")
+	projectName := requireProjectName(w, r)
 	if projectName == "" {
-		JSONError(w, "project query param required", http.StatusBadRequest)
 		return
 	}
 	projectPath := resolveProjectPath(projectName, h.db)

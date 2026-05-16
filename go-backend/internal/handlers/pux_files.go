@@ -13,15 +13,8 @@ import (
 // for the given project, read from the local filesystem.
 // Query params: project (required), depth (optional, default 4)
 func (h *PuxHandler) GetProjectFiles(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	if project == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project query param required"})
-		return
-	}
-
-	projectPath := resolveProjectPath(project, h.db)
+	projectPath := requireProject(w, r, h.db)
 	if projectPath == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 
@@ -37,16 +30,13 @@ func (h *PuxHandler) GetProjectFiles(w http.ResponseWriter, r *http.Request) {
 // GetProjectFile handles GET /api/pux/file — returns the content of a single file.
 // Query params: project (required), path (required, relative to project root)
 func (h *PuxHandler) GetProjectFile(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
 	relPath := r.URL.Query().Get("path")
-	if project == "" || relPath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project and path query params required"})
+	projectPath := requireProject(w, r, h.db)
+	if projectPath == "" {
 		return
 	}
-
-	projectPath := resolveProjectPath(project, h.db)
-	if projectPath == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+	if relPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
 		return
 	}
 
@@ -82,14 +72,13 @@ func (h *PuxHandler) SaveProjectFile(w http.ResponseWriter, r *http.Request) {
 		Content string `json:"content"`
 	}](w, r)
 	if !ok { return }
-	if req.Project == "" || req.Path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project and path are required"})
+	if req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
 		return
 	}
 
-	projectPath := resolveProjectPath(req.Project, h.db)
+	projectPath := requireProjectBody(w, req.Project, h.db)
 	if projectPath == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 
@@ -121,14 +110,13 @@ func (h *PuxHandler) CreateProjectFile(w http.ResponseWriter, r *http.Request) {
 		Path    string `json:"path"`
 	}](w, r)
 	if !ok { return }
-	if req.Project == "" || req.Path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project and path are required"})
+	if req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
 		return
 	}
 
-	projectPath := resolveProjectPath(req.Project, h.db)
+	projectPath := requireProjectBody(w, req.Project, h.db)
 	if projectPath == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 
@@ -167,14 +155,13 @@ func (h *PuxHandler) MoveProjectFile(w http.ResponseWriter, r *http.Request) {
 		To      string `json:"to"`
 	}](w, r)
 	if !ok { return }
-	if req.Project == "" || req.From == "" || req.To == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project, from, and to are required"})
+	if req.From == "" || req.To == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
 		return
 	}
 
-	projectPath := resolveProjectPath(req.Project, h.db)
+	projectPath := requireProjectBody(w, req.Project, h.db)
 	if projectPath == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 
@@ -213,16 +200,13 @@ func (h *PuxHandler) MoveProjectFile(w http.ResponseWriter, r *http.Request) {
 // DeleteProjectFile handles DELETE /api/pux/file — moves file to .pux/trash/ for undo.
 // Query params: project (required), path (required)
 func (h *PuxHandler) DeleteProjectFile(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
 	relPath := r.URL.Query().Get("path")
-	if project == "" || relPath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project and path query params required"})
+	projectPath := requireProject(w, r, h.db)
+	if projectPath == "" {
 		return
 	}
-
-	projectPath := resolveProjectPath(project, h.db)
-	if projectPath == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+	if relPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
 		return
 	}
 
@@ -264,14 +248,13 @@ func (h *PuxHandler) RestoreProjectFile(w http.ResponseWriter, r *http.Request) 
 		TrashPath string `json:"trashPath"`
 	}](w, r)
 	if !ok { return }
-	if req.Project == "" || req.TrashPath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project and trashPath are required"})
+	if req.TrashPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "trashPath is required"})
 		return
 	}
 
-	projectPath := resolveProjectPath(req.Project, h.db)
+	projectPath := requireProjectBody(w, req.Project, h.db)
 	if projectPath == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 

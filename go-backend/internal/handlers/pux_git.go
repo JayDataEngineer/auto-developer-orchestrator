@@ -22,15 +22,8 @@ type FileDiff struct {
 
 // GetGitDiff handles GET /api/pux/git/diff — returns changed files with original + modified content.
 func (h *PuxHandler) GetGitDiff(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	if project == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project query param required"})
-		return
-	}
-
-	projectPath := resolveProjectPath(project, h.db)
+	projectPath := requireProject(w, r, h.db)
 	if projectPath == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 

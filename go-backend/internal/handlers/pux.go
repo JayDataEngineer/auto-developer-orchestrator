@@ -291,14 +291,7 @@ func (h *PuxHandler) writeLlamaSSE(w http.ResponseWriter, evt llamaeng.AgentEven
 		}
 	}
 
-	data, err := json.Marshal(sseEvt.Data)
-	if err != nil {
-		return
-	}
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", sseEvt.Type, string(data))
-	if canFlush {
-		flusher.Flush()
-	}
+	writeSSE(w, sseEvt.Type, sseEvt.Data, canFlush, flusher)
 }
 
 // compositeAgentKey builds a key from projectPath and agentId.

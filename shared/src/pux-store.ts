@@ -177,6 +177,20 @@ function openOverlay(key: (typeof overlayKeys)[number], extra?: Partial<PuxState
 	return { ...closeAllOverlays(), [key]: true, ...extra };
 }
 
+// ── API loader helper ──
+
+async function apiLoad<T>(path: string, transform: (data: unknown) => Partial<PuxState>): Promise<Partial<PuxState> | null> {
+	try {
+		const fetch = getFetch();
+		const resp = await fetch(apiUrl(path));
+		if (!resp.ok) return null;
+		const data = await resp.json();
+		return transform(data);
+	} catch {
+		return null;
+	}
+}
+
 // ── Store ──
 
 export const usePuxStore = create<PuxState>((set, get) => ({
@@ -237,22 +251,16 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	loadModels: async () => {
-		try {
-			const fetch = getFetch();
-			const resp = await fetch(apiUrl("/api/pux/models"));
-			if (!resp.ok) return;
-			const data = await resp.json();
-			const models = Array.isArray(data) ? data : data.models || [];
-			set({
-				modelList: models.map((m: Record<string, string>) => ({
-					id: m.id || m.name,
-					name: m.name || m.id,
-					provider: m.provider || "",
-				})),
-			});
-		} catch {
-			// ignore
-		}
+		const update = await apiLoad("/api/pux/models", (data: unknown) => {
+			const raw = Array.isArray(data) ? data : (data as Record<string, unknown>)?.models || [];
+			const models = (raw as Record<string, string>[]).map((m) => ({
+				id: m.id || m.name,
+				name: m.name || m.id,
+				provider: m.provider || "",
+			}));
+			return { modelList: models };
+		});
+		if (update) set(update);
 	},
 
 	setModel: (model) => set({ activeModel: model, showModelPicker: false }),
@@ -293,15 +301,10 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		}),
 
 	loadConversations: async () => {
-		try {
-			const fetch = getFetch();
-			const resp = await fetch(apiUrl("/api/pux/conversations"));
-			if (!resp.ok) return;
-			const data = await resp.json();
-			set({ conversations: Array.isArray(data) ? data : [] });
-		} catch {
-			// ignore
-		}
+		const update = await apiLoad("/api/pux/conversations", (data: unknown) => ({
+			conversations: Array.isArray(data) ? data : [],
+		}));
+		if (update) set(update);
 	},
 
 	deleteConversation: async (project, agentId) => {
@@ -329,20 +332,17 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	loadProjects: async () => {
-		try {
-			const fetch = getFetch();
-			const resp = await fetch(apiUrl("/api/projects"));
-			if (!resp.ok) return;
-			const data = await resp.json();
-			const projects = Array.isArray(data) ? data : (data.projects || []);
-			set({ projects });
+		const update = await apiLoad("/api/projects", (data: unknown) => {
+			const projects = Array.isArray(data) ? data : ((data as Record<string, unknown>)?.projects || []) as Project[];
+			return { projects };
+		});
+		if (update) {
+			set(update);
 			// Auto-select first project if none active
-			if (!get().activeProject && projects.length > 0) {
-				const first = projects[0];
+			if (!get().activeProject && (update.projects as Project[]).length > 0) {
+				const first = (update.projects as Project[])[0];
 				set({ activeProject: first.name || first.path, activeProjectPath: first.path || "" });
 			}
-		} catch {
-			// ignore
 		}
 	},
 
@@ -416,14 +416,10 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	updateRunningAgents: async () => {
-		try {
-			const fetch = getFetch();
-			const resp = await fetch(apiUrl("/api/pux/agent-status"));
-			if (!resp.ok) return;
-			const data = await resp.json();
+		const update = await apiLoad("/api/pux/agent-status", (data: unknown) => {
 			const map = new Map<string, RunningAgentInfo>();
 			const entries = Array.isArray(data) ? data : [];
-			for (const entry of entries) {
+			for (const entry of entries as Array<Record<string, string>>) {
 				const key = `${entry.project}:${entry.agentId}`;
 				map.set(key, {
 					project: entry.project,
@@ -432,22 +428,16 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 					lastEventAt: entry.lastEventAt ? new Date(entry.lastEventAt).getTime() : 0,
 				});
 			}
-			set({ runningAgents: map });
-		} catch {
-			// ignore
-		}
+			return { runningAgents: map };
+		});
+		if (update) set(update);
 	},
 
 	loadProviders: async () => {
-		try {
-			const fetch = getFetch();
-			const resp = await fetch(apiUrl("/api/pux/providers"));
-			if (!resp.ok) return;
-			const data = await resp.json();
-			set({ providers: data.providers || {} });
-		} catch {
-			// ignore
-		}
+		const update = await apiLoad("/api/pux/providers", (data: unknown) => ({
+			providers: ((data as Record<string, unknown>)?.providers || {}) as ProvidersMap,
+		}));
+		if (update) set(update);
 	},
 
 	toggleProvidersOverlay: () => {
@@ -537,15 +527,10 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	closeMCPOverlay: () => set({ showMCPOverlay: false }),
 
 	loadMCPServers: async () => {
-		try {
-			const fetch = getFetch();
-			const resp = await fetch(apiUrl("/api/pux/mcp-servers"));
-			if (!resp.ok) return;
-			const data = await resp.json();
-			set({ mcpServers: Array.isArray(data) ? data : [] });
-		} catch {
-			// ignore
-		}
+		const update = await apiLoad("/api/pux/mcp-servers", (data: unknown) => ({
+			mcpServers: Array.isArray(data) ? data : [],
+		}));
+		if (update) set(update);
 	},
 
 	toggleSettingsOverlay: () => {

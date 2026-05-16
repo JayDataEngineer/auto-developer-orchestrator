@@ -117,6 +117,48 @@ func (s *GitHubTokenStore) Set(token string) {
 	os.Setenv("GITHUB_TOKEN", token)
 }
 
+// requireProject resolves and validates a project query parameter.
+// Returns the project directory path, or sends an error response and returns "".
+func requireProject(w http.ResponseWriter, r *http.Request, db *storage.Database) string {
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project query param required"})
+		return ""
+	}
+	projectPath := resolveProjectPath(project, db)
+	if projectPath == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return ""
+	}
+	return projectPath
+}
+
+// requireProjectName validates that a project query parameter is present.
+// Use this when you need the project name but not its path.
+func requireProjectName(w http.ResponseWriter, r *http.Request) string {
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		JSONError(w, "project query parameter is required", http.StatusBadRequest)
+		return ""
+	}
+	return project
+}
+
+// requireProjectBody resolves a project name from a decoded request body field.
+// Returns the project directory path, or sends an error response and returns "".
+func requireProjectBody(w http.ResponseWriter, project string, db *storage.Database) string {
+	if project == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project is required"})
+		return ""
+	}
+	projectPath := resolveProjectPath(project, db)
+	if projectPath == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return ""
+	}
+	return projectPath
+}
+
 // decodeReq decodes JSON from the request body into T.
 // On failure, writes a standardized 400 error and returns false.
 func decodeReq[T any](w http.ResponseWriter, r *http.Request) (*T, bool) {

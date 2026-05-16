@@ -10,12 +10,11 @@ import (
 // GetHistory returns conversation history for a project+agent.
 // GET /api/pux/history?project=...&agentId=...&limit=...
 func (h *PuxHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	agentID := r.URL.Query().Get("agentId")
+	project := requireProjectName(w, r)
 	if project == "" {
-		JSONError(w, "project query parameter is required", http.StatusBadRequest)
 		return
 	}
+	agentID := r.URL.Query().Get("agentId")
 	limit := 200
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := fmt.Sscanf(l, "%d", &limit); err != nil || n != 1 {
@@ -73,12 +72,11 @@ func (h *PuxHandler) GetConversations(w http.ResponseWriter, r *http.Request) {
 // DeleteConversation deletes all messages for a project+agent.
 // DELETE /api/pux/conversation?project=...&agentId=...
 func (h *PuxHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	agentID := r.URL.Query().Get("agentId")
+	project := requireProjectName(w, r)
 	if project == "" {
-		JSONError(w, "project query parameter is required", http.StatusBadRequest)
 		return
 	}
+	agentID := r.URL.Query().Get("agentId")
 
 	if h.db == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
