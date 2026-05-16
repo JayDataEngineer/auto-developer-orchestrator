@@ -62,8 +62,15 @@ Full-screen settings overlay with `/settings` slash command.
 - **Slash command**: `/settings` toggles the overlay. No ctrl+keybinding — consistent with Pux conventions (use `/` for UI panels).
 - **Keyboard**: ↑↓ to navigate between sections, Enter to activate (model→pick model, providers→providers panel), Escape to close.
 
-## 8. Search/Find in Chat (Claude Code)
-Search through message history with highlighted matching. No search functionality at all.
+## 8. Search/Find in Chat ✅ DONE
+Case-insensitive search through conversation messages with `/search` slash command.
+
+- **`SearchOverlay`** (`ts-tui-ink/src/components/search-overlay.tsx`): Live search as you type. Searches through all user and assistant message text content (extracts text parts from the assistant-ui runtime messages).
+- **Character-sequence matching**: Type any sequence — finds matches even if characters aren't contiguous (e.g. "srch" matches "search"). Standard substring matching as well.
+- **Match navigation**: ↑↓ arrows cycle through matches. Shows position (3/15) and match count. Current match displayed with brand-color highlight.
+- **Snippet view**: Shows ~40 chars of context around each match with ellipsis truncation.
+- **Coverage**: Searches user messages (`content[0].text`) and all assistant text parts. Tool call content is not searched. "text" and "reasoning" parts are included.
+- **Slash command**: `/search` toggles the overlay.
 
 ## 9. Vim/Emacs Input Modes (Claude Code)
 `VimTextInput` and `BaseTextInput` with vim/emacs keybindings. We have standard `ink-text-input` with basic editing.

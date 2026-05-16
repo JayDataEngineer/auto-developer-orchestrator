@@ -87,6 +87,14 @@ const commands: Command[] = [
 		},
 	},
 	{
+		name: "search",
+		description: "Search through conversation messages",
+		handler: async () => {
+			usePuxStore.getState().toggleSearchOverlay();
+			return { type: "handled" };
+		},
+	},
+	{
 		name: "files",
 		description: "Open file picker to browse and attach files",
 		handler: async () => {
