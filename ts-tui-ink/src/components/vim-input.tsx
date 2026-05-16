@@ -246,7 +246,7 @@ export function VimInput({
   const storeText = useAuiState((s) => s.composer.text);
   const { isFocused } = useFocus({ autoFocus });
 
-  const [vimMode, setVimMode] = useState<VimMode>("normal");
+  const [vimMode, setVimMode] = useState<VimMode>("insert");
   const [state, dispatch] = useReducer(reducer, { text: storeText, cursorOffset: 0, preferredColumn: undefined });
   const stateRef = useRef(state);
   stateRef.current = state;
