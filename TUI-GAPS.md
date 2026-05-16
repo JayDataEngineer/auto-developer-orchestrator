@@ -35,8 +35,14 @@ Six built-in themes with reactive color system via React Context.
 - **16 components updated**: All components that previously imported the static `colors` object now call `useColors()` at the component level, making them reactive to theme changes.
 - **Figma/Chalk-compatible**: All color values are valid chalk color names or `#hex` values supported by Ink's `colorize()`.
 
-## 5. File Picker Dialog (OpenCode)
-`ctrl+f` → file picker overlay with fuzzy search. Useful for referencing files, attaching context, navigating. We have a files view but no interactive file picker from the composer.
+## 5. File Picker Dialog ✅ DONE
+Interactive file tree with fuzzy search for browsing and attaching files from the composer.
+
+- **`FilePicker`** (`ts-tui-ink/src/components/file-picker.tsx`): Full-screen overlay showing the project file tree starting from `activeProjectPath` (or cwd). Lists directories first, then files. Skips `node_modules`, `.git`, `.next`, `dist`, `.cache`, and common ignored directories.
+- **Fuzzy search**: Type to filter files — uses character-sequence matching (not substring). Directories that match are auto-expanded. Filters across full relative path (e.g. `src/comp/but` matches `src/components/button.tsx`).
+- **Tree navigation**: Directories auto-displayed when filter is active. Arrow keys to navigate, Enter to expand/collapse directories or select files.
+- **File insertion**: Selecting a file inserts its relative path (e.g. `./src/main.ts`) into the composer text, overwriting the input cursor position. Uses `useAui().composer()` for direct composer access.
+- **Slash command**: `/files` toggles the picker.
 
 ## 6. Log Viewer / Diagnostics ✅ DONE
 Tabbed diagnostics overlay with `/logs` slash command. Shows all session diagnostics from existing store data.

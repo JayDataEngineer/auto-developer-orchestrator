@@ -31,6 +31,7 @@ import { ProvidersOverlay } from "./components/providers-overlay.js";
 import { SettingsOverlay } from "./components/settings-overlay.js";
 import { SessionSwitcher } from "./components/session-switcher.js";
 import { LogViewer } from "./components/log-viewer.js";
+import { FilePicker } from "./components/file-picker.js";
 import { QuestionDialog } from "./components/question-dialog.js";
 import { DecisionDialog } from "./components/decision-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
@@ -181,6 +182,7 @@ function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<stri
 	const showSettings = usePuxStore((s) => s.showSettingsOverlay);
 const showSwitcher = usePuxStore((s) => s.showSessionSwitcher);
 const showLogs = usePuxStore((s) => s.showLogViewer);
+const showFilePicker = usePuxStore((s) => s.showFilePicker);
 
 	// HITL decision dialog takes priority over everything
 	if (pendingDecision) {
@@ -198,6 +200,11 @@ const showLogs = usePuxStore((s) => s.showLogViewer);
 				)}
 			</Box>
 		);
+	}
+
+	// File picker
+	if (showFilePicker) {
+		return <FilePicker />;
 	}
 
 	// Log viewer

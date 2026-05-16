@@ -87,6 +87,14 @@ const commands: Command[] = [
 		},
 	},
 	{
+		name: "files",
+		description: "Open file picker to browse and attach files",
+		handler: async () => {
+			usePuxStore.getState().toggleFilePicker();
+			return { type: "handled" };
+		},
+	},
+	{
 		name: "logs",
 		description: "Open diagnostics log viewer",
 		handler: async () => {

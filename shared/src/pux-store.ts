@@ -87,6 +87,9 @@ interface PuxState {
 	// Log viewer
 	showLogViewer: boolean;
 
+	// File picker
+	showFilePicker: boolean;
+
 	// Theme
 	theme: string;
 
@@ -127,6 +130,8 @@ interface PuxState {
 	closeSessionSwitcher: () => void;
 	toggleLogViewer: () => void;
 	closeLogViewer: () => void;
+	toggleFilePicker: () => void;
+	closeFilePicker: () => void;
 }
 
 // ── Store ──
@@ -149,6 +154,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	showSettingsOverlay: false,
 	showSessionSwitcher: false,
 	showLogViewer: false,
+	showFilePicker: false,
 	theme: (() => {
 		try {
 			return typeof localStorage !== "undefined" ? localStorage.getItem("pux:theme") || "default" : "default";
@@ -462,6 +468,13 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	closeLogViewer: () => set({ showLogViewer: false }),
+
+	toggleFilePicker: () => {
+		const show = !get().showFilePicker;
+		set({ showFilePicker: show, showModelPicker: false, showProvidersOverlay: false, showSettingsOverlay: false, showSessionSwitcher: false, showLogViewer: false });
+	},
+
+	closeFilePicker: () => set({ showFilePicker: false }),
 
 	toggleSettingsOverlay: () => {
 		const show = !get().showSettingsOverlay;
