@@ -231,6 +231,11 @@ function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<stri
 		return <SessionSwitcher />;
 	}
 
+	// Settings overlay
+	if (showSettings) {
+		return <SettingsOverlay />;
+	}
+
 	// Providers overlay takes priority over views
 	if (showProviders) {
 		return <ProvidersOverlay />;
