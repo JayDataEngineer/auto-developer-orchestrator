@@ -9,7 +9,7 @@ import React, { useState, useMemo } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import { useAuiState } from "@assistant-ui/react-ink";
 import { formatToolResult, getToolArgPreview } from "@pux/shared";
-import { colors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
+import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 
 interface ToolCallEntry {
 	toolCallId: string;
@@ -26,6 +26,7 @@ export function ToolsView() {
 	const [selectedIdx, setSelectedIdx] = useState(0);
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
 	const { stdout } = useStdout();
+	const colors = useColors();
 	const rows = stdout?.rows ?? 24;
 
 	// Extract all tool calls from messages

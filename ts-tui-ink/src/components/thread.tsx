@@ -22,7 +22,7 @@ import { UserMessage } from "./user-message.js";
 import { SuggestionChips } from "./suggestion-chips.js";
 import { ComposerQueue } from "./composer-queue.js";
 import { getCommands } from "../commands.js";
-import { colors, symbols } from "../theme.js";
+import { useColors, symbols } from "../theme.js";
 
 // ── Thread ──
 
@@ -53,6 +53,7 @@ export function Thread({ onCommand }: ThreadProps) {
 
 	// Running state for cancel button
 	const isRunning = useAuiState((s) => s.thread.isRunning);
+	const colors = useColors();
 
 	return (
 		<Box flexDirection="column" flexGrow={1}>
@@ -120,6 +121,7 @@ function CommandPalette({
 	selectedIdx: number;
 	onSelectIdx: (i: number) => void;
 }) {
+	const colors = useColors();
 	const text = useAuiState((s) => s.composer.text);
 
 	const matches = useMemo(() => {
@@ -164,6 +166,7 @@ function MessageWrapper() {
 // ── Welcome ──
 
 function Welcome() {
+	const colors = useColors();
 	return (
 		<Box flexDirection="column" paddingY={1} paddingX={2}>
 			<Text bold color={colors.brand}>Pux {symbols.dot} Agent Orchestrator</Text>

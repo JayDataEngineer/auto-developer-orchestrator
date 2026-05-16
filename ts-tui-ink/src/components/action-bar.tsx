@@ -10,10 +10,11 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { ActionBarPrimitive, useAuiState } from "@assistant-ui/react-ink";
-import { colors, symbols } from "../theme.js";
+import { useColors, symbols } from "../theme.js";
 
 export function ActionBar() {
 	const role = useAuiState((s) => s.message.role);
+	const colors = useColors();
 
 	if (role === "assistant") {
 		return (

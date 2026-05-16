@@ -9,13 +9,14 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { usePuxStore } from "@pux/shared";
-import { colors, symbols } from "../theme.js";
+import { useColors, symbols } from "../theme.js";
 
 export function DecisionDialog() {
 	const pending = usePuxStore((s) => s.pendingDecision);
 	const respond = usePuxStore((s) => s.respondToDecision);
 	const [feedback, setFeedback] = useState("");
 	const [feedbackMode, setFeedbackMode] = useState(false);
+	const colors = useColors();
 
 	// Detect if this is a tool permission request: sourceTool is set and
 	// the title follows the "Allow %q?" pattern or metadata has toolName.

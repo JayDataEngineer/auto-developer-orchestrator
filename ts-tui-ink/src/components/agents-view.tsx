@@ -14,7 +14,7 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import { usePuxStore, type AgentState } from "@pux/shared";
-import { colors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
+import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 
 export function AgentsView() {
 	const agents = usePuxStore((s) => s.agents);
@@ -22,6 +22,7 @@ export function AgentsView() {
 	const rows = stdout?.rows ?? 24;
 	const [selectedIdx, setSelectedIdx] = useState(0);
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
+	const colors = useColors();
 
 	// Force re-render every second to update running durations
 	const [, setTick] = useState(0);
@@ -130,6 +131,7 @@ function AgentCard({
 	isSelected: boolean;
 	isExpanded: boolean;
 }) {
+	const colors = useColors();
 	const statusIcon = agent.status === "running"
 		? symbols.toolRunning
 		: agent.status === "error"

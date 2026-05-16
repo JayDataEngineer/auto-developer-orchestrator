@@ -15,10 +15,11 @@ import { ReasoningAccordion } from "./reasoning-accordion.js";
 import { BranchPicker } from "./branch-picker.js";
 import { MarkdownText } from "./markdown-text.js";
 import { TerminalImage } from "./terminal-image.js";
-import { colors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
+import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 
 export function AssistantMessage() {
 	const msg = useAuiState((s) => s.message);
+	const colors = useColors();
 	const parts = msg.parts;
 	const isRunning = msg.status?.type === "running";
 	const hasContent = parts && parts.some((p: any) =>
@@ -123,6 +124,7 @@ function ToolCallDisplay({
 	result?: unknown;
 	isError?: boolean;
 }) {
+	const colors = useColors();
 	const isDone = result !== undefined;
 	const isRunning = !isDone && !isError;
 

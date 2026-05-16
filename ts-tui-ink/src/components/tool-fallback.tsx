@@ -8,7 +8,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { colors, symbols, BLACK_CIRCLE } from "../theme.js";
+import { useColors, symbols, BLACK_CIRCLE } from "../theme.js";
 
 interface ToolFallbackProps {
 	toolName: string;
@@ -36,6 +36,7 @@ function formatArgs(args?: Record<string, unknown>): string {
 }
 
 export function ToolFallback({ toolName, args, result, isError }: ToolFallbackProps) {
+	const colors = useColors();
 	const isDone = result !== undefined;
 	const isRunning = !isDone && !isError;
 

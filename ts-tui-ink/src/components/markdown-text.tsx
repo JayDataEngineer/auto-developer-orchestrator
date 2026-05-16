@@ -9,7 +9,7 @@
 
 import React from "react";
 import { Text } from "ink";
-import { colors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
+import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 
 interface Segment {
 	text: string;
@@ -66,6 +66,7 @@ interface MarkdownTextProps {
 }
 
 export function MarkdownText({ text, dim }: MarkdownTextProps) {
+	const colors = useColors();
 	const lines = text.split("\n");
 	const elements: React.ReactNode[] = [];
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { Box, Text } from "ink";
-import { colors, BLOCKQUOTE_BAR } from "../theme.js";
+import { BLOCKQUOTE_BAR } from "../theme.js";
 
 export interface TerminalImageProps {
   image: string;

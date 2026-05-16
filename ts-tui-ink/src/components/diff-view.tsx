@@ -9,7 +9,6 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { DiffView } from "@assistant-ui/react-ink";
-import { colors } from "../theme.js";
 
 interface DiffViewDisplayProps {
 	patch?: string;

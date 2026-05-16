@@ -9,7 +9,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { ThreadPrimitive, useAuiState } from "@assistant-ui/react-ink";
-import { colors, symbols } from "../theme.js";
+import { useColors, symbols } from "../theme.js";
 
 export function SuggestionChips() {
 	const isEmpty = useAuiState((s) => s.thread.isEmpty);
@@ -33,6 +33,7 @@ function SuggestionList() {
 	const isEmpty = useAuiState((s) => s.thread.isEmpty);
 	const isRunning = useAuiState((s) => s.thread.isRunning);
 	const composerText = useAuiState((s) => s.composer.text);
+	const colors = useColors();
 
 	if (!isEmpty || isRunning) return null;
 	// Hide suggestions when typing a slash command (Tab conflict)

@@ -20,13 +20,14 @@ import {
 } from "@assistant-ui/react-ink";
 import { usePuxStore, formatToolResult } from "@pux/shared";
 import { TerminalImage } from "./terminal-image.js";
-import { colors, symbols, BLACK_CIRCLE, BLOCKQUOTE_BAR } from "../theme.js";
+import { useColors, symbols, BLACK_CIRCLE, BLOCKQUOTE_BAR } from "../theme.js";
 
 // ── Bash execution tool UI ──
 
 export const BashToolUI = makeAssistantToolUI({
 	toolName: "bash",
 	render: ({ args, result, isError, status }) => {
+		const colors = useColors();
 		const command = (args as any)?.command || (args as any)?.cmd || "";
 		const isDone = status.type === "complete";
 		const isRunning = status.type === "running";
@@ -107,6 +108,7 @@ function DelegateRenderer({
 	status: { type: string };
 	toolCallId?: string;
 }) {
+	const colors = useColors();
 	const agentName = (args as any)?.agent_id || (args as any)?.agent || "agent";
 	const task = (args as any)?.task || (args as any)?.prompt || "";
 	const isDone = status.type === "complete";
@@ -198,6 +200,7 @@ function DelegateRenderer({
 export const FileEditToolUI = makeAssistantToolUI({
 	toolName: "write_file",
 	render: ({ args, isError, status }) => {
+		const colors = useColors();
 		const path = (args as any)?.path || (args as any)?.file_path || "";
 		const content = (args as any)?.content || "";
 		const isDone = status.type === "complete";
@@ -251,6 +254,7 @@ function EditDiffRenderer({
 	isError?: boolean;
 	status: { type: string };
 }) {
+	const colors = useColors();
 	const path = (args as any)?.path || (args as any)?.file_path || "";
 	const oldStr = (args as any)?.old_string || "";
 	const newStr = (args as any)?.new_string || "";
@@ -324,6 +328,7 @@ export const FileEditPatchToolUI = makeAssistantToolUI({
 export const FileReadToolUI = makeAssistantToolUI({
 	toolName: "read_file",
 	render: ({ args, status }) => {
+		const colors = useColors();
 		const path = (args as any)?.path || (args as any)?.file_path || "";
 		const isDone = status.type === "complete";
 		const isRunning = status.type === "running";
@@ -415,6 +420,7 @@ function extractScreenshotURI(result: unknown): string | null {
 }
 
 function ScreenshotRenderer(p: { result?: unknown; isError?: boolean; status: { type: string } }) {
+  const colors = useColors();
   const isDone = p.status.type === "complete";
   const imageUri = isDone && !p.isError ? extractScreenshotURI(p.result) : null;
   return (

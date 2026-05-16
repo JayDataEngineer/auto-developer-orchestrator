@@ -8,9 +8,10 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { ErrorPrimitive } from "@assistant-ui/react-ink";
-import { colors, symbols } from "../theme.js";
+import { useColors, symbols } from "../theme.js";
 
 export function ErrorMessage() {
+	const colors = useColors();
 	return (
 		<ErrorPrimitive.Root>
 			<Box paddingLeft={2} marginBottom={1}>

@@ -13,7 +13,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import { usePuxStore } from "@pux/shared";
-import { colors, symbols } from "../theme.js";
+import { useColors, symbols } from "../theme.js";
 
 export function ConversationsView() {
 	const conversations = usePuxStore((s) => s.conversations);
@@ -23,6 +23,7 @@ export function ConversationsView() {
 	const deleteConversation = usePuxStore((s) => s.deleteConversation);
 	const [selectedIdx, setSelectedIdx] = useState(0);
 	const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+	const colors = useColors();
 
 	// Keyboard navigation
 	useInput(useCallback((input: string, key: any) => {

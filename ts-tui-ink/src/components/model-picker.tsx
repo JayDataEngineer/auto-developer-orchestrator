@@ -8,7 +8,7 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { usePuxStore } from "@pux/shared";
-import { colors, symbols } from "../theme.js";
+import { useColors, symbols } from "../theme.js";
 
 export function ModelPicker() {
 	const show = usePuxStore((s) => s.showModelPicker);
@@ -16,6 +16,7 @@ export function ModelPicker() {
 	const activeModel = usePuxStore((s) => s.activeModel);
 	const setModel = usePuxStore((s) => s.setModel);
 	const toggle = usePuxStore((s) => s.toggleModelPicker);
+	const colors = useColors();
 	const [idx, setIdx] = useState(0);
 
 	useInput((_, key) => {

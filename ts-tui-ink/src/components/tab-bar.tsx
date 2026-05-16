@@ -9,7 +9,7 @@ import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { usePuxStore, type TuiView } from "@pux/shared";
 import { useAuiState } from "@assistant-ui/react-ink";
-import { colors, symbols } from "../theme.js";
+import { useColors, symbols } from "../theme.js";
 
 const VIEWS: { key: TuiView; label: string }[] = [
 	{ key: "chat", label: "Chat" },
@@ -28,6 +28,7 @@ export function TabBar() {
 
 	// Count running agents
 	const runningAgents = [...agents.values()].filter((a) => a.status === "running").length;
+	const colors = useColors();
 
 	return (
 		<Box>

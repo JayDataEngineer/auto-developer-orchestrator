@@ -32,6 +32,7 @@ import { SettingsOverlay } from "./components/settings-overlay.js";
 import { QuestionDialog } from "./components/question-dialog.js";
 import { DecisionDialog } from "./components/decision-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
+import { ThemeProvider } from "./theme.js";
 import { executeCommand, type CommandContext } from "./commands.js";
 
 // ── Runtime Provider ──
@@ -113,8 +114,10 @@ interface AppProps {
 export function App({ model: initialModel, project }: AppProps) {
 	return (
 		<PuxRuntimeProvider>
-			<ToolRegistry />
-			<PuxApp initialModel={initialModel} project={project} />
+			<ThemeProvider>
+				<ToolRegistry />
+				<PuxApp initialModel={initialModel} project={project} />
+			</ThemeProvider>
 		</PuxRuntimeProvider>
 	);
 }

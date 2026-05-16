@@ -26,8 +26,14 @@ New `PermissionHook` (`go-backend/internal/hooks/permission.go`) implements `Too
 - **DecisionDialog enhanced**: Detects tool permission requests via `metadata.toolName`, shows args in monospace, offers 3-button layout (Y=once, A=always, N=reject).
 - **API endpoints**: `GET/PUT /api/pux/tool-permissions` already existed — change levels at runtime.
 
-## 4. Theme System (OpenCode)
-One hardcoded theme (8 colors). OpenCode ships 10 themes (catppuccin, dracula, tokyonight, etc.) with a theme manager. Claude Code has dynamic runtime themes.
+## 4. Theme System ✅ DONE
+Six built-in themes with reactive color system via React Context.
+
+- **`ThemeProvider` + `useColors()` hook** (`ts-tui-ink/src/theme.tsx`): Wraps the app and provides reactive colors from a React Context. Components call `const colors = useColors()` and re-render when the theme changes. Both `theme.ts` was renamed to `theme.tsx` to support the JSX in `ThemeProvider`.
+- **6 themes**: Default (magenta brand), Dark (green/black), Light (blue/light), Catppuccin (mocha), Dracula, Tokyo Night (storm). Each defines 11 color slots (brand, user, assistant, success, error, warning, running, text, textDim, textMuted, subtle).
+- **Theme selection**: `/settings` → navigate to Theme section → press 1-6 to switch. Persisted to `localStorage` (`pux:theme`). The settings overlay uses `themeList` from theme.tsx so new themes auto-appear.
+- **16 components updated**: All components that previously imported the static `colors` object now call `useColors()` at the component level, making them reactive to theme changes.
+- **Figma/Chalk-compatible**: All color values are valid chalk color names or `#hex` values supported by Ink's `colorize()`.
 
 ## 5. File Picker Dialog (OpenCode)
 `ctrl+f` → file picker overlay with fuzzy search. Useful for referencing files, attaching context, navigating. We have a files view but no interactive file picker from the composer.

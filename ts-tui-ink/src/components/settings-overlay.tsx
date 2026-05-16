@@ -1,13 +1,7 @@
 import React, { useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import { usePuxStore } from "@pux/shared";
-import { colors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
-
-const THEMES = [
-  { id: "default", name: "Default", desc: "Magenta brand + standard chalk colors" },
-  { id: "dark", name: "Dark", desc: "Green brand, minimal contrast" },
-  { id: "light", name: "Light", desc: "Blue brand, light-friendly" },
-] as const;
+import { useColors, symbols, BLOCKQUOTE_BAR, themeList } from "../theme.js";
 
 const SECTION_KEYS = ["model", "providers", "theme", "system"] as const;
 type SectionId = (typeof SECTION_KEYS)[number];
@@ -30,9 +24,10 @@ export function SettingsOverlay() {
   const toggleModelPicker = usePuxStore((s) => s.toggleModelPicker);
   const closeSettingsOverlay = usePuxStore((s) => s.closeSettingsOverlay);
   const setTheme = usePuxStore((s) => s.setTheme);
+  const colors = useColors();
   const [focusIdx, setFocusIdx] = React.useState(0);
 
-  useInput(
+	useInput(
     useCallback(
       (input: string, key: any) => {
         if (!show) return;
@@ -62,8 +57,18 @@ export function SettingsOverlay() {
           }
           return;
         }
+
+        // Number key to select theme when theme section is focused
+        const section = SECTION_KEYS[focusIdx];
+        if (section === "theme") {
+          const num = parseInt(input, 10);
+          if (num >= 1 && num <= themeList.length) {
+            setTheme(themeList[num - 1].id);
+            return;
+          }
+        }
       },
-      [show, focusIdx, closeSettingsOverlay, toggleProvidersOverlay, toggleModelPicker],
+      [show, focusIdx, closeSettingsOverlay, toggleProvidersOverlay, toggleModelPicker, setTheme],
     ),
   );
 
@@ -135,7 +140,7 @@ export function SettingsOverlay() {
 
                 {section === "theme" && (
                   <>
-                    {THEMES.map((t) => {
+                    {themeList.map((t) => {
                       const active = t.id === theme;
                       return (
                         <Box key={t.id}>
@@ -146,13 +151,9 @@ export function SettingsOverlay() {
                         </Box>
                       );
                     })}
-                    <Box marginTop={1}>
-                      {THEMES.map((t) => (
-                        <Text key={t.id} dimColor>
-                          {t.id === "default" ? "" : " "}[{t.id[0].toUpperCase()}] {t.name}
-                        </Text>
-                      ))}
-                    </Box>
+                    {focused && (
+                      <Text color="gray">  Press number key (1-{themeList.length}) to switch theme</Text>
+                    )}
                   </>
                 )}
 
