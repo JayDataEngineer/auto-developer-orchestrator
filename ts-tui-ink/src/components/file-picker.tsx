@@ -189,7 +189,7 @@ export function FilePicker() {
           const prefix = entry.depth > 0 ? "  ".repeat(entry.depth) : "";
           return (
             <Text key={entry.fullPath} backgroundColor={selected ? "gray" : undefined}>
-              {" "}{selected ? symbols.arrow : " "}{" "}
+              {"  "}
               <Text
                 color={entry.isDir ? "cyan" : selected ? colors.brand : undefined}
                 bold={entry.isDir || selected}

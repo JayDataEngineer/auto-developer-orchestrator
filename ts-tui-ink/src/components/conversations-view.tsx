@@ -100,7 +100,7 @@ export function ConversationsView() {
 					<Box key={`${conv.project}:${conv.agentId}`} flexDirection="column" marginBottom={0}>
 						<Box>
 							<Text color={isActive ? colors.brand : isSelected ? colors.running : "gray"}>
-								{isActive ? symbols.arrow : "  "}{" "}
+								{"   "}
 							</Text>
 							<Text bold={isSelected} color={isActive ? colors.brand : undefined}>
 								{conv.title || "(untitled)"}

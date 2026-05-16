@@ -57,7 +57,7 @@ export function LogViewer() {
       <Box paddingX={1} paddingY={1} gap={1}>
         {SECTIONS.map((s) => (
           <Text key={s} bold={s === section} color={s === section ? colors.brand : "gray"}>
-            {s === section ? symbols.arrow : " "} {SECTION_LABELS[s]}
+            {" "} {SECTION_LABELS[s]}
           </Text>
         ))}
       </Box>

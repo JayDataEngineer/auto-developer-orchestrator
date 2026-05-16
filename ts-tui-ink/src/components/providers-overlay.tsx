@@ -343,7 +343,7 @@ export function ProvidersOverlay() {
 						<Box key={label} marginTop={1}>
 							<Box width={12}>
 								<Text bold={configField === i} color={configField === i ? colors.brand : undefined}>
-									{configField === i ? symbols.arrow : " "} {label}:
+									{" "} {label}:
 								</Text>
 							</Box>
 							<TextInput
@@ -414,7 +414,7 @@ function ProviderRow({ name, provider, isSelected, activeModel, cols }: {
 
 	return (
 		<Text backgroundColor={isSelected ? "gray" : undefined}>
-			{" "}{isSelected ? symbols.arrow : " "}{" "}
+			{"  "}
 			<Text color={statusColor}>{statusIcon} </Text>
 			<Text bold={isSelected}>{name.padEnd(14)}</Text>
 			<Text color={typeColor}>{typeLabel.padEnd(12)}</Text>
@@ -428,7 +428,7 @@ function AddProviderRow({ isSelected }: { isSelected: boolean }) {
 	const colors = useColors();
 	return (
 		<Text backgroundColor={isSelected ? "gray" : undefined}>
-			{" "}{isSelected ? symbols.arrow : " "}{" "}
+			{"  "}
 			<Text color={colors.brand} bold>+ Add provider...</Text>
 		</Text>
 	);
@@ -474,7 +474,7 @@ function ModelRow({ model, provider, isSelected, isActive, cols }: {
 
 	return (
 		<Text backgroundColor={isSelected ? "gray" : undefined}>
-			{"    "}{isSelected ? symbols.arrow : " "}{" "}
+			{"     "}
 			<Text color={isActive ? colors.brand : undefined} bold={isActive || isSelected}>
 				{model.name}
 			</Text>
@@ -499,7 +499,7 @@ function CatalogRow({ id, entry, isSelected, cols }: {
 	const descMax = cols - 4 - 29;
 	return (
 		<Text backgroundColor={isSelected ? "gray" : undefined}>
-			{" "}{isSelected ? symbols.arrow : " "}{" "}
+			{"  "}
 			<Text bold={isSelected}>{entry.name.padEnd(16)}</Text>
 			<Text color={typeColor}>{TYPE_LABELS[entry.type].padEnd(10)}</Text>
 			<Text dimColor>{clip(entry.description, descMax)}</Text>

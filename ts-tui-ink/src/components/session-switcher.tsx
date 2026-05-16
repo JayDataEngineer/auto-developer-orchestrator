@@ -101,7 +101,7 @@ export function SessionSwitcher() {
           const selected = i === idx;
           return (
             <Text key={`${conv.project}:${conv.agentId}`} backgroundColor={selected ? "gray" : undefined}>
-              {" "}{selected ? symbols.arrow : " "}{" "}
+              {"  "}
               <Text
                 color={isActive ? colors.brand : undefined}
                 bold={isActive || selected}

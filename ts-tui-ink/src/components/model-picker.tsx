@@ -52,7 +52,7 @@ export function ModelPicker() {
 					const selected = i === idx;
 					return (
 						<Text key={m.id} backgroundColor={selected ? "gray" : undefined}>
-							{" "}{selected ? symbols.arrow : " "}{" "}
+							{"  "}
 							<Text
 								color={current ? colors.brand : undefined}
 								bold={current || selected}

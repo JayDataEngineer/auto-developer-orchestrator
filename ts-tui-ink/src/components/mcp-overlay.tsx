@@ -114,7 +114,7 @@ export function MCPOverlay() {
                 const isSelected = globalIdx === selectedIdx;
                 return (
                   <Text key={tool} backgroundColor={isSelected ? "gray" : undefined} bold={isSelected}>
-                    {"  "}{isSelected ? symbols.arrow : " "} {tool}
+                    {"   "} {tool}
                   </Text>
                 );
               })}
@@ -170,7 +170,7 @@ function ServerRow({ server, isSelected }: { server: MCPServerInfo; isSelected: 
 
   return (
     <Text backgroundColor={isSelected ? "gray" : undefined}>
-      {" "}{isSelected ? symbols.arrow : " "}{" "}
+      {"  "}
       <Text color={statusColor}>{statusIcon} </Text>
       <Text bold={isSelected}>{server.prefix.padEnd(12)}</Text>
       <Text dimColor>{server.endpoint}</Text>
