@@ -20,9 +20,17 @@ import type {
 	AgentState,
 	ToolCallRecord,
 	TuiView,
+	ProvidersMap,
 } from "./types";
 
 // ── State ──
+
+export interface RunningAgentInfo {
+	project: string;
+	agentId: string;
+	startedAt: number;
+	lastEventAt: number;
+}
 
 interface PuxState {
 	// HITL (unified decision protocol)
@@ -59,8 +67,16 @@ interface PuxState {
 	agents: Map<string, AgentState>;
 	activeTuiView: TuiView;
 
+	// Multi-conversation tracking
+	runningAgents: Map<string, RunningAgentInfo>;
+	viewedConversations: Set<string>;
+
 	// Model picker overlay
 	showModelPicker: boolean;
+
+	// Providers overlay (fullscreen browser)
+	providers: ProvidersMap;
+	showProvidersOverlay: boolean;
 
 	// Error
 	lastError: string | null;
@@ -84,6 +100,13 @@ interface PuxState {
 	updateAgentStatus: (agentId: string, status: AgentState["status"], result?: string) => void;
 	addAgentToolCall: (agentId: string, toolCall: ToolCallRecord) => void;
 	clearAgents: () => void;
+	startNewChat: () => void;
+	markViewed: (project: string, agentId: string) => void;
+	updateRunningAgents: () => Promise<void>;
+	loadProviders: () => Promise<void>;
+	toggleProvidersOverlay: () => void;
+	closeProvidersOverlay: () => void;
+	selectModel: (provider: string, modelId: string) => Promise<void>;
 }
 
 // ── Store ──
@@ -101,11 +124,20 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	conversationKey: "",
 	modelList: [],
 	showModelPicker: false,
+	providers: {},
+	showProvidersOverlay: false,
 	conversations: [],
 	projects: [],
 	activeWorkbenchTab: "vnc",
 	agents: new Map(),
 	activeTuiView: "chat",
+	runningAgents: new Map(),
+	viewedConversations: (() => {
+		try {
+			const saved = typeof localStorage !== "undefined" ? localStorage.getItem("pux:viewedConversations") : null;
+			return saved ? new Set(JSON.parse(saved) as string[]) : new Set<string>();
+		} catch { return new Set<string>(); }
+	})(),
 	lastError: null,
 
 	respondToDecision: async (action, value) => {
@@ -160,6 +192,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	setConversation: (project, agentId) => {
 		const projects = get().projects as Array<{ name: string; path?: string }>;
 		const p = projects.find((pr) => pr.name === project);
+		get().markViewed(project, agentId);
 		set({
 			activeProject: project,
 			activeProjectPath: p?.path || "",
@@ -280,7 +313,99 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	clearAgents: () => set({ agents: new Map() }),
+
+	startNewChat: () => {
+		const { activeProject } = get();
+		set({
+			activeAgentId: "",
+			conversationKey: `${activeProject}:new-${Date.now()}`,
+			pendingDecision: null,
+			lastUsage: null,
+			contextMetrics: null,
+			compacting: false,
+			lastError: null,
+		});
+	},
+
+	markViewed: (project, agentId) => {
+		const key = `${project}:${agentId}`;
+		const viewed = new Set(get().viewedConversations);
+		viewed.add(key);
+		try { localStorage.setItem("pux:viewedConversations", JSON.stringify([...viewed])); } catch {}
+		set({ viewedConversations: viewed });
+	},
+
+	updateRunningAgents: async () => {
+		try {
+			const fetch = getFetch();
+			const resp = await fetch(apiUrl("/api/pux/agent-status"));
+			if (!resp.ok) return;
+			const data = await resp.json();
+			const map = new Map<string, RunningAgentInfo>();
+			const entries = Array.isArray(data) ? data : [];
+			for (const entry of entries) {
+				const key = `${entry.project}:${entry.agentId}`;
+				map.set(key, {
+					project: entry.project,
+					agentId: entry.agentId,
+					startedAt: entry.startedAt ? new Date(entry.startedAt).getTime() : 0,
+					lastEventAt: entry.lastEventAt ? new Date(entry.lastEventAt).getTime() : 0,
+				});
+			}
+			set({ runningAgents: map });
+		} catch {
+			// ignore
+		}
+	},
+
+	loadProviders: async () => {
+		try {
+			const fetch = getFetch();
+			const resp = await fetch(apiUrl("/api/pux/providers"));
+			if (!resp.ok) return;
+			const data = await resp.json();
+			set({ providers: data.providers || {} });
+		} catch {
+			// ignore
+		}
+	},
+
+	toggleProvidersOverlay: () => {
+		const show = !get().showProvidersOverlay;
+		if (show) {
+			get().loadProviders();
+			get().loadModels();
+		}
+		set({ showProvidersOverlay: show, showModelPicker: false });
+	},
+
+	closeProvidersOverlay: () => set({ showProvidersOverlay: false }),
+
+	selectModel: async (provider, modelId) => {
+		const store = get();
+		try {
+			const fetch = getFetch();
+			await fetch(apiUrl("/api/pux/model"), {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					project: store.activeProject,
+					provider,
+					modelId,
+					agentId: store.activeAgentId || "default",
+				}),
+			});
+		} catch {
+			// fire and forget
+		}
+		set({
+			activeModel: modelId,
+			showProvidersOverlay: false,
+			showModelPicker: false,
+		});
+	},
 }));
 
 // Re-export types for convenience
-export type { TokenUsage, ContextMetrics, PendingDecision, DecisionHint, Conversation, Project, WorkbenchTab, AgentState, ToolCallRecord, TuiView };
+export type { TokenUsage, ContextMetrics, PendingDecision, DecisionHint, Conversation, Project, WorkbenchTab, AgentState, ToolCallRecord, TuiView, ModelCost, ModelInfo, ProviderInfo, ProvidersMap } from "./types";
+// RunningAgentInfo is defined in this file, just re-export it directly

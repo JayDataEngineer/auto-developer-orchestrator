@@ -38,6 +38,7 @@ export interface Conversation {
 	lastAt: string;
 	messageCount: number;
 	title: string;
+	status?: "running" | "";
 }
 
 export interface Project {
@@ -75,3 +76,35 @@ export interface ToolCallRecord {
 // ── TUI Views ──
 
 export type TuiView = "chat" | "agents" | "tools" | "files" | "conversations";
+
+// ── Providers & Models ──
+
+export interface ModelCost {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+}
+
+export interface ModelInfo {
+	id: string;
+	name: string;
+	reasoning: boolean;
+	input: string[];
+	cost: ModelCost;
+	contextWindow: number;
+	maxTokens: number;
+}
+
+export interface ProviderInfo {
+	baseUrl: string;
+	api: string;
+	status: "available" | "configured" | "unavailable";
+	compat: {
+		supportsDeveloperRole: boolean;
+		supportsReasoningEffort: boolean;
+	};
+	models: ModelInfo[];
+}
+
+export type ProvidersMap = Record<string, ProviderInfo>;

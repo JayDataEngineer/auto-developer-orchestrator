@@ -95,6 +95,22 @@ const commands: Command[] = [
 		},
 	},
 	{
+		name: "providers",
+		description: "Browse providers and models (fullscreen)",
+		handler: async () => {
+			usePuxStore.getState().toggleProvidersOverlay();
+			return { type: "handled" };
+		},
+	},
+	{
+		name: "models",
+		description: "Browse models by provider (fullscreen)",
+		handler: async () => {
+			usePuxStore.getState().toggleProvidersOverlay();
+			return { type: "handled" };
+		},
+	},
+	{
 		name: "history",
 		description: "List recent conversations",
 		handler: async () => {

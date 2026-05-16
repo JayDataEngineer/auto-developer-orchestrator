@@ -112,6 +112,100 @@ func (h *PuxHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetProviders returns all configured providers with full model metadata.
+// GET /api/pux/providers
+func (h *PuxHandler) GetProviders(w http.ResponseWriter, r *http.Request) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"providers": map[string]interface{}{}})
+		return
+	}
+
+	settingsPath := filepath.Join(homeDir, ".pi", "agent", "settings.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"providers": map[string]interface{}{}})
+		return
+	}
+
+	var settings struct {
+		Providers map[string]struct {
+			BaseURL string `json:"baseUrl"`
+			API     string `json:"api"`
+			APIKey  string `json:"apiKey"`
+			Compat  struct {
+				SupportsDeveloperRole   bool `json:"supportsDeveloperRole"`
+				SupportsReasoningEffort bool `json:"supportsReasoningEffort"`
+			} `json:"compat"`
+			Models []struct {
+				ID            string   `json:"id"`
+				Name          string   `json:"name"`
+				Reasoning     bool     `json:"reasoning"`
+				Input         []string `json:"input"`
+				Cost          struct {
+					Input      float64 `json:"input"`
+					Output     float64 `json:"output"`
+					CacheRead  float64 `json:"cacheRead"`
+					CacheWrite float64 `json:"cacheWrite"`
+				} `json:"cost"`
+				ContextWindow int `json:"contextWindow"`
+				MaxTokens     int `json:"maxTokens"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"providers": map[string]interface{}{}})
+		return
+	}
+
+	result := make(map[string]interface{})
+	for name, p := range settings.Providers {
+		status := "configured"
+		if h.providerAvailable(name) {
+			status = "available"
+		}
+
+		models := make([]map[string]interface{}, 0, len(p.Models))
+		for _, m := range p.Models {
+			models = append(models, map[string]interface{}{
+				"id":            m.ID,
+				"name":          m.Name,
+				"reasoning":     m.Reasoning,
+				"input":         m.Input,
+				"cost":          map[string]float64{"input": m.Cost.Input, "output": m.Cost.Output, "cacheRead": m.Cost.CacheRead, "cacheWrite": m.Cost.CacheWrite},
+				"contextWindow": m.ContextWindow,
+				"maxTokens":     m.MaxTokens,
+			})
+		}
+
+		result[name] = map[string]interface{}{
+			"baseUrl": p.BaseURL,
+			"api":     p.API,
+			"status":  status,
+			"compat":  map[string]bool{"supportsDeveloperRole": p.Compat.SupportsDeveloperRole, "supportsReasoningEffort": p.Compat.SupportsReasoningEffort},
+			"models":  models,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"providers": result})
+}
+
+// providerAvailable checks if a provider has a live engine.
+func (h *PuxHandler) providerAvailable(name string) bool {
+	switch name {
+	case "llamacpp":
+		return h.llamaEngine != nil
+	case "gemini":
+		return h.geminiEngine != nil
+	case "openrouter":
+		return h.openrouterEngine != nil
+	case "cluster":
+		return h.clusterEngine != nil
+	default:
+		return false
+	}
+}
+
 // engineFromSettings reads a provider's apiKey and baseUrl from settings.json
 // and creates a temporary LLMClient for it.
 func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.LLMClient {

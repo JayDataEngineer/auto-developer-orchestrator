@@ -22,6 +22,7 @@ export function StatusBar({ model }: StatusBarProps) {
 	const compacting = usePuxStore((s) => s.compacting);
 	const agents = usePuxStore((s) => s.agents);
 	const activeView = usePuxStore((s) => s.activeTuiView);
+	const showProviders = usePuxStore((s) => s.showProvidersOverlay);
 	const { stdout } = useStdout();
 	const cols = stdout?.columns ?? 80;
 
@@ -31,8 +32,11 @@ export function StatusBar({ model }: StatusBarProps) {
 		agents: "Agents",
 		tools: "Tools",
 		files: "Files",
+		conversations: "History",
 	};
-	const left = `${model} ${symbols.dot} ${viewLabels[activeView] || "Chat"}`;
+	const left = showProviders
+		? `${model} ${symbols.dot} Providers`
+		: `${model} ${symbols.dot} ${viewLabels[activeView] || "Chat"}`;
 
 	// Build right side: token usage + timing + agents
 	let right = "";

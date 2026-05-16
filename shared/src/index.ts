@@ -8,6 +8,7 @@ export { setBaseUrl, apiUrl } from "./server-url";
 
 // State
 export { usePuxStore } from "./pux-store";
+export type { RunningAgentInfo } from "./pux-store";
 
 // Adapters
 export { puxChatAdapter } from "./pux-chat-adapter";
@@ -30,4 +31,8 @@ export type {
 	AgentState,
 	ToolCallRecord,
 	TuiView,
+	ModelCost,
+	ModelInfo,
+	ProviderInfo,
+	ProvidersMap,
 } from "./types";

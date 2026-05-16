@@ -51,6 +51,7 @@ type PuxHandler struct {
 	langfuse *observability.LangfuseClient
 
 	selectedEngines map[string]*llamaeng.LLMClient // per-agent engine override
+	registry       *AgentRegistry                   // tracks running agents
 }
 
 // NewPuxHandler creates a new Pux handler.
@@ -64,6 +65,7 @@ func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, 
 		litellmKey:    os.Getenv("LITELLM_MASTER_KEY"),
 		toolPerms:     perms.NewToolPermissionConfig(logger),
 		selectedEngines: make(map[string]*llamaeng.LLMClient),
+		registry:       NewAgentRegistry(),
 	}
 }
 
@@ -144,9 +146,11 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Put("/tool-permissions", h.SetToolPermission)
 	r.Get("/history", h.GetHistory)
 	r.Get("/conversations", h.GetConversations)
+	r.Get("/agent-status", h.GetAgentStatus)
 	r.Delete("/conversation", h.DeleteConversation)
 	r.Put("/conversation/rename", h.RenameConversation)
 	r.Get("/models", h.GetModels)
+	r.Get("/providers", h.GetProviders)
 	r.Put("/model", h.SetModel)
 	r.Post("/compact", h.Compact)
 	r.Post("/hook-response", h.HookResponse)
@@ -162,6 +166,28 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/git/diff", h.GetGitDiff)
 	r.Post("/feedback", h.Feedback)
 	r.Post("/suggestions", h.Suggestions)
+}
+
+// GetAgentStatus returns running agent status.
+// GET /api/pux/agent-status?project=...&agentId=... (single)
+// GET /api/pux/agent-status (all running)
+func (h *PuxHandler) GetAgentStatus(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	agentID := r.URL.Query().Get("agentId")
+	if project != "" && agentID != "" {
+		if h.registry.IsRunning(project, agentID) {
+			running := h.registry.GetAllRunning()
+			for _, e := range running {
+				if e.Project == project && e.AgentID == agentID {
+					writeJSON(w, http.StatusOK, e)
+					return
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "idle"})
+		return
+	}
+	writeJSON(w, http.StatusOK, h.registry.GetAllRunning())
 }
 
 // resolveAgent reads ?agentId= from the query string, defaulting to "default".
