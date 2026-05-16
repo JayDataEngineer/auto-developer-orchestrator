@@ -190,18 +190,33 @@ function MessageWrapper() {
 
 function Welcome() {
 	const colors = useColors();
+	const activeModel = usePuxStore((s) => s.activeModel);
+	const modelList = usePuxStore((s) => s.modelList);
+	const projectPath = usePuxStore((s) => s.activeProjectPath);
+	const projectName = usePuxStore((s) => s.activeProject);
+
+	const modelEntry = modelList.find((m) => m.id === activeModel);
+	const modelLabel = modelEntry?.name || activeModel || "no model";
+
+	// Shorten path: ~/Documents/programs/dev/foo → …/dev/foo
+	const shortPath = projectPath
+		? "…" + projectPath.replace(/.*\/([^/]+\/[^/]+)$/, "/$1")
+		: projectName;
+
 	return (
-		<Box flexDirection="column" paddingY={1} paddingX={2}>
-			<Text bold color={colors.brand}>Pux {symbols.dot} Agent Orchestrator</Text>
-			<Box marginTop={1}>
-				<Text dimColor>Type a message or /help for commands.</Text>
+		<Box flexDirection="column" paddingY={2} paddingX={3}>
+			<Box>
+				<Box flexDirection="column" marginRight={2}>
+					<Text color={colors.brand}>{"▐▛██▜▌"}</Text>
+					<Text color={colors.brand}>{"▝▜██▛▘"}</Text>
+					<Text color={colors.brand}>{" ▘▘▝▝ "}</Text>
+				</Box>
+				<Box flexDirection="column" justifyContent="center">
+					<Text bold color={colors.brand}>Pux</Text>
+					<Text dimColor>{modelLabel}</Text>
+					<Text dimColor>{shortPath}</Text>
+				</Box>
 			</Box>
-			<Box marginTop={1} flexDirection="column">
-				<Text dimColor><Text bold>Enter</Text> Send  <Text bold>Scroll</Text> Mouse wheel  <Text bold>Ctrl+C x2</Text> Quit  <Text bold>Ctrl+T</Text> View</Text>
-				<Text dimColor><Text bold>Esc</Text> Vim normal  <Text bold>i</Text> Insert  <Text bold>h/j/k/l</Text> Move</Text>
-			</Box>
-			{/* Phase 1: Suggestion chips on empty thread */}
-			<SuggestionChips />
 		</Box>
 	);
 }
