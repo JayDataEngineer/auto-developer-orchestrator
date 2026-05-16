@@ -600,6 +600,10 @@ func (a *App) buildRouter(
 		r.Get("/cli/cat", cliHandler.ReadFile)
 		r.Get("/cli/ls", cliHandler.ListDirectory)
 
+		// Filesystem browser (for "Open Folder" dialog)
+		fsBrowseHandler := handlers.NewFsBrowseHandler()
+		r.Get("/fs/browse", fsBrowseHandler.Browse)
+
 		// Pux Agent
 		r.Route("/pux", func(r chi.Router) {
 			a.puxHandler.RegisterRoutes(r)

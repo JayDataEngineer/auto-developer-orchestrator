@@ -19,7 +19,9 @@ import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
 import { WorkersPanel } from "@/components/workbench/workers-panel";
 import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
 import { DecisionDialog } from "@/components/decision-dialog";
+import { AddProjectDialog } from "@/components/add-project-dialog";
 import { WidgetToolUIs } from "@/components/assistant-ui/widget-tool-ui";
+import { AskUserToolUI } from "@/components/assistant-ui/ask-user-tool-ui";
 import {
 	Sidebar,
 	SidebarContent,
@@ -56,13 +58,11 @@ import {
 	Code2,
 	Calendar,
 	ChevronRight,
-	FolderOpen,
-	Folder,
-	MessageSquare,
 	TerminalIcon,
 	Trash2,
 	Plus,
 	Users,
+	FolderOpen,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -93,6 +93,7 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 			{WidgetToolUIs.map((UI, i) => (
 				<UI key={i} />
 			))}
+			<AskUserToolUI />
 			{children}
 		</AssistantRuntimeProvider>
 	);
@@ -157,11 +158,6 @@ function ProjectGroup({
 						tooltip={displayName}
 					>
 						<ChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden" />
-						{isActive ? (
-							<FolderOpen className="text-yellow-500" />
-						) : (
-							<Folder className="text-yellow-500" />
-						)}
 						<span>{displayName}</span>
 						{project?.hasManifest && (
 							<span className="ml-auto rounded bg-sidebar-primary/20 px-1 text-[9px] text-sidebar-primary group-data-[collapsible=icon]:hidden">
@@ -184,7 +180,6 @@ function ProjectGroup({
 												onSelectConversation(c.project, c.agentId)
 											}
 										>
-											<MessageSquare className="size-3" />
 											<div className="flex min-w-0 flex-1 items-center gap-1.5">
 												{isUnviewed && !isRunning && (
 													<span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-white" />
@@ -235,6 +230,7 @@ function AppSidebar() {
 	const projects = usePuxStore((s) => s.projects);
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const setConversation = usePuxStore((s) => s.setConversation);
+	const [showAddProject, setShowAddProject] = useState(false);
 
 	// Group conversations by project
 	const convsByProject = useMemo(() => {
@@ -279,6 +275,15 @@ function AppSidebar() {
 							<span className="group-data-[collapsible=icon]:hidden">New Chat</span>
 						</SidebarMenuButton>
 					</SidebarMenuItem>
+					<SidebarMenuItem>
+						<SidebarMenuButton
+							onClick={() => setShowAddProject(true)}
+							tooltip="Open Folder"
+						>
+							<FolderOpen className="size-4" />
+							<span className="group-data-[collapsible=icon]:hidden">Open Folder</span>
+						</SidebarMenuButton>
+					</SidebarMenuItem>
 				</SidebarMenu>
 			</SidebarHeader>
 			<SidebarContent className="group-data-[collapsible=icon]:hidden">
@@ -317,6 +322,7 @@ function AppSidebar() {
 				</SidebarMenu>
 			</SidebarFooter>
 			<SidebarRail />
+			<AddProjectDialog open={showAddProject} onOpenChange={setShowAddProject} />
 		</Sidebar>
 	);
 }
