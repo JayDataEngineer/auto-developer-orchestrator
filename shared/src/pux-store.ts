@@ -59,12 +59,16 @@ interface PuxState {
 	agents: Map<string, AgentState>;
 	activeTuiView: TuiView;
 
+	// Model picker overlay
+	showModelPicker: boolean;
+
 	// Error
 	lastError: string | null;
 
 	// ── Actions ──
 	respondToDecision: (action: string, value: string) => Promise<void>;
 	loadModels: () => Promise<void>;
+	toggleModelPicker: () => void;
 	loadConversations: () => Promise<void>;
 	loadProjects: () => Promise<void>;
 	setModel: (model: string) => void;
@@ -96,6 +100,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	activeConversationId: "",
 	conversationKey: "",
 	modelList: [],
+	showModelPicker: false,
 	conversations: [],
 	projects: [],
 	activeWorkbenchTab: "vnc",
@@ -138,7 +143,13 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		}
 	},
 
-	setModel: (model) => set({ activeModel: model }),
+	setModel: (model) => set({ activeModel: model, showModelPicker: false }),
+
+	toggleModelPicker: () => {
+		const show = !get().showModelPicker;
+		if (show) get().loadModels();
+		set({ showModelPicker: show });
+	},
 
 	setProject: (project) => {
 		const projects = get().projects as Array<{ name: string; path?: string }>;
