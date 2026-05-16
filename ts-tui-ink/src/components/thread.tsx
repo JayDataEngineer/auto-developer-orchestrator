@@ -234,10 +234,10 @@ function CommandComposer({
 			onSubmit={(submittedText: string) => {
 				const trimmed = submittedText.trim();
 				if (trimmed.startsWith("/")) {
+					aui.composer().setText("");
 					onCommand(trimmed).then((output) => {
 						if (output) onOutput(output);
 					});
-					setTimeout(() => aui.composer().setText(""), 0);
 				} else if (trimmed.length > 0) {
 					aui.composer().send();
 				}
