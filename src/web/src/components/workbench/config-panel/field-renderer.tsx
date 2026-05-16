@@ -107,13 +107,13 @@ export function FieldRenderer<T>({
 		case "select":
 			return (
 				<Field label={field.label} required={field.required}>
-					<Select value={value ?? ""} onValueChange={onChange}>
+					<Select value={value || "__none__"} onValueChange={(v) => onChange(v === "__none__" ? "" : v)}>
 						<SelectTrigger className="h-8 text-xs">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
 							{field.options.map((opt) => (
-								<SelectItem key={opt.value} value={opt.value} className="text-xs">
+								<SelectItem key={opt.value || "__none__"} value={opt.value || "__none__"} className="text-xs">
 									{opt.label}
 								</SelectItem>
 							))}
@@ -152,12 +152,12 @@ export function FieldRenderer<T>({
 			const models = usePuxStore((s) => s.modelList);
 			return (
 				<Field label={field.label}>
-					<Select value={value ?? ""} onValueChange={onChange}>
+					<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
 						<SelectTrigger className="h-8 text-xs">
 							<SelectValue placeholder="Default" />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="" className="text-xs">Default</SelectItem>
+							<SelectItem value="__default__" className="text-xs">Default</SelectItem>
 							{models.map((m) => (
 								<SelectItem key={m.id} value={m.id} className="text-xs">
 									{m.name}
