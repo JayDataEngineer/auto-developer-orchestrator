@@ -1,4 +1,0 @@
-description: "Browser automation via sb_server — navigate, click, type, extract, download"
-mcp_servers: []
-tools:
-  - bash

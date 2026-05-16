@@ -9,4 +9,3 @@ tools:
   - get_storage
   - set_storage
   - clear_storage
-mcp_servers: []

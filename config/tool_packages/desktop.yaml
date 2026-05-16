@@ -1,8 +1,0 @@
-description: "GUI automation via xdotool — screenshot, click, type, key, observe (OCR + elements)"
-mcp_servers: []
-tools:
-  - desktop_screenshot
-  - desktop_click
-  - desktop_type
-  - desktop_key
-  - desktop_observe

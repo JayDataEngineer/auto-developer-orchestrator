@@ -6,4 +6,3 @@ tools:
   - file_edit
   - file_glob
   - file_grep
-mcp_servers: []

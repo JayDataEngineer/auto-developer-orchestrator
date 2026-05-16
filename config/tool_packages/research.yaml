@@ -1,5 +1,0 @@
-description: "Deep web research — search, scrape, crawl, map"
-mcp_servers:
-  - web
-tools:
-  - bash

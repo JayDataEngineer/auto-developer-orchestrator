@@ -7,5 +7,4 @@ tools:
   - desktop_observe
   - app_interact
   - app_profile
-mcp_servers: []
 sandbox_tier: bridged

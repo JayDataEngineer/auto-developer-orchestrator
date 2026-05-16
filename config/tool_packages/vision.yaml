@@ -1,5 +1,0 @@
-description: "Image and visual analysis"
-mcp_servers:
-  - media
-tools:
-  - bash
