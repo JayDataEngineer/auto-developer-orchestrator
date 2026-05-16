@@ -23,6 +23,29 @@ import type {
 	ProvidersMap,
 } from "./types";
 
+// ── Safe localStorage access ──
+
+const storage = {
+	get(key: string, fallback: string = ""): string {
+		try {
+			return typeof localStorage !== "undefined" ? localStorage.getItem(key) || fallback : fallback;
+		} catch { return fallback; }
+	},
+	set(key: string, value: string): void {
+		try { if (typeof localStorage !== "undefined") localStorage.setItem(key, value); } catch {}
+	},
+	getJSON<T>(key: string, fallback: T): T {
+		try {
+			if (typeof localStorage === "undefined") return fallback;
+			const raw = localStorage.getItem(key);
+			return raw ? JSON.parse(raw) as T : fallback;
+		} catch { return fallback; }
+	},
+	setJSON(key: string, value: unknown): void {
+		storage.set(key, JSON.stringify(value));
+	},
+};
+
 // ── State ──
 
 export interface RunningAgentInfo {
@@ -110,6 +133,9 @@ interface PuxState {
 
 	// Error
 	lastError: string | null;
+
+	// Active plan (Contract 2.7)
+	activePlan: { planId: string; name: string; filePath: string } | null;
 
 	// ── Actions ──
 	respondToDecision: (action: string, value: string) => Promise<void>;
@@ -215,24 +241,16 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	showSearchOverlay: false,
 	showMCPOverlay: false,
 	mcpServers: [],
-	theme: (() => {
-		try {
-			return typeof localStorage !== "undefined" ? localStorage.getItem("pux:theme") || "default" : "default";
-		} catch { return "default"; }
-	})(),
+	theme: storage.get("pux:theme", "default"),
 	conversations: [],
 	projects: [],
 	activeWorkbenchTab: "vnc",
 	agents: new Map(),
 	activeTuiView: "chat",
 	runningAgents: new Map(),
-	viewedConversations: (() => {
-		try {
-			const saved = typeof localStorage !== "undefined" ? localStorage.getItem("pux:viewedConversations") : null;
-			return saved ? new Set(JSON.parse(saved) as string[]) : new Set<string>();
-		} catch { return new Set<string>(); }
-	})(),
+	viewedConversations: new Set(storage.getJSON<string[]>("pux:viewedConversations", [])),
 	lastError: null,
+	activePlan: null,
 
 	respondToDecision: async (action, value) => {
 		const { pendingDecision } = get();
@@ -411,7 +429,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		const key = `${project}:${agentId}`;
 		const viewed = new Set(get().viewedConversations);
 		viewed.add(key);
-		try { localStorage.setItem("pux:viewedConversations", JSON.stringify([...viewed])); } catch {}
+		storage.setJSON("pux:viewedConversations", [...viewed]);
 		set({ viewedConversations: viewed });
 	},
 
@@ -545,7 +563,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	closeSettingsOverlay: () => set({ showSettingsOverlay: false }),
 
 	setTheme: (theme) => {
-		try { localStorage.setItem("pux:theme", theme); } catch {}
+		storage.set("pux:theme", theme);
 		set({ theme });
 	},
 }));

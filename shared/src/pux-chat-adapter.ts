@@ -182,6 +182,16 @@ function handleMetaEvent(
 			usePuxStore.setState({ lastError: data.error as string });
 			break;
 		}
+		case "plan_created": {
+			usePuxStore.setState({
+				activePlan: {
+					planId: data.planId as string,
+					name: data.name as string,
+					filePath: data.filePath as string,
+				},
+			});
+			break;
+		}
 	}
 }
 
