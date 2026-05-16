@@ -28,6 +28,7 @@ import { ToolsView } from "./components/tools-view.js";
 import { FilesView } from "./components/files-view.js";
 import { ConversationsView } from "./components/conversations-view.js";
 import { ProvidersOverlay } from "./components/providers-overlay.js";
+import { SettingsOverlay } from "./components/settings-overlay.js";
 import { QuestionDialog } from "./components/question-dialog.js";
 import { DecisionDialog } from "./components/decision-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
@@ -172,6 +173,7 @@ function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<stri
 	const activeView = usePuxStore((s) => s.activeTuiView);
 	const pendingDecision = usePuxStore((s) => s.pendingDecision);
 	const showProviders = usePuxStore((s) => s.showProvidersOverlay);
+	const showSettings = usePuxStore((s) => s.showSettingsOverlay);
 
 	// HITL decision dialog takes priority over everything
 	if (pendingDecision) {

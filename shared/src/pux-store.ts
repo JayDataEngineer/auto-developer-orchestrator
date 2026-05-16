@@ -78,6 +78,12 @@ interface PuxState {
 	providers: ProvidersMap;
 	showProvidersOverlay: boolean;
 
+	// Settings overlay
+	showSettingsOverlay: boolean;
+
+	// Theme
+	theme: string;
+
 	// Error
 	lastError: string | null;
 
@@ -108,6 +114,9 @@ interface PuxState {
 	closeProvidersOverlay: () => void;
 	selectModel: (provider: string, modelId: string) => Promise<void>;
 	addProvider: (provider: { id: string; baseUrl: string; apiKey: string; models: Array<{ id: string; name: string; contextWindow: number; maxTokens: number }> }) => Promise<void>;
+	toggleSettingsOverlay: () => void;
+	closeSettingsOverlay: () => void;
+	setTheme: (theme: string) => void;
 }
 
 // ── Store ──
@@ -127,6 +136,12 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	showModelPicker: false,
 	providers: {},
 	showProvidersOverlay: false,
+	showSettingsOverlay: false,
+	theme: (() => {
+		try {
+			return typeof localStorage !== "undefined" ? localStorage.getItem("pux:theme") || "default" : "default";
+		} catch { return "default"; }
+	})(),
 	conversations: [],
 	projects: [],
 	activeWorkbenchTab: "vnc",
@@ -406,7 +421,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		});
 	},
 
-	addProvider: async (provider) => {
+		addProvider: async (provider) => {
 		try {
 			const fetch = getFetch();
 			const resp = await fetch(apiUrl("/api/pux/providers"), {
@@ -420,6 +435,22 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		} catch {
 			// ignore
 		}
+	},
+
+	toggleSettingsOverlay: () => {
+		const show = !get().showSettingsOverlay;
+		if (show) {
+			get().loadProviders();
+			get().loadModels();
+		}
+		set({ showSettingsOverlay: show, showProvidersOverlay: false });
+	},
+
+	closeSettingsOverlay: () => set({ showSettingsOverlay: false }),
+
+	setTheme: (theme) => {
+		try { localStorage.setItem("pux:theme", theme); } catch {}
+		set({ theme });
 	},
 }));
 

@@ -87,6 +87,14 @@ const commands: Command[] = [
 		},
 	},
 	{
+		name: "settings",
+		description: "Open settings panel (model, theme, system info)",
+		handler: async () => {
+			usePuxStore.getState().toggleSettingsOverlay();
+			return { type: "handled" };
+		},
+	},
+	{
 		name: "model",
 		description: "Browse providers and switch model",
 		handler: async () => {

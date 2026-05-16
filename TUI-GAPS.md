@@ -35,8 +35,14 @@ One hardcoded theme (8 colors). OpenCode ships 10 themes (catppuccin, dracula, t
 ## 6. Log Viewer / Diagnostics (OpenCode, Claude Code)
 OpenCode has `ctrl+l` → dedicated log viewer with table + detail panels. Claude Code has `Doctor.tsx` diagnostics. No centralized log/event viewer.
 
-## 7. Settings UI (Claude Code, OpenCode)
-Settings screens for API keys, model defaults, theme, etc. We have a provider overlay but no general settings panel.
+## 7. Settings UI ✅ DONE
+Full-screen settings overlay with `/settings` slash command.
+
+- **`SettingsOverlay`** (`ts-tui-ink/src/components/settings-overlay.tsx`): Follows the same overlay pattern as `ProvidersOverlay` — takes over the content area, has up/down navigation, Escape to close.
+- **Four sections**: Active Model (shows current model + provider, Enter to open model picker), Providers (lists configured providers with status, Enter to open providers panel), Theme (selectable radio group with checkmarks, stored in localStorage), System (project name, agent ID).
+- **Theme storage**: `pux:theme` key in localStorage via `usePuxStore.setTheme()`. Initial value loaded on store creation. Three built-in themes defined: Default (magenta brand), Dark (green brand), Light (blue brand).
+- **Slash command**: `/settings` toggles the overlay. No ctrl+keybinding — consistent with Pux conventions (use `/` for UI panels).
+- **Keyboard**: ↑↓ to navigate between sections, Enter to activate (model→pick model, providers→providers panel), Escape to close.
 
 ## 8. Search/Find in Chat (Claude Code)
 Search through message history with highlighted matching. No search functionality at all.
