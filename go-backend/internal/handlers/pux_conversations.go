@@ -61,6 +61,12 @@ func (h *PuxHandler) GetConversations(w http.ResponseWriter, r *http.Request) {
 		}
 		summaries = filtered
 	}
+	// Enrich with running status
+	for i := range summaries {
+		if h.registry.IsRunning(summaries[i].Project, summaries[i].AgentID) {
+			summaries[i].Status = "running"
+		}
+	}
 	writeJSON(w, http.StatusOK, summaries)
 }
 

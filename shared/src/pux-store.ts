@@ -107,6 +107,7 @@ interface PuxState {
 	toggleProvidersOverlay: () => void;
 	closeProvidersOverlay: () => void;
 	selectModel: (provider: string, modelId: string) => Promise<void>;
+	addProvider: (provider: { id: string; baseUrl: string; apiKey: string; models: Array<{ id: string; name: string; contextWindow: number; maxTokens: number }> }) => Promise<void>;
 }
 
 // ── Store ──
@@ -403,6 +404,22 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			showProvidersOverlay: false,
 			showModelPicker: false,
 		});
+	},
+
+	addProvider: async (provider) => {
+		try {
+			const fetch = getFetch();
+			const resp = await fetch(apiUrl("/api/pux/providers"), {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(provider),
+			});
+			if (resp.ok) {
+				await get().loadProviders();
+			}
+		} catch {
+			// ignore
+		}
 	},
 }));
 

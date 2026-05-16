@@ -318,6 +318,66 @@ func TestSaveAssistantMessage(t *testing.T) {
 	}
 }
 
+func TestSaveStreamingMessage(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// First save creates the row
+	if err := db.SaveStreamingMessage(ctx, "proj", "agent1", "Hello", "hmm"); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, _ := db.GetConversationHistory(ctx, "proj", "agent1", 100)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0].Text != "Hello" {
+		t.Errorf("expected 'Hello', got %q", msgs[0].Text)
+	}
+	if msgs[0].ToolCalls != "[streaming]" {
+		t.Errorf("expected '[streaming]', got %q", msgs[0].ToolCalls)
+	}
+
+	// Second save updates the existing row
+	if err := db.SaveStreamingMessage(ctx, "proj", "agent1", "Hello world", "hmm ok"); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, _ = db.GetConversationHistory(ctx, "proj", "agent1", 100)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message after update, got %d", len(msgs))
+	}
+	if msgs[0].Text != "Hello world" {
+		t.Errorf("expected 'Hello world', got %q", msgs[0].Text)
+	}
+
+	// Finalize replaces [streaming] with real tool calls
+	if err := db.FinalizeStreamingMessage(ctx, "proj", "agent1", "Hello world done", "hmm ok done", `[{"tool":"bash"}]`); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, _ = db.GetConversationHistory(ctx, "proj", "agent1", 100)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message after finalize, got %d", len(msgs))
+	}
+	if msgs[0].Text != "Hello world done" {
+		t.Errorf("expected 'Hello world done', got %q", msgs[0].Text)
+	}
+	if msgs[0].ToolCalls != `[{"tool":"bash"}]` {
+		t.Errorf("expected real tool calls, got %q", msgs[0].ToolCalls)
+	}
+}
+
+func TestFinalizeStreamingMessageNoRow(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	err := db.FinalizeStreamingMessage(ctx, "proj", "agent1", "text", "thinking", "[]")
+	if err == nil {
+		t.Error("expected error when no streaming row exists")
+	}
+}
+
 func TestGetConversationHistoryLimit(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

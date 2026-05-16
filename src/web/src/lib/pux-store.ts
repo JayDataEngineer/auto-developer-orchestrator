@@ -11,4 +11,5 @@ export type {
 	Conversation,
 	Project,
 	WorkbenchTab,
+	RunningAgentInfo,
 } from "@pux/shared";

@@ -236,6 +236,48 @@ func (d *Database) SaveAssistantMessage(ctx context.Context, project, agentID, t
 	return res.LastInsertId()
 }
 
+// SaveStreamingMessage creates or updates an in-progress assistant message.
+// Uses '[streaming]' as a sentinel in tool_calls to identify the placeholder row.
+func (d *Database) SaveStreamingMessage(ctx context.Context, project, agentID, text, thinking string) error {
+	var id int64
+	err := d.db.QueryRowContext(ctx,
+		Rebind(d.dialect, `SELECT id FROM conversation_messages
+			WHERE project = ? AND agent_id = ? AND role = 'assistant' AND tool_calls = '[streaming]'
+			ORDER BY created_at DESC LIMIT 1`),
+		project, agentID).Scan(&id)
+
+	if err != nil {
+		// No streaming row exists — insert one
+		_, err = d.db.ExecContext(ctx,
+			Rebind(d.dialect, `INSERT INTO conversation_messages (project, agent_id, role, text, thinking, tool_calls)
+				VALUES (?, ?, 'assistant', ?, ?, '[streaming]')`),
+			project, agentID, text, thinking)
+		return err
+	}
+	// Update existing streaming row
+	_, err = d.db.ExecContext(ctx,
+		Rebind(d.dialect, `UPDATE conversation_messages SET text = ?, thinking = ? WHERE id = ?`),
+		text, thinking, id)
+	return err
+}
+
+// FinalizeStreamingMessage completes a streaming placeholder with final content.
+// If no streaming row exists, returns an error (caller should fall back to SaveAssistantMessage).
+func (d *Database) FinalizeStreamingMessage(ctx context.Context, project, agentID, text, thinking, toolCallsJSON string) error {
+	result, err := d.db.ExecContext(ctx,
+		Rebind(d.dialect, `UPDATE conversation_messages SET text = ?, thinking = ?, tool_calls = ?
+			WHERE project = ? AND agent_id = ? AND role = 'assistant' AND tool_calls = '[streaming]'`),
+		text, thinking, toolCallsJSON, project, agentID)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("no streaming message found")
+	}
+	return nil
+}
+
 // GetConversationHistory returns messages for a project+agent, ordered by creation time.
 func (d *Database) GetConversationHistory(ctx context.Context, project, agentID string, limit int) ([]StoredMessage, error) {
 	if limit <= 0 {
@@ -331,6 +373,7 @@ type ConversationSummary struct {
 	LastAt       string `json:"lastAt"`
 	MessageCount int    `json:"messageCount"`
 	Title        string `json:"title"`
+	Status       string `json:"status,omitempty"` // "running" if agent is active
 }
 
 // GetConversationSummaries returns the latest conversation for each project+agent pair.

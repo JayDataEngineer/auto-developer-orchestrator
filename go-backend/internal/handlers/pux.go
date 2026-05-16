@@ -151,6 +151,7 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Put("/conversation/rename", h.RenameConversation)
 	r.Get("/models", h.GetModels)
 	r.Get("/providers", h.GetProviders)
+	r.Post("/providers", h.AddProvider)
 	r.Put("/model", h.SetModel)
 	r.Post("/compact", h.Compact)
 	r.Post("/hook-response", h.HookResponse)

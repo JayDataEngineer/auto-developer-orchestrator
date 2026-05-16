@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -288,6 +289,10 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	}
 	defer orch.Close()
 
+	// Register agent as running (for multi-conversation status tracking)
+	h.registry.Start(req.Project, req.AgentId)
+	defer h.registry.Stop(req.Project, req.AgentId)
+
 	// Rehydrate session tree from SQL history for context continuity
 	var historyLen int
 	if h.db != nil {
@@ -380,8 +385,20 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 
 	// Stream events
 	var assistantText, assistantThinking string
+
+	// Collect tool calls for persistence (id + name + args is enough for
+	// the history adapter to reconstruct tool-call cards in the UI).
+	type savedToolCall struct {
+		ID   string         `json:"id"`
+		Name string         `json:"name"`
+		Args map[string]any `json:"args"`
+	}
+	var toolCalls []savedToolCall
+
 	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
+	saveTicker := time.NewTicker(5 * time.Second)
+	defer saveTicker.Stop()
 
 	llamaEvents := make(chan llama.AgentEvent, 256)
 	go func() {
@@ -392,6 +409,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 				assistantText += evt.Data.Text
 			case core.EventTypeThinkingDelta:
 				assistantThinking += evt.Data.Text
+			case core.EventTypeToolStart:
+				toolCalls = append(toolCalls, savedToolCall{
+					ID:   evt.Data.ToolID,
+					Name: evt.Data.ToolName,
+					Args: evt.Data.ToolArgs,
+				})
 			}
 			llamaEvents <- convertCoreEventToLlama(evt)
 		}
@@ -406,8 +429,17 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 				h.writeLlamaSSE(w, evt, canFlush, flusher)
 			}
 			if h.db != nil {
-				if _, err := h.db.SaveAssistantMessage(ctx, req.Project, req.AgentId, assistantText, assistantThinking, "[]"); err != nil {
-					h.log.Warn("Failed to save assistant message", zap.Error(err))
+				toolCallsJSON := "[]"
+				if len(toolCalls) > 0 {
+					if b, err := json.Marshal(toolCalls); err == nil {
+						toolCallsJSON = string(b)
+					}
+				}
+				if err := h.db.FinalizeStreamingMessage(r.Context(), req.Project, req.AgentId, assistantText, assistantThinking, toolCallsJSON); err != nil {
+					h.log.Warn("Failed to finalize streaming message, falling back to insert", zap.Error(err))
+					if _, fallbackErr := h.db.SaveAssistantMessage(r.Context(), req.Project, req.AgentId, assistantText, assistantThinking, toolCallsJSON); fallbackErr != nil {
+						h.log.Warn("Failed to save assistant message", zap.Error(fallbackErr))
+					}
 				}
 			}
 			if loopErr != nil {
@@ -433,6 +465,13 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			}
 			keepalive.Reset(15 * time.Second)
 			h.writeLlamaSSE(w, evt, canFlush, flusher)
+			h.registry.Bump(req.Project, req.AgentId)
+		case <-saveTicker.C:
+			if h.db != nil && (assistantText != "" || assistantThinking != "") {
+				if err := h.db.SaveStreamingMessage(r.Context(), req.Project, req.AgentId, assistantText, assistantThinking); err != nil {
+					h.log.Warn("Failed to save streaming message", zap.Error(err))
+				}
+			}
 		}
 	}
 }
