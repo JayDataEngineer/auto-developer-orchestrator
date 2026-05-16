@@ -543,4 +543,23 @@ tasks:
               print(f'                  ctx:    {v[\"ctx_size\"]}')
               print()
           print('Usage: task model MODEL=qwen36')
+
+  # ── Release ───────────────────────────────────────────────────────────
+  release:
+    desc: "Bump version, commit, tag. Usage: task release VERSION=3.1.0"
+    preconditions:
+      - sh: test -n "{{.VERSION}}"
+        msg: "Set VERSION. Example: task release VERSION=3.1.0"
+      - sh: git diff --quiet
+        msg: "Working tree dirty — commit or stash first."
+    cmds:
+      - sed -i 's/"version": ".*"/"version": "{{.VERSION}}"/' package.json
+      - cmd: cd ts-tui-ink && sed -i 's/"version": ".*"/"version": "{{.VERSION}}"/' package.json
+        ignore_error: true
+      - cmd: cd shared && sed -i 's/"version": ".*"/"version": "{{.VERSION}}"/' package.json
+        ignore_error: true
+      - git add package.json ts-tui-ink/package.json shared/package.json
+      - git commit -m "release: v{{.VERSION}}"
+      - git tag "v{{.VERSION}}"
+      - echo "Released v{{.VERSION}} — push with: git push --follow-tags"
           "
