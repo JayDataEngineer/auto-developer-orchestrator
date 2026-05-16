@@ -73,8 +73,14 @@ In-TUI MCP server management (add, configure, test, remove). No MCP UI.
 ## 12. Autocomplete on File Paths (Claude Code, OpenCode)
 Context-aware file path autocomplete in the composer/editor. We have slash command palette but no path autocomplete.
 
-## 13. Session Switching (OpenCode)
-`ctrl+s` for instant session switch overlay. Our conversations view requires tab navigation.
+## 13. Session Switching ✅ DONE
+Quick conversation switching overlay with `/sessions` slash command.
+
+- **`SessionSwitcher`** (`ts-tui-ink/src/components/session-switcher.tsx`): Compact overlay with live text filter — type to filter conversations by title, agent ID, or project. Arrow keys navigate, Enter switches, Escape closes.
+- **Auto-loads**: Fetches conversations on open via `loadConversations()`. Resets filter and selection each time.
+- **Smart filter**: Filters across `title`, `agentId`, and `project` fields. Shows conversation count, project name, and active indicator (←).
+- **Store integration**: `toggleSessionSwitcher()` / `closeSessionSwitcher()` actions in Zustand store. Closes other overlays when opened.
+- **Slash command**: `/sessions` toggles the overlay. Follows Pux conventions — no ctrl+keybinding.
 
 ## 14. Command History ✅ DONE
 Up/down arrows in the composer navigate a 200-entry sent message history. Pressing up saves the current draft and replaces the input with the most recent history item; pressing down restores the draft (or goes newer). Deduplicates consecutive identical entries.

@@ -87,6 +87,14 @@ const commands: Command[] = [
 		},
 	},
 	{
+		name: "sessions",
+		description: "Quick switch between conversations",
+		handler: async () => {
+			usePuxStore.getState().toggleSessionSwitcher();
+			return { type: "handled" };
+		},
+	},
+	{
 		name: "settings",
 		description: "Open settings panel (model, theme, system info)",
 		handler: async () => {
