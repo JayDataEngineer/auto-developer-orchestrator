@@ -154,9 +154,6 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 
 	return (
 		<Box flexDirection="column" height={rows} width={cols}>
-			{/* Tab bar — view switching */}
-			<TabBar />
-
 			{/* Content area — switches based on active view */}
 			<Box flexGrow={1} flexDirection="column">
 				<ContentArea onCommand={handleCommand} />
