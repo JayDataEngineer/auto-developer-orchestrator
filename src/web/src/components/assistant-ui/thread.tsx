@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { usePuxStore } from "@/lib/pux-store";
 import { Spinner } from "@/components/ui/spinner";
+import { AddProviderDialog } from "@/components/add-provider-dialog";
 import { cn } from "@/lib/utils";
 import {
 	ActionBarMorePrimitive,
@@ -49,10 +50,11 @@ import {
 	DownloadIcon,
 	MoreHorizontalIcon,
 	PencilIcon,
+	PlusIcon,
 	RefreshCwIcon,
 	SquareIcon,
 } from "lucide-react";
-import { useMemo, type FC } from "react";
+import { useMemo, useState, type FC } from "react";
 
 export const Thread: FC = () => {
 	return (
@@ -166,6 +168,7 @@ const ComposerAction: FC = () => {
 	const modelList = usePuxStore((s) => s.modelList);
 	const activeModel = usePuxStore((s) => s.activeModel);
 	const setModel = usePuxStore((s) => s.setModel);
+	const [showAddProvider, setShowAddProvider] = useState(false);
 
 	const grouped = useMemo(() => {
 		const map = new Map<string, typeof modelList>();
@@ -180,29 +183,41 @@ const ComposerAction: FC = () => {
 	const currentName = modelList.find((m) => m.id === activeModel)?.name || activeModel || "Default";
 
 	return (
-		<div className="aui-composer-action-wrapper relative flex items-center justify-between">
-			<Select value={activeModel || undefined} onValueChange={setModel}>
-				<SelectTrigger
-					className="h-7 w-auto max-w-48 gap-1 border-none bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-accent/50 focus:ring-0"
-					aria-label="Select model"
-				>
-					<SelectValue placeholder={currentName} />
-				</SelectTrigger>
-				<SelectContent className="max-h-80 min-w-[200px]">
-					{[...grouped.entries()].map(([provider, models]) => (
-						<SelectGroup key={provider}>
-							<SelectLabel className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-								{provider}
-							</SelectLabel>
-							{models.map((m) => (
-								<SelectItem key={m.id} value={m.id} className="text-sm">
-									{m.name}
-								</SelectItem>
+		<>
+			<div className="aui-composer-action-wrapper relative flex items-center justify-between">
+				<div className="flex items-center gap-0.5">
+					<Select value={activeModel || undefined} onValueChange={setModel}>
+						<SelectTrigger
+							className="h-7 w-auto max-w-48 gap-1 border-none bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-accent/50 focus:ring-0"
+							aria-label="Select model"
+						>
+							<SelectValue placeholder={currentName} />
+						</SelectTrigger>
+						<SelectContent className="max-h-80 min-w-[200px]">
+							{[...grouped.entries()].map(([provider, models]) => (
+								<SelectGroup key={provider}>
+									<SelectLabel className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+										{provider}
+									</SelectLabel>
+									{models.map((m) => (
+										<SelectItem key={m.id} value={m.id} className="text-sm">
+											{m.name}
+										</SelectItem>
+									))}
+								</SelectGroup>
 							))}
-						</SelectGroup>
-					))}
-				</SelectContent>
-			</Select>
+						</SelectContent>
+					</Select>
+					<Button
+						variant="ghost"
+						size="icon"
+						className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+						onClick={() => setShowAddProvider(true)}
+						aria-label="Add provider"
+					>
+						<PlusIcon className="size-3.5" />
+					</Button>
+				</div>
 			<AuiIf condition={(s) => !s.thread.isRunning}>
 				<ComposerPrimitive.Send asChild>
 					<TooltipIconButton
@@ -232,6 +247,8 @@ const ComposerAction: FC = () => {
 				</ComposerPrimitive.Cancel>
 			</AuiIf>
 		</div>
+		<AddProviderDialog open={showAddProvider} onOpenChange={setShowAddProvider} />
+	</>
 	);
 };
 
