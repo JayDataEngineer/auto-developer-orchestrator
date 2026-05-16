@@ -43,5 +43,5 @@ Context-aware file path autocomplete in the composer/editor. We have slash comma
 ## 13. Session Switching (OpenCode)
 `ctrl+s` for instant session switch overlay. Our conversations view requires tab navigation.
 
-## 14. Command History (Claude Code, OpenCode)
-No input history browsing with up/down arrows in the composer.
+## 14. Command History ✅ DONE
+Up/down arrows in the composer navigate a 200-entry sent message history. Pressing up saves the current draft and replaces the input with the most recent history item; pressing down restores the draft (or goes newer). Deduplicates consecutive identical entries.

@@ -8,7 +8,7 @@
  * Phase 1 additions: Cancel button, suggestion chips, composer queue.
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import {
 	ThreadPrimitive,
@@ -181,6 +181,12 @@ function Welcome() {
 	);
 }
 
+// ── Command history (module-level, persists across renders) ──
+
+const sentHistory: string[] = [];
+let historyBrowsing = false; // true while user is navigating history
+const MAX_HISTORY = 200;
+
 // ── Command-aware composer ──
 
 function CommandComposer({
@@ -196,6 +202,7 @@ function CommandComposer({
 }) {
 	const aui = useAui();
 	const text = useAuiState((s) => s.composer.text);
+	const draftRef = useRef("");
 
 	const matches = useMemo(() => {
 		if (!text || !text.startsWith("/")) return [];
@@ -212,36 +219,75 @@ function CommandComposer({
 	}, [matches.length, selectedIdx, onSelectIdx]);
 
 	useInput(useCallback((_input: string, key: any) => {
-		if (matches.length === 0) return;
+		if (matches.length > 0) {
+			// Command palette navigation takes priority
+			if (key.upArrow) {
+				onSelectIdx(selectedIdx <= 0 ? matches.length - 1 : selectedIdx - 1);
+				return;
+			}
+			if (key.downArrow) {
+				onSelectIdx((selectedIdx + 1) % matches.length);
+				return;
+			}
+			if (key.tab) {
+				aui.composer().setText("/" + matches[selectedIdx] + " ");
+				return;
+			}
+			return;
+		}
+
+		// History navigation (no command palette showing)
 		if (key.upArrow) {
-			onSelectIdx(selectedIdx <= 0 ? matches.length - 1 : selectedIdx - 1);
+			if (sentHistory.length === 0) return;
+			if (!historyBrowsing) {
+				// Save current draft before navigating history
+				draftRef.current = text;
+				historyBrowsing = true;
+			}
+			// Find current position in history
+			const idx = sentHistory.indexOf(text);
+			const prevIdx = idx < 0 ? 0 : Math.min(idx + 1, sentHistory.length - 1);
+			aui.composer().setText(sentHistory[prevIdx]);
 			return;
 		}
 		if (key.downArrow) {
-			onSelectIdx((selectedIdx + 1) % matches.length);
+			if (!historyBrowsing || sentHistory.length === 0) return;
+			const idx = sentHistory.indexOf(text);
+			if (idx > 0) {
+				aui.composer().setText(sentHistory[idx - 1]);
+			} else {
+				// Restore draft (past newest entry)
+				historyBrowsing = false;
+				aui.composer().setText(draftRef.current);
+			}
 			return;
 		}
-		if (key.tab) {
-			aui.composer().setText("/" + matches[selectedIdx] + " ");
-			return;
+	}, [matches, text, aui, selectedIdx, onSelectIdx]));
+
+	const handleSubmit = useCallback((submittedText: string) => {
+		const trimmed = submittedText.trim();
+		if (trimmed.startsWith("/")) {
+			aui.composer().setText("");
+			onCommand(trimmed).then((output) => {
+				if (output) onOutput(output);
+			});
+		} else if (trimmed.length > 0) {
+			// Save to history before sending
+			if (sentHistory.length === 0 || sentHistory[0] !== trimmed) {
+				sentHistory.unshift(trimmed);
+				if (sentHistory.length > MAX_HISTORY) sentHistory.pop();
+			}
+			historyBrowsing = false;
+			draftRef.current = "";
+			aui.composer().send();
 		}
-	}, [matches, aui, selectedIdx, onSelectIdx]));
+	}, [aui, onCommand, onOutput]);
 
 	return (
 		<ComposerPrimitive.Input
 			submitOnEnter={true}
 			multiLine={true}
-			onSubmit={(submittedText: string) => {
-				const trimmed = submittedText.trim();
-				if (trimmed.startsWith("/")) {
-					aui.composer().setText("");
-					onCommand(trimmed).then((output) => {
-						if (output) onOutput(output);
-					});
-				} else if (trimmed.length > 0) {
-					aui.composer().send();
-				}
-			}}
+			onSubmit={handleSubmit}
 			placeholder="Message..."
 			autoFocus
 		/>
