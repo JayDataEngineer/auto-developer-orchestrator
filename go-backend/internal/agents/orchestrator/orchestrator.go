@@ -33,6 +33,7 @@ import (
 	schedulertool "github.com/auto-developer-orchestrator/backend/internal/tools/scheduler"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/todo"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
+	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
 )
 
@@ -66,6 +67,7 @@ type Config struct {
 	DesktopProvider desktoptools.DesktopProvider // optional: if set, registers desktop screenshot/click/type/key tools for employees
 	Subscriber      chan<- core.AgentEvent      // optional: if set, ask_user tool can emit events to TUI
 	Scheduler       any                         // optional: *scheduler.Scheduler — passed through to scheduler tool
+	ToolPerms       *perms.ToolPermissionConfig // optional: if set, enables per-tool permission checks
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -359,6 +361,13 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		approvalHook := hooks.NewApprovalHook(cfg.ApprovalHandler, true, 0) // plan-only, default timeout
 		loopHooks = append(loopHooks, approvalHook)
 		logger.Printf("Approval hook enabled (plan-only mode)")
+	}
+
+	// Add permission hook if tool permissions configured
+	if cfg.ToolPerms != nil {
+		permHook := hooks.NewPermissionHook(cfg.ToolPerms, core.GlobalDecisions, nil)
+		loopHooks = append(loopHooks, permHook)
+		logger.Printf("Permission hook enabled (%d tools configured)", len(cfg.ToolPerms.AllPermissions()))
 	}
 
 	// Add extra hooks from add-ons (Langfuse, etc.)

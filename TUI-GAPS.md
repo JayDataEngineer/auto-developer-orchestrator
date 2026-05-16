@@ -16,8 +16,15 @@ SGR mouse tracking (modes 1000 + 1006) enabled on startup, disabled on exit. Par
 - Registered under both canonical (`file_edit`) and alias (`edit_file`) tool names.
 - Future: Could enhance with full unified diff parsing if the backend returns a proper patch in the artifact.
 
-## 3. Permission System (Claude Code, OpenCode)
-Structured tool execution permissions (allow/deny/always-allow for session). Our HITL dialogs are simpler — no persistent permission grants per-tool or per-session.
+## 3. Permission System ✅ DONE
+New `PermissionHook` (`go-backend/internal/hooks/permission.go`) implements `ToolCallWrapper` and checks configured permission levels before tool execution.
+
+- **Three levels**: `auto` (pass through), `confirm` (ask user), `deny` (block with error). Configured via `ToolPermissionConfig` defaults: bash/write/edit/web_fetch=auto, delete/git_push/git_reset=confirm.
+- **Uses existing `DecisionRegistry`**: Confirm triggers a `decision_request` SSE event with `hint: "approval"`, tool name in the header, and args in the description. Blocks until user responds.
+- **Always allow (session)**: Users press `A` in the TUI dialog → backend caches the grant in a per-session map. Subsequent calls to the same tool bypass permission checks.
+- **Reject**: Returns a tool error to the agent loop.
+- **DecisionDialog enhanced**: Detects tool permission requests via `metadata.toolName`, shows args in monospace, offers 3-button layout (Y=once, A=always, N=reject).
+- **API endpoints**: `GET/PUT /api/pux/tool-permissions` already existed — change levels at runtime.
 
 ## 4. Theme System (OpenCode)
 One hardcoded theme (8 colors). OpenCode ships 10 themes (catppuccin, dracula, tokyonight, etc.) with a theme manager. Claude Code has dynamic runtime themes.

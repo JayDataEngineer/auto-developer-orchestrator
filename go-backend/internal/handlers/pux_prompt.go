@@ -145,6 +145,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		ArtifactDB:      h.db,
 		BrowserProvider: h.cuBridge, // wire accessibility/cookie/storage tools to employees
 		DesktopProvider: h.cuBridge, // wire desktop screenshot/click/type/key tools to employees
+		ToolPerms:       h.toolPerms, // wire per-tool permission checks
 	}
 
 	// Wire visual context for frame-based vision caching (skips vision API when page hasn't changed)
