@@ -365,6 +365,8 @@ func GetCapabilitySkill(name string) string {
 }
 
 // BuildWorkerPrompt assembles a worker's full prompt from persona + capability skills.
+// The prompt ends with a DynamicBoundary so the HTTP layer can split and cache
+// the stable portion (persona + SKILL.md) separately from any future dynamic content.
 func BuildWorkerPrompt(persona string, capabilities []string) string {
 	var sb strings.Builder
 	if persona != "" {
@@ -377,6 +379,7 @@ func BuildWorkerPrompt(persona string, capabilities []string) string {
 			fmt.Fprintf(&sb, "--- %s capability ---\n%s\n\n", capName, skill)
 		}
 	}
+	sb.WriteString(DynamicBoundary)
 	return sb.String()
 }
 

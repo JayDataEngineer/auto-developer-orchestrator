@@ -12,7 +12,7 @@ func TestInjectCacheBreakpoints_SplitsAtBoundary(t *testing.T) {
 		{Role: "user", Content: "hello"},
 	}
 
-	result := injectCacheBreakpoints(msgs)
+	result := injectCacheBreakpoints(msgs, true)
 
 	// Should split into 3 messages: stable system (cached) + dynamic system + user
 	if len(result) != 3 {
@@ -26,7 +26,7 @@ func TestInjectCacheBreakpoints_SplitsAtBoundary(t *testing.T) {
 		t.Errorf("stable content wrong: %q", result[0].Content)
 	}
 	if result[0].CacheControl == nil || result[0].CacheControl.Type != "ephemeral" {
-		t.Error("stable system message should have cache_control: ephemeral")
+		t.Error("stable system message should have cache_control: ephemeral when withCacheControl=true")
 	}
 
 	if result[1].Role != "system" {
@@ -44,13 +44,36 @@ func TestInjectCacheBreakpoints_SplitsAtBoundary(t *testing.T) {
 	}
 }
 
+func TestInjectCacheBreakpoints_GeminiNoCacheControl(t *testing.T) {
+	msgs := []Message{
+		{Role: "system", Content: "Stable content\n" + dynamicBoundary + "\nDynamic content"},
+		{Role: "user", Content: "hello"},
+	}
+
+	// withCacheControl=false — Gemini auto-prefix-caching
+	result := injectCacheBreakpoints(msgs, false)
+
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+	}
+
+	// Stable message should be split but NOT have cache_control
+	if result[0].CacheControl != nil {
+		t.Error("Gemini: stable message should NOT have cache_control (auto-prefix-caching)")
+	}
+	// Content should still be split correctly
+	if result[0].Content != "Stable content" {
+		t.Errorf("stable content wrong: %q", result[0].Content)
+	}
+}
+
 func TestInjectCacheBreakpoints_NoBoundary(t *testing.T) {
 	msgs := []Message{
 		{Role: "system", Content: "No boundary here"},
 		{Role: "user", Content: "hello"},
 	}
 
-	result := injectCacheBreakpoints(msgs)
+	result := injectCacheBreakpoints(msgs, true)
 
 	// Should return unchanged
 	if len(result) != 2 {
@@ -67,7 +90,7 @@ func TestInjectCacheBreakpoints_NoSystemMessage(t *testing.T) {
 		{Role: "assistant", Content: "hi"},
 	}
 
-	result := injectCacheBreakpoints(msgs)
+	result := injectCacheBreakpoints(msgs, true)
 
 	if len(result) != 2 {
 		t.Fatalf("expected 2 messages (unchanged), got %d", len(result))
@@ -79,7 +102,7 @@ func TestInjectCacheBreakpoints_OnlyBoundary(t *testing.T) {
 		{Role: "system", Content: dynamicBoundary},
 	}
 
-	result := injectCacheBreakpoints(msgs)
+	result := injectCacheBreakpoints(msgs, true)
 
 	// Boundary with empty content on both sides — should still work
 	if len(result) != 0 {
@@ -95,14 +118,13 @@ func TestLLMClient_SupportsCaching(t *testing.T) {
 		{"claude-3-opus", true},
 		{"anthropic/claude-3", true},
 		{"deepseek-v4-flash", true},
-		{"gemini-3-flash", false},
+		{"gemini-3-flash-preview", true},
 		{"qwen3-27b", false},
 		{"gemma-4-26b", false},
 	}
 
 	for _, tt := range tests {
 		client := &LLMClient{modelName: tt.model}
-		// apiKey must be set for IsCloud to return true
 		client.apiKey = "test-key"
 		if got := client.supportsCaching(); got != tt.expected {
 			t.Errorf("supportsCaching(%q) = %v, want %v", tt.model, got, tt.expected)
@@ -110,7 +132,27 @@ func TestLLMClient_SupportsCaching(t *testing.T) {
 	}
 }
 
-func TestSanitizeRequest_InjectsCacheControl(t *testing.T) {
+func TestLLMClient_WantsCacheControl(t *testing.T) {
+	tests := []struct {
+		model    string
+		expected bool
+	}{
+		{"claude-3-opus", true},
+		{"deepseek-v4-flash", true},
+		{"gemini-3-flash-preview", false},
+		{"qwen3-27b", false},
+	}
+
+	for _, tt := range tests {
+		client := &LLMClient{modelName: tt.model}
+		client.apiKey = "test-key"
+		if got := client.wantsCacheControl(); got != tt.expected {
+			t.Errorf("wantsCacheControl(%q) = %v, want %v", tt.model, got, tt.expected)
+		}
+	}
+}
+
+func TestSanitizeRequest_ClaudeGetsCacheControl(t *testing.T) {
 	client := &LLMClient{
 		modelName: "claude-3-opus",
 		apiKey:    "test-key",
@@ -125,22 +167,21 @@ func TestSanitizeRequest_InjectsCacheControl(t *testing.T) {
 
 	result := client.sanitizeRequest(req)
 
-	// System should be split
 	if len(result.Messages) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(result.Messages))
 	}
 	if result.Messages[0].CacheControl == nil {
-		t.Error("stable system message should have cache_control")
+		t.Error("Claude: stable system message should have cache_control")
 	}
 	if result.Messages[0].CacheControl.Type != "ephemeral" {
 		t.Error("cache_control type should be ephemeral")
 	}
 }
 
-func TestSanitizeRequest_NoCacheControlForLocalProvider(t *testing.T) {
+func TestSanitizeRequest_GeminiSplitNoCacheControl(t *testing.T) {
 	client := &LLMClient{
-		modelName: "gemma-4-26b",
-		// no apiKey — local provider
+		modelName: "gemini-3-flash-preview",
+		apiKey:    "test-key",
 	}
 
 	req := ChatCompletionRequest{
@@ -152,18 +193,43 @@ func TestSanitizeRequest_NoCacheControlForLocalProvider(t *testing.T) {
 
 	result := client.sanitizeRequest(req)
 
-	// Local provider returns unchanged (still has boundary)
+	// Should split into 3 messages
+	if len(result.Messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result.Messages))
+	}
+	// Gemini: split but NO cache_control
+	if result.Messages[0].CacheControl != nil {
+		t.Error("Gemini: stable message should NOT have cache_control")
+	}
+	if result.Messages[0].Content != "Stable rules" {
+		t.Errorf("Gemini: stable content wrong: %q", result.Messages[0].Content)
+	}
+}
+
+func TestSanitizeRequest_LocalProviderUnchanged(t *testing.T) {
+	client := &LLMClient{
+		modelName: "gemma-4-26b",
+	}
+
+	req := ChatCompletionRequest{
+		Messages: []Message{
+			{Role: "system", Content: "Stable rules\n" + dynamicBoundary + "\nSandbox: abc"},
+			{Role: "user", Content: "hello"},
+		},
+	}
+
+	result := client.sanitizeRequest(req)
+
+	// Local provider returns unchanged
 	if len(result.Messages) != 2 {
 		t.Fatalf("expected 2 messages (unchanged for local), got %d", len(result.Messages))
 	}
 }
 
-// Verify CacheControl type alias works
 func TestCacheControlType(t *testing.T) {
 	cc := &CacheControl{Type: "ephemeral"}
 	if cc.Type != "ephemeral" {
 		t.Error("CacheControl type alias broken")
 	}
-	// Verify it's the core type
 	var _ *core.CacheControl = cc
 }

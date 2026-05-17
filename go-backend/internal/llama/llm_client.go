@@ -468,9 +468,9 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 
 	// Inject prompt caching on system messages for providers that support it.
 	// Split at the DynamicBoundary — stable content before the boundary gets
-	// cache_control: ephemeral, which tells Anthropic/DeepSeek to cache it.
+	// cache_control: ephemeral for Anthropic/DeepSeek, or just split for Gemini.
 	if e.supportsCaching() {
-		req.Messages = injectCacheBreakpoints(req.Messages)
+		req.Messages = injectCacheBreakpoints(req.Messages, e.wantsCacheControl())
 	}
 
 	// Gemini 3 requires thought_signature on tool calls in conversation history.
@@ -493,7 +493,18 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 
 // supportsCaching returns true for providers that support prompt caching.
 // Anthropic (via OpenRouter) and DeepSeek support cache_control: ephemeral.
+// Gemini uses automatic prefix caching — split the message but skip cache_control.
 func (e *LLMClient) supportsCaching() bool {
+	name := strings.ToLower(e.modelName)
+	return strings.Contains(name, "claude") ||
+		strings.Contains(name, "deepseek") ||
+		strings.Contains(name, "anthropic") ||
+		strings.Contains(name, "gemini")
+}
+
+// wantsCacheControl returns true for providers that use the explicit cache_control field.
+// Gemini does automatic prefix caching and doesn't support the cache_control parameter.
+func (e *LLMClient) wantsCacheControl() bool {
 	name := strings.ToLower(e.modelName)
 	return strings.Contains(name, "claude") ||
 		strings.Contains(name, "deepseek") ||
@@ -503,9 +514,10 @@ func (e *LLMClient) supportsCaching() bool {
 // dynamicBoundary is the marker that splits stable from dynamic prompt content.
 const dynamicBoundary = "<system_prompt_dynamic_boundary>"
 
-// injectCacheBreakpoints splits system messages at the dynamic boundary
-// and marks the stable portion with cache_control for providers that support it.
-func injectCacheBreakpoints(messages []Message) []Message {
+// injectCacheBreakpoints splits system messages at the dynamic boundary.
+// If withCacheControl is true, marks the stable portion with cache_control: ephemeral
+// (Anthropic/DeepSeek). If false, just splits the message for automatic prefix caching (Gemini).
+func injectCacheBreakpoints(messages []Message, withCacheControl bool) []Message {
 	for i := range messages {
 		m := &messages[i]
 		if m.Role != "system" {
@@ -526,11 +538,14 @@ func injectCacheBreakpoints(messages []Message) []Message {
 			newMsgs = append(newMsgs, messages[:i]...)
 		}
 		if stable != "" {
-			newMsgs = append(newMsgs, Message{
-				Role:         "system",
-				Content:      stable,
-				CacheControl: &CacheControl{Type: "ephemeral"},
-			})
+			msg := Message{
+				Role:    "system",
+				Content: stable,
+			}
+			if withCacheControl {
+				msg.CacheControl = &CacheControl{Type: "ephemeral"}
+			}
+			newMsgs = append(newMsgs, msg)
 		}
 		if dynamic != "" {
 			newMsgs = append(newMsgs, Message{
