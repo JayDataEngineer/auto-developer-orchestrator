@@ -629,3 +629,94 @@ func TestClose(t *testing.T) {
 		t.Errorf("Close returned error: %v", err)
 	}
 }
+
+func TestSaveToolResult(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	id, err := db.SaveToolResult(ctx, "proj", "agent1", "call_123", "bash", "total 42\nfile1.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 {
+		t.Error("expected non-zero ID")
+	}
+
+	msgs, _ := db.GetConversationHistory(ctx, "proj", "agent1", 100)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0].Role != "tool" {
+		t.Errorf("expected role 'tool', got %q", msgs[0].Role)
+	}
+	if msgs[0].ToolCallID != "call_123" {
+		t.Errorf("expected toolCallId 'call_123', got %q", msgs[0].ToolCallID)
+	}
+	if msgs[0].ToolName != "bash" {
+		t.Errorf("expected toolName 'bash', got %q", msgs[0].ToolName)
+	}
+	if msgs[0].Content != "total 42\nfile1.txt" {
+		t.Errorf("expected content, got %q", msgs[0].Content)
+	}
+}
+
+func TestFullConversationRoundTrip(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// Simulate a full conversation: user → assistant (with tool call) → tool result → assistant
+	db.SaveUserMessage(ctx, "proj", "agent1", "List files in /tmp")
+
+	toolCallsJSON := `[{"id":"call_abc","name":"bash","args":{"cmd":"ls /tmp"}}]`
+	db.SaveAssistantMessage(ctx, "proj", "agent1", "", "", toolCallsJSON)
+
+	db.SaveToolResult(ctx, "proj", "agent1", "call_abc", "bash", "file1.txt\nfile2.txt")
+
+	db.SaveAssistantMessage(ctx, "proj", "agent1", "I found 2 files in /tmp: file1.txt and file2.txt", "", "[]")
+
+	msgs, err := db.GetConversationHistory(ctx, "proj", "agent1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(msgs))
+	}
+
+	// Verify user message
+	if msgs[0].Role != "user" {
+		t.Errorf("msg[0]: expected role 'user', got %q", msgs[0].Role)
+	}
+	if msgs[0].Content != "List files in /tmp" {
+		t.Errorf("msg[0]: expected content, got %q", msgs[0].Content)
+	}
+
+	// Verify assistant message with tool calls
+	if msgs[1].Role != "assistant" {
+		t.Errorf("msg[1]: expected role 'assistant', got %q", msgs[1].Role)
+	}
+	if msgs[1].ToolCalls != toolCallsJSON {
+		t.Errorf("msg[1]: expected tool_calls, got %q", msgs[1].ToolCalls)
+	}
+
+	// Verify tool result
+	if msgs[2].Role != "tool" {
+		t.Errorf("msg[2]: expected role 'tool', got %q", msgs[2].Role)
+	}
+	if msgs[2].ToolCallID != "call_abc" {
+		t.Errorf("msg[2]: expected toolCallId 'call_abc', got %q", msgs[2].ToolCallID)
+	}
+	if msgs[2].ToolName != "bash" {
+		t.Errorf("msg[2]: expected toolName 'bash', got %q", msgs[2].ToolName)
+	}
+	if msgs[2].Content != "file1.txt\nfile2.txt" {
+		t.Errorf("msg[2]: expected content, got %q", msgs[2].Content)
+	}
+
+	// Verify final assistant response
+	if msgs[3].Role != "assistant" {
+		t.Errorf("msg[3]: expected role 'assistant', got %q", msgs[3].Role)
+	}
+	if msgs[3].Text != "I found 2 files in /tmp: file1.txt and file2.txt" {
+		t.Errorf("msg[3]: expected text, got %q", msgs[3].Text)
+	}
+}

@@ -208,15 +208,17 @@ func (d *Database) SetSystemConfig(ctx context.Context, key, value string) error
 
 // StoredMessage represents a persisted conversation message.
 type StoredMessage struct {
-	ID        int64  `json:"id"`
-	Project   string `json:"project"`
-	AgentID   string `json:"agentId"`
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	Text      string `json:"text"`
-	Thinking  string `json:"thinking"`
-	ToolCalls string `json:"toolCalls"`
-	CreatedAt string `json:"createdAt"`
+	ID         int64  `json:"id"`
+	Project    string `json:"project"`
+	AgentID    string `json:"agentId"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	Text       string `json:"text"`
+	Thinking   string `json:"thinking"`
+	ToolCalls  string `json:"toolCalls"`
+	ToolCallID string `json:"toolCallId"`
+	ToolName   string `json:"toolName"`
+	CreatedAt  string `json:"createdAt"`
 }
 
 // Dialect returns the active database dialect.
@@ -227,6 +229,18 @@ func (d *Database) SaveUserMessage(ctx context.Context, project, agentID, conten
 	res, err := d.db.ExecContext(ctx,
 		Rebind(d.dialect, `INSERT INTO conversation_messages (project, agent_id, role, content) VALUES (?, ?, 'user', ?)`),
 		project, agentID, content)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// SaveToolResult persists a tool result message.
+// Stored as role='tool' with dedicated tool_call_id and tool_name columns.
+func (d *Database) SaveToolResult(ctx context.Context, project, agentID, toolCallID, toolName, content string) (int64, error) {
+	res, err := d.db.ExecContext(ctx,
+		Rebind(d.dialect, `INSERT INTO conversation_messages (project, agent_id, role, content, tool_call_id, tool_name) VALUES (?, ?, 'tool', ?, ?, ?)`),
+		project, agentID, content, toolCallID, toolName)
 	if err != nil {
 		return 0, err
 	}
@@ -292,7 +306,7 @@ func (d *Database) GetConversationHistory(ctx context.Context, project, agentID 
 		limit = 200
 	}
 	rows, err := d.db.QueryContext(ctx,
-		Rebind(d.dialect, `SELECT id, project, agent_id, role, content, text, thinking, tool_calls, created_at
+		Rebind(d.dialect, `SELECT id, project, agent_id, role, content, text, thinking, tool_calls, tool_call_id, tool_name, created_at
 		 FROM conversation_messages
 		 WHERE project = ? AND agent_id = ?
 		 ORDER BY created_at ASC
@@ -306,7 +320,7 @@ func (d *Database) GetConversationHistory(ctx context.Context, project, agentID 
 	var msgs []StoredMessage
 	for rows.Next() {
 		var m StoredMessage
-		if err := rows.Scan(&m.ID, &m.Project, &m.AgentID, &m.Role, &m.Content, &m.Text, &m.Thinking, &m.ToolCalls, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Project, &m.AgentID, &m.Role, &m.Content, &m.Text, &m.Thinking, &m.ToolCalls, &m.ToolCallID, &m.ToolName, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		msgs = append(msgs, m)

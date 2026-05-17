@@ -324,6 +324,19 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 				case "assistant":
 					msg.Content = stored.Text
 					msg.ReasoningContent = stored.Thinking
+					// Restore tool calls from JSON
+					if stored.ToolCalls != "" && stored.ToolCalls != "[]" && stored.ToolCalls != "[streaming]" {
+						var tcs []core.ToolCallResponse
+						if err := json.Unmarshal([]byte(stored.ToolCalls), &tcs); err == nil {
+							msg.ToolCalls = tcs
+						}
+					}
+				case "tool":
+					msg.Content = stored.Content
+					msg.ToolCallID = stored.ToolCallID
+					msg.Name = stored.ToolName
+				default:
+					continue // skip unknown roles
 				}
 				if err := orch.Session.AppendMessage(msg); err != nil {
 					h.log.Warn("Failed to append history message", zap.Error(err))
@@ -410,6 +423,14 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	}
 	var toolCalls []savedToolCall
 
+	// Collect tool results for persistence — saved to DB after streaming.
+	type savedToolResult struct {
+		ToolCallID string
+		ToolName   string
+		Content    string
+	}
+	var toolResults []savedToolResult
+
 	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
 	saveTicker := time.NewTicker(5 * time.Second)
@@ -429,6 +450,24 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 					ID:   evt.Data.ToolID,
 					Name: evt.Data.ToolName,
 					Args: evt.Data.ToolArgs,
+				})
+			case core.EventTypeToolEnd:
+				resultContent := ""
+				if evt.Data.Result != nil {
+					if b, err := json.Marshal(evt.Data.Result); err == nil {
+						resultContent = string(b)
+					}
+				}
+				if evt.Data.Error != "" {
+					if resultContent != "" {
+						resultContent += "\n"
+					}
+					resultContent += "Error: " + evt.Data.Error
+				}
+				toolResults = append(toolResults, savedToolResult{
+					ToolCallID: evt.Data.ToolID,
+					ToolName:   evt.Data.ToolName,
+					Content:    resultContent,
 				})
 			}
 			llamaEvents <- convertCoreEventToLlama(evt)
@@ -454,6 +493,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 					h.log.Warn("Failed to finalize streaming message, falling back to insert", zap.Error(err))
 					if _, fallbackErr := h.db.SaveAssistantMessage(r.Context(), req.Project, req.AgentId, assistantText, assistantThinking, toolCallsJSON); fallbackErr != nil {
 						h.log.Warn("Failed to save assistant message", zap.Error(fallbackErr))
+					}
+				}
+				// Persist tool results so they survive session rehydration
+				for _, tr := range toolResults {
+					if _, err := h.db.SaveToolResult(r.Context(), req.Project, req.AgentId, tr.ToolCallID, tr.ToolName, tr.Content); err != nil {
+						h.log.Warn("Failed to save tool result", zap.String("tool", tr.ToolName), zap.Error(err))
 					}
 				}
 			}

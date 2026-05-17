@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 	text TEXT NOT NULL DEFAULT '',
 	thinking TEXT NOT NULL DEFAULT '',
 	tool_calls TEXT NOT NULL DEFAULT '[]',
+	tool_call_id TEXT NOT NULL DEFAULT '',
+	tool_name TEXT NOT NULL DEFAULT '',
 	created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -169,6 +171,8 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 	text TEXT NOT NULL DEFAULT '',
 	thinking TEXT NOT NULL DEFAULT '',
 	tool_calls TEXT NOT NULL DEFAULT '[]',
+	tool_call_id TEXT NOT NULL DEFAULT '',
+	tool_name TEXT NOT NULL DEFAULT '',
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
