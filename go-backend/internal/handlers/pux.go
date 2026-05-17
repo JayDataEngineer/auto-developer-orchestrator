@@ -168,6 +168,8 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/feedback", h.Feedback)
 	r.Post("/suggestions", h.Suggestions)
 	r.Get("/mcp-servers", h.GetMCPServers)
+	r.Post("/mcp-servers", h.AddMCPServer)
+	r.Delete("/mcp-servers", h.RemoveMCPServer)
 }
 
 // GetAgentStatus returns running agent status.

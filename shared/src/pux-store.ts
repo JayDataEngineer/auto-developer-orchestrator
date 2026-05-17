@@ -178,6 +178,8 @@ interface PuxState {
 	toggleMCPOverlay: () => void;
 	closeMCPOverlay: () => void;
 	loadMCPServers: () => Promise<void>;
+	addMCPServer: (prefix: string, endpoint: string) => Promise<void>;
+	removeMCPServer: (prefix: string) => Promise<void>;
 }
 
 // ── Overlay helpers ──
@@ -205,7 +207,7 @@ function openOverlay(key: (typeof overlayKeys)[number], extra?: Partial<PuxState
 
 // ── API loader helper ──
 
-async function apiLoad<T>(path: string, transform: (data: unknown) => Partial<PuxState>): Promise<Partial<PuxState> | null> {
+async function apiLoad<T>(path: string, transform: (data: unknown) => Partial<PuxState> | null): Promise<Partial<PuxState> | null> {
 	try {
 		const fetch = getFetch();
 		const resp = await fetch(apiUrl(path));
@@ -319,9 +321,14 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		}),
 
 	loadConversations: async () => {
-		const update = await apiLoad("/api/pux/conversations", (data: unknown) => ({
-			conversations: Array.isArray(data) ? data : [],
-		}));
+		const update = await apiLoad("/api/pux/conversations", (data: unknown) => {
+			const convs = Array.isArray(data) ? data as Conversation[] : [];
+			const current = get().conversations;
+			if (convs.length === current.length && convs.every((c, i) =>
+				c.project === current[i].project && c.agentId === current[i].agentId && c.lastAt === current[i].lastAt && c.messageCount === current[i].messageCount
+			)) return null;
+			return { conversations: convs };
+		});
 		if (update) set(update);
 	},
 
@@ -435,8 +442,22 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 
 	updateRunningAgents: async () => {
 		const update = await apiLoad("/api/pux/agent-status", (data: unknown) => {
-			const map = new Map<string, RunningAgentInfo>();
 			const entries = Array.isArray(data) ? data : [];
+			const current = get().runningAgents;
+			// Quick size check — if same count and same keys/values, skip
+			if (entries.length === current.size) {
+				let same = true;
+				for (const entry of entries as Array<Record<string, string>>) {
+					const key = `${entry.project}:${entry.agentId}`;
+					const existing = current.get(key);
+					if (!existing || existing.lastEventAt !== (entry.lastEventAt ? new Date(entry.lastEventAt).getTime() : 0)) {
+						same = false;
+						break;
+					}
+				}
+				if (same) return null;
+			}
+			const map = new Map<string, RunningAgentInfo>();
 			for (const entry of entries as Array<Record<string, string>>) {
 				const key = `${entry.project}:${entry.agentId}`;
 				map.set(key, {
@@ -549,6 +570,34 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			mcpServers: Array.isArray(data) ? data : [],
 		}));
 		if (update) set(update);
+	},
+
+	addMCPServer: async (prefix, endpoint) => {
+		try {
+			const fetch = getFetch();
+			await fetch(apiUrl("/api/pux/mcp-servers"), {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ prefix, endpoint }),
+			});
+			await get().loadMCPServers();
+		} catch {
+			// ignore
+		}
+	},
+
+	removeMCPServer: async (prefix) => {
+		try {
+			const fetch = getFetch();
+			await fetch(apiUrl("/api/pux/mcp-servers"), {
+				method: "DELETE",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ prefix }),
+			});
+			await get().loadMCPServers();
+		} catch {
+			// ignore
+		}
 	},
 
 	toggleSettingsOverlay: () => {
