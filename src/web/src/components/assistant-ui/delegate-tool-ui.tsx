@@ -1,6 +1,6 @@
 "use client";
 
-import { makeAssistantToolUI } from "@assistant-ui/react";
+import { makeAssistantToolUI, MessagePartPrimitive } from "@assistant-ui/react";
 import { usePuxStore } from "@/lib/pux-store";
 import { Bot, CheckCircle, Loader2, XCircle } from "lucide-react";
 
@@ -25,8 +25,8 @@ function DelegateRenderer({
 	const subToolCount = agentState?.toolCalls.length ?? 0;
 
 	return (
-		<div className="my-2 rounded-lg border border-border py-3">
-			<div className="flex items-center gap-2 px-4 text-sm">
+		<div className="my-2 rounded-lg border border-border">
+			<div className="flex items-center gap-2 px-4 py-3 text-sm border-b border-border">
 				{isRunning ? (
 					<Loader2 size={14} className="animate-spin text-blue-500" />
 				) : isError ? (
@@ -37,17 +37,22 @@ function DelegateRenderer({
 				<Bot size={14} className="text-muted-foreground" />
 				<span className="font-medium">{agentName}</span>
 				{task && (
-					<span className="text-muted-foreground truncate max-w-[300px]">
+					<span className="text-muted-foreground truncate max-w-[400px]">
 						{task}
 					</span>
 				)}
 				<span className="text-xs text-muted-foreground ml-auto">
 					{isRunning ? "working..." : isComplete ? "done" : isError ? "failed" : ""}
 				</span>
+				{subToolCount > 0 && (
+					<span className="text-xs text-muted-foreground">
+						· {subToolCount} tool{subToolCount !== 1 ? "s" : ""}
+					</span>
+				)}
 			</div>
-			{subToolCount > 0 && (
-				<div className="mt-1 border-t border-border px-4 pt-1.5 text-xs text-muted-foreground">
-					{subToolCount} tool{subToolCount !== 1 ? "s" : ""} used
+			{isComplete && (
+				<div className="px-4 py-3">
+					<MessagePartPrimitive.Messages />
 				</div>
 			)}
 		</div>
