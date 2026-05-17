@@ -2,14 +2,14 @@ import { useEffect, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, RefreshCw, Save, FileText } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw, Save } from "lucide-react";
 
 interface PromptSection {
 	name: string;
 	content: string;
 }
 
-export function PromptPanel() {
+export function PromptDetail({ onBack }: { onBack: () => void }) {
 	const [sections, setSections] = useState<PromptSection[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [activeIdx, setActiveIdx] = useState(0);
@@ -29,7 +29,6 @@ export function PromptPanel() {
 
 	useEffect(() => { fetchSections(); }, [fetchSections]);
 
-	// When sections load or active tab changes, update editor
 	useEffect(() => {
 		if (sections.length > 0 && sections[activeIdx]) {
 			setEditContent(sections[activeIdx].content);
@@ -48,7 +47,6 @@ export function PromptPanel() {
 				body: JSON.stringify({ content: editContent }),
 			});
 			if (resp.ok) {
-				// Update local state
 				setSections((prev) =>
 					prev.map((s, i) => i === activeIdx ? { ...s, content: editContent } : s)
 				);
@@ -68,7 +66,6 @@ export function PromptPanel() {
 	if (sections.length === 0) {
 		return (
 			<div className="flex flex-1 flex-col items-center justify-center gap-3">
-				<FileText className="size-8 text-muted-foreground/50" />
 				<span className="text-xs text-muted-foreground">No prompt sections found</span>
 			</div>
 		);
@@ -76,24 +73,32 @@ export function PromptPanel() {
 
 	return (
 		<div className="flex h-full flex-col">
-			{/* Header with section tabs */}
+			{/* Back button + section tabs */}
 			<div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
-				{sections.map((s, i) => (
-					<button
-						key={s.name}
-						onClick={() => { if (dirty) { setEditContent(sections[i].content); setDirty(false); } setActiveIdx(i); }}
-						className={cn(
-							"rounded-md px-2 py-1 text-[10px] font-medium transition-colors",
-							i === activeIdx
-								? "bg-accent text-accent-foreground"
-								: "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-						)}
-					>
-						{s.name}
-						{dirty && i === activeIdx && <span className="ml-1 text-amber-400">●</span>}
-					</button>
-				))}
-				<div className="ml-auto flex items-center gap-1">
+				<Button variant="ghost" size="icon" className="size-6 shrink-0" onClick={onBack} title="Back to agents">
+					<ArrowLeft size={12} />
+				</Button>
+				<div className="flex items-center gap-0.5 overflow-x-auto">
+					{sections.map((s, i) => (
+						<button
+							key={s.name}
+							onClick={() => {
+								if (dirty) { setEditContent(sections[i].content); setDirty(false); }
+								setActiveIdx(i);
+							}}
+							className={cn(
+								"shrink-0 rounded-md px-2 py-1 text-[10px] font-medium transition-colors",
+								i === activeIdx
+									? "bg-accent text-accent-foreground"
+									: "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
+							)}
+						>
+							{s.name}
+							{dirty && i === activeIdx && <span className="ml-1 text-amber-400">●</span>}
+						</button>
+					))}
+				</div>
+				<div className="ml-auto flex shrink-0 items-center gap-1">
 					<Button variant="ghost" size="icon" className="size-6" onClick={fetchSections} title="Refresh">
 						<RefreshCw size={12} />
 					</Button>

@@ -1,8 +1,15 @@
+import { useState } from "react";
 import {
 	Users,
 	RotateCcw,
+	Crown,
+	Pencil,
 } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ConfigPanel } from "./config-panel/config-panel";
+import { PromptDetail } from "./prompt-panel";
 import type { FieldConfig } from "./config-panel/types";
 
 // ── Types ──
@@ -96,51 +103,93 @@ function buildBody(form: WorkerFormData): Record<string, any> {
 	return body;
 }
 
+// ── CTO Card ──
+
+function CTOCard({ onClick }: { onClick: () => void }) {
+	return (
+		<Card className="px-3 py-2 cursor-pointer hover:bg-accent/30 transition-colors" onClick={onClick}>
+			<div className="flex items-center gap-2">
+				<div className="flex size-6 items-center justify-center rounded bg-amber-500/20">
+					<Crown className="size-3.5 text-amber-500" />
+				</div>
+				<div className="min-w-0 flex-1">
+					<div className="flex items-center gap-2">
+						<span className="truncate text-sm font-medium">CTO (Pux)</span>
+						<Badge variant="outline" className="text-[9px]">orchestrator</Badge>
+					</div>
+					<p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+						Edit system prompt sections
+					</p>
+				</div>
+				<Button variant="ghost" size="icon" className="size-7 shrink-0" title="Edit prompt">
+					<Pencil size={14} />
+				</Button>
+			</div>
+		</Card>
+	);
+}
+
 // ── Panel ──
 
 export function WorkersPanel() {
+	const [view, setView] = useState<"list" | "cto">("list");
+
+	if (view === "cto") {
+		return <PromptDetail onBack={() => setView("list")} />;
+	}
+
 	return (
-		<ConfigPanel<WorkerFormData>
-			fetchUrl="/api/workers/"
-			createUrl="/api/workers/"
-			updateUrl={(name) => `/api/workers/${name}`}
-			deleteUrl={(name) => `/api/workers/${name}`}
-			fields={workerFields}
-			emptyForm={emptyForm}
-			formToBody={buildBody}
-			responseToForm={workerToForm}
-			itemDef={{
-				id: (w: any) => w.name,
-				label: (w: any) => w.name,
-				description: (w: any) => w.hint || w.persona,
-				badges: (w: any) => [
-					...(w.isDefault ? [{ text: "default", variant: "outline" as const }] : []),
-					...(w.capabilities || []).map((c: string) => ({
-						text: c,
-						variant: "secondary" as const,
-					})),
-				],
-			}}
-			title="Workers"
-			emptyMessage="No workers configured"
-			emptyIcon={<Users className="size-8 text-muted-foreground/50" />}
-			extraActions={(w: any) =>
-				w.isModified
-					? [{ label: "Revert to default", icon: <RotateCcw size={14} />, url: `/api/workers/${w.name}/revert`, method: "POST" }]
-					: []
-			}
-			askAITemplate={(form, isEdit, editItem) => {
-				const parts: string[] = [isEdit ? `Update the worker "${(editItem as any)?.name}" for me.` : "Create a new worker for me."];
-				if (form.name.trim()) parts.push(`Name: ${form.name.trim()}`);
-				if (form.hint.trim()) parts.push(`Hint: ${form.hint.trim()}`);
-				if (form.persona.trim()) parts.push(`Persona: ${form.persona.trim()}`);
-				if (form.capabilities.length > 0) parts.push(`Capabilities: ${form.capabilities.join(", ")}`);
-				if (form.model) parts.push(`Model: ${form.model}`);
-				if (form.maxRounds) parts.push(`Max rounds: ${form.maxRounds}`);
-				if (form.temperature != null) parts.push(`Temperature: ${form.temperature}`);
-				if (form.delegatesTo.length > 0) parts.push(`Can delegate to: ${form.delegatesTo.join(", ")}`);
-				return parts.join(" ");
-			}}
-		/>
+		<div className="flex h-full flex-col">
+			{/* CTO card at the top */}
+			<div className="p-2 pb-0">
+				<CTOCard onClick={() => setView("cto")} />
+			</div>
+
+			{/* Workers list below */}
+			<div className="flex-1 overflow-hidden">
+				<ConfigPanel<WorkerFormData>
+					fetchUrl="/api/workers/"
+					createUrl="/api/workers/"
+					updateUrl={(name) => `/api/workers/${name}`}
+					deleteUrl={(name) => `/api/workers/${name}`}
+					fields={workerFields}
+					emptyForm={emptyForm}
+					formToBody={buildBody}
+					responseToForm={workerToForm}
+					itemDef={{
+						id: (w: any) => w.name,
+						label: (w: any) => w.name,
+						description: (w: any) => w.hint || w.persona,
+						badges: (w: any) => [
+							...(w.isDefault ? [{ text: "default", variant: "outline" as const }] : []),
+							...(w.capabilities || []).map((c: string) => ({
+								text: c,
+								variant: "secondary" as const,
+							})),
+						],
+					}}
+					title="Workers"
+					emptyMessage="No workers configured"
+					emptyIcon={<Users className="size-8 text-muted-foreground/50" />}
+					extraActions={(w: any) =>
+						w.isModified
+							? [{ label: "Revert to default", icon: <RotateCcw size={14} />, url: `/api/workers/${w.name}/revert`, method: "POST" }]
+							: []
+					}
+					askAITemplate={(form, isEdit, editItem) => {
+						const parts: string[] = [isEdit ? `Update the worker "${(editItem as any)?.name}" for me.` : "Create a new worker for me."];
+						if (form.name.trim()) parts.push(`Name: ${form.name.trim()}`);
+						if (form.hint.trim()) parts.push(`Hint: ${form.hint.trim()}`);
+						if (form.persona.trim()) parts.push(`Persona: ${form.persona.trim()}`);
+						if (form.capabilities.length > 0) parts.push(`Capabilities: ${form.capabilities.join(", ")}`);
+						if (form.model) parts.push(`Model: ${form.model}`);
+						if (form.maxRounds) parts.push(`Max rounds: ${form.maxRounds}`);
+						if (form.temperature != null) parts.push(`Temperature: ${form.temperature}`);
+						if (form.delegatesTo.length > 0) parts.push(`Can delegate to: ${form.delegatesTo.join(", ")}`);
+						return parts.join(" ");
+					}}
+				/>
+			</div>
+		</div>
 	);
 }
