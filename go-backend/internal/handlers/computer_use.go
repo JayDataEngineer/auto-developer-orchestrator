@@ -405,8 +405,32 @@ func (h *ComputerUseHandler) getClient(sandboxID string) (*browser.SandboxBrowse
 	if err != nil {
 		return nil, fmt.Errorf("computer use not enabled for sandbox %s: %w", sandboxID, err)
 	}
+
+	// Auto-enable: if the sandbox exists but has no browser session, enable
+	// browser mode now. This covers the delegate_to → browser_ops path where
+	// Enable() was never called from the web UI but the sandbox was auto-created.
 	if sandbox.DesktopSession == nil {
-		return nil, fmt.Errorf("sandbox %s has no browser session", sandboxID)
+		h.logger.Info("auto-enabling browser mode for tool call", zap.String("sandbox_id", sandboxID))
+		session, enableErr := h.manager.EnableBrowserMode(context.Background(), sandboxID)
+		if enableErr != nil {
+			h.logger.Info("auto-enable: browser mode failed, trying desktop mode", zap.Error(enableErr))
+			session, enableErr = h.manager.EnableDesktopMode(context.Background(), sandboxID)
+			if enableErr != nil {
+				return nil, fmt.Errorf("sandbox %s: failed to auto-enable browser/desktop mode: %w", sandboxID, enableErr)
+			}
+		}
+		// Refresh sandbox reference after enabling mode
+		sandbox, err = h.manager.GetSandbox(sandboxID)
+		if err != nil {
+			return nil, fmt.Errorf("sandbox %s disappeared after enable: %w", sandboxID, err)
+		}
+		// Use the session from EnableBrowserMode directly if DesktopSession is somehow still nil
+		if sandbox.DesktopSession == nil && session != nil {
+			sandbox.DesktopSession = session
+		}
+		if sandbox.DesktopSession == nil {
+			return nil, fmt.Errorf("sandbox %s: browser session not established after enable", sandboxID)
+		}
 	}
 
 	// Reconnect: create a new CDP client and connect
@@ -416,18 +440,24 @@ func (h *ComputerUseHandler) getClient(sandboxID string) (*browser.SandboxBrowse
 		return nil, fmt.Errorf("failed to reconnect CDP client for %s: %w", sandboxID, err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Connect with backoff — Chrome may still be starting up
+	connectCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	if err := client.Connect(ctx); err != nil {
-		// Connection failed — remove stale client
+	connectErr := retry.Do(connectCtx, retry.Short, func() error {
+		if err := client.Connect(connectCtx); err != nil {
+			h.logger.Info("auto-enable: waiting for Chrome CDP", zap.String("sandbox_id", sandboxID), zap.Error(err))
+			return err
+		}
+		return nil
+	})
+	if connectErr != nil {
 		h.mu.Lock()
 		delete(h.clients, sandboxID)
 		h.mu.Unlock()
-		return nil, fmt.Errorf("failed to reconnect to Chrome for %s: %w", sandboxID, err)
+		return nil, fmt.Errorf("failed to connect to Chrome for %s after auto-enable: %w", sandboxID, connectErr)
 	}
 
-	h.logger.Info("auto-reconnected CDP client", zap.String("sandbox_id", sandboxID), zap.Int("cdp_port", cdpPort))
+	h.logger.Info("auto-connected CDP client", zap.String("sandbox_id", sandboxID), zap.Int("cdp_port", cdpPort))
 	return client, nil
 }
 
