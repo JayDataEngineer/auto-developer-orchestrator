@@ -4,6 +4,7 @@ import {
 	Select,
 	SelectContent,
 	SelectItem,
+	SelectSeparator,
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
@@ -151,6 +152,10 @@ export function FieldRenderer<T>({
 
 		case "model": {
 			const models = usePuxStore((s) => s.modelList);
+			const defaultLogic = usePuxStore((s) => s.defaultLogic);
+			const defaultWorker = usePuxStore((s) => s.defaultWorker);
+			const logicName = models.find((m) => m.id === defaultLogic)?.name || defaultLogic;
+			const workerName = models.find((m) => m.id === defaultWorker)?.name || defaultWorker;
 			return (
 				<Field label={field.label}>
 					<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
@@ -158,10 +163,14 @@ export function FieldRenderer<T>({
 							<SelectValue placeholder="Default" />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="__default__" className="text-xs">Default</SelectItem>
+							<SelectItem value="__default__" className="text-xs">Default (Worker)</SelectItem>
+							{defaultLogic && defaultLogic !== defaultWorker && (
+								<SelectItem value="__logic__" className="text-xs">Logic: {logicName}</SelectItem>
+							)}
+							{(defaultLogic || defaultWorker) && <SelectSeparator />}
 							{models.map((m) => (
 								<SelectItem key={m.id} value={m.id} className="text-xs">
-									{m.name}
+									{m.name}{m.id === defaultWorker ? " (worker)" : m.id === defaultLogic ? " (logic)" : ""}
 								</SelectItem>
 							))}
 						</SelectContent>

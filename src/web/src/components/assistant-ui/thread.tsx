@@ -48,14 +48,16 @@ import {
 	ChevronLeftIcon,
 	ChevronRightIcon,
 	CopyIcon,
+	CpuIcon,
 	DownloadIcon,
+	HardDriveIcon,
 	MoreHorizontalIcon,
 	PencilIcon,
 	PlusIcon,
 	RefreshCwIcon,
 	SquareIcon,
 } from "lucide-react";
-import { useMemo, useState, type FC } from "react";
+import { useEffect, useMemo, useState, type FC } from "react";
 
 export const Thread: FC = () => {
 	return (
@@ -169,6 +171,10 @@ const ComposerAction: FC = () => {
 	const modelList = usePuxStore((s) => s.modelList);
 	const activeModel = usePuxStore((s) => s.activeModel);
 	const setModel = usePuxStore((s) => s.setModel);
+	const defaultLogic = usePuxStore((s) => s.defaultLogic);
+	const defaultWorker = usePuxStore((s) => s.defaultWorker);
+	const setDefaults = usePuxStore((s) => s.setDefaults);
+	const loadDefaults = usePuxStore((s) => s.loadDefaults);
 	const [showAddProvider, setShowAddProvider] = useState(false);
 
 	const grouped = useMemo(() => {
@@ -182,18 +188,62 @@ const ComposerAction: FC = () => {
 	}, [modelList]);
 
 	const currentName = modelList.find((m) => m.id === activeModel)?.name || activeModel || "Default";
+	const logicName = modelList.find((m) => m.id === defaultLogic)?.name || defaultLogic || "none";
+	const workerName = modelList.find((m) => m.id === defaultWorker)?.name || defaultWorker || "none";
+
+	// Load defaults on mount
+	useEffect(() => { loadDefaults(); }, []);
 
 	return (
 		<>
 			<div className="aui-composer-action-wrapper relative flex items-center justify-between">
-				<Select value={activeModel || undefined} onValueChange={setModel}>
+				<Select value={activeModel || undefined} onValueChange={(val) => {
+					if (val === "__clear_logic") { setDefaults("", defaultWorker); return; }
+					if (val === "__clear_worker") { setDefaults(defaultLogic, ""); return; }
+					setModel(val);
+				}}>
 					<SelectTrigger
 						className="h-7 w-auto max-w-48 gap-1 border-none bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-accent/50 focus:ring-0"
 						aria-label="Select model"
 					>
 						<SelectValue placeholder={currentName} />
 					</SelectTrigger>
-					<SelectContent className="max-h-80 min-w-[200px]">
+					<SelectContent className="max-h-80 min-w-[220px]">
+						{/* Defaults info at top */}
+						{defaultLogic || defaultWorker ? (
+							<>
+								<div className="space-y-0.5 px-2 py-1.5">
+									{defaultLogic && (
+										<div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+											<CpuIcon className="size-3 shrink-0" />
+											<span className="truncate">Logic: {logicName}</span>
+											<div
+												className="ml-auto cursor-pointer hover:text-foreground"
+												onMouseDown={(e) => e.preventDefault()}
+												onClick={() => setDefaults("", defaultWorker)}
+											>
+												✕
+											</div>
+										</div>
+									)}
+									{defaultWorker && (
+										<div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+											<HardDriveIcon className="size-3 shrink-0" />
+											<span className="truncate">Worker: {workerName}</span>
+											<div
+												className="ml-auto cursor-pointer hover:text-foreground"
+												onMouseDown={(e) => e.preventDefault()}
+												onClick={() => setDefaults(defaultLogic, "")}
+											>
+												✕
+											</div>
+										</div>
+									)}
+								</div>
+								<SelectSeparator />
+							</>
+						) : null}
+						{/* Models grouped by provider */}
 						{[...grouped.entries()].map(([provider, models]) => (
 							<SelectGroup key={provider}>
 								<SelectLabel className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -206,12 +256,33 @@ const ComposerAction: FC = () => {
 								))}
 							</SelectGroup>
 						))}
-						<SelectSeparator className="my-1" />
+						<SelectSeparator />
+						{/* Set as default actions */}
+						{activeModel && (
+							<>
+								<div
+									className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground"
+									onMouseDown={(e) => e.preventDefault()}
+									onClick={() => setDefaults(activeModel, defaultWorker)}
+								>
+									<CpuIcon className="size-3.5" />
+									Set as Logic Default
+								</div>
+								<div
+									className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground"
+									onMouseDown={(e) => e.preventDefault()}
+									onClick={() => setDefaults(defaultLogic, activeModel)}
+								>
+									<HardDriveIcon className="size-3.5" />
+									Set as Worker Default
+								</div>
+								<SelectSeparator />
+							</>
+						)}
+						{/* Add provider */}
 						<div
 							className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground"
-							onMouseDown={(e) => {
-								e.preventDefault();
-							}}
+							onMouseDown={(e) => e.preventDefault()}
 							onClick={() => setShowAddProvider(true)}
 						>
 							<PlusIcon className="size-3.5" />

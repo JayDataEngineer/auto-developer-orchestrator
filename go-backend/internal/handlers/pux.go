@@ -56,6 +56,9 @@ type PuxHandler struct {
 
 	selectedEngines map[string]*llamaeng.LLMClient // per-agent engine override
 	registry       *AgentRegistry                   // tracks running agents
+
+	defaultLogic  string // model ID for CTO/orchestrator (logic)
+	defaultWorker string // model ID for sub-agents/employees (worker)
 }
 
 // NewPuxHandler creates a new Pux handler.
@@ -187,6 +190,8 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/mcp-servers", h.GetMCPServers)
 	r.Post("/mcp-servers", h.AddMCPServer)
 	r.Delete("/mcp-servers", h.RemoveMCPServer)
+	r.Get("/defaults", h.GetDefaults)
+	r.Put("/defaults", h.SetDefaults)
 
 	// SSH remote browse
 	if h.sshBrowse != nil {
@@ -262,6 +267,13 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load defaults from settings.json on first call
+	if h.defaultLogic == "" && h.defaultWorker == "" {
+		logic, worker := readDefaults()
+		h.defaultLogic = logic
+		h.defaultWorker = worker
+	}
+
 	// Resolve engine for this prompt.
 	key := compositeAgentKey(projectPath, req.AgentId)
 
@@ -276,6 +288,15 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 			h.selectedEngines[key] = eng
 			h.llamaEngine = eng
 			h.log.Info("Using model from request", zap.String("model", req.Model))
+		}
+	}
+
+	// 3) Use logic default if no model was explicitly resolved (CTO/orchestrator).
+	// Not stored in selectedEngines so default changes take effect on next prompt.
+	if h.llamaEngine == nil && h.defaultLogic != "" {
+		if eng := h.resolveEngineForModel(h.defaultLogic); eng != nil {
+			h.llamaEngine = eng
+			h.log.Info("Using logic default", zap.String("model", h.defaultLogic))
 		}
 	}
 

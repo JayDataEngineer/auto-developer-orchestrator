@@ -84,6 +84,8 @@ interface PuxState {
 	// Model
 	activeModel: string;
 	modelList: Array<{ id: string; name: string; provider: string }>;
+	defaultLogic: string;
+	defaultWorker: string;
 
 	// Conversations
 	conversations: Conversation[];
@@ -180,6 +182,8 @@ interface PuxState {
 	loadMCPServers: () => Promise<void>;
 	addMCPServer: (prefix: string, endpoint: string) => Promise<void>;
 	removeMCPServer: (prefix: string) => Promise<void>;
+	setDefaults: (logic: string, worker: string) => Promise<void>;
+	loadDefaults: () => Promise<void>;
 }
 
 // ── Overlay helpers ──
@@ -233,6 +237,8 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	activeConversationId: "",
 	conversationKey: "",
 	modelList: [],
+	defaultLogic: "",
+	defaultWorker: "",
 	showModelPicker: false,
 	providers: {},
 	showProvidersOverlay: false,
@@ -598,6 +604,28 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		} catch {
 			// ignore
 		}
+	},
+
+	setDefaults: async (logic, worker) => {
+		try {
+			const fetch = getFetch();
+			await fetch(apiUrl("/api/pux/defaults"), {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ logic, worker }),
+			});
+		} catch {
+			// fire and forget
+		}
+		set({ defaultLogic: logic, defaultWorker: worker });
+	},
+
+	loadDefaults: async () => {
+		const update = await apiLoad("/api/pux/defaults", (data: unknown) => {
+			const d = data as Record<string, string>;
+			return { defaultLogic: d.logic || "", defaultWorker: d.worker || "" };
+		});
+		if (update) set(update);
 	},
 
 	toggleSettingsOverlay: () => {

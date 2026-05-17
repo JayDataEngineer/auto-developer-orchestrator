@@ -163,7 +163,34 @@ my-app/                        ← An Organization (separate repo)
 - **Vision-in-the-loop**: browser screenshots auto-described via vision provider chain
 - **SoM labeler**: JS injection labels interactive elements with numbered boxes, 50-element cap
 
-### Key Packages
+### Model Defaults (Logic & Worker)
+
+The system supports two persistent model defaults configured from the model selector:
+
+| Default | Purpose | API field |
+|---------|---------|-----------|
+| **Logic** | CTO/orchestrator — reasoning-heavy, planning | `defaultLogic` |
+| **Worker** | Sub-agents/employees — faster execution | `defaultWorker` |
+
+**How it works:**
+1. Set defaults via the model picker dropdown (click the model name in the composer)
+   - **Web**: dropdown shows current defaults at top, "Set as Logic Default" / "Set as Worker Default" buttons
+   - **TUI**: `l` to set highlighted model as logic, `w` to set as worker
+2. Defaults are persisted in `~/.pi/agent/settings.json` under `"defaults"`
+3. Logic default is used for CTO prompts when no explicit model is selected
+4. Worker default is used by `ProviderFactory` for sub-agents without a `model:` field in their role config
+5. If a worker default isn't set, sub-agents fall through to the CTO's engine
+
+**Resolution priority (CTO):** per-agent selection → inline `--model` → logic default → fallback chain
+**Resolution priority (workers):** role `model:` field → worker default → CTO's engine
+
+**API:**
+- `GET /api/pux/defaults` — returns `{logic, worker}`
+- `PUT /api/pux/defaults` — sets `{logic, worker}`
+
+**Files:** `go-backend/internal/handlers/pux.go` (fields + Prompt wiring), `pux_models.go` (handlers + persistence), `pux_prompt.go` (ProviderFactory wiring), `shared/src/pux-store.ts` (state + actions), `src/web/src/components/assistant-ui/thread.tsx` (UI), `ts-tui-ink/src/components/model-picker.tsx` (TUI)
+
+## Key Packages
 
 | Package | Purpose |
 |---------|---------|
@@ -183,6 +210,41 @@ python3 -m pytest test_sse_contract.py -v          # SSE event validation
 ```
 
 Tests auto-skip when required services are unreachable.
+
+## Remote LLM Access (Tech Noir Ray Cluster — Tailscale)
+
+The cluster runs an LLM gateway behind Traefik on Tailscale node `100.86.69.57`.
+Auto-loads the default model on first `/v1/chat/completions` request.
+
+| Detail | Value |
+|--------|-------|
+| Cluster node | `100.86.69.57` (Tailscale) |
+| Traefik NodePort | `30080` (web :80 → NodePort 30080) |
+| Default model | `qwen3.6-27b-q5_k_s-32k` (BeeLlama.cpp with speculative decoding) |
+
+**Endpoints** (from any machine on the Tailscale network):
+
+| Method | Endpoint | What it does |
+|--------|----------|-------------|
+| POST | `/v1/llm/configure` | Select model & engine |
+| POST | `/v1/chat/completions` | OpenAI-compatible chat (auto-loads default) |
+| GET | `/v1/models` | List available models |
+| * | `/llm/*` | Raw passthrough to llama-server HTTP API |
+
+**Quick start:**
+```bash
+# 1. Configure a model (first time)
+curl -X POST http://100.86.69.57:30080/v1/llm/configure \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen3.6-27b-q5_k_s-32k"}'
+
+# 2. Chat
+curl http://100.86.69.57:30080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen3.6-27b-q5_k_s-32k", "messages": [{"role": "user", "content": "Hello!"}]}'
+```
+
+If `config/local.yaml` has `secrets.api_key` set, include it: `-H "x-api-key: your-key"` or `?api_key=your-key`.
 
 ## TUI Visual Testing
 

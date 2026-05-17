@@ -251,7 +251,34 @@ func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.LL
 
 // resolveEngineForModel finds the provider for a model ID in settings.json
 // and creates an LLMClient. Returns nil if the model is not found.
+// Settings.json providers take priority over hardcoded engines.
 func (h *PuxHandler) resolveEngineForModel(modelID string) *llamaeng.LLMClient {
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		data, err := os.ReadFile(filepath.Join(homeDir, ".pi", "agent", "settings.json"))
+		if err == nil {
+			var settings struct {
+				Providers map[string]struct {
+					BaseURL string `json:"baseUrl"`
+					APIKey  string `json:"apiKey"`
+					Models  []struct {
+						ID string `json:"id"`
+					} `json:"models"`
+				} `json:"providers"`
+			}
+			if json.Unmarshal(data, &settings) == nil {
+				for providerName, provider := range settings.Providers {
+					for _, m := range provider.Models {
+						if m.ID == modelID {
+							return h.engineFromSettings(providerName, modelID)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Fall through to hardcoded engines for well-known model IDs
 	switch {
 	case modelID == "gemini-3-flash-preview" && h.geminiEngine != nil:
 		return h.geminiEngine
@@ -259,36 +286,6 @@ func (h *PuxHandler) resolveEngineForModel(modelID string) *llamaeng.LLMClient {
 		return h.openrouterEngine
 	case strings.Contains(modelID, "qwen") && h.clusterEngine != nil:
 		return h.clusterEngine
-	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	data, err := os.ReadFile(filepath.Join(homeDir, ".pi", "agent", "settings.json"))
-	if err != nil {
-		return nil
-	}
-
-	var settings struct {
-		Providers map[string]struct {
-			BaseURL string `json:"baseUrl"`
-			APIKey  string `json:"apiKey"`
-			Models  []struct {
-				ID string `json:"id"`
-			} `json:"models"`
-		} `json:"providers"`
-	}
-	if json.Unmarshal(data, &settings) != nil {
-		return nil
-	}
-
-	for providerName, provider := range settings.Providers {
-		for _, m := range provider.Models {
-			if m.ID == modelID {
-				return h.engineFromSettings(providerName, modelID)
-			}
-		}
 	}
 
 	if h.llamaEngine != nil && h.llamaEngine.ModelName() == modelID {
@@ -571,4 +568,107 @@ func (h *PuxHandler) removePersistedMCPServer(prefix string) {
 		return
 	}
 	os.WriteFile(settingsPath, output, 0600)
+}
+
+// settingsPath returns the path to the user's settings.json.
+func settingsPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".pi", "agent", "settings.json"), nil
+}
+
+// readDefaults reads the logic/worker model defaults from settings.json.
+func readDefaults() (logic, worker string) {
+	path, err := settingsPath()
+	if err != nil {
+		return "", ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", ""
+	}
+	var settings struct {
+		Defaults struct {
+			Logic  string `json:"logic"`
+			Worker string `json:"worker"`
+		} `json:"defaults"`
+	}
+	if json.Unmarshal(data, &settings) != nil {
+		return "", ""
+	}
+	return settings.Defaults.Logic, settings.Defaults.Worker
+}
+
+// writeDefaults persists logic/worker model defaults to settings.json.
+func writeDefaults(logic, worker string) error {
+	path, err := settingsPath()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return err
+	}
+	defaults, _ := json.Marshal(map[string]string{
+		"logic":  logic,
+		"worker": worker,
+	})
+	settings["defaults"] = defaults
+	output, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, output, 0600)
+}
+
+// GetDefaults returns the current logic and worker model defaults.
+// GET /api/pux/defaults
+func (h *PuxHandler) GetDefaults(w http.ResponseWriter, r *http.Request) {
+	logic, worker := h.defaultLogic, h.defaultWorker
+	if logic == "" && worker == "" {
+		logic, worker = readDefaults()
+		h.defaultLogic = logic
+		h.defaultWorker = worker
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"logic":  logic,
+		"worker": worker,
+	})
+}
+
+// SetDefaults updates the logic and worker model defaults.
+// PUT /api/pux/defaults
+func (h *PuxHandler) SetDefaults(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeReq[struct {
+		Logic  string `json:"logic"`
+		Worker string `json:"worker"`
+	}](w, r)
+	if !ok {
+		return
+	}
+
+	if err := writeDefaults(req.Logic, req.Worker); err != nil {
+		JSONError(w, "Failed to persist defaults: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.defaultLogic = req.Logic
+	h.defaultWorker = req.Worker
+
+	h.log.Info("Model defaults updated",
+		zap.String("logic", req.Logic),
+		zap.String("worker", req.Worker),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"logic":   req.Logic,
+		"worker":  req.Worker,
+	})
 }

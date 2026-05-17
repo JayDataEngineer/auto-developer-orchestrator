@@ -263,8 +263,16 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	cfg.Subscriber = events // ask_user tool emits to TUI via this channel
 	cfg.Scheduler = h.schedulerTool // scheduler tool for LLM
 
-	// Model resolver — lets sub-agents use role-specific models
+	// Model resolver — lets sub-agents use role-specific models.
+	// Special model IDs:
+	//   "__logic__" → use the logic default
+	//   ""          → let ProviderFactory handle it (worker default → CTO's engine)
 	cfg.ModelResolver = func(modelID string) core.LLMProvider {
+		if modelID == "__logic__" && h.defaultLogic != "" {
+			modelID = h.defaultLogic
+		} else if modelID == "" {
+			return nil
+		}
 		eng := h.resolveEngineForModel(modelID)
 		if eng == nil {
 			return nil
@@ -275,7 +283,13 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	// ProviderFactory — creates isolated providers per sub-agent.
 	// Each sub-agent gets its own Adapter → own session → own llama-server slot.
 	// This prevents KV cache thrashing and enables true concurrent execution.
+	// Uses the worker default model if set, falling back to the CTO's engine.
 	cfg.ProviderFactory = func() core.LLMProvider {
+		if h.defaultWorker != "" {
+			if eng := h.resolveEngineForModel(h.defaultWorker); eng != nil {
+				return llm.NewAdapter(eng, 0)
+			}
+		}
 		return llm.NewAdapter(engine, 0)
 	}
 
