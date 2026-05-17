@@ -168,12 +168,22 @@ function handleMetaEvent(
 			const outputTokens = (data.output as number) || 0;
 			stepsRef.push({ inputTokens, outputTokens });
 
+			const contextWindow = (data.contextWindow as number) || 0;
+			const contextUtil = contextWindow > 0 ? inputTokens / contextWindow : 0;
+
 			usePuxStore.setState({
 				lastUsage: {
 					input: inputTokens,
 					output: outputTokens,
 					cache: (data.cache as number) || 0,
 					model: data.model as string | undefined,
+				},
+				// Update context metrics so status bar shows usage after each turn
+				contextMetrics: {
+					contextTokens: inputTokens,
+					contextSize: contextWindow,
+					contextUtil,
+					compactionType: "",
 				},
 			});
 			break;
