@@ -307,6 +307,18 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 		proxyPath = "/vnc.html"
 	}
 
+	// For the vnc.html page without query params, redirect with the correct
+	// WebSocket path so noVNC connects through the proxy instead of /websockify.
+	if (proxyPath == "/vnc.html" || proxyPath == "") && r.URL.RawQuery == "" {
+		// noVNC prepends '/' to the path value, so strip the leading slash
+		// to avoid a double-slash (//api/...) that chi would 404 on.
+		wsProxyPath := fmt.Sprintf("api/sandbox/vnc/%s/websockify", id)
+		redirectURL := fmt.Sprintf("/api/sandbox/vnc/%s/vnc.html?autoconnect=true&path=%s&resize=scale",
+			id, wsProxyPath)
+		http.Redirect(w, r, redirectURL, http.StatusFound)
+		return
+	}
+
 	// Check for WebSocket upgrade
 	if websocket.IsWebSocketUpgrade(r) {
 		h.proxyVNCWebSocket(w, r, containerHost, novncPort, proxyPath, id)
