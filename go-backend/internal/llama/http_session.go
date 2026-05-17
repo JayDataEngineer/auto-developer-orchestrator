@@ -241,6 +241,13 @@ func (a *streamAccumulator) processChunk(ch chan<- ChatEvent, delta StreamDelta,
 	}
 
 	a.processReasoning(ch, delta)
+
+	// Forward tool call deltas so the agent loop can capture ExtraContent
+	// (e.g. Gemini's thought_signature) before accumulating.
+	if len(delta.ToolCalls) > 0 {
+		ch <- ChatEvent{Type: ChatEventToolChunk, Deltas: delta.ToolCalls}
+	}
+
 	a.accumulateToolCalls(delta)
 
 	if finish != "" {

@@ -264,9 +264,14 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 					}
 					if len(toolCallAccum) == 0 {
 						for _, tc := range evt.Deltas {
+							sig := ""
+							if tc.ExtraContent != nil && tc.ExtraContent.Google != nil {
+								sig = tc.ExtraContent.Google.ThoughtSignature
+							}
 							toolCallAccum[tc.Index] = &ToolCallResponse{
-								ID:   tc.ID,
-								Type: tc.Type,
+								ID:               tc.ID,
+								Type:             tc.Type,
+								ThoughtSignature: sig,
 								Function: FunctionCallData{
 									Name:      tc.Function.Name,
 									Arguments: tc.Function.Arguments,
@@ -286,6 +291,10 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				}
 
 				for _, tc := range evt.Deltas {
+					sig := ""
+					if tc.ExtraContent != nil && tc.ExtraContent.Google != nil {
+						sig = tc.ExtraContent.Google.ThoughtSignature
+					}
 					if existing, ok := toolCallAccum[tc.Index]; ok {
 						if tc.Function.Name != "" {
 							existing.Function.Name += tc.Function.Name
@@ -299,10 +308,14 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 						if tc.Type != "" {
 							existing.Type = tc.Type
 						}
+						if sig != "" {
+							existing.ThoughtSignature = sig
+						}
 					} else {
 						toolCallAccum[tc.Index] = &ToolCallResponse{
-							ID:   tc.ID,
-							Type: tc.Type,
+							ID:               tc.ID,
+							Type:             tc.Type,
+							ThoughtSignature: sig,
 							Function: FunctionCallData{
 								Name:      tc.Function.Name,
 								Arguments: tc.Function.Arguments,
