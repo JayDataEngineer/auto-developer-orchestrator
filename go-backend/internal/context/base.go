@@ -3,6 +3,7 @@ package context
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
@@ -29,14 +30,19 @@ func (m *BaseContextManager) BuildContext(ctx context.Context) ([]core.Message, 
 		return nil, err
 	}
 
-	// Safety net: hard-truncate any tool result still above the limit
+	// Safety net: hard-truncate any tool result still above the limit.
+	// Keep the tail — errors and results at the end are most useful.
 	maxSize := m.config.HardTruncateSize
 	if maxSize <= 0 {
 		maxSize = 6000
 	}
 	for i, msg := range msgs {
 		if msg.Role == "tool" && len(msg.Content) > maxSize {
-			msgs[i].Content = msg.Content[:maxSize] + "...[truncated]"
+			tail := msg.Content[len(msg.Content)-maxSize:]
+			if idx := strings.Index(tail, "\n"); idx >= 0 && idx < 200 {
+				tail = tail[idx+1:]
+			}
+			msgs[i].Content = "...[truncated, showing tail]\n" + tail
 		}
 	}
 
@@ -62,7 +68,13 @@ func (m *BaseContextManager) ProcessToolResult(_ context.Context, _, _, result s
 		maxSize = 6000
 	}
 	if len(result) > maxSize {
-		return result[:maxSize] + "...[truncated]", nil
+		// Keep the end — errors/results at the tail matter most
+		tail := result[len(result)-maxSize:]
+		// Avoid mid-line split
+		if idx := strings.Index(tail, "\n"); idx >= 0 && idx < 200 {
+			tail = tail[idx+1:]
+		}
+		return "...[output truncated, showing tail]\n" + tail, nil
 	}
 	return result, nil
 }

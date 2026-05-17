@@ -1090,12 +1090,18 @@ func (r *ParallelRunner) pendingCount() int {
 }
 
 // subAgentResultProcessor returns a ToolResultProcessor for sub-agents.
-// Truncates very large results to prevent context overflow while keeping
-// enough detail for the agent to work effectively.
+// Uses line-aware tail truncation to prevent context overflow while keeping
+// errors and final results at the end for effective debugging.
 func subAgentResultProcessor() func(ctx context.Context, toolName, toolCallID, result string) string {
 	return func(ctx context.Context, toolName, toolCallID, result string) string {
 		if len(result) > 12000 {
-			return result[:12000] + "\n...[truncated — full result available via load_spilled if needed]"
+			// Keep the end — errors and final results are most important
+			tail := result[len(result)-10000:]
+			// Find first newline to avoid mid-line split
+			if idx := strings.Index(tail, "\n"); idx >= 0 && idx < 200 {
+				tail = tail[idx+1:]
+			}
+			return "...[output truncated, showing tail]\n" + tail
 		}
 		return result
 	}

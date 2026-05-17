@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -188,7 +189,14 @@ func TestReadTool_Execute(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	m := result.(map[string]any)
-	testutil.AssertStringField(t, m, "content", "file content")
+	// Content now includes line numbers
+	content, _ := m["content"].(string)
+	if !strings.Contains(content, "file content") {
+		t.Errorf("content should contain file body, got %q", content)
+	}
+	if !strings.Contains(content, "1|") {
+		t.Errorf("content should have line numbers, got %q", content)
+	}
 	testutil.AssertStringField(t, m, "path", "read.txt")
 }
 
@@ -201,6 +209,87 @@ func TestReadTool_Execute_MissingPath(t *testing.T) {
 	var toolErr *core.ToolError
 	if !errors.As(err, &toolErr) {
 		t.Fatalf("expected *core.ToolError, got %T", err)
+	}
+}
+
+func TestReadTool_Execute_WithOffset(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "lines.txt")
+	lines := []string{"line1", "line2", "line3", "line4", "line5"}
+	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir})
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"file_path": "lines.txt",
+		"offset":    float64(3), // JSON numbers come as float64
+	})
+	testutil.AssertNoError(t, err)
+
+	m := result.(map[string]any)
+	content := m["content"].(string)
+	// Should start at line 3
+	if !strings.Contains(content, "3|line3") {
+		t.Errorf("should show line 3, got %q", content)
+	}
+	if strings.Contains(content, "line1") {
+		t.Errorf("should not contain line1 when offset=3, got %q", content)
+	}
+	if !strings.Contains(content, "5|line5") {
+		t.Errorf("should show line 5, got %q", content)
+	}
+}
+
+func TestReadTool_Execute_WithLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "lines.txt")
+	lines := []string{"line1", "line2", "line3", "line4", "line5"}
+	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir})
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"file_path": "lines.txt",
+		"limit":     float64(2),
+	})
+	testutil.AssertNoError(t, err)
+
+	m := result.(map[string]any)
+	content := m["content"].(string)
+	// Should show lines 1-2 with continuation message
+	if !strings.Contains(content, "1|line1") {
+		t.Errorf("should show line 1, got %q", content)
+	}
+	if !strings.Contains(content, "2|line2") {
+		t.Errorf("should show line 2, got %q", content)
+	}
+	if strings.Contains(content, "line3") {
+		t.Errorf("should not contain line3 with limit=2, got %q", content)
+	}
+	if !strings.Contains(content, "more lines") {
+		t.Errorf("should have continuation message, got %q", content)
+	}
+}
+
+func TestReadTool_Execute_Metadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "lines.txt")
+	lines := []string{"line1", "line2", "line3"}
+	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir})
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"file_path": "lines.txt",
+	})
+	testutil.AssertNoError(t, err)
+
+	m := result.(map[string]any)
+	// Check metadata fields
+	totalLines, _ := m["total_lines"].(int)
+	if totalLines != 3 {
+		t.Errorf("total_lines should be 3, got %d", totalLines)
+	}
+	startLine, _ := m["start_line"].(int)
+	if startLine != 1 {
+		t.Errorf("start_line should be 1, got %d", startLine)
 	}
 }
 

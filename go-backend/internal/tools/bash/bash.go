@@ -3,8 +3,10 @@ package bash
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 )
 
 // Executor executes a bash command and returns stdout.
@@ -23,7 +25,12 @@ func New(exec Executor) *Tool {
 }
 
 func (t *Tool) Name() string        { return "bash" }
-func (t *Tool) Description() string { return "Execute a bash command" }
+func (t *Tool) Description() string {
+	return fmt.Sprintf(
+		"Execute a bash command. If output exceeds %d characters, it will be truncated (keeping the end).",
+		truncate.BashMaxChars,
+	)
+}
 
 func (t *Tool) Schema() json.RawMessage {
 	return json.RawMessage(`{
@@ -50,5 +57,13 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"output": output}, nil
+
+	// Apply tail-truncation for bash output (keep errors/results at the end)
+	tr := truncate.Tail(output, truncate.FileMaxLines, truncate.BashMaxChars)
+	result := tr.Content
+	if msg := truncate.FormatBashTruncation(tr); msg != "" {
+		result += msg
+	}
+
+	return map[string]any{"output": result}, nil
 }

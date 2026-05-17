@@ -23,6 +23,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	asktool "github.com/auto-developer-orchestrator/backend/internal/tools/ask"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/graph"
 	mcptools "github.com/auto-developer-orchestrator/backend/internal/tools/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
@@ -385,10 +386,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		ToolResultProcessor: func(procCtx context.Context, toolName, toolCallID, result string) string {
 			processed, err := ctxMgr.ProcessToolResult(procCtx, toolName, toolCallID, result)
 			if err != nil {
-				if len(result) > 6000 {
-					return result[:6000] + "...[truncated]"
-				}
-				return result
+				// Fallback: use line-aware truncation instead of blind slice
+				return truncate.Tail(result, truncate.FileMaxLines, truncate.BashMaxChars).Content
 			}
 			return processed
 		},

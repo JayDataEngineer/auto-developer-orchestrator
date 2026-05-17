@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 )
 
 // SandboxFileOps provides file operation capabilities inside a sandbox.
@@ -90,7 +92,13 @@ func NewReadTool(ops SandboxFileOps) *ReadTool {
 }
 
 func (t *ReadTool) Name() string        { return "file_read" }
-func (t *ReadTool) Description() string { return "Read a file from the filesystem" }
+func (t *ReadTool) Description() string {
+	return fmt.Sprintf(
+		"Read file contents. Output is truncated to %d lines or %s (whichever is hit first). "+
+			"Use offset/limit for large files. When you need the full file, continue reading with offset until complete.",
+		truncate.FileMaxLines, truncate.FormatSize(truncate.FileMaxBytes),
+	)
+}
 
 func (t *ReadTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
@@ -109,11 +117,116 @@ func (t *ReadTool) Execute(ctx context.Context, args map[string]any) (any, error
 	if path == "" {
 		return nil, core.NewToolError("file_read", "missing required parameter 'file_path'")
 	}
+
+	// Parse optional offset (1-indexed) and limit
+	offset := intArg(args, "offset", 1)
+	limit := intArg(args, "limit", 0)
+	if offset < 1 {
+		offset = 1
+	}
+
 	content, err := t.ops.ReadFile(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"content": content, "path": path}, nil
+
+	// Apply offset: skip to the requested line (1-indexed → 0-indexed slice)
+	lines := strings.Split(content, "\n")
+	// Remove trailing empty from trailing newline
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	totalLines := len(lines)
+
+	startIdx := offset - 1 // convert to 0-indexed
+	if startIdx >= totalLines {
+		return nil, core.NewToolError("file_read",
+			fmt.Sprintf("offset %d is beyond end of file (%d lines total)", offset, totalLines))
+	}
+
+	// Apply user-specified limit
+	var userLimit int
+	var selected []string
+	if limit > 0 {
+		end := startIdx + limit
+		if end > totalLines {
+			end = totalLines
+		}
+		selected = lines[startIdx:end]
+		userLimit = limit
+	} else {
+		selected = lines[startIdx:]
+	}
+
+	selectedContent := strings.Join(selected, "\n")
+
+	// Apply truncation (respects both line and byte limits)
+	tr := truncate.Head(selectedContent, truncate.FileMaxLines, truncate.FileMaxBytes)
+
+	// Build output with line numbers and continuation message
+	output := addLineNumbers(tr.Content, offset)
+	contMsg := truncate.FormatFileContinuation(tr, offset, userLimit, totalLines)
+	if contMsg != "" {
+		output += contMsg
+	}
+
+	return map[string]any{
+		"content":     output,
+		"path":        path,
+		"total_lines": totalLines,
+		"start_line":  offset,
+		"shown_lines": tr.OutputLines,
+	}, nil
+}
+
+// intArg extracts an integer argument from the args map, returning def if missing/invalid.
+func intArg(args map[string]any, key string, def int) int {
+	v, ok := args[key]
+	if !ok {
+		return def
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return def
+		}
+		return int(i)
+	case string:
+		i, err := strconv.Atoi(n)
+		if err != nil {
+			return def
+		}
+		return i
+	}
+	return def
+}
+
+// addLineNumbers prepends line numbers to each line, starting at startLine.
+func addLineNumbers(content string, startLine int) string {
+	if content == "" {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	// Determine width for alignment
+	maxLine := startLine + len(lines) - 1
+	width := len(strconv.Itoa(maxLine))
+	if width < 4 {
+		width = 4
+	}
+
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "%*d|%s", width, startLine+i, line)
+	}
+	return b.String()
 }
 
 // WriteTool implements core.Tool for writing files.
