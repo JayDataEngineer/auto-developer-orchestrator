@@ -2,8 +2,11 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func newTestDB(t *testing.T) *Database {
@@ -718,5 +721,70 @@ func TestFullConversationRoundTrip(t *testing.T) {
 	}
 	if msgs[3].Text != "I found 2 files in /tmp: file1.txt and file2.txt" {
 		t.Errorf("msg[3]: expected text, got %q", msgs[3].Text)
+	}
+}
+
+func TestMigrationAddsToolColumns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-test.db")
+	ctx := context.Background()
+
+	// Create a DB with the OLD schema (no tool_call_id/tool_name)
+	oldDB, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = oldDB.Exec(`
+		CREATE TABLE IF NOT EXISTS system_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS conversation_messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project TEXT NOT NULL,
+			agent_id TEXT NOT NULL DEFAULT 'default',
+			role TEXT NOT NULL,
+			content TEXT NOT NULL DEFAULT '',
+			text TEXT NOT NULL DEFAULT '',
+			thinking TEXT NOT NULL DEFAULT '',
+			tool_calls TEXT NOT NULL DEFAULT '[]',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	if err != nil {
+		oldDB.Close()
+		t.Fatal(err)
+	}
+	// Insert some data with the old schema
+	_, _ = oldDB.Exec(`INSERT INTO conversation_messages (project, agent_id, role, content) VALUES ('test', 'a1', 'user', 'hello')`)
+	oldDB.Close()
+
+	// Open with NewDatabase — this should trigger migration
+	db, err := NewDatabase(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Verify new columns exist by inserting a tool result
+	_, err = db.SaveToolResult(ctx, "test", "a1", "call_1", "bash", "ok")
+	if err != nil {
+		t.Fatalf("SaveToolResult failed after migration: %v", err)
+	}
+
+	// Verify round-trip
+	msgs, _ := db.GetConversationHistory(ctx, "test", "a1", 100)
+	// Should have: original user message + new tool result
+	var found bool
+	for _, m := range msgs {
+		if m.Role == "tool" && m.ToolCallID == "call_1" && m.ToolName == "bash" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("tool result not found after migration")
+	}
+
+	// Verify migration is marked as applied (idempotent)
+	var count int
+	db.DB().QueryRow(`SELECT COUNT(*) FROM system_config WHERE key = 'migration:add tool_call_id and tool_name columns'`).Scan(&count)
+	if count != 1 {
+		t.Errorf("expected migration to be marked as applied, got count=%d", count)
 	}
 }

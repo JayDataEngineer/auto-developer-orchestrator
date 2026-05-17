@@ -50,6 +50,11 @@ func NewDatabase(dataSource string) (*Database, error) {
 		return nil, fmt.Errorf("failed to create tables (%s): %w", driverName, err)
 	}
 
+	// Run schema migrations for existing databases
+	if err := runMigrations(db, dialect); err != nil {
+		return nil, fmt.Errorf("failed to run migrations (%s): %w", driverName, err)
+	}
+
 	// Insert default config (dialect-safe)
 	upsertConfig := Rebind(dialect, `INSERT INTO system_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING`)
 	_, _ = db.Exec(upsertConfig, "projectsDir", "/app/projects")
@@ -59,6 +64,55 @@ func NewDatabase(dataSource string) (*Database, error) {
 		dialect:     dialect,
 		projectsDir: "/app/projects",
 	}, nil
+}
+
+// runMigrations applies incremental schema changes to existing databases.
+// Each migration is idempotent — it checks whether the change is needed before applying.
+func runMigrations(db *sql.DB, dialect Dialect) error {
+	type migration struct {
+		name string
+		sql  string
+	}
+
+	migrations := []migration{
+		{
+			name: "add tool_call_id and tool_name columns",
+			sql:  Rebind(dialect, `ALTER TABLE conversation_messages ADD COLUMN tool_call_id TEXT NOT NULL DEFAULT ''; ALTER TABLE conversation_messages ADD COLUMN tool_name TEXT NOT NULL DEFAULT ''`),
+		},
+	}
+
+	for _, m := range migrations {
+		// Check if migration already applied
+		var count int
+		row := db.QueryRow(Rebind(dialect,
+			`SELECT COUNT(*) FROM system_config WHERE key = ?`), "migration:"+m.name)
+		if err := row.Scan(&count); err == nil && count > 0 {
+			continue // already applied
+		}
+
+		// Apply
+		if _, err := db.Exec(m.sql); err != nil {
+			// SQLite ALTER TABLE ADD COLUMN fails if column already exists.
+			// That's fine — mark it as done anyway.
+			if dialect == DialectSQLite {
+				// Verify columns actually exist before marking done
+				var colCount int
+				db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('conversation_messages') WHERE name IN ('tool_call_id', 'tool_name')`).Scan(&colCount)
+				if colCount < 2 {
+					return fmt.Errorf("migration %q failed: %w", m.name, err)
+				}
+			} else {
+				return fmt.Errorf("migration %q failed: %w", m.name, err)
+			}
+		}
+
+		// Mark as applied
+		db.Exec(Rebind(dialect,
+			`INSERT INTO system_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING`),
+			"migration:"+m.name, "applied")
+	}
+
+	return nil
 }
 
 // Close closes the database connection
