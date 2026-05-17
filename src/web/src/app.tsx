@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
 	useLocalRuntime,
 	AssistantRuntimeProvider,
@@ -398,48 +398,19 @@ export function App() {
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
 	const workbenchPanelRef = usePanelRef();
-	const workbenchAnimRef = useRef<number | null>(null);
 
 	// Poll for running agent status
 	useAgentStatusPolling();
 	const [showTerminal, setShowTerminal] = useState(false);
 
-	const animatePanel = useCallback((from: number, to: number, duration = 200) => {
-		const panel = workbenchPanelRef.current;
-		if (!panel) return;
-		if (workbenchAnimRef.current) {
-			cancelAnimationFrame(workbenchAnimRef.current);
-		}
-		const startTime = performance.now();
-		const tick = (now: number) => {
-			const elapsed = now - startTime;
-			const progress = Math.min(elapsed / duration, 1);
-			const eased = 1 - Math.pow(1 - progress, 3);
-			const current = from + (to - from) * eased;
-			panel.resize(current);
-			if (progress < 1) {
-				workbenchAnimRef.current = requestAnimationFrame(tick);
-			}
-		};
-		workbenchAnimRef.current = requestAnimationFrame(tick);
-	}, []);
-
 	const toggleWorkbench = useCallback(() => {
 		const panel = workbenchPanelRef.current;
 		if (!panel) return;
 		if (panel.isCollapsed()) {
-			panel.expand();
-			setWorkbenchVisible(true);
+			panel.resize(35);
 		} else {
-			animatePanel(panel.getSize().asPercentage, 0, 200);
-			setWorkbenchVisible(false);
+			panel.collapse();
 		}
-	}, [animatePanel]);
-
-	useEffect(() => {
-		return () => {
-			if (workbenchAnimRef.current) cancelAnimationFrame(workbenchAnimRef.current);
-		};
 	}, []);
 
 	// Ctrl+` to toggle terminal
