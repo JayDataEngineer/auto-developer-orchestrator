@@ -156,43 +156,28 @@ func (sm *SessionManager) GetHostFingerprint(host, port string) (string, error) 
 	}
 	addr := net.JoinHostPort(host, port)
 
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("cannot connect to %s: %w", addr, err)
+	}
+	defer conn.Close()
+
 	var capturedKey ssh.PublicKey
-	_, _, _, err := ssh.NewClientConn(nil, addr, &ssh.ClientConfig{
+	sshConn, _, _, err := ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			capturedKey = key
 			return nil
 		},
 		Timeout: 10 * time.Second,
 	})
-	_ = err // We expect this to fail since we passed nil conn; we just want the key
-
-	if capturedKey == nil {
-		// Fallback: do a real connection to capture the key
-		conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
-		if err != nil {
-			return "", fmt.Errorf("cannot connect to %s: %w", addr, err)
-		}
-		defer conn.Close()
-
-		sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
-			HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
-				capturedKey = key
-				return nil
-			},
-			Timeout: 10 * time.Second,
-		})
-		if err != nil {
-			return "", fmt.Errorf("SSH handshake failed: %w", err)
-		}
-		sshConn.Close()
-		go func() { for range chans {} }()
-		go func() { for range reqs {} }()
+	if err != nil {
+		return "", fmt.Errorf("SSH handshake failed: %w", err)
 	}
+	sshConn.Close()
 
 	if capturedKey == nil {
 		return "", fmt.Errorf("failed to retrieve host key")
 	}
-
 	return ssh.FingerprintSHA256(capturedKey), nil
 }
 

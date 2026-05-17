@@ -28,6 +28,38 @@ type browseResponse struct {
 	Entries []browseEntry `json:"entries"`
 }
 
+// maxBrowseEntries caps directory listings.
+const maxBrowseEntries = 200
+
+// fileEntry is a minimal dir entry representation for filtering/sorting.
+type fileEntry struct {
+	Name  string
+	IsDir bool
+	Size  int64
+}
+
+// filterAndSortEntries filters hidden/skipped names, caps entries, and sorts
+// directories first then alphabetical. Shared by local and SSH browse.
+func filterAndSortEntries(entries []fileEntry) []browseEntry {
+	var result []browseEntry
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name, ".") || skipNames[entry.Name] {
+			continue
+		}
+		result = append(result, browseEntry{Name: entry.Name, IsDir: entry.IsDir, Size: entry.Size})
+		if len(result) >= maxBrowseEntries {
+			break
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].IsDir != result[j].IsDir {
+			return result[i].IsDir
+		}
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+	return result
+}
+
 // NewFsBrowseHandler creates a handler with an allowlist of permitted roots.
 // Default roots: $HOME, $PROJECT_ROOT, /home, /tmp.
 // Override/add with PUX_FS_ROOTS env (comma-separated; set to "/" for full access).
@@ -120,16 +152,9 @@ func (h *FsBrowseHandler) Browse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Filter and build response
-	var result []browseEntry
+	// Build file entries, filter and sort
+	fe := make([]fileEntry, 0, len(entries))
 	for _, entry := range entries {
-		name := entry.Name()
-
-		// Skip hidden files and known noise
-		if strings.HasPrefix(name, ".") || skipNames[name] {
-			continue
-		}
-
 		isDir := entry.IsDir()
 		var size int64
 		if !isDir {
@@ -137,22 +162,9 @@ func (h *FsBrowseHandler) Browse(w http.ResponseWriter, r *http.Request) {
 				size = info.Size()
 			}
 		}
-
-		result = append(result, browseEntry{Name: name, IsDir: isDir, Size: size})
-
-		// Cap at 200 entries
-		if len(result) >= 200 {
-			break
-		}
+		fe = append(fe, fileEntry{Name: entry.Name(), IsDir: isDir, Size: size})
 	}
-
-	// Sort: directories first, then alphabetical
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].IsDir != result[j].IsDir {
-			return result[i].IsDir
-		}
-		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
-	})
+	result := filterAndSortEntries(fe)
 
 	// Compute parent
 	parent := filepath.Dir(evalPath)

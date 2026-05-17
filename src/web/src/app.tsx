@@ -168,13 +168,12 @@ function ProjectGroup({
 						tooltip={displayName}
 					>
 						<ChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden" />
-						<span>{displayName}</span>
+						<span className="flex-1 truncate">{displayName}</span>
 						{project?.hasManifest && (
 							<span className="rounded bg-sidebar-primary/20 px-1 text-[9px] text-sidebar-primary group-data-[collapsible=icon]:hidden">
 								org
 							</span>
 						)}
-						<span className="ml-auto group-data-[collapsible=icon]:hidden" />
 					</SidebarMenuButton>
 				</CollapsibleTrigger>
 				<button

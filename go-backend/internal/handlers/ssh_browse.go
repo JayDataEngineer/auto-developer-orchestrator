@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"path"
-	"sort"
-	"strings"
 
 	puxssh "github.com/auto-developer-orchestrator/backend/internal/ssh"
 	"github.com/pkg/sftp"
@@ -113,37 +111,12 @@ func (h *SshBrowseHandler) SshBrowse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Filter and build response (same shape as local fs_browse)
-	var result []browseEntry
+	// Build file entries, filter and sort
+	fe := make([]fileEntry, 0, len(entries))
 	for _, entry := range entries {
-		name := entry.Name()
-
-		// Skip hidden files and known noise
-		if strings.HasPrefix(name, ".") || skipNames[name] {
-			continue
-		}
-
-		isDir := entry.IsDir()
-		var size int64
-		if !isDir {
-			size = entry.Size()
-		}
-
-		result = append(result, browseEntry{Name: name, IsDir: isDir, Size: size})
-
-		// Cap at 200 entries
-		if len(result) >= 200 {
-			break
-		}
+		fe = append(fe, fileEntry{Name: entry.Name(), IsDir: entry.IsDir(), Size: entry.Size()})
 	}
-
-	// Sort: directories first, then alphabetical
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].IsDir != result[j].IsDir {
-			return result[i].IsDir
-		}
-		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
-	})
+	result := filterAndSortEntries(fe)
 
 	// Compute parent
 	parent := path.Dir(browsePath)
