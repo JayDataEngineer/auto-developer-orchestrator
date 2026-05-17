@@ -23,6 +23,12 @@ type Message struct {
 	ToolCallID       string             `json:"tool_call_id,omitempty"`
 	Name             string             `json:"name,omitempty"`
 	ReasoningContent string             `json:"reasoning_content,omitempty"`
+	CacheControl     *CacheControl      `json:"cache_control,omitempty"` // Anthropic/OpenRouter prompt caching
+}
+
+// CacheControl marks a message as eligible for prompt caching on providers that support it.
+type CacheControl struct {
+	Type string `json:"type"` // "ephemeral" for Anthropic-style caching
 }
 
 // ToolCallResponse is a structured tool call from the model.

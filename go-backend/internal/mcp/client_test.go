@@ -42,7 +42,7 @@ func TestClient_SessionPersistence(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient("test", server.URL, nil)
 	ctx := context.Background()
 
 	// Initialize once
@@ -88,7 +88,7 @@ func TestClient_AutoInitialize(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient("test", server.URL, nil)
 
 	// Call Research WITHOUT calling Initialize first
 	result, err := client.Research(context.Background(), "test query", 3)
@@ -150,7 +150,7 @@ func TestClient_ResearchMaxResults(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client := NewClient(server.URL, nil)
+			client := NewClient("test", server.URL, nil)
 			_, err := client.Research(context.Background(), "test", tt.maxResults)
 			if err != nil {
 				t.Fatal(err)
@@ -190,7 +190,7 @@ func TestClient_ScrapeParams(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient("test", server.URL, nil)
 	_, err := client.Scrape(context.Background(), "https://docs.example.com/api")
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +224,7 @@ func TestClient_MultipleContentItems(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient("test", server.URL, nil)
 	result, err := client.CallTool(context.Background(), "test", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +258,7 @@ func TestClient_RawResultFallback(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient("test", server.URL, nil)
 	result, err := client.CallTool(context.Background(), "test", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +288,7 @@ func TestClient_HTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient("test", server.URL, nil)
 	_, err := client.CallTool(context.Background(), "test", nil)
 	if err == nil {
 		t.Fatal("expected error for 500")
@@ -307,7 +307,7 @@ func TestClient_ContextCancellation(t *testing.T) {
 	defer server.Close()
 	defer close(block) // unblock the handler on cleanup
 
-	client := NewClient(server.URL, nil)
+	client := NewClient("test", server.URL, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -341,7 +341,7 @@ func TestClient_ProtocolVersion(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient("test", server.URL, nil)
 	client.Initialize(context.Background())
 
 	if capturedInit == nil {
@@ -380,7 +380,7 @@ func TestClient_JSONRPCVersion(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient("test", server.URL, nil)
 	client.Initialize(context.Background())
 	client.CallTool(context.Background(), "test", nil)
 

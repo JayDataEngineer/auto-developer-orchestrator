@@ -450,6 +450,8 @@ type StreamOptions struct {
 // sanitizeRequest strips llama.cpp-specific fields for cloud providers.
 // Cloud APIs (Gemini, OpenRouter, OpenAI) reject unknown fields like
 // top_k, repeat_penalty, presence_penalty, min_p, cache_prompt, and session_id.
+// For providers that support prompt caching, it splits the system message at
+// the DynamicBoundary and marks the stable portion with cache_control.
 func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionRequest {
 	if !e.IsCloud() {
 		return req
@@ -463,6 +465,13 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 	req.MinP = 0
 	req.CachePrompt = false
 	req.SessionID = ""
+
+	// Inject prompt caching on system messages for providers that support it.
+	// Split at the DynamicBoundary — stable content before the boundary gets
+	// cache_control: ephemeral, which tells Anthropic/DeepSeek to cache it.
+	if e.supportsCaching() {
+		req.Messages = injectCacheBreakpoints(req.Messages)
+	}
 
 	// Gemini 3 requires thought_signature on tool calls in conversation history.
 	// Inject a dummy signature for any that lack one.
@@ -480,6 +489,61 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 	}
 
 	return req
+}
+
+// supportsCaching returns true for providers that support prompt caching.
+// Anthropic (via OpenRouter) and DeepSeek support cache_control: ephemeral.
+func (e *LLMClient) supportsCaching() bool {
+	name := strings.ToLower(e.modelName)
+	return strings.Contains(name, "claude") ||
+		strings.Contains(name, "deepseek") ||
+		strings.Contains(name, "anthropic")
+}
+
+// dynamicBoundary is the marker that splits stable from dynamic prompt content.
+const dynamicBoundary = "<system_prompt_dynamic_boundary>"
+
+// injectCacheBreakpoints splits system messages at the dynamic boundary
+// and marks the stable portion with cache_control for providers that support it.
+func injectCacheBreakpoints(messages []Message) []Message {
+	for i := range messages {
+		m := &messages[i]
+		if m.Role != "system" {
+			continue
+		}
+		idx := strings.Index(m.Content, dynamicBoundary)
+		if idx == -1 {
+			continue
+		}
+
+		// Split: stable part (before boundary) + dynamic part (after boundary)
+		stable := strings.TrimSpace(m.Content[:idx])
+		dynamic := strings.TrimSpace(m.Content[idx+len(dynamicBoundary):])
+
+		// Replace the single system message with two: stable (cached) + dynamic
+		var newMsgs []Message
+		if i > 0 {
+			newMsgs = append(newMsgs, messages[:i]...)
+		}
+		if stable != "" {
+			newMsgs = append(newMsgs, Message{
+				Role:         "system",
+				Content:      stable,
+				CacheControl: &CacheControl{Type: "ephemeral"},
+			})
+		}
+		if dynamic != "" {
+			newMsgs = append(newMsgs, Message{
+				Role:    "system",
+				Content: dynamic,
+			})
+		}
+		if i+1 < len(messages) {
+			newMsgs = append(newMsgs, messages[i+1:]...)
+		}
+		return newMsgs
+	}
+	return messages
 }
 
 // ChatCompletionResponse maps to the non-streaming /v1/chat/completions response.

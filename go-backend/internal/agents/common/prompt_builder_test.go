@@ -167,6 +167,9 @@ func TestBuildOrchestratorPromptV2_LegacyFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	os.Setenv("PROJECT_ROOT", tmpDir)
 
+	// Reset singleton so it picks up the new config dir
+	ResetGlobalBuilder()
+
 	prompt := BuildOrchestratorPromptV2(nil, "sandbox-legacy", "", "", nil, nil)
 	if prompt == "" {
 		t.Fatal("legacy fallback returned empty prompt")
@@ -182,6 +185,7 @@ func TestBuildOrchestratorPromptV2_LegacyFallback(t *testing.T) {
 	} else {
 		os.Unsetenv("PROJECT_ROOT")
 	}
+	ResetGlobalBuilder()
 }
 
 func TestBuildOrchestratorPromptV2_ToolsSection(t *testing.T) {
@@ -211,4 +215,183 @@ func (m *mockTool) Description() string             { return m.desc }
 func (m *mockTool) Schema() json.RawMessage         { return json.RawMessage(`{"type":"object"}`) }
 func (m *mockTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	return nil, nil
+}
+
+func TestPromptBuilder_OrgAfterBoundary(t *testing.T) {
+	root := repoRoot(t)
+	configDir := filepath.Join(root, "config")
+
+	builder := NewPromptBuilder(configDir)
+	ctx := &PromptContext{
+		KernelRoles: LoadAgentRoles(),
+		Org: &OrgManifest{
+			Name:        "test-org",
+			Description: "Test organization",
+		},
+	}
+
+	prompt := builder.Build(ctx)
+	idx := strings.Index(prompt, DynamicBoundary)
+
+	if idx == -1 {
+		t.Fatal("expected boundary marker in prompt")
+	}
+
+	// Org header should appear AFTER the boundary, not before
+	beforeBoundary := prompt[:idx]
+	afterBoundary := prompt[idx+len(DynamicBoundary):]
+
+	if strings.Contains(beforeBoundary, "Organization: test-org") {
+		t.Error("org header should appear AFTER boundary, not before stable sections")
+	}
+	if !strings.Contains(afterBoundary, "Organization: test-org") {
+		t.Error("org header should appear after boundary marker")
+	}
+
+	// Stable content (CTO identity) should still be before boundary
+	if !strings.Contains(beforeBoundary, "CTO") {
+		t.Error("expected CTO identity before boundary marker")
+	}
+}
+
+func TestPromptBuilder_SingletonPersists(t *testing.T) {
+	root := repoRoot(t)
+	os.Setenv("PROJECT_ROOT", root)
+	ResetGlobalBuilder()
+
+	// First call creates the singleton
+	prompt1 := BuildOrchestratorPromptV2(nil, "sandbox-1", "", "", nil, nil)
+	if prompt1 == "" {
+		t.Fatal("first call returned empty prompt")
+	}
+
+	// Verify singleton exists
+	if globalBuilder == nil {
+		t.Fatal("globalBuilder should be initialized after first call")
+	}
+
+	// Second call should reuse same builder
+	builderBefore := globalBuilder
+	prompt2 := BuildOrchestratorPromptV2(nil, "sandbox-2", "", "", nil, nil)
+	if globalBuilder != builderBefore {
+		t.Error("singleton builder should persist across calls")
+	}
+
+	// Stable content should be identical
+	idx1 := strings.Index(prompt1, DynamicBoundary)
+	idx2 := strings.Index(prompt2, DynamicBoundary)
+	if idx1 == -1 || idx2 == -1 {
+		t.Fatal("expected boundary marker in prompts")
+	}
+	if prompt1[:idx1] != prompt2[:idx2] {
+		t.Error("stable content should be identical across calls (from cache)")
+	}
+
+	ResetGlobalBuilder()
+}
+
+func TestPromptBuilder_MCPInstructions(t *testing.T) {
+	root := repoRoot(t)
+	configDir := filepath.Join(root, "config")
+
+	builder := NewPromptBuilder(configDir)
+	ctx := &PromptContext{
+		KernelRoles: LoadAgentRoles(),
+		MCPInstructions: map[string]string{
+			"web":   "Use the web research tools for searching and scraping.",
+			"media": "Use media tools for image analysis.",
+		},
+	}
+
+	prompt := builder.Build(ctx)
+
+	if !strings.Contains(prompt, "MCP Server Instructions") {
+		t.Error("expected MCP instructions section header")
+	}
+	if !strings.Contains(prompt, "web research tools") {
+		t.Error("expected web MCP instructions")
+	}
+	if !strings.Contains(prompt, "media tools") {
+		t.Error("expected media MCP instructions")
+	}
+}
+
+func TestPromptBuilder_MCPInstructionsEmpty(t *testing.T) {
+	root := repoRoot(t)
+	configDir := filepath.Join(root, "config")
+
+	builder := NewPromptBuilder(configDir)
+	ctx := &PromptContext{
+		KernelRoles: LoadAgentRoles(),
+	}
+
+	prompt := builder.Build(ctx)
+
+	if strings.Contains(prompt, "MCP Server Instructions") {
+		t.Error("should not render MCP section when no instructions provided")
+	}
+}
+
+func TestRegisterMCPInstructions(t *testing.T) {
+	RegisterMCPInstructions("test_server", "Use test tools wisely.")
+
+	m := MCPInstructionsMap()
+	if m["test_server"] != "Use test tools wisely." {
+		t.Error("expected registered instruction to be available")
+	}
+
+	// Clean up
+	mcpInstructionStore.mu.Lock()
+	delete(mcpInstructionStore.instructions, "test_server")
+	mcpInstructionStore.mu.Unlock()
+}
+
+func TestPromptBuilder_InheritedCacheKeyChangesWithTools(t *testing.T) {
+	root := repoRoot(t)
+	configDir := filepath.Join(root, "config")
+
+	builder := NewPromptBuilder(configDir)
+
+	// Context with one tool
+	ctx1 := &PromptContext{
+		Tools:       []core.Tool{&mockTool{name: "tool_a", desc: "A"}},
+		KernelRoles: LoadAgentRoles(),
+	}
+
+	// Context with different tool
+	ctx2 := &PromptContext{
+		Tools:       []core.Tool{&mockTool{name: "tool_b", desc: "B"}},
+		KernelRoles: LoadAgentRoles(),
+	}
+
+	key1 := builder.inheritedCacheKey(builder.sections[9], ctx1) // tools section
+	key2 := builder.inheritedCacheKey(builder.sections[9], ctx2) // tools section
+
+	if key1 == key2 {
+		t.Error("cache key should differ when tool names change")
+	}
+}
+
+func TestPromptBuilder_InheritedCacheKeyChangesWithMCP(t *testing.T) {
+	root := repoRoot(t)
+	configDir := filepath.Join(root, "config")
+
+	builder := NewPromptBuilder(configDir)
+
+	ctx1 := &PromptContext{
+		KernelRoles:     LoadAgentRoles(),
+		MCPInstructions: map[string]string{"web": "use web tools"},
+	}
+	ctx2 := &PromptContext{
+		KernelRoles:     LoadAgentRoles(),
+		MCPInstructions: map[string]string{"media": "use media tools"},
+	}
+
+	// Use the mcp section (index 10)
+	key1 := builder.inheritedCacheKey(builder.sections[10], ctx1)
+	key2 := builder.inheritedCacheKey(builder.sections[10], ctx2)
+
+	if key1 == key2 {
+		t.Error("cache key should differ when MCP instructions change")
+	}
 }

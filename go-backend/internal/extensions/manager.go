@@ -104,7 +104,7 @@ func (m *Manager) Clients() map[string]*mcp.Client {
 	clients := make(map[string]*mcp.Client)
 	for _, ext := range m.exts {
 		endpoint := fmt.Sprintf("http://127.0.0.1:%d/mcp", ext.port)
-		clients[ext.Name] = mcp.NewClient(endpoint, m.logger)
+		clients[ext.Name] = mcp.NewClient(ext.Name, endpoint, m.logger)
 	}
 	return clients
 }

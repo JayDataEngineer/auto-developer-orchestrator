@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,8 +22,8 @@ const (
 )
 
 // DynamicBoundary is inserted between stable and inherited sections.
-// Enables future API-level prompt caching — everything before this marker
-// can use cache_scope: global; everything after is session-specific.
+// Enables API-level prompt caching — everything before this marker
+// can use cache_control: ephemeral (Anthropic) or cachedContents (Gemini).
 const DynamicBoundary = "<system_prompt_dynamic_boundary>"
 
 // Section defines one piece of the system prompt.
@@ -42,9 +43,11 @@ type PromptContext struct {
 	Org            *OrgManifest
 	OrgRoles       map[string]*AgentRole
 	KernelRoles    map[string]*AgentRole
+	MCPInstructions map[string]string // server prefix → instruction text
 }
 
 // PromptBuilder assembles the CTO system prompt from cached sections.
+// Intended to be a long-lived singleton — the cache persists across calls.
 type PromptBuilder struct {
 	sections  []Section
 	cache     map[string]string
@@ -52,6 +55,12 @@ type PromptBuilder struct {
 	mu        sync.RWMutex
 	configDir string
 }
+
+// globalBuilder is the singleton PromptBuilder, created on first use.
+var (
+	globalBuilder     *PromptBuilder
+	globalBuilderOnce sync.Once
+)
 
 // NewPromptBuilder creates a builder with all registered sections in order.
 func NewPromptBuilder(configDir string) *PromptBuilder {
@@ -107,26 +116,38 @@ func (b *PromptBuilder) Build(ctx *PromptContext) string {
 			continue
 		}
 
-		// Insert boundary before first non-stable section
+		// Insert boundary before first non-stable section.
+		// Org manifesto goes AFTER the boundary so stable sections
+		// remain cacheable regardless of which org is active.
 		if !boundaryInserted && s.Level != Stable {
 			parts = append(parts, DynamicBoundary)
 			boundaryInserted = true
+			// Org header is the first dynamic section
+			if ctx.Org != nil {
+				parts = append(parts, b.renderOrgManifesto(ctx.Org))
+			}
 		}
 
 		parts = append(parts, content)
 	}
 
-	// If org manifesto exists, prepend it before everything
-	if ctx.Org != nil {
-		var header strings.Builder
-		fmt.Fprintf(&header, "# Organization: %s\n%s\n\n", ctx.Org.Name, ctx.Org.Description)
-		if manifesto := ctx.Org.ManifestoContent(); manifesto != "" {
-			fmt.Fprintf(&header, "## Manifesto\n%s\n\n", manifesto)
-		}
-		return header.String() + strings.Join(parts, "\n\n")
+	// No non-stable content — insert boundary + org at the end
+	if !boundaryInserted && ctx.Org != nil {
+		parts = append(parts, DynamicBoundary)
+		parts = append(parts, b.renderOrgManifesto(ctx.Org))
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+// renderOrgManifesto produces the org header section.
+func (b *PromptBuilder) renderOrgManifesto(org *OrgManifest) string {
+	var header strings.Builder
+	fmt.Fprintf(&header, "# Organization: %s\n%s", org.Name, org.Description)
+	if manifesto := org.ManifestoContent(); manifesto != "" {
+		fmt.Fprintf(&header, "\n\n## Manifesto\n%s", manifesto)
+	}
+	return header.String()
 }
 
 // getStable loads a stable section from file, using cache if unchanged.
@@ -140,7 +161,6 @@ func (b *PromptBuilder) getStable(s Section) string {
 	path := b.sectionPath(s.File)
 	info, err := os.Stat(path)
 	if err != nil {
-		// Can't stat — return cached value or empty
 		if ok {
 			return cached
 		}
@@ -169,38 +189,79 @@ func (b *PromptBuilder) getStable(s Section) string {
 	return content
 }
 
-// getInherited renders an inherited section, checking if config has changed.
-func (b *PromptBuilder) getInherited(s Section, ctx *PromptContext) string {
-	// For inherited sections, check if workers/capabilities dir changed
-	configDir := FindKernelConfigDir()
-	workersDir := "config/workers"
-	if configDir != "" {
-		workersDir = filepath.Join(configDir, "workers")
+// inheritedCacheKey computes a cache key for inherited sections that includes
+// tool names and config dir modTimes. This ensures the cache invalidates when
+// tools change at runtime (MCP extension connects) or capabilities are edited.
+func (b *PromptBuilder) inheritedCacheKey(s Section, ctx *PromptContext) string {
+	// Start with section name
+	key := s.Name + "|"
+
+	// Include tool names — if new MCP tools appear, the key changes
+	if ctx.Tools != nil {
+		names := make([]string, len(ctx.Tools))
+		for i, t := range ctx.Tools {
+			names[i] = t.Name()
+		}
+		sort.Strings(names)
+		key += strings.Join(names, ",")
+	}
+	key += "|"
+
+	// Include MCP instruction keys — if a new server connects, key changes
+	if ctx.MCPInstructions != nil {
+		prefixes := make([]string, 0, len(ctx.MCPInstructions))
+		for p := range ctx.MCPInstructions {
+			prefixes = append(prefixes, p)
+		}
+		sort.Strings(prefixes)
+		key += strings.Join(prefixes, ",")
 	}
 
-	key := s.Name + "_inherited"
+	return key
+}
+
+// getInherited renders an inherited section, checking if config has changed.
+func (b *PromptBuilder) getInherited(s Section, ctx *PromptContext) string {
+	cacheKey := b.inheritedCacheKey(s, ctx) + "_inherited"
+
+	// Collect modTimes from workers + capabilities dirs
+	configDir := FindKernelConfigDir()
+	workersDir := "config/workers"
+	capabilitiesDir := "config/capabilities"
+	if configDir != "" {
+		workersDir = filepath.Join(configDir, "workers")
+		capabilitiesDir = filepath.Join(configDir, "capabilities")
+	}
 
 	b.mu.RLock()
-	cached, ok := b.cache[key]
-	modTime := b.modTimes[key]
+	cached, ok := b.cache[cacheKey]
+	cacheTime := b.modTimes[cacheKey]
 	b.mu.RUnlock()
 
-	// Check workers dir modTime
-	if dirInfo, err := os.Stat(workersDir); err == nil {
-		if ok && !dirInfo.ModTime().After(modTime) {
-			return cached // cache hit
+	// Find the latest modTime across both dirs
+	latestMod := time.Time{}
+	for _, dir := range []string{workersDir, capabilitiesDir} {
+		if info, err := os.Stat(dir); err == nil {
+			if info.ModTime().After(latestMod) {
+				latestMod = info.ModTime()
+			}
 		}
+	}
+
+	// Cache hit if key matches and dirs haven't changed
+	if ok && !latestMod.After(cacheTime) {
+		return cached
 	}
 
 	// Recompute
 	content := s.Render(ctx)
 
 	b.mu.Lock()
-	b.cache[key] = content
-	if dirInfo, err := os.Stat(workersDir); err == nil {
-		b.modTimes[key] = dirInfo.ModTime()
+	b.cache[cacheKey] = content
+	if !latestMod.IsZero() {
+		b.modTimes[cacheKey] = latestMod
 	} else {
-		b.modTimes[key] = time.Now()
+		b.modTimes[cacheKey] = time.Now()
 	}
 	b.mu.Unlock()
 
@@ -254,10 +315,16 @@ func (b *PromptBuilder) renderTools(ctx *PromptContext) string {
 }
 
 func (b *PromptBuilder) renderMCP(ctx *PromptContext) string {
-	// MCP instructions are handled by the MCP server instructions injected
-	// via the skill system or attached separately. This section is a hook
-	// for future MCP instruction injection.
-	return ""
+	if len(ctx.MCPInstructions) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# MCP Server Instructions\n\n")
+	for prefix, instructions := range ctx.MCPInstructions {
+		fmt.Fprintf(&sb, "## %s\n%s\n\n", prefix, instructions)
+	}
+	return sb.String()
 }
 
 // --- Volatile section renderers ---
@@ -283,10 +350,51 @@ func (b *PromptBuilder) renderSandboxID(ctx *PromptContext) string {
 	return "Sandbox ID: " + ctx.SandboxID
 }
 
-// --- Public entry point ---
+// --- MCP instruction registry ---
+
+// mcpInstructionStore holds MCP server instruction text, populated by the MCP
+// package during initialization. The prompt builder reads from here — no circular import.
+var mcpInstructionStore struct {
+	mu           sync.RWMutex
+	instructions map[string]string // server prefix → instruction text
+}
+
+// RegisterMCPInstructions stores instruction text for an MCP server.
+// Called by the MCP package after initializing each server.
+func RegisterMCPInstructions(prefix, instructions string) {
+	mcpInstructionStore.mu.Lock()
+	defer mcpInstructionStore.mu.Unlock()
+	if mcpInstructionStore.instructions == nil {
+		mcpInstructionStore.instructions = make(map[string]string)
+	}
+	if instructions != "" {
+		mcpInstructionStore.instructions[prefix] = instructions
+	}
+}
+
+// MCPInstructionsMap returns a snapshot of all registered MCP instructions.
+func MCPInstructionsMap() map[string]string {
+	mcpInstructionStore.mu.RLock()
+	defer mcpInstructionStore.mu.RUnlock()
+	out := make(map[string]string, len(mcpInstructionStore.instructions))
+	for k, v := range mcpInstructionStore.instructions {
+		out[k] = v
+	}
+	return out
+}
+
+// --- Public entry points ---
+
+// ResetGlobalBuilder resets the singleton PromptBuilder.
+// Called when config changes require a fresh builder (e.g. configDir changes).
+func ResetGlobalBuilder() {
+	globalBuilderOnce = sync.Once{}
+	globalBuilder = nil
+}
 
 // BuildOrchestratorPromptV2 builds the CTO system prompt using the section pipeline
 // if config/prompt_sections/ exists, otherwise falls back to the legacy template.
+// Uses a singleton PromptBuilder so the cache persists across calls.
 func BuildOrchestratorPromptV2(tools []core.Tool, sandboxID, projectContext, skills string, org *OrgManifest, orgRoles map[string]*AgentRole) string {
 	configDir := FindKernelConfigDir()
 
@@ -300,16 +408,52 @@ func BuildOrchestratorPromptV2(tools []core.Tool, sandboxID, projectContext, ski
 		return BuildOrchestratorPromptWithOrg(tools, sandboxID, projectContext, skills, org, orgRoles)
 	}
 
-	builder := NewPromptBuilder(configDir)
+	// Use singleton builder so cache persists across calls
+	globalBuilderOnce.Do(func() {
+		globalBuilder = NewPromptBuilder(configDir)
+	})
+
 	ctx := &PromptContext{
-		Tools:          tools,
-		SandboxID:      sandboxID,
-		ProjectContext: projectContext,
-		Skills:         skills,
-		Org:            org,
-		OrgRoles:       orgRoles,
-		KernelRoles:    LoadAgentRoles(),
+		Tools:           tools,
+		SandboxID:       sandboxID,
+		ProjectContext:  projectContext,
+		Skills:          skills,
+		Org:             org,
+		OrgRoles:        orgRoles,
+		KernelRoles:     LoadAgentRoles(),
+		MCPInstructions: MCPInstructionsMap(),
 	}
 
-	return builder.Build(ctx)
+	return globalBuilder.Build(ctx)
+}
+
+// BuildOrchestratorPromptV2WithMCP is like BuildOrchestratorPromptV2 but accepts
+// explicit MCP instructions. Used when MCP server instructions are known at call time.
+func BuildOrchestratorPromptV2WithMCP(tools []core.Tool, sandboxID, projectContext, skills string, org *OrgManifest, orgRoles map[string]*AgentRole, mcpInstructions map[string]string) string {
+	configDir := FindKernelConfigDir()
+
+	sectionsDir := "config/prompt_sections"
+	if configDir != "" {
+		sectionsDir = filepath.Join(configDir, "prompt_sections")
+	}
+	if _, err := os.Stat(sectionsDir); os.IsNotExist(err) {
+		return BuildOrchestratorPromptWithOrg(tools, sandboxID, projectContext, skills, org, orgRoles)
+	}
+
+	globalBuilderOnce.Do(func() {
+		globalBuilder = NewPromptBuilder(configDir)
+	})
+
+	ctx := &PromptContext{
+		Tools:           tools,
+		SandboxID:       sandboxID,
+		ProjectContext:  projectContext,
+		Skills:          skills,
+		Org:             org,
+		OrgRoles:        orgRoles,
+		KernelRoles:     LoadAgentRoles(),
+		MCPInstructions: mcpInstructions,
+	}
+
+	return globalBuilder.Build(ctx)
 }

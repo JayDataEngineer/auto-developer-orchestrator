@@ -18,17 +18,20 @@ import (
 
 // Client is an HTTP client for the MCP research server.
 type Client struct {
-	endpoint   string
-	httpClient *http.Client
-	logger     *zap.Logger
-	sessionID  string        // Mcp-Session-Id from initialize response
-	sem        chan struct{} // concurrency limiter — 2 concurrent requests max
+	endpoint     string
+	prefix       string // server prefix for tool routing and instructions
+	httpClient   *http.Client
+	logger       *zap.Logger
+	sessionID    string        // Mcp-Session-Id from initialize response
+	instructions string        // instructions text from initialize response
+	sem          chan struct{} // concurrency limiter — 2 concurrent requests max
 }
 
 // NewClient creates a new MCP client. The endpoint should be the MCP server URL.
+// The prefix identifies this server for tool routing and instruction registration.
 // If endpoint is empty, it falls back to the MCP_RESEARCH_ENDPOINT env var,
 // then to "http://100.86.69.57:8327/mcp".
-func NewClient(endpoint string, logger *zap.Logger) *Client {
+func NewClient(prefix, endpoint string, logger *zap.Logger) *Client {
 	if endpoint == "" {
 		endpoint = os.Getenv("MCP_RESEARCH_ENDPOINT")
 	}
@@ -39,6 +42,7 @@ func NewClient(endpoint string, logger *zap.Logger) *Client {
 		logger = zap.NewNop()
 	}
 	return &Client{
+		prefix:   prefix,
 		endpoint: endpoint,
 		httpClient: &http.Client{
 			Timeout: 90 * time.Second, // MCP research can be slow (search + scrape)
@@ -93,6 +97,29 @@ func (c *Client) Initialize(ctx context.Context) error {
 	// Capture session ID from response headers for subsequent requests
 	if sid := headers.Get("Mcp-Session-Id"); sid != "" {
 		c.sessionID = sid
+	}
+
+	// Parse instructions from the initialize response
+	var initResult struct {
+		Instructions string `json:"instructions"`
+	}
+	if err := json.Unmarshal(respBody, &struct {
+		Result json.RawMessage `json:"result"`
+	}{}); err == nil {
+		// respBody is the full JSON-RPC response, parse result.instructions
+		var rpcResp struct {
+			Result json.RawMessage `json:"result"`
+		}
+		if json.Unmarshal(respBody, &rpcResp) == nil && len(rpcResp.Result) > 0 {
+			_ = json.Unmarshal(rpcResp.Result, &initResult)
+		}
+	}
+	if initResult.Instructions != "" {
+		c.instructions = initResult.Instructions
+		c.logger.Debug("MCP server instructions captured",
+			zap.String("prefix", c.prefix),
+			zap.Int("length", len(initResult.Instructions)),
+		)
 	}
 
 	// Send initialized notification (fire-and-forget, no ID)
@@ -259,6 +286,16 @@ func (c *Client) Endpoint() string {
 	return c.endpoint
 }
 
+// Instructions returns the instructions text from the MCP server's initialize response.
+func (c *Client) Instructions() string {
+	return c.instructions
+}
+
+// Prefix returns the server prefix used for tool routing.
+func (c *Client) Prefix() string {
+	return c.prefix
+}
+
 // doRequest sends a JSON-RPC request and returns the response body and headers.
 // Handles both plain JSON and SSE (text/event-stream) responses from the MCP server.
 // Uses a semaphore to limit concurrent requests (max 2) to avoid overwhelming the server.
@@ -355,13 +392,50 @@ func NewMultiClient(logger *zap.Logger) *MultiClient {
 	}
 }
 
+// InstructionRegistrar is set by the application startup to register MCP instructions
+// with the prompt builder. This avoids a circular import between mcp and agents/common.
+var InstructionRegistrar func(prefix, instructions string)
+
+// registerInstructions calls the registered InstructionRegistrar if set.
+func registerInstructions(prefix, instructions string) {
+	if InstructionRegistrar != nil {
+		InstructionRegistrar(prefix, instructions)
+	}
+}
+
 // AddClient registers an MCP server with a tool name prefix.
 func (m *MultiClient) AddClient(prefix string, client *Client) {
 	m.clients[prefix] = client
 }
 
+// HasClient checks if a server with the given prefix is registered.
+func (m *MultiClient) HasClient(prefix string) bool {
+	_, ok := m.clients[prefix]
+	return ok
+}
+
+// RemoveClient removes a server by prefix and cleans up its tool entries.
+func (m *MultiClient) RemoveClient(prefix string) {
+	delete(m.clients, prefix)
+	// Remove tool routing entries for this prefix
+	for toolName, p := range m.toolMap {
+		if p == prefix {
+			delete(m.toolMap, toolName)
+		}
+	}
+	// Rebuild cached tools without this server's tools
+	var filtered []MCPTool
+	for _, t := range m.cachedTools {
+		if m.toolMap[t.Name] != "" {
+			filtered = append(filtered, t)
+		}
+	}
+	m.cachedTools = filtered
+}
+
 // InitializeAll initializes all registered MCP servers and discovers their tools.
 // Populates both toolMap (tool → prefix routing) and cachedTools (full tool list).
+// Also captures server instructions and registers them with the prompt builder.
 func (m *MultiClient) InitializeAll(ctx context.Context) error {
 	m.cachedTools = nil
 	seen := make(map[string]bool)
@@ -370,6 +444,12 @@ func (m *MultiClient) InitializeAll(ctx context.Context) error {
 			m.logger.Warn("MCP server initialize failed", zap.String("prefix", prefix), zap.Error(err))
 			continue
 		}
+
+		// Register instructions with the prompt builder
+		if client.Instructions() != "" {
+			registerInstructions(prefix, client.Instructions())
+		}
+
 		tools, err := client.ListTools(ctx)
 		if err != nil {
 			m.logger.Warn("MCP tools/list failed", zap.String("prefix", prefix), zap.Error(err))

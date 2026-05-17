@@ -9,6 +9,7 @@ import (
 // This file exists for backwards compatibility within the llama package.
 
 type Message = core.Message
+type CacheControl = core.CacheControl
 type ToolCallResponse = core.ToolCallResponse
 type FunctionCallData = core.FunctionCallData
 type ToolCall = core.ToolCall

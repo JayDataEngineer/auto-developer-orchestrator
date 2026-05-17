@@ -312,10 +312,10 @@ func (a *App) initMCP() {
 		hubBase = "http://100.86.69.57:30080"
 	}
 
-	webResearchClient := mcp.NewClient(hubBase+"/mcp/web", a.logger)
+	webResearchClient := mcp.NewClient("web", hubBase+"/mcp/web", a.logger)
 	mcpMulti.AddClient("web", webResearchClient)
 
-	mediaAnalysisClient := mcp.NewClient(hubBase+"/mcp/media", a.logger)
+	mediaAnalysisClient := mcp.NewClient("media", hubBase+"/mcp/media", a.logger)
 	mcpMulti.AddClient("media", mediaAnalysisClient)
 
 	// Start extension subprocesses
@@ -333,7 +333,27 @@ func (a *App) initMCP() {
 		a.logger.Info("Extension servers started", zap.Int("count", started))
 	}
 
+	// Load user-configured MCP servers from settings.json
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		settingsPath := filepath.Join(homeDir, ".pi", "agent", "settings.json")
+		if data, err := os.ReadFile(settingsPath); err == nil {
+			var cfg struct {
+				MCPServers map[string]string `json:"mcpServers"`
+			}
+			if json.Unmarshal(data, &cfg) == nil {
+				for prefix, endpoint := range cfg.MCPServers {
+					if !mcpMulti.HasClient(prefix) {
+						mcpMulti.AddClient(prefix, mcp.NewClient(prefix, endpoint, a.logger))
+						a.logger.Info("Loaded persisted MCP server", zap.String("prefix", prefix), zap.String("endpoint", endpoint))
+					}
+				}
+			}
+		}
+	}
+
 	if mcpMulti.IsAvailable() {
+		// Wire MCP instruction registration → prompt builder (avoids circular import)
+		mcp.InstructionRegistrar = common.RegisterMCPInstructions
 		if err := mcpMulti.InitializeAll(context.Background()); err != nil {
 			a.logger.Warn("MCP multi-client initialization had errors", zap.Error(err))
 		}

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
+	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"go.uber.org/zap"
 )
 
@@ -412,4 +414,161 @@ func (h *PuxHandler) AddProvider(w http.ResponseWriter, r *http.Request) {
 		"success":  true,
 		"provider": req.ID,
 	})
+}
+
+// AddMCPServer adds a new MCP server dynamically.
+// POST /api/pux/mcp-servers
+func (h *PuxHandler) AddMCPServer(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeReq[struct {
+		Prefix   string `json:"prefix"`
+		Endpoint string `json:"endpoint"`
+	}](w, r)
+	if !ok {
+		return
+	}
+
+	if req.Prefix == "" || req.Endpoint == "" {
+		JSONError(w, "prefix and endpoint are required", http.StatusBadRequest)
+		return
+	}
+
+	if h.mcpMulti == nil {
+		JSONError(w, "MCP multi-client not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	if h.mcpMulti.HasClient(req.Prefix) {
+		JSONError(w, "MCP server with this prefix already exists", http.StatusConflict)
+		return
+	}
+
+	// Create client and add to multi-client
+	client := mcp.NewClient(req.Prefix, req.Endpoint, h.log)
+	h.mcpMulti.AddClient(req.Prefix, client)
+
+	// Initialize the new client and discover tools
+	if err := h.mcpMulti.InitializeAll(context.Background()); err != nil {
+		h.log.Warn("MCP server initialize had errors", zap.String("prefix", req.Prefix), zap.Error(err))
+	}
+
+	toolCount := len(h.mcpMulti.ServerToolNames(req.Prefix))
+
+	// Persist to settings.json
+	h.persistMCPServer(req.Prefix, req.Endpoint)
+
+	h.log.Info("MCP server added",
+		zap.String("prefix", req.Prefix),
+		zap.String("endpoint", req.Endpoint),
+		zap.Int("tools", toolCount),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"prefix":    req.Prefix,
+		"toolCount": toolCount,
+	})
+}
+
+// RemoveMCPServer removes an MCP server dynamically.
+// DELETE /api/pux/mcp-servers
+func (h *PuxHandler) RemoveMCPServer(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeReq[struct {
+		Prefix string `json:"prefix"`
+	}](w, r)
+	if !ok {
+		return
+	}
+
+	if req.Prefix == "" {
+		JSONError(w, "prefix is required", http.StatusBadRequest)
+		return
+	}
+
+	if h.mcpMulti == nil || !h.mcpMulti.HasClient(req.Prefix) {
+		JSONError(w, "MCP server not found", http.StatusNotFound)
+		return
+	}
+
+	h.mcpMulti.RemoveClient(req.Prefix)
+
+	// Remove from settings.json
+	h.removePersistedMCPServer(req.Prefix)
+
+	h.log.Info("MCP server removed", zap.String("prefix", req.Prefix))
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"prefix":  req.Prefix,
+	})
+}
+
+// persistMCPServer writes an MCP server entry to settings.json.
+func (h *PuxHandler) persistMCPServer(prefix, endpoint string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	settingsPath := filepath.Join(homeDir, ".pi", "agent", "settings.json")
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return
+	}
+
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return
+	}
+
+	// Get or create mcpServers map
+	var mcpServers map[string]string
+	if raw, ok := settings["mcpServers"]; ok {
+		json.Unmarshal(raw, &mcpServers)
+	}
+	if mcpServers == nil {
+		mcpServers = make(map[string]string)
+	}
+	mcpServers[prefix] = endpoint
+
+	settings["mcpServers"], _ = json.Marshal(mcpServers)
+	output, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(settingsPath, output, 0600)
+}
+
+// removePersistedMCPServer removes an MCP server entry from settings.json.
+func (h *PuxHandler) removePersistedMCPServer(prefix string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	settingsPath := filepath.Join(homeDir, ".pi", "agent", "settings.json")
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return
+	}
+
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return
+	}
+
+	var mcpServers map[string]string
+	if raw, ok := settings["mcpServers"]; ok {
+		json.Unmarshal(raw, &mcpServers)
+	}
+	if mcpServers == nil {
+		return
+	}
+
+	delete(mcpServers, prefix)
+	settings["mcpServers"], _ = json.Marshal(mcpServers)
+	output, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(settingsPath, output, 0600)
 }
