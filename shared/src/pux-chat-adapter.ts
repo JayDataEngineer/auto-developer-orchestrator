@@ -39,6 +39,7 @@ interface RunningTool {
 	args: Record<string, any>;
 	argsText: string;
 	interrupt?: { type: "human"; payload: unknown };
+	progress?: string;
 	artifact?: unknown;
 	modelContent?: readonly { type: "text"; text: string }[];
 	messages?: Array<{
@@ -236,6 +237,7 @@ function buildSnapshot(
 			args: tool.args,
 			argsText: tool.argsText,
 			...(tool.result !== undefined ? { result: tool.result } : {}),
+			...(tool.progress ? { progress: tool.progress } : {}),
 			...(tool.isError ? { isError: true } : {}),
 			...(tool.interrupt ? { interrupt: tool.interrupt } : {}),
 			...(tool.artifact !== undefined ? { artifact: tool.artifact } : {}),
@@ -542,8 +544,15 @@ export const puxChatAdapter: ChatModelAdapter = {
 							break;
 						}
 
-						case "tool_execution_update": {
-							// Live progress text from a running tool — not a separate part
+						case "tool_update": {
+							const toolId = parsed.toolId as string;
+							if (toolId) {
+								const existing = tools.get(toolId);
+								if (existing) {
+									existing.progress = (parsed.text as string) || "";
+									yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
+								}
+							}
 							break;
 						}
 
