@@ -18,7 +18,7 @@ import {
 	useAuiState,
 	DiffView,
 } from "@assistant-ui/react-ink";
-import { usePuxStore, formatToolResult } from "@pux/shared";
+import { usePuxStore } from "@pux/shared";
 import { TerminalImage } from "./terminal-image.js";
 import { useColors, symbols, BLACK_CIRCLE, BLOCKQUOTE_BAR } from "../theme.js";
 
@@ -31,36 +31,19 @@ export const BashToolUI = makeAssistantToolUI({
 		const command = (args as any)?.command || (args as any)?.cmd || "";
 		const isDone = status.type === "complete";
 		const isRunning = status.type === "running";
-		const resultLines = formatToolResult(result, 10);
+		const cmdPreview = command.length > 80 ? command.slice(0, 77) + "..." : command;
 
 		return (
-			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-				<Box>
-					<Text
-						color={
-							isError
-								? colors.error
-								: isDone
-									? colors.success
-									: colors.running
-						}
-					>
-						{BLACK_CIRCLE}{" "}
-					</Text>
-					<Text bold color={isRunning ? colors.running : undefined}>
-						bash
-					</Text>
-					<Text color="gray"> {command.slice(0, 60)}</Text>
-				</Box>
-				{resultLines.length > 0 && !isRunning && (
-					<Box paddingLeft={2} flexDirection="column">
-						{resultLines.map((line: string, i: number) => (
-							<Text key={i} dimColor={isError} color={isError ? colors.error : undefined}>
-								{line}
-							</Text>
-						))}
-					</Box>
-				)}
+			<Box paddingLeft={2} marginBottom={1}>
+				<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>
+					{BLACK_CIRCLE}{" "}
+				</Text>
+				<Text bold color={isRunning ? colors.running : undefined}>
+					bash
+				</Text>
+				<Text color="gray">({cmdPreview})</Text>
+				{isDone && !isError && <Text color="gray"> done</Text>}
+				{isError && <Text color={colors.error}> failed</Text>}
 			</Box>
 		);
 	},
@@ -114,82 +97,30 @@ function DelegateRenderer({
 	const isDone = status.type === "complete";
 	const isRunning = status.type === "running";
 
-	// Phase 3: Look up sub-agent details from Zustand store
+	// Look up sub-agent details from Zustand store
 	const agents = usePuxStore((s) => s.agents);
 	const agentState = [...agents.values()].find(
 		(a) => a.agentName === agentName && a.task === task
 	);
 
-	const output =
-		typeof result === "string"
-			? result
-			: result
-				? JSON.stringify(result, null, 2)
-				: "";
-	const resultLines = formatToolResult(result, 6);
-
 	// Count sub-agent tool calls
 	const subToolCount = agentState?.toolCalls.length ?? 0;
+	const taskPreview = task.length > 40 ? task.slice(0, 37) + "..." : task;
 
 	return (
-		<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-			<Box>
-				<Text
-					color={isDone ? colors.success : colors.running}
-				>
-					{BLACK_CIRCLE}{" "}
-				</Text>
-				<Text bold color={colors.brand}>
-					{agentName}
-				</Text>
-				<Text color="gray">
-					{" "}
-					{isRunning ? "working..." : isDone ? "done" : ""}
-				</Text>
-				{subToolCount > 0 && (
-					<Text color="gray"> {symbols.dot} {subToolCount} tools</Text>
-				)}
-			</Box>
-			{task && (
-				<Text dimColor color="gray">
-					{"  "}
-					{task.slice(0, 80)}
-				</Text>
-			)}
-
-			{/* Phase 3: Nested tool call list from agent state */}
-			{agentState && agentState.toolCalls.length > 0 && (
-				<Box paddingLeft={2} flexDirection="column" marginTop={0}>
-					{agentState.toolCalls.slice(0, 5).map((tc, i) => (
-						<Box key={i}>
-							<Text color={tc.isError ? colors.error : colors.success}>
-								{tc.isError ? "  ✕" : "  ●"}{" "}
-							</Text>
-							<Text dimColor>{tc.toolName}</Text>
-							{tc.result !== undefined && (
-								<Text color="gray">
-									{" "}
-									{typeof tc.result === "string"
-										? (tc.result as string).split("\n")[0]?.slice(0, 40) || ""
-										: ""}
-								</Text>
-							)}
-						</Box>
-					))}
-					{agentState.toolCalls.length > 5 && (
-						<Text dimColor color="gray">
-							{"  "}... +{agentState.toolCalls.length - 5} more
-						</Text>
-					)}
-				</Box>
-			)}
-
-			{resultLines.length > 0 && isDone && !agentState && (
-				<Box paddingLeft={2} flexDirection="column" marginTop={1}>
-					{resultLines.map((line: string, i: number) => (
-						<Text key={i} dimColor>{line}</Text>
-					))}
-				</Box>
+		<Box paddingLeft={2} marginBottom={1}>
+			<Text color={isDone ? colors.success : colors.running}>
+				{BLACK_CIRCLE}{" "}
+			</Text>
+			<Text bold color={colors.brand}>
+				{agentName}
+			</Text>
+			{taskPreview && <Text color="gray">({taskPreview})</Text>}
+			<Text color="gray">
+				{isDone ? " done" : isRunning ? " working..." : ""}
+			</Text>
+			{subToolCount > 0 && (
+				<Text color="gray"> {symbols.dot} {subToolCount} tools</Text>
 			)}
 		</Box>
 	);

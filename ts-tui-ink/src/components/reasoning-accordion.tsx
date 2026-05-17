@@ -42,7 +42,7 @@ export function ReasoningAccordion() {
 				{isRunning ? (
 					<Text dimColor italic>Thinking... {preview}</Text>
 				) : (
-					<Text dimColor italic>Thought ({lines.length} lines)</Text>
+					<Text dimColor italic>Thought</Text>
 				)}
 			</Box>
 		);

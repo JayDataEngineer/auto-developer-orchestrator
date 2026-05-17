@@ -1,16 +1,16 @@
 /**
  * AssistantMessage — renders assistant messages.
  *
- * Renders text, reasoning (collapsed), and tool calls with args + result preview.
- * Reasoning is shown via ReasoningAccordion only (no duplicate from parts loop).
- * Tool calls show: ● toolName(args) when running, ● toolName(args) ⎿ result when done.
+ * Renders text, reasoning (collapsed), and tool calls.
+ * Reasoning via ReasoningAccordion only (no duplicate from parts loop).
+ * Tool calls: single line — ● toolName(args) when running, ● toolName(args) done when complete.
  */
 
 import React from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useAuiState } from "@assistant-ui/react-ink";
-import { formatToolResult, getToolArgPreview } from "@pux/shared";
+import { getToolArgPreview } from "@pux/shared";
 import { ReasoningAccordion } from "./reasoning-accordion.js";
 import { BranchPicker } from "./branch-picker.js";
 import { MarkdownText } from "./markdown-text.js";
@@ -110,7 +110,7 @@ export function AssistantMessage() {
 	);
 }
 
-// ── Tool call display — shows args and result ──
+// ── Tool call display — compact single line ──
 
 function ToolCallDisplay({
 	toolName,
@@ -131,43 +131,20 @@ function ToolCallDisplay({
 	// Extract a useful arg preview
 	const argPreview = getToolArgPreview(toolName, args as Record<string, unknown> | undefined);
 
-	// Format result preview
-	const resultPreview = isDone ? formatToolResult(result, 3) : [];
-
-	// Max width for result lines to prevent terminal wrapping garble
-	const maxResultWidth = 90;
-
 	return (
-		<Box flexDirection="column">
-			<Box>
-				<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>
-					{isRunning ? symbols.toolRunning : isError ? symbols.toolError : symbols.toolDone}
-				</Text>
-				<Text> </Text>
-				<Text bold color={isDone ? colors.success : isRunning ? colors.running : undefined}>
-					{toolName}
-				</Text>
-				{argPreview && (
-					<Text color="gray">({argPreview})</Text>
-				)}
-				{isDone && !isError && (
-					<Text color="gray"> done</Text>
-				)}
-			</Box>
-			{resultPreview.length > 0 && !isError && (
-				<Box paddingLeft={2} flexDirection="column">
-					{resultPreview.map((line, i) => (
-						<Text key={i} dimColor>
-							{"  "}{BLOCKQUOTE_BAR} {line.length > maxResultWidth ? line.slice(0, maxResultWidth - 3) + "..." : line}
-						</Text>
-					))}
-				</Box>
+		<Box>
+			<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>
+				{isRunning ? symbols.toolRunning : isError ? symbols.toolError : symbols.toolDone}
+			</Text>
+			<Text> </Text>
+			<Text bold color={isRunning ? colors.running : undefined}>
+				{toolName}
+			</Text>
+			{argPreview && (
+				<Text color="gray">({argPreview})</Text>
 			)}
-			{isError && (
-				<Box paddingLeft={2}>
-					<Text color={colors.error}>  {symbols.cross} failed</Text>
-				</Box>
-			)}
+			{isDone && !isError && <Text color="gray"> done</Text>}
+			{isError && <Text color={colors.error}> failed</Text>}
 		</Box>
 	);
 }
