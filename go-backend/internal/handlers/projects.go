@@ -293,10 +293,12 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify directory exists
-	if _, err := os.Stat(req.Path); os.IsNotExist(err) {
-		JSONError(w, "Directory does not exist", http.StatusBadRequest)
-		return
+	// Verify directory exists (skip for remote paths like ssh://)
+	if !strings.Contains(req.Path, "://") {
+		if _, err := os.Stat(req.Path); os.IsNotExist(err) {
+			JSONError(w, "Directory does not exist", http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Store in database

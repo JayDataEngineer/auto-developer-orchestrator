@@ -13,6 +13,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/hooks"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
+	puxssh "github.com/auto-developer-orchestrator/backend/internal/ssh"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/observability"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
@@ -49,6 +50,9 @@ type PuxHandler struct {
 
 	metrics  *observability.Metrics
 	langfuse *observability.LangfuseClient
+
+	sshManager  *puxssh.SessionManager // SSH session manager for remote browsing
+	sshBrowse   *SshBrowseHandler      // SSH browse HTTP handlers
 
 	selectedEngines map[string]*llamaeng.LLMClient // per-agent engine override
 	registry       *AgentRegistry                   // tracks running agents
@@ -105,6 +109,19 @@ func (h *PuxHandler) SetSandboxOnly(sandboxMgr *sandbox.Manager, cu *ComputerUse
 	h.sandboxMgr = sandboxMgr
 	if cu != nil {
 		h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
+	}
+}
+
+// SetSSHManager wires the SSH session manager for remote filesystem browsing.
+func (h *PuxHandler) SetSSHManager(mgr *puxssh.SessionManager) {
+	h.sshManager = mgr
+	h.sshBrowse = NewSshBrowseHandler(mgr, h.log)
+}
+
+// CloseSSH closes all SSH sessions on shutdown.
+func (h *PuxHandler) CloseSSH() {
+	if h.sshManager != nil {
+		h.sshManager.CloseAll()
 	}
 }
 
@@ -170,6 +187,14 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/mcp-servers", h.GetMCPServers)
 	r.Post("/mcp-servers", h.AddMCPServer)
 	r.Delete("/mcp-servers", h.RemoveMCPServer)
+
+	// SSH remote browse
+	if h.sshBrowse != nil {
+		r.Post("/ssh/connect", h.sshBrowse.SshConnect)
+		r.Post("/ssh/browse", h.sshBrowse.SshBrowse)
+		r.Post("/ssh/disconnect", h.sshBrowse.SshDisconnect)
+		r.Post("/ssh/trust-host", h.sshBrowse.SshTrustHost)
+	}
 }
 
 // GetAgentStatus returns running agent status.

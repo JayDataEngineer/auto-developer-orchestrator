@@ -51,9 +51,9 @@ func resolveProjectPath(project string, db *storage.Database) string {
 		if err == nil {
 			for _, p := range customProjects {
 				if p.Name == project {
-					// Skip non-filesystem paths (e.g. jules:// URLs)
+					// Return remote paths directly (e.g. ssh://user@host/path)
 					if strings.Contains(p.Path, "://") {
-						break
+						return p.Path
 					}
 					if info, err := os.Stat(p.Path); err == nil && info.IsDir() {
 						return p.Path

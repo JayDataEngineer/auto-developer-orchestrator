@@ -25,6 +25,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/manifest"
 	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/models"
+	puxssh "github.com/auto-developer-orchestrator/backend/internal/ssh"
 	"github.com/auto-developer-orchestrator/backend/internal/observability"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
@@ -108,6 +109,9 @@ func (a *App) shutdown() {
 	}
 	if a.sandboxHandler != nil {
 		a.sandboxHandler.CleanupVNCConnections()
+	}
+	if a.puxHandler != nil {
+		a.puxHandler.CloseSSH()
 	}
 	if a.sched != nil {
 		a.sched.Stop()
@@ -208,6 +212,10 @@ func (a *App) initHandlers() {
 
 	// Pux handler
 	a.puxHandler = handlers.NewPuxHandler(a.db, gitOps, githubHandler, logger)
+
+	// SSH session manager for remote filesystem browsing
+	sshManager := puxssh.NewSessionManager(logger)
+	a.puxHandler.SetSSHManager(sshManager)
 
 	// Observability
 	metrics := observability.NewMetrics()
@@ -675,6 +683,13 @@ func (a *App) buildRouter(
 		workerHandler := handlers.NewWorkerHandler(workersStore, a.logger)
 		r.Route("/workers", func(r chi.Router) {
 			workerHandler.RegisterRoutes(r)
+		})
+
+		// CTO prompt sections — editable prompt template files
+		configDir := common.FindKernelConfigDir()
+		promptHandler := handlers.NewPromptSectionHandler(configDir, a.logger)
+		r.Route("/prompt-sections", func(r chi.Router) {
+			promptHandler.RegisterRoutes(r)
 		})
 
 		// Cluster services
