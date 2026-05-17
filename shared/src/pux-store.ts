@@ -145,6 +145,7 @@ interface PuxState {
 	toggleModelPicker: () => void;
 	loadConversations: () => Promise<void>;
 	loadProjects: () => Promise<void>;
+	removeProject: (name: string) => Promise<void>;
 	setModel: (model: string) => void;
 	setProject: (project: string) => void;
 	setConversation: (project: string, agentId: string) => void;
@@ -374,6 +375,26 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 				const first = (update.projects as Project[])[0];
 				set({ activeProject: first.name || first.path, activeProjectPath: first.path || "" });
 			}
+		}
+	},
+
+	removeProject: async (name) => {
+		try {
+			const fetch = getFetch();
+			const resp = await fetch(apiUrl("/api/projects"), {
+				method: "DELETE",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ name }),
+			});
+			if (!resp.ok) return;
+			// Remove from local state
+			const { activeProject } = get();
+			set((state) => ({
+				projects: (state.projects as Project[]).filter((p) => p.name !== name),
+				activeProject: activeProject === name ? "" : activeProject,
+			}));
+		} catch {
+			// ignore
 		}
 	},
 

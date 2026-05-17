@@ -448,6 +448,33 @@ func (h *ProjectHandler) Add(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// Remove handles DELETE /projects — removes a project from the sidebar.
+func (h *ProjectHandler) Remove(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeReq[struct {
+		Name string `json:"name"`
+	}](w, r)
+	if !ok {
+		return
+	}
+
+	if req.Name == "" {
+		JSONError(w, "name is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.db.DeleteCustomProject(r.Context(), req.Name); err != nil {
+		h.logger.Error("Failed to delete project", zap.String("name", req.Name), zap.Error(err))
+		JSONError(w, "Failed to remove project", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info("Project removed", zap.String("name", req.Name))
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"name":    req.Name,
+	})
+}
+
 // Clone clones a repository via git CLI
 func (h *ProjectHandler) Clone(w http.ResponseWriter, r *http.Request) {
 	req, ok := decodeReq[struct {

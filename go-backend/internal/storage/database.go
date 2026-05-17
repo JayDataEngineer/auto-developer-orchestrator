@@ -118,6 +118,14 @@ func (d *Database) EnsureCustomProject(ctx context.Context, name, path string) e
 	return err
 }
 
+// DeleteCustomProject removes a custom project by name.
+func (d *Database) DeleteCustomProject(ctx context.Context, name string) error {
+	_, err := d.db.ExecContext(ctx,
+		Rebind(d.dialect, "DELETE FROM custom_projects WHERE name = ?"),
+		name)
+	return err
+}
+
 // GetProjectDir returns the directory for a project
 func (d *Database) GetProjectDir(ctx context.Context, projectName string) (string, error) {
 	var path string

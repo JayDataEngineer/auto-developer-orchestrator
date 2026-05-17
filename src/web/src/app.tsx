@@ -68,6 +68,7 @@ import {
 	Plus,
 	Users,
 	FolderOpen,
+	XIcon,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -154,6 +155,7 @@ function ProjectGroup({
 }) {
 	const displayName = projectKey.split("/").pop() || projectKey;
 	const deleteConversation = usePuxStore((s) => s.deleteConversation);
+	const removeProject = usePuxStore((s) => s.removeProject);
 	const runningAgents = usePuxStore((s) => s.runningAgents);
 	const viewedConversations = usePuxStore((s) => s.viewedConversations);
 
@@ -168,12 +170,23 @@ function ProjectGroup({
 						<ChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden" />
 						<span>{displayName}</span>
 						{project?.hasManifest && (
-							<span className="ml-auto rounded bg-sidebar-primary/20 px-1 text-[9px] text-sidebar-primary group-data-[collapsible=icon]:hidden">
+							<span className="rounded bg-sidebar-primary/20 px-1 text-[9px] text-sidebar-primary group-data-[collapsible=icon]:hidden">
 								org
 							</span>
 						)}
+						<span className="ml-auto group-data-[collapsible=icon]:hidden" />
 					</SidebarMenuButton>
 				</CollapsibleTrigger>
+				<button
+					onClick={(e) => {
+						e.stopPropagation();
+						removeProject(projectKey);
+					}}
+					className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/collapsible:opacity-100 group-data-[collapsible=icon]:hidden"
+					title="Remove from sidebar"
+				>
+					<XIcon className="size-3" />
+				</button>
 				{conversations.length > 0 && (
 					<CollapsibleContent className="group-data-[collapsible=icon]:hidden">
 						<SidebarMenuSub>

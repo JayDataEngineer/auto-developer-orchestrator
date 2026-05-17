@@ -584,6 +584,7 @@ func (a *App) buildRouter(
 		r.Get("/projects", projectHandler.List)
 		r.Post("/projects/add", projectHandler.Add)
 		r.Post("/projects/register", projectHandler.Add)
+		r.Delete("/projects", projectHandler.Remove)
 		r.Post("/clone", projectHandler.Clone)
 		r.Post("/branch/checkout", projectHandler.CheckoutBranch)
 		r.Get("/branch", projectHandler.GetBranch)
