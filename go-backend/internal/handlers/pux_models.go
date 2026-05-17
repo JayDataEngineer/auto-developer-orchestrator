@@ -243,9 +243,10 @@ func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.LL
 		Logger:    h.log,
 	})
 	if err := eng.LoadModel(); err != nil {
-		h.log.Warn("Failed to create engine from settings", zap.String("provider", providerID), zap.Error(err))
+		h.log.Warn("Failed to create engine from settings", zap.String("provider", providerID), zap.String("url", p.BaseURL), zap.Error(err))
 		return nil
 	}
+	h.log.Info("Created engine from settings", zap.String("provider", providerID), zap.String("url", p.BaseURL), zap.String("model", modelID))
 	return eng
 }
 
@@ -274,7 +275,13 @@ func (h *PuxHandler) resolveEngineForModel(modelID string) *llamaeng.LLMClient {
 						}
 					}
 				}
+				h.log.Warn("resolveEngineForModel: model not found in any provider",
+					zap.String("modelID", modelID))
+			} else {
+				h.log.Warn("resolveEngineForModel: failed to parse settings.json")
 			}
+		} else {
+			h.log.Warn("resolveEngineForModel: failed to read settings.json", zap.Error(err))
 		}
 	}
 

@@ -287,7 +287,9 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		if eng := h.resolveEngineForModel(req.Model); eng != nil {
 			h.selectedEngines[key] = eng
 			h.llamaEngine = eng
-			h.log.Info("Using model from request", zap.String("model", req.Model))
+		} else {
+			h.log.Warn("Model not found in any provider, falling back to current engine",
+				zap.String("model", req.Model))
 		}
 	}
 
@@ -296,7 +298,6 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	if h.llamaEngine == nil && h.defaultLogic != "" {
 		if eng := h.resolveEngineForModel(h.defaultLogic); eng != nil {
 			h.llamaEngine = eng
-			h.log.Info("Using logic default", zap.String("model", h.defaultLogic))
 		}
 	}
 
@@ -310,7 +311,6 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	if eng := h.engineFromSettings("openrouter", "deepseek/deepseek-v4-flash"); eng != nil {
 		h.llamaEngine = eng
 		h.selectedEngines[key] = eng
-		h.log.Info("Bootstrapped cloud engine (no local model)", zap.String("model", eng.ModelName()))
 		h.promptWithOrchestrator(w, r, *req, projectPath)
 		return
 	}
