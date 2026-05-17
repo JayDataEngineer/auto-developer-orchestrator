@@ -493,9 +493,9 @@ export function App() {
 
 				{workbenchVisible && (
 					<>
-						<Separator className="w-1 bg-border hover:bg-ring/50 transition-colors" />
+						<Separator className="w-px bg-border hover:bg-ring/50 transition-colors" />
 						<Panel defaultSize={35} minSize={20} collapsible>
-							<div className="flex h-full flex-col border-l border-border bg-sidebar text-sidebar-foreground">
+							<div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
 								<Workbench />
 							</div>
 						</Panel>
