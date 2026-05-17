@@ -23,6 +23,7 @@ import { AddProjectDialog } from "@/components/add-project-dialog";
 import { WidgetToolUIs } from "@/components/assistant-ui/widget-tool-ui";
 import { AskUserToolUI } from "@/components/assistant-ui/ask-user-tool-ui";
 import { PlanReviewToolUI } from "@/components/assistant-ui/plan-review-tool-ui";
+import { DelegateToolUI, DelegateAsyncToolUI } from "@/components/assistant-ui/delegate-tool-ui";
 import {
 	Sidebar,
 	SidebarContent,
@@ -101,6 +102,8 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 			))}
 			<AskUserToolUI />
 			<PlanReviewToolUI />
+			<DelegateToolUI />
+			<DelegateAsyncToolUI />
 			{children}
 		</AssistantRuntimeProvider>
 	);
