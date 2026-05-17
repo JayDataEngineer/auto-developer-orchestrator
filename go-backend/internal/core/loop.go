@@ -363,6 +363,13 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			log.Printf("loop: usage in=%d out=%d total_in=%d total_out=%d",
 				lastUsage.PromptTokens, lastUsage.CompletionTokens,
 				state.TotalInputTokens, state.TotalOutputTokens)
+
+			// Inject real token usage into context for accurate context manager estimates
+			ctx = context.WithValue(ctx, TokenUsageKey{}, &TokenUsage{
+				PromptTokens:     lastUsage.PromptTokens,
+				CompletionTokens: lastUsage.CompletionTokens,
+				ContextSize:      l.provider.ContextSize(),
+			})
 		}
 		state.TurnModel = l.provider.ModelName()
 

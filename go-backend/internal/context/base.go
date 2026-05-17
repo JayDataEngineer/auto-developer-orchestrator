@@ -41,7 +41,7 @@ func (m *BaseContextManager) BuildContext(ctx context.Context) ([]core.Message, 
 	}
 
 	m.metrics = ContextMetrics{
-		EstimatedTokens: EstimateTokens(msgs),
+		EstimatedTokens: EstimateTokensFromUsage(ctx, msgs),
 		ContextSize:     m.config.ContextSize,
 		MessageCount:    len(msgs),
 	}

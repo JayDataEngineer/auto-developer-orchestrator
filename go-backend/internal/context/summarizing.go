@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -24,16 +25,49 @@ type SummarizingContextManager struct {
 	logger   *log.Logger
 	metrics  ContextMetrics
 	subCh    chan<- core.AgentEvent // cached from context during BuildContext
+
+	// Iterative summary merging — carries forward previous summary
+	lastSummary string
+
+	// Conversation log — append-mode markdown file the agent can read
+	convLog     *os.File
+	convLogPath string
+
+	// File operation tracking — cumulative across compactions
+	readFiles     []string
+	modifiedFiles []string
+	readSet       map[string]bool
+	modifiedSet   map[string]bool
 }
 
 func NewSummarizingContextManager(inner ContextManager, cfg Config, sess core.Session, provider core.LLMProvider) *SummarizingContextManager {
-	return &SummarizingContextManager{
-		inner:    inner,
-		config:   cfg,
-		session:  sess,
-		provider: provider,
-		logger:   log.Default(),
+	m := &SummarizingContextManager{
+		inner:       inner,
+		config:      cfg,
+		session:     sess,
+		provider:    provider,
+		logger:      log.Default(),
+		readSet:     make(map[string]bool),
+		modifiedSet: make(map[string]bool),
 	}
+
+	// Open conversation log if enabled and spill dir is configured
+	if cfg.ConversationLogEnabled && cfg.SpillDir != "" {
+		m.convLogPath = filepath.Join(cfg.SpillDir, "conversation_log.md")
+		// Ensure spill directory exists
+		if err := os.MkdirAll(cfg.SpillDir, 0755); err != nil {
+			m.logger.Printf("SummarizingContextManager: failed to create spill dir: %v", err)
+		} else {
+			f, err := os.OpenFile(m.convLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err != nil {
+				m.logger.Printf("SummarizingContextManager: failed to open conversation log: %v", err)
+			} else {
+				m.convLog = f
+			}
+		}
+	}
+
+	return m
 }
 
 func (m *SummarizingContextManager) BuildContext(ctx context.Context) ([]core.Message, error) {
@@ -45,7 +79,7 @@ func (m *SummarizingContextManager) BuildContext(ctx context.Context) ([]core.Me
 	// Check compaction thresholds before delegating to inner
 	if m.session != nil {
 		msgs, _ := m.session.BuildContext(ctx)
-		tokens := EstimateTokens(msgs)
+		tokens := EstimateTokensFromUsage(ctx, msgs)
 		contextSize := m.config.ContextSize
 		if contextSize <= 0 {
 			contextSize = 32768
@@ -96,6 +130,9 @@ func (m *SummarizingContextManager) SessionID() string {
 }
 
 func (m *SummarizingContextManager) Close() error {
+	if m.convLog != nil {
+		m.convLog.Close()
+	}
 	return m.inner.Close()
 }
 
@@ -125,7 +162,13 @@ func (m *SummarizingContextManager) fullCompact(ctx context.Context, msgs []core
 	// 1. Archive the full conversation to disk (lossless preservation)
 	archivePath := m.archiveConversation(msgs)
 
-	// 2. Generate LLM summary of older messages
+	// 2. Append to conversation log (agent-readable file)
+	m.appendToConversationLog(msgs)
+
+	// 3. Scan file operations from messages being compacted
+	m.scanFileOperations(msgs)
+
+	// 4. Generate LLM summary of older messages
 	summary := m.generateSummary(ctx, msgs)
 	if summary == "" {
 		m.logger.Printf("SummarizingContextManager: LLM summary failed, falling back to micro-compact")
@@ -133,7 +176,10 @@ func (m *SummarizingContextManager) fullCompact(ctx context.Context, msgs []core
 		return
 	}
 
-	// 3. Call session.Compact with the real summary
+	// 5. Append file tracking and re-injection metadata to summary
+	summary = m.enrichSummary(summary)
+
+	// 6. Call session.Compact with the real summary
 	_, err := m.session.Compact(ctx, summary)
 	if err != nil {
 		m.logger.Printf("SummarizingContextManager: full compact failed: %v", err)
@@ -147,30 +193,102 @@ func (m *SummarizingContextManager) fullCompact(ctx context.Context, msgs []core
 	m.emitCompactionEvent(len(msgs), 0)
 }
 
+// findCutPoint walks backwards through messages accumulating token estimates,
+// finding a safe cut point that respects turn boundaries. It never splits
+// an assistant→tool_result pair. Falls back to len(msgs)/5 when keepTokens <= 0.
+func findCutPoint(msgs []core.Message, keepTokens int) int {
+	if keepTokens <= 0 {
+		// Legacy behavior: keep last ~20%
+		keep := len(msgs) / 5
+		if keep < 4 {
+			keep = 4
+		}
+		if keep > 20 {
+			keep = 20
+		}
+		return len(msgs) - keep
+	}
+
+	// Walk backwards accumulating tokens until we hit the budget
+	accumulated := 0
+	minKeep := 4
+	if len(msgs) <= minKeep {
+		return 0
+	}
+
+	for i := len(msgs) - 1; i >= minKeep; i-- {
+		msg := msgs[i]
+		tok := estimateMessageTokens(msg)
+
+		// Don't split turn boundaries: if this is a tool result, include the
+		// assistant message that triggered it (walk past tool results)
+		if msg.Role == "tool" && i > minKeep {
+			// Accumulate this tool result
+			accumulated += tok
+			// Also count the preceding assistant message (it must stay with its results)
+			if msgs[i-1].Role == "assistant" {
+				accumulated += estimateMessageTokens(msgs[i-1])
+				i-- // skip the assistant on next iteration
+			}
+			continue
+		}
+
+		accumulated += tok
+		if accumulated >= keepTokens {
+			// We've accumulated enough — cut here, keep everything from i onward
+			// But make sure we're not cutting at a tool result (move back to assistant)
+			cut := i
+			for cut > 0 && msgs[cut].Role == "tool" {
+				cut--
+			}
+			if cut < minKeep {
+				return 0
+			}
+			return cut
+		}
+	}
+
+	return 0 // Not enough messages to exceed budget, summarize from start
+}
+
 // generateSummary calls the LLM to produce a structured summary of older messages.
-// It keeps the most recent messages intact and summarizes everything before them.
+// Uses turn-boundary-aware cut points and supports iterative summary merging.
 func (m *SummarizingContextManager) generateSummary(ctx context.Context, msgs []core.Message) string {
 	if m.provider == nil {
 		return ""
 	}
 
-	// Keep the last ~20% of messages intact, summarize the rest
-	keepRecent := len(msgs) / 5
-	if keepRecent < 4 {
-		keepRecent = 4
-	}
-	if keepRecent > 20 {
-		keepRecent = 20
+	// Determine keep budget
+	keepTokens := m.config.KeepRecentTokens
+	if keepTokens <= 0 {
+		// Legacy: 20% of context size
+		keepTokens = m.config.ContextSize / 5
 	}
 
-	oldMsgs := msgs[:len(msgs)-keepRecent]
+	cutPoint := findCutPoint(msgs, keepTokens)
+	oldMsgs := msgs[:cutPoint]
 	if len(oldMsgs) < 2 {
 		return ""
 	}
 
 	// Build the conversation text for summarization
 	var b strings.Builder
-	b.WriteString("=== CONVERSATION TO SUMMARIZE ===\n\n")
+
+	// Iterative merge: include previous summary if available
+	if m.lastSummary != "" {
+		// Cap previous summary to ~1500 tokens to avoid blowing up the prompt
+		prevSummary := m.lastSummary
+		const maxPrevSummaryChars = 5000 // ~1500 tokens at 0.3 ratio
+		if len(prevSummary) > maxPrevSummaryChars {
+			prevSummary = prevSummary[:maxPrevSummaryChars] + "\n...[previous summary truncated]"
+		}
+		b.WriteString("=== PREVIOUS SUMMARY ===\n")
+		b.WriteString(prevSummary)
+		b.WriteString("\n\n=== NEW CONVERSATION TO MERGE ===\n\n")
+	} else {
+		b.WriteString("=== CONVERSATION TO SUMMARIZE ===\n\n")
+	}
+
 	for _, msg := range oldMsgs {
 		switch msg.Role {
 		case "user":
@@ -192,7 +310,21 @@ func (m *SummarizingContextManager) generateSummary(ctx context.Context, msgs []
 		b.WriteString("\n")
 	}
 
-	summaryPrompt := `Summarize the conversation above into a structured summary that preserves:
+	var summaryPrompt string
+	if m.lastSummary != "" {
+		summaryPrompt = `You are merging NEW conversation content into an EXISTING summary above.
+
+Update the structured summary to incorporate the new information. Preserve:
+1. The user's original goal/intent (update if it changed)
+2. Key decisions made and why (add new decisions)
+3. Important findings, facts, or data discovered (accumulate)
+4. Tools used and their results (add new ones, brief)
+5. Any errors encountered and how they were resolved
+6. Current state of progress (reflect latest state)
+
+Output the complete updated summary. Be concise but comprehensive.`
+	} else {
+		summaryPrompt = `Summarize the conversation above into a structured summary that preserves:
 1. The user's original goal/intent
 2. Key decisions made and why
 3. Important findings, facts, or data discovered
@@ -201,6 +333,7 @@ func (m *SummarizingContextManager) generateSummary(ctx context.Context, msgs []
 6. Current state of progress
 
 Be concise but comprehensive. The agent needs this summary to continue working effectively.`
+	}
 
 	summarizeMessages := []core.Message{
 		{
@@ -238,7 +371,129 @@ Be concise but comprehensive. The agent needs this summary to continue working e
 	if len(result) < 50 {
 		return "" // too short to be useful
 	}
+
+	// Store for iterative merging on next compaction
+	m.lastSummary = result
+
 	return result
+}
+
+// scanFileOperations scans assistant messages for file_read, file_write, and bash
+// tool calls, extracting file paths for cumulative tracking across compactions.
+func (m *SummarizingContextManager) scanFileOperations(msgs []core.Message) {
+	for _, msg := range msgs {
+		if msg.Role != "assistant" {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			args := tc.Function.Arguments
+			if args == "" {
+				continue
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+				continue
+			}
+
+			switch tc.Function.Name {
+			case "file_read", "read_file":
+				if path, ok := parsed["path"].(string); ok && path != "" && !m.readSet[path] {
+					m.readSet[path] = true
+					m.readFiles = append(m.readFiles, path)
+				}
+			case "file_write", "write_file", "edit_file":
+				if path, ok := parsed["path"].(string); ok && path != "" && !m.modifiedSet[path] {
+					m.modifiedSet[path] = true
+					m.modifiedFiles = append(m.modifiedFiles, path)
+				}
+			}
+		}
+	}
+}
+
+// enrichSummary appends file tracking metadata, conversation log reference,
+// and recently-accessed file re-injection to the summary.
+func (m *SummarizingContextManager) enrichSummary(summary string) string {
+	var b strings.Builder
+	b.WriteString(summary)
+
+	// File tracking XML (Pi-Mono pattern)
+	if len(m.readFiles) > 0 || len(m.modifiedFiles) > 0 {
+		b.WriteString("\n\n<file-tracking>\n")
+		if len(m.readFiles) > 0 {
+			b.WriteString("<read-files>\n")
+			for _, f := range m.readFiles {
+				b.WriteString(fmt.Sprintf("  <file>%s</file>\n", f))
+			}
+			b.WriteString("</read-files>\n")
+		}
+		if len(m.modifiedFiles) > 0 {
+			b.WriteString("<modified-files>\n")
+			for _, f := range m.modifiedFiles {
+				b.WriteString(fmt.Sprintf("  <file>%s</file>\n", f))
+			}
+			b.WriteString("</modified-files>\n")
+		}
+		b.WriteString("</file-tracking>")
+	}
+
+	// Conversation log reference (DeepAgents pattern)
+	if m.convLogPath != "" {
+		b.WriteString(fmt.Sprintf("\n\n<conversation-log path=\"%s\">Full conversation history saved here. Use file_read to access it.</conversation-log>", m.convLogPath))
+	}
+
+	// Recently-accessed file re-injection (post-compact recovery)
+	reinjectCount := m.config.ReinjectFileCount
+	if reinjectCount > 0 && len(m.readFiles) > 0 {
+		start := len(m.readFiles) - reinjectCount
+		if start < 0 {
+			start = 0
+		}
+		recent := m.readFiles[start:]
+		b.WriteString("\n\n<recently-accessed-files>\n")
+		for _, f := range recent {
+			b.WriteString(fmt.Sprintf("  <file>%s</file>\n", f))
+		}
+		b.WriteString("</recently-accessed-files>")
+	}
+
+	return b.String()
+}
+
+// appendToConversationLog writes evicted messages to the append-mode markdown
+// conversation log. The agent can read this file with file_read at any time.
+func (m *SummarizingContextManager) appendToConversationLog(msgs []core.Message) {
+	if m.convLog == nil {
+		return
+	}
+
+	timestamp := time.Now().Format(time.RFC3339)
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("\n\n---\n## Compaction at %s (%d messages)\n\n", timestamp, len(msgs)))
+
+	for _, msg := range msgs {
+		switch msg.Role {
+		case "user":
+			b.WriteString(fmt.Sprintf("**User**: %s\n\n", truncateForSummary(msg.Content, 1000)))
+		case "assistant":
+			if msg.Content != "" {
+				b.WriteString(fmt.Sprintf("**Assistant**: %s\n\n", truncateForSummary(msg.Content, 1000)))
+			}
+			for _, tc := range msg.ToolCalls {
+				b.WriteString(fmt.Sprintf("**Tool Call `%s`**: `%s`\n\n", tc.Function.Name, truncateForSummary(tc.Function.Arguments, 300)))
+			}
+		case "tool":
+			name := msg.Name
+			if name == "" {
+				name = "tool"
+			}
+			b.WriteString(fmt.Sprintf("**Tool Result (%s)**: %s\n\n", name, truncateForSummary(msg.Content, 500)))
+		}
+	}
+
+	if _, err := m.convLog.WriteString(b.String()); err != nil {
+		m.logger.Printf("SummarizingContextManager: failed to append to conversation log: %v", err)
+	}
 }
 
 // archiveConversation saves the full conversation to disk before summarization.

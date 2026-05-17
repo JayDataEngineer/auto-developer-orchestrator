@@ -110,6 +110,19 @@ type AgentEventData struct {
 // SubscriberKey is a context key for injecting the SSE subscriber channel.
 type SubscriberKey struct{}
 
+// TokenUsageKey is a context key for injecting real API token usage data
+// from the agent loop into the context manager for accurate token estimation.
+type TokenUsageKey struct{}
+
+// TokenUsage holds real token counts from the last API call, injected via
+// context so the context manager can use real usage instead of char heuristics.
+type TokenUsage struct {
+	PromptTokens     int // tokens in the prompt (from API response)
+	CompletionTokens int // tokens in the completion
+	ContextSize      int // model's context window size
+	TrailingMessages int // number of messages appended since last API call
+}
+
 // SendEvent sends an event to the subscriber channel without blocking.
 func SendEvent(ch chan<- AgentEvent, evt AgentEvent) {
 	defer func() { recover() }()

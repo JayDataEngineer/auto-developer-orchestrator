@@ -17,6 +17,7 @@ import { VNCViewer } from "@/components/workbench/vnc-viewer";
 import { EditorPanel } from "@/components/workbench/editor-panel";
 import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
 import { WorkersPanel } from "@/components/workbench/workers-panel";
+import { PromptPanel } from "@/components/workbench/prompt-panel";
 import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
 import { AddProjectDialog } from "@/components/add-project-dialog";
 import { WidgetToolUIs } from "@/components/assistant-ui/widget-tool-ui";
@@ -67,6 +68,7 @@ import {
 	Plus,
 	Users,
 	FolderOpen,
+	FileText,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -361,6 +363,10 @@ function Workbench() {
 					<Users className="size-4" />
 					Workers
 				</TabsTrigger>
+				<TabsTrigger value="prompt" className="gap-1.5 text-xs">
+					<FileText className="size-4" />
+					CTO
+				</TabsTrigger>
 			</TabsList>
 			<TabsContent value="vnc" className="flex-1 overflow-hidden mt-0">
 				<VNCViewer />
@@ -373,6 +379,9 @@ function Workbench() {
 			</TabsContent>
 			<TabsContent value="workers" className="flex-1 overflow-hidden mt-0">
 				<WorkersPanel />
+			</TabsContent>
+			<TabsContent value="prompt" className="flex-1 overflow-hidden mt-0">
+				<PromptPanel />
 			</TabsContent>
 		</Tabs>
 	);

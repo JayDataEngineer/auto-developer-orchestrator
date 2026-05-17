@@ -78,6 +78,18 @@ type Config struct {
 	// structured summaries during full compaction. If nil, full compaction
 	// falls back to micro-compaction.
 	LLMProvider core.LLMProvider
+
+	// KeepRecentTokens is the token budget for recent messages preserved
+	// during full compaction. 0 = 20% of ContextSize (legacy behavior).
+	KeepRecentTokens int
+
+	// ConversationLogEnabled writes evicted messages to an append-mode
+	// markdown file the agent can read with file_read. Default true.
+	ConversationLogEnabled bool
+
+	// ReinjectFileCount is the number of recently-read file paths to
+	// re-inject into the summary after compaction. 0 = disable. Default 5.
+	ReinjectFileCount int
 }
 
 // DefaultConfig returns sensible defaults matching current behavior.
@@ -91,6 +103,8 @@ func DefaultConfig() Config {
 		FullCompactThreshold:   0.75,
 		KeepResults:            4,
 		EnableSummary:          true,
+		ConversationLogEnabled: true,
+		ReinjectFileCount:      5,
 	}
 }
 
