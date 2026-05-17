@@ -116,14 +116,25 @@ interface AppProps {
 	cwd: string;
 }
 
+// Wrapper that re-keys the runtime provider when conversationKey changes,
+// causing useLocalRuntime to be fully recreated (clears internal message state).
+function PuxRuntimeWrapper({ children }: { children: React.ReactNode }) {
+	const conversationKey = usePuxStore((s) => s.conversationKey);
+	return (
+		<PuxRuntimeProvider key={conversationKey}>
+			{children}
+		</PuxRuntimeProvider>
+	);
+}
+
 export function App({ model: initialModel, project }: AppProps) {
 	return (
-		<PuxRuntimeProvider>
+		<PuxRuntimeWrapper>
 			<ThemeProvider>
 				<ToolRegistry />
 				<PuxApp initialModel={initialModel} project={project} />
 			</ThemeProvider>
-		</PuxRuntimeProvider>
+		</PuxRuntimeWrapper>
 	);
 }
 

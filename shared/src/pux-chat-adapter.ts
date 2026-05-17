@@ -115,7 +115,12 @@ function handleMetaEvent(
 	switch (eventType) {
 		case "agent_spawned": {
 			const agentId = data.agentId as string | undefined;
-			if (agentId) usePuxStore.setState({ activeAgentId: agentId });
+			if (agentId) {
+				usePuxStore.setState({ activeAgentId: agentId });
+				// Auto-mark as viewed — user is already on this conversation
+				const project = usePuxStore.getState().activeProject;
+				if (project) usePuxStore.getState().markViewed(project, agentId);
+			}
 			break;
 		}
 		case "decision_request": {

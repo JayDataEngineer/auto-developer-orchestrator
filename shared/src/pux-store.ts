@@ -285,6 +285,10 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 				name: m.name || m.id,
 				provider: m.provider || "",
 			}));
+			// Skip if unchanged (compare by id)
+			const current = get().modelList;
+			if (models.length === current.length &&
+				models.every((m, i) => m.id === current[i].id && m.provider === current[i].provider)) return null;
 			return { modelList: models };
 		});
 		if (update) set(update);
@@ -319,7 +323,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	clearConversation: () =>
 		set({
 			activeAgentId: "",
-			conversationKey: `${get().activeProject}:default`,
+			conversationKey: `${get().activeProject}:clear-${Date.now()}`,
 			pendingDecision: null,
 			lastUsage: null,
 			contextMetrics: null,
@@ -331,12 +335,28 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		const update = await apiLoad("/api/pux/conversations", (data: unknown) => {
 			const convs = Array.isArray(data) ? data as Conversation[] : [];
 			const current = get().conversations;
-			if (convs.length === current.length && convs.every((c, i) =>
-				c.project === current[i].project && c.agentId === current[i].agentId && c.lastAt === current[i].lastAt && c.messageCount === current[i].messageCount
-			)) return null;
+			// Order-independent dedup: compare by key, not by array index
+			if (convs.length === current.length) {
+				const currentMap = new Map(current.map((c) => [`${c.project}:${c.agentId}`, c]));
+				let same = true;
+				for (const c of convs) {
+					const existing = currentMap.get(`${c.project}:${c.agentId}`);
+					if (!existing || existing.lastAt !== c.lastAt || existing.messageCount !== c.messageCount) {
+						same = false;
+						break;
+					}
+				}
+				if (same) return null;
+			}
 			return { conversations: convs };
 		});
 		if (update) set(update);
+		// Auto-mark the active conversation as viewed (handles page reloads,
+		// already-active conversations, and agent_spawned resolving a new ID)
+		const s = get();
+		if (s.activeProject && s.activeAgentId) {
+			s.markViewed(s.activeProject, s.activeAgentId);
+		}
 	},
 
 	deleteConversation: async (project, agentId) => {
@@ -366,6 +386,10 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	loadProjects: async () => {
 		const update = await apiLoad("/api/projects", (data: unknown) => {
 			const projects = Array.isArray(data) ? data : ((data as Record<string, unknown>)?.projects || []) as Project[];
+			// Skip if unchanged (compare by name + path)
+			const current = get().projects;
+			if (projects.length === current.length &&
+				projects.every((p, i) => p.name === current[i].name && p.path === current[i].path)) return null;
 			return { projects };
 		});
 		if (update) {
