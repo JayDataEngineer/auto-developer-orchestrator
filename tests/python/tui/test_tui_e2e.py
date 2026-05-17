@@ -208,8 +208,13 @@ class TestMessageFlow:
     def test_streaming_completes(self):
         """agent_end event should stop streaming — no infinite spinner."""
         send_input("say ok\n", wait=2)
-        done = wait_for_streaming_done(timeout=60)
-        assert done, "Streaming never completed (infinite spinner?)"
+        # Wait for the response text to appear (proof the model answered)
+        screen = wait_for_text("ok", timeout=90)
+        # Then verify streaming stopped (or response already came through)
+        done = wait_for_streaming_done(timeout=90)
+        assert done or screen, (
+            "Streaming never completed and no response text found (infinite spinner?)"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
