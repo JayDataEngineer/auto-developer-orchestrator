@@ -9,30 +9,35 @@ import type { FieldConfig } from "./config-panel/types";
 
 interface WorkerFormData {
 	name: string;
+	hint: string;
 	persona: string;
 	capabilities: string[];
 	model: string;
 	maxRounds: number | undefined;
 	temperature: number | undefined;
 	sandbox: string;
+	delegatesTo: string[];
 }
 
 // ── Constants ──
 
 const emptyForm: WorkerFormData = {
 	name: "",
+	hint: "",
 	persona: "",
 	capabilities: [],
 	model: "",
 	maxRounds: undefined,
 	temperature: undefined,
 	sandbox: "",
+	delegatesTo: [],
 };
 
 // ── Field config ──
 
 const workerFields: FieldConfig<WorkerFormData>[] = [
 	{ key: "name", type: "text", label: "Name", placeholder: "data-collector", required: true },
+	{ key: "hint", type: "text", label: "Hint", placeholder: "One-line CTO-facing description" },
 	{ key: "persona", type: "textarea", label: "Persona", placeholder: "You are a data collection specialist...", rows: 3, required: true },
 	{
 		key: "capabilities", type: "multiselect", label: "Capabilities",
@@ -57,6 +62,7 @@ const workerFields: FieldConfig<WorkerFormData>[] = [
 			{ value: "native", label: "Native" },
 		],
 	},
+	{ key: "delegatesTo", type: "workers", label: "Can Delegate To" },
 ];
 
 // ── Helpers ──
@@ -64,12 +70,14 @@ const workerFields: FieldConfig<WorkerFormData>[] = [
 function workerToForm(w: any): WorkerFormData {
 	return {
 		name: w.name || "",
+		hint: w.hint || "",
 		persona: w.persona || "",
 		capabilities: w.capabilities || [],
 		model: w.model || "",
 		maxRounds: w.max_rounds || undefined,
 		temperature: w.temperature || undefined,
 		sandbox: w.sandbox || "",
+		delegatesTo: w.delegates_to || [],
 	};
 }
 
@@ -78,11 +86,13 @@ function buildBody(form: WorkerFormData): Record<string, any> {
 		name: form.name.trim(),
 		persona: form.persona.trim(),
 	};
+	if (form.hint.trim()) body.hint = form.hint.trim();
 	if (form.capabilities.length > 0) body.capabilities = form.capabilities;
 	if (form.model) body.model = form.model;
 	if (form.maxRounds) body.maxRounds = form.maxRounds;
 	if (form.temperature != null) body.temperature = form.temperature;
 	if (form.sandbox) body.sandbox = form.sandbox;
+	if (form.delegatesTo.length > 0) body.delegatesTo = form.delegatesTo;
 	return body;
 }
 
@@ -102,7 +112,7 @@ export function WorkersPanel() {
 			itemDef={{
 				id: (w: any) => w.name,
 				label: (w: any) => w.name,
-				description: (w: any) => w.persona,
+				description: (w: any) => w.hint || w.persona,
 				badges: (w: any) => [
 					...(w.isDefault ? [{ text: "default", variant: "outline" as const }] : []),
 					...(w.capabilities || []).map((c: string) => ({
@@ -122,11 +132,13 @@ export function WorkersPanel() {
 			askAITemplate={(form, isEdit, editItem) => {
 				const parts: string[] = [isEdit ? `Update the worker "${(editItem as any)?.name}" for me.` : "Create a new worker for me."];
 				if (form.name.trim()) parts.push(`Name: ${form.name.trim()}`);
+				if (form.hint.trim()) parts.push(`Hint: ${form.hint.trim()}`);
 				if (form.persona.trim()) parts.push(`Persona: ${form.persona.trim()}`);
 				if (form.capabilities.length > 0) parts.push(`Capabilities: ${form.capabilities.join(", ")}`);
 				if (form.model) parts.push(`Model: ${form.model}`);
 				if (form.maxRounds) parts.push(`Max rounds: ${form.maxRounds}`);
 				if (form.temperature != null) parts.push(`Temperature: ${form.temperature}`);
+				if (form.delegatesTo.length > 0) parts.push(`Can delegate to: ${form.delegatesTo.join(", ")}`);
 				return parts.join(" ");
 			}}
 		/>

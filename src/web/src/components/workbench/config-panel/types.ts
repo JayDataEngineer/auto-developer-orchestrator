@@ -9,6 +9,8 @@ export type FieldConfig<T> =
 	| { key: keyof T & string; type: "multiselect"; label: string; options: { value: string; label: string }[] }
 	| { key: keyof T & string; type: "number"; label: string; placeholder?: string; min?: number; max?: number }
 	| { key: keyof T & string; type: "model"; label: string }
+	| { key: keyof T & string; type: "workers"; label: string; exclude?: string }
+	| { key: keyof T & string; type: "worker"; label: string }
 	| { key: keyof T & string; type: "toggle"; label: string };
 
 // ── Item display definition ──

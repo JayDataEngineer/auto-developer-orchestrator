@@ -13,6 +13,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// kernelWorkerNames is populated at startup from the kernel workers directory.
+// These names are immutable (Contract 3.5) — REST endpoints reject modifications.
+var kernelWorkerNames map[string]bool
+
 // WorkerHandler handles worker config HTTP endpoints.
 type WorkerHandler struct {
 	store    *autoconfig.WorkerStore
@@ -24,6 +28,9 @@ type WorkerHandler struct {
 // Snapshots existing worker files as defaults for revert.
 func NewWorkerHandler(store *autoconfig.WorkerStore, logger *zap.Logger) *WorkerHandler {
 	h := &WorkerHandler{store: store, log: logger, defaults: make(map[string][]byte)}
+
+	// Snapshot kernel worker names (Contract 3.5: immutable)
+	kernelWorkerNames = common.KernelWorkerNames()
 
 	// Snapshot current worker files as defaults
 	if dir := store.Dir(); dir != "" {
@@ -101,12 +108,14 @@ func (h *WorkerHandler) ListCapabilities(w http.ResponseWriter, r *http.Request)
 func (h *WorkerHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name         string   `json:"name"`
+		Hint         string   `json:"hint"`
 		Persona      string   `json:"persona"`
 		Capabilities []string `json:"capabilities"`
 		Model        string   `json:"model"`
 		MaxRounds    int      `json:"maxRounds"`
 		Temperature  float64  `json:"temperature"`
 		Sandbox      string   `json:"sandbox"`
+		DelegatesTo  []string `json:"delegatesTo"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -120,14 +129,19 @@ func (h *WorkerHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"persona is required"}`, http.StatusBadRequest)
 		return
 	}
+	if rejectKernel(w, req.Name) {
+		return
+	}
 
 	spec := map[string]any{
+		"hint":         req.Hint,
 		"persona":      req.Persona,
 		"capabilities": req.Capabilities,
 		"model":        req.Model,
 		"max_rounds":   req.MaxRounds,
 		"temperature":  req.Temperature,
 		"sandbox":      req.Sandbox,
+		"delegates_to": req.DelegatesTo,
 	}
 
 	_, err := h.store.Put(r.Context(), req.Name, spec)
@@ -139,6 +153,10 @@ func (h *WorkerHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 
 	// Return the created worker detail
 	detail, _ := h.store.Get(r.Context(), req.Name)
+
+	// Invalidate prompt builder cache — worker roster changed
+	common.ResetGlobalBuilder()
+
 	writeJSON(w, http.StatusCreated, detail)
 }
 
@@ -149,14 +167,19 @@ func (h *WorkerHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
 		return
 	}
+	if rejectKernel(w, name) {
+		return
+	}
 
 	var req struct {
+		Hint         string   `json:"hint"`
 		Persona      string   `json:"persona"`
 		Capabilities []string `json:"capabilities"`
 		Model        string   `json:"model"`
 		MaxRounds    int      `json:"maxRounds"`
 		Temperature  float64  `json:"temperature"`
 		Sandbox      string   `json:"sandbox"`
+		DelegatesTo  []string `json:"delegatesTo"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -164,12 +187,14 @@ func (h *WorkerHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 	}
 
 	spec := map[string]any{
+		"hint":         req.Hint,
 		"persona":      req.Persona,
 		"capabilities": req.Capabilities,
 		"model":        req.Model,
 		"max_rounds":   req.MaxRounds,
 		"temperature":  req.Temperature,
 		"sandbox":      req.Sandbox,
+		"delegates_to": req.DelegatesTo,
 	}
 
 	if _, err := h.store.Put(r.Context(), name, spec); err != nil {
@@ -179,6 +204,10 @@ func (h *WorkerHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 	}
 
 	detail, _ := h.store.Get(r.Context(), name)
+
+	// Invalidate prompt builder cache — worker roster changed
+	common.ResetGlobalBuilder()
+
 	writeJSON(w, http.StatusOK, detail)
 }
 
@@ -189,12 +218,18 @@ func (h *WorkerHandler) DeleteWorker(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
 		return
 	}
+	if rejectKernel(w, name) {
+		return
+	}
 
 	if err := h.store.Delete(r.Context(), name); err != nil {
 		h.log.Error("worker delete", zap.Error(err))
 		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 		return
 	}
+
+	// Invalidate prompt builder cache — worker roster changed
+	common.ResetGlobalBuilder()
 
 	writeJSON(w, http.StatusOK, map[string]any{"message": "worker deleted"})
 }
@@ -204,6 +239,9 @@ func (h *WorkerHandler) RevertWorker(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if name == "" {
 		http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
+		return
+	}
+	if rejectKernel(w, name) {
 		return
 	}
 
@@ -221,6 +259,10 @@ func (h *WorkerHandler) RevertWorker(w http.ResponseWriter, r *http.Request) {
 	}
 
 	detail, _ := h.store.Get(r.Context(), name)
+
+	// Invalidate prompt builder cache — worker config reverted
+	common.ResetGlobalBuilder()
+
 	writeJSON(w, http.StatusOK, detail)
 }
 
@@ -235,4 +277,13 @@ func (h *WorkerHandler) isModified(name string) bool {
 		return true
 	}
 	return string(current) != string(original)
+}
+
+// rejectKernel returns true and writes a 403 if name is a kernel worker.
+func rejectKernel(w http.ResponseWriter, name string) bool {
+	if kernelWorkerNames[name] {
+		http.Error(w, `{"error":"kernel workers are immutable (Contract 3.5)"}`, http.StatusForbidden)
+		return true
+	}
+	return false
 }

@@ -190,3 +190,81 @@ func setupTestEnvForWorkers(t *testing.T) {
 	os.Setenv("PROJECT_ROOT", dir)
 	t.Cleanup(func() { os.Unsetenv("PROJECT_ROOT") })
 }
+
+func TestKernelWorkerProtection(t *testing.T) {
+	_, r := newTestWorkerHandler(t)
+
+	// Override kernel names AFTER handler construction (constructor calls common.KernelWorkerNames)
+	kernelWorkerNames = map[string]bool{
+		"browser_ops": true,
+		"code_ops":    true,
+		"sarah":       true,
+	}
+	t.Cleanup(func() { kernelWorkerNames = nil })
+
+	t.Run("create kernel worker returns 403", func(t *testing.T) {
+		body := map[string]any{
+			"name":    "browser_ops",
+			"persona": "Hijacked",
+		}
+		b, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("update kernel worker returns 403", func(t *testing.T) {
+		body := map[string]any{"persona": "Hijacked"}
+		b, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPut, "/sarah", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("delete kernel worker returns 403", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/code_ops", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("revert kernel worker returns 403", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/browser_ops/revert", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("custom worker still works", func(t *testing.T) {
+		body := map[string]any{
+			"name":         "custom-worker",
+			"persona":      "My custom worker",
+			"capabilities": []string{"shell"},
+		}
+		b, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+		}
+	})
+}

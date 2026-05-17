@@ -211,7 +211,11 @@ export function ConfigPanel<T>({
 			const resp = await fetch(fetchUrl);
 			if (resp.ok) {
 				const data = await resp.json();
-				setItems(Array.isArray(data) ? data : data.jobs ?? data.workers ?? []);
+				const parsed = Array.isArray(data) ? data : data.jobs ?? data.workers ?? [];
+				setItems((prev) => {
+					if (prev.length === parsed.length && prev.every((item, i) => item === parsed[i])) return prev;
+					return parsed;
+				});
 			}
 		} catch { /* ignore */ } finally { setLoading(false); }
 	}, [fetchUrl]);

@@ -237,6 +237,11 @@ func (t *WorkerTool) create(ctx context.Context, args map[string]any, store *Wor
 		return nil, core.NewToolError("manage_worker", "create requires 'name'")
 	}
 
+	// Contract 3.5: kernel workers are immutable
+	if common.KernelWorkerNames()[name] {
+		return nil, core.NewToolError("manage_worker", fmt.Sprintf("worker %q is a kernel worker and cannot be created/modified", name))
+	}
+
 	// Build spec from args
 	spec := map[string]any{
 		"persona":      args["persona"],
@@ -278,6 +283,11 @@ func (t *WorkerTool) update(ctx context.Context, args map[string]any) (any, erro
 	name, _ := args["name"].(string)
 	if name == "" {
 		return nil, core.NewToolError("manage_worker", "update requires 'name'")
+	}
+
+	// Contract 3.5: kernel workers are immutable
+	if common.KernelWorkerNames()[name] {
+		return nil, core.NewToolError("manage_worker", fmt.Sprintf("worker %q is a kernel worker and cannot be modified", name))
 	}
 
 	// Find which store has the worker
@@ -325,6 +335,11 @@ func (t *WorkerTool) update(ctx context.Context, args map[string]any) (any, erro
 }
 
 func (t *WorkerTool) delete(ctx context.Context, name string) (any, error) {
+	// Contract 3.5: kernel workers are immutable
+	if common.KernelWorkerNames()[name] {
+		return nil, core.NewToolError("manage_worker", fmt.Sprintf("worker %q is a kernel worker and cannot be deleted", name))
+	}
+
 	// Try persistent first, then JIT
 	err := t.store.Delete(ctx, name)
 	if err != nil {

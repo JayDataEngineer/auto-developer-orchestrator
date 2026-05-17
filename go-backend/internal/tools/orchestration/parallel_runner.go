@@ -245,6 +245,18 @@ func subscriberFromCtx(ctx context.Context) chan<- core.AgentEvent {
 	return ch
 }
 
+// jsonToToolSpec converts a core.Tool's schema into an OpenAITool spec.
+func jsonToToolSpec(t core.Tool) core.OpenAITool {
+	return core.OpenAITool{
+		Type: "function",
+		Function: core.FunctionDef{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Parameters:  t.Schema(),
+		},
+	}
+}
+
 // Close cleans up all live agents and pending async tasks.
 func (r *ParallelRunner) Close() {
 	r.mu.Lock()
@@ -543,7 +555,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 
 // RunDelegateTracked runs a sub-agent with file change tracking.
 // Returns the result, an agent reference for continuation, and file changes.
-func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error) {
+func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string) (map[string]any, error) {
 	subscriber := subscriberFromCtx(ctx)
 	// Take pre-snapshot
 	var snapshotID string
@@ -584,6 +596,17 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames)},
 		})
 		return nil, core.NewToolError("delegate_to", fmt.Sprintf("none of the requested tools were found: %v", toolNames))
+	}
+
+	// Inject scoped delegation tools if the sub-agent's role has delegates_to
+	if len(delegatesTo) > 0 && r.depth < r.maxDepth && r.roleProvider != nil {
+		scopedDelegate := NewDelegateToToolDynamic(r, r.mcpResolver, r.roleProvider, func() []string { return delegatesTo })
+		scopedAsync := NewDelegateAsyncToolDynamic(r, r.mcpResolver, r.roleProvider, func() []string { return delegatesTo })
+		selectedTools = append(selectedTools,
+			jsonToToolSpec(scopedDelegate),
+			jsonToToolSpec(scopedAsync),
+		)
+		r.logger("SCOPED_DELEGATION: sub-agent %q can delegate to %v", agentName, delegatesTo)
 	}
 
 	// Create isolated provider — kept alive for delegate_continue
@@ -982,7 +1005,7 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 		defer cancel()
 
 		// Use tracked delegation for file change tracking + agent_ref
-		result, err := r.RunDelegateTracked(bgCtx, task, instructions, toolNames, maxRounds, temperature, modelID, "")
+		result, err := r.RunDelegateTracked(bgCtx, task, instructions, toolNames, maxRounds, temperature, modelID, "", nil)
 
 		// Async delegates don't need to stay alive for continuation.
 		// Clean up the live agent but keep the completedSnapshot for revert.

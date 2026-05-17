@@ -24,6 +24,7 @@ type WorkerStore struct {
 
 // workerConfig matches common.workerConfig exactly — same YAML format.
 type workerConfig struct {
+	Hint         string   `yaml:"hint,omitempty"`
 	Persona      string   `yaml:"persona"`
 	Capabilities []string `yaml:"capabilities"`
 	Tools        []string `yaml:"tools,omitempty"`
@@ -32,6 +33,7 @@ type workerConfig struct {
 	Temperature  float64  `yaml:"temperature"`
 	Model        string   `yaml:"model"`
 	Sandbox      string   `yaml:"sandbox"`
+	DelegatesTo  []string `yaml:"delegates_to,omitempty"`
 }
 
 // NewWorkerStore creates a persistent worker store.
@@ -89,6 +91,7 @@ func (s *WorkerStore) Get(ctx context.Context, name string) (any, error) {
 
 	return map[string]any{
 		"name":         name,
+		"hint":         wc.Hint,
 		"persona":      wc.Persona,
 		"capabilities": wc.Capabilities,
 		"tools":        wc.Tools,
@@ -97,6 +100,7 @@ func (s *WorkerStore) Get(ctx context.Context, name string) (any, error) {
 		"temperature":  wc.Temperature,
 		"model":        wc.Model,
 		"sandbox":      wc.Sandbox,
+		"delegates_to": wc.DelegatesTo,
 		"jit":          s.jit,
 	}, nil
 }
@@ -109,6 +113,11 @@ func (s *WorkerStore) Put(ctx context.Context, name string, spec map[string]any)
 
 	if err := ValidateName(name); err != nil {
 		return nil, err
+	}
+
+	// Contract 3.5: kernel workers are immutable — reject creates/updates that collide.
+	if common.KernelWorkerNames()[name] {
+		return nil, fmt.Errorf("worker %q is a kernel worker and cannot be modified", name)
 	}
 
 	// Parse spec into workerConfig
@@ -155,6 +164,11 @@ func (s *WorkerStore) Delete(ctx context.Context, name string) error {
 
 	if err := ValidateName(name); err != nil {
 		return err
+	}
+
+	// Contract 3.5: kernel workers are immutable.
+	if common.KernelWorkerNames()[name] {
+		return fmt.Errorf("worker %q is a kernel worker and cannot be deleted", name)
 	}
 
 	path := filepath.Join(s.baseDir, name+".yaml")
@@ -222,6 +236,10 @@ func validateCapabilities(caps []string) error {
 func specToWorkerConfig(spec map[string]any) (*workerConfig, error) {
 	wc := &workerConfig{}
 
+	if v, ok := spec["hint"].(string); ok {
+		wc.Hint = v
+	}
+
 	if v, ok := spec["persona"].(string); ok {
 		wc.Persona = v
 	}
@@ -274,6 +292,14 @@ func specToWorkerConfig(spec map[string]any) (*workerConfig, error) {
 
 	if v, ok := spec["sandbox"].(string); ok {
 		wc.Sandbox = v
+	}
+
+	if v, ok := spec["delegates_to"].([]any); ok {
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				wc.DelegatesTo = append(wc.DelegatesTo, s)
+			}
+		}
 	}
 
 	return wc, nil

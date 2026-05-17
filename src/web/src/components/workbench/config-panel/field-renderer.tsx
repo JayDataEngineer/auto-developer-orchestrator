@@ -10,6 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { usePuxStore } from "@/lib/pux-store";
 import { X } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { FieldConfig } from "./types";
 
 // ── Field wrapper (label + input) ──
@@ -161,6 +162,61 @@ export function FieldRenderer<T>({
 							{models.map((m) => (
 								<SelectItem key={m.id} value={m.id} className="text-xs">
 									{m.name}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</Field>
+			);
+		}
+
+		case "workers": {
+			const [workerNames, setWorkerNames] = useState<string[]>([]);
+			useEffect(() => {
+				fetch("/api/workers/")
+					.then((r) => r.json())
+					.then((data) => {
+						const names = (data.workers || []).map((w: any) => w.name as string);
+						setWorkerNames(names.filter((n: string) => n !== field.exclude));
+					})
+					.catch(() => {});
+			}, [field.exclude]);
+			const options = workerNames.map((n) => ({ value: n, label: n }));
+			return (
+				<Field label={field.label}>
+					<MultiSelect
+						options={options}
+						selected={value ?? []}
+						onChange={onChange}
+					/>
+				</Field>
+			);
+		}
+
+		case "worker": {
+			const [workerList, setWorkerList] = useState<{name: string; hint: string}[]>([]);
+			useEffect(() => {
+				fetch("/api/workers/")
+					.then((r) => r.json())
+					.then((data) => {
+						setWorkerList((data.workers || []).map((w: any) => ({
+							name: w.name as string,
+							hint: (w.hint || w.persona || "") as string,
+						})));
+					})
+					.catch(() => {});
+			}, []);
+			return (
+				<Field label={field.label}>
+					<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
+						<SelectTrigger className="h-8 text-xs">
+							<SelectValue placeholder="Default (CTO)" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="__default__" className="text-xs">Default (CTO)</SelectItem>
+							{workerList.map((w) => (
+								<SelectItem key={w.name} value={w.name} className="text-xs">
+									{w.name}{w.hint ? ` — ${w.hint.slice(0, 50)}` : ""}
 								</SelectItem>
 							))}
 						</SelectContent>

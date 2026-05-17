@@ -21,6 +21,7 @@ interface FormData {
 	cronExpr: string;
 	everyMinutes: string;
 	model: string;
+	agentId: string;
 	description: string;
 }
 
@@ -33,6 +34,7 @@ const emptyForm: FormData = {
 	cronExpr: "",
 	everyMinutes: "30",
 	model: "",
+	agentId: "",
 	description: "",
 };
 
@@ -76,6 +78,7 @@ function buildBody(form: FormData): Record<string, any> {
 		project: "default",
 	};
 	if (form.description.trim()) body.description = form.description.trim();
+	if (form.agentId) body.agentId = form.agentId;
 	if (form.model) body.model = form.model;
 	if (form.scheduleType === "cron") body.cronExpr = form.cronExpr.trim();
 	if (form.scheduleType === "every") {
@@ -92,6 +95,7 @@ function jobToForm(job: any): FormData {
 		cronExpr: job.cronExpr || "",
 		everyMinutes: job.everySeconds ? String(Math.floor(job.everySeconds / 60) || 30) : "30",
 		model: job.model || "",
+		agentId: job.agentId || "",
 		description: job.description || "",
 	};
 }
@@ -102,6 +106,7 @@ const schedulerFields: FieldConfig<FormData>[] = [
 	{ key: "name", type: "text", label: "Name", placeholder: "daily-standup", required: true },
 	{ key: "message", type: "textarea", label: "Prompt", placeholder: "What should this job do?", rows: 3, required: true },
 	{ key: "model", type: "model", label: "Model" },
+	{ key: "agentId", type: "worker", label: "Agent" },
 	{
 		key: "scheduleType", type: "select", label: "Schedule",
 		options: [
@@ -147,7 +152,10 @@ export function SchedulerPanel() {
 					}
 					return parts.join(" · ");
 				},
-				badges: (job: any) => [{ text: job.scheduleType, variant: "secondary" as const }],
+				badges: (job: any) => [
+					...(job.agentId ? [{ text: `→ ${job.agentId}`, variant: "outline" as const }] : []),
+					{ text: job.scheduleType, variant: "secondary" as const },
+				],
 				status: (job: any) => STATUS_CFG[job.status] || STATUS_CFG.idle,
 			}}
 			title="Scheduler"
@@ -164,6 +172,7 @@ export function SchedulerPanel() {
 				if (form.name.trim()) parts.push(`Name: ${form.name.trim()}`);
 				if (form.message.trim()) parts.push(`Prompt: ${form.message.trim()}`);
 				if (form.model) parts.push(`Model: ${form.model}`);
+				if (form.agentId) parts.push(`Agent: ${form.agentId}`);
 				if (form.scheduleType !== "manual") parts.push(`Schedule: ${form.scheduleType}`);
 				if (form.scheduleType === "cron" && form.cronExpr.trim()) parts.push(`Cron: ${form.cronExpr.trim()}`);
 				if (form.scheduleType === "every" && form.everyMinutes) parts.push(`Every ${form.everyMinutes} minutes`);

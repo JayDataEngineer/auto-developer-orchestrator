@@ -250,3 +250,49 @@ func TestWorkerStoreYAMLCompatibleWithLoader(t *testing.T) {
 		t.Errorf("temperature = %f, want 0.2", role.Temperature)
 	}
 }
+
+func TestWorkerStoreRejectsKernelWorkers(t *testing.T) {
+	setupTestEnv(t)
+	dir := t.TempDir()
+	s := NewWorkerStore(dir)
+	ctx := context.Background()
+
+	// Get the actual kernel worker names from the loaded config
+	kernelNames := common.KernelWorkerNames()
+	if len(kernelNames) == 0 {
+		t.Skip("no kernel workers loaded — skipping kernel protection test")
+	}
+
+	// Pick a kernel name to test with
+	var kernelName string
+	for name := range kernelNames {
+		kernelName = name
+		break
+	}
+
+	t.Run("Put rejects kernel worker", func(t *testing.T) {
+		_, err := s.Put(ctx, kernelName, map[string]any{
+			"persona":      "Hijacked kernel worker",
+			"capabilities": []any{"shell"},
+		})
+		if err == nil {
+			t.Fatalf("expected error when putting kernel worker %q, got nil", kernelName)
+		}
+	})
+
+	t.Run("Delete rejects kernel worker", func(t *testing.T) {
+		err := s.Delete(ctx, kernelName)
+		if err == nil {
+			t.Fatalf("expected error when deleting kernel worker %q, got nil", kernelName)
+		}
+	})
+
+	t.Run("custom worker still allowed", func(t *testing.T) {
+		_, err := s.Put(ctx, "my-custom-worker", map[string]any{
+			"persona": "Custom worker",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error for custom worker: %v", err)
+		}
+	})
+}
