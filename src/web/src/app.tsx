@@ -53,7 +53,7 @@ import {
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
-import { Panel, Group, Separator } from "react-resizable-panels";
+import { Panel, Group, Separator, usePanelRef } from "react-resizable-panels";
 import {
 	PanelRight,
 	PanelLeftOpen,
@@ -397,13 +397,20 @@ export function App() {
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
+	const workbenchPanelRef = usePanelRef();
 
 	// Poll for running agent status
 	useAgentStatusPolling();
 	const [showTerminal, setShowTerminal] = useState(false);
 
 	const toggleWorkbench = useCallback(() => {
-		setWorkbenchVisible((prev) => !prev);
+		const panel = workbenchPanelRef.current;
+		if (!panel) return;
+		if (panel.isCollapsed()) {
+			panel.expand();
+		} else {
+			panel.collapse();
+		}
 	}, []);
 
 	// Ctrl+` to toggle terminal
@@ -430,7 +437,12 @@ export function App() {
 			defaultOpen={true}
 		>
 			<AppSidebar />
-			<Group orientation="horizontal" className="h-svh">
+			<style>{`
+				.right-panel-group > [data-panel]:last-child {
+					transition: flex 200ms ease-linear;
+				}
+			`}</style>
+			<Group orientation="horizontal" className="right-panel-group h-svh">
 				<Panel defaultSize={65} minSize={30}>
 					<SidebarInset className="flex h-full flex-col overflow-hidden">
 						{/* Navbar */}
@@ -445,15 +457,7 @@ export function App() {
 							>
 								<TerminalIcon className="size-4" />
 							</Button>
-							{/* Workbench tab indicator */}
-							{workbenchVisible && (
-								<>
-									<div className="mx-2 h-5 w-px bg-border" />
-									<span className="text-xs font-medium text-muted-foreground">
-										Workbench
-									</span>
-								</>
-							)}
+
 							<Button
 								variant="ghost"
 								size="icon"
@@ -491,16 +495,21 @@ export function App() {
 					</SidebarInset>
 				</Panel>
 
-				{workbenchVisible && (
-					<>
-						<Separator className="w-px bg-border hover:bg-ring/50 transition-colors" />
-						<Panel defaultSize={35} minSize={20} collapsible>
-							<div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-								<Workbench />
-							</div>
-						</Panel>
-					</>
-				)}
+				<>
+					<Separator className="w-px bg-border hover:bg-ring/50 transition-colors" />
+					<Panel
+						panelRef={workbenchPanelRef}
+						defaultSize={35}
+						minSize={20}
+						collapsible
+						collapsedSize={0}
+						onResize={(size) => setWorkbenchVisible(size.asPercentage > 0)}
+					>
+						<div className="flex h-full flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
+							<Workbench />
+						</div>
+					</Panel>
+				</>
 			</Group>
 		</SidebarProvider>
 	);
