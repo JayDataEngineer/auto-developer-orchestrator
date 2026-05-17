@@ -407,7 +407,7 @@ export function App() {
 		const panel = workbenchPanelRef.current;
 		if (!panel) return;
 		if (panel.isCollapsed()) {
-			panel.resize(35);
+			panel.resize("35%");
 		} else {
 			panel.collapse();
 		}
