@@ -8,7 +8,7 @@ import {
 	SheetTitle,
 	SheetDescription,
 } from "@/components/ui/sheet";
-import { PlusIcon, TrashIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, CheckCircle, XCircle, Loader2 } from "lucide-react";
 import { useState, type FC } from "react";
 
 interface ProviderForm {
@@ -35,10 +35,13 @@ export const AddProviderDialog: FC<{ open: boolean; onOpenChange: (v: boolean) =
 	const [form, setForm] = useState<ProviderForm>(emptyForm);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState("");
+	const [testResult, setTestResult] = useState<"idle" | "testing" | "ok" | "fail">("idle");
+	const [testDetail, setTestDetail] = useState("");
 
 	const setField = (field: keyof ProviderForm, value: string) => {
 		setForm((f) => ({ ...f, [field]: value }));
 		setError("");
+		setTestResult("idle");
 	};
 
 	const setModel = (i: number, field: string, value: string | number) => {
@@ -54,6 +57,43 @@ export const AddProviderDialog: FC<{ open: boolean; onOpenChange: (v: boolean) =
 
 	const removeModel = (i: number) =>
 		setForm((f) => ({ ...f, models: f.models.filter((_, idx) => idx !== i) }));
+
+	const testConnection = async () => {
+		if (!form.baseUrl) {
+			setTestResult("fail");
+			setTestDetail("Base URL is required");
+			return;
+		}
+		setTestResult("testing");
+		setTestDetail("");
+		try {
+			const headers: Record<string, string> = { "Content-Type": "application/json" };
+			if (form.apiKey) headers["Authorization"] = `Bearer ${form.apiKey}`;
+
+			// Normalize: try /v1/models, then /models
+			const base = form.baseUrl.replace(/\/+$/, "");
+			const url = base.endsWith("/v1") || base.endsWith("/v1/")
+				? `${base}/models`
+				: `${base}/v1/models`;
+
+			const resp = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+			if (resp.ok) {
+				const data = await resp.json();
+				const modelIds: string[] = (data?.data || data?.models || [])
+					.map((m: any) => m.id || m.name)
+					.filter(Boolean);
+				setTestResult("ok");
+				setTestDetail(modelIds.length > 0 ? `${modelIds.length} models available` : "Connected");
+			} else {
+				const text = await resp.text().catch(() => "");
+				setTestResult("fail");
+				setTestDetail(`${resp.status}: ${text.slice(0, 100) || resp.statusText}`);
+			}
+		} catch (e: any) {
+			setTestResult("fail");
+			setTestDetail(e?.message || "Connection failed");
+		}
+	};
 
 	const submit = async () => {
 		if (!form.id || !form.baseUrl) {
@@ -74,6 +114,7 @@ export const AddProviderDialog: FC<{ open: boolean; onOpenChange: (v: boolean) =
 			});
 			onOpenChange(false);
 			setForm(emptyForm());
+			setTestResult("idle");
 		} catch {
 			setError("Failed to add provider");
 		} finally {
@@ -117,6 +158,31 @@ export const AddProviderDialog: FC<{ open: boolean; onOpenChange: (v: boolean) =
 							onChange={(e) => setField("apiKey", e.target.value)}
 						/>
 					</label>
+
+					{/* Test connection */}
+					<div className="flex items-center gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={testConnection}
+							disabled={testResult === "testing" || !form.baseUrl}
+							className="h-8 gap-1.5 text-xs"
+						>
+							{testResult === "testing" ? (
+								<Loader2 className="size-3 animate-spin" />
+							) : testResult === "ok" ? (
+								<CheckCircle className="size-3 text-green-500" />
+							) : testResult === "fail" ? (
+								<XCircle className="size-3 text-red-500" />
+							) : null}
+							Test Connection
+						</Button>
+						{testDetail && (
+							<span className={`text-xs ${testResult === "ok" ? "text-green-600" : testResult === "fail" ? "text-red-500" : "text-muted-foreground"}`}>
+								{testDetail}
+							</span>
+						)}
+					</div>
 
 					<div className="flex flex-col gap-3 pt-2">
 						<div className="flex items-center justify-between">
