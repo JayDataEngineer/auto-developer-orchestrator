@@ -1,18 +1,17 @@
 /**
  * Mouse scroll for Ink TUI.
  *
- * Uses DECSET mode 1007 (Alternate Scroll Mode) which tells the terminal
- * to convert scroll wheel events into arrow key sequences. This works without
- * capturing clicks or interfering with terminal-native text selection.
+ * Intentionally does NOT enable any mouse tracking mode.
  *
- * Mode 1000 (normal mouse tracking) was previously used but it captures click
- * events, which breaks click-and-drag text selection in the terminal.
+ * - Mode 1000 captures clicks → breaks text selection
+ * - Mode 1007 (Alternate Scroll) converts wheel to Up/Down arrows → but those
+ *   get consumed by Ink's useInput handlers (VimInput, overlays), preventing
+ *   terminal-native scrollback from working
+ *
+ * Instead, we rely on Ink's <Static> component graduating old messages to
+ * terminal scrollback, where the terminal's native scroll wheel works.
+ * No DECSET modes needed.
  */
-
-// ── DECSET sequences ──
-
-const ENABLE_ALT_SCROLL = "\x1b[?1007h";
-const DISABLE_ALT_SCROLL = "\x1b[?1007l";
 
 let tracked = false;
 
@@ -21,21 +20,17 @@ export function isMouseTracking(): boolean {
 }
 
 export function initMouseTracking(): void {
-	if (tracked) return;
-	process.stdout.write(ENABLE_ALT_SCROLL);
+	// No-op: don't enable any mouse tracking mode.
+	// Scroll works via Ink <Static> + terminal-native scrollback.
 	tracked = true;
 }
 
 export function disableMouseTracking(): void {
-	if (!tracked) return;
-	process.stdout.write(DISABLE_ALT_SCROLL);
 	tracked = false;
 }
 
 /**
  * No-op — kept for import compatibility in main.tsx stdin patch.
- * With mode 1007 the terminal handles scroll-to-arrow conversion natively,
- * so there are no SGR mouse sequences to filter.
  */
 export function filterAndEmitMouseEvents(input: string): string {
 	return input;

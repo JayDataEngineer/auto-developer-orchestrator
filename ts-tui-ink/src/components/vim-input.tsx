@@ -493,9 +493,6 @@ export function VimInput({
             <Text inverse>{atCursor}</Text>
             {after}
           </Text>
-          {vimMode === "normal" && (
-            <Text color="yellow" dimColor> -- NORMAL --</Text>
-          )}
         </Box>
       )}
     </Box>
