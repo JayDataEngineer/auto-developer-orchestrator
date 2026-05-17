@@ -86,14 +86,13 @@ export const Thread: FC = () => {
 						<ThreadPrimitive.Messages>
 							{() => <ThreadMessage />}
 						</ThreadPrimitive.Messages>
+						<AuiIf condition={(s) => s.thread.isRunning}>
+							<div className="flex items-center gap-2 px-2 text-xs text-muted-foreground">
+								<Spinner className="size-3.5" />
+								Thinking...
+							</div>
+						</AuiIf>
 					</div>
-
-					<AuiIf condition={(s) => s.thread.isRunning}>
-						<div className="mx-auto flex w-full max-w-[var(--thread-max-width)] items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
-							<Spinner className="size-3.5" />
-							Thinking...
-						</div>
-					</AuiIf>
 
 					<ThreadPrimitive.ViewportFooter className="aui-thread-viewport-footer sticky bottom-0 mt-auto flex flex-col gap-4 overflow-visible rounded-t-3xl bg-background pb-4 md:pb-6">
 						<ThreadScrollToBottom />
