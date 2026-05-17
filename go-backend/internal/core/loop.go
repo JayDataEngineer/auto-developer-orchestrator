@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/auto-developer-orchestrator/backend/internal/retry"
 )
 
 // AgentLoopConfig holds the configuration for an agent loop.
@@ -188,9 +190,14 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 	providerRetry:
 		for attempt := 0; attempt <= l.config.MaxProviderRetries; attempt++ {
 			if attempt > 0 {
-				backoff := time.Duration(attempt) * 2 * time.Second
+				backoff := retry.Config{BaseDelay: 1 * time.Second, MaxDelay: 30 * time.Second, Jitter: true}.Delay(attempt - 1)
 				l.logger.Printf("Provider retry %d/%d after %v (error: %v)", attempt, l.config.MaxProviderRetries, backoff, providerErr)
-				time.Sleep(backoff)
+				select {
+				case <-ctx.Done():
+					SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
+					return ctx.Err()
+				case <-time.After(backoff):
+				}
 			}
 
 			// Reset accumulators for each attempt
@@ -507,12 +514,23 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			}
 			result, resultErr := executeFn(ctx, tc.Name, tc.Args)
 
-			// Classify error and retry transient failures once
+			// Classify error and retry transient failures with exponential backoff
 			if resultErr != nil && ClassifyError(resultErr) == ErrorTransient {
-				backoff := time.Duration(500 * time.Millisecond)
-				l.logger.Printf("Transient error on %s, retrying after %v: %v", tc.Name, backoff, resultErr)
-				time.Sleep(backoff)
-				result, resultErr = executeFn(ctx, tc.Name, tc.Args)
+				transientCfg := retry.Short
+			transientRetry:
+				for attempt := 0; attempt < transientCfg.MaxAttempts; attempt++ {
+					backoff := transientCfg.Delay(attempt)
+					l.logger.Printf("Transient error on %s, retry %d after %v: %v", tc.Name, attempt+1, backoff, resultErr)
+					select {
+					case <-ctx.Done():
+						break transientRetry
+					case <-time.After(backoff):
+					}
+					result, resultErr = executeFn(ctx, tc.Name, tc.Args)
+					if resultErr == nil || ClassifyError(resultErr) != ErrorTransient {
+						break transientRetry
+					}
+				}
 			}
 
 			var resultStr string
@@ -533,8 +551,10 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				resultStr = string(resultBytes)
 				if l.config.ToolResultProcessor != nil {
 					resultStr = l.config.ToolResultProcessor(ctx, tc.Name, tcr.ID, resultStr)
-				} else if len(resultStr) > 6000 {
-					resultStr = resultStr[:6000] + "...[truncated]"
+				} else if len(resultStr) > 30000 {
+					// Fallback: keep the end (errors/results matter most)
+					resultStr = resultStr[len(resultStr)-30000:]
+					resultStr = "...[output truncated, showing last 30000 chars]\n" + resultStr
 				}
 			}
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/framestream"
+	"github.com/auto-developer-orchestrator/backend/internal/retry"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/target"
@@ -292,14 +293,17 @@ func (sbc *SandboxBrowserClient) GetStreamer() *framestream.Streamer {
 // Creates a new Chrome tab for the navigation and keeps it alive for subsequent actions.
 // Also enriches results with accessibility tree elements when available.
 func (sbc *SandboxBrowserClient) Navigate(ctx context.Context, url string) (*PageInfo, error) {
-	info, err := sbc.navigateInner(ctx, url)
-	if err != nil {
-		sbc.logger.Warn("navigate failed, reconnecting and retrying", zap.Error(err))
-		if recErr := sbc.reconnect(ctx); recErr != nil {
-			return nil, fmt.Errorf("navigate failed and recovery also failed: %w (recovery: %v)", err, recErr)
+	info, err := retry.DoWithResult(ctx, retry.Short, func() (*PageInfo, error) {
+		info, err := sbc.navigateInner(ctx, url)
+		if err != nil {
+			sbc.logger.Warn("navigate failed, reconnecting for retry", zap.Error(err))
+			if recErr := sbc.reconnect(ctx); recErr != nil {
+				return nil, fmt.Errorf("navigate failed and recovery also failed: %w (recovery: %v)", err, recErr)
+			}
+			return sbc.navigateInner(ctx, url)
 		}
-		info, err = sbc.navigateInner(ctx, url)
-	}
+		return info, nil
+	})
 	if info != nil {
 		sbc.enrichA11yBackground(ctx, info)
 	}
@@ -418,15 +422,17 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 
 // Click clicks an element by its label ID.
 func (sbc *SandboxBrowserClient) Click(ctx context.Context, elementID int) (*PageInfo, error) {
-	info, err := sbc.clickInner(ctx, elementID)
-	if err != nil {
-		sbc.logger.Warn("click failed, reconnecting and retrying", zap.Error(err))
-		if recErr := sbc.reconnect(ctx); recErr != nil {
-			return nil, fmt.Errorf("click failed and recovery also failed: %w (recovery: %v)", err, recErr)
+	return retry.DoWithResult(ctx, retry.Short, func() (*PageInfo, error) {
+		info, err := sbc.clickInner(ctx, elementID)
+		if err != nil {
+			sbc.logger.Warn("click failed, reconnecting for retry", zap.Error(err))
+			if recErr := sbc.reconnect(ctx); recErr != nil {
+				return nil, fmt.Errorf("click failed and recovery also failed: %w (recovery: %v)", err, recErr)
+			}
+			return sbc.clickInner(ctx, elementID)
 		}
-		info, err = sbc.clickInner(ctx, elementID)
-	}
-	return info, err
+		return info, nil
+	})
 }
 
 func (sbc *SandboxBrowserClient) clickInner(ctx context.Context, elementID int) (*PageInfo, error) {
@@ -479,15 +485,17 @@ func (sbc *SandboxBrowserClient) clickInner(ctx context.Context, elementID int) 
 
 // Type types text into an element by its label ID.
 func (sbc *SandboxBrowserClient) Type(ctx context.Context, elementID int, text string, submit bool) (*PageInfo, error) {
-	info, err := sbc.typeInner(ctx, elementID, text, submit)
-	if err != nil {
-		sbc.logger.Warn("type failed, reconnecting and retrying", zap.Error(err))
-		if recErr := sbc.reconnect(ctx); recErr != nil {
-			return nil, fmt.Errorf("type failed and recovery also failed: %w (recovery: %v)", err, recErr)
+	return retry.DoWithResult(ctx, retry.Short, func() (*PageInfo, error) {
+		info, err := sbc.typeInner(ctx, elementID, text, submit)
+		if err != nil {
+			sbc.logger.Warn("type failed, reconnecting for retry", zap.Error(err))
+			if recErr := sbc.reconnect(ctx); recErr != nil {
+				return nil, fmt.Errorf("type failed and recovery also failed: %w (recovery: %v)", err, recErr)
+			}
+			return sbc.typeInner(ctx, elementID, text, submit)
 		}
-		info, err = sbc.typeInner(ctx, elementID, text, submit)
-	}
-	return info, err
+		return info, nil
+	})
 }
 
 func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, text string, submit bool) (*PageInfo, error) {
@@ -555,15 +563,17 @@ func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, t
 
 // Scroll scrolls the page in a direction.
 func (sbc *SandboxBrowserClient) Scroll(ctx context.Context, direction string, amount int) (*PageInfo, error) {
-	info, err := sbc.scrollInner(ctx, direction, amount)
-	if err != nil {
-		sbc.logger.Warn("scroll failed, reconnecting and retrying", zap.Error(err))
-		if recErr := sbc.reconnect(ctx); recErr != nil {
-			return nil, fmt.Errorf("scroll failed and recovery also failed: %w (recovery: %v)", err, recErr)
+	return retry.DoWithResult(ctx, retry.Short, func() (*PageInfo, error) {
+		info, err := sbc.scrollInner(ctx, direction, amount)
+		if err != nil {
+			sbc.logger.Warn("scroll failed, reconnecting for retry", zap.Error(err))
+			if recErr := sbc.reconnect(ctx); recErr != nil {
+				return nil, fmt.Errorf("scroll failed and recovery also failed: %w (recovery: %v)", err, recErr)
+			}
+			return sbc.scrollInner(ctx, direction, amount)
 		}
-		info, err = sbc.scrollInner(ctx, direction, amount)
-	}
-	return info, err
+		return info, nil
+	})
 }
 
 func (sbc *SandboxBrowserClient) scrollInner(ctx context.Context, direction string, amount int) (*PageInfo, error) {

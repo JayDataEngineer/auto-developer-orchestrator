@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/retry"
 	"github.com/moby/moby/client"
 	"go.uber.org/zap"
 )
@@ -98,19 +99,20 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 	sandbox.VNCBackend = backend
 
 	// Wait for Chrome to be ready (supervisord starts it at container boot)
-	for i := range 10 {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("context cancelled while waiting for Chrome: %w", ctx.Err())
-		}
+	cfg := retry.Long
+	chromeErr := retry.Do(ctx, cfg, func() error {
 		output, err := m.execInContainer(ctx, containerName, []string{
 			"wget", "-qO-", "http://127.0.0.1:9222/json/version",
 		}, false)
-		if err == nil && output != "" {
-			m.logger.Info("Chrome CDP ready", zap.String("output", output[:min(len(output), 100)]))
-			break
+		if err != nil || output == "" {
+			m.logger.Info("waiting for Chrome CDP")
+			return fmt.Errorf("Chrome CDP not ready: %w", err)
 		}
-		m.logger.Info("waiting for Chrome CDP", zap.Int("attempt", i+1))
-		time.Sleep(1 * time.Second)
+		m.logger.Info("Chrome CDP ready", zap.String("output", output[:min(len(output), 100)]))
+		return nil
+	})
+	if chromeErr != nil {
+		return nil, fmt.Errorf("Chrome CDP not ready after retries: %w", chromeErr)
 	}
 
 	session := &DesktopSession{

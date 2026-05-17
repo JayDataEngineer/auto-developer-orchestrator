@@ -11,6 +11,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/framestream"
+	"github.com/auto-developer-orchestrator/backend/internal/retry"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"go.uber.org/zap"
 )
@@ -188,18 +189,18 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 		}
 	}
 
-	// Step 3: Connect via CDP (with retry)
-	for i := range 10 {
-		connectErr := client.Connect(ctx)
-		if connectErr == nil {
-			break
+	// Step 3: Connect via CDP (with exponential backoff)
+	cfg := retry.Long
+	connectErr := retry.Do(ctx, cfg, func() error {
+		err := client.Connect(ctx)
+		if err != nil {
+			h.logger.Info("background: waiting for Chrome CDP", zap.Error(err))
 		}
-		if ctx.Err() != nil {
-			h.logger.Warn("background: CDP connect timed out", zap.String("sandbox_id", sandboxID))
-			return
-		}
-		h.logger.Info("background: waiting for Chrome CDP", zap.Int("attempt", i+1), zap.Error(connectErr))
-		time.Sleep(2 * time.Second)
+		return err
+	})
+	if connectErr != nil {
+		h.logger.Warn("background: CDP connect failed after retries", zap.String("sandbox_id", sandboxID), zap.Error(connectErr))
+		return
 	}
 
 	// Step 4: Install X11 automation tools (xdotool, imagemagick) BEFORE writing
