@@ -372,7 +372,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if skillStore.Count() > 0 {
 		skillsStr = skillStore.FormatAvailableSkills()
 	}
-	systemPrompt := common.BuildOrchestratorPromptWithOrg(ctoToolReg.All(), cfg.SandboxID, "", skillsStr, cfg.Org, cfg.OrgRoles)
+	systemPrompt := common.BuildOrchestratorPromptV2(ctoToolReg.All(), cfg.SandboxID, "", skillsStr, cfg.Org, cfg.OrgRoles)
 
 	ctoToolSpecs := common.ToOpenAITools(ctoToolReg.All())
 	loopCfg := core.AgentLoopConfig{

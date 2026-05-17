@@ -1,3 +1,4 @@
+hint: "Browse the web, find things, download files, fill forms"
 persona: "Web Operations — browse the web, find things, download files, fill forms."
 capabilities:
   - browser

@@ -1,3 +1,4 @@
+hint: "Search the web, synthesize findings into concise reports"
 persona: "Research Lead — search the web, synthesize findings into concise reports."
 capabilities:
   - research

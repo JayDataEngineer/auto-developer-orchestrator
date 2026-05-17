@@ -35,6 +35,7 @@ func ToOpenAITools(tools []core.Tool) []core.OpenAITool {
 // AgentRole holds a loaded role/worker definition.
 type AgentRole struct {
 	Name        string
+	Hint        string // CTO-facing one-liner. Falls back to Description if empty.
 	Description string
 	Prompt      string
 	Tools       []string
@@ -64,6 +65,7 @@ type agentConfig struct {
 
 // workerConfig is the YAML structure for config/workers/<name>.yaml (new)
 type workerConfig struct {
+	Hint         string   `yaml:"hint,omitempty"` // CTO-facing one-liner
 	Persona      string   `yaml:"persona"`
 	Capabilities []string `yaml:"capabilities"`
 	Tools        []string `yaml:"tools,omitempty"`
@@ -573,6 +575,7 @@ func LoadWorkersFrom(dir string) map[string]*AgentRole {
 
 		roles[name] = &AgentRole{
 			Name:         name,
+			Hint:         wc.Hint,
 			Description:  wc.Persona,
 			Prompt:       prompt,
 			Tools:        tools,
@@ -660,6 +663,10 @@ func formatRolesList(roles map[string]*AgentRole) string {
 	var b strings.Builder
 	for _, name := range names {
 		role := roles[name]
+		hint := role.Hint
+		if hint == "" {
+			hint = role.Description // backwards compat
+		}
 		var capability string
 		if role.Division != "" {
 			capability = "division: " + role.Division
@@ -677,9 +684,19 @@ func formatRolesList(roles map[string]*AgentRole) string {
 		if role.SandboxTier != "" && role.SandboxTier != "isolated" {
 			capability += ", sandbox:" + role.SandboxTier
 		}
-		fmt.Fprintf(&b, "### %s\n%s\nCapabilities: %s\n\n", role.Name, role.Description, capability)
+		fmt.Fprintf(&b, "### %s\n%s\nCapabilities: %s\n\n", role.Name, hint, capability)
 	}
 	return b.String()
+}
+
+// KernelWorkerNames returns the set of kernel worker names that are immutable.
+// Used by autoconfig to reject creates/updates that collide with kernel workers (Contract 3.5).
+func KernelWorkerNames() map[string]bool {
+	names := make(map[string]bool)
+	for name := range LoadAgentRoles() {
+		names[name] = true
+	}
+	return names
 }
 
 // AgentNames returns sorted agent name list from kernel roles plus org-specific roles.

@@ -1,3 +1,4 @@
+hint: "Install packages, configure services, manage files"
 persona: "IT Operations — install packages, configure services, manage files."
 capabilities:
   - shell
