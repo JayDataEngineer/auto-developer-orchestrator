@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
 	useLocalRuntime,
 	AssistantRuntimeProvider,
@@ -18,10 +18,10 @@ import { EditorPanel } from "@/components/workbench/editor-panel";
 import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
 import { WorkersPanel } from "@/components/workbench/workers-panel";
 import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
-import { DecisionDialog } from "@/components/decision-dialog";
 import { AddProjectDialog } from "@/components/add-project-dialog";
 import { WidgetToolUIs } from "@/components/assistant-ui/widget-tool-ui";
 import { AskUserToolUI } from "@/components/assistant-ui/ask-user-tool-ui";
+import { PlanReviewToolUI } from "@/components/assistant-ui/plan-review-tool-ui";
 import {
 	Sidebar,
 	SidebarContent,
@@ -41,15 +41,19 @@ import {
 	useSidebar,
 } from "@/components/ui/sidebar";
 import {
+	Tabs,
+	TabsList,
+	TabsTrigger,
+	TabsContent,
+} from "@/components/ui/tabs";
+import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Panel, Group, Separator } from "react-resizable-panels";
 import {
-	PanelRightOpen,
-	PanelRightClose,
 	PanelRight,
 	PanelLeftOpen,
 	PanelLeftClose,
@@ -94,6 +98,7 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 				<UI key={i} />
 			))}
 			<AskUserToolUI />
+			<PlanReviewToolUI />
 			{children}
 		</AssistantRuntimeProvider>
 	);
@@ -333,41 +338,43 @@ function Workbench() {
 	const storeTab = usePuxStore((s) => s.activeWorkbenchTab);
 	const setStoreTab = usePuxStore((s) => s.setWorkbenchTab);
 
-	const tabs: { id: WorkbenchTab; icon: React.ReactNode; label: string }[] = [
-		{ id: "vnc", icon: <Monitor className="size-4" />, label: "Sandbox" },
-		{ id: "editor", icon: <Code2 className="size-4" />, label: "Editor" },
-		{ id: "scheduler", icon: <Calendar className="size-4" />, label: "Scheduler" },
-		{ id: "workers", icon: <Users className="size-4" />, label: "Workers" },
-	];
-
 	return (
-		<div className="flex h-full flex-col bg-sidebar">
-			{/* Tab bar inside the workbench */}
-			<div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-2">
-				{tabs.map((t) => (
-					<button
-						key={t.id}
-						onClick={() => setStoreTab(t.id)}
-						className={cn(
-							"inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
-							storeTab === t.id
-								? "bg-accent text-accent-foreground"
-								: "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-						)}
-					>
-						{t.icon}
-						{t.label}
-					</button>
-				))}
-			</div>
-			{/* Tab content */}
-			<div className="flex-1 overflow-hidden">
-				{storeTab === "vnc" && <VNCViewer />}
-				{storeTab === "editor" && <EditorPanel />}
-				{storeTab === "scheduler" && <SchedulerPanel />}
-				{storeTab === "workers" && <WorkersPanel />}
-			</div>
-		</div>
+		<Tabs
+			value={storeTab}
+			onValueChange={(v) => setStoreTab(v as WorkbenchTab)}
+			className="flex h-full flex-col bg-sidebar"
+		>
+			<TabsList className="h-9 shrink-0 w-full justify-start rounded-none border-b border-border bg-transparent px-2">
+				<TabsTrigger value="vnc" className="gap-1.5 text-xs">
+					<Monitor className="size-4" />
+					Sandbox
+				</TabsTrigger>
+				<TabsTrigger value="editor" className="gap-1.5 text-xs">
+					<Code2 className="size-4" />
+					Editor
+				</TabsTrigger>
+				<TabsTrigger value="scheduler" className="gap-1.5 text-xs">
+					<Calendar className="size-4" />
+					Scheduler
+				</TabsTrigger>
+				<TabsTrigger value="workers" className="gap-1.5 text-xs">
+					<Users className="size-4" />
+					Workers
+				</TabsTrigger>
+			</TabsList>
+			<TabsContent value="vnc" className="flex-1 overflow-hidden mt-0">
+				<VNCViewer />
+			</TabsContent>
+			<TabsContent value="editor" className="flex-1 overflow-hidden mt-0">
+				<EditorPanel />
+			</TabsContent>
+			<TabsContent value="scheduler" className="flex-1 overflow-hidden mt-0">
+				<SchedulerPanel />
+			</TabsContent>
+			<TabsContent value="workers" className="flex-1 overflow-hidden mt-0">
+				<WorkersPanel />
+			</TabsContent>
+		</Tabs>
 	);
 }
 
@@ -380,15 +387,11 @@ export function App() {
 	const conversationKey = usePuxStore((s) => s.conversationKey);
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
-	const activeAgentId = usePuxStore((s) => s.activeAgentId);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
 
 	// Poll for running agent status
 	useAgentStatusPolling();
 	const [showTerminal, setShowTerminal] = useState(false);
-	const [workbenchWidth, setWorkbenchWidth] = useState(800);
-	const workbenchWidthRef = useRef(800);
-	const workbenchProviderRef = useRef<HTMLDivElement>(null);
 
 	const toggleWorkbench = useCallback(() => {
 		setWorkbenchVisible((prev) => !prev);
@@ -412,132 +415,84 @@ export function App() {
 		loadConversations();
 	}, [loadModels, loadConversations, loadProjects]);
 
-	// Drag-resize handle for workbench sidebar
-	const [dragging, setDragging] = useState(false);
-	const handleResizeStart = useCallback((e: React.MouseEvent) => {
-		e.preventDefault();
-		const startX = e.clientX;
-		const startWidth = workbenchWidthRef.current;
-		setDragging(true);
-
-		const handleMove = (moveEvent: MouseEvent) => {
-			moveEvent.preventDefault();
-			const delta = startX - moveEvent.clientX;
-			const newWidth = Math.max(
-				250,
-				Math.min(window.innerWidth * 0.75, startWidth + delta),
-			);
-			workbenchWidthRef.current = newWidth;
-			// Direct DOM updates — avoids re-renders during drag
-			const el = workbenchProviderRef.current;
-			if (el) el.style.width = `${newWidth}px`;
-			const inset = el?.previousElementSibling as HTMLElement | null;
-			if (inset) inset.style.marginRight = `${newWidth}px`;
-		};
-
-		const handleUp = () => {
-			setWorkbenchWidth(workbenchWidthRef.current);
-			document.removeEventListener("mousemove", handleMove);
-			document.removeEventListener("mouseup", handleUp);
-			document.body.style.cursor = "";
-			document.body.style.userSelect = "";
-			document.body.style.pointerEvents = "";
-			setDragging(false);
-		};
-
-		document.body.style.cursor = "col-resize";
-		document.body.style.userSelect = "none";
-		document.body.style.pointerEvents = "auto";
-		document.addEventListener("mousemove", handleMove);
-		document.addEventListener("mouseup", handleUp);
-	}, []);
-
 	return (
 		<SidebarProvider
 			className="relative h-svh overflow-hidden"
 			defaultOpen={true}
 		>
 			<AppSidebar />
-			<SidebarInset
-				className="flex h-svh flex-col overflow-hidden transition-[margin-right] duration-200 ease-linear"
-				style={
-					workbenchVisible
-						? { marginRight: `${workbenchWidth}px` } as React.CSSProperties
-						: undefined
-				}
-			>
-				{/* Navbar */}
-				<header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
-					<SidebarToggle />
-					<Button
-						variant="ghost"
-						size="icon"
-						className="ml-1 h-7 w-7"
-						onClick={() => setShowTerminal((v) => !v)}
-						aria-label="Toggle terminal"
-					>
-						<TerminalIcon className="size-4" />
-					</Button>
-					{/* Workbench tab indicator */}
-					{workbenchVisible && (
-						<>
-							<div className="mx-2 h-5 w-px bg-border" />
-							<span className="text-xs font-medium text-muted-foreground">
-								Workbench
-							</span>
-						</>
-					)}
-					<Button
-						variant="ghost"
-						size="icon"
-						className="ml-auto h-7 w-7"
-						onClick={toggleWorkbench}
-						aria-label={
-							workbenchVisible
-								? "Close workbench"
-								: "Open workbench"
-						}
-					>
-						{workbenchVisible ? (
-							<PanelRight className="size-4" />
-						) : (
-							<PanelRight className="size-4" />
-						)}
-					</Button>
-				</header>
-				<PuxRuntimeProvider key={conversationKey}>
-					<div className="flex h-full flex-col">
-						<div className="flex-1 overflow-hidden">
-							<Thread />
-						</div>
-						{showTerminal && (
-							<TerminalDrawer
-								cwd={activeProjectPath || activeProject}
-								onClose={() => setShowTerminal(false)}
-							/>
-						)}
-					</div>
-				</PuxRuntimeProvider>
-			</SidebarInset>
-			{/* Workbench — fixed right panel with slide animation */}
-			<div
-				ref={workbenchProviderRef}
-				className={cn(
-					"fixed inset-y-0 right-0 z-10 flex flex-col border-l border-border bg-sidebar text-sidebar-foreground",
-					!dragging && "transition-transform duration-200 ease-linear",
-					!workbenchVisible && "translate-x-full",
+			<Group orientation="horizontal" className="h-svh">
+				<Panel defaultSize={65} minSize={30}>
+					<SidebarInset className="flex h-full flex-col overflow-hidden">
+						{/* Navbar */}
+						<header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
+							<SidebarToggle />
+							<Button
+								variant="ghost"
+								size="icon"
+								className="ml-1 h-7 w-7"
+								onClick={() => setShowTerminal((v) => !v)}
+								aria-label="Toggle terminal"
+							>
+								<TerminalIcon className="size-4" />
+							</Button>
+							{/* Workbench tab indicator */}
+							{workbenchVisible && (
+								<>
+									<div className="mx-2 h-5 w-px bg-border" />
+									<span className="text-xs font-medium text-muted-foreground">
+										Workbench
+									</span>
+								</>
+							)}
+							<Button
+								variant="ghost"
+								size="icon"
+								className="ml-auto h-7 w-7"
+								onClick={toggleWorkbench}
+								aria-label={
+									workbenchVisible
+										? "Close workbench"
+										: "Open workbench"
+								}
+							>
+								<PanelRight className="size-4" />
+							</Button>
+						</header>
+						<PuxRuntimeProvider key={conversationKey}>
+							{showTerminal ? (
+								<Group orientation="vertical" className="flex-1">
+									<Panel defaultSize={70} minSize={30}>
+										<Thread />
+									</Panel>
+									<Separator className="h-1 bg-border hover:bg-ring/50 transition-colors" />
+									<Panel defaultSize={30} minSize={15} collapsible>
+										<TerminalDrawer
+											cwd={activeProjectPath || activeProject}
+											onClose={() => setShowTerminal(false)}
+										/>
+									</Panel>
+								</Group>
+							) : (
+								<div className="flex-1 overflow-hidden">
+									<Thread />
+								</div>
+							)}
+						</PuxRuntimeProvider>
+					</SidebarInset>
+				</Panel>
+
+				{workbenchVisible && (
+					<>
+						<Separator className="w-1 bg-border hover:bg-ring/50 transition-colors" />
+						<Panel defaultSize={35} minSize={20} collapsible>
+							<div className="flex h-full flex-col border-l border-border bg-sidebar text-sidebar-foreground">
+								<Workbench />
+							</div>
+						</Panel>
+					</>
 				)}
-				style={{ width: `${workbenchWidth}px` }}
-			>
-				{/* Drag-resize handle — wider hit area for reliable grabbing */}
-				<div
-					className="absolute inset-y-0 -left-1.5 z-30 w-4 cursor-col-resize hover:bg-ring/30 active:bg-ring"
-					onMouseDown={handleResizeStart}
-				/>
-				<Workbench />
-			</div>
-			{/* HITL Decision overlay */}
-			<DecisionDialog />
+			</Group>
 		</SidebarProvider>
 	);
 }

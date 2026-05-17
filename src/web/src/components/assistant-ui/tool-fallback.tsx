@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { useCollapsibleRoot } from "./use-collapsible";
+import { usePuxStore } from "@/lib/pux-store";
+import { ShieldCheck, CheckCircle } from "lucide-react";
 
 export type ToolFallbackRootProps = Omit<
 	React.ComponentPropsWithRef<typeof Collapsible>,
@@ -250,9 +252,74 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	argsText,
 	result,
 	status,
+	interrupt,
 }) => {
 	const isCancelled =
 		status?.type === "incomplete" && status.reason === "cancelled";
+
+	// Handle approval interrupts inline — permission hooks from any tool
+	const pending = usePuxStore((s) => s.pendingDecision);
+	const respond = usePuxStore((s) => s.respondToDecision);
+	const isComplete = status?.type === "complete";
+	const answered = isComplete && pending === null;
+
+	if (interrupt?.type === "human") {
+		const payload = interrupt.payload as Record<string, unknown> | undefined;
+		const hint = payload?.hint as string | undefined;
+
+		if (hint === "approval") {
+			if (answered) {
+				return (
+					<div className="my-2 rounded-lg border border-border py-3">
+						<div className="flex items-center gap-2 px-4 text-sm">
+							<CheckCircle size={14} className="text-muted-foreground" />
+							<span className="text-muted-foreground">
+								Approved: <b>{toolName}</b>
+							</span>
+						</div>
+					</div>
+				);
+			}
+
+			const title = (payload?.title as string) || `Allow "${toolName}"?`;
+			const description = payload?.description as string | undefined;
+
+			return (
+				<div className="my-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5 py-3">
+					<div className="flex items-center gap-2 px-4 text-sm">
+						<ShieldCheck size={14} className="text-yellow-500" />
+						<span className="text-xs font-semibold uppercase tracking-wider text-dim">
+							Approval Required
+						</span>
+					</div>
+					{title && (
+						<div className="mt-2 px-4 text-sm font-medium">
+							{title}
+						</div>
+					)}
+					{description && (
+						<div className="mt-1 px-4 text-sm text-muted-foreground">
+							{description}
+						</div>
+					)}
+					<div className="flex gap-2 border-t border-border px-4 py-3">
+						<button
+							onClick={() => respond("approve", "")}
+							className="rounded-md bg-green-600 px-4 py-1.5 text-sm text-white hover:bg-green-700"
+						>
+							Approve
+						</button>
+						<button
+							onClick={() => respond("reject", "")}
+							className="rounded-md bg-red-600 px-4 py-1.5 text-sm text-white hover:bg-red-700"
+						>
+							Reject
+						</button>
+					</div>
+				</div>
+			);
+		}
+	}
 
 	return (
 		<ToolFallbackRoot

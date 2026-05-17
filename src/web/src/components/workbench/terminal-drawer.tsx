@@ -36,7 +36,7 @@ export function TerminalDrawer({ cwd, onClose }: { cwd?: string; onClose: () => 
 	);
 
 	return (
-		<div className="flex h-56 shrink-0 flex-col border-t border-border">
+		<div className="flex h-full flex-col border-t border-border">
 			{/* Tab bar */}
 			<div className="flex h-7 items-end border-b border-border bg-muted/20">
 				{tabs.map((tab) => (

@@ -18,19 +18,19 @@ function AskUserRenderer({
 	const question = (args.question as string) || "";
 	const options = args.options as string[] | undefined;
 	const allowFreeText = args.allowFreeText !== false;
-	const pending = usePuxStore((s) => s.pendingDecision);
 	const respond = usePuxStore((s) => s.respondToDecision);
+	const pending = usePuxStore((s) => s.pendingDecision);
 	const [input, setInput] = useState("");
 
 	const isComplete = status?.type === "complete";
 	const answered = isComplete && pending === null;
 
 	const handleSubmit = (value: string) => {
+		const decisionId = args.decisionId as string || pending?.decisionId || "";
 		respond("answer", value);
 		setInput("");
 	};
 
-	// After answered: show question + muted "Answered" badge
 	if (answered) {
 		return (
 			<div className="my-2 rounded-lg border border-border py-3">
@@ -49,7 +49,6 @@ function AskUserRenderer({
 		);
 	}
 
-	// Active question — interactive
 	return (
 		<div className="my-2 rounded-lg border border-accent/30 bg-accent/5 py-3">
 			<div className="flex items-center gap-2 px-4 text-sm">
