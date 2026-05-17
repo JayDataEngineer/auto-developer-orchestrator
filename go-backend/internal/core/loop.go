@@ -190,10 +190,6 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			if attempt > 0 {
 				backoff := time.Duration(attempt) * 2 * time.Second
 				l.logger.Printf("Provider retry %d/%d after %v (error: %v)", attempt, l.config.MaxProviderRetries, backoff, providerErr)
-				SendEvent(subscriber, AgentEvent{
-					Type: EventTypeTextDelta,
-					Data: AgentEventData{Text: fmt.Sprintf("\n[Retrying generation (attempt %d/%d)...]\n", attempt+1, l.config.MaxProviderRetries+1)},
-				})
 				time.Sleep(backoff)
 			}
 
