@@ -21,6 +21,9 @@ export default defineConfig({
 				ws: true,
 			},
 		},
+		watch: {
+			ignored: ["**/next-app/**", "**/.next/**"],
+		},
 	},
 	build: {
 		outDir: resolve(__dirname, "../../dist-web"),

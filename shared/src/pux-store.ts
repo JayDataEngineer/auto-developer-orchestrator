@@ -285,10 +285,12 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 				name: m.name || m.id,
 				provider: m.provider || "",
 			}));
-			// Skip if unchanged (compare by id)
+			// Skip if unchanged (order-independent: compare by id set)
 			const current = get().modelList;
-			if (models.length === current.length &&
-				models.every((m, i) => m.id === current[i].id && m.provider === current[i].provider)) return null;
+			if (models.length === current.length) {
+				const currentIds = new Set(current.map((m) => m.id));
+				if (models.every((m) => currentIds.has(m.id))) return null;
+			}
 			return { modelList: models };
 		});
 		if (update) set(update);

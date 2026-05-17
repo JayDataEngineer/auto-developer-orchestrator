@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
@@ -60,6 +61,14 @@ func (h *PuxHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 			Provider: "llamacpp",
 		})
 	}
+
+	// Sort for deterministic output (map iteration is random)
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].Provider != models[j].Provider {
+			return models[i].Provider < models[j].Provider
+		}
+		return models[i].ID < models[j].ID
+	})
 
 	writeJSON(w, http.StatusOK, models)
 }
