@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
 	useLocalRuntime,
 	AssistantRuntimeProvider,
@@ -53,7 +53,7 @@ import {
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
-import { Panel, Group, Separator } from "react-resizable-panels";
+import { Panel, Group, Separator, usePanelRef } from "react-resizable-panels";
 import {
 	PanelRight,
 	PanelLeftOpen,
@@ -397,13 +397,49 @@ export function App() {
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
+	const workbenchPanelRef = usePanelRef();
+	const workbenchAnimRef = useRef<number | null>(null);
 
 	// Poll for running agent status
 	useAgentStatusPolling();
 	const [showTerminal, setShowTerminal] = useState(false);
 
+	const animatePanel = useCallback((from: number, to: number, duration = 200) => {
+		const panel = workbenchPanelRef.current;
+		if (!panel) return;
+		if (workbenchAnimRef.current) {
+			cancelAnimationFrame(workbenchAnimRef.current);
+		}
+		const startTime = performance.now();
+		const tick = (now: number) => {
+			const elapsed = now - startTime;
+			const progress = Math.min(elapsed / duration, 1);
+			const eased = 1 - Math.pow(1 - progress, 3);
+			const current = from + (to - from) * eased;
+			panel.resize(current);
+			if (progress < 1) {
+				workbenchAnimRef.current = requestAnimationFrame(tick);
+			}
+		};
+		workbenchAnimRef.current = requestAnimationFrame(tick);
+	}, []);
+
 	const toggleWorkbench = useCallback(() => {
-		setWorkbenchVisible((prev) => !prev);
+		const panel = workbenchPanelRef.current;
+		if (!panel) return;
+		if (panel.isCollapsed()) {
+			panel.expand();
+			setWorkbenchVisible(true);
+		} else {
+			animatePanel(panel.getSize().asPercentage, 0, 200);
+			setWorkbenchVisible(false);
+		}
+	}, [animatePanel]);
+
+	useEffect(() => {
+		return () => {
+			if (workbenchAnimRef.current) cancelAnimationFrame(workbenchAnimRef.current);
+		};
 	}, []);
 
 	// Ctrl+` to toggle terminal
@@ -483,18 +519,21 @@ export function App() {
 					</SidebarInset>
 				</Panel>
 
-				<div
-					className="flex overflow-hidden shrink-0"
-					style={{
-						width: workbenchVisible ? "35%" : "0px",
-						transition: "width 200ms ease-linear",
-					}}
-				>
-					<div className="w-px bg-border shrink-0" />
-					<div className="flex-1 flex flex-col overflow-hidden bg-sidebar text-sidebar-foreground min-w-0">
-						<Workbench />
-					</div>
-				</div>
+				<>
+					<Separator className="w-px bg-border hover:bg-ring/50 transition-colors" />
+					<Panel
+						panelRef={workbenchPanelRef}
+						defaultSize={35}
+						minSize={20}
+						collapsible
+						collapsedSize={0}
+						onResize={(size) => setWorkbenchVisible(size.asPercentage > 0)}
+					>
+						<div className="flex h-full flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
+							<Workbench />
+						</div>
+					</Panel>
+				</>
 			</Group>
 		</SidebarProvider>
 	);
