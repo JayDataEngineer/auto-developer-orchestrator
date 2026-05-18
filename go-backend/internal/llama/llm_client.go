@@ -687,6 +687,20 @@ func (e *LLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletionResp
 		return nil, fmt.Errorf("decode response: %w (body: %s)", err, string(respBody))
 	}
 
+	// Unwrap MCP Hub response envelope: {"status":"success","data":{...}}
+	// The hub wraps OpenAI-format responses; direct parse finds no choices.
+	if len(result.Choices) == 0 {
+		var wrapper struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if json.Unmarshal(respBody, &wrapper) == nil && len(wrapper.Data) > 0 {
+			var inner ChatCompletionResponse
+			if json.Unmarshal(wrapper.Data, &inner) == nil && len(inner.Choices) > 0 {
+				result = inner
+			}
+		}
+	}
+
 	return &result, nil
 }
 
