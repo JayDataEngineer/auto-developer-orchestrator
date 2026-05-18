@@ -433,7 +433,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 // Run executes the agent with a user message.
 func (a *Agent) Run(ctx context.Context, userMsg string, subscriber chan<- core.AgentEvent) error {
-	return a.Loop.Run(ctx, userMsg, subscriber)
+	return a.Loop.RunWithImages(ctx, userMsg, nil, subscriber)
+}
+
+// RunWithImages executes the agent with a multimodal user message (text + images).
+func (a *Agent) RunWithImages(ctx context.Context, userMsg string, images []core.ContentImage, subscriber chan<- core.AgentEvent) error {
+	return a.Loop.RunWithImages(ctx, userMsg, images, subscriber)
 }
 
 // Continue sends a follow-up message.

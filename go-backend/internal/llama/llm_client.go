@@ -391,7 +391,7 @@ func (e *LLMClient) WarmUp() error {
 	e.logger.Info("Warming up llama-server with single-token request...")
 
 	req := ChatCompletionRequest{
-		Messages:    []Message{{Role: "user", Content: "Hello"}},
+		Messages:    []APIChatMessage{{Role: "user", Content: []byte(`"Hello"`)}},
 		MaxTokens:   1,
 		Temperature: 0.1,
 		CachePrompt: true,
@@ -420,16 +420,16 @@ func (e *LLMClient) Close() error {
 
 // ChatCompletionRequest maps to the /v1/chat/completions request body.
 type ChatCompletionRequest struct {
-	Model            string       `json:"model,omitempty"` // model ID for cloud providers
-	Messages         []Message    `json:"messages"`
-	Tools            []OpenAITool `json:"tools,omitempty"`
-	MaxTokens        int          `json:"max_tokens,omitempty"`
-	Temperature      float32      `json:"temperature,omitempty"`
-	TopP             float32      `json:"top_p,omitempty"`
-	TopK             int          `json:"top_k,omitempty"`
-	RepeatPenalty    float32      `json:"repeat_penalty,omitempty"`
-	PresencePenalty  float32      `json:"presence_penalty,omitempty"`
-	MinP             float32      `json:"min_p,omitempty"`
+	Model            string             `json:"model,omitempty"` // model ID for cloud providers
+	Messages         []APIChatMessage   `json:"messages"`
+	Tools            []OpenAITool       `json:"tools,omitempty"`
+	MaxTokens        int                `json:"max_tokens,omitempty"`
+	Temperature      float32            `json:"temperature,omitempty"`
+	TopP             float32            `json:"top_p,omitempty"`
+	TopK             int                `json:"top_k,omitempty"`
+	RepeatPenalty    float32            `json:"repeat_penalty,omitempty"`
+	PresencePenalty  float32            `json:"presence_penalty,omitempty"`
+	MinP             float32            `json:"min_p,omitempty"`
 
 	// KV cache persistence (llama-server extension)
 	CachePrompt bool   `json:"cache_prompt,omitempty"`
@@ -440,6 +440,65 @@ type ChatCompletionRequest struct {
 
 	// Request usage data in streaming response (OpenAI stream_options)
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+}
+
+// APIChatMessage is the wire format for chat messages sent to /v1/chat/completions.
+// Supports both plain text content (string) and multimodal content (array of parts).
+type APIChatMessage struct {
+	Role             string          `json:"role"`
+	Content          json.RawMessage `json:"content"` // string or []ContentPart
+	ToolCalls        []ToolCallResponse `json:"tool_calls,omitempty"`
+	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	Name             string          `json:"name,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+}
+
+// ContentPart represents a single part in a multimodal content array.
+type ContentPart struct {
+	Type     string       `json:"type"`
+	Text     string       `json:"text,omitempty"`
+	ImageURL *ImageURLPart `json:"image_url,omitempty"`
+}
+
+// ImageURLPart holds the image URL for multimodal content.
+type ImageURLPart struct {
+	URL string `json:"url"`
+}
+
+// toAPIMessage converts a core.Message to APIChatMessage.
+// When the message has images, content is serialized as a multimodal array.
+// Otherwise it's a plain string.
+func toAPIMessage(m Message) APIChatMessage {
+	if len(m.Images) > 0 {
+		parts := make([]ContentPart, 0, 1+len(m.Images))
+		if m.Content != "" {
+			parts = append(parts, ContentPart{Type: "text", Text: m.Content})
+		}
+		for _, img := range m.Images {
+			parts = append(parts, ContentPart{
+				Type:     "image_url",
+				ImageURL: &ImageURLPart{URL: img.DataURL},
+			})
+		}
+		content, _ := json.Marshal(parts)
+		return APIChatMessage{
+			Role:             m.Role,
+			Content:          content,
+			ToolCalls:        m.ToolCalls,
+			ToolCallID:       m.ToolCallID,
+			Name:             m.Name,
+			ReasoningContent: m.ReasoningContent,
+		}
+	}
+	content, _ := json.Marshal(m.Content)
+	return APIChatMessage{
+		Role:             m.Role,
+		Content:          content,
+		ToolCalls:        m.ToolCalls,
+		ToolCallID:       m.ToolCallID,
+		Name:             m.Name,
+		ReasoningContent: m.ReasoningContent,
+	}
 }
 
 // StreamOptions controls what additional data is included in streaming responses.
@@ -466,18 +525,25 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 	req.CachePrompt = false
 	req.SessionID = ""
 
+	return req
+}
+
+// prepareRequest applies cloud sanitization, cache breakpoints, and Gemini
+// thought_signature injection to messages BEFORE converting to API wire format.
+func (e *LLMClient) prepareMessages(messages []Message) []Message {
+	if !e.IsCloud() {
+		return messages
+	}
+
 	// Inject prompt caching on system messages for providers that support it.
-	// Split at the DynamicBoundary — stable content before the boundary gets
-	// cache_control: ephemeral for Anthropic/DeepSeek, or just split for Gemini.
 	if e.supportsCaching() {
-		req.Messages = injectCacheBreakpoints(req.Messages, e.wantsCacheControl())
+		messages = injectCacheBreakpoints(messages, e.wantsCacheControl())
 	}
 
 	// Gemini 3 requires thought_signature on tool calls in conversation history.
-	// Inject a dummy signature for any that lack one.
 	if strings.Contains(strings.ToLower(e.modelName), "gemini") {
-		for i := range req.Messages {
-			m := &req.Messages[i]
+		for i := range messages {
+			m := &messages[i]
 			if m.Role == "assistant" && len(m.ToolCalls) > 0 {
 				for j := range m.ToolCalls {
 					if m.ToolCalls[j].ThoughtSignature == "" {
@@ -488,7 +554,7 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 		}
 	}
 
-	return req
+	return messages
 }
 
 // supportsCaching returns true for providers that support prompt caching.

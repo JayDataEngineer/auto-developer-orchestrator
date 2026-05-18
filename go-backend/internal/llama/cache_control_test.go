@@ -158,22 +158,20 @@ func TestSanitizeRequest_ClaudeGetsCacheControl(t *testing.T) {
 		apiKey:    "test-key",
 	}
 
-	req := ChatCompletionRequest{
-		Messages: []Message{
-			{Role: "system", Content: "Stable rules\n" + dynamicBoundary + "\nSandbox: abc"},
-			{Role: "user", Content: "hello"},
-		},
+	msgs := []Message{
+		{Role: "system", Content: "Stable rules\n" + dynamicBoundary + "\nSandbox: abc"},
+		{Role: "user", Content: "hello"},
 	}
 
-	result := client.sanitizeRequest(req)
+	result := client.prepareMessages(msgs)
 
-	if len(result.Messages) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result.Messages))
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
 	}
-	if result.Messages[0].CacheControl == nil {
+	if result[0].CacheControl == nil {
 		t.Error("Claude: stable system message should have cache_control")
 	}
-	if result.Messages[0].CacheControl.Type != "ephemeral" {
+	if result[0].CacheControl.Type != "ephemeral" {
 		t.Error("cache_control type should be ephemeral")
 	}
 }
@@ -184,25 +182,23 @@ func TestSanitizeRequest_GeminiSplitNoCacheControl(t *testing.T) {
 		apiKey:    "test-key",
 	}
 
-	req := ChatCompletionRequest{
-		Messages: []Message{
-			{Role: "system", Content: "Stable rules\n" + dynamicBoundary + "\nSandbox: abc"},
-			{Role: "user", Content: "hello"},
-		},
+	msgs := []Message{
+		{Role: "system", Content: "Stable rules\n" + dynamicBoundary + "\nSandbox: abc"},
+		{Role: "user", Content: "hello"},
 	}
 
-	result := client.sanitizeRequest(req)
+	result := client.prepareMessages(msgs)
 
 	// Should split into 3 messages
-	if len(result.Messages) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result.Messages))
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
 	}
 	// Gemini: split but NO cache_control
-	if result.Messages[0].CacheControl != nil {
+	if result[0].CacheControl != nil {
 		t.Error("Gemini: stable message should NOT have cache_control")
 	}
-	if result.Messages[0].Content != "Stable rules" {
-		t.Errorf("Gemini: stable content wrong: %q", result.Messages[0].Content)
+	if result[0].Content != "Stable rules" {
+		t.Errorf("Gemini: stable content wrong: %q", result[0].Content)
 	}
 }
 
@@ -211,18 +207,16 @@ func TestSanitizeRequest_LocalProviderUnchanged(t *testing.T) {
 		modelName: "gemma-4-26b",
 	}
 
-	req := ChatCompletionRequest{
-		Messages: []Message{
-			{Role: "system", Content: "Stable rules\n" + dynamicBoundary + "\nSandbox: abc"},
-			{Role: "user", Content: "hello"},
-		},
+	msgs := []Message{
+		{Role: "system", Content: "Stable rules\n" + dynamicBoundary + "\nSandbox: abc"},
+		{Role: "user", Content: "hello"},
 	}
 
-	result := client.sanitizeRequest(req)
+	result := client.prepareMessages(msgs)
 
 	// Local provider returns unchanged
-	if len(result.Messages) != 2 {
-		t.Fatalf("expected 2 messages (unchanged for local), got %d", len(result.Messages))
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages (unchanged for local), got %d", len(result))
 	}
 }
 

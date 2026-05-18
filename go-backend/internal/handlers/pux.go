@@ -234,14 +234,15 @@ func resolveAgent(r *http.Request) string {
 }
 
 type promptRequest struct {
-	Message       string `json:"message"`
-	Project       string `json:"project"`
-	Org           string `json:"org,omitempty"`
-	AgentId       string `json:"agentId,omitempty"`
-	Model         string `json:"model,omitempty"`
-	ThinkingLevel string `json:"thinkingLevel,omitempty"`
-	AutoBranch    bool   `json:"autoBranch,omitempty"`
-	AutoMerge     bool   `json:"autoMerge,omitempty"`
+	Message       string   `json:"message"`
+	Images        []string `json:"images,omitempty"`
+	Project       string   `json:"project"`
+	Org           string   `json:"org,omitempty"`
+	AgentId       string   `json:"agentId,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	ThinkingLevel string   `json:"thinkingLevel,omitempty"`
+	AutoBranch    bool     `json:"autoBranch,omitempty"`
+	AutoMerge     bool     `json:"autoMerge,omitempty"`
 }
 
 // Prompt sends a coding task to Pux and streams events back via SSE.

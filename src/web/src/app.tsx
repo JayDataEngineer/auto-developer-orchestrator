@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import {
 	useLocalRuntime,
 	AssistantRuntimeProvider,
+	SimpleImageAttachmentAdapter,
 } from "@assistant-ui/react";
 import {
 	usePuxStore,
@@ -78,7 +79,10 @@ import {
 function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	const historyAdapter = useMemo(() => createPuxHistoryAdapter(), []);
 	const runtime = useLocalRuntime(puxChatAdapter, {
-		adapters: { history: historyAdapter },
+		adapters: {
+			history: historyAdapter,
+			attachments: new SimpleImageAttachmentAdapter(),
+		},
 	});
 
 	// Listen for pux:send-message events from workbench panels

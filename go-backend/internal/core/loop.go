@@ -83,6 +83,11 @@ func (l *AgentLoop) SetLogger(logger *log.Logger) {
 
 // Run starts the agent loop for a user message, emitting events to the subscriber channel.
 func (l *AgentLoop) Run(ctx context.Context, userMsg string, subscriber chan<- AgentEvent) error {
+	return l.RunWithImages(ctx, userMsg, nil, subscriber)
+}
+
+// RunWithImages starts the agent loop for a multimodal user message (text + images).
+func (l *AgentLoop) RunWithImages(ctx context.Context, userMsg string, images []ContentImage, subscriber chan<- AgentEvent) error {
 	l.mu.Lock()
 	if l.running {
 		l.mu.Unlock()
@@ -112,7 +117,7 @@ func (l *AgentLoop) Run(ctx context.Context, userMsg string, subscriber chan<- A
 	if len(sessCtx) == 0 || sessCtx[0].Role != "system" {
 		l.session.AppendMessage(Message{Role: "system", Content: l.config.SystemPrompt})
 	}
-	l.session.AppendMessage(Message{Role: "user", Content: userMsg})
+	l.session.AppendMessage(Message{Role: "user", Content: userMsg, Images: images})
 
 	return l.runLoop(ctx, subscriber)
 }

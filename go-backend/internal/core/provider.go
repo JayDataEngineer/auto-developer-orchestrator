@@ -19,11 +19,18 @@ const (
 type Message struct {
 	Role             string             `json:"role"`
 	Content          string             `json:"content"`
+	Images           []ContentImage     `json:"images,omitempty"`           // base64 data URLs for multimodal
 	ToolCalls        []ToolCallResponse `json:"tool_calls,omitempty"`
 	ToolCallID       string             `json:"tool_call_id,omitempty"`
 	Name             string             `json:"name,omitempty"`
 	ReasoningContent string             `json:"reasoning_content,omitempty"`
 	CacheControl     *CacheControl      `json:"cache_control,omitempty"` // Anthropic/OpenRouter prompt caching
+}
+
+// ContentImage holds an image for multimodal messages.
+// Stored as a base64 data URL (data:image/png;base64,...).
+type ContentImage struct {
+	DataURL string `json:"data_url"` // data:image/<type>;base64,<data>
 }
 
 // CacheControl marks a message as eligible for prompt caching on providers that support it.

@@ -396,6 +396,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 
 	orchMsg := agentsMDPrefix + memoryPrefix + planPrefix + "User request: " + req.Message
 
+	// Convert base64 data URLs to ContentImage slices
+	var images []core.ContentImage
+	for _, dataURL := range req.Images {
+		images = append(images, core.ContentImage{DataURL: dataURL})
+	}
+
 	// Event channel (created earlier in function, passed to orchestrator Config)
 
 	// Detached context
@@ -408,7 +414,11 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	go func() {
 		defer close(done)
 		defer close(events)
-		loopErr = orch.Run(ctx, orchMsg, events)
+		if len(images) > 0 {
+			loopErr = orch.RunWithImages(ctx, orchMsg, images, events)
+		} else {
+			loopErr = orch.Run(ctx, orchMsg, events)
+		}
 	}()
 
 	// Stream events

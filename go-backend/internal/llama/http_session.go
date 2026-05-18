@@ -110,7 +110,7 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 		}
 
 		req := s.buildRequest(opts)
-		sanitizeMessages(&req.Messages)
+		sanitizeAPIMessages(&req.Messages)
 
 		acc := newStreamAccumulator(s.thinkingBudget)
 
@@ -180,8 +180,22 @@ func streamDeltaFromResponse(choice ChatChoice) StreamDelta {
 
 // buildRequest constructs a ChatCompletionRequest from session state and options.
 func (s *Session) buildRequest(opts GenerateOptions) ChatCompletionRequest {
+	// Prepare messages: cache breakpoints, Gemini signatures (cloud only).
+	// Must happen on []core.Message before conversion to API wire format.
+	prepared := s.messages
+	if llm, ok := s.engine.(*LLMClient); ok {
+		prepared = llm.prepareMessages(prepared)
+	}
+
+	// Convert core.Messages to API wire format — messages with images
+	// become multimodal content arrays, others stay as plain strings.
+	apiMsgs := make([]APIChatMessage, len(prepared))
+	for i, m := range prepared {
+		apiMsgs[i] = toAPIMessage(m)
+	}
+
 	req := ChatCompletionRequest{
-		Messages:        s.messages,
+		Messages:        apiMsgs,
 		Tools:           s.tools,
 		MaxTokens:       opts.MaxTokens,
 		Temperature:     opts.Temperature,
@@ -408,9 +422,9 @@ func serializeToolCalls(calls []ToolCallResponse) string {
 	return string(b)
 }
 
-// sanitizeMessages ensures no duplicate tool_call_ids exist across the message list.
+// sanitizeAPIMessages ensures no duplicate tool_call_ids exist across the message list.
 // DeepSeek emits duplicate IDs which cause API 400 errors.
-func sanitizeMessages(msgs *[]Message) {
+func sanitizeAPIMessages(msgs *[]APIChatMessage) {
 	// First pass: collect all tool_call_ids from assistant messages
 	seenIDs := make(map[string]bool)
 	for i := range *msgs {
@@ -441,7 +455,7 @@ func sanitizeMessages(msgs *[]Message) {
 			}
 		}
 	}
-	cleaned := make([]Message, 0, len(*msgs))
+	cleaned := make([]APIChatMessage, 0, len(*msgs))
 	for _, m := range *msgs {
 		if m.Role == "tool" && m.ToolCallID != "" {
 			if !validIDs[m.ToolCallID] {
@@ -545,7 +559,7 @@ func (s *Session) Close() error {
 // freeSlot sends a minimal request to free the slot's KV cache.
 func (s *Session) freeSlot() error {
 	req := ChatCompletionRequest{
-		Messages:    []Message{{Role: "user", Content: ""}},
+		Messages:    []APIChatMessage{{Role: "user", Content: []byte(`""`)}},
 		MaxTokens:   0,
 		CachePrompt: false,
 		SessionID:   s.sessionID,

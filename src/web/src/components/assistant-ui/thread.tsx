@@ -2,6 +2,11 @@
 
 import { MarkdownTextContent } from "@/components/assistant-ui/markdown-text";
 import {
+	ComposerAddAttachment,
+	ComposerAttachments,
+	UserMessageAttachments,
+} from "@/components/assistant-ui/attachment";
+import {
 	ReasoningContent,
 	ReasoningRoot,
 	ReasoningText,
@@ -150,8 +155,9 @@ const Composer: FC = () => {
 			<ComposerPrimitive.AttachmentDropzone asChild>
 				<div
 					data-slot="aui_composer-shell"
-					className="flex w-full flex-col gap-2 rounded-3xl border border-border bg-muted p-2.5 transition-shadow focus-within:border-ring/75 focus-within:ring-2 focus-within:ring-ring/20"
+					className="flex w-full flex-col gap-2 rounded-3xl border border-border bg-muted p-2.5 transition-shadow focus-within:border-ring/75 focus-within:ring-2 focus-within:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50"
 				>
+					<ComposerAttachments />
 					<ComposerPrimitive.Input
 						placeholder="Send a message..."
 						className="aui-composer-input max-h-32 min-h-10 w-full resize-none bg-transparent px-1.75 py-1 text-sm outline-none placeholder:text-muted-foreground/80"
@@ -289,6 +295,7 @@ const ComposerAction: FC = () => {
 						</div>
 					</SelectContent>
 				</Select>
+			<ComposerAddAttachment />
 			<AuiIf condition={(s) => !s.thread.isRunning}>
 				<ComposerPrimitive.Send asChild>
 					<TooltipIconButton
@@ -465,6 +472,7 @@ const UserMessage: FC = () => {
 			className="fade-in slide-in-from-bottom-1 grid animate-in auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [contain-intrinsic-size:auto_60px] [content-visibility:auto] [&:where(>*)]:col-start-2"
 			data-role="user"
 		>
+			<UserMessageAttachments />
 			<div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
 				<div className="aui-user-message-content wrap-break-word peer rounded-2xl bg-muted px-4 py-2.5 text-foreground empty:hidden">
 					<MessagePrimitive.Parts />
