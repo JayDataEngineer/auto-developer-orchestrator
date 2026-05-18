@@ -53,7 +53,7 @@ func (s *Scheduler) executeJob(jobID string) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		output, err = s.promptSender(ctx, job.Project, job.AgentID, job.Message, job.Model, job.Org, job.AutoBranch, job.AutoMerge)
+		output, err = s.promptSender(ctx, job.Project, job.AgentID, job.Message, job.Model, job.Org, job.AutoBranch, job.AutoMerge, job.SandboxOnly)
 	} else {
 		err = fmt.Errorf("no PromptSender configured for scheduled jobs")
 	}

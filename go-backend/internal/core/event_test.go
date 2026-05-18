@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"testing"
 )
 
@@ -83,5 +84,36 @@ func TestSubscriberKey(t *testing.T) {
 	var key SubscriberKey
 	if key != (SubscriberKey{}) {
 		t.Error("SubscriberKey should be a zero-value struct")
+	}
+}
+
+func TestSubscriberKeyContextRoundTrip(t *testing.T) {
+	// Verify that storing chan<- AgentEvent in context and extracting
+	// with the correct type assertion works. This was a real bug:
+	// context stored chan<- T but assertion used chan T (different types).
+	ch := make(chan AgentEvent, 8)
+	var sendOnly chan<- AgentEvent = ch
+
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, SubscriberKey{}, sendOnly)
+
+	// Must assert to chan<- AgentEvent, NOT chan AgentEvent
+	extracted, ok := ctx.Value(SubscriberKey{}).(chan<- AgentEvent)
+	if !ok {
+		t.Fatal("type assertion to chan<- AgentEvent failed — subscriber would be nil in tools")
+	}
+	if extracted == nil {
+		t.Fatal("extracted subscriber is nil")
+	}
+
+	// Verify SendEvent works through the extracted channel
+	SendEvent(extracted, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: "test"}})
+	select {
+	case evt := <-ch:
+		if evt.Data.Text != "test" {
+			t.Errorf("got %q, want %q", evt.Data.Text, "test")
+		}
+	default:
+		t.Fatal("event not received on channel")
 	}
 }

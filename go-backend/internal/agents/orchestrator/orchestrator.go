@@ -67,6 +67,7 @@ type Config struct {
 	Subscriber      chan<- core.AgentEvent      // optional: if set, ask_user tool can emit events to TUI
 	Scheduler       any                         // optional: *scheduler.Scheduler — passed through to scheduler tool
 	ToolPerms       *perms.ToolPermissionConfig // optional: if set, enables per-tool permission checks
+	SandboxOnly     bool                        // optional: if true, only bash + file tools available (no delegation, MCP, browser, etc.)
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -106,6 +107,59 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		file.NewGlobTool(cfg.FileOps),
 		meta.NewWaitTool(),
 		meta.NewYieldArtifactToolWithDB(cfg.ArtifactDB, cfg.ProjectDir, cfg.SandboxID),
+	}
+
+	// ── Sandbox-only mode: strict isolation ──
+	// When enabled, the agent can only run bash + file ops inside its sandbox.
+	// No delegation, no MCP, no browser, no desktop, no memory, no skills.
+	if cfg.SandboxOnly {
+		logger.Printf("SANDBOX-ONLY mode: only bash + file tools available")
+
+		scratchStore := ctxpkg.NewScratchStore()
+		ctoTools = append(ctoTools,
+			ctxpkg.NewScratchWriteTool(scratchStore),
+			ctxpkg.NewScratchReadTool(scratchStore),
+			ctxpkg.NewScratchClearTool(scratchStore),
+		)
+
+		ctoToolReg := core.NewToolRegistry(ctoTools)
+		ctoToolReg.RegisterCommonAliases()
+		ctoToolSpecs := common.ToOpenAITools(ctoToolReg.All())
+
+		maxRounds := cfg.MaxToolRounds
+		if maxRounds == 0 {
+			maxRounds = 50
+		}
+
+		// Build a minimal system prompt — no employee roster, no skills
+		systemPrompt := common.BuildOrchestratorPromptV2(ctoToolReg.All(), cfg.SandboxID, "", "", nil, nil)
+
+		loopCfg := core.AgentLoopConfig{
+			SystemPrompt:  systemPrompt,
+			MaxToolRounds: maxRounds,
+			MaxTokens:     16384,
+			ContextSize:   cfg.ContextSize,
+			Tools:         ctoToolSpecs,
+			Opts: core.GenerateOptions{
+				MaxTokens:   16384,
+				Temperature: 0.7,
+				TopP:        0.95,
+				TopK:        20,
+			},
+			ProjectDir: cfg.ProjectDir,
+			SandboxID:  cfg.SandboxID,
+		}
+
+		loop := core.NewAgentLoop(provider, ctoToolReg, sess, loopCfg)
+		loop.SetLogger(logger)
+
+		return &Agent{
+			Loop:    loop,
+			Session: sess,
+			Memory:  cfg.MemoryStore,
+			config:  cfg,
+			logger:  logger,
+		}, nil
 	}
 
 	// Register ask_user tool (Contract 3: no subscriber injection — uses context)

@@ -57,6 +57,7 @@ type createJobRequest struct {
 	AtTime       string `json:"atTime,omitempty"`
 	AutoBranch   bool   `json:"autoBranch,omitempty"`
 	AutoMerge    bool   `json:"autoMerge,omitempty"`
+	SandboxOnly  bool   `json:"sandboxOnly,omitempty"`
 	Enabled      *bool  `json:"enabled,omitempty"`
 	// Phase 4: Delivery
 	DeliveryMode       string `json:"deliveryMode,omitempty"`
@@ -91,6 +92,7 @@ func (h *SchedulerHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		AtTime:                 req.AtTime,
 		AutoBranch:             req.AutoBranch,
 		AutoMerge:              req.AutoMerge,
+		SandboxOnly:            req.SandboxOnly,
 		Enabled:                enabled,
 		DeliveryMode:           scheduler.DeliveryMode(req.DeliveryMode),
 		DeliveryWebhookURL:     req.DeliveryWebhookURL,
@@ -157,6 +159,7 @@ func (h *SchedulerHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 		AtTime:                 req.AtTime,
 		AutoBranch:             req.AutoBranch,
 		AutoMerge:              req.AutoMerge,
+		SandboxOnly:            req.SandboxOnly,
 		DeliveryMode:           scheduler.DeliveryMode(req.DeliveryMode),
 		DeliveryWebhookURL:     req.DeliveryWebhookURL,
 		FailureAlertAfter:      req.FailureAlertAfter,

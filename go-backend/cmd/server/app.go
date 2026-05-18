@@ -719,7 +719,7 @@ func (a *App) buildRouter(
 // makeLocalPromptSender creates a PromptSender that calls the local /api/pux/prompt endpoint.
 // The scheduler uses this to execute jobs — same path as orch agent prompt, web UI, and TUI.
 func makeLocalPromptSender(baseURL, projectRoot string, logger *zap.Logger) scheduler.PromptSender {
-	return func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge bool) (string, error) {
+	return func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge, sandboxOnly bool) (string, error) {
 		// If org is set, resolve it to a project path (same as CLI --org)
 		effectiveProject := project
 		if org != "" {
@@ -731,10 +731,11 @@ func makeLocalPromptSender(baseURL, projectRoot string, logger *zap.Logger) sche
 		}
 
 		payload := map[string]interface{}{
-			"message":    message,
-			"project":    effectiveProject,
-			"autoBranch": autoBranch,
-			"autoMerge":  autoMerge,
+			"message":     message,
+			"project":     effectiveProject,
+			"autoBranch":  autoBranch,
+			"autoMerge":   autoMerge,
+			"sandboxOnly": sandboxOnly,
 		}
 		if agentID != "" {
 			payload["agentId"] = agentID

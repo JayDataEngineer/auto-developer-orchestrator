@@ -241,8 +241,14 @@ func (r *ParallelRunner) SetRoleProviders(roleProvider RoleProvider, mcpResolver
 // not held as a struct field. This keeps ParallelRunner a pure tool with no direct
 // reference to the event stream.
 func subscriberFromCtx(ctx context.Context) chan<- core.AgentEvent {
-	ch, _ := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent)
-	return ch
+	// Accept both chan<- AgentEvent (from loop.go) and chan AgentEvent (from tests)
+	if ch, ok := ctx.Value(core.SubscriberKey{}).(chan<- core.AgentEvent); ok {
+		return ch
+	}
+	if ch, ok := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent); ok {
+		return ch
+	}
+	return nil
 }
 
 // jsonToToolSpec converts a core.Tool's schema into an OpenAITool spec.

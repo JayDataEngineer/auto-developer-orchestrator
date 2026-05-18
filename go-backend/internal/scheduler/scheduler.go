@@ -105,6 +105,10 @@ type Job struct {
 	Blocks    []string `json:"blocks,omitempty"`    // job IDs this blocks
 	BlockedBy []string `json:"blockedBy,omitempty"` // job IDs blocking this
 
+	// Sandbox-only mode: job can only run bash/file ops inside its sandbox.
+	// Blocks delegation, MCP, browser, desktop, memory, skills, etc.
+	SandboxOnly bool `json:"sandboxOnly,omitempty"`
+
 	// Inbound webhook token — POST /api/scheduler/webhook/{token} triggers this job
 	WebhookToken string `json:"webhookToken,omitempty"`
 
@@ -124,7 +128,7 @@ type JobExecution struct {
 }
 
 // PromptSender is a function that sends a prompt to the /api/pux/prompt endpoint and returns the response text.
-type PromptSender func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge bool) (string, error)
+type PromptSender func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge, sandboxOnly bool) (string, error)
 
 // SessionInjector injects text into the main agent session.
 type SessionInjector func(project, agentID, text string) error

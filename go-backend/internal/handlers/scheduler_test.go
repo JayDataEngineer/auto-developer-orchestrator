@@ -21,7 +21,7 @@ func setupSchedulerRouter(t *testing.T) (*chi.Mux, *scheduler.Scheduler) {
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "scheduler.json")
 
-	s := scheduler.NewScheduler(storePath, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge bool) (string, error) {
+	s := scheduler.NewScheduler(storePath, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge, sandboxOnly bool) (string, error) {
 		return "test output", nil
 	}, logger)
 

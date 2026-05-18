@@ -243,6 +243,7 @@ type promptRequest struct {
 	ThinkingLevel string   `json:"thinkingLevel,omitempty"`
 	AutoBranch    bool     `json:"autoBranch,omitempty"`
 	AutoMerge     bool     `json:"autoMerge,omitempty"`
+	SandboxOnly   bool     `json:"sandboxOnly,omitempty"`
 }
 
 // Prompt sends a coding task to Pux and streams events back via SSE.

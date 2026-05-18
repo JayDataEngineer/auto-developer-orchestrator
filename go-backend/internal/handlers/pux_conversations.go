@@ -32,6 +32,9 @@ func (h *PuxHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, "Failed to get history", http.StatusInternalServerError)
 		return
 	}
+	if msgs == nil {
+		msgs = []storage.StoredMessage{}
+	}
 	writeJSON(w, http.StatusOK, msgs)
 }
 

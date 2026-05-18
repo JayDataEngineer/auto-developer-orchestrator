@@ -91,7 +91,7 @@ func (r *DecisionRegistry) Cleanup(id string) {
 func (r *DecisionRegistry) WaitForDecision(
 	ctx context.Context,
 	req DecisionRequest,
-	subscriber chan AgentEvent,
+	subscriber chan<- AgentEvent,
 	timeout time.Duration,
 ) (DecisionResponse, error) {
 	ch := r.Register(req.ID)
