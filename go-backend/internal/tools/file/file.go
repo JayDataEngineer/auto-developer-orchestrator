@@ -16,7 +16,7 @@ import (
 type SandboxFileOps interface {
 	ReadFile(ctx context.Context, path string) (string, error)
 	WriteFile(ctx context.Context, path string, content string, overwrite bool) (string, error)
-	EditFile(ctx context.Context, path string, oldStr, newStr string) (string, error)
+	EditFile(ctx context.Context, path string, oldStr, newStr string, replaceAll bool) (string, error)
 	Grep(ctx context.Context, path string, pattern string) (string, error)
 	Glob(ctx context.Context, path string, pattern string) (string, error)
 }
@@ -51,7 +51,7 @@ func (s *SimpleSandboxOps) WriteFile(ctx context.Context, path string, content s
 	return fmt.Sprintf("Wrote %d bytes to %s", len(content), path), nil
 }
 
-func (s *SimpleSandboxOps) EditFile(ctx context.Context, path string, oldStr, newStr string) (string, error) {
+func (s *SimpleSandboxOps) EditFile(ctx context.Context, path string, oldStr, newStr string, replaceAll bool) (string, error) {
 	data, err := os.ReadFile(s.absPath(path))
 	if err != nil {
 		return "", err
@@ -60,11 +60,23 @@ func (s *SimpleSandboxOps) EditFile(ctx context.Context, path string, oldStr, ne
 	if !strings.Contains(content, oldStr) {
 		return "", fmt.Errorf("oldString not found in file")
 	}
-	newContent := strings.Replace(content, oldStr, newStr, 1)
+
+	count := strings.Count(content, oldStr)
+	var newContent string
+	if replaceAll {
+		newContent = strings.ReplaceAll(content, oldStr, newStr)
+	} else {
+		if count > 1 {
+			return "", fmt.Errorf("oldString found %d times in file. Use replace_all=true to replace all occurrences, or provide a more specific string", count)
+		}
+		newContent = strings.Replace(content, oldStr, newStr, 1)
+		count = 1
+	}
+
 	if err := os.WriteFile(s.absPath(path), []byte(newContent), 0644); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Replaced 1 occurrence in %s", path), nil
+	return fmt.Sprintf("Replaced %d occurrence(s) in %s", count, path), nil
 }
 
 func (s *SimpleSandboxOps) Grep(ctx context.Context, path string, pattern string) (string, error) {
@@ -283,7 +295,9 @@ func NewEditTool(ops SandboxFileOps) *EditTool {
 }
 
 func (t *EditTool) Name() string        { return "file_edit" }
-func (t *EditTool) Description() string { return "Replace a string in a file" }
+func (t *EditTool) Description() string {
+	return "Replace a string in a file. Set replace_all=true to replace all occurrences."
+}
 
 func (t *EditTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
@@ -291,7 +305,8 @@ func (t *EditTool) Schema() json.RawMessage {
 		"properties": {
 			"file_path": {"type": "string", "description": "Path to the file to edit"},
 			"old_string": {"type": "string", "description": "The text to replace"},
-			"new_string": {"type": "string", "description": "The text to replace it with"}
+			"new_string": {"type": "string", "description": "The text to replace it with"},
+			"replace_all": {"type": "boolean", "description": "If true, replace all occurrences. Default is false (first occurrence only)."}
 		},
 		"required": ["file_path", "old_string", "new_string"]
 	}`)
@@ -304,7 +319,11 @@ func (t *EditTool) Execute(ctx context.Context, args map[string]any) (any, error
 	if path == "" || oldStr == "" {
 		return nil, core.NewToolError("file_edit", "missing required parameters")
 	}
-	result, err := t.ops.EditFile(ctx, path, oldStr, newStr)
+	replaceAll := false
+	if v, ok := args["replace_all"].(bool); ok {
+		replaceAll = v
+	}
+	result, err := t.ops.EditFile(ctx, path, oldStr, newStr, replaceAll)
 	if err != nil {
 		return nil, err
 	}

@@ -65,10 +65,14 @@ func (f *FileOps) WriteFile(ctx context.Context, path string, content string, ov
 	return fmt.Sprintf("Wrote %s (%d bytes)", path, len(content)), nil
 }
 
-func (f *FileOps) EditFile(ctx context.Context, path string, oldStr, newStr string) (string, error) {
+func (f *FileOps) EditFile(ctx context.Context, path string, oldStr, newStr string, replaceAll bool) (string, error) {
 	sedOld := strings.ReplaceAll(oldStr, "/", "\\/")
 	sedNew := strings.ReplaceAll(newStr, "/", "\\/")
-	_, err := f.exec(ctx, fmt.Sprintf("sed -i 's/%s/%s/' %s", sedOld, sedNew, shQ(path)))
+	flag := ""
+	if replaceAll {
+		flag = "g"
+	}
+	_, err := f.exec(ctx, fmt.Sprintf("sed -i 's/%s/%s/%s' %s", sedOld, sedNew, flag, shQ(path)))
 	if err != nil {
 		return "", err
 	}

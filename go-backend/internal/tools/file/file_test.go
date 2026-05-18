@@ -111,7 +111,7 @@ func TestSimpleSandboxOps_EditFile(t *testing.T) {
 	os.WriteFile(path, []byte("hello world foo"), 0644)
 
 	ops := &SimpleSandboxOps{BasePath: dir}
-	result, err := ops.EditFile(context.Background(), "edit.txt", "world", "there")
+	result, err := ops.EditFile(context.Background(), "edit.txt", "world", "there", false)
 	testutil.AssertNoError(t, err)
 	if result == "" {
 		t.Error("expected non-empty result")
@@ -129,7 +129,7 @@ func TestSimpleSandboxOps_EditFile_NotFound(t *testing.T) {
 	os.WriteFile(path, []byte("hello world"), 0644)
 
 	ops := &SimpleSandboxOps{BasePath: dir}
-	_, err := ops.EditFile(context.Background(), "edit.txt", "nonexistent", "replacement")
+	_, err := ops.EditFile(context.Background(), "edit.txt", "nonexistent", "replacement", false)
 	if err == nil {
 		t.Fatal("expected error for oldString not found")
 	}
@@ -137,9 +137,42 @@ func TestSimpleSandboxOps_EditFile_NotFound(t *testing.T) {
 
 func TestSimpleSandboxOps_EditFile_FileNotFound(t *testing.T) {
 	ops := &SimpleSandboxOps{BasePath: t.TempDir()}
-	_, err := ops.EditFile(context.Background(), "nope.txt", "old", "new")
+	_, err := ops.EditFile(context.Background(), "nope.txt", "old", "new", false)
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestSimpleSandboxOps_EditFile_ReplaceAll(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "edit.txt")
+	os.WriteFile(path, []byte("foo bar foo baz foo"), 0644)
+
+	ops := &SimpleSandboxOps{BasePath: dir}
+	result, err := ops.EditFile(context.Background(), "edit.txt", "foo", "qux", true)
+	testutil.AssertNoError(t, err)
+	if !strings.Contains(result, "3") {
+		t.Errorf("expected count of 3 in result, got %q", result)
+	}
+
+	data, _ := os.ReadFile(path)
+	if string(data) != "qux bar qux baz qux" {
+		t.Errorf("expected 'qux bar qux baz qux', got %q", string(data))
+	}
+}
+
+func TestSimpleSandboxOps_EditFile_MultipleWithoutFlag(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "edit.txt")
+	os.WriteFile(path, []byte("foo bar foo"), 0644)
+
+	ops := &SimpleSandboxOps{BasePath: dir}
+	_, err := ops.EditFile(context.Background(), "edit.txt", "foo", "qux", false)
+	if err == nil {
+		t.Fatal("expected error for multiple occurrences without replace_all")
+	}
+	if !strings.Contains(err.Error(), "2 times") {
+		t.Errorf("expected error about 2 occurrences, got %q", err.Error())
 	}
 }
 
@@ -370,6 +403,29 @@ func TestEditTool_Execute(t *testing.T) {
 	}
 }
 
+func TestEditTool_Execute_ReplaceAll(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "edit.txt")
+	os.WriteFile(path, []byte("aaa bbb aaa ccc aaa"), 0644)
+
+	tool := NewEditTool(&SimpleSandboxOps{BasePath: dir})
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"file_path":   "edit.txt",
+		"old_string":  "aaa",
+		"new_string":  "zzz",
+		"replace_all": true,
+	})
+	testutil.AssertNoError(t, err)
+
+	m := result.(map[string]any)
+	testutil.AssertStringField(t, m, "path", "edit.txt")
+
+	data, _ := os.ReadFile(path)
+	if string(data) != "zzz bbb zzz ccc zzz" {
+		t.Errorf("expected 'zzz bbb zzz ccc zzz', got %q", string(data))
+	}
+}
+
 func TestEditTool_Execute_MissingParams(t *testing.T) {
 	tool := NewEditTool(&SimpleSandboxOps{})
 	_, err := tool.Execute(context.Background(), map[string]any{
@@ -403,7 +459,7 @@ func TestGrepTool_Execute_MissingPattern(t *testing.T) {
 type mockFileOps struct {
 	readFileFn  func(ctx context.Context, path string) (string, error)
 	writeFileFn func(ctx context.Context, path string, content string, overwrite bool) (string, error)
-	editFileFn  func(ctx context.Context, path string, oldStr, newStr string) (string, error)
+	editFileFn  func(ctx context.Context, path string, oldStr, newStr string, replaceAll bool) (string, error)
 	grepFn      func(ctx context.Context, path string, pattern string) (string, error)
 	globFn      func(ctx context.Context, path string, pattern string) (string, error)
 }
@@ -420,9 +476,9 @@ func (m *mockFileOps) WriteFile(ctx context.Context, path string, content string
 	}
 	return "", nil
 }
-func (m *mockFileOps) EditFile(ctx context.Context, path string, oldStr, newStr string) (string, error) {
+func (m *mockFileOps) EditFile(ctx context.Context, path string, oldStr, newStr string, replaceAll bool) (string, error) {
 	if m.editFileFn != nil {
-		return m.editFileFn(ctx, path, oldStr, newStr)
+		return m.editFileFn(ctx, path, oldStr, newStr, replaceAll)
 	}
 	return "", nil
 }
@@ -504,6 +560,6 @@ func (f grepFunc) WriteFile(ctx context.Context, path string, content string, ov
 	return "", nil
 }
 
-func (f grepFunc) EditFile(ctx context.Context, path string, oldStr, newStr string) (string, error) {
+func (f grepFunc) EditFile(ctx context.Context, path string, oldStr, newStr string, replaceAll bool) (string, error) {
 	return "", nil
 }

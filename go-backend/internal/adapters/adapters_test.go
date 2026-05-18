@@ -61,7 +61,7 @@ func TestFileOps_WriteFile_NilManager(t *testing.T) {
 
 func TestFileOps_EditFile_NilManager(t *testing.T) {
 	f := &FileOps{Mgr: nil}
-	_, err := f.EditFile(context.Background(), "file.txt", "old", "new")
+	_, err := f.EditFile(context.Background(), "file.txt", "old", "new", false)
 	if err == nil {
 		t.Fatal("expected error for nil manager")
 	}
