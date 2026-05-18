@@ -121,9 +121,18 @@ func (h *X11Handler) Mouse(w http.ResponseWriter, r *http.Request) {
 		if button == 0 {
 			button = 1
 		}
+		x, y := req.X, req.Y
+
+		// Move cursor to target. Brief pause lets VNC render the cursor
+		// arriving before the click fires — makes mouse movement visible
+		// to anyone watching through noVNC.
+		_, _ = h.exec(r, sandboxID, display, []string{
+			"bash", "-c", fmt.Sprintf("xdotool mousemove %d %d && sleep 0.15", x, y),
+		})
+
+		// Execute the click
 		_, err := h.exec(r, sandboxID, display, []string{
-			"xdotool", "mousemove", fmt.Sprintf("%d", req.X), fmt.Sprintf("%d", req.Y),
-			"click", fmt.Sprintf("%d", button),
+			"xdotool", "click", fmt.Sprintf("%d", button),
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
