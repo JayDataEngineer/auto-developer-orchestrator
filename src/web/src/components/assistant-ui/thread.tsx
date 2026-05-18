@@ -35,7 +35,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { AddProviderDialog } from "@/components/add-provider-dialog";
 import { cn } from "@/lib/utils";
 import {
-	ActionBarMorePrimitive,
 	ActionBarPrimitive,
 	AuiIf,
 	BranchPickerPrimitive,
@@ -56,7 +55,6 @@ import {
 	CpuIcon,
 	DownloadIcon,
 	HardDriveIcon,
-	MoreHorizontalIcon,
 	PencilIcon,
 	PlusIcon,
 	RefreshCwIcon,
@@ -202,6 +200,8 @@ const ComposerAction: FC = () => {
 	return (
 		<>
 			<div className="aui-composer-action-wrapper relative flex items-center justify-between">
+			<div className="flex items-center gap-1">
+				<ComposerAddAttachment />
 				<Select value={activeModel || undefined} onValueChange={(val) => {
 					if (val === "__clear_logic") { setDefaults("", defaultWorker); return; }
 					if (val === "__clear_worker") { setDefaults(defaultLogic, ""); return; }
@@ -295,7 +295,8 @@ const ComposerAction: FC = () => {
 						</div>
 					</SelectContent>
 				</Select>
-			<ComposerAddAttachment />
+			</div>
+			<div className="flex items-center gap-1">
 			<AuiIf condition={(s) => !s.thread.isRunning}>
 				<ComposerPrimitive.Send asChild>
 					<TooltipIconButton
@@ -324,6 +325,7 @@ const ComposerAction: FC = () => {
 					</Button>
 				</ComposerPrimitive.Cancel>
 			</AuiIf>
+			</div>
 		</div>
 		<AddProviderDialog open={showAddProvider} onOpenChange={setShowAddProvider} />
 	</>
@@ -434,33 +436,16 @@ const AssistantActionBar: FC = () => {
 					</AuiIf>
 				</TooltipIconButton>
 			</ActionBarPrimitive.Copy>
+			<ActionBarPrimitive.ExportMarkdown asChild>
+				<TooltipIconButton tooltip="Export as Markdown">
+					<DownloadIcon />
+				</TooltipIconButton>
+			</ActionBarPrimitive.ExportMarkdown>
 			<ActionBarPrimitive.Reload asChild>
 				<TooltipIconButton tooltip="Refresh">
 					<RefreshCwIcon />
 				</TooltipIconButton>
 			</ActionBarPrimitive.Reload>
-			<ActionBarMorePrimitive.Root>
-				<ActionBarMorePrimitive.Trigger asChild>
-					<TooltipIconButton
-						tooltip="More"
-						className="data-[state=open]:bg-accent"
-					>
-						<MoreHorizontalIcon />
-					</TooltipIconButton>
-				</ActionBarMorePrimitive.Trigger>
-				<ActionBarMorePrimitive.Content
-					side="bottom"
-					align="start"
-					className="aui-action-bar-more-content z-50 min-w-32 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
-				>
-					<ActionBarPrimitive.ExportMarkdown asChild>
-						<ActionBarMorePrimitive.Item className="aui-action-bar-more-item flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
-							<DownloadIcon className="size-4" />
-							Export as Markdown
-						</ActionBarMorePrimitive.Item>
-					</ActionBarPrimitive.ExportMarkdown>
-				</ActionBarMorePrimitive.Content>
-			</ActionBarMorePrimitive.Root>
 		</ActionBarPrimitive.Root>
 	);
 };
