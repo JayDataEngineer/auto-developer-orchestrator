@@ -162,17 +162,40 @@ func formatToolArgs(toolName string, args map[string]any) string {
 		if cmd, ok := args["cmd"].(string); ok {
 			return cmd
 		}
-	case "write", "file_write", "write_file":
+	case "file_write", "write_file":
 		if path, ok := args["file_path"].(string); ok {
 			return fmt.Sprintf("Write to: %s", path)
 		}
-	case "edit", "file_edit", "edit_file":
-		if path, ok := args["file_path"].(string); ok {
-			return fmt.Sprintf("Edit: %s", path)
+	case "file_edit", "edit_file":
+		path, _ := args["file_path"].(string)
+		old, _ := args["old_string"].(string)
+		preview := old
+		if len(preview) > 80 {
+			preview = preview[:80] + "..."
 		}
-	case "web_fetch", "web_search":
-		if url, ok := args["url"].(string); ok {
-			return fmt.Sprintf("Fetch: %s", url)
+		return fmt.Sprintf("Edit: %s\nReplace: %q", path, preview)
+	case "file_read", "read_file":
+		if path, ok := args["file_path"].(string); ok {
+			return fmt.Sprintf("Read: %s", path)
+		}
+	case "delegate_to":
+		if role, ok := args["role"].(string); ok {
+			return fmt.Sprintf("Delegate to %s", role)
+		}
+		if task, ok := args["task"].(string); ok {
+			preview := task
+			if len(preview) > 100 {
+				preview = preview[:100] + "..."
+			}
+			return preview
+		}
+	case "delegate_async":
+		if task, ok := args["task"].(string); ok {
+			preview := task
+			if len(preview) > 100 {
+				preview = preview[:100] + "..."
+			}
+			return preview
 		}
 	}
 	// Fallback: show args as JSON-like text

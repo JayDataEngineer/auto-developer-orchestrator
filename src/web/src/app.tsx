@@ -18,6 +18,7 @@ import { VNCViewer } from "@/components/workbench/vnc-viewer";
 import { EditorPanel } from "@/components/workbench/editor-panel";
 import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
 import { WorkersPanel } from "@/components/workbench/workers-panel";
+import { PermissionsPanel } from "@/components/workbench/permissions-panel";
 import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
 import { AddProjectDialog } from "@/components/add-project-dialog";
 import { WidgetToolUIs } from "@/components/assistant-ui/widget-tool-ui";
@@ -70,6 +71,7 @@ import {
 	Users,
 	FolderOpen,
 	XIcon,
+	Shield,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -380,6 +382,10 @@ function Workbench() {
 					<Users className="size-4" />
 					Agents
 				</TabsTrigger>
+				<TabsTrigger value="permissions" className="gap-1.5 text-xs">
+					<Shield className="size-4" />
+					Permissions
+				</TabsTrigger>
 			</TabsList>
 			<TabsContent value="vnc" className="flex-1 overflow-hidden mt-0">
 				<VNCViewer />
@@ -392,6 +398,9 @@ function Workbench() {
 			</TabsContent>
 			<TabsContent value="workers" className="flex-1 overflow-hidden mt-0">
 				<WorkersPanel />
+			</TabsContent>
+			<TabsContent value="permissions" className="flex-1 overflow-hidden mt-0">
+				<PermissionsPanel />
 			</TabsContent>
 		</Tabs>
 	);
