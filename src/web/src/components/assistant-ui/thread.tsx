@@ -5,6 +5,7 @@ import {
 	ComposerAttachments,
 	UserMessageAttachments,
 } from "@/components/assistant-ui/attachment";
+import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
@@ -294,12 +295,13 @@ const ComposerAction: FC = () => {
 const AssistantMessage: FC = () => {
 	return (
 		<MessagePrimitive.Root
-			className="relative mx-auto w-full max-w-[var(--thread-max-width)] py-3 fade-in slide-in-from-bottom-1 animate-in duration-150"
+			className="group relative mx-auto w-full max-w-[var(--thread-max-width)] py-3 fade-in slide-in-from-bottom-1 animate-in duration-150"
 			data-role="assistant"
 		>
 			<div className="break-words px-2 leading-relaxed text-foreground">
 				<MessagePrimitive.Parts
 					components={{
+						Text: MarkdownText,
 						tools: { Fallback: ToolFallback },
 					}}
 				/>
@@ -312,7 +314,7 @@ const AssistantMessage: FC = () => {
 				</AuiIf>
 			</div>
 
-			<div className="mt-1 ml-2 flex min-h-6 items-center">
+			<div className="mt-1 ml-2 flex min-h-6 items-center opacity-0 transition-opacity group-hover:opacity-100">
 				<BranchPicker />
 				<AssistantActionBar />
 			</div>
@@ -334,7 +336,7 @@ const AssistantActionBar: FC = () => {
 	return (
 		<ActionBarPrimitive.Root
 			hideWhenRunning
-			autohide="not-last"
+			autohide
 			className="-ml-1 flex gap-1 text-muted-foreground"
 		>
 			<ActionBarPrimitive.Copy asChild>
