@@ -15,14 +15,21 @@ pytestmark = [pytest.mark.api]
 
 
 class TestConversationHistory:
-    """GET /api/pi/history — list conversation summaries."""
+    """GET /api/pux/history — list conversation messages; GET /api/pux/conversations — summaries."""
 
-    def test_history_returns_conversations_list(self, api_url, api_session):
-        resp = api_session.get(f"{api_url}/api/pi/history")
+    def test_history_returns_list(self, api_url, api_session):
+        resp = api_session.get(f"{api_url}/api/pux/history", params={"project": "default"})
         assert resp.status_code == 200
         data = resp.json()
-        assert "conversations" in data
-        assert isinstance(data["conversations"], list)
+        # GetHistory returns a raw list of messages
+        assert isinstance(data, list)
+
+    def test_conversations_returns_list(self, api_url, api_session):
+        resp = api_session.get(f"{api_url}/api/pux/conversations")
+        assert resp.status_code == 200
+        data = resp.json()
+        # GetConversations returns a raw list of ConversationSummary objects
+        assert isinstance(data, list)
 
     def test_conversation_summary_has_required_fields(self, api_url, api_session, test_project):
         """Every conversation summary must have project, agentId, lastMessage, lastAt, messageCount, title."""
@@ -35,10 +42,9 @@ class TestConversationHistory:
         except Exception:
             pass  # Agent might fail but messages should still be saved
 
-        resp = api_session.get(f"{api_url}/api/pi/history")
+        resp = api_session.get(f"{api_url}/api/pux/conversations")
         assert resp.status_code == 200
-        data = resp.json()
-        conversations = data["conversations"]
+        conversations = resp.json()
 
         if not conversations:
             pytest.skip("No conversations exist yet — send a prompt first")
@@ -56,15 +62,15 @@ class TestConversationHistory:
 
         # Cleanup
         api_session.delete(
-            f"{api_url}/api/pi/conversation?project={test_project}&agentId={agent_id}"
+            f"{api_url}/api/pux/conversation?project={test_project}&agentId={agent_id}"
         )
 
 
 class TestConversationRename:
-    """PUT /api/pi/conversation/rename — set custom title."""
+    """PUT /api/pux/conversation/rename — set custom title."""
 
     def test_rename_sets_title(self, api_url, api_session, test_project):
-        """Rename a conversation and verify the title appears in history."""
+        """Rename a conversation and verify the title appears in conversations."""
         # Create a conversation by sending a message
         from utils.sse import stream_prompt
         agent_id = f"test-rename-{__name__}"
@@ -73,27 +79,27 @@ class TestConversationRename:
         except Exception:
             pass
 
-        # Rename it
+        # Rename it — project, agentId, and title go in the JSON body
         new_title = "My Custom Title 123"
         resp = api_session.put(
-            f"{api_url}/api/pi/conversation/rename?project={test_project}&agentId={agent_id}",
-            json={"title": new_title},
+            f"{api_url}/api/pux/conversation/rename",
+            json={"project": test_project, "agentId": agent_id, "title": new_title},
         )
         assert resp.status_code == 200, f"Rename failed: {resp.text}"
         data = resp.json()
-        assert data.get("renamed") is True
+        assert data.get("success") is True
 
-        # Verify title appears in history
-        hist_resp = api_session.get(f"{api_url}/api/pi/history")
-        assert hist_resp.status_code == 200
-        conversations = hist_resp.json()["conversations"]
+        # Verify title appears in conversations list
+        conv_resp = api_session.get(f"{api_url}/api/pux/conversations")
+        assert conv_resp.status_code == 200
+        conversations = conv_resp.json()
         match = [c for c in conversations if c["project"] == test_project and c["agentId"] == agent_id]
         assert len(match) == 1, f"Expected 1 conversation, found {len(match)}"
         assert match[0]["title"] == new_title, f"Title mismatch: expected {new_title!r}, got {match[0]['title']!r}"
 
         # Cleanup
         api_session.delete(
-            f"{api_url}/api/pi/conversation?project={test_project}&agentId={agent_id}"
+            f"{api_url}/api/pux/conversation?project={test_project}&agentId={agent_id}"
         )
 
     def test_rename_overwrites_previous_title(self, api_url, api_session, test_project):
@@ -107,54 +113,56 @@ class TestConversationRename:
 
         # First rename
         api_session.put(
-            f"{api_url}/api/pi/conversation/rename?project={test_project}&agentId={agent_id}",
-            json={"title": "First Title"},
+            f"{api_url}/api/pux/conversation/rename",
+            json={"project": test_project, "agentId": agent_id, "title": "First Title"},
         )
 
         # Second rename
         resp = api_session.put(
-            f"{api_url}/api/pi/conversation/rename?project={test_project}&agentId={agent_id}",
-            json={"title": "Second Title"},
+            f"{api_url}/api/pux/conversation/rename",
+            json={"project": test_project, "agentId": agent_id, "title": "Second Title"},
         )
         assert resp.status_code == 200
 
         # Verify second title won
-        hist = api_session.get(f"{api_url}/api/pi/history").json()["conversations"]
-        match = [c for c in hist if c["project"] == test_project and c["agentId"] == agent_id]
+        conv_resp = api_session.get(f"{api_url}/api/pux/conversations")
+        conversations = conv_resp.json()
+        match = [c for c in conversations if c["project"] == test_project and c["agentId"] == agent_id]
         assert len(match) == 1
         assert match[0]["title"] == "Second Title"
 
         # Cleanup
         api_session.delete(
-            f"{api_url}/api/pi/conversation?project={test_project}&agentId={agent_id}"
+            f"{api_url}/api/pux/conversation?project={test_project}&agentId={agent_id}"
         )
 
     def test_rename_missing_project_returns_error(self, api_url, api_session):
         resp = api_session.put(
-            f"{api_url}/api/pi/conversation/rename?project=&agentId=default",
-            json={"title": "test"},
+            f"{api_url}/api/pux/conversation/rename",
+            json={"project": "", "agentId": "default", "title": "test"},
         )
         assert resp.status_code == 400
 
-    def test_rename_missing_agent_id_returns_error(self, api_url, api_session):
+    def test_rename_missing_title_returns_error(self, api_url, api_session):
         resp = api_session.put(
-            f"{api_url}/api/pi/conversation/rename?project=test&agentId=",
-            json={"title": "test"},
+            f"{api_url}/api/pux/conversation/rename",
+            json={"project": "test", "agentId": "default"},
         )
+        # The handler requires both project and title
         assert resp.status_code == 400
 
     def test_rename_nonexistent_conversation_succeeds(self, api_url, api_session):
         """Renaming a conversation that has no messages should still succeed (upsert)."""
         resp = api_session.put(
-            f"{api_url}/api/pi/conversation/rename?project=ghost-project&agentId=ghost-agent",
-            json={"title": "Ghost Title"},
+            f"{api_url}/api/pux/conversation/rename",
+            json={"project": "ghost-project", "agentId": "ghost-agent", "title": "Ghost Title"},
         )
         assert resp.status_code == 200
-        assert resp.json().get("renamed") is True
+        assert resp.json().get("success") is True
 
 
 class TestConversationDelete:
-    """DELETE /api/pi/conversation — delete conversation + title."""
+    """DELETE /api/pux/conversation — delete conversation + title."""
 
     def test_delete_removes_conversation(self, api_url, api_session, test_project):
         """Create, rename, then delete a conversation — verify it's gone."""
@@ -167,37 +175,40 @@ class TestConversationDelete:
 
         # Rename so we can verify both title and messages are deleted
         api_session.put(
-            f"{api_url}/api/pi/conversation/rename?project={test_project}&agentId={agent_id}",
-            json={"title": "To Be Deleted"},
+            f"{api_url}/api/pux/conversation/rename",
+            json={"project": test_project, "agentId": agent_id, "title": "To Be Deleted"},
         )
 
         # Confirm it exists
-        hist = api_session.get(f"{api_url}/api/pi/history").json()["conversations"]
-        match = [c for c in hist if c["project"] == test_project and c["agentId"] == agent_id]
+        conv_resp = api_session.get(f"{api_url}/api/pux/conversations")
+        conversations = conv_resp.json()
+        match = [c for c in conversations if c["project"] == test_project and c["agentId"] == agent_id]
         assert len(match) == 1
 
-        # Delete
+        # Delete — uses query params for project and agentId
         resp = api_session.delete(
-            f"{api_url}/api/pi/conversation?project={test_project}&agentId={agent_id}"
+            f"{api_url}/api/pux/conversation?project={test_project}&agentId={agent_id}"
         )
         assert resp.status_code == 200
-        assert resp.json().get("deleted") is True
+        assert resp.json().get("success") is True
 
-        # Verify it's gone from history
-        hist2 = api_session.get(f"{api_url}/api/pi/history").json()["conversations"]
-        match2 = [c for c in hist2 if c["project"] == test_project and c["agentId"] == agent_id]
-        assert len(match2) == 0, f"Conversation still in history after delete: {match2}"
+        # Verify it's gone from conversations
+        conv_resp2 = api_session.get(f"{api_url}/api/pux/conversations")
+        conversations2 = conv_resp2.json()
+        match2 = [c for c in conversations2 if c["project"] == test_project and c["agentId"] == agent_id]
+        assert len(match2) == 0, f"Conversation still in conversations after delete: {match2}"
 
     def test_delete_nonexistent_conversation_succeeds(self, api_url, api_session):
         """Deleting a conversation that doesn't exist should return success."""
         resp = api_session.delete(
-            f"{api_url}/api/pi/conversation?project=nope&agentId=nope"
+            f"{api_url}/api/pux/conversation?project=nope&agentId=nope"
         )
         assert resp.status_code == 200
-        assert resp.json().get("deleted") is True
+        assert resp.json().get("success") is True
 
     def test_delete_missing_params_returns_error(self, api_url, api_session):
-        resp = api_session.delete(f"{api_url}/api/pi/conversation?project=test")
+        resp = api_session.delete(f"{api_url}/api/pux/conversation")
+        # No project query param — requireProjectName returns 400
         assert resp.status_code == 400
 
     def test_delete_also_removes_title(self, api_url, api_session, test_project):
@@ -211,30 +222,32 @@ class TestConversationDelete:
 
         # Rename
         api_session.put(
-            f"{api_url}/api/pi/conversation/rename?project={test_project}&agentId={agent_id}",
-            json={"title": "Title To Be Nuked"},
+            f"{api_url}/api/pux/conversation/rename",
+            json={"project": test_project, "agentId": agent_id, "title": "Title To Be Nuked"},
         )
 
         # Delete
         resp = api_session.delete(
-            f"{api_url}/api/pi/conversation?project={test_project}&agentId={agent_id}"
+            f"{api_url}/api/pux/conversation?project={test_project}&agentId={agent_id}"
         )
         assert resp.status_code == 200
 
-        # Re-create conversation with same ID — title should be empty
+        # Re-create conversation with same ID — title should be auto-set from new first message
         try:
             stream_prompt(api_url, api_session, test_project, "hello again", agent_id=agent_id)
         except Exception:
             pass
 
-        hist = api_session.get(f"{api_url}/api/pi/history").json()["conversations"]
-        match = [c for c in hist if c["project"] == test_project and c["agentId"] == agent_id]
+        conv_resp = api_session.get(f"{api_url}/api/pux/conversations")
+        conversations = conv_resp.json()
+        match = [c for c in conversations if c["project"] == test_project and c["agentId"] == agent_id]
         if match:
-            assert match[0]["title"] == "", f"Title should be empty after delete+recreate, got: {match[0]['title']!r}"
+            # Title should no longer be the old custom title
+            assert match[0]["title"] != "Title To Be Nuked", f"Old custom title should be gone, got: {match[0]['title']!r}"
 
         # Cleanup
         api_session.delete(
-            f"{api_url}/api/pi/conversation?project={test_project}&agentId={agent_id}"
+            f"{api_url}/api/pux/conversation?project={test_project}&agentId={agent_id}"
         )
 
 
@@ -251,30 +264,33 @@ class TestConversationRoundTrip:
         except Exception:
             pass
 
-        # Step 2: Verify it appears in history
-        hist = api_session.get(f"{api_url}/api/pi/history").json()["conversations"]
-        match = [c for c in hist if c["project"] == test_project and c["agentId"] == agent_id]
-        assert len(match) == 1, f"Step 2: Conversation not in history"
+        # Step 2: Verify it appears in conversations
+        conv_resp = api_session.get(f"{api_url}/api/pux/conversations")
+        conversations = conv_resp.json()
+        match = [c for c in conversations if c["project"] == test_project and c["agentId"] == agent_id]
+        assert len(match) == 1, "Step 2: Conversation not in conversations"
         conv = match[0]
         assert conv["messageCount"] >= 1, f"Step 2: Expected messages, got {conv['messageCount']}"
-        assert conv["title"] == "", f"Step 2: Title should be empty initially, got: {conv['title']!r}"
+        # Title is auto-set from the first user message
+        assert conv["title"] != "", "Step 2: Title should be auto-set from first message"
 
         # Step 3: Rename it
         resp = api_session.put(
-            f"{api_url}/api/pi/conversation/rename?project={test_project}&agentId={agent_id}",
-            json={"title": "Integration Test Chat"},
+            f"{api_url}/api/pux/conversation/rename",
+            json={"project": test_project, "agentId": agent_id, "title": "Integration Test Chat"},
         )
         assert resp.status_code == 200
 
-        # Step 4: Verify new title in history
-        hist2 = api_session.get(f"{api_url}/api/pi/history").json()["conversations"]
-        match2 = [c for c in hist2 if c["project"] == test_project and c["agentId"] == agent_id]
+        # Step 4: Verify new title in conversations
+        conv_resp2 = api_session.get(f"{api_url}/api/pux/conversations")
+        conversations2 = conv_resp2.json()
+        match2 = [c for c in conversations2 if c["project"] == test_project and c["agentId"] == agent_id]
         assert len(match2) == 1
         assert match2[0]["title"] == "Integration Test Chat"
 
-        # Step 5: Get messages — verify they exist
+        # Step 5: Get messages via history — verify they exist
         msgs_resp = api_session.get(
-            f"{api_url}/api/pi/messages?project={test_project}&agentId={agent_id}"
+            f"{api_url}/api/pux/history", params={"project": test_project, "agentId": agent_id}
         )
         assert msgs_resp.status_code == 200
         messages = msgs_resp.json()
@@ -282,19 +298,20 @@ class TestConversationRoundTrip:
 
         # Step 6: Delete
         del_resp = api_session.delete(
-            f"{api_url}/api/pi/conversation?project={test_project}&agentId={agent_id}"
+            f"{api_url}/api/pux/conversation?project={test_project}&agentId={agent_id}"
         )
         assert del_resp.status_code == 200
-        assert del_resp.json()["deleted"] is True
+        assert del_resp.json()["success"] is True
 
-        # Step 7: Verify gone from history
-        hist3 = api_session.get(f"{api_url}/api/pi/history").json()["conversations"]
-        match3 = [c for c in hist3 if c["project"] == test_project and c["agentId"] == agent_id]
+        # Step 7: Verify gone from conversations
+        conv_resp3 = api_session.get(f"{api_url}/api/pux/conversations")
+        conversations3 = conv_resp3.json()
+        match3 = [c for c in conversations3 if c["project"] == test_project and c["agentId"] == agent_id]
         assert len(match3) == 0, "Step 7: Conversation should be gone after delete"
 
         # Step 8: Verify messages are gone
-        msgs2 = api_session.get(
-            f"{api_url}/api/pi/messages?project={test_project}&agentId={agent_id}"
+        msgs2_resp = api_session.get(
+            f"{api_url}/api/pux/history", params={"project": test_project, "agentId": agent_id}
         )
-        assert msgs2.status_code == 200
-        assert len(msgs2.json()) == 0, "Step 8: Messages should be empty after delete"
+        assert msgs2_resp.status_code == 200
+        assert len(msgs2_resp.json()) == 0, "Step 8: Messages should be empty after delete"

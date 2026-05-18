@@ -1,11 +1,11 @@
 /**
  * Navigation E2E Tests
  *
- * Tests tab switching, keyboard shortcuts, project selector,
- * branding, and top-level layout.
+ * Tests workbench tab switching, sidebar, branding,
+ * and top-level layout.
  */
 import { test, expect } from '@playwright/test';
-import { mockApiRoutes, MOCK_PROJECTS } from './fixtures';
+import { mockApiRoutes } from './fixtures';
 
 test.describe('Navigation', () => {
   test.beforeEach(async ({ page }) => {
@@ -14,134 +14,89 @@ test.describe('Navigation', () => {
     await page.waitForLoadState('networkidle');
     // Wait for all API calls to resolve and React to render
     await page.waitForTimeout(3000);
-    // Verify the top bar is rendered before running tests
-    await page.waitForSelector('button:has-text("Agent")', { timeout: 10000 });
+    // Verify the app is rendered before running tests
+    await page.waitForSelector('[data-slot="thread-root"], [aria-label="Message input"]', { timeout: 10000 });
   });
 
-  test('renders all 3 tab buttons', async ({ page }) => {
-    await expect(page.getByRole('button', { name: 'Agent' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Tasks' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Desktop' })).toBeVisible();
+  test('renders workbench tab buttons', async ({ page }) => {
+    await expect(page.getByRole('tab', { name: 'Sandbox' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Editor' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Scheduler' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Agents' })).toBeVisible();
   });
 
-  test('defaults to Agent tab on load', async ({ page }) => {
-    const agentBtn = page.getByRole('button', { name: 'Agent' });
-    await expect(agentBtn).toHaveClass(/bg-primary/);
+  test('defaults to Sandbox tab on load', async ({ page }) => {
+    const sandboxTab = page.getByRole('tab', { name: 'Sandbox' });
+    await expect(sandboxTab).toHaveAttribute('data-state', 'active');
   });
 
-  test('switches to Tasks tab on click', async ({ page }) => {
-    await page.getByRole('button', { name: 'Tasks' }).click();
-    await expect(page.getByRole('button', { name: 'Tasks' })).toHaveClass(/bg-primary/);
-    await expect(page.getByRole('button', { name: 'Agent' })).not.toHaveClass(/bg-primary/);
+  test('switches to Scheduler tab on click', async ({ page }) => {
+    await page.getByRole('tab', { name: 'Scheduler' }).click();
+    await expect(page.getByRole('tab', { name: 'Scheduler' })).toHaveAttribute('data-state', 'active');
+    await expect(page.getByRole('tab', { name: 'Sandbox' })).not.toHaveAttribute('data-state', 'active');
   });
 
-  test('switches to Desktop tab on click', async ({ page }) => {
-    await page.getByRole('button', { name: 'Desktop' }).click();
-    await expect(page.getByRole('button', { name: 'Desktop' })).toHaveClass(/bg-primary/);
+  test('switches to Agents tab on click', async ({ page }) => {
+    await page.getByRole('tab', { name: 'Agents' }).click();
+    await expect(page.getByRole('tab', { name: 'Agents' })).toHaveAttribute('data-state', 'active');
   });
 
-  test('renders project selector with projects', async ({ page }) => {
-    const select = page.locator('select').first();
-    await expect(select).toBeVisible();
-    await expect(select).toHaveValue(MOCK_PROJECTS[0]);
+  test('renders Pux branding in sidebar', async ({ page }) => {
+    // "Pux" text appears in the sidebar header
+    const puxText = page.getByText('Pux', { exact: true }).first();
+    await expect(puxText).toBeVisible({ timeout: 5000 });
   });
 
-  test('renders PI branding text', async ({ page }) => {
-    // "PI" text appears in the top bar — check it exists
-    const piText = page.getByText('PI', { exact: true }).first();
-    await expect(piText).toBeVisible({ timeout: 5000 });
+  test('shows New Chat button in sidebar', async ({ page }) => {
+    const newChatBtn = page.getByText('New Chat');
+    await expect(newChatBtn).toBeVisible({ timeout: 5000 });
   });
 
-  test('shows GitHub settings button', async ({ page }) => {
-    // The GitHub button has title "GitHub Settings" or text "GitHub"
-    const githubBtn = page.getByTitle('GitHub Settings');
-    const githubText = page.getByText('GitHub').first();
-    const btnVisible = await githubBtn.isVisible().catch(() => false);
-    const textVisible = await githubText.isVisible().catch(() => false);
-    expect(btnVisible || textVisible).toBe(true);
-  });
-
-  test('keyboard shortcut Ctrl+1 switches to Agent tab', async ({ page }) => {
-    await page.getByRole('button', { name: 'Tasks' }).click();
-    await page.waitForTimeout(300);
-    await page.evaluate(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', ctrlKey: true, bubbles: true }));
-    });
-    await page.waitForTimeout(300);
-    await expect(page.getByRole('button', { name: 'Agent' })).toHaveClass(/bg-primary/);
-  });
-
-  test('keyboard shortcut Ctrl+2 switches to Tasks tab', async ({ page }) => {
-    await page.evaluate(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', ctrlKey: true, bubbles: true }));
-    });
-    await page.waitForTimeout(300);
-    await expect(page.getByRole('button', { name: 'Tasks' })).toHaveClass(/bg-primary/);
-  });
-
-  test('keyboard shortcut Ctrl+3 switches to Desktop tab', async ({ page }) => {
-    await page.evaluate(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: '3', ctrlKey: true, bubbles: true }));
-    });
-    await page.waitForTimeout(300);
-    await expect(page.getByRole('button', { name: 'Desktop' })).toHaveClass(/bg-primary/);
+  test('shows Open Folder button in sidebar', async ({ page }) => {
+    const openFolderBtn = page.getByText('Open Folder');
+    await expect(openFolderBtn).toBeVisible({ timeout: 5000 });
   });
 
   test('no white screen on any tab', async ({ page }) => {
-    const tabs = ['Tasks', 'Desktop'];
+    const tabs = ['Editor', 'Scheduler', 'Agents'];
     for (const tab of tabs) {
-      await page.getByRole('button', { name: tab }).click();
+      await page.getByRole('tab', { name: tab }).click();
       await page.waitForTimeout(1000);
-      const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-      await expect(rootDiv).toBeVisible();
+      // Body should always be visible
+      await expect(page.locator('body')).toBeVisible();
+      // Textarea should remain visible (chat is always present)
+      await expect(page.getByLabel('Message input')).toBeVisible({ timeout: 5000 });
     }
   });
 
-  test('changing project in selector updates state', async ({ page }) => {
-    const select = page.locator('select').first();
-    await select.selectOption(MOCK_PROJECTS[1]);
-    await expect(select).toHaveValue(MOCK_PROJECTS[1]);
-  });
-
   test('tab buttons have SVG icons', async ({ page }) => {
-    const tabs = ['Agent', 'Tasks', 'Desktop'];
+    const tabs = ['Sandbox', 'Editor', 'Scheduler', 'Agents'];
     for (const tab of tabs) {
-      const button = page.getByRole('button', { name: tab });
-      const svg = button.locator('svg');
+      const tabBtn = page.getByRole('tab', { name: tab });
+      const svg = tabBtn.locator('svg');
       await expect(svg).toBeAttached();
     }
   });
 
-  // ── Dynamic Sidebar Layout ──
+  // ── Sidebar Layout ──
 
-  test('Agent tab shows both left history sidebar and right artifacts panel', async ({ page }) => {
-    // Agent tab is default - check left sidebar (History) and right panel (Artifacts)
-    await expect(page.getByText('Artifacts')).toBeVisible({ timeout: 5000 });
-    // History sidebar should have the collapse toggle
-    const sidebarToggle = page.locator('.absolute.z-20 button, button:has(.lucide-chevrons-left), .lucide-chevron-left').first();
-    await expect(sidebarToggle).toBeVisible({ timeout: 5000 });
+  test('sidebar shows project groups or empty state', async ({ page }) => {
+    // Either "No projects yet" or project items are shown
+    const noProjects = page.getByText('No projects yet');
+    const projectItems = page.locator('[data-collapsible]');
+    const hasEmpty = await noProjects.isVisible().catch(() => false);
+    const hasProjects = (await projectItems.count()) > 0;
+    expect(hasEmpty || hasProjects).toBe(true);
   });
 
-  test('Tasks tab shows no sidebars, full-width kanban', async ({ page }) => {
-    await page.getByRole('button', { name: 'Tasks' }).click();
-    await page.waitForTimeout(1000);
-
-    // Artifacts panel should NOT be visible
-    const artifactsPanel = page.getByText('Artifacts');
-    const visible = await artifactsPanel.isVisible().catch(() => false);
-    expect(visible).toBe(false);
-
-    // Kanban columns should be visible
-    await expect(page.getByText('Pending').first()).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText('Completed').first()).toBeVisible({ timeout: 5000 });
+  test('workbench toggle button is visible', async ({ page }) => {
+    // The panel toggle button with aria-label
+    const toggleBtn = page.getByLabel('Open workbench').or(page.getByLabel('Close workbench'));
+    await expect(toggleBtn.first()).toBeVisible({ timeout: 5000 });
   });
 
-  test('Desktop tab shows its own 3-panel layout', async ({ page }) => {
-    await page.getByRole('button', { name: 'Desktop' }).click();
-    await page.waitForTimeout(1000);
-
-    // Should show "Agent Chat" header in narrow left panel
-    await expect(page.getByText('Agent Chat')).toBeVisible({ timeout: 5000 });
+  test('terminal toggle button is visible', async ({ page }) => {
+    const termBtn = page.getByLabel('Toggle terminal');
+    await expect(termBtn).toBeVisible({ timeout: 5000 });
   });
-
 });

@@ -142,10 +142,8 @@ func (h *ArtifactHandler) List(w http.ResponseWriter, r *http.Request) {
 	h.mu.RUnlock()
 
 	var result []*Artifact
-	if agentArtifacts != nil {
-		for _, a := range agentArtifacts {
-			result = append(result, a)
-		}
+	for _, a := range agentArtifacts {
+		result = append(result, a)
 	}
 
 	if result == nil {

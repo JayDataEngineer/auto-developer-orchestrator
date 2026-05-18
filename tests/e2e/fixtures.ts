@@ -9,7 +9,11 @@ import { test as base, expect, type Page, type Route } from '@playwright/test';
 
 // ─── Mock Data ────────────────────────────────────────────────────
 
-export const MOCK_PROJECTS = ['test-project', 'demo-app', 'sample-repo'];
+export const MOCK_PROJECTS = [
+  { name: 'test-project', path: '/home/user/projects/test-project' },
+  { name: 'demo-app', path: '/home/user/projects/demo-app' },
+  { name: 'sample-repo', path: '/home/user/projects/sample-repo' },
+];
 
 export const MOCK_TASKS = [
   {
@@ -300,7 +304,89 @@ export async function mockApiRoutes(page: Page, config: MockConfig = {}) {
     });
   });
 
-  // ── Pi Agent endpoints ──
+  // ── Pux API endpoints (new API paths used by the redesigned UI) ──
+
+  await page.route('**/api/pux/models**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MOCK_MODELS),
+    });
+  });
+
+  await page.route('**/api/pux/conversations**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([]),
+    });
+  });
+
+  await page.route('**/api/pux/conversation**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true }),
+    });
+  });
+
+  await page.route('**/api/pux/history**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ messages: [] }),
+    });
+  });
+
+  await page.route('**/api/pux/model**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true }),
+    });
+  });
+
+  await page.route('**/api/pux/defaults**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ logic: '', worker: '' }),
+    });
+  });
+
+  await page.route('**/api/pux/providers**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ providers: [] }),
+    });
+  });
+
+  await page.route('**/api/pux/agent-status**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: {} }),
+    });
+  });
+
+  await page.route('**/api/pux/mcp-servers**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ servers: [] }),
+    });
+  });
+
+  await page.route('**/api/pux/decision**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true }),
+    });
+  });
+
+  // ── Legacy Pi Agent endpoints (kept for backward compatibility) ──
 
   await page.route('**/api/pi/state**', async route => {
     await route.fulfill({
@@ -435,6 +521,16 @@ export async function mockApiRoutes(page: Page, config: MockConfig = {}) {
     }
   });
 
+  // ── Workers endpoints (used by Agents tab) ──
+
+  await page.route('**/api/workers/**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([]),
+    });
+  });
+
   // ── Artifacts endpoint ──
 
   await page.route('**/api/pi/artifacts**', async route => {
@@ -508,8 +604,9 @@ export async function mockApiRoutes(page: Page, config: MockConfig = {}) {
   });
 
   // ── SSE Prompt endpoint (the big one) ──
+  // Mock both /api/pux/prompt (new) and /api/pi/prompt (legacy)
 
-  await page.route('**/api/pi/prompt', async route => {
+  const sseHandler = async (route: Route) => {
     const events = sseEvents || SSE_SIMPLE_REPLY;
     const body = buildSSEStream(events);
 
@@ -522,7 +619,10 @@ export async function mockApiRoutes(page: Page, config: MockConfig = {}) {
       },
       body,
     });
-  });
+  };
+
+  await page.route('**/api/pux/prompt', sseHandler);
+  await page.route('**/api/pi/prompt', sseHandler);
 
   // ── Sub-agent endpoints ──
 

@@ -16,7 +16,7 @@ pytestmark = pytest.mark.api
 class TestArtifacts:
     def test_list_artifacts_empty(self, api_url, api_session, test_project):
         resp = api_session.get(
-            f"{api_url}/api/pi/artifacts",
+            f"{api_url}/api/pux/artifacts",
             params={"project": test_project, "agentId": "default"},
         )
         assert resp.status_code == 200
@@ -26,7 +26,7 @@ class TestArtifacts:
         assert isinstance(artifacts, list)
 
     def test_create_artifact(self, api_url, api_session, test_project):
-        resp = api_session.post(f"{api_url}/api/pi/artifacts", json={
+        resp = api_session.post(f"{api_url}/api/pux/artifacts", json={
             "project": test_project,
             "agentId": "default",
             "type": "plan",
@@ -41,7 +41,7 @@ class TestArtifacts:
 
     def test_list_after_create(self, api_url, api_session, test_project):
         # Create an artifact first
-        api_session.post(f"{api_url}/api/pi/artifacts", json={
+        api_session.post(f"{api_url}/api/pux/artifacts", json={
             "project": test_project,
             "agentId": "default",
             "type": "note",
@@ -51,7 +51,7 @@ class TestArtifacts:
 
         # List should return it
         resp = api_session.get(
-            f"{api_url}/api/pi/artifacts",
+            f"{api_url}/api/pux/artifacts",
             params={"project": test_project, "agentId": "default"},
         )
         assert resp.status_code == 200
@@ -61,7 +61,7 @@ class TestArtifacts:
 
     def test_artifacts_missing_agentid(self, api_url, api_session, test_project):
         resp = api_session.get(
-            f"{api_url}/api/pi/artifacts",
+            f"{api_url}/api/pux/artifacts",
             params={"project": test_project},
         )
         # Should return 400 or empty list
@@ -69,50 +69,24 @@ class TestArtifacts:
 
 
 # ---------------------------------------------------------------------------
-# Sub-agents
+# Sub-agents (now via agent-status endpoint)
 # ---------------------------------------------------------------------------
 
 
 class TestSubAgents:
     def test_list_subagents_empty(self, api_url, api_session, test_project):
         resp = api_session.get(
-            f"{api_url}/api/pi/subagent/list",
-            params={"project": test_project, "parentAgentId": "default"},
+            f"{api_url}/api/pux/agent-status",
+            params={"project": test_project},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data is not None
 
-    def test_spawn_subagent(self, api_url, api_session, test_project):
-        resp = api_session.post(f"{api_url}/api/pi/subagent/spawn", json={
-            "project": test_project,
-            "parentAgentId": "default",
-            "taskDescription": "Test sub-agent task",
-        })
-        # May fail if no active parent session
-        assert resp.status_code in (200, 400, 500)
-        if resp.status_code == 200:
-            data = resp.json()
-            assert data.get("success") is not None or "agentId" in data
-
     def test_subagent_status_no_agent(self, api_url, api_session, test_project):
         resp = api_session.get(
-            f"{api_url}/api/pi/subagent/status",
-            params={"project": test_project, "subAgentId": "nonexistent-sub"},
+            f"{api_url}/api/pux/agent-status",
+            params={"project": test_project},
         )
-        # Should return 404 or error
-        assert resp.status_code in (200, 400, 404, 500)
-
-    def test_subagent_abort_no_agent(self, api_url, api_session, test_project):
-        resp = api_session.post(f"{api_url}/api/pi/subagent/abort", json={
-            "project": test_project,
-            "subAgentId": "nonexistent-sub",
-        })
-        assert resp.status_code in (200, 400, 404, 500)
-
-    def test_subagent_result_no_agent(self, api_url, api_session, test_project):
-        resp = api_session.get(
-            f"{api_url}/api/pi/subagent/result",
-            params={"project": test_project, "subAgentId": "nonexistent-sub"},
-        )
+        # Should return 200 with status info or error
         assert resp.status_code in (200, 400, 404, 500)

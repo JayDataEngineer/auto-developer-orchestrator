@@ -57,7 +57,9 @@ def test_project(api_url, api_session):
     if resp.status_code == 200:
         projects = resp.json().get("projects", [])
         if projects:
-            return projects[0]
+            # projects is a list of dicts with "name" key
+            first = projects[0]
+            return first["name"] if isinstance(first, dict) else first
 
     return "deep-research-engine"
 

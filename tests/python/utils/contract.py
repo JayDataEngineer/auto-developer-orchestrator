@@ -19,6 +19,9 @@ VALID_SSE_EVENT_TYPES = {
     "plan_created", "plan_updated",
     "artifact_created", "artifact_updated",
     "subagent_start", "subagent_end",
+    # Agent loop events
+    "step_start", "message_start", "message_end", "turn_start", "turn_end",
+    "auto_retry_start", "auto_retry_end",
     # SSE protocol events
     "message",
 }

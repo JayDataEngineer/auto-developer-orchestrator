@@ -789,7 +789,7 @@ class TestAPIErrorContract:
 
     def test_missing_message_returns_400(self, api_url, api_session):
         resp = api_session.post(
-            f"{api_url}/api/pi/prompt",
+            f"{api_url}/api/pux/prompt",
             json={"project": TEST_PROJECT},
         )
         assert resp.status_code == 400, (
@@ -798,7 +798,7 @@ class TestAPIErrorContract:
 
     def test_nonexistent_project_returns_error(self, api_url, api_session):
         resp = api_session.post(
-            f"{api_url}/api/pi/prompt",
+            f"{api_url}/api/pux/prompt",
             json={"message": "hello", "project": "nonexistent-proj-xyz-999"},
         )
         assert resp.status_code in (400, 404), (
@@ -807,7 +807,7 @@ class TestAPIErrorContract:
 
     def test_empty_message_returns_error(self, api_url, api_session):
         resp = api_session.post(
-            f"{api_url}/api/pi/prompt",
+            f"{api_url}/api/pux/prompt",
             json={"message": "", "project": TEST_PROJECT},
         )
         # Empty message should either be rejected or processed

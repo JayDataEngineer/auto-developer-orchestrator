@@ -15,7 +15,7 @@ import (
 )
 
 // writeJSON writes a JSON response with the given status code.
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
@@ -51,9 +51,9 @@ func resolveProjectPath(project string, db *storage.Database) string {
 		if err == nil {
 			for _, p := range customProjects {
 				if p.Name == project {
-					// Return remote paths directly (e.g. ssh://user@host/path)
+					// Skip URL-only paths — they are not filesystem directories
 					if strings.Contains(p.Path, "://") {
-						return p.Path
+						break
 					}
 					if info, err := os.Stat(p.Path); err == nil && info.IsDir() {
 						return p.Path

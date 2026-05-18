@@ -52,7 +52,7 @@ def stream_prompt(api_url, api_session, project, message,
     """Send a prompt to a Pi agent and collect all SSE events."""
     return list(post_and_stream(
         api_session,
-        f"{api_url}/api/pi/prompt",
+        f"{api_url}/api/pux/prompt",
         {
             "message": message,
             "project": project,

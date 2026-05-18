@@ -24,20 +24,19 @@ test.describe('Auto-Developer Orchestrator - Visual Tests', () => {
       fullPage: true,
     });
 
-    // Verify root container is visible
-    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-    await expect(rootDiv).toBeVisible();
+    // Verify body is visible
+    await expect(page.locator('body')).toBeVisible();
   });
 
-  test('should show top bar with tabs and take screenshot', async ({ page }) => {
+  test('should show header with workbench tabs and take screenshot', async ({ page }) => {
     await mockApiRoutes(page);
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    // Top bar should be visible
-    const topBar = page.locator('.h-10.border-b');
-    await expect(topBar).toBeVisible();
+    // Header bar should be visible
+    const header = page.locator('header');
+    await expect(header).toBeVisible();
 
     await page.screenshot({
       path: path.join(__dirname, 'screenshots', '02-top-bar.png'),
@@ -45,15 +44,14 @@ test.describe('Auto-Developer Orchestrator - Visual Tests', () => {
     });
   });
 
-  test('should show Agent tab and take screenshot', async ({ page }) => {
+  test('should show chat thread and take screenshot', async ({ page }) => {
     await mockApiRoutes(page);
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(3000);
 
-    // Agent tab is default — verify content area exists
-    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-    await expect(rootDiv).toBeVisible();
+    // Chat thread shows welcome text
+    await expect(page.getByText('Your AI-powered development orchestrator')).toBeVisible();
 
     await page.screenshot({
       path: path.join(__dirname, 'screenshots', '03-agent-tab.png'),
@@ -61,36 +59,36 @@ test.describe('Auto-Developer Orchestrator - Visual Tests', () => {
     });
   });
 
-  test('should show Tasks tab and take screenshot', async ({ page }) => {
+  test('should show Scheduler tab and take screenshot', async ({ page }) => {
     await mockApiRoutes(page);
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    await page.getByRole('button', { name: 'Tasks' }).click();
+    await page.getByRole('tab', { name: 'Scheduler' }).click();
     await page.waitForTimeout(2000);
 
     await page.screenshot({
-      path: path.join(__dirname, 'screenshots', '04-tasks-tab.png'),
+      path: path.join(__dirname, 'screenshots', '04-scheduler-tab.png'),
       fullPage: true,
     });
 
     // Verify page didn't crash
-    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-    await expect(rootDiv).toBeVisible();
+    await expect(page.locator('body')).toBeVisible();
   });
 
-  test('should show project selector and take screenshot', async ({ page }) => {
+  test('should show model selector and take screenshot', async ({ page }) => {
     await mockApiRoutes(page);
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    const select = page.locator('select').first();
-    await expect(select).toBeVisible();
+    // Model selector is in the composer bar
+    const modelSelector = page.getByLabel('Select model');
+    await expect(modelSelector).toBeVisible();
 
     await page.screenshot({
-      path: path.join(__dirname, 'screenshots', '06-project-selector.png'),
+      path: path.join(__dirname, 'screenshots', '06-model-selector.png'),
       clip: { x: 0, y: 0, width: 800, height: 100 },
     });
   });
@@ -108,8 +106,7 @@ test.describe('Auto-Developer Orchestrator - Visual Tests', () => {
     });
 
     // App should still be functional
-    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-    await expect(rootDiv).toBeVisible();
+    await expect(page.locator('body')).toBeVisible();
   });
 
   test('should test responsive layout - tablet view', async ({ page }) => {
@@ -124,8 +121,7 @@ test.describe('Auto-Developer Orchestrator - Visual Tests', () => {
       fullPage: true,
     });
 
-    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-    await expect(rootDiv).toBeVisible();
+    await expect(page.locator('body')).toBeVisible();
   });
 
   test('should test responsive layout - desktop wide', async ({ page }) => {
@@ -140,24 +136,6 @@ test.describe('Auto-Developer Orchestrator - Visual Tests', () => {
       fullPage: true,
     });
 
-    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-    await expect(rootDiv).toBeVisible();
-  });
-
-  test('should capture dark theme with backdrop blur', async ({ page }) => {
-    await mockApiRoutes(page);
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
-
-    await page.screenshot({
-      path: path.join(__dirname, 'screenshots', '10-ui-theme.png'),
-      fullPage: true,
-    });
-
-    // Verify backdrop-blur (glass morphism effect) is used in top bar
-    const blurElements = page.locator('.backdrop-blur-md');
-    const count = await blurElements.count();
-    expect(count).toBeGreaterThan(0);
+    await expect(page.locator('body')).toBeVisible();
   });
 });

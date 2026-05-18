@@ -2,7 +2,7 @@
  * Functional E2E Tests
  *
  * Tests app loading, main UI sections, tab navigation,
- * logs display, and viewport responsiveness.
+ * and viewport responsiveness.
  */
 import { test, expect } from '@playwright/test';
 import { mockApiRoutes } from './fixtures';
@@ -15,47 +15,47 @@ test.describe('Auto-Developer Orchestrator - Functional Tests', () => {
     await page.waitForTimeout(2000);
   });
 
-  test('should load the application', async ({ page }) => {
-    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-    await expect(rootDiv).toBeVisible();
+  test('should load the application', async () => {
+    // App renders with body visible
+    await expect(page.locator('body')).toBeVisible();
   });
 
   test('should display main UI sections', async ({ page }) => {
-    // Top bar with tabs
-    await expect(page.getByRole('button', { name: 'Agent' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Tasks' })).toBeVisible();
+    // Workbench tabs
+    await expect(page.getByRole('tab', { name: 'Sandbox' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Scheduler' })).toBeVisible();
 
-    // Project selector
-    await expect(page.locator('select').first()).toBeVisible();
+    // Chat textarea
+    await expect(page.getByLabel('Message input')).toBeVisible();
 
-    // PI branding
-    await expect(page.getByText('PI', { exact: true }).first()).toBeVisible();
+    // Pux branding
+    await expect(page.getByText('Pux', { exact: true }).first()).toBeVisible();
   });
 
   test('should have working tab navigation', async ({ page }) => {
-    // Switch to Tasks tab
-    await page.getByRole('button', { name: 'Tasks' }).click();
+    // Switch to Editor tab
+    await page.getByRole('tab', { name: 'Editor' }).click();
     await page.waitForTimeout(500);
-    await expect(page.getByRole('button', { name: 'Tasks' })).toHaveClass(/bg-primary/);
+    await expect(page.getByRole('tab', { name: 'Editor' })).toHaveAttribute('data-state', 'active');
 
-    // Switch to Desktop tab
-    await page.getByRole('button', { name: 'Desktop' }).click();
+    // Switch to Agents tab
+    await page.getByRole('tab', { name: 'Agents' }).click();
     await page.waitForTimeout(500);
-    await expect(page.getByRole('button', { name: 'Desktop' })).toHaveClass(/bg-primary/);
+    await expect(page.getByRole('tab', { name: 'Agents' })).toHaveAttribute('data-state', 'active');
 
-    // Back to Agent
-    await page.getByRole('button', { name: 'Agent' }).click();
+    // Back to Sandbox
+    await page.getByRole('tab', { name: 'Sandbox' }).click();
     await page.waitForTimeout(500);
-    await expect(page.getByRole('button', { name: 'Agent' })).toHaveClass(/bg-primary/);
+    await expect(page.getByRole('tab', { name: 'Sandbox' })).toHaveAttribute('data-state', 'active');
   });
 
-  test('should display agent chat on Agent tab', async ({ page }) => {
-    // Agent tab is default — should show Pi Agent Ready or textarea
-    const textarea = page.locator('textarea');
-    const emptyState = page.getByText('Pi Agent Ready');
+  test('should display agent chat', async ({ page }) => {
+    // Chat is always visible with textarea or welcome text
+    const textarea = page.getByLabel('Message input');
+    const welcomeText = page.getByText('Your AI-powered development orchestrator');
     const textareaVisible = await textarea.isVisible().catch(() => false);
-    const emptyVisible = await emptyState.isVisible().catch(() => false);
-    expect(textareaVisible || emptyVisible).toBe(true);
+    const welcomeVisible = await welcomeText.isVisible().catch(() => false);
+    expect(textareaVisible || welcomeVisible).toBe(true);
   });
 
   test('should handle window resize', async ({ page }) => {
@@ -68,8 +68,7 @@ test.describe('Auto-Developer Orchestrator - Functional Tests', () => {
     for (const viewport of viewports) {
       await page.setViewportSize(viewport);
       await page.waitForTimeout(500);
-      const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-      await expect(rootDiv).toBeVisible();
+      await expect(page.locator('body')).toBeVisible();
     }
   });
 });

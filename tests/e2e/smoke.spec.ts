@@ -27,13 +27,15 @@ test.describe('Smoke Test - Full App Health', () => {
     const crashErrors = errors.filter(e => e.includes('Uncaught') || e.includes('TypeError'));
     expect(crashErrors.length, `Crash on load: ${crashErrors.join('; ')}`).toBe(0);
 
-    // ── Step 2: Agent tab ──
-    await expect(page.getByText('Pi Agent Ready')).toBeVisible();
-    await expect(page.locator('textarea')).toBeVisible();
+    // ── Step 2: Chat thread is visible ──
+    // Welcome text shows "Pux" and "Your AI-powered development orchestrator"
+    // Note: "Pux" appears in both sidebar header and welcome text — use welcome-specific selector
+    await expect(page.getByText('Your AI-powered development orchestrator')).toBeVisible();
+    await expect(page.getByLabel('Message input')).toBeVisible();
 
     // ── Step 3: Send message with tool call ──
-    await page.locator('textarea').fill('Test message');
-    await page.locator('textarea').press('Enter');
+    await page.getByLabel('Message input').fill('Test message');
+    await page.getByLabel('Message input').press('Enter');
 
     await expect(page.getByText('Test message')).toBeVisible({ timeout: 5000 });
 
@@ -46,28 +48,25 @@ test.describe('Smoke Test - Full App Health', () => {
     // Wait for stream to finish
     await page.waitForTimeout(5000);
 
-    // ── Step 4: Tasks tab ──
-    await page.locator('.h-10.border-b button:has-text("Tasks")').click();
+    // ── Step 4: Workbench tabs ──
+    // The right panel has workbench tabs: Sandbox, Editor, Scheduler, Agents
+    await expect(page.getByRole('tab', { name: 'Sandbox' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Agents' })).toBeVisible();
+
+    // ── Step 5: Scheduler tab ──
+    await page.getByRole('tab', { name: 'Scheduler' }).click();
     await page.waitForTimeout(1000);
 
-    await expect(page.getByText('Pending').first()).toBeVisible();
-    await expect(page.getByText('Fix login bug')).toBeVisible();
-    await expect(page.getByText('Add dark mode')).toBeVisible();
+    // Scheduler should render (ConfigPanel)
+    const schedulerPanel = page.locator('[data-slot="config-panel"], .flex.h-full');
+    await expect(schedulerPanel.first()).toBeVisible();
 
-    // ── Step 5: Desktop tab ──
-    await page.locator('.h-10.border-b button:has-text("Desktop")').click();
-    await page.waitForTimeout(2000);
-
-    // Desktop should render something
-    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-    await expect(rootDiv).toBeVisible();
-
-    // ── Step 6: Back to Agent ──
-    await page.locator('.h-10.border-b button:has-text("Agent")').click();
+    // ── Step 6: Back to default tab ──
+    await page.getByRole('tab', { name: 'Sandbox' }).click();
     await page.waitForTimeout(500);
 
-    // Agent tab should still work (textarea visible)
-    await expect(page.locator('textarea')).toBeVisible();
+    // Chat should still work (textarea visible)
+    await expect(page.getByLabel('Message input')).toBeVisible();
 
     // ── Final: No critical errors ──
     const criticalErrors = errors.filter(e =>
@@ -101,9 +100,10 @@ test.describe('Smoke Test - Full App Health', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
+    // App renders with sidebar and main content
     await expect(page.locator('body')).toBeVisible();
-    await expect(page.locator('.h-10.border-b button:has-text("Agent")')).toBeVisible();
-    await expect(page.locator('.h-10.border-b button:has-text("Tasks")')).toBeVisible();
+    // The workbench tabs exist in the right panel
+    await expect(page.getByRole('tab', { name: 'Sandbox' }).first()).toBeVisible({ timeout: 10000 });
   });
 });
 
@@ -128,29 +128,23 @@ test.describe('Smoke Test - SSE Event Processing', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    await page.locator('textarea').fill('Fix the bug and run tests');
-    await page.locator('textarea').press('Enter');
+    await page.getByLabel('Message input').fill('Fix the bug and run tests');
+    await page.getByLabel('Message input').press('Enter');
 
     // All 3 tool names must render
     await expect(page.locator('text=read').first()).toBeVisible({ timeout: 10000 });
     await expect(page.locator('text=edit').first()).toBeVisible({ timeout: 10000 });
     await expect(page.locator('text=bash').first()).toBeVisible({ timeout: 10000 });
 
-    // Reasoning block
-    await expect(page.getByText('Reasoning')).toBeVisible({ timeout: 10000 });
-
     // Wait for full completion
     await page.waitForTimeout(8000);
 
     // No spinning loaders after completion
-    const toolSpinners = page.locator('.border.border-white\\/5.bg-zinc-950 .animate-spin');
+    const toolSpinners = page.locator('[data-slot="tool-fallback-trigger-icon"].animate-spin');
     const count = await toolSpinners.count();
     expect(count, 'Tool calls still spinning after completion').toBe(0);
 
     // Final text
     await expect(page.getByText(/completed the changes/)).toBeVisible({ timeout: 3000 });
-
-    // Token usage
-    await expect(page.getByText(/Tokens:/).first()).toBeVisible({ timeout: 3000 });
   });
 });

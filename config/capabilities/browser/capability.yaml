@@ -1,5 +1,6 @@
 description: "Browser automation via CDP — navigate, click, type, extract"
 tools:
+  - bash
   - browse_to
   - browser_screenshot
   - find_element

@@ -314,11 +314,11 @@ class TestHistoryBrowser:
     def test_conversation_click_loads_history(self, page):
         """Clicking a conversation in sidebar should load its messages."""
         # Wait for sidebar to populate
-        sidebar = page.locator("[data-slot='sidebar-content']")
+        sidebar = page.locator("[data-sidebar='content']")
         sidebar.wait_for(timeout=10000)
 
         # Find conversation items (sub-buttons in the sidebar)
-        conv_buttons = page.locator("[data-slot='sidebar-menu-sub-button']")
+        conv_buttons = page.locator("[data-sidebar='menu-sub-button']")
         if conv_buttons.count() == 0:
             pytest.skip("No conversations in sidebar")
 
@@ -329,17 +329,17 @@ class TestHistoryBrowser:
         # Wait for messages to appear
         page.wait_for_timeout(2000)
 
-        # Check that the thread viewport has content
-        messages = page.locator("[data-slot='aui_message-group'] > *")
+        # Check that the thread viewport has content (messages use data-role attributes)
+        messages = page.locator("[data-role='user'], [data-role='assistant']")
         count = messages.count()
         assert count > 0, "No messages rendered after clicking conversation"
 
     def test_user_message_visible_in_history(self, page):
         """User messages from history should be visible with correct content."""
-        sidebar = page.locator("[data-slot='sidebar-content']")
+        sidebar = page.locator("[data-sidebar='content']")
         sidebar.wait_for(timeout=10000)
 
-        conv_buttons = page.locator("[data-slot='sidebar-menu-sub-button']")
+        conv_buttons = page.locator("[data-sidebar='menu-sub-button']")
         if conv_buttons.count() == 0:
             pytest.skip("No conversations in sidebar")
 
@@ -359,25 +359,25 @@ class TestHistoryBrowser:
         page.wait_for_timeout(2000)
 
         # Verify at least one user message is rendered
-        user_msgs = page.locator("[data-slot='aui_message-group']").locator("text=/go to|list|What is|delegate|open/i")
-        assert user_msgs.count() > 0, "No user message content found in history"
+        user_msgs = page.locator("[data-role='user']")
+        assert user_msgs.count() > 0, "No user message found in history"
 
     def test_no_empty_ghost_messages(self, page):
         """History should not render empty assistant message bubbles."""
-        sidebar = page.locator("[data-slot='sidebar-content']")
+        sidebar = page.locator("[data-sidebar='content']")
         sidebar.wait_for(timeout=10000)
 
-        conv_buttons = page.locator("[data-slot='sidebar-menu-sub-button']")
+        conv_buttons = page.locator("[data-sidebar='menu-sub-button']")
         if conv_buttons.count() == 0:
             pytest.skip("No conversations in sidebar")
 
         conv_buttons.first.click()
         page.wait_for_timeout(2000)
 
-        # All rendered message groups should have visible content
-        groups = page.locator("[data-slot='aui_message-group'] > *")
-        for i in range(groups.count()):
-            group = groups.nth(i)
-            # Each group should have some text content
-            text = group.text_content()
-            assert len(text.strip()) > 0, f"Message group {i} is empty (ghost message)"
+        # All rendered messages should have visible content
+        messages = page.locator("[data-role='user'], [data-role='assistant']")
+        for i in range(messages.count()):
+            msg = messages.nth(i)
+            # Each message should have some text content
+            text = msg.text_content()
+            assert len(text.strip()) > 0, f"Message {i} is empty (ghost message)"

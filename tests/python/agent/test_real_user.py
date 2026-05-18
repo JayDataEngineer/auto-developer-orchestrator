@@ -156,7 +156,7 @@ class TestChatActuallyShowsContent:
         """Send a prompt and collect ALL SSE events."""
         return list(post_and_stream(
             requests.Session(),
-            f"{API}/api/pi/prompt",
+            f"{API}/api/pux/prompt",
             {
                 "message": message,
                 "project": TEST_PROJECT,

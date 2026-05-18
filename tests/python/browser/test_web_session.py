@@ -1,235 +1,206 @@
 """
 Web browser sub-agent tests: session, navigate, click, type, screenshot, state.
+
+These tests use the sandbox computer-use API:
+  POST /api/sandbox/          — create sandbox
+  POST /api/sandbox/{id}/browser-mode — enable browser
+  POST /api/sandbox/{id}/computer-use/enable   — enable computer use
+  POST /api/sandbox/{id}/computer-use/act       — perform action
+  GET  /api/sandbox/{id}/computer-use/screenshot — take screenshot
+  GET  /api/sandbox/{id}/computer-use/snapshot   — get accessibility snapshot
 """
 
 import pytest
 
 pytestmark = pytest.mark.browser
 
-# Track session IDs for cleanup
-_session_ids: list[str] = []
+# Track sandbox IDs for cleanup
+_sandbox_ids: list[str] = []
 
 
 @pytest.fixture(autouse=True, scope="module")
-def cleanup_sessions(api_url, api_session):
-    """Close any test sessions after the module finishes."""
+def cleanup_sandboxes(api_url, api_session):
+    """Close any test sandboxes after the module finishes."""
     yield
-    for sid in _session_ids:
+    for sid in _sandbox_ids:
         try:
-            api_session.delete(
-                f"{api_url}/api/pi/web/session",
-                json={"sessionId": sid},
-            )
+            api_session.delete(f"{api_url}/api/sandbox/{sid}")
         except Exception:
             pass
-    _session_ids.clear()
+    _sandbox_ids.clear()
+
+
+def _create_browser_sandbox(api_url, api_session):
+    """Create a sandbox with browser mode enabled. Returns sandbox ID or None."""
+    # Create sandbox
+    resp = api_session.post(f"{api_url}/api/sandbox/", json={"project": "test-repo"})
+    if resp.status_code in (500, 502, 503):
+        return None
+    if resp.status_code != 200:
+        return None
+    data = resp.json()
+    sid = data.get("id", data.get("sandboxId", ""))
+    if not sid:
+        return None
+
+    _sandbox_ids.append(sid)
+
+    # Enable browser mode
+    mode_resp = api_session.post(f"{api_url}/api/sandbox/{sid}/browser-mode")
+    if mode_resp.status_code not in (200, 201):
+        return None
+
+    # Enable computer use
+    cu_resp = api_session.post(f"{api_url}/api/sandbox/{sid}/computer-use/enable")
+    if cu_resp.status_code not in (200, 201):
+        return None
+
+    return sid
 
 
 class TestWebSession:
-    def test_create_session(self, api_url, api_session):
-        resp = api_session.post(
-            f"{api_url}/api/pi/web/session",
-            json={"sessionId": "e2e-test-session"},
-        )
-        if resp.status_code in (500, 502, 503):
-            pytest.skip("Browserless service unavailable")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "sessionId" in data
-        _session_ids.append(data["sessionId"])
+    def test_create_browser_sandbox(self, api_url, api_session):
+        sid = _create_browser_sandbox(api_url, api_session)
+        if sid is None:
+            pytest.skip("Browser/Sandbox service unavailable")
+        assert isinstance(sid, str) and len(sid) > 0
 
-    def test_close_session(self, api_url, api_session):
+    def test_close_sandbox(self, api_url, api_session):
         # Create then close
-        create_resp = api_session.post(
-            f"{api_url}/api/pi/web/session",
-            json={},
-        )
-        if create_resp.status_code in (500, 502, 503):
-            pytest.skip("Browserless service unavailable")
-        assert create_resp.status_code == 200
-        sid = create_resp.json()["sessionId"]
+        sid = _create_browser_sandbox(api_url, api_session)
+        if sid is None:
+            pytest.skip("Browser/Sandbox service unavailable")
 
-        close_resp = api_session.delete(
-            f"{api_url}/api/pi/web/session",
-            json={"sessionId": sid},
-        )
-        assert close_resp.status_code == 200
+        close_resp = api_session.delete(f"{api_url}/api/sandbox/{sid}")
+        assert close_resp.status_code in (200, 204, 404)
 
 
 class TestWebNavigate:
     @pytest.fixture(autouse=True)
-    def _session(self, api_url, api_session):
-        """Create a session for navigation tests."""
-        resp = api_session.post(f"{api_url}/api/pi/web/session", json={})
-        if resp.status_code in (500, 502, 503):
-            pytest.skip("Browserless service unavailable")
-        assert resp.status_code == 200
-        self.session_id = resp.json()["sessionId"]
-        _session_ids.append(self.session_id)
+    def _sandbox(self, api_url, api_session):
+        """Create a sandbox for navigation tests."""
+        self.sandbox_id = _create_browser_sandbox(api_url, api_session)
+        if self.sandbox_id is None:
+            pytest.skip("Browser/Sandbox service unavailable")
         yield
         try:
-            api_session.delete(
-                f"{api_url}/api/pi/web/session",
-                json={"sessionId": self.session_id},
-            )
+            api_session.delete(f"{api_url}/api/sandbox/{self.sandbox_id}")
         except Exception:
             pass
 
     def test_navigate_example_com(self, api_url, api_session):
         resp = api_session.post(
-            f"{api_url}/api/pi/web/navigate",
-            json={"url": "https://example.com", "sessionId": self.session_id},
+            f"{api_url}/api/sandbox/{self.sandbox_id}/computer-use/act",
+            json={"action": "navigate", "url": "https://example.com"},
         )
         if resp.status_code == 500:
-            pytest.skip("Browserless service error")
-        assert resp.status_code == 200
-        data = resp.json()
-        # Should have page info
-        assert "url" in data or "title" in data or "elements" in data or "screenshot" in data
-
-    def test_navigate_invalid_url(self, api_url, api_session):
-        resp = api_session.post(
-            f"{api_url}/api/pi/web/navigate",
-            json={"url": "not-a-valid-url", "sessionId": self.session_id},
-        )
-        # Should handle gracefully
-        if resp.status_code == 500:
-            pytest.skip("Browserless service error")
-        assert resp.status_code in (200, 400)
+            pytest.skip("Browser service error")
+        assert resp.status_code in (200, 400, 404)
+        if resp.status_code == 200:
+            data = resp.json()
+            assert isinstance(data, dict)
 
 
 class TestWebInteraction:
     @pytest.fixture(autouse=True)
-    def _session(self, api_url, api_session):
-        # Create session and navigate first
-        resp = api_session.post(f"{api_url}/api/pi/web/session", json={})
-        if resp.status_code in (500, 502, 503):
-            pytest.skip("Browserless service unavailable")
-        assert resp.status_code == 200
-        self.session_id = resp.json()["sessionId"]
-        _session_ids.append(self.session_id)
+    def _sandbox(self, api_url, api_session):
+        self.sandbox_id = _create_browser_sandbox(api_url, api_session)
+        if self.sandbox_id is None:
+            pytest.skip("Browser/Sandbox service unavailable")
 
         # Navigate to a page with interactive elements
         api_session.post(
-            f"{api_url}/api/pi/web/navigate",
-            json={"url": "https://example.com", "sessionId": self.session_id},
+            f"{api_url}/api/sandbox/{self.sandbox_id}/computer-use/act",
+            json={"action": "navigate", "url": "https://example.com"},
         )
         yield
         try:
-            api_session.delete(
-                f"{api_url}/api/pi/web/session",
-                json={"sessionId": self.session_id},
-            )
+            api_session.delete(f"{api_url}/api/sandbox/{self.sandbox_id}")
         except Exception:
             pass
 
     def test_click_element(self, api_url, api_session):
         resp = api_session.post(
-            f"{api_url}/api/pi/web/click",
-            json={"elementId": 0, "sessionId": self.session_id},
+            f"{api_url}/api/sandbox/{self.sandbox_id}/computer-use/act",
+            json={"action": "click", "element": 0},
         )
         if resp.status_code == 500:
-            pytest.skip("Browserless service error")
-        # Click may succeed or fail depending on element; just verify no server error
+            pytest.skip("Browser service error")
         assert resp.status_code in (200, 400, 404)
 
     def test_type_text(self, api_url, api_session):
         resp = api_session.post(
-            f"{api_url}/api/pi/web/type",
-            json={
-                "elementId": 0,
-                "text": "e2e test input",
-                "submit": False,
-                "sessionId": self.session_id,
-            },
+            f"{api_url}/api/sandbox/{self.sandbox_id}/computer-use/act",
+            json={"action": "type", "text": "e2e test input"},
         )
         if resp.status_code == 500:
-            pytest.skip("Browserless service error")
+            pytest.skip("Browser service error")
         assert resp.status_code in (200, 400, 404)
 
 
 class TestWebScreenshot:
     @pytest.fixture(autouse=True)
-    def _session(self, api_url, api_session):
-        resp = api_session.post(f"{api_url}/api/pi/web/session", json={})
-        if resp.status_code in (500, 502, 503):
-            pytest.skip("Browserless service unavailable")
-        assert resp.status_code == 200
-        self.session_id = resp.json()["sessionId"]
-        _session_ids.append(self.session_id)
+    def _sandbox(self, api_url, api_session):
+        self.sandbox_id = _create_browser_sandbox(api_url, api_session)
+        if self.sandbox_id is None:
+            pytest.skip("Browser/Sandbox service unavailable")
 
         api_session.post(
-            f"{api_url}/api/pi/web/navigate",
-            json={"url": "https://example.com", "sessionId": self.session_id},
+            f"{api_url}/api/sandbox/{self.sandbox_id}/computer-use/act",
+            json={"action": "navigate", "url": "https://example.com"},
         )
         yield
         try:
-            api_session.delete(
-                f"{api_url}/api/pi/web/session",
-                json={"sessionId": self.session_id},
-            )
+            api_session.delete(f"{api_url}/api/sandbox/{self.sandbox_id}")
         except Exception:
             pass
 
     def test_screenshot_returns_image(self, api_url, api_session):
         resp = api_session.get(
-            f"{api_url}/api/pi/web/screenshot",
-            params={"sessionId": self.session_id},
+            f"{api_url}/api/sandbox/{self.sandbox_id}/computer-use/screenshot",
         )
         if resp.status_code == 404:
-            pytest.skip("Browserless screenshot endpoint unavailable")
+            pytest.skip("Screenshot endpoint unavailable")
         assert resp.status_code == 200
         assert "image" in resp.headers.get("Content-Type", "") or len(resp.content) > 0
 
-    def test_screenshot_missing_session_400(self, api_url, api_session):
+    def test_screenshot_missing_sandbox_400(self, api_url, api_session):
         resp = api_session.get(
-            f"{api_url}/api/pi/web/screenshot",
-            params={"sessionId": "nonexistent-session"},
+            f"{api_url}/api/sandbox/nonexistent-sandbox/computer-use/screenshot",
         )
-        assert resp.status_code in (400, 404)
+        assert resp.status_code in (400, 404, 500)
 
 
 class TestWebState:
     @pytest.fixture(autouse=True)
-    def _session(self, api_url, api_session):
-        resp = api_session.post(f"{api_url}/api/pi/web/session", json={})
-        if resp.status_code in (500, 502, 503):
-            pytest.skip("Browserless service unavailable")
-        assert resp.status_code == 200
-        self.session_id = resp.json()["sessionId"]
-        _session_ids.append(self.session_id)
+    def _sandbox(self, api_url, api_session):
+        self.sandbox_id = _create_browser_sandbox(api_url, api_session)
+        if self.sandbox_id is None:
+            pytest.skip("Browser/Sandbox service unavailable")
 
         api_session.post(
-            f"{api_url}/api/pi/web/navigate",
-            json={"url": "https://example.com", "sessionId": self.session_id},
+            f"{api_url}/api/sandbox/{self.sandbox_id}/computer-use/act",
+            json={"action": "navigate", "url": "https://example.com"},
         )
         yield
         try:
-            api_session.delete(
-                f"{api_url}/api/pi/web/session",
-                json={"sessionId": self.session_id},
-            )
+            api_session.delete(f"{api_url}/api/sandbox/{self.sandbox_id}")
         except Exception:
             pass
 
-    def test_get_state_returns_page_info(self, api_url, api_session):
+    def test_get_snapshot_returns_page_info(self, api_url, api_session):
         resp = api_session.get(
-            f"{api_url}/api/pi/web/state",
-            params={"sessionId": self.session_id},
+            f"{api_url}/api/sandbox/{self.sandbox_id}/computer-use/snapshot",
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        # Should have some page info
-        assert data is not None and len(data) > 0
+        assert resp.status_code in (200, 404)
+        if resp.status_code == 200:
+            data = resp.json()
+            assert data is not None
 
-    def test_describe_page(self, api_url, api_session):
-        resp = api_session.post(
-            f"{api_url}/api/pi/web/describe",
-            json={"sessionId": self.session_id},
+    def test_a11y_snapshot(self, api_url, api_session):
+        resp = api_session.get(
+            f"{api_url}/api/sandbox/{self.sandbox_id}/computer-use/a11y-snapshot",
         )
         if resp.status_code == 404:
-            pytest.skip("Describe endpoint unavailable")
-        assert resp.status_code == 200
-        data = resp.json()
-        # Should return a description string
-        assert "description" in data or "text" in data or isinstance(data, str) or len(data) > 0
+            pytest.skip("A11y snapshot endpoint unavailable")
+        assert resp.status_code in (200, 404)

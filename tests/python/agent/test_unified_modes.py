@@ -37,7 +37,7 @@ def collect_prompt(session, api_url, project, message, agent_id=None, timeout=12
 
     events = list(post_and_stream(
         session,
-        f"{api_url}/api/pi/prompt",
+        f"{api_url}/api/pux/prompt",
         {
             "message": message,
             "project": project,

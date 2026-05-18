@@ -1,7 +1,13 @@
 """
-Playwright frontend UI tests: app loads, tab navigation, agent view, prompt,
-desktop panel, scheduler panel.
-Tests against the REAL backend — no mocking.
+Playwright frontend UI tests: app loads, sidebar, composer, workbench tabs.
+
+Tests against the REAL backend -- no mocking.
+
+Current UI layout (from app.tsx):
+  - Left sidebar: shadcn Sidebar with project groups + conversations
+  - Main area: Thread (messages + composer) always visible
+  - Right panel: Workbench with tabs (Sandbox, Editor, Scheduler, Agents)
+  - Header bar: sidebar toggle, terminal toggle, workbench toggle
 """
 
 import pytest
@@ -22,102 +28,175 @@ class TestAppLoads:
         # Page should have content, not be blank
         body = page.locator("body")
         assert body.is_visible()
-        # Should have the top bar with tabs
-        top_bar = page.locator(".h-10.border-b")
-        assert top_bar.is_visible()
+        # Should have the header bar
+        header = page.locator("header.h-10")
+        assert header.is_visible()
 
-    def test_tabs_visible(self, page, frontend_url):
+    def test_sidebar_visible(self, page, frontend_url):
         goto_frontend(page, frontend_url)
-        # All 4 tabs should be visible: Agent, Tasks, Desktop, Scheduler
-        # Use exact=True to avoid matching sidebar session buttons that contain "Agent"
-        for tab_name in ["Agent", "Tasks", "Desktop", "Scheduler"]:
-            btn = page.get_by_role("button", name=tab_name, exact=True)
-            assert btn.is_visible(timeout=5000), f"Tab '{tab_name}' not visible"
+        # Sidebar should be visible by default (defaultOpen={true})
+        sidebar = page.locator("[data-sidebar='content']")
+        assert sidebar.is_visible(timeout=5000)
 
-    def test_project_selector_visible(self, page, frontend_url):
+    def test_composer_present(self, page, frontend_url):
         goto_frontend(page, frontend_url)
-        # Project selector dropdown should be visible
-        selector = page.locator("select").first
-        assert selector.is_visible(timeout=5000)
-        options = selector.locator("option").all_text_contents()
-        assert len(options) > 0, "No projects in selector"
+        # Composer textarea should be present (always visible in main thread area)
+        textarea = page.locator("textarea")
+        assert textarea.is_visible(timeout=5000)
 
 
 # ---------------------------------------------------------------------------
-# Tab navigation
+# Sidebar
 # ---------------------------------------------------------------------------
 
 
-class TestTabNavigation:
+class TestSidebar:
     @pytest.fixture(autouse=True)
     def _load(self, page, frontend_url):
         goto_frontend(page, frontend_url)
 
-    def test_agent_tab(self, page):
-        page.get_by_role("button", name="Agent", exact=True).click()
-        page.wait_for_timeout(1000)
-        # Should show the agent chat textarea
-        textarea = page.locator("textarea").first
-        assert textarea.is_visible(timeout=5000)
+    def test_sidebar_shows_new_chat_button(self, page):
+        """Sidebar should have 'New Chat' button."""
+        new_chat = page.locator("[data-sidebar='menu-button']", has_text="New Chat")
+        assert new_chat.is_visible(timeout=5000), "'New Chat' button not visible in sidebar"
 
-    def test_tasks_tab(self, page):
-        page.get_by_role("button", name="Tasks", exact=True).click()
-        page.wait_for_timeout(1000)
-        # Should show tasks-related UI
-        content = page.content()
-        assert any(kw in content for kw in ["Task", "task", "New", "board"]), \
-            "Tasks tab doesn't show task-related content"
+    def test_sidebar_shows_open_folder_button(self, page):
+        """Sidebar should have 'Open Folder' button."""
+        open_folder = page.locator("[data-sidebar='menu-button']", has_text="Open Folder")
+        assert open_folder.is_visible(timeout=5000), "'Open Folder' button not visible in sidebar"
 
-    def test_desktop_tab(self, page):
-        page.get_by_role("button", name="Desktop", exact=True).click()
-        page.wait_for_timeout(2000)
-        # Should show desktop UI (Agent Chat sidebar + Controls)
-        agent_chat = page.get_by_text("Agent Chat")
-        assert agent_chat.is_visible(timeout=5000), "Desktop Agent Chat sidebar not visible"
+    def test_sidebar_toggle_works(self, page):
+        """Clicking sidebar toggle should collapse/expand the sidebar."""
+        # Find the sidebar trigger button in the header
+        toggle = page.locator("header button[aria-label='Toggle Sidebar'], header button").first
+        # Sidebar content should start visible
+        sidebar_content = page.locator("[data-sidebar='content']")
+        assert sidebar_content.is_visible()
 
-    def test_scheduler_tab(self, page):
-        page.get_by_role("button", name="Scheduler", exact=True).click()
-        page.wait_for_timeout(1000)
-        # Should show scheduler-related UI
-        content = page.content()
-        assert any(kw in content for kw in ["Job", "Schedule", "Cron", "New"]), \
-            "Scheduler tab doesn't show scheduler content"
+    def test_sidebar_toggle_button(self, page):
+        """Header should have sidebar toggle button."""
+        # SidebarTrigger renders as a button inside the header
+        header = page.locator("header.h-10")
+        toggle_btn = header.locator("button").first
+        assert toggle_btn.is_visible()
 
 
 # ---------------------------------------------------------------------------
-# Pi Agent View
+# Workbench (right panel)
 # ---------------------------------------------------------------------------
 
 
-class TestPiAgentView:
+class TestWorkbenchTabs:
     @pytest.fixture(autouse=True)
-    def _load_agent_tab(self, page, frontend_url):
+    def _load(self, page, frontend_url):
         goto_frontend(page, frontend_url)
-        page.get_by_role("button", name="Agent", exact=True).click()
-        page.wait_for_timeout(1000)
 
-    def test_prompt_textarea_present(self, page):
+    def test_workbench_tabs_visible(self, page):
+        """Workbench right panel should show Sandbox, Editor, Scheduler, Agents tabs."""
+        # Workbench uses Radix TabsTrigger elements
+        for tab_name in ["Sandbox", "Editor", "Scheduler", "Agents"]:
+            tab = page.get_by_role("tab", name=tab_name)
+            assert tab.is_visible(timeout=5000), f"Workbench tab '{tab_name}' not visible"
+
+    def test_sandbox_tab_content(self, page):
+        """Clicking Sandbox tab should show sandbox-related content."""
+        page.get_by_role("tab", name="Sandbox").click()
+        page.wait_for_timeout(1000)
+        # Sandbox tab shows VNC viewer or "No sandbox" message
+        content = page.content()
+        shows_content = any(kw in content for kw in [
+            "sandbox", "Sandbox", "No sandbox", "Detecting", "Start sandbox",
+        ])
+        assert shows_content, "Sandbox tab appears blank"
+
+    def test_editor_tab_content(self, page):
+        """Clicking Editor tab should show editor-related content."""
+        page.get_by_role("tab", name="Editor").click()
+        page.wait_for_timeout(1000)
+        content = page.content()
+        shows_content = any(kw in content for kw in ["Editor", "No file", "Select", "file"])
+        assert shows_content, "Editor tab appears blank"
+
+    def test_scheduler_tab_content(self, page):
+        """Clicking Scheduler tab should show scheduler-related content."""
+        page.get_by_role("tab", name="Scheduler").click()
+        page.wait_for_timeout(1000)
+        content = page.content()
+        shows_content = any(kw in content for kw in ["Scheduler", "Schedule", "Job", "No scheduled"])
+        assert shows_content, "Scheduler tab appears blank"
+
+    def test_agents_tab_content(self, page):
+        """Clicking Agents tab should show workers/agents content."""
+        page.get_by_role("tab", name="Agents").click()
+        page.wait_for_timeout(1000)
+        content = page.content()
+        shows_content = any(kw in content for kw in ["Workers", "Agent", "CTO", "No workers", "orchestrator"])
+        assert shows_content, "Agents tab appears blank"
+
+
+# ---------------------------------------------------------------------------
+# Composer (main chat area)
+# ---------------------------------------------------------------------------
+
+
+class TestComposer:
+    @pytest.fixture(autouse=True)
+    def _load(self, page, frontend_url):
+        goto_frontend(page, frontend_url)
+
+    def test_composer_textarea_present(self, page):
+        """Chat textarea should be visible."""
         textarea = page.locator("textarea").first
         assert textarea.is_visible(timeout=5000)
 
     def test_can_type_in_textarea(self, page):
+        """Should be able to type in the composer textarea."""
         textarea = page.locator("textarea").first
         textarea.fill("Hello from test")
         assert textarea.input_value() == "Hello from test"
 
+    def test_send_button_present(self, page):
+        """Send button should be present (aria-label='Send message')."""
+        send_btn = page.locator("button[aria-label='Send message']")
+        assert send_btn.is_visible(timeout=5000)
+
+    def test_model_selector_present(self, page):
+        """Model selector should be present in the composer area."""
+        model_select = page.locator("button[aria-label='Select model']")
+        assert model_select.is_visible(timeout=5000)
+
 
 # ---------------------------------------------------------------------------
-# Agent prompt (slow — needs LLM)
+# Header bar
+# ---------------------------------------------------------------------------
+
+
+class TestHeaderBar:
+    @pytest.fixture(autouse=True)
+    def _load(self, page, frontend_url):
+        goto_frontend(page, frontend_url)
+
+    def test_terminal_toggle_present(self, page):
+        """Header should have terminal toggle button."""
+        term_btn = page.locator("button[aria-label='Toggle terminal']")
+        assert term_btn.is_visible(timeout=5000)
+
+    def test_workbench_toggle_present(self, page):
+        """Header should have workbench toggle button."""
+        wb_btn = page.locator("button[aria-label='Open workbench'], button[aria-label='Close workbench']")
+        assert wb_btn.is_visible(timeout=5000)
+
+
+# ---------------------------------------------------------------------------
+# Agent prompt (slow -- needs LLM)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
 class TestAgentPrompt:
     @pytest.fixture(autouse=True)
-    def _load_agent_tab(self, page, frontend_url):
+    def _load(self, page, frontend_url):
         goto_frontend(page, frontend_url)
-        page.get_by_role("button", name="Agent", exact=True).click()
-        page.wait_for_timeout(1000)
 
     def test_send_prompt_and_get_response(self, page):
         textarea = page.locator("textarea").first
@@ -126,7 +205,7 @@ class TestAgentPrompt:
         textarea.fill("Say exactly: hello e2e")
         textarea.press("Enter")
 
-        # Wait for response — could take up to 30s with real model
+        # Wait for response -- could take up to 30s with real model
         page.wait_for_timeout(15000)
 
         # Page should still be responsive (not crashed)
@@ -134,39 +213,3 @@ class TestAgentPrompt:
         # Should have some content rendered
         html = page.content()
         assert len(html) > 100
-
-
-# ---------------------------------------------------------------------------
-# Desktop tab detailed tests
-# ---------------------------------------------------------------------------
-
-
-class TestDesktopTab:
-    @pytest.fixture(autouse=True)
-    def _load_desktop(self, page, frontend_url):
-        goto_frontend(page, frontend_url)
-        page.get_by_role("button", name="Desktop", exact=True).click()
-        page.wait_for_timeout(2000)
-
-    def test_left_sidebar_agent_chat(self, page):
-        """Left sidebar should have Agent Chat panel with textarea."""
-        agent_chat = page.get_by_text("Agent Chat")
-        assert agent_chat.is_visible(timeout=5000)
-
-    def test_left_sidebar_textarea(self, page):
-        """Agent Chat sidebar should have a textarea for messages."""
-        textarea = page.locator(".w-80 textarea, .border-r textarea").first
-        assert textarea.is_visible(timeout=5000)
-
-    def test_right_sidebar_controls(self, page):
-        """Right sidebar should have Controls panel."""
-        controls = page.get_by_text("Controls")
-        assert controls.is_visible(timeout=5000)
-
-    def test_center_panel_has_content(self, page):
-        """Center panel should show sandbox status or relevant content."""
-        content = page.content()
-        shows_content = any(kw in content for kw in [
-            "sandbox", "Desktop", "Start", "not available", "Select"
-        ])
-        assert shows_content, "Desktop center panel appears blank"

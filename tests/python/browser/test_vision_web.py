@@ -37,7 +37,7 @@ TEST_PROJECT = "test-repo"
 def _has_vision_model():
     """Check if any vision model is reachable via the API."""
     try:
-        resp = requests.get(f"{API}/api/pi/models", timeout=5)
+        resp = requests.get(f"{API}/api/pux/models", timeout=5)
         if resp.status_code != 200:
             return False
         data = resp.json()
@@ -56,13 +56,9 @@ def _has_vision_model():
 
 
 def _has_browser_service():
-    """Check if the browser/web service is running."""
+    """Check if the browser/sandbox service is running."""
     try:
-        resp = requests.post(
-            f"{API}/api/pi/web/session",
-            json={"project": TEST_PROJECT},
-            timeout=5,
-        )
+        resp = requests.get(f"{API}/api/sandbox/", timeout=5)
         return resp.status_code < 400
     except Exception:
         return False
@@ -93,23 +89,21 @@ class TestWebUpdateContract:
     """
 
     @pytest.mark.skipif(not BROWSER_AVAILABLE, reason="Browser service not available")
-    def test_web_session_creates_and_closes(self):
-        """Browser sessions should be creatable and closeable."""
-        # Create session
+    def test_sandbox_creates_and_closes(self):
+        """Browser sandboxes should be creatable and closeable."""
+        # Create sandbox
         resp = requests.post(
-            f"{API}/api/pi/web/session",
+            f"{API}/api/sandbox/",
             json={"project": TEST_PROJECT},
             timeout=30,
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert "sessionId" in data or data.get("success") is True
+        sid = data.get("id", data.get("sandboxId", ""))
 
-        # Close session
-        session_id = data.get("sessionId", "default")
+        # Close sandbox
         close_resp = requests.delete(
-            f"{API}/api/pi/web/session",
-            json={"project": TEST_PROJECT, "sessionId": session_id},
+            f"{API}/api/sandbox/{sid}",
             timeout=10,
         )
         assert close_resp.status_code in (200, 204, 404)
@@ -195,7 +189,7 @@ class TestVisionModelAvailability:
 
     def test_vision_model_configured(self):
         """At least one model should support image input."""
-        resp = requests.get(f"{API}/api/pi/models", timeout=10)
+        resp = requests.get(f"{API}/api/pux/models", timeout=10)
         assert resp.status_code == 200
         data = resp.json()
         models = data.get("models", [])
@@ -219,7 +213,7 @@ class TestVisionModelAvailability:
     @pytest.mark.skipif(not VISION_AVAILABLE, reason="No vision model available")
     def test_vision_model_responds(self):
         """The configured vision model should actually respond to prompts."""
-        resp = requests.get(f"{API}/api/pi/models", timeout=10)
+        resp = requests.get(f"{API}/api/pux/models", timeout=10)
         data = resp.json()
         models = data.get("models", [])
 
@@ -234,7 +228,7 @@ class TestVisionModelAvailability:
 
                 # Try a simple text prompt (no image needed for basic check)
                 resp = requests.post(
-                    f"{API}/api/pi/prompt",
+                    f"{API}/api/pux/prompt",
                     json={
                         "message": "Say ok",
                         "project": TEST_PROJECT,
@@ -244,7 +238,7 @@ class TestVisionModelAvailability:
                     stream=True,
                 )
                 if resp.status_code == 200:
-                    print(f"  ✓ Vision model {model_id} responds to text prompts")
+                    print(f"  Vision model {model_id} responds to text prompts")
                     return
 
         pytest.skip("Vision models configured but not responding")
@@ -259,53 +253,56 @@ class TestVisionModelAvailability:
 class TestBrowserAutomationContract:
     """Test browser automation endpoints that produce web_update events."""
 
-    def test_navigate_to_url(self):
-        """Test browser navigation."""
-        # Create session first
-        session_resp = requests.post(
-            f"{API}/api/pi/web/session",
+    def _create_browser_sandbox(self):
+        """Create a sandbox with browser mode enabled."""
+        resp = requests.post(
+            f"{API}/api/sandbox/",
             json={"project": TEST_PROJECT},
             timeout=30,
         )
-        if session_resp.status_code != 200:
-            pytest.skip("Could not create browser session")
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        sid = data.get("id", data.get("sandboxId", ""))
 
-        session_data = session_resp.json()
-        session_id = session_data.get("sessionId", "default")
+        # Enable browser mode
+        requests.post(f"{API}/api/sandbox/{sid}/browser-mode")
+        # Enable computer use
+        requests.post(f"{API}/api/sandbox/{sid}/computer-use/enable")
+        return sid
 
-        # Navigate
+    def test_navigate_to_url(self):
+        """Test browser navigation via computer-use act."""
+        sid = self._create_browser_sandbox()
+        if not sid:
+            pytest.skip("Could not create browser sandbox")
+
         nav_resp = requests.post(
-            f"{API}/api/pi/web/navigate",
-            json={
-                "project": TEST_PROJECT,
-                "sessionId": session_id,
-                "url": "https://example.com",
-            },
+            f"{API}/api/sandbox/{sid}/computer-use/act",
+            json={"action": "navigate", "url": "https://example.com"},
             timeout=30,
         )
         # Should succeed or fail gracefully
         assert nav_resp.status_code in (200, 400, 404, 500)
 
+        # Cleanup
+        requests.delete(f"{API}/api/sandbox/{sid}")
+
     def test_screenshot_returns_base64(self):
         """Screenshot should return base64-encoded image data."""
-        session_resp = requests.post(
-            f"{API}/api/pi/web/session",
-            json={"project": TEST_PROJECT},
+        sid = self._create_browser_sandbox()
+        if not sid:
+            pytest.skip("Could not create browser sandbox")
+
+        # Navigate first
+        requests.post(
+            f"{API}/api/sandbox/{sid}/computer-use/act",
+            json={"action": "navigate", "url": "https://example.com"},
             timeout=30,
         )
-        if session_resp.status_code != 200:
-            pytest.skip("Could not create browser session")
 
-        session_data = session_resp.json()
-        session_id = session_data.get("sessionId", "default")
-
-        # Take screenshot
-        ss_resp = requests.post(
-            f"{API}/api/pi/web/screenshot",
-            json={
-                "project": TEST_PROJECT,
-                "sessionId": session_id,
-            },
+        ss_resp = requests.get(
+            f"{API}/api/sandbox/{sid}/computer-use/screenshot",
             timeout=30,
         )
 
@@ -320,29 +317,31 @@ class TestBrowserAutomationContract:
                 except Exception as e:
                     pytest.fail(f"Screenshot is not valid base64: {e}")
 
+        # Cleanup
+        requests.delete(f"{API}/api/sandbox/{sid}")
+
     def test_page_state_returns_structure(self):
         """Page state/description should return structured data."""
-        session_resp = requests.post(
-            f"{API}/api/pi/web/session",
-            json={"project": TEST_PROJECT},
+        sid = self._create_browser_sandbox()
+        if not sid:
+            pytest.skip("Could not create browser sandbox")
+
+        # Navigate first
+        requests.post(
+            f"{API}/api/sandbox/{sid}/computer-use/act",
+            json={"action": "navigate", "url": "https://example.com"},
             timeout=30,
         )
-        if session_resp.status_code != 200:
-            pytest.skip("Could not create browser session")
 
-        session_data = session_resp.json()
-        session_id = session_data.get("sessionId", "default")
-
-        state_resp = requests.post(
-            f"{API}/api/pi/web/state",
-            json={
-                "project": TEST_PROJECT,
-                "sessionId": session_id,
-            },
+        state_resp = requests.get(
+            f"{API}/api/sandbox/{sid}/computer-use/snapshot",
             timeout=30,
         )
 
         if state_resp.status_code == 200:
             data = state_resp.json()
-            # Should have URL and title at minimum
+            # Should have some page info
             assert isinstance(data, dict)
+
+        # Cleanup
+        requests.delete(f"{API}/api/sandbox/{sid}")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,6 +64,13 @@ type PuxHandler struct {
 
 // NewPuxHandler creates a new Pux handler.
 func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, logger *zap.Logger) *PuxHandler {
+	tp := perms.NewToolPermissionConfig(logger)
+	// Load persisted permission overrides
+	permPath := filepath.Join(os.Getenv("HOME"), ".pi", "agent", "tool_permissions.json")
+	if err := tp.Load(permPath); err != nil {
+		logger.Warn("Failed to load tool permissions", zap.Error(err))
+	}
+
 	return &PuxHandler{
 		db:            db,
 		git:           gitOps,
@@ -70,7 +78,7 @@ func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, 
 		log:           logger,
 		litellmURL:    os.Getenv("LITELLM_PROXY_URL"),
 		litellmKey:    os.Getenv("LITELLM_MASTER_KEY"),
-		toolPerms:     perms.NewToolPermissionConfig(logger),
+		toolPerms:     tp,
 		selectedEngines: make(map[string]*llamaeng.LLMClient),
 		registry:       NewAgentRegistry(),
 	}
@@ -224,15 +232,6 @@ func (h *PuxHandler) GetAgentStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.registry.GetAllRunning())
 }
 
-// resolveAgent reads ?agentId= from the query string, defaulting to "default".
-func resolveAgent(r *http.Request) string {
-	aid := r.URL.Query().Get("agentId")
-	if aid == "" {
-		return "default"
-	}
-	return aid
-}
-
 type promptRequest struct {
 	Message       string   `json:"message"`
 	Images        []string `json:"images,omitempty"`
@@ -263,7 +262,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 
 	projectPath := resolveProjectPath(req.Project, h.db)
 	if projectPath == "" {
-		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+		writeJSON(w, http.StatusNotFound, map[string]any{
 			"success": false, "error": "Project not found",
 		})
 		return
@@ -318,7 +317,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// No engine available
-	writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+	writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 		"success": false,
 		"error":   "Agent engine not available. Start llama-server or configure a cloud provider.",
 	})
@@ -333,7 +332,7 @@ func (h *PuxHandler) writeLlamaSSE(w http.ResponseWriter, evt llamaeng.AgentEven
 
 	// Ensure tool events have IDs
 	if sseEvt.Type == "tool_execution_start" {
-		if dataMap, ok := sseEvt.Data.(map[string]interface{}); ok {
+		if dataMap, ok := sseEvt.Data.(map[string]any); ok {
 			tid, _ := dataMap["toolId"].(string)
 			if tid == "" {
 				dataMap["toolId"] = nextToolFallbackId()
@@ -374,7 +373,7 @@ func (h *PuxHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
 		zap.String("level", req.Level),
 	)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"tool":    req.Tool,
 		"level":   req.Level,
@@ -402,14 +401,14 @@ func (h *PuxHandler) Compact(w http.ResponseWriter, r *http.Request) {
 	compacted, err := h.db.CompactSession(r.Context(), req.Project, req.AgentID)
 	if err != nil {
 		h.log.Warn("manual compact failed", zap.String("project", req.Project), zap.Error(err))
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"status":  "error",
 			"message": err.Error(),
 		})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"status":            "ok",
 		"compactedMessages": compacted,
 	})
@@ -455,7 +454,7 @@ func (h *PuxHandler) HookResponse(w http.ResponseWriter, r *http.Request) {
 // GetMCPServers handles GET /api/pux/mcp-servers — returns registered MCP server info.
 func (h *PuxHandler) GetMCPServers(w http.ResponseWriter, r *http.Request) {
 	if h.mcpMulti == nil {
-		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+		writeJSON(w, http.StatusOK, []map[string]any{})
 		return
 	}
 	writeJSON(w, http.StatusOK, h.mcpMulti.ServersInfo())
@@ -485,7 +484,7 @@ func (h *PuxHandler) GetTree(w http.ResponseWriter, r *http.Request) {
 	root := tree.GetTree()
 	nodes := serializeTree(root)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"sessionId":   tree.ID(),
 		"currentNode": tree.GetCurrentNode(),
 		"nodes":       nodes,
@@ -528,7 +527,7 @@ func (h *PuxHandler) Fork(w http.ResponseWriter, r *http.Request) {
 	defer forked.Close()
 
 	forkPath := forked.(*session.SessionTree).FilePath()
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"status":   "ok",
 		"forkPath": forkPath,
 		"forkId":   forked.ID(),
@@ -536,15 +535,15 @@ func (h *PuxHandler) Fork(w http.ResponseWriter, r *http.Request) {
 }
 
 // serializeTree converts a TreeNode tree into a flat list for JSON serialization.
-func serializeTree(node *core.TreeNode) []map[string]interface{} {
+func serializeTree(node *core.TreeNode) []map[string]any {
 	if node == nil {
 		return nil
 	}
-	var result []map[string]interface{}
+	var result []map[string]any
 
 	var walk func(n *core.TreeNode)
 	walk = func(n *core.TreeNode) {
-		entry := map[string]interface{}{
+		entry := map[string]any{
 			"id":        n.Entry.ID,
 			"parentId":  n.Entry.ParentID,
 			"type":      string(n.Entry.Type),

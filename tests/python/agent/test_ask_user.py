@@ -6,7 +6,7 @@ responds via the approval system. Verifies:
 
 1. ask_user tool triggers approval_request SSE event with type="question"
 2. The approval_request has correct fields (requestId, type, message)
-3. User can respond via POST /api/pi/respond with action="answer"
+3. User can respond via POST /api/pux/decision with action="answer"
 4. Agent receives the answer and continues generating
 5. The full round-trip completes (agent_end received after answering)
 6. ask_user is NOT available in scheduler (fire-and-forget)
@@ -87,10 +87,10 @@ def _collect_events_and_answer(session, prompt, project, agent_id, answer, timeo
         if not approval_found.wait(timeout=60):
             return
         time.sleep(0.3)  # Small delay to ensure the approval is registered
-        session.post(f"{API}/api/pi/respond", json={
+        session.post(f"{API}/api/pux/decision", json={
             "project": project,
             "agentId": agent_id,
-            "requestId": approval_data["request_id"],
+            "decisionId": approval_data["request_id"],
             "action": "answer",
             "message": answer,
         }, timeout=10)
@@ -102,7 +102,7 @@ def _collect_events_and_answer(session, prompt, project, agent_id, answer, timeo
     try:
         for event in post_and_stream(
             session,
-            f"{API}/api/pi/prompt",
+            f"{API}/api/pux/prompt",
             {
                 "message": prompt,
                 "project": project,
@@ -160,10 +160,10 @@ class TestAskUserSSEEvent:
             if not approval_found.wait(timeout=60):
                 return
             time.sleep(0.3)
-            api_session.post(f"{API}/api/pi/respond", json={
+            api_session.post(f"{API}/api/pux/decision", json={
                 "project": TEST_PROJECT,
                 "agentId": agent_id,
-                "requestId": approval_req_id["id"],
+                "decisionId": approval_req_id["id"],
                 "action": "answer",
                 "message": "Python",
             }, timeout=10)
@@ -174,7 +174,7 @@ class TestAskUserSSEEvent:
         try:
             for event in post_and_stream(
                 api_session,
-                f"{API}/api/pi/prompt",
+                f"{API}/api/pux/prompt",
                 {
                     "message": prompt,
                     "project": TEST_PROJECT,
@@ -219,10 +219,10 @@ class TestAskUserSSEEvent:
             if not approval_found.wait(timeout=60):
                 return
             time.sleep(0.3)
-            api_session.post(f"{API}/api/pi/respond", json={
+            api_session.post(f"{API}/api/pux/decision", json={
                 "project": TEST_PROJECT,
                 "agentId": agent_id,
-                "requestId": approval_req_id["id"],
+                "decisionId": approval_req_id["id"],
                 "action": "answer",
                 "message": "React",
             }, timeout=10)
@@ -233,7 +233,7 @@ class TestAskUserSSEEvent:
         try:
             for event in post_and_stream(
                 api_session,
-                f"{API}/api/pi/prompt",
+                f"{API}/api/pux/prompt",
                 {
                     "message": prompt,
                     "project": TEST_PROJECT,
@@ -385,10 +385,10 @@ class TestAskUserToolStart:
             if not approval_found.wait(timeout=60):
                 return
             time.sleep(0.3)
-            api_session.post(f"{API}/api/pi/respond", json={
+            api_session.post(f"{API}/api/pux/decision", json={
                 "project": TEST_PROJECT,
                 "agentId": agent_id,
-                "requestId": approval_req_id["id"],
+                "decisionId": approval_req_id["id"],
                 "action": "answer",
                 "message": "Go",
             }, timeout=10)
@@ -399,7 +399,7 @@ class TestAskUserToolStart:
         try:
             for event in post_and_stream(
                 api_session,
-                f"{API}/api/pi/prompt",
+                f"{API}/api/pux/prompt",
                 {
                     "message": prompt,
                     "project": TEST_PROJECT,

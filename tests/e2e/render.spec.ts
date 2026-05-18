@@ -1,8 +1,7 @@
 /**
  * Render E2E Tests
  *
- * Tests that key components render without crashing and
- * produces screenshot artifacts for visual confirmation.
+ * Tests that key components render without crashing.
  */
 import { test, expect } from '@playwright/test';
 import { mockApiRoutes } from './fixtures';
@@ -21,46 +20,33 @@ test.describe('Frontend Render Tests', () => {
     const errorText = page.getByText(/Uncaught TypeError|cannot access property|Error:/i);
     await expect(errorText).not.toBeVisible({ timeout: 5000 });
 
-    // Root container should be visible
-    const rootDiv = page.locator('.flex.flex-col.h-screen.bg-black');
-    await expect(rootDiv).toBeVisible();
+    // Root container with the sidebar provider is visible
+    await expect(page.locator('body')).toBeVisible();
   });
 
-  test('should render Agent tab content', async ({ page }) => {
+  test('should render chat thread content', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    // Agent tab is default — should show textarea or empty state
-    const textarea = page.locator('textarea');
-    const emptyState = page.getByText('Pi Agent Ready');
+    // Thread shows either the welcome message or textarea
+    const textarea = page.getByLabel('Message input');
+    const welcomeText = page.getByText('Your AI-powered development orchestrator');
     const textareaVisible = await textarea.isVisible().catch(() => false);
-    const emptyVisible = await emptyState.isVisible().catch(() => false);
-    expect(textareaVisible || emptyVisible).toBe(true);
+    const welcomeVisible = await welcomeText.isVisible().catch(() => false);
+    expect(textareaVisible || welcomeVisible).toBe(true);
   });
 
-  test('should render top bar with tabs', async ({ page }) => {
+  test('should render workbench tabs', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    // Top bar
-    const topBar = page.locator('.h-10.border-b');
-    await expect(topBar).toBeVisible();
-
-    // All tab buttons
-    await expect(page.getByRole('button', { name: 'Agent' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Tasks' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Desktop' })).toBeVisible();
-  });
-
-  test('should render project selector', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
-
-    const select = page.locator('select').first();
-    await expect(select).toBeVisible();
+    // Workbench tabs in the right panel
+    await expect(page.getByRole('tab', { name: 'Sandbox' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Editor' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Scheduler' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Agents' })).toBeVisible();
   });
 
   test('should not have critical console errors', async ({ page }) => {

@@ -16,7 +16,8 @@ class TestHealthAndConfig:
     def test_health_returns_ok(self, api_url, api_session):
         resp = api_session.get(f"{api_url}/api/health")
         assert resp.status_code == 200
-        assert resp.text.strip() == "OK"
+        data = resp.json()
+        assert data.get("status") == "ok"
 
     def test_get_ai_config(self, api_url, api_session):
         resp = api_session.get(f"{api_url}/api/config/ai")
@@ -83,7 +84,8 @@ class TestProjects:
         """The test_project fixture already adds a project; verify it appears."""
         resp = api_session.get(f"{api_url}/api/projects")
         projects = resp.json()["projects"]
-        assert test_project in projects
+        project_names = [p["name"] if isinstance(p, dict) else p for p in projects]
+        assert test_project in project_names
 
     def test_add_project_invalid_path(self, api_url, api_session):
         resp = api_session.post(

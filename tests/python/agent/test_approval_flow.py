@@ -81,7 +81,7 @@ class TestApprovalRequestContract:
             try:
                 for event in post_and_stream(
                     _mod_session,
-                    f"{API}/api/pi/prompt",
+                    f"{API}/api/pux/prompt",
                     {
                         "message": prompt,
                         "project": TEST_PROJECT,
@@ -96,7 +96,7 @@ class TestApprovalRequestContract:
                         # Immediately deny to unblock the stream
                         request_id = event[1].get("requestId", "")
                         if request_id:
-                            _mod_session.post(f"{API}/api/pi/respond", json={
+                            _mod_session.post(f"{API}/api/pux/decision", json={
                                 "project": TEST_PROJECT,
                                 "agentId": "default",
                                 "requestId": request_id,
@@ -213,16 +213,16 @@ class TestApprovalRequestContract:
 
 class TestRespondEndpointContract:
     """
-    Test POST /api/pi/respond — the endpoint the frontend uses to
+    Test POST /api/pux/decision — the endpoint the frontend uses to
     approve/deny approvals and answer questions.
     """
 
     def test_respond_no_pending_approval(self):
         """When no approval is pending, respond should return gracefully."""
-        resp = _mod_session.post(f"{API}/api/pi/respond", json={
+        resp = _mod_session.post(f"{API}/api/pux/decision", json={
             "project": TEST_PROJECT,
             "agentId": "default",
-            "requestId": "nonexistent-req-xyz",
+            "decisionId": "nonexistent-req-xyz",
             "action": "approve",
         })
         assert resp.status_code in (200, 404)
@@ -232,20 +232,20 @@ class TestRespondEndpointContract:
 
     def test_respond_deny_no_pending(self):
         """Deny with no pending approval should be safe."""
-        resp = _mod_session.post(f"{API}/api/pi/respond", json={
+        resp = _mod_session.post(f"{API}/api/pux/decision", json={
             "project": TEST_PROJECT,
             "agentId": "default",
-            "requestId": "nonexistent-req-xyz",
+            "decisionId": "nonexistent-req-xyz",
             "action": "deny",
         })
         assert resp.status_code in (200, 404)
 
     def test_respond_answer_no_pending(self):
         """Answer with no pending question should be safe."""
-        resp = _mod_session.post(f"{API}/api/pi/respond", json={
+        resp = _mod_session.post(f"{API}/api/pux/decision", json={
             "project": TEST_PROJECT,
             "agentId": "default",
-            "requestId": "nonexistent-req-xyz",
+            "decisionId": "nonexistent-req-xyz",
             "action": "answer",
             "answer": "test answer",
         })
@@ -291,10 +291,10 @@ class TestApprovalEdgeCases:
 
     def test_respond_with_invalid_action(self):
         """Invalid action should be handled gracefully."""
-        resp = _mod_session.post(f"{API}/api/pi/respond", json={
+        resp = _mod_session.post(f"{API}/api/pux/decision", json={
             "project": TEST_PROJECT,
             "agentId": "default",
-            "requestId": "test-req",
+            "decisionId": "test-req",
             "action": "invalid_action",
         })
         # Should not crash (200 with error, 400, or 404)
@@ -302,7 +302,7 @@ class TestApprovalEdgeCases:
 
     def test_respond_with_missing_fields(self):
         """Missing required fields should return error, not crash."""
-        resp = _mod_session.post(f"{API}/api/pi/respond", json={
+        resp = _mod_session.post(f"{API}/api/pux/decision", json={
             "project": TEST_PROJECT,
         })
         assert resp.status_code in (200, 400, 404, 500)
