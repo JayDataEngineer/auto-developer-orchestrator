@@ -98,9 +98,15 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// Browser, desktop, and MCP tools go ONLY to employees via delegate_to.
 	// This forces the model to delegate instead of doing work itself.
 
+	// Build media describer from MCP client (nil if MCP unavailable)
+	var mediaDescriber file.MediaDescriber
+	if cfg.MCPClient != nil {
+		mediaDescriber = &file.MCPMediaDescriber{Client: cfg.MCPClient}
+	}
+
 	ctoTools := []core.Tool{
 		bash.New(cfg.BashExecutor),
-		file.NewReadTool(cfg.FileOps),
+		file.NewReadTool(cfg.FileOps, mediaDescriber),
 		file.NewWriteTool(cfg.FileOps),
 		file.NewEditTool(cfg.FileOps),
 		file.NewGrepTool(cfg.FileOps),
@@ -318,7 +324,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 				hostFileOps := &file.SimpleSandboxOps{BasePath: cfg.ProjectDir}
 				nativeReg := core.NewToolRegistry([]core.Tool{
 					bash.New(hostExec),
-					file.NewReadTool(hostFileOps),
+					file.NewReadTool(hostFileOps, mediaDescriber),
 					file.NewWriteTool(hostFileOps),
 					file.NewEditTool(hostFileOps),
 					file.NewGrepTool(hostFileOps),

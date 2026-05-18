@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -96,18 +97,20 @@ func (s *SimpleSandboxOps) absPath(p string) string {
 
 // ReadTool implements core.Tool for reading files.
 type ReadTool struct {
-	ops SandboxFileOps
+	ops   SandboxFileOps
+	media MediaDescriber
 }
 
-func NewReadTool(ops SandboxFileOps) *ReadTool {
-	return &ReadTool{ops: ops}
+func NewReadTool(ops SandboxFileOps, media MediaDescriber) *ReadTool {
+	return &ReadTool{ops: ops, media: media}
 }
 
 func (t *ReadTool) Name() string        { return "file_read" }
 func (t *ReadTool) Description() string {
 	return fmt.Sprintf(
-		"Read file contents. Output is truncated to %d lines or %s (whichever is hit first). "+
-			"Use offset/limit for large files. When you need the full file, continue reading with offset until complete.",
+		"Read file contents. Supports text files (truncated to %d lines or %s), "+
+			"images (png/jpg/gif/webp), documents (pdf/ppt/pptx), and audio (wav/mp3/flac). "+
+			"Use offset/limit for large text files.",
 		truncate.FileMaxLines, truncate.FormatSize(truncate.FileMaxBytes),
 	)
 }
@@ -128,6 +131,12 @@ func (t *ReadTool) Execute(ctx context.Context, args map[string]any) (any, error
 	path, _ := args["file_path"].(string)
 	if path == "" {
 		return nil, core.NewToolError("file_read", "missing required parameter 'file_path'")
+	}
+
+	// Check if this is a multimodal file type (image, audio, document)
+	ext := filepath.Ext(path)
+	if toolName, ok := isMultimodalExt(ext); ok {
+		return t.readMultimodal(ctx, path, toolName)
 	}
 
 	// Parse optional offset (1-indexed) and limit
@@ -188,6 +197,35 @@ func (t *ReadTool) Execute(ctx context.Context, args map[string]any) (any, error
 		"total_lines": totalLines,
 		"start_line":  offset,
 		"shown_lines": tr.OutputLines,
+	}, nil
+}
+
+// readMultimodal handles non-text files (images, audio, documents) via the MediaDescriber.
+func (t *ReadTool) readMultimodal(ctx context.Context, path string, toolName string) (any, error) {
+	if t.media == nil {
+		ext := filepath.Ext(path)
+		return nil, core.NewToolError("file_read",
+			fmt.Sprintf("cannot read %s file: media analysis not available", ext))
+	}
+
+	// Resolve to absolute path for the media describer
+	absPath := path
+	if !filepath.IsAbs(path) {
+		if baseOps, ok := t.ops.(*SimpleSandboxOps); ok {
+			absPath = baseOps.absPath(path)
+		}
+	}
+
+	desc, err := t.media.Describe(ctx, absPath, toolName)
+	if err != nil {
+		return nil, core.NewToolError("file_read",
+			fmt.Sprintf("failed to analyze %s file: %v", filepath.Ext(path), err))
+	}
+
+	return map[string]any{
+		"content": desc,
+		"path":    path,
+		"media":   true,
 	}, nil
 }
 

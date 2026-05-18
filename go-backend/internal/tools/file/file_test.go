@@ -200,14 +200,14 @@ func TestSimpleSandboxOps_Glob(t *testing.T) {
 
 func TestReadTool_Name(t *testing.T) {
 	ops := &SimpleSandboxOps{BasePath: t.TempDir()}
-	tool := NewReadTool(ops)
+	tool := NewReadTool(ops, nil)
 	if tool.Name() != "file_read" {
 		t.Errorf("Name() = %q, want %q", tool.Name(), "file_read")
 	}
 }
 
 func TestReadTool_Schema(t *testing.T) {
-	testutil.AssertValidSchema(t, NewReadTool(&SimpleSandboxOps{}))
+	testutil.AssertValidSchema(t, NewReadTool(&SimpleSandboxOps{}, nil))
 }
 
 func TestReadTool_Execute(t *testing.T) {
@@ -215,7 +215,7 @@ func TestReadTool_Execute(t *testing.T) {
 	path := filepath.Join(dir, "read.txt")
 	os.WriteFile(path, []byte("file content"), 0644)
 
-	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir})
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir}, nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"file_path": "read.txt",
 	})
@@ -234,7 +234,7 @@ func TestReadTool_Execute(t *testing.T) {
 }
 
 func TestReadTool_Execute_MissingPath(t *testing.T) {
-	tool := NewReadTool(&SimpleSandboxOps{})
+	tool := NewReadTool(&SimpleSandboxOps{}, nil)
 	_, err := tool.Execute(context.Background(), map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing file_path")
@@ -251,7 +251,7 @@ func TestReadTool_Execute_WithOffset(t *testing.T) {
 	lines := []string{"line1", "line2", "line3", "line4", "line5"}
 	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 
-	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir})
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir}, nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"file_path": "lines.txt",
 		"offset":    float64(3), // JSON numbers come as float64
@@ -278,7 +278,7 @@ func TestReadTool_Execute_WithLimit(t *testing.T) {
 	lines := []string{"line1", "line2", "line3", "line4", "line5"}
 	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 
-	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir})
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir}, nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"file_path": "lines.txt",
 		"limit":     float64(2),
@@ -308,7 +308,7 @@ func TestReadTool_Execute_Metadata(t *testing.T) {
 	lines := []string{"line1", "line2", "line3"}
 	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 
-	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir})
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir}, nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"file_path": "lines.txt",
 	})
@@ -323,6 +323,147 @@ func TestReadTool_Execute_Metadata(t *testing.T) {
 	startLine, _ := m["start_line"].(int)
 	if startLine != 1 {
 		t.Errorf("start_line should be 1, got %d", startLine)
+	}
+}
+
+// mockMediaDescriber is a test double for MediaDescriber.
+type mockMediaDescriber struct {
+	describeFn func(ctx context.Context, absPath string, toolName string) (string, error)
+}
+
+func (m *mockMediaDescriber) Describe(ctx context.Context, absPath string, toolName string) (string, error) {
+	if m.describeFn != nil {
+		return m.describeFn(ctx, absPath, toolName)
+	}
+	return "mock description", nil
+}
+
+func TestReadTool_Execute_ImageFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "photo.png")
+	os.WriteFile(path, []byte("\x89PNG fake image data"), 0644)
+
+	media := &mockMediaDescriber{
+		describeFn: func(_ context.Context, absPath string, toolName string) (string, error) {
+			if toolName != "phi4_vision" {
+				t.Errorf("expected toolName phi4_vision, got %q", toolName)
+			}
+			return "A sunset over the ocean", nil
+		},
+	}
+
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir}, media)
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"file_path": "photo.png",
+	})
+	testutil.AssertNoError(t, err)
+
+	m := result.(map[string]any)
+	content, _ := m["content"].(string)
+	if !strings.Contains(content, "sunset") {
+		t.Errorf("expected image description, got %q", content)
+	}
+	if m["media"] != true {
+		t.Error("expected media=true in result")
+	}
+	testutil.AssertStringField(t, m, "path", "photo.png")
+}
+
+func TestReadTool_Execute_AudioFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "speech.mp3")
+	os.WriteFile(path, []byte("\xff\xfb fake mp3"), 0644)
+
+	media := &mockMediaDescriber{
+		describeFn: func(_ context.Context, _ string, toolName string) (string, error) {
+			if toolName != "transcribe_audio" {
+				t.Errorf("expected toolName transcribe_audio, got %q", toolName)
+			}
+			return "Hello, this is a test transcript.", nil
+		},
+	}
+
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir}, media)
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"file_path": "speech.mp3",
+	})
+	testutil.AssertNoError(t, err)
+
+	m := result.(map[string]any)
+	content, _ := m["content"].(string)
+	if !strings.Contains(content, "test transcript") {
+		t.Errorf("expected transcript, got %q", content)
+	}
+}
+
+func TestReadTool_Execute_PDFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.pdf")
+	os.WriteFile(path, []byte("%PDF-1.4 fake pdf"), 0644)
+
+	media := &mockMediaDescriber{
+		describeFn: func(_ context.Context, _ string, toolName string) (string, error) {
+			if toolName != "kosmos_ocr" {
+				t.Errorf("expected toolName kosmos_ocr, got %q", toolName)
+			}
+			return "# Report\nThis is the extracted PDF text.", nil
+		},
+	}
+
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir}, media)
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"file_path": "report.pdf",
+	})
+	testutil.AssertNoError(t, err)
+
+	m := result.(map[string]any)
+	content, _ := m["content"].(string)
+	if !strings.Contains(content, "extracted PDF") {
+		t.Errorf("expected OCR result, got %q", content)
+	}
+}
+
+func TestReadTool_Execute_NoMediaDescriber(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "photo.png")
+	os.WriteFile(path, []byte("\x89PNG"), 0644)
+
+	tool := NewReadTool(&SimpleSandboxOps{BasePath: dir}, nil)
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"file_path": "photo.png",
+	})
+	if err == nil {
+		t.Fatal("expected error for image file without media describer")
+	}
+	if !strings.Contains(err.Error(), "media analysis not available") {
+		t.Errorf("expected media error, got %q", err.Error())
+	}
+}
+
+func TestIsMultimodalExt(t *testing.T) {
+	tests := []struct {
+		ext      string
+		wantTool string
+		wantOK   bool
+	}{
+		{".png", "phi4_vision", true},
+		{".PNG", "phi4_vision", true},
+		{".jpg", "phi4_vision", true},
+		{".jpeg", "phi4_vision", true},
+		{".pdf", "kosmos_ocr", true},
+		{".mp3", "transcribe_audio", true},
+		{".wav", "transcribe_audio", true},
+		{".txt", "", false},
+		{".go", "", false},
+		{".json", "", false},
+		{"", "", false},
+	}
+	for _, tt := range tests {
+		tool, ok := isMultimodalExt(tt.ext)
+		if tool != tt.wantTool || ok != tt.wantOK {
+			t.Errorf("isMultimodalExt(%q) = (%q, %v), want (%q, %v)",
+				tt.ext, tool, ok, tt.wantTool, tt.wantOK)
+		}
 	}
 }
 
