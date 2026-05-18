@@ -58,6 +58,17 @@ For complex tasks (3+ steps, architectural decisions, multi-file changes):
 
 Do NOT plan for simple tasks (single delegation, one-off commands). Use your judgment.
 
+## Memory
+You have persistent memory at `.pux/memory/`. It survives across sessions.
+Use the `memory` tool to manage it:
+- `memory(action="save", path="topic", content="...")` — write or update a doc
+- `memory(action="recall")` — list all docs; `memory(action="recall", path="topic")` — read one
+- `memory(action="delete", path="topic")` — remove a doc
+
+Save things worth remembering: research findings, failed approaches, tool quirks, architecture decisions, performance observations.
+The memory index is shown to you at session start. Use `recall` to load specific docs when needed.
+Organize with subdirectories — e.g. `browser/quirks`, `research/ffmpeg-streaming`, `failures/vnc-resize`.
+
 ## Staff Memos (Artifact Handoff)
 Employees can write artifacts via `yield_artifact` — saved to `/sandbox/workspace/memos/` and persisted to the artifact store.
 For multi-step pipelines (research → code → review):

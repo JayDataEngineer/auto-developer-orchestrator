@@ -108,8 +108,11 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		fileOps = adapters.FileOps{Mgr: h.sandboxMgr, SandboxID: sandboxID}
 	}
 
-	// Project memory (MEMORY.md)
+	// Project memory (MEMORY.md — legacy, still supported)
 	memStore := memory.NewProjectMemory(projectPath)
+
+	// Folder-based memory (.pux/memory/) — new system
+	memFolder := memory.NewFolderStore(projectPath, &bashExec)
 
 	// Credential store for secret resolution in tools
 	credStore := sensitive.NewStore()
@@ -140,6 +143,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		BashExecutor:  &bashExec,
 		FileOps:       &fileOps,
 		MemoryStore:   memStore,
+		MemoryFolder:  memFolder,
 		ApprovalHandler: approvalHandler,
 		GitExecutor:     nil, // disabled — git auto-commits on session start are unwanted
 		ArtifactDB:      h.db,
@@ -363,13 +367,19 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Inject project memory prefix into the message
+	// Priority: folder-based memory (.pux/memory/) > legacy MEMORY.md
 	var memoryPrefix string
-	if mem := orch.Memory; mem != nil {
-		memoryPrefix = mem.InjectPrefix()
-	} else {
-		memoryPrefix = memory.ReadMemoryFile(projectPath)
-		if memoryPrefix != "" {
-			memoryPrefix = "<memory>\n" + memoryPrefix + "\n</memory>\n\n"
+	if memFolder != nil {
+		memoryPrefix = memFolder.InjectPrefix()
+	}
+	if memoryPrefix == "" {
+		if mem := orch.Memory; mem != nil {
+			memoryPrefix = mem.InjectPrefix()
+		} else {
+			memoryPrefix = memory.ReadMemoryFile(projectPath)
+			if memoryPrefix != "" {
+				memoryPrefix = "<memory>\n" + memoryPrefix + "\n</memory>\n\n"
+			}
 		}
 	}
 
