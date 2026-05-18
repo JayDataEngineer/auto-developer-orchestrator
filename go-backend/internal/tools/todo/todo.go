@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -12,8 +11,8 @@ import (
 
 // Item is a single todo item.
 type Item struct {
-	Task   string `json:"task"`
-	Status string `json:"status"` // pending, in_progress, done, blocked
+	Content string `json:"content"`
+	Status  string `json:"status"` // pending, in_progress, completed
 }
 
 // Store holds the todo list state.
@@ -26,68 +25,16 @@ func NewStore() *Store {
 	return &Store{Items: make([]Item, 0)}
 }
 
-// Format returns the todo list as a compact JSON string for prompt injection (~250 tokens max).
-func (s *Store) Format() string {
+// Replace replaces the entire todo list. Returns the new list.
+func (s *Store) Replace(items []Item) []Item {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.Items) == 0 {
-		return ""
-	}
-	data, _ := json.Marshal(map[string]any{"todos": s.Items})
-	return string(data)
-}
-
-// Add adds a todo item.
-func (s *Store) Add(task string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if task == "" {
-		return fmt.Errorf("task cannot be empty")
-	}
-	// Deduplicate
-	for _, item := range s.Items {
-		if strings.EqualFold(item.Task, task) {
-			return nil
-		}
-	}
-	s.Items = append(s.Items, Item{Task: task, Status: "pending"})
-	return nil
-}
-
-// Update changes the status of a todo item by task name (prefix match).
-func (s *Store) Update(task string, status string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.Items {
-		if strings.EqualFold(s.Items[i].Task, task) || strings.HasPrefix(strings.ToLower(s.Items[i].Task), strings.ToLower(task)) {
-			s.Items[i].Status = status
-			return nil
-		}
-	}
-	return fmt.Errorf("todo not found: %s", task)
-}
-
-// Delete removes a todo item.
-func (s *Store) Delete(task string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.Items {
-		if strings.EqualFold(s.Items[i].Task, task) || strings.HasPrefix(strings.ToLower(s.Items[i].Task), strings.ToLower(task)) {
-			s.Items = append(s.Items[:i], s.Items[i+1:]...)
-			return nil
-		}
-	}
-	return fmt.Errorf("todo not found: %s", task)
-}
-
-// Clear removes all todos.
-func (s *Store) Clear() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Items = nil
+	s.Items = items
+	return s.Items
 }
 
 // Tool implements core.Tool for managing the todo list.
+// Uses full-state replacement: each call sends the complete list.
 type Tool struct {
 	store *Store
 }
@@ -96,118 +43,122 @@ func NewTool(store *Store) *Tool {
 	return &Tool{store: store}
 }
 
-func (t *Tool) Name() string        { return "todo" }
-func (t *Tool) Description() string { return "Manage the task todo list. Use add, update, delete, or clear." }
+func (t *Tool) Name() string { return "todo" }
+func (t *Tool) Description() string {
+	return `Use this tool to create and manage a structured task list for your current work session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
+
+Only use this tool if you think it will be helpful in staying organized. If the user's request is trivial and takes less than 3 steps, it is better to NOT use this tool and just do the task directly.
+
+## When to Use
+
+- Complex multi-step tasks (3+ distinct steps)
+- Non-trivial tasks requiring careful planning
+- User provides multiple tasks at once
+- The plan may need future revisions based on results
+
+## How to Use
+
+1. When you start working on a task — mark it as in_progress BEFORE beginning work.
+2. After completing a task — mark it as completed and add any new follow-up tasks discovered.
+3. You can make several updates to the todo list at once. For example, when you complete a task, you can mark the next task as in_progress.
+4. Each call REPLACES the entire list. Always include ALL items, not just the ones that changed.
+
+## When NOT to Use
+
+- Single straightforward tasks
+- Tasks that take less than 3 trivial steps
+- Purely conversational or informational requests
+
+## Task States
+
+- pending: Task not yet started
+- in_progress: Currently working on it
+- completed: Task finished successfully
+
+## Rules
+
+- Mark tasks in_progress BEFORE starting them.
+- Mark tasks completed IMMEDIATELY after finishing (don't batch completions).
+- ONLY mark completed when FULLY accomplished. If blocked, keep as in_progress.
+- Always have at least one task in_progress unless all are completed.
+- Remove tasks that are no longer relevant.`
+}
 
 func (t *Tool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"action": {
-				"type": "string",
-				"description": "Action: add, update, delete, clear, list",
-				"enum": ["add", "update", "delete", "clear", "list"]
-			},
-			"task": {"type": "string", "description": "Task description (for add, update, delete)"},
-			"status": {
-				"type": "string",
-				"description": "New status (for update only): pending, in_progress, done, blocked",
-				"enum": ["pending", "in_progress", "done", "blocked"]
+			"todos": {
+				"type": "array",
+				"description": "The complete todo list. Each call replaces the entire list.",
+				"items": {
+					"type": "object",
+					"properties": {
+						"content": {"type": "string", "description": "Description of the task"},
+						"status": {"type": "string", "description": "Task status", "enum": ["pending", "in_progress", "completed"]}
+					},
+					"required": ["content", "status"]
+				}
 			}
 		},
-		"required": ["action"]
+		"required": ["todos"]
 	}`)
 }
 
 func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	action, _ := args["action"].(string)
-	task, _ := args["task"].(string)
-	status, _ := args["status"].(string)
-
-	switch action {
-	case "add":
-		if task == "" {
-			return nil, core.NewToolError("todo", "missing required parameter 'task' for add")
-		}
-		if err := t.store.Add(task); err != nil {
-			return nil, err
-		}
-		msg := fmt.Sprintf("Task added: %s", task)
-		return map[string]any{
-			"success": true, "action": "add", "task": task,
-			"widget": core.WidgetResult{
-				Type: "confirm", Title: "Task Added", Icon: "CheckCircle", Message: msg,
-			},
-		}, nil
-
-	case "update":
-		if task == "" {
-			return nil, core.NewToolError("todo", "missing required parameter 'task' for update")
-		}
-		if status == "" {
-			return nil, core.NewToolError("todo", "missing required parameter 'status' for update")
-		}
-		if err := t.store.Update(task, status); err != nil {
-			return nil, err
-		}
-		msg := fmt.Sprintf("Task %q → %s", task, status)
-		return map[string]any{
-			"success": true, "action": "update", "task": task, "status": status,
-			"widget": core.WidgetResult{
-				Type: "confirm", Title: "Task Updated", Icon: "CheckCircle", Message: msg,
-			},
-		}, nil
-
-	case "delete":
-		if task == "" {
-			return nil, core.NewToolError("todo", "missing required parameter 'task' for delete")
-		}
-		if err := t.store.Delete(task); err != nil {
-			return nil, err
-		}
-		msg := fmt.Sprintf("Task deleted: %s", task)
-		return map[string]any{
-			"success": true, "action": "delete", "task": task,
-			"widget": core.WidgetResult{
-				Type: "confirm", Title: "Deleted", Icon: "Trash2", Message: msg,
-			},
-		}, nil
-
-	case "clear":
-		t.store.Clear()
-		return map[string]any{
-			"success": true, "action": "clear",
-			"widget": core.WidgetResult{
-				Type: "confirm", Title: "Cleared", Icon: "Trash2", Message: "All tasks cleared",
-			},
-		}, nil
-
-	case "list":
-		rows := make([]map[string]any, 0, len(t.store.Items))
-		for _, item := range t.store.Items {
-			rows = append(rows, map[string]any{"task": item.Task, "status": item.Status})
-		}
-		return map[string]any{
-			"todos": t.store.Items,
-			"widget": core.WidgetResult{
-				Type:  "list",
-				Title: fmt.Sprintf("%d task%s", len(rows), pluralS(len(rows))),
-				Icon:  "ListTodo",
-				Columns: []core.WidgetColumn{
-					{Key: "task", Label: "Task", Type: core.WidgetColText},
-					{Key: "status", Label: "Status", Type: core.WidgetColStatus, ColorMap: map[string]string{
-						"pending": "text-muted-foreground", "in_progress": "text-blue-400",
-						"done": "text-green-400", "blocked": "text-red-400",
-					}},
-				},
-				Rows:  rows,
-				Empty: "No tasks",
-			},
-		}, nil
-
-	default:
-		return nil, core.NewToolError("todo", "unknown action: "+action)
+	rawTodos, ok := args["todos"].([]any)
+	if !ok {
+		return nil, core.NewToolError("todo", "missing required parameter 'todos' (must be an array)")
 	}
+
+	items := make([]Item, 0, len(rawTodos))
+	for i, raw := range rawTodos {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return nil, core.NewToolError("todo", fmt.Sprintf("todos[%d] must be an object", i))
+		}
+		content, _ := m["content"].(string)
+		status, _ := m["status"].(string)
+		if content == "" {
+			return nil, core.NewToolError("todo", fmt.Sprintf("todos[%d] missing required 'content'", i))
+		}
+		switch status {
+		case "pending", "in_progress", "completed":
+			// valid
+		case "":
+			return nil, core.NewToolError("todo", fmt.Sprintf("todos[%d] missing required 'status'", i))
+		default:
+			return nil, core.NewToolError("todo", fmt.Sprintf("todos[%d] invalid status %q (use pending, in_progress, or completed)", i, status))
+		}
+		items = append(items, Item{Content: content, Status: status})
+	}
+
+	current := t.store.Replace(items)
+
+	// Build widget rows
+	rows := make([]map[string]any, 0, len(current))
+	for _, item := range current {
+		rows = append(rows, map[string]any{"content": item.Content, "status": item.Status})
+	}
+
+	return map[string]any{
+		"todos": current,
+		"widget": core.WidgetResult{
+			Type:  "list",
+			Title: fmt.Sprintf("%d task%s", len(rows), pluralS(len(rows))),
+			Icon:  "ListTodo",
+			Columns: []core.WidgetColumn{
+				{Key: "content", Label: "Task", Type: core.WidgetColText},
+				{Key: "status", Label: "Status", Type: core.WidgetColStatus, ColorMap: map[string]string{
+					"pending":    "text-muted-foreground",
+					"in_progress": "text-blue-400",
+					"completed":  "text-green-400",
+				}},
+			},
+			Rows:  rows,
+			Empty: "No tasks",
+		},
+	}, nil
 }
 
 func pluralS(n int) string {

@@ -420,10 +420,6 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// Add extra hooks from add-ons (Langfuse, etc.)
 	loopHooks = append(loopHooks, cfg.ExtraHooks...)
 
-	// Todo hook — injects todo state before each model call
-	todoHook := hooks.NewTodoHook(todoStore)
-	loopHooks = append(loopHooks, todoHook)
-
 	var skillsStr string
 	if skillStore.Count() > 0 {
 		skillsStr = skillStore.FormatAvailableSkills()

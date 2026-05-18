@@ -416,6 +416,73 @@ const DesktopObserveToolUI = makeAssistantToolUI({
   render: ScreenshotRenderer,
 });
 
+// ── Todo list tool UI ──
+
+type TodoItem = { content?: string; status?: string };
+
+export const TodoToolUI = makeAssistantToolUI({
+	toolName: "todo",
+	render: ({ args, result, status }) => {
+		const colors = useColors();
+		const isDone = status.type === "complete";
+		const isRunning = status.type === "running";
+
+		// Parse todos from args (while running) or result (when complete)
+		let todos: TodoItem[] = [];
+		if (isDone && result && typeof result === "object") {
+			const r = result as { todos?: TodoItem[] };
+			todos = Array.isArray(r.todos) ? r.todos : [];
+		} else if (args && typeof args === "object") {
+			const a = args as { todos?: TodoItem[] };
+			todos = Array.isArray(a.todos) ? a.todos : [];
+		}
+
+		if (isRunning && todos.length === 0) {
+			return (
+				<Box paddingLeft={2} marginBottom={1}>
+					<Text color={colors.running}>{BLACK_CIRCLE} </Text>
+					<Text bold color={colors.running}>todo</Text>
+					<Text color="gray"> loading...</Text>
+				</Box>
+			);
+		}
+
+		if (todos.length === 0) return null;
+
+		return (
+			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+				<Box>
+					<Text color={isDone ? colors.success : colors.running}>
+						{BLACK_CIRCLE}{" "}
+					</Text>
+					<Text bold color={isRunning ? colors.running : undefined}>
+						todo
+					</Text>
+					<Text color="gray"> {todos.length} item{todos.length !== 1 ? "s" : ""}</Text>
+				</Box>
+				{todos.map((item, i) => {
+					const s = item.status ?? "pending";
+					let icon = "○";
+					let color = "gray";
+					if (s === "completed") { icon = symbols.check; color = colors.success; }
+					else if (s === "in_progress") { icon = "●"; color = colors.running; }
+					return (
+						<Box key={i} paddingLeft={2}>
+							<Text color={color}>{icon} </Text>
+							<Text
+								color={s === "completed" ? "gray" : undefined}
+								strikethrough={s === "completed"}
+							>
+								{item.content ?? "untitled"}
+							</Text>
+						</Box>
+					);
+				})}
+			</Box>
+		);
+	},
+});
+
 // ── Tool Registry — mount inside AssistantRuntimeProvider ──
 // Each makeAssistantToolUI returns a component that registers
 // itself via hooks when mounted within the runtime context.
@@ -439,6 +506,7 @@ export function ToolRegistry() {
 			<WebScreenshotToolUI />
 			<ObserveToolUI />
 			<DesktopObserveToolUI />
+			<TodoToolUI />
 		</>
 	);
 }
