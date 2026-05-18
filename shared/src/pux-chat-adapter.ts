@@ -360,7 +360,15 @@ export const puxChatAdapter: ChatModelAdapter = {
 							.join("")
 					: "";
 
-		if (!userText) return;
+		// Extract image attachments
+		const images: string[] =
+			Array.isArray(content)
+				? content
+						.filter((p: { type: string }) => p.type === "image")
+						.map((p: { image: string }) => p.image)
+				: [];
+
+		if (!userText && images.length === 0) return;
 
 		// Gap 8: Read model from runConfig.custom first, fall back to Zustand store
 		const custom = runConfig?.custom as Record<string, unknown> | undefined;
@@ -375,10 +383,11 @@ export const puxChatAdapter: ChatModelAdapter = {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				message: userText,
+				message: userText || "(image attached)",
 				project,
 				agentId: store.activeAgentId || undefined,
 				...(model ? { model } : {}),
+				...(images.length > 0 ? { images } : {}),
 				temperature,
 			}),
 			signal: abortSignal,
@@ -423,6 +432,11 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		// Gap 2: Steps accumulator
 		const stepsRef: UsageStep[] = [];
+
+		// Sub-agent tracking: when a sub-agent is active, its tool events
+		// are routed to the Zustand store (for nested rendering) instead of
+		// the tools map (which becomes flat message parts).
+		let activeSubAgentName: string | null = null;
 
 		// Initial yield — empty, running
 		yield buildSnapshot(accText, accThinking, tools, sources, "running", timing, stepsRef);
@@ -513,6 +527,25 @@ export const puxChatAdapter: ChatModelAdapter = {
 							const toolId = (parsed.toolId as string) || `tc_${Date.now()}`;
 							const toolName = (parsed.toolName as string) || "unknown";
 							const toolArgs = (parsed.toolArgs || parsed.args || {}) as Record<string, unknown>;
+							const toolAgentName = parsed.agentName as string | undefined;
+
+							// Route sub-agent tool calls to Zustand store (for nested
+							// rendering) instead of the tools map (flat message parts).
+							if (toolAgentName && activeSubAgentName && toolAgentName === activeSubAgentName) {
+								const agents = usePuxStore.getState().agents;
+								const agent = [...agents.values()].find(
+									(a) => a.agentName === toolAgentName && a.status === "running",
+								);
+								if (agent) {
+									usePuxStore.getState().addAgentToolCall(agent.agentId, {
+										toolName,
+										args: toolArgs,
+										timestamp: Date.now(),
+									});
+								}
+								break;
+							}
+
 							inferTabFromTool(toolName, toolArgs);
 							tools.set(toolId, {
 								toolCallId: toolId,
@@ -526,6 +559,31 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 						case "tool_execution_end": {
 							const toolId = parsed.toolId as string;
+							const toolAgentName = parsed.agentName as string | undefined;
+
+							// Sub-agent tool completion — update store record, skip tools map
+							if (toolAgentName && activeSubAgentName && toolAgentName === activeSubAgentName) {
+								const agents = usePuxStore.getState().agents;
+								const agent = [...agents.values()].find(
+									(a) => a.agentName === toolAgentName && a.status === "running",
+								);
+								if (agent) {
+									const lastTool = agent.toolCalls[agent.toolCalls.length - 1];
+									if (lastTool && !lastTool.endedAt) {
+										const updated = { ...lastTool, endedAt: Date.now() };
+										if (parsed.result !== undefined) updated.result = parsed.result;
+										if (parsed.error) updated.isError = true;
+										// Replace the last entry immutably
+										const newCalls = [...agent.toolCalls];
+										newCalls[newCalls.length - 1] = updated;
+										const newAgents = new Map(agents);
+										newAgents.set(agent.agentId, { ...agent, toolCalls: newCalls });
+										usePuxStore.setState({ agents: newAgents });
+									}
+								}
+								break;
+							}
+
 							const existing = toolId ? tools.get(toolId) : null;
 							if (existing) {
 								existing.result = parsed.result;
@@ -595,6 +653,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 							// so we can collect its messages
 							subAgentMessageAccum = [];
 							if (agentName) {
+								activeSubAgentName = agentName;
 								if (["jake", "ryan", "browser_ops", "desktop_ops"].includes(agentName)) {
 									usePuxStore.getState().setWorkbenchTab("vnc");
 								} else if (["marcus", "code_ops"].includes(agentName)) {
@@ -614,6 +673,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 						case "subagent_end": {
 							const agentId = parsed.agentId as string | undefined;
 							const agentName = parsed.agentName as string | undefined;
+							activeSubAgentName = null;
 							const result = typeof parsed.result === "string"
 								? parsed.result
 								: parsed.result ? JSON.stringify(parsed.result) : undefined;
@@ -626,32 +686,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 								);
 								if (match) {
 									usePuxStore.getState().updateAgentStatus(match.agentId, "complete", result);
-								}
-							}
-							break;
-						}
-						case "subagent_tool_start": {
-							const agentId = parsed.agentId as string | undefined;
-							const agentName = parsed.agentName as string | undefined;
-							const toolName = parsed.toolName as string;
-							const toolArgs = parsed.toolArgs || parsed.args;
-							if (agentId && toolName) {
-								usePuxStore.getState().addAgentToolCall(agentId, {
-									toolName,
-									args: toolArgs,
-									timestamp: Date.now(),
-								});
-							} else if (agentName && toolName) {
-								const agents = usePuxStore.getState().agents;
-								const match = [...agents.values()].find(
-									(a) => a.agentName === agentName && a.status === "running",
-								);
-								if (match) {
-									usePuxStore.getState().addAgentToolCall(match.agentId, {
-										toolName,
-										args: toolArgs,
-										timestamp: Date.now(),
-									});
 								}
 							}
 							break;

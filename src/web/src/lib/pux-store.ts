@@ -12,4 +12,6 @@ export type {
 	Project,
 	WorkbenchTab,
 	RunningAgentInfo,
+	AgentState,
+	ToolCallRecord,
 } from "@pux/shared";

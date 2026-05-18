@@ -71,6 +71,7 @@ export interface ToolCallRecord {
 	result?: unknown;
 	isError?: boolean;
 	timestamp: number;
+	endedAt?: number;
 }
 
 // ── TUI Views ──
