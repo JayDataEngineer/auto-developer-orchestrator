@@ -12,8 +12,8 @@ import (
 // DelegateRunner creates and runs sub-agents for delegate_to/delegate_async.
 type DelegateRunner interface {
 	RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error)
-	RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string) (map[string]any, error)
-	RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error)
+	RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string) (map[string]any, error)
+	RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error)
 	CollectAsyncResults(ctx context.Context) (map[string]any, error)
 	RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error)
 }
@@ -179,7 +179,14 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	// Use tracked delegation — returns agent_ref + file changes
-	return t.runner.RunDelegateTracked(ctx, task, resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, sandboxTier, delegatesTo)
+	// Pass original instructions (role name) as agentName for correct SSE event labeling
+	agentName := instructions
+	if roleMap != nil {
+		if role := roleMap[instructions]; role != nil {
+			// Already resolved — use the original key as display name
+		}
+	}
+	return t.runner.RunDelegateTracked(ctx, task, resolvedInstructions, agentName, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, sandboxTier, delegatesTo)
 }
 
 // DelegateContinueTool sends feedback to an existing sub-agent for continuation.
@@ -356,7 +363,7 @@ func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (a
 		return nil, core.NewToolError("delegate_async", "no tools specified and role '"+instructions+"' has no default tools")
 	}
 
-	return t.runner.RunDelegateAsync(ctx, taskID, task, resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel)
+	return t.runner.RunDelegateAsync(ctx, taskID, task, resolvedInstructions, instructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel)
 }
 
 // CollectResultsTool waits for all pending async delegates to complete.

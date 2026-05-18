@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useCollapsibleRoot } from "./use-collapsible";
 import { usePuxStore } from "@/lib/pux-store";
 import { ShieldCheck, CheckCircle } from "lucide-react";
+import { DelegateRenderer, isDelegateTool } from "@/components/assistant-ui/delegate-tool-ui";
 
 export type ToolFallbackRootProps = Omit<
 	React.ComponentPropsWithRef<typeof Collapsible>,
@@ -250,12 +251,18 @@ function ToolFallbackError({
 const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	toolName,
 	argsText,
+	args,
 	result,
 	status,
 	interrupt,
 }) => {
 	const isCancelled =
 		status?.type === "incomplete" && status.reason === "cancelled";
+
+	// Delegate tools get the specialized collapsible card UI
+	if (isDelegateTool(toolName)) {
+		return <DelegateRenderer args={args ?? {}} result={result} status={status} />;
+	}
 
 	// Handle approval interrupts inline — permission hooks from any tool
 	const pending = usePuxStore((s) => s.pendingDecision);

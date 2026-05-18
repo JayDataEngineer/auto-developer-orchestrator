@@ -106,8 +106,10 @@ function SubAgentToolRow({ tool }: { tool: ToolCallRecord }) {
 }
 
 // ── Main delegate renderer ──
+// Exported so ToolFallback can use it directly (bypasses makeAssistantToolUI
+// registration which has a timing/matching issue in assistant-ui v0.14.5).
 
-function DelegateRenderer({
+export function DelegateRenderer({
 	args,
 	status,
 }: {
@@ -115,7 +117,7 @@ function DelegateRenderer({
 	result?: any;
 	status?: { type: string };
 }) {
-	const agentName = (args.agent_id as string) || (args.agent as string) || "agent";
+	const agentName = (args.agent_id as string) || (args.agent as string) || (args.instructions as string) || "agent";
 	const task = (args.task as string) || (args.prompt as string) || "";
 	const isRunning = status?.type === "running";
 	const isComplete = status?.type === "complete";
@@ -220,6 +222,7 @@ function DelegateRenderer({
 	);
 }
 
+// Keep makeAssistantToolUI registration as fallback (may work in future versions)
 export const DelegateToolUI = makeAssistantToolUI({
 	toolName: "delegate_to",
 	render: DelegateRenderer,
@@ -229,3 +232,8 @@ export const DelegateAsyncToolUI = makeAssistantToolUI({
 	toolName: "delegate_async",
 	render: DelegateRenderer,
 });
+
+// Check if a tool name is a delegation tool (used by ToolFallback)
+export function isDelegateTool(toolName: string): boolean {
+	return toolName === "delegate_to" || toolName === "delegate_async";
+}

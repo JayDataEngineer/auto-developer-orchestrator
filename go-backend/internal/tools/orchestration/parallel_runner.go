@@ -561,7 +561,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 
 // RunDelegateTracked runs a sub-agent with file change tracking.
 // Returns the result, an agent reference for continuation, and file changes.
-func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string) (map[string]any, error) {
+func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string) (map[string]any, error) {
 	subscriber := subscriberFromCtx(ctx)
 	// Take pre-snapshot
 	var snapshotID string
@@ -573,7 +573,11 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 	}
 
-	agentName := extractAgentName(instructions)
+	// Use caller-provided agentName (original role name like "shell_ops"),
+	// fall back to extracting from instructions if empty
+	if agentName == "" {
+		agentName = extractAgentName(instructions)
+	}
 
 	// Emit subagent_start to parent subscriber
 	core.SendEvent(subscriber, core.AgentEvent{
@@ -965,7 +969,7 @@ func (r *ParallelRunner) RevertAgent(ctx context.Context, agentRef string) (map[
 }
 
 // RunDelegateAsync launches a sub-agent in a goroutine. Returns immediately.
-func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
+func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
 	// Capture subscriber from parent ctx before spawning goroutine.
 	// The goroutine uses context.Background() to survive parent cancellation,
 	// so we re-inject the subscriber into the background context.
@@ -1011,7 +1015,7 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 		defer cancel()
 
 		// Use tracked delegation for file change tracking + agent_ref
-		result, err := r.RunDelegateTracked(bgCtx, task, instructions, toolNames, maxRounds, temperature, modelID, "", nil)
+		result, err := r.RunDelegateTracked(bgCtx, task, instructions, agentName, toolNames, maxRounds, temperature, modelID, "", nil)
 
 		// Async delegates don't need to stay alive for continuation.
 		// Clean up the live agent but keep the completedSnapshot for revert.
