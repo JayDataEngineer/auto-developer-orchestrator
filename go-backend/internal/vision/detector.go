@@ -40,6 +40,7 @@ var browserTools = map[string]bool{
 // desktopTools produce DesktopFrame results with image_b64.
 var desktopTools = map[string]bool{
 	"desktop_screenshot": true,
+	"browser_screenshot": true,
 	"desktop_click":      true,
 	"desktop_type":       true,
 	"desktop_key":        true,

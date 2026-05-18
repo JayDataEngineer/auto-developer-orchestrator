@@ -7,6 +7,43 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
 
+// ── Navigate Tool (BrowserProvider) ──
+
+type NavigateProviderTool struct {
+	provider  BrowserProvider
+	sandboxID func() string
+}
+
+func NewNavigateProviderTool(p BrowserProvider, sandboxID func() string) *NavigateProviderTool {
+	return &NavigateProviderTool{provider: p, sandboxID: sandboxID}
+}
+
+func (t *NavigateProviderTool) Name() string { return "browse_to" }
+func (t *NavigateProviderTool) Description() string {
+	return "Navigate the browser to a URL. Returns page title, URL, and a preview of page content. ALWAYS use this to navigate — do NOT use bash+curl."
+}
+func (t *NavigateProviderTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"url": {"type": "string", "description": "The full URL to navigate to"}
+		},
+		"required": ["url"]
+	}`)
+}
+
+func (t *NavigateProviderTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	if sbID == "" {
+		return nil, core.NewToolError("browse_to", "no sandbox available")
+	}
+	url, _ := args["url"].(string)
+	if url == "" {
+		return nil, core.NewToolError("browse_to", "missing required parameter 'url'")
+	}
+	return t.provider.Navigate(ctx, sbID, url)
+}
+
 // ── Find Element Tool ──
 
 type FindElementTool struct {
@@ -57,6 +94,33 @@ func (t *FindElementTool) Execute(ctx context.Context, args map[string]any) (any
 	}
 
 	return t.provider.FindElement(ctx, sbID, req)
+}
+
+// ── Browser Screenshot Tool ──
+
+type BrowserScreenshotTool struct {
+	provider  BrowserProvider
+	sandboxID func() string
+}
+
+func NewBrowserScreenshotTool(p BrowserProvider, sandboxID func() string) *BrowserScreenshotTool {
+	return &BrowserScreenshotTool{provider: p, sandboxID: sandboxID}
+}
+
+func (t *BrowserScreenshotTool) Name() string { return "browser_screenshot" }
+func (t *BrowserScreenshotTool) Description() string {
+	return "Take a screenshot of the current browser page. Returns a base64-encoded image that is automatically described by the vision system. Use this to visually verify page state, check layouts, or see what the user sees."
+}
+func (t *BrowserScreenshotTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {}}`)
+}
+
+func (t *BrowserScreenshotTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	if sbID == "" {
+		return nil, core.NewToolError("browser_screenshot", "no sandbox available")
+	}
+	return t.provider.BrowserScreenshot(ctx, sbID)
 }
 
 // ── A11y Snapshot Tool ──
@@ -297,6 +361,8 @@ func RegisterBrowserTools(tools []core.Tool, p BrowserProvider, sandboxID func()
 		return tools
 	}
 	return append(tools,
+		NewNavigateProviderTool(p, sandboxID),
+		NewBrowserScreenshotTool(p, sandboxID),
 		NewFindElementTool(p, sandboxID),
 		NewA11ySnapshotTool(p, sandboxID),
 		NewGetCookiesTool(p, sandboxID),

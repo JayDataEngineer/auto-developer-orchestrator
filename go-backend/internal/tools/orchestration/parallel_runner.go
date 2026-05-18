@@ -1183,6 +1183,7 @@ func (s *subSession) GetCurrentNode() string { return s.parent.ID() + "-sub" }
 // Used by the auto-director to decide whether to raise Chrome for VNC visibility.
 func hasBrowserTools(toolNames []string) bool {
 	browserTools := map[string]bool{
+		"browse_to":         true,
 		"sb_server":         true,
 		"browser_navigate":  true,
 		"browser_click":     true,

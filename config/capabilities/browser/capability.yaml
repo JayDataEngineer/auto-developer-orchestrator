@@ -1,6 +1,7 @@
-description: "Browser automation via sb_server — navigate, click, type, extract, download"
+description: "Browser automation via CDP — navigate, click, type, extract"
 tools:
-  - bash
+  - browse_to
+  - browser_screenshot
   - find_element
   - snapshot_a11y
   - get_cookies

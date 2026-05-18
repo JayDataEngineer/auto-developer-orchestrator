@@ -313,7 +313,7 @@ func (h *SandboxHandler) VNCProxy(w http.ResponseWriter, r *http.Request) {
 		// noVNC prepends '/' to the path value, so strip the leading slash
 		// to avoid a double-slash (//api/...) that chi would 404 on.
 		wsProxyPath := fmt.Sprintf("api/sandbox/vnc/%s/websockify", id)
-		redirectURL := fmt.Sprintf("/api/sandbox/vnc/%s/vnc.html?autoconnect=true&path=%s&resize=scale",
+		redirectURL := fmt.Sprintf("/api/sandbox/vnc/%s/vnc.html?autoconnect=true&path=%s&resize=remote",
 			id, wsProxyPath)
 		http.Redirect(w, r, redirectURL, http.StatusFound)
 		return

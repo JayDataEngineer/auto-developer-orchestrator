@@ -172,6 +172,12 @@ func (b *ComputerUseBridge) ExtractPageContent(ctx context.Context, sandboxID st
 	return client.ExtractPageContent(ctx, rawHTML)
 }
 
+// Navigate navigates the browser to a URL and returns page info.
+func (b *ComputerUseBridge) Navigate(ctx context.Context, sandboxID string, url string) (map[string]interface{}, error) {
+	req := map[string]interface{}{"action": "navigate", "url": url}
+	return callHandler(ctx, b.CU.Act, http.MethodPost, "/api/sandbox/{id}/computer-use/act", req, sandboxID)
+}
+
 // FindElement performs a semantic find and optional action.
 func (b *ComputerUseBridge) FindElement(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error) {
 	return callHandler(ctx, b.CU.FindElement, http.MethodPost, "/api/sandbox/{id}/computer-use/find", req, sandboxID)
@@ -215,4 +221,19 @@ func (b *ComputerUseBridge) SetStorage(ctx context.Context, sandboxID string, ke
 // ClearStorage clears localStorage.
 func (b *ComputerUseBridge) ClearStorage(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
 	return callHandler(ctx, b.CU.ClearStorage, http.MethodDelete, "/api/sandbox/{id}/computer-use/storage", nil, sandboxID)
+}
+
+// BrowserScreenshot takes a CDP screenshot of the current browser page.
+// Returns image data as {"image_b64": "..."} for the vision pipeline.
+func (b *ComputerUseBridge) BrowserScreenshot(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	result, err := callHandler(ctx, b.CU.Screenshot, http.MethodGet, "/api/sandbox/{id}/computer-use/screenshot?format=json", nil, sandboxID)
+	if err != nil {
+		return nil, err
+	}
+	// Normalize field name: CDP handler returns "image", vision detector expects "image_b64"
+	if img, ok := result["image"].(string); ok && img != "" {
+		result["image_b64"] = img
+		delete(result, "image")
+	}
+	return result, nil
 }

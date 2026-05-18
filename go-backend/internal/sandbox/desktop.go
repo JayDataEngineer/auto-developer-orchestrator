@@ -213,7 +213,7 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		// Standard — x11vnc + websockify + noVNC
 		_, err = m.execInContainer(ctx, containerName, []string{
 			"x11vnc", "-display", display, "-rfbport", fmt.Sprintf("%d", vncPort),
-			"-forever", "-shared", "-nopw", "-bg",
+			"-forever", "-shared", "-nopw", "-bg", "-xrandr",
 		}, true)
 		if err != nil {
 			m.logger.Warn("x11vnc start warning", zap.Error(err))

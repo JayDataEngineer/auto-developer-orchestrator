@@ -1,9 +1,21 @@
 # Browser Capability
 
-A headless Chrome runs inside the sandbox via CDP (Chrome DevTools Protocol).
-The browser session persists across tool calls — cookies and login state are preserved.
+A Chrome browser runs inside the sandbox, visible on VNC. All navigation and
+interaction happens through CDP (Chrome DevTools Protocol) — the same Chrome
+window you see on screen is the one the tools control.
 
 ## Tools
+
+### browse_to
+Navigate to a URL. Returns page title, URL, and a preview of page content.
+**ALWAYS use this to navigate — do NOT use bash+curl.**
+
+Parameter: `url` (required) — the full URL to navigate to.
+
+Example:
+```
+browse_to({url: "https://www.google.com"})
+```
 
 ### find_element
 Find a page element by semantic criteria and optionally interact with it.
@@ -29,26 +41,22 @@ Get the accessibility tree of the current page — lists all interactive element
 their ARIA role, name, and CSS selector. Use this to discover what's on the page before
 interacting.
 
-### bash (for navigation)
-Navigate using the internal SeleniumBase server:
-```bash
-curl -s -X POST http://localhost:9876/navigate -H 'Content-Type: application/json' -d '{"url": "https://www.google.com"}'
-```
+### browser_screenshot
+Take a screenshot of the current browser page. The image is automatically described
+by the vision system — you'll see a text description of what's on screen.
+Use this to visually verify page state, check layouts, or confirm actions worked.
 
-Other sb_server endpoints via bash:
-- `curl -s http://localhost:9876/read_dom` — get page structure
-- `curl -s http://localhost:9876/screenshot` — capture screenshot
-- `curl -s -X POST http://localhost:9876/click_element -H 'Content-Type: application/json' -d '{"selector": "#btn"}'`
-- `curl -s -X POST http://localhost:9876/type_text -H 'Content-Type: application/json' -d '{"selector": "#input", "text": "hello"}'`
+No parameters required.
 
 ## Workflow
-1. Navigate: use bash+curl to `http://localhost:9876/navigate` with target URL
-2. Discover: call `snapshot_a11y` or bash+curl to `read_dom` to find interactive elements
+1. Navigate: call `browse_to` with the target URL
+2. Discover: call `snapshot_a11y` to find interactive elements
 3. Interact: call `find_element` with action="click" or action="type"
-4. Verify: call `snapshot_a11y` again to check the result
+4. Verify: call `browser_screenshot` to visually confirm the result
 
 ## CRITICAL RULES
 - ALWAYS call tools to interact with the browser — NEVER describe what you would do
-- NEVER claim the browser is open without actually calling navigate first
+- NEVER claim the browser is open without actually calling browse_to first
+- NEVER use bash+curl to navigate — use browse_to instead
 - If a tool returns an error, report the error honestly — do not fabricate results
 - The browser starts on a blank page — you MUST navigate to a URL first

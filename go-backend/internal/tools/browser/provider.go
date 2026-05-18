@@ -5,6 +5,8 @@ import "context"
 // BrowserProvider abstracts browser automation for tool wrappers.
 // Implemented by handlers.ComputerUseBridge.
 type BrowserProvider interface {
+	// Navigate navigates the browser to a URL and returns page info.
+	Navigate(ctx context.Context, sandboxID string, url string) (map[string]interface{}, error)
 	// FindElement finds an element by semantic criteria and optionally performs an action.
 	FindElement(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error)
 	// A11ySnapshot returns the accessibility tree.
@@ -21,4 +23,6 @@ type BrowserProvider interface {
 	SetStorage(ctx context.Context, sandboxID string, key, value string) (map[string]interface{}, error)
 	// ClearStorage clears localStorage.
 	ClearStorage(ctx context.Context, sandboxID string) (map[string]interface{}, error)
+	// BrowserScreenshot takes a screenshot of the current browser page via CDP.
+	BrowserScreenshot(ctx context.Context, sandboxID string) (map[string]interface{}, error)
 }

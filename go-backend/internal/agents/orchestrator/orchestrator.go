@@ -179,8 +179,9 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 	if cfg.BrowserProvider != nil {
 		sandboxIDFn := func() string { return cfg.SandboxID }
+		before := len(employeeTools)
 		employeeTools = browsertools.RegisterBrowserTools(employeeTools, cfg.BrowserProvider, sandboxIDFn)
-		logger.Printf("Browser a11y/cookie/storage tools loaded for employees: 8 tools")
+		logger.Printf("Browser tools loaded for employees: %d tools (browse_to + a11y/cookie/storage)", len(employeeTools)-before)
 	}
 
 	// Application profiles — shared between CTO (manage_profile) and employees (app_profile)

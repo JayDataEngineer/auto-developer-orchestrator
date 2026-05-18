@@ -70,7 +70,7 @@ func (r *ToolRegistry) RegisterCommonAliases() {
 	r.RegisterAlias("edit_file", "file_edit")
 	r.RegisterAlias("grep", "file_grep")
 	r.RegisterAlias("glob", "file_glob")
-	r.RegisterAlias("browse_to", "navigate")
+	r.RegisterAlias("navigate", "browse_to")
 	r.RegisterAlias("click", "click_element")
 	r.RegisterAlias("type_text", "type")
 	r.RegisterAlias("search", "search_web")
