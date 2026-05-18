@@ -677,16 +677,27 @@ export const puxChatAdapter: ChatModelAdapter = {
 							const result = typeof parsed.result === "string"
 								? parsed.result
 								: parsed.result ? JSON.stringify(parsed.result) : undefined;
-							if (agentId) {
-								usePuxStore.getState().updateAgentStatus(agentId, "complete", result);
-							} else if (agentName) {
-								const agents = usePuxStore.getState().agents;
-								const match = [...agents.values()].find(
-									(a) => a.agentName === agentName && a.status === "running",
-								);
-								if (match) {
-									usePuxStore.getState().updateAgentStatus(match.agentId, "complete", result);
+
+							// Close any tool calls that never got a tool_execution_end
+							// (race: subagent_end may arrive before final tool_execution_end)
+							const agents = usePuxStore.getState().agents;
+							const match = agentId
+								? agents.get(agentId)
+								: [...agents.values()].find(
+										(a) => a.agentName === agentName && a.status === "running",
+									);
+							if (match) {
+								const hasOpenTools = match.toolCalls.some((t) => !t.endedAt);
+								if (hasOpenTools) {
+									const now = Date.now();
+									const newCalls = match.toolCalls.map((t) =>
+										t.endedAt ? t : { ...t, endedAt: now },
+									);
+									const newAgents = new Map(agents);
+									newAgents.set(match.agentId, { ...match, toolCalls: newCalls });
+									usePuxStore.setState({ agents: newAgents });
 								}
+								usePuxStore.getState().updateAgentStatus(match.agentId, "complete", result);
 							}
 							break;
 						}
