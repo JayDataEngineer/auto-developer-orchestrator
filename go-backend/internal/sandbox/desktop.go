@@ -194,9 +194,10 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	backend := m.detectVNCBackend(ctx, containerName)
 	sandbox.VNCBackend = backend
 
-	// Step 1: Start Xvfb
+	// Step 1: Start Xvfb with large virtual screen for RANDR resize support.
+	// 4096x2160 gives RANDR a large maximum so x11vnc can resize to any viewport.
 	_, err := m.execInContainer(ctx, containerName, []string{
-		"Xvfb", display, "-screen", "0", "1920x1080x24", "-ac", "+extension", "RANDR",
+		"Xvfb", display, "-screen", "0", "4096x2160x24", "-ac", "+extension", "RANDR",
 	}, true)
 	if err != nil {
 		m.portMutex.Lock()
@@ -206,6 +207,15 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	}
 
 	time.Sleep(500 * time.Millisecond)
+
+	// Step 1b: Configure RANDR for dynamic resize — disable fixed output so
+	// XRRSetScreenSize can resize without CRTC conflicts, then set initial fb.
+	_, _ = m.execInContainer(ctx, containerName, []string{
+		"bash", "-c", fmt.Sprintf(
+			"DISPLAY=%s xrandr --output screen --off 2>/dev/null; "+
+				"DISPLAY=%s xrandr --fb 1280x720 2>/dev/null || true",
+			display, display),
+	}, false)
 
 	// Step 2: Start window manager (xfwm4 or openbox as fallback)
 	_, err = m.execInContainer(ctx, containerName, []string{

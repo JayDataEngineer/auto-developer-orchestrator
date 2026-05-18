@@ -19,7 +19,9 @@ FROM ubuntu:22.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:99
-ENV RESOLUTION=1280x720x24
+# Large virtual screen gives RANDR headroom for resize=remote.
+# setup-display.sh sets the actual desktop to 1280x720 after Xvfb starts.
+ENV RESOLUTION=4096x2160x24
 ENV CHROME_REMOTE_DEBUGGING_PORT=9222
 
 # Core dependencies — everything a dev sandbox needs
@@ -121,7 +123,8 @@ COPY scripts/sb_agent.py /usr/local/bin/sb_agent.py
 COPY scripts/sb_server.py /usr/local/bin/sb_server.py
 COPY scripts/desktop_observe.py /usr/local/bin/desktop_observe.py
 COPY scripts/start-kasmvnc.sh /usr/local/bin/start-kasmvnc.sh
-RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py /usr/local/bin/start-kasmvnc.sh
+COPY scripts/setup-display.sh /usr/local/bin/setup-display.sh
+RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py /usr/local/bin/start-kasmvnc.sh /usr/local/bin/setup-display.sh
 
 # Supervisor + log dir
 RUN mkdir -p /var/log/supervisor
