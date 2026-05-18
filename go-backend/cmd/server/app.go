@@ -52,6 +52,7 @@ type App struct {
 	puxHandler         *handlers.PuxHandler
 	sandboxHandler     *handlers.SandboxHandler
 	computerUseHandler *handlers.ComputerUseHandler
+	x11Handler         *handlers.X11Handler
 	sched              *scheduler.Scheduler
 	promPusher         *observability.MetricsPusher
 	extMgr             *extensions.Manager
@@ -257,7 +258,8 @@ func (a *App) initHandlers() {
 
 	// Computer Use + X11
 	a.computerUseHandler = handlers.NewComputerUseHandler(sandboxMgr, visionClient, logger)
-	x11Handler := handlers.NewX11Handler(sandboxMgr, logger)
+	a.x11Handler = handlers.NewX11Handler(sandboxMgr, logger)
+	x11Handler := a.x11Handler
 
 	// Wire engines
 	a.puxHandler.SetSandboxOnly(sandboxMgr, a.computerUseHandler, x11Handler)
@@ -655,7 +657,7 @@ func (a *App) buildRouter(
 				a.computerUseHandler.RegisterRoutes(r)
 			})
 			r.Route("/{id}/x11", func(r chi.Router) {
-				handlers.NewX11Handler(nil, a.logger).RegisterRoutes(r)
+				a.x11Handler.RegisterRoutes(r)
 			})
 			r.Route("/{id}/files", func(r chi.Router) {
 				fileHandler.RegisterRoutes(r)
