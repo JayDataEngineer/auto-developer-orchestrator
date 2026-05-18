@@ -142,7 +142,7 @@ func (h *X11Handler) Mouse(w http.ResponseWriter, r *http.Request) {
 
 	case "move":
 		_, err := h.exec(r, sandboxID, display, []string{
-			"xdotool", "mousemove", fmt.Sprintf("%d", req.X), fmt.Sprintf("%d", req.Y),
+			"bash", "-c", fmt.Sprintf("xdotool mousemove %d %d && sleep 0.1", req.X, req.Y),
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
