@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	agentModel     string
-	agentThinking  string
+	agentModel      string
+	agentThinking   string
 	agentAutoBranch bool
+	agentID         string
 )
 
 var agentCmd = &cobra.Command{
@@ -48,11 +49,16 @@ var agentPromptCmd = &cobra.Command{
 			}
 		}
 
+		effectiveAgentID := agentID
+		if effectiveAgentID == "" {
+			effectiveAgentID = "default"
+		}
+
 		req := api.PromptRequest{
 			Message:       message,
 			Project:       effectiveProject,
 			Org:           effectiveOrg,
-			AgentID:       "default",
+			AgentID:       effectiveAgentID,
 			Model:         agentModel,
 			ThinkingLevel: agentThinking,
 			AutoBranch:    agentAutoBranch,
@@ -239,6 +245,7 @@ func init() {
 	agentPromptCmd.Flags().StringVar(&agentModel, "model", "", "Model override")
 	agentPromptCmd.Flags().StringVar(&agentThinking, "thinking-level", "", "Thinking level")
 	agentPromptCmd.Flags().BoolVar(&agentAutoBranch, "auto-branch", false, "Auto-create branch")
+	agentPromptCmd.Flags().StringVar(&agentID, "agent-id", "", "Agent ID for conversation isolation (default: \"default\")")
 
 	agentCmd.AddCommand(agentPromptCmd)
 	agentCmd.AddCommand(agentHistoryCmd)
