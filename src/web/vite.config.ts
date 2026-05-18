@@ -11,6 +11,7 @@ export default defineConfig({
 			"@": resolve(__dirname, "src"),
 			"@pux/shared": resolve(__dirname, "../../shared/src/index.ts"),
 		},
+		dedupe: ["react", "react-dom", "zustand"],
 	},
 	server: {
 		port: 5175,
