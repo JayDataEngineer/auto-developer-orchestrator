@@ -63,6 +63,21 @@ SSE_NUMERIC_FIELDS = {
 VALID_APPROVAL_TYPES = {"tool_confirm", "plan", "question"}
 VALID_RISK_LEVELS = {"low", "medium", "high"}
 
+# VisionAwareExecutor tool maps — mirrors vision/detector.go
+# Tools whose results contain screenshots (page_context JSON with "screenshot" field)
+VISION_BROWSER_TOOLS = {
+    "browse_to", "navigate", "click_element", "click", "type", "type_text",
+    "read_page", "observe", "scroll", "scroll_page", "search_web", "scrape",
+    "find_element", "snapshot_a11y", "get_cookies", "set_cookie", "clear_cookies",
+    "get_storage", "set_storage", "clear_storage",
+}
+
+# Tools whose results contain image_b64 (desktop frame JSON)
+VISION_DESKTOP_TOOLS = {
+    "desktop_screenshot", "browser_screenshot",
+    "desktop_click", "desktop_type", "desktop_key", "desktop_observe",
+}
+
 
 def validate_sse_event(event_type, data):
     """

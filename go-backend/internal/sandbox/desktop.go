@@ -115,6 +115,23 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 		return nil, fmt.Errorf("Chrome CDP not ready after retries: %w", chromeErr)
 	}
 
+	// Restart x11vnc with -xrandr for dynamic resize support.
+	// The container's supervisord starts x11vnc without -xrandr,
+	// so noVNC's resize=remote requests would be silently ignored.
+	// KasmVNC handles resize natively — only patch standard backend.
+	if backend == BackendStandard {
+		if _, err := m.execInContainer(ctx, containerName, []string{
+			"sh", "-c",
+			"kill $(pgrep -f 'x11vnc.*-rfbport 5900') 2>/dev/null; sleep 0.3; " +
+				"x11vnc -display :99 -rfbport 5900 -forever -shared -nopw -bg -xrandr",
+		}, false); err != nil {
+			m.logger.Warn("failed to restart x11vnc with -xrandr, resize=remote may not work",
+				zap.Error(err))
+		} else {
+			m.logger.Info("restarted x11vnc with -xrandr for dynamic resize")
+		}
+	}
+
 	session := &DesktopSession{
 		SandboxID:  sandboxID,
 		Mode:       ModeBrowser,

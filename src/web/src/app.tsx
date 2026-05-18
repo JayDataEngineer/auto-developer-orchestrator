@@ -500,21 +500,19 @@ export function App() {
 					</SidebarInset>
 				</Panel>
 
-				<>
-					<Separator className="w-px bg-border hover:bg-ring/50 transition-colors" />
-					<Panel
-						panelRef={workbenchPanelRef}
-						defaultSize={35}
-						minSize={20}
-						collapsible
-						collapsedSize={0}
-						onResize={(size) => setWorkbenchVisible(size.asPercentage > 0)}
-					>
-						<div className="flex h-full flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
-							<Workbench />
-						</div>
-					</Panel>
-				</>
+				<Separator className="w-px bg-border hover:bg-ring/50 transition-colors cursor-col-resize" />
+				<Panel
+					panelRef={workbenchPanelRef}
+					defaultSize={35}
+					minSize={20}
+					collapsible
+					collapsedSize={0}
+					onResize={(size) => setWorkbenchVisible(size.asPercentage > 0)}
+				>
+					<div className="flex h-full flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
+						<Workbench />
+					</div>
+				</Panel>
 			</Group>
 		</SidebarProvider>
 	);

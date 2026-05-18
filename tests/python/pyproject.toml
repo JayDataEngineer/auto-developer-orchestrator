@@ -25,3 +25,4 @@ markers = [
 ]
 addopts = "-v --tb=short"
 testpaths = ["."]
+pythonpath = ["."]
