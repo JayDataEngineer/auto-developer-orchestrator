@@ -214,7 +214,7 @@ export function VNCViewer() {
 
 	return (
 		<iframe
-			src={`/api/sandbox/vnc/${sandbox.id}/vnc.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=2000&path=${encodeURIComponent(wsPath)}`}
+			src={`/api/sandbox/vnc/${sandbox.id}/vnc.html?autoconnect=true&resize=remote&reconnect=true&reconnect_delay=2000&path=${encodeURIComponent(wsPath)}`}
 			className="h-full w-full border-0"
 			title="Sandbox VNC"
 		/>
