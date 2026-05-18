@@ -21,6 +21,7 @@ export function VNCViewer() {
 	const [loading, setLoading] = useState(true);
 	const [starting, setStarting] = useState(false);
 	const [enabling, setEnabling] = useState(false);
+	const [vncReady, setVncReady] = useState(false);
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
 
@@ -72,14 +73,43 @@ export function VNCViewer() {
 		return () => clearInterval(interval);
 	}, [isActive, detectSandbox]);
 
-	// Auto-switch to VNC tab when sandbox becomes ready
-	const prevActive = useRef(false);
+	// Poll vnc-health until the VNC server is actually accepting connections.
+	// desktop_session.is_active just means the Go backend registered the session —
+	// the actual x11vnc + websockify inside the container may still be starting.
 	useEffect(() => {
-		if (isActive && !prevActive.current) {
+		if (!isActive || !sandbox) {
+			setVncReady(false);
+			return;
+		}
+		let cancelled = false;
+		const poll = () => {
+			if (cancelled) return;
+			fetch(`/api/sandbox/${sandbox.id}/vnc-health`)
+				.then((r) => r.json())
+				.then((data) => {
+					if (cancelled) return;
+					if (data.healthy) {
+						setVncReady(true);
+					} else {
+						setTimeout(poll, 500);
+					}
+				})
+				.catch(() => {
+					if (!cancelled) setTimeout(poll, 500);
+				});
+		};
+		poll();
+		return () => { cancelled = true; };
+	}, [isActive, sandbox]);
+
+	// Auto-switch to VNC tab when VNC is actually ready
+	const prevReady = useRef(false);
+	useEffect(() => {
+		if (vncReady && !prevReady.current) {
 			usePuxStore.getState().setWorkbenchTab("vnc");
 		}
-		prevActive.current = isActive;
-	}, [isActive]);
+		prevReady.current = vncReady;
+	}, [vncReady]);
 
 	const startSandbox = async () => {
 		if (!activeProject) return;
@@ -170,11 +200,21 @@ export function VNCViewer() {
 		);
 	}
 
+	// Desktop session active but VNC server not yet accepting connections
+	if (!vncReady) {
+		return (
+			<div className="flex h-full flex-col items-center justify-center gap-3">
+				<Monitor className="size-8 animate-pulse text-muted-foreground/50" />
+				<span className="text-xs text-muted-foreground">Starting VNC...</span>
+			</div>
+		);
+	}
+
 	const wsPath = `api/sandbox/vnc/${sandbox.id}/websockify`;
 
 	return (
 		<iframe
-			src={`/api/sandbox/vnc/${sandbox.id}/vnc.html?autoconnect=true&resize=remote&path=${encodeURIComponent(wsPath)}`}
+			src={`/api/sandbox/vnc/${sandbox.id}/vnc.html?autoconnect=true&resize=remote&reconnect=true&reconnect_delay=2000&path=${encodeURIComponent(wsPath)}`}
 			className="h-full w-full border-0"
 			title="Sandbox VNC"
 		/>
