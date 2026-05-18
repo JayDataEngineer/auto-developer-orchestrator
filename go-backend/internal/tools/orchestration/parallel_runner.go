@@ -34,6 +34,9 @@ type SubOrchestrator interface {
 // OrchestratorFactory creates a sub-orchestrator for recursive delegation.
 type OrchestratorFactory func(ctx context.Context, cfg SubOrchestratorConfig) (SubOrchestrator, error)
 
+// SummarizerFunc summarizes text (typically a sub-agent result) to a target length.
+type SummarizerFunc func(ctx context.Context, text string, targetChars int) (string, error)
+
 // ParallelRunner implements DelegateRunner with goroutine-based parallelism.
 // delegate_async spawns independent sub-agents; collect_results waits for all.
 type ParallelRunner struct {
@@ -69,6 +72,10 @@ type ParallelRunner struct {
 	// Scoped delegation: when set, sub-agents with delegates_to get scoped delegation tools
 	roleProvider RoleProvider
 	mcpResolver  MCPResolver
+
+	// Sub-agent result summarization: when set, long sub-agent results are summarized
+	// before returning to the CTO instead of just being truncated.
+	summarizer SummarizerFunc
 
 	mu                sync.Mutex
 	tasks             map[string]*asyncTask
@@ -234,6 +241,10 @@ func (r *ParallelRunner) SetDepth(depth int) {
 func (r *ParallelRunner) SetRoleProviders(roleProvider RoleProvider, mcpResolver MCPResolver) {
 	r.roleProvider = roleProvider
 	r.mcpResolver = mcpResolver
+}
+
+func (r *ParallelRunner) SetSummarizer(fn SummarizerFunc) {
+	r.summarizer = fn
 }
 
 // subscriberFromCtx extracts the SSE subscriber channel from the context.
@@ -554,6 +565,9 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 		return map[string]any{"error": runErr.Error(), "partial_result": finalText}, runErr
 	}
 
+	// Summarize long sub-agent results before returning to CTO
+	finalText = r.maybeSummarize(ctx, finalText)
+
 	return map[string]any{"result": finalText, "status": "completed", "division": divisionPath}, nil
 }
 
@@ -771,6 +785,9 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 		return result, runErr
 	}
+
+	// Summarize long sub-agent results before returning to CTO
+	finalText = r.maybeSummarize(ctx, finalText)
 
 	enriched := map[string]any{"result": finalText, "status": "completed", "agent_ref": agentRef}
 	if changes != nil {
@@ -1255,4 +1272,22 @@ func containsSpace(s string) bool {
 
 func truncateTask(task string, maxLen int) string {
 	return util.TruncateEllipsis(task, maxLen)
+}
+
+// maybeSummarize summarizes long sub-agent results using the configured summarizer.
+// Falls back to returning the original text if no summarizer is set or summarization fails.
+func (r *ParallelRunner) maybeSummarize(ctx context.Context, text string) string {
+	const summarizeThreshold = 2000
+	if len(text) <= summarizeThreshold || r.summarizer == nil {
+		return text
+	}
+
+	summarized, err := r.summarizer(ctx, text, 1000)
+	if err != nil || len(summarized) < 50 {
+		r.logger("SUMMARIZE_FAILED: len=%d err=%v, returning original", len(text), err)
+		return text
+	}
+
+	r.logger("SUMMARIZE_OK: %d -> %d chars", len(text), len(summarized))
+	return summarized
 }

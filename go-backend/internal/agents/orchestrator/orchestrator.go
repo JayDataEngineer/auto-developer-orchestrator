@@ -45,6 +45,7 @@ type Config struct {
 	SessionPath     string
 	WorkDir         string
 	MemoryStore     *memory.Store
+	MemoryFolder    *memory.FolderStore
 	BashExecutor    bash.Executor
 	FileOps         file.SandboxFileOps
 	DelegateRunner   orchestration.DelegateRunner
@@ -182,6 +183,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		ctoTools = append(ctoTools, memory.NewTool(cfg.MemoryStore))
 	}
 
+	// Folder-based memory tool (replaces single-file MEMORY.md)
+	if cfg.MemoryFolder != nil {
+		ctoTools = append(ctoTools, memory.NewFolderTool(cfg.MemoryFolder))
+	}
+
 	// Scheduler tool — via autoconfig contract (ArtifactStore)
 	if cfg.Scheduler != nil {
 		if backend, ok := cfg.Scheduler.(schedulertool.Backend); ok {
@@ -221,6 +227,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		ctxpkg.NewScratchReadTool(scratchStore),
 		ctxpkg.NewScratchClearTool(scratchStore),
 		ctxpkg.NewLoadSpilledTool(ctxMgr),
+		ctxpkg.NewSummarizeTool(ctxMgr, sess, provider),
+		ctxpkg.NewContextStatusTool(ctxMgr),
 	)
 
 	// ── Employee tools: NOT registered on the CTO ──
@@ -297,6 +305,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		pr.SetProjectDir(cfg.ProjectDir)
 		pr.SetDepth(0)
 		pr.SetOrchestratorFactory(makeOrchestratorFactory(provider, cfg))
+		// Summarize long sub-agent results before returning to CTO
+		pr.SetSummarizer(func(ctx context.Context, text string, targetChars int) (string, error) {
+			return ctxpkg.SummarizeText(ctx, provider, text, targetChars)
+		})
 		// Subscriber is now injected via context (Contract 3.4 compliance).
 		// No need to call SetSubscriber — subscriberFromCtx() extracts it from ctx.
 		// Wire visual context for sub-agent vision caching
