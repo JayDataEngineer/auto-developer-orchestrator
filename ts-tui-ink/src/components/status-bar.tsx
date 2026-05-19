@@ -36,7 +36,8 @@ export function StatusBar() {
 
 	// Pad to fill width
 	const model = activeModel || lastUsage?.model || "";
-	const modelLabel = model || "no model";
+	// Shorten openrouter model prefixes: "google/gemma-3-27b-it" → "or/gemma-3-27b-it"
+	const modelLabel = model ? model.replace(/^[a-z][-a-z0-9]*\//, "or/") : "no model";
 	const rightStr = right ? ` ${right} ` : "";
 
 	return (
