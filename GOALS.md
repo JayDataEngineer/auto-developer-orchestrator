@@ -110,3 +110,13 @@ Each goal has a concrete test task that proves it works.
 - **OpenAI protocol fix**: Cycle/reflection nudges converted from fake `role: "tool"` messages to `role: "user"` messages. Cloud providers validate that every tool message has a matching tool_call_id.
 - **Orchestrator tool access**: `OrchestratorExecutor.Execute()` falls through to `baseExecutor` for non-orchestrator tools (bash, file_*, browser, desktop)
 - **Browser navigation fix**: `navigateInner()` now creates a blank tab via `/json/new` then uses `chromedp.Navigate()` which properly waits for page load. Previous approach (`/json/new?URL`) resulted in `about:blank` because async navigation wasn't awaited.
+
+
+# New Goals
+* The ability to use skills to get AI to go in 'refinement loops'. What is this? It's the rpocess of building complex code autonomiously.
+  - For example, when coding something complex like a FLUX CI/CD pipeline, the system could be able to find an error, fix, restart the loop in an completely autonmous cycle.
+    - This concept expands to web dev work as well. It's a common pain for AI to code somehting on the website - BUT, this can incorporate webroswing /vision now. For example, getting sidebars working is a pain, and requires multiple attempts many of the time. So, the loop can instead be 'soft errors', like coding, going to the site and looking at it, even interacting with the component, and saying "nah, this is the issue, retry". Again, going inside the loop until something is actually working. 
+  - When the AI operates in someting like 130TPS, rapid tool calls with GO, not only will issues be fixed automatically, but it will be faster than a human doing it himself, depending on the task.
+
+* Complex AI pipelines, but in md
+  - For example, making an orcastrator with tools, delegation, for a complete deep research, all done through the webui agent interface. Simple, yet intricate, the complexity is offloaded to the ai
