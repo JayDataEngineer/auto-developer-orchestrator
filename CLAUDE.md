@@ -131,28 +131,40 @@ Roles import tool packages — no tool duplication across employees. Adding a ne
 
 Pux is an **Agent OS** — the kernel provides the engine, external "Organizations" provide config overlays. When a project directory contains `pux.yaml`, the kernel enters org mode:
 
+**All orgs live in `~/.pux/orgs/`** — single canonical location. Git-backed orgs are symlinked from their repo location.
+
 ```
-my-app/                        ← An Organization (separate repo)
-├── pux.yaml                   # Org manifest — name, description, schedules
-├── MANIFESTO.md               # Prepended to CTO prompt (org culture/brand)
-├── roles/                     # Org-specific employees (overrides kernel defaults)
-│   └── content-writer/
-├── tool_packages/             # Org-specific tool groups
-│   └── twitter.yaml
-├── sandbox/                   # Org-specific scripts (mounted into sandbox)
-│   └── post.py
-└── prompts/                   # Scheduled prompt templates
-    └── morning_post.md
+~/.pux/orgs/
+├── invest/                 → symlink to ~/Documents/programs/dev/invest
+├── twitter-agent/          → symlink to ~/Documents/programs/dev/twitter-agent
+├── tech-noir/              → symlink to ~/Documents/projects/creative/tech-noir/pux-org
+├── dev-bot/                → moved directly (no git)
+└── general/                → moved directly (no git)
+
+# Each org:
+my-org/
+├── pux.yaml                # Org manifest (extensions_dir, skills_dir, staff_root, etc.)
+├── MANIFESTO.md            # Prepended to CTO prompt
+├── roles/                  # Org-specific employees
+├── capabilities/           # Org-specific tool compositions
+├── skills/                 # Org-scoped SKILL.md definitions
+├── extensions/             # Org-scoped MCP extension servers (started at boot)
+├── sandbox/                # Scripts mounted into sandbox
+└── prompts/                # Scheduled prompt templates
 ```
+
+**pux.yaml new fields:**
+- `extensions_dir`: Org-scoped extension servers (TypeScript MCP). Discovered at startup.
+- `skills_dir`: Org-scoped SKILL.md files. Loaded per-session, merged with kernel skills.
 
 **How it works:**
-1. Kernel detects `pux.yaml` in project root → enters org mode
-2. Org roles overlay kernel defaults (org-specific employees replace defaults)
-3. Org manifesto prepended to CTO system prompt
-4. Org schedules registered with the scheduler
-5. No `pux.yaml` → everything works as before (kernel defaults)
+1. `--org <name>` resolves via `~/.pux/orgs/<name>/` (primary) then legacy paths
+2. Kernel detects `pux.yaml` → enters org mode
+3. Org roles overlay kernel defaults; org capabilities merged; org skills merged
+4. Org extensions discovered and started alongside kernel extensions at server boot
+5. Role-level tool filtering ensures org tools only reach workers that import them
 
-**Creating a new app = config only.** No Go code, no recompilation. Write YAML + Markdown, point `--project` at the directory.
+**Creating a new app = config only.** No Go code, no recompilation. Write YAML + Markdown, `--org` points to it.
 
 ### Agent Pipeline
 

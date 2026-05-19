@@ -94,9 +94,7 @@ func findRepoRoot(binPath string) string {
 }
 
 // resolveOrgPath finds the directory for a named organization.
-// Searches in order:
-// 1. ~/Documents/programs/dev/<name>/ (primary location)
-// 2. Relative to current working directory
+// Primary location: ~/.pux/orgs/<name>. Falls back to legacy locations.
 // The directory must contain pux.yaml to be valid.
 func resolveOrgPath(name string) (string, error) {
 	// Alias mapping: --org code → dev-bot, etc.
@@ -107,18 +105,11 @@ func resolveOrgPath(name string) (string, error) {
 
 	home, _ := os.UserHomeDir()
 	candidates := []string{
-		filepath.Join(home, "Documents", "programs", "dev", name),
-		filepath.Join(home, "Documents", "programs", "dev", name+"-bot"),
-		filepath.Join(home, "Documents", "programs", "dev", name+"-org"),
+		filepath.Join(home, ".pux", "orgs", name),                    // primary
+		filepath.Join(home, "Documents", "programs", "dev", name),    // legacy
 		filepath.Join(home, "Documents", "projects", name, "pux-org"),
 		filepath.Join(home, "Documents", "projects", name),
 	}
-	// Also check relative to cwd
-	cwd, _ := os.Getwd()
-	candidates = append(candidates,
-		filepath.Join(cwd, name),
-		filepath.Join(cwd, "..", name),
-	)
 
 	for _, dir := range candidates {
 		puxYaml := filepath.Join(dir, "pux.yaml")

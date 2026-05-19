@@ -829,13 +829,12 @@ func makeLocalPromptSender(baseURL, projectRoot string, logger *zap.Logger) sche
 }
 
 // resolveOrgPathLocal resolves an org name to its directory path.
-// Mirrors the CLI's resolveOrgPath logic — searches standard locations for pux.yaml.
+// Primary location: ~/.pux/orgs/<name>. Falls back to legacy locations.
 func resolveOrgPathLocal(name string) (string, error) {
 	home, _ := os.UserHomeDir()
 	candidates := []string{
-		filepath.Join(home, "Documents", "programs", "dev", name),
-		filepath.Join(home, "Documents", "programs", "dev", name+"-org"),
-		filepath.Join(home, "Documents", "projects", name, "pux-org"),
+		filepath.Join(home, ".pux", "orgs", name),          // primary
+		filepath.Join(home, "Documents", "programs", "dev", name), // legacy
 		filepath.Join(home, "Documents", "projects", name),
 	}
 	for _, dir := range candidates {
@@ -846,7 +845,7 @@ func resolveOrgPathLocal(name string) (string, error) {
 	return "", fmt.Errorf("organization '%s' not found", name)
 }
 
-// discoverOrgExtensionDirs scans known org locations for directories containing
+// discoverOrgExtensionDirs scans ~/.pux/orgs/ for directories containing
 // pux.yaml with an extensions_dir configured. Returns list of extension directories.
 func discoverOrgExtensionDirs() []string {
 	home, _ := os.UserHomeDir()
@@ -854,39 +853,25 @@ func discoverOrgExtensionDirs() []string {
 		return nil
 	}
 
-	// Scan standard org parent directories for pux.yaml
-	parentDirs := []string{
-		filepath.Join(home, "Documents", "programs", "dev"),
-		filepath.Join(home, "Documents", "projects"),
+	orgsDir := filepath.Join(home, ".pux", "orgs")
+	entries, err := os.ReadDir(orgsDir)
+	if err != nil {
+		return nil
 	}
 
 	var extDirs []string
-	for _, parent := range parentDirs {
-		entries, err := os.ReadDir(parent)
-		if err != nil {
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			orgDir := filepath.Join(parent, entry.Name())
-
-			// Check for pux.yaml directly
-			org := common.LoadOrgManifest(orgDir)
-			if org == nil {
-				// Also check pux-org subdirectory
-				orgDir2 := filepath.Join(orgDir, "pux-org")
-				org = common.LoadOrgManifest(orgDir2)
-				if org == nil {
-					continue
-				}
-			}
-
-			if extDir := org.ExtensionsDirPath(); extDir != "" {
-				if _, err := os.Stat(extDir); err == nil {
-					extDirs = append(extDirs, extDir)
-				}
+		orgDir := filepath.Join(orgsDir, entry.Name())
+		org := common.LoadOrgManifest(orgDir)
+		if org == nil {
+			continue
+		}
+		if extDir := org.ExtensionsDirPath(); extDir != "" {
+			if _, err := os.Stat(extDir); err == nil {
+				extDirs = append(extDirs, extDir)
 			}
 		}
 	}
