@@ -188,11 +188,15 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 				<ContentArea />
 			</Box>
 
-			{/* Always-visible composer bar */}
-			<ComposerBar onCommand={handleCommand} />
+			{/* Always-visible composer bar — never shrink */}
+			<Box flexShrink={0}>
+				<ComposerBar onCommand={handleCommand} />
+			</Box>
 
-			{/* Status bar */}
-			<StatusBar />
+			{/* Status bar — never shrink */}
+			<Box flexShrink={0}>
+				<StatusBar />
+			</Box>
 		</Box>
 	);
 }

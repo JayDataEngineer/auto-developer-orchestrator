@@ -31,7 +31,7 @@ export function Thread() {
 	useAuiEvent("thread.runEnd", () => {});
 
 	return (
-		<Box flexDirection="column" flexGrow={1} overflow="hidden">
+		<Box flexDirection="column" flexGrow={1}>
 			{/*
 			 * Messages — ThreadPrimitive.Messages uses Ink <Static> internally.
 			 * Older messages (beyond windowSize+overscan) are written to terminal
