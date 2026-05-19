@@ -22,6 +22,7 @@ import { puxChatAdapter, createPuxHistoryAdapter, usePuxStore } from "@pux/share
 import { getFetch } from "@pux/shared";
 import { apiUrl } from "@pux/shared";
 import { Thread } from "./components/thread.js";
+import { ComposerBar } from "./components/composer-bar.js";
 import { StatusBar } from "./components/status-bar.js";
 import { TabBar } from "./components/tab-bar.js";
 import { AgentsView } from "./components/agents-view.js";
@@ -178,8 +179,11 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 		<Box flexDirection="column" height={rows} width={cols}>
 			{/* Content area — switches based on active view */}
 			<Box flexGrow={1} flexDirection="column">
-				<ContentArea onCommand={handleCommand} />
+				<ContentArea />
 			</Box>
+
+			{/* Always-visible composer bar */}
+			<ComposerBar onCommand={handleCommand} />
 
 			{/* Status bar */}
 			<StatusBar />
@@ -189,7 +193,7 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 
 // ── Content Area ──
 
-function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<string | null> }) {
+function ContentArea() {
 	const activeView = usePuxStore((s) => s.activeTuiView);
 	const pendingDecision = usePuxStore((s) => s.pendingDecision);
 	const showProviders = usePuxStore((s) => s.showProvidersOverlay);
@@ -271,6 +275,6 @@ function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<stri
 			return <ConversationsView />;
 		case "chat":
 		default:
-			return <Thread onCommand={onCommand} />;
+			return <Thread />;
 	}
 }
