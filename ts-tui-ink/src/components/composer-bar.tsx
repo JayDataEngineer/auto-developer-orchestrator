@@ -192,6 +192,18 @@ function CommandComposer({
 	}, [pathCompletions.length, pathIdx, onPathIdx]);
 
 	useInput(useCallback((_input: string, key: any) => {
+		// When a non-chat view or overlay is active, don't consume arrow keys
+		// so the active view's own useInput handler can use them
+		const s = usePuxStore.getState();
+		const inOverlay = s.agentSelectorOpen || s.zoomedAgentId || s.showProvidersOverlay
+			|| s.showSettingsOverlay || s.showSessionSwitcher || s.showLogViewer
+			|| s.showSearchOverlay || s.showHelpOverlay || s.showMCPOverlay
+			|| !!s.pendingDecision;
+		const inNonChatView = s.activeTuiView !== "chat";
+		if ((inOverlay || inNonChatView) && (key.upArrow || key.downArrow)) {
+			return;
+		}
+
 		if (matches.length > 0) {
 			if (key.upArrow) {
 				onSelectIdx(selectedIdx <= 0 ? matches.length - 1 : selectedIdx - 1);
