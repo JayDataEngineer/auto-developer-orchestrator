@@ -318,9 +318,14 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// No engine available
+	errMsg := "Agent engine not available. Start llama-server or configure a cloud provider."
+	// Persist error as assistant message so it survives session reload
+	if h.db != nil {
+		h.db.SaveAssistantMessage(r.Context(), req.Project, req.AgentId, "Error: "+errMsg, "", "[]")
+	}
 	writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 		"success": false,
-		"error":   "Agent engine not available. Start llama-server or configure a cloud provider.",
+		"error":   errMsg,
 	})
 }
 

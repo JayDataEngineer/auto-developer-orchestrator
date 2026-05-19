@@ -76,9 +76,14 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 				// Fail fast: no sandbox = every tool call will fail.
 				// Return error immediately instead of proceeding to broken execution.
 				h.log.Error("Failed to auto-create sandbox — cannot execute tools", zap.Error(err))
+				errMsg := fmt.Sprintf("Sandbox unavailable: %s. Start Docker or run 'task dev' first.", err)
+				// Persist error as assistant message so it survives session reload
+				if h.db != nil {
+					h.db.SaveAssistantMessage(r.Context(), req.Project, req.AgentId, "Error: "+errMsg, "", "[]")
+				}
 				setSSEHeaders(w)
 				flusher, canFlush := w.(http.Flusher)
-				writeSSE(w, "error", map[string]string{"error": fmt.Sprintf("Sandbox unavailable: %s. Start Docker or run 'task dev' first.", err)}, canFlush, flusher)
+				writeSSE(w, "error", map[string]string{"error": errMsg}, canFlush, flusher)
 				writeSSE(w, "done", map[string]bool{"done": true}, canFlush, flusher)
 				return
 			}
@@ -499,6 +504,13 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 				assistantText += evt.Data.Text
 			case core.EventTypeThinkingDelta:
 				assistantThinking += evt.Data.Text
+			case core.EventTypeError:
+				if evt.Data.Error != "" {
+					if assistantText != "" {
+						assistantText += "\n\n"
+					}
+					assistantText += "Error: " + evt.Data.Error
+				}
 			case core.EventTypeToolStart:
 				toolCalls = append(toolCalls, savedToolCall{
 					ID:   evt.Data.ToolID,
