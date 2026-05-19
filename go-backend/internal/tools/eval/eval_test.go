@@ -42,7 +42,7 @@ func TestEvalTool_StringManipulation(t *testing.T) {
 func TestEvalTool_WithData(t *testing.T) {
 	tool := NewEvalTool()
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"code": `return data.items.filter(x => x.active).map(x => x.name)`,
+		"code": `return data.filter(x => x.active).map(x => x.name)`,
 		"data": `[{"name":"a","active":true},{"name":"b","active":false},{"name":"c","active":true}]`,
 	})
 	if err != nil {

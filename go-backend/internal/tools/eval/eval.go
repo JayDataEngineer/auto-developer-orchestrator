@@ -5,26 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/dop251/goja"
 )
 
 const (
-	defaultTimeout = 10 * time.Second
-	maxOutputChars = 50000
+	defaultTimeout  = 10 * time.Second
+	maxOutputChars  = 50000
 )
 
 // EvalTool runs JavaScript in a sandboxed ES5.1+ runtime.
 // No filesystem, no network, no imports. The agent uses this for
 // deterministic transforms: JSON manipulation, batch operations,
 // data pipelines, retry logic, loops, and string processing.
-//
-// The runtime provides:
-//   - JSON.parse / JSON.stringify
-//   - console.log (captures output)
-//   - Math, Date, RegExp, Array, Object, String, Number, Map, Set
-//   - A "data" global if the agent passes input data
 type EvalTool struct {
 	timeout time.Duration
 	logger  *log.Logger
@@ -128,35 +123,42 @@ func (t *EvalTool) runSandboxed(code string, data any) (any, error) {
 	vm := goja.New()
 
 	// Console capture
-	var consoleOutput []string
-	consoleLog := func(call goja.FunctionCall) goja.Value {
+	consoleOutput := &stringWriter{}
+
+	err := vm.Set("__consoleCapture", func(call goja.FunctionCall) goja.Value {
 		parts := make([]string, len(call.Arguments))
 		for i, arg := range call.Arguments {
 			parts[i] = arg.String()
 		}
-		consoleOutput = append(consoleOutput, parts...)
+		consoleOutput.WriteString(strings.Join(parts, " "))
 		return goja.Undefined()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup console: %w", err)
 	}
 
-	consoleObj := vm.NewObject()
-	_ = consoleObj.Set("log", consoleLog)
-	_ = consoleObj.Set("warn", consoleLog)
-	_ = consoleObj.Set("error", consoleLog)
-	_ = vm.Set("console", consoleObj)
-
-	// JSON global (goja provides this natively, but ensure it's there)
-	// goja includes JSON.parse/stringify by default
+	// Set up console using JS so it captures properly
+	_, err = vm.RunString(`
+		var console = {
+			log: function() { __consoleCapture.apply(null, arguments); __consoleCapture("\n"); },
+			warn: function() { __consoleCapture.apply(null, arguments); __consoleCapture("\n"); },
+			error: function() { __consoleCapture.apply(null, arguments); __consoleCapture("\n"); },
+		};
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup console: %w", err)
+	}
 
 	// Set input data
 	if data != nil {
 		_ = vm.Set("data", data)
 	}
 
-	// Wrap code to capture result
-	// If the code uses 'return', it's treated as a function body.
-	// If not, we check for a 'result' global after execution.
-	wrapped := "(function() {\n" + code + "\n})"
-	result, err := vm.RunString(wrapped)
+	// Wrap code in an immediately-invoked function so 'return' works.
+	// Also define a 'result' global as a fallback output mechanism.
+	script := "(function() {\n" + code + "\n})()"
+
+	result, err := vm.RunString(script)
 	if err != nil {
 		return map[string]any{
 			"error":   cleanJSerror(err),
@@ -166,10 +168,10 @@ func (t *EvalTool) runSandboxed(code string, data any) (any, error) {
 
 	// Extract return value
 	var returnValue any
-	if result != nil && !goja.IsUndefined(result) {
+	if result != nil && !goja.IsUndefined(result) && result.Export() != nil {
 		returnValue = result.Export()
 	} else {
-		// Check for 'result' global
+		// Check for 'result' global as fallback
 		if r := vm.Get("result"); r != nil && !goja.IsUndefined(r) {
 			returnValue = r.Export()
 		}
@@ -184,25 +186,25 @@ func (t *EvalTool) runSandboxed(code string, data any) (any, error) {
 		output["result"] = returnValue
 	}
 
-	if len(consoleOutput) > 0 {
-		joined := ""
-		for _, line := range consoleOutput {
-			joined += line + "\n"
+	consoleStr := consoleOutput.String()
+	if consoleStr != "" {
+		if len(consoleStr) > maxOutputChars {
+			consoleStr = consoleStr[:maxOutputChars] + "\n...[output truncated]"
 		}
-		if len(joined) > maxOutputChars {
-			joined = joined[:maxOutputChars] + "\n...[output truncated]"
-		}
-		output["output"] = joined
+		output["output"] = consoleStr
 	}
 
 	return output, nil
 }
 
+// stringWriter is a simple string builder for console output.
+type stringWriter struct {
+	strings.Builder
+}
+
 // cleanJSerror extracts the useful message from a goja exception.
 func cleanJSerror(err error) string {
 	msg := err.Error()
-	// goja errors often have a prefix like "ReferenceError: ..."
-	// Keep the message as-is but cap length
 	if len(msg) > 500 {
 		return msg[:500] + "..."
 	}
