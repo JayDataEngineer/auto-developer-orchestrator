@@ -11,6 +11,7 @@ import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useAuiState } from "@assistant-ui/react-ink";
 import { getToolArgPreview } from "@pux/shared";
+import { usePuxStore } from "@pux/shared";
 import { ReasoningAccordion } from "./reasoning-accordion.js";
 import { BranchPicker } from "./branch-picker.js";
 import { MarkdownText } from "./markdown-text.js";
@@ -52,13 +53,22 @@ export function AssistantMessage() {
 					case "tool-call":
 						return (
 							<Box key={part.toolCallId || i} flexDirection="column">
-								<ToolCallDisplay
-									toolName={part.toolName}
-									args={part.args}
-									argsText={part.argsText}
-									result={part.result}
-									isError={part.isError}
-								/>
+								{isDelegateTool(part.toolName) ? (
+									<DelegateToolCallDisplay
+										toolName={part.toolName}
+										args={part.args}
+										result={part.result}
+										isError={part.isError}
+									/>
+								) : (
+									<ToolCallDisplay
+										toolName={part.toolName}
+										args={part.args}
+										argsText={part.argsText}
+										result={part.result}
+										isError={part.isError}
+									/>
+								)}
 							</Box>
 						);
 					case "reasoning":
@@ -111,6 +121,67 @@ export function AssistantMessage() {
 }
 
 // ── Tool call display — compact single line ──
+
+function isDelegateTool(name: string): boolean {
+	return name === "delegate_to" || name === "delegate_async";
+}
+
+// ── Delegate tool display — shows sub-agent progress from Zustand store ──
+
+function DelegateToolCallDisplay({
+	toolName,
+	args,
+	result,
+	isError,
+}: {
+	toolName: string;
+	args?: unknown;
+	result?: unknown;
+	isError?: boolean;
+}) {
+	const colors = useColors();
+	const isDone = result !== undefined;
+	const isRunning = !isDone && !isError;
+
+	const agentName = (args as any)?.agent_id || (args as any)?.agent || (args as any)?.instructions || "agent";
+	const task = (args as any)?.task || (args as any)?.prompt || "";
+	const taskPreview = task.length > 50 ? task.slice(0, 47) + "..." : task;
+
+	// Look up sub-agent details from Zustand store
+	const agents = usePuxStore((s) => s.agents);
+	const agentState = [...agents.values()].find(
+		(a) => a.agentName === agentName && a.task === task,
+	);
+	const subToolCount = agentState?.toolCalls.length ?? 0;
+	const lastToolName = subToolCount > 0 ? agentState!.toolCalls[subToolCount - 1].toolName : null;
+
+	return (
+		<Box flexDirection="column">
+			<Box>
+				<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>
+					{isRunning ? symbols.toolRunning : isError ? symbols.toolError : symbols.toolDone}
+				</Text>
+				<Text> </Text>
+				<Text bold color={colors.brand}>{agentName}</Text>
+				{taskPreview && <Text color="gray">({taskPreview})</Text>}
+				<Text color="gray">
+					{isDone ? " done" : isRunning ? " working..." : ""}
+				</Text>
+				{subToolCount > 0 && (
+					<Text color="gray"> · {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
+				)}
+			</Box>
+			{/* Show last active sub-tool when running */}
+			{isRunning && lastToolName && (
+				<Box paddingLeft={3}>
+					<Text dimColor color={colors.running}>
+						{symbols.toolRunning} {lastToolName}
+					</Text>
+				</Box>
+			)}
+		</Box>
+	);
+}
 
 function ToolCallDisplay({
 	toolName,

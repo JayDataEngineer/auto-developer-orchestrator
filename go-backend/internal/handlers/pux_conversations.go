@@ -120,3 +120,30 @@ func (h *PuxHandler) RenameConversation(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 }
+
+// MarkRead marks a conversation as read.
+// PUT /api/pux/conversation/mark-read
+func (h *PuxHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeReq[struct {
+		Project string `json:"project"`
+		AgentID string `json:"agentId"`
+	}](w, r)
+	if !ok {
+		return
+	}
+	if req.Project == "" {
+		JSONError(w, "project is required", http.StatusBadRequest)
+		return
+	}
+
+	if h.db == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+		return
+	}
+
+	if err := h.db.SetConversationStatus(r.Context(), req.Project, req.AgentID, "read"); err != nil {
+		JSONError(w, "Failed to mark conversation as read", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}

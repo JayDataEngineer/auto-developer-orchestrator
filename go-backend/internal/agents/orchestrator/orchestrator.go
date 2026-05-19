@@ -210,7 +210,19 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		home, _ := os.UserHomeDir()
 		skillStore = skills.LoadStandard(cfg.ProjectDir, home)
 	}
-	if skillStore.Count() > 0 {
+	// Merge org-scoped skills on top of kernel skills
+	if cfg.Org != nil {
+		if orgSkillsDir := cfg.Org.SkillsDirPath(); orgSkillsDir != "" {
+			if skillStore == nil {
+				skillStore = skills.NewStore()
+			}
+			loaded := skillStore.LoadFromDirs([]string{orgSkillsDir})
+			if loaded > 0 {
+				logger.Printf("Org skills loaded: %d from %s", loaded, orgSkillsDir)
+			}
+		}
+	}
+	if skillStore != nil && skillStore.Count() > 0 {
 		ctoTools = append(ctoTools, skills.NewReadSkillTool(skillStore))
 		logger.Printf("Skills loaded: %d skills discovered", skillStore.Count())
 	}

@@ -177,12 +177,15 @@ function handleMetaEvent(
 			const contextWindow = (data.contextWindow as number) || 0;
 			const contextUtil = contextWindow > 0 ? inputTokens / contextWindow : 0;
 
+			// Sync actual model from backend into store so StatusBar shows it
+			const actualModel = (data.model as string) || undefined;
+
 			usePuxStore.setState({
 				lastUsage: {
 					input: inputTokens,
 					output: outputTokens,
 					cache: (data.cache as number) || 0,
-					model: data.model as string | undefined,
+					model: actualModel,
 				},
 				// Update context metrics so status bar shows usage after each turn
 				contextMetrics: {
@@ -191,6 +194,8 @@ function handleMetaEvent(
 					contextUtil,
 					compactionType: "",
 				},
+				// Update activeModel so StatusBar reflects the model the backend actually used
+				...(actualModel ? { activeModel: actualModel } : {}),
 			});
 			break;
 		}
@@ -531,7 +536,9 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 							// Route sub-agent tool calls to Zustand store (for nested
 							// rendering) instead of the tools map (flat message parts).
-							if (toolAgentName && activeSubAgentName && toolAgentName === activeSubAgentName) {
+							// Uses store lookup (source of truth) rather than activeSubAgentName
+							// so routing works even with concurrent sub-agents or reordered events.
+							if (toolAgentName) {
 								const agents = usePuxStore.getState().agents;
 								const agent = [...agents.values()].find(
 									(a) => a.agentName === toolAgentName && a.status === "running",
@@ -542,8 +549,8 @@ export const puxChatAdapter: ChatModelAdapter = {
 										args: toolArgs,
 										timestamp: Date.now(),
 									});
+									break;
 								}
-								break;
 							}
 
 							inferTabFromTool(toolName, toolArgs);
@@ -561,8 +568,9 @@ export const puxChatAdapter: ChatModelAdapter = {
 							const toolId = parsed.toolId as string;
 							const toolAgentName = parsed.agentName as string | undefined;
 
-							// Sub-agent tool completion — update store record, skip tools map
-							if (toolAgentName && activeSubAgentName && toolAgentName === activeSubAgentName) {
+							// Sub-agent tool completion — update store record, skip tools map.
+							// Uses store lookup instead of activeSubAgentName for robustness.
+							if (toolAgentName) {
 								const agents = usePuxStore.getState().agents;
 								const agent = [...agents.values()].find(
 									(a) => a.agentName === toolAgentName && a.status === "running",
@@ -580,8 +588,8 @@ export const puxChatAdapter: ChatModelAdapter = {
 										newAgents.set(agent.agentId, { ...agent, toolCalls: newCalls });
 										usePuxStore.setState({ agents: newAgents });
 									}
+									break;
 								}
-								break;
 							}
 
 							const existing = toolId ? tools.get(toolId) : null;
@@ -704,7 +712,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 						case "subagent_thinking_delta": {
 							const text = parsed.text as string | undefined;
 							const agentName = parsed.agentName as string | undefined;
-							if (text && agentName && activeSubAgentName === agentName) {
+							if (text && agentName) {
 								const agents = usePuxStore.getState().agents;
 								const agent = [...agents.values()].find(
 									(a) => a.agentName === agentName && a.status === "running",

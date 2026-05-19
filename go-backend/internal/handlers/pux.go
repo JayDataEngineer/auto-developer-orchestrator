@@ -177,6 +177,7 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/agent-status", h.GetAgentStatus)
 	r.Delete("/conversation", h.DeleteConversation)
 	r.Put("/conversation/rename", h.RenameConversation)
+	r.Put("/conversation/mark-read", h.MarkRead)
 	r.Get("/models", h.GetModels)
 	r.Get("/providers", h.GetProviders)
 	r.Post("/providers", h.AddProvider)

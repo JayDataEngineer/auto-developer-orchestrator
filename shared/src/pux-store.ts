@@ -126,6 +126,9 @@ interface PuxState {
 	// Search overlay
 	showSearchOverlay: boolean;
 
+	// Help overlay
+	showHelpOverlay: boolean;
+
 	// MCP server overlay
 	showMCPOverlay: boolean;
 	mcpServers: MCPServerInfo[];
@@ -179,6 +182,8 @@ interface PuxState {
 	closeFilePicker: () => void;
 	toggleSearchOverlay: () => void;
 	closeSearchOverlay: () => void;
+	toggleHelpOverlay: () => void;
+	closeHelpOverlay: () => void;
 	toggleMCPOverlay: () => void;
 	closeMCPOverlay: () => void;
 	loadMCPServers: () => Promise<void>;
@@ -198,6 +203,7 @@ const overlayKeys = [
 	"showLogViewer",
 	"showFilePicker",
 	"showSearchOverlay",
+	"showHelpOverlay",
 	"showMCPOverlay",
 ] as const;
 
@@ -249,6 +255,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	showLogViewer: false,
 	showFilePicker: false,
 	showSearchOverlay: false,
+	showHelpOverlay: false,
 	showMCPOverlay: false,
 	mcpServers: [],
 	theme: storage.get("pux:theme", "default-dark"),
@@ -622,6 +629,13 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	closeSearchOverlay: () => set({ showSearchOverlay: false }),
+
+	toggleHelpOverlay: () => {
+		const show = !get().showHelpOverlay;
+		set(show ? openOverlay("showHelpOverlay") : { showHelpOverlay: false });
+	},
+
+	closeHelpOverlay: () => set({ showHelpOverlay: false }),
 
 	toggleMCPOverlay: () => {
 		const show = !get().showMCPOverlay;

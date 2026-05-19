@@ -25,7 +25,7 @@ import { usePuxStore } from "@pux/shared";
 import { getCommands } from "../commands.js";
 import { PathAutocomplete, getCompletions } from "./path-autocomplete.js";
 import { VimInput } from "./vim-input.js";
-import { useColors, symbols } from "../theme.js";
+import { useColors } from "../theme.js";
 import { CommandRow } from "./help-overlay.js";
 import { createRequire } from "node:module";
 const puxVersion = createRequire(import.meta.url)("../../../package.json").version;
@@ -140,7 +140,6 @@ function CommandPalette({
 	selectedIdx: number;
 	onSelectIdx: (i: number) => void;
 }) {
-	const colors = useColors();
 	const text = useAuiState((s) => s.composer.text);
 
 	const matches = useMemo(() => {

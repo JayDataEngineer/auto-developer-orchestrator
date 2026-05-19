@@ -8,12 +8,9 @@ import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { usePuxStore } from "@pux/shared";
 
-interface StatusBarProps {
-	model: string;
-	project: string;
-}
-
-export function StatusBar({ model }: StatusBarProps) {
+export function StatusBar() {
+	const activeModel = usePuxStore((s) => s.activeModel);
+	const lastUsage = usePuxStore((s) => s.lastUsage);
 	const contextMetrics = usePuxStore((s) => s.contextMetrics);
 	const compacting = usePuxStore((s) => s.compacting);
 	const { stdout } = useStdout();
@@ -30,7 +27,8 @@ export function StatusBar({ model }: StatusBarProps) {
 		right += " compacting";
 	}
 
-	// Pad to fill width
+	// Pad to fill width — prefer store's activeModel, fall back to model from last response
+	const model = activeModel || lastUsage?.model || "";
 	const label = model || "no model";
 	const leftStr = ` ${label} `;
 	const rightStr = right ? ` ${right} ` : "";

@@ -34,6 +34,7 @@ import { LogViewer } from "./components/log-viewer.js";
 import { FilePicker } from "./components/file-picker.js";
 import { SearchOverlay } from "./components/search-overlay.js";
 import { MCPOverlay } from "./components/mcp-overlay.js";
+import { HelpOverlay } from "./components/help-overlay.js";
 import { QuestionDialog } from "./components/question-dialog.js";
 import { DecisionDialog } from "./components/decision-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
@@ -141,7 +142,9 @@ export function App({ model: initialModel, project }: AppProps) {
 function PuxApp({ initialModel, project }: { initialModel: string; project: string }) {
 	const { exit } = useApp();
 	const { stdout } = useStdout();
-	const [model, setModel] = useState(initialModel);
+	// Sync local model state with the Zustand store's activeModel
+	const storeModel = usePuxStore((s) => s.activeModel);
+	const [model, setModel] = useState(initialModel || storeModel);
 	const lastCtrlC = useRef(0);
 
 	// Phase 4: Global keybindings for view cycling and quit
@@ -181,7 +184,7 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 			</Box>
 
 			{/* Status bar */}
-			<StatusBar model={model} project={project} />
+			<StatusBar />
 		</Box>
 	);
 }
@@ -197,6 +200,7 @@ function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<stri
 	const showLogs = usePuxStore((s) => s.showLogViewer);
 	const showFilePicker = usePuxStore((s) => s.showFilePicker);
 	const showSearch = usePuxStore((s) => s.showSearchOverlay);
+	const showHelp = usePuxStore((s) => s.showHelpOverlay);
 	const showMCP = usePuxStore((s) => s.showMCPOverlay);
 
 	// HITL decision dialog takes priority over everything
@@ -225,6 +229,11 @@ function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<stri
 	// MCP server overlay
 	if (showMCP) {
 		return <MCPOverlay />;
+	}
+
+	// Help overlay
+	if (showHelp) {
+		return <HelpOverlay />;
 	}
 
 	// File picker

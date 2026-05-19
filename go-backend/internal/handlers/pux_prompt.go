@@ -400,6 +400,9 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		if _, err := h.db.SaveUserMessage(r.Context(), req.Project, req.AgentId, req.Message); err != nil {
 			h.log.Warn("Failed to save user message", zap.Error(err))
 		}
+		if err := h.db.SetConversationStatus(r.Context(), req.Project, req.AgentId, "processing"); err != nil {
+			h.log.Warn("Failed to set conversation status to processing", zap.Error(err))
+		}
 	}
 
 	// Inject active plan if one exists (survives context compaction)
@@ -481,6 +484,9 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			if _, err := h.db.SaveToolResult(r.Context(), req.Project, req.AgentId, tr.ToolCallID, tr.ToolName, tr.Content); err != nil {
 				h.log.Warn("Failed to save tool result", zap.String("tool", tr.ToolName), zap.Error(err))
 			}
+		}
+		if err := h.db.SetConversationStatus(r.Context(), req.Project, req.AgentId, "unread"); err != nil {
+			h.log.Warn("Failed to set conversation status to unread", zap.Error(err))
 		}
 	}
 

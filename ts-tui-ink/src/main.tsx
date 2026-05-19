@@ -184,6 +184,20 @@ usePuxStore.getState().setProject(projectName);
 await usePuxStore.getState().loadProjects();
 await usePuxStore.getState().loadConversations();
 
+// Load models and defaults from backend, resolve actual model if not specified via CLI
+if (backendOnline) {
+	await usePuxStore.getState().loadModels();
+	await usePuxStore.getState().loadDefaults();
+	const store = usePuxStore.getState();
+	if (!modelName) {
+		// Use logic default, then first available model, then leave empty
+		const resolved = store.defaultLogic || store.modelList[0]?.id || "";
+		if (resolved) {
+			usePuxStore.getState().setModel(resolved);
+		}
+	}
+}
+
 // ── Mouse tracking ──
 
 initMouseTracking();

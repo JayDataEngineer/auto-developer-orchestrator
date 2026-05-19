@@ -34,12 +34,10 @@ const commands: Command[] = [
 	{
 		name: "help",
 		description: "Show available commands",
-		handler: async () => ({
-			type: "handled",
-			message: commands
-				.map((c) => `  /${c.name.padEnd(12)} ${c.description}`)
-				.join("\n"),
-		}),
+		handler: async () => {
+			usePuxStore.getState().toggleHelpOverlay();
+			return { type: "handled" };
+		},
 	},
 	{
 		name: "quit",
@@ -204,14 +202,6 @@ const commands: Command[] = [
 		description: "Switch to tools view",
 		handler: async () => {
 			usePuxStore.getState().setTuiView("tools");
-			return { type: "handled" };
-		},
-	},
-	{
-		name: "files",
-		description: "Switch to files view",
-		handler: async () => {
-			usePuxStore.getState().setTuiView("files");
 			return { type: "handled" };
 		},
 	},

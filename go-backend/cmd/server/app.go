@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal"
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/autoconfig"
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
@@ -577,7 +578,7 @@ func (a *App) buildRouter(
 			} else {
 				status["llm"] = "unavailable"
 			}
-			status["version"] = "0.2.0"
+			status["version"] = internal.Version
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(status)
 		})

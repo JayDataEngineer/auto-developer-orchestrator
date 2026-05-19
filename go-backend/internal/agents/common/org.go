@@ -23,13 +23,15 @@ type DatabaseConfig struct {
 // When a project directory contains a pux.yaml, the kernel enters "org mode" and
 // loads org-specific roles, tool packages, manifesto, and schedules.
 type OrgManifest struct {
-	Name         string            `yaml:"name"`
-	Description  string            `yaml:"description"`
-	Manifesto    string            `yaml:"manifesto"`
-	StaffRoot    string            `yaml:"staff_root"`
-	ToolPkgsRoot string            `yaml:"tool_packages_root"`
-	Schedules    []OrgSchedule     `yaml:"schedules"`
-	Databases    map[string]DatabaseConfig `yaml:"databases"` // NEW
+	Name          string                    `yaml:"name"`
+	Description   string                    `yaml:"description"`
+	Manifesto     string                    `yaml:"manifesto"`
+	StaffRoot     string                    `yaml:"staff_root"`
+	ToolPkgsRoot  string                    `yaml:"tool_packages_root"`
+	ExtensionsDir string                    `yaml:"extensions_dir"` // org-scoped extension servers
+	SkillsDir     string                    `yaml:"skills_dir"`     // org-scoped skill definitions
+	Schedules     []OrgSchedule             `yaml:"schedules"`
+	Databases     map[string]DatabaseConfig `yaml:"databases"`
 
 	baseDir string // absolute path to the directory containing pux.yaml
 }
@@ -83,6 +85,24 @@ func (o *OrgManifest) ToolPkgsDir() string {
 		return ""
 	}
 	return o.resolvePath(o.ToolPkgsRoot)
+}
+
+// ExtensionsDirPath returns the absolute path to the org's extensions directory.
+// Returns empty string if no extensions_dir is configured.
+func (o *OrgManifest) ExtensionsDirPath() string {
+	if o.ExtensionsDir == "" {
+		return ""
+	}
+	return o.resolvePath(o.ExtensionsDir)
+}
+
+// SkillsDirPath returns the absolute path to the org's skills directory.
+// Returns empty string if no skills_dir is configured.
+func (o *OrgManifest) SkillsDirPath() string {
+	if o.SkillsDir == "" {
+		return ""
+	}
+	return o.resolvePath(o.SkillsDir)
 }
 
 // ManifestoContent reads and returns the org's manifesto markdown.

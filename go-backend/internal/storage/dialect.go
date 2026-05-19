@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS conversation_titles (
 	project TEXT NOT NULL,
 	agent_id TEXT NOT NULL,
 	title TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (project, agent_id)
 );
 
@@ -183,6 +184,7 @@ CREATE TABLE IF NOT EXISTS conversation_titles (
 	project TEXT NOT NULL,
 	agent_id TEXT NOT NULL,
 	title TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (project, agent_id)
 );
 

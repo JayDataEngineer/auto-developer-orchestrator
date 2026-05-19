@@ -38,7 +38,7 @@ export interface Conversation {
 	lastAt: string;
 	messageCount: number;
 	title: string;
-	status?: "running" | "";
+	status?: "processing" | "unread" | "read" | "";
 }
 
 export interface Project {

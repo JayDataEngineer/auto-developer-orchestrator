@@ -79,6 +79,10 @@ func runMigrations(db *sql.DB, dialect Dialect) error {
 			name: "add tool_call_id and tool_name columns",
 			sql:  Rebind(dialect, `ALTER TABLE conversation_messages ADD COLUMN tool_call_id TEXT NOT NULL DEFAULT ''; ALTER TABLE conversation_messages ADD COLUMN tool_name TEXT NOT NULL DEFAULT ''`),
 		},
+		{
+			name: "add status column to conversation_titles",
+			sql:  Rebind(dialect, `ALTER TABLE conversation_titles ADD COLUMN status TEXT NOT NULL DEFAULT ''`),
+		},
 	}
 
 	for _, m := range migrations {
@@ -441,6 +445,16 @@ func (d *Database) SetConversationTitle(ctx context.Context, project, agentID, t
 	return err
 }
 
+// SetConversationStatus updates the status of a conversation (processing, unread, read).
+func (d *Database) SetConversationStatus(ctx context.Context, project, agentID, status string) error {
+	_, err := d.db.ExecContext(ctx, Rebind(d.dialect, `
+		INSERT INTO conversation_titles (project, agent_id, title, status)
+		VALUES (?, ?, '', ?)
+		ON CONFLICT(project, agent_id) DO UPDATE SET status = excluded.status`),
+		project, agentID, status)
+	return err
+}
+
 // ConversationSummary is a summary of a single conversation session.
 type ConversationSummary struct {
 	Project      string `json:"project"`
@@ -466,7 +480,8 @@ func (d *Database) GetConversationSummaries(ctx context.Context) ([]Conversation
 			) AS last_message,
 			MAX(cm.created_at) AS last_at,
 			COUNT(*) AS message_count,
-			COALESCE(ct.title, '') AS title
+			COALESCE(ct.title, '') AS title,
+			COALESCE(ct.status, '') AS status
 		FROM conversation_messages cm
 		LEFT JOIN conversation_titles ct ON ct.project = cm.project AND ct.agent_id = cm.agent_id
 		GROUP BY cm.project, cm.agent_id
@@ -480,7 +495,7 @@ func (d *Database) GetConversationSummaries(ctx context.Context) ([]Conversation
 	var summaries []ConversationSummary
 	for rows.Next() {
 		var s ConversationSummary
-		if err := rows.Scan(&s.Project, &s.AgentID, &s.LastMessage, &s.LastAt, &s.MessageCount, &s.Title); err != nil {
+		if err := rows.Scan(&s.Project, &s.AgentID, &s.LastMessage, &s.LastAt, &s.MessageCount, &s.Title, &s.Status); err != nil {
 			return nil, err
 		}
 		// Truncate last message for display
