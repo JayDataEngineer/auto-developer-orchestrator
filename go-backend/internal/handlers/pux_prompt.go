@@ -152,6 +152,8 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		ApprovalHandler: approvalHandler,
 		GitExecutor:     nil, // disabled — git auto-commits on session start are unwanted
 		ArtifactDB:      h.db,
+		TranscriptDB:    h.db,
+		Project:         req.Project,
 		BrowserProvider: h.cuBridge, // wire accessibility/cookie/storage tools to employees
 		DesktopProvider: h.cuBridge, // wire desktop screenshot/click/type/key tools to employees
 		ToolPerms:       h.toolPerms, // wire per-tool permission checks

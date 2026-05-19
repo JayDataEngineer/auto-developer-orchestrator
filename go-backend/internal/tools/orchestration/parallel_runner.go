@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
 )
@@ -76,6 +78,11 @@ type ParallelRunner struct {
 	// Sub-agent result summarization: when set, long sub-agent results are summarized
 	// before returning to the CTO instead of just being truncated.
 	summarizer SummarizerFunc
+
+	// Sub-agent transcript persistence: when set, sub-agent messages are stored
+	// in the database so their full chat log can be retrieved later.
+	db             *storage.Database
+	project        string // project name for DB storage
 
 	mu                sync.Mutex
 	tasks             map[string]*asyncTask
@@ -247,6 +254,14 @@ func (r *ParallelRunner) SetSummarizer(fn SummarizerFunc) {
 	r.summarizer = fn
 }
 
+// SetTranscriptDB enables sub-agent transcript persistence to the database.
+// When set, sub-agent messages (user, assistant, tool) are stored in conversation_messages
+// with a composite agent_id so they can be retrieved later via the history API.
+func (r *ParallelRunner) SetTranscriptDB(db *storage.Database, project string) {
+	r.db = db
+	r.project = project
+}
+
 // subscriberFromCtx extracts the SSE subscriber channel from the context.
 // Contract 3.4 compliance: subscriber is retrieved from context (set by AgentLoop),
 // not held as a struct field. This keeps ParallelRunner a pure tool with no direct
@@ -367,7 +382,13 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		},
 	}
 
-	sess := &subSession{parent: r.baseSession, msgCount: 0}
+	sess := &subSession{
+		parent:    r.baseSession,
+		msgCount:  0,
+		db:        r.db,
+		project:   r.project,
+		dbAgentID: r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli()),
+	}
 	executor := r.executor
 	if r.executorFactory != nil && sandboxTier != "" {
 		executor = r.executorFactory(sandboxTier)
@@ -669,7 +690,13 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		},
 	}
 
-	sess := &subSession{parent: r.baseSession, msgCount: 0}
+	sess := &subSession{
+		parent:    r.baseSession,
+		msgCount:  0,
+		db:        r.db,
+		project:   r.project,
+		dbAgentID: r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli()),
+	}
 	executor := r.executor
 	if r.executorFactory != nil && sandboxTier != "" {
 		executor = r.executorFactory(sandboxTier)
@@ -1136,17 +1163,46 @@ func subAgentResultProcessor() func(ctx context.Context, toolName, toolCallID, r
 
 // subSession is a minimal session that stores messages in memory.
 // It wraps a parent session for context inheritance in sub-agents.
+// When db is set, messages are also persisted to the database for transcript retrieval.
 type subSession struct {
 	parent   core.Session
 	messages []core.Message
 	msgCount int
+	// Transcript persistence
+	db          *storage.Database
+	project     string // project name
+	dbAgentID   string // composite agent_id for DB queries (e.g. "session-sub:marcus-1234")
 }
 
-func (s *subSession) ID() string          { return s.parent.ID() + "-sub" }
-func (s *subSession) Close() error         { return nil }
+func (s *subSession) ID() string { return s.parent.ID() + "-sub" }
+func (s *subSession) Close() error { return nil }
 func (s *subSession) AppendMessage(msg core.Message) error {
 	s.messages = append(s.messages, msg)
 	s.msgCount++
+
+	// Persist to database if transcript storage is enabled
+	if s.db != nil && s.project != "" && s.dbAgentID != "" {
+		ctx := context.Background()
+		switch msg.Role {
+		case "user":
+			_, _ = s.db.SaveUserMessage(ctx, s.project, s.dbAgentID, msg.Content)
+		case "tool":
+			toolName := msg.Name
+			if toolName == "" {
+				toolName = "unknown"
+			}
+			_, _ = s.db.SaveToolResult(ctx, s.project, s.dbAgentID, msg.ToolCallID, toolName, msg.Content)
+		case "assistant":
+			toolCallsJSON := "[]"
+			if len(msg.ToolCalls) > 0 {
+				if tcJSON, err := json.Marshal(msg.ToolCalls); err == nil {
+					toolCallsJSON = string(tcJSON)
+				}
+			}
+			_, _ = s.db.SaveAssistantMessage(ctx, s.project, s.dbAgentID, msg.Content, msg.ReasoningContent, toolCallsJSON)
+		}
+	}
+
 	return nil
 }
 func (s *subSession) BuildContext(ctx context.Context) ([]core.Message, error) {

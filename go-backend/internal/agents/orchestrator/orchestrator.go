@@ -34,6 +34,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/tools/todo"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
+	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
 )
 
@@ -60,6 +61,8 @@ type Config struct {
 	MCPClient        *mcp.MultiClient          // optional: if set, registers MCP tools (search, analyze_image, etc.)
 	ModelResolver    orchestration.ModelResolver // optional: if set, sub-agents can use role-specific models
 	ArtifactDB       meta.ArtifactStore         // optional: if set, yield_artifact persists to DB
+	TranscriptDB     *storage.Database          // optional: if set, sub-agent messages persist for transcript retrieval
+	Project          string                     // project name for transcript DB storage
 	Org              *common.OrgManifest        // optional: org manifest for overlay mode
 	OrgRoles         map[string]*common.AgentRole // optional: org-specific employee roles
 	DBProvider       common.DBProvider          // optional: if set, registers graph/face tools for employees
@@ -325,6 +328,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		pr.SetSummarizer(func(ctx context.Context, text string, targetChars int) (string, error) {
 			return ctxpkg.SummarizeText(ctx, provider, text, targetChars)
 		})
+		// Persist sub-agent transcripts to DB for later retrieval
+		if cfg.TranscriptDB != nil && cfg.Project != "" {
+			pr.SetTranscriptDB(cfg.TranscriptDB, cfg.Project)
+		}
 		// Subscriber is now injected via context (Contract 3.4 compliance).
 		// No need to call SetSubscriber — subscriberFromCtx() extracts it from ctx.
 		// Wire visual context for sub-agent vision caching
@@ -591,6 +598,8 @@ func makeOrchestratorFactory(provider core.LLMProvider, parentCfg Config) orches
 			ProviderFactory: parentCfg.ProviderFactory,
 			ModelResolver: parentCfg.ModelResolver,
 			ArtifactDB:    parentCfg.ArtifactDB,
+			TranscriptDB:  parentCfg.TranscriptDB,
+			Project:       parentCfg.Project,
 			ExtraHooks:    parentCfg.ExtraHooks,
 			DBProvider:    parentCfg.DBProvider,
 			LLMProvider:   parentCfg.LLMProvider,
