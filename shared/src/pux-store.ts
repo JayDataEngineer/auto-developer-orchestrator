@@ -102,6 +102,7 @@ interface PuxState {
 
 	// Multi-conversation tracking
 	runningAgents: Map<string, RunningAgentInfo>;
+	// viewedConversations kept for legacy compat; real status is server-side
 	viewedConversations: Set<string>;
 
 	// Model picker overlay
@@ -511,6 +512,19 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		viewed.add(key);
 		storage.setJSON("pux:viewedConversations", [...viewed]);
 		set({ viewedConversations: viewed });
+		// Mark as read on server
+		const fetch = getFetch();
+		fetch(apiUrl("/api/pux/conversation/mark-read"), {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ project, agentId }),
+		}).catch(() => { /* best-effort */ });
+		// Update local conversation status immediately
+		set((state) => ({
+			conversations: state.conversations.map((c) =>
+				c.project === project && c.agentId === agentId ? { ...c, status: "read" } : c
+			),
+		}));
 	},
 
 	updateRunningAgents: async () => {

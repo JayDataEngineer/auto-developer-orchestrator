@@ -336,6 +336,12 @@ func (a *App) initMCP() {
 		filepath.Join(projectRoot, "extensions"),
 		filepath.Join(os.Getenv("HOME"), ".pux", "extensions"),
 	}
+	// Discover org-scoped extensions from all known organizations
+	orgExtDirs := discoverOrgExtensionDirs()
+	if len(orgExtDirs) > 0 {
+		extDirs = append(extDirs, orgExtDirs...)
+		a.logger.Info("Org extension directories discovered", zap.Int("count", len(orgExtDirs)))
+	}
 	started := a.extMgr.StartAll(context.Background(), extDirs...)
 	if started > 0 {
 		for prefix, client := range a.extMgr.Clients() {
@@ -838,4 +844,51 @@ func resolveOrgPathLocal(name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("organization '%s' not found", name)
+}
+
+// discoverOrgExtensionDirs scans known org locations for directories containing
+// pux.yaml with an extensions_dir configured. Returns list of extension directories.
+func discoverOrgExtensionDirs() []string {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return nil
+	}
+
+	// Scan standard org parent directories for pux.yaml
+	parentDirs := []string{
+		filepath.Join(home, "Documents", "programs", "dev"),
+		filepath.Join(home, "Documents", "projects"),
+	}
+
+	var extDirs []string
+	for _, parent := range parentDirs {
+		entries, err := os.ReadDir(parent)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			orgDir := filepath.Join(parent, entry.Name())
+
+			// Check for pux.yaml directly
+			org := common.LoadOrgManifest(orgDir)
+			if org == nil {
+				// Also check pux-org subdirectory
+				orgDir2 := filepath.Join(orgDir, "pux-org")
+				org = common.LoadOrgManifest(orgDir2)
+				if org == nil {
+					continue
+				}
+			}
+
+			if extDir := org.ExtensionsDirPath(); extDir != "" {
+				if _, err := os.Stat(extDir); err == nil {
+					extDirs = append(extDirs, extDir)
+				}
+			}
+		}
+	}
+	return extDirs
 }

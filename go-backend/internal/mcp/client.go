@@ -234,7 +234,13 @@ func (c *Client) ProcessHTML(ctx context.Context, html string) (string, error) {
 }
 
 // IsAvailable returns true if the MCP server is reachable.
+// Fast-path: if a session is already established, return true without
+// re-initializing. This avoids competing for the semaphore with active
+// worker tool calls and prevents overwriting a valid session ID.
 func (c *Client) IsAvailable() bool {
+	if c.sessionID != "" {
+		return true
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return c.Initialize(ctx) == nil

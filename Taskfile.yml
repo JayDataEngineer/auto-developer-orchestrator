@@ -37,10 +37,13 @@ tasks:
   build:
     desc: Build server and CLI binaries
     dir: go-backend
+    vars:
+      VERSION:
+        sh: cat ../VERSION
     cmds:
-      - go build -o server ./cmd/server/
-      - go build -o orch ./cmd/cli/
-      - echo "Built go-backend/server and go-backend/orch"
+      - go build -ldflags "-X github.com/auto-developer-orchestrator/backend/internal.Version={{.VERSION}}" -o server ./cmd/server/
+      - go build -ldflags "-X github.com/auto-developer-orchestrator/backend/internal.Version={{.VERSION}}" -o orch ./cmd/cli/
+      - echo "Built go-backend/server and go-backend/orch (v{{.VERSION}})"
 
   # ── Local Development ───────────────────────────────────────────────────
   dev:
@@ -553,6 +556,7 @@ tasks:
       - sh: git diff --quiet
         msg: "Working tree dirty — commit or stash first."
     cmds:
+      - cmd: echo "{{.VERSION}}" > VERSION
       - cmd: |
           sed -i 's/"version": ".*"/"version": "{{.VERSION}}"/' package.json
       - cmd: |
@@ -561,7 +565,7 @@ tasks:
       - cmd: |
           cd shared && sed -i 's/"version": ".*"/"version": "{{.VERSION}}"/' package.json
         ignore_error: true
-      - git add package.json ts-tui-ink/package.json shared/package.json
+      - git add VERSION package.json ts-tui-ink/package.json shared/package.json
       - cmd: |
           git commit -m "release: v{{.VERSION}}"
       - cmd: |
