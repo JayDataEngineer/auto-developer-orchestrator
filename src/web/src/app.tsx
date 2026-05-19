@@ -503,7 +503,7 @@ export function App() {
 				<Panel defaultSize={65} minSize={30}>
 					<SidebarInset className="flex h-full flex-col overflow-hidden">
 						{/* Navbar */}
-						<header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
+						<header className="flex h-10 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-4">
 							<SidebarToggle />
 							<Button
 								variant="ghost"
