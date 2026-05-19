@@ -12,14 +12,14 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, Text, useInput } from "ink";
 import { usePuxStore, type AgentState } from "@pux/shared";
 import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
+import { useTerminalSize } from "../use-terminal-size.js";
 
 export function AgentsView() {
 	const agents = usePuxStore((s) => s.agents);
-	const { stdout } = useStdout();
-	const rows = stdout?.rows ?? 24;
+	const { rows } = useTerminalSize();
 	const [selectedIdx, setSelectedIdx] = useState(0);
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
 	const colors = useColors();

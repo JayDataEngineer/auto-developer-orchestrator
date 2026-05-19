@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, Text, useInput } from "ink";
 import {
 	ThreadPrimitive,
 	ComposerPrimitive,
@@ -24,6 +24,7 @@ import { ComposerQueue } from "./composer-queue.js";
 import { usePuxStore } from "@pux/shared";
 import { getCommands } from "../commands.js";
 import { PathAutocomplete, getCompletions } from "./path-autocomplete.js";
+import { useTerminalSize } from "../use-terminal-size.js";
 import { VimInput } from "./vim-input.js";
 import { useColors } from "../theme.js";
 import { CommandRow } from "./help-overlay.js";
@@ -40,8 +41,7 @@ export function Thread({ onCommand }: ThreadProps) {
 	const [commandOutput, setCommandOutput] = useState<string | null>(null);
 	const [selectedIdx, setSelectedIdx] = useState(0);
 	const [pathIdx, setPathIdx] = useState(0);
-	const { stdout } = useStdout();
-	const cols = stdout?.columns ?? 80;
+	const { cols } = useTerminalSize();
 
 	// Auto-dismiss command output after 5s
 	useEffect(() => {

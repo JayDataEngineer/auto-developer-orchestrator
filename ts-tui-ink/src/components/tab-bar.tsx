@@ -6,10 +6,11 @@
  */
 
 import React from "react";
-import { Box, Text, useStdout } from "ink";
+import { Box, Text } from "ink";
 import { usePuxStore, type TuiView } from "@pux/shared";
 import { useAuiState } from "@assistant-ui/react-ink";
 import { useColors, symbols } from "../theme.js";
+import { useTerminalSize } from "../use-terminal-size.js";
 
 const VIEWS: { key: TuiView; label: string }[] = [
 	{ key: "chat", label: "Chat" },
@@ -23,8 +24,7 @@ export function TabBar() {
 	const activeView = usePuxStore((s) => s.activeTuiView);
 	const agents = usePuxStore((s) => s.agents);
 	const isRunning = useAuiState((s) => s.thread.isRunning);
-	const { stdout } = useStdout();
-	const cols = stdout?.columns ?? 80;
+	const { cols } = useTerminalSize();
 
 	// Count running agents
 	const runningAgents = [...agents.values()].filter((a) => a.status === "running").length;

@@ -7,9 +7,10 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, Text, useInput } from "ink";
 import { useAuiState } from "@assistant-ui/react-ink";
 import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
+import { useTerminalSize } from "../use-terminal-size.js";
 
 interface FileEntry {
 	path: string;
@@ -26,9 +27,8 @@ export function FilesView() {
 	const messages = useAuiState((s) => s.thread.messages);
 	const [selectedIdx, setSelectedIdx] = useState(0);
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
-	const { stdout } = useStdout();
 	const colors = useColors();
-	const rows = stdout?.rows ?? 24;
+	const { rows } = useTerminalSize();
 
 	// Extract file operations from tool calls
 	const fileEntries = useMemo(() => {

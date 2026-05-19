@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useMemo, useCallback } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { usePuxStore, type ProvidersMap, type ModelInfo } from "@pux/shared";
 import {
@@ -22,6 +22,7 @@ import {
 	type ProviderType,
 } from "../provider-catalog.js";
 import { useColors, symbols } from "../theme.js";
+import { useTerminalSize } from "../use-terminal-size.js";
 
 type Screen = "list" | "detail" | "add" | "config";
 
@@ -47,10 +48,8 @@ export function ProvidersOverlay() {
 	const [configField, setConfigField] = useState(0);
 	const [configError, setConfigError] = useState<string | null>(null);
 
-	const { stdout } = useStdout();
 	const colors = useColors();
-	const rows = stdout?.rows ?? 24;
-	const cols = stdout?.columns ?? 80;
+	const { rows, cols } = useTerminalSize();
 
 	// Sorted provider names
 	const providerNames = useMemo(() => Object.keys(providers).sort(), [providers]);

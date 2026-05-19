@@ -1,8 +1,9 @@
 import React, { useCallback } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, Text, useInput } from "ink";
 import { usePuxStore } from "@pux/shared";
 import { getCommands, type Command } from "../commands.js";
 import { useColors, symbols } from "../theme.js";
+import { useTerminalSize } from "../use-terminal-size.js";
 
 // ── Command groups for organized display ──
 
@@ -52,8 +53,7 @@ export function CommandRow({
 export function HelpOverlay() {
 	const show = usePuxStore((s) => s.showHelpOverlay);
 	const closeHelp = usePuxStore((s) => s.closeHelpOverlay);
-	const { stdout } = useStdout();
-	const cols = stdout?.columns ?? 80;
+	const { cols } = useTerminalSize();
 	const colors = useColors();
 
 	useInput(

@@ -5,16 +5,16 @@
  */
 
 import React from "react";
-import { Box, Text, useStdout } from "ink";
+import { Box, Text } from "ink";
 import { usePuxStore } from "@pux/shared";
+import { useTerminalSize } from "../use-terminal-size.js";
 
 export function StatusBar() {
 	const activeModel = usePuxStore((s) => s.activeModel);
 	const lastUsage = usePuxStore((s) => s.lastUsage);
 	const contextMetrics = usePuxStore((s) => s.contextMetrics);
 	const compacting = usePuxStore((s) => s.compacting);
-	const { stdout } = useStdout();
-	const cols = stdout?.columns ?? 80;
+	const { cols } = useTerminalSize();
 
 	// Build right side: context usage
 	let right = "";

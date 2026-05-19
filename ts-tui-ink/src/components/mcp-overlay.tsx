@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useMemo } from "react";
-import { Box, Text, useInput, useStdout, type Key } from "ink";
+import { Box, Text, useInput, type Key } from "ink";
 import TextInput from "ink-text-input";
 import { usePuxStore, type MCPServerInfo } from "@pux/shared";
 import { useColors, symbols } from "../theme.js";
+import { useTerminalSize } from "../use-terminal-size.js";
 
 type Screen = "list" | "detail" | "add";
 
@@ -24,10 +25,8 @@ export function MCPOverlay() {
 	const [addField, setAddField] = useState(0); // 0=prefix, 1=endpoint
 	const [addError, setAddError] = useState<string | null>(null);
 
-	const { stdout } = useStdout();
 	const colors = useColors();
-	const rows = stdout?.rows ?? 24;
-	const cols = stdout?.columns ?? 80;
+	const { rows, cols } = useTerminalSize();
 
 	const maxVisible = rows - 8;
 

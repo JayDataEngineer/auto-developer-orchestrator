@@ -11,7 +11,8 @@
  */
 
 import React, { useMemo, useState, useCallback, useRef } from "react";
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
+import { useTerminalSize } from "./use-terminal-size.js";
 import {
 	AssistantRuntimeProvider,
 	useLocalRuntime,
@@ -141,7 +142,7 @@ export function App({ model: initialModel, project }: AppProps) {
 
 function PuxApp({ initialModel, project }: { initialModel: string; project: string }) {
 	const { exit } = useApp();
-	const { stdout } = useStdout();
+	const { rows, cols } = useTerminalSize();
 	// Sync local model state with the Zustand store's activeModel
 	const storeModel = usePuxStore((s) => s.activeModel);
 	const [model, setModel] = useState(initialModel || storeModel);
@@ -164,9 +165,6 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 			return;
 		}
 	}, [exit]));
-
-	const rows = stdout?.rows ?? 24;
-	const cols = stdout?.columns ?? 80;
 
 	// Command handler
 	const handleCommand = useCallback(async (input: string): Promise<string | null> => {
