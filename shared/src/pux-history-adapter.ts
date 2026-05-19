@@ -54,7 +54,7 @@ type ThreadLike =
  * Tool results are re-attached to their parent tool-call parts in the preceding
  * assistant message. Empty assistant messages (from streaming mid-saves) are skipped.
  */
-function storedMessagesToThreadLikes(data: StoredMessage[]): ThreadLike[] {
+export function storedMessagesToThreadLikes(data: StoredMessage[]): ThreadLike[] {
 	// First pass: build a toolCallId → result lookup from tool role messages
 	const toolResults = new Map<string, { result: string; isError: boolean }>();
 	for (const msg of data) {

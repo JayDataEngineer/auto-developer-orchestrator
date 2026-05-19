@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
 	useLocalRuntime,
 	AssistantRuntimeProvider,
@@ -12,7 +12,8 @@ import {
 } from "@/lib/pux-store";
 import { relativeTime } from "@pux/shared";
 import { puxChatAdapter } from "@/lib/pux-chat-adapter";
-import { createPuxHistoryAdapter } from "@/lib/pux-history-adapter";
+import { createPuxHistoryAdapter, storedMessagesToThreadLikes } from "@/lib/pux-history-adapter";
+import { getFetch, apiUrl } from "@pux/shared";
 import { Thread } from "@/components/assistant-ui/thread";
 import { VNCViewer } from "@/components/workbench/vnc-viewer";
 import { EditorPanel } from "@/components/workbench/editor-panel";
@@ -75,8 +76,8 @@ import {
 } from "lucide-react";
 
 // ── Runtime Provider ──
-// Re-keyed on conversationKey to reload history when switching conversations.
-// Placed inside SidebarInset so sidebar state survives re-key.
+// NOT re-keyed — uses runtime.thread.reset() to switch conversations.
+// Placed inside SidebarInset so sidebar state survives conversation switches.
 
 function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	const historyAdapter = useMemo(() => createPuxHistoryAdapter(), []);
@@ -86,6 +87,43 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 			attachments: new SimpleImageAttachmentAdapter(),
 		},
 	});
+
+	// When the active conversation changes, reset the thread and reload history.
+	// This avoids the AuiProvider crash caused by key-based remounting.
+	const conversationKey = usePuxStore((s) => s.conversationKey);
+	const prevKeyRef = useRef(conversationKey);
+	useEffect(() => {
+		if (conversationKey === prevKeyRef.current) return;
+		prevKeyRef.current = conversationKey;
+
+		(async () => {
+			const store = usePuxStore.getState();
+			const project = store.activeProject;
+			if (!project) {
+				runtime.thread.reset();
+				return;
+			}
+			try {
+				const params = new URLSearchParams({ project, limit: "200" });
+				if (store.activeAgentId) params.set("agentId", store.activeAgentId);
+				const fetch = getFetch();
+				const resp = await fetch(apiUrl(`/api/pux/history?${params}`));
+				if (!resp.ok) {
+					runtime.thread.reset();
+					return;
+				}
+				const data = await resp.json();
+				if (!Array.isArray(data) || data.length === 0) {
+					runtime.thread.reset();
+					return;
+				}
+				const messages = storedMessagesToThreadLikes(data);
+				runtime.thread.reset(messages);
+			} catch {
+				runtime.thread.reset();
+			}
+		})();
+	}, [conversationKey, runtime]);
 
 	// Listen for pux:send-message events from workbench panels
 	useEffect(() => {
@@ -412,7 +450,6 @@ export function App() {
 	const loadModels = usePuxStore((s) => s.loadModels);
 	const loadConversations = usePuxStore((s) => s.loadConversations);
 	const loadProjects = usePuxStore((s) => s.loadProjects);
-	const conversationKey = usePuxStore((s) => s.conversationKey);
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
@@ -486,7 +523,7 @@ export function App() {
 								<PanelRight className="size-4" />
 							</Button>
 						</header>
-						<PuxRuntimeProvider key={conversationKey}>
+						<PuxRuntimeProvider>
 							{showTerminal ? (
 								<Group orientation="vertical" className="flex-1">
 									<Panel defaultSize={70} minSize={30}>

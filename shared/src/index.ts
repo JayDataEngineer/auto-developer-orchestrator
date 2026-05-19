@@ -12,7 +12,7 @@ export type { RunningAgentInfo, MCPServerInfo } from "./pux-store";
 
 // Adapters
 export { puxChatAdapter } from "./pux-chat-adapter";
-export { createPuxHistoryAdapter } from "./pux-history-adapter";
+export { createPuxHistoryAdapter, storedMessagesToThreadLikes } from "./pux-history-adapter";
 
 // Utilities
 export { formatToolResult } from "./format-tool-result";
