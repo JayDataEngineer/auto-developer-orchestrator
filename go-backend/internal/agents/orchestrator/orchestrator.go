@@ -26,6 +26,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/graph"
 	mcptools "github.com/auto-developer-orchestrator/backend/internal/tools/mcp"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/eval"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	plantool "github.com/auto-developer-orchestrator/backend/internal/tools/plan"
@@ -199,6 +200,9 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// Todo list — always available (created internally)
 	todoStore := todo.NewStore()
 	ctoTools = append(ctoTools, todo.NewTool(todoStore))
+
+	// JS eval tool — sandboxed runtime for deterministic transforms
+	ctoTools = append(ctoTools, eval.NewEvalTool())
 
 	// Register skills (auto-load from standard paths if not provided)
 	skillStore := cfg.Skills

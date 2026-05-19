@@ -52,6 +52,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
+	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -61,10 +62,12 @@ require (
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
+	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
