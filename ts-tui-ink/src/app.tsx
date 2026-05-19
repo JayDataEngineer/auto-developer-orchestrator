@@ -26,6 +26,7 @@ import { ComposerBar } from "./components/composer-bar.js";
 import { StatusBar } from "./components/status-bar.js";
 import { TabBar } from "./components/tab-bar.js";
 import { AgentsView } from "./components/agents-view.js";
+import { AgentZoomOverlay } from "./components/agent-zoom-overlay.js";
 import { ToolsView } from "./components/tools-view.js";
 import { FilesView } from "./components/files-view.js";
 import { ConversationsView } from "./components/conversations-view.js";
@@ -202,6 +203,7 @@ function ContentArea() {
 	const showSearch = usePuxStore((s) => s.showSearchOverlay);
 	const showHelp = usePuxStore((s) => s.showHelpOverlay);
 	const showMCP = usePuxStore((s) => s.showMCPOverlay);
+	const zoomedAgentId = usePuxStore((s) => s.zoomedAgentId);
 
 	// HITL decision dialog takes priority over everything
 	if (pendingDecision) {
@@ -219,6 +221,11 @@ function ContentArea() {
 				)}
 			</Box>
 		);
+	}
+
+	// Agent zoom overlay — below HITL, above other overlays
+	if (zoomedAgentId) {
+		return <AgentZoomOverlay />;
 	}
 
 	// Search overlay
