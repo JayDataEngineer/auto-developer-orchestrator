@@ -73,6 +73,7 @@ import {
 	FolderOpen,
 	XIcon,
 	Settings,
+	WifiOff,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -165,6 +166,44 @@ function useAgentStatusPolling(intervalMs = 3000) {
 		}, intervalMs);
 		return () => clearInterval(id);
 	}, [update, loadConversations, intervalMs]);
+}
+
+function useBackendHealth(intervalMs = 10000) {
+	const [online, setOnline] = useState(true);
+	useEffect(() => {
+		let alive = true;
+		const check = async () => {
+			try {
+				const fetch = getFetch();
+				const resp = await fetch(apiUrl("/api/pux/models"), {
+					method: "GET",
+					signal: AbortSignal.timeout(3000),
+				});
+				if (alive) setOnline(resp.ok);
+			} catch {
+				if (alive) setOnline(false);
+			}
+		};
+		check();
+		const id = setInterval(check, intervalMs);
+		return () => {
+			alive = false;
+			clearInterval(id);
+		};
+	}, [intervalMs]);
+	return online;
+}
+
+function BackendOfflineBanner() {
+	const online = useBackendHealth();
+	if (online) return null;
+	return (
+		<div className="flex h-7 shrink-0 items-center gap-2 bg-red-600/90 px-4 text-xs font-medium text-white">
+			<WifiOff className="size-3.5" />
+			<span>Backend offline — start with </span>
+			<code className="rounded bg-white/20 px-1.5 py-0.5 text-[11px]">task dev</code>
+		</div>
+	);
 }
 
 function SidebarToggle() {
@@ -529,6 +568,7 @@ export function App() {
 								<PanelRight className="size-4" />
 							</Button>
 						</header>
+						<BackendOfflineBanner />
 						<PuxRuntimeProvider>
 							{showTerminal ? (
 								<Group orientation="vertical" className="flex-1">
