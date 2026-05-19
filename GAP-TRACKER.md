@@ -22,53 +22,29 @@ Remaining: Some browser tests still skip. The dedupe fix may not cover all cases
 
 Commit: `3fc0fae`
 
-## 4. No Project Test Files (vitest)
+## 4. No Project Test Files (vitest) — PARTIALLY FIXED
 
-`src/`, `shared/`, and `ts-tui-ink/` have zero test files. The `vitest.config.ts` is ready but there's nothing to run.
+Added 75 unit tests for `shared/src/pux-store.ts` covering initial state, sync/async actions, agent monitoring, overlays, and state transitions. All passing.
 
-**Fix needed**: Add unit tests for:
-- `shared/src/pux-chat-adapter.ts` (SSE parsing, state management)
-- `shared/src/pux-store.ts` (Zustand store actions)
-- `ts-tui-ink/src/components/` (Ink component rendering)
+Remaining: `shared/src/pux-chat-adapter.ts` and `ts-tui-ink/src/components/` still have no tests.
 
-## 5. Unstaged Pre-existing Changes
+Commit: `184e267`
 
-Note: `go-backend/internal/perms/tool_permissions.go` was on this list but has since been committed. The perms test (`tool_permissions_test.go`) was also fixed to match the new tool names. All 40 Go packages now pass.
+## 5. Unstaged Pre-existing Changes — MOSTLY FIXED
 
-Commit: `5ab1397`
+Most previously dirty files have been committed:
+- `GOALS.md` — committed (`08ce453`)
+- `src/web/src/components/workbench/prompt-panel.tsx` — committed (`f3d0866`)
+- `go-backend/internal/perms/tool_permissions.go` — committed earlier (`5ab1397`)
+- `shared/src/pux-chat-adapter.ts`, `thread.tsx`, `hooks/permission.go` — no longer dirty
 
-These files were dirty before the test-fix session and remain unstaged:
+Remaining: `memos/review-config-report.md` contains exposed API tokens — do NOT commit until secrets are rotated and removed.
 
-| File | What changed |
-|------|-------------|
-| `go-backend/internal/hooks/permission.go` | Added `file_read`, `file_edit`, `delegate_to`, `delegate_async` to tool arg formatters |
-| `go-backend/internal/perms/tool_permissions.go` | Replaced old tool names (`write`, `edit`, `delete`) with new ones (`file_read`, `file_write`, `file_edit`, etc.), added persistence |
-| `shared/src/pux-chat-adapter.ts` | Fixed race: close tool calls that never got `tool_execution_end` before `subagent_end` |
-| `src/web/src/components/assistant-ui/thread.tsx` | UI changes |
-| `src/web/src/components/workbench/prompt-panel.tsx` | UI changes (prompt panel redesign) |
-| `memos/review-config-report.md` | Doc update |
+## 6. Untracked Files — FIXED
 
-**Action needed**: Review and commit these separately — they're feature changes, not test fixes.
-
-## 6. Untracked Files — PARTIALLY FIXED
-
-Added stray files to `.gitignore`: `example.png`, `go-backend/go-backend/`, `tests/python/frontend/screenshots/`, `tool-ui/`, `src/web/next-app/`.
-
-Remaining untracked: `memos/dune-themes.txt`, `memos/meaning-of-dune.md` — these are intentional notes.
-
-Commit: `3fc0fae`
-
-| Path | Description |
-|------|-------------|
-| `example.png` | Screenshot — should be gitignored |
-| `go-backend/go-backend/` | Looks like accidental binary output — should be gitignored |
-| `memos/dune-themes.txt` | Notes file |
-| `memos/meaning-of-dune.md` | Notes file |
-| `src/web/next-app/` | Experimental Next.js app? |
-| `tests/python/frontend/screenshots/` | Test artifacts — should be gitignored |
-| `tool-ui/` | Reference UI code — should be gitignored or documented |
-
-**Action needed**: Add to `.gitignore` or commit if intentional.
+Stray files gitignored and memo files committed.
+- `example.png`, `go-backend/go-backend/`, `tests/python/frontend/screenshots/`, `tool-ui/`, `src/web/next-app/` → gitignored (`3fc0fae`)
+- `memos/dune-themes.txt`, `memos/meaning-of-dune.md` → committed (`796e64`)
 
 ## 7. Todo Test Rewrite (Already Committed)
 
