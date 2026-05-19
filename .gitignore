@@ -88,6 +88,21 @@ docs/tsconfig.json
 shared/bun.lock
 ts-tui-ink/bun.lock
 
+# Stray screenshots and test artifacts
+example.png
+
+# Go binary output in wrong location
+go-backend/go-backend/
+
+# Python test screenshots
+tests/python/frontend/screenshots/
+
+# Reference UI code (not source)
+tool-ui/
+
+# Experimental Next.js app
+src/web/next-app/
+
 # Test artifacts from sandbox/agent use case runs
 makima*.jpg
 ctx_test2.py

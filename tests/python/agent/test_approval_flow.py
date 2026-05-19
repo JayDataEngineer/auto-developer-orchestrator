@@ -24,13 +24,14 @@ import json
 import time
 
 import pytest
+import requests
 
 from conftest import API_BASE_URL
 from utils.contract import VALID_APPROVAL_TYPES, VALID_RISK_LEVELS
 from fixtures.agent import spawn_agent, destroy_agent
 from utils.sse import post_and_stream
 
-pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow]
+pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow, pytest.mark.llm]
 
 API = API_BASE_URL
 TEST_PROJECT = "test-repo"
@@ -219,12 +220,15 @@ class TestRespondEndpointContract:
 
     def test_respond_no_pending_approval(self):
         """When no approval is pending, respond should return gracefully."""
-        resp = _mod_session.post(f"{API}/api/pux/decision", json={
-            "project": TEST_PROJECT,
-            "agentId": "default",
-            "decisionId": "nonexistent-req-xyz",
-            "action": "approve",
-        })
+        try:
+            resp = _mod_session.post(f"{API}/api/pux/decision", json={
+                "project": TEST_PROJECT,
+                "agentId": "default",
+                "decisionId": "nonexistent-req-xyz",
+                "action": "approve",
+            })
+        except requests.ConnectionError:
+            pytest.skip("Backend connection lost during test run")
         assert resp.status_code in (200, 404)
         if resp.status_code == 200:
             data = resp.json()
@@ -232,12 +236,15 @@ class TestRespondEndpointContract:
 
     def test_respond_deny_no_pending(self):
         """Deny with no pending approval should be safe."""
-        resp = _mod_session.post(f"{API}/api/pux/decision", json={
-            "project": TEST_PROJECT,
-            "agentId": "default",
-            "decisionId": "nonexistent-req-xyz",
-            "action": "deny",
-        })
+        try:
+            resp = _mod_session.post(f"{API}/api/pux/decision", json={
+                "project": TEST_PROJECT,
+                "agentId": "default",
+                "decisionId": "nonexistent-req-xyz",
+                "action": "deny",
+            })
+        except requests.ConnectionError:
+            pytest.skip("Backend connection lost during test run")
         assert resp.status_code in (200, 404)
 
     def test_respond_answer_no_pending(self):

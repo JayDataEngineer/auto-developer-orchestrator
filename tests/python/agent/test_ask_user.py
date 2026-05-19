@@ -24,7 +24,7 @@ import pytest
 from conftest import API_BASE_URL
 from utils.sse import post_and_stream
 
-pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow]
+pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow, pytest.mark.llm]
 
 API = API_BASE_URL
 TEST_PROJECT = "test-repo"

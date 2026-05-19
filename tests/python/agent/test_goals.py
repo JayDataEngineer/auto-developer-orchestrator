@@ -18,7 +18,7 @@ from conftest import API_BASE_URL
 from utils.sse import post_and_stream, stream_pux_prompt
 from utils.contract import validate_sse_event
 
-pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow]
+pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow, pytest.mark.llm]
 
 API = API_BASE_URL
 TEST_PROJECT = "test-repo"

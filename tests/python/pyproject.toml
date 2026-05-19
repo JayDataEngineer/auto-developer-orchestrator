@@ -21,6 +21,7 @@ markers = [
     "playwright: Playwright frontend UI tests",
     "tui: TUI visual tests (requires task tui-visual)",
     "slow: Slow tests (LLM-dependent)",
+    "llm: Tests that require LLM generation (skip with --skip-llm)",
     "vision: Tests using vision/AI verification",
 ]
 addopts = "-v --tb=short"

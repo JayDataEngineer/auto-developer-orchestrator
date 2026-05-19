@@ -19,7 +19,7 @@ from conftest import API_BASE_URL
 from fixtures.agent import spawn_agent, destroy_agent
 from utils.sse import stream_prompt, post_and_stream
 
-pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow]
+pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow, pytest.mark.llm]
 
 API = API_BASE_URL
 TEST_PROJECT = "test-repo"

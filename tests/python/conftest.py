@@ -113,8 +113,10 @@ def _probe(url, method="GET", json_body=None, timeout=5, expect_lt=400):
 
 
 def pytest_collection_modifyitems(config, items):
-    """Auto-skip tests whose required services are unreachable."""
+    """Auto-skip tests whose required services are unreachable, or when --skip-llm is set."""
     global _SERVICES_AVAILABLE
+
+    skip_llm = config.getoption("--skip-llm", default=False)
 
     if not _SERVICES_AVAILABLE:
         _SERVICES_AVAILABLE["api"] = _probe(f"{API_BASE_URL}/api/health")
@@ -138,6 +140,13 @@ def pytest_collection_modifyitems(config, items):
     }
 
     for item in items:
+        # Skip LLM-dependent tests when --skip-llm is passed
+        if skip_llm:
+            for marker in item.iter_markers():
+                if marker.name == "llm":
+                    item.add_marker(pytest.mark.skip(reason="--skip-llm flag provided"))
+                    break
+
         for marker in item.iter_markers():
             marker_name = marker.name
             if marker_name in skip_map:
@@ -152,3 +161,8 @@ def pytest_collection_modifyitems(config, items):
                     reason = skip_map[marker_name]
                     item.add_marker(pytest.mark.skip(reason=reason))
                     break
+
+
+def pytest_addoption(parser):
+    parser.addoption("--skip-llm", action="store_true", default=False,
+                     help="Skip tests that require LLM generation")

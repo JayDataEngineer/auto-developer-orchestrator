@@ -22,7 +22,7 @@ from fixtures.agent import spawn_agent, destroy_agent
 from utils.sse import stream_prompt
 from utils.contract import validate_sse_event, VALID_SSE_EVENT_TYPES
 
-pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow]
+pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow, pytest.mark.llm]
 
 API = API_BASE_URL
 TEST_PROJECT = "test-repo"
