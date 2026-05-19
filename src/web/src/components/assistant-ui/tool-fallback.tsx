@@ -185,6 +185,61 @@ function ToolFallbackArgs({
 	);
 }
 
+// ── Image extraction from tool results ──
+
+const BASE64_RE = /^[A-Za-z0-9+/=]+$/;
+
+function extractImageSrc(value: unknown): string | null {
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		if (trimmed.startsWith("data:image/")) return trimmed;
+		if (trimmed.length > 200 && BASE64_RE.test(trimmed)) {
+			return `data:image/png;base64,${trimmed}`;
+		}
+	}
+	return null;
+}
+
+function extractScreenshotFromResult(
+	result: unknown,
+): { src: string; meta?: Record<string, unknown> } | null {
+	if (result == null) return null;
+
+	// String result — try parsing as JSON first (tool results arrive as JSON strings)
+	if (typeof result === "string") {
+		try {
+			const parsed = JSON.parse(result);
+			return extractScreenshotFromResult(parsed);
+		} catch {
+			// Not valid JSON — check if it's a raw base64 image
+			const src = extractImageSrc(result);
+			return src ? { src } : null;
+		}
+	}
+
+	// Object result — look for screenshot/image fields
+	if (typeof result === "object" && !Array.isArray(result)) {
+		const obj = result as Record<string, unknown>;
+
+		// Common patterns: screenshot, image, image_b64
+		for (const key of ["screenshot", "image", "image_b64"]) {
+			if (typeof obj[key] === "string") {
+				const src = extractImageSrc(obj[key]);
+				if (src) {
+					// Build metadata from remaining fields (excluding the image data)
+					const meta: Record<string, unknown> = {};
+					for (const [k, v] of Object.entries(obj)) {
+						if (k !== key && typeof v !== "object") meta[k] = v;
+					}
+					return { src, meta: Object.keys(meta).length > 0 ? meta : undefined };
+				}
+			}
+		}
+	}
+
+	return null;
+}
+
 function ToolFallbackResult({
 	result,
 	className,
@@ -193,6 +248,9 @@ function ToolFallbackResult({
 	result?: unknown;
 }) {
 	if (result === undefined) return null;
+
+	// Check if result contains an image we can render
+	const imageInfo = extractScreenshotFromResult(result);
 
 	return (
 		<div
@@ -203,10 +261,36 @@ function ToolFallbackResult({
 			)}
 			{...props}
 		>
-			<p className="aui-tool-fallback-result-header font-semibold">Result:</p>
-			<pre className="aui-tool-fallback-result-content whitespace-pre-wrap">
-				{typeof result === "string" ? result : JSON.stringify(result, null, 2)}
-			</pre>
+			{imageInfo ? (
+				<>
+					{imageInfo.meta && (
+						<div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+							{Object.entries(imageInfo.meta).map(([k, v]) => (
+								<span key={k}>
+									<span className="font-medium text-foreground">{k}</span>:{" "}
+									{String(v).length > 80
+										? String(v).slice(0, 77) + "..."
+										: String(v)}
+								</span>
+							))}
+						</div>
+					)}
+					<img
+						src={imageInfo.src}
+						alt="Tool result screenshot"
+						className="max-h-64 rounded-md border border-border"
+					/>
+				</>
+			) : (
+				<>
+					<p className="aui-tool-fallback-result-header font-semibold">Result:</p>
+					<pre className="aui-tool-fallback-result-content whitespace-pre-wrap">
+						{typeof result === "string"
+							? result
+							: JSON.stringify(result, null, 2)}
+					</pre>
+				</>
+			)}
 		</div>
 	);
 }
