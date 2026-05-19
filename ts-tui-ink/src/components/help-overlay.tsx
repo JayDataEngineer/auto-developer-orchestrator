@@ -9,11 +9,11 @@ import { useColors, symbols } from "../theme.js";
 const GROUPS = [
 	{
 		label: "General",
-		names: ["help", "quit", "clear", "compact", "new", "status", "sessions"],
+		names: ["help", "quit", "clear", "compact", "new", "status", "history"],
 	},
 	{
 		label: "Panels",
-		names: ["search", "files", "logs", "settings", "mcp", "model"],
+		names: ["search", "files", "logs", "sessions", "settings", "mcp", "model"],
 	},
 	{
 		label: "Views",
