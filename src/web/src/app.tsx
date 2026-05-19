@@ -11,7 +11,7 @@ import {
 	type RunningAgentInfo,
 } from "@/lib/pux-store";
 import { relativeTime } from "@pux/shared";
-import { puxChatAdapter } from "@/lib/pux-chat-adapter";
+import { webChatAdapter } from "@/lib/pux-chat-adapter";
 import { createPuxHistoryAdapter, storedMessagesToThreadLikes } from "@/lib/pux-history-adapter";
 import { getFetch, apiUrl } from "@pux/shared";
 import { Thread } from "@/components/assistant-ui/thread";
@@ -82,7 +82,7 @@ import {
 
 function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	const historyAdapter = useMemo(() => createPuxHistoryAdapter(), []);
-	const runtime = useLocalRuntime(puxChatAdapter, {
+	const runtime = useLocalRuntime(webChatAdapter, {
 		adapters: {
 			history: historyAdapter,
 			attachments: new SimpleImageAttachmentAdapter(),

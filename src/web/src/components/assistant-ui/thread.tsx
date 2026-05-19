@@ -48,7 +48,8 @@ import {
 	RefreshCwIcon,
 	SquareIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FC } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "react";
+import { getWebCommands } from "@/lib/commands";
 
 export const Thread: FC = () => {
 	return (
@@ -118,20 +119,124 @@ const ThreadWelcome: FC = () => {
 };
 
 const Composer: FC = () => {
+	const composerRef = useRef<HTMLDivElement>(null);
+	const [inputValue, setInputValue] = useState("");
+	const [paletteVisible, setPaletteVisible] = useState(false);
+	const [selectedIndex, setSelectedIndex] = useState(0);
+
+	// Track textarea value via native listener (assistant-ui owns the textarea)
+	useEffect(() => {
+		const el = composerRef.current;
+		if (!el) return;
+		const textarea = el.querySelector("textarea");
+		if (!textarea) return;
+
+		const handler = () => {
+			const val = textarea.value;
+			setInputValue(val);
+			const isCommand = val.startsWith("/") && !val.slice(1).includes(" ");
+			setPaletteVisible(isCommand);
+			if (isCommand) setSelectedIndex(0);
+		};
+		textarea.addEventListener("input", handler);
+		return () => textarea.removeEventListener("input", handler);
+	}, []);
+
+	// Filter commands based on what's typed after /
+	const allCommands = useMemo(() => getWebCommands(), []);
+	const query = inputValue.startsWith("/")
+		? inputValue.slice(1).split(" ")[0].toLowerCase()
+		: "";
+	const filtered = useMemo(
+		() =>
+			query
+				? allCommands.filter((c) => c.name.startsWith(query))
+				: allCommands,
+		[allCommands, query],
+	);
+
+	// Insert a command name into the textarea using native value setter
+	const insertCommand = useCallback((cmdName: string) => {
+		const textarea = composerRef.current?.querySelector("textarea");
+		if (!textarea) return;
+		const setter = Object.getOwnPropertyDescriptor(
+			HTMLTextAreaElement.prototype,
+			"value",
+		)!.set!;
+		setter.call(textarea, "/" + cmdName + " ");
+		textarea.dispatchEvent(new Event("input", { bubbles: true }));
+		textarea.focus();
+		setPaletteVisible(false);
+	}, []);
+
+	// Keyboard navigation for command palette (capture phase to preempt assistant-ui)
+	useEffect(() => {
+		if (!paletteVisible || filtered.length === 0) return;
+		const textarea = composerRef.current?.querySelector("textarea");
+		if (!textarea) return;
+
+		const handler = (e: KeyboardEvent) => {
+			if (e.key === "ArrowDown") {
+				e.preventDefault();
+				e.stopPropagation();
+				setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
+			} else if (e.key === "ArrowUp") {
+				e.preventDefault();
+				e.stopPropagation();
+				setSelectedIndex((i) => Math.max(i - 1, 0));
+			} else if (e.key === "Tab" && !e.shiftKey) {
+				e.preventDefault();
+				e.stopPropagation();
+				insertCommand(filtered[selectedIndex].name);
+			} else if (e.key === "Escape") {
+				e.preventDefault();
+				setPaletteVisible(false);
+			}
+		};
+		textarea.addEventListener("keydown", handler, true);
+		return () => textarea.removeEventListener("keydown", handler, true);
+	}, [paletteVisible, filtered, selectedIndex, insertCommand]);
+
 	return (
-		<ComposerPrimitive.Root className="relative flex w-full flex-col">
-			<ComposerPrimitive.AttachmentDropzone className="flex w-full flex-col rounded-2xl border border-input bg-background px-1 pt-2 outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
-				<ComposerAttachments />
-				<ComposerPrimitive.Input
-					placeholder="Send a message..."
-					className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-4 pt-2 pb-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
-					rows={1}
-					autoFocus
-					aria-label="Message input"
-				/>
-				<ComposerAction />
-			</ComposerPrimitive.AttachmentDropzone>
-		</ComposerPrimitive.Root>
+		<div ref={composerRef} className="relative flex w-full flex-col">
+			{/* Command palette */}
+			{paletteVisible && filtered.length > 0 && (
+				<div className="absolute bottom-full left-0 right-0 mb-1 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-lg z-50">
+					{filtered.map((cmd, i) => (
+						<div
+							key={cmd.name}
+							className={cn(
+								"flex items-center gap-3 rounded-lg px-3 py-2 text-sm cursor-pointer",
+								i === selectedIndex
+									? "bg-accent text-accent-foreground"
+									: "text-muted-foreground hover:bg-accent/50",
+							)}
+							onMouseDown={(e) => e.preventDefault()}
+							onClick={() => insertCommand(cmd.name)}
+							onMouseEnter={() => setSelectedIndex(i)}
+						>
+							<code className="text-xs font-mono text-foreground min-w-[100px]">
+								/{cmd.name}
+							</code>
+							<span className="text-xs">{cmd.description}</span>
+						</div>
+					))}
+				</div>
+			)}
+			<ComposerPrimitive.Root className="flex w-full flex-col">
+				<ComposerPrimitive.AttachmentDropzone className="flex w-full flex-col rounded-2xl border border-input bg-background px-1 pt-2 outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
+					<ComposerAttachments />
+					<ComposerPrimitive.Input
+						placeholder="Send a message... (type / for commands)"
+						className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-4 pt-2 pb-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
+						rows={1}
+						autoFocus
+						aria-label="Message input"
+					/>
+					<ComposerAction />
+				</ComposerPrimitive.AttachmentDropzone>
+			</ComposerPrimitive.Root>
+		</div>
 	);
 };
 

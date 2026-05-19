@@ -23,6 +23,7 @@ interface FormData {
 	model: string;
 	agentId: string;
 	description: string;
+	sandboxOnly: boolean;
 }
 
 // ── Constants ──
@@ -36,6 +37,7 @@ const emptyForm: FormData = {
 	model: "",
 	agentId: "",
 	description: "",
+	sandboxOnly: false,
 };
 
 const STATUS_CFG: Record<string, { icon: React.ReactNode; color: string; spin?: boolean }> = {
@@ -76,6 +78,7 @@ function buildBody(form: FormData): Record<string, any> {
 		message: form.message.trim(),
 		scheduleType: form.scheduleType,
 		project: "default",
+		sandboxOnly: form.sandboxOnly,
 	};
 	if (form.description.trim()) body.description = form.description.trim();
 	if (form.agentId) body.agentId = form.agentId;
@@ -97,6 +100,7 @@ function jobToForm(job: any): FormData {
 		model: job.model || "",
 		agentId: job.agentId || "",
 		description: job.description || "",
+		sandboxOnly: job.sandboxOnly || false,
 	};
 }
 
@@ -117,6 +121,7 @@ const schedulerFields: FieldConfig<FormData>[] = [
 	},
 	{ key: "cronExpr", type: "text", label: "Cron expression", placeholder: "0 9 * * *" },
 	{ key: "everyMinutes", type: "number", label: "Every N minutes", placeholder: "30", min: 1 },
+	{ key: "sandboxOnly", type: "toggle", label: "Sandbox only" },
 	{ key: "description", type: "text", label: "Description", placeholder: "Optional note" },
 ];
 
@@ -155,6 +160,7 @@ export function SchedulerPanel() {
 				badges: (job: any) => [
 					...(job.agentId ? [{ text: `→ ${job.agentId}`, variant: "outline" as const }] : []),
 					{ text: job.scheduleType, variant: "secondary" as const },
+					...(job.sandboxOnly ? [{ text: "sandbox", variant: "outline" as const }] : []),
 				],
 				status: (job: any) => STATUS_CFG[job.status] || STATUS_CFG.idle,
 			}}
@@ -176,6 +182,7 @@ export function SchedulerPanel() {
 				if (form.scheduleType !== "manual") parts.push(`Schedule: ${form.scheduleType}`);
 				if (form.scheduleType === "cron" && form.cronExpr.trim()) parts.push(`Cron: ${form.cronExpr.trim()}`);
 				if (form.scheduleType === "every" && form.everyMinutes) parts.push(`Every ${form.everyMinutes} minutes`);
+				if (form.sandboxOnly) parts.push("Sandbox only: no delegation, MCP, browser, or desktop tools");
 				if (form.description.trim()) parts.push(`Note: ${form.description.trim()}`);
 				return parts.join(" ");
 			}}
