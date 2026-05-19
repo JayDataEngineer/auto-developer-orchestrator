@@ -311,6 +311,74 @@ func TestToolCall(t *testing.T) {
 	}
 }
 
+func TestGenerateOptions_ResponseFormat(t *testing.T) {
+	opts := GenerateOptions{
+		MaxTokens: 2048,
+		ResponseFormat: &ResponseFormat{
+			Type: "json_object",
+		},
+	}
+	if opts.ResponseFormat == nil {
+		t.Fatal("expected ResponseFormat to be set")
+	}
+	if opts.ResponseFormat.Type != "json_object" {
+		t.Errorf("Type = %q, want %q", opts.ResponseFormat.Type, "json_object")
+	}
+
+	// JSON serialization
+	data, err := json.Marshal(opts.ResponseFormat)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+	if string(data) != `{"type":"json_object"}` {
+		t.Errorf("marshaled = %q, want %q", string(data), `{"type":"json_object"}`)
+	}
+}
+
+func TestGenerateOptions_ResponseFormatWithSchema(t *testing.T) {
+	opts := GenerateOptions{
+		ResponseFormat: &ResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &JSONSchemaFormat{
+				Name:   "result",
+				Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
+				Strict: true,
+			},
+		},
+	}
+	data, err := json.Marshal(opts.ResponseFormat)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if parsed["type"] != "json_schema" {
+		t.Errorf("type = %v, want json_schema", parsed["type"])
+	}
+	schema, ok := parsed["json_schema"].(map[string]any)
+	if !ok {
+		t.Fatal("expected json_schema object")
+	}
+	if schema["name"] != "result" {
+		t.Errorf("name = %v, want result", schema["name"])
+	}
+	if schema["strict"] != true {
+		t.Errorf("strict = %v, want true", schema["strict"])
+	}
+}
+
+func TestGenerateOptions_NilResponseFormat(t *testing.T) {
+	opts := GenerateOptions{
+		MaxTokens:   1024,
+		Temperature: 0.5,
+	}
+	if opts.ResponseFormat != nil {
+		t.Error("expected nil ResponseFormat by default")
+	}
+}
+
 func TestMessage_JSONMarshaling(t *testing.T) {
 	m := Message{
 		Role:    "assistant",

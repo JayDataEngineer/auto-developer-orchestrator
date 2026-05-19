@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
 )
 
@@ -440,6 +441,9 @@ type ChatCompletionRequest struct {
 
 	// Request usage data in streaming response (OpenAI stream_options)
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+
+	// Structured output format (OpenAI response_format)
+	ResponseFormat *core.ResponseFormat `json:"response_format,omitempty"`
 }
 
 // APIChatMessage is the wire format for chat messages sent to /v1/chat/completions.

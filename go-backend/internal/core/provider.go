@@ -142,12 +142,27 @@ const (
 	FinishToolCalls FinishReason = "tool_calls"
 )
 
+// ResponseFormat controls the output format for structured responses.
+// Supported by OpenAI, Anthropic, Gemini, and llama-server (gguf).
+type ResponseFormat struct {
+	Type       string           `json:"type"`                  // "text", "json_object", or "json_schema"
+	JSONSchema *JSONSchemaFormat `json:"json_schema,omitempty"` // Required when type="json_schema"
+}
+
+// JSONSchemaFormat holds a JSON Schema definition for structured output.
+type JSONSchemaFormat struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+	Strict bool            `json:"strict,omitempty"`
+}
+
 // GenerateOptions controls generation parameters.
 type GenerateOptions struct {
-	MaxTokens   int
-	Temperature float32
-	TopP        float32
-	TopK        int
+	MaxTokens      int
+	Temperature    float32
+	TopP           float32
+	TopK           int
+	ResponseFormat *ResponseFormat // Request structured output (JSON, schema-validated, etc.)
 }
 
 // LLMProvider abstracts an LLM backend (llama-server, Gemini, OpenRouter, etc.).

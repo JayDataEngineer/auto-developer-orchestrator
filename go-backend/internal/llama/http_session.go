@@ -208,6 +208,7 @@ func (s *Session) buildRequest(opts GenerateOptions) ChatCompletionRequest {
 		CachePrompt:     !s.engine.IsCloud(),
 		SessionID:       s.sessionID,
 		Stream:          true,
+		ResponseFormat:  opts.ResponseFormat,
 	}
 	if s.engine.IsCloud() {
 		req.Model = s.engine.ModelName()
