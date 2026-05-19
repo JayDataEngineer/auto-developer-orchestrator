@@ -141,21 +141,6 @@ const commands: Command[] = [
 		},
 	},
 	{
-		name: "history",
-		description: "List recent conversations",
-		handler: async () => {
-			const convos = usePuxStore.getState().conversations;
-			if (convos.length === 0) {
-				return { type: "handled", message: "No conversations found." };
-			}
-			const lines = convos
-				.slice(0, 10)
-				.map((c, i) => `  ${String(i + 1).padStart(2)}. ${c.agentId.slice(0, 8)} ${c.title || "(untitled)"}`)
-				.join("\n");
-			return { type: "handled", message: `Recent conversations:\n${lines}` };
-		},
-	},
-	{
 		name: "status",
 		description: "Show session status",
 		handler: async (_, ctx) => {
