@@ -14,11 +14,11 @@ const GROUPS = [
 	},
 	{
 		label: "Panels",
-		names: ["search", "files", "logs", "sessions", "settings", "mcp", "model"],
+		names: ["search", "logs", "sessions", "settings", "mcp", "model"],
 	},
 	{
 		label: "Views",
-		names: ["chat", "agents", "tools", "conversations"],
+		names: ["chat", "agents", "tools", "files", "conversations"],
 	},
 ];
 

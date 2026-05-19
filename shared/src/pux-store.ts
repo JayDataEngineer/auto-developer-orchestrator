@@ -121,9 +121,6 @@ interface PuxState {
 	// Log viewer
 	showLogViewer: boolean;
 
-	// File picker
-	showFilePicker: boolean;
-
 	// Search overlay
 	showSearchOverlay: boolean;
 
@@ -179,8 +176,6 @@ interface PuxState {
 	closeSessionSwitcher: () => void;
 	toggleLogViewer: () => void;
 	closeLogViewer: () => void;
-	toggleFilePicker: () => void;
-	closeFilePicker: () => void;
 	toggleSearchOverlay: () => void;
 	closeSearchOverlay: () => void;
 	toggleHelpOverlay: () => void;
@@ -202,7 +197,6 @@ const overlayKeys = [
 	"showSettingsOverlay",
 	"showSessionSwitcher",
 	"showLogViewer",
-	"showFilePicker",
 	"showSearchOverlay",
 	"showHelpOverlay",
 	"showMCPOverlay",
@@ -254,7 +248,6 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	showSettingsOverlay: false,
 	showSessionSwitcher: false,
 	showLogViewer: false,
-	showFilePicker: false,
 	showSearchOverlay: false,
 	showHelpOverlay: false,
 	showMCPOverlay: false,
@@ -629,13 +622,6 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	closeLogViewer: () => set({ showLogViewer: false }),
-
-	toggleFilePicker: () => {
-		const show = !get().showFilePicker;
-		set(show ? openOverlay("showFilePicker") : { showFilePicker: false });
-	},
-
-	closeFilePicker: () => set({ showFilePicker: false }),
 
 	toggleSearchOverlay: () => {
 		const show = !get().showSearchOverlay;

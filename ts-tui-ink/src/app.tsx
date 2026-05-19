@@ -33,7 +33,6 @@ import { ProvidersOverlay } from "./components/providers-overlay.js";
 import { SettingsOverlay } from "./components/settings-overlay.js";
 import { SessionSwitcher } from "./components/session-switcher.js";
 import { LogViewer } from "./components/log-viewer.js";
-import { FilePicker } from "./components/file-picker.js";
 import { SearchOverlay } from "./components/search-overlay.js";
 import { MCPOverlay } from "./components/mcp-overlay.js";
 import { HelpOverlay } from "./components/help-overlay.js";
@@ -200,7 +199,6 @@ function ContentArea() {
 	const showSettings = usePuxStore((s) => s.showSettingsOverlay);
 	const showSwitcher = usePuxStore((s) => s.showSessionSwitcher);
 	const showLogs = usePuxStore((s) => s.showLogViewer);
-	const showFilePicker = usePuxStore((s) => s.showFilePicker);
 	const showSearch = usePuxStore((s) => s.showSearchOverlay);
 	const showHelp = usePuxStore((s) => s.showHelpOverlay);
 	const showMCP = usePuxStore((s) => s.showMCPOverlay);
@@ -236,11 +234,6 @@ function ContentArea() {
 	// Help overlay
 	if (showHelp) {
 		return <HelpOverlay />;
-	}
-
-	// File picker
-	if (showFilePicker) {
-		return <FilePicker />;
 	}
 
 	// Log viewer

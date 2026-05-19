@@ -94,9 +94,9 @@ const commands: Command[] = [
 	},
 	{
 		name: "files",
-		description: "Open file picker to browse and attach files",
+		description: "Switch to files view (session file operations)",
 		handler: async () => {
-			usePuxStore.getState().toggleFilePicker();
+			usePuxStore.getState().setTuiView("files");
 			return { type: "handled" };
 		},
 	},
