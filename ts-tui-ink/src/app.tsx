@@ -27,6 +27,7 @@ import { StatusBar } from "./components/status-bar.js";
 import { TabBar } from "./components/tab-bar.js";
 import { AgentsView } from "./components/agents-view.js";
 import { AgentZoomOverlay } from "./components/agent-zoom-overlay.js";
+import { AgentSelectorOverlay } from "./components/agent-selector-overlay.js";
 import { ToolsView } from "./components/tools-view.js";
 import { FilesView } from "./components/files-view.js";
 import { ConversationsView } from "./components/conversations-view.js";
@@ -165,6 +166,11 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 			usePuxStore.getState().cycleTuiView();
 			return;
 		}
+		// Ctrl+O: toggle agent selector
+		if (input === "o" && key.ctrl) {
+			usePuxStore.getState().toggleAgentSelector();
+			return;
+		}
 	}, [exit]));
 
 	// Command handler
@@ -204,6 +210,7 @@ function ContentArea() {
 	const showHelp = usePuxStore((s) => s.showHelpOverlay);
 	const showMCP = usePuxStore((s) => s.showMCPOverlay);
 	const zoomedAgentId = usePuxStore((s) => s.zoomedAgentId);
+	const agentSelectorOpen = usePuxStore((s) => s.agentSelectorOpen);
 
 	// HITL decision dialog takes priority over everything
 	if (pendingDecision) {
@@ -221,6 +228,11 @@ function ContentArea() {
 				)}
 			</Box>
 		);
+	}
+
+	// Agent selector overlay (Ctrl+O) — below HITL, above zoom
+	if (agentSelectorOpen) {
+		return <AgentSelectorOverlay />;
 	}
 
 	// Agent zoom overlay — below HITL, above other overlays

@@ -99,6 +99,7 @@ interface PuxState {
 	// Agent monitoring (TUI + web)
 	agents: Map<string, AgentState>;
 	zoomedAgentId: string | null;
+	agentSelectorOpen: boolean;
 	activeTuiView: TuiView;
 
 	// Multi-conversation tracking
@@ -163,6 +164,8 @@ interface PuxState {
 	updateAgentThinking: (agentId: string, text: string) => void;
 	clearAgents: () => void;
 	setZoomedAgent: (agentId: string | null) => void;
+	toggleAgentSelector: () => void;
+	closeAgentSelector: () => void;
 	startNewChat: () => void;
 	markViewed: (project: string, agentId: string) => void;
 	updateRunningAgents: () => Promise<void>;
@@ -260,6 +263,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	activeWorkbenchTab: "vnc",
 	agents: new Map(),
 	zoomedAgentId: null,
+	agentSelectorOpen: false,
 	activeTuiView: "chat",
 	runningAgents: new Map(),
 	viewedConversations: new Set(storage.getJSON<string[]>("pux:viewedConversations", [])),
@@ -491,6 +495,9 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 
 	setZoomedAgent: (agentId) => set({ zoomedAgentId: agentId }),
 
+	toggleAgentSelector: () => set((s) => ({ agentSelectorOpen: !s.agentSelectorOpen })),
+	closeAgentSelector: () => set({ agentSelectorOpen: false }),
+
 	startNewChat: () => {
 		const { activeProject } = get();
 		set({
@@ -502,6 +509,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			compacting: false,
 			lastError: null,
 			zoomedAgentId: null,
+			agentSelectorOpen: false,
 		});
 	},
 

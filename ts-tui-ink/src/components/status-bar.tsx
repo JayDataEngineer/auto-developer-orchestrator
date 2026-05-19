@@ -1,20 +1,27 @@
 /**
- * StatusBar — bottom status bar with model and context usage.
+ * StatusBar — bottom status bar with model, agent pills, and context usage.
  *
- * Left: model name. Right: context usage (tokens + %).
+ * Left: model name + agent pills. Right: context usage (tokens + %).
+ * Agent pills show running agents: ○ marcus (3 tools · 12.3s) · ○ sarah (1 tool)
  */
 
 import React from "react";
 import { Box, Text } from "ink";
 import { usePuxStore } from "@pux/shared";
 import { useTerminalSize } from "../use-terminal-size.js";
+import { useColors, symbols } from "../theme.js";
 
 export function StatusBar() {
 	const activeModel = usePuxStore((s) => s.activeModel);
 	const lastUsage = usePuxStore((s) => s.lastUsage);
 	const contextMetrics = usePuxStore((s) => s.contextMetrics);
 	const compacting = usePuxStore((s) => s.compacting);
+	const agents = usePuxStore((s) => s.agents);
 	const { cols } = useTerminalSize();
+	const colors = useColors();
+
+	// Running agents for pills
+	const runningAgents = [...agents.values()].filter((a) => a.status === "running");
 
 	// Build right side: context usage
 	let right = "";
@@ -27,20 +34,49 @@ export function StatusBar() {
 		right += " compacting";
 	}
 
-	// Pad to fill width — prefer store's activeModel, fall back to model from last response
+	// Pad to fill width
 	const model = activeModel || lastUsage?.model || "";
-	const label = model || "no model";
-	const leftStr = ` ${label} `;
+	const modelLabel = model || "no model";
 	const rightStr = right ? ` ${right} ` : "";
-	const contentLen = leftStr.length + rightStr.length;
-	const padding = Math.max(0, cols - contentLen);
-	const padded = rightStr
-		? `${leftStr}${" ".repeat(padding)}${rightStr}`
-		: `${leftStr}`;
 
 	return (
-		<Box>
-			<Text dimColor>{padded}</Text>
+		<Box flexDirection="column">
+			{/* Agent pills row — only when agents exist */}
+			{runningAgents.length > 0 && (
+				<Box>
+					<Text dimColor>
+						{" "}
+						{runningAgents.map((a, i) => {
+							const duration = a.endedAt
+								? `${((a.endedAt - a.startedAt) / 1000).toFixed(1)}s`
+								: `${((Date.now() - a.startedAt) / 1000).toFixed(1)}s`;
+							const pill = `${symbols.toolRunning} ${a.agentName} (${a.toolCalls.length} tool${a.toolCalls.length !== 1 ? "s" : ""} ${symbols.dot} ${duration})`;
+							return i < runningAgents.length - 1
+								? `${pill} ${symbols.dot} `
+								: pill;
+						}).join("")}
+						{agents.size > runningAgents.length
+							? ` ${symbols.dot} ${agents.size - runningAgents.length} done`
+							: ""}
+					</Text>
+				</Box>
+			)}
+
+			{/* Main status line */}
+			<Box>
+				<Text dimColor>{` ${modelLabel} `}</Text>
+				{runningAgents.length > 0 && (
+					<Text color={colors.running} dimColor>
+						{symbols.dot} Ctrl+O agents
+					</Text>
+				)}
+				{rightStr && (
+					<Text dimColor>
+						{" ".repeat(Math.max(0, cols - modelLabel.length - rightStr.length - 20))}
+						{rightStr}
+					</Text>
+				)}
+			</Box>
 		</Box>
 	);
 }
