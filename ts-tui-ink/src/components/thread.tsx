@@ -31,7 +31,7 @@ export function Thread() {
 	useAuiEvent("thread.runEnd", () => {});
 
 	return (
-		<Box flexDirection="column" flexGrow={1}>
+		<Box flexDirection="column" flexGrow={1} overflow="hidden">
 			{/*
 			 * Messages — ThreadPrimitive.Messages uses Ink <Static> internally.
 			 * Older messages (beyond windowSize+overscan) are written to terminal
@@ -39,7 +39,7 @@ export function Thread() {
 			 * windowSize=5 keeps the last 5 messages live; overscan=5 adds a
 			 * buffer so up to 10 messages stay live before any graduate to Static.
 			 */}
-			<Box flexDirection="column" flexGrow={1}>
+			<Box flexDirection="column">
 				<ThreadPrimitive.Empty>
 					<Welcome />
 				</ThreadPrimitive.Empty>

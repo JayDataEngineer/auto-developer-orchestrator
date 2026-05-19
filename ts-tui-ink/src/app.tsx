@@ -183,8 +183,8 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 
 	return (
 		<Box flexDirection="column" height={rows} width={cols}>
-			{/* Content area — switches based on active view */}
-			<Box flexGrow={1} flexDirection="column">
+			{/* Content area — clips overflow so composer/status stay visible */}
+			<Box flexGrow={1} flexDirection="column" overflow="hidden">
 				<ContentArea />
 			</Box>
 
