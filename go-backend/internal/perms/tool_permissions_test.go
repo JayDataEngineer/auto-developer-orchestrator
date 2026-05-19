@@ -11,14 +11,16 @@ func TestNewToolPermissionConfig_Defaults(t *testing.T) {
 	perms := c.AllPermissions()
 
 	expected := map[string]PermissionLevel{
-		"bash":         PermAutoApprove,
-		"write":        PermAutoApprove,
-		"edit":         PermAutoApprove,
-		"delete":       PermRequireApproval,
-		"git_push":     PermRequireApproval,
-		"git_reset":    PermRequireApproval,
-		"web_fetch":    PermAutoApprove,
-		"computer_use": PermAutoApprove,
+		"bash":           PermAutoApprove,
+		"file_read":      PermAutoApprove,
+		"file_write":     PermAutoApprove,
+		"file_edit":      PermAutoApprove,
+		"file_grep":      PermAutoApprove,
+		"file_glob":      PermAutoApprove,
+		"delegate_to":    PermAutoApprove,
+		"delegate_async": PermAutoApprove,
+		"memory":         PermAutoApprove,
+		"create_plan":    PermAutoApprove,
 	}
 	for tool, level := range expected {
 		p, ok := perms[tool]
