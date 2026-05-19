@@ -240,7 +240,6 @@ function ProjectGroup({
 	const deleteConversation = usePuxStore((s) => s.deleteConversation);
 	const removeProject = usePuxStore((s) => s.removeProject);
 	const runningAgents = usePuxStore((s) => s.runningAgents);
-	const viewedConversations = usePuxStore((s) => s.viewedConversations);
 
 	return (
 		<Collapsible defaultOpen={isActive} className="group/collapsible">
@@ -274,8 +273,9 @@ function ProjectGroup({
 						<SidebarMenuSub>
 							{conversations.map((c) => {
 								const convKey = `${c.project}:${c.agentId}`;
-								const isRunning = runningAgents.has(convKey);
-								const isUnviewed = !viewedConversations.has(convKey) && c.messageCount > 0;
+								const status = c.status || "";
+								const isProcessing = status === "processing" || runningAgents.has(convKey);
+								const isUnread = status === "unread";
 								return (
 									<SidebarMenuSubItem key={`${c.project}-${c.agentId}`} className="group/sub">
 										<SidebarMenuSubButton
@@ -284,10 +284,10 @@ function ProjectGroup({
 											}
 										>
 											<div className="flex min-w-0 flex-1 items-center gap-1.5">
-												{isUnviewed && !isRunning && (
+												{isUnread && !isProcessing && (
 													<span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-white" />
 												)}
-												{isRunning && (
+												{isProcessing && (
 													<span className="relative flex h-2 w-2 shrink-0">
 														<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
 														<span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
