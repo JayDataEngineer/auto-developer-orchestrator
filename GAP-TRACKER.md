@@ -33,6 +33,10 @@ Commit: `3fc0fae`
 
 ## 5. Unstaged Pre-existing Changes
 
+Note: `go-backend/internal/perms/tool_permissions.go` was on this list but has since been committed. The perms test (`tool_permissions_test.go`) was also fixed to match the new tool names. All 40 Go packages now pass.
+
+Commit: `5ab1397`
+
 These files were dirty before the test-fix session and remain unstaged:
 
 | File | What changed |
