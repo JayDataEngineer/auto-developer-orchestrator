@@ -1,6 +1,7 @@
 package llama
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -51,7 +52,7 @@ func (s *Session) ChatWithTools(system string, userMsg string, tools []OpenAIToo
 	}
 	s.tools = tools
 
-	return s.generateChatStream(opts), nil
+	return s.generateChatStream(context.Background(), opts), nil
 }
 
 // FeedToolResults appends tool result messages and continues generation.
@@ -79,7 +80,7 @@ func (s *Session) FeedToolResults(assistantMsg Message, toolResults []ToolResult
 		})
 	}
 
-	return s.generateChatStream(opts), nil
+	return s.generateChatStream(context.Background(), opts), nil
 }
 
 // FeedUserMessage appends a user message and continues generation.
@@ -89,17 +90,17 @@ func (s *Session) FeedUserMessage(userMsg string, opts GenerateOptions) (<-chan 
 	}
 
 	s.messages = append(s.messages, Message{Role: "user", Content: userMsg})
-	return s.generateChatStream(opts), nil
+	return s.generateChatStream(context.Background(), opts), nil
 }
 
 // GenerateStream runs the model using the session's current messages and tools.
 // Exported for use by the adapter when rebuilding after compaction.
-func (s *Session) GenerateStream(opts GenerateOptions) <-chan ChatEvent {
-	return s.generateChatStream(opts)
+func (s *Session) GenerateStream(ctx context.Context, opts GenerateOptions) <-chan ChatEvent {
+	return s.generateChatStream(ctx, opts)
 }
 
 // generateChatStream runs the model via /v1/chat/completions and returns a channel of ChatEvents.
-func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
+func (s *Session) generateChatStream(ctx context.Context, opts GenerateOptions) <-chan ChatEvent {
 	ch := make(chan ChatEvent, 256)
 
 	go func() {
@@ -134,7 +135,7 @@ func (s *Session) generateChatStream(opts GenerateOptions) <-chan ChatEvent {
 				ch <- ChatEvent{Type: ChatEventError, Err: err}
 			}
 		} else {
-			err := s.engine.chatCompleteStream(req, func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool {
+			err := s.engine.chatCompleteStream(ctx, req, func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool {
 				return acc.processChunk(ch, delta, finish, usage, s)
 			})
 			if err != nil {

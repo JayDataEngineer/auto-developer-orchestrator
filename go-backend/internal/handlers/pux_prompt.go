@@ -415,8 +415,10 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 
 	// Event channel (created earlier in function, passed to orchestrator Config)
 
-	// Detached context
-	ctx, cancel := context.WithCancel(context.Background())
+	// Use request context so client disconnect cancels the orchestrator.
+	// Previously used context.Background() which leaked goroutines when
+	// test clients disconnected mid-stream.
+	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
 	done := make(chan struct{})
@@ -456,6 +458,31 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	defer keepalive.Stop()
 	saveTicker := time.NewTicker(5 * time.Second)
 	defer saveTicker.Stop()
+
+	// savePartialResults persists the current state to the database.
+	// Called both on normal completion and on client disconnect.
+	savePartialResults := func() {
+		if h.db == nil {
+			return
+		}
+		toolCallsJSON := "[]"
+		if len(toolCalls) > 0 {
+			if b, err := json.Marshal(toolCalls); err == nil {
+				toolCallsJSON = string(b)
+			}
+		}
+		if err := h.db.FinalizeStreamingMessage(r.Context(), req.Project, req.AgentId, assistantText, assistantThinking, toolCallsJSON); err != nil {
+			h.log.Warn("Failed to finalize streaming message, falling back to insert", zap.Error(err))
+			if _, fallbackErr := h.db.SaveAssistantMessage(r.Context(), req.Project, req.AgentId, assistantText, assistantThinking, toolCallsJSON); fallbackErr != nil {
+				h.log.Warn("Failed to save assistant message", zap.Error(fallbackErr))
+			}
+		}
+		for _, tr := range toolResults {
+			if _, err := h.db.SaveToolResult(r.Context(), req.Project, req.AgentId, tr.ToolCallID, tr.ToolName, tr.Content); err != nil {
+				h.log.Warn("Failed to save tool result", zap.String("tool", tr.ToolName), zap.Error(err))
+			}
+		}
+	}
 
 	llamaEvents := make(chan llama.AgentEvent, 256)
 	go func() {
@@ -498,31 +525,37 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	for {
 		select {
 		case <-ctx.Done():
+			// Client disconnected — cancel orchestrator and save partial results.
+			// The deferred cancel() ensures the orchestrator context is cancelled,
+			// which propagates through to the LLM HTTP requests.
+			h.log.Info("Client disconnected, saving partial results",
+				zap.String("agentId", req.AgentId),
+				zap.String("project", req.Project))
+
+			// Drain remaining events from the converter goroutine so it can exit.
+			// The orchestrator will stop shortly because ctx is cancelled.
+			go func() {
+				for range llamaEvents {
+				}
+			}()
+
+			// Wait briefly for the orchestrator to finish, then save what we have.
+			select {
+			case <-done:
+				// Orchestrator finished — save final results
+			case <-time.After(5 * time.Second):
+				// Timeout — save partial results anyway
+				h.log.Warn("Orchestrator didn't finish after client disconnect, saving partial",
+					zap.String("agentId", req.AgentId))
+			}
+			savePartialResults()
 			return
+
 		case <-done:
 			for evt := range llamaEvents {
 				h.writeLlamaSSE(w, evt, canFlush, flusher)
 			}
-			if h.db != nil {
-				toolCallsJSON := "[]"
-				if len(toolCalls) > 0 {
-					if b, err := json.Marshal(toolCalls); err == nil {
-						toolCallsJSON = string(b)
-					}
-				}
-				if err := h.db.FinalizeStreamingMessage(r.Context(), req.Project, req.AgentId, assistantText, assistantThinking, toolCallsJSON); err != nil {
-					h.log.Warn("Failed to finalize streaming message, falling back to insert", zap.Error(err))
-					if _, fallbackErr := h.db.SaveAssistantMessage(r.Context(), req.Project, req.AgentId, assistantText, assistantThinking, toolCallsJSON); fallbackErr != nil {
-						h.log.Warn("Failed to save assistant message", zap.Error(fallbackErr))
-					}
-				}
-				// Persist tool results so they survive session rehydration
-				for _, tr := range toolResults {
-					if _, err := h.db.SaveToolResult(r.Context(), req.Project, req.AgentId, tr.ToolCallID, tr.ToolName, tr.Content); err != nil {
-						h.log.Warn("Failed to save tool result", zap.String("tool", tr.ToolName), zap.Error(err))
-					}
-				}
-			}
+			savePartialResults()
 			if loopErr != nil {
 				h.log.Error("Orchestrator error", zap.Error(loopErr))
 			}

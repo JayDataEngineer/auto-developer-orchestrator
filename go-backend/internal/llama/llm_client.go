@@ -22,7 +22,7 @@ import (
 // Mocks can implement this for testing.
 type ChatProvider interface {
 	chatComplete(req ChatCompletionRequest) (*ChatCompletionResponse, error)
-	chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error
+	chatCompleteStream(ctx context.Context, req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error
 	NewSession(ctxSize int) (*Session, error)
 	IsLoaded() bool
 	IsCloud() bool
@@ -707,7 +707,7 @@ func (e *LLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletionResp
 // chatCompleteStream sends a chat completion request and streams chunks via callback.
 // SSE format: "data: {json}\n\n" with delta objects containing content, reasoning_content, or tool_calls.
 // The final chunk includes a usage field with prompt_tokens and completion_tokens.
-func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error {
+func (e *LLMClient) chatCompleteStream(ctx context.Context, req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error {
 	req.Stream = true
 	// Request usage data in streaming response (like Pi-Mono does)
 	// This makes llama-server send a usage-only chunk at the end of the stream.
@@ -717,7 +717,7 @@ func (e *LLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(d
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", e.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", e.baseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}

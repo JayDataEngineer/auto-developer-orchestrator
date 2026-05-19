@@ -70,10 +70,24 @@ Commit: `3fc0fae`
 
 The `go-backend/internal/tools/todo/todo_test.go` was completely rewritten to match the new full-state-replacement API (`todos` array) instead of the old action-based API (`add`/`update`/`delete`). This was committed separately by the Playwright agent.
 
-## 8. Backend Stability
+## 8. Backend Stability — FIXED
 
-The Go backend crashes during long Python test runs (4+ minutes). Tests after the crash get `ConnectionError`. This affects:
-- `agent/test_approval_flow.py` — backend dies mid-suite
-- `sse/test_agent_lifecycle.py` — backend dies during multi-turn tests
+Root cause: `pux_prompt.go` used `context.Background()` instead of `r.Context()` for the orchestrator goroutine. When test clients disconnected mid-stream (timeout), the orchestrator never got cancelled. Each orphaned prompt leaked:
+- 1 orchestrator goroutine (running the agent loop)
+- 1 event converter goroutine (blocked on full channel)
+- 1 LLM session + HTTP connection to llama-server
+- Growing session memory (messages accumulate each turn)
 
-**Fix needed**: Investigate backend memory leaks or goroutine leaks during extended SSE streaming.
+After 4+ minutes of sequential test runs, accumulated goroutines/sessions crashed the server.
+
+**Fix** (3 parts):
+1. **SSE handler**: Changed `context.Background()` → `r.Context()` at `pux_prompt.go:419`. Client disconnect now cancels the orchestrator context. Added drain + save-partial-results on disconnect with 5s timeout.
+2. **LLM client**: Threaded `context.Context` through `chatCompleteStream` → `generateChatStream` → `GenerateStream` chain. Used `http.NewRequestWithContext` so HTTP requests to llama-server are cancelled when the orchestrator stops.
+3. **Event converter**: `convertEvents` now uses `select` with `ctx.Done()` to prevent goroutine leaks when the downstream channel is full.
+
+Files changed:
+- `go-backend/internal/handlers/pux_prompt.go` — request context + disconnect handling
+- `go-backend/internal/llama/llm_client.go` — interface + implementation accept context
+- `go-backend/internal/llama/http_session.go` — GenerateStream/generateChatStream accept context
+- `go-backend/internal/llm/adapter.go` — convertEvents respects context cancellation
+- `go-backend/internal/llama/mock_llm_client_test.go` — mock updated for new interface

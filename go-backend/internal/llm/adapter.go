@@ -52,9 +52,9 @@ func (a *Adapter) StreamChat(ctx context.Context, messages []core.Message, tools
 	// For local llama-server, the session_id still enables KV cache reuse.
 	a.session.SetMessages(reordered)
 	a.session.SetTools(tools)
-	ch := a.session.GenerateStream(opts)
+	ch := a.session.GenerateStream(ctx, opts)
 
-	return convertEvents(ch), nil
+	return convertEvents(ctx, ch), nil
 }
 
 func (a *Adapter) ModelName() string {
@@ -78,7 +78,7 @@ func (a *Adapter) Close() {
 	}
 }
 
-func convertEvents(ch <-chan core.ChatEvent) <-chan core.ChatEvent {
+func convertEvents(ctx context.Context, ch <-chan core.ChatEvent) <-chan core.ChatEvent {
 	out := make(chan core.ChatEvent, 256)
 	go func() {
 		defer close(out)
@@ -106,7 +106,11 @@ func convertEvents(ch <-chan core.ChatEvent) <-chan core.ChatEvent {
 					evt.Deltas = deltas
 				}
 			}
-			out <- evt
+			select {
+			case out <- evt:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 	return out

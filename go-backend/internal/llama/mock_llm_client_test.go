@@ -1,6 +1,7 @@
 package llama
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -105,7 +106,7 @@ func (m *mockLLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletion
 	return m.nextResponse()
 }
 
-func (m *mockLLMClient) chatCompleteStream(req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error {
+func (m *mockLLMClient) chatCompleteStream(ctx context.Context, req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error {
 	resp, err := m.chatComplete(req)
 	if err != nil {
 		return err
