@@ -4,6 +4,7 @@ import "@assistant-ui/react-markdown/styles/dot.css";
 
 import {
 	type CodeHeaderProps,
+	type SyntaxHighlighterProps,
 	MarkdownTextPrimitive,
 	unstable_memoizeMarkdownComponents as memoizeMarkdownComponents,
 } from "@assistant-ui/react-markdown";
@@ -11,6 +12,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { type FC, memo, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
+import ShikiHighlighter from "react-shiki";
 
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { cn } from "@/lib/utils";
@@ -84,7 +86,27 @@ const useCopyToClipboard = ({
 	return { isCopied, copyToClipboard };
 };
 
+const SyntaxHighlighter: FC<SyntaxHighlighterProps> = ({
+	code,
+	language,
+	node: _node,
+	components: _components,
+}) => {
+	return (
+		<ShikiHighlighter
+			language={language || "text"}
+			theme={{ dark: "github-dark", light: "github-light" }}
+			addDefaultStyles={false}
+			showLanguage={false}
+			className="[&_pre]:overflow-x-auto [&_pre]:rounded-b-lg [&_pre]:!bg-muted/75 [&_pre]:p-4"
+		>
+			{code.trim()}
+		</ShikiHighlighter>
+	);
+};
+
 const markdownComponents = memoizeMarkdownComponents({
+	SyntaxHighlighter,
 	h1: ({ className, ...props }) => (
 		<h1
 			className={cn(
