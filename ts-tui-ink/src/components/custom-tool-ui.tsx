@@ -10,15 +10,16 @@
  * not a string. Access status.type for comparison.
  */
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
+import Spinner from "ink-spinner";
 import {
 	makeAssistantToolUI,
 	makeAssistantTool,
 	useAuiState,
 	DiffView,
 } from "@assistant-ui/react-ink";
-import { usePuxStore } from "@pux/shared";
+import { usePuxStore, getToolArgPreview } from "@pux/shared";
 import { TerminalImage } from "./terminal-image.js";
 import { useColors, symbols, BLACK_CIRCLE, BLOCKQUOTE_BAR } from "../theme.js";
 
@@ -103,24 +104,99 @@ function DelegateRenderer({
 		(a) => a.agentName === agentName && a.task === task
 	);
 
-	// Count sub-agent tool calls
-	const subToolCount = agentState?.toolCalls.length ?? 0;
-	const taskPreview = task.length > 40 ? task.slice(0, 37) + "..." : task;
+	const toolCalls = agentState?.toolCalls ?? [];
+	const subToolCount = toolCalls.length;
+	const taskPreview = task.length > 50 ? task.slice(0, 47) + "..." : task;
+
+	// Duration
+	const duration = agentState
+		? agentState.endedAt
+			? `${((agentState.endedAt - agentState.startedAt) / 1000).toFixed(1)}s`
+			: `${((Date.now() - agentState.startedAt) / 1000).toFixed(1)}s`
+		: "";
+
+	// Tick every second while running to update duration
+	const [, setTick] = useState(0);
+	useEffect(() => {
+		if (!isRunning) return;
+		const timer = setInterval(() => setTick((t) => t + 1), 1000);
+		return () => clearInterval(timer);
+	}, [isRunning]);
+
+	// ── Collapsed summary when done ──
+	if (isDone) {
+		return (
+			<Box paddingLeft={2} marginBottom={1}>
+				<Text color={colors.success}>{BLACK_CIRCLE} </Text>
+				<Text bold color={colors.brand}>{agentName}</Text>
+				{taskPreview && <Text color="gray">({taskPreview})</Text>}
+				<Text color="gray">
+					{" "}Done{subToolCount > 0 ? ` (${subToolCount} tool${subToolCount !== 1 ? "s" : ""}${symbols.dot}${duration})` : ""}
+				</Text>
+			</Box>
+		);
+	}
+
+	// ── Running: show nested tool snippets ──
+	// Show the last N tool calls (most recent activity)
+	const maxShow = 5;
+	const visibleTools = toolCalls.length > maxShow
+		? toolCalls.slice(-maxShow)
+		: toolCalls;
+	const hiddenCount = toolCalls.length - visibleTools.length;
 
 	return (
-		<Box paddingLeft={2} marginBottom={1}>
-			<Text color={isDone ? colors.success : colors.running}>
-				{BLACK_CIRCLE}{" "}
-			</Text>
-			<Text bold color={colors.brand}>
-				{agentName}
-			</Text>
-			{taskPreview && <Text color="gray">({taskPreview})</Text>}
-			<Text color="gray">
-				{isDone ? " done" : isRunning ? " working..." : ""}
-			</Text>
-			{subToolCount > 0 && (
-				<Text color="gray"> {symbols.dot} {subToolCount} tools</Text>
+		<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+			{/* Header line */}
+			<Box>
+				<Text color={colors.running}>
+					{isRunning ? <Spinner type="dots" /> : BLACK_CIRCLE}
+					{" "}
+				</Text>
+				<Text bold color={colors.brand}>{agentName}</Text>
+				{taskPreview && <Text color="gray">({taskPreview})</Text>}
+				{subToolCount > 0 && (
+					<Text color="gray"> {symbols.dot} {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
+				)}
+			</Box>
+
+			{/* Hidden count indicator */}
+			{hiddenCount > 0 && (
+				<Box paddingLeft={2}>
+					<Text dimColor color="gray">
+						{" └ "}{symbols.dot} {hiddenCount} earlier tool{hiddenCount !== 1 ? "s" : ""}
+					</Text>
+				</Box>
+			)}
+
+			{/* Nested tool snippets */}
+			{visibleTools.map((tc, i) => {
+				const isLast = i === visibleTools.length - 1;
+				const isActive = !tc.endedAt;
+				const argPreview = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 50);
+				return (
+					<Box key={`${tc.toolName}-${tc.timestamp}-${i}`} paddingLeft={2}>
+						<Text dimColor color="gray">{" └ "}</Text>
+						<Text color={tc.isError ? colors.error : tc.endedAt ? colors.success : colors.running}>
+							{tc.isError ? symbols.toolError : tc.endedAt ? symbols.toolDone : symbols.toolRunning}
+						</Text>
+						<Text> </Text>
+						<Text bold color={isActive ? colors.running : undefined}>
+							{tc.toolName}
+						</Text>
+						{argPreview && <Text color="gray"> {argPreview.length > 50 ? argPreview.slice(0, 47) + "..." : argPreview}</Text>}
+						{isActive && isLast && isRunning && (
+							<Text color={colors.running}>{" "}<Spinner type="dots" /></Text>
+						)}
+					</Box>
+				);
+			})}
+
+			{/* No tools yet — initializing */}
+			{toolCalls.length === 0 && (
+				<Box paddingLeft={2}>
+					<Text dimColor color="gray">{" └ "}Initializing...</Text>
+				</Box>
 			)}
 		</Box>
 	);
