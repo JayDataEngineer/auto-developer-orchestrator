@@ -1,8 +1,6 @@
-import React, { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import React, { useCallback, useEffect, useReducer, useRef } from "react";
 import { Box, Text, useFocus, useInput } from "ink";
 import { useAui, useAuiState } from "@assistant-ui/react-ink";
-
-type VimMode = "insert" | "normal";
 
 type BufferState = {
   text: string;
@@ -227,14 +225,6 @@ interface VimInputProps {
   onSubmit?: (text: string) => void;
 }
 
-function lineForDelete(text: string, offset: number): { start: number; end: number } {
-  const s = getLineStart(text, offset);
-  let e = text.indexOf("\n", offset);
-  if (e === -1) e = text.length;
-  else e = e + 1;
-  return { start: s, end: e };
-}
-
 export function VimInput({
   submitOnEnter = false,
   placeholder = "",
@@ -246,13 +236,10 @@ export function VimInput({
   const storeText = useAuiState((s) => s.composer.text);
   const { isFocused } = useFocus({ autoFocus });
 
-  const [vimMode, setVimMode] = useState<VimMode>("insert");
   const [state, dispatch] = useReducer(reducer, { text: storeText, cursorOffset: 0, preferredColumn: undefined });
   const stateRef = useRef(state);
   stateRef.current = state;
   const pendingSyncRef = useRef(new Map<string, number>());
-  const pendingKeysRef = useRef<string[]>([]);
-  const killRingRef = useRef<string>("");
 
   useEffect(() => {
     const counter = pendingSyncRef.current;
@@ -283,20 +270,6 @@ export function VimInput({
     [aui],
   );
 
-  // Direct text commit — replaces the repeated sync boilerplate in vim commands.
-  const commitText = useCallback(
-    (newText: string, cursorOffset: number) => {
-      stateRef.current = { text: newText, cursorOffset, preferredColumn: undefined };
-      dispatch({ type: "set-text", text: newText });
-      dispatch({ type: "set-cursor", cursorOffset });
-      const counter = pendingSyncRef.current;
-      if (counter.size >= PENDING_SYNC_CAP) counter.clear();
-      counter.set(newText, (counter.get(newText) ?? 0) + 1);
-      aui.composer().setText(newText);
-    },
-    [aui],
-  );
-
   const submit = useCallback(() => {
     const text = stateRef.current.text;
     if (onSubmit) {
@@ -310,111 +283,6 @@ export function VimInput({
     useCallback(
       (input: string, key: any) => {
         if (!isFocused) return;
-
-        if (vimMode === "normal") {
-          if (key.escape) { setVimMode("normal"); pendingKeysRef.current = []; return; }
-          if (input === "i") { setVimMode("insert"); pendingKeysRef.current = []; return; }
-          if (input === "a") {
-            commit({ type: "move-right" }, { syncText: false });
-            setVimMode("insert");
-            pendingKeysRef.current = [];
-            return;
-          }
-          if (input === "I") {
-            commit({ type: "move-home", multiLine }, { syncText: false });
-            setVimMode("insert");
-            pendingKeysRef.current = [];
-            return;
-          }
-          if (input === "A") {
-            commit({ type: "move-end", multiLine }, { syncText: false });
-            setVimMode("insert");
-            pendingKeysRef.current = [];
-            return;
-          }
-          if (input === "o") {
-            const { text: t, cursorOffset: c } = stateRef.current;
-            commitText(t.slice(0, c) + "\n" + t.slice(c), c + 1);
-            setVimMode("insert");
-            pendingKeysRef.current = [];
-            return;
-          }
-          if (input === "O") {
-            const { text: t, cursorOffset: c } = stateRef.current;
-            const lineStart = getLineStart(t, c);
-            commitText(t.slice(0, lineStart) + "\n" + t.slice(lineStart), lineStart);
-            setVimMode("insert");
-            pendingKeysRef.current = [];
-            return;
-          }
-          if (input === "h") { commit({ type: "move-left" }, { syncText: false }); pendingKeysRef.current = []; return; }
-          if (input === "l") { commit({ type: "move-right" }, { syncText: false }); pendingKeysRef.current = []; return; }
-          if (input === "j") { commit({ type: "move-down" }, { syncText: false }); pendingKeysRef.current = []; return; }
-          if (input === "k") { commit({ type: "move-up" }, { syncText: false }); pendingKeysRef.current = []; return; }
-          if (input === "w") { commit({ type: "move-word-right" }, { syncText: false }); pendingKeysRef.current = []; return; }
-          if (input === "b") { commit({ type: "move-word-left" }, { syncText: false }); pendingKeysRef.current = []; return; }
-          if (input === "0") { commit({ type: "move-home", multiLine: false }, { syncText: false }); pendingKeysRef.current = []; return; }
-          if (input === "^") {
-            const { text: t, cursorOffset: c } = stateRef.current;
-            const ls = getLineStart(t, c);
-            const firstNonBlank = t.slice(ls).search(/\S/);
-            const target = firstNonBlank === -1 ? ls : ls + firstNonBlank;
-            stateRef.current = { ...stateRef.current, cursorOffset: target, preferredColumn: undefined };
-            dispatch({ type: "set-cursor", cursorOffset: target });
-            pendingKeysRef.current = [];
-            return;
-          }
-          if (input === "$") { commit({ type: "move-end", multiLine }, { syncText: false }); pendingKeysRef.current = []; return; }
-          if (input === "x") { commit({ type: "delete-forward" }); pendingKeysRef.current = []; return; }
-          if (input === "X") { commit({ type: "delete-backward" }); pendingKeysRef.current = []; return; }
-          if (input === "p" || input === "P") {
-            if (killRingRef.current) {
-              const { text: t, cursorOffset: c } = stateRef.current;
-              const newText = t.slice(0, c) + killRingRef.current + t.slice(c);
-              const nextCursor = input === "p" ? c + killRingRef.current.length : c;
-              commitText(newText, nextCursor);
-            }
-            pendingKeysRef.current = [];
-            return;
-          }
-          if (input === "D" || input === "C") {
-            const { text: t, cursorOffset: c } = stateRef.current;
-            const lineEnd = getLineEnd(t, c);
-            if (lineEnd > c) {
-              killRingRef.current = t.slice(c, lineEnd);
-              commitText(t.slice(0, c) + t.slice(lineEnd), c);
-            }
-            if (input === "C") setVimMode("insert");
-            pendingKeysRef.current = [];
-            return;
-          }
-          if (input === "d") {
-            pendingKeysRef.current.push("d");
-            if (pendingKeysRef.current.length >= 2 && pendingKeysRef.current.every((k) => k === "d")) {
-              const { text: t, cursorOffset: c } = stateRef.current;
-              const { start, end } = lineForDelete(t, c);
-              killRingRef.current = t.slice(start, end);
-              const newText = t.slice(0, start) + t.slice(end);
-              commitText(newText, Math.min(start, newText.length));
-              pendingKeysRef.current = [];
-            }
-            return;
-          }
-          // No undo stack — 'u' is intentionally unbound (vim convention)
-          if (key.return && submitOnEnter) {
-            submit();
-            pendingKeysRef.current = [];
-            return;
-          }
-          pendingKeysRef.current = [];
-          return;
-        }
-
-        if (key.escape) {
-          setVimMode("normal");
-          pendingKeysRef.current = [];
-          return;
-        }
 
         const lowerInput = input.toLowerCase();
 
@@ -458,7 +326,7 @@ export function VimInput({
           commit({ type: "insert", text: input });
         }
       },
-      [isFocused, vimMode, commit, commitText, multiLine, submitOnEnter, submit],
+      [isFocused, commit, multiLine, submitOnEnter, submit],
     ),
     { isActive: isFocused },
   );
@@ -484,11 +352,7 @@ export function VimInput({
         </Text>
       ) : (
         <Box flexGrow={1}>
-          <Text
-            dimColor={isShowingPlaceholder}
-            bold={vimMode === "normal"}
-            color={vimMode === "normal" ? "yellow" : undefined}
-          >
+          <Text dimColor={isShowingPlaceholder}>
             {before}
             <Text inverse>{atCursor}</Text>
             {after}
