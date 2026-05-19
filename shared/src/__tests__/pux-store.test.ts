@@ -233,7 +233,7 @@ describe("clearError", () => {
 });
 
 describe("setWorkbenchTab", () => {
-	const tabs: WorkbenchTab[] = ["vnc", "editor", "scheduler", "workers", "permissions"];
+	const tabs: WorkbenchTab[] = ["vnc", "editor", "scheduler", "workers", "settings"];
 	for (const tab of tabs) {
 		it(`sets activeWorkbenchTab to "${tab}"`, () => {
 			usePuxStore.getState().setWorkbenchTab(tab);

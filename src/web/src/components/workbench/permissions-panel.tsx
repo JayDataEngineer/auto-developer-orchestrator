@@ -29,7 +29,7 @@ const RISK_COLORS: Record<string, string> = {
 	high: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
 };
 
-export function PermissionsPanel() {
+export function PermissionsPanel({ embedded = false }: { embedded?: boolean }) {
 	const [permissions, setPermissions] = useState<Record<string, ToolPermission>>({});
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState<string | null>(null);
@@ -86,15 +86,19 @@ export function PermissionsPanel() {
 	});
 
 	return (
-		<div className="flex flex-col gap-2 p-4">
-			<div className="flex items-center gap-2 mb-2">
-				<Shield className="h-4 w-4 text-muted-foreground" />
-				<h3 className="text-sm font-semibold">Tool Permissions</h3>
-			</div>
-			<p className="text-xs text-muted-foreground mb-3">
-				Set approval requirements per tool. "Confirm" pauses the agent and asks
-				for your approval before executing.
-			</p>
+		<div className={cn("flex flex-col gap-2", embedded ? "px-4 pb-4" : "p-4")}>
+			{!embedded && (
+				<>
+					<div className="flex items-center gap-2 mb-2">
+						<Shield className="h-4 w-4 text-muted-foreground" />
+						<h3 className="text-sm font-semibold">Tool Permissions</h3>
+					</div>
+					<p className="text-xs text-muted-foreground mb-3">
+						Set approval requirements per tool. "Confirm" pauses the agent and asks
+						for your approval before executing.
+					</p>
+				</>
+			)}
 			{tools.map((perm) => {
 				const meta = LEVEL_META[perm.level] || LEVEL_META.auto;
 				const Icon = meta.icon;

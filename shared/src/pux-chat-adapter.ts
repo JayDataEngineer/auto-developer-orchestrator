@@ -701,8 +701,23 @@ export const puxChatAdapter: ChatModelAdapter = {
 							}
 							break;
 						}
-						case "subagent_thinking_delta":
+						case "subagent_thinking_delta": {
+							const text = parsed.text as string | undefined;
+							const agentName = parsed.agentName as string | undefined;
+							if (text && agentName && activeSubAgentName === agentName) {
+								const agents = usePuxStore.getState().agents;
+								const agent = [...agents.values()].find(
+									(a) => a.agentName === agentName && a.status === "running",
+								);
+								if (agent) {
+									usePuxStore.getState().updateAgentThinking(agent.agentId, text);
+								}
+							}
+							break;
+						}
 						case "subagent_text_delta": {
+							// Sub-agent text output — not rendered in the trace,
+							// but we could store it for future use
 							break;
 						}
 

@@ -158,6 +158,7 @@ interface PuxState {
 	addAgent: (agent: AgentState) => void;
 	updateAgentStatus: (agentId: string, status: AgentState["status"], result?: string) => void;
 	addAgentToolCall: (agentId: string, toolCall: ToolCallRecord) => void;
+	updateAgentThinking: (agentId: string, text: string) => void;
 	clearAgents: () => void;
 	startNewChat: () => void;
 	markViewed: (project: string, agentId: string) => void;
@@ -250,7 +251,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	showSearchOverlay: false,
 	showMCPOverlay: false,
 	mcpServers: [],
-	theme: storage.get("pux:theme", "default"),
+	theme: storage.get("pux:theme", "default-dark"),
 	conversations: [],
 	projects: [],
 	activeWorkbenchTab: "vnc",
@@ -465,6 +466,18 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			agents.set(agentId, {
 				...existing,
 				toolCalls: [...existing.toolCalls, toolCall],
+			});
+			set({ agents });
+		}
+	},
+
+	updateAgentThinking: (agentId, text) => {
+		const agents = new Map(get().agents);
+		const existing = agents.get(agentId);
+		if (existing) {
+			agents.set(agentId, {
+				...existing,
+				thinkingText: (existing.thinkingText || "") + text,
 			});
 			set({ agents });
 		}

@@ -49,7 +49,7 @@ export interface Project {
 	hasManifest?: boolean;
 }
 
-export type WorkbenchTab = "vnc" | "editor" | "scheduler" | "workers" | "permissions";
+export type WorkbenchTab = "vnc" | "editor" | "scheduler" | "workers" | "settings";
 
 // ── Agent monitoring ──
 
@@ -61,6 +61,7 @@ export interface AgentState {
 	startedAt: number;
 	endedAt?: number;
 	toolCalls: ToolCallRecord[];
+	thinkingText?: string;
 	result?: string;
 	error?: string;
 }

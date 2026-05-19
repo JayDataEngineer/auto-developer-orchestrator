@@ -19,7 +19,7 @@ import { VNCViewer } from "@/components/workbench/vnc-viewer";
 import { EditorPanel } from "@/components/workbench/editor-panel";
 import { SchedulerPanel } from "@/components/workbench/scheduler-panel";
 import { WorkersPanel } from "@/components/workbench/workers-panel";
-import { PermissionsPanel } from "@/components/workbench/permissions-panel";
+import { SettingsPanel } from "@/components/workbench/settings-panel";
 import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
 import { AddProjectDialog } from "@/components/add-project-dialog";
 import { WidgetToolUIs } from "@/components/assistant-ui/widget-tool-ui";
@@ -72,7 +72,7 @@ import {
 	Users,
 	FolderOpen,
 	XIcon,
-	Shield,
+	Settings,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -420,9 +420,9 @@ function Workbench() {
 					<Users className="size-4" />
 					Agents
 				</TabsTrigger>
-				<TabsTrigger value="permissions" className="gap-1.5 text-xs">
-					<Shield className="size-4" />
-					Permissions
+				<TabsTrigger value="settings" className="gap-1.5 text-xs">
+					<Settings className="size-4" />
+					Settings
 				</TabsTrigger>
 			</TabsList>
 			<TabsContent value="vnc" className="flex-1 overflow-hidden mt-0">
@@ -437,8 +437,8 @@ function Workbench() {
 			<TabsContent value="workers" className="flex-1 overflow-hidden mt-0">
 				<WorkersPanel />
 			</TabsContent>
-			<TabsContent value="permissions" className="flex-1 overflow-hidden mt-0">
-				<PermissionsPanel />
+			<TabsContent value="settings" className="flex-1 overflow-hidden mt-0">
+				<SettingsPanel />
 			</TabsContent>
 		</Tabs>
 	);
@@ -452,8 +452,14 @@ export function App() {
 	const loadProjects = usePuxStore((s) => s.loadProjects);
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
+	const theme = usePuxStore((s) => s.theme);
 	const [workbenchVisible, setWorkbenchVisible] = useState(true);
 	const workbenchPanelRef = usePanelRef();
+
+	// Apply theme on mount
+	useEffect(() => {
+		document.documentElement.setAttribute("data-pux-theme", theme);
+	}, [theme]);
 
 	// Poll for running agent status
 	useAgentStatusPolling();
