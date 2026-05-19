@@ -55,7 +55,7 @@ export function getCompletions(input: string, cwd: string): Completion[] {
   });
 
   const baseDir = rawPrefix.endsWith("/") ? rawPrefix : path.dirname(rawPrefix);
-  const prefixShow = baseDir === "." ? "" : baseDir + "/";
+  const prefixShow = baseDir === "." ? "" : baseDir.endsWith("/") ? baseDir : baseDir + "/";
 
   return sorted.slice(0, 20).map((e) => {
     const full = path.join(dir, e);
@@ -79,25 +79,32 @@ export function PathAutocomplete({ text, cwd, selectedIdx }: PathAutocompletePro
 
   if (completions.length === 0) return null;
 
+  const MAX_VISIBLE = 5;
+  const startIdx = Math.max(0, Math.min(selectedIdx - MAX_VISIBLE + 1, completions.length - MAX_VISIBLE));
+  const visible = completions.slice(startIdx, startIdx + MAX_VISIBLE);
+
   return (
     <Box flexDirection="column" paddingX={1}>
-      {completions.map((c, i) => (
-        <Text key={c.fullPath}>
-          {i === selectedIdx ? (
-            <Text bold color={colors.brand}>{c.display}</Text>
-          ) : (
-            <Text>{c.display}</Text>
-          )}
-          {" "}
-          {c.isDir ? (
-            <Text color="cyan">dir</Text>
-          ) : (
-            <Text dimColor color="gray">
-              {path.extname(c.display) || "file"}
-            </Text>
-          )}
-        </Text>
-      ))}
+      {visible.map((c, i) => {
+        const globalIdx = startIdx + i;
+        return (
+          <Text key={c.fullPath}>
+            {globalIdx === selectedIdx ? (
+              <Text bold color={colors.brand}>{c.display}</Text>
+            ) : (
+              <Text>{c.display}</Text>
+            )}
+            {" "}
+            {c.isDir ? (
+              <Text color="cyan">dir</Text>
+            ) : (
+              <Text dimColor color="gray">
+                {path.extname(c.display) || "file"}
+              </Text>
+            )}
+          </Text>
+        );
+      })}
       <Text dimColor color="gray"> Tab autocomplete path</Text>
     </Box>
   );

@@ -26,6 +26,7 @@ import { getCommands } from "../commands.js";
 import { PathAutocomplete, getCompletions } from "./path-autocomplete.js";
 import { VimInput } from "./vim-input.js";
 import { useColors, symbols } from "../theme.js";
+import { CommandRow } from "./help-overlay.js";
 import { createRequire } from "node:module";
 const puxVersion = createRequire(import.meta.url)("../../../package.json").version;
 
@@ -154,24 +155,23 @@ function CommandPalette({
 	if (matches.length === 0) return null;
 
 	const MAX_VISIBLE = 5;
-	const visible = matches.slice(0, MAX_VISIBLE);
-	const hasMore = matches.length > MAX_VISIBLE;
+	// Scroll the visible window so the selected item is always in view
+	const startIdx = Math.max(0, Math.min(selectedIdx - MAX_VISIBLE + 1, matches.length - MAX_VISIBLE));
+	const visible = matches.slice(startIdx, startIdx + MAX_VISIBLE);
 
 	return (
 		<Box flexDirection="column" paddingX={1}>
-			{visible.map((c, i) => (
-				<Text key={c.name}>
-					{i === selectedIdx ? (
-						<Text bold color={colors.brand}>/{c.name}</Text>
-					) : (
-						<Text>/{c.name}</Text>
-					)}
-					<Text color="gray"> {symbols.dot} {c.desc}</Text>
-				</Text>
-			))}
-			{hasMore && (
-				<Text dimColor color="gray">  ... {matches.length - MAX_VISIBLE} more</Text>
-			)}
+			{visible.map((c, i) => {
+				const globalIdx = startIdx + i;
+				return (
+					<CommandRow
+						key={c.name}
+						name={c.name}
+						description={c.desc}
+						selected={globalIdx === selectedIdx}
+					/>
+				);
+			})}
 			<Text dimColor color="gray"> Up/Down navigate · Tab autocomplete</Text>
 		</Box>
 	);
