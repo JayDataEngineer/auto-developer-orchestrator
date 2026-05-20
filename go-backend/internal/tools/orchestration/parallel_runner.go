@@ -262,6 +262,15 @@ func (r *ParallelRunner) SetTranscriptDB(db *storage.Database, project string) {
 	r.project = project
 }
 
+// makeTranscriptID builds a deterministic composite ID for subagent transcript persistence.
+// Returns empty string if baseSession is nil (e.g. in tests).
+func (r *ParallelRunner) makeTranscriptID(agentName string) string {
+	if r.baseSession == nil {
+		return ""
+	}
+	return r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli())
+}
+
 // subscriberFromCtx extracts the SSE subscriber channel from the context.
 // Contract 3.4 compliance: subscriber is retrieved from context (set by AgentLoop),
 // not held as a struct field. This keeps ParallelRunner a pure tool with no direct
@@ -309,7 +318,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	r.logger("SYNC_DELEGATE: task=%q agent=%s tools=%v model=%q", task, agentName, toolNames, modelID)
 
 	// Generate deterministic transcript ID before emitting event
-	transcriptID := r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli())
+	transcriptID := r.makeTranscriptID(agentName)
 
 	// Emit subagent_start to parent subscriber
 	core.SendEvent(subscriber, core.AgentEvent{
@@ -504,7 +513,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	r.logger("DIVISION_DELEGATE: path=%s depth=%d model=%q", absPath, r.depth+1, modelID)
 
 	// Emit subagent_start
-	transcriptID := r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli())
+	transcriptID := r.makeTranscriptID(agentName)
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
 		Data: core.AgentEventData{
@@ -621,7 +630,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	}
 
 	// Generate deterministic transcript ID before emitting event
-	transcriptID := r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli())
+	transcriptID := r.makeTranscriptID(agentName)
 
 	// Emit subagent_start to parent subscriber
 	core.SendEvent(subscriber, core.AgentEvent{
