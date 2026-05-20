@@ -592,7 +592,7 @@ export function App() {
 					</SidebarInset>
 				</Panel>
 
-				<Separator className="w-px bg-border hover:bg-ring/50 transition-colors cursor-col-resize" />
+				<Separator className="relative w-3 cursor-col-resize before:content-[''] before:absolute before:inset-y-0 before:left-1/2 before:-translate-x-1/2 before:w-px before:bg-border before:transition-colors hover:before:bg-ring/50" />
 				<Panel
 					panelRef={workbenchPanelRef}
 					defaultSize={35}
