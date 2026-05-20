@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useRef, useState } from "react";
 import {
 	AlertCircleIcon,
 	CheckIcon,
@@ -340,13 +340,17 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	status,
 	interrupt,
 }) => {
-	const [expanded, setExpanded] = useState(false);
 	const isCancelled =
 		status?.type === "incomplete" && status.reason === "cancelled";
 	const isRunning = status?.type === "running";
 	const isComplete = status?.type === "complete";
 	const hasError = status?.type === "incomplete";
 	const hasResult = result !== undefined && result !== null;
+
+	// Check if this is a screenshot tool before early returns
+	const isScreenshotTool = ["screenshot", "observe", "browser_screenshot",
+		"desktop_screenshot", "computer_screenshot", "take_screenshot",
+		"web_screenshot", "desktop_observe"].includes(toolName);
 
 	// Delegate tools get the specialized collapsible card UI
 	if (isDelegateTool(toolName)) {
@@ -357,6 +361,21 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	const pending = usePuxStore((s) => s.pendingDecision);
 	const respond = usePuxStore((s) => s.respondToDecision);
 	const answered = isComplete && pending === null;
+
+	// Auto-expand screenshot tools when result arrives with an image
+	const imageInfo = hasResult && !isCancelled ? extractScreenshotFromResult(result) : null;
+	const shouldAutoExpand = isScreenshotTool && imageInfo;
+
+	const [expanded, setExpanded] = useState(false);
+	// Sync: when shouldAutoExpand becomes true, open it once
+	const prevAutoExpand = useRef(false);
+	if (shouldAutoExpand && !prevAutoExpand.current) {
+		prevAutoExpand.current = true;
+		setExpanded(true);
+	}
+	if (!shouldAutoExpand && prevAutoExpand.current) {
+		prevAutoExpand.current = false;
+	}
 
 	if (interrupt?.type === "human") {
 		const payload = interrupt.payload as Record<string, unknown> | undefined;
@@ -415,16 +434,10 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	}
 
 	// Check for image in result
-	const imageInfo = hasResult && !isCancelled ? extractScreenshotFromResult(result) : null;
 	// Screenshot tools: image lives under the tool row as expandable result.
 	// Other tools with images (orchestrator sharing): render inline.
-	const isScreenshotTool = ["screenshot", "observe", "browser_screenshot",
-		"desktop_screenshot", "computer_screenshot", "take_screenshot",
-		"web_screenshot", "desktop_observe"].includes(toolName);
 	const showImageInline = imageInfo && !isScreenshotTool;
 	const showImageUnderTool = imageInfo && isScreenshotTool;
-	// Auto-expand screenshot tools when they complete with an image
-	const autoExpanded = isScreenshotTool && showImageUnderTool;
 
 	// Compact tool row — same format as sub-agent tool rows
 	const preview = toolArgPreview(toolName, args);
@@ -463,7 +476,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 						size={10}
 						className={cn(
 							"shrink-0 text-muted-foreground transition-transform duration-150",
-							(expanded || autoExpanded) ? "rotate-0" : "-rotate-90",
+							expanded ? "rotate-0" : "-rotate-90",
 						)}
 					/>
 				)}
@@ -490,8 +503,8 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 					/>
 				</div>
 			)}
-			{/* Image under screenshot tool row — expandable, auto-opens */}
-			{showImageUnderTool && (expanded || autoExpanded) && (
+			{/* Image under screenshot tool row — expandable, auto-opens on first result */}
+			{showImageUnderTool && expanded && (
 				<div className="px-2 pb-1 pl-6">
 					{imageInfo.meta && (
 						<div className="mb-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
