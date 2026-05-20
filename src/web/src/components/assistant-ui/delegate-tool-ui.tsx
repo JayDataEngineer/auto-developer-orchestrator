@@ -1,11 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { makeAssistantToolUI } from "@assistant-ui/react";
 import { usePuxStore } from "@/lib/pux-store";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { useCollapsibleRoot } from "./use-collapsible";
 import {
 	Bot,
 	CheckCircle,
@@ -271,9 +269,17 @@ export function DelegateRenderer({
 	const thinkingText = agentState?.thinkingText;
 	const subToolCount = toolCalls.length;
 
-	// Auto-expand while running, user can toggle freely
-	const { collapsibleRef, isOpen, handleOpenChange, animationStyle } =
-		useCollapsibleRoot(isRunning);
+	// Auto-expand while running. useRef tracks whether we've auto-expanded
+	// so user can freely toggle after without it snapping back.
+	const [expanded, setExpanded] = useState(false);
+	const wasRunning = useRef(false);
+	if (isRunning && !wasRunning.current) {
+		wasRunning.current = true;
+		setExpanded(true);
+	}
+	if (!isRunning && wasRunning.current) {
+		wasRunning.current = false;
+	}
 
 	const statusLabel = isRunning
 		? "working..."
@@ -288,79 +294,67 @@ export function DelegateRenderer({
 		: 0;
 
 	return (
-		<Collapsible
-			ref={collapsibleRef}
-			open={isOpen}
-			onOpenChange={handleOpenChange}
-			className="my-2 w-full rounded-lg border border-border"
-			style={animationStyle}
-		>
-			{/* Header — entire row is the fold trigger */}
-			<CollapsibleTrigger asChild>
-				<div className="flex items-center gap-2 px-4 py-3 text-sm cursor-pointer hover:bg-accent/30 transition-colors select-none">
-					{isRunning ? (
-						<Loader2 size={14} className="animate-spin text-blue-500" />
-					) : isError ? (
-						<XCircle size={14} className="text-red-500" />
-					) : (
-						<CheckCircle size={14} className="text-green-500" />
-					)}
-					<Bot size={14} className="text-muted-foreground" />
-					<span className="font-medium">{agentName}</span>
-					{task && (
-						<span className="text-muted-foreground truncate max-w-[300px]">
-							{task}
-						</span>
-					)}
-					<span className="text-xs text-muted-foreground ml-auto">
-						{statusLabel}
-					</span>
-					{subToolCount > 0 && (
-						<span className="text-xs text-dim">
-							{"\u00B7"} {subToolCount} tool{subToolCount !== 1 ? "s" : ""}
-						</span>
-					)}
-					{elapsed > 0 && !isRunning && (
-						<span className="text-xs text-dim tabular-nums">
-							{formatDuration(elapsed)}
-						</span>
-					)}
-					<ChevronDownIcon
-						className={cn(
-							"size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ease-out",
-							"group-data-[state=closed]/trigger:-rotate-90",
-						)}
-					/>
-				</div>
-			</CollapsibleTrigger>
-
-			{/* Collapsible execution trace */}
-			<CollapsibleContent
-				className={cn(
-					"overflow-hidden text-sm outline-none",
-					"data-[state=closed]:animate-collapsible-up",
-					"data-[state=open]:animate-collapsible-down",
-					"data-[state=closed]:fill-mode-forwards",
-					"data-[state=closed]:pointer-events-none",
-					"data-[state=open]:duration-200",
-					"data-[state=closed]:duration-200",
-				)}
+		<div className="my-2 w-full rounded-lg border border-border">
+			{/* Header — click to fold/unfold */}
+			<button
+				type="button"
+				onClick={() => setExpanded((v) => !v)}
+				className="flex items-center gap-2 px-4 py-3 text-sm w-full cursor-pointer hover:bg-accent/30 transition-colors select-none text-left"
 			>
-				{/* Thinking section */}
-				{thinkingText && (
-					<ThinkingSection text={thinkingText} isRunning={isRunning} />
+				{isRunning ? (
+					<Loader2 size={14} className="animate-spin text-blue-500" />
+				) : isError ? (
+					<XCircle size={14} className="text-red-500" />
+				) : (
+					<CheckCircle size={14} className="text-green-500" />
 				)}
-
-				{/* Tool call list */}
+				<Bot size={14} className="text-muted-foreground" />
+				<span className="font-medium">{agentName}</span>
+				{task && (
+					<span className="text-muted-foreground truncate max-w-[300px]">
+						{task}
+					</span>
+				)}
+				<span className="text-xs text-muted-foreground ml-auto">
+					{statusLabel}
+				</span>
 				{subToolCount > 0 && (
-					<div className={cn("py-1", !thinkingText && "border-t border-border")}>
-						{toolCalls.map((tool, i) => (
-							<SubAgentToolRow key={`${tool.toolName}-${tool.timestamp}-${i}`} tool={tool} />
-						))}
-					</div>
+					<span className="text-xs text-dim">
+						{"\u00B7"} {subToolCount} tool{subToolCount !== 1 ? "s" : ""}
+					</span>
 				)}
-			</CollapsibleContent>
-		</Collapsible>
+				{elapsed > 0 && !isRunning && (
+					<span className="text-xs text-dim tabular-nums">
+						{formatDuration(elapsed)}
+					</span>
+				)}
+				<ChevronDownIcon
+					className={cn(
+						"size-3.5 shrink-0 text-muted-foreground transition-transform duration-150",
+						expanded ? "rotate-0" : "-rotate-90",
+					)}
+				/>
+			</button>
+
+			{/* Expandable execution trace */}
+			{expanded && (
+				<div className="border-t border-border">
+					{/* Thinking section */}
+					{thinkingText && (
+						<ThinkingSection text={thinkingText} isRunning={isRunning} />
+					)}
+
+					{/* Tool call list */}
+					{subToolCount > 0 && (
+						<div className={cn("py-1", !thinkingText && "border-t border-border")}>
+							{toolCalls.map((tool, i) => (
+								<SubAgentToolRow key={`${tool.toolName}-${tool.timestamp}-${i}`} tool={tool} />
+							))}
+						</div>
+					)}
+				</div>
+			)}
+		</div>
 	);
 }
 
