@@ -3,6 +3,7 @@ package common
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -134,4 +135,88 @@ func (o *OrgManifest) resolvePath(p string) string {
 		return p
 	}
 	return filepath.Join(o.baseDir, p)
+}
+
+// PuxHomeDir returns ~/.pux, resolving from HOME or USERPROFILE.
+func PuxHomeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".pux")
+}
+
+// OrgInfo holds summary info about a discovered org for API responses.
+type OrgInfo struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Path        string            `json:"path"`
+	Roles       []string          `json:"roles"`
+	RoleDetails map[string]any    `json:"role_details,omitempty"`
+}
+
+// DiscoverOrgs scans ~/.pux/orgs/ for valid organizations.
+// Resolves symlinks, loads pux.yaml from each, and returns summary info.
+func DiscoverOrgs() []*OrgInfo {
+	orgsDir := filepath.Join(PuxHomeDir(), "orgs")
+	entries, err := os.ReadDir(orgsDir)
+	if err != nil {
+		return nil
+	}
+
+	var orgs []*OrgInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			// Could be a symlink — stat to check
+			info, err := os.Stat(filepath.Join(orgsDir, entry.Name()))
+			if err != nil || !info.IsDir() {
+				continue
+			}
+		}
+
+		orgPath := filepath.Join(orgsDir, entry.Name())
+		// Resolve symlinks
+		if resolved, err := filepath.EvalSymlinks(orgPath); err == nil {
+			orgPath = resolved
+		}
+
+		org := LoadOrgManifest(orgPath)
+		if org == nil {
+			continue
+		}
+
+		info := &OrgInfo{
+			Name:        org.Name,
+			Description: org.Description,
+			Path:        orgPath,
+		}
+
+		// Load roles if staff_root is configured
+		if org.RolesDir() != "" {
+			roles := LoadAgentRolesFrom(org.RolesDir())
+			info.RoleDetails = make(map[string]any, len(roles))
+			for name, role := range roles {
+				info.Roles = append(info.Roles, name)
+				info.RoleDetails[name] = map[string]any{
+					"name":         name,
+					"hint":         role.Hint,
+					"persona":      role.Description,
+					"capabilities": role.Capabilities,
+					"imports":      role.Imports,
+					"model":        role.Model,
+					"sandbox":      role.SandboxTier,
+				}
+			}
+			sort.Strings(info.Roles)
+		}
+
+		orgs = append(orgs, info)
+	}
+
+	// Sort by name
+	sort.Slice(orgs, func(i, j int) bool {
+		return orgs[i].Name < orgs[j].Name
+	})
+
+	return orgs
 }

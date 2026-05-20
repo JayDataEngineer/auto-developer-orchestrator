@@ -54,13 +54,21 @@ func NewWorkerHandler(store *autoconfig.WorkerStore, logger *zap.Logger) *Worker
 func (h *WorkerHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/", h.ListWorkers)
 	r.Get("/capabilities", h.ListCapabilities)
+	r.Get("/orgs", h.ListOrgs)
 	r.Post("/", h.CreateWorker)
 	r.Put("/{name}", h.UpdateWorker)
 	r.Delete("/{name}", h.DeleteWorker)
 	r.Post("/{name}/revert", h.RevertWorker)
 }
 
-// ListWorkers returns all workers.
+// ListOrgs returns all discovered organizations from ~/.pux/orgs/.
+func (h *WorkerHandler) ListOrgs(w http.ResponseWriter, r *http.Request) {
+	orgs := common.DiscoverOrgs()
+	writeJSON(w, http.StatusOK, map[string]any{"orgs": orgs})
+}
+
+// ListWorkers returns all workers — kernel workers plus org workers.
+// Each worker includes a "source" field: "kernel" for base workers, or the org name.
 func (h *WorkerHandler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 	result, err := h.store.List(r.Context())
 	if err != nil {
@@ -86,6 +94,29 @@ func (h *WorkerHandler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 		if m, ok := detail.(map[string]any); ok {
 			m["isDefault"] = h.defaults[name] != nil
 			m["isModified"] = h.isModified(name)
+			m["source"] = "kernel"
+			workers = append(workers, m)
+		}
+	}
+
+	// Append org workers
+	orgs := common.DiscoverOrgs()
+	for _, org := range orgs {
+		for _, name := range org.Roles {
+			detail, ok := org.RoleDetails[name]
+			if !ok {
+				continue
+			}
+			m, ok := detail.(map[string]any)
+			if !ok {
+				continue
+			}
+			m["source"] = org.Name
+			m["sourceDescription"] = org.Description
+			m["sourcePath"] = org.Path
+			m["isDefault"] = true
+			m["isModified"] = false
+			m["isOrg"] = true
 			workers = append(workers, m)
 		}
 	}

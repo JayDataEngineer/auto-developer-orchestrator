@@ -40,8 +40,12 @@ func TestWorkersListEmpty(t *testing.T) {
 	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
 	workers := resp["workers"].([]any)
-	if len(workers) != 0 {
-		t.Errorf("workers = %v, want empty", workers)
+	// May include org workers from ~/.pux/orgs/ — check no kernel workers
+	for _, w := range workers {
+		m := w.(map[string]any)
+		if m["source"] == "kernel" {
+			t.Errorf("unexpected kernel worker: %v", m)
+		}
 	}
 }
 
@@ -74,12 +78,20 @@ func TestWorkersCreateAndList(t *testing.T) {
 	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
 	workers := resp["workers"].([]any)
-	if len(workers) != 1 {
-		t.Fatalf("workers count = %d, want 1", len(workers))
+	// Find our created worker among potentially many org workers
+	var found *map[string]any
+	for _, w := range workers {
+		m := w.(map[string]any)
+		if m["name"] == "test-worker" && m["source"] == "kernel" {
+			found = &m
+			break
+		}
 	}
-	worker := workers[0].(map[string]any)
-	if worker["name"] != "test-worker" {
-		t.Errorf("name = %q, want test-worker", worker["name"])
+	if found == nil {
+		t.Fatalf("test-worker not found among %d workers", len(workers))
+	}
+	if (*found)["name"] != "test-worker" {
+		t.Errorf("name = %q, want test-worker", (*found)["name"])
 	}
 }
 
