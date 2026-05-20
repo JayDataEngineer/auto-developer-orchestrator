@@ -15,6 +15,11 @@ const THEMES = [
 		label: "Assistant UI",
 		description: "Standard @assistant-ui/shadcn default theme",
 	},
+	{
+		id: "mono",
+		label: "Mono",
+		description: "All gray, monochrome theme",
+	},
 ] as const;
 
 function applyTheme(id: string) {
