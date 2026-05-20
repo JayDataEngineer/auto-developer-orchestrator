@@ -170,6 +170,7 @@ interface PuxState {
 	setProject: (project: string) => void;
 	setConversation: (project: string, agentId: string) => void;
 	deleteConversation: (project: string, agentId: string) => Promise<void>;
+	renameConversation: (project: string, agentId: string, title: string) => Promise<void>;
 	clearConversation: () => void;
 	clearError: () => void;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
@@ -415,6 +416,25 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			if (activeProject === project && activeAgentId === agentId) {
 				set({ conversationKey: `default` });
 			}
+		} catch {
+			// ignore
+		}
+	},
+
+	renameConversation: async (project, agentId, title) => {
+		try {
+			const fetch = getFetch();
+			const resp = await fetch(apiUrl("/api/pux/conversation/rename"), {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ project, agentId, title }),
+			});
+			if (!resp.ok) return;
+			set((state) => ({
+				conversations: state.conversations.map((c) =>
+					c.project === project && c.agentId === agentId ? { ...c, title } : c,
+				),
+			}));
 		} catch {
 			// ignore
 		}
