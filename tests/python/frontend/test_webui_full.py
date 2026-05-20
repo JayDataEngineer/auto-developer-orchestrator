@@ -246,9 +246,23 @@ def mock_api_routes(page, workers=None, scheduler_jobs=None, models=None, projec
 
 
 def send_message(page, text="test"):
-    """Fill the composer and press Enter."""
+    """Set the composer text and submit via Enter.
+
+    Uses the native HTMLTextAreaElement value setter + input event
+    dispatch because Playwright's fill() doesn't trigger React's
+    synthetic onChange handler in assistant-ui v0.14.x.
+    """
     textarea = page.locator("textarea").first
-    textarea.fill(text)
+    page.evaluate("""(args) => {
+        const [selector, text] = args;
+        const textarea = document.querySelector(selector);
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLTextAreaElement.prototype, 'value'
+        ).set;
+        nativeInputValueSetter.call(textarea, text);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    }""", ["textarea", text])
     textarea.press("Enter")
 
 
