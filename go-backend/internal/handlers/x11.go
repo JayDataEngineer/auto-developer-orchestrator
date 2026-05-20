@@ -36,12 +36,14 @@ func NewX11Handler(manager *sandbox.Manager, logger *zap.Logger) *X11Handler {
 func (h *X11Handler) RegisterRoutes(r interface {
 	Post(string, http.HandlerFunc)
 	Get(string, http.HandlerFunc)
+	Put(string, http.HandlerFunc)
 }) {
 	r.Post("/mouse", h.Mouse)
 	r.Post("/keyboard", h.Keyboard)
 	r.Get("/screenshot", h.Screenshot)
 	r.Get("/observe", h.Observe)
 	r.Get("/resolution", h.Resolution)
+	r.Put("/resolution", h.SetResolution)
 	r.Get("/active-window", h.ActiveWindow)
 }
 
@@ -341,6 +343,38 @@ func (h *X11Handler) Resolution(w http.ResponseWriter, r *http.Request) {
 		"width":  parts[0],
 		"height": parts[1],
 	})
+}
+
+// PUT /api/sandbox/{id}/x11/resolution
+// Resizes the X11 framebuffer to match the given width/height via xrandr.
+// Used by the web frontend to eliminate gray bars around the noVNC viewport.
+func (h *X11Handler) SetResolution(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+
+	var req struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.Width < 100 || req.Height < 100 || req.Width > 4096 || req.Height > 2160 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("dimensions %dx%d out of range (100-4096 x 100-2160)", req.Width, req.Height)})
+		return
+	}
+
+	display := h.displayForSandbox(sandboxID)
+	_, err := h.exec(r, sandboxID, display, []string{
+		"xrandr", "--fb", fmt.Sprintf("%dx%d", req.Width, req.Height),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	h.logger.Debug("resized framebuffer", zap.String("sandbox", sandboxID), zap.Int("w", req.Width), zap.Int("h", req.Height))
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // ── Active Window ────────────────────────────────────────────────────────

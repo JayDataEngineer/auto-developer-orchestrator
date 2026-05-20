@@ -107,6 +107,7 @@ interface PuxState {
 
 	// Workbench (web only — auto-driven by SSE tool events)
 	activeWorkbenchTab: WorkbenchTab;
+	workbenchLayoutVersion: number;
 
 	// Agent monitoring (TUI + web)
 	agents: Map<string, AgentState>;
@@ -172,6 +173,7 @@ interface PuxState {
 	clearConversation: () => void;
 	clearError: () => void;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
+	bumpWorkbenchLayout: () => void;
 	setTuiView: (view: TuiView) => void;
 	cycleTuiView: () => void;
 	addAgent: (agent: AgentState) => void;
@@ -281,6 +283,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	conversations: [],
 	projects: [],
 	activeWorkbenchTab: "vnc",
+	workbenchLayoutVersion: 0,
 	agents: new Map(),
 	zoomedAgentId: null,
 	agentSelectorOpen: false,
@@ -458,6 +461,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	clearError: () => set({ lastError: null }),
 
 	setWorkbenchTab: (tab) => set({ activeWorkbenchTab: tab }),
+	bumpWorkbenchLayout: () => set((s) => ({ workbenchLayoutVersion: s.workbenchLayoutVersion + 1 })),
 
 	setTuiView: (view) => set({ activeTuiView: view }),
 

@@ -24,6 +24,8 @@ export function VNCViewer() {
 	const [vncReady, setVncReady] = useState(false);
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
+	const layoutVersion = usePuxStore((s) => s.workbenchLayoutVersion);
+	const containerRef = useRef<HTMLDivElement>(null);
 
 	const detectSandbox = useCallback(() => {
 		if (!activeProject) {
@@ -111,6 +113,47 @@ export function VNCViewer() {
 		prevReady.current = vncReady;
 	}, [vncReady]);
 
+	// Resize the X11 framebuffer to match the container dimensions.
+	// Called once after drag ends (via layoutVersion bump from onLayoutChanged)
+	// and on window resize (via ResizeObserver with 200ms debounce).
+	const sandboxId = sandbox?.id;
+	useEffect(() => {
+		if (!sandboxId || !containerRef.current) return;
+
+		const resizeToContainer = () => {
+			const el = containerRef.current;
+			if (!el) return;
+			// Subtract 4px to account for noVNC's internal viewport chrome
+			// and pixel rounding that makes the framebuffer slightly too large.
+			const w = Math.floor(el.clientWidth) - 4;
+			const h = Math.floor(el.clientHeight) - 4;
+			if (w < 100 || h < 100) return;
+
+			fetch(`/api/sandbox/${sandboxId}/x11/resolution`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ width: w, height: h }),
+			}).catch(() => { /* sandbox may have been removed */ });
+		};
+
+		// Fire immediately for this layout change
+		resizeToContainer();
+
+		// ResizeObserver with debounce catches window resizes that don't
+		// change panel percentages (so onLayoutChanged won't fire).
+		let timer: ReturnType<typeof setTimeout>;
+		const observer = new ResizeObserver(() => {
+			clearTimeout(timer);
+			timer = setTimeout(resizeToContainer, 200);
+		});
+		observer.observe(containerRef.current);
+
+		return () => {
+			clearTimeout(timer);
+			observer.disconnect();
+		};
+	}, [sandboxId, layoutVersion]);
+
 	const startSandbox = async () => {
 		if (!activeProject) return;
 		setStarting(true);
@@ -153,7 +196,7 @@ export function VNCViewer() {
 
 	if (loading) {
 		return (
-			<div className="flex h-full items-center justify-center">
+			<div ref={containerRef} className="flex h-full items-center justify-center">
 				<span className="text-xs text-muted-foreground">Detecting sandbox...</span>
 			</div>
 		);
@@ -161,7 +204,7 @@ export function VNCViewer() {
 
 	if (!sandbox) {
 		return (
-			<div className="flex h-full flex-col items-center justify-center gap-3">
+			<div ref={containerRef} className="flex h-full flex-col items-center justify-center gap-3">
 				<Monitor className="size-8 text-muted-foreground/50" />
 				<span className="text-xs text-muted-foreground">No sandbox for this project</span>
 				{activeProject && (
@@ -181,7 +224,7 @@ export function VNCViewer() {
 	// Sandbox exists but no desktop session — auto-polling will catch when it becomes ready
 	if (!sandbox.desktop_session?.is_active) {
 		return (
-			<div className="flex h-full flex-col items-center justify-center gap-3">
+			<div ref={containerRef} className="flex h-full flex-col items-center justify-center gap-3">
 				<Monitor className="size-8 animate-pulse text-muted-foreground/50" />
 				<span className="text-xs text-muted-foreground">
 					{sandbox.mode === "cli" ? "Sandbox starting..." : "Connecting..."}
@@ -203,7 +246,7 @@ export function VNCViewer() {
 	// Desktop session active but VNC server not yet accepting connections
 	if (!vncReady) {
 		return (
-			<div className="flex h-full flex-col items-center justify-center gap-3">
+			<div ref={containerRef} className="flex h-full flex-col items-center justify-center gap-3">
 				<Monitor className="size-8 animate-pulse text-muted-foreground/50" />
 				<span className="text-xs text-muted-foreground">Starting VNC...</span>
 			</div>
@@ -213,10 +256,12 @@ export function VNCViewer() {
 	const wsPath = `api/sandbox/vnc/${sandbox.id}/websockify`;
 
 	return (
-		<iframe
-			src={`/api/sandbox/vnc/${sandbox.id}/vnc.html?autoconnect=true&resize=remote&reconnect=true&reconnect_delay=2000&path=${encodeURIComponent(wsPath)}`}
-			className="h-full w-full border-0"
-			title="Sandbox VNC"
-		/>
+		<div ref={containerRef} className="h-full w-full">
+			<iframe
+				src={`/api/sandbox/vnc/${sandbox.id}/vnc.html?autoconnect=true&resize=remote&reconnect=true&reconnect_delay=2000&path=${encodeURIComponent(wsPath)}`}
+				className="h-full w-full border-0"
+				title="Sandbox VNC"
+			/>
+		</div>
 	);
 }

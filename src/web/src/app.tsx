@@ -538,7 +538,7 @@ export function App() {
 			defaultOpen={true}
 		>
 			<AppSidebar />
-			<Group orientation="horizontal" className="h-svh">
+			<Group orientation="horizontal" className="h-svh" onLayoutChanged={() => usePuxStore.getState().bumpWorkbenchLayout()}>
 				<Panel defaultSize={65} minSize={30}>
 					<SidebarInset className="flex h-full flex-col overflow-hidden">
 						{/* Navbar */}
