@@ -270,9 +270,8 @@ export function DelegateRenderer({
 	const toolCalls = agentState?.toolCalls ?? [];
 	const thinkingText = agentState?.thinkingText;
 	const subToolCount = toolCalls.length;
-	const hasContent = subToolCount > 0 || !!thinkingText;
 
-	// Auto-expand while running, collapse when done
+	// Auto-expand while running, user can toggle freely
 	const { collapsibleRef, isOpen, handleOpenChange, animationStyle } =
 		useCollapsibleRoot(isRunning);
 
@@ -296,78 +295,71 @@ export function DelegateRenderer({
 			className="my-2 w-full rounded-lg border border-border"
 			style={animationStyle}
 		>
-			{/* Header */}
-			<div className="flex items-center gap-2 px-4 py-3 text-sm">
-				{isRunning ? (
-					<Loader2 size={14} className="animate-spin text-blue-500" />
-				) : isError ? (
-					<XCircle size={14} className="text-red-500" />
-				) : (
-					<CheckCircle size={14} className="text-green-500" />
-				)}
-				<Bot size={14} className="text-muted-foreground" />
-				<span className="font-medium">{agentName}</span>
-				{task && (
-					<span className="text-muted-foreground truncate max-w-[300px]">
-						{task}
+			{/* Header — entire row is the fold trigger */}
+			<CollapsibleTrigger asChild>
+				<div className="flex items-center gap-2 px-4 py-3 text-sm cursor-pointer hover:bg-accent/30 transition-colors select-none">
+					{isRunning ? (
+						<Loader2 size={14} className="animate-spin text-blue-500" />
+					) : isError ? (
+						<XCircle size={14} className="text-red-500" />
+					) : (
+						<CheckCircle size={14} className="text-green-500" />
+					)}
+					<Bot size={14} className="text-muted-foreground" />
+					<span className="font-medium">{agentName}</span>
+					{task && (
+						<span className="text-muted-foreground truncate max-w-[300px]">
+							{task}
+						</span>
+					)}
+					<span className="text-xs text-muted-foreground ml-auto">
+						{statusLabel}
 					</span>
-				)}
-				<span className="text-xs text-muted-foreground ml-auto">
-					{statusLabel}
-				</span>
-				{subToolCount > 0 && (
-					<span className="text-xs text-dim">
-						{"\u00B7"} {subToolCount} tool{subToolCount !== 1 ? "s" : ""}
-					</span>
-				)}
-				{elapsed > 0 && !isRunning && (
-					<span className="text-xs text-dim tabular-nums">
-						{formatDuration(elapsed)}
-					</span>
-				)}
-				{/* Expand/collapse chevron — show when there's any expandable content */}
-				{hasContent && (
-					<CollapsibleTrigger asChild>
-						<button className="p-0.5 rounded hover:bg-accent/50 transition-colors">
-							<ChevronDownIcon
-								className={cn(
-									"size-3.5 text-muted-foreground transition-transform duration-200 ease-out",
-									"group-data-[state=closed]/trigger:-rotate-90",
-								)}
-							/>
-						</button>
-					</CollapsibleTrigger>
-				)}
-			</div>
+					{subToolCount > 0 && (
+						<span className="text-xs text-dim">
+							{"\u00B7"} {subToolCount} tool{subToolCount !== 1 ? "s" : ""}
+						</span>
+					)}
+					{elapsed > 0 && !isRunning && (
+						<span className="text-xs text-dim tabular-nums">
+							{formatDuration(elapsed)}
+						</span>
+					)}
+					<ChevronDownIcon
+						className={cn(
+							"size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ease-out",
+							"group-data-[state=closed]/trigger:-rotate-90",
+						)}
+					/>
+				</div>
+			</CollapsibleTrigger>
 
 			{/* Collapsible execution trace */}
-			{hasContent && (
-				<CollapsibleContent
-					className={cn(
-						"overflow-hidden text-sm outline-none",
-						"data-[state=closed]:animate-collapsible-up",
-						"data-[state=open]:animate-collapsible-down",
-						"data-[state=closed]:fill-mode-forwards",
-						"data-[state=closed]:pointer-events-none",
-						"data-[state=open]:duration-200",
-						"data-[state=closed]:duration-200",
-					)}
-				>
-					{/* Thinking section */}
-					{thinkingText && (
-						<ThinkingSection text={thinkingText} isRunning={isRunning} />
-					)}
+			<CollapsibleContent
+				className={cn(
+					"overflow-hidden text-sm outline-none",
+					"data-[state=closed]:animate-collapsible-up",
+					"data-[state=open]:animate-collapsible-down",
+					"data-[state=closed]:fill-mode-forwards",
+					"data-[state=closed]:pointer-events-none",
+					"data-[state=open]:duration-200",
+					"data-[state=closed]:duration-200",
+				)}
+			>
+				{/* Thinking section */}
+				{thinkingText && (
+					<ThinkingSection text={thinkingText} isRunning={isRunning} />
+				)}
 
-					{/* Tool call list */}
-					{subToolCount > 0 && (
-						<div className={cn("py-1", !thinkingText && "border-t border-border")}>
-							{toolCalls.map((tool, i) => (
-								<SubAgentToolRow key={`${tool.toolName}-${tool.timestamp}-${i}`} tool={tool} />
-							))}
-						</div>
-					)}
-				</CollapsibleContent>
-			)}
+				{/* Tool call list */}
+				{subToolCount > 0 && (
+					<div className={cn("py-1", !thinkingText && "border-t border-border")}>
+						{toolCalls.map((tool, i) => (
+							<SubAgentToolRow key={`${tool.toolName}-${tool.timestamp}-${i}`} tool={tool} />
+						))}
+					</div>
+				)}
+			</CollapsibleContent>
 		</Collapsible>
 	);
 }
