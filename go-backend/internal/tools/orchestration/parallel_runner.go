@@ -12,7 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/agents"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	ctxpkg "github.com/auto-developer-orchestrator/backend/internal/context"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
@@ -83,6 +85,9 @@ type ParallelRunner struct {
 	// backgrounded by the user (Ctrl+B). The delegation registers as a foreground
 	// task; Ctrl+B signals BackgroundReq; the subagent keeps running.
 	taskMgr *core.TaskManager
+
+	// Shared scratch store for sub-agent scratch pad hooks (same instance as CTO).
+	scratchStore *ctxpkg.ScratchStore
 
 	// Sub-agent transcript persistence: when set, sub-agent messages are stored
 	// in the database so their full chat log can be retrieved later.
@@ -168,6 +173,12 @@ func (r *ParallelRunner) SetRaiseBrowserFunc(f func(ctx context.Context)) {
 // Ctrl+B to send it to the background while the subagent keeps running.
 func (r *ParallelRunner) SetTaskManager(m *core.TaskManager) {
 	r.taskMgr = m
+}
+
+// SetScratchStore sets the shared scratch store for sub-agent scratch pad hooks.
+// When set, sub-agents get scratch pad re-injection just like the CTO.
+func (r *ParallelRunner) SetScratchStore(s *ctxpkg.ScratchStore) {
+	r.scratchStore = s
 }
 
 // SetVisualContext enables frame-based vision caching for sub-agent executors.
@@ -391,22 +402,6 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		r.raiseBrowserFunc(ctx)
 	}
 
-	// Create sub-agent with a very minimal loop config
-	cfg := core.AgentLoopConfig{
-		SystemPrompt:   instructions,
-		MaxToolRounds:  maxRounds,
-		MaxTokens:      8192,
-		ContextSize:    r.ctxSize,
-		Tools:          selectedTools,
-		ToolResultProcessor: subAgentResultProcessor(),
-		Opts: core.GenerateOptions{
-			MaxTokens:   8192,
-			Temperature: temperature,
-			TopP:        0.95,
-			TopK:        20,
-		},
-	}
-
 	sess := &subSession{
 		parent:    r.baseSession,
 		msgCount:  0,
@@ -429,7 +424,22 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		vExec.SetVisualContext(r.visualContext)
 		executor = vExec
 	}
-	loop := core.NewAgentLoop(provider, executor, sess, cfg)
+	// Use BaseAgent so sub-agents get common hooks (scratch pad re-injection, etc.)
+	subAgent := agents.NewBaseAgent(agents.BaseConfig{
+		Provider:        provider,
+		Session:         sess,
+		SystemPrompt:    instructions,
+		ToolSpecs:       selectedTools,
+		Executor:        executor,
+		MaxToolRounds:   maxRounds,
+		MaxTokens:       8192,
+		ContextSize:     r.ctxSize,
+		ProjectDir:      r.projectDir,
+		GenerateOptions: core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
+		ScratchStore:    r.scratchStore,
+		ToolResultProcessor: subAgentResultProcessor(),
+	})
+	loop := subAgent.Loop()
 
 	// Register as foreground task for Ctrl+B backgrounding
 	var bgTask *core.BackgroundTask
@@ -855,7 +865,22 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		vExec.SetVisualContext(r.visualContext)
 		executor = vExec
 	}
-	loop := core.NewAgentLoop(provider, executor, sess, cfg)
+	// Use BaseAgent so sub-agents get common hooks (scratch pad re-injection, etc.)
+	subAgent := agents.NewBaseAgent(agents.BaseConfig{
+		Provider:        provider,
+		Session:         sess,
+		SystemPrompt:    instructions,
+		ToolSpecs:       selectedTools,
+		Executor:        executor,
+		MaxToolRounds:   maxRounds,
+		MaxTokens:       8192,
+		ContextSize:     r.ctxSize,
+		ProjectDir:      r.projectDir,
+		GenerateOptions: core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
+		ScratchStore:    r.scratchStore,
+		ToolResultProcessor: subAgentResultProcessor(),
+	})
+	loop := subAgent.Loop()
 
 	// Register as a foreground task so Ctrl+B can background the delegation
 	var bgTask *core.BackgroundTask
@@ -1076,7 +1101,21 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 		vExec.SetVisualContext(r.visualContext)
 		continueExecutor = vExec
 	}
-	loop := core.NewAgentLoop(la.Provider, continueExecutor, la.Session, la.Config)
+	// Use BaseAgent for continuation so sub-agents keep getting common hooks
+	continueAgent := agents.NewBaseAgent(agents.BaseConfig{
+		Provider:        la.Provider,
+		Session:         la.Session,
+		SystemPrompt:    la.Config.SystemPrompt,
+		ToolSpecs:       la.Config.Tools,
+		Executor:        continueExecutor,
+		MaxToolRounds:   la.Config.MaxToolRounds,
+		ContextSize:     la.Config.ContextSize,
+		ProjectDir:      r.projectDir,
+		GenerateOptions: la.Config.Opts,
+		ScratchStore:    r.scratchStore,
+		ToolResultProcessor: la.Config.ToolResultProcessor,
+	})
+	loop := continueAgent.Loop()
 
 	// Emit subagent_start (continuation) — reuse existing session's transcript ID
 	core.SendEvent(subscriber, core.AgentEvent{

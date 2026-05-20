@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/auto-developer-orchestrator/backend/internal/agents"
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/adapters"
 	"github.com/auto-developer-orchestrator/backend/internal/autoconfig"
@@ -78,8 +79,7 @@ type Config struct {
 
 // Agent is the full orchestrator agent with all tools.
 type Agent struct {
-	Loop     *core.AgentLoop
-	Session  *session.SessionTree
+	*agents.BaseAgent
 	Memory   *memory.Store
 	config   Config
 	logger   *log.Logger
@@ -162,31 +162,27 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		// Build a minimal system prompt — no employee roster, no skills
 		systemPrompt := common.BuildOrchestratorPromptV2(ctoToolReg.All(), cfg.SandboxID, "", "", nil, nil)
 
-		loopCfg := core.AgentLoopConfig{
-			SystemPrompt:  systemPrompt,
-			MaxToolRounds: maxRounds,
-			MaxTokens:     16384,
-			ContextSize:   cfg.ContextSize,
-			Tools:         ctoToolSpecs,
-			Opts: core.GenerateOptions{
-				MaxTokens:   16384,
-				Temperature: 0.7,
-				TopP:        0.95,
-				TopK:        20,
-			},
-			ProjectDir: cfg.ProjectDir,
-			SandboxID:  cfg.SandboxID,
-		}
-
-		loop := core.NewAgentLoop(provider, ctoToolReg, sess, loopCfg)
-		loop.SetLogger(logger)
+		baseAgent := agents.NewBaseAgent(agents.BaseConfig{
+			Provider:        provider,
+			Session:         sess,
+			SystemPrompt:    systemPrompt,
+			ToolSpecs:       ctoToolSpecs,
+			Executor:        core.ToolExecutor(ctoToolReg),
+			MaxToolRounds:   maxRounds,
+			MaxTokens:       16384,
+			ContextSize:     cfg.ContextSize,
+			ProjectDir:      cfg.ProjectDir,
+			SandboxID:       cfg.SandboxID,
+			GenerateOptions: core.GenerateOptions{MaxTokens: 16384, Temperature: 0.7, TopP: 0.95, TopK: 20},
+			ScratchStore:    scratchStore,
+			Logger:          logger,
+		})
 
 		return &Agent{
-			Loop:    loop,
-			Session: sess,
-			Memory:  cfg.MemoryStore,
-			config:  cfg,
-			logger:  logger,
+			BaseAgent: baseAgent,
+			Memory:    cfg.MemoryStore,
+			config:    cfg,
+			logger:    logger,
 		}, nil
 	}
 
@@ -392,6 +388,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			// isolated + bridged both use the sandbox executor
 			return allToolReg
 		})
+		// Share the CTO's scratch store with sub-agents so they get scratch pad re-injection
+		pr.SetScratchStore(scratchStore)
 		runner = pr
 	}
 
@@ -452,35 +450,21 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		maxRounds = 50
 	}
 
-	// Context manager handles compaction now — no more CompactionHook
-	goalNudgeHook := hooks.NewGoalNudgeHook(maxRounds)
-	journalHook := hooks.NewJournalCheckpointHook(sess)
-	scratchpadHook := hooks.NewScratchpadHook(scratchStore)
-	loopHooks := []core.LoopHook{goalNudgeHook, journalHook, scratchpadHook}
+	// CTO-specific hooks (common hooks — scratchpad, goal nudge, permission — are wired by BaseAgent)
+	var ctoHooks []core.LoopHook
+	ctoHooks = append(ctoHooks, hooks.NewJournalCheckpointHook(sess))
 
-	// Add git checkpoint hook if executor provided
 	if cfg.GitExecutor != nil {
-		gitHook := hooks.NewGitCheckpointHook(cfg.GitExecutor)
-		loopHooks = append(loopHooks, gitHook)
+		ctoHooks = append(ctoHooks, hooks.NewGitCheckpointHook(cfg.GitExecutor))
 		logger.Printf("Git checkpoint hook enabled")
 	}
 
-	// Add approval hook if handler provided
 	if cfg.ApprovalHandler != nil {
-		approvalHook := hooks.NewApprovalHook(cfg.ApprovalHandler, true, 0) // plan-only, default timeout
-		loopHooks = append(loopHooks, approvalHook)
+		ctoHooks = append(ctoHooks, hooks.NewApprovalHook(cfg.ApprovalHandler, true, 0))
 		logger.Printf("Approval hook enabled (plan-only mode)")
 	}
 
-	// Add permission hook if tool permissions configured
-	if cfg.ToolPerms != nil {
-		permHook := hooks.NewPermissionHook(cfg.ToolPerms, core.GlobalDecisions, nil)
-		loopHooks = append(loopHooks, permHook)
-		logger.Printf("Permission hook enabled (%d tools configured)", len(cfg.ToolPerms.AllPermissions()))
-	}
-
-	// Add extra hooks from add-ons (Langfuse, etc.)
-	loopHooks = append(loopHooks, cfg.ExtraHooks...)
+	ctoHooks = append(ctoHooks, cfg.ExtraHooks...)
 
 	var skillsStr string
 	if skillStore.Count() > 0 {
@@ -489,30 +473,13 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	systemPrompt := common.BuildOrchestratorPromptV2(ctoToolReg.All(), cfg.SandboxID, "", skillsStr, cfg.Org, cfg.OrgRoles)
 
 	ctoToolSpecs := common.ToOpenAITools(ctoToolReg.All())
-	loopCfg := core.AgentLoopConfig{
-		SystemPrompt:   systemPrompt,
-		MaxToolRounds:  maxRounds,
-		MaxTokens:      16384,
-		ContextSize:    cfg.ContextSize,
-		ThinkingBudget: 4096,
-		Tools:          ctoToolSpecs,
-		ToolResultProcessor: func(procCtx context.Context, toolName, toolCallID, result string) string {
-			processed, err := ctxMgr.ProcessToolResult(procCtx, toolName, toolCallID, result)
-			if err != nil {
-				// Fallback: use line-aware truncation instead of blind slice
-				return truncate.Tail(result, truncate.FileMaxLines, truncate.BashMaxChars).Content
-			}
-			return processed
-		},
-		Opts: core.GenerateOptions{
-			MaxTokens:   16384,
-			Temperature: 0.7,
-			TopP:        0.95,
-			TopK:        20,
-		},
-		Hooks:      loopHooks,
-		ProjectDir: cfg.ProjectDir,
-		SandboxID:  cfg.SandboxID,
+
+	toolResultProcessor := func(procCtx context.Context, toolName, toolCallID, result string) string {
+		processed, err := ctxMgr.ProcessToolResult(procCtx, toolName, toolCallID, result)
+		if err != nil {
+			return truncate.Tail(result, truncate.FileMaxLines, truncate.BashMaxChars).Content
+		}
+		return processed
 	}
 
 	// Main loop executor uses ctoToolReg (has delegate_to, bash, file tools)
@@ -529,33 +496,50 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		executor = vExec
 	}
 
-	loop := core.NewAgentLoop(provider, executor, sess, loopCfg)
-	loop.SetLogger(logger)
+	baseAgent := agents.NewBaseAgent(agents.BaseConfig{
+		Provider:        provider,
+		Session:         sess,
+		SystemPrompt:    systemPrompt,
+		ToolSpecs:       ctoToolSpecs,
+		Executor:        executor,
+		MaxToolRounds:   maxRounds,
+		MaxTokens:       16384,
+		ContextSize:     cfg.ContextSize,
+		ThinkingBudget:  4096,
+		ProjectDir:      cfg.ProjectDir,
+		SandboxID:       cfg.SandboxID,
+		GenerateOptions: core.GenerateOptions{MaxTokens: 16384, Temperature: 0.7, TopP: 0.95, TopK: 20},
+		ScratchStore:    scratchStore,
+		PermDecisions:   core.GlobalDecisions,
+		ToolPerms:       cfg.ToolPerms,
+		ExtraHooks:      ctoHooks,
+		ToolResultProcessor: toolResultProcessor,
+		Logger:          logger,
+	})
 
 	return &Agent{
-		Loop:     loop,
-		Session:  sess,
-		Memory:   cfg.MemoryStore,
-		config:   cfg,
-		logger:   logger,
-		jitStore: jitStore,
-		runner:   pr,
+		BaseAgent: baseAgent,
+		Memory:    cfg.MemoryStore,
+		config:    cfg,
+		logger:    logger,
+		jitStore:  jitStore,
+		runner:    pr,
 	}, nil
 }
 
 // Run executes the agent with a user message.
 func (a *Agent) Run(ctx context.Context, userMsg string, subscriber chan<- core.AgentEvent) error {
-	return a.Loop.RunWithImages(ctx, userMsg, nil, subscriber)
+	return a.Loop().RunWithImages(ctx, userMsg, nil, subscriber)
 }
 
 // RunWithImages executes the agent with a multimodal user message (text + images).
 func (a *Agent) RunWithImages(ctx context.Context, userMsg string, images []core.ContentImage, subscriber chan<- core.AgentEvent) error {
-	return a.Loop.RunWithImages(ctx, userMsg, images, subscriber)
+	return a.Loop().RunWithImages(ctx, userMsg, images, subscriber)
 }
 
 // Continue sends a follow-up message.
 func (a *Agent) Continue(ctx context.Context, userMsg string, subscriber chan<- core.AgentEvent) error {
-	return a.Loop.Continue(ctx, userMsg, subscriber)
+	return a.Loop().Continue(ctx, userMsg, subscriber)
 }
 
 // Close releases resources.
@@ -568,12 +552,13 @@ func (a *Agent) Close() error {
 	if a.jitStore != nil {
 		_ = a.jitStore.Cleanup()
 	}
-	return a.Loop.Close()
+	a.BaseAgent.Close()
+	return nil
 }
 
 // IsRunning returns whether the agent is currently active.
 func (a *Agent) IsRunning() bool {
-	return a.Loop.IsRunning()
+	return a.Loop().IsRunning()
 }
 
 // makeOrchestratorFactory creates a factory for recursive delegation.
