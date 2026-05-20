@@ -122,6 +122,70 @@ func (m *TaskManager) SetSubscriber(ch chan<- AgentEvent) {
 	m.subscriber = ch
 }
 
+// StartTracked creates a tracked task without running a command.
+// Used for delegations: the caller manages the lifecycle (calls CompleteTracked
+// when done). The task gets the same foreground→background signal mechanism.
+func (m *TaskManager) StartTracked(command, description string) (*BackgroundTask, error) {
+	taskID := "bg_" + uuid.New().String()[:8]
+
+	task := &BackgroundTask{
+		ID:             taskID,
+		Command:        command,
+		Description:    description,
+		Status:         TaskRunning,
+		StartTime:      time.Now(),
+		Done:           make(chan struct{}),
+		IsBackgrounded: false,
+		BackgroundReq:  make(chan struct{}, 1),
+	}
+
+	m.mu.Lock()
+	m.tasks[taskID] = task
+	m.mu.Unlock()
+
+	m.emitEvent(EventTypeTaskStarted, AgentEventData{
+		TaskID:  taskID,
+		Command: command,
+		Status:  string(TaskRunning),
+	})
+
+	return task, nil
+}
+
+// CompleteTracked marks a tracked task as complete. Used by the parallel runner
+// when a backgrounded delegation finishes.
+func (m *TaskManager) CompleteTracked(taskID string, output string, exitCode int, errStr string) {
+	m.mu.RLock()
+	task, ok := m.tasks[taskID]
+	m.mu.RUnlock()
+
+	if !ok {
+		return
+	}
+
+	task.mu.Lock()
+	if errStr != "" {
+		task.Status = TaskFailed
+		task.Error = errStr
+	} else {
+		task.Status = TaskCompleted
+	}
+	task.ExitCode = exitCode
+	task.Output.WriteString(output)
+	task.EndTime = time.Now()
+	task.mu.Unlock()
+
+	close(task.Done)
+
+	m.emitEvent(EventTypeTaskCompleted, AgentEventData{
+		TaskID:   taskID,
+		Command:  task.Command,
+		Status:   string(task.Status),
+		ExitCode: exitCode,
+		Error:    errStr,
+	})
+}
+
 // Start begins executing a command. If runInBG is true, the task runs in the
 // background and the method returns immediately. If runInBG is false, the
 // command still runs in a goroutine but the caller should wait on task.Done

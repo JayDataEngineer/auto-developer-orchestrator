@@ -341,6 +341,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		pr.SetProjectDir(cfg.ProjectDir)
 		pr.SetDepth(0)
 		pr.SetOrchestratorFactory(makeOrchestratorFactory(provider, cfg))
+		// Enable Ctrl+B backgrounding for synchronous delegations
+		if cfg.TaskMgr != nil {
+			pr.SetTaskManager(cfg.TaskMgr)
+		}
 		// Summarize long sub-agent results before returning to CTO
 		pr.SetSummarizer(func(ctx context.Context, text string, targetChars int) (string, error) {
 			return ctxpkg.SummarizeText(ctx, provider, text, targetChars)

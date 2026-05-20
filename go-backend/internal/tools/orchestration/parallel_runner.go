@@ -79,6 +79,11 @@ type ParallelRunner struct {
 	// before returning to the CTO instead of just being truncated.
 	summarizer SummarizerFunc
 
+	// Background task manager: when set, synchronous delegations can be
+	// backgrounded by the user (Ctrl+B). The delegation registers as a foreground
+	// task; Ctrl+B signals BackgroundReq; the subagent keeps running.
+	taskMgr *core.TaskManager
+
 	// Sub-agent transcript persistence: when set, sub-agent messages are stored
 	// in the database so their full chat log can be retrieved later.
 	db             *storage.Database
@@ -156,6 +161,13 @@ func (r *ParallelRunner) SetExecutorFactory(f func(tier string) core.ToolExecuto
 // in a delegation, so the VNC stream shows the browser.
 func (r *ParallelRunner) SetRaiseBrowserFunc(f func(ctx context.Context)) {
 	r.raiseBrowserFunc = f
+}
+
+// SetTaskManager enables Ctrl+B backgrounding for synchronous delegations.
+// When set, delegate_to registers as a foreground task; the user can press
+// Ctrl+B to send it to the background while the subagent keeps running.
+func (r *ParallelRunner) SetTaskManager(m *core.TaskManager) {
+	r.taskMgr = m
 }
 
 // SetVisualContext enables frame-based vision caching for sub-agent executors.
@@ -419,6 +431,15 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	}
 	loop := core.NewAgentLoop(provider, executor, sess, cfg)
 
+	// Register as foreground task for Ctrl+B backgrounding
+	var bgTask *core.BackgroundTask
+	if r.taskMgr != nil {
+		bgTask, _ = r.taskMgr.StartTracked(
+			fmt.Sprintf("delegate %s", agentName),
+			truncateTask(task, 120),
+		)
+	}
+
 	// Collect events into result
 	events := make(chan core.AgentEvent, 128)
 	done := make(chan struct{})
@@ -432,6 +453,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 
 	// Drain events: accumulate text result + forward tool events to parent subscriber
 	var finalText string
+	var backgrounded bool
 	evtDone := false
 	for !evtDone {
 		select {
@@ -461,7 +483,55 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 					core.SendEvent(subscriber, forwarded)
 				}
 			}
+		case <-func() <-chan struct{} {
+			if bgTask != nil {
+				return bgTask.BackgroundReq
+			}
+			return nil
+		}():
+			backgrounded = true
+			evtDone = true
 		}
+	}
+
+	// Handle backgrounded delegation — subagent keeps running in goroutine
+	if backgrounded && bgTask != nil {
+		go func() {
+			var bgText string
+			for evt := range events {
+				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+					bgText += evt.Data.Text
+				}
+				if subscriber != nil {
+					switch evt.Type {
+					case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
+						core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+						forwarded := evt
+						forwarded.Data.AgentName = agentName
+						core.SendEvent(subscriber, forwarded)
+					}
+				}
+			}
+			<-done
+			var errStr string
+			if runErr != nil {
+				errStr = runErr.Error()
+			}
+			r.taskMgr.CompleteTracked(bgTask.ID, finalText+bgText, 0, errStr)
+			endStatus := "completed"
+			if runErr != nil {
+				endStatus = "error"
+			}
+			core.SendEvent(subscriber, core.AgentEvent{
+				Type: core.EventTypeSubAgentEnd,
+				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120)},
+			})
+		}()
+		return map[string]any{
+			"status":  "backgrounded",
+			"task_id": bgTask.ID,
+			"message": fmt.Sprintf("Delegation to %s sent to background. Use task_output with task_id '%s' to check results.", agentName, bgTask.ID),
+		}, nil
 	}
 
 	// Emit subagent_end
@@ -540,6 +610,15 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	}
 	defer subOrch.Close()
 
+	// Register as foreground task for Ctrl+B backgrounding
+	var bgTask *core.BackgroundTask
+	if r.taskMgr != nil {
+		bgTask, _ = r.taskMgr.StartTracked(
+			fmt.Sprintf("division %s", agentName),
+			truncateTask(task, 120),
+		)
+	}
+
 	// Run the sub-orchestrator, collect events
 	events := make(chan core.AgentEvent, 128)
 	done := make(chan struct{})
@@ -552,6 +631,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	}()
 
 	var finalText string
+	var backgrounded bool
 	evtDone := false
 	for !evtDone {
 		select {
@@ -580,7 +660,56 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 					core.SendEvent(subscriber, forwarded)
 				}
 			}
+		case <-func() <-chan struct{} {
+			if bgTask != nil {
+				return bgTask.BackgroundReq
+			}
+			return nil
+		}():
+			backgrounded = true
+			evtDone = true
 		}
+	}
+
+	// Handle backgrounded division delegation
+	if backgrounded && bgTask != nil {
+		go func() {
+			var bgText string
+			for evt := range events {
+				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+					bgText += evt.Data.Text
+				}
+				if subscriber != nil {
+					switch evt.Type {
+					case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
+						core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+						forwarded := evt
+						forwarded.Data.AgentName = agentName
+						core.SendEvent(subscriber, forwarded)
+					}
+				}
+			}
+			<-done
+			var errStr string
+			if runErr != nil {
+				errStr = runErr.Error()
+			}
+			r.taskMgr.CompleteTracked(bgTask.ID, finalText+bgText, 0, errStr)
+			endStatus := "completed"
+			if runErr != nil {
+				endStatus = "error"
+			}
+			core.SendEvent(subscriber, core.AgentEvent{
+				Type: core.EventTypeSubAgentEnd,
+				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120)},
+			})
+		}()
+		return map[string]any{
+			"status":    "backgrounded",
+			"task_id":   bgTask.ID,
+			"division":  divisionPath,
+			"message":   fmt.Sprintf("Division %s sent to background. Use task_output with task_id '%s' to check results.", agentName, bgTask.ID),
+		}, nil
 	}
 
 	// Emit subagent_end
@@ -728,6 +857,15 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	}
 	loop := core.NewAgentLoop(provider, executor, sess, cfg)
 
+	// Register as a foreground task so Ctrl+B can background the delegation
+	var bgTask *core.BackgroundTask
+	if r.taskMgr != nil {
+		bgTask, _ = r.taskMgr.StartTracked(
+			fmt.Sprintf("delegate_to %s", agentName),
+			truncateTask(task, 120),
+		)
+	}
+
 	// Run the loop
 	events := make(chan core.AgentEvent, 128)
 	done := make(chan struct{})
@@ -740,7 +878,9 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	}()
 
 	// Drain events: accumulate text result + forward tool events to parent subscriber
+	// Also watch for background signal (Ctrl+B) if TaskManager is wired in.
 	var finalText string
+	var backgrounded bool
 	evtDone := false
 	for !evtDone {
 		select {
@@ -768,7 +908,71 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 					core.SendEvent(subscriber, forwarded)
 				}
 			}
+		case <-func() <-chan struct{} {
+			if bgTask != nil {
+				return bgTask.BackgroundReq
+			}
+			return nil // nil channel never fires
+		}():
+			// User pressed Ctrl+B — detach from the blocking loop.
+			// The subagent goroutine keeps running; we'll collect its result
+			// when it finishes and store it in the task.
+			backgrounded = true
+			evtDone = true
 		}
+	}
+
+	// If backgrounded, spin up a goroutine to collect the final result and
+	// store it in the TaskManager so the user can check on it later.
+	if backgrounded && bgTask != nil {
+		go func() {
+			// Drain remaining events from the still-running subagent
+			var bgText string
+			for evt := range events {
+				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+					bgText += evt.Data.Text
+				}
+				// Keep forwarding events to SSE so TUI shows live progress
+				if subscriber != nil {
+					switch evt.Type {
+					case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
+						core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+						forwarded := evt
+						forwarded.Data.AgentName = agentName
+						core.SendEvent(subscriber, forwarded)
+					}
+				}
+			}
+			<-done // wait for loop.Run to return
+
+			var errStr string
+			if runErr != nil {
+				errStr = runErr.Error()
+			}
+			r.taskMgr.CompleteTracked(bgTask.ID, finalText+bgText, 0, errStr)
+
+			// Emit subagent_end for the backgrounded delegation
+			endStatus := "completed"
+			if runErr != nil {
+				endStatus = "error"
+			}
+			core.SendEvent(subscriber, core.AgentEvent{
+				Type: core.EventTypeSubAgentEnd,
+				Data: core.AgentEventData{
+					AgentName: agentName,
+					Status:    endStatus,
+					Task:      truncateTask(task, 120),
+				},
+			})
+		}()
+
+		agentRef := fmt.Sprintf("%s-%d", agentName, time.Now().UnixMilli())
+		return map[string]any{
+			"status":    "backgrounded",
+			"task_id":   bgTask.ID,
+			"agent_ref": agentRef,
+			"message":   fmt.Sprintf("Delegation to %s sent to background. Use task_output with task_id '%s' to check results.", agentName, bgTask.ID),
+		}, nil
 	}
 
 	// Emit subagent_end

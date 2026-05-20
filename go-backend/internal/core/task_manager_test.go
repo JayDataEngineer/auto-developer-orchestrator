@@ -238,3 +238,78 @@ func TestTaskManager_SSEEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskManager_TrackedDelegation(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "pux-task-test-")
+	defer os.RemoveAll(dir)
+
+	mgr := NewTaskManager(dir)
+
+	// Start a tracked task (like a delegation — no command)
+	task, err := mgr.StartTracked("delegate_to marcus", "fix the bug")
+	if err != nil {
+		t.Fatalf("StartTracked failed: %v", err)
+	}
+	if task.ID == "" {
+		t.Fatal("expected non-empty task ID")
+	}
+	if task.IsBackgrounded {
+		t.Fatal("tracked task should not start as backgrounded")
+	}
+
+	// Check status is running
+	status, err := mgr.Status(task.ID)
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if status.Status != TaskRunning {
+		t.Errorf("expected running, got %s", status.Status)
+	}
+
+	// Complete it
+	mgr.CompleteTracked(task.ID, "fixed the bug in auth.go", 0, "")
+
+	// Wait for completion
+	result, err := mgr.Wait(task.ID, 2*time.Second)
+	if err != nil {
+		t.Fatalf("Wait failed: %v", err)
+	}
+	if result.Status != TaskCompleted {
+		t.Errorf("expected completed, got %s", result.Status)
+	}
+}
+
+func TestTaskManager_TrackedBackground(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "pux-task-test-")
+	defer os.RemoveAll(dir)
+
+	mgr := NewTaskManager(dir)
+
+	task, _ := mgr.StartTracked("delegate_to marcus", "fix the bug")
+
+	// Background it (simulating Ctrl+B)
+	err := mgr.Background(task.ID)
+	if err != nil {
+		t.Fatalf("Background failed: %v", err)
+	}
+	if !task.IsBackgrounded {
+		t.Fatal("expected task to be backgrounded")
+	}
+
+	// The BackgroundReq channel should have been signaled
+	select {
+	case <-task.BackgroundReq:
+		// Good
+	case <-time.After(1 * time.Second):
+		t.Fatal("BackgroundReq was not signaled")
+	}
+
+	// Now complete it (subagent finishes in background)
+	mgr.CompleteTracked(task.ID, "fixed", 0, "")
+
+	// Should be completed now
+	result, _ := mgr.Wait(task.ID, 2*time.Second)
+	if result.Status != TaskCompleted {
+		t.Errorf("expected completed, got %s", result.Status)
+	}
+}
