@@ -60,19 +60,31 @@ const commands: Command[] = [
 		description: "Compact context to free token budget",
 		handler: async () => {
 			const store = usePuxStore.getState();
+			const { activeProject, activeAgentId } = store;
+			if (!activeProject && !activeAgentId) {
+				return { type: "handled", message: "No active conversation to compact." };
+			}
+			store.setState({ compacting: true });
 			try {
 				const fetch = getFetch();
 				const resp = await fetch(apiUrl(`/api/pux/compact`), {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ conversation_id: store.activeConversationId }),
+					body: JSON.stringify({ project: activeProject || "default", agentId: activeAgentId || "default" }),
 				});
 				if (resp.ok) {
-					return { type: "handled", message: "Context compacted." };
+					const data = await resp.json();
+					if (data.status === "ok") {
+						const saved = data.tokensBefore - data.tokensAfter;
+						return { type: "handled", message: `Compacted (${data.compactionType}): ${saved} tokens freed.` };
+					}
+					return { type: "handled", message: data.message || "Nothing to compact." };
 				}
 				return { type: "handled", message: "Compact failed." };
 			} catch {
 				return { type: "handled", message: "Backend unreachable." };
+			} finally {
+				store.setState({ compacting: false });
 			}
 		},
 	},

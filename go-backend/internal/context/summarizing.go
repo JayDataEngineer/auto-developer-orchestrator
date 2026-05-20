@@ -251,21 +251,17 @@ func findCutPoint(msgs []core.Message, keepTokens int) int {
 	return 0 // Not enough messages to exceed budget, summarize from start
 }
 
-// generateSummary calls the LLM to produce a structured summary of older messages.
-// Uses turn-boundary-aware cut points and supports iterative summary merging.
-func (m *SummarizingContextManager) generateSummary(ctx context.Context, msgs []core.Message) string {
-	if m.provider == nil {
+// SummarizeMessages calls the LLM to produce a structured summary of messages.
+// This is the reusable core used by both automatic and manual compaction.
+// prevSummary is optional — when provided, the LLM merges new content into it.
+// cutPoint specifies how many leading messages to summarize (msgs[:cutPoint]).
+func SummarizeMessages(ctx context.Context, provider core.LLMProvider, msgs []core.Message, cutPoint int, prevSummary string) string {
+	if provider == nil || len(msgs) < 2 {
 		return ""
 	}
-
-	// Determine keep budget
-	keepTokens := m.config.KeepRecentTokens
-	if keepTokens <= 0 {
-		// Legacy: 20% of context size
-		keepTokens = m.config.ContextSize / 5
+	if cutPoint <= 0 || cutPoint > len(msgs) {
+		cutPoint = len(msgs)
 	}
-
-	cutPoint := findCutPoint(msgs, keepTokens)
 	oldMsgs := msgs[:cutPoint]
 	if len(oldMsgs) < 2 {
 		return ""
@@ -274,16 +270,14 @@ func (m *SummarizingContextManager) generateSummary(ctx context.Context, msgs []
 	// Build the conversation text for summarization
 	var b strings.Builder
 
-	// Iterative merge: include previous summary if available
-	if m.lastSummary != "" {
-		// Cap previous summary to ~1500 tokens to avoid blowing up the prompt
-		prevSummary := m.lastSummary
-		const maxPrevSummaryChars = 5000 // ~1500 tokens at 0.3 ratio
-		if len(prevSummary) > maxPrevSummaryChars {
-			prevSummary = prevSummary[:maxPrevSummaryChars] + "\n...[previous summary truncated]"
+	if prevSummary != "" {
+		const maxPrevSummaryChars = 5000
+		ps := prevSummary
+		if len(ps) > maxPrevSummaryChars {
+			ps = ps[:maxPrevSummaryChars] + "\n...[previous summary truncated]"
 		}
 		b.WriteString("=== PREVIOUS SUMMARY ===\n")
-		b.WriteString(prevSummary)
+		b.WriteString(ps)
 		b.WriteString("\n\n=== NEW CONVERSATION TO MERGE ===\n\n")
 	} else {
 		b.WriteString("=== CONVERSATION TO SUMMARIZE ===\n\n")
@@ -311,7 +305,7 @@ func (m *SummarizingContextManager) generateSummary(ctx context.Context, msgs []
 	}
 
 	var summaryPrompt string
-	if m.lastSummary != "" {
+	if prevSummary != "" {
 		summaryPrompt = `You are merging NEW conversation content into an EXISTING summary above.
 
 Update the structured summary to incorporate the new information. Preserve:
@@ -342,39 +336,52 @@ Be concise but comprehensive. The agent needs this summary to continue working e
 		},
 	}
 
-	// Call the LLM provider
 	opts := core.GenerateOptions{
 		MaxTokens:   2048,
 		Temperature: 0.3,
 		TopP:        0.9,
 	}
 
-	ch, err := m.provider.StreamChat(ctx, summarizeMessages, nil, opts)
+	ch, err := provider.StreamChat(ctx, summarizeMessages, nil, opts)
 	if err != nil {
-		m.logger.Printf("SummarizingContextManager: LLM call failed: %v", err)
 		return ""
 	}
 
-	// Collect the streaming response
 	var summary strings.Builder
 	for evt := range ch {
 		if evt.Type == core.ChatEventContent {
 			summary.WriteString(evt.Content)
 		}
 		if evt.Type == core.ChatEventError {
-			m.logger.Printf("SummarizingContextManager: LLM stream error: %v", evt.Err)
 			return ""
 		}
 	}
 
 	result := strings.TrimSpace(summary.String())
 	if len(result) < 50 {
-		return "" // too short to be useful
+		return ""
 	}
 
-	// Store for iterative merging on next compaction
-	m.lastSummary = result
+	return result
+}
 
+// generateSummary calls the LLM to produce a structured summary of older messages.
+// Uses turn-boundary-aware cut points and supports iterative summary merging.
+func (m *SummarizingContextManager) generateSummary(ctx context.Context, msgs []core.Message) string {
+	if m.provider == nil {
+		return ""
+	}
+
+	keepTokens := m.config.KeepRecentTokens
+	if keepTokens <= 0 {
+		keepTokens = m.config.ContextSize / 5
+	}
+
+	cutPoint := findCutPoint(msgs, keepTokens)
+	result := SummarizeMessages(ctx, m.provider, msgs, cutPoint, m.lastSummary)
+	if result != "" {
+		m.lastSummary = result
+	}
 	return result
 }
 

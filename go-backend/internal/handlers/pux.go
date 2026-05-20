@@ -394,8 +394,9 @@ func (h *PuxHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
 }
 
 // Compact triggers a manual context compaction for the given agent session.
-// This is a lightweight operation — it clears old tool results (micro-compact).
-// Full LLM-based compaction happens automatically via the SummarizingContextManager during BuildContext.
+// Performs LLM summarization on the session JSONL file, replacing old messages
+// with a structured summary. Falls back to micro-compact (tool result truncation)
+// when no LLM engine is available.
 func (h *PuxHandler) Compact(w http.ResponseWriter, r *http.Request) {
 	req, ok := decodeReq[struct {
 		Project string `json:"project"`
@@ -409,22 +410,17 @@ func (h *PuxHandler) Compact(w http.ResponseWriter, r *http.Request) {
 		req.AgentID = "default"
 	}
 
-	// Micro-compact: trim old messages from the database
-	// The session tree handles full compaction internally during the agent loop
-	compacted, err := h.db.CompactSession(r.Context(), req.Project, req.AgentID)
-	if err != nil {
-		h.log.Warn("manual compact failed", zap.String("project", req.Project), zap.Error(err))
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":  "error",
-			"message": err.Error(),
-		})
-		return
+	// Run compaction on the JSONL session file
+	result := h.compactSession(r.Context(), req.Project, req.AgentID)
+
+	// Also trim the database for consistency
+	if h.db != nil {
+		if _, err := h.db.CompactSession(r.Context(), req.Project, req.AgentID); err != nil {
+			h.log.Warn("db compact failed (non-fatal)", zap.String("project", req.Project), zap.Error(err))
+		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":            "ok",
-		"compactedMessages": compacted,
-	})
+	writeJSON(w, http.StatusOK, result)
 }
 
 // SetHookBridge sets the SSE hook bridge for TUI interception.
