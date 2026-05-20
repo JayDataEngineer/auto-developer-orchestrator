@@ -75,6 +75,7 @@ import {
 	Settings,
 	WifiOff,
 	AlertTriangle,
+	Pencil,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -257,6 +258,105 @@ function SidebarToggle() {
 	);
 }
 
+// ── Conversation item with inline rename ──
+
+function ConversationItem({
+	conversation: c,
+	isProcessing,
+	isUnread,
+	onSelect,
+	onDelete,
+	onRename,
+}: {
+	conversation: Conversation;
+	isProcessing: boolean;
+	isUnread: boolean;
+	onSelect: () => void;
+	onDelete: () => void;
+	onRename: (title: string) => void;
+}) {
+	const [renaming, setRenaming] = useState(false);
+	const [draft, setDraft] = useState("");
+	const inputRef = useRef<HTMLInputElement>(null);
+
+	const startRename = (e: React.MouseEvent) => {
+		e.stopPropagation();
+		setDraft(c.title || c.lastMessage || "");
+		setRenaming(true);
+		setTimeout(() => inputRef.current?.focus(), 0);
+	};
+
+	const submitRename = () => {
+		const trimmed = draft.trim();
+		if (trimmed) onRename(trimmed);
+		setRenaming(false);
+	};
+
+	return (
+		<SidebarMenuSubItem className="group/sub">
+			{renaming ? (
+				<div className="flex items-center gap-1 px-2 py-1">
+					<input
+						ref={inputRef}
+						value={draft}
+						onChange={(e) => setDraft(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") submitRename();
+							if (e.key === "Escape") setRenaming(false);
+						}}
+						onBlur={submitRename}
+						className="h-5 w-full rounded bg-background px-1.5 text-[12px] outline-none ring-1 ring-ring"
+					/>
+				</div>
+			) : (
+				<SidebarMenuSubButton
+					onClick={onSelect}
+					className="!cursor-default"
+				>
+					<div className="flex min-w-0 flex-1 items-center gap-1.5">
+						{isUnread && !isProcessing && (
+							<span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-white" />
+						)}
+						{isProcessing && (
+							<span className="relative flex h-2 w-2 shrink-0">
+								<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
+								<span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+							</span>
+						)}
+						<div className="flex min-w-0 flex-1 flex-col">
+							<span className="truncate text-[12px]">
+								{c.title || c.lastMessage || "Untitled"}
+							</span>
+							<span className="text-[10px] text-muted-foreground">
+								{relativeTime(c.lastAt, { now: "now" })}
+								{c.messageCount > 0 &&
+									` · ${c.messageCount} msgs`}
+							</span>
+						</div>
+					</div>
+					<button
+						onClick={startRename}
+						className="shrink-0 rounded p-0.5 opacity-0 hover:bg-muted group-hover/sub:opacity-100"
+						title="Rename"
+					>
+						<Pencil className="size-3" />
+					</button>
+					<button
+						onClick={(e) => {
+							e.stopPropagation();
+							onDelete();
+						}}
+						className="shrink-0 rounded p-0.5 opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/sub:opacity-100"
+						title="Delete chat"
+					>
+						<Trash2 className="size-3" />
+					</button>
+				</SidebarMenuSubButton>
+			)}
+		</SidebarMenuSubItem>
+	);
+}
+
 // ── Project Group (collapsible) ──
 
 function ProjectGroup({
@@ -276,6 +376,7 @@ function ProjectGroup({
 }) {
 	const displayName = projectKey.split("/").pop() || projectKey;
 	const deleteConversation = usePuxStore((s) => s.deleteConversation);
+	const renameConversation = usePuxStore((s) => s.renameConversation);
 	const removeProject = usePuxStore((s) => s.removeProject);
 	const runningAgents = usePuxStore((s) => s.runningAgents);
 
@@ -315,45 +416,15 @@ function ProjectGroup({
 								const isProcessing = status === "processing" || runningAgents.has(convKey);
 								const isUnread = status === "unread";
 								return (
-									<SidebarMenuSubItem key={`${c.project}-${c.agentId}`} className="group/sub">
-										<SidebarMenuSubButton
-											onClick={() =>
-												onSelectConversation(c.project, c.agentId)
-											}
-										>
-											<div className="flex min-w-0 flex-1 items-center gap-1.5">
-												{isUnread && !isProcessing && (
-													<span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-white" />
-												)}
-												{isProcessing && (
-													<span className="relative flex h-2 w-2 shrink-0">
-														<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
-														<span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
-													</span>
-												)}
-												<div className="flex min-w-0 flex-1 flex-col">
-													<span className="truncate text-[12px]">
-														{c.title || c.lastMessage || "Untitled"}
-													</span>
-													<span className="text-[10px] text-muted-foreground">
-														{relativeTime(c.lastAt, { now: "now" })}
-														{c.messageCount > 0 &&
-															` · ${c.messageCount} msgs`}
-													</span>
-												</div>
-											</div>
-											<button
-												onClick={(e) => {
-													e.stopPropagation();
-													deleteConversation(c.project, c.agentId);
-												}}
-												className="ml-1 shrink-0 rounded p-0.5 opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/sub:opacity-100"
-												title="Delete chat"
-											>
-												<Trash2 className="size-3" />
-											</button>
-										</SidebarMenuSubButton>
-									</SidebarMenuSubItem>
+									<ConversationItem
+										key={`${c.project}-${c.agentId}`}
+										conversation={c}
+										isProcessing={isProcessing}
+										isUnread={isUnread}
+										onSelect={() => onSelectConversation(c.project, c.agentId)}
+										onDelete={() => deleteConversation(c.project, c.agentId)}
+										onRename={(title) => renameConversation(c.project, c.agentId, title)}
+									/>
 								);
 							})}
 						</SidebarMenuSub>
@@ -480,24 +551,24 @@ function Workbench() {
 			onValueChange={(v) => setStoreTab(v as WorkbenchTab)}
 			className="flex h-full flex-col bg-sidebar"
 		>
-			<TabsList className="h-9 shrink-0 w-full justify-start rounded-none border-b border-border bg-transparent px-2">
-				<TabsTrigger value="vnc" className="gap-1.5 text-xs">
+			<TabsList className="h-9 shrink-0 w-full rounded-none border-b border-border bg-transparent px-2">
+				<TabsTrigger value="vnc" className="gap-1.5 text-xs grow shrink-0">
 					<Monitor className="size-4" />
 					Sandbox
 				</TabsTrigger>
-				<TabsTrigger value="editor" className="gap-1.5 text-xs">
+				<TabsTrigger value="editor" className="gap-1.5 text-xs grow shrink-0">
 					<Code2 className="size-4" />
 					Editor
 				</TabsTrigger>
-				<TabsTrigger value="scheduler" className="gap-1.5 text-xs">
+				<TabsTrigger value="scheduler" className="gap-1.5 text-xs grow shrink-0">
 					<Calendar className="size-4" />
 					Scheduler
 				</TabsTrigger>
-				<TabsTrigger value="workers" className="gap-1.5 text-xs">
+				<TabsTrigger value="workers" className="gap-1.5 text-xs grow shrink-0">
 					<Users className="size-4" />
 					Agents
 				</TabsTrigger>
-				<TabsTrigger value="settings" className="gap-1.5 text-xs">
+				<TabsTrigger value="settings" className="gap-1.5 text-xs grow shrink-0">
 					<Settings className="size-4" />
 					Settings
 				</TabsTrigger>
