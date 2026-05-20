@@ -6,7 +6,7 @@
  */
 
 import { puxChatAdapter } from "@pux/shared";
-import type { ChatModelAdapter } from "@assistant-ui/react";
+import type { ChatModelAdapter, ChatModelRunResult } from "@assistant-ui/react";
 import { executeWebCommand, parseCommand } from "./commands";
 
 function extractUserText(
@@ -31,34 +31,50 @@ export const webChatAdapter: ChatModelAdapter = {
 		if (lastMsg?.role === "user") {
 			const text = extractUserText(lastMsg.content).trim();
 			if (text.startsWith("/")) {
-				const result = await executeWebCommand(text);
-				if (result.type === "handled") {
-					if (result.silent) {
-						// Silent commands (tab switches) — no message bubble.
-						// Yield empty complete so the runtime finishes cleanly.
-						yield {
-							content: [],
-							status: { type: "complete" as const, reason: "stop" as const },
-						} as any;
-					} else {
-						yield {
-							content: [
-								{
-									type: "text" as const,
-									text:
-										result.message
-										|| `Ran /${parseCommand(text)?.command || "?"}`,
+				try {
+					const result = await executeWebCommand(text);
+					if (result.type === "handled") {
+						if (result.silent) {
+							// Silent commands (tab switches, /clear, /new) — no message bubble.
+							// Omit content so no ghost assistant message renders.
+							const done: ChatModelRunResult = {
+								status: { type: "complete", reason: "stop" },
+							};
+							yield done;
+						} else {
+							const response: ChatModelRunResult = {
+								content: [
+									{
+										type: "text" as const,
+										text:
+											result.message
+											|| `Ran /${parseCommand(text)?.command || "?"}`,
+									},
+								],
+								status: {
+									type: "complete" as const,
+									reason: "stop" as const,
 								},
-							],
-							status: {
-								type: "complete" as const,
-								reason: "stop" as const,
-							},
-						};
+							};
+							yield response;
+						}
+						return;
 					}
+					// passthrough — send to backend as normal
+				} catch (err) {
+					// Command handler threw — show error instead of breaking the stream
+					const errorResult: ChatModelRunResult = {
+						content: [
+							{
+								type: "text" as const,
+								text: `Command error: ${err instanceof Error ? err.message : String(err)}`,
+							},
+						],
+						status: { type: "complete" as const, reason: "stop" as const },
+					};
+					yield errorResult;
 					return;
 				}
-				// passthrough — send to backend as normal
 			}
 		}
 

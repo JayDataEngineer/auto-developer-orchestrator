@@ -41,6 +41,7 @@ const commands: WebCommand[] = [
 	{
 		name: "clear",
 		description: "Clear conversation history",
+		silent: true,
 		handler: async () => {
 			usePuxStore.getState().clearConversation();
 			return { type: "handled" };
@@ -51,17 +52,32 @@ const commands: WebCommand[] = [
 		description: "Compact context to free token budget",
 		handler: async () => {
 			try {
+				const store = usePuxStore.getState();
 				const fetch = getFetch();
 				const resp = await fetch(apiUrl("/api/pux/compact"), {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({
-						conversation_id: usePuxStore.getState().activeConversationId,
+						project: store.activeProject || "default",
+						agentId: store.activeAgentId || "default",
 					}),
 				});
+				if (!resp.ok) {
+					return { type: "handled", message: "Compact failed." };
+				}
+				const data = await resp.json();
+				if (data.status === "noop") {
+					return { type: "handled", message: `Nothing to compact — ${data.message || "session too small"}` };
+				}
+				if (data.status === "error") {
+					return { type: "handled", message: `Compact error: ${data.message || "unknown"}` };
+				}
+				const saved = data.tokensBefore && data.tokensAfter
+					? ` (${data.tokensBefore} → ${data.tokensAfter} tokens)`
+					: "";
 				return {
 					type: "handled",
-					message: resp.ok ? "Context compacted." : "Compact failed.",
+					message: `Context compacted via ${data.compactionType || "summary"}${saved}. ${data.messagesCompacted || 0} messages compacted.`,
 				};
 			} catch {
 				return { type: "handled", message: "Backend unreachable." };
@@ -71,16 +87,9 @@ const commands: WebCommand[] = [
 	{
 		name: "new",
 		description: "Start a new conversation",
+		silent: true,
 		handler: async () => {
 			usePuxStore.getState().startNewChat();
-			return { type: "handled" };
-		},
-	},
-	{
-		name: "model",
-		description: "Open model picker",
-		handler: async () => {
-			usePuxStore.getState().toggleModelPicker();
 			return { type: "handled" };
 		},
 	},
@@ -92,7 +101,7 @@ const commands: WebCommand[] = [
 			const lines = [
 				`**Project:** ${store.activeProject || "(none)"}`,
 				`**Model:** ${store.activeModel || "default"}`,
-				`**Conversation:** ${store.activeConversationId || "(new)"}`,
+				`**Conversation:** ${store.activeAgentId || "(new)"}`,
 			];
 			if (store.lastUsage) {
 				lines.push(
@@ -110,27 +119,6 @@ const commands: WebCommand[] = [
 				lines.push(`**Agents:** ${running} running, ${agents.length} total`);
 			}
 			return { type: "handled", message: lines.join("\n") };
-		},
-	},
-	{
-		name: "history",
-		description: "List recent conversations",
-		handler: async () => {
-			const convos = usePuxStore.getState().conversations;
-			if (convos.length === 0) {
-				return { type: "handled", message: "No conversations found." };
-			}
-			const lines = convos
-				.slice(0, 10)
-				.map(
-					(c, i) =>
-						`${String(i + 1).padStart(2)}. ${c.title || c.agentId.slice(0, 8)}`,
-				)
-				.join("\n");
-			return {
-				type: "handled",
-				message: `**Recent conversations:**\n\`\`\`\n${lines}\n\`\`\``,
-			};
 		},
 	},
 	// ── Workbench tab shortcuts (silent — no message bubble) ──
@@ -176,23 +164,6 @@ const commands: WebCommand[] = [
 		silent: true,
 		handler: async () => {
 			usePuxStore.getState().setWorkbenchTab("settings");
-			return { type: "handled" };
-		},
-	},
-	{
-		name: "providers",
-		description: "Open provider browser",
-		silent: true,
-		handler: async () => {
-			usePuxStore.getState().toggleProvidersOverlay();
-			return { type: "handled" };
-		},
-	},
-	{
-		name: "mcp",
-		description: "View MCP server status",
-		handler: async () => {
-			usePuxStore.getState().toggleMCPOverlay();
 			return { type: "handled" };
 		},
 	},
