@@ -122,33 +122,26 @@ const ThreadWelcome: FC = () => {
 
 const Composer: FC = () => {
 	const composerRef = useRef<HTMLDivElement>(null);
-	const [inputValue, setInputValue] = useState("");
 	const [paletteVisible, setPaletteVisible] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [query, setQuery] = useState("");
 
-	// Track textarea value via native listener (assistant-ui owns the textarea)
-	useEffect(() => {
-		const el = composerRef.current;
-		if (!el) return;
-		const textarea = el.querySelector("textarea");
-		if (!textarea) return;
-
-		const handler = () => {
-			const val = textarea.value;
-			setInputValue(val);
+	// Track input changes via React's onChange (batched with @assistant-ui store
+	// updates). Previously used a native addEventListener("input", ...) which
+	// fired before the store synced, causing the controlled textarea to reset.
+	const handleInputChange = useCallback(
+		(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+			const val = e.target.value;
 			const isCommand = val.startsWith("/") && !val.slice(1).includes(" ");
+			setQuery(isCommand ? val.slice(1).split(" ")[0].toLowerCase() : "");
 			setPaletteVisible(isCommand);
 			if (isCommand) setSelectedIndex(0);
-		};
-		textarea.addEventListener("input", handler);
-		return () => textarea.removeEventListener("input", handler);
-	}, []);
+		},
+		[],
+	);
 
 	// Filter commands based on what's typed after /
 	const allCommands = useMemo(() => getWebCommands(), []);
-	const query = inputValue.startsWith("/")
-		? inputValue.slice(1).split(" ")[0].toLowerCase()
-		: "";
 	const filtered = useMemo(
 		() =>
 			query
@@ -169,6 +162,7 @@ const Composer: FC = () => {
 		textarea.dispatchEvent(new Event("input", { bubbles: true }));
 		textarea.focus();
 		setPaletteVisible(false);
+		setQuery("");
 	}, []);
 
 	// Keyboard navigation for command palette (capture phase to preempt assistant-ui)
@@ -233,6 +227,7 @@ const Composer: FC = () => {
 						className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-4 pt-2 pb-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
 						rows={1}
 						autoFocus
+						onChange={handleInputChange}
 						aria-label="Message input"
 					/>
 					<ComposerAction />
