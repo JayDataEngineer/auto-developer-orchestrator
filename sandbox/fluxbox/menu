@@ -1,5 +1,6 @@
 [begin] (Pux Sandbox)
-[exec] (Chrome) {/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check}
+[exec] (Chrome) {/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check --enable-features=WebContentsForceDark}
+[exec] (File Browser) {pcmanfm /sandbox/workspace}
 [exec] (Terminal) {xterm}
 [separator]
 [include] (/usr/local/bin/fluxbox-apps-menu.sh)
