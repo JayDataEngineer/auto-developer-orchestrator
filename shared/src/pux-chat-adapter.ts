@@ -657,6 +657,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 							const agentName = parsed.agentName as string | undefined;
 							const agentId = parsed.agentId as string | undefined;
 							const task = parsed.task as string || parsed.prompt as string || "";
+							const transcriptId = parsed.transcriptId as string | undefined;
 							// Gap 9: Track which delegate tool this sub-agent belongs to
 							// so we can collect its messages
 							subAgentMessageAccum = [];
@@ -674,6 +675,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 									status: "running",
 									startedAt: Date.now(),
 									toolCalls: [],
+									transcriptId,
 								});
 							}
 							break;

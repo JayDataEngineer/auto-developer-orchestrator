@@ -308,13 +308,17 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	subscriber := subscriberFromCtx(ctx)
 	r.logger("SYNC_DELEGATE: task=%q agent=%s tools=%v model=%q", task, agentName, toolNames, modelID)
 
+	// Generate deterministic transcript ID before emitting event
+	transcriptID := r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli())
+
 	// Emit subagent_start to parent subscriber
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
 		Data: core.AgentEventData{
-			AgentName: agentName,
-			Task:      truncateTask(task, 120),
-			ToolName:  "delegate_to",
+			AgentName:    agentName,
+			Task:         truncateTask(task, 120),
+			ToolName:     "delegate_to",
+			TranscriptID: transcriptID,
 		},
 	})
 
@@ -387,7 +391,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		msgCount:  0,
 		db:        r.db,
 		project:   r.project,
-		dbAgentID: r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli()),
+		dbAgentID: transcriptID,
 	}
 	executor := r.executor
 	if r.executorFactory != nil && sandboxTier != "" {
@@ -500,12 +504,14 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	r.logger("DIVISION_DELEGATE: path=%s depth=%d model=%q", absPath, r.depth+1, modelID)
 
 	// Emit subagent_start
+	transcriptID := r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli())
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
 		Data: core.AgentEventData{
-			AgentName: agentName,
-			Task:      truncateTask(task, 120),
-			ToolName:  "delegate_to",
+			AgentName:    agentName,
+			Task:         truncateTask(task, 120),
+			ToolName:     "delegate_to",
+			TranscriptID: transcriptID,
 		},
 	})
 
@@ -614,13 +620,17 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		agentName = extractAgentName(instructions)
 	}
 
+	// Generate deterministic transcript ID before emitting event
+	transcriptID := r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli())
+
 	// Emit subagent_start to parent subscriber
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
 		Data: core.AgentEventData{
-			AgentName: agentName,
-			Task:      truncateTask(task, 120),
-			ToolName:  "delegate_to",
+			AgentName:    agentName,
+			Task:         truncateTask(task, 120),
+			ToolName:     "delegate_to",
+			TranscriptID: transcriptID,
 		},
 	})
 
@@ -695,7 +705,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		msgCount:  0,
 		db:        r.db,
 		project:   r.project,
-		dbAgentID: r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli()),
+		dbAgentID: transcriptID,
 	}
 	executor := r.executor
 	if r.executorFactory != nil && sandboxTier != "" {
@@ -855,13 +865,14 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	}
 	loop := core.NewAgentLoop(la.Provider, continueExecutor, la.Session, la.Config)
 
-	// Emit subagent_start (continuation)
+	// Emit subagent_start (continuation) — reuse existing session's transcript ID
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
 		Data: core.AgentEventData{
-			AgentName: la.Role,
-			Task:      truncateTask(fmt.Sprintf("continuation: %s", feedback), 120),
-			ToolName:  "delegate_continue",
+			AgentName:    la.Role,
+			Task:         truncateTask(fmt.Sprintf("continuation: %s", feedback), 120),
+			ToolName:     "delegate_continue",
+			TranscriptID: la.Session.dbAgentID,
 		},
 	})
 

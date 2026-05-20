@@ -64,6 +64,7 @@ export interface AgentState {
 	thinkingText?: string;
 	result?: string;
 	error?: string;
+	transcriptId?: string;
 }
 
 export interface ToolCallRecord {

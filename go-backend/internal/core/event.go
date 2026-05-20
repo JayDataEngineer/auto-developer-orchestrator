@@ -92,6 +92,7 @@ type AgentEventData struct {
 	ParentToolID string `json:"parentToolId,omitempty"` // ID of the delegate_to call
 	Task         string `json:"task,omitempty"`         // task description
 	Status       string `json:"status,omitempty"`       // e.g. "running", "completed", "error"
+	TranscriptID string `json:"transcriptId,omitempty"` // composite DB agent_id for transcript retrieval
 
 	// Hook interception — set for hook_request events.
 	HookPoint string `json:"hookPoint,omitempty"` // "tool_call", "tool_result", "context"
