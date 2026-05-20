@@ -50,7 +50,7 @@ const TOOL_LABELS: Record<string, string> = {
 	collect_results: "Collected results",
 };
 
-function toolLabel(name: string): string {
+export function toolLabel(name: string): string {
 	return TOOL_LABELS[name] ?? name;
 }
 
@@ -75,11 +75,11 @@ const TOOL_ICONS: Record<string, React.ElementType> = {
 	delegate_async: GitBranch,
 };
 
-function toolIcon(name: string): React.ElementType {
+export function toolIcon(name: string): React.ElementType {
 	return TOOL_ICONS[name] ?? Wrench;
 }
 
-function toolArgPreview(name: string, args?: unknown): string {
+export function toolArgPreview(name: string, args?: unknown): string {
 	if (!args || typeof args !== "object") return "";
 	const a = args as Record<string, unknown>;
 	switch (name) {

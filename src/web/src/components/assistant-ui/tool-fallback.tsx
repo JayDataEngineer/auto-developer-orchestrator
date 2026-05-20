@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import {
 	AlertCircleIcon,
 	CheckIcon,
@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { useCollapsibleRoot } from "./use-collapsible";
 import { usePuxStore } from "@/lib/pux-store";
 import { ShieldCheck, CheckCircle } from "lucide-react";
-import { DelegateRenderer, isDelegateTool } from "@/components/assistant-ui/delegate-tool-ui";
+import { DelegateRenderer, isDelegateTool, toolIcon, toolLabel, toolArgPreview } from "@/components/assistant-ui/delegate-tool-ui";
 
 export type ToolFallbackRootProps = Omit<
 	React.ComponentPropsWithRef<typeof Collapsible>,
@@ -340,8 +340,13 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	status,
 	interrupt,
 }) => {
+	const [expanded, setExpanded] = useState(false);
 	const isCancelled =
 		status?.type === "incomplete" && status.reason === "cancelled";
+	const isRunning = status?.type === "running";
+	const isComplete = status?.type === "complete";
+	const hasError = status?.type === "incomplete";
+	const hasResult = result !== undefined && result !== null;
 
 	// Delegate tools get the specialized collapsible card UI
 	if (isDelegateTool(toolName)) {
@@ -351,7 +356,6 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	// Handle approval interrupts inline — permission hooks from any tool
 	const pending = usePuxStore((s) => s.pendingDecision);
 	const respond = usePuxStore((s) => s.respondToDecision);
-	const isComplete = status?.type === "complete";
 	const answered = isComplete && pending === null;
 
 	if (interrupt?.type === "human") {
@@ -361,12 +365,10 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 		if (hint === "approval") {
 			if (answered) {
 				return (
-					<div className="my-2 rounded-lg border border-border py-3">
-						<div className="flex items-center gap-2 px-4 text-sm">
-							<CheckCircle size={14} className="text-muted-foreground" />
-							<span className="text-muted-foreground">
-								Approved: <b>{toolName}</b>
-							</span>
+					<div className="my-1 px-2 py-1">
+						<div className="flex items-center gap-2 text-xs text-muted-foreground">
+							<CheckCircle size={12} className="text-muted-foreground" />
+							<span>Approved: <b>{toolName}</b></span>
 						</div>
 					</div>
 				);
@@ -412,20 +414,89 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 		}
 	}
 
+	// Check for image in result — render inline
+	const imageInfo = hasResult && !isCancelled ? extractScreenshotFromResult(result) : null;
+
+	// Compact tool row — same format as sub-agent tool rows
+	const preview = toolArgPreview(toolName, args);
+	const Icon = toolIcon(toolName);
+	const label = toolLabel(toolName);
+	const color = hasError
+		? "text-red-500"
+		: isRunning
+			? "text-blue-500 animate-pulse"
+			: "text-green-500";
+
 	return (
-		<ToolFallbackRoot
-			className={cn(isCancelled && "border-muted-foreground/30 bg-muted/30")}
-		>
-			<ToolFallbackTrigger toolName={toolName} status={status} />
-			<ToolFallbackContent>
-				<ToolFallbackError status={status} />
-				<ToolFallbackArgs
-					argsText={argsText}
-					className={cn(isCancelled && "opacity-60")}
-				/>
-				{!isCancelled && <ToolFallbackResult result={result} />}
-			</ToolFallbackContent>
-		</ToolFallbackRoot>
+		<div className="group/tool-row">
+			<div
+				className={cn(
+					"flex items-center gap-2 px-2 py-1 text-xs cursor-pointer",
+					"hover:bg-accent/30 transition-colors",
+					hasResult && "select-none",
+				)}
+				onClick={() => hasResult && setExpanded(!expanded)}
+			>
+				<Icon size={12} className={cn("shrink-0", color)} />
+				<span className="font-medium text-muted-foreground">
+					{label}
+				</span>
+				{preview && (
+					<span className="truncate text-dim max-w-[200px]">
+						{preview}
+					</span>
+				)}
+				{isCancelled && (
+					<span className="text-dim line-through">cancelled</span>
+				)}
+				{hasResult && (
+					<ChevronDownIcon
+						size={10}
+						className={cn(
+							"shrink-0 text-muted-foreground transition-transform duration-150",
+							expanded ? "rotate-0" : "-rotate-90",
+						)}
+					/>
+				)}
+				{isRunning && !hasResult && (
+					<span className="text-dim">...</span>
+				)}
+			</div>
+			{/* Inline image — always visible, no expand needed */}
+			{imageInfo && (
+				<div className="px-2 pb-1 pl-6">
+					{imageInfo.meta && (
+						<div className="mb-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+							{Object.entries(imageInfo.meta).map(([k, v]) => (
+								<span key={k}>
+									<span className="font-medium text-foreground">{k}</span>: {String(v).length > 60 ? String(v).slice(0, 57) + "..." : String(v)}
+								</span>
+							))}
+						</div>
+					)}
+					<img
+						src={imageInfo.src}
+						alt="Tool result"
+						className="max-h-64 rounded-md border border-border"
+					/>
+				</div>
+			)}
+			{/* Expandable result (non-image) */}
+			{hasResult && expanded && !imageInfo && (
+				<div className="px-2 pb-1 pl-6">
+					<pre
+						className={cn(
+							"whitespace-pre-wrap text-[11px] leading-relaxed rounded-md p-2 max-h-48 overflow-y-auto",
+							hasError
+								? "bg-red-500/5 text-red-400 border border-red-500/20"
+								: "bg-muted/50 text-muted-foreground",
+						)}
+					>
+						{typeof result === "string" ? result : JSON.stringify(result, null, 2)}
+					</pre>
+				</div>
+			)}
+		</div>
 	);
 };
 
