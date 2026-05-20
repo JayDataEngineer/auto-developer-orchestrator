@@ -522,7 +522,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 							if (parsed.agentName) {
 								const agents = usePuxStore.getState().agents;
 								const agent = [...agents.values()].find(
-									(a) => a.agentName === parsed.agentName && a.status === "running",
+									(a) => a.agentName === parsed.agentName,
 								);
 								if (agent && thinkingText) {
 									usePuxStore.getState().updateAgentThinking(agent.agentId, thinkingText);
@@ -545,7 +545,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 								if (text) {
 									const agents = usePuxStore.getState().agents;
 									const agent = [...agents.values()].find(
-										(a) => a.agentName === parsed.agentName && a.status === "running",
+										(a) => a.agentName === parsed.agentName,
 									);
 									if (agent) {
 										usePuxStore.getState().updateAgentText(agent.agentId, text);

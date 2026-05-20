@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useRef, useState } from "react";
+import { memo, useState } from "react";
 import {
 	AlertCircleIcon,
 	CheckIcon,
@@ -362,20 +362,10 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	const respond = usePuxStore((s) => s.respondToDecision);
 	const answered = isComplete && pending === null;
 
-	// Auto-expand screenshot tools when result arrives with an image
+	// Extract image from result
 	const imageInfo = hasResult && !isCancelled ? extractScreenshotFromResult(result) : null;
-	const shouldAutoExpand = isScreenshotTool && imageInfo;
 
 	const [expanded, setExpanded] = useState(false);
-	// Sync: when shouldAutoExpand becomes true, open it once
-	const prevAutoExpand = useRef(false);
-	if (shouldAutoExpand && !prevAutoExpand.current) {
-		prevAutoExpand.current = true;
-		setExpanded(true);
-	}
-	if (!shouldAutoExpand && prevAutoExpand.current) {
-		prevAutoExpand.current = false;
-	}
 
 	if (interrupt?.type === "human") {
 		const payload = interrupt.payload as Record<string, unknown> | undefined;
@@ -446,7 +436,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	const color = hasError
 		? "text-red-500"
 		: isRunning
-			? "text-blue-500 animate-pulse"
+			? "text-blue-500"
 			: "text-green-500";
 
 	return (
