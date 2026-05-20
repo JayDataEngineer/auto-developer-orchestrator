@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,6 +60,9 @@ func (h *ComputerUseHandler) RegisterRoutes(r interface {
 	r.Get("/storage", h.GetStorage)
 	r.Post("/storage", h.SetStorage)
 	r.Delete("/storage", h.ClearStorage)
+	r.Post("/evaluate-js", h.EvaluateJS)
+	r.Get("/read-page", h.ReadPage)
+	r.Post("/download", h.DownloadFile)
 }
 
 // Enable enables computer use mode on a sandbox: creates desktop mode (VNC + Chrome) + SandboxBrowserClient
@@ -749,6 +753,122 @@ func (h *ComputerUseHandler) ClearStorage(w http.ResponseWriter, r *http.Request
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
+	})
+}
+
+// EvaluateJSRequest is the request body for the evaluate-js endpoint.
+type EvaluateJSRequest struct {
+	Code string `json:"code"`
+}
+
+// EvaluateJS executes JavaScript in the browser and returns the result.
+// POST /api/sandbox/{id}/computer-use/evaluate-js
+func (h *ComputerUseHandler) EvaluateJS(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	req, ok := decodeReq[EvaluateJSRequest](w, r)
+	if !ok {
+		return
+	}
+	if req.Code == "" {
+		JSONError(w, "code is required", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getClient(sandboxID)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	result, jsType, err := client.EvaluateJS(r.Context(), req.Code)
+	if err != nil {
+		JSONError(w, fmt.Sprintf("evaluate_js failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"result": result,
+		"type":   jsType,
+	})
+}
+
+// ReadPage extracts structured content from the current page.
+// GET /api/sandbox/{id}/computer-use/read-page
+func (h *ComputerUseHandler) ReadPage(w http.ResponseWriter, r *http.Request) {
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		data, err := client.ReadPage(r.Context())
+		if err != nil {
+			JSONError(w, fmt.Sprintf("read_page failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, data)
+	})
+}
+
+// DownloadFileRequest is the request body for the download endpoint.
+type DownloadFileRequest struct {
+	URL  string `json:"url"`
+	Path string `json:"path,omitempty"`
+}
+
+// DownloadFile downloads a file to the sandbox via curl.
+// POST /api/sandbox/{id}/computer-use/download
+func (h *ComputerUseHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	req, ok := decodeReq[DownloadFileRequest](w, r)
+	if !ok {
+		return
+	}
+	if req.URL == "" {
+		JSONError(w, "url is required", http.StatusBadRequest)
+		return
+	}
+
+	if h.manager == nil {
+		JSONError(w, "sandbox manager not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	destPath := req.Path
+	if destPath == "" {
+		// Default: extract filename from URL, save to workspace
+		parts := strings.Split(req.URL, "/")
+		filename := parts[len(parts)-1]
+		if filename == "" || strings.Contains(filename, "?") {
+			filename = "download"
+		}
+		// Strip query string
+		if idx := strings.Index(filename, "?"); idx >= 0 {
+			filename = filename[:idx]
+		}
+		destPath = "/sandbox/workspace/" + filename
+	}
+
+	// Use curl with proper user agent and follow redirects
+	cmd := []string{
+		"bash", "-c",
+		fmt.Sprintf(`curl -L -s -o %s -w "%%{http_code}" -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --max-time 30 '%s'`, destPath, req.URL),
+	}
+
+	output, err := h.manager.ExecInSandbox(r.Context(), sandboxID, cmd)
+	if err != nil {
+		JSONError(w, fmt.Sprintf("download failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// output is the HTTP status code from -w
+	statusCode := strings.TrimSpace(output)
+
+	// Get file size
+	sizeOutput, _ := h.manager.ExecInSandbox(r.Context(), sandboxID, []string{
+		"bash", "-c", fmt.Sprintf(`stat -c '%%s' %s 2>/dev/null || echo "0"`, destPath),
+	})
+	fileSize := strings.TrimSpace(sizeOutput)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"path":        destPath,
+		"size":        fileSize,
+		"url":         req.URL,
+		"http_status": statusCode,
 	})
 }
 

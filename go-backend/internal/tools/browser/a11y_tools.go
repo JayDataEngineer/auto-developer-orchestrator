@@ -371,5 +371,111 @@ func RegisterBrowserTools(tools []core.Tool, p BrowserProvider, sandboxID func()
 		NewGetStorageTool(p, sandboxID),
 		NewSetStorageTool(p, sandboxID),
 		NewClearStorageTool(p, sandboxID),
+		NewEvaluateJSTool(p, sandboxID),
+		NewReadPageProviderTool(p, sandboxID),
+		NewDownloadFileTool(p, sandboxID),
 	)
+}
+
+// ── Evaluate JS Tool ──
+
+type EvaluateJSTool struct {
+	provider  BrowserProvider
+	sandboxID func() string
+}
+
+func NewEvaluateJSTool(p BrowserProvider, sandboxID func() string) *EvaluateJSTool {
+	return &EvaluateJSTool{provider: p, sandboxID: sandboxID}
+}
+
+func (t *EvaluateJSTool) Name() string { return "evaluate_js" }
+func (t *EvaluateJSTool) Description() string {
+	return "Execute JavaScript in the browser and return the result. Use this to extract data from the page (e.g., image URLs, form values, DOM queries) that isn't available through other tools."
+}
+func (t *EvaluateJSTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"code": {"type": "string", "description": "JavaScript code to evaluate. Must be a single expression or IIFE. Example: \"Array.from(document.querySelectorAll('img')).map(i=>i.src)\""}
+		},
+		"required": ["code"]
+	}`)
+}
+
+func (t *EvaluateJSTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	if sbID == "" {
+		return nil, core.NewToolError("evaluate_js", "no sandbox available")
+	}
+	code, _ := args["code"].(string)
+	if code == "" {
+		return nil, core.NewToolError("evaluate_js", "missing required parameter 'code'")
+	}
+	return t.provider.EvaluateJS(ctx, sbID, code)
+}
+
+// ── Read Page Tool ──
+
+type ReadPageProviderTool struct {
+	provider  BrowserProvider
+	sandboxID func() string
+}
+
+func NewReadPageProviderTool(p BrowserProvider, sandboxID func() string) *ReadPageProviderTool {
+	return &ReadPageProviderTool{provider: p, sandboxID: sandboxID}
+}
+
+func (t *ReadPageProviderTool) Name() string { return "read_page" }
+func (t *ReadPageProviderTool) Description() string {
+	return "Extract structured content from the current browser page: title, URL, visible text, images (with src and alt), and links (with text and URL). Use this instead of screenshots when you need page data for processing."
+}
+func (t *ReadPageProviderTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {}}`)
+}
+
+func (t *ReadPageProviderTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	if sbID == "" {
+		return nil, core.NewToolError("read_page", "no sandbox available")
+	}
+	return t.provider.ReadPage(ctx, sbID)
+}
+
+// ── Download File Tool ──
+
+type DownloadFileTool struct {
+	provider  BrowserProvider
+	sandboxID func() string
+}
+
+func NewDownloadFileTool(p BrowserProvider, sandboxID func() string) *DownloadFileTool {
+	return &DownloadFileTool{provider: p, sandboxID: sandboxID}
+}
+
+func (t *DownloadFileTool) Name() string { return "download_file" }
+func (t *DownloadFileTool) Description() string {
+	return "Download a file to the sandbox workspace. Returns the file path and size. Use this instead of bash+curl for downloading images, PDFs, or any file."
+}
+func (t *DownloadFileTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"url": {"type": "string", "description": "URL of the file to download"},
+			"path": {"type": "string", "description": "Destination path in the sandbox (default: /sandbox/workspace/<filename>)"}
+		},
+		"required": ["url"]
+	}`)
+}
+
+func (t *DownloadFileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	if sbID == "" {
+		return nil, core.NewToolError("download_file", "no sandbox available")
+	}
+	url, _ := args["url"].(string)
+	if url == "" {
+		return nil, core.NewToolError("download_file", "missing required parameter 'url'")
+	}
+	path, _ := args["path"].(string)
+	return t.provider.DownloadFile(ctx, sbID, url, path)
 }

@@ -360,6 +360,9 @@ func TestComputerUseHandlerRegisterRoutes(t *testing.T) {
 		{"GET", "/storage"},
 		{"POST", "/storage"},
 		{"DELETE", "/storage"},
+		{"POST", "/evaluate-js"},
+		{"GET", "/read-page"},
+		{"POST", "/download"},
 	}
 
 	if len(router.routes) != len(expectedRoutes) {

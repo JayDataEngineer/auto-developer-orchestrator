@@ -97,6 +97,27 @@ type PageInfo struct {
 	Screenshot  string              `json:"screenshot,omitempty"` // base64 PNG
 }
 
+// PageImage represents an image found on a page.
+type PageImage struct {
+	Src string `json:"src"`
+	Alt string `json:"alt,omitempty"`
+}
+
+// PageLink represents a link found on a page.
+type PageLink struct {
+	Text string `json:"text"`
+	URL  string `json:"url"`
+}
+
+// PageData holds structured content extracted from a page via read_page.
+type PageData struct {
+	Title  string      `json:"title"`
+	URL    string      `json:"url"`
+	Text   string      `json:"text"`
+	Images []PageImage `json:"images"`
+	Links  []PageLink  `json:"links"`
+}
+
 // Session holds state for one browser tab
 type Session struct {
 	ID         string

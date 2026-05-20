@@ -1565,6 +1565,9 @@ func hasBrowserTools(toolNames []string) bool {
 		"navigate_url":      true,
 		"get_page_text":     true,
 		"execute_js":        true,
+		"evaluate_js":       true,
+		"read_page":         true,
+		"download_file":     true,
 	}
 	for _, name := range toolNames {
 		if browserTools[name] {

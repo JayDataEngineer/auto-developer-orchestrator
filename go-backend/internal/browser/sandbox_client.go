@@ -618,6 +618,68 @@ func (sbc *SandboxBrowserClient) scrollInner(ctx context.Context, direction stri
 	}, nil
 }
 
+// readPageJS extracts structured page content (title, URL, text, images, links).
+const readPageJS = `
+(function(){
+    var imgs = Array.from(document.querySelectorAll('img')).slice(0, 100)
+        .map(function(i){ return {src: i.src || '', alt: (i.alt || '').substring(0, 200)} })
+        .filter(function(i){ return i.src && !i.src.startsWith('data:') });
+    var links = Array.from(document.querySelectorAll('a[href]')).slice(0, 100)
+        .map(function(a){ return {text: (a.textContent || '').trim().substring(0, 200), url: a.href} });
+    return JSON.stringify({
+        title: document.title,
+        url: location.href,
+        text: (document.body ? document.body.innerText : '').substring(0, 8000),
+        images: imgs,
+        links: links
+    });
+})()
+`
+
+// EvaluateJS executes arbitrary JavaScript in the active browser tab and returns
+// the stringified result and its JS type.
+func (sbc *SandboxBrowserClient) EvaluateJS(ctx context.Context, code string) (string, string, error) {
+	wrapped := fmt.Sprintf(
+		`(function(){ var __r = %s; return JSON.stringify({r: String(__r), t: typeof __r}); })()`,
+		code,
+	)
+	var raw string
+	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
+		return chromedp.Run(actCtx, chromedp.Evaluate(wrapped, &raw))
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("evaluate_js failed: %w", err)
+	}
+
+	var parsed struct {
+		R string `json:"r"`
+		T string `json:"t"`
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		// Fallback: return raw result with unknown type
+		return raw, "string", nil
+	}
+	return parsed.R, parsed.T, nil
+}
+
+// ReadPage extracts structured content from the current page: title, URL, text,
+// images (src + alt), and links (text + url).
+func (sbc *SandboxBrowserClient) ReadPage(ctx context.Context) (*PageData, error) {
+	var raw string
+	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
+		return chromedp.Run(actCtx, chromedp.Evaluate(readPageJS, &raw))
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read_page failed: %w", err)
+	}
+
+	var data PageData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return nil, fmt.Errorf("parse page data: %w", err)
+	}
+	return &data, nil
+}
+
 // ExtractPageContent evaluates JavaScript on the active tab to return page content.
 // The browser is a real Chrome — it renders JS, handles cookies, bypasses most anti-bot.
 // Returns raw HTML for processing by MCP process_html, or innerText as fallback.

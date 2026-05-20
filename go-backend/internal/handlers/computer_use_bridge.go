@@ -237,3 +237,20 @@ func (b *ComputerUseBridge) BrowserScreenshot(ctx context.Context, sandboxID str
 	}
 	return result, nil
 }
+
+// EvaluateJS executes JavaScript in the browser and returns the result.
+func (b *ComputerUseBridge) EvaluateJS(ctx context.Context, sandboxID, code string) (map[string]interface{}, error) {
+	return callHandler(ctx, b.CU.EvaluateJS, http.MethodPost, "/api/sandbox/{id}/computer-use/evaluate-js",
+		map[string]interface{}{"code": code}, sandboxID)
+}
+
+// ReadPage extracts structured content from the current page.
+func (b *ComputerUseBridge) ReadPage(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	return callHandler(ctx, b.CU.ReadPage, http.MethodGet, "/api/sandbox/{id}/computer-use/read-page", nil, sandboxID)
+}
+
+// DownloadFile downloads a file to the sandbox via curl.
+func (b *ComputerUseBridge) DownloadFile(ctx context.Context, sandboxID, url, path string) (map[string]interface{}, error) {
+	return callHandler(ctx, b.CU.DownloadFile, http.MethodPost, "/api/sandbox/{id}/computer-use/download",
+		map[string]interface{}{"url": url, "path": path}, sandboxID)
+}
