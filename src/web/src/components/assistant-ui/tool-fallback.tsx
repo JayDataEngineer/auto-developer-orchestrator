@@ -414,8 +414,17 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 		}
 	}
 
-	// Check for image in result — render inline
+	// Check for image in result
 	const imageInfo = hasResult && !isCancelled ? extractScreenshotFromResult(result) : null;
+	// Screenshot tools: image lives under the tool row as expandable result.
+	// Other tools with images (orchestrator sharing): render inline.
+	const isScreenshotTool = ["screenshot", "observe", "browser_screenshot",
+		"desktop_screenshot", "computer_screenshot", "take_screenshot",
+		"web_screenshot", "desktop_observe"].includes(toolName);
+	const showImageInline = imageInfo && !isScreenshotTool;
+	const showImageUnderTool = imageInfo && isScreenshotTool;
+	// Auto-expand screenshot tools when they complete with an image
+	const autoExpanded = isScreenshotTool && showImageUnderTool;
 
 	// Compact tool row — same format as sub-agent tool rows
 	const preview = toolArgPreview(toolName, args);
@@ -454,7 +463,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 						size={10}
 						className={cn(
 							"shrink-0 text-muted-foreground transition-transform duration-150",
-							expanded ? "rotate-0" : "-rotate-90",
+							(expanded || autoExpanded) ? "rotate-0" : "-rotate-90",
 						)}
 					/>
 				)}
@@ -462,8 +471,8 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 					<span className="text-dim">...</span>
 				)}
 			</div>
-			{/* Inline image — always visible, no expand needed */}
-			{imageInfo && (
+			{/* Image inline — orchestrator sharing an image with the user */}
+			{showImageInline && (
 				<div className="px-2 pb-1 pl-6">
 					{imageInfo.meta && (
 						<div className="mb-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
@@ -481,7 +490,26 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 					/>
 				</div>
 			)}
-			{/* Expandable result (non-image) */}
+			{/* Image under screenshot tool row — expandable, auto-opens */}
+			{showImageUnderTool && (expanded || autoExpanded) && (
+				<div className="px-2 pb-1 pl-6">
+					{imageInfo.meta && (
+						<div className="mb-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+							{Object.entries(imageInfo.meta).map(([k, v]) => (
+								<span key={k}>
+									<span className="font-medium text-foreground">{k}</span>: {String(v).length > 60 ? String(v).slice(0, 57) + "..." : String(v)}
+								</span>
+							))}
+						</div>
+					)}
+					<img
+						src={imageInfo.src}
+						alt="Screenshot"
+						className="max-h-64 rounded-md border border-border"
+					/>
+				</div>
+			)}
+			{/* Expandable text result (non-image, non-screenshot) */}
 			{hasResult && expanded && !imageInfo && (
 				<div className="px-2 pb-1 pl-6">
 					<pre
