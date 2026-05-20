@@ -193,6 +193,45 @@ function SubAgentToolRow({ tool }: { tool: ToolCallRecord }) {
 	);
 }
 
+// ── Briefing section (what the CTO told the sub-agent) ──
+
+function BriefingSection({ instructions, task }: { instructions?: string; task: string }) {
+	const [expanded, setExpanded] = useState(false);
+	const briefing = instructions || task;
+	if (!briefing) return null;
+
+	return (
+		<div className="border-t border-border">
+			<button
+				onClick={() => setExpanded(!expanded)}
+				className="flex items-center gap-2 px-4 py-2 text-xs w-full hover:bg-accent/30 transition-colors"
+			>
+				<FileText size={12} className="shrink-0 text-muted-foreground" />
+				<span className="font-medium text-muted-foreground">
+					Briefing
+				</span>
+				<span className="text-dim truncate max-w-[200px]">
+					{task.slice(0, 60)}{task.length > 60 ? "..." : ""}
+				</span>
+				<ChevronDownIcon
+					size={10}
+					className={cn(
+						"ml-1 shrink-0 text-muted-foreground transition-transform duration-150",
+						expanded ? "rotate-0" : "-rotate-90",
+					)}
+				/>
+			</button>
+			{expanded && (
+				<div className="px-4 pb-2 pl-8">
+					<pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-foreground bg-muted/50 rounded-md p-2 max-h-64 overflow-y-auto">
+						{briefing}
+					</pre>
+				</div>
+			)}
+		</div>
+	);
+}
+
 // ── Thinking section ──
 
 function ThinkingSection({ text, isRunning }: { text: string; isRunning: boolean }) {
@@ -222,7 +261,7 @@ function ThinkingSection({ text, isRunning }: { text: string; isRunning: boolean
 			</button>
 			{expanded && (
 				<div className="px-4 pb-2 pl-8">
-					<pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground bg-muted/50 rounded-md p-2 max-h-48 overflow-y-auto">
+					<pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-foreground bg-muted/50 rounded-md p-2 max-h-48 overflow-y-auto">
 						{text}
 					</pre>
 				</div>
@@ -375,6 +414,11 @@ export function DelegateRenderer({
 			{/* Expandable execution trace */}
 			{expanded && (
 				<div className="border-t border-border">
+					{/* Briefing — what the CTO told this agent */}
+					{(args.instructions || task) && (
+						<BriefingSection instructions={args.instructions as string} task={task} />
+					)}
+
 					{/* Thinking section */}
 					{thinkingText && (
 						<ThinkingSection text={thinkingText} isRunning={isRunning} />
@@ -382,7 +426,7 @@ export function DelegateRenderer({
 
 					{/* Tool call list */}
 					{subToolCount > 0 && (
-						<div className={cn("py-1", !thinkingText && "border-t border-border")}>
+						<div className={cn("py-1", !thinkingText && (!args.instructions && !task) && "border-t border-border")}>
 							{toolCalls.map((tool, i) => (
 								<SubAgentToolRow key={`${tool.toolName}-${tool.timestamp}-${i}`} tool={tool} />
 							))}
