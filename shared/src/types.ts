@@ -62,6 +62,7 @@ export interface AgentState {
 	endedAt?: number;
 	toolCalls: ToolCallRecord[];
 	thinkingText?: string;
+	text?: string;
 	result?: string;
 	error?: string;
 	transcriptId?: string;

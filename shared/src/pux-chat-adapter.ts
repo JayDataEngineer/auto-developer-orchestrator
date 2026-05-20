@@ -518,11 +518,14 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 						case "thinking_delta": {
 							const thinkingText = (parsed.text as string) || "";
-							// Sub-agent thinking → accumulate into sub-agent messages (Gap 9)
+							// Sub-agent thinking → store in Zustand for delegation card
 							if (parsed.agentName) {
-								if (thinkingText && subAgentMessageAccum.length > 0) {
-									const last = subAgentMessageAccum[subAgentMessageAccum.length - 1];
-									last.content.push({ type: "reasoning" as const, text: thinkingText });
+								const agents = usePuxStore.getState().agents;
+								const agent = [...agents.values()].find(
+									(a) => a.agentName === parsed.agentName && a.status === "running",
+								);
+								if (agent && thinkingText) {
+									usePuxStore.getState().updateAgentThinking(agent.agentId, thinkingText);
 								}
 								break;
 							}
@@ -536,26 +539,17 @@ export const puxChatAdapter: ChatModelAdapter = {
 						}
 
 						case "text_delta": {
-							// Sub-agent text → accumulate into sub-agent messages (Gap 9)
+							// Sub-agent text → store in Zustand for delegation card
 							if (parsed.agentName) {
 								const text = (parsed.text as string) || "";
-								if (text && subAgentMessageAccum.length > 0) {
-									const last = subAgentMessageAccum[subAgentMessageAccum.length - 1];
-									const lastPart = last.content[last.content.length - 1];
-									if (lastPart && lastPart.type === "text") {
-										lastPart.text += text;
-									} else {
-										last.content.push({ type: "text" as const, text });
+								if (text) {
+									const agents = usePuxStore.getState().agents;
+									const agent = [...agents.values()].find(
+										(a) => a.agentName === parsed.agentName && a.status === "running",
+									);
+									if (agent) {
+										usePuxStore.getState().updateAgentText(agent.agentId, text);
 									}
-								} else if (text) {
-									subAgentMessageAccum.push({
-										id: `submsg_${Date.now()}_${subAgentMessageAccum.length}`,
-										role: "assistant",
-										content: [{ type: "text" as const, text }],
-										createdAt: new Date(),
-										status: { type: "complete" as const, reason: "stop" as const },
-										metadata: {},
-									});
 								}
 								break;
 							}

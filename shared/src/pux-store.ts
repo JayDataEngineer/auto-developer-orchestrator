@@ -180,6 +180,7 @@ interface PuxState {
 	updateAgentStatus: (agentId: string, status: AgentState["status"], result?: string) => void;
 	addAgentToolCall: (agentId: string, toolCall: ToolCallRecord) => void;
 	updateAgentThinking: (agentId: string, text: string) => void;
+	updateAgentText: (agentId: string, text: string) => void;
 	clearAgents: () => void;
 	setZoomedAgent: (agentId: string | null) => void;
 	toggleAgentSelector: () => void;
@@ -512,6 +513,18 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			agents.set(agentId, {
 				...existing,
 				thinkingText: (existing.thinkingText || "") + text,
+			});
+			set({ agents });
+		}
+	},
+
+	updateAgentText: (agentId, text) => {
+		const agents = new Map(get().agents);
+		const existing = agents.get(agentId);
+		if (existing) {
+			agents.set(agentId, {
+				...existing,
+				text: (existing.text || "") + text,
 			});
 			set({ agents });
 		}

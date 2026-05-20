@@ -22,6 +22,7 @@ import {
 	GitBranch,
 	Wrench,
 	Brain,
+	MessageSquare,
 } from "lucide-react";
 import type { ToolCallRecord } from "@/lib/pux-store";
 
@@ -230,6 +231,40 @@ function ThinkingSection({ text, isRunning }: { text: string; isRunning: boolean
 	);
 }
 
+function TextSection({ text }: { text: string }) {
+	const [expanded, setExpanded] = useState(false);
+	if (!text) return null;
+
+	return (
+		<div className="border-t border-border">
+			<button
+				onClick={() => setExpanded(!expanded)}
+				className="flex items-center gap-2 px-4 py-2 text-xs w-full hover:bg-accent/30 transition-colors"
+			>
+				<MessageSquare size={12} className="shrink-0 text-muted-foreground" />
+				<span className="font-medium text-muted-foreground">
+					Output
+				</span>
+				<span className="text-dim">({text.length} chars)</span>
+				<ChevronDownIcon
+					size={10}
+					className={cn(
+						"ml-1 shrink-0 text-muted-foreground transition-transform duration-150",
+						expanded ? "rotate-0" : "-rotate-90",
+					)}
+				/>
+			</button>
+			{expanded && (
+				<div className="px-4 pb-2 pl-8">
+					<pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-foreground bg-muted/50 rounded-md p-2 max-h-64 overflow-y-auto">
+						{text}
+					</pre>
+				</div>
+			)}
+		</div>
+	);
+}
+
 // ── Main delegate renderer ──
 // Exported so ToolFallback can use it directly (bypasses makeAssistantToolUI
 // registration which has a timing/matching issue in assistant-ui v0.14.5).
@@ -267,6 +302,7 @@ export function DelegateRenderer({
 	})();
 	const toolCalls = agentState?.toolCalls ?? [];
 	const thinkingText = agentState?.thinkingText;
+	const agentText = agentState?.text;
 	const subToolCount = toolCalls.length;
 
 	// Auto-expand while running. useRef tracks whether we've auto-expanded
@@ -352,6 +388,9 @@ export function DelegateRenderer({
 							))}
 						</div>
 					)}
+
+					{/* Sub-agent text output */}
+					{agentText && <TextSection text={agentText} />}
 				</div>
 			)}
 		</div>
