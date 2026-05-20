@@ -42,7 +42,6 @@ beforeEach(() => {
 		showSettingsOverlay: false,
 		showSessionSwitcher: false,
 		showLogViewer: false,
-		showFilePicker: false,
 		showSearchOverlay: false,
 		showMCPOverlay: false,
 		mcpServers: [],
@@ -136,7 +135,6 @@ describe("initial state", () => {
 		expect(s.showSettingsOverlay).toBe(false);
 		expect(s.showSessionSwitcher).toBe(false);
 		expect(s.showLogViewer).toBe(false);
-		expect(s.showFilePicker).toBe(false);
 		expect(s.showSearchOverlay).toBe(false);
 		expect(s.showMCPOverlay).toBe(false);
 	});
@@ -422,7 +420,6 @@ describe("overlay mutual exclusion", () => {
 		["showSettingsOverlay", () => usePuxStore.getState().toggleSettingsOverlay(), () => usePuxStore.getState().toggleSettingsOverlay()],
 		["showSessionSwitcher", () => usePuxStore.getState().toggleSessionSwitcher(), () => usePuxStore.getState().toggleSessionSwitcher()],
 		["showLogViewer", () => usePuxStore.getState().toggleLogViewer(), () => usePuxStore.getState().toggleLogViewer()],
-		["showFilePicker", () => usePuxStore.getState().toggleFilePicker(), () => usePuxStore.getState().toggleFilePicker()],
 		["showSearchOverlay", () => usePuxStore.getState().toggleSearchOverlay(), () => usePuxStore.getState().toggleSearchOverlay()],
 		["showMCPOverlay", () => usePuxStore.getState().toggleMCPOverlay(), () => usePuxStore.getState().toggleMCPOverlay()],
 	];
@@ -433,7 +430,6 @@ describe("overlay mutual exclusion", () => {
 		"showSettingsOverlay",
 		"showSessionSwitcher",
 		"showLogViewer",
-		"showFilePicker",
 		"showSearchOverlay",
 		"showMCPOverlay",
 	] as const;
@@ -442,7 +438,7 @@ describe("overlay mutual exclusion", () => {
 		describe(`${key}`, () => {
 			it("opens the overlay and closes all others", () => {
 				// Open a different overlay first (pick one that is not the current key)
-				const otherKey = key === "showLogViewer" ? "showFilePicker" : "showLogViewer";
+				const otherKey = key === "showModelPicker" ? "showSessionSwitcher" : "showModelPicker";
 				usePuxStore.setState({ [otherKey]: true });
 
 				open();
@@ -486,12 +482,6 @@ describe("close overlay actions", () => {
 		usePuxStore.setState({ showLogViewer: true });
 		usePuxStore.getState().closeLogViewer();
 		expect(usePuxStore.getState().showLogViewer).toBe(false);
-	});
-
-	it("closeFilePicker closes file picker", () => {
-		usePuxStore.setState({ showFilePicker: true });
-		usePuxStore.getState().closeFilePicker();
-		expect(usePuxStore.getState().showFilePicker).toBe(false);
 	});
 
 	it("closeSearchOverlay closes search overlay", () => {

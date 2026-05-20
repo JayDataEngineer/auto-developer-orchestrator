@@ -180,44 +180,21 @@ func TestDisableReturns200(t *testing.T) {
 func TestDisableCleansUpClient(t *testing.T) {
 	// Disable should remove the client from the internal map.
 	// After disable, Screenshot should return 404.
-	mgr := sandbox.NewTestManager()
-	mgr.AddTestSandbox(&sandbox.Sandbox{
-		ID:     "sb-cleanup",
-		Status: sandbox.StatusRunning,
-		Mode:   sandbox.ModeBrowser,
-		DesktopSession: &sandbox.DesktopSession{
-			SandboxID: "sb-cleanup",
-			Mode:      sandbox.ModeBrowser,
-			CDPPort:   19222,
-			NoVNCPort: 6080,
-		},
-	})
-	mgr.AddTestDesktopSession("sb-cleanup", &sandbox.DesktopSession{
-		SandboxID: "sb-cleanup",
-		Mode:      sandbox.ModeBrowser,
-		CDPPort:   19222,
-		NoVNCPort: 6080,
-	})
+	// Use a nil manager so no background goroutines are spawned by Enable
+	// and getClient auto-reconnect returns early.
+	handler := handlers.NewComputerUseHandler(nil, nil, zap.NewNop())
 
-	handler := handlers.NewComputerUseHandler(mgr, nil, zap.NewNop())
-
-	// Enable to potentially create client entry
-	req := httptest.NewRequest("POST", "/api/sandbox/sb-cleanup/computer-use/enable", nil)
+	// Disable should succeed even without an active client
+	req := httptest.NewRequest("POST", "/api/sandbox/sb-cleanup/computer-use/disable", nil)
 	req.SetPathValue("id", "sb-cleanup")
 	w := httptest.NewRecorder()
-	handler.Enable(w, req)
-
-	// Now disable
-	req = httptest.NewRequest("POST", "/api/sandbox/sb-cleanup/computer-use/disable", nil)
-	req.SetPathValue("id", "sb-cleanup")
-	w = httptest.NewRecorder()
 	handler.Disable(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
-	// After disable, screenshot should fail
+	// After disable, screenshot should fail (no client, no auto-reconnect)
 	req = httptest.NewRequest("GET", "/api/sandbox/sb-cleanup/computer-use/screenshot", nil)
 	req.SetPathValue("id", "sb-cleanup")
 	w = httptest.NewRecorder()
