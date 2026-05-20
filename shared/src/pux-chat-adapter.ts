@@ -563,7 +563,14 @@ export const puxChatAdapter: ChatModelAdapter = {
 						}
 
 						case "tool_execution_start": {
-							const toolId = (parsed.toolId as string) || `tc_${Date.now()}`;
+							let toolId = (parsed.toolId as string) || `tc_${Date.now()}`;
+							// Ensure unique toolCallId — some LLMs emit duplicate IDs
+							// (e.g., "researcher" for multiple delegate_to calls).
+							// @assistant-ui/core keys parts by toolCallId, so duplicates
+							// cause React duplicate-key warnings.
+							if (tools.has(toolId)) {
+								toolId = `${toolId}_${tools.size}`;
+							}
 							const toolName = (parsed.toolName as string) || "unknown";
 							const toolArgs = (parsed.toolArgs || parsed.args || {}) as Record<string, unknown>;
 							const toolAgentName = parsed.agentName as string | undefined;

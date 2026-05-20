@@ -7,6 +7,12 @@ import {
 } from "@/components/assistant-ui/attachment";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
+import {
+	ReasoningRoot,
+	ReasoningTrigger,
+	ReasoningContent,
+	ReasoningText,
+} from "@/components/assistant-ui/reasoning";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,20 +37,18 @@ import {
 	MessagePrimitive,
 	ThreadPrimitive,
 	useAuiState,
+	type ReasoningMessagePartComponent,
 } from "@assistant-ui/react";
 import {
 	ArrowDownIcon,
 	ArrowUpIcon,
-	Brain,
 	CheckIcon,
-	ChevronDownIcon,
 	ChevronLeftIcon,
 	ChevronRightIcon,
 	CopyIcon,
 	CpuIcon,
 	DownloadIcon,
 	HardDriveIcon,
-	LoaderIcon,
 	PencilIcon,
 	PlusIcon,
 	RefreshCwIcon,
@@ -268,7 +272,8 @@ const ComposerAction: FC = () => {
 			<div className="relative mx-2 mb-2 flex items-center justify-between">
 				<div className="flex items-center gap-1">
 					<ComposerAddAttachment />
-					<Select value={activeModel || undefined} onValueChange={(val) => {
+					<Select value={activeModel || "__none__"} onValueChange={(val) => {
+						if (val === "__none__") return;
 						if (val === "__clear_logic") { setDefaults("", defaultWorker); return; }
 						if (val === "__clear_worker") { setDefaults(defaultLogic, ""); return; }
 						setModel(val);
@@ -394,51 +399,27 @@ const ComposerAction: FC = () => {
 	);
 };
 
-// ── Collapsible thinking section for CTO messages ──
-
-function ThinkingSection() {
-	const [expanded, setExpanded] = useState(false);
-	const isRunning = useAuiState((s) => s.thread.isRunning);
-	// Extract reasoning text from message content parts
-	const reasoningText = useAuiState((s) => {
-		const content = (s.message as any).content as any[] | undefined;
-		if (!content) return "";
-		return content
-			.filter((p: any) => p.type === "reasoning")
-			.map((p: any) => p.text || "")
-			.join("");
-	});
-
-	if (!reasoningText) return null;
-
+const ReasoningPart: ReasoningMessagePartComponent = ({ text, status }) => {
+	const running = status.type === "running";
 	return (
-		<div className="border-b border-border mb-2">
-			<button
-				onClick={() => setExpanded(!expanded)}
-				className="flex items-center gap-2 px-2 py-1.5 text-xs w-full hover:bg-accent/30 transition-colors"
-			>
-				<Brain size={12} className={cn("shrink-0", isRunning ? "text-blue-500" : "text-muted-foreground")} />
-				<span className="font-medium text-muted-foreground">
-					Thinking
-				</span>
-				{isRunning && (
-					<span className="text-dim">...</span>
-				)}
-				<ChevronDownIcon
-					size={10}
-					className={cn(
-						"shrink-0 text-muted-foreground transition-transform duration-150",
-						expanded ? "rotate-0" : "-rotate-90",
-					)}
-				/>
-			</button>
-			{expanded && (
-				<div className="px-2 pb-2 pl-6">
-					<pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground bg-muted/50 rounded-md p-2 max-h-48 overflow-y-auto">
-						{reasoningText}
-					</pre>
-				</div>
-			)}
+		<ReasoningRoot defaultOpen={running}>
+			<ReasoningTrigger active={running} />
+			<ReasoningContent>
+				<ReasoningText>{text}</ReasoningText>
+			</ReasoningContent>
+		</ReasoningRoot>
+	);
+}
+
+function TextPartWrapper() {
+	const hasActiveToolCall = useAuiState((s) => {
+		const parts = (s.message as any).parts as any[] | undefined;
+		if (!parts) return false;
+		return parts.some((p: any) => p.type === "tool-call" && p.status?.type === "running");
+	});
+	return (
+		<div data-hide-md-dot={hasActiveToolCall ? true : undefined}>
+			<MarkdownText />
 		</div>
 	);
 }
@@ -450,20 +431,14 @@ const AssistantMessage: FC = () => {
 			data-role="assistant"
 		>
 			<div className="break-words px-2 leading-relaxed text-foreground">
-				<ThinkingSection />
 				<MessagePrimitive.Parts
 					components={{
-						Text: MarkdownText,
+						Text: TextPartWrapper,
+						Reasoning: ReasoningPart,
 						tools: { Fallback: ToolFallback },
 					}}
 				/>
 				<MessageError />
-				<AuiIf condition={(s) => s.thread.isRunning && s.message.content.length === 0}>
-					<div className="flex items-center gap-2 text-muted-foreground">
-						<LoaderIcon className="size-4 animate-spin" />
-						<span className="text-sm">Thinking...</span>
-					</div>
-				</AuiIf>
 			</div>
 
 			<div className="mt-1 ml-2 flex min-h-6 items-center opacity-0 transition-opacity group-hover:opacity-100">
