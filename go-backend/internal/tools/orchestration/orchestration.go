@@ -107,7 +107,7 @@ func NewDelegateToToolDynamic(r DelegateRunner, mcpResolver MCPResolver, rolePro
 
 func (t *DelegateToTool) Name() string { return "delegate_to" }
 func (t *DelegateToTool) Description() string {
-	return "Delegate a task to an employee. Work is auto-accepted on completion. Returns result and file changes. Use delegate_revert to undo if the work is wrong. Use delegate_continue to give feedback to a still-running agent."
+	return "Delegate a task to an agent. Write a detailed task brief — the agent only has their role training plus what you write in 'task'. Include what to do, relevant context, and expected output. Work is auto-accepted on completion. Returns result and file changes. Use delegate_revert to undo if the work is wrong."
 }
 
 func (t *DelegateToTool) Schema() json.RawMessage {
@@ -122,20 +122,23 @@ func (t *DelegateToTool) Schema() json.RawMessage {
 	schema := fmt.Sprintf(`{
 		"type": "object",
 		"properties": {
-			"task": {"type": "string", "description": "Description of the task for the sub-agent"},
-			"instructions": {"type": "string", "description": "Employee role name or custom instructions", "enum": %s},
+			"task": {"type": "string", "description": "Detailed task brief for the agent. Include: (1) what to do — the specific goal, (2) context — what you already know that they need, (3) expected output — format or file path for results. Write as a numbered list for multi-step tasks. Be specific — the agent has no other context besides their role training."},
+			"role": {"type": "string", "description": "Agent role to assign. Each role has specialized tools and training.", "enum": %s},
 			"tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names the sub-agent can use (optional if using a role name)"},
 			"max_rounds": {"type": "integer", "description": "Maximum tool rounds (default: from role or 15)"},
 			"temperature": {"type": "number", "description": "Temperature for generation (default: from role or 0.4)"}
 		},
-		"required": ["task", "instructions"]
+		"required": ["task", "role"]
 	}`, enumJSON)
 	return json.RawMessage(schema)
 }
 
 func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	task, _ := args["task"].(string)
-	instructions, _ := args["instructions"].(string)
+	role, _ := args["role"].(string)
+	if role == "" {
+		role, _ = args["instructions"].(string) // backwards compat
+	}
 
 	if task == "" {
 		task, _ = args["step"].(string)
@@ -143,8 +146,8 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 	if task == "" {
 		return nil, core.NewToolError("delegate_to", "missing required parameter 'task'")
 	}
-	if instructions == "" {
-		return nil, core.NewToolError("delegate_to", "missing required parameter 'instructions'")
+	if role == "" {
+		return nil, core.NewToolError("delegate_to", "missing required parameter 'role'")
 	}
 
 	var toolNames []string
@@ -167,7 +170,7 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 
 	// Resolve role name → prompt + defaults
 	roleMap := t.roleProvider()
-	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, division, sandboxTier, delegatesTo := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
+	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, division, sandboxTier, delegatesTo := resolveRole(role, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
 
 	// Division head: delegate to a full sub-orchestrator
 	if division != "" {
@@ -175,17 +178,12 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	if len(resolvedTools) == 0 {
-		return nil, core.NewToolError("delegate_to", "no tools specified and role '"+instructions+"' has no default tools")
+		return nil, core.NewToolError("delegate_to", "no tools specified and role '"+role+"' has no default tools")
 	}
 
 	// Use tracked delegation — returns agent_ref + file changes
-	// Pass original instructions (role name) as agentName for correct SSE event labeling
-	agentName := instructions
-	if roleMap != nil {
-		if role := roleMap[instructions]; role != nil {
-			// Already resolved — use the original key as display name
-		}
-	}
+	// Pass role name as agentName for correct SSE event labeling
+	agentName := role
 	return t.runner.RunDelegateTracked(ctx, task, resolvedInstructions, agentName, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, sandboxTier, delegatesTo)
 }
 
@@ -303,7 +301,7 @@ func NewDelegateAsyncToolDynamic(r DelegateRunner, mcpResolver MCPResolver, role
 
 func (t *DelegateAsyncTool) Name() string { return "delegate_async" }
 func (t *DelegateAsyncTool) Description() string {
-	return "Launch an employee in the background. Use a role name as instructions."
+	return "Launch an agent in the background. Write a detailed task brief — the agent only has their role training plus what you write in 'task'. Use for parallel work, then collect_results to wait."
 }
 
 func (t *DelegateAsyncTool) Schema() json.RawMessage {
@@ -319,11 +317,11 @@ func (t *DelegateAsyncTool) Schema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"task_id": {"type": "string", "description": "Unique ID for this async task"},
-			"task": {"type": "string", "description": "Description of the task"},
-			"instructions": {"type": "string", "description": "Employee role name or custom instructions", "enum": %s},
+			"task": {"type": "string", "description": "Detailed task brief for the agent. Include: (1) what to do — the specific goal, (2) context — what you already know that they need, (3) expected output — format or file path for results. Write as a numbered list for multi-step tasks. Be specific — the agent has no other context besides their role training."},
+			"role": {"type": "string", "description": "Agent role to assign. Each role has specialized tools and training.", "enum": %s},
 			"tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names (optional if using a role name)"}
 		},
-		"required": ["task_id", "task", "instructions"]
+		"required": ["task_id", "task", "role"]
 	}`, enumJSON)
 	return json.RawMessage(schema)
 }
@@ -331,9 +329,12 @@ func (t *DelegateAsyncTool) Schema() json.RawMessage {
 func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	taskID, _ := args["task_id"].(string)
 	task, _ := args["task"].(string)
-	instructions, _ := args["instructions"].(string)
+	role, _ := args["role"].(string)
+	if role == "" {
+		role, _ = args["instructions"].(string) // backwards compat
+	}
 
-	if taskID == "" || task == "" || instructions == "" {
+	if taskID == "" || task == "" || role == "" {
 		return nil, core.NewToolError("delegate_async", "missing required parameters")
 	}
 
@@ -357,13 +358,13 @@ func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (a
 
 	// Resolve role name → prompt + defaults
 	roleMap := t.roleProvider()
-	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, _, _, _ := resolveRole(instructions, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
+	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, _, _, _ := resolveRole(role, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
 
 	if len(resolvedTools) == 0 {
-		return nil, core.NewToolError("delegate_async", "no tools specified and role '"+instructions+"' has no default tools")
+		return nil, core.NewToolError("delegate_async", "no tools specified and role '"+role+"' has no default tools")
 	}
 
-	return t.runner.RunDelegateAsync(ctx, taskID, task, resolvedInstructions, instructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel)
+	return t.runner.RunDelegateAsync(ctx, taskID, task, resolvedInstructions, role, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel)
 }
 
 // CollectResultsTool waits for all pending async delegates to complete.
