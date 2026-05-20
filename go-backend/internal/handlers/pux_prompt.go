@@ -158,6 +158,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		DesktopProvider: h.cuBridge, // wire desktop screenshot/click/type/key tools to employees
 		ToolPerms:       h.toolPerms, // wire per-tool permission checks
 		SandboxOnly:     req.SandboxOnly, // scheduled jobs: restrict to bash/file ops only
+		TaskMgr:        h.taskMgr,       // background task support for bash commands
 	}
 
 	// Wire visual context for frame-based vision caching (skips vision API when page hasn't changed)
@@ -274,6 +275,9 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	cfg.MCPClient = h.mcpMulti
 	cfg.Subscriber = events // ask_user tool emits to TUI via this channel
 	cfg.Scheduler = h.schedulerTool // scheduler tool for LLM
+
+	// Wire TaskManager subscriber so background task events flow to SSE
+	h.taskMgr.SetSubscriber(events)
 
 	// Model resolver — lets sub-agents use role-specific models.
 	// Special model IDs:

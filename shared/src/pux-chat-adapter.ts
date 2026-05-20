@@ -213,6 +213,46 @@ function handleMetaEvent(
 			});
 			break;
 		}
+		// ── Background task events ──
+		case "task_started": {
+			const taskId = data.taskId as string;
+			const command = data.command as string;
+			usePuxStore.getState().addBackgroundTask({
+				id: taskId,
+				command,
+				status: "running",
+				output: "",
+				startTime: Date.now(),
+			});
+			usePuxStore.getState().setForegroundTask(taskId);
+			break;
+		}
+		case "task_completed": {
+			const taskId = data.taskId as string;
+			const status = (data.status as string) === "failed" ? "failed" : "completed";
+			usePuxStore.getState().updateBackgroundTask(taskId, {
+				status,
+				output: (data.text as string) || "",
+				exitCode: (data.exitCode as number) || 0,
+				error: (data.error as string) || "",
+				endTime: Date.now(),
+			});
+			// Clear foreground task if this was it
+			if (usePuxStore.getState().foregroundTaskId === taskId) {
+				usePuxStore.getState().setForegroundTask(null);
+			}
+			break;
+		}
+		case "task_background": {
+			const taskId = data.taskId as string;
+			usePuxStore.getState().updateBackgroundTask(taskId, {
+				status: "backgrounded",
+			});
+			if (usePuxStore.getState().foregroundTaskId === taskId) {
+				usePuxStore.getState().setForegroundTask(null);
+			}
+			break;
+		}
 	}
 }
 

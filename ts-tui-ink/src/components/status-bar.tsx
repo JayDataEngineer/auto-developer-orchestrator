@@ -17,11 +17,17 @@ export function StatusBar() {
 	const contextMetrics = usePuxStore((s) => s.contextMetrics);
 	const compacting = usePuxStore((s) => s.compacting);
 	const agents = usePuxStore((s) => s.agents);
+	const backgroundTasks = usePuxStore((s) => s.backgroundTasks);
+	const foregroundTaskId = usePuxStore((s) => s.foregroundTaskId);
 	const { cols } = useTerminalSize();
 	const colors = useColors();
 
 	// Running agents for pills
 	const runningAgents = [...agents.values()].filter((a) => a.status === "running");
+
+	// Background task counts
+	const bgRunning = [...backgroundTasks.values()].filter((t) => t.status === "running" || t.status === "backgrounded").length;
+	const bgCompleted = [...backgroundTasks.values()].filter((t) => t.status === "completed" || t.status === "failed").length;
 
 	// Build right side: context usage
 	let right = "";
@@ -66,6 +72,21 @@ export function StatusBar() {
 			{/* Main status line */}
 			<Box>
 				<Text dimColor>{` ${modelLabel} `}</Text>
+				{foregroundTaskId && (
+					<Text color="yellow" dimColor>
+						{symbols.dot} Ctrl+B background
+					</Text>
+				)}
+				{bgRunning > 0 && (
+					<Text color="yellow" dimColor>
+						{symbols.dot} bg:{bgRunning}
+					</Text>
+				)}
+				{bgCompleted > 0 && (
+					<Text color="green" dimColor>
+						{symbols.dot} bg:{bgCompleted} done
+					</Text>
+				)}
 				{runningAgents.length > 0 && (
 					<Text color={colors.running} dimColor>
 						{symbols.dot} Ctrl+O agents

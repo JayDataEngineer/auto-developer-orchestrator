@@ -63,6 +63,18 @@ export interface MCPServerInfo {
 	tools: string[];
 }
 
+export interface BackgroundTask {
+	id: string;
+	command: string;
+	status: "running" | "completed" | "failed" | "backgrounded";
+	output: string;
+	exitCode?: number;
+	error?: string;
+	startTime: number;
+	endTime?: number;
+	duration?: string;
+}
+
 interface PuxState {
 	// HITL (unified decision protocol)
 	pendingDecision: PendingDecision | null;
@@ -142,6 +154,10 @@ interface PuxState {
 	// Active plan (Contract 2.7)
 	activePlan: { planId: string; name: string; filePath: string } | null;
 
+	// Background tasks (bash commands running in background)
+	backgroundTasks: Map<string, BackgroundTask>;
+	foregroundTaskId: string | null;
+
 	// ── Actions ──
 	respondToDecision: (action: string, value: string) => Promise<void>;
 	loadModels: () => Promise<void>;
@@ -192,6 +208,10 @@ interface PuxState {
 	removeMCPServer: (prefix: string) => Promise<void>;
 	setDefaults: (logic: string, worker: string) => Promise<void>;
 	loadDefaults: () => Promise<void>;
+	addBackgroundTask: (task: BackgroundTask) => void;
+	updateBackgroundTask: (id: string, update: Partial<BackgroundTask>) => void;
+	setForegroundTask: (id: string | null) => void;
+	backgroundCurrentTask: () => Promise<void>;
 }
 
 // ── Overlay helpers ──
@@ -269,6 +289,8 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	viewedConversations: new Set(storage.getJSON<string[]>("pux:viewedConversations", [])),
 	lastError: null,
 	activePlan: null,
+	backgroundTasks: new Map(),
+	foregroundTaskId: null,
 
 	respondToDecision: async (action, value) => {
 		const { pendingDecision } = get();
@@ -730,6 +752,46 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	setTheme: (theme) => {
 		storage.set("pux:theme", theme);
 		set({ theme });
+	},
+
+	// ── Background task actions ──
+
+	addBackgroundTask: (task) => {
+		const tasks = new Map(get().backgroundTasks);
+		tasks.set(task.id, task);
+		set({ backgroundTasks: tasks });
+	},
+
+	updateBackgroundTask: (id, update) => {
+		const tasks = new Map(get().backgroundTasks);
+		const existing = tasks.get(id);
+		if (existing) {
+			tasks.set(id, { ...existing, ...update });
+			set({ backgroundTasks: tasks });
+		}
+	},
+
+	setForegroundTask: (id) => {
+		set({ foregroundTaskId: id });
+	},
+
+	backgroundCurrentTask: async () => {
+		const taskId = get().foregroundTaskId;
+		if (!taskId) return;
+		try {
+			const baseUrl = apiUrl("/api/pux");
+			const resp = await getFetch()(`${baseUrl}/tasks/${taskId}/background`, { method: "POST" });
+			if (resp.ok) {
+				const tasks = new Map(get().backgroundTasks);
+				const existing = tasks.get(taskId);
+				if (existing) {
+					tasks.set(taskId, { ...existing, status: "backgrounded" });
+					set({ backgroundTasks: tasks, foregroundTaskId: null });
+				}
+			}
+		} catch {
+			// Best-effort — TUI may not have network access
+		}
 	},
 }));
 

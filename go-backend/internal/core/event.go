@@ -51,6 +51,9 @@ const (
 	EventTypeDecisionRequest AgentEventType = "decision_request" // unified HITL
 	EventTypeUserQuestion    AgentEventType = "user_question"    // legacy, replaced by decision_request
 	EventTypeSource          AgentEventType = "source"            // citation/reference link
+	EventTypeTaskStarted     AgentEventType = "task_started"       // background task registered
+	EventTypeTaskCompleted   AgentEventType = "task_completed"     // background task finished
+	EventTypeTaskBackground  AgentEventType = "task_background"    // foreground → background conversion
 )
 
 // AgentEvent is an event emitted by the agent loop.
@@ -106,6 +109,11 @@ type AgentEventData struct {
 	SourceType string `json:"sourceType,omitempty"` // "url" or "document"
 	SourceURL  string `json:"sourceUrl,omitempty"`  // URL for "url" sources
 	SourceID   string `json:"sourceId,omitempty"`   // unique ID for the source
+
+	// Background task fields — set on task_started, task_completed, task_background events
+	TaskID   string `json:"taskId,omitempty"`
+	Command  string `json:"command,omitempty"`
+	ExitCode int    `json:"exitCode,omitempty"`
 }
 
 // SubscriberKey is a context key for injecting the SSE subscriber channel.

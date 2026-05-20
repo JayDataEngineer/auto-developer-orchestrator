@@ -171,6 +171,14 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 			usePuxStore.getState().toggleAgentSelector();
 			return;
 		}
+		// Ctrl+B: background current foreground task
+		if (input === "b" && key.ctrl) {
+			const store = usePuxStore.getState();
+			if (store.foregroundTaskId) {
+				store.backgroundCurrentTask();
+			}
+			return;
+		}
 	}, [exit]));
 
 	// Command handler

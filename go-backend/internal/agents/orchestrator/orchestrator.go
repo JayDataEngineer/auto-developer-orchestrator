@@ -73,6 +73,7 @@ type Config struct {
 	Scheduler       any                         // optional: *scheduler.Scheduler — passed through to scheduler tool
 	ToolPerms       *perms.ToolPermissionConfig // optional: if set, enables per-tool permission checks
 	SandboxOnly     bool                        // optional: if true, only bash + file tools available (no delegation, MCP, browser, etc.)
+	TaskMgr         *core.TaskManager           // optional: if set, bash tool supports run_in_background + task_output
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -84,6 +85,14 @@ type Agent struct {
 	logger   *log.Logger
 	jitStore *autoconfig.WorkerStore          // session-scoped workers, cleaned up on Close
 	runner   *orchestration.ParallelRunner    // nil if external DelegateRunner provided
+}
+
+// newBashTool creates a bash tool, optionally with TaskManager support.
+func newBashTool(cfg Config) core.Tool {
+	if cfg.TaskMgr != nil {
+		return bash.NewWithTaskManager(cfg.BashExecutor, cfg.TaskMgr, cfg.ProjectDir)
+	}
+	return bash.New(cfg.BashExecutor)
 }
 
 // New creates a new orchestrator agent.
@@ -110,15 +119,23 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 
 	ctoTools := []core.Tool{
-		bash.New(cfg.BashExecutor),
+		newBashTool(cfg),
 		file.NewReadTool(cfg.FileOps, mediaDescriber),
+	}
+
+	// task_output tool — available when TaskManager is wired in
+	if cfg.TaskMgr != nil {
+		ctoTools = append(ctoTools, bash.NewTaskOutputTool(cfg.TaskMgr))
+	}
+
+	ctoTools = append(ctoTools,
 		file.NewWriteTool(cfg.FileOps),
 		file.NewEditTool(cfg.FileOps),
 		file.NewGrepTool(cfg.FileOps),
 		file.NewGlobTool(cfg.FileOps),
 		meta.NewWaitTool(),
 		meta.NewYieldArtifactToolWithDB(cfg.ArtifactDB, cfg.ProjectDir, cfg.SandboxID),
-	}
+	)
 
 	// ── Sandbox-only mode: strict isolation ──
 	// When enabled, the agent can only run bash + file ops inside its sandbox.

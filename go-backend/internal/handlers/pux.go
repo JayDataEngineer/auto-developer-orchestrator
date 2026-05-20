@@ -57,6 +57,7 @@ type PuxHandler struct {
 
 	selectedEngines map[string]*llamaeng.LLMClient // per-agent engine override
 	registry       *AgentRegistry                   // tracks running agents
+	taskMgr        *core.TaskManager                // background task manager
 
 	defaultLogic  string // model ID for CTO/orchestrator (logic)
 	defaultWorker string // model ID for sub-agents/employees (worker)
@@ -81,6 +82,7 @@ func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, 
 		toolPerms:     tp,
 		selectedEngines: make(map[string]*llamaeng.LLMClient),
 		registry:       NewAgentRegistry(),
+		taskMgr:        core.NewTaskManager(filepath.Join(os.Getenv("HOME"), ".pi", "agent", "task-results")),
 	}
 }
 
@@ -201,6 +203,11 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Delete("/mcp-servers", h.RemoveMCPServer)
 	r.Get("/defaults", h.GetDefaults)
 	r.Put("/defaults", h.SetDefaults)
+
+	// Background task management
+	r.Post("/tasks/{taskID}/background", h.BackgroundTask)
+	r.Get("/tasks", h.ListTasks)
+	r.Get("/tasks/{taskID}", h.GetTaskStatus)
 
 	// SSH remote browse
 	if h.sshBrowse != nil {
@@ -665,4 +672,53 @@ func (h *PuxHandler) generateSuggestions(messages []map[string]any) []string {
 		"Show me what changed",
 		"Run the tests",
 	}
+}
+
+// BackgroundTask sends a foreground task to the background.
+// POST /api/pux/tasks/{taskID}/background
+func (h *PuxHandler) BackgroundTask(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+	if taskID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "missing taskID"})
+		return
+	}
+
+	if err := h.taskMgr.Background(taskID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"taskId":  taskID,
+		"status":  "backgrounded",
+	})
+}
+
+// ListTasks returns all background tasks.
+// GET /api/pux/tasks
+func (h *PuxHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
+	tasks := h.taskMgr.List()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"tasks": tasks,
+		"count": len(tasks),
+	})
+}
+
+// GetTaskStatus returns the status of a specific task.
+// GET /api/pux/tasks/{taskID}
+func (h *PuxHandler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+	if taskID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "missing taskID"})
+		return
+	}
+
+	status, err := h.taskMgr.Status(taskID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, status)
 }
