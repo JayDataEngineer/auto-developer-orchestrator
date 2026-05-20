@@ -24,8 +24,9 @@ type ManagedExtension struct {
 
 // Manager starts and stops extension subprocesses, capturing their MCP server ports.
 type Manager struct {
-	exts   []*ManagedExtension
-	logger *zap.Logger
+	exts           []*ManagedExtension
+	startupResults []StartupResult
+	logger         *zap.Logger
 }
 
 // NewManager creates a new extension process manager.
@@ -54,6 +55,7 @@ func (m *Manager) StartAll(ctx context.Context, dirs ...string) int {
 	}
 
 	started := 0
+	m.startupResults = nil
 	for _, ext := range seen {
 		port, cmd, err := m.startOne(ctx, ext)
 		if err != nil {
@@ -61,12 +63,23 @@ func (m *Manager) StartAll(ctx context.Context, dirs ...string) int {
 				zap.String("name", ext.Name),
 				zap.String("dir", ext.Dir),
 				zap.Error(err))
+			m.startupResults = append(m.startupResults, StartupResult{
+				Name:    ext.Name,
+				Version: ext.Version,
+				Success: false,
+				Error:   err.Error(),
+			})
 			continue
 		}
 		m.exts = append(m.exts, &ManagedExtension{
 			Extension: *ext,
 			cmd:       cmd,
 			port:      port,
+		})
+		m.startupResults = append(m.startupResults, StartupResult{
+			Name:    ext.Name,
+			Version: ext.Version,
+			Success: true,
 		})
 		m.logger.Info("extension started",
 			zap.String("name", ext.Name),
@@ -107,6 +120,11 @@ func (m *Manager) Clients() map[string]*mcp.Client {
 		clients[ext.Name] = mcp.NewClient(ext.Name, endpoint, m.logger)
 	}
 	return clients
+}
+
+// StartupResults returns results from the most recent StartAll call.
+func (m *Manager) StartupResults() []StartupResult {
+	return m.startupResults
 }
 
 // Extensions returns info about all managed extensions.

@@ -1,5 +1,13 @@
 package extensions
 
+// StartupResult records the result of attempting to start an extension.
+type StartupResult struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
 // Extension represents a discovered extension with its configuration.
 type Extension struct {
 	Name        string       // Unique identifier, used as MCP prefix and tool package name

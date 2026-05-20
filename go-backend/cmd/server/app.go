@@ -572,6 +572,17 @@ func (a *App) buildRouter(
 		r.Post("/tools/exec", toolsHandler.ExecTool)
 		r.Get("/tools", toolsHandler.ToolsList)
 
+		// Extensions status
+		r.Get("/extensions", func(w http.ResponseWriter, r *http.Request) {
+			results := a.extMgr.StartupResults()
+			w.Header().Set("Content-Type", "application/json")
+			if results == nil {
+				w.Write([]byte("[]"))
+				return
+			}
+			json.NewEncoder(w).Encode(results)
+		})
+
 		// Health check
 		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			status := map[string]string{"status": "ok"}

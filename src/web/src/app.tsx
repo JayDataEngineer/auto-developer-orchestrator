@@ -74,6 +74,7 @@ import {
 	XIcon,
 	Settings,
 	WifiOff,
+	AlertTriangle,
 } from "lucide-react";
 
 // ── Runtime Provider ──
@@ -202,6 +203,43 @@ function BackendOfflineBanner() {
 			<WifiOff className="size-3.5" />
 			<span>Backend offline — start with </span>
 			<code className="rounded bg-white/20 px-1.5 py-0.5 text-[11px]">task dev</code>
+		</div>
+	);
+}
+
+function ExtensionFailureToast() {
+	const [toast, setToast] = useState<{ name: string; error: string } | null>(null);
+
+	useEffect(() => {
+		let alive = true;
+		(async () => {
+			try {
+				const resp = await getFetch("/api/extensions");
+				if (!alive) return;
+				const results: { name: string; success: boolean; error?: string }[] = await resp.json();
+				const failed = results.find((r) => !r.success);
+				if (failed) {
+					setToast({ name: failed.name, error: failed.error || "unknown error" });
+					setTimeout(() => { if (alive) setToast(null); }, 10000);
+				}
+			} catch {
+				// backend not up yet
+			}
+		})();
+		return () => { alive = false; };
+	}, []);
+
+	if (!toast) return null;
+
+	return (
+		<div className="flex h-7 shrink-0 items-center gap-2 bg-amber-600/90 px-4 text-xs font-medium text-white">
+			<AlertTriangle className="size-3.5 shrink-0" />
+			<span className="truncate">
+				Extension <span className="font-semibold">{toast.name}</span> failed: {toast.error}
+			</span>
+			<button onClick={() => setToast(null)} className="ml-auto shrink-0 rounded p-0.5 hover:bg-white/20">
+				<XIcon className="size-3" />
+			</button>
 		</div>
 	);
 }
@@ -569,6 +607,7 @@ export function App() {
 							</Button>
 						</header>
 						<BackendOfflineBanner />
+						<ExtensionFailureToast />
 						<PuxRuntimeProvider>
 							{showTerminal ? (
 								<Group orientation="vertical" className="flex-1">
