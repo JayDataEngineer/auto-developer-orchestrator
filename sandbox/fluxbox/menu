@@ -1,0 +1,15 @@
+[begin] (Pux Sandbox)
+[exec] (Chrome) {/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check}
+[exec] (Terminal) {xterm}
+[separator]
+[include] (/usr/local/bin/fluxbox-apps-menu.sh)
+[separator]
+[exec] (Restart Chrome) {/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check &}
+[exec] (Reload Menu) {fluxbox-remote reconfigure}
+[separator]
+[config] (Window Options)
+[workspaces] (Workspace)
+[separator]
+[restart] (Restart Fluxbox)
+[exit] (Exit)
+[end]

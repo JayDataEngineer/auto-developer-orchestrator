@@ -217,15 +217,16 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 			display, display),
 	}, false)
 
-	// Step 2: Start window manager (xfwm4 or openbox as fallback)
+	// Step 2: Start window manager (fluxbox for menu support, then fallbacks)
 	_, err = m.execInContainer(ctx, containerName, []string{
-		"sh", "-c", fmt.Sprintf("DISPLAY=%s xfwm4 &>/dev/null || DISPLAY=%s openbox &>/dev/null || true", display, display),
+		"sh", "-c", fmt.Sprintf("DISPLAY=%s fluxbox &>/dev/null || DISPLAY=%s xfwm4 &>/dev/null || DISPLAY=%s openbox &>/dev/null || true", display, display, display),
 	}, true)
 	if err != nil {
 		m.logger.Warn("window manager start warning", zap.Error(err))
 	}
 
 	// Step 2b: Set desktop background to a dark solid color
+	// (fluxbox styles handle this, but xsetroot is the fallback for bare WMs)
 	_, _ = m.execInContainer(ctx, containerName, []string{
 		"sh", "-c", fmt.Sprintf("DISPLAY=%s xsetroot -solid '#1e1e2e' 2>/dev/null || true", display),
 	}, false)
