@@ -147,11 +147,21 @@ function DelegateToolCallDisplay({
 	const task = (args as any)?.task || (args as any)?.prompt || "";
 	const taskPreview = task.length > 50 ? task.slice(0, 47) + "..." : task;
 
-	// Look up sub-agent details from Zustand store
+	// Look up sub-agent details from Zustand store.
+	// Uses agentName match + task prefix match because the backend
+	// truncates task text to 120 chars in subagent_start events.
 	const agents = usePuxStore((s) => s.agents);
-	const agentState = [...agents.values()].find(
-		(a) => a.agentName === agentName && a.task === task,
-	);
+	const agentState = (() => {
+		const candidates = [...agents.values()].filter(
+			(a) => a.agentName === agentName,
+		);
+		if (candidates.length === 0) return undefined;
+		if (candidates.length === 1) return candidates[0];
+		const byTask = candidates.find(
+			(a) => task.startsWith(a.task) || a.task.startsWith(task),
+		);
+		return byTask ?? candidates.find((a) => a.status === "running") ?? candidates[0];
+	})();
 
 	const toolCalls = agentState?.toolCalls ?? [];
 	const subToolCount = toolCalls.length;

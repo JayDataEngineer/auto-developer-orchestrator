@@ -251,9 +251,22 @@ export function DelegateRenderer({
 	const isError = status?.type === "error";
 
 	const agents = usePuxStore((s) => s.agents);
-	const agentState = [...agents.values()].find(
-		(a) => a.agentName === agentName && a.task === task,
-	);
+	// Match by agentName first (exact), then narrow by task prefix if
+	// multiple agents share the same name. The backend truncates task
+	// text to 120 chars in subagent_start, so we use startsWith rather
+	// than exact match.
+	const agentState = (() => {
+		const candidates = [...agents.values()].filter(
+			(a) => a.agentName === agentName,
+		);
+		if (candidates.length === 0) return undefined;
+		if (candidates.length === 1) return candidates[0];
+		// Multiple agents with same name — try task prefix match
+		const byTask = candidates.find(
+			(a) => task.startsWith(a.task) || a.task.startsWith(task),
+		);
+		return byTask ?? candidates.find((a) => a.status === "running") ?? candidates[0];
+	})();
 	const toolCalls = agentState?.toolCalls ?? [];
 	const thinkingText = agentState?.thinkingText;
 	const subToolCount = toolCalls.length;
