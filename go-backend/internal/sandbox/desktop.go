@@ -225,6 +225,11 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		m.logger.Warn("window manager start warning", zap.Error(err))
 	}
 
+	// Step 2b: Set desktop background to a dark solid color
+	_, _ = m.execInContainer(ctx, containerName, []string{
+		"sh", "-c", fmt.Sprintf("DISPLAY=%s xsetroot -solid '#1e1e2e' 2>/dev/null || true", display),
+	}, false)
+
 	// Step 3: Start VNC server — KasmVNC or standard x11vnc
 	if backend == BackendKasm {
 		// KasmVNC — built-in web server with H.264/WebRTC
