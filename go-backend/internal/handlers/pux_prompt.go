@@ -228,23 +228,29 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	}
 	cfg.ExtraHooks = extraHooks
 
-	// Build vision fallback chain — used when the engine lacks native vision.
-	// Priority: MCP (Florence-2 on cluster, fast) → Native (llama.cpp/LLM vision, flexible).
-	// When the LLM can see images (mmproj/Gemini), skip to avoid redundant descriptions.
+	// Build vision fallback chain — always configured as fallback when native vision is
+	// unavailable or fails. Priority: phi4 (capable) → MCP Florence-2 (fast) → Native llama.cpp.
+	// The VisionAwareExecutor uses native image_url when EngineHasVision=true,
+	// and falls back to text description via this chain when false.
 	var visionChain *vision.FallbackChain
 	engineHasVision := false
 	if engine != nil {
 		engineHasVision = engine.HasVision()
 	}
-	if !engineHasVision {
+	{
 		var providers []vision.Provider
 
-		// Tier 1: MCP media analysis server (Florence-2, fast structured descriptions)
+		// Tier 1: phi4_vision (high quality, good for browser/desktop screenshots)
+		if h.mcpMulti != nil && h.mcpMulti.HasTool("phi4_vision") {
+			providers = append(providers, vision.NewPhi4Provider(h.mcpMulti))
+		}
+
+		// Tier 2: MCP Florence-2 (fast, structured descriptions)
 		if h.mcpMulti != nil && h.mcpMulti.HasTool("analyze_image") {
 			providers = append(providers, vision.NewMCPProvider(h.mcpMulti))
 		}
 
-		// Tier 2: Native local llama.cpp vision (flexible, handles complex scenes)
+		// Tier 3: Native local llama.cpp vision (flexible, handles complex scenes)
 		if h.visionClient != nil {
 			vc := h.visionClient
 			providers = append(providers, vision.NewNativeProvider(vision.NativeProviderOpt{
@@ -265,13 +271,18 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			visionChain = vision.NewFallbackChain(providers...)
 			h.log.Info("Vision fallback chain configured",
 				zap.Int("providers", len(providers)),
-				zap.String("engine", engine.ModelName()),
+				zap.Bool("nativeVision", engineHasVision),
+				zap.String("engine", func() string {
+					if engine != nil {
+						return engine.ModelName()
+					}
+					return "none"
+				}()),
 			)
 		}
-	} else if engineHasVision {
-		h.log.Debug("LLM has native vision, skipping fallback chain", zap.String("engine", engine.ModelName()))
 	}
 	cfg.VisionChain = visionChain
+	cfg.EngineHasVision = engineHasVision
 	cfg.MCPClient = h.mcpMulti
 	cfg.Subscriber = events // ask_user tool emits to TUI via this channel
 	cfg.Scheduler = h.schedulerTool // scheduler tool for LLM
@@ -326,17 +337,27 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 
 	// Rehydrate session tree from SQL history for context continuity
 	var historyLen int
+	var lastUserContent string // track for dedup
 	if h.db != nil {
 		history, err := h.db.GetConversationHistory(r.Context(), req.Project, req.AgentId, 200)
 		if err != nil {
 			h.log.Warn("Failed to load conversation history", zap.Error(err))
 		} else {
 			historyLen = len(history)
+			deduped := 0
 			for _, stored := range history {
 				msg := core.Message{Role: stored.Role}
 				switch stored.Role {
 				case "user":
 					msg.Content = stored.Content
+					// Dedup: skip consecutive user messages with identical content.
+					// Frontend retries (SSE failures, page refresh) can cause
+					// the same message to be saved twice.
+					if stored.Content == lastUserContent {
+						deduped++
+						continue
+					}
+					lastUserContent = stored.Content
 				case "assistant":
 					msg.Content = stored.Text
 					msg.ReasoningContent = stored.Thinking
@@ -347,10 +368,17 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 							msg.ToolCalls = tcs
 						}
 					}
+					// Skip empty assistant messages (orphaned streaming placeholders).
+					// These break the consecutive-user dedup tracker and waste context.
+					if stored.Text == "" && stored.Thinking == "" && (stored.ToolCalls == "" || stored.ToolCalls == "[]" || stored.ToolCalls == "[streaming]") {
+						continue
+					}
+					lastUserContent = "" // reset dedup tracker on real assistant message
 				case "tool":
 					msg.Content = stored.Content
 					msg.ToolCallID = stored.ToolCallID
 					msg.Name = stored.ToolName
+					lastUserContent = "" // reset dedup tracker on role change
 				default:
 					continue // skip unknown roles
 				}
@@ -358,10 +386,15 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 					h.log.Warn("Failed to append history message", zap.Error(err))
 				}
 			}
+			if deduped > 0 {
+				h.log.Info("Deduped history messages",
+					zap.String("agentId", req.AgentId),
+					zap.Int("removed", deduped))
+			}
 			if historyLen > 0 {
 				h.log.Info("Session rehydrated from SQL history",
 					zap.String("agentId", req.AgentId),
-					zap.Int("messages", historyLen))
+					zap.Int("messages", historyLen-deduped))
 			}
 		}
 	}
@@ -406,10 +439,16 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 
 	writeSSE(w, string(core.EventTypeAgentSpawned), map[string]string{"agentId": req.AgentId}, canFlush, flusher)
 
-	// Save user message
+	// Save user message — skip if it was already the last message saved
+	// (prevents duplicates from frontend retries / SSE failures).
 	if h.db != nil {
-		if _, err := h.db.SaveUserMessage(r.Context(), req.Project, req.AgentId, req.Message); err != nil {
-			h.log.Warn("Failed to save user message", zap.Error(err))
+		if lastUserContent != req.Message {
+			if _, err := h.db.SaveUserMessage(r.Context(), req.Project, req.AgentId, req.Message); err != nil {
+				h.log.Warn("Failed to save user message", zap.Error(err))
+			}
+		} else {
+			h.log.Info("Skipping duplicate user message save",
+				zap.String("agentId", req.AgentId))
 		}
 		if err := h.db.SetConversationStatus(r.Context(), req.Project, req.AgentId, "processing"); err != nil {
 			h.log.Warn("Failed to set conversation status to processing", zap.Error(err))

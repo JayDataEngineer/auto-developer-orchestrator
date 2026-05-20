@@ -3,6 +3,7 @@ package vision
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -20,12 +21,33 @@ type VisualContext interface {
 	LastChangeScore() float64
 }
 
+// VisionResult wraps a tool result carrying extracted images for native vision delivery.
+// The agent loop detects this type and routes data appropriately:
+//   - OriginalResult → SSE event (frontend rendering, base64 intact)
+//   - StrippedJSON → ToolResult.Content (LLM reads clean text, no base64 waste)
+//   - Images → Message.Images → image_url content parts for the LLM
+type VisionResult struct {
+	OriginalResult any                 // raw result with base64 INTACT (for SSE → frontend)
+	StrippedJSON   string              // JSON with base64 removed (for LLM tool message text)
+	Images         []core.ContentImage // extracted images (for LLM image_url delivery)
+}
+
+// GetVisionData implements core.VisionCarrier.
+func (vr *VisionResult) GetVisionData() (any, string, []core.ContentImage) {
+	return vr.OriginalResult, vr.StrippedJSON, vr.Images
+}
+
 // VisionAwareExecutor wraps a ToolExecutor and post-processes results
-// that contain image data, injecting text descriptions from the vision chain.
+// that contain image data. It has two modes:
+//   - Native vision (nativeVision=true): extracts image, strips base64 from text,
+//     returns VisionResult for image_url delivery to the LLM
+//   - Fallback (nativeVision=false): describes image via FallbackChain,
+//     injects text description into the result
 type VisionAwareExecutor struct {
-	inner  core.ToolExecutor
-	chain  *FallbackChain
-	logger *log.Logger
+	inner        core.ToolExecutor
+	chain        *FallbackChain
+	logger       *log.Logger
+	nativeVision bool // true when LLM supports image_url (Qwen/Gemini/etc)
 
 	vc              VisualContext // optional: enables frame-based caching
 	changeThreshold float64       // skip vision if score < this (default 0.05)
@@ -34,7 +56,8 @@ type VisionAwareExecutor struct {
 	lastDesc string // cached description from last vision call
 }
 
-// NewVisionAwareExecutor wraps the given executor with automatic vision descriptions.
+// NewVisionAwareExecutor wraps the given executor with automatic vision processing.
+// The chain may be nil (native-vision-only mode with no text fallback).
 func NewVisionAwareExecutor(inner core.ToolExecutor, chain *FallbackChain, logger *log.Logger) *VisionAwareExecutor {
 	if logger == nil {
 		logger = log.Default()
@@ -45,6 +68,12 @@ func NewVisionAwareExecutor(inner core.ToolExecutor, chain *FallbackChain, logge
 		logger:          logger,
 		changeThreshold: 0.05,
 	}
+}
+
+// SetNativeVision controls whether the executor sends images via image_url (true)
+// or falls back to text description via the chain (false).
+func (e *VisionAwareExecutor) SetNativeVision(native bool) {
+	e.nativeVision = native
 }
 
 // SetVisualContext enables frame-based vision caching. When the page hasn't
@@ -67,11 +96,6 @@ func (e *VisionAwareExecutor) Execute(ctx context.Context, toolName string, args
 		return result, err
 	}
 
-	// No chain = no vision
-	if e.chain == nil {
-		return result, nil
-	}
-
 	// Serialize result to detect images
 	resultBytes, merr := json.Marshal(result)
 	if merr != nil {
@@ -81,6 +105,40 @@ func (e *VisionAwareExecutor) Execute(ctx context.Context, toolName string, args
 
 	detection := DetectImage(toolName, resultStr)
 	if detection == nil || !detection.HasImage || detection.AlreadyDescribed {
+		return result, nil
+	}
+
+	// Native vision path: extract image, strip base64 from text, return VisionResult
+	if e.nativeVision {
+		return e.nativeVisionPath(result, resultStr, detection)
+	}
+
+	// Fallback path: describe via chain, inject text description
+	return e.fallbackPath(ctx, result, detection, toolName)
+}
+
+// nativeVisionPath extracts the image and returns a VisionResult that routes
+// data to the correct pipeline: original result (with base64) for SSE/frontend,
+// stripped JSON for LLM text, and images for image_url delivery.
+func (e *VisionAwareExecutor) nativeVisionPath(originalResult any, resultJSON string, detection *ImageDetection) (any, error) {
+	stripped := stripBase64FromJSON(resultJSON, detection)
+
+	dataURL := "data:" + detection.MIMEType + ";base64," + detection.Base64Data
+	images := []core.ContentImage{{DataURL: dataURL}}
+
+	e.logger.Printf("vision: native — extracted image from tool result (%d bytes base64, stripped %d chars)",
+		len(detection.Base64Data), len(resultJSON)-len(stripped))
+
+	return &VisionResult{
+		OriginalResult: originalResult,
+		StrippedJSON:   stripped,
+		Images:         images,
+	}, nil
+}
+
+// fallbackPath describes the image via the fallback chain and injects text.
+func (e *VisionAwareExecutor) fallbackPath(ctx context.Context, result any, detection *ImageDetection, toolName string) (any, error) {
+	if e.chain == nil {
 		return result, nil
 	}
 
@@ -115,8 +173,39 @@ func (e *VisionAwareExecutor) Execute(ctx context.Context, toolName string, args
 	e.lastDesc = desc.Text
 	e.mu.Unlock()
 
+	e.logger.Printf("vision: %s described image from %s in %dms", desc.Provider, toolName, desc.LatencyMs)
+
 	// Inject description into the result
 	return injectDescription(result, desc.Text), nil
+}
+
+// stripBase64FromJSON removes the image base64 data from a JSON string, replacing
+// it with a placeholder. Keeps all other fields (URLs, accessibility tree, etc.).
+func stripBase64FromJSON(resultJSON string, detection *ImageDetection) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(resultJSON), &m); err != nil {
+		// Can't parse — return as-is with base64 truncated
+		if len(resultJSON) > 500 {
+			return resultJSON[:200] + fmt.Sprintf("...[truncated, %d bytes total]", len(resultJSON))
+		}
+		return resultJSON
+	}
+
+	// Strip known image fields
+	for _, key := range []string{"screenshot", "image", "image_b64"} {
+		if val, ok := m[key].(string); ok && len(val) > 200 {
+			// Likely base64 image data — check if it matches the detection
+			if val == detection.Base64Data || len(val) == len(detection.Base64Data) {
+				m[key] = "[image attached separately]"
+			}
+		}
+	}
+
+	stripped, err := json.Marshal(m)
+	if err != nil {
+		return resultJSON
+	}
+	return string(stripped)
 }
 
 // promptForTool returns a context-appropriate description prompt.

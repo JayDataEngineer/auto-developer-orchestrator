@@ -71,6 +71,51 @@ func extractMCPText(raw string) string {
 	return raw
 }
 
+// Phi4Provider describes images via the MCP phi4_vision tool on the media server.
+// Uses Gemma-based phi4 model for high-quality scene understanding — better for
+// browser/desktop screenshots where you need layout, text, and button understanding.
+type Phi4Provider struct {
+	client *mcp.MultiClient
+}
+
+// NewPhi4Provider creates a vision provider backed by the phi4_vision MCP tool.
+func NewPhi4Provider(client *mcp.MultiClient) *Phi4Provider {
+	return &Phi4Provider{client: client}
+}
+
+func (p *Phi4Provider) Name() string { return "phi4" }
+
+func (p *Phi4Provider) IsAvailable(ctx context.Context) bool {
+	if p.client == nil {
+		return false
+	}
+	return p.client.HasTool("phi4_vision")
+}
+
+func (p *Phi4Provider) Describe(ctx context.Context, img ImageInput) (Description, error) {
+	dataURI := "data:" + img.MIMEType + ";base64," + img.Base64
+
+	prompt := img.Prompt
+	if prompt == "" {
+		prompt = "Describe what you see in this image in detail."
+	}
+
+	result, err := p.client.CallTool(ctx, "phi4_vision", map[string]any{
+		"imageSource": dataURI,
+		"prompt":      prompt,
+	})
+	if err != nil {
+		return Description{}, fmt.Errorf("MCP phi4_vision: %w", err)
+	}
+
+	text := extractMCPText(result)
+
+	return Description{
+		Text:     text,
+		Provider: "phi4",
+	}, nil
+}
+
 // NativeProvider wraps the browser.VisionClient for llama.cpp-based vision.
 // It health-checks the server before use.
 type NativeProvider struct {

@@ -265,6 +265,7 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		"--no-sandbox",
 		"--disable-dev-shm-usage",
 		"--disable-gpu",
+		"--enable-features=WebContentsForceDark",
 		fmt.Sprintf("--remote-debugging-port=%d", cdpPort),
 		"--window-size=1280,800",
 		fmt.Sprintf("--display=%s", display),
@@ -315,8 +316,8 @@ func (m *Manager) startNoVNC(ctx context.Context, containerName string, novncPor
 	cmd := []string{
 		"sh", "-c",
 		fmt.Sprintf(
-			"websockify --web=/usr/share/novnc/ %d localhost:%d &>/tmp/novnc-%d.log || "+
-				"websockify --web=/opt/noVNC/ %d localhost:%d &>/tmp/novnc-%d.log || true",
+			"websockify --web /usr/share/novnc %d localhost:%d &>/tmp/novnc-%d.log || "+
+				"websockify --web /opt/noVNC %d localhost:%d &>/tmp/novnc-%d.log || true",
 			novncPort, vncPort, novncPort,
 			novncPort, vncPort, novncPort,
 		),

@@ -78,6 +78,16 @@ type ToolResult struct {
 	ToolCallID string
 	ToolName   string
 	Content    string
+	Images     []ContentImage // extracted screenshots sent as image_url to vision-capable models
+}
+
+// VisionCarrier is implemented by tool results that carry extracted images
+// for native vision delivery. The vision executor wraps results in a type
+// that satisfies this interface when native vision is enabled.
+type VisionCarrier interface {
+	// GetVisionData returns the original result (for SSE/frontend), stripped JSON
+	// (for LLM text), and extracted images (for LLM image_url delivery).
+	GetVisionData() (originalResult any, strippedJSON string, images []ContentImage)
 }
 
 // OpenAITool is the tool definition format for /v1/chat/completions.

@@ -3,10 +3,10 @@
 [exec] (File Browser) {pcmanfm /sandbox/workspace}
 [exec] (Terminal) {xterm}
 [separator]
-[include] (/usr/local/bin/fluxbox-apps-menu.sh)
+[include] (~/.fluxbox/apps-menu)
 [separator]
-[exec] (Restart Chrome) {/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check &}
-[exec] (Reload Menu) {fluxbox-remote reconfigure}
+[exec] (Restart Chrome) {/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check --enable-features=WebContentsForceDark &}
+[exec] (Reload Menu) {/usr/local/bin/fluxbox-apps-menu.sh && fluxbox-remote reconfigure}
 [separator]
 [config] (Window Options)
 [workspaces] (Workspace)

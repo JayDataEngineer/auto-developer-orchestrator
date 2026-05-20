@@ -57,7 +57,8 @@ type Config struct {
 	ApprovalHandler  hooks.ApprovalHandler     // optional: if set, create_plan requires user approval
 	GitExecutor      hooks.GitExecutor         // optional: if set, git checkpoints are created
 	ExtraHooks       []core.LoopHook           // optional: add-on hooks (Langfuse, etc.)
-	VisionChain      *vision.FallbackChain     // optional: if set, auto-describes images in tool results
+	VisionChain      *vision.FallbackChain     // optional: if set, fallback text description for non-vision models
+	EngineHasVision  bool                      // true if the LLM supports native image_url
 	VisualContext    vision.VisualContext      // optional: if set, enables frame-based vision caching
 	MCPClient        *mcp.MultiClient          // optional: if set, registers MCP tools (search, analyze_image, etc.)
 	ModelResolver    orchestration.ModelResolver // optional: if set, sub-agents can use role-specific models
@@ -352,8 +353,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		// Subscriber is now injected via context (Contract 3.4 compliance).
 		// No need to call SetSubscriber — subscriberFromCtx() extracts it from ctx.
 		// Wire visual context for sub-agent vision caching
-		if cfg.VisualContext != nil && cfg.VisionChain != nil {
-			pr.SetVisualContext(cfg.VisualContext, cfg.VisionChain, func(format string, args ...interface{}) {
+		if cfg.VisualContext != nil {
+			pr.SetVisualContext(cfg.VisualContext, cfg.VisionChain, cfg.EngineHasVision, func(format string, args ...interface{}) {
 				logger.Printf("SUB_VISION: "+format, args...)
 			})
 		}
@@ -484,17 +485,18 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 	// Main loop executor uses ctoToolReg (has delegate_to, bash, file tools)
 	// Sub-agents use allToolReg via ParallelRunner (has everything)
+	// Always wrap with VisionAwareExecutor — it handles both native vision
+	// (extracts image_url, strips base64 from text) and fallback (describes via chain).
 	executor := core.ToolExecutor(ctoToolReg)
-	if cfg.VisionChain != nil {
-		vExec := vision.NewVisionAwareExecutor(ctoToolReg, cfg.VisionChain, logger)
-		if cfg.VisualContext != nil {
-			vExec.SetVisualContext(cfg.VisualContext)
-			logger.Printf("Vision-aware executor enabled with frame caching (wrapping CTO tool registry)")
-		} else {
-			logger.Printf("Vision-aware executor enabled (wrapping CTO tool registry)")
-		}
-		executor = vExec
+	vExec := vision.NewVisionAwareExecutor(ctoToolReg, cfg.VisionChain, logger)
+	vExec.SetNativeVision(cfg.EngineHasVision)
+	if cfg.VisualContext != nil {
+		vExec.SetVisualContext(cfg.VisualContext)
+		logger.Printf("Vision-aware executor enabled (native=%v, frame caching)", cfg.EngineHasVision)
+	} else {
+		logger.Printf("Vision-aware executor enabled (native=%v)", cfg.EngineHasVision)
 	}
+	executor = vExec
 
 	baseAgent := agents.NewBaseAgent(agents.BaseConfig{
 		Provider:        provider,

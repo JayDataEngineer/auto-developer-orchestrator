@@ -219,6 +219,19 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				return err
 			}
 
+			// Debug: log message roles to detect history duplication
+			if round == 0 {
+				var roles []string
+				for _, m := range sessCtx {
+					content := m.Content
+					if len(content) > 40 {
+						content = content[:40] + "..."
+					}
+					roles = append(roles, fmt.Sprintf("%s:%q", m.Role, content))
+				}
+				l.logger.Printf("LLM context (round 0, %d msgs): %s", len(sessCtx), strings.Join(roles, " → "))
+			}
+
 			// Ensure system messages are first (strict Jinja templates require it)
 			sessCtx = reorderSystemFirst(sessCtx)
 
@@ -552,6 +565,9 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			}
 
 			var resultStr string
+			var resultForSSE any = result
+			var visionImages []ContentImage
+
 			if resultErr != nil {
 				state.FailCounts[tc.Name]++
 				state.ConsecutiveFails++
@@ -565,8 +581,17 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			} else {
 				state.FailCounts[tc.Name] = 0
 				state.ConsecutiveFails = 0
-				resultBytes, _ := json.Marshal(result)
-				resultStr = string(resultBytes)
+
+				// Check if the executor returned a VisionCarrier (native vision path).
+				// This separates the original result (with base64 for frontend) from
+				// stripped text + images (for LLM consumption).
+				if vc, ok := result.(VisionCarrier); ok {
+					resultForSSE, resultStr, visionImages = vc.GetVisionData()
+				} else {
+					resultBytes, _ := json.Marshal(result)
+					resultStr = string(resultBytes)
+				}
+
 				if l.config.ToolResultProcessor != nil {
 					resultStr = l.config.ToolResultProcessor(ctx, tc.Name, tcr.ID, resultStr)
 				} else if len(resultStr) > 30000 {
@@ -581,9 +606,9 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				Data: AgentEventData{
 					ToolName:     tc.Name,
 					ToolID:       tc.ID,
-					Result:       result,
+					Result:       resultForSSE,
 					Error:        func() string { if resultErr != nil { return resultErr.Error() }; return "" }(),
-					Artifact:     extractArtifact(tc.Name, result),
+					Artifact:     extractArtifact(tc.Name, resultForSSE),
 					ModelContent: extractModelContent(resultStr, tc.Name),
 				},
 			})
@@ -603,7 +628,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				h.OnAfterToolCall(ctx, state, tc.Name, tc.Args, resultStr, resultErr)
 			}
 
-			toolResults = append(toolResults, ToolResult{ToolCallID: tcr.ID, ToolName: tc.Name, Content: resultStr})
+			toolResults = append(toolResults, ToolResult{ToolCallID: tcr.ID, ToolName: tc.Name, Content: resultStr, Images: visionImages})
 		}
 
 		// Feed tool results back into session
@@ -613,6 +638,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				Content:    tr.Content,
 				ToolCallID: tr.ToolCallID,
 				Name:       tr.ToolName,
+				Images:     tr.Images,
 			})
 		}
 

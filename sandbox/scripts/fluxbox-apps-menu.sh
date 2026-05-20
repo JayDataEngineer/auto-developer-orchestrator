@@ -1,28 +1,30 @@
 #!/bin/bash
 # Generate fluxbox menu entries from installed .desktop files.
-# Used as a dynamic menu by fluxbox's [include] directive.
+# Writes to ~/.fluxbox/apps-menu which is [include]d by the main menu.
 #
-# Output format: fluxbox menu XML snippet, e.g.:
-#   [exec] (Google Chrome) {/usr/bin/google-chrome-stable}
-#   [exec] (Terminal) {xterm}
+# Called:
+#   - At container startup (via supervisord)
+#   - On "Reload Menu" from the fluxbox right-click menu
+#   - After apt installs new applications
+#
+# Output: static fluxbox menu XML snippet at ~/.fluxbox/apps-menu
 
 DATA_DIRS="/usr/share/applications ${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+OUTFILE="$HOME/.fluxbox/apps-menu"
 
-has_display() {
-	# Quick check if the app needs a display (GUI vs CLI)
-	grep -qiE "^(NoDisplay|Hidden)=true" "$1" && return 1
-	grep -qiE "^Categories=.*(Settings|System|ConsoleOnly)" "$1" && return 1
-	return 0
-}
+tmpfile=$(mktemp)
+echo "[submenu] (Applications)" > "$tmpfile"
 
-echo "[submenu] (Applications)"
-
-# Scan standard locations
 for dir in $DATA_DIRS; do
 	[ -d "$dir" ] || continue
 	for desktop_file in "$dir"/*.desktop; do
 		[ -f "$desktop_file" ] || continue
-		has_display "$desktop_file" || continue
+
+		# Skip hidden / NoDisplay entries
+		grep -qiE "^(NoDisplay|Hidden)=true" "$desktop_file" && continue
+
+		# Skip CLI-only / system config tools
+		grep -qiE "^Categories=.*(ConsoleOnly|Settings;System)" "$desktop_file" && continue
 
 		name=$(grep -m1 "^Name=" "$desktop_file" | cut -d= -f2-)
 		exec_cmd=$(grep -m1 "^Exec=" "$desktop_file" | cut -d= -f2-)
@@ -33,6 +35,7 @@ for dir in $DATA_DIRS; do
 
 		echo "[exec] ($name) {$exec_cmd}"
 	done
-done | sort -t'(' -k2 -u
+done | sort -t'(' -k2 -u >> "$tmpfile"
 
-echo "[end]"
+echo "[end]" >> "$tmpfile"
+mv "$tmpfile" "$OUTFILE"

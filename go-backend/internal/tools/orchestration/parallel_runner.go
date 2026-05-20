@@ -68,6 +68,12 @@ type ParallelRunner struct {
 	// with VisionAwareExecutor to skip vision calls when the page hasn't changed.
 	visualContext   vision.VisualContext
 	visionChain     *vision.FallbackChain
+	nativeVision    bool // true if sub-agent models support native image_url
+	// NOTE: nativeVision is inherited from the CTO's engine. Workers with different
+	// models (e.g. code_ops uses DeepSeek text-only) are safe because DetectImage()
+	// only triggers for browser/desktop tools — workers without those never hit the
+	// vision path. If a future worker mixes browser capability with a text-only model,
+	// this needs per-worker HasVision() resolution.
 	visionLogger    func(format string, args ...interface{})
 
 	// Auto-director: raise browser window for VNC visibility when browser agent starts
@@ -184,9 +190,10 @@ func (r *ParallelRunner) SetScratchStore(s *ctxpkg.ScratchStore) {
 // SetVisualContext enables frame-based vision caching for sub-agent executors.
 // When set, sub-agents that produce screenshots will have their vision calls
 // skipped if the page hasn't changed since the last description.
-func (r *ParallelRunner) SetVisualContext(vc vision.VisualContext, chain *vision.FallbackChain, logger func(format string, args ...interface{})) {
+func (r *ParallelRunner) SetVisualContext(vc vision.VisualContext, chain *vision.FallbackChain, nativeVision bool, logger func(format string, args ...interface{})) {
 	r.visualContext = vc
 	r.visionChain = chain
+	r.nativeVision = nativeVision
 	r.visionLogger = logger
 }
 
@@ -413,15 +420,20 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	if r.executorFactory != nil && sandboxTier != "" {
 		executor = r.executorFactory(sandboxTier)
 	}
-	// Wrap sub-agent executor with vision caching when visual context is available
-	if r.visualContext != nil && r.visionChain != nil {
+	// Wrap sub-agent executor with vision processing (always)
+	// Native vision: extracts image_url, strips base64 from text
+	// Fallback: describes via chain when model can't see
+	{
 		var vLogger *log.Logger
 		if r.visionLogger != nil {
 			vLogger = log.New(io.Discard, "", 0)
 			_ = vLogger
 		}
 		vExec := vision.NewVisionAwareExecutor(executor, r.visionChain, vLogger)
-		vExec.SetVisualContext(r.visualContext)
+		vExec.SetNativeVision(r.nativeVision)
+		if r.visualContext != nil {
+			vExec.SetVisualContext(r.visualContext)
+		}
 		executor = vExec
 	}
 	// Use BaseAgent so sub-agents get common hooks (scratch pad re-injection, etc.)
@@ -859,10 +871,13 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	if r.executorFactory != nil && sandboxTier != "" {
 		executor = r.executorFactory(sandboxTier)
 	}
-	// Wrap sub-agent executor with vision caching when visual context is available
-	if r.visualContext != nil && r.visionChain != nil {
+	// Wrap sub-agent executor with vision processing (always)
+	{
 		vExec := vision.NewVisionAwareExecutor(executor, r.visionChain, log.New(io.Discard, "", 0))
-		vExec.SetVisualContext(r.visualContext)
+		vExec.SetNativeVision(r.nativeVision)
+		if r.visualContext != nil {
+			vExec.SetVisualContext(r.visualContext)
+		}
 		executor = vExec
 	}
 	// Use BaseAgent so sub-agents get common hooks (scratch pad re-injection, etc.)
@@ -1096,9 +1111,12 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 
 	// Create a new agent loop with the SAME session (has full history)
 	continueExecutor := core.ToolExecutor(r.executor)
-	if r.visualContext != nil && r.visionChain != nil {
+	{
 		vExec := vision.NewVisionAwareExecutor(continueExecutor, r.visionChain, log.New(io.Discard, "", 0))
-		vExec.SetVisualContext(r.visualContext)
+		vExec.SetNativeVision(r.nativeVision)
+		if r.visualContext != nil {
+			vExec.SetVisualContext(r.visualContext)
+		}
 		continueExecutor = vExec
 	}
 	// Use BaseAgent for continuation so sub-agents keep getting common hooks
