@@ -42,6 +42,12 @@ type Session interface {
 	// Returns the number of tool results truncated.
 	TruncateToolResults(keep int) (int, error)
 
+	// ReplaceToolResults replaces old tool result content using a custom function.
+	// The replace function receives (index, toolName, currentContent) and returns
+	// the new content. Keeps the `keep` most recent results intact.
+	// Returns the number of tool results replaced.
+	ReplaceToolResults(replace func(i int, name, content string) string, keep int) (int, error)
+
 	// GetTree returns the session tree for navigation.
 	GetTree() *TreeNode
 

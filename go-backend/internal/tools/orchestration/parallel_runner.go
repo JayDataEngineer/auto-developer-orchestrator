@@ -424,12 +424,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	// Native vision: extracts image_url, strips base64 from text
 	// Fallback: describes via chain when model can't see
 	{
-		var vLogger *log.Logger
-		if r.visionLogger != nil {
-			vLogger = log.New(io.Discard, "", 0)
-			_ = vLogger
-		}
-		vExec := vision.NewVisionAwareExecutor(executor, r.visionChain, vLogger)
+		vExec := vision.NewVisionAwareExecutor(executor, r.visionChain, log.New(io.Discard, "", 0))
 		vExec.SetNativeVision(r.nativeVision)
 		if r.visualContext != nil {
 			vExec.SetVisualContext(r.visualContext)
@@ -1541,6 +1536,9 @@ func (s *subSession) Compact(ctx context.Context, summary string) (string, error
 	return fmt.Sprintf("compacted %d messages, kept %d", removed, kept), nil
 }
 func (s *subSession) TruncateToolResults(keep int) (int, error) { return 0, nil }
+func (s *subSession) ReplaceToolResults(replace func(i int, name, content string) string, keep int) (int, error) {
+	return 0, nil
+}
 func (s *subSession) GetCurrentNode() string { return s.parent.ID() + "-sub" }
 
 // hasBrowserTools checks if the tool list contains browser/web automation tools.

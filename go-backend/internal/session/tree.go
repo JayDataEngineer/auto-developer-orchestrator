@@ -460,7 +460,55 @@ func (t *SessionTree) TruncateToolResults(keep int) (int, error) {
 	return truncated, nil
 }
 
-// GetTree returns the session tree for navigation.
+// ReplaceToolResults replaces old tool result content using a custom function.
+// Follows the same node-walking pattern as TruncateToolResults but gives the
+// caller full control over the replacement text.
+func (t *SessionTree) ReplaceToolResults(replace func(i int, name, content string) string, keep int) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	path := t.walkPath(t.session.ID, t.current)
+	if path == nil {
+		return 0, fmt.Errorf("cannot resolve path for replacement")
+	}
+
+	var toolNodes []*core.TreeNode
+	for _, node := range path {
+		if node.Entry.Type == core.EntryTypeToolResult {
+			toolNodes = append(toolNodes, node)
+		}
+	}
+
+	if len(toolNodes) <= keep {
+		return 0, nil
+	}
+
+	replaced := 0
+	for i := 0; i < len(toolNodes)-keep; i++ {
+		node := toolNodes[i]
+		if node.Entry.Data == nil {
+			continue
+		}
+		var msg core.Message
+		if err := json.Unmarshal(node.Entry.Data, &msg); err != nil {
+			continue
+		}
+		if msg.Content == "" {
+			continue
+		}
+		newContent := replace(i, msg.Name, msg.Content)
+		msg.Content = newContent
+		if newData, err := json.Marshal(msg); err == nil {
+			updated := node.Entry
+			updated.Data = newData
+			node.Entry = updated
+			t.entries[node.Entry.ID] = updated
+		}
+		replaced++
+	}
+
+	return replaced, nil
+}
 func (t *SessionTree) GetTree() *core.TreeNode {
 	t.mu.Lock()
 	defer t.mu.Unlock()

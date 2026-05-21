@@ -21,7 +21,8 @@ type SummarizingContextManager struct {
 	inner    ContextManager
 	config   Config
 	session  core.Session   // for TruncateToolResults/Compact
-	provider core.LLMProvider
+	provider core.LLMProvider        // main provider
+	compact  core.LLMProvider        // cheap model for summaries (optional)
 	logger   *log.Logger
 	metrics  ContextMetrics
 	subCh    chan<- core.AgentEvent // cached from context during BuildContext
@@ -41,11 +42,18 @@ type SummarizingContextManager struct {
 }
 
 func NewSummarizingContextManager(inner ContextManager, cfg Config, sess core.Session, provider core.LLMProvider) *SummarizingContextManager {
+	// Use compact provider for summaries if configured, otherwise main provider
+	summaryProvider := provider
+	if cfg.CompactProvider != nil {
+		summaryProvider = cfg.CompactProvider
+	}
+
 	m := &SummarizingContextManager{
 		inner:       inner,
 		config:      cfg,
 		session:     sess,
 		provider:    provider,
+		compact:     summaryProvider,
 		logger:      log.Default(),
 		readSet:     make(map[string]bool),
 		modifiedSet: make(map[string]bool),
@@ -95,6 +103,10 @@ func (m *SummarizingContextManager) BuildContext(ctx context.Context) ([]core.Me
 
 		if ratio >= m.config.FullCompactThreshold {
 			m.fullCompact(ctx, msgs)
+		} else if ratio >= m.config.PruneThreshold && m.config.PruneThreshold > 0 {
+			m.pruneCompact()
+		} else if ratio >= m.config.MaskThreshold && m.config.MaskThreshold > 0 {
+			m.maskCompact()
 		} else if ratio >= m.config.MicroCompactThreshold {
 			m.microCompact()
 		}
@@ -151,6 +163,52 @@ func (m *SummarizingContextManager) microCompact() {
 		m.metrics.CompactionType = "micro"
 		m.metrics.LastCompaction = time.Now()
 		m.emitCompactionEvent(truncated, 0)
+	}
+}
+
+// maskCompact replaces old tool results with short placeholder references.
+// Keeps the tool call visible (assistant message with tool_calls is preserved)
+// but replaces the verbose result content with "[ref: tool result N]".
+// Lighter than pruning — the agent can still see what tools were called.
+func (m *SummarizingContextManager) maskCompact() {
+	if m.session == nil {
+		return
+	}
+	replaced, err := m.session.ReplaceToolResults(func(i int, name, content string) string {
+		// Keep the last KeepResults results intact
+		return fmt.Sprintf("[ref: %s result %d — %d chars]", name, i+1, len(content))
+	}, m.config.KeepResults)
+	if err != nil {
+		m.logger.Printf("SummarizingContextManager: mask-compact failed: %v", err)
+		return
+	}
+	if replaced > 0 {
+		m.logger.Printf("SummarizingContextManager: mask-compact: replaced %d tool results with refs", replaced)
+		m.metrics.CompactionType = "mask"
+		m.metrics.LastCompaction = time.Now()
+		m.emitCompactionEvent(replaced, 0)
+	}
+}
+
+// pruneCompact removes old tool result content entirely, replacing with
+// a minimal placeholder. More aggressive than mask — saves the most tokens
+// without burning an LLM call for summarization.
+func (m *SummarizingContextManager) pruneCompact() {
+	if m.session == nil {
+		return
+	}
+	pruned, err := m.session.ReplaceToolResults(func(i int, name, _ string) string {
+		return fmt.Sprintf("[tool %s executed — result pruned]", name)
+	}, m.config.KeepResults)
+	if err != nil {
+		m.logger.Printf("SummarizingContextManager: prune-compact failed: %v", err)
+		return
+	}
+	if pruned > 0 {
+		m.logger.Printf("SummarizingContextManager: prune-compact: pruned %d tool results", pruned)
+		m.metrics.CompactionType = "prune"
+		m.metrics.LastCompaction = time.Now()
+		m.emitCompactionEvent(pruned, 0)
 	}
 }
 
@@ -366,9 +424,13 @@ Be concise but comprehensive. The agent needs this summary to continue working e
 }
 
 // generateSummary calls the LLM to produce a structured summary of older messages.
-// Uses turn-boundary-aware cut points and supports iterative summary merging.
+// Uses the compact provider (cheaper model) when available, otherwise main provider.
 func (m *SummarizingContextManager) generateSummary(ctx context.Context, msgs []core.Message) string {
-	if m.provider == nil {
+	provider := m.compact
+	if provider == nil {
+		provider = m.provider
+	}
+	if provider == nil {
 		return ""
 	}
 
@@ -378,7 +440,7 @@ func (m *SummarizingContextManager) generateSummary(ctx context.Context, msgs []
 	}
 
 	cutPoint := findCutPoint(msgs, keepTokens)
-	result := SummarizeMessages(ctx, m.provider, msgs, cutPoint, m.lastSummary)
+	result := SummarizeMessages(ctx, provider, msgs, cutPoint, m.lastSummary)
 	if result != "" {
 		m.lastSummary = result
 	}

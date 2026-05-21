@@ -61,6 +61,9 @@ type LoopState struct {
 	TurnOutputTokens  int
 	TurnModel         string
 	StartedAt         time.Time
+
+	// DoomLoop tracks recent tool call signatures for repetition detection.
+	DoomLoop *DoomLoopDetector
 }
 
 // GenerateResponse holds the model's response for a single generation call.

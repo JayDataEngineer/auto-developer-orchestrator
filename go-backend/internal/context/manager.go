@@ -63,6 +63,16 @@ type Config struct {
 	// (truncate old tool results) is triggered.
 	MicroCompactThreshold float64
 
+	// MaskThreshold is the ratio at which old tool results are replaced
+	// with short [ref: X] placeholders instead of removing them entirely.
+	// Between MicroCompact and Prune. 0 = disable.
+	MaskThreshold float64
+
+	// PruneThreshold is the ratio at which old tool outputs are removed
+	// entirely, keeping only assistant/user messages. Between Mask and Full.
+	// 0 = disable.
+	PruneThreshold float64
+
 	// FullCompactThreshold is the ratio at which full compaction
 	// (LLM summary) is triggered.
 	FullCompactThreshold float64
@@ -78,6 +88,12 @@ type Config struct {
 	// structured summaries during full compaction. If nil, full compaction
 	// falls back to micro-compaction.
 	LLMProvider core.LLMProvider
+
+	// CompactProvider is an optional cheaper model used for compaction
+	// summaries. When set, full compaction uses this provider instead
+	// of the main agent's provider. Saves tokens on the expensive model.
+	// Falls back to LLMProvider if nil.
+	CompactProvider core.LLMProvider
 
 	// KeepRecentTokens is the token budget for recent messages preserved
 	// during full compaction. 0 = 20% of ContextSize (legacy behavior).
@@ -100,6 +116,8 @@ func DefaultConfig() Config {
 		PreviewSize:            500,
 		HardTruncateSize:       6000,
 		MicroCompactThreshold:  0.55,
+		MaskThreshold:          0.65,
+		PruneThreshold:         0.70,
 		FullCompactThreshold:   0.75,
 		KeepResults:            4,
 		EnableSummary:          true,

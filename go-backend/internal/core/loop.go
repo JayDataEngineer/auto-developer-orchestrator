@@ -155,6 +155,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 		SandboxID:  l.config.SandboxID,
 		FailCounts: make(map[string]int),
 		StartedAt:  time.Now(),
+		DoomLoop:   NewDoomLoopDetector(6, 3),
 	}
 
 	// Notify hooks: agent started
@@ -217,19 +218,6 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
 				SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 				return err
-			}
-
-			// Debug: log message roles to detect history duplication
-			if round == 0 {
-				var roles []string
-				for _, m := range sessCtx {
-					content := m.Content
-					if len(content) > 40 {
-						content = content[:40] + "..."
-					}
-					roles = append(roles, fmt.Sprintf("%s:%q", m.Role, content))
-				}
-				l.logger.Printf("LLM context (round 0, %d msgs): %s", len(sessCtx), strings.Join(roles, " → "))
 			}
 
 			// Ensure system messages are first (strict Jinja templates require it)
@@ -455,6 +443,16 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 
 		if stoppedNaturally || hitMaxRounds || circuitBroken {
 			decision := "respond"
+
+			// Wind-down: on forced termination, make one final LLM call without
+			// tools to get a useful summary instead of hard-stopping.
+			if (hitMaxRounds || circuitBroken) && contentStr != "" {
+				windDown := l.windDownSummary(ctx, subscriber, hitMaxRounds, circuitBroken)
+				if windDown != "" {
+					contentStr = windDown
+				}
+			}
+
 			if circuitBroken {
 				decision = "error"
 				l.logger.Printf("Circuit breaker tripped: %d consecutive failures", state.ConsecutiveFails)
@@ -502,6 +500,18 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 		if len(deduped) < len(toolCalls) {
 			l.logger.Printf("Deduplicated tool calls: %d -> %d", len(toolCalls), len(deduped))
 			toolCalls = deduped
+		}
+
+		// Doom loop detection — check if we're repeating the same tool call
+		for _, tcr := range toolCalls {
+			if state.DoomLoop.Record(tcr.Function.Name, tcr.ToToolCall().Args) {
+				warning := state.DoomLoop.WarningMessage()
+				l.logger.Printf("Doom loop detected: %s", warning)
+				// Inject warning as a user message to force the model to change approach
+				l.session.AppendMessage(Message{Role: "user", Content: warning})
+				state.DoomLoop.Reset()
+				break
+			}
 		}
 
 		var toolResults []ToolResult
@@ -581,6 +591,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			} else {
 				state.FailCounts[tc.Name] = 0
 				state.ConsecutiveFails = 0
+				state.DoomLoop.Reset()
 
 				// Check if the executor returned a VisionCarrier (native vision path).
 				// This separates the original result (with base64 for frontend) from
@@ -713,6 +724,54 @@ func (l *AgentLoop) Abort() {
 	if l.cancel != nil {
 		l.cancel()
 	}
+}
+
+// windDownSummary makes one final LLM call without tools when the agent loop
+// terminates abnormally (max rounds or circuit breaker). Strips tools from the
+// payload and asks the model to summarize what it found.
+func (l *AgentLoop) windDownSummary(ctx context.Context, subscriber chan<- AgentEvent, hitMaxRounds, circuitBroken bool) string {
+	sessCtx, err := l.session.BuildContext(ctx)
+	if err != nil {
+		return ""
+	}
+	sessCtx = reorderSystemFirst(sessCtx)
+
+	// Inject wind-down instruction
+	reason := "max iterations reached"
+	if circuitBroken {
+		reason = "too many consecutive tool failures"
+	}
+	sessCtx = append(sessCtx, Message{
+		Role: "user",
+		Content: fmt.Sprintf(
+			"[SYSTEM: %s. Provide a concise summary of what you accomplished and what remains undone. Do not attempt any more tool calls.]",
+			reason),
+	})
+
+	// Stream with no tools — forces a pure text response
+	opts := l.config.Opts
+	opts.MaxTokens = 1024
+	chatCh, err := l.provider.StreamChat(ctx, sessCtx, nil, opts)
+	if err != nil {
+		return ""
+	}
+
+	var summary strings.Builder
+	for evt := range chatCh {
+		if evt.Type == ChatEventContent {
+			summary.WriteString(evt.Content)
+			SendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: evt.Content}})
+		}
+		if evt.Type == ChatEventError {
+			return ""
+		}
+	}
+
+	result := strings.TrimSpace(summary.String())
+	if len(result) < 20 {
+		return ""
+	}
+	return result
 }
 
 // Close releases the agent's resources.

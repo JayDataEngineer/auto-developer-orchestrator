@@ -113,6 +113,9 @@ func (m *mockSession) Compact(ctx context.Context, summary string) (string, erro
 	return "", nil
 }
 func (m *mockSession) TruncateToolResults(keep int) (int, error) { return 0, nil }
+func (m *mockSession) ReplaceToolResults(replace func(i int, name, content string) string, keep int) (int, error) {
+	return 0, nil
+}
 func (m *mockSession) GetTree() *TreeNode { return nil }
 func (m *mockSession) GetCurrentNode() string { return "root" }
 func (m *mockSession) Close() error {

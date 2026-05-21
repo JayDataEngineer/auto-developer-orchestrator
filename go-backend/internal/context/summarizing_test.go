@@ -52,6 +52,9 @@ func (s *mockSession) TruncateToolResults(keep int) (int, error) {
 	}
 	return 0, nil
 }
+func (s *mockSession) ReplaceToolResults(replace func(i int, name, content string) string, keep int) (int, error) {
+	return 0, nil
+}
 func (s *mockSession) GetTree() *core.TreeNode                              { return nil }
 func (s *mockSession) GetCurrentNode() string                                { return "root" }
 func (s *mockSession) Close() error                                          { return nil }
