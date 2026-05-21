@@ -100,6 +100,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     libwebp-dev \
     xdg-utils \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Python packages for web scraping, image processing, and stealth browsing

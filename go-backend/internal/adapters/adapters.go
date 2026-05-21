@@ -79,12 +79,54 @@ func (f *FileOps) EditFile(ctx context.Context, path string, oldStr, newStr stri
 	return fmt.Sprintf("Edited %s", path), nil
 }
 
+// rgExcludes is the set of directories always excluded from file search.
+// Sourced from OpenCode's SkipHidden + common noise dirs. Passed as
+// --glob '!<dir>' flags to ripgrep so junk never gets listed.
+var rgExcludes = []string{
+	"node_modules", "vendor", "dist", "build", "target",
+	".git", ".idea", ".vscode", "__pycache__",
+	"bin", "obj", "out", "coverage",
+	"tmp", "temp", "logs", "generated",
+	"bower_components", "jspm_packages",
+	".cache", ".next", ".nuxt", ".turbo",
+	".venv", "venv", "env",
+	".tox", ".mypy_cache", ".pytest_cache",
+	".DS_Store", "Thumbs.db",
+}
+
+// rgExcludeFlags builds the --glob '!<dir>' flags for ripgrep.
+func rgExcludeFlags() string {
+	var b strings.Builder
+	for _, d := range rgExcludes {
+		b.WriteString(" --glob ")
+		b.WriteString(shQ("!"+d))
+	}
+	return b.String()
+}
+
 func (f *FileOps) Grep(ctx context.Context, path string, pattern string) (string, error) {
+	// Prefer ripgrep: respects .gitignore, skips hidden files, and
+	// excludes common junk dirs via --glob negation flags.
+	if out, err := f.exec(ctx, fmt.Sprintf(
+		"rg --max-count=200 --max-depth=6 %s %s %s 2>/dev/null",
+		rgExcludeFlags(), shQ(pattern), shQ(path),
+	)); err == nil && out != "" {
+		return out, nil
+	}
+	// Fallback to grep
 	return f.exec(ctx, fmt.Sprintf("grep -rn %s %s 2>/dev/null | head -200 || true", shQ(pattern), shQ(path)))
 }
 
 func (f *FileOps) Glob(ctx context.Context, path string, pattern string) (string, error) {
-	// -maxdepth 6 to avoid scanning node_modules etc; head -500 to cap output
+	// Prefer ripgrep: respects .gitignore, skips binary/hidden files,
+	// and excludes common junk dirs via --glob negation flags.
+	if out, err := f.exec(ctx, fmt.Sprintf(
+		"rg --files --glob %s %s --max-depth 6 --sort=path %s 2>/dev/null | head -500",
+		shQ(pattern), rgExcludeFlags(), shQ(path),
+	)); err == nil && out != "" {
+		return out, nil
+	}
+	// Fallback: capped find (no gitignore awareness)
 	return f.exec(ctx, fmt.Sprintf("find %s -name %s -type f -maxdepth 6 2>/dev/null | head -500", shQ(path), shQ(pattern)))
 }
 
