@@ -80,11 +80,12 @@ func (f *FileOps) EditFile(ctx context.Context, path string, oldStr, newStr stri
 }
 
 func (f *FileOps) Grep(ctx context.Context, path string, pattern string) (string, error) {
-	return f.exec(ctx, fmt.Sprintf("grep -rn %s %s 2>&1 || true", shQ(pattern), shQ(path)))
+	return f.exec(ctx, fmt.Sprintf("grep -rn %s %s 2>/dev/null | head -200 || true", shQ(pattern), shQ(path)))
 }
 
 func (f *FileOps) Glob(ctx context.Context, path string, pattern string) (string, error) {
-	return f.exec(ctx, fmt.Sprintf("find %s -name %s -type f -maxdepth 50", shQ(path), shQ(pattern)))
+	// -maxdepth 6 to avoid scanning node_modules etc; head -500 to cap output
+	return f.exec(ctx, fmt.Sprintf("find %s -name %s -type f -maxdepth 6 2>/dev/null | head -500", shQ(path), shQ(pattern)))
 }
 
 // ── Git adapter ──────────────────────────────────────────────────────

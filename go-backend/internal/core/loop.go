@@ -605,10 +605,10 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 
 				if l.config.ToolResultProcessor != nil {
 					resultStr = l.config.ToolResultProcessor(ctx, tc.Name, tcr.ID, resultStr)
-				} else if len(resultStr) > 30000 {
+				} else if len(resultStr) > 10000 {
 					// Fallback: keep the end (errors/results matter most)
-					resultStr = resultStr[len(resultStr)-30000:]
-					resultStr = "...[output truncated, showing last 30000 chars]\n" + resultStr
+					resultStr = resultStr[len(resultStr)-10000:]
+					resultStr = "...[output truncated, showing last 10000 chars]\n" + resultStr
 				}
 			}
 
@@ -949,6 +949,12 @@ func extractModelContent(resultStr, toolName string) string {
 		// (the full content is already in the session context via tool result)
 		if len(resultStr) > 3000 {
 			return resultStr[:3000] + "\n...[file content continues]"
+		}
+
+	case "file_glob":
+		// Glob results: cap at 5000 chars (file lists can be enormous)
+		if len(resultStr) > 5000 {
+			return resultStr[:5000] + "\n...[file list truncated]"
 		}
 
 	case "bash":
