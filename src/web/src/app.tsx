@@ -11,6 +11,7 @@ import {
 	type RunningAgentInfo,
 } from "@/lib/pux-store";
 import { relativeTime } from "@pux/shared";
+import { cn } from "@/lib/utils";
 import { webChatAdapter } from "@/lib/pux-chat-adapter";
 import { createPuxHistoryAdapter, storedMessagesToThreadLikes } from "@/lib/pux-history-adapter";
 import { getFetch, apiUrl } from "@pux/shared";
@@ -56,6 +57,7 @@ import {
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Panel, Group, Separator, usePanelRef } from "react-resizable-panels";
 import {
 	PanelRight,
@@ -75,7 +77,9 @@ import {
 	WifiOff,
 	AlertTriangle,
 	Pencil,
+	Menu,
 } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 // ── Runtime Provider ──
 // NOT re-keyed — uses runtime.thread.reset() to switch conversations.
@@ -399,9 +403,10 @@ function ProjectGroup({
 				<button
 					onClick={(e) => {
 						e.stopPropagation();
+						e.preventDefault();
 						removeProject(projectKey);
 					}}
-					className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/collapsible:opacity-100 group-data-[collapsible=icon]:hidden"
+					className="absolute right-1 top-1.5 z-10 rounded p-1 opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/collapsible:opacity-100 group-data-[collapsible=icon]:hidden"
 					title="Remove from sidebar"
 				>
 					<XIcon className="size-3" />
@@ -543,6 +548,7 @@ function AppSidebar() {
 function Workbench() {
 	const storeTab = usePuxStore((s) => s.activeWorkbenchTab);
 	const setStoreTab = usePuxStore((s) => s.setWorkbenchTab);
+	const isMobile = useIsMobile();
 
 	return (
 		<Tabs
@@ -550,24 +556,27 @@ function Workbench() {
 			onValueChange={(v) => setStoreTab(v as WorkbenchTab)}
 			className="flex h-full flex-col bg-sidebar"
 		>
-			<TabsList className="h-9 shrink-0 w-full rounded-none border-b border-border bg-transparent px-2">
-				<TabsTrigger value="vnc" className="gap-1.5 text-xs grow shrink-0">
+			<TabsList className={cn(
+				"shrink-0 w-full rounded-none border-b border-border bg-transparent px-2",
+				isMobile ? "h-12" : "h-9",
+			)}>
+				<TabsTrigger value="vnc" className={cn("gap-1.5 grow shrink-0", isMobile ? "text-sm" : "text-xs")}>
 					<Monitor className="size-4" />
 					Sandbox
 				</TabsTrigger>
-				<TabsTrigger value="editor" className="gap-1.5 text-xs grow shrink-0">
+				<TabsTrigger value="editor" className={cn("gap-1.5 grow shrink-0", isMobile ? "text-sm" : "text-xs")}>
 					<Code2 className="size-4" />
 					Editor
 				</TabsTrigger>
-				<TabsTrigger value="scheduler" className="gap-1.5 text-xs grow shrink-0">
+				<TabsTrigger value="scheduler" className={cn("gap-1.5 grow shrink-0", isMobile ? "text-sm" : "text-xs")}>
 					<Calendar className="size-4" />
 					Scheduler
 				</TabsTrigger>
-				<TabsTrigger value="workers" className="gap-1.5 text-xs grow shrink-0">
+				<TabsTrigger value="workers" className={cn("gap-1.5 grow shrink-0", isMobile ? "text-sm" : "text-xs")}>
 					<Users className="size-4" />
 					Agents
 				</TabsTrigger>
-				<TabsTrigger value="settings" className="gap-1.5 text-xs grow shrink-0">
+				<TabsTrigger value="settings" className={cn("gap-1.5 grow shrink-0", isMobile ? "text-sm" : "text-xs")}>
 					<Settings className="size-4" />
 					Settings
 				</TabsTrigger>
@@ -600,7 +609,10 @@ export function App() {
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
 	const theme = usePuxStore((s) => s.theme);
-	const [workbenchVisible, setWorkbenchVisible] = useState(true);
+	const fontScale = usePuxStore((s) => s.fontScale);
+	const isMobile = useIsMobile();
+	const [workbenchVisible, setWorkbenchVisible] = useState(false);
+	const [mobileWorkbenchOpen, setMobileWorkbenchOpen] = useState(false);
 	const workbenchPanelRef = usePanelRef();
 
 	// Apply theme on mount
@@ -608,11 +620,20 @@ export function App() {
 		document.documentElement.setAttribute("data-pux-theme", theme);
 	}, [theme]);
 
+	// Apply font scale
+	useEffect(() => {
+		document.documentElement.style.fontSize = `${fontScale * 100}%`;
+	}, [fontScale]);
+
 	// Poll for running agent status
 	useAgentStatusPolling();
 	const [showTerminal, setShowTerminal] = useState(false);
 
 	const toggleWorkbench = useCallback(() => {
+		if (isMobile) {
+			setMobileWorkbenchOpen((v) => !v);
+			return;
+		}
 		const panel = workbenchPanelRef.current;
 		if (!panel) return;
 		if (panel.isCollapsed()) {
@@ -620,7 +641,7 @@ export function App() {
 		} else {
 			panel.collapse();
 		}
-	}, []);
+	}, [isMobile]);
 
 	// Ctrl+` to toggle terminal
 	useEffect(() => {
@@ -643,78 +664,141 @@ export function App() {
 	return (
 		<SidebarProvider
 			className="relative h-svh overflow-hidden"
-			defaultOpen={true}
+			defaultOpen={!isMobile}
 		>
 			<AppSidebar />
-			<Group orientation="horizontal" className="h-svh" onLayoutChanged={() => usePuxStore.getState().bumpWorkbenchLayout()}>
-				<Panel defaultSize={65} minSize={30}>
-					<SidebarInset className="flex h-full flex-col overflow-hidden">
-						{/* Navbar */}
-						<header className="flex h-10 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-4">
-							<SidebarToggle />
-							<Button
-								variant="ghost"
-								size="icon"
-								className="ml-1 h-7 w-7"
-								onClick={() => setShowTerminal((v) => !v)}
-								aria-label="Toggle terminal"
-							>
-								<TerminalIcon className="size-4" />
-							</Button>
 
-							<Button
-								variant="ghost"
-								size="icon"
-								className="ml-auto h-7 w-7"
-								onClick={toggleWorkbench}
-								aria-label={
-									workbenchVisible
-										? "Close workbench"
-										: "Open workbench"
-								}
-							>
-								<PanelRight className="size-4" />
-							</Button>
-						</header>
-						<BackendOfflineBanner />
-						<ExtensionFailureToast />
-						<PuxRuntimeProvider>
-							{showTerminal ? (
-								<Group orientation="vertical" className="flex-1">
-									<Panel defaultSize={70} minSize={30}>
-										<Thread />
-									</Panel>
-									<Separator className="h-1 bg-border hover:bg-ring/50 transition-colors" />
-									<Panel defaultSize={30} minSize={15} collapsible>
-										<TerminalDrawer
-											cwd={activeProjectPath || activeProject}
-											onClose={() => setShowTerminal(false)}
-										/>
-									</Panel>
-								</Group>
-							) : (
-								<div className="flex-1 overflow-hidden">
+			{isMobile ? (
+				/* ── Mobile layout: full-width chat + sheet workbench ── */
+				<div className="flex h-svh flex-col">
+					{/* Navbar */}
+					<header className="flex h-12 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-3">
+						<SidebarToggle />
+						<Button
+							variant="ghost"
+							size="icon"
+							className="ml-1 h-9 w-9"
+							onClick={() => setShowTerminal((v) => !v)}
+							aria-label="Toggle terminal"
+						>
+							<TerminalIcon className="size-5" />
+						</Button>
+
+						<Button
+							variant="ghost"
+							size="icon"
+							className="ml-auto h-9 w-9"
+							onClick={() => setMobileWorkbenchOpen(true)}
+							aria-label="Open workbench"
+						>
+							<PanelRight className="size-5" />
+						</Button>
+					</header>
+					<BackendOfflineBanner />
+					<ExtensionFailureToast />
+					<PuxRuntimeProvider>
+						{showTerminal ? (
+							<Group orientation="vertical" className="flex-1">
+								<Panel defaultSize={70} minSize={30}>
 									<Thread />
-								</div>
-							)}
-						</PuxRuntimeProvider>
-					</SidebarInset>
-				</Panel>
+								</Panel>
+								<Separator className="h-1 bg-border hover:bg-ring/50 transition-colors" />
+								<Panel defaultSize={30} minSize={15} collapsible>
+									<TerminalDrawer
+										cwd={activeProjectPath || activeProject}
+										onClose={() => setShowTerminal(false)}
+									/>
+								</Panel>
+							</Group>
+						) : (
+							<div className="flex-1 overflow-hidden">
+								<Thread />
+							</div>
+						)}
+					</PuxRuntimeProvider>
 
-				<Separator className="relative w-3 cursor-col-resize before:content-[''] before:absolute before:inset-y-0 before:left-1/2 before:-translate-x-1/2 before:w-px before:bg-border before:transition-colors hover:before:bg-ring/50" />
-				<Panel
-					panelRef={workbenchPanelRef}
-					defaultSize={35}
-					minSize={20}
-					collapsible
-					collapsedSize={0}
-					onResize={(size) => setWorkbenchVisible(size.asPercentage > 0)}
-				>
-					<div className="flex h-full flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
-						<Workbench />
-					</div>
-				</Panel>
-			</Group>
+					{/* Workbench as bottom sheet on mobile */}
+					<Sheet open={mobileWorkbenchOpen} onOpenChange={setMobileWorkbenchOpen}>
+						<SheetContent
+							side="bottom"
+							className="h-[85vh] rounded-t-xl p-0 bg-sidebar text-sidebar-foreground"
+						>
+							<Workbench />
+						</SheetContent>
+					</Sheet>
+				</div>
+			) : (
+				/* ── Desktop layout: resizable panels ── */
+				<Group orientation="horizontal" className="h-svh" onLayoutChanged={() => usePuxStore.getState().bumpWorkbenchLayout()}>
+					<Panel defaultSize={65} minSize={30}>
+						<SidebarInset className="flex h-full flex-col overflow-hidden">
+							{/* Navbar */}
+							<header className="flex h-10 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-4">
+								<SidebarToggle />
+								<Button
+									variant="ghost"
+									size="icon"
+									className="ml-1 h-7 w-7"
+									onClick={() => setShowTerminal((v) => !v)}
+									aria-label="Toggle terminal"
+								>
+									<TerminalIcon className="size-4" />
+								</Button>
+
+								<Button
+									variant="ghost"
+									size="icon"
+									className="ml-auto h-7 w-7"
+									onClick={toggleWorkbench}
+									aria-label={
+										workbenchVisible
+											? "Close workbench"
+											: "Open workbench"
+									}
+								>
+									<PanelRight className="size-4" />
+								</Button>
+							</header>
+							<BackendOfflineBanner />
+							<ExtensionFailureToast />
+							<PuxRuntimeProvider>
+								{showTerminal ? (
+									<Group orientation="vertical" className="flex-1">
+										<Panel defaultSize={70} minSize={30}>
+											<Thread />
+										</Panel>
+										<Separator className="h-1 bg-border hover:bg-ring/50 transition-colors" />
+										<Panel defaultSize={30} minSize={15} collapsible>
+											<TerminalDrawer
+												cwd={activeProjectPath || activeProject}
+												onClose={() => setShowTerminal(false)}
+											/>
+										</Panel>
+									</Group>
+								) : (
+									<div className="flex-1 overflow-hidden">
+										<Thread />
+									</div>
+								)}
+							</PuxRuntimeProvider>
+						</SidebarInset>
+					</Panel>
+
+					<Separator className="relative w-3 cursor-col-resize before:content-[''] before:absolute before:inset-y-0 before:left-1/2 before:-translate-x-1/2 before:w-px before:bg-border before:transition-colors hover:before:bg-ring/50" />
+					<Panel
+						panelRef={workbenchPanelRef}
+						defaultSize={35}
+						minSize={20}
+						collapsible
+						collapsedSize={0}
+						onResize={(size) => setWorkbenchVisible(size.asPercentage > 0)}
+					>
+						<div className="flex h-full flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
+							<Workbench />
+						</div>
+					</Panel>
+				</Group>
+			)}
 		</SidebarProvider>
 	);
 }
