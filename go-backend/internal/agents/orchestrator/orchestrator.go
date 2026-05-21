@@ -29,6 +29,7 @@ import (
 	mcptools "github.com/auto-developer-orchestrator/backend/internal/tools/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/eval"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/python"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	plantool "github.com/auto-developer-orchestrator/backend/internal/tools/plan"
 	schedulertool "github.com/auto-developer-orchestrator/backend/internal/tools/scheduler"
@@ -221,6 +222,9 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// JS eval tool — sandboxed runtime for deterministic transforms
 	ctoTools = append(ctoTools, eval.NewEvalTool())
 
+	// Python tool — subprocess execution with timeout
+	ctoTools = append(ctoTools, python.NewPythonTool())
+
 	// Register skills (auto-load from standard paths if not provided)
 	skillStore := cfg.Skills
 	if skillStore == nil {
@@ -382,6 +386,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 					file.NewEditTool(hostFileOps),
 					file.NewGrepTool(hostFileOps),
 					file.NewGlobTool(hostFileOps),
+					python.NewPythonTool(python.WithWorkDir(cfg.ProjectDir)),
 				})
 				nativeReg.RegisterCommonAliases()
 				return nativeReg

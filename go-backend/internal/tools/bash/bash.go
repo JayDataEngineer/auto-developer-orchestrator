@@ -17,19 +17,20 @@ type Executor interface {
 
 // Tool implements core.Tool for bash execution.
 type Tool struct {
-	executor Executor
-	taskMgr  *core.TaskManager
-	workDir  string
+	executor  Executor
+	taskMgr   *core.TaskManager
+	workDir   string
+	validator *Validator // nil = no command restriction
 }
 
-// New creates a new bash tool.
+// New creates a new bash tool with default command restrictions.
 func New(exec Executor) *Tool {
-	return &Tool{executor: exec}
+	return &Tool{executor: exec, validator: NewDefaultValidator()}
 }
 
-// NewWithTaskManager creates a bash tool with background task support.
+// NewWithTaskManager creates a bash tool with background task support and default restrictions.
 func NewWithTaskManager(exec Executor, taskMgr *core.TaskManager, workDir string) *Tool {
-	return &Tool{executor: exec, taskMgr: taskMgr, workDir: workDir}
+	return &Tool{executor: exec, taskMgr: taskMgr, workDir: workDir, validator: NewDefaultValidator()}
 }
 
 func (t *Tool) Name() string { return "bash" }
@@ -65,6 +66,17 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	}
 	if cmd == "" {
 		return nil, core.NewToolError("bash", "missing required parameter 'command'")
+	}
+
+	// Validate command against restriction rules (defense-in-depth)
+	if t.validator != nil {
+		if err := t.validator.Validate(cmd); err != nil {
+			return map[string]any{
+				"output":  "",
+				"error":   err.Error(),
+				"blocked": true,
+			}, nil
+		}
 	}
 
 	runInBackground, _ := args["run_in_background"].(bool)
