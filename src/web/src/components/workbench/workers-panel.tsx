@@ -42,6 +42,7 @@ interface Worker {
 	hint: string;
 	persona: string;
 	capabilities: string[];
+	imports?: string[];
 	model: string;
 	max_rounds: number;
 	temperature: number;
@@ -202,7 +203,7 @@ function WorkerCard({
 	worker: Worker;
 	onEdit: (w: Worker) => void;
 	onDelete: (name: string) => void;
-	onRevert: (name: string) => void;
+	onRevert: (w: Worker) => void;
 }) {
 	const isOrg = worker.isOrg;
 
@@ -212,14 +213,14 @@ function WorkerCard({
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-2">
 						<span className="truncate text-sm font-medium">{worker.name}</span>
-						{worker.isDefault && (
+						{worker.isDefault && !isOrg && (
 							<Badge variant="outline" className="text-[9px]">default</Badge>
 						)}
-						{(worker.capabilities || []).map((c: string) => (
+						{(worker.capabilities || worker.imports || []).map((c: string) => (
 							<Badge key={c} variant="secondary" className="text-[9px]">{c}</Badge>
 						))}
-						{isOrg && (
-							<Badge variant="outline" className="text-[9px] text-muted-foreground">{worker.source}</Badge>
+						{worker.isModified && (
+							<Badge variant="destructive" className="text-[9px]">modified</Badge>
 						)}
 					</div>
 					{(worker.hint || worker.persona) && (
@@ -228,41 +229,39 @@ function WorkerCard({
 						</p>
 					)}
 				</div>
-				{!isOrg && (
-					<div className="flex shrink-0 items-center gap-0.5">
-						{worker.isModified && (
-							<Button
-								variant="ghost"
-								size="icon"
-								className="size-7"
-								onClick={() => onRevert(worker.name)}
-								title="Revert to default"
-							>
-								<RotateCcw size={14} />
-							</Button>
-						)}
+				<div className="flex shrink-0 items-center gap-0.5">
+					{worker.isModified && (
 						<Button
 							variant="ghost"
 							size="icon"
 							className="size-7"
-							onClick={() => onEdit(worker)}
-							title="Edit"
+							onClick={() => onRevert(worker)}
+							title="Revert to default"
 						>
-							<Pencil size={14} />
+							<RotateCcw size={14} />
 						</Button>
-						{!worker.isDefault && (
-							<Button
-								variant="ghost"
-								size="icon"
-								className="size-7 text-muted-foreground/40 hover:text-destructive"
-								onClick={() => onDelete(worker.name)}
-								title="Delete"
-							>
-								<Trash2 size={14} />
-							</Button>
-						)}
-					</div>
-				)}
+					)}
+					<Button
+						variant="ghost"
+						size="icon"
+						className="size-7"
+						onClick={() => onEdit(worker)}
+						title="Edit"
+					>
+						<Pencil size={14} />
+					</Button>
+					{!worker.isDefault && !isOrg && (
+						<Button
+							variant="ghost"
+							size="icon"
+							className="size-7 text-muted-foreground/40 hover:text-destructive"
+							onClick={() => onDelete(worker.name)}
+							title="Delete"
+						>
+							<Trash2 size={14} />
+						</Button>
+					)}
+				</div>
 			</div>
 		</Card>
 	);
@@ -323,6 +322,7 @@ function GroupSection({
 function WorkerForm({
 	initial,
 	itemId,
+	onReset,
 	onSubmit,
 	onCancel,
 	onAskAI,
@@ -330,6 +330,7 @@ function WorkerForm({
 }: {
 	initial: WorkerFormData;
 	itemId?: string;
+	onReset?: () => void;
 	onSubmit: (data: WorkerFormData) => void;
 	onCancel: () => void;
 	onAskAI: (data: WorkerFormData) => void;
@@ -374,6 +375,17 @@ function WorkerForm({
 				>
 					{submitting ? "Saving..." : isEdit ? "Save" : "Create"}
 				</Button>
+				{isEdit && onReset && (
+					<Button
+						variant="outline"
+						onClick={onReset}
+						className="h-7 text-xs gap-1"
+						title="Reset to default"
+					>
+						<RotateCcw size={11} />
+						Reset
+					</Button>
+				)}
 				<Button
 					variant="outline"
 					onClick={() => onAskAI(form)}
@@ -441,10 +453,15 @@ export function WorkersPanel() {
 		if (!editItem) return;
 		setSubmitting(true);
 		try {
+			const body = buildBody(form);
+			// Include source for org workers so backend routes correctly
+			if (editItem.isOrg) {
+				body.source = editItem.source;
+			}
 			await fetch(`/api/workers/${editItem.name}`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(buildBody(form)),
+				body: JSON.stringify(body),
 			});
 			setEditItem(null);
 			fetchWorkers();
@@ -456,8 +473,9 @@ export function WorkersPanel() {
 		fetchWorkers();
 	};
 
-	const revertWorker = async (name: string) => {
-		await fetch(`/api/workers/${name}/revert`, { method: "POST" });
+	const revertWorker = async (worker: Worker) => {
+		const params = worker.isOrg ? `?source=${encodeURIComponent(worker.source)}` : "";
+		await fetch(`/api/workers/${worker.name}/revert${params}`, { method: "POST" });
 		fetchWorkers();
 	};
 
@@ -534,6 +552,7 @@ export function WorkersPanel() {
 				<WorkerForm
 					initial={workerToForm(editItem)}
 					itemId={editItem.name}
+					onReset={() => { revertWorker(editItem); setEditItem(null); }}
 					onSubmit={submitEdit}
 					onCancel={() => setEditItem(null)}
 					onAskAI={askAI}
