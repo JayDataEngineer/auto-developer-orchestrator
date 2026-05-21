@@ -60,6 +60,7 @@ type App struct {
 	promPusher         *observability.MetricsPusher
 	extMgr             *extensions.Manager
 	imageServer        *vision.ImageServer
+	sshManager         *puxssh.SessionManager
 }
 
 // NewApp initializes all components and assembles the application.
@@ -229,6 +230,7 @@ func (a *App) initHandlers() {
 
 	// SSH session manager for remote filesystem browsing
 	sshManager := puxssh.NewSessionManager(logger)
+	a.sshManager = sshManager
 	a.puxHandler.SetSSHManager(sshManager)
 
 	// Observability
@@ -701,6 +703,10 @@ func (a *App) buildRouter(
 
 		// Terminal WebSocket
 		r.Get("/terminal/ws", a.sandboxHandler.TerminalWS)
+
+		// SSH Terminal WebSocket
+		sshTermHandler := handlers.NewSshTerminalHandler(a.sshManager, a.logger)
+		r.Get("/terminal/ssh/ws", sshTermHandler.SshTerminalWS)
 
 		// Artifacts
 		r.Route("/pux/artifacts", func(r chi.Router) {

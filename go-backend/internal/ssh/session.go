@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"go.uber.org/zap"
 )
@@ -28,7 +29,8 @@ func NewSessionManager(log *zap.Logger) *SessionManager {
 }
 
 // Connect establishes an SSH connection and returns a session key.
-// It tries private key auth first (if keyData provided), then password.
+// Auth priority: (1) provided keyData, (2) SSH agent ($SSH_AUTH_SOCK),
+// (3) auto-loaded ~/.ssh/id_* keys, (4) provided password.
 func (sm *SessionManager) Connect(user, host, port, password, keyData string) (string, error) {
 	if port == "" {
 		port = "22"
@@ -38,14 +40,13 @@ func (sm *SessionManager) Connect(user, host, port, password, keyData string) (s
 
 	var authMethods []ssh.AuthMethod
 
-	// Key auth
+	// 1. Explicit key auth
 	if keyData != "" {
 		signer, err := ssh.ParsePrivateKey([]byte(keyData))
 		if err != nil {
-			// Try with passphrase — empty string for unencrypted keys that still parse weirdly
 			signer, err = ssh.ParsePrivateKeyWithPassphrase([]byte(keyData), []byte(password))
 			if err != nil {
-				sm.log.Warn("Failed to parse SSH key, falling back to password", zap.Error(err))
+				sm.log.Warn("Failed to parse SSH key, falling back", zap.Error(err))
 			} else {
 				authMethods = append(authMethods, ssh.PublicKeys(signer))
 			}
@@ -54,13 +55,23 @@ func (sm *SessionManager) Connect(user, host, port, password, keyData string) (s
 		}
 	}
 
-	// Password auth
+	// 2. SSH agent auth
+	if agentAuth := sm.tryAgentAuth(); agentAuth != nil {
+		authMethods = append(authMethods, agentAuth)
+	}
+
+	// 3. Auto-load keys from ~/.ssh/
+	for _, signer := range sm.loadSSHKeys() {
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	}
+
+	// 4. Password auth
 	if password != "" {
 		authMethods = append(authMethods, ssh.Password(password))
 	}
 
 	if len(authMethods) == 0 {
-		return "", fmt.Errorf("no authentication method provided (need keyData or password)")
+		return "", fmt.Errorf("no authentication method available (no keyData, no SSH agent, no ~/.ssh keys, no password)")
 	}
 
 	// Host key callback — check known_hosts, auto-accept for first connection
@@ -241,4 +252,70 @@ func generateSessionKey() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// tryAgentAuth attempts to use the SSH agent ($SSH_AUTH_SOCK).
+func (sm *SessionManager) tryAgentAuth() ssh.AuthMethod {
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return nil
+	}
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		sm.log.Debug("SSH agent not reachable", zap.String("socket", sock), zap.Error(err))
+		return nil
+	}
+	ag := agent.NewClient(conn)
+	signers, err := ag.Signers()
+	if err != nil || len(signers) == 0 {
+		conn.Close()
+		return nil
+	}
+	sm.log.Debug("SSH agent auth available", zap.Int("signers", len(signers)))
+	return ssh.PublicKeysCallback(ag.Signers)
+}
+
+// loadSSHKeys loads private keys from ~/.ssh/id_* (no extension or .pub only).
+func (sm *SessionManager) loadSSHKeys() []ssh.Signer {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	sshDir := filepath.Join(home, ".ssh")
+
+	entries, err := os.ReadDir(sshDir)
+	if err != nil {
+		return nil
+	}
+
+	var signers []ssh.Signer
+	for _, entry := range entries {
+		name := entry.Name()
+		// Only load id_* files that look like private keys
+		if len(name) < 4 || name[:3] != "id_" {
+			continue
+		}
+		// Skip .pub files
+		if len(name) > 4 && name[len(name)-4:] == ".pub" {
+			continue
+		}
+		// Skip known non-key files
+		if name == "id_ed25519_sk" || name == "id_rsa_ssh2" {
+			continue
+		}
+
+		keyPath := filepath.Join(sshDir, name)
+		data, err := os.ReadFile(keyPath)
+		if err != nil {
+			continue
+		}
+
+		signer, err := ssh.ParsePrivateKey(data)
+		if err != nil {
+			continue
+		}
+		signers = append(signers, signer)
+		sm.log.Debug("Auto-loaded SSH key", zap.String("key", name))
+	}
+	return signers
 }
