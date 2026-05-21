@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
 	"github.com/auto-developer-orchestrator/backend/internal/scheduler"
+	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
@@ -19,9 +19,13 @@ func setupSchedulerRouter(t *testing.T) (*chi.Mux, *scheduler.Scheduler) {
 	t.Helper()
 	logger := zap.NewNop()
 	dir := t.TempDir()
-	storePath := filepath.Join(dir, "scheduler.json")
+	db, err := storage.NewDatabase(dir + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
 
-	s := scheduler.NewScheduler(storePath, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge, sandboxOnly bool) (string, error) {
+	s := scheduler.NewScheduler(db, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge, sandboxOnly bool) (string, error) {
 		return "test output", nil
 	}, logger)
 

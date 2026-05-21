@@ -129,35 +129,33 @@ func (s *Scheduler) executeJob(jobID string) {
 	job.LastRunAt = time.Now()
 	s.computeNextRun(job)
 
-	// Keep last 200 executions
+	// Keep last 200 executions in memory
 	s.executions = append(s.executions, execution)
 	if len(s.executions) > 200 {
 		s.executions = s.executions[len(s.executions)-200:]
 	}
 
-	// Write to persistent run log (Phase 1)
-	if s.runLogMgr != nil {
-		status := execution.Status
-		if status == "running" {
-			status = "ok"
-		}
-		nextRunMs := int64(0)
-		if !job.NextRunAt.IsZero() {
-			nextRunMs = job.NextRunAt.UnixMilli()
-		}
-		s.runLogMgr.Append(RunLogEntry{
-			JobID:       jobID,
-			Status:      status,
-			Error:       execution.Error,
-			Summary:     util.Truncate(output, 500),
-			RunAtMs:     execution.StartedAt.UnixMilli(),
-			DurationMs:  execution.EndedAt.Sub(execution.StartedAt).Milliseconds(),
-			NextRunAtMs: nextRunMs,
-			Model:       job.Model,
-		})
+	// Write to persistent run log via database
+	status := execution.Status
+	if status == "running" {
+		status = "ok"
 	}
+	nextRunMs := int64(0)
+	if !job.NextRunAt.IsZero() {
+		nextRunMs = job.NextRunAt.UnixMilli()
+	}
+	s.appendRunLog(RunLogEntry{
+		JobID:       jobID,
+		Status:      status,
+		Error:       execution.Error,
+		Summary:     util.Truncate(output, 500),
+		RunAtMs:     execution.StartedAt.UnixMilli(),
+		DurationMs:  execution.EndedAt.Sub(execution.StartedAt).Milliseconds(),
+		NextRunAtMs: nextRunMs,
+		Model:       job.Model,
+	})
 
-	s.save()
+	s.saveJob(job)
 
 	// Log failure — no SSE event emitted (non-contract events are prohibited)
 	if execution.Status == "error" {
@@ -211,7 +209,7 @@ func (s *Scheduler) SetDependencies(jobID string, blocks, blockedBy []string) er
 		return err
 	}
 
-	s.save()
+	s.saveJob(job)
 	return nil
 }
 
@@ -402,4 +400,16 @@ func (s *Scheduler) sendFailureAlert(job *Job, errMsg string) {
 		zap.String("job", job.ID),
 		zap.Int("errors", job.ConsecutiveErrors),
 	)
+}
+
+// errorBackoff returns the backoff duration for a given error count.
+func (s *Scheduler) errorBackoff(consecutiveErrors int) time.Duration {
+	idx := consecutiveErrors - 1
+	if idx < 0 {
+		return 0
+	}
+	if idx >= len(DefaultBackoffSchedule) {
+		return DefaultBackoffSchedule[len(DefaultBackoffSchedule)-1]
+	}
+	return DefaultBackoffSchedule[idx]
 }

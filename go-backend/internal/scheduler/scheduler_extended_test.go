@@ -10,9 +10,9 @@ import (
 
 func newExtScheduler(t *testing.T) *Scheduler {
 	t.Helper()
-	dir := t.TempDir()
+	db := newTestDB(t)
 	logger := zap.NewNop()
-	s := NewScheduler(dir, nil, logger)
+	s := NewScheduler(db, nil, logger)
 	return s
 }
 
@@ -146,30 +146,6 @@ func TestSetDependenciesNotFoundJob(t *testing.T) {
 	}
 }
 
-// ── ListRuns / ListAllRuns ────────────────────────────────────
-
-func TestListRunsNoLogMgr(t *testing.T) {
-	s := newExtScheduler(t)
-	runs, err := s.ListRuns("job-1", 10, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if runs != nil {
-		t.Error("expected nil with no log manager")
-	}
-}
-
-func TestListAllRunsNoLogMgr(t *testing.T) {
-	s := newExtScheduler(t)
-	runs, err := s.ListAllRuns(10, "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if runs != nil {
-		t.Error("expected nil with no log manager")
-	}
-}
-
 // ── Start/Stop ────────────────────────────────────────────────
 
 func TestSchedulerStartStop(t *testing.T) {
@@ -178,14 +154,3 @@ func TestSchedulerStartStop(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	s.Stop()
 }
-
-// ── SetRunLogManager / SetSessionInjector ──────────────────
-
-func TestSetRunLogManagerMethod(t *testing.T) {
-	s := newExtScheduler(t)
-	s.SetRunLogManager(nil, "/tmp/test")
-	if s.projectRoot != "/tmp/test" {
-		t.Errorf("expected projectRoot=/tmp/test, got %q", s.projectRoot)
-	}
-}
-

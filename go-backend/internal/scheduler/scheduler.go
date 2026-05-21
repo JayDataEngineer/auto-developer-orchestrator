@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
@@ -46,6 +47,7 @@ const (
 	maxMissedOnStartup   = 5
 	missedJobStaggerMs   = 5000
 	stuckRunThreshold    = 2 * time.Hour
+	runLogKeepN          = 2000
 )
 
 // JobStatus tracks the runtime state of a job.
@@ -135,47 +137,37 @@ type SessionInjector func(project, agentID, text string) error
 
 // Scheduler manages scheduled jobs.
 type Scheduler struct {
-	jobs          map[string]*Job
-	executions    []*JobExecution
+	jobs          map[string]*Job          // Write-through cache from DB
+	executions    []*JobExecution          // In-memory only (ephemeral active runs)
 	cronScheduler *cron.Cron
 	promptSender  PromptSender
 	logger        *zap.Logger
-	storePath     string
+	db            *storage.Database
 	mu            sync.RWMutex
 	stopCh        chan struct{}
 
-	// Run log manager
-	runLogMgr   *RunLogManager
 	projectRoot string
 
 	// Session delivery
 	sessionInjector SessionInjector
-
-	// (removed: non-contract subscriber)
 }
 
-// NewScheduler creates a new scheduler.
-func NewScheduler(storePath string, sender PromptSender, logger *zap.Logger) *Scheduler {
+// NewScheduler creates a new scheduler backed by the database.
+func NewScheduler(db *storage.Database, sender PromptSender, logger *zap.Logger) *Scheduler {
 	return &Scheduler{
 		jobs:          make(map[string]*Job),
 		executions:    make([]*JobExecution, 0),
 		cronScheduler: cron.New(cron.WithSeconds()),
 		promptSender:  sender,
 		logger:        logger,
-		storePath:     storePath,
+		db:            db,
 		stopCh:        make(chan struct{}),
 	}
 }
 
-// SetRunLogManager configures the run log manager and project root.
-func (s *Scheduler) SetRunLogManager(runLogMgr *RunLogManager, projectRoot string) {
-	s.runLogMgr = runLogMgr
-	s.projectRoot = projectRoot
-}
-
-// Start loads persisted jobs and starts the scheduler.
+// Start loads persisted jobs from the database and starts the scheduler.
 func (s *Scheduler) Start(ctx context.Context) error {
-	if err := s.load(); err != nil {
+	if err := s.load(ctx); err != nil {
 		s.logger.Warn("failed to load scheduler state, starting fresh", zap.Error(err))
 	}
 
@@ -188,12 +180,21 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop gracefully stops the scheduler and persists state.
+// Stop gracefully stops the scheduler.
 func (s *Scheduler) Stop() {
 	close(s.stopCh)
 	s.cronScheduler.Stop()
-	s.save()
 	s.logger.Info("scheduler stopped")
+}
+
+// SetSessionInjector sets the session delivery callback.
+func (s *Scheduler) SetSessionInjector(fn SessionInjector) {
+	s.sessionInjector = fn
+}
+
+// SetProjectRoot sets the project root path.
+func (s *Scheduler) SetProjectRoot(root string) {
+	s.projectRoot = root
 }
 
 // resolveProjectPath resolves a project name to its filesystem path.
@@ -218,86 +219,27 @@ func (s *Scheduler) resolveProjectPath(project string) string {
 	return ""
 }
 
-// save writes jobs to the store file.
-func (s *Scheduler) save() {
-	if s.storePath == "" {
-		return
-	}
-
-	store := struct {
-		Jobs       []*Job          `json:"jobs"`
-		Executions []*JobExecution `json:"executions"`
-	}{
-		Jobs:       make([]*Job, 0, len(s.jobs)),
-		Executions: s.executions,
-	}
-	for _, j := range s.jobs {
-		store.Jobs = append(store.Jobs, j)
-	}
-
-	data, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		s.logger.Error("failed to marshal scheduler state", zap.Error(err))
-		return
-	}
-
-	// Ensure directory exists
-	dir := filepath.Dir(s.storePath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		s.logger.Error("failed to create scheduler dir", zap.Error(err))
-		return
-	}
-
-	// Atomic write: write to temp file then rename
-	tmpPath := s.storePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
-		s.logger.Error("failed to write scheduler state", zap.Error(err))
-		return
-	}
-	if err := os.Rename(tmpPath, s.storePath); err != nil {
-		s.logger.Error("failed to rename scheduler state", zap.Error(err))
-		return
+// saveJob persists a single job to the database.
+func (s *Scheduler) saveJob(job *Job) {
+	ctx := context.Background()
+	dbJob := jobToDB(job)
+	if err := s.db.SaveScheduledJob(ctx, dbJob); err != nil {
+		s.logger.Error("failed to persist job to database", zap.String("id", job.ID), zap.Error(err))
 	}
 }
 
-// errorBackoff returns the backoff duration for a given error count.
-func (s *Scheduler) errorBackoff(consecutiveErrors int) time.Duration {
-	idx := consecutiveErrors - 1
-	if idx < 0 {
-		return 0
-	}
-	if idx >= len(DefaultBackoffSchedule) {
-		return DefaultBackoffSchedule[len(DefaultBackoffSchedule)-1]
-	}
-	return DefaultBackoffSchedule[idx]
-}
-
-// load reads jobs from the store file, clears stuck runs, and catches up missed jobs.
-func (s *Scheduler) load() error {
-	if s.storePath == "" {
-		return nil
-	}
-
-	data, err := os.ReadFile(s.storePath)
+// load reads jobs from the database, clears stuck runs, and catches up missed jobs.
+func (s *Scheduler) load(ctx context.Context) error {
+	dbJobs, err := s.db.ListScheduledJobs(ctx)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	var store struct {
-		Jobs       []*Job          `json:"jobs"`
-		Executions []*JobExecution `json:"executions"`
-	}
-	if err := json.Unmarshal(data, &store); err != nil {
 		return err
 	}
 
 	now := time.Now()
 	var missedJobs []*Job
 
-	for _, job := range store.Jobs {
+	for _, dbJob := range dbJobs {
+		job := dbToJob(dbJob)
 		job.cronEntryID = 0 // Reset on load
 
 		// Clear stuck runs (older than 2h)
@@ -337,10 +279,6 @@ func (s *Scheduler) load() error {
 			}
 		}
 	}
-	s.executions = store.Executions
-	if s.executions == nil {
-		s.executions = make([]*JobExecution, 0)
-	}
 
 	// Startup catch-up: run max N missed jobs immediately, stagger the rest
 	if len(missedJobs) > 0 {
@@ -369,6 +307,116 @@ func (s *Scheduler) load() error {
 	}
 
 	return nil
+}
+
+// ── Job <-> DB conversion ──────────────────────────────────────────────
+
+func jobToDB(j *Job) *storage.ScheduledJob {
+	var lastRunAt, nextRunAt, createdAt, updatedAt *time.Time
+	if !j.LastRunAt.IsZero() {
+		lastRunAt = &j.LastRunAt
+	}
+	if !j.NextRunAt.IsZero() {
+		nextRunAt = &j.NextRunAt
+	}
+	if !j.CreatedAt.IsZero() {
+		createdAt = &j.CreatedAt
+	}
+	if !j.UpdatedAt.IsZero() {
+		updatedAt = &j.UpdatedAt
+	}
+
+	blocks, _ := json.Marshal(j.Blocks)
+	blockedBy, _ := json.Marshal(j.BlockedBy)
+
+	return &storage.ScheduledJob{
+		ID:                     j.ID,
+		Name:                   j.Name,
+		Description:            j.Description,
+		Project:                j.Project,
+		AgentID:                j.AgentID,
+		Message:                j.Message,
+		Model:                  j.Model,
+		Org:                    j.Org,
+		ScheduleType:           string(j.Schedule),
+		CronExpr:               j.CronExpr,
+		Timezone:               j.Timezone,
+		EverySeconds:           j.EverySeconds,
+		AtTime:                 j.AtTime,
+		AutoBranch:             j.AutoBranch,
+		AutoMerge:              j.AutoMerge,
+		Enabled:                j.Enabled,
+		DeliveryMode:           string(j.DeliveryMode),
+		DeliveryWebhookURL:     j.DeliveryWebhookURL,
+		DeliveryBestEffort:     j.DeliveryBestEffort,
+		FailureAlertAfter:      j.FailureAlertAfter,
+		FailureAlertWebhookURL: j.FailureAlertWebhookURL,
+		Status:                 string(j.Status),
+		LastRunAt:              lastRunAt,
+		LastRunStatus:          j.LastRunStatus,
+		LastError:              j.LastError,
+		NextRunAt:              nextRunAt,
+		ConsecutiveErrors:      j.ConsecutiveErrors,
+		InputTokens:            j.InputTokens,
+		OutputTokens:           j.OutputTokens,
+		DurationMs:             j.DurationMs,
+		Blocks:                 string(blocks),
+		BlockedBy:              string(blockedBy),
+		SandboxOnly:            j.SandboxOnly,
+		WebhookToken:           j.WebhookToken,
+		CreatedAt:              createdAt,
+		UpdatedAt:              updatedAt,
+	}
+}
+
+func dbToJob(d *storage.ScheduledJob) *Job {
+	j := &Job{
+		ID:                     d.ID,
+		Name:                   d.Name,
+		Description:            d.Description,
+		Project:                d.Project,
+		AgentID:                d.AgentID,
+		Message:                d.Message,
+		Model:                  d.Model,
+		Org:                    d.Org,
+		Schedule:               ScheduleType(d.ScheduleType),
+		CronExpr:               d.CronExpr,
+		Timezone:               d.Timezone,
+		EverySeconds:           d.EverySeconds,
+		AtTime:                 d.AtTime,
+		AutoBranch:             d.AutoBranch,
+		AutoMerge:              d.AutoMerge,
+		Enabled:                d.Enabled,
+		DeliveryMode:           DeliveryMode(d.DeliveryMode),
+		DeliveryWebhookURL:     d.DeliveryWebhookURL,
+		DeliveryBestEffort:     d.DeliveryBestEffort,
+		FailureAlertAfter:      d.FailureAlertAfter,
+		FailureAlertWebhookURL: d.FailureAlertWebhookURL,
+		Status:                 JobStatus(d.Status),
+		LastRunStatus:          d.LastRunStatus,
+		LastError:              d.LastError,
+		ConsecutiveErrors:      d.ConsecutiveErrors,
+		InputTokens:            d.InputTokens,
+		OutputTokens:           d.OutputTokens,
+		DurationMs:             d.DurationMs,
+		SandboxOnly:            d.SandboxOnly,
+		WebhookToken:           d.WebhookToken,
+	}
+	if d.LastRunAt != nil {
+		j.LastRunAt = *d.LastRunAt
+	}
+	if d.NextRunAt != nil {
+		j.NextRunAt = *d.NextRunAt
+	}
+	if d.CreatedAt != nil {
+		j.CreatedAt = *d.CreatedAt
+	}
+	if d.UpdatedAt != nil {
+		j.UpdatedAt = *d.UpdatedAt
+	}
+	_ = json.Unmarshal([]byte(d.Blocks), &j.Blocks)
+	_ = json.Unmarshal([]byte(d.BlockedBy), &j.BlockedBy)
+	return j
 }
 
 var defaultHTTPClient *http.Client

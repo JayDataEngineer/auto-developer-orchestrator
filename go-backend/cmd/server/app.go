@@ -400,22 +400,12 @@ func (a *App) initMCP() {
 }
 
 func (a *App) initScheduler() {
-	storePath := os.Getenv("SCHEDULER_STORE_PATH")
-	if storePath == "" {
-		storePath = "../data/scheduler/jobs.json"
-	}
-
 	// Create PromptSender that calls the local /api/pux/prompt endpoint
 	projectRoot := os.Getenv("PROJECT_ROOT")
 	promptSender := makeLocalPromptSender("http://localhost:3847", projectRoot, a.logger)
 
-	a.sched = scheduler.NewScheduler(storePath, promptSender, a.logger)
-
-	runLogMgr, err := scheduler.NewRunLogManager("")
-	if err != nil {
-		a.logger.Warn("Failed to create run log manager", zap.Error(err))
-	}
-	a.sched.SetRunLogManager(runLogMgr, projectRoot)
+	a.sched = scheduler.NewScheduler(a.db, promptSender, a.logger)
+	a.sched.SetProjectRoot(projectRoot)
 
 	if err := a.sched.Start(context.Background()); err != nil {
 		a.logger.Warn("Failed to start scheduler", zap.Error(err))

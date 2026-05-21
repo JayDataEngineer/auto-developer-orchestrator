@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // Postgres driver
 	_ "github.com/mattn/go-sqlite3"     // SQLite driver
@@ -587,4 +588,283 @@ func (d *Database) GetLatestTranscript(ctx context.Context, sessionID string) (*
 		return nil, err
 	}
 	return &t, nil
+}
+
+// ── Scheduled Jobs ─────────────────────────────────────────────────────
+
+// ScheduledJob is the database representation of a scheduler.Job.
+type ScheduledJob struct {
+	ID                   string
+	Name                 string
+	Description          string
+	Project              string
+	AgentID              string
+	Message              string
+	Model                string
+	Org                  string
+	ScheduleType         string
+	CronExpr             string
+	Timezone             string
+	EverySeconds         int64
+	AtTime               string
+	AutoBranch           bool
+	AutoMerge            bool
+	Enabled              bool
+	DeliveryMode         string
+	DeliveryWebhookURL   string
+	DeliveryBestEffort   bool
+	FailureAlertAfter    int
+	FailureAlertWebhookURL string
+	Status               string
+	LastRunAt            *time.Time
+	LastRunStatus        string
+	LastError            string
+	NextRunAt            *time.Time
+	ConsecutiveErrors    int
+	InputTokens          int
+	OutputTokens         int
+	DurationMs           int64
+	Blocks               string // JSON array
+	BlockedBy            string // JSON array
+	SandboxOnly          bool
+	WebhookToken         string
+	CreatedAt            *time.Time
+	UpdatedAt            *time.Time
+}
+
+const scheduledJobCols = `id, name, description, project, agent_id, message, model, org,
+	schedule_type, cron_expr, timezone, every_seconds, at_time,
+	auto_branch, auto_merge, enabled,
+	delivery_mode, delivery_webhook_url, delivery_best_effort,
+	failure_alert_after, failure_alert_webhook_url,
+	status, last_run_at, last_run_status, last_error, next_run_at,
+	consecutive_errors, input_tokens, output_tokens, duration_ms,
+	blocks, blocked_by, sandbox_only, webhook_token, created_at, updated_at`
+
+func scanScheduledJob(row interface{ Scan(...interface{}) error }, j *ScheduledJob) error {
+	return row.Scan(
+		&j.ID, &j.Name, &j.Description, &j.Project, &j.AgentID, &j.Message, &j.Model, &j.Org,
+		&j.ScheduleType, &j.CronExpr, &j.Timezone, &j.EverySeconds, &j.AtTime,
+		&j.AutoBranch, &j.AutoMerge, &j.Enabled,
+		&j.DeliveryMode, &j.DeliveryWebhookURL, &j.DeliveryBestEffort,
+		&j.FailureAlertAfter, &j.FailureAlertWebhookURL,
+		&j.Status, &j.LastRunAt, &j.LastRunStatus, &j.LastError, &j.NextRunAt,
+		&j.ConsecutiveErrors, &j.InputTokens, &j.OutputTokens, &j.DurationMs,
+		&j.Blocks, &j.BlockedBy, &j.SandboxOnly, &j.WebhookToken, &j.CreatedAt, &j.UpdatedAt,
+	)
+}
+
+// SaveScheduledJob upserts a scheduled job.
+func (d *Database) SaveScheduledJob(ctx context.Context, j *ScheduledJob) error {
+	_, err := d.db.ExecContext(ctx, Rebind(d.dialect, `
+		INSERT INTO scheduled_jobs (`+scheduledJobCols+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?,  ?, ?, ?,  ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name=excluded.name, description=excluded.description, project=excluded.project,
+			agent_id=excluded.agent_id, message=excluded.message, model=excluded.model, org=excluded.org,
+			schedule_type=excluded.schedule_type, cron_expr=excluded.cron_expr, timezone=excluded.timezone,
+			every_seconds=excluded.every_seconds, at_time=excluded.at_time,
+			auto_branch=excluded.auto_branch, auto_merge=excluded.auto_merge, enabled=excluded.enabled,
+			delivery_mode=excluded.delivery_mode, delivery_webhook_url=excluded.delivery_webhook_url,
+			delivery_best_effort=excluded.delivery_best_effort,
+			failure_alert_after=excluded.failure_alert_after, failure_alert_webhook_url=excluded.failure_alert_webhook_url,
+			status=excluded.status, last_run_at=excluded.last_run_at, last_run_status=excluded.last_run_status,
+			last_error=excluded.last_error, next_run_at=excluded.next_run_at,
+			consecutive_errors=excluded.consecutive_errors, input_tokens=excluded.input_tokens,
+			output_tokens=excluded.output_tokens, duration_ms=excluded.duration_ms,
+			blocks=excluded.blocks, blocked_by=excluded.blocked_by, sandbox_only=excluded.sandbox_only,
+			webhook_token=excluded.webhook_token, updated_at=CURRENT_TIMESTAMP`),
+		j.ID, j.Name, j.Description, j.Project, j.AgentID, j.Message, j.Model, j.Org,
+		j.ScheduleType, j.CronExpr, j.Timezone, j.EverySeconds, j.AtTime,
+		j.AutoBranch, j.AutoMerge, j.Enabled,
+		j.DeliveryMode, j.DeliveryWebhookURL, j.DeliveryBestEffort,
+		j.FailureAlertAfter, j.FailureAlertWebhookURL,
+		j.Status, j.LastRunAt, j.LastRunStatus, j.LastError, j.NextRunAt,
+		j.ConsecutiveErrors, j.InputTokens, j.OutputTokens, j.DurationMs,
+		j.Blocks, j.BlockedBy, j.SandboxOnly, j.WebhookToken, j.CreatedAt, j.UpdatedAt,
+	)
+	return err
+}
+
+// GetScheduledJob returns a single job by ID.
+func (d *Database) GetScheduledJob(ctx context.Context, id string) (*ScheduledJob, error) {
+	var j ScheduledJob
+	err := scanScheduledJob(d.db.QueryRowContext(ctx,
+		Rebind(d.dialect, `SELECT `+scheduledJobCols+` FROM scheduled_jobs WHERE id = ?`), id), &j)
+	if err != nil {
+		return nil, err
+	}
+	return &j, nil
+}
+
+// ListScheduledJobs returns all scheduled jobs.
+func (d *Database) ListScheduledJobs(ctx context.Context) ([]*ScheduledJob, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT `+scheduledJobCols+` FROM scheduled_jobs ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []*ScheduledJob
+	for rows.Next() {
+		var j ScheduledJob
+		if err := scanScheduledJob(rows, &j); err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, &j)
+	}
+	return jobs, rows.Err()
+}
+
+// DeleteScheduledJob removes a job by ID.
+func (d *Database) DeleteScheduledJob(ctx context.Context, id string) error {
+	_, err := d.db.ExecContext(ctx, Rebind(d.dialect, `DELETE FROM scheduled_jobs WHERE id = ?`), id)
+	return err
+}
+
+// FindJobByWebhookToken finds a job by its webhook token.
+func (d *Database) FindJobByWebhookToken(ctx context.Context, token string) (*ScheduledJob, error) {
+	var j ScheduledJob
+	err := scanScheduledJob(d.db.QueryRowContext(ctx,
+		Rebind(d.dialect, `SELECT `+scheduledJobCols+` FROM scheduled_jobs WHERE webhook_token = ?`), token), &j)
+	if err != nil {
+		return nil, err
+	}
+	return &j, nil
+}
+
+// FindJobByProjectAndName finds a job by project and name.
+func (d *Database) FindJobByProjectAndName(ctx context.Context, project, name string) (*ScheduledJob, error) {
+	var j ScheduledJob
+	err := scanScheduledJob(d.db.QueryRowContext(ctx,
+		Rebind(d.dialect, `SELECT `+scheduledJobCols+` FROM scheduled_jobs WHERE project = ? AND name = ?`), project, name), &j)
+	if err != nil {
+		return nil, err
+	}
+	return &j, nil
+}
+
+// ── Scheduler Run Logs ─────────────────────────────────────────────────
+
+// DBRunLogEntry is the database representation of a scheduler run log entry.
+type DBRunLogEntry struct {
+	ID             int64
+	JobID          string
+	Action         string
+	Status         string
+	Error          string
+	Summary        string
+	Delivered      bool
+	DeliveryStatus string
+	DeliveryError  string
+	SessionID      string
+	RunAtMs        int64
+	DurationMs     int64
+	NextRunAtMs    int64
+	Model          string
+	Provider       string
+	InputTokens    int
+	OutputTokens   int
+	CacheTokens    int
+	CreatedAt      *time.Time
+}
+
+const runLogCols = `id, job_id, action, status, error, summary, delivered, delivery_status, delivery_error,
+	session_id, run_at_ms, duration_ms, next_run_at_ms, model, provider,
+	input_tokens, output_tokens, cache_tokens, created_at`
+
+func scanRunLog(row interface{ Scan(...interface{}) error }, e *DBRunLogEntry) error {
+	return row.Scan(
+		&e.ID, &e.JobID, &e.Action, &e.Status, &e.Error, &e.Summary,
+		&e.Delivered, &e.DeliveryStatus, &e.DeliveryError,
+		&e.SessionID, &e.RunAtMs, &e.DurationMs, &e.NextRunAtMs,
+		&e.Model, &e.Provider, &e.InputTokens, &e.OutputTokens, &e.CacheTokens, &e.CreatedAt,
+	)
+}
+
+// AppendRunLog inserts a run log entry.
+func (d *Database) AppendRunLog(ctx context.Context, e *DBRunLogEntry) error {
+	_, err := d.db.ExecContext(ctx, Rebind(d.dialect, `
+		INSERT INTO scheduler_run_logs (job_id, action, status, error, summary, delivered, delivery_status, delivery_error,
+			session_id, run_at_ms, duration_ms, next_run_at_ms, model, provider,
+			input_tokens, output_tokens, cache_tokens)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?,  ?, ?, ?)`),
+		e.JobID, e.Action, e.Status, e.Error, e.Summary, e.Delivered, e.DeliveryStatus, e.DeliveryError,
+		e.SessionID, e.RunAtMs, e.DurationMs, e.NextRunAtMs, e.Model, e.Provider,
+		e.InputTokens, e.OutputTokens, e.CacheTokens,
+	)
+	return err
+}
+
+// ReadRunLogs returns the most recent run log entries for a job.
+func (d *Database) ReadRunLogs(ctx context.Context, jobID string, limit int) ([]*DBRunLogEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.db.QueryContext(ctx,
+		Rebind(d.dialect, `SELECT `+runLogCols+` FROM scheduler_run_logs WHERE job_id = ? ORDER BY created_at DESC LIMIT ?`),
+		jobID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []*DBRunLogEntry
+	for rows.Next() {
+		var e DBRunLogEntry
+		if err := scanRunLog(rows, &e); err != nil {
+			return nil, err
+		}
+		entries = append(entries, &e)
+	}
+	return entries, rows.Err()
+}
+
+// ReadAllRunLogs returns run log entries across all jobs with optional filters.
+func (d *Database) ReadAllRunLogs(ctx context.Context, limit int, statusFilter, jobIDFilter string) ([]*DBRunLogEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	query := `SELECT ` + runLogCols + ` FROM scheduler_run_logs WHERE 1=1`
+	var args []interface{}
+	if statusFilter != "" && statusFilter != "all" {
+		query += ` AND status = ?`
+		args = append(args, statusFilter)
+	}
+	if jobIDFilter != "" {
+		query += ` AND job_id = ?`
+		args = append(args, jobIDFilter)
+	}
+	query += ` ORDER BY created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := d.db.QueryContext(ctx, Rebind(d.dialect, query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []*DBRunLogEntry
+	for rows.Next() {
+		var e DBRunLogEntry
+		if err := scanRunLog(rows, &e); err != nil {
+			return nil, err
+		}
+		entries = append(entries, &e)
+	}
+	return entries, rows.Err()
+}
+
+// PruneRunLogs keeps only the last keepN entries for a job.
+func (d *Database) PruneRunLogs(ctx context.Context, jobID string, keepN int) error {
+	if keepN <= 0 {
+		keepN = 2000
+	}
+	_, err := d.db.ExecContext(ctx, Rebind(d.dialect, `
+		DELETE FROM scheduler_run_logs
+		WHERE job_id = ? AND id NOT IN (
+			SELECT id FROM scheduler_run_logs WHERE job_id = ? ORDER BY created_at DESC LIMIT ?
+		)`), jobID, jobID, keepN)
+	return err
 }

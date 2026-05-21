@@ -133,6 +133,75 @@ CREATE TABLE IF NOT EXISTS context_transcripts (
 
 CREATE INDEX IF NOT EXISTS idx_transcripts_session
 	ON context_transcripts(session_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	project TEXT NOT NULL,
+	agent_id TEXT NOT NULL DEFAULT '',
+	message TEXT NOT NULL,
+	model TEXT NOT NULL DEFAULT '',
+	org TEXT NOT NULL DEFAULT '',
+	schedule_type TEXT NOT NULL,
+	cron_expr TEXT NOT NULL DEFAULT '',
+	timezone TEXT NOT NULL DEFAULT '',
+	every_seconds INTEGER DEFAULT 0,
+	at_time TEXT NOT NULL DEFAULT '',
+	auto_branch BOOLEAN DEFAULT FALSE,
+	auto_merge BOOLEAN DEFAULT FALSE,
+	enabled BOOLEAN DEFAULT TRUE,
+	delivery_mode TEXT NOT NULL DEFAULT 'store',
+	delivery_webhook_url TEXT NOT NULL DEFAULT '',
+	delivery_best_effort BOOLEAN DEFAULT FALSE,
+	failure_alert_after INTEGER DEFAULT 0,
+	failure_alert_webhook_url TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT 'idle',
+	last_run_at TIMESTAMPTZ,
+	last_run_status TEXT NOT NULL DEFAULT '',
+	last_error TEXT NOT NULL DEFAULT '',
+	next_run_at TIMESTAMPTZ,
+	consecutive_errors INTEGER DEFAULT 0,
+	input_tokens INTEGER DEFAULT 0,
+	output_tokens INTEGER DEFAULT 0,
+	duration_ms INTEGER DEFAULT 0,
+	blocks TEXT NOT NULL DEFAULT '[]',
+	blocked_by TEXT NOT NULL DEFAULT '[]',
+	sandbox_only BOOLEAN DEFAULT FALSE,
+	webhook_token TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sched_jobs_project_name
+	ON scheduled_jobs(project, name);
+CREATE INDEX IF NOT EXISTS idx_sched_jobs_webhook_token
+	ON scheduled_jobs(webhook_token) WHERE webhook_token != '';
+
+CREATE TABLE IF NOT EXISTS scheduler_run_logs (
+	id SERIAL PRIMARY KEY,
+	job_id TEXT NOT NULL,
+	action TEXT NOT NULL DEFAULT 'finished',
+	status TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	summary TEXT NOT NULL DEFAULT '',
+	delivered BOOLEAN DEFAULT FALSE,
+	delivery_status TEXT NOT NULL DEFAULT '',
+	delivery_error TEXT NOT NULL DEFAULT '',
+	session_id TEXT NOT NULL DEFAULT '',
+	run_at_ms INTEGER DEFAULT 0,
+	duration_ms INTEGER DEFAULT 0,
+	next_run_at_ms INTEGER DEFAULT 0,
+	model TEXT NOT NULL DEFAULT '',
+	provider TEXT NOT NULL DEFAULT '',
+	input_tokens INTEGER DEFAULT 0,
+	output_tokens INTEGER DEFAULT 0,
+	cache_tokens INTEGER DEFAULT 0,
+	created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_logs_job_created
+	ON scheduler_run_logs(job_id, created_at DESC);
 `
 
 // SQLite DDL — uses AUTOINCREMENT and WAL journal mode params in connection string.
@@ -225,4 +294,73 @@ CREATE TABLE IF NOT EXISTS context_transcripts (
 
 CREATE INDEX IF NOT EXISTS idx_transcripts_session
 	ON context_transcripts(session_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	project TEXT NOT NULL,
+	agent_id TEXT NOT NULL DEFAULT '',
+	message TEXT NOT NULL,
+	model TEXT NOT NULL DEFAULT '',
+	org TEXT NOT NULL DEFAULT '',
+	schedule_type TEXT NOT NULL,
+	cron_expr TEXT NOT NULL DEFAULT '',
+	timezone TEXT NOT NULL DEFAULT '',
+	every_seconds INTEGER DEFAULT 0,
+	at_time TEXT NOT NULL DEFAULT '',
+	auto_branch BOOLEAN DEFAULT FALSE,
+	auto_merge BOOLEAN DEFAULT FALSE,
+	enabled BOOLEAN DEFAULT TRUE,
+	delivery_mode TEXT NOT NULL DEFAULT 'store',
+	delivery_webhook_url TEXT NOT NULL DEFAULT '',
+	delivery_best_effort BOOLEAN DEFAULT FALSE,
+	failure_alert_after INTEGER DEFAULT 0,
+	failure_alert_webhook_url TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT 'idle',
+	last_run_at DATETIME,
+	last_run_status TEXT NOT NULL DEFAULT '',
+	last_error TEXT NOT NULL DEFAULT '',
+	next_run_at DATETIME,
+	consecutive_errors INTEGER DEFAULT 0,
+	input_tokens INTEGER DEFAULT 0,
+	output_tokens INTEGER DEFAULT 0,
+	duration_ms INTEGER DEFAULT 0,
+	blocks TEXT NOT NULL DEFAULT '[]',
+	blocked_by TEXT NOT NULL DEFAULT '[]',
+	sandbox_only BOOLEAN DEFAULT FALSE,
+	webhook_token TEXT NOT NULL DEFAULT '',
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sched_jobs_project_name
+	ON scheduled_jobs(project, name);
+CREATE INDEX IF NOT EXISTS idx_sched_jobs_webhook_token
+	ON scheduled_jobs(webhook_token) WHERE webhook_token != '';
+
+CREATE TABLE IF NOT EXISTS scheduler_run_logs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	job_id TEXT NOT NULL,
+	action TEXT NOT NULL DEFAULT 'finished',
+	status TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	summary TEXT NOT NULL DEFAULT '',
+	delivered BOOLEAN DEFAULT FALSE,
+	delivery_status TEXT NOT NULL DEFAULT '',
+	delivery_error TEXT NOT NULL DEFAULT '',
+	session_id TEXT NOT NULL DEFAULT '',
+	run_at_ms INTEGER DEFAULT 0,
+	duration_ms INTEGER DEFAULT 0,
+	next_run_at_ms INTEGER DEFAULT 0,
+	model TEXT NOT NULL DEFAULT '',
+	provider TEXT NOT NULL DEFAULT '',
+	input_tokens INTEGER DEFAULT 0,
+	output_tokens INTEGER DEFAULT 0,
+	cache_tokens INTEGER DEFAULT 0,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_logs_job_created
+	ON scheduler_run_logs(job_id, created_at DESC);
 `

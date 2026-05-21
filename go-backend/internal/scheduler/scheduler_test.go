@@ -2,26 +2,34 @@ package scheduler
 
 import (
 	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"go.uber.org/zap"
 )
 
-func newTestScheduler(t *testing.T) (*Scheduler, string) {
+func newTestDB(t *testing.T) *storage.Database {
 	t.Helper()
 	dir := t.TempDir()
-	storePath := filepath.Join(dir, "scheduler.json")
+	db, err := storage.NewDatabase(dir + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func newTestScheduler(t *testing.T) (*Scheduler, *storage.Database) {
+	t.Helper()
+	db := newTestDB(t)
 	logger := zap.NewNop()
-	s := NewScheduler(storePath, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge, sandboxOnly bool) (string, error) {
+	s := NewScheduler(db, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge, sandboxOnly bool) (string, error) {
 		return "test output", nil
 	}, logger)
-	return s, dir
+	return s, db
 }
 
 // --- Job validation ---
@@ -254,19 +262,17 @@ func TestCreateCronJob(t *testing.T) {
 	}
 }
 
-// --- Persistence ---
+// --- Persistence via database ---
 
 func TestSaveAndLoad(t *testing.T) {
-	dir := t.TempDir()
-	storePath := filepath.Join(dir, "scheduler.json")
+	db := newTestDB(t)
 	logger := zap.NewNop()
 
-	s1 := NewScheduler(storePath, nil, logger)
+	s1 := NewScheduler(db, nil, logger)
 	s1.CreateJob(&Job{Name: "persist-test", Project: "p", Message: "m", Schedule: ScheduleEvery, EverySeconds: 300, Enabled: true})
-	s1.save()
 
-	s2 := NewScheduler(storePath, nil, logger)
-	if err := s2.load(); err != nil {
+	s2 := NewScheduler(db, nil, logger)
+	if err := s2.load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	jobs := s2.ListJobs()
@@ -276,18 +282,6 @@ func TestSaveAndLoad(t *testing.T) {
 	if jobs[0].Name != "persist-test" {
 		t.Errorf("expected name persist-test, got %s", jobs[0].Name)
 	}
-}
-
-func TestLoadNoFile(t *testing.T) {
-	s, _ := newTestScheduler(t)
-	if err := s.load(); err != nil {
-		t.Errorf("load with no file should not error: %v", err)
-	}
-}
-
-func TestSaveEmptyPath(t *testing.T) {
-	s := NewScheduler("", nil, zap.NewNop())
-	s.save() // should not panic
 }
 
 // --- Execution tracking ---
@@ -309,11 +303,10 @@ func TestTriggerJobNotFound(t *testing.T) {
 
 func TestTriggerJobExecutes(t *testing.T) {
 	var called atomic.Int32
-	dir := t.TempDir()
-	storePath := filepath.Join(dir, "scheduler.json")
+	db := newTestDB(t)
 	logger := zap.NewNop()
 
-	s := NewScheduler(storePath, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge, sandboxOnly bool) (string, error) {
+	s := NewScheduler(db, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge, sandboxOnly bool) (string, error) {
 		called.Add(1)
 		return "done", nil
 	}, logger)
@@ -392,30 +385,5 @@ func TestTruncateStr(t *testing.T) {
 	}
 	if s := util.Truncate("hello world", 5); s != "hello" {
 		t.Errorf("expected hello, got %s", s)
-	}
-}
-
-// --- Store file format ---
-
-func TestStoreFileIsJSON(t *testing.T) {
-	dir := t.TempDir()
-	storePath := filepath.Join(dir, "scheduler.json")
-	s := NewScheduler(storePath, nil, zap.NewNop())
-	s.CreateJob(&Job{Name: "json-test", Project: "p", Message: "m", Schedule: ScheduleEvery, EverySeconds: 60, Enabled: true})
-	s.save()
-
-	data, err := os.ReadFile(storePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var store struct {
-		Jobs []*Job `json:"jobs"`
-	}
-	if err := json.Unmarshal(data, &store); err != nil {
-		t.Errorf("store file should be valid JSON: %v", err)
-	}
-	if len(store.Jobs) != 1 {
-		t.Errorf("expected 1 job in store, got %d", len(store.Jobs))
 	}
 }

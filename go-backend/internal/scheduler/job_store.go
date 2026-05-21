@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -72,7 +73,7 @@ func (s *Scheduler) CreateJob(job *Job) error {
 	}
 
 	s.jobs[job.ID] = job
-	s.save()
+	s.saveJob(job)
 
 	s.logger.Info("job created",
 		zap.String("id", job.ID),
@@ -158,7 +159,7 @@ func (s *Scheduler) UpdateJob(jobID string, updates *Job) error {
 		}
 	}
 
-	s.save()
+	s.saveJob(existing)
 	return nil
 }
 
@@ -177,7 +178,10 @@ func (s *Scheduler) DeleteJob(jobID string) error {
 	}
 
 	delete(s.jobs, jobID)
-	s.save()
+	ctx := context.Background()
+	if err := s.db.DeleteScheduledJob(ctx, jobID); err != nil {
+		s.logger.Error("failed to delete job from database", zap.String("id", jobID), zap.Error(err))
+	}
 
 	s.logger.Info("job deleted", zap.String("id", jobID))
 	return nil
@@ -250,20 +254,24 @@ func (s *Scheduler) ListExecutions(jobID string, limit int) []*JobExecution {
 	return result
 }
 
-// ListRuns returns persistent run log entries for a job.
+// ListRuns returns persistent run log entries for a job from the database.
 func (s *Scheduler) ListRuns(jobID string, limit int, statusFilter string) ([]RunLogEntry, error) {
-	if s.runLogMgr == nil {
-		return nil, nil
+	ctx := context.Background()
+	entries, err := s.db.ReadRunLogs(ctx, jobID, limit)
+	if err != nil {
+		return nil, err
 	}
-	return s.runLogMgr.Read(jobID, limit)
+	return dbRunLogsToEntries(entries), nil
 }
 
-// ListAllRuns returns run log entries across all jobs.
+// ListAllRuns returns run log entries across all jobs from the database.
 func (s *Scheduler) ListAllRuns(limit int, statusFilter, jobIDFilter string) ([]RunLogEntry, error) {
-	if s.runLogMgr == nil {
-		return nil, nil
+	ctx := context.Background()
+	entries, err := s.db.ReadAllRunLogs(ctx, limit, statusFilter, jobIDFilter)
+	if err != nil {
+		return nil, err
 	}
-	return s.runLogMgr.ReadAll(limit, statusFilter, jobIDFilter)
+	return dbRunLogsToEntries(entries), nil
 }
 
 // TriggerJob manually triggers a job execution.
@@ -306,7 +314,7 @@ func (s *Scheduler) validateJob(job *Job) error {
 		if job.CronExpr == "" {
 			return fmt.Errorf("cronExpr is required for cron schedule")
 		}
-		if _, err := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(job.CronExpr); err != nil {
+		if _, err := cron.NewParser(cron.Second|cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Descriptor).Parse(job.CronExpr); err != nil {
 			return fmt.Errorf("invalid cron expression: %w", err)
 		}
 	case ScheduleEvery:
