@@ -21,6 +21,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/plan"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
@@ -113,11 +114,16 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		fileOps = adapters.FileOps{Mgr: h.sandboxMgr, SandboxID: sandboxID}
 	}
 
+	// Host executor — CTO reads/writes directly on the host filesystem.
+	// Sub-agents with isolated/bridged sandbox tiers keep using the Docker sandbox.
+	hostBash := &adapters.HostExecutor{WorkDir: projectPath}
+	hostFileOps := &file.SimpleSandboxOps{BasePath: projectPath}
+
 	// Project memory (MEMORY.md — legacy, still supported)
 	memStore := memory.NewProjectMemory(projectPath)
 
-	// Folder-based memory (.pux/memory/) — new system
-	memFolder := memory.NewFolderStore(projectPath, &bashExec)
+	// Folder-based memory (.pux/memory/) — uses host executor so files land on host
+	memFolder := memory.NewFolderStore(projectPath, hostBash)
 
 	// Credential store for secret resolution in tools
 	credStore := sensitive.NewStore()
@@ -147,6 +153,8 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		WorkDir:       "/sandbox",
 		BashExecutor:  &bashExec,
 		FileOps:       &fileOps,
+		HostBash:      hostBash,
+		HostFileOps:   hostFileOps,
 		MemoryStore:   memStore,
 		MemoryFolder:  memFolder,
 		ApprovalHandler: approvalHandler,

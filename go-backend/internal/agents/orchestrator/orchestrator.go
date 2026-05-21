@@ -50,8 +50,10 @@ type Config struct {
 	WorkDir         string
 	MemoryStore     *memory.Store
 	MemoryFolder    *memory.FolderStore
-	BashExecutor    bash.Executor
-	FileOps         file.SandboxFileOps
+	BashExecutor    bash.Executor   // sandbox executor — used by sub-agents (isolated/bridged)
+	FileOps         file.SandboxFileOps // sandbox file ops — used by sub-agents
+	HostBash        bash.Executor   // host executor — CTO reads/writes directly on host
+	HostFileOps     file.SandboxFileOps // host file ops — CTO file tools
 	DelegateRunner   orchestration.DelegateRunner
 	ProviderFactory  orchestration.ProviderFactory  // creates isolated providers per sub-agent (own session/slot)
 	Skills           *skills.Store
@@ -89,12 +91,17 @@ type Agent struct {
 	runner   *orchestration.ParallelRunner    // nil if external DelegateRunner provided
 }
 
-// newBashTool creates a bash tool, optionally with TaskManager support.
+// newBashTool creates a bash tool for the CTO using the host executor.
+// The CTO runs commands directly on the host machine — not inside the sandbox.
 func newBashTool(cfg Config) core.Tool {
-	if cfg.TaskMgr != nil {
-		return bash.NewWithTaskManager(cfg.BashExecutor, cfg.TaskMgr, cfg.ProjectDir)
+	exec := cfg.HostBash
+	if exec == nil {
+		exec = cfg.BashExecutor // fallback to sandbox if no host executor
 	}
-	return bash.New(cfg.BashExecutor)
+	if cfg.TaskMgr != nil {
+		return bash.NewWithTaskManager(exec, cfg.TaskMgr, cfg.ProjectDir)
+	}
+	return bash.New(exec)
 }
 
 // New creates a new orchestrator agent.
@@ -120,9 +127,16 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		mediaDescriber = &file.MCPMediaDescriber{Client: cfg.MCPClient}
 	}
 
+	// CTO uses host file ops — reads/writes directly on the host filesystem.
+	// Falls back to sandbox ops if no host file ops are configured.
+	hostFileOps := cfg.HostFileOps
+	if hostFileOps == nil {
+		hostFileOps = cfg.FileOps
+	}
+
 	ctoTools := []core.Tool{
 		newBashTool(cfg),
-		file.NewReadTool(cfg.FileOps, mediaDescriber),
+		file.NewReadTool(hostFileOps, mediaDescriber),
 	}
 
 	// task_output tool — available when TaskManager is wired in
@@ -131,10 +145,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 
 	ctoTools = append(ctoTools,
-		file.NewWriteTool(cfg.FileOps),
-		file.NewEditTool(cfg.FileOps),
-		file.NewGrepTool(cfg.FileOps),
-		file.NewGlobTool(cfg.FileOps),
+		file.NewWriteTool(hostFileOps),
+		file.NewEditTool(hostFileOps),
+		file.NewGrepTool(hostFileOps),
+		file.NewGlobTool(hostFileOps),
 		meta.NewWaitTool(),
 		meta.NewYieldArtifactToolWithDB(cfg.ArtifactDB, cfg.ProjectDir, cfg.SandboxID),
 	)
@@ -363,8 +377,13 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			})
 		}
 		// Wire git-based change tracking for delegate_to / delegate_continue / delegate_revert
-		if cfg.BashExecutor != nil {
-			pr.SetSnapshotter(orchestration.NewGitSnapshotter(cfg.BashExecutor))
+		// Uses host executor — git operates on the host project directory
+		gitExec := cfg.HostBash
+		if gitExec == nil {
+			gitExec = cfg.BashExecutor
+		}
+		if gitExec != nil {
+			pr.SetSnapshotter(orchestration.NewGitSnapshotter(gitExec))
 		}
 
 		// Auto-director: raise Chrome window for VNC visibility when browser agent starts
@@ -602,6 +621,8 @@ func makeOrchestratorFactory(provider core.LLMProvider, parentCfg Config) orches
 			WorkDir:       parentCfg.WorkDir,
 			BashExecutor:  parentCfg.BashExecutor,
 			FileOps:       parentCfg.FileOps,
+			HostBash:      parentCfg.HostBash,
+			HostFileOps:   parentCfg.HostFileOps,
 			MemoryStore:   parentCfg.MemoryStore,
 			Org:           org,
 			OrgRoles:      orgRoles,
