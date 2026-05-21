@@ -114,20 +114,26 @@ export function VNCViewer() {
 	}, [vncReady]);
 
 	// Resize the X11 framebuffer to match the container dimensions.
-	// Called once after drag ends (via layoutVersion bump from onLayoutChanged)
-	// and on window resize (via ResizeObserver with 200ms debounce).
+	// Uses a last-sent dimension guard to prevent feedback loops:
+	// xrandr changes framebuffer → noVNC re-renders → container might
+	// report same size → skip the API call, breaking the loop.
 	const sandboxId = sandbox?.id;
 	useEffect(() => {
-		if (!sandboxId || !containerRef.current) return;
+		if (!sandboxId || !containerRef.current || !vncReady) return;
+
+		let lastW = 0;
+		let lastH = 0;
 
 		const resizeToContainer = () => {
 			const el = containerRef.current;
 			if (!el) return;
-			// Subtract 4px to account for noVNC's internal viewport chrome
-			// and pixel rounding that makes the framebuffer slightly too large.
 			const w = Math.floor(el.clientWidth) - 4;
 			const h = Math.floor(el.clientHeight) - 4;
 			if (w < 100 || h < 100) return;
+			// Skip if dimensions haven't changed — prevents infinite loop
+			if (w === lastW && h === lastH) return;
+			lastW = w;
+			lastH = h;
 
 			fetch(`/api/sandbox/${sandboxId}/x11/resolution`, {
 				method: "PUT",
@@ -152,7 +158,7 @@ export function VNCViewer() {
 			clearTimeout(timer);
 			observer.disconnect();
 		};
-	}, [sandboxId, layoutVersion]);
+	}, [sandboxId, layoutVersion, vncReady]);
 
 	const startSandbox = async () => {
 		if (!activeProject) return;

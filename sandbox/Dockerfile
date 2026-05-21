@@ -131,6 +131,10 @@ RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/b
 # Fluxbox config — dark theme, dynamic app menu
 COPY fluxbox/ /root/.fluxbox/
 
+# Desktop shortcuts (shown by pcmanfm --desktop)
+COPY desktop/ /root/Desktop/
+RUN chmod +x /root/Desktop/*.desktop
+
 # Supervisor + log dir
 RUN mkdir -p /var/log/supervisor
 
