@@ -1,36 +1,25 @@
+# Dependencies
 node_modules/
+.venv/
+venv/
+
+# Build output
 build/
 dist/
 dist-web/
 coverage/
+*.out
+*.exe
+
+# IDE / editor
 .DS_Store
-*.log
-.env*
-!.env.example
-*.pyc
-__pycache__/
-.venv/
-venv/
 *.swp
 *.swo
 *~
-ref_docs/
 
-# Go binaries
-go-backend/bin/
-go-backend/cli
-*.exe
-data/
-
-# Playwright
-playwright-report/
-playwright-report-lit/
-test-results/
-tests/e2e/screenshots/
-~/.pi/
-passwords.txt
-
-# Keys and credentials — NEVER commit
+# Environment / secrets — NEVER commit
+.env*
+!.env.example
 .pi/
 pi-config/
 **/settings.json
@@ -38,28 +27,40 @@ pi-config/
 **/*api-key*
 **/*apikey*
 **/*credentials*
+passwords.txt
 
-# Session scratch files
-CONV.txt
-convo.txt
-PROGRESS.md
-go-backend/CONVO.txt
-go-backend/convo.txt
+# Logs
+*.log
 
-# LLM progress reports / temp files
-llms*.txt
-research_field_report.md
-*.out
+# Python bytecode
+*.pyc
+__pycache__/
 
-# One-off planning docs
-docs/OPENSHELL_INTEGRATION_PLAN.md
-docs/SCHEDULER_PLAN.md
-
-# Compiled Go binaries
+# Go binaries
+go-backend/bin/
+go-backend/cli
 go-backend/main
 go-backend/orch
+go-backend/orch-dev
 go-backend/server
 go-backend/tmp/
+go-backend/go-backend/
+
+# Data and sessions
+data/
+~/.pi/
+**/.pux/sessions/
+**/.pux/spill/
+
+# Keys and credentials
+ref_docs/
+
+# Test artifacts
+playwright-report/
+playwright-report-lit/
+test-results/
+tests/e2e/screenshots/
+tests/python/frontend/screenshots/
 
 # Sandbox / external reference repos (large, not source)
 reference/
@@ -80,22 +81,9 @@ docs/postcss.config.mjs
 docs/src/
 docs/tsconfig.json
 
-# Agent session files (all nested directories)
-**/.pux/sessions/
-**/.pux/spill/
-
 # Bun lockfiles in workspace packages (root manages deps)
 shared/bun.lock
 ts-tui-ink/bun.lock
-
-# Stray screenshots and test artifacts
-example.png
-
-# Go binary output in wrong location
-go-backend/go-backend/
-
-# Python test screenshots
-tests/python/frontend/screenshots/
 
 # Reference UI code (not source)
 tool-ui/
@@ -103,20 +91,41 @@ tool-ui/
 # Experimental Next.js app
 src/web/next-app/
 
-# Test artifacts from sandbox/agent use case runs
-makima*.jpg
+# Session scratch files
+CONV.txt
+convo.txt
+PROGRESS.md
+go-backend/CONVO.txt
+go-backend/convo.txt
+
+# LLM progress reports
+llms*.txt
+research_field_report.md
+
+# One-off planning docs
+docs/OPENSHELL_INTEGRATION_PLAN.md
+docs/SCHEDULER_PLAN.md
+
+# Stray images from agent/sandbox runs (tracked images live in tests/)
+/*.jpg
+/*.png
+/*.jpeg
+/*.webp
+
+# Agent artifact files generated during sandbox use case runs
+/httpserver/
 ctx_test2.py
 database.py
 fib_bench.py
 hello.txt
 is_prime.py
+llms_txt_report.md
 main.py
 models.py
 pacman.html
 review_target.py
 sample.txt
+test.txt
 test_is_prime.py
 test_primes.py
 wordfreq.py
-llms_txt_report.md
-httpserver/
