@@ -98,7 +98,7 @@ const SyntaxHighlighter: FC<SyntaxHighlighterProps> = ({
 			theme={{ dark: "github-dark", light: "github-light" }}
 			addDefaultStyles={false}
 			showLanguage={false}
-			className="[&_pre]:overflow-x-auto [&_pre]:rounded-b-lg [&_pre]:!bg-muted/75 [&_pre]:p-4"
+			className="[&_pre]:overflow-x-auto [&_pre]:rounded-b-lg [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-relaxed"
 		>
 			{code.trim()}
 		</ShikiHighlighter>
@@ -236,7 +236,7 @@ const markdownComponents = memoizeMarkdownComponents({
 	pre: ({ className, ...props }) => (
 		<pre
 			className={cn(
-				"aui-md-pre overflow-x-auto rounded-t-none rounded-b-lg border border-border/50 border-t-0 bg-muted/30 p-3 text-xs leading-relaxed",
+				"aui-md-pre overflow-x-auto rounded-t-none rounded-b-lg border border-border/50 border-t-0 bg-muted/30 p-3 text-xs leading-relaxed text-foreground",
 				className,
 			)}
 			{...props}
@@ -245,7 +245,7 @@ const markdownComponents = memoizeMarkdownComponents({
 	code: ({ className, ...props }) => (
 		<code
 			className={cn(
-				"aui-md-inline-code rounded-md border border-border/50 bg-muted/50 px-1.5 py-0.5 font-mono text-[0.85em]",
+				"aui-md-inline-code rounded-md border border-border/50 bg-muted/50 px-1.5 py-0.5 font-mono text-[0.85em] text-foreground",
 				className,
 			)}
 			{...props}
