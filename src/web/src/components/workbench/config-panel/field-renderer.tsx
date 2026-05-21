@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { usePuxStore } from "@/lib/pux-store";
+import { Switch } from "@/components/ui/switch";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FieldConfig } from "./types";
@@ -242,6 +243,16 @@ export function FieldRenderer<T>({
 				</Field>
 			);
 		}
+
+		case "toggle":
+			return (
+				<label className="flex items-center justify-between gap-2">
+					<span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+						{field.label}
+					</span>
+					<Switch checked={!!value} onCheckedChange={(checked) => onChange(checked)} />
+				</label>
+			);
 
 		default:
 			return null;
