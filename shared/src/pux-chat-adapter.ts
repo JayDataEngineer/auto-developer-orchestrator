@@ -658,6 +658,12 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 						case "tool_update": {
 							const toolId = parsed.toolId as string;
+							const updateAgentName = parsed.agentName as string | undefined;
+							// Sub-agent tool updates: skip — they're rendered in the
+							// DelegateRenderer card via tool_execution_end, not streamed.
+							if (updateAgentName) {
+								break;
+							}
 							if (toolId) {
 								const existing = tools.get(toolId);
 								if (existing) {
@@ -709,8 +715,9 @@ export const puxChatAdapter: ChatModelAdapter = {
 								} else if (["marcus", "code_ops"].includes(agentName)) {
 									usePuxStore.getState().setWorkbenchTab("editor");
 								}
+								const storeAgentId = agentId || `${agentName}_${Date.now()}`;
 								usePuxStore.getState().addAgent({
-									agentId: agentId || `${agentName}_${Date.now()}`,
+									agentId: storeAgentId,
 									agentName,
 									task,
 									status: "running",
@@ -718,6 +725,16 @@ export const puxChatAdapter: ChatModelAdapter = {
 									toolCalls: [],
 									transcriptId,
 								});
+								// Inject agentId into the running delegate_to tool's args
+								// so DelegateRenderer can match by ID for concurrent agent support.
+								if (agentId) {
+									for (const tool of tools.values()) {
+										if ((tool.toolName === "delegate_to" || tool.toolName === "delegate_async") && tool.result === undefined) {
+											(tool.args as Record<string, unknown>).__agentId = agentId;
+											break;
+										}
+									}
+								}
 							}
 							break;
 						}
@@ -752,23 +769,11 @@ export const puxChatAdapter: ChatModelAdapter = {
 							}
 							break;
 						}
-						case "subagent_thinking_delta": {
-							const text = parsed.text as string | undefined;
-							const agentName = parsed.agentName as string | undefined;
-							if (text && agentName) {
-								const agents = usePuxStore.getState().agents;
-								const agent = [...agents.values()].find(
-									(a) => a.agentName === agentName && a.status === "running",
-								);
-								if (agent) {
-									usePuxStore.getState().updateAgentThinking(agent.agentId, text);
-								}
-							}
-							break;
-						}
+						case "subagent_thinking_delta":
 						case "subagent_text_delta": {
-							// Sub-agent text output — not rendered in the trace,
-							// but we could store it for future use
+							// These SSE event types are never emitted by the backend.
+							// Sub-agent content arrives as thinking_delta/text_delta with agentName set,
+							// handled in the cases above.
 							break;
 						}
 

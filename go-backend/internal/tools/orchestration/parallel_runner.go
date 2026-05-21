@@ -375,7 +375,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	if len(selectedTools) == 0 {
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
-			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames)},
+			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames), TranscriptID: transcriptID},
 		})
 		return nil, core.NewToolError("delegate_to", fmt.Sprintf("none of the requested tools were found: %v", toolNames))
 	}
@@ -541,7 +541,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 			}
 			core.SendEvent(subscriber, core.AgentEvent{
 				Type: core.EventTypeSubAgentEnd,
-				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120)},
+				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120), TranscriptID: transcriptID},
 			})
 		}()
 		return map[string]any{
@@ -559,9 +559,10 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
-			AgentName: agentName,
-			Status:    endStatus,
-			Task:      truncateTask(task, 120),
+			AgentName:    agentName,
+			Status:       endStatus,
+			Task:         truncateTask(task, 120),
+			TranscriptID: transcriptID,
 		},
 	})
 
@@ -621,7 +622,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	if err != nil {
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
-			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: err.Error()},
+			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: err.Error(), TranscriptID: transcriptID},
 		})
 		return nil, fmt.Errorf("failed to create division orchestrator: %w", err)
 	}
@@ -718,7 +719,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 			}
 			core.SendEvent(subscriber, core.AgentEvent{
 				Type: core.EventTypeSubAgentEnd,
-				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120)},
+				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120), TranscriptID: transcriptID},
 			})
 		}()
 		return map[string]any{
@@ -737,9 +738,10 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
-			AgentName: agentName,
-			Status:    endStatus,
-			Task:      truncateTask(task, 120),
+			AgentName:    agentName,
+			Status:       endStatus,
+			Task:         truncateTask(task, 120),
+			TranscriptID: transcriptID,
 		},
 	})
 
@@ -803,7 +805,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	if len(selectedTools) == 0 {
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
-			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames)},
+			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames), TranscriptID: transcriptID},
 		})
 		return nil, core.NewToolError("delegate_to", fmt.Sprintf("none of the requested tools were found: %v", toolNames))
 	}
@@ -994,9 +996,10 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 			core.SendEvent(subscriber, core.AgentEvent{
 				Type: core.EventTypeSubAgentEnd,
 				Data: core.AgentEventData{
-					AgentName: agentName,
-					Status:    endStatus,
-					Task:      truncateTask(task, 120),
+					AgentName:    agentName,
+					Status:       endStatus,
+					Task:         truncateTask(task, 120),
+					TranscriptID: transcriptID,
 				},
 			})
 		}()
@@ -1018,9 +1021,10 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
-			AgentName: agentName,
-			Status:    endStatus,
-			Task:      truncateTask(task, 120),
+			AgentName:    agentName,
+			Status:       endStatus,
+			Task:         truncateTask(task, 120),
+			TranscriptID: transcriptID,
 		},
 	})
 
@@ -1191,9 +1195,10 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
-			AgentName: la.Role,
-			Status:    endStatus,
-			Task:      truncateTask(feedback, 120),
+			AgentName:    la.Role,
+			Status:       endStatus,
+			Task:         truncateTask(feedback, 120),
+			TranscriptID: la.Session.dbAgentID,
 		},
 	})
 

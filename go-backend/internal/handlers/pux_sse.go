@@ -190,24 +190,34 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 		return &sseEvent{Type: "plan_updated", Data: event.Data}
 
 	case llamaeng.EventTypeSubAgentStart:
+		data := map[string]interface{}{
+			"agentName": event.Data.AgentName,
+			"task":      event.Data.Task,
+			"toolName":  event.Data.ToolName,
+		}
+		if event.Data.TranscriptID != "" {
+			data["agentId"] = event.Data.TranscriptID
+		}
 		return &sseEvent{
 			Type: "subagent_start",
-			Data: map[string]interface{}{
-				"agentName": event.Data.AgentName,
-				"task":      event.Data.Task,
-				"toolName":  event.Data.ToolName,
-			},
+			Data: data,
 		}
 
 	case llamaeng.EventTypeSubAgentEnd:
+		data := map[string]interface{}{
+			"agentName": event.Data.AgentName,
+			"status":    event.Data.Status,
+			"task":      event.Data.Task,
+		}
+		if event.Data.Error != "" {
+			data["error"] = event.Data.Error
+		}
+		if event.Data.TranscriptID != "" {
+			data["agentId"] = event.Data.TranscriptID
+		}
 		return &sseEvent{
 			Type: "subagent_end",
-			Data: map[string]interface{}{
-				"agentName": event.Data.AgentName,
-				"status":    event.Data.Status,
-				"task":      event.Data.Task,
-				"error":     event.Data.Error,
-			},
+			Data: data,
 		}
 
 	case llamaeng.EventTypeSource:

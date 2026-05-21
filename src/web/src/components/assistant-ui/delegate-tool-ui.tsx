@@ -316,18 +316,22 @@ export function DelegateRenderer({
 	result?: any;
 	status?: { type: string };
 }) {
-	const agentName = (args.agent_id as string) || (args.agent as string) || (args.instructions as string) || "agent";
+	const agentName = (args.role as string) || (args.agent_id as string) || (args.agent as string) || (args.instructions as string) || "agent";
 	const task = (args.task as string) || (args.prompt as string) || "";
 	const isRunning = status?.type === "running";
 	const isComplete = status?.type === "complete";
 	const isError = status?.type === "error";
 
 	const agents = usePuxStore((s) => s.agents);
-	// Match by agentName first (exact), then narrow by task prefix if
-	// multiple agents share the same name. The backend truncates task
-	// text to 120 chars in subagent_start, so we use startsWith rather
-	// than exact match.
+	// Match by injected agentId (exact, handles concurrent same-role agents),
+	// then fall back to agentName + task prefix matching.
 	const agentState = (() => {
+		// Best: match by agentId injected during subagent_start
+		const injectedId = args.__agentId as string | undefined;
+		if (injectedId) {
+			const byId = agents.get(injectedId);
+			if (byId) return byId;
+		}
 		const candidates = [...agents.values()].filter(
 			(a) => a.agentName === agentName,
 		);
