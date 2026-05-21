@@ -810,14 +810,14 @@ export function EditorPanel() {
 										<div
 											key={tab.path}
 											className={cn(
-												"group/tab flex h-7 shrink-0 cursor-pointer items-center gap-1 border-r border-border px-2 text-xs transition-colors",
+												"group/tab flex h-7 min-w-0 shrink-0 cursor-pointer items-center gap-1 border-r border-border px-2 text-xs transition-colors",
 												tab.path === activePath
 													? "border-b-2 border-b-primary bg-background text-foreground"
 													: "text-muted-foreground hover:bg-accent/50",
 											)}
 											onClick={() => openFile(tab.path)}
 										>
-											<span className="min-w-0 max-w-28 truncate">
+											<span className="min-w-0 max-w-[180px] truncate">
 												{dirty.has(tab.path) && (
 													<span className="mr-0.5 text-[10px] text-orange-400">●</span>
 												)}
