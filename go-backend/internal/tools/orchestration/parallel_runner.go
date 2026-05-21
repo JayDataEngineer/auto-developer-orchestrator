@@ -803,6 +803,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 	}
 	if len(selectedTools) == 0 {
+		r.logger("DELEGATE_FAIL: agent=%s no tools found — requested=%v available=%v", agentName, toolNames, toolNamesFromSpecs(r.toolSpecs))
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
 			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames), TranscriptID: transcriptID},
@@ -823,6 +824,14 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 
 	// Create isolated provider — kept alive for delegate_continue
 	provider := r.providerFactory()
+	if provider == nil {
+		r.logger("DELEGATE_FAIL: agent=%s providerFactory returned nil", agentName)
+		core.SendEvent(subscriber, core.AgentEvent{
+			Type: core.EventTypeSubAgentEnd,
+			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: "provider factory returned nil", TranscriptID: transcriptID},
+		})
+		return nil, core.NewToolError("delegate_to", "provider factory returned nil for sub-agent "+agentName)
+	}
 	if modelID != "" && r.modelResolver != nil {
 		if resolved := r.modelResolver(modelID); resolved != nil {
 			if closer, ok := provider.(io.Closer); ok {
@@ -894,6 +903,8 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	})
 	loop := subAgent.Loop()
 
+	r.logger("DELEGATE_START: agent=%s tools=%v maxRounds=%d model=%q sandboxTier=%q", agentName, toolNamesFromSpecs(selectedTools), maxRounds, modelID, sandboxTier)
+
 	// Register as a foreground task so Ctrl+B can background the delegation
 	var bgTask *core.BackgroundTask
 	if r.taskMgr != nil {
@@ -912,11 +923,15 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		defer close(done)
 		defer close(events)
 		runErr = loop.Run(ctx, enrichedTask, events)
+		if runErr != nil {
+			r.logger("DELEGATE_LOOP_ERR: agent=%s err=%v", agentName, runErr)
+		}
 	}()
 
 	// Drain events: accumulate text result + forward tool events to parent subscriber
 	// Also watch for background signal (Ctrl+B) if TaskManager is wired in.
 	var finalText string
+	var firstError string
 	var backgrounded bool
 	evtDone := false
 	for !evtDone {
@@ -925,6 +940,9 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 			for evt := range events {
 				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 					finalText += evt.Data.Text
+				}
+				if evt.Type == core.EventTypeError && firstError == "" {
+					firstError = evt.Data.Error
 				}
 			}
 			evtDone = true
@@ -935,6 +953,10 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 			}
 			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 				finalText += evt.Data.Text
+			}
+			if evt.Type == core.EventTypeError && firstError == "" {
+				firstError = evt.Data.Error
+				r.logger("DELEGATE_LOOP_ERROR: agent=%s error=%s", agentName, firstError)
 			}
 			if subscriber != nil {
 				switch evt.Type {
@@ -1018,6 +1040,12 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	if runErr != nil {
 		endStatus = "error"
 	}
+	// Log final outcome with error details for debugging insta-failures
+	if runErr != nil {
+		r.logger("DELEGATE_DONE: agent=%s status=error err=%v firstLoopError=%s", agentName, runErr, firstError)
+	} else {
+		r.logger("DELEGATE_DONE: agent=%s status=ok textLen=%d", agentName, len(finalText))
+	}
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
@@ -1025,6 +1053,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 			Status:       endStatus,
 			Task:         truncateTask(task, 120),
 			TranscriptID: transcriptID,
+			Error:        firstError,
 		},
 	})
 
@@ -1633,4 +1662,13 @@ func (r *ParallelRunner) maybeSummarize(ctx context.Context, text string) string
 
 	r.logger("SUMMARIZE_OK: %d -> %d chars", len(text), len(summarized))
 	return summarized
+}
+
+// toolNamesFromSpecs extracts tool names from a list of tool specs (for logging).
+func toolNamesFromSpecs(specs []core.OpenAITool) []string {
+	names := make([]string, len(specs))
+	for i, s := range specs {
+		names[i] = s.Function.Name
+	}
+	return names
 }
