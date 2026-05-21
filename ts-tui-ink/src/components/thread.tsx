@@ -74,23 +74,33 @@ function Welcome() {
 	const modelEntry = modelList.find((m) => m.id === activeModel);
 	const modelLabel = modelEntry?.name || activeModel || "no model";
 
-	// Shorten path: ~/Documents/programs/dev/foo → …/dev/foo
-	const shortPath = projectPath
-		? "…" + projectPath.replace(/.*\/([^/]+\/[^/]+)$/, "/$1")
-		: projectName;
-
 	return (
-		<Box flexDirection="column" paddingY={2} paddingX={3}>
-			<Box>
-				<Box flexDirection="column" marginRight={2}>
-					<Text color={colors.brand}>{"▐▛██▜▌"}</Text>
-					<Text color={colors.brand}>{"▝▜██▛▘"}</Text>
-					<Text color={colors.brand}>{" ▘▘▝▝ "}</Text>
+		<Box flexDirection="column" paddingY={1} paddingX={2}>
+			<Text bold color={colors.brand}>
+				{" "}Pux v{puxVersion}
+			</Text>
+			<Box gap={1} marginTop={1}>
+				<Text dimColor>Model:</Text>
+				<Text color={colors.assistant}>{modelLabel}</Text>
+			</Box>
+			{projectName && (
+				<Box gap={1}>
+					<Text dimColor>Project:</Text>
+					<Text color={colors.text}>{projectName}</Text>
 				</Box>
-				<Box flexDirection="column" justifyContent="center">
-					<Text bold color={colors.brand}>Pux v{puxVersion}</Text>
-					<Text dimColor>{modelLabel}</Text>
-					<Text dimColor>{shortPath}</Text>
+			)}
+
+			<Box flexDirection="column" marginTop={1}>
+				<Text dimColor>
+					{" "}Type a message to start, or try:
+				</Text>
+				<Box gap={1} marginTop={1}>
+					<Text color="gray">{"  "}/help</Text>
+					<Text dimColor>commands</Text>
+					<Text color="gray">/model</Text>
+					<Text dimColor>switch model</Text>
+					<Text color="gray">/compact</Text>
+					<Text dimColor>free context</Text>
 				</Box>
 			</Box>
 		</Box>

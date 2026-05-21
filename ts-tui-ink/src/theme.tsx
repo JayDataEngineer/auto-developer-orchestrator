@@ -46,19 +46,19 @@ const themeDefs: ThemeDef[] = [
 	{
 		id: "default",
 		name: "Default",
-		desc: "Magenta brand + standard chalk colors",
+		desc: "Magenta brand + high contrast chalk colors",
 		colors: {
 			brand: "magenta",
 			user: "greenBright",
-			assistant: "blue",
+			assistant: "cyan",
 			success: "green",
 			error: "red",
 			warning: "yellow",
 			running: "cyan",
 			text: "white",
-			textDim: "white",
+			textDim: "gray",
 			textMuted: "gray",
-			subtle: "gray",
+			subtle: "blackBright",
 		},
 	},
 	{

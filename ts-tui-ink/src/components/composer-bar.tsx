@@ -76,10 +76,9 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 			/>
 
 			{/* Input area */}
-			<Text color="gray">{"─".repeat(cols)}</Text>
+			<Text color={colors.subtle}>{"─".repeat(cols)}</Text>
 			<Box paddingX={1}>
-				<Text color={colors.brand} bold>{">"}</Text>
-				<Text> </Text>
+				<Text color={colors.brand} bold>{">"} </Text>
 				<CommandComposer
 					onCommand={onCommand}
 					onOutput={setCommandOutput}
@@ -92,11 +91,11 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 				{/* Cancel button when running */}
 				{isRunning && (
 					<ComposerPrimitive.Cancel>
-						<Text color="red"> {" "}cancel</Text>
+						<Text color="red"> cancel</Text>
 					</ComposerPrimitive.Cancel>
 				)}
 			</Box>
-			<Text color="gray">{"─".repeat(cols)}</Text>
+			<Text color={colors.subtle}>{"─".repeat(cols)}</Text>
 		</Box>
 	);
 }

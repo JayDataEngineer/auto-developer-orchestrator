@@ -34,8 +34,8 @@ export function AssistantMessage() {
 	if (isRunning && !hasContent) {
 		return (
 			<Box marginTop={1} paddingX={1} gap={1}>
-				<Text color={colors.brand}><Spinner type="dots" /></Text>
-				<Text dimColor>thinking...</Text>
+				<Text color={colors.assistant}><Spinner type="dots" /></Text>
+				<Text color={colors.textDim}>thinking...</Text>
 			</Box>
 		);
 	}
@@ -78,7 +78,9 @@ export function AssistantMessage() {
 						if (!part.text?.trim()) return null;
 						return (
 							<Box key={i} flexDirection="column" paddingLeft={1}>
-								<MarkdownText text={part.text} />
+								<Text color={colors.text}>
+									<MarkdownText text={part.text} />
+								</Text>
 							</Box>
 						);
 					case "image":
@@ -284,9 +286,9 @@ function ToolCallDisplay({
 				{toolName}
 			</Text>
 			{argPreview && (
-				<Text color="gray">({argPreview})</Text>
+				<Text color={colors.textMuted}>({argPreview})</Text>
 			)}
-			{isDone && !isError && <Text color="gray"> done</Text>}
+			{isDone && !isError && <Text color={colors.textMuted}> done</Text>}
 			{isError && <Text color={colors.error}> failed</Text>}
 		</Box>
 	);

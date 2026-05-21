@@ -84,7 +84,7 @@ export function MarkdownText({ text, dim }: MarkdownTextProps) {
 				inCodeBlock = false;
 				for (const cl of codeBlockLines) {
 					elements.push(
-						<Text key={`code-${i}-${cl.slice(0, 10)}`} color="cyan" dimColor>
+						<Text key={`code-${i}-${cl.slice(0, 10)}`} color={colors.assistant}>
 							{"  "}{BLOCKQUOTE_BAR} {cl}
 						</Text>,
 					);
