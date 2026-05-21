@@ -373,6 +373,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		}
 	}
 	if len(selectedTools) == 0 {
+		r.logger("DELEGATE_FAIL: agent=%s no tools found — requested=%v available=%v", agentName, toolNames, toolNamesFromSpecs(r.toolSpecs))
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
 			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames), TranscriptID: transcriptID},
@@ -384,6 +385,14 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	// Each sub-agent gets its own Adapter → own session → own llama-server slot.
 	// If modelID is specified, use the model resolver to pick the right engine instead.
 	provider := r.providerFactory()
+	if provider == nil {
+		r.logger("DELEGATE_FAIL: agent=%s providerFactory returned nil", agentName)
+		core.SendEvent(subscriber, core.AgentEvent{
+			Type: core.EventTypeSubAgentEnd,
+			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: "provider factory returned nil", TranscriptID: transcriptID},
+		})
+		return nil, core.NewToolError("delegate_to", "provider factory returned nil for sub-agent "+agentName)
+	}
 	if modelID != "" && r.modelResolver != nil {
 		if resolved := r.modelResolver(modelID); resolved != nil {
 			// Close the factory-created provider, use the resolved model-specific one instead
@@ -448,6 +457,8 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	})
 	loop := subAgent.Loop()
 
+	r.logger("DELEGATE_START: agent=%s tools=%v maxRounds=%d model=%q sandboxTier=%q", agentName, toolNamesFromSpecs(selectedTools), maxRounds, modelID, sandboxTier)
+
 	// Register as foreground task for Ctrl+B backgrounding
 	var bgTask *core.BackgroundTask
 	if r.taskMgr != nil {
@@ -466,10 +477,14 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		defer close(done)
 		defer close(events)
 		runErr = loop.Run(ctx, enrichedTask, events)
+		if runErr != nil {
+			r.logger("DELEGATE_LOOP_ERR: agent=%s err=%v", agentName, runErr)
+		}
 	}()
 
 	// Drain events: accumulate text result + forward tool events to parent subscriber
 	var finalText string
+	var firstError string
 	var backgrounded bool
 	evtDone := false
 	for !evtDone {
@@ -480,6 +495,9 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 					finalText += evt.Data.Text
 				}
+				if evt.Type == core.EventTypeError && firstError == "" {
+					firstError = evt.Data.Error
+				}
 			}
 			evtDone = true
 		case evt, ok := <-events:
@@ -489,6 +507,10 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 			}
 			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
 				finalText += evt.Data.Text
+			}
+			if evt.Type == core.EventTypeError && firstError == "" {
+				firstError = evt.Data.Error
+				r.logger("DELEGATE_LOOP_ERROR: agent=%s error=%s", agentName, firstError)
 			}
 			// Forward tool + text/thinking events to parent subscriber with agent context
 			if subscriber != nil {
@@ -556,6 +578,11 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 	if runErr != nil {
 		endStatus = "error"
 	}
+	if runErr != nil {
+		r.logger("DELEGATE_DONE: agent=%s status=error err=%v firstLoopError=%s", agentName, runErr, firstError)
+	} else {
+		r.logger("DELEGATE_DONE: agent=%s status=ok textLen=%d", agentName, len(finalText))
+	}
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
@@ -563,6 +590,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 			Status:       endStatus,
 			Task:         truncateTask(task, 120),
 			TranscriptID: transcriptID,
+			Error:        firstError,
 		},
 	})
 
