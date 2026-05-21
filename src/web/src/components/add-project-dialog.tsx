@@ -302,7 +302,9 @@ export function AddProjectDialog({
 	// Fetch on open or when SSH connects or when showHidden changes
 	useEffect(() => {
 		if (open && (source !== "ssh" || sshConnected) && source !== "tailscale" && source !== "manual") {
-			fetchDir(currentPath || "");
+			// Reset path when switching sources to avoid using SSH paths for local browsing
+			const pathToFetch = source === "local" ? "" : (currentPath || "");
+			fetchDir(pathToFetch);
 		}
 	}, [open, source, sshConnected, showHidden]); // eslint-disable-line react-hooks/exhaustive-deps
 
