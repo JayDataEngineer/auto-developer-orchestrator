@@ -79,6 +79,7 @@ import {
 	AlertTriangle,
 	Pencil,
 	Menu,
+	Search,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -447,6 +448,7 @@ function AppSidebar() {
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const setConversation = usePuxStore((s) => s.setConversation);
 	const [showAddProject, setShowAddProject] = useState(false);
+	const [search, setSearch] = useState("");
 
 	// Group conversations by project
 	const convsByProject = useMemo(() => {
@@ -467,6 +469,19 @@ function AppSidebar() {
 			...Array.from(convsByProject.keys()).filter((k) => !knownNames.has(k)),
 		];
 	}, [projects, convsByProject]);
+
+	// Filter by search term (matches project names + conversation titles)
+	const filteredKeys = useMemo(() => {
+		if (!search.trim()) return allProjectKeys;
+		const q = search.toLowerCase();
+		return allProjectKeys.filter((key) => {
+			if (key.toLowerCase().includes(q)) return true;
+			const convs = convsByProject.get(key) || [];
+			return convs.some((c) =>
+				(c.title || c.lastMessage || "").toLowerCase().includes(q)
+			);
+		});
+	}, [allProjectKeys, convsByProject, search]);
 
 	return (
 		<Sidebar collapsible="icon">
@@ -503,14 +518,27 @@ function AppSidebar() {
 				</SidebarMenu>
 			</SidebarHeader>
 			<SidebarContent className="group-data-[collapsible=icon]:hidden">
+				{/* Search */}
+				<div className="px-2 pb-1">
+					<div className="relative">
+						<Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+						<input
+							type="text"
+							placeholder="Search..."
+							value={search}
+							onChange={(e) => setSearch(e.target.value)}
+							className="h-7 w-full rounded-md bg-sidebar-accent/50 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-1 focus:ring-sidebar-ring"
+						/>
+					</div>
+				</div>
 				<SidebarGroup>
 					<SidebarMenu>
-						{allProjectKeys.length === 0 ? (
+						{filteredKeys.length === 0 ? (
 							<div className="px-2 py-3 text-center text-xs text-muted-foreground">
-								No projects yet
+								{allProjectKeys.length === 0 ? "No projects yet" : "No matches"}
 							</div>
 						) : (
-							allProjectKeys.map((projectKey) => (
+							filteredKeys.map((projectKey) => (
 								<ProjectGroup
 									key={projectKey}
 									projectKey={projectKey}
