@@ -35,6 +35,7 @@ import {
 	SidebarHeader,
 	SidebarInset,
 	SidebarMenu,
+	SidebarMenuAction,
 	SidebarMenuButton,
 	SidebarMenuItem,
 	SidebarMenuSub,
@@ -400,17 +401,16 @@ function ProjectGroup({
 						)}
 					</SidebarMenuButton>
 				</CollapsibleTrigger>
-				<button
+				<SidebarMenuAction
+					showOnHover
 					onClick={(e) => {
 						e.stopPropagation();
-						e.preventDefault();
 						removeProject(projectKey);
 					}}
-					className="absolute right-1 top-1.5 z-10 rounded p-1 opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/collapsible:opacity-100 group-data-[collapsible=icon]:hidden"
 					title="Remove from sidebar"
 				>
 					<XIcon className="size-3" />
-				</button>
+				</SidebarMenuAction>
 				{conversations.length > 0 && (
 					<CollapsibleContent className="group-data-[collapsible=icon]:hidden">
 						<SidebarMenuSub>

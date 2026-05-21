@@ -473,15 +473,15 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 				body: JSON.stringify({ name }),
 			});
 			if (!resp.ok) return;
-			// Remove from local state
-			const { activeProject } = get();
-			set((state) => ({
-				projects: (state.projects as Project[]).filter((p) => p.name !== name),
-				activeProject: activeProject === name ? "" : activeProject,
-			}));
 		} catch {
-			// ignore
+			// ignore — still remove locally
 		}
+		const { activeProject } = get();
+		set((state) => ({
+			projects: (state.projects as Project[]).filter((p) => p.name !== name),
+			conversations: state.conversations.filter((c) => c.project !== name),
+			activeProject: activeProject === name ? "" : activeProject,
+		}));
 	},
 
 	clearError: () => set({ lastError: null }),
