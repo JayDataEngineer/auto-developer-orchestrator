@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, useDeferredValue, memo } from "react";
 import {
 	useLocalRuntime,
 	AssistantRuntimeProvider,
@@ -364,7 +364,7 @@ function ConversationItem({
 
 // ── Project Group (collapsible) ──
 
-function ProjectGroup({
+const ProjectGroup = memo(function ProjectGroup({
 	projectKey,
 	project,
 	conversations,
@@ -438,7 +438,7 @@ function ProjectGroup({
 			</SidebarMenuItem>
 		</Collapsible>
 	);
-}
+});
 
 // ── Sidebar ──
 
@@ -449,6 +449,7 @@ function AppSidebar() {
 	const setConversation = usePuxStore((s) => s.setConversation);
 	const [showAddProject, setShowAddProject] = useState(false);
 	const [search, setSearch] = useState("");
+	const deferredSearch = useDeferredValue(search);
 
 	// Group conversations by project
 	const convsByProject = useMemo(() => {
@@ -472,8 +473,8 @@ function AppSidebar() {
 
 	// Filter by search term (matches project names + conversation titles)
 	const filteredKeys = useMemo(() => {
-		if (!search.trim()) return allProjectKeys;
-		const q = search.toLowerCase();
+		if (!deferredSearch.trim()) return allProjectKeys;
+		const q = deferredSearch.toLowerCase();
 		return allProjectKeys.filter((key) => {
 			if (key.toLowerCase().includes(q)) return true;
 			const convs = convsByProject.get(key) || [];
@@ -481,7 +482,7 @@ function AppSidebar() {
 				(c.title || c.lastMessage || "").toLowerCase().includes(q)
 			);
 		});
-	}, [allProjectKeys, convsByProject, search]);
+	}, [allProjectKeys, convsByProject, deferredSearch]);
 
 	return (
 		<Sidebar collapsible="icon">
