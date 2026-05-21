@@ -185,8 +185,16 @@ export function FieldRenderer<T>({
 				fetch("/api/workers/")
 					.then((r) => r.json())
 					.then((data) => {
-						const names = (data.workers || []).map((w: any) => w.name as string);
-						setWorkerNames(names.filter((n: string) => n !== field.exclude));
+						const seen = new Set<string>();
+						const names: string[] = [];
+						for (const w of (data.workers || [])) {
+							const n = (w as any).name as string;
+							if (n && n !== field.exclude && !seen.has(n)) {
+								seen.add(n);
+								names.push(n);
+							}
+						}
+						setWorkerNames(names);
 					})
 					.catch(() => {});
 			}, [field.exclude]);
@@ -203,7 +211,7 @@ export function FieldRenderer<T>({
 		}
 
 		case "worker": {
-			const [workerList, setWorkerList] = useState<{name: string; hint: string}[]>([]);
+			const [workerList, setWorkerList] = useState<{name: string; hint: string; source: string}[]>([]);
 			useEffect(() => {
 				fetch("/api/workers/")
 					.then((r) => r.json())
@@ -211,6 +219,7 @@ export function FieldRenderer<T>({
 						setWorkerList((data.workers || []).map((w: any) => ({
 							name: w.name as string,
 							hint: (w.hint || w.persona || "") as string,
+							source: (w.source || "kernel") as string,
 						})));
 					})
 					.catch(() => {});
@@ -224,7 +233,7 @@ export function FieldRenderer<T>({
 						<SelectContent>
 							<SelectItem value="__default__" className="text-xs">Default (CTO)</SelectItem>
 							{workerList.map((w) => (
-								<SelectItem key={w.name} value={w.name} className="text-xs">
+								<SelectItem key={`${w.source}-${w.name}`} value={w.name} className="text-xs">
 									{w.name}{w.hint ? ` — ${w.hint.slice(0, 50)}` : ""}
 								</SelectItem>
 							))}

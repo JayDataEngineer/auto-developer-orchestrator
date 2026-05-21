@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,28 +12,42 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/autoconfig"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 )
 
 // kernelWorkerNames is populated at startup from the kernel workers directory.
 // These names are immutable (Contract 3.5) — REST endpoints reject modifications.
 var kernelWorkerNames map[string]bool
 
+// orgRoleDefault holds the original files for a single org role.
+type orgRoleDefault struct {
+	configYAML []byte // original config.yaml
+	promptMD   []byte // original prompt.md
+	rolesDir   string // absolute path to the org's roles/ directory
+}
+
 // WorkerHandler handles worker config HTTP endpoints.
 type WorkerHandler struct {
-	store    *autoconfig.WorkerStore
-	log      *zap.Logger
-	defaults map[string][]byte // original YAML content by worker name
+	store        *autoconfig.WorkerStore
+	log          *zap.Logger
+	defaults     map[string][]byte          // original YAML content by kernel worker name
+	orgDefaults  map[string]orgRoleDefault  // "orgName/roleName" → original files
 }
 
 // NewWorkerHandler creates a new worker handler.
 // Snapshots existing worker files as defaults for revert.
 func NewWorkerHandler(store *autoconfig.WorkerStore, logger *zap.Logger) *WorkerHandler {
-	h := &WorkerHandler{store: store, log: logger, defaults: make(map[string][]byte)}
+	h := &WorkerHandler{
+		store:       store,
+		log:         logger,
+		defaults:    make(map[string][]byte),
+		orgDefaults: make(map[string]orgRoleDefault),
+	}
 
 	// Snapshot kernel worker names (Contract 3.5: immutable)
 	kernelWorkerNames = common.KernelWorkerNames()
 
-	// Snapshot current worker files as defaults
+	// Snapshot current kernel worker files as defaults
 	if dir := store.Dir(); dir != "" {
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
@@ -43,6 +58,24 @@ func NewWorkerHandler(store *autoconfig.WorkerStore, logger *zap.Logger) *Worker
 			data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 			if err == nil {
 				h.defaults[name] = data
+			}
+		}
+	}
+
+	// Snapshot org role files as defaults
+	for _, org := range common.DiscoverOrgs() {
+		if org.RolesDir == "" {
+			continue
+		}
+		for _, roleName := range org.Roles {
+			cfgData, _ := os.ReadFile(filepath.Join(org.RolesDir, roleName, "config.yaml"))
+			promptData, _ := os.ReadFile(filepath.Join(org.RolesDir, roleName, "prompt.md"))
+			if cfgData != nil {
+				h.orgDefaults[org.Name+"/"+roleName] = orgRoleDefault{
+					configYAML: cfgData,
+					promptMD:   promptData,
+					rolesDir:   org.RolesDir,
+				}
 			}
 		}
 	}
@@ -85,6 +118,8 @@ func (h *WorkerHandler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 	}
 	names, _ := listResult["items"].([]string)
 
+	// Track names to deduplicate — org workers shadow kernel workers with the same name
+	seen := make(map[string]bool)
 	workers := make([]map[string]any, 0, len(names))
 	for _, name := range names {
 		detail, err := h.store.Get(r.Context(), name)
@@ -93,16 +128,20 @@ func (h *WorkerHandler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 		}
 		if m, ok := detail.(map[string]any); ok {
 			m["isDefault"] = h.defaults[name] != nil
-			m["isModified"] = h.isModified(name)
+			m["isModified"] = h.isKernelModified(name)
 			m["source"] = "kernel"
 			workers = append(workers, m)
+			seen[name] = true
 		}
 	}
 
-	// Append org workers
+	// Append org workers (skip if name already present from kernel — org overlays kernel)
 	orgs := common.DiscoverOrgs()
 	for _, org := range orgs {
 		for _, name := range org.Roles {
+			if seen[name] {
+				continue // org role shadows kernel worker — skip kernel duplicate
+			}
 			detail, ok := org.RoleDetails[name]
 			if !ok {
 				continue
@@ -111,13 +150,15 @@ func (h *WorkerHandler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				continue
 			}
+			key := org.Name + "/" + name
 			m["source"] = org.Name
 			m["sourceDescription"] = org.Description
 			m["sourcePath"] = org.Path
 			m["isDefault"] = true
-			m["isModified"] = false
+			m["isModified"] = h.isOrgModified(key, org.RolesDir, name)
 			m["isOrg"] = true
 			workers = append(workers, m)
+			seen[name] = true
 		}
 	}
 
@@ -191,7 +232,7 @@ func (h *WorkerHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, detail)
 }
 
-// UpdateWorker updates an existing worker.
+// UpdateWorker updates an existing worker (kernel or org).
 func (h *WorkerHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if name == "" {
@@ -211,9 +252,16 @@ func (h *WorkerHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 		Temperature  float64  `json:"temperature"`
 		Sandbox      string   `json:"sandbox"`
 		DelegatesTo  []string `json:"delegatesTo"`
+		Source       string   `json:"source"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Route to org update if source is an org name
+	if req.Source != "" && req.Source != "kernel" {
+		h.updateOrgWorker(w, r, name, req.Source, &req)
 		return
 	}
 
@@ -235,10 +283,111 @@ func (h *WorkerHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 	}
 
 	detail, _ := h.store.Get(r.Context(), name)
+	common.ResetGlobalBuilder()
+	writeJSON(w, http.StatusOK, detail)
+}
 
-	// Invalidate prompt builder cache — worker roster changed
+// updateOrgWorker writes updated config.yaml + prompt.md for an org role.
+func (h *WorkerHandler) updateOrgWorker(w http.ResponseWriter, r *http.Request, name, source string, req *struct {
+	Hint         string   `json:"hint"`
+	Persona      string   `json:"persona"`
+	Capabilities []string `json:"capabilities"`
+	Model        string   `json:"model"`
+	MaxRounds    int      `json:"maxRounds"`
+	Temperature  float64  `json:"temperature"`
+	Sandbox      string   `json:"sandbox"`
+	DelegatesTo  []string `json:"delegatesTo"`
+	Source       string   `json:"source"`
+}) {
+	// Find the org's roles dir from defaults (fast, no re-discovery)
+	key := source + "/" + name
+	rolesDir := ""
+	if def, ok := h.orgDefaults[key]; ok {
+		rolesDir = def.rolesDir
+	} else {
+		// Fallback: discover
+		for _, org := range common.DiscoverOrgs() {
+			if org.Name == source {
+				rolesDir = org.RolesDir
+				break
+			}
+		}
+	}
+	if rolesDir == "" {
+		http.Error(w, fmt.Sprintf(`{"error":"org %q not found"}`, source), http.StatusNotFound)
+		return
+	}
+
+	roleDir := filepath.Join(rolesDir, name)
+	if _, err := os.Stat(roleDir); os.IsNotExist(err) {
+		http.Error(w, fmt.Sprintf(`{"error":"role %q not found in org %q"}`, name, source), http.StatusNotFound)
+		return
+	}
+
+	// Build config.yaml — merge with existing to preserve fields we don't edit
+	existingCfg, _ := os.ReadFile(filepath.Join(roleDir, "config.yaml"))
+	cfgMap := make(map[string]any)
+	if existingCfg != nil {
+		yaml.Unmarshal(existingCfg, &cfgMap)
+	}
+
+	// Update fields from request
+	cfgMap["description"] = req.Persona
+	if len(req.Capabilities) > 0 {
+		cfgMap["imports"] = req.Capabilities
+	}
+	if req.Model != "" {
+		cfgMap["model"] = req.Model
+	}
+	if req.MaxRounds > 0 {
+		cfgMap["max_rounds"] = req.MaxRounds
+	}
+	if req.Temperature > 0 {
+		cfgMap["temperature"] = req.Temperature
+	}
+	if req.Sandbox != "" {
+		cfgMap["sandbox"] = req.Sandbox
+	}
+
+	cfgData, err := yaml.Marshal(cfgMap)
+	if err != nil {
+		http.Error(w, `{"error":"marshal config failed"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Write config.yaml
+	if err := os.WriteFile(filepath.Join(roleDir, "config.yaml"), cfgData, 0644); err != nil {
+		h.log.Error("org worker config write", zap.Error(err))
+		http.Error(w, `{"error":"write failed"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Write prompt.md if persona is provided
+	if req.Persona != "" {
+		if err := os.WriteFile(filepath.Join(roleDir, "prompt.md"), []byte(req.Persona), 0644); err != nil {
+			h.log.Error("org worker prompt write", zap.Error(err))
+			http.Error(w, `{"error":"write failed"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+
 	common.ResetGlobalBuilder()
 
+	// Return updated worker detail
+	key = source + "/" + name
+	detail := map[string]any{
+		"name":         name,
+		"persona":      req.Persona,
+		"capabilities": req.Capabilities,
+		"model":        req.Model,
+		"max_rounds":   req.MaxRounds,
+		"temperature":  req.Temperature,
+		"sandbox":      req.Sandbox,
+		"source":       source,
+		"isDefault":    true,
+		"isModified":   h.isOrgModified(key, rolesDir, name),
+		"isOrg":        true,
+	}
 	writeJSON(w, http.StatusOK, detail)
 }
 
@@ -259,9 +408,7 @@ func (h *WorkerHandler) DeleteWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Invalidate prompt builder cache — worker roster changed
 	common.ResetGlobalBuilder()
-
 	writeJSON(w, http.StatusOK, map[string]any{"message": "worker deleted"})
 }
 
@@ -276,6 +423,14 @@ func (h *WorkerHandler) RevertWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for org revert via query param
+	source := r.URL.Query().Get("source")
+	if source != "" && source != "kernel" {
+		h.revertOrgWorker(w, r, name, source)
+		return
+	}
+
+	// Kernel worker revert
 	original, ok := h.defaults[name]
 	if !ok {
 		http.Error(w, `{"error":"no default for this worker"}`, http.StatusNotFound)
@@ -290,24 +445,102 @@ func (h *WorkerHandler) RevertWorker(w http.ResponseWriter, r *http.Request) {
 	}
 
 	detail, _ := h.store.Get(r.Context(), name)
-
-	// Invalidate prompt builder cache — worker config reverted
 	common.ResetGlobalBuilder()
-
 	writeJSON(w, http.StatusOK, detail)
 }
 
-// isModified checks if a worker file differs from its default.
-func (h *WorkerHandler) isModified(name string) bool {
+// revertOrgWorker restores an org role's config.yaml + prompt.md from startup snapshot.
+func (h *WorkerHandler) revertOrgWorker(w http.ResponseWriter, r *http.Request, name, source string) {
+	key := source + "/" + name
+	def, ok := h.orgDefaults[key]
+	if !ok {
+		http.Error(w, `{"error":"no default for this org role"}`, http.StatusNotFound)
+		return
+	}
+
+	rolesDir := def.rolesDir
+	roleDir := filepath.Join(rolesDir, name)
+
+	// Restore config.yaml
+	if err := os.WriteFile(filepath.Join(roleDir, "config.yaml"), def.configYAML, 0644); err != nil {
+		h.log.Error("org worker revert config", zap.Error(err))
+		http.Error(w, `{"error":"revert failed"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Restore prompt.md
+	if def.promptMD != nil {
+		if err := os.WriteFile(filepath.Join(roleDir, "prompt.md"), def.promptMD, 0644); err != nil {
+			h.log.Error("org worker revert prompt", zap.Error(err))
+			http.Error(w, `{"error":"revert failed"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+
+	common.ResetGlobalBuilder()
+
+	// Parse the restored config to return details
+	var cfg struct {
+		Description string   `yaml:"description"`
+		Imports     []string `yaml:"imports"`
+		Tools       []string `yaml:"tools"`
+		MaxRounds   int      `yaml:"max_rounds"`
+		Temperature float64  `yaml:"temperature"`
+		Model       string   `yaml:"model"`
+		Sandbox     string   `yaml:"sandbox"`
+	}
+	yaml.Unmarshal(def.configYAML, &cfg)
+
+	detail := map[string]any{
+		"name":         name,
+		"persona":      cfg.Description,
+		"capabilities": cfg.Imports,
+		"model":        cfg.Model,
+		"max_rounds":   cfg.MaxRounds,
+		"temperature":  cfg.Temperature,
+		"sandbox":      cfg.Sandbox,
+		"source":       source,
+		"isDefault":    true,
+		"isModified":   false,
+		"isOrg":        true,
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// isKernelModified checks if a kernel worker file differs from its default.
+func (h *WorkerHandler) isKernelModified(name string) bool {
 	original, ok := h.defaults[name]
 	if !ok {
-		return false // not a default worker
+		return false
 	}
 	current, err := os.ReadFile(filepath.Join(h.store.Dir(), name+".yaml"))
 	if err != nil {
 		return true
 	}
 	return string(current) != string(original)
+}
+
+// isOrgModified checks if an org role's config.yaml or prompt.md differs from default.
+func (h *WorkerHandler) isOrgModified(key, rolesDir, roleName string) bool {
+	def, ok := h.orgDefaults[key]
+	if !ok {
+		return false
+	}
+	roleDir := filepath.Join(rolesDir, roleName)
+
+	currentCfg, err := os.ReadFile(filepath.Join(roleDir, "config.yaml"))
+	if err != nil || string(currentCfg) != string(def.configYAML) {
+		return true
+	}
+
+	if def.promptMD != nil {
+		currentPrompt, err := os.ReadFile(filepath.Join(roleDir, "prompt.md"))
+		if err != nil || string(currentPrompt) != string(def.promptMD) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // rejectKernel returns true and writes a 403 if name is a kernel worker.
