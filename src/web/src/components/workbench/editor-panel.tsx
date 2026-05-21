@@ -255,14 +255,20 @@ function FileTreeItem({
 const fileCache = new Map<string, string>();
 const dirtyFiles = new Set<string>();
 
+// Persist tab state across workbench subtab switches (component remounts)
+const tabStateCache = new Map<string, { tabs: Tab[]; activePath: string }>();
+
 // ── Panel ──
 
 export function EditorPanel() {
 	const [files, setFiles] = useState<FileEntry[]>([]);
-	const [tabs, setTabs] = useState<Tab[]>([]);
-	const [activePath, setActivePath] = useState("");
+	const activeProject = usePuxStore((s) => s.activeProject);
+	const cacheKey = activeProject || "";
+	const cached = tabStateCache.get(cacheKey);
+	const [tabs, setTabs] = useState<Tab[]>(cached?.tabs ?? []);
+	const [activePath, setActivePath] = useState(cached?.activePath ?? "");
 	const [content, setContent] = useState("");
-	const [loading, setLoading] = useState(true);
+	const [loading, setLoading] = useState(!cached);
 	const [cursorPos, setCursorPos] = useState({ ln: 1, col: 1 });
 	const [dirty, setDirty] = useState<Set<string>>(new Set());
 	const [saving, setSaving] = useState(false);
@@ -275,7 +281,6 @@ export function EditorPanel() {
 	const [newFileName, setNewFileName] = useState("");
 	const [isCreating, setIsCreating] = useState(false);
 	const newFileInputRef = useRef<HTMLInputElement>(null);
-	const activeProject = usePuxStore((s) => s.activeProject);
 	const [showFileTree, setShowFileTree] = useState(true);
 	const [diffMode, setDiffMode] = useState(false);
 	const [diffs, setDiffs] = useState<FileDiff[]>([]);
@@ -326,6 +331,33 @@ export function EditorPanel() {
 			return;
 		}
 
+		// If we have cached tab state, restore it and just load the tree
+		if (cached) {
+			fetch(`/api/pux/files?project=${encodeURIComponent(activeProject)}`)
+				.then((r) => (r.ok ? r.json() : []))
+				.then((data) => {
+					setFiles(Array.isArray(data) ? data : []);
+				})
+				.catch(() => setFiles([]));
+			// Restore content for the active file (re-fetch if evicted from cache)
+			if (cached.activePath) {
+				if (fileCache.has(cached.activePath)) {
+					setContent(fileCache.get(cached.activePath)!);
+				} else {
+					fetch(
+						`/api/pux/file?project=${encodeURIComponent(activeProject)}&path=${encodeURIComponent(cached.activePath)}`,
+					)
+						.then((r) => (r.ok ? r.text() : ""))
+						.then((text) => {
+							fileCache.set(cached.activePath, text);
+							setContent(text);
+						})
+						.catch(() => {});
+				}
+			}
+			return;
+		}
+
 		fileCache.clear();
 		dirtyFiles.clear();
 		setDirty(new Set());
@@ -346,6 +378,13 @@ export function EditorPanel() {
 			.catch(() => setFiles([]))
 			.finally(() => setLoading(false));
 	}, [activeProject]);
+
+	// Persist tab state to cache on changes
+	useEffect(() => {
+		if (cacheKey) {
+			tabStateCache.set(cacheKey, { tabs, activePath });
+		}
+	}, [cacheKey, tabs, activePath]);
 
 	const openFile = useCallback(
 		(path: string) => {
@@ -721,7 +760,7 @@ export function EditorPanel() {
 						/* Diff view — no tabs, full-height DiffEditor */
 						<>
 							{activeDiffPath && (
-								<div className="flex h-6 items-center gap-1 border-b border-border bg-muted/20 px-2 text-[11px] text-muted-foreground">
+								<div className="flex h-6 shrink-0 items-center gap-1 overflow-hidden border-b border-border bg-muted/20 px-2 text-[11px] text-muted-foreground">
 									{activeDiffPath.split("/").map((seg, i, arr) => (
 										<span key={i} className="flex items-center gap-0.5">
 											{i > 0 && <span className="text-muted-foreground/50">/</span>}
@@ -766,7 +805,7 @@ export function EditorPanel() {
 						<>
 							{/* Tab bar */}
 							{tabs.length > 0 && (
-								<div className="flex h-8 items-end overflow-x-auto border-b border-border bg-muted/30">
+								<div className="flex h-8 shrink-0 items-end overflow-x-auto border-b border-border bg-muted/30">
 									{tabs.map((tab) => (
 										<div
 											key={tab.path}
@@ -778,7 +817,7 @@ export function EditorPanel() {
 											)}
 											onClick={() => openFile(tab.path)}
 										>
-											<span className="max-w-28 truncate">
+											<span className="min-w-0 max-w-28 truncate">
 												{dirty.has(tab.path) && (
 													<span className="mr-0.5 text-[10px] text-orange-400">●</span>
 												)}
@@ -799,7 +838,7 @@ export function EditorPanel() {
 							)}
 							{/* Breadcrumb */}
 							{activePath && (
-								<div className="flex h-6 items-center gap-0.5 border-b border-border bg-muted/20 px-2 text-[11px] text-muted-foreground">
+								<div className="flex h-6 shrink-0 items-center gap-0.5 overflow-hidden border-b border-border bg-muted/20 px-2 text-[11px] text-muted-foreground">
 									{pathSegments(activePath).map((seg, i, arr) => (
 										<span key={i} className="flex items-center gap-0.5">
 											{i > 0 && (
