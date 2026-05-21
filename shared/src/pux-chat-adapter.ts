@@ -4,7 +4,11 @@
  * POSTs to /api/pux/prompt, parses SSE events, yields ChatModelRunResult
  * snapshots that useLocalRuntime renders via the styled Thread component.
  *
- * Content events (text_delta, thinking_delta, tool_execution_*) → message parts.
+ * Uses a segment model: SSE events append to an ordered `parts[]` timeline
+ * in arrival order. Adjacent same-type events (thinking, text) merge into
+ * one segment. Tool calls are separate segments updated in-place by ID.
+ *
+ * Content events (text_delta, thinking_delta, tool_execution_*) → message segments.
  * Meta events (decision_request, compaction, agent_end) → Zustand + snapshot metadata.
  *
  * Populates native assistant-ui fields:
@@ -31,13 +35,8 @@ import { apiUrl } from "./server-url";
 
 // ── Types ──
 
-type Part = TextMessagePart | ReasoningMessagePart | ToolCallMessagePart | SourceMessagePart;
-
-interface RunningTool {
-	toolCallId: string;
-	toolName: string;
-	args: Record<string, any>;
-	argsText: string;
+/** Extended tool-call segment that carries extra fields during streaming */
+type ToolCallSegment = ToolCallMessagePart & {
 	interrupt?: { type: "human"; payload: unknown };
 	progress?: string;
 	artifact?: unknown;
@@ -50,7 +49,9 @@ interface RunningTool {
 		status: { type: "complete"; reason: "stop" };
 		metadata: Record<string, unknown>;
 	}>;
-}
+};
+
+type Segment = TextMessagePart | ReasoningMessagePart | ToolCallSegment | SourceMessagePart;
 
 /** Timing accumulator — populated during streaming for metadata.timing */
 interface TimingAccum {
@@ -65,6 +66,44 @@ interface TimingAccum {
 interface UsageStep {
 	inputTokens: number;
 	outputTokens: number;
+}
+
+// ── Segment helpers ──
+
+/** Append thinking text — merge into last segment if it's reasoning, else new segment */
+function appendThinking(parts: Segment[], text: string): void {
+	const last = parts[parts.length - 1];
+	if (last?.type === "reasoning") {
+		// Replace element — ReasoningMessagePart.text is readonly
+		parts[parts.length - 1] = { type: "reasoning", text: last.text + text };
+	} else {
+		parts.push({ type: "reasoning", text });
+	}
+}
+
+/** Append response text — merge into last segment if it's text, else new segment */
+function appendText(parts: Segment[], text: string): void {
+	const last = parts[parts.length - 1];
+	if (last?.type === "text") {
+		// Replace element — TextMessagePart.text is readonly
+		parts[parts.length - 1] = { type: "text", text: last.text + text };
+	} else {
+		parts.push({ type: "text", text });
+	}
+}
+
+/** Find a tool-call segment by its toolCallId */
+function findToolPart(parts: Segment[], toolCallId: string): ToolCallSegment | undefined {
+	return parts.find((p): p is ToolCallSegment => p.type === "tool-call" && p.toolCallId === toolCallId);
+}
+
+/** Update a tool-call segment immutably (properties are readonly on ToolCallMessagePart) */
+function updateToolPart(parts: Segment[], toolCallId: string, updates: Record<string, unknown>): ToolCallSegment | undefined {
+	const idx = parts.findIndex((p): p is ToolCallSegment => p.type === "tool-call" && p.toolCallId === toolCallId);
+	if (idx === -1) return undefined;
+	const updated = { ...parts[idx], ...updates } as ToolCallSegment;
+	parts[idx] = updated;
+	return updated;
 }
 
 // ── Meta event dispatcher → Zustand + timing + steps ──
@@ -109,7 +148,7 @@ function handleMetaEvent(
 	eventType: string,
 	data: Record<string, unknown>,
 	statusRef: string[],
-	tools: Map<string, RunningTool & { result?: unknown; isError?: boolean }>,
+	parts: Segment[],
 	stepsRef: UsageStep[],
 ): void {
 	switch (eventType) {
@@ -139,13 +178,13 @@ function handleMetaEvent(
 			});
 			statusRef[0] = "requires-action";
 
-			// Gap 6: Set interrupt on the tool that triggered this decision.
-			// The backend sends sourceTool — find it in the running tools map.
+			// Set interrupt on the tool segment that triggered this decision
 			const sourceToolName = data.sourceTool as string;
 			if (sourceToolName) {
-				for (const tool of tools.values()) {
-					if (tool.toolName === sourceToolName && tool.result === undefined) {
-						(tool as any).interrupt = { type: "human" as const, payload: data };
+				for (let i = 0; i < parts.length; i++) {
+					const part = parts[i];
+					if (part.type === "tool-call" && part.toolName === sourceToolName && !("result" in part)) {
+						parts[i] = { ...part, interrupt: { type: "human" as const, payload: data } };
 						break;
 					}
 				}
@@ -169,7 +208,6 @@ function handleMetaEvent(
 			break;
 		}
 		case "agent_end": {
-			// Gap 2: Record per-step usage
 			const inputTokens = (data.input as number) || 0;
 			const outputTokens = (data.output as number) || 0;
 			stepsRef.push({ inputTokens, outputTokens });
@@ -177,7 +215,6 @@ function handleMetaEvent(
 			const contextWindow = (data.contextWindow as number) || 0;
 			const contextUtil = contextWindow > 0 ? inputTokens / contextWindow : 0;
 
-			// Sync actual model from backend into store so StatusBar shows it
 			const actualModel = (data.model as string) || undefined;
 
 			usePuxStore.setState({
@@ -187,14 +224,12 @@ function handleMetaEvent(
 					cache: (data.cache as number) || 0,
 					model: actualModel,
 				},
-				// Update context metrics so status bar shows usage after each turn
 				contextMetrics: {
 					contextTokens: inputTokens,
 					contextSize: contextWindow,
 					contextUtil,
 					compactionType: "",
 				},
-				// Update activeModel so StatusBar reflects the model the backend actually used
 				...(actualModel ? { activeModel: actualModel } : {}),
 			});
 			break;
@@ -213,7 +248,6 @@ function handleMetaEvent(
 			});
 			break;
 		}
-		// ── Background task events ──
 		case "task_started": {
 			const taskId = data.taskId as string;
 			const command = data.command as string;
@@ -237,7 +271,6 @@ function handleMetaEvent(
 				error: (data.error as string) || "",
 				endTime: Date.now(),
 			});
-			// Clear foreground task if this was it
 			if (usePuxStore.getState().foregroundTaskId === taskId) {
 				usePuxStore.getState().setForegroundTask(null);
 			}
@@ -261,53 +294,19 @@ function handleMetaEvent(
 type SnapshotStatus = "running" | "complete" | "requires-action";
 
 function buildSnapshot(
-	accText: string,
-	accThinking: string,
-	tools: Map<string, RunningTool & { result?: unknown; isError?: boolean }>,
+	parts: Segment[],
 	sources: SourceMessagePart[],
 	status: SnapshotStatus,
 	timing: TimingAccum,
 	steps: UsageStep[],
 ): ChatModelRunResult {
-	const parts: Part[] = [];
+	// Build content: timeline segments + sources appended at end
+	const content: Segment[] = [...parts];
+	for (const src of sources) content.push(src);
 
-	// Thinking always first (if present)
-	if (accThinking) {
-		parts.push({ type: "reasoning", text: accThinking });
-	}
+	const toolCallCount = parts.filter(p => p.type === "tool-call").length;
 
-	// Tool calls in order they were started
-	let toolCallCount = 0;
-	for (const tool of tools.values()) {
-		toolCallCount++;
-		const part: ToolCallMessagePart = {
-			type: "tool-call",
-			toolCallId: tool.toolCallId,
-			toolName: tool.toolName,
-			args: tool.args,
-			argsText: tool.argsText,
-			...(tool.result !== undefined ? { result: tool.result } : {}),
-			...(tool.progress ? { progress: tool.progress } : {}),
-			...(tool.isError ? { isError: true } : {}),
-			...(tool.interrupt ? { interrupt: tool.interrupt } : {}),
-			...(tool.artifact !== undefined ? { artifact: tool.artifact } : {}),
-			...(tool.modelContent ? { modelContent: tool.modelContent } : {}),
-			...(tool.messages && tool.messages.length > 0 ? { messages: tool.messages as any } : {}),
-		};
-		parts.push(part);
-	}
-
-	// Source/citation parts after tools
-	for (const src of sources) {
-		parts.push(src);
-	}
-
-	// Text last (matches ordering: thinking → tools → sources → text)
-	if (accText) {
-		parts.push({ type: "text", text: accText });
-	}
-
-	// Determine status natively
+	// Determine status
 	let runStatus: ChatModelRunResult["status"];
 	if (status === "complete") {
 		runStatus = { type: "complete", reason: "stop" };
@@ -317,7 +316,7 @@ function buildSnapshot(
 		runStatus = { type: "running" };
 	}
 
-	// Gap 1: Build metadata.timing
+	// Build metadata.timing
 	const now = Date.now();
 	const totalStreamTime = timing.streamStartTime ? now - timing.streamStartTime : 0;
 	const tokenCount = timing.tokenCount;
@@ -325,12 +324,12 @@ function buildSnapshot(
 		? Math.round((tokenCount / totalStreamTime) * 1000)
 		: undefined;
 
-	// Gap 2: Build metadata.steps from accumulated usage
+	// Build metadata.steps from accumulated usage
 	const stepsMeta = steps.length > 0
 		? steps.map((s) => ({ usage: { inputTokens: s.inputTokens, outputTokens: s.outputTokens } }))
 		: undefined;
 
-	// Gap 4: Build metadata.custom
+	// Build metadata.custom
 	const store = usePuxStore.getState();
 	const customMeta: Record<string, unknown> = {};
 	if (store.activeModel) customMeta.model = store.activeModel;
@@ -338,7 +337,7 @@ function buildSnapshot(
 	if (store.activeProject) customMeta.project = store.activeProject;
 
 	return {
-		content: parts,
+		content,
 		status: runStatus,
 		metadata: {
 			timing: {
@@ -384,6 +383,26 @@ function parseSSE(
 	return { events, remaining };
 }
 
+// ── Read timeout ──
+
+const STREAM_STALL_TIMEOUT = 30_000; // 30s — 2x the 15s keepalive interval
+
+function readWithTimeout(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+	ms: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(
+			() => reject(new DOMException("Stream stalled", "TimeoutError")),
+			ms,
+		);
+		reader.read().then(
+			(r) => { clearTimeout(timer); resolve(r); },
+			(e) => { clearTimeout(timer); reject(e); },
+		);
+	});
+}
+
 // ── ChatModelAdapter ──
 
 export const puxChatAdapter: ChatModelAdapter = {
@@ -415,7 +434,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		if (!userText && images.length === 0) return;
 
-		// Gap 8: Read model from runConfig.custom first, fall back to Zustand store
 		const custom = runConfig?.custom as Record<string, unknown> | undefined;
 		const model = (custom?.model as string) || store.activeModel || undefined;
 		const temperature = (custom?.temperature as number) || undefined;
@@ -453,20 +471,18 @@ export const puxChatAdapter: ChatModelAdapter = {
 		const decoder = new TextDecoder();
 		let buffer = "";
 
-		// Accumulators — the source of truth for building snapshots
-		let accText = "";
-		let accThinking = "";
-		const tools = new Map<string, RunningTool & { result?: unknown; isError?: boolean }>();
+		// Ordered segment timeline — events append in arrival order
+		const parts: Segment[] = [];
 		const sources: SourceMessagePart[] = [];
 
-		// Sub-agent message tracking — accumulates into the current delegate tool's messages
+		// Sub-agent message tracking
 		let activeSubAgentToolId: string | null = null;
-		let subAgentMessageAccum: RunningTool["messages"] extends infer T | undefined ? NonNullable<T> : never = [];
+		let subAgentMessageAccum: NonNullable<ToolCallSegment["messages"]> = [];
 
 		// Mutable status ref so handleMetaEvent can update it
 		const statusRef: SnapshotStatus[] = ["running"];
 
-		// Gap 1: Timing accumulator
+		// Timing accumulator
 		const timing: TimingAccum = {
 			streamStartTime: Date.now(),
 			firstTokenTime: null,
@@ -475,21 +491,32 @@ export const puxChatAdapter: ChatModelAdapter = {
 			tokenCount: null,
 		};
 
-		// Gap 2: Steps accumulator
+		// Steps accumulator
 		const stepsRef: UsageStep[] = [];
 
-		// Sub-agent tracking: when a sub-agent is active, its tool events
-		// are routed to the Zustand store (for nested rendering) instead of
-		// the tools map (which becomes flat message parts).
+		// Sub-agent tracking
 		let activeSubAgentName: string | null = null;
 
 		// Initial yield — empty, running
-		yield buildSnapshot(accText, accThinking, tools, sources, "running", timing, stepsRef);
+		yield buildSnapshot(parts, sources, "running", timing, stepsRef);
 
 		try {
 			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
+				let readResult: ReadableStreamReadResult<Uint8Array>;
+				try {
+					readResult = await readWithTimeout(reader, STREAM_STALL_TIMEOUT);
+				} catch (readErr) {
+					// Stream stalled — no data for 30s. Yield complete and return.
+					if (readErr instanceof DOMException && readErr.name === "TimeoutError") {
+						timing.totalStreamTime = Date.now() - timing.streamStartTime;
+						yield buildSnapshot(parts, sources, "complete", timing, stepsRef);
+						return;
+					}
+					throw readErr;
+				}
+
+				if (readResult.done) break;
+				const value = readResult.value!;
 
 				buffer += decoder.decode(value, { stream: true });
 				const { events, remaining } = parseSSE(buffer);
@@ -498,7 +525,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 				for (const { event, data } of events) {
 					if (data === "[DONE]") {
 						timing.totalStreamTime = Date.now() - timing.streamStartTime;
-						yield buildSnapshot(accText, accThinking, tools, sources, "complete", timing, stepsRef);
+						yield buildSnapshot(parts, sources, "complete", timing, stepsRef);
 						return;
 					}
 
@@ -514,11 +541,11 @@ export const puxChatAdapter: ChatModelAdapter = {
 					}
 
 					switch (event) {
-						// ── Content events → message parts ──
+						// ── Content events → timeline segments ──
 
 						case "thinking_delta": {
 							const thinkingText = (parsed.text as string) || "";
-							// Sub-agent thinking → store in Zustand for delegation card
+							// Sub-agent thinking → Zustand store for delegation card
 							if (parsed.agentName) {
 								const agents = usePuxStore.getState().agents;
 								const agent = [...agents.values()].find(
@@ -529,17 +556,16 @@ export const puxChatAdapter: ChatModelAdapter = {
 								}
 								break;
 							}
-							// Track first token time
 							if (timing.firstTokenTime === null) {
 								timing.firstTokenTime = Date.now();
 							}
-							accThinking += thinkingText;
-							yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
+							appendThinking(parts, thinkingText);
+							yield buildSnapshot(parts, sources, statusRef[0], timing, stepsRef);
 							break;
 						}
 
 						case "text_delta": {
-							// Sub-agent text → store in Zustand for delegation card
+							// Sub-agent text → Zustand store for delegation card
 							if (parsed.agentName) {
 								const text = (parsed.text as string) || "";
 								if (text) {
@@ -553,32 +579,26 @@ export const puxChatAdapter: ChatModelAdapter = {
 								}
 								break;
 							}
-							// Track first token time
 							if (timing.firstTokenTime === null) {
 								timing.firstTokenTime = Date.now();
 							}
-							accText += (parsed.text as string) || "";
-							yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
+							appendText(parts, (parsed.text as string) || "");
+							yield buildSnapshot(parts, sources, statusRef[0], timing, stepsRef);
 							break;
 						}
 
 						case "tool_execution_start": {
 							let toolId = (parsed.toolId as string) || `tc_${Date.now()}`;
-							// Ensure unique toolCallId — some LLMs emit duplicate IDs
-							// (e.g., "researcher" for multiple delegate_to calls).
-							// @assistant-ui/core keys parts by toolCallId, so duplicates
-							// cause React duplicate-key warnings.
-							if (tools.has(toolId)) {
-								toolId = `${toolId}_${tools.size}`;
+							// Ensure unique toolCallId
+							if (findToolPart(parts, toolId) !== undefined) {
+								const toolCount = parts.filter(p => p.type === "tool-call").length;
+								toolId = `${toolId}_${toolCount}`;
 							}
 							const toolName = (parsed.toolName as string) || "unknown";
 							const toolArgs = (parsed.toolArgs || parsed.args || {}) as Record<string, unknown>;
 							const toolAgentName = parsed.agentName as string | undefined;
 
-							// Route sub-agent tool calls to Zustand store (for nested
-							// rendering) instead of the tools map (flat message parts).
-							// Uses store lookup (source of truth) rather than activeSubAgentName
-							// so routing works even with concurrent sub-agents or reordered events.
+							// Route sub-agent tool calls to Zustand store
 							if (toolAgentName) {
 								const agents = usePuxStore.getState().agents;
 								const agent = [...agents.values()].find(
@@ -595,13 +615,14 @@ export const puxChatAdapter: ChatModelAdapter = {
 							}
 
 							inferTabFromTool(toolName, toolArgs);
-							tools.set(toolId, {
+							parts.push({
+								type: "tool-call",
 								toolCallId: toolId,
 								toolName,
 								args: toolArgs as any,
 								argsText: JSON.stringify(toolArgs, null, 2),
 							});
-							yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
+							yield buildSnapshot(parts, sources, statusRef[0], timing, stepsRef);
 							break;
 						}
 
@@ -609,8 +630,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 							const toolId = parsed.toolId as string;
 							const toolAgentName = parsed.agentName as string | undefined;
 
-							// Sub-agent tool completion — update store record, skip tools map.
-							// Uses store lookup instead of activeSubAgentName for robustness.
+							// Sub-agent tool completion — update Zustand store
 							if (toolAgentName) {
 								const agents = usePuxStore.getState().agents;
 								const agent = [...agents.values()].find(
@@ -622,7 +642,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 										const updated = { ...lastTool, endedAt: Date.now() };
 										if (parsed.result !== undefined) updated.result = parsed.result;
 										if (parsed.error) updated.isError = true;
-										// Replace the last entry immutably
 										const newCalls = [...agent.toolCalls];
 										newCalls[newCalls.length - 1] = updated;
 										const newAgents = new Map(agents);
@@ -633,48 +652,45 @@ export const puxChatAdapter: ChatModelAdapter = {
 								}
 							}
 
-							const existing = toolId ? tools.get(toolId) : null;
-							if (existing) {
-								existing.result = parsed.result;
-								existing.isError = !!parsed.error;
-								// Gap 11: Artifact data
-								if (parsed.artifact !== undefined) {
-									existing.artifact = parsed.artifact;
-								}
-								// Gap 12: Model content separation
+							if (toolId) {
+								const updates: Record<string, unknown> = {};
+								if (parsed.result !== undefined) updates.result = parsed.result;
+								if (parsed.error) updates.isError = true;
+								if (parsed.artifact !== undefined) updates.artifact = parsed.artifact;
 								if (parsed.modelContent) {
-									existing.modelContent = [{ type: "text" as const, text: parsed.modelContent as string }];
+									updates.modelContent = [{ type: "text" as const, text: parsed.modelContent as string }];
 								}
+								const tool = updateToolPart(parts, toolId, updates);
 								// Flush accumulated sub-agent messages into delegate tools
-								if (activeSubAgentToolId === toolId && subAgentMessageAccum.length > 0) {
-									existing.messages = subAgentMessageAccum;
+								if (tool && activeSubAgentToolId === toolId && subAgentMessageAccum.length > 0) {
+									updateToolPart(parts, toolId, { messages: subAgentMessageAccum });
 									subAgentMessageAccum = [];
 									activeSubAgentToolId = null;
 								}
 							}
-							yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
+							yield buildSnapshot(parts, sources, statusRef[0], timing, stepsRef);
 							break;
 						}
 
 						case "tool_update": {
 							const toolId = parsed.toolId as string;
 							const updateAgentName = parsed.agentName as string | undefined;
-							// Sub-agent tool updates: skip — they're rendered in the
-							// DelegateRenderer card via tool_execution_end, not streamed.
+							// Sub-agent tool updates: skip
 							if (updateAgentName) {
 								break;
 							}
 							if (toolId) {
-								const existing = tools.get(toolId);
-								if (existing) {
-									existing.progress = (parsed.text as string) || "";
-									yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
+								const updated = updateToolPart(parts, toolId, {
+									progress: (parsed.text as string) || "",
+								});
+								if (updated) {
+									yield buildSnapshot(parts, sources, statusRef[0], timing, stepsRef);
 								}
 							}
 							break;
 						}
 
-						// Gap 10: Source/citation events
+						// Source/citation events
 						case "source": {
 							const sourceType = (parsed.sourceType as string) || "url";
 							const sourceId = (parsed.id as string) || `src_${Date.now()}`;
@@ -696,7 +712,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 									filename: (parsed.filename as string) || undefined,
 								});
 							}
-							yield buildSnapshot(accText, accThinking, tools, sources, statusRef[0], timing, stepsRef);
+							yield buildSnapshot(parts, sources, statusRef[0], timing, stepsRef);
 							break;
 						}
 
@@ -705,8 +721,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 							const agentId = parsed.agentId as string | undefined;
 							const task = parsed.task as string || parsed.prompt as string || "";
 							const transcriptId = parsed.transcriptId as string | undefined;
-							// Gap 9: Track which delegate tool this sub-agent belongs to
-							// so we can collect its messages
 							subAgentMessageAccum = [];
 							if (agentName) {
 								activeSubAgentName = agentName;
@@ -725,12 +739,13 @@ export const puxChatAdapter: ChatModelAdapter = {
 									toolCalls: [],
 									transcriptId,
 								});
-								// Inject agentId into the running delegate_to tool's args
-								// so DelegateRenderer can match by ID for concurrent agent support.
+								// Inject agentId into the running delegate tool's args
 								if (agentId) {
-									for (const tool of tools.values()) {
-										if ((tool.toolName === "delegate_to" || tool.toolName === "delegate_async") && tool.result === undefined) {
-											(tool.args as Record<string, unknown>).__agentId = agentId;
+									for (const part of parts) {
+										if (part.type === "tool-call" &&
+											(part.toolName === "delegate_to" || part.toolName === "delegate_async") &&
+											!("result" in part)) {
+											(part.args as Record<string, unknown>).__agentId = agentId;
 											break;
 										}
 									}
@@ -746,8 +761,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 								? parsed.result
 								: parsed.result ? JSON.stringify(parsed.result) : undefined;
 
-							// Close any tool calls that never got a tool_execution_end
-							// (race: subagent_end may arrive before final tool_execution_end)
 							const agents = usePuxStore.getState().agents;
 							const match = agentId
 								? agents.get(agentId)
@@ -771,9 +784,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 						}
 						case "subagent_thinking_delta":
 						case "subagent_text_delta": {
-							// These SSE event types are never emitted by the backend.
-							// Sub-agent content arrives as thinking_delta/text_delta with agentName set,
-							// handled in the cases above.
 							break;
 						}
 
@@ -781,7 +791,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 						case "error": {
 							const errMsg = (parsed.error as string) || "Unknown error";
-							accText += `\n\n> **Error:** ${errMsg}`;
+							appendText(parts, `\n\n> **Error:** ${errMsg}`);
 							statusRef[0] = "complete";
 							usePuxStore.setState({ lastError: errMsg });
 							break;
@@ -790,7 +800,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 						// ── Meta events → Zustand + timing + steps ──
 
 						default: {
-							handleMetaEvent(event, parsed, statusRef, tools, stepsRef);
+							handleMetaEvent(event, parsed, statusRef, parts, stepsRef);
 							break;
 						}
 					}
@@ -798,10 +808,9 @@ export const puxChatAdapter: ChatModelAdapter = {
 			}
 		} catch (err) {
 			if (err instanceof Error && err.name === "AbortError") {
-				// Gap 5: Yield cancelled status instead of silent return
 				timing.totalStreamTime = Date.now() - timing.streamStartTime;
 				yield {
-					...buildSnapshot(accText, accThinking, tools, sources, "running", timing, stepsRef),
+					...buildSnapshot(parts, sources, "running", timing, stepsRef),
 					status: { type: "incomplete" as const, reason: "cancelled" as const },
 				};
 				return;
@@ -815,6 +824,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		// Stream ended without [DONE] — yield final snapshot
 		timing.totalStreamTime = Date.now() - timing.streamStartTime;
-		yield buildSnapshot(accText, accThinking, tools, sources, "complete", timing, stepsRef);
+		yield buildSnapshot(parts, sources, "complete", timing, stepsRef);
 	},
 };
