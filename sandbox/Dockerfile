@@ -135,6 +135,9 @@ COPY fluxbox/ /root/.fluxbox/
 COPY desktop/ /root/Desktop/
 RUN chmod +x /root/Desktop/*.desktop
 
+# pcmanfm desktop config (dark background)
+COPY pcmanfm/ /root/.config/pcmanfm/default/
+
 # Supervisor + log dir
 RUN mkdir -p /var/log/supervisor
 

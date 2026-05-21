@@ -194,6 +194,12 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	backend := m.detectVNCBackend(ctx, containerName)
 	sandbox.VNCBackend = backend
 
+	// Step 0: Kill existing desktop processes from supervisord/browser mode.
+	// Without this, we get duplicate window managers and display fighting.
+	_, _ = m.execInContainer(ctx, containerName, []string{
+		"bash", "-c", "pkill -f 'fluxbox' 2>/dev/null; pkill -f 'pcmanfm --desktop' 2>/dev/null; sleep 0.3",
+	}, false)
+
 	// Step 1: Start Xvfb with large virtual screen for RANDR resize support.
 	// 4096x2160 gives RANDR a large maximum so x11vnc can resize to any viewport.
 	_, err := m.execInContainer(ctx, containerName, []string{
@@ -225,10 +231,11 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		m.logger.Warn("window manager start warning", zap.Error(err))
 	}
 
-	// Step 2b: Set desktop background to a dark solid color
-	// (fluxbox styles handle this, but xsetroot is the fallback for bare WMs)
+	// Step 2b: Set desktop background + start pcmanfm for desktop icons.
+	// pcmanfm --desktop manages the root window, so it must start after fluxbox.
+	// The pcmanfm config in /root/.config/pcmanfm/default/ sets the dark background.
 	_, _ = m.execInContainer(ctx, containerName, []string{
-		"sh", "-c", fmt.Sprintf("DISPLAY=%s xsetroot -solid '#1e1e2e' 2>/dev/null || true", display),
+		"sh", "-c", fmt.Sprintf("DISPLAY=%s xsetroot -solid '#1e1e2e' 2>/dev/null; DISPLAY=%s pcmanfm --desktop &>/dev/null &", display, display),
 	}, false)
 
 	// Step 3: Start VNC server — KasmVNC or standard x11vnc
