@@ -12,6 +12,7 @@ import {
 	FolderOpenIcon,
 	ChevronRightIcon,
 	FileCodeIcon,
+	FileImageIcon,
 	XIcon,
 	Trash2Icon,
 	PlusIcon,
@@ -94,10 +95,19 @@ function getLang(filename: string): string {
 	return LANG_MAP[ext] || "plaintext";
 }
 
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"]);
+
+function isImageFile(path: string): boolean {
+	const ext = path.split(".").pop()?.toLowerCase() || "";
+	return IMAGE_EXTS.has(ext);
+}
+
 function getFileIcon(name: string) {
 	const ext = name.split(".").pop()?.toLowerCase();
 	if (["ts", "tsx", "js", "jsx", "go", "rs", "py"].includes(ext || ""))
 		return <FileCodeIcon size={14} className="shrink-0 text-blue-400" />;
+	if (ext && IMAGE_EXTS.has(ext))
+		return <FileImageIcon size={14} className="shrink-0 text-green-400" />;
 	return <FileIcon size={14} className="shrink-0 text-muted-foreground" />;
 }
 
@@ -858,9 +868,17 @@ export function EditorPanel() {
 									))}
 								</div>
 							)}
-							{/* Monaco editor */}
-							<div className="flex-1">
-								{activePath ? (
+							{/* Monaco editor or image preview */}
+							<div className="flex-1 overflow-hidden">
+								{activePath && isImageFile(activePath) ? (
+									<div className="flex h-full items-center justify-center bg-black/20 p-4">
+										<img
+											src={`/api/pux/file?project=${encodeURIComponent(activeProject || "")}&path=${encodeURIComponent(activePath)}`}
+											alt={activePath.split("/").pop()}
+											className="max-h-full max-w-full object-contain"
+										/>
+									</div>
+								) : activePath ? (
 									<Editor
 										key={activePath}
 										path={activePath}
@@ -893,7 +911,9 @@ export function EditorPanel() {
 			{activePath && (
 				<div className="flex h-6 items-center justify-between border-t border-border bg-muted/30 px-3 text-[11px] text-muted-foreground">
 					<span>
-						{LANG_LABELS[lang] || lang}
+						{isImageFile(activePath)
+							? (activePath.split(".").pop()?.toUpperCase() || "Image")
+							: (LANG_LABELS[lang] || lang)}
 					</span>
 					<span className="flex items-center gap-3">
 						{dirty.has(activePath) && (
@@ -901,9 +921,11 @@ export function EditorPanel() {
 								{saving ? "Saving..." : "Modified"}
 							</span>
 						)}
-						<span>
-							Ln {cursorPos.ln}, Col {cursorPos.col}
-						</span>
+						{!isImageFile(activePath) && (
+							<span>
+								Ln {cursorPos.ln}, Col {cursorPos.col}
+							</span>
+						)}
 					</span>
 				</div>
 			)}

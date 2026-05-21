@@ -58,6 +58,15 @@ func (h *PuxHandler) GetProjectFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Serve image files with correct MIME type so the frontend can use the URL
+	// directly in an <img> tag instead of routing through Monaco.
+	if ct := imageContentType(relPath); ct != "" {
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write(data)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write(data)
 }
@@ -362,4 +371,27 @@ func buildFileTree(root, currentPath string, maxDepth int) ([]FileNode, error) {
 	}
 
 	return nodes, nil
+}
+
+// imageContentType returns the MIME type for known image extensions, or "".
+func imageContentType(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".svg":
+		return "image/svg+xml"
+	case ".bmp":
+		return "image/bmp"
+	case ".ico":
+		return "image/x-icon"
+	default:
+		return ""
+	}
 }
