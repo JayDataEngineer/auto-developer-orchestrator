@@ -11,12 +11,13 @@ import (
 
 // MCPProvider describes images via the MCP analyze_image tool on the Ray cluster.
 type MCPProvider struct {
-	client *mcp.MultiClient
+	client      *mcp.MultiClient
+	imageServer *ImageServer // writes base64 to temp file, serves via HTTP
 }
 
 // NewMCPProvider creates a vision provider backed by the MCP media-analysis server.
-func NewMCPProvider(client *mcp.MultiClient) *MCPProvider {
-	return &MCPProvider{client: client}
+func NewMCPProvider(client *mcp.MultiClient, imageServer *ImageServer) *MCPProvider {
+	return &MCPProvider{client: client, imageServer: imageServer}
 }
 
 func (p *MCPProvider) Name() string { return "mcp" }
@@ -29,7 +30,10 @@ func (p *MCPProvider) IsAvailable(ctx context.Context) bool {
 }
 
 func (p *MCPProvider) Describe(ctx context.Context, img ImageInput) (Description, error) {
-	dataURI := "data:" + img.MIMEType + ";base64," + img.Base64
+	imageURL, err := p.imageServer.Save(img.Base64, img.MIMEType)
+	if err != nil {
+		return Description{}, fmt.Errorf("save temp image: %w", err)
+	}
 
 	prompt := img.Prompt
 	if prompt == "" {
@@ -37,14 +41,13 @@ func (p *MCPProvider) Describe(ctx context.Context, img ImageInput) (Description
 	}
 
 	result, err := p.client.CallTool(ctx, "analyze_image", map[string]any{
-		"imageSource": dataURI,
+		"imageSource": imageURL,
 		"prompt":      prompt,
 	})
 	if err != nil {
 		return Description{}, fmt.Errorf("MCP analyze_image: %w", err)
 	}
 
-	// The MCP tool returns text content. Try to parse as JSON with a description field.
 	text := extractMCPText(result)
 
 	return Description{
@@ -75,12 +78,13 @@ func extractMCPText(raw string) string {
 // Uses Gemma-based phi4 model for high-quality scene understanding — better for
 // browser/desktop screenshots where you need layout, text, and button understanding.
 type Phi4Provider struct {
-	client *mcp.MultiClient
+	client      *mcp.MultiClient
+	imageServer *ImageServer
 }
 
 // NewPhi4Provider creates a vision provider backed by the phi4_vision MCP tool.
-func NewPhi4Provider(client *mcp.MultiClient) *Phi4Provider {
-	return &Phi4Provider{client: client}
+func NewPhi4Provider(client *mcp.MultiClient, imageServer *ImageServer) *Phi4Provider {
+	return &Phi4Provider{client: client, imageServer: imageServer}
 }
 
 func (p *Phi4Provider) Name() string { return "phi4" }
@@ -93,7 +97,10 @@ func (p *Phi4Provider) IsAvailable(ctx context.Context) bool {
 }
 
 func (p *Phi4Provider) Describe(ctx context.Context, img ImageInput) (Description, error) {
-	dataURI := "data:" + img.MIMEType + ";base64," + img.Base64
+	imageURL, err := p.imageServer.Save(img.Base64, img.MIMEType)
+	if err != nil {
+		return Description{}, fmt.Errorf("save temp image: %w", err)
+	}
 
 	prompt := img.Prompt
 	if prompt == "" {
@@ -101,7 +108,7 @@ func (p *Phi4Provider) Describe(ctx context.Context, img ImageInput) (Descriptio
 	}
 
 	result, err := p.client.CallTool(ctx, "phi4_vision", map[string]any{
-		"imageSource": dataURI,
+		"imageSource": imageURL,
 		"prompt":      prompt,
 	})
 	if err != nil {

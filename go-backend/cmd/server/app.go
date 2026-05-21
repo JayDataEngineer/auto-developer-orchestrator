@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,7 @@ import (
 	schedulertool "github.com/auto-developer-orchestrator/backend/internal/tools/scheduler"
 	"github.com/auto-developer-orchestrator/backend/internal/services"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
+	"github.com/auto-developer-orchestrator/backend/internal/vision"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -57,6 +59,7 @@ type App struct {
 	sched              *scheduler.Scheduler
 	promPusher         *observability.MetricsPusher
 	extMgr             *extensions.Manager
+	imageServer        *vision.ImageServer
 }
 
 // NewApp initializes all components and assembles the application.
@@ -81,6 +84,15 @@ func (a *App) Run() {
 	if port == "" {
 		port = "3847"
 	}
+
+	// Update image server base URL now that we know the port and Tailscale IP
+	tsIP := getTailscaleIP()
+	imageServerBaseURL := fmt.Sprintf("http://%s:%s", tsIP, port)
+	if os.Getenv("VISION_BASE_URL") != "" {
+		imageServerBaseURL = os.Getenv("VISION_BASE_URL")
+	}
+	a.imageServer.SetBaseURL(imageServerBaseURL)
+	a.logger.Info("Vision image server ready", zap.String("baseURL", imageServerBaseURL))
 
 	a.server = &http.Server{
 		Addr:         ":" + port,
@@ -278,6 +290,11 @@ func (a *App) initHandlers() {
 		a.puxHandler.SetOpenRouterEngine(a.engines.OpenRouter)
 	}
 	a.puxHandler.SetVisionClient(visionClient)
+
+	// Image server: writes base64 to temp files, serves via HTTP for MCP vision tools.
+	// Created here so the router can reference it. Base URL is finalized in Run().
+	a.imageServer = vision.NewImageServer("http://127.0.0.1:3847", zap.NewStdLog(logger))
+	a.puxHandler.SetImageServer(a.imageServer)
 
 	// Other handlers
 	fileHandler := handlers.NewFileHandler(sandboxMgr, logger)
@@ -572,6 +589,9 @@ func (a *App) buildRouter(
 		r.Post("/tools/exec", toolsHandler.ExecTool)
 		r.Get("/tools", toolsHandler.ToolsList)
 
+		// Vision temp image serving (MCP vision fetches from here)
+		r.Handle("/vision/tmp/*", a.imageServer)
+
 		// Extensions status
 		r.Get("/extensions", func(w http.ResponseWriter, r *http.Request) {
 			results := a.extMgr.StartupResults()
@@ -837,6 +857,24 @@ func makeLocalPromptSender(baseURL, projectRoot string, logger *zap.Logger) sche
 
 		return output.String(), scanner.Err()
 	}
+}
+
+// getTailscaleIP returns the machine's Tailscale IPv4 address, or "127.0.0.1" as fallback.
+func getTailscaleIP() string {
+	data, err := os.ReadFile("/run/tailscale/tailscaled.state")
+	if err == nil {
+		// Quick check that tailscale is active
+		_ = data
+	}
+	// Try `tailscale ip` command
+	out, err := exec.Command("tailscale", "ip", "-4").Output()
+	if err == nil {
+		ip := strings.TrimSpace(string(out))
+		if ip != "" {
+			return ip
+		}
+	}
+	return "127.0.0.1"
 }
 
 // resolveOrgPathLocal resolves an org name to its directory path.

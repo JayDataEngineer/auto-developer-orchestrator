@@ -21,6 +21,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/session"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
+	"github.com/auto-developer-orchestrator/backend/internal/vision"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
@@ -45,6 +46,7 @@ type PuxHandler struct {
 	mcpMulti     *mcp.MultiClient   // optional: multi-server MCP routing
 
 	visionClient   *browser.VisionClient // local llama.cpp vision (second fallback tier)
+	imageServer    *vision.ImageServer   // serves temp images for MCP vision tools
 	eventStore     *storage.EventStore
 	schedulerTool  any               // schedulertool.Backend — scheduler tool for LLM
 	hookBridge     *hooks.SSEHookBridge // SSE hook bridge for TUI interception
@@ -151,6 +153,11 @@ func (h *PuxHandler) SetMCPMulti(multi *mcp.MultiClient) {
 // SetVisionClient configures the local vision client (llama.cpp) for fallback vision.
 func (h *PuxHandler) SetVisionClient(vc *browser.VisionClient) {
 	h.visionClient = vc
+}
+
+// SetImageServer configures the temp image file server for MCP vision tools.
+func (h *PuxHandler) SetImageServer(is *vision.ImageServer) {
+	h.imageServer = is
 }
 
 // SetEventStore configures the event store for session event persistence.

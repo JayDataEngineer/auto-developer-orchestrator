@@ -242,12 +242,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 
 		// Tier 1: phi4_vision (high quality, good for browser/desktop screenshots)
 		if h.mcpMulti != nil && h.mcpMulti.HasTool("phi4_vision") {
-			providers = append(providers, vision.NewPhi4Provider(h.mcpMulti))
+			providers = append(providers, vision.NewPhi4Provider(h.mcpMulti, h.imageServer))
 		}
 
 		// Tier 2: MCP Florence-2 (fast, structured descriptions)
 		if h.mcpMulti != nil && h.mcpMulti.HasTool("analyze_image") {
-			providers = append(providers, vision.NewMCPProvider(h.mcpMulti))
+			providers = append(providers, vision.NewMCPProvider(h.mcpMulti, h.imageServer))
 		}
 
 		// Tier 3: Native local llama.cpp vision (flexible, handles complex scenes)
