@@ -212,6 +212,8 @@ func (h *PuxHandler) providerAvailable(name string) bool {
 		return h.openrouterEngine != nil
 	case "cluster":
 		return h.clusterEngine != nil
+	case "zai":
+		return true // Cloud provider, always reachable if configured
 	default:
 		return false
 	}

@@ -21,7 +21,7 @@ coverage/
 .env*
 !.env.example
 .pi/
-pi-config/
+pux-config/
 **/settings.json
 **/auth.json
 **/*api-key*
@@ -48,7 +48,6 @@ go-backend/go-backend/
 
 # Data and sessions
 data/
-~/.pi/
 **/.pux/sessions/
 **/.pux/spill/
 
@@ -64,8 +63,6 @@ tests/python/frontend/screenshots/
 
 # Sandbox / external reference repos (large, not source)
 reference/
-openshell/
-claw-code-parity/
 projects/
 go-backend/projects/
 
@@ -95,7 +92,7 @@ src/web/next-app/
 CONV.txt
 convo.txt
 PROGRESS.md
-go-backend/CONVO.txt
+go-backend/CONV.txt
 go-backend/convo.txt
 
 # LLM progress reports
@@ -106,13 +103,13 @@ research_field_report.md
 docs/OPENSHELL_INTEGRATION_PLAN.md
 docs/SCHEDULER_PLAN.md
 
-# Stray images from agent/sandbox runs (tracked images live in tests/)
+# Stray images from agent/sandbox runs
 /*.jpg
 /*.png
 /*.jpeg
 /*.webp
 
-# Agent artifact files generated during sandbox use case runs
+# Agent artifact files from sandbox use case runs
 /httpserver/
 ctx_test2.py
 database.py
