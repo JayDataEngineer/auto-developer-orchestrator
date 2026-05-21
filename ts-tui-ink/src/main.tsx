@@ -83,6 +83,9 @@ if (hasExtendedKeys) {
 
 function restoreTerminal() {
 	disableMouseTracking();
+	// Restore font size
+	const scale = usePuxStore.getState().fontScale;
+	if (scale !== 1) applyFontScale(1);
 	if (hasExtendedKeys) {
 		const { writeSync } = require("node:fs") as { writeSync: (fd: number, data: string) => void };
 		writeSync(1, DISABLE_MODIFY_OTHER_KEYS + DISABLE_KITTY_KEYBOARD);
@@ -201,6 +204,33 @@ if (backendOnline) {
 // ── Mouse tracking ──
 
 initMouseTracking();
+
+// ── Font scale ──
+// Applies saved font scale via Kitty OSC 50 or terminal-specific sequences.
+// Re-applied whenever the store value changes.
+
+const BASE_FONT_SIZE = 14; // assumed default terminal font size
+function applyFontScale(scale: number) {
+	const term = process.env.TERM_PROGRAM ?? process.env.TERM ?? "";
+	const size = Math.round(BASE_FONT_SIZE * scale);
+	if (term === "kitty" || term === "xterm-kitty") {
+		// Kitty: OSC 50 sets font size
+		process.stdout.write(`\x1b]50;FontSize=${size}\x07`);
+	} else if (term === "WezTerm") {
+		// WezTerm: OSC 50 with font-size
+		process.stdout.write(`\x1b]50;font-size=${size}\x07`);
+	}
+	// Other terminals: font size change not supported via escape sequences
+}
+
+// Apply on startup
+const initialScale = usePuxStore.getState().fontScale;
+if (initialScale !== 1) applyFontScale(initialScale);
+
+// Re-apply on change
+usePuxStore.subscribe((state, prev) => {
+	if (state.fontScale !== prev.fontScale) applyFontScale(state.fontScale);
+});
 
 // ── Render ──
 

@@ -19,11 +19,13 @@ export function SettingsOverlay() {
   const activeProject = usePuxStore((s) => s.activeProject);
   const activeAgentId = usePuxStore((s) => s.activeAgentId);
   const theme = usePuxStore((s) => s.theme);
+  const fontScale = usePuxStore((s) => s.fontScale);
   const providers = usePuxStore((s) => s.providers);
   const toggleProvidersOverlay = usePuxStore((s) => s.toggleProvidersOverlay);
   const toggleModelPicker = usePuxStore((s) => s.toggleModelPicker);
   const closeSettingsOverlay = usePuxStore((s) => s.closeSettingsOverlay);
   const setTheme = usePuxStore((s) => s.setTheme);
+  const setFontScale = usePuxStore((s) => s.setFontScale);
   const colors = useColors();
   const [focusIdx, setFocusIdx] = React.useState(0);
 
@@ -64,6 +66,19 @@ export function SettingsOverlay() {
           const num = parseInt(input, 10);
           if (num >= 1 && num <= themeList.length) {
             setTheme(themeList[num - 1].id);
+            return;
+          }
+          // +/- to adjust font scale
+          if (input === "+" || input === "=") {
+            setFontScale(Math.round((fontScale + 0.1) * 10) / 10);
+            return;
+          }
+          if (input === "-" || input === "_") {
+            setFontScale(Math.round((fontScale - 0.1) * 10) / 10);
+            return;
+          }
+          if (input === "0") {
+            setFontScale(1);
             return;
           }
         }
@@ -151,8 +166,13 @@ export function SettingsOverlay() {
                         </Box>
                       );
                     })}
+                    <Box marginTop={1}>
+                      <Text dimColor>
+                        {BLOCKQUOTE_BAR} Text size: {Math.round(fontScale * 100)}%
+                      </Text>
+                    </Box>
                     {focused && (
-                      <Text color="gray">  Press number key (1-{themeList.length}) to switch theme</Text>
+                      <Text color="gray">  Press number (1-{themeList.length}) to switch theme, +/- to resize, 0 to reset</Text>
                     )}
                   </>
                 )}

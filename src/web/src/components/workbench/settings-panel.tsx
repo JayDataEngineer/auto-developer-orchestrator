@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { usePuxStore } from "@/lib/pux-store";
 import { PermissionsPanel } from "@/components/workbench/permissions-panel";
-import { Palette, Shield, Check } from "lucide-react";
+import { Palette, Shield, Check, Type } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const THEMES = [
@@ -29,7 +29,9 @@ function applyTheme(id: string) {
 
 export function SettingsPanel() {
 	const theme = usePuxStore((s) => s.theme);
+	const fontScale = usePuxStore((s) => s.fontScale);
 	const setTheme = usePuxStore((s) => s.setTheme);
+	const setFontScale = usePuxStore((s) => s.setFontScale);
 	const appliedRef = useRef(theme);
 
 	// Apply theme on mount and when store changes
@@ -77,6 +79,36 @@ export function SettingsPanel() {
 							</button>
 						);
 					})}
+				</div>
+			</div>
+
+			{/* ── Text Size ── */}
+			<div className="border-b border-border px-4 pb-4">
+				<div className="flex items-center gap-2 mb-2 pt-3">
+					<Type className="h-4 w-4 text-muted-foreground" />
+					<h3 className="text-sm font-semibold">Text Size</h3>
+				</div>
+				<div className="flex items-center gap-3">
+					<span className="text-xs text-muted-foreground w-6 text-center">A</span>
+					<input
+						type="range"
+						min="0.7"
+						max="1.6"
+						step="0.05"
+						value={fontScale}
+						onChange={(e) => setFontScale(parseFloat(e.target.value))}
+						className="flex-1 h-1.5 rounded-full appearance-none bg-secondary cursor-pointer accent-primary"
+					/>
+					<span className="text-base text-muted-foreground w-6 text-center font-semibold">A</span>
+				</div>
+				<div className="flex justify-between mt-1">
+					<span className="text-[10px] text-muted-foreground">{Math.round(fontScale * 100)}%</span>
+					<button
+						onClick={() => setFontScale(1)}
+						className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+					>
+						Reset
+					</button>
 				</div>
 			</div>
 

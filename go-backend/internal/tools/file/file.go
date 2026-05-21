@@ -1,11 +1,14 @@
 package file
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -80,12 +83,129 @@ func (s *SimpleSandboxOps) EditFile(ctx context.Context, path string, oldStr, ne
 	return fmt.Sprintf("Replaced %d occurrence(s) in %s", count, path), nil
 }
 
+// skipDirs are directories always excluded from local file search,
+// matching the ripgrep exclude list used in adapters.FileOps.
+var skipDirs = map[string]bool{
+	"node_modules": true, "vendor": true, "dist": true, "build": true,
+	"target": true, ".git": true, ".idea": true, ".vscode": true,
+	"__pycache__": true, "bin": true, "obj": true, "out": true,
+	"coverage": true, "tmp": true, "temp": true, "logs": true,
+	"generated": true, "bower_components": true, "jspm_packages": true,
+	".cache": true, ".next": true, ".nuxt": true, ".turbo": true,
+	".venv": true, "venv": true, "env": true,
+	".tox": true, ".mypy_cache": true, ".pytest_cache": true,
+}
+
 func (s *SimpleSandboxOps) Grep(ctx context.Context, path string, pattern string) (string, error) {
-	return "", fmt.Errorf("grep not implemented")
+	root := s.absPath(path)
+
+	// Try ripgrep first (respects .gitignore, fast)
+	if rg, _ := exec.LookPath("rg"); rg != "" {
+		out, err := exec.CommandContext(ctx, rg,
+			"--max-count=200", "--max-depth=6",
+			"--glob", "!node_modules", "--glob", "!vendor",
+			"--glob", "!.git", "--glob", "!__pycache__",
+			"--glob", "!.cache", "--glob", "!dist",
+			pattern, root,
+		).CombinedOutput()
+		if err == nil && len(out) > 0 {
+			return string(out), nil
+		}
+	}
+
+	// Fallback: walk filesystem and search with regexp
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", fmt.Errorf("invalid regex pattern: %w", err)
+	}
+
+	var results []string
+	filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || len(results) >= 200 {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name != "." && name != ".." && (strings.HasPrefix(name, ".") || skipDirs[name]) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// Read file and search
+		f, err := os.Open(p)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		lineno := 0
+		for scanner.Scan() {
+			lineno++
+			if re.MatchString(scanner.Text()) {
+				results = append(results, fmt.Sprintf("%s:%d:%s", p, lineno, scanner.Text()))
+				if len(results) >= 200 {
+					break
+				}
+			}
+		}
+		return nil
+	})
+	if len(results) == 0 {
+		return "", nil
+	}
+	return strings.Join(results, "\n"), nil
 }
 
 func (s *SimpleSandboxOps) Glob(ctx context.Context, path string, pattern string) (string, error) {
-	return "", fmt.Errorf("glob not implemented")
+	root := s.absPath(path)
+
+	// Try ripgrep first (respects .gitignore, fast)
+	if rg, _ := exec.LookPath("rg"); rg != "" {
+		out, err := exec.CommandContext(ctx, rg,
+			"--files", "--glob", pattern,
+			"--glob", "!node_modules", "--glob", "!vendor",
+			"--glob", "!.git", "--glob", "!__pycache__",
+			"--glob", "!.cache", "--glob", "!dist",
+			"--max-depth", "6", "--sort=path", root,
+		).CombinedOutput()
+		if err == nil && len(out) > 0 {
+			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+			if len(lines) > 500 {
+				lines = lines[:500]
+			}
+			return strings.Join(lines, "\n"), nil
+		}
+	}
+
+	// Fallback: filepath.WalkDir with pattern matching
+	var results []string
+	globPattern := pattern
+	if !strings.Contains(globPattern, "/") {
+		globPattern = "**/" + globPattern
+	}
+
+	filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || len(results) >= 500 {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name != "." && name != ".." && (strings.HasPrefix(name, ".") || skipDirs[name]) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// Match the filename against the original pattern
+		matched, _ := filepath.Match(pattern, d.Name())
+		if matched {
+			results = append(results, p)
+		}
+		return nil
+	})
+	if len(results) == 0 {
+		return "", nil
+	}
+	return strings.Join(results, "\n"), nil
 }
 
 func (s *SimpleSandboxOps) absPath(p string) string {

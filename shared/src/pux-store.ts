@@ -149,6 +149,9 @@ interface PuxState {
 	// Theme
 	theme: string;
 
+	// Font scale (TUI: terminal font size multiplier, Web: CSS font-size scale)
+	fontScale: number;
+
 	// Error
 	lastError: string | null;
 
@@ -197,6 +200,7 @@ interface PuxState {
 	toggleSettingsOverlay: () => void;
 	closeSettingsOverlay: () => void;
 	setTheme: (theme: string) => void;
+	setFontScale: (scale: number) => void;
 	toggleSessionSwitcher: () => void;
 	closeSessionSwitcher: () => void;
 	toggleLogViewer: () => void;
@@ -281,7 +285,8 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	showHelpOverlay: false,
 	showMCPOverlay: false,
 	mcpServers: [],
-	theme: storage.get("pux:theme", "default-dark"),
+	theme: storage.get("pux:theme", "mono"),
+	fontScale: parseFloat(storage.get("pux:fontScale", "1")) || 1,
 	conversations: [],
 	projects: [],
 	activeWorkbenchTab: "vnc",
@@ -789,6 +794,12 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	setTheme: (theme) => {
 		storage.set("pux:theme", theme);
 		set({ theme });
+	},
+
+	setFontScale: (scale) => {
+		const clamped = Math.max(0.5, Math.min(2.0, scale));
+		storage.set("pux:fontScale", String(clamped));
+		set({ fontScale: clamped });
 	},
 
 	// ── Background task actions ──
