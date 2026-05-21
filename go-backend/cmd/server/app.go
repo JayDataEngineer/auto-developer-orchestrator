@@ -662,6 +662,11 @@ func (a *App) buildRouter(
 		// Filesystem browser (for "Open Folder" dialog)
 		fsBrowseHandler := handlers.NewFsBrowseHandler()
 		r.Get("/fs/browse", fsBrowseHandler.Browse)
+		r.Post("/fs/mkdir", fsBrowseHandler.Mkdir)
+
+		// Tailscale device discovery
+		tailscaleHandler := handlers.NewTailscaleHandler(a.logger)
+		r.Get("/tailscale/devices", tailscaleHandler.Devices)
 
 		// Pux Agent
 		r.Route("/pux", func(r chi.Router) {

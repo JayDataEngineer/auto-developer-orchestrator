@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"strings"
 
 	puxssh "github.com/auto-developer-orchestrator/backend/internal/ssh"
 	"github.com/pkg/sftp"
@@ -179,5 +180,57 @@ func (h *SshBrowseHandler) SshTrustHost(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":     true,
 		"fingerprint": fingerprint,
+	})
+}
+
+// SshMkdir handles POST /api/pux/ssh/mkdir — create directory on remote.
+func (h *SshBrowseHandler) SshMkdir(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeReq[struct {
+		SessionKey string `json:"sessionKey"`
+		Path       string `json:"path"`
+		Name       string `json:"name"`
+	}](w, r)
+	if !ok {
+		return
+	}
+
+	if req.SessionKey == "" {
+		JSONError(w, "sessionKey is required", http.StatusBadRequest)
+		return
+	}
+	if req.Path == "" || req.Name == "" {
+		JSONError(w, "path and name are required", http.StatusBadRequest)
+		return
+	}
+
+	// Sanitize name
+	cleanName := path.Clean(req.Name)
+	if strings.Contains(cleanName, "/") || cleanName == "." || cleanName == ".." {
+		JSONError(w, "invalid folder name", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.sessions.GetClient(req.SessionKey)
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		JSONError(w, fmt.Sprintf("SFTP client failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer sftpClient.Close()
+
+	fullPath := path.Join(req.Path, cleanName)
+	if err := sftpClient.Mkdir(fullPath); err != nil {
+		JSONError(w, fmt.Sprintf("cannot create folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"path":    fullPath,
 	})
 }

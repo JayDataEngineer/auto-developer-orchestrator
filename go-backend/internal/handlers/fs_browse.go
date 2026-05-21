@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -176,5 +177,61 @@ func (h *FsBrowseHandler) Browse(w http.ResponseWriter, r *http.Request) {
 		Path:    evalPath,
 		Parent:  parent,
 		Entries: result,
+	})
+}
+
+// Mkdir handles POST /api/fs/mkdir — create a new directory.
+func (h *FsBrowseHandler) Mkdir(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeReq[struct {
+		Path string `json:"path"`
+		Name string `json:"name"`
+	}](w, r)
+	if !ok {
+		return
+	}
+
+	if req.Path == "" || req.Name == "" {
+		JSONError(w, "path and name are required", http.StatusBadRequest)
+		return
+	}
+
+	// Clean and resolve parent
+	absParent, err := filepath.Abs(filepath.Clean(req.Path))
+	if err != nil {
+		JSONError(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	evalParent, err := filepath.EvalSymlinks(absParent)
+	if err != nil {
+		JSONError(w, "parent path does not exist", http.StatusBadRequest)
+		return
+	}
+
+	if !h.isAllowed(evalParent) {
+		JSONError(w, "access denied", http.StatusForbidden)
+		return
+	}
+
+	// Sanitize name — no path separators
+	cleanName := filepath.Clean(req.Name)
+	if strings.Contains(cleanName, "/") || cleanName == "." || cleanName == ".." {
+		JSONError(w, "invalid folder name", http.StatusBadRequest)
+		return
+	}
+
+	fullPath := filepath.Join(evalParent, cleanName)
+	if err := os.Mkdir(fullPath, 0755); err != nil {
+		if os.IsExist(err) {
+			JSONError(w, "folder already exists", http.StatusConflict)
+			return
+		}
+		JSONError(w, fmt.Sprintf("cannot create folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"path":    fullPath,
 	})
 }

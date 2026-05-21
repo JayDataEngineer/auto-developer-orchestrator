@@ -222,6 +222,7 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 		r.Post("/ssh/browse", h.sshBrowse.SshBrowse)
 		r.Post("/ssh/disconnect", h.sshBrowse.SshDisconnect)
 		r.Post("/ssh/trust-host", h.sshBrowse.SshTrustHost)
+		r.Post("/ssh/mkdir", h.sshBrowse.SshMkdir)
 	}
 }
 
