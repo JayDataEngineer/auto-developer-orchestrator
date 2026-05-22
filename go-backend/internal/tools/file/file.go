@@ -249,6 +249,23 @@ func (s *SimpleSandboxOps) Glob(ctx context.Context, path string, pattern string
 
 func (s *SimpleSandboxOps) absPath(p string) string {
 	if strings.HasPrefix(p, "/") {
+		// Remap sandbox paths to the host project directory.
+		// When using the native executor (no Docker), /sandbox/workspace/ doesn't
+		// exist on the host — it needs to be mapped to the actual project dir.
+		if s.BasePath != "" {
+			if strings.HasPrefix(p, "/sandbox/workspace/") {
+				return s.BasePath + p[len("/sandbox/workspace"):]
+			}
+			if strings.HasPrefix(p, "/sandbox/tmp/") {
+				return os.TempDir() + p[len("/sandbox/tmp"):]
+			}
+			if p == "/sandbox/workspace" {
+				return s.BasePath
+			}
+			if p == "/sandbox/tmp" {
+				return os.TempDir()
+			}
+		}
 		return p
 	}
 	return s.BasePath + "/" + p
