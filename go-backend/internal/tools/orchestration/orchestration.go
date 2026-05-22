@@ -107,7 +107,7 @@ func NewDelegateToToolDynamic(r DelegateRunner, mcpResolver MCPResolver, rolePro
 
 func (t *DelegateToTool) Name() string { return "delegate_to" }
 func (t *DelegateToTool) Description() string {
-	return "Delegate a task to an agent. Write a detailed task brief — the agent only has their role training plus what you write in 'task'. Include what to do, relevant context, and expected output. Work is auto-accepted on completion. Returns result and file changes. Use delegate_revert to undo if the work is wrong."
+	return "Delegate a task to a specialized agent. The agent runs autonomously — you CANNOT communicate with it during execution. Your 'task' field is the agent's ONLY context beyond its role training.\n\nYour task brief MUST include:\n1. GOAL — exactly what to accomplish (not vague direction)\n2. CONTEXT — all file paths, URLs, names, values, error messages the agent needs\n3. STEPS — numbered list for multi-step tasks\n4. EXPECTED OUTPUT — file path, format, or specific data to return\n5. VERIFICATION — build command, test command, or how to confirm success\n\nBAD:  \"Fix the login bug\"\nGOOD: \"In /sandbox/workspace/go-backend/internal/handlers/auth.go, the Login handler returns 500 when email is empty (line 47). Add validation to return 400 with {\"error\": \"email required\"}. Run `go test ./internal/handlers/...` to verify.\"\n\nIf the agent fails, re-delegate with the FULL error output included. Returns result and file changes. Use delegate_revert to undo if wrong."
 }
 
 func (t *DelegateToTool) Schema() json.RawMessage {
@@ -122,7 +122,7 @@ func (t *DelegateToTool) Schema() json.RawMessage {
 	schema := fmt.Sprintf(`{
 		"type": "object",
 		"properties": {
-			"task": {"type": "string", "description": "Detailed task brief for the agent. Include: (1) what to do — the specific goal, (2) context — what you already know that they need, (3) expected output — format or file path for results. Write as a numbered list for multi-step tasks. Be specific — the agent has no other context besides their role training."},
+			"task": {"type": "string", "description": "COMPLETE task brief. The agent has NO other context besides its role training. Include: (1) GOAL — specific outcome, (2) CONTEXT — all paths, URLs, names, errors, current state, (3) STEPS — numbered for multi-step tasks, (4) EXPECTED OUTPUT — file path and format for results, (5) VERIFICATION — build/test commands or how to confirm success. A task brief under 3 sentences is almost certainly too vague."},
 			"role": {"type": "string", "description": "Agent role to assign. Each role has specialized tools and training.", "enum": %s},
 			"tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names the sub-agent can use (optional if using a role name)"},
 			"max_rounds": {"type": "integer", "description": "Maximum tool rounds (default: from role or 15)"},
@@ -301,7 +301,7 @@ func NewDelegateAsyncToolDynamic(r DelegateRunner, mcpResolver MCPResolver, role
 
 func (t *DelegateAsyncTool) Name() string { return "delegate_async" }
 func (t *DelegateAsyncTool) Description() string {
-	return "Launch an agent in the background. Write a detailed task brief — the agent only has their role training plus what you write in 'task'. Use for parallel work, then collect_results to wait."
+	return "Launch an agent in the background for parallel work. The agent runs autonomously — same task brief rules as delegate_to. Write a COMPLETE task brief with goal, context, steps, expected output, and verification. Use collect_results to wait for completion."
 }
 
 func (t *DelegateAsyncTool) Schema() json.RawMessage {
@@ -317,7 +317,7 @@ func (t *DelegateAsyncTool) Schema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"task_id": {"type": "string", "description": "Unique ID for this async task"},
-			"task": {"type": "string", "description": "Detailed task brief for the agent. Include: (1) what to do — the specific goal, (2) context — what you already know that they need, (3) expected output — format or file path for results. Write as a numbered list for multi-step tasks. Be specific — the agent has no other context besides their role training."},
+			"task": {"type": "string", "description": "COMPLETE task brief. The agent has NO other context besides its role training. Include: (1) GOAL — specific outcome, (2) CONTEXT — all paths, URLs, names, errors, current state, (3) STEPS — numbered for multi-step tasks, (4) EXPECTED OUTPUT — file path and format for results, (5) VERIFICATION — build/test commands or how to confirm success. A task brief under 3 sentences is almost certainly too vague."},
 			"role": {"type": "string", "description": "Agent role to assign. Each role has specialized tools and training.", "enum": %s},
 			"tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names (optional if using a role name)"}
 		},
