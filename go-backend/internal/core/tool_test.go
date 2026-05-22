@@ -157,6 +157,47 @@ func TestToolRegistry_Execute_WithAlias(t *testing.T) {
 	}
 }
 
+// TestToolRegistry_AliasNoShadowMCP verifies that RegisterCommonAliases does not
+// override real MCP tools with the same name (e.g., MCP "search" tool must not be
+// redirected to non-existent "search_web").
+func TestToolRegistry_AliasNoShadowMCP(t *testing.T) {
+	mcpSearchTool := &stubTool{
+		name: "search",
+		execute: func(ctx context.Context, args map[string]any) (any, error) {
+			return "mcp_search_result", nil
+		},
+	}
+	reg := NewToolRegistry([]Tool{mcpSearchTool})
+	reg.RegisterCommonAliases()
+
+	// "search" must resolve to the MCP tool, not redirect to "search_web"
+	result, err := reg.Execute(context.Background(), "search", nil)
+	if err != nil {
+		t.Fatalf("search should resolve to MCP tool, got error: %v", err)
+	}
+	if result != "mcp_search_result" {
+		t.Errorf("expected MCP search result, got %v", result)
+	}
+}
+
+// TestToolRegistry_AliasSkipsWhenRealToolExists verifies RegisterAlias is a no-op
+// when the alias name already has a real tool registered.
+func TestToolRegistry_AliasSkipsWhenRealToolExists(t *testing.T) {
+	reg := NewToolRegistry([]Tool{
+		&stubTool{name: "grep"},
+	})
+	// This should be silently ignored — "grep" is a real tool
+	reg.RegisterAlias("grep", "file_grep")
+
+	tool := reg.Get("grep")
+	if tool == nil {
+		t.Fatal("grep should resolve to the real tool, not be aliased away")
+	}
+	if tool.Name() != "grep" {
+		t.Errorf("expected tool name 'grep', got %q", tool.Name())
+	}
+}
+
 func TestToolError(t *testing.T) {
 	err := NewToolError("bash", "command failed")
 	if err.Error() != "[bash] command failed" {

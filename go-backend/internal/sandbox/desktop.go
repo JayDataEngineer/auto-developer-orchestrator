@@ -115,23 +115,10 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 		return nil, fmt.Errorf("Chrome CDP not ready after retries: %w", chromeErr)
 	}
 
-	// Restart x11vnc with -xrandr for dynamic resize support.
-	// The container's supervisord starts x11vnc without -xrandr (and has
-	// autorestart=true), so we must use supervisorctl to stop it cleanly
-	// before starting our own. Otherwise supervisord restarts the old one.
-	// KasmVNC handles resize natively — only patch standard backend.
-	if backend == BackendStandard {
-		if _, err := m.execInContainer(ctx, containerName, []string{
-			"sh", "-c",
-			"supervisorctl stop x11vnc 2>/dev/null; sleep 0.3; " +
-				"x11vnc -display :99 -rfbport 5900 -forever -shared -nopw -bg -xrandr",
-		}, false); err != nil {
-			m.logger.Warn("failed to restart x11vnc with -xrandr, resize=remote may not work",
-				zap.Error(err))
-		} else {
-			m.logger.Info("restarted x11vnc with -xrandr for dynamic resize")
-		}
-	}
+	// The pux-sandbox image's supervisord.conf already starts x11vnc with -xrandr,
+	// so no restart is needed. KasmVNC handles resize natively.
+	// If x11vnc lacks -xrandr (e.g. third-party image), resize=remote falls back
+	// to client-side scaling — still functional, just not pixel-perfect.
 
 	session := &DesktopSession{
 		SandboxID:  sandboxID,

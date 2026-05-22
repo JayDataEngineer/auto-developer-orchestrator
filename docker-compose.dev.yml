@@ -23,7 +23,7 @@ services:
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-sk-orch-2026-lf-a1b2c3d4e5f6}
       - DOCKER_HOST=unix:///var/run/docker.sock
       - OPENSHELL_POLICIES_DIR=/etc/openshell/policies
-      - OPENSHELL_IMAGE=nvidia/openshell:latest
+      - OPENSHELL_IMAGE=pux-sandbox:latest
       - OPENSHELL_NETWORK=shared-infra
     volumes:
       - ./go-backend:/app
@@ -81,7 +81,7 @@ services:
   # Note: Individual sandbox containers are created dynamically by the Go backend.
   # Start with: docker compose -f docker-compose.dev.yml --profile sandbox up -d
   openshell-manager:
-    image: nvidia/openshell:latest
+    image: pux-sandbox:latest
     container_name: orchestrator-openshell
     profiles: ["sandbox"]
     privileged: false

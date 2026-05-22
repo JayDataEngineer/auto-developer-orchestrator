@@ -48,9 +48,16 @@ func NewToolRegistry(tools []Tool) *ToolRegistry {
 
 // RegisterAlias adds an alternate name for a canonical tool.
 // The agent loop automatically normalizes tool names through aliases.
+// Skips registration if the alias collides with an actual registered tool
+// (e.g., MCP tools like "search", "grep", "glob" must not be overridden).
 func (r *ToolRegistry) RegisterAlias(alias, canonical string) {
 	// Prevent self-referencing loops
 	if alias == canonical {
+		return
+	}
+	// Don't shadow real tools — an MCP tool named "search" must not be
+	// redirected to a non-existent "search_web" via alias.
+	if _, exists := r.tools[alias]; exists {
 		return
 	}
 	r.aliases[alias] = canonical

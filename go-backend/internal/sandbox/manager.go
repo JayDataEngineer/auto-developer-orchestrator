@@ -135,7 +135,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	)
 
 	containerName := m.getContainerName(opts.ID)
-	image := getEnvOrDefault("OPENSHELL_IMAGE", "nvidia/openshell:latest")
+	image := getEnvOrDefault("OPENSHELL_IMAGE", "pux-sandbox:latest")
 	policy := opts.Policy
 	if policy == "" {
 		policy = "developer"
