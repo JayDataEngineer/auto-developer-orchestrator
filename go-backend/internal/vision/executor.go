@@ -136,7 +136,8 @@ func (e *VisionAwareExecutor) nativeVisionPath(originalResult any, resultJSON st
 	}, nil
 }
 
-// fallbackPath describes the image via the fallback chain and injects text.
+// fallbackPath describes the image via the fallback chain, strips the base64
+// from the result, and injects the description as a proper field.
 func (e *VisionAwareExecutor) fallbackPath(ctx context.Context, result any, detection *ImageDetection, toolName string) (any, error) {
 	if e.chain == nil {
 		return result, nil
@@ -151,7 +152,7 @@ func (e *VisionAwareExecutor) fallbackPath(ctx context.Context, result any, dete
 			e.mu.Unlock()
 			if cached != "" {
 				e.logger.Printf("vision: skipping %s — page unchanged (score=%.4f, cached)", toolName, score)
-				return injectDescription(result, cached), nil
+				return stripAndDescribe(result, detection, cached)
 			}
 		}
 	}
@@ -175,8 +176,7 @@ func (e *VisionAwareExecutor) fallbackPath(ctx context.Context, result any, dete
 
 	e.logger.Printf("vision: %s described image from %s in %dms", desc.Provider, toolName, desc.LatencyMs)
 
-	// Inject description into the result
-	return injectDescription(result, desc.Text), nil
+	return stripAndDescribe(result, detection, desc.Text)
 }
 
 // stripBase64FromJSON removes the image base64 data from a JSON string, replacing
@@ -194,8 +194,8 @@ func stripBase64FromJSON(resultJSON string, detection *ImageDetection) string {
 	// Strip known image fields
 	for _, key := range []string{"screenshot", "image", "image_b64"} {
 		if val, ok := m[key].(string); ok && len(val) > 200 {
-			// Likely base64 image data — check if it matches the detection
-			if val == detection.Base64Data || len(val) == len(detection.Base64Data) {
+			// Likely base64 image data — exact match or prefix (some tools wrap it)
+			if val == detection.Base64Data || strings.HasPrefix(val, detection.Base64Data[:min(100, len(detection.Base64Data))]) {
 				m[key] = "[image attached separately]"
 			}
 		}
@@ -222,46 +222,38 @@ func promptForTool(toolName string) string {
 	return "Describe what you see in this image in detail."
 }
 
-// injectDescription appends a vision description to the tool result.
-// For PageContext: injects into the Vision field.
-// For everything else: wraps in a map with a vision_description field.
-func injectDescription(result any, descText string) any {
-	// Try to set Vision field on PageContext-like structs
+// stripAndDescribe strips base64 image data from the result and injects the
+// vision description as a proper top-level field. This is the fallback path
+// equivalent of nativeVisionPath — both strip base64, but fallback injects
+// text instead of returning image_url parts.
+func stripAndDescribe(result any, detection *ImageDetection, descText string) (any, error) {
 	resultBytes, err := json.Marshal(result)
 	if err != nil {
-		return result
+		return result, nil
 	}
 
 	var m map[string]any
 	if err := json.Unmarshal(resultBytes, &m); err != nil {
-		return result
+		return result, nil
 	}
 
-	// If it has a "vision" or "screenshot" field, it's a PageContext-like result
-	if _, hasVision := m["vision"]; hasVision {
-		if _, hasScreenshot := m["screenshot"]; hasScreenshot {
-			// It's a PageContext — set the Vision field
-			m["vision"] = descText
-			return m
-		}
-	}
-
-	// If it has image_b64, it's a DesktopFrame-like result
-	if _, hasB64 := m["image_b64"]; hasB64 {
-		m["vision_description"] = descText
-		return m
-	}
-
-	// Generic: append description to the first string field we find
-	for key, val := range m {
-		if s, ok := val.(string); ok && len(s) > 100 {
-			// Likely the main content field
-			if !strings.Contains(s, "[Vision:") {
-				m[key] = s + "\n\n[Vision: " + descText + "]"
+	// Strip known image fields — the vision description replaces the raw image data
+	for _, key := range []string{"screenshot", "image", "image_b64"} {
+		if val, ok := m[key].(string); ok && len(val) > 200 {
+			if val == detection.Base64Data || strings.HasPrefix(val, detection.Base64Data[:min(100, len(detection.Base64Data))]) {
+				delete(m, key)
 			}
-			return m
 		}
 	}
 
-	return result
+	// Inject description: use existing "vision" field if present, otherwise "vision_description"
+	if _, hasVision := m["vision"]; hasVision {
+		m["vision"] = descText
+	} else {
+		m["vision_description"] = descText
+	}
+
+	return m, nil
 }
+
+

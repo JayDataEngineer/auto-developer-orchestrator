@@ -192,6 +192,66 @@ func TestWorkersUpdate(t *testing.T) {
 	}
 }
 
+func TestWorkersOrgUpdateAndRevert(t *testing.T) {
+	// Test org revert logic at the method level (no DiscoverOrgs dependency)
+	orgDir := t.TempDir()
+	orgRolesDir := filepath.Join(orgDir, "roles")
+	roleDir := filepath.Join(orgRolesDir, "test-role")
+	os.MkdirAll(roleDir, 0755)
+
+	// Write original role files
+	originalCfg := "description: Original persona\nimports:\n  - shell\nmax_rounds: 15\ntemperature: 0.4\n"
+	os.WriteFile(filepath.Join(roleDir, "config.yaml"), []byte(originalCfg), 0644)
+	os.WriteFile(filepath.Join(roleDir, "prompt.md"), []byte("Original prompt"), 0644)
+
+	dir := t.TempDir()
+	store := autoconfig.NewWorkerStore(dir)
+	log := zap.NewNop()
+	h := NewWorkerHandler(store, log)
+
+	// Manually populate org defaults (simulating what NewWorkerHandler does)
+	key := "test-org/test-role"
+	h.orgDefaults[key] = orgRoleDefault{
+		configYAML: []byte(originalCfg),
+		promptMD:   []byte("Original prompt"),
+		rolesDir:   orgRolesDir,
+	}
+
+	// Modify the files on disk
+	modifiedCfg := "description: Modified persona\nimports:\n  - code\nmax_rounds: 20\ntemperature: 0.7\n"
+	os.WriteFile(filepath.Join(roleDir, "config.yaml"), []byte(modifiedCfg), 0644)
+	os.WriteFile(filepath.Join(roleDir, "prompt.md"), []byte("Modified prompt"), 0644)
+
+	// Verify isModified detects the change
+	if !h.isOrgModified(key, orgRolesDir, "test-role") {
+		t.Error("expected org role to be modified")
+	}
+
+	// Call revertOrgWorker directly (avoids DiscoverOrgs needing ~/.pux/orgs/)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/test-role/revert?source=test-org", nil)
+	h.revertOrgWorker(w, r, "test-role", "test-org")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("revert status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	// Verify files restored
+	restoredCfg, _ := os.ReadFile(filepath.Join(roleDir, "config.yaml"))
+	if string(restoredCfg) != originalCfg {
+		t.Errorf("config.yaml not restored:\ngot:  %s\nwant: %s", string(restoredCfg), originalCfg)
+	}
+	restoredPrompt, _ := os.ReadFile(filepath.Join(roleDir, "prompt.md"))
+	if string(restoredPrompt) != "Original prompt" {
+		t.Errorf("prompt.md not restored: %s", string(restoredPrompt))
+	}
+
+	// Verify isModified now returns false
+	if h.isOrgModified(key, orgRolesDir, "test-role") {
+		t.Error("expected org role to NOT be modified after revert")
+	}
+}
+
 func setupTestEnvForWorkers(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()

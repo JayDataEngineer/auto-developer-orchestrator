@@ -148,11 +148,12 @@ func PuxHomeDir() string {
 
 // OrgInfo holds summary info about a discovered org for API responses.
 type OrgInfo struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Path        string            `json:"path"`
-	Roles       []string          `json:"roles"`
-	RoleDetails map[string]any    `json:"role_details,omitempty"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Path        string         `json:"path"`
+	Roles       []string       `json:"roles"`
+	RolesDir    string         `json:"roles_dir"`
+	RoleDetails map[string]any `json:"role_details,omitempty"`
 }
 
 // DiscoverOrgs scans ~/.pux/orgs/ for valid organizations.
@@ -189,6 +190,7 @@ func DiscoverOrgs() []*OrgInfo {
 			Name:        org.Name,
 			Description: org.Description,
 			Path:        orgPath,
+			RolesDir:    org.RolesDir(),
 		}
 
 		// Load roles if staff_root is configured
@@ -205,6 +207,8 @@ func DiscoverOrgs() []*OrgInfo {
 					"imports":      role.Imports,
 					"model":        role.Model,
 					"sandbox":      role.SandboxTier,
+					"max_rounds":   role.MaxRounds,
+					"temperature":  role.Temperature,
 				}
 			}
 			sort.Strings(info.Roles)

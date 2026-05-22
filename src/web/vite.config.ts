@@ -15,6 +15,7 @@ export default defineConfig({
 	},
 	server: {
 		port: 5175,
+		allowedHosts: ["pux.athleticnationalauthority.com"],
 		proxy: {
 			"/api": {
 				target: "http://localhost:3847",

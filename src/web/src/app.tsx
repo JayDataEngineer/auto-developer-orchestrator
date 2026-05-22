@@ -442,6 +442,11 @@ const ProjectGroup = memo(function ProjectGroup({
 
 // ── Sidebar ──
 
+function latestAt(convs: Conversation[] | undefined): number {
+	if (!convs || convs.length === 0) return 0;
+	return Math.max(...convs.map((c) => new Date(c.lastAt).getTime() || 0));
+}
+
 function AppSidebar() {
 	const conversations = usePuxStore((s) => s.conversations);
 	const projects = usePuxStore((s) => s.projects);
@@ -451,7 +456,7 @@ function AppSidebar() {
 	const [search, setSearch] = useState("");
 	const deferredSearch = useDeferredValue(search);
 
-	// Group conversations by project
+	// Group conversations by project, sorted newest-first within each group
 	const convsByProject = useMemo(() => {
 		const map = new Map<string, Conversation[]>();
 		for (const c of conversations) {
@@ -459,16 +464,24 @@ function AppSidebar() {
 			existing.push(c);
 			map.set(c.project, existing);
 		}
+		for (const [key, arr] of map) {
+			arr.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
+			map.set(key, arr);
+		}
 		return map;
 	}, [conversations]);
 
-	// All project keys: known projects first, then any projects only in conversations
+	// All project keys sorted by most recent conversation (last used first)
 	const allProjectKeys = useMemo(() => {
-		const knownNames = new Set(projects.map((p) => p.name));
-		return [
+		const all = new Set([
 			...projects.map((p) => p.name),
-			...Array.from(convsByProject.keys()).filter((k) => !knownNames.has(k)),
-		];
+			...convsByProject.keys(),
+		]);
+		return Array.from(all).sort((a, b) => {
+			const aLatest = latestAt(convsByProject.get(a));
+			const bLatest = latestAt(convsByProject.get(b));
+			return bLatest - aLatest;
+		});
 	}, [projects, convsByProject]);
 
 	// Filter by search term (matches project names + conversation titles)

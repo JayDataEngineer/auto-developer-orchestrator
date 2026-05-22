@@ -470,7 +470,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		ProjectDir:      r.projectDir,
 		GenerateOptions: core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
 		ScratchStore:    r.scratchStore,
-		ToolResultProcessor: subAgentResultProcessor(),
+		ToolResultProcessor: subAgentResultProcessor(r.projectDir),
 	})
 	loop := subAgent.Loop()
 
@@ -909,7 +909,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		MaxTokens:      8192,
 		ContextSize:    r.ctxSize,
 		Tools:          selectedTools,
-		ToolResultProcessor: subAgentResultProcessor(),
+		ToolResultProcessor: subAgentResultProcessor(r.projectDir),
 		Opts: core.GenerateOptions{
 			MaxTokens:   8192,
 			Temperature: temperature,
@@ -951,7 +951,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		ProjectDir:      r.projectDir,
 		GenerateOptions: core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
 		ScratchStore:    r.scratchStore,
-		ToolResultProcessor: subAgentResultProcessor(),
+		ToolResultProcessor: subAgentResultProcessor(r.projectDir),
 	})
 	loop := subAgent.Loop()
 
@@ -1507,21 +1507,63 @@ func (r *ParallelRunner) pendingCount() int {
 }
 
 // subAgentResultProcessor returns a ToolResultProcessor for sub-agents.
-// Aggressively truncates tool results to prevent context bloat.
-// The sub-agent's full output is persisted to the transcript DB — the in-context
-// result only needs enough for the model to understand the outcome.
-func subAgentResultProcessor() func(ctx context.Context, toolName, toolCallID, result string) string {
+// Large tool results are spilled to disk (inside the sandbox workspace) instead
+// of being truncated. The agent gets a preview + file path reference and can
+// read the full output with file_read if needed — same pattern as claude-code.
+func subAgentResultProcessor(projectDir string) func(ctx context.Context, toolName, toolCallID, result string) string {
+	const spillThreshold = 4000  // bytes — spill anything larger
+	const previewLines = 30      // lines of preview kept in-context
+
+	spillDir := filepath.Join(projectDir, ".pux", "spill")
+	// Sandbox path for the reference — sub-agent reads via file_read
+	sandboxSpillDir := "/sandbox/workspace/.pux/spill"
+
 	return func(ctx context.Context, toolName, toolCallID, result string) string {
-		if len(result) > 6000 {
-			// Keep the end — errors and final results are most important
-			tail := result[len(result)-5000:]
-			// Find first newline to avoid mid-line split
-			if idx := strings.Index(tail, "\n"); idx >= 0 && idx < 200 {
-				tail = tail[idx+1:]
-			}
-			return "...[output truncated, showing tail]\n" + tail
+		if len(result) <= spillThreshold {
+			return result
 		}
-		return result
+
+		// Create spill directory on host (maps to sandbox via bind mount)
+		if err := os.MkdirAll(spillDir, 0755); err != nil {
+			// Can't spill — fall back to tail truncation
+			tail := result
+			if len(tail) > 3000 {
+				tail = tail[len(tail)-3000:]
+			}
+			return "...[spill failed, showing tail]\n" + tail
+		}
+
+		// Generate deterministic file name from tool call
+		ref := fmt.Sprintf("%s-%s", toolName, toolCallID)
+		if len(ref) > 60 {
+			ref = ref[:60]
+		}
+		hostPath := filepath.Join(spillDir, ref+".txt")
+
+		// Write full output to disk
+		if err := os.WriteFile(hostPath, []byte(result), 0644); err != nil {
+			tail := result
+			if len(tail) > 3000 {
+				tail = tail[len(tail)-3000:]
+			}
+			return "...[spill write failed, showing tail]\n" + tail
+		}
+
+		// Build preview — first N lines
+		lines := strings.Split(result, "\n")
+		previewCount := previewLines
+		if previewCount > len(lines) {
+			previewCount = len(lines)
+		}
+		preview := strings.Join(lines[:previewCount], "\n")
+
+		// Reference path inside sandbox
+		sandboxPath := filepath.Join(sandboxSpillDir, ref+".txt")
+
+		return fmt.Sprintf(
+			"%s\n\n...[%d lines total. Full output written to %s — use file_read(\"%s\") to read it]",
+			preview, len(lines), sandboxPath, sandboxPath,
+		)
 	}
 }
 

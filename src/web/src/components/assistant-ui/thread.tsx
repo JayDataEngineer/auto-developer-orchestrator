@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { usePuxStore } from "@/lib/pux-store";
 import { AddProviderDialog } from "@/components/add-provider-dialog";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import {
 	ActionBarPrimitive,
@@ -58,11 +59,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "reac
 import { getWebCommands } from "@/lib/commands";
 
 export const Thread: FC = () => {
+	const isMobile = useIsMobile();
+
 	return (
 		<ThreadPrimitive.Root
 			className="flex h-full flex-col bg-background text-sm"
 			style={{
-				["--thread-max-width" as string]: "44rem",
+				["--thread-max-width" as string]: isMobile ? "100%" : "44rem",
 			} as React.CSSProperties}
 		>
 			<ThreadPrimitive.Viewport
@@ -129,6 +132,7 @@ const Composer: FC = () => {
 	const [paletteVisible, setPaletteVisible] = useState(false);
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [query, setQuery] = useState("");
+	const isMobile = useIsMobile();
 
 	// Track input changes via React's onChange (batched with @assistant-ui store
 	// updates). Previously used a native addEventListener("input", ...) which
@@ -228,9 +232,12 @@ const Composer: FC = () => {
 					<ComposerAttachments />
 					<ComposerPrimitive.Input
 						placeholder="Send a message... (type / for commands)"
-						className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-4 pt-2 pb-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
+						className={cn(
+							"w-full resize-none bg-transparent px-4 pt-2 pb-3 outline-none placeholder:text-muted-foreground focus-visible:ring-0",
+							isMobile ? "min-h-16 text-base mb-2" : "max-h-32 min-h-14 text-sm mb-1",
+						)}
 						rows={1}
-						autoFocus
+						autoFocus={!isMobile}
 						onChange={handleInputChange}
 						aria-label="Message input"
 					/>
@@ -250,6 +257,7 @@ const ComposerAction: FC = () => {
 	const setDefaults = usePuxStore((s) => s.setDefaults);
 	const loadDefaults = usePuxStore((s) => s.loadDefaults);
 	const [showAddProvider, setShowAddProvider] = useState(false);
+	const isMobile = useIsMobile();
 
 	const grouped = useMemo(() => {
 		const map = new Map<string, typeof modelList>();
@@ -272,6 +280,7 @@ const ComposerAction: FC = () => {
 			<div className="relative mx-2 mb-2 flex items-center justify-between">
 				<div className="flex items-center gap-1">
 					<ComposerAddAttachment />
+					{!isMobile && (
 					<Select value={activeModel || "__none__"} onValueChange={(val) => {
 						if (val === "__none__") return;
 						if (val === "__clear_logic") { setDefaults("", defaultWorker); return; }
@@ -362,6 +371,7 @@ const ComposerAction: FC = () => {
 							</div>
 						</SelectContent>
 					</Select>
+					)}
 				</div>
 				<div className="flex items-center gap-1">
 					<AuiIf condition={(s) => !s.thread.isRunning}>
@@ -372,10 +382,10 @@ const ComposerAction: FC = () => {
 								type="button"
 								variant="default"
 								size="icon"
-								className="size-8 rounded-full"
+								className={cn("rounded-full", isMobile ? "size-10" : "size-8")}
 								aria-label="Send message"
 							>
-								<ArrowUpIcon className="size-4" />
+								<ArrowUpIcon className={isMobile ? "size-5" : "size-4"} />
 							</TooltipIconButton>
 						</ComposerPrimitive.Send>
 					</AuiIf>
@@ -385,10 +395,10 @@ const ComposerAction: FC = () => {
 								type="button"
 								variant="default"
 								size="icon"
-								className="size-8 rounded-full"
+								className={cn("rounded-full", isMobile ? "size-10" : "size-8")}
 								aria-label="Stop generating"
 							>
-								<SquareIcon className="size-3 fill-current" />
+								<SquareIcon className={cn("fill-current", isMobile ? "size-4" : "size-3")} />
 							</Button>
 						</ComposerPrimitive.Cancel>
 					</AuiIf>

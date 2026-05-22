@@ -1,15 +1,34 @@
-# Auto-Developer Orchestrator
+# PUX - AiO Ai Harness Hub
 
-The ultimate command center for AI-powered software engineering. A high-performance polyglot orchestrator that manages autonomous agents (Jules, Deep Agents) to explore, implement, and review code.
+Pux is a system crafted for maximum, streamlined control over the AI system that you use.
+
+## Make Pux your own with Text Files
+
+Through the WebUI, agents and orchestrators can be made on the fly. Get your agent just the way you like it.
+
+Tasks can be specific, like coding, or something more generalized, such as a specialized, no code deep research pipeline.
+
+Proudly unopinionated.
+
+## Tooling to get the Job Done
+
+Native to Pux is a sandboxed desktop, browser, text editor, and vision toolkit. This gives an edge to Pux when dealing with web development, or integrating it with tools such as telegram or game development.
+
+There is a WebUI, as well as an early alpha release of the Terminal Interface.
+
+Coming soon, scheduled jobs. This allows jobs to be run entirely in a safe, sandboxed environment.
+
+## Stay Soverign at any Step
+
+In the fast paced corporate world of today, it is easy to get 'locked in' to a certain provider. Issues with providers like cosumer-unfriendly billing practices by companies such as Google AI can be far behind, at your own discretion. You can use Opus for planning, and a local Qwen model for execution.
 
 ---
 
 ## 🛠 Architecture
 
-- **Frontend**: React 19 + Vite + Tailwind CSS (Industrial UI)
-- **Backend**: Go 1.24 (High-performance API + Git Ops + SQLite)
-- **AI Service**: Python FastAPI (Deep Agent workflows via LangChain/uv)
-- **Agents**: Google Jules (Cloud-based) + Local Deep Agents (Explorer, Implementer, Reviewer)
+- **Web Frontend**: A minimalist webui desinged to both manage and use the PUX system.
+- **Go Backend**: As opposed to a pure Typescript or Python backedn, Pux is built on a contract system. This gives the TUI, WebUI, and backend a simple language to speak while keeping Go speed for heavy, rapid tool use.
+- **Extensions**: An extension system desinged to allow more advanced functionality being added
 
 ---
 
@@ -18,7 +37,6 @@ The ultimate command center for AI-powered software engineering. A high-performa
 ### 1. Prerequisites
 - **Node.js 22+**
 - **Go 1.24+**
-- **Python 3.12+** (with `uv` installed)
 - **Docker & Docker Compose** (optional, recommended for full infra)
 
 ### 2. Setup
@@ -75,6 +93,5 @@ The project uses a unified **Makefile** for all operations:
 ## 📝 Documentation
 
 - [Architecture Guide](ARCHITECTURE.md) - Deep dive into system design
-- [Jules API Reference](docs/JULES.md) - Integration with Google Jules
 - [Changelog](docs/CHANGELOG.md) - Implementation history and status
 - [Manifesto](MANIFESTO.md) - Project vision and philosophy

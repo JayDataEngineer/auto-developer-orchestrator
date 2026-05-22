@@ -102,6 +102,11 @@
   color-scheme: dark;
 }
 
+/* Hide streaming dot when active tool calls are present */
+[data-hide-md-dot] .aui-md[data-status="running"]::after {
+  display: none !important;
+}
+
 /* Mono: bright gray background for text input area */
 [data-pux-theme="mono"] .border-input {
   background: oklch(0.25 0 0);
@@ -176,6 +181,12 @@ body {
   width: var(--sidebar-width-icon);
 }
 
+/* Neutralize react-shiki .line-numbers:before leaking into Monaco Editor */
+.monaco-editor .line-numbers:before {
+  display: none !important;
+  content: none !important;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -188,4 +199,33 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
+}
+
+/* ── Mobile ── */
+@media (max-width: 767px) {
+  /* Always show action bar on mobile (no hover) */
+  [data-role="assistant"] .group .opacity-0 {
+    opacity: 1 !important;
+  }
+
+  /* Larger message text for readability */
+  [data-role="assistant"] .break-words {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+  }
+
+  /* Prevent 300ms tap delay */
+  * {
+    touch-action: manipulation;
+  }
+
+  /* Hide scrollbars on mobile (native momentum scroll) */
+  ::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Sidebar sheet — swipe-friendly */
+  [data-mobile="true"] {
+    overscroll-behavior: contain;
+  }
 }
