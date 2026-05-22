@@ -1,26 +1,47 @@
 package handlers
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
-// GetProjectFiles handles GET /api/pux/files — returns a recursive file tree
-// for the given project, read from the local filesystem.
-// Query params: project (required), depth (optional, default 4)
-func (h *PuxHandler) GetProjectFiles(w http.ResponseWriter, r *http.Request) {
-	projectPath := requireProject(w, r, h.db)
-	if projectPath == "" {
+// GetProjectInfo handles GET /api/pux/project-info — returns project metadata
+// including whether it's local or SSH. Frontend uses this to route file ops.
+func (h *PuxHandler) GetProjectInfo(w http.ResponseWriter, r *http.Request) {
+	fs := requireProjectFS(w, r, h.db, h.sshManager)
+	if fs == nil {
 		return
 	}
 
-	tree, err := buildFileTree(projectPath, projectPath, 4)
+	resp := map[string]any{
+		"type": fs.Type(),
+		"root": fs.Root(),
+	}
+	if ssh := fs.SSHInfo(); ssh != nil {
+		resp["host"] = ssh.Host
+		resp["user"] = ssh.User
+		resp["port"] = ssh.Port
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetProjectFiles handles GET /api/pux/files — returns a recursive file tree.
+// Supports both local and SSH-backed projects via ProjectFS.
+func (h *PuxHandler) GetProjectFiles(w http.ResponseWriter, r *http.Request) {
+	fs := requireProjectFS(w, r, h.db, h.sshManager)
+	if fs == nil {
+		return
+	}
+
+	tree, err := fs.BuildTree(4)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "SSH not connected") {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -28,11 +49,10 @@ func (h *PuxHandler) GetProjectFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetProjectFile handles GET /api/pux/file — returns the content of a single file.
-// Query params: project (required), path (required, relative to project root)
 func (h *PuxHandler) GetProjectFile(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
-	projectPath := requireProject(w, r, h.db)
-	if projectPath == "" {
+	fs := requireProjectFS(w, r, h.db, h.sshManager)
+	if fs == nil {
 		return
 	}
 	if relPath == "" {
@@ -40,15 +60,7 @@ func (h *PuxHandler) GetProjectFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Security: ensure the resolved path stays within the project directory
-	absPath := filepath.Join(projectPath, relPath)
-	absPath, err := filepath.Abs(absPath)
-	if err != nil || !strings.HasPrefix(absPath, projectPath) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path escapes project directory"})
-		return
-	}
-
-	data, err := os.ReadFile(absPath)
+	data, err := fs.ReadFile(relPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
@@ -58,8 +70,7 @@ func (h *PuxHandler) GetProjectFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serve image files with correct MIME type so the frontend can use the URL
-	// directly in an <img> tag instead of routing through Monaco.
+	// Serve image files with correct MIME type
 	if ct := imageContentType(relPath); ct != "" {
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "no-cache")
@@ -72,38 +83,26 @@ func (h *PuxHandler) GetProjectFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // SaveProjectFile handles PUT /api/pux/file — writes content to a file.
-// Body: JSON { "project": "...", "path": "...", "content": "..." }
-// Also handles POST /api/pux/file with "create" mode — creates an empty file.
 func (h *PuxHandler) SaveProjectFile(w http.ResponseWriter, r *http.Request) {
 	req, ok := decodeReq[struct {
 		Project string `json:"project"`
 		Path    string `json:"path"`
 		Content string `json:"content"`
 	}](w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	if req.Path == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
 		return
 	}
 
-	projectPath := requireProjectBody(w, req.Project, h.db)
-	if projectPath == "" {
+	fs := requireProjectFSBody(w, req.Project, h.db, h.sshManager)
+	if fs == nil {
 		return
 	}
 
-	absPath := filepath.Join(projectPath, req.Path)
-	absPath, err := filepath.Abs(absPath)
-	if err != nil || !strings.HasPrefix(absPath, projectPath) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path escapes project directory"})
-		return
-	}
-
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	if err := os.WriteFile(absPath, []byte(req.Content), 0o644); err != nil {
+	if err := fs.WriteFile(req.Path, []byte(req.Content)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -112,42 +111,29 @@ func (h *PuxHandler) SaveProjectFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateProjectFile handles POST /api/pux/file/create — creates a new empty file.
-// Body: JSON { "project": "...", "path": "..." }
 func (h *PuxHandler) CreateProjectFile(w http.ResponseWriter, r *http.Request) {
 	req, ok := decodeReq[struct {
 		Project string `json:"project"`
 		Path    string `json:"path"`
 	}](w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	if req.Path == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
 		return
 	}
 
-	projectPath := requireProjectBody(w, req.Project, h.db)
-	if projectPath == "" {
+	fs := requireProjectFSBody(w, req.Project, h.db, h.sshManager)
+	if fs == nil {
 		return
 	}
 
-	absPath := filepath.Join(projectPath, req.Path)
-	absPath, err := filepath.Abs(absPath)
-	if err != nil || !strings.HasPrefix(absPath, projectPath) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path escapes project directory"})
-		return
-	}
-
-	// Check if already exists
-	if _, err := os.Stat(absPath); err == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "file already exists"})
-		return
-	}
-
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	if err := os.WriteFile(absPath, []byte{}, 0o644); err != nil {
+	if err := fs.CreateFile(req.Path); err != nil {
+		if os.IsExist(err) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "file already exists"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -156,49 +142,30 @@ func (h *PuxHandler) CreateProjectFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // MoveProjectFile handles POST /api/pux/file/move — moves/renames a file.
-// Body: JSON { "project": "...", "from": "...", "to": "..." }
 func (h *PuxHandler) MoveProjectFile(w http.ResponseWriter, r *http.Request) {
 	req, ok := decodeReq[struct {
 		Project string `json:"project"`
 		From    string `json:"from"`
 		To      string `json:"to"`
 	}](w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	if req.From == "" || req.To == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
 		return
 	}
 
-	projectPath := requireProjectBody(w, req.Project, h.db)
-	if projectPath == "" {
+	fs := requireProjectFSBody(w, req.Project, h.db, h.sshManager)
+	if fs == nil {
 		return
 	}
 
-	fromAbs := filepath.Join(projectPath, req.From)
-	fromAbs, err := filepath.Abs(fromAbs)
-	if err != nil || !strings.HasPrefix(fromAbs, projectPath) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "source path escapes project directory"})
-		return
-	}
-
-	toAbs := filepath.Join(projectPath, req.To)
-	toAbs, err = filepath.Abs(toAbs)
-	if err != nil || !strings.HasPrefix(toAbs, projectPath) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "destination path escapes project directory"})
-		return
-	}
-
-	if _, err := os.Stat(fromAbs); os.IsNotExist(err) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "source file not found"})
-		return
-	}
-
-	if err := os.MkdirAll(filepath.Dir(toAbs), 0o755); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	if err := os.Rename(fromAbs, toAbs); err != nil {
+	if err := fs.MoveFile(req.From, req.To); err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "source file not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -206,12 +173,13 @@ func (h *PuxHandler) MoveProjectFile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "from": req.From, "to": req.To})
 }
 
-// DeleteProjectFile handles DELETE /api/pux/file — moves file to .pux/trash/ for undo.
-// Query params: project (required), path (required)
+// DeleteProjectFile handles DELETE /api/pux/file — deletes a file.
+// For local projects: moves to .pux/trash/ for undo.
+// For SSH projects: permanent delete (no trash on remote).
 func (h *PuxHandler) DeleteProjectFile(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
-	projectPath := requireProject(w, r, h.db)
-	if projectPath == "" {
+	fs := requireProjectFS(w, r, h.db, h.sshManager)
+	if fs == nil {
 		return
 	}
 	if relPath == "" {
@@ -219,44 +187,33 @@ func (h *PuxHandler) DeleteProjectFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absPath := filepath.Join(projectPath, relPath)
-	absPath, err := filepath.Abs(absPath)
-	if err != nil || !strings.HasPrefix(absPath, projectPath) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path escapes project directory"})
-		return
-	}
-
-	if _, err := os.Stat(absPath); os.IsNotExist(err) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
-		return
-	}
-
-	// Move to .pux/trash/<timestamp>_<filename> instead of deleting
-	trashDir := filepath.Join(projectPath, ".pux", "trash")
-	os.MkdirAll(trashDir, 0o755)
-
-	name := filepath.Base(absPath)
-	trashPath := filepath.Join(trashDir, fmt.Sprintf("%d_%s", time.Now().UnixMilli(), name))
-
-	if err := os.Rename(absPath, trashPath); err != nil {
+	trashPath, err := fs.DeleteFile(relPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status":    "ok",
-		"trashPath": trashPath,
-	})
+	resp := map[string]string{"status": "ok"}
+	if trashPath != "" {
+		resp["trashPath"] = trashPath
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // RestoreProjectFile handles POST /api/pux/file/restore — restores from .pux/trash/.
-// Body: JSON { "project": "...", "trashPath": "..." }
+// Only supported for local projects.
 func (h *PuxHandler) RestoreProjectFile(w http.ResponseWriter, r *http.Request) {
 	req, ok := decodeReq[struct {
 		Project   string `json:"project"`
 		TrashPath string `json:"trashPath"`
 	}](w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	if req.TrashPath == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "trashPath is required"})
 		return
@@ -287,7 +244,7 @@ func (h *PuxHandler) RestoreProjectFile(w http.ResponseWriter, r *http.Request) 
 		originalName = trashName[underscoreIdx+1:]
 	}
 
-	// Restore to project root (best we can do without tracking original path)
+	// Restore to project root
 	restorePath := filepath.Join(projectPath, originalName)
 	if err := os.Rename(absTrash, restorePath); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -295,83 +252,12 @@ func (h *PuxHandler) RestoreProjectFile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
-		"status":      "ok",
-		"restoredTo":  restorePath,
+		"status":     "ok",
+		"restoredTo": restorePath,
 	})
 }
 
-// ── File tree builder ──
-
-type FileNode struct {
-	Name     string      `json:"name"`
-	Type     string      `json:"type"` // "file" or "dir"
-	Path     string      `json:"path"`
-	Children []FileNode  `json:"children,omitempty"`
-}
-
-// Directories and files to skip when listing.
-var skipNames = map[string]bool{
-	"node_modules": true,
-	".git":         true,
-	"__pycache__":  true,
-	".next":        true,
-	"dist":         true,
-	".cache":       true,
-	"vendor":       true,
-	".pux":         true,
-	".DS_Store":    true,
-}
-
-func buildFileTree(root, currentPath string, maxDepth int) ([]FileNode, error) {
-	if maxDepth <= 0 {
-		return nil, nil
-	}
-
-	entries, err := os.ReadDir(currentPath)
-	if err != nil {
-		return nil, fmt.Errorf("read dir %s: %w", currentPath, err)
-	}
-
-	var nodes []FileNode
-	for _, entry := range entries {
-		name := entry.Name()
-
-		// Skip hidden files and known noise
-		if strings.HasPrefix(name, ".") || skipNames[name] {
-			continue
-		}
-
-		fullPath := filepath.Join(currentPath, name)
-		relPath, _ := filepath.Rel(root, fullPath)
-
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-
-		if info.IsDir() {
-			children, _ := buildFileTree(root, fullPath, maxDepth-1)
-			nodes = append(nodes, FileNode{
-				Name:     name,
-				Type:     "dir",
-				Path:     relPath,
-				Children: children,
-			})
-		} else {
-			// Skip files larger than 1MB
-			if info.Size() > 1_000_000 {
-				continue
-			}
-			nodes = append(nodes, FileNode{
-				Name: name,
-				Type: "file",
-				Path: relPath,
-			})
-		}
-	}
-
-	return nodes, nil
-}
+// ── Helpers ──
 
 // imageContentType returns the MIME type for known image extensions, or "".
 func imageContentType(path string) string {

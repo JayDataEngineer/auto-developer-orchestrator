@@ -183,7 +183,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		projectSet[p.Name] = true
 	}
 
-	// Filter to only projects that resolve to an actual directory
+	// Filter to only projects that resolve to an actual directory or SSH path
 	type projectInfo struct {
 		Name         string `json:"name"`
 		Path         string `json:"path,omitempty"`
@@ -191,10 +191,22 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		Description  string `json:"description,omitempty"`
 		Version      string `json:"version,omitempty"`
 	}
+	// Build lookup for custom projects by name (for SSH path resolution)
+	customByName := make(map[string]string)
+	for _, p := range customProjects {
+		customByName[p.Name] = p.Path
+	}
 	// Resolve paths and deduplicate — only keep one project per unique path
 	seenPaths := make(map[string]string) // path → first project name
 	projects := make([]projectInfo, 0, len(projectSet))
 	for project := range projectSet {
+		// Try custom project path first (handles SSH urls)
+		if customPath, ok := customByName[project]; ok && strings.Contains(customPath, "://") {
+			// SSH/remote project — always include
+			seenPaths[customPath] = project
+			projects = append(projects, projectInfo{Name: project, Path: customPath})
+			continue
+		}
 		dir := resolveProjectPath(project, h.db)
 		if dir == "" {
 			continue

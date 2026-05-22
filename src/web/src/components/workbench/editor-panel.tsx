@@ -22,6 +22,8 @@ import {
 	FilePlus2Icon,
 	FileMinusIcon,
 	RefreshCwIcon,
+	ServerIcon,
+	WifiOffIcon,
 } from "lucide-react";
 import {
 	ContextMenu,
@@ -296,18 +298,85 @@ export function EditorPanel() {
 	const [diffs, setDiffs] = useState<FileDiff[]>([]);
 	const [diffLoading, setDiffLoading] = useState(false);
 	const [activeDiffPath, setActiveDiffPath] = useState("");
+	const [sshStatus, setSshStatus] = useState<"unknown" | "connected" | "disconnected">("unknown");
+	const [isSshProject, setIsSshProject] = useState(false);
+	const [sshConnecting, setSshConnecting] = useState(false);
 
 	// Refresh file tree
 	const refreshTree = useCallback(() => {
 		if (!activeProject) return;
 		fetch(`/api/pux/files?project=${encodeURIComponent(activeProject)}`)
-			.then((r) => (r.ok ? r.json() : []))
+			.then((r) => {
+				if (r.status === 503) {
+					setSshStatus("disconnected");
+					return [];
+				}
+				return r.ok ? r.json() : [];
+			})
 			.then((data) => {
 				const tree = Array.isArray(data) ? data : [];
 				setFiles(tree);
+				if (tree.length > 0) setSshStatus("connected");
 			})
 			.catch(() => {});
 	}, [activeProject]);
+
+	// SSH auto-connect using the project's stored credentials
+	const connectSsh = useCallback(async (user: string, host: string, port: string) => {
+		setSshConnecting(true);
+		try {
+			const resp = await fetch("/api/pux/ssh/connect", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ user, host, port, password: "", keyData: "" }),
+			});
+			if (resp.ok) {
+				setSshStatus("connected");
+				refreshTree();
+			} else {
+				setSshStatus("disconnected");
+			}
+		} catch {
+			setSshStatus("disconnected");
+		} finally {
+			setSshConnecting(false);
+		}
+	}, [refreshTree]);
+
+	// Detect if project is SSH and check connection status
+	useEffect(() => {
+		if (!activeProject) {
+			setIsSshProject(false);
+			setSshStatus("unknown");
+			return;
+		}
+		fetch(`/api/pux/project-info?project=${encodeURIComponent(activeProject)}`)
+			.then((r) => r.ok ? r.json() : null)
+			.then((info) => {
+				if (info?.type === "ssh") {
+					setIsSshProject(true);
+					// Try to load files — if 503, we know SSH is disconnected
+					fetch(`/api/pux/files?project=${encodeURIComponent(activeProject)}`)
+						.then((r) => {
+							if (r.status === 503) {
+								setSshStatus("disconnected");
+								connectSsh(info.user, info.host, info.port);
+							} else {
+								setSshStatus("connected");
+							}
+							return r.ok ? r.json() : [];
+						})
+						.then((data) => {
+							if (data && Array.isArray(data)) setFiles(data);
+						})
+						.catch(() => {});
+				} else {
+					setIsSshProject(false);
+					setSshStatus("unknown");
+				}
+			})
+			.catch(() => {});
+	}, [activeProject, connectSsh]);
 
 	// Load git diffs
 	const loadDiffs = useCallback(() => {
@@ -622,6 +691,15 @@ export function EditorPanel() {
 					<div className="flex h-7 items-center justify-between border-b border-border px-2">
 						<div className="flex items-center gap-1">
 							<span className="text-[11px] font-medium text-muted-foreground">{diffMode ? "Changes" : "Files"}</span>
+							{isSshProject && !diffMode && (
+								<span className={cn(
+									"flex items-center gap-0.5 text-[10px]",
+									sshStatus === "connected" ? "text-emerald-500" : "text-muted-foreground",
+								)}>
+									<ServerIcon size={10} />
+									{sshStatus === "connected" ? "SSH" : sshConnecting ? "..." : ""}
+								</span>
+							)}
 							{!diffMode && (
 							<button
 								onClick={() => {
@@ -726,10 +804,31 @@ export function EditorPanel() {
 							))
 						)
 					) : files.length === 0 ? (
-						<div className="flex h-full items-center justify-center">
-							<span className="px-2 text-center text-[11px] text-muted-foreground">
-								Empty project
-							</span>
+						<div className="flex h-full flex-col items-center justify-center gap-2 px-3">
+							{isSshProject && sshStatus === "disconnected" ? (
+								<>
+									<WifiOffIcon className="size-5 text-muted-foreground/50" />
+									<span className="text-[11px] text-muted-foreground text-center">SSH disconnected</span>
+									<button
+										onClick={() => {
+											fetch(`/api/pux/project-info?project=${encodeURIComponent(activeProject)}`)
+												.then((r) => r.ok ? r.json() : null)
+												.then((info) => {
+													if (info) connectSsh(info.user, info.host, info.port);
+												});
+										}}
+										disabled={sshConnecting}
+										className="flex items-center gap-1 rounded bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/20 disabled:opacity-50"
+									>
+										<ServerIcon size={10} />
+										{sshConnecting ? "Connecting..." : "Reconnect"}
+									</button>
+								</>
+							) : (
+								<span className="px-2 text-center text-[11px] text-muted-foreground">
+									Empty project
+								</span>
+							)}
 						</div>
 					) : (
 						files.map((entry) => (

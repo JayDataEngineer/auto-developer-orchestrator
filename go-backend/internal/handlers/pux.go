@@ -197,6 +197,7 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/fork", h.Fork)
 	r.Get("/files", h.GetProjectFiles)
 	r.Get("/file", h.GetProjectFile)
+	r.Get("/project-info", h.GetProjectInfo)
 	r.Put("/file", h.SaveProjectFile)
 	r.Post("/file/create", h.CreateProjectFile)
 	r.Post("/file/move", h.MoveProjectFile)

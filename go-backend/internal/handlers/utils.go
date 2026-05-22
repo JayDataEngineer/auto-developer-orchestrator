@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	puxssh "github.com/auto-developer-orchestrator/backend/internal/ssh"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 )
 
@@ -86,6 +87,106 @@ func resolveProjectPath(project string, db *storage.Database) string {
 	}
 
 	return ""
+}
+
+// resolveProjectFS resolves a project name to a ProjectFS (local or SSH).
+// Used by file operation handlers that need filesystem access.
+func resolveProjectFS(project string, db *storage.Database, sshMgr *puxssh.SessionManager) (ProjectFS, error) {
+	if project == "" {
+		return nil, fmt.Errorf("project is required")
+	}
+
+	// If project is an absolute local path, use it directly
+	if filepath.IsAbs(project) && !strings.Contains(project, "://") {
+		if info, err := os.Stat(project); err == nil && info.IsDir() {
+			return NewLocalFS(project), nil
+		}
+	}
+
+	// Check custom projects from DB
+	if db != nil {
+		ctx := context.Background()
+		customProjects, err := db.GetCustomProjects(ctx)
+		if err == nil {
+			for _, p := range customProjects {
+				if p.Name == project {
+					// SSH project
+					if strings.Contains(p.Path, "://") {
+						info, ok := ParseSSHURL(p.Path)
+						if !ok {
+							return nil, fmt.Errorf("invalid SSH URL: %s", p.Path)
+						}
+						if sshMgr == nil {
+							return nil, fmt.Errorf("SSH not available for project %s", project)
+						}
+						return NewSshFS(info, sshMgr), nil
+					}
+					// Local project
+					if info, err := os.Stat(p.Path); err == nil && info.IsDir() {
+						return NewLocalFS(p.Path), nil
+					}
+					return nil, fmt.Errorf("project directory not found: %s", p.Path)
+				}
+			}
+		}
+	}
+
+	// Fall back to PROJECT_ROOT/<project>
+	projectsDir := os.Getenv("PROJECT_ROOT")
+	if projectsDir == "" {
+		projectsDir = "/app/projects"
+	}
+
+	candidate := filepath.Join(projectsDir, "projects", project)
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return NewLocalFS(candidate), nil
+	}
+
+	candidate = filepath.Join(projectsDir, project)
+	if candidate != projectsDir {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return NewLocalFS(candidate), nil
+		}
+	}
+
+	return nil, fmt.Errorf("project not found: %s", project)
+}
+
+// requireProjectFS resolves a project from query params to a ProjectFS.
+func requireProjectFS(w http.ResponseWriter, r *http.Request, db *storage.Database, sshMgr *puxssh.SessionManager) ProjectFS {
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project query param required"})
+		return nil
+	}
+	fs, err := resolveProjectFS(project, db, sshMgr)
+	if err != nil {
+		status := http.StatusNotFound
+		if strings.Contains(err.Error(), "SSH not available") {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return nil
+	}
+	return fs
+}
+
+// requireProjectFSBody resolves a project from request body to a ProjectFS.
+func requireProjectFSBody(w http.ResponseWriter, project string, db *storage.Database, sshMgr *puxssh.SessionManager) ProjectFS {
+	if project == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project is required"})
+		return nil
+	}
+	fs, err := resolveProjectFS(project, db, sshMgr)
+	if err != nil {
+		status := http.StatusNotFound
+		if strings.Contains(err.Error(), "SSH not available") {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return nil
+	}
+	return fs
 }
 
 // GitHubTokenStore provides thread-safe storage for the GitHub API token.

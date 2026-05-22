@@ -128,6 +128,17 @@ func (sm *SessionManager) GetClient(sessionKey string) (*ssh.Client, error) {
 	return client, nil
 }
 
+// GetClientByKey returns the SSH client for a connection key ("user@host:port").
+// Used by SshFS to find the underlying connection without needing a session key.
+func (sm *SessionManager) GetClientByKey(clientKey string) (*ssh.Client, bool) {
+	val, ok := sm.mu.Load(clientKey)
+	if !ok {
+		return nil, false
+	}
+	client, ok := val.(*ssh.Client)
+	return client, ok
+}
+
 // Disconnect closes an SSH session.
 func (sm *SessionManager) Disconnect(sessionKey string) error {
 	clientKeyVal, ok := sm.sessions.LoadAndDelete(sessionKey)
