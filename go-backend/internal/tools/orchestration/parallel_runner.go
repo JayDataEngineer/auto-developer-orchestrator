@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1844,5 +1845,29 @@ func discoverProjectContext(projectDir string) string {
 		}
 	}
 
+	// Inject git status so sub-agents know what's changed
+	if gitDir := filepath.Join(projectDir, ".git"); dirExists(gitDir) {
+		if status, err := exec.Command("git", "-C", projectDir, "status", "--short").Output(); err == nil && len(status) > 0 {
+			statusStr := string(status)
+			if len(statusStr) > 1000 {
+				statusStr = statusStr[:1000] + "\n...(truncated)"
+			}
+			b.WriteString("Git status:\n" + statusStr + "\n")
+		}
+		if diff, err := exec.Command("git", "-C", projectDir, "diff", "--stat", "HEAD").Output(); err == nil && len(diff) > 0 {
+			diffStr := string(diff)
+			if len(diffStr) > 1000 {
+				diffStr = diffStr[:1000] + "\n...(truncated)"
+			}
+			b.WriteString("Git diff --stat:\n" + diffStr + "\n")
+		}
+	}
+
 	return b.String()
+}
+
+// dirExists reports whether the path is an existing directory.
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }

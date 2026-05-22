@@ -3,6 +3,8 @@ package file
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,10 +13,47 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 )
+
+// FileReadTracker records content hashes on file_read and validates them on file_edit.
+// This detects concurrent modifications between read and edit (GAP-D).
+type FileReadTracker struct {
+	mu    sync.RWMutex
+	hashes map[string]string // path → SHA-256 of last-read content
+}
+
+func NewFileReadTracker() *FileReadTracker {
+	return &FileReadTracker{hashes: make(map[string]string)}
+}
+
+func (t *FileReadTracker) Record(path, content string) {
+	h := sha256.Sum256([]byte(content))
+	t.mu.Lock()
+	t.hashes[path] = hex.EncodeToString(h[:])
+	t.mu.Unlock()
+}
+
+// CheckAndInvalidate returns nil if the file hasn't changed since last read.
+// Returns an error if the content differs. Removes the entry after check.
+func (t *FileReadTracker) CheckAndInvalidate(path, currentContent string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	expected, ok := t.hashes[path]
+	if !ok {
+		return nil // no prior read recorded — allow edit
+	}
+	delete(t.hashes, path) // one-shot: invalidate after check
+	h := sha256.Sum256([]byte(currentContent))
+	actual := hex.EncodeToString(h[:])
+	if actual != expected {
+		return fmt.Errorf("file %s was modified after last read — re-read before editing", path)
+	}
+	return nil
+}
 
 // SandboxFileOps provides file operation capabilities inside a sandbox.
 type SandboxFileOps interface {
@@ -217,12 +256,17 @@ func (s *SimpleSandboxOps) absPath(p string) string {
 
 // ReadTool implements core.Tool for reading files.
 type ReadTool struct {
-	ops   SandboxFileOps
-	media MediaDescriber
+	ops     SandboxFileOps
+	media   MediaDescriber
+	tracker *FileReadTracker // optional: records content hash for edit validation
 }
 
 func NewReadTool(ops SandboxFileOps, media MediaDescriber) *ReadTool {
 	return &ReadTool{ops: ops, media: media}
+}
+
+func NewReadToolWithTracker(ops SandboxFileOps, media MediaDescriber, tracker *FileReadTracker) *ReadTool {
+	return &ReadTool{ops: ops, media: media, tracker: tracker}
 }
 
 func (t *ReadTool) Name() string        { return "file_read" }
@@ -269,6 +313,11 @@ func (t *ReadTool) Execute(ctx context.Context, args map[string]any) (any, error
 	content, err := t.ops.ReadFile(ctx, path)
 	if err != nil {
 		return nil, err
+	}
+
+	// Record content hash for concurrent modification detection
+	if t.tracker != nil {
+		t.tracker.Record(path, content)
 	}
 
 	// Apply offset: skip to the requested line (1-indexed → 0-indexed slice)
@@ -445,11 +494,16 @@ func (t *WriteTool) Execute(ctx context.Context, args map[string]any) (any, erro
 
 // EditTool implements core.Tool for editing files.
 type EditTool struct {
-	ops SandboxFileOps
+	ops     SandboxFileOps
+	tracker *FileReadTracker // optional: validates content hasn't changed since read
 }
 
 func NewEditTool(ops SandboxFileOps) *EditTool {
 	return &EditTool{ops: ops}
+}
+
+func NewEditToolWithTracker(ops SandboxFileOps, tracker *FileReadTracker) *EditTool {
+	return &EditTool{ops: ops, tracker: tracker}
 }
 
 func (t *EditTool) Name() string        { return "file_edit" }
@@ -480,6 +534,17 @@ func (t *EditTool) Execute(ctx context.Context, args map[string]any) (any, error
 	replaceAll := false
 	if v, ok := args["replace_all"].(bool); ok {
 		replaceAll = v
+	}
+	// Validate concurrent modification: if tracker is set and the file was
+	// previously read, check the current content matches the recorded hash.
+	if t.tracker != nil {
+		currentContent, err := t.ops.ReadFile(ctx, path)
+		if err != nil {
+			return nil, core.NewToolError("file_edit", fmt.Sprintf("cannot read file for validation: %v", err))
+		}
+		if err := t.tracker.CheckAndInvalidate(path, currentContent); err != nil {
+			return nil, core.NewToolError("file_edit", err.Error())
+		}
 	}
 	result, err := t.ops.EditFile(ctx, path, oldStr, newStr, replaceAll)
 	if err != nil {

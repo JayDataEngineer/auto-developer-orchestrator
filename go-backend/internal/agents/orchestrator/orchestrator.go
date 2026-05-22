@@ -136,8 +136,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 	ctoTools := []core.Tool{
 		newBashTool(cfg),
-		file.NewReadTool(hostFileOps, mediaDescriber),
 	}
+
+	// Shared tracker for concurrent modification detection between read and edit
+	tracker := file.NewFileReadTracker()
+	ctoTools = append(ctoTools, file.NewReadToolWithTracker(hostFileOps, mediaDescriber, tracker))
 
 	// task_output tool — available when TaskManager is wired in
 	if cfg.TaskMgr != nil {
@@ -146,7 +149,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 	ctoTools = append(ctoTools,
 		file.NewWriteTool(hostFileOps),
-		file.NewEditTool(hostFileOps),
+		file.NewEditToolWithTracker(hostFileOps, tracker),
 		file.NewGrepTool(hostFileOps),
 		file.NewGlobTool(hostFileOps),
 		meta.NewWaitTool(),
@@ -398,11 +401,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			if tier == "native" {
 				hostExec := &adapters.HostExecutor{WorkDir: cfg.ProjectDir}
 				hostFileOps := &file.SimpleSandboxOps{BasePath: cfg.ProjectDir}
+				nativeTracker := file.NewFileReadTracker()
 				nativeReg := core.NewToolRegistry([]core.Tool{
 					bash.New(hostExec),
-					file.NewReadTool(hostFileOps, mediaDescriber),
+					file.NewReadToolWithTracker(hostFileOps, mediaDescriber, nativeTracker),
 					file.NewWriteTool(hostFileOps),
-					file.NewEditTool(hostFileOps),
+					file.NewEditToolWithTracker(hostFileOps, nativeTracker),
 					file.NewGrepTool(hostFileOps),
 					file.NewGlobTool(hostFileOps),
 					python.NewPythonTool(python.WithWorkDir(cfg.ProjectDir)),
