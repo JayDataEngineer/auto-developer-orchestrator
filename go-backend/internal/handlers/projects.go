@@ -468,6 +468,12 @@ func (h *ProjectHandler) Remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Also clean up all conversations so the project doesn't reappear via polling
+	if err := h.db.ClearProjectConversations(r.Context(), req.Name); err != nil {
+		h.logger.Warn("Failed to clear project conversations", zap.String("name", req.Name), zap.Error(err))
+		// non-fatal — project is already removed
+	}
+
 	h.logger.Info("Project removed", zap.String("name", req.Name))
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,

@@ -401,6 +401,20 @@ func (d *Database) ClearConversationHistory(ctx context.Context, project, agentI
 	return nil
 }
 
+// ClearProjectConversations deletes all messages and titles for every conversation in a project.
+func (d *Database) ClearProjectConversations(ctx context.Context, project string) error {
+	_, err := d.db.ExecContext(ctx,
+		Rebind(d.dialect, `DELETE FROM conversation_messages WHERE project = ?`),
+		project)
+	if err != nil {
+		return err
+	}
+	_, _ = d.db.ExecContext(ctx,
+		Rebind(d.dialect, `DELETE FROM conversation_titles WHERE project = ?`),
+		project)
+	return nil
+}
+
 // CompactSession removes old tool-result messages for a project+agent, keeping the most recent ones.
 // Returns the number of messages compacted.
 func (d *Database) CompactSession(ctx context.Context, project, agentID string) (int, error) {
