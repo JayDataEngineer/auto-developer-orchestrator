@@ -1,4 +1,6 @@
 import { relativeTime } from "@pux/shared";
+import { usePuxStore } from "@/lib/pux-store";
+import { useCallback } from "react";
 import {
 	Clock,
 	AlertTriangle,
@@ -22,6 +24,7 @@ interface FormData {
 	everyMinutes: string;
 	model: string;
 	agentId: string;
+	project: string;
 	description: string;
 	sandboxOnly: boolean;
 }
@@ -36,6 +39,7 @@ const emptyForm: FormData = {
 	everyMinutes: "30",
 	model: "",
 	agentId: "",
+	project: "",
 	description: "",
 	sandboxOnly: false,
 };
@@ -72,12 +76,12 @@ function formatSchedule(job: any): string {
 	return "manual";
 }
 
-function buildBody(form: FormData): Record<string, any> {
+function buildBody(form: FormData, project: string): Record<string, any> {
 	const body: Record<string, any> = {
 		name: form.name.trim(),
 		message: form.message.trim(),
 		scheduleType: form.scheduleType,
-		project: "default",
+		project: form.project || project || "default",
 		sandboxOnly: form.sandboxOnly,
 	};
 	if (form.description.trim()) body.description = form.description.trim();
@@ -99,6 +103,7 @@ function jobToForm(job: any): FormData {
 		everyMinutes: job.everySeconds ? String(Math.floor(job.everySeconds / 60) || 30) : "30",
 		model: job.model || "",
 		agentId: job.agentId || "",
+		project: job.project || "",
 		description: job.description || "",
 		sandboxOnly: job.sandboxOnly || false,
 	};
@@ -109,6 +114,7 @@ function jobToForm(job: any): FormData {
 const schedulerFields: FieldConfig<FormData>[] = [
 	{ key: "name", type: "text", label: "Name", placeholder: "daily-standup", required: true },
 	{ key: "message", type: "textarea", label: "Prompt", placeholder: "What should this job do?", rows: 3, required: true },
+	{ key: "project", type: "text", label: "Project", placeholder: "Uses active project if empty" },
 	{ key: "model", type: "model", label: "Model" },
 	{ key: "agentId", type: "worker", label: "Agent" },
 	{
@@ -128,6 +134,9 @@ const schedulerFields: FieldConfig<FormData>[] = [
 // ── Panel ──
 
 export function SchedulerPanel() {
+	const activeProject = usePuxStore((s) => s.activeProject);
+	const formToBody = useCallback((form: FormData) => buildBody(form, activeProject), [activeProject]);
+
 	return (
 		<ConfigPanel<FormData>
 			fetchUrl="/api/scheduler/"
@@ -136,7 +145,7 @@ export function SchedulerPanel() {
 			deleteUrl={(id) => `/api/scheduler/${id}`}
 			fields={schedulerFields}
 			emptyForm={emptyForm}
-			formToBody={buildBody}
+			formToBody={formToBody}
 			responseToForm={jobToForm}
 			itemDef={{
 				id: (job: any) => job.id,
@@ -158,6 +167,7 @@ export function SchedulerPanel() {
 					return parts.join(" · ");
 				},
 				badges: (job: any) => [
+					{ text: job.project || "default", variant: "outline" as const },
 					...(job.agentId ? [{ text: `→ ${job.agentId}`, variant: "outline" as const }] : []),
 					{ text: job.scheduleType, variant: "secondary" as const },
 					...(job.sandboxOnly ? [{ text: "sandbox", variant: "outline" as const }] : []),
