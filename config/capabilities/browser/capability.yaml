@@ -1,4 +1,4 @@
-description: "Browser automation via CDP — navigate, click, type, extract"
+description: "Browser automation via CDP — navigate, interact, extract, download"
 tools:
   - bash
   - browse_to
@@ -11,3 +11,6 @@ tools:
   - get_storage
   - set_storage
   - clear_storage
+  - evaluate_js
+  - read_page
+  - download_file

@@ -66,7 +66,9 @@ func (r *ToolRegistry) RegisterAlias(alias, canonical string) {
 // RegisterCommonAliases adds standard aliases so models can call tools by common alternate names.
 // Canonical tool names are: bash, file_read, file_write, file_edit, file_grep, file_glob, etc.
 // Aliases let models use natural names like write_file, read_file, etc.
+// Each alias is guarded: if the alias OR canonical name is not in the registry, it's a no-op.
 func (r *ToolRegistry) RegisterCommonAliases() {
+	// Bash variants
 	r.RegisterAlias("bash_execute", "bash")
 	r.RegisterAlias("execute_bash", "bash")
 	r.RegisterAlias("execute_command", "bash")
@@ -77,10 +79,8 @@ func (r *ToolRegistry) RegisterCommonAliases() {
 	r.RegisterAlias("edit_file", "file_edit")
 	r.RegisterAlias("grep", "file_grep")
 	r.RegisterAlias("glob", "file_glob")
+	// Browser navigation shortcut
 	r.RegisterAlias("navigate", "browse_to")
-	r.RegisterAlias("click", "click_element")
-	r.RegisterAlias("type_text", "type")
-	r.RegisterAlias("search", "search_web")
 }
 
 // Get returns a tool by name, resolving aliases.

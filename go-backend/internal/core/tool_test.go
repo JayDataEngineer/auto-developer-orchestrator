@@ -76,9 +76,7 @@ func TestToolRegistry_RegisterCommonAliases(t *testing.T) {
 		&stubTool{name: "file_edit"},
 		&stubTool{name: "file_grep"},
 		&stubTool{name: "file_glob"},
-		&stubTool{name: "click_element"},
-		&stubTool{name: "type"},
-		&stubTool{name: "search_web"},
+		&stubTool{name: "browse_to"},
 	})
 	reg.RegisterCommonAliases()
 
@@ -95,9 +93,7 @@ func TestToolRegistry_RegisterCommonAliases(t *testing.T) {
 		{"edit_file", "file_edit"},
 		{"grep", "file_grep"},
 		{"glob", "file_glob"},
-		{"click", "click_element"},
-		{"type_text", "type"},
-		{"search", "search_web"},
+		{"navigate", "browse_to"},
 	}
 	for _, a := range aliases {
 		if reg.Get(a.alias) == nil {
@@ -105,7 +101,7 @@ func TestToolRegistry_RegisterCommonAliases(t *testing.T) {
 		}
 	}
 	// Also verify direct canonical names still work
-	for _, name := range []string{"bash", "file_read", "file_write", "file_edit", "file_grep", "file_glob"} {
+	for _, name := range []string{"bash", "file_read", "file_write", "file_edit", "file_grep", "file_glob", "browse_to"} {
 		if reg.Get(name) == nil {
 			t.Errorf("canonical tool %q should be accessible directly", name)
 		}
@@ -158,25 +154,25 @@ func TestToolRegistry_Execute_WithAlias(t *testing.T) {
 }
 
 // TestToolRegistry_AliasNoShadowMCP verifies that RegisterCommonAliases does not
-// override real MCP tools with the same name (e.g., MCP "search" tool must not be
-// redirected to non-existent "search_web").
+// override real MCP tools with the same name (e.g., MCP "grep" tool must not be
+// redirected to non-existent "file_grep" — "grep" as a real tool wins over alias).
 func TestToolRegistry_AliasNoShadowMCP(t *testing.T) {
-	mcpSearchTool := &stubTool{
-		name: "search",
+	mcpGrepTool := &stubTool{
+		name: "grep",
 		execute: func(ctx context.Context, args map[string]any) (any, error) {
-			return "mcp_search_result", nil
+			return "mcp_grep_result", nil
 		},
 	}
-	reg := NewToolRegistry([]Tool{mcpSearchTool})
+	reg := NewToolRegistry([]Tool{mcpGrepTool})
 	reg.RegisterCommonAliases()
 
-	// "search" must resolve to the MCP tool, not redirect to "search_web"
-	result, err := reg.Execute(context.Background(), "search", nil)
+	// "grep" must resolve to the MCP tool, not redirect to "file_grep"
+	result, err := reg.Execute(context.Background(), "grep", nil)
 	if err != nil {
-		t.Fatalf("search should resolve to MCP tool, got error: %v", err)
+		t.Fatalf("grep should resolve to MCP tool, got error: %v", err)
 	}
-	if result != "mcp_search_result" {
-		t.Errorf("expected MCP search result, got %v", result)
+	if result != "mcp_grep_result" {
+		t.Errorf("expected MCP grep result, got %v", result)
 	}
 }
 

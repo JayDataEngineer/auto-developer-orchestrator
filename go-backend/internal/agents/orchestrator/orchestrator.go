@@ -411,6 +411,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 					file.NewGrepTool(hostFileOps),
 					file.NewGlobTool(hostFileOps),
 					python.NewPythonTool(python.WithWorkDir(cfg.ProjectDir)),
+					eval.NewEvalTool(),
 				})
 				nativeReg.RegisterCommonAliases()
 				return nativeReg

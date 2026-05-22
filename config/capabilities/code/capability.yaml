@@ -1,4 +1,4 @@
-description: "Code operations — file editing, search, and build"
+description: "Code operations — file editing, search, scripting, and build"
 tools:
   - bash
   - file_read
@@ -6,3 +6,5 @@ tools:
   - file_edit
   - file_glob
   - file_grep
+  - python
+  - eval
