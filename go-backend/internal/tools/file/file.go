@@ -535,6 +535,9 @@ func (t *EditTool) Execute(ctx context.Context, args map[string]any) (any, error
 	if v, ok := args["replace_all"].(bool); ok {
 		replaceAll = v
 	}
+	// Normalize smart quotes to ASCII — LLMs sometimes generate curly quotes
+	oldStr = normalizeQuotes(oldStr)
+	newStr = normalizeQuotes(newStr)
 	// Validate concurrent modification: if tracker is set and the file was
 	// previously read, check the current content matches the recorded hash.
 	if t.tracker != nil {
@@ -629,4 +632,16 @@ func (t *GlobTool) Execute(ctx context.Context, args map[string]any) (any, error
 		return nil, err
 	}
 	return map[string]any{"files": result, "pattern": pattern}, nil
+}
+
+// normalizeQuotes converts smart/curly quotes to ASCII equivalents.
+// LLMs sometimes generate these, which breaks exact string matching.
+func normalizeQuotes(s string) string {
+	s = strings.ReplaceAll(s, "\u201c", `"`)  // left double quote
+	s = strings.ReplaceAll(s, "\u201d", `"`)  // right double quote
+	s = strings.ReplaceAll(s, "\u2018", "'")  // left single quote
+	s = strings.ReplaceAll(s, "\u2019", "'")  // right single quote
+	s = strings.ReplaceAll(s, "\u00ab", "<<") // left guillemet
+	s = strings.ReplaceAll(s, "\u00bb", ">>") // right guillemet
+	return s
 }

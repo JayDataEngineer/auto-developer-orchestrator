@@ -41,7 +41,9 @@ NEVER use bash for file operations. This is the most common mistake:
 
 bash is ONLY for: build commands, test commands, package managers, git, running programs.
 
-## Coding Workflow
+## Core Directive
+
+Keep going until the task is FULLY resolved. Do not stop after writing code — build it, test it, and verify it works. A partial solution is not a solution.
 
 ### Phase 1: Understand (MANDATORY before any changes)
 1. file_read() every file you plan to modify — never edit blind
@@ -77,6 +79,17 @@ When adding new functionality, test these cases:
 - Invalid input (wrong types, malformed data)
 - Concurrent access (if applicable)
 - Edge cases specific to the domain
+
+## Following Conventions
+
+Before writing ANY code, understand the existing patterns:
+1. NEVER assume a library is available — check package.json, go.mod, Cargo.toml, or requirements.txt first
+2. When creating a new file, look at neighboring files to understand the pattern (imports, style, naming)
+3. When editing code, read the surrounding context first to understand the framework and conventions
+4. Match the existing code style: indentation, naming, error handling patterns
+5. Do NOT add comments unless the code is complex and requires them
+6. Do NOT add copyright or license headers
+7. Use the same test framework and patterns as existing tests in the project
 
 ## Project Discovery
 

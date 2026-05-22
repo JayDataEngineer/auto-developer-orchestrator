@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -251,6 +252,9 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 		b.WriteString("Do NOT write to /home/ubuntu/ or other paths — they are not persisted to the host. ")
 		b.WriteString("The project files appear at /sandbox/workspace/ and that is the only persistent location.\n")
 		b.WriteString("</workspace_note>")
+
+		// Inject environment info (platform, date) for platform-aware code
+		b.WriteString(fmt.Sprintf("\n\n<env>\nPlatform: %s\nDate: %s\n</env>", runtime.GOOS, time.Now().Format("2006-01-02")))
 
 		// Inject project context — CLAUDE.md, build system hints
 		projectCtx := discoverProjectContext(r.projectDir)
@@ -1795,20 +1799,42 @@ func toolNamesFromSpecs(specs []core.OpenAITool) []string {
 // build, test, and lint the project without guessing.
 func discoverProjectContext(projectDir string) string {
 	var b strings.Builder
+	const maxFileContent = 2000
 
-	// Check for CLAUDE.md — project-specific instructions
-	for _, name := range []string{"CLAUDE.md", "claude.md", ".claude/CLAUDE.md"} {
+	// Check for project instruction files — in priority order
+	for _, name := range []string{
+		"CLAUDE.md", "claude.md", ".claude/CLAUDE.md",
+		"OpenCode.md", "opencode.md",
+		".cursorrules",
+	} {
 		path := filepath.Join(projectDir, name)
 		data, err := os.ReadFile(path)
 		if err == nil {
 			content := string(data)
-			if len(content) > 2000 {
-				content = content[:2000] + "\n...(truncated)"
+			if len(content) > maxFileContent {
+				content = content[:maxFileContent] + "\n...(truncated)"
 			}
-			b.WriteString("CLAUDE.md (" + name + "):\n")
+			b.WriteString("Project instructions (" + name + "):\n")
 			b.WriteString(content)
 			b.WriteString("\n\n")
 			break
+		}
+	}
+
+	// Extract build/test sections from README if no instruction file found
+	if b.Len() == 0 {
+		for _, name := range []string{"README.md", "readme.md", "README.MD"} {
+			path := filepath.Join(projectDir, name)
+			data, err := os.ReadFile(path)
+			if err == nil {
+				content := extractRelevantReadme(string(data), maxFileContent)
+				if content != "" {
+					b.WriteString("README (build/test sections):\n")
+					b.WriteString(content)
+					b.WriteString("\n\n")
+				}
+				break
+			}
 		}
 	}
 
@@ -1821,7 +1847,7 @@ func discoverProjectContext(projectDir string) string {
 		lint    string
 	}
 	systems := []buildSystem{
-		{"go.mod", "Go", "go build ./...", "go test ./...", ""},
+		{"go.mod", "Go", "go build ./...", "go test ./...", "go vet ./..."},
 		{"package.json", "Node.js", "npm run build", "npm test", "npm run lint"},
 		{"Makefile", "Make", "make", "make test", "make lint"},
 		{"Cargo.toml", "Rust", "cargo build", "cargo test", "cargo clippy"},
@@ -1863,6 +1889,28 @@ func discoverProjectContext(projectDir string) string {
 		}
 	}
 
+	// Top-level directory listing so agents know the file structure
+	if entries, err := os.ReadDir(projectDir); err == nil && len(entries) > 0 {
+		var names []string
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".") {
+				continue // skip hidden files
+			}
+			if e.IsDir() {
+				names = append(names, e.Name()+"/")
+			} else {
+				names = append(names, e.Name())
+			}
+			if len(names) >= 30 {
+				names = append(names, "...")
+				break
+			}
+		}
+		if len(names) > 0 {
+			b.WriteString("Files: " + strings.Join(names, ", ") + "\n")
+		}
+	}
+
 	return b.String()
 }
 
@@ -1870,4 +1918,45 @@ func discoverProjectContext(projectDir string) string {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// extractRelevantReadme pulls build, test, install, and usage sections
+// from a README so sub-agents know how to work with the project.
+func extractRelevantReadme(content string, maxLen int) string {
+	// Target section headers that contain useful build/test info
+	keywords := []string{"build", "install", "test", "usage", "run", "getting started", "quick start", "setup", "develop"}
+	lines := strings.Split(content, "\n")
+	var relevant []string
+	inRelevant := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Detect section headers (## or ###)
+		if strings.HasPrefix(trimmed, "##") {
+			headerLower := strings.ToLower(trimmed)
+			inRelevant = false
+			for _, kw := range keywords {
+				if strings.Contains(headerLower, kw) {
+					inRelevant = true
+					break
+				}
+			}
+		}
+		if inRelevant {
+			relevant = append(relevant, line)
+			totalLen := len(strings.Join(relevant, "\n"))
+			if totalLen > maxLen {
+				break
+			}
+		}
+	}
+
+	if len(relevant) == 0 {
+		return ""
+	}
+	result := strings.Join(relevant, "\n")
+	if len(result) > maxLen {
+		result = result[:maxLen] + "\n...(truncated)"
+	}
+	return result
 }

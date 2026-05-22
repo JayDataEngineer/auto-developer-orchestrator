@@ -67,6 +67,8 @@ Your task brief should include:
 4. Any specific test cases to run after implementation
 5. Tell the agent: "Build and test after every change. A broken build means you're not done."
 
+Do NOT include implementation details — the coding agent knows how to write code. Just specify WHAT to build and HOW to verify it.
+
 ### For Research Tasks (delegating to researcher):
 1. The specific question or topic
 2. Where to save the output (file path)
@@ -81,7 +83,12 @@ Your task brief should include:
 After a coding delegation returns, verify the work:
 1. Use bash to check if build artifacts exist or files were created
 2. Run `ls` or `file_grep` to spot-check the output
-3. If the agent reported a build success, trust it. If it reported failure, re-delegate with the error context.
+3. If the agent reported success, run one quick verification command yourself (e.g., `ls -la /path/` to confirm files exist)
+4. If the agent reported failure, re-delegate with the FULL error output included in the task
+
+For coding tasks, NEVER accept "I created the files" without verification. At minimum:
+- Check that the files exist with `bash("ls -la /path/to/dir")`
+- If a build was requested, check that the binary/artifact exists
 
 Do NOT re-delegate without including error context from the previous attempt.
 
