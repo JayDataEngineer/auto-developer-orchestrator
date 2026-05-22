@@ -75,7 +75,19 @@ func (s *PlanStore) Put(ctx context.Context, name string, spec map[string]any) (
 	defer s.mu.Unlock()
 
 	if err := os.MkdirAll(s.dir, 0755); err != nil {
-		return nil, fmt.Errorf("create plans dir: %w", err)
+		// Permission denied? Try fixing the .pux parent dir ownership.
+		// Sandbox containers sometimes create .pux as root.
+		if os.IsPermission(err) {
+			puxDir := filepath.Dir(s.dir) // .pux
+			if fi, statErr := os.Stat(puxDir); statErr == nil && fi.Mode().Perm()&0200 == 0 {
+				_ = os.Chmod(puxDir, 0755)
+			}
+			if retryErr := os.MkdirAll(s.dir, 0755); retryErr != nil {
+				return nil, fmt.Errorf("create plans dir: %w (parent dir may have wrong permissions — try removing .pux/)", retryErr)
+			}
+		} else {
+			return nil, fmt.Errorf("create plans dir: %w", err)
+		}
 	}
 
 	path := filepath.Join(s.dir, name+".md")
