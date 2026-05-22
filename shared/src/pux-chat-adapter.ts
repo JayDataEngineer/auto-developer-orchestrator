@@ -756,6 +756,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 						case "subagent_end": {
 							const agentId = parsed.agentId as string | undefined;
 							const agentName = parsed.agentName as string | undefined;
+							const endStatus = parsed.status as string;
 							activeSubAgentName = null;
 							const result = typeof parsed.result === "string"
 								? parsed.result
@@ -778,15 +779,11 @@ export const puxChatAdapter: ChatModelAdapter = {
 									newAgents.set(match.agentId, { ...match, toolCalls: newCalls });
 									usePuxStore.setState({ agents: newAgents });
 								}
-								usePuxStore.getState().updateAgentStatus(match.agentId, "complete", result);
+								const finalStatus = endStatus === "error" ? "error" : "complete";
+								usePuxStore.getState().updateAgentStatus(match.agentId, finalStatus, result || parsed.error as string);
 							}
 							break;
 						}
-						case "subagent_thinking_delta":
-						case "subagent_text_delta": {
-							break;
-						}
-
 						// ── Error events → visible error text ──
 
 						case "error": {

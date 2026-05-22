@@ -209,6 +209,9 @@ func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 			"status":    event.Data.Status,
 			"task":      event.Data.Task,
 		}
+		if event.Data.Text != "" {
+			data["result"] = event.Data.Text
+		}
 		if event.Data.Error != "" {
 			data["error"] = event.Data.Error
 		}

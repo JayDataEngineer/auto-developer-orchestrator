@@ -585,7 +585,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 			}
 			core.SendEvent(subscriber, core.AgentEvent{
 				Type: core.EventTypeSubAgentEnd,
-				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120), TranscriptID: transcriptID},
+				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120), TranscriptID: transcriptID, Text: finalText + bgText},
 			})
 		}()
 		return map[string]any{
@@ -613,6 +613,7 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 			Task:         truncateTask(task, 120),
 			TranscriptID: transcriptID,
 			Error:        firstError,
+			Text:         finalText,
 		},
 	})
 
@@ -776,7 +777,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 			}
 			core.SendEvent(subscriber, core.AgentEvent{
 				Type: core.EventTypeSubAgentEnd,
-				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120), TranscriptID: transcriptID},
+				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120), TranscriptID: transcriptID, Text: finalText + bgText},
 			})
 		}()
 		return map[string]any{
@@ -799,6 +800,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 			Status:       endStatus,
 			Task:         truncateTask(task, 120),
 			TranscriptID: transcriptID,
+			Text:         finalText,
 		},
 	})
 
@@ -1079,6 +1081,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 					Status:       endStatus,
 					Task:         truncateTask(task, 120),
 					TranscriptID: transcriptID,
+					Text:         finalText + bgText,
 				},
 			})
 		}()
@@ -1111,6 +1114,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 			Task:         truncateTask(task, 120),
 			TranscriptID: transcriptID,
 			Error:        firstError,
+			Text:         finalText,
 		},
 	})
 
@@ -1289,6 +1293,7 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 			Status:       endStatus,
 			Task:         truncateTask(feedback, 120),
 			TranscriptID: la.Session.dbAgentID,
+			Text:         finalText,
 		},
 	})
 
