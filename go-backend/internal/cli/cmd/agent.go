@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 
+	"golang.org/x/term"
+
 	"github.com/auto-developer-orchestrator/backend/internal/cli/api"
 	"github.com/charmbracelet/glamour"
 	"github.com/spf13/cobra"
@@ -104,6 +106,8 @@ var agentHistoryCmd = &cobra.Command{
 }
 
 func streamText(body io.Reader) error {
+	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+
 	renderer, _ := glamour.NewTermRenderer(
 		glamour.WithEnvironmentConfig(),
 		glamour.WithAutoStyle(),
@@ -119,12 +123,18 @@ func streamText(body io.Reader) error {
 			var d api.TextDeltaData
 			if err := json.Unmarshal(event.Data, &d); err == nil {
 				accumulated += d.Text
-				rendered, err := renderer.Render(accumulated)
-				if err != nil {
-					rendered = accumulated
+				if isTTY {
+					// TTY: full redraw for clean markdown rendering
+					rendered, err := renderer.Render(accumulated)
+					if err != nil {
+						rendered = accumulated
+					}
+					fmt.Print("\033[H\033[2J") // clear screen for re-render
+					fmt.Print(rendered)
+				} else {
+					// Pipe/redirect: print only the delta, no screen clear
+					fmt.Print(d.Text)
 				}
-				fmt.Print("\033[H\033[2J") // clear screen for re-render
-				fmt.Print(rendered)
 			}
 		case api.EventThinkingDelta:
 			var d api.ThinkingDeltaData
@@ -217,8 +227,8 @@ func streamText(body io.Reader) error {
 		}
 	}
 
-	// Final render
-	if accumulated != "" {
+	// Final render (TTY only — pipe already got incremental output)
+	if accumulated != "" && isTTY {
 		rendered, _ := renderer.Render(accumulated)
 		fmt.Print(rendered)
 	}

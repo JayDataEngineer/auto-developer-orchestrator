@@ -178,9 +178,11 @@ func ClassifyError(err error) ErrorClass {
 		strings.Contains(msg, "refused") || strings.Contains(msg, "eof") ||
 		strings.Contains(msg, "context canceled") || strings.Contains(msg, "deadline exceeded") ||
 		strings.Contains(msg, "internal_error") || strings.Contains(msg, "stream error") ||
-		strings.Contains(msg, "received from peer") || strings.Contains(msg, "502") ||
-		strings.Contains(msg, "503") || strings.Contains(msg, "504") ||
-		strings.Contains(msg, "overloaded") || strings.Contains(msg, "rate limit") {
+		strings.Contains(msg, "received from peer") || strings.Contains(msg, "500") ||
+		strings.Contains(msg, "502") || strings.Contains(msg, "503") ||
+		strings.Contains(msg, "504") || strings.Contains(msg, "overloaded") ||
+		strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "internal server error") {
 		return ErrorTransient
 	}
 	// Permanent: resource doesn't exist, permission denied, invalid params

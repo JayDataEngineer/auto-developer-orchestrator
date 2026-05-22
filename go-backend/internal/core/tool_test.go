@@ -183,6 +183,8 @@ func TestClassifyError(t *testing.T) {
 		{name: "context canceled", err: errors.New("context canceled"), want: ErrorTransient},
 		{name: "deadline exceeded", err: errors.New("deadline exceeded"), want: ErrorTransient},
 		{name: "rate limit exceeded", err: errors.New("rate limit exceeded"), want: ErrorTransient},
+		{name: "500 internal server error", err: errors.New("HTTP 500: Internal Server Error"), want: ErrorTransient},
+		{name: "internal server error text", err: errors.New("internal server error from provider"), want: ErrorTransient},
 		{name: "502 bad gateway", err: errors.New("502 bad gateway"), want: ErrorTransient},
 		{name: "503 service unavailable", err: errors.New("503 service unavailable"), want: ErrorTransient},
 		{name: "504 gateway timeout", err: errors.New("504 gateway timeout"), want: ErrorTransient},

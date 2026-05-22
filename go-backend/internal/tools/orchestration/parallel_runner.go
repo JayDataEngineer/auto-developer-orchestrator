@@ -615,7 +615,14 @@ func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions str
 		return map[string]any{"error": runErr.Error(), "partial_result": finalText}, runErr
 	}
 
-	return map[string]any{"result": finalText, "status": "completed"}, nil
+	// Return only the final assistant message, not the entire accumulated context
+	artifact := extractLastAssistantFromSession(sess)
+	if artifact == "" {
+		artifact = finalText
+	}
+	artifact = r.maybeSummarize(ctx, artifact)
+
+	return map[string]any{"result": artifact, "status": "completed"}, nil
 }
 
 // RunDivisionDelegate creates a full sub-orchestrator for a division head.
@@ -1137,8 +1144,10 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	}
 	r.mu.Unlock()
 
-	// Build result
+	// Build result — return only the sub-agent's final summary, not its entire context.
+	// The full transcript is persisted to DB. The CTO only needs the artifact (outcome).
 	if runErr != nil {
+		// On error, include partial text for debugging
 		result := map[string]any{"error": runErr.Error(), "partial_result": finalText, "agent_ref": agentRef}
 		if changes != nil {
 			result["changes"] = map[string]any{
@@ -1149,17 +1158,19 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		return result, runErr
 	}
 
-	// Summarize long sub-agent results before returning to CTO
-	finalText = r.maybeSummarize(ctx, finalText)
+	// Extract the sub-agent's final message (not its entire accumulated output).
+	// This is the artifact — the concise summary the CTO needs.
+	artifact := extractLastAssistantFromSession(sess)
+	if artifact == "" {
+		artifact = finalText // fallback if session has no assistant messages
+	}
+	artifact = r.maybeSummarize(ctx, artifact)
 
-	enriched := map[string]any{"result": finalText, "status": "completed", "agent_ref": agentRef}
+	enriched := map[string]any{"result": artifact, "status": "completed", "agent_ref": agentRef}
 	if changes != nil {
 		enriched["changes"] = map[string]any{
 			"files":   changes.Files,
 			"summary": changes.Summary,
-		}
-		if changes.Diff != "" {
-			enriched["diff"] = changes.Diff
 		}
 	}
 
@@ -1293,15 +1304,12 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 		return enriched, runErr
 	}
 
-	enriched["result"] = finalText
+	enriched["result"] = r.maybeSummarize(ctx, finalText)
 	enriched["status"] = "continued"
 	if changes != nil {
 		enriched["changes"] = map[string]any{
 			"files":   changes.Files,
 			"summary": changes.Summary,
-		}
-		if changes.Diff != "" {
-			enriched["diff"] = changes.Diff
 		}
 	}
 	return enriched, nil
@@ -1499,13 +1507,14 @@ func (r *ParallelRunner) pendingCount() int {
 }
 
 // subAgentResultProcessor returns a ToolResultProcessor for sub-agents.
-// Uses line-aware tail truncation to prevent context overflow while keeping
-// errors and final results at the end for effective debugging.
+// Aggressively truncates tool results to prevent context bloat.
+// The sub-agent's full output is persisted to the transcript DB — the in-context
+// result only needs enough for the model to understand the outcome.
 func subAgentResultProcessor() func(ctx context.Context, toolName, toolCallID, result string) string {
 	return func(ctx context.Context, toolName, toolCallID, result string) string {
-		if len(result) > 12000 {
+		if len(result) > 6000 {
 			// Keep the end — errors and final results are most important
-			tail := result[len(result)-10000:]
+			tail := result[len(result)-5000:]
 			// Find first newline to avoid mid-line split
 			if idx := strings.Index(tail, "\n"); idx >= 0 && idx < 200 {
 				tail = tail[idx+1:]
@@ -1568,33 +1577,32 @@ func (s *subSession) Navigate(nodeID string) error { return fmt.Errorf("sub-sess
 func (s *subSession) Branch(label string) (string, error) { return "", fmt.Errorf("sub-sessions do not support branching") }
 func (s *subSession) Fork(nodeID string) (core.Session, error) { return nil, fmt.Errorf("sub-sessions do not support forking") }
 func (s *subSession) Compact(ctx context.Context, summary string) (string, error) {
-	// Keep recent messages verbatim, summarize older ones.
-	// Tool results get truncated to 2000 chars (not dropped).
-	// User/assistant messages get truncated to 4000 chars.
-	if len(s.messages) <= 10 {
+	// Keep recent messages verbatim, truncate older ones.
+	// Sub-agents should have lean context — compact aggressively.
+	if len(s.messages) <= 6 {
 		return "", nil
 	}
 
 	var compacted []core.Message
 	kept := 0
 	for i, msg := range s.messages {
-		if i >= len(s.messages)-10 {
-			// Keep the last 10 messages verbatim
+		if i >= len(s.messages)-6 {
+			// Keep the last 6 messages verbatim
 			compacted = append(compacted, msg)
 			kept++
 		} else {
-			// Older messages: truncate but don't drop
+			// Older messages: truncate aggressively
 			content := msg.Content
 			switch msg.Role {
 			case "tool":
-				// Tool results: keep first 2000 chars
-				if len(content) > 2000 {
-					content = content[:2000] + "\n...[compacted]"
+				// Tool results: keep first 1000 chars
+				if len(content) > 1000 {
+					content = content[:1000] + "\n...[compacted]"
 				}
 			case "user", "assistant":
-				// User/assistant: keep first 4000 chars
-				if len(content) > 4000 {
-					content = content[:4000] + "\n...[compacted]"
+				// User/assistant: keep first 2000 chars
+				if len(content) > 2000 {
+					content = content[:2000] + "\n...[compacted]"
 				}
 			}
 			if content != "" {
@@ -1691,22 +1699,43 @@ func truncateTask(task string, maxLen int) string {
 	return util.TruncateEllipsis(task, maxLen)
 }
 
-// maybeSummarize summarizes long sub-agent results using the configured summarizer.
-// Falls back to returning the original text if no summarizer is set or summarization fails.
+// maybeSummarize summarizes sub-agent results aggressively before returning to the CTO.
+// Sub-agents should return artifacts, not their entire context.
+// Falls back to tail-truncation if no summarizer is set or summarization fails.
 func (r *ParallelRunner) maybeSummarize(ctx context.Context, text string) string {
-	const summarizeThreshold = 2000
-	if len(text) <= summarizeThreshold || r.summarizer == nil {
+	const summarizeThreshold = 500
+	if len(text) <= summarizeThreshold {
 		return text
 	}
 
-	summarized, err := r.summarizer(ctx, text, 1000)
-	if err != nil || len(summarized) < 50 {
-		r.logger("SUMMARIZE_FAILED: len=%d err=%v, returning original", len(text), err)
-		return text
+	// Use LLM summarizer if available — compress to concise artifact
+	if r.summarizer != nil {
+		summarized, err := r.summarizer(ctx, text, 400)
+		if err == nil && len(summarized) >= 50 {
+			r.logger("SUMMARIZE_OK: %d -> %d chars", len(text), len(summarized))
+			return summarized
+		}
+		r.logger("SUMMARIZE_FAILED: len=%d err=%v, truncating", len(text), err)
 	}
 
-	r.logger("SUMMARIZE_OK: %d -> %d chars", len(text), len(summarized))
-	return summarized
+	// Fallback: keep only the tail (errors and final status are at the end)
+	if len(text) > 600 {
+		return "...[truncated]\n" + text[len(text)-500:]
+	}
+	return text
+}
+
+// extractLastAssistantFromSession returns the content of the last assistant message
+// in the sub-session. This is the sub-agent's final summary — not its entire reasoning
+// history. Used instead of accumulating all text_delta events across all turns.
+func extractLastAssistantFromSession(sess *subSession) string {
+	msgs := sess.messages
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" && msgs[i].Content != "" {
+			return msgs[i].Content
+		}
+	}
+	return ""
 }
 
 // toolNamesFromSpecs extracts tool names from a list of tool specs (for logging).
