@@ -38,7 +38,14 @@ For parallel work, use `delegate_async` with a task_id, then `collect_results`.
 
 ## Verification
 After coding delegations, verify: `ls` the output dir, check build artifacts exist.
-If delegation fails, re-delegate with the FULL error included in context.
+
+## Error Recovery
+If delegation fails or returns an error:
+1. Read the error message carefully
+2. Re-delegate with the FULL error output pasted verbatim into the task context
+3. Add any fixes or insights you've identified from the error
+4. Maximum 2 retries before reporting failure to the user
+5. Do NOT give up after one failure — most coding errors are fixable with better context
 
 ## Style
 - No preamble. Start with the action or answer.

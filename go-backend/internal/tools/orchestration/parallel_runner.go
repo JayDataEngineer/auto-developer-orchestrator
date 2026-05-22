@@ -241,16 +241,24 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 		b.WriteString(lastAssistantContext)
 		b.WriteString("\n</cto_context>\n\n")
 	}
+
+	// Normalize host paths in the task to /sandbox/workspace/ so the sub-agent
+	// never sees contradictory paths (host path in task vs /sandbox/ in workspace_note).
+	normalizedTask := task
+	if r.projectDir != "" {
+		normalizedTask = strings.ReplaceAll(normalizedTask, r.projectDir, "/sandbox/workspace")
+	}
+
 	b.WriteString("<task>\n")
-	b.WriteString(task)
+	b.WriteString(normalizedTask)
 	b.WriteString("\n</task>")
 
 	// Append workspace path awareness so sub-agents always write to the bind-mounted directory
 	if r.projectDir != "" {
 		b.WriteString("\n\n<workspace_note>\n")
-		b.WriteString("All file operations must target /sandbox/workspace/ (the project root mount). ")
-		b.WriteString("Do NOT write to /home/ubuntu/ or other paths — they are not persisted to the host. ")
-		b.WriteString("The project files appear at /sandbox/workspace/ and that is the only persistent location.\n")
+		b.WriteString("Your working directory is /sandbox/workspace/ — this IS the project root. ")
+		b.WriteString("All file operations (read, write, edit, build) target /sandbox/workspace/. ")
+		b.WriteString("Ignore any other paths mentioned in the task — /sandbox/workspace/ is the ONLY path you need.\n")
 		b.WriteString("</workspace_note>")
 
 		// Inject environment info (platform, date) for platform-aware code
@@ -266,8 +274,16 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 	}
 
 	enriched := b.String()
-	if len(enriched) > 2000 {
-		enriched = enriched[:2000] + "...\n</task>"
+	// Truncate at the task content level, not the workspace/project metadata.
+	// Keep metadata intact — it's essential for the sub-agent.
+	if len(enriched) > 4000 {
+		// Find </task> and truncate after it, keeping the rest
+		taskEnd := strings.Index(enriched, "</task>")
+		if taskEnd > 0 && taskEnd < 4000 {
+			// Keep task + everything after (workspace_note, env, project_context)
+			return enriched
+		}
+		enriched = enriched[:4000] + "...\n</task>"
 	}
 	return enriched
 }
