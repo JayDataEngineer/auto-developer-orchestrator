@@ -99,6 +99,12 @@ go-backend/convo.txt
 llms*.txt
 research_field_report.md
 
+# Archived / legacy code
+_archive/
+
+# Pi config directory (session data, not source)
+pi-config/
+
 # One-off planning docs
 docs/OPENSHELL_INTEGRATION_PLAN.md
 docs/SCHEDULER_PLAN.md
