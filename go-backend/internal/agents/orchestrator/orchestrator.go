@@ -31,7 +31,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/python"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
-	plantool "github.com/auto-developer-orchestrator/backend/internal/tools/plan"
+	_ "github.com/auto-developer-orchestrator/backend/internal/tools/plan" // plan tool: removed from CTO, kept for re-enable
 	schedulertool "github.com/auto-developer-orchestrator/backend/internal/tools/scheduler"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/todo"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
@@ -209,10 +209,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if cfg.Subscriber != nil {
 		ctoTools = append(ctoTools, asktool.NewAskUserTool())
 
-		// Plan tool uses PlanStore (ArtifactStore contract) for file I/O
-		plansDir := filepath.Join(cfg.ProjectDir, ".pux", "plans")
-		planStore := autoconfig.NewPlanStore(plansDir)
-		ctoTools = append(ctoTools, plantool.NewPlanTool(cfg.ProjectDir, planStore))
+		// Plan tool removed from CTO — delegation-first means no planning step.
+		// create_plan was a bottleneck: model calls it, waits for approval,
+		// then does the work itself instead of delegating.
+		// The plan store is kept for backward compat if re-enabled later.
+		_ = filepath.Join(cfg.ProjectDir, ".pux", "plans")
 	}
 
 	if cfg.MemoryStore != nil {
