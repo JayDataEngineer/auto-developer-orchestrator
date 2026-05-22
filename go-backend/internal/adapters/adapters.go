@@ -8,6 +8,7 @@ package adapters
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -57,7 +58,9 @@ func (f *FileOps) WriteFile(ctx context.Context, path string, content string, ov
 	if !overwrite {
 		redirect = ">>"
 	}
-	cmd := fmt.Sprintf("cat <<'OPENCODE_EOF' %s %s\n%s\nOPENCODE_EOF", redirect, shQ(path), content)
+	// Use base64 pipe instead of heredoc — heredocs break with Docker exec TTY mode
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+	cmd := fmt.Sprintf("echo '%s' | base64 -d %s %s", encoded, redirect, shQ(path))
 	output, err := f.exec(ctx, cmd)
 	if err != nil {
 		return output, err

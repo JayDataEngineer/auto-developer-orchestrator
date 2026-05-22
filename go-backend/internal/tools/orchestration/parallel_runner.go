@@ -243,6 +243,23 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 	b.WriteString(task)
 	b.WriteString("\n</task>")
 
+	// Append workspace path awareness so sub-agents always write to the bind-mounted directory
+	if r.projectDir != "" {
+		b.WriteString("\n\n<workspace_note>\n")
+		b.WriteString("All file operations must target /sandbox/workspace/ (the project root mount). ")
+		b.WriteString("Do NOT write to /home/ubuntu/ or other paths — they are not persisted to the host. ")
+		b.WriteString("The project files appear at /sandbox/workspace/ and that is the only persistent location.\n")
+		b.WriteString("</workspace_note>")
+
+		// Inject project context — CLAUDE.md, build system hints
+		projectCtx := discoverProjectContext(r.projectDir)
+		if projectCtx != "" {
+			b.WriteString("\n\n<project_context>\n")
+			b.WriteString(projectCtx)
+			b.WriteString("\n</project_context>")
+		}
+	}
+
 	enriched := b.String()
 	if len(enriched) > 2000 {
 		enriched = enriched[:2000] + "...\n</task>"
@@ -1699,4 +1716,62 @@ func toolNamesFromSpecs(specs []core.OpenAITool) []string {
 		names[i] = s.Function.Name
 	}
 	return names
+}
+
+// discoverProjectContext reads project files (CLAUDE.md, build system files) and
+// returns a brief summary for sub-agent context. Helps sub-agents know how to
+// build, test, and lint the project without guessing.
+func discoverProjectContext(projectDir string) string {
+	var b strings.Builder
+
+	// Check for CLAUDE.md — project-specific instructions
+	for _, name := range []string{"CLAUDE.md", "claude.md", ".claude/CLAUDE.md"} {
+		path := filepath.Join(projectDir, name)
+		data, err := os.ReadFile(path)
+		if err == nil {
+			content := string(data)
+			if len(content) > 2000 {
+				content = content[:2000] + "\n...(truncated)"
+			}
+			b.WriteString("CLAUDE.md (" + name + "):\n")
+			b.WriteString(content)
+			b.WriteString("\n\n")
+			break
+		}
+	}
+
+	// Detect build system and suggest commands
+	type buildSystem struct {
+		file    string
+		name    string
+		build   string
+		test    string
+		lint    string
+	}
+	systems := []buildSystem{
+		{"go.mod", "Go", "go build ./...", "go test ./...", ""},
+		{"package.json", "Node.js", "npm run build", "npm test", "npm run lint"},
+		{"Makefile", "Make", "make", "make test", "make lint"},
+		{"Cargo.toml", "Rust", "cargo build", "cargo test", "cargo clippy"},
+		{"pyproject.toml", "Python", "", "pytest", "ruff check ."},
+		{"requirements.txt", "Python", "", "pytest", "ruff check ."},
+	}
+
+	for _, sys := range systems {
+		if _, err := os.Stat(filepath.Join(projectDir, sys.file)); err == nil {
+			b.WriteString("Build system: " + sys.name + " (" + sys.file + ")\n")
+			if sys.build != "" {
+				b.WriteString("Build: " + sys.build + "\n")
+			}
+			if sys.test != "" {
+				b.WriteString("Test: " + sys.test + "\n")
+			}
+			if sys.lint != "" {
+				b.WriteString("Lint: " + sys.lint + "\n")
+			}
+			break
+		}
+	}
+
+	return b.String()
 }
