@@ -10,6 +10,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/agents"
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/adapters"
+	"github.com/auto-developer-orchestrator/backend/internal/checkpoint"
 	"github.com/auto-developer-orchestrator/backend/internal/autoconfig"
 	ctxpkg "github.com/auto-developer-orchestrator/backend/internal/context"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -501,6 +502,13 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		ctoHooks = append(ctoHooks, hooks.NewApprovalHook(cfg.ApprovalHandler, true, 0))
 		logger.Printf("Approval hook enabled (plan-only mode)")
 	}
+
+	// File checkpoint hook — auto-backups before file writes/edits/destructive bash
+	home, _ := os.UserHomeDir()
+	cpManager := checkpoint.NewManager(sess.ID(), cfg.ProjectDir,
+		filepath.Join(home, ".pi", "agent", "checkpoints", sess.ID()))
+	ctoHooks = append(ctoHooks, hooks.NewFileCheckpointHook(cpManager))
+	logger.Printf("File checkpoint hook enabled (session %s)", sess.ID())
 
 	ctoHooks = append(ctoHooks, cfg.ExtraHooks...)
 

@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
+	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
 )
 
 // sseEvent is a simplified event for the frontend.
@@ -24,7 +25,15 @@ func nextToolFallbackId() string {
 }
 
 // writeSSE sends a single SSE event to the response writer.
+// Sensitive data (API keys, tokens, passwords) is scrubbed from text-bearing events.
 func writeSSE(w http.ResponseWriter, eventType string, data interface{}, canFlush bool, flusher http.Flusher) {
+	// Scrub secrets from events that carry user-visible text
+	if sensitive.ShouldScrubEvent(eventType) {
+		if m, ok := data.(map[string]any); ok {
+			data = sensitive.ScrubMap(m)
+		}
+	}
+
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return
