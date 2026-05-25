@@ -3,7 +3,6 @@ package common
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -16,7 +15,7 @@ func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
-	os.Setenv("PROJECT_ROOT", root)
+	t.Setenv("PROJECT_ROOT", root)
 	return root
 }
 
@@ -146,8 +145,7 @@ func TestFormatRolesList_HintField(t *testing.T) {
 }
 
 func TestBuildOrchestratorPromptV2_Fallback(t *testing.T) {
-	root := repoRoot(t)
-	os.Setenv("PROJECT_ROOT", root)
+	repoRoot(t)
 
 	// With prompt_sections/ existing, V2 should use section pipeline
 	prompt := BuildOrchestratorPromptV2(nil, "sandbox-123", "", "", nil, nil)
@@ -160,12 +158,9 @@ func TestBuildOrchestratorPromptV2_Fallback(t *testing.T) {
 }
 
 func TestBuildOrchestratorPromptV2_LegacyFallback(t *testing.T) {
-	// Temporarily point to a non-existent config dir to trigger fallback
-	origConfigDir := FindKernelConfigDir()
-
 	// Create a temp dir without prompt_sections
 	tmpDir := t.TempDir()
-	os.Setenv("PROJECT_ROOT", tmpDir)
+	t.Setenv("PROJECT_ROOT", tmpDir)
 
 	// Reset singleton so it picks up the new config dir
 	ResetGlobalBuilder()
@@ -179,18 +174,12 @@ func TestBuildOrchestratorPromptV2_LegacyFallback(t *testing.T) {
 		t.Error("legacy fallback should not contain boundary marker")
 	}
 
-	// Restore
-	if origConfigDir != "" {
-		os.Setenv("PROJECT_ROOT", origConfigDir)
-	} else {
-		os.Unsetenv("PROJECT_ROOT")
-	}
+	// Restore — t.Setenv automatically restores on test cleanup
 	ResetGlobalBuilder()
 }
 
 func TestBuildOrchestratorPromptV2_ToolsSection(t *testing.T) {
-	root := repoRoot(t)
-	os.Setenv("PROJECT_ROOT", root)
+	repoRoot(t)
 
 	// Create a mock tool
 	mockTool := &mockTool{name: "test_tool", desc: "A test tool"}
@@ -255,8 +244,7 @@ func TestPromptBuilder_OrgAfterBoundary(t *testing.T) {
 }
 
 func TestPromptBuilder_SingletonPersists(t *testing.T) {
-	root := repoRoot(t)
-	os.Setenv("PROJECT_ROOT", root)
+	repoRoot(t)
 	ResetGlobalBuilder()
 
 	// First call creates the singleton

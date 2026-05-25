@@ -12,7 +12,7 @@ from urllib3.util.retry import Retry
 
 # URL configuration — importable by test files
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:3847")
-FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:5174")
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:5175")
 
 
 # ---------------------------------------------------------------------------

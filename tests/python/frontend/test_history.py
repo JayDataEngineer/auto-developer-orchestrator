@@ -15,6 +15,7 @@ Run:
 """
 
 import json
+import os
 import time
 
 import pytest
@@ -22,8 +23,8 @@ import requests
 
 from fixtures.browser import goto_frontend
 
-API = "http://localhost:3847"
-FRONTEND = "http://localhost:5175"
+API = os.environ.get("API_BASE_URL", "http://localhost:3847")
+FRONTEND = os.environ.get("FRONTEND_BASE_URL", "http://localhost:5175")
 
 
 # ── Helpers ──
@@ -309,7 +310,7 @@ class TestHistoryBrowser:
         try:
             goto_frontend(page, FRONTEND)
         except Exception:
-            pytest.skip("Frontend not running on :5175")
+            pytest.skip(f"Frontend not running on {FRONTEND}")
 
     def test_conversation_click_loads_history(self, page):
         """Clicking a conversation in sidebar should load its messages."""

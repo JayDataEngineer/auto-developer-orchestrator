@@ -28,9 +28,7 @@ func TestLoadModelConfigWithBothModels(t *testing.T) {
 	os.WriteFile(filepath.Join(settingsPath, "settings.json"), []byte(content), 0644)
 
 	// Override HOME
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", dir)
 
 	cfg, err := LoadModelConfig(testLogger())
 	if err != nil {
@@ -60,9 +58,7 @@ func TestLoadModelConfigFallbackToDefaults(t *testing.T) {
 }`
 	os.WriteFile(filepath.Join(settingsPath, "settings.json"), []byte(content), 0644)
 
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", dir)
 
 	cfg, err := LoadModelConfig(testLogger())
 	if err != nil {
@@ -83,9 +79,7 @@ func TestLoadModelConfigFallbackToDefaults(t *testing.T) {
 func TestLoadModelConfigMissingFile(t *testing.T) {
 	dir := t.TempDir()
 
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", dir)
 
 	cfg, err := LoadModelConfig(testLogger())
 	if err != nil {
@@ -116,9 +110,7 @@ func TestSetMainModelPersists(t *testing.T) {
 }`
 	os.WriteFile(filepath.Join(settingsPath, "settings.json"), []byte(content), 0644)
 
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", dir)
 
 	cfg, _ := LoadModelConfig(testLogger())
 
@@ -154,9 +146,7 @@ func TestSetToolModelPersists(t *testing.T) {
 	content := `{"defaultProvider":"llamacpp","defaultModel":"gemma-4-26b"}`
 	os.WriteFile(filepath.Join(settingsPath, "settings.json"), []byte(content), 0644)
 
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", dir)
 
 	cfg, _ := LoadModelConfig(testLogger())
 
@@ -214,9 +204,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 	content := `{"defaultProvider":"llamacpp","defaultModel":"gemma-4-26b"}`
 	os.WriteFile(filepath.Join(settingsPath, "settings.json"), []byte(content), 0644)
 
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", dir)
 
 	cfg, _ := LoadModelConfig(testLogger())
 
@@ -259,9 +247,7 @@ func TestPersistPreservesOtherFields(t *testing.T) {
 }`
 	os.WriteFile(filepath.Join(settingsPath, "settings.json"), []byte(content), 0644)
 
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", dir)
 
 	cfg, _ := LoadModelConfig(testLogger())
 

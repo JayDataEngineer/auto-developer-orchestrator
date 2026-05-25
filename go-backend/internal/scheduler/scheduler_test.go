@@ -302,12 +302,17 @@ func TestTriggerJobNotFound(t *testing.T) {
 }
 
 func TestTriggerJobExecutes(t *testing.T) {
+	done := make(chan struct{}, 1)
 	var called atomic.Int32
 	db := newTestDB(t)
 	logger := zap.NewNop()
 
 	s := NewScheduler(db, func(ctx context.Context, project, agentID, message, model, org string, autoBranch, autoMerge, sandboxOnly bool) (string, error) {
 		called.Add(1)
+		select {
+		case done <- struct{}{}:
+		default:
+		}
 		return "done", nil
 	}, logger)
 
@@ -318,8 +323,12 @@ func TestTriggerJobExecutes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Wait for async execution
-	time.Sleep(200 * time.Millisecond)
+	// Wait for async execution with timeout
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt sender to be called")
+	}
 
 	if called.Load() != 1 {
 		t.Errorf("expected prompt sender called once, got %d", called.Load())

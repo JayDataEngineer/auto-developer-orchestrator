@@ -14,7 +14,7 @@ func setupTestEnv(t *testing.T) {
 	t.Helper()
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
-	os.Setenv("PROJECT_ROOT", repoRoot)
+	t.Setenv("PROJECT_ROOT", repoRoot)
 	common.ReloadPromptTemplate()
 }
 

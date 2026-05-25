@@ -259,8 +259,7 @@ func setupTestEnvForWorkers(t *testing.T) {
 	os.MkdirAll(filepath.Join(configDir, "capabilities", "shell"), 0755)
 	os.WriteFile(filepath.Join(configDir, "prompt.md"), []byte("# test"), 0644)
 	os.WriteFile(filepath.Join(configDir, "capabilities", "shell", "capability.yaml"), []byte("tools:\n  - bash\n"), 0644)
-	os.Setenv("PROJECT_ROOT", dir)
-	t.Cleanup(func() { os.Unsetenv("PROJECT_ROOT") })
+	t.Setenv("PROJECT_ROOT", dir)
 }
 
 func TestKernelWorkerProtection(t *testing.T) {

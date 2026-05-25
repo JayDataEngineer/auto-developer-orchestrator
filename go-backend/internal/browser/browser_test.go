@@ -181,9 +181,18 @@ func TestNewVisionClient(t *testing.T) {
 }
 
 func TestNewVisionClientDefaultURL(t *testing.T) {
+	t.Setenv("MCP_HUB_ENDPOINT", "")
 	client := NewVisionClient("", "", nil)
 	if client.baseURL != "http://localhost:8001" {
 		t.Errorf("expected default localhost:8001, got %q", client.baseURL)
+	}
+}
+
+func TestNewVisionClientUsesMCPHub(t *testing.T) {
+	t.Setenv("MCP_HUB_ENDPOINT", "http://100.86.69.57:30080")
+	client := NewVisionClient("", "", nil)
+	if client.baseURL != "http://100.86.69.57:30080/llm" {
+		t.Errorf("expected MCP hub URL, got %q", client.baseURL)
 	}
 }
 

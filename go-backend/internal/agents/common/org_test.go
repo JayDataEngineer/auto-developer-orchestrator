@@ -264,7 +264,7 @@ func TestTechNoirOrg(t *testing.T) {
 
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
-	os.Setenv("PROJECT_ROOT", repoRoot)
+	t.Setenv("PROJECT_ROOT", repoRoot)
 
 	org := LoadOrgManifest(techNoirPath)
 	if org == nil {
@@ -464,7 +464,7 @@ func TestTechNoirOrg(t *testing.T) {
 func TestOrgPromptMergesKernelRoles(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
-	os.Setenv("PROJECT_ROOT", repoRoot)
+	t.Setenv("PROJECT_ROOT", repoRoot)
 
 	testSuitePath := "/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator/test-suite"
 	if _, err := os.Stat(testSuitePath); os.IsNotExist(err) {

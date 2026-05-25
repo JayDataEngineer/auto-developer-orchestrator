@@ -10,7 +10,7 @@ import (
 func TestLoadAgentRoles(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
-	os.Setenv("PROJECT_ROOT", repoRoot)
+	t.Setenv("PROJECT_ROOT", repoRoot)
 
 	ReloadPromptTemplate()
 
@@ -74,7 +74,7 @@ func TestLoadAgentRoles(t *testing.T) {
 func TestToolPackages(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
-	os.Setenv("PROJECT_ROOT", repoRoot)
+	t.Setenv("PROJECT_ROOT", repoRoot)
 
 	ReloadPromptTemplate()
 
