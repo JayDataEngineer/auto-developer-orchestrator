@@ -418,13 +418,14 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 				_, _ = bashExec.Exec(ctx, "DISPLAY=:99 wmctrl -a 'Google Chrome' 2>/dev/null || true")
 			})
 		}
-		// Per-role sandbox tier: native roles use host executor, others use sandbox
+		// Per-role sandbox tier: native roles use host executor, others use sandbox.
+		// When there's no sandbox (Docker down), ALL tiers fall through to host executor.
 		pr.SetExecutorFactory(func(tier string) core.ToolExecutor {
-			if tier == "native" {
+			if tier == "native" || cfg.SandboxID == "" {
 				hostExec := &adapters.HostExecutor{WorkDir: cfg.ProjectDir}
 				hostFileOps := &file.SimpleSandboxOps{BasePath: cfg.ProjectDir}
 				nativeTracker := file.NewFileReadTracker()
-				nativeReg := core.NewToolRegistry([]core.Tool{
+				hostReg := core.NewToolRegistry([]core.Tool{
 					bash.New(hostExec),
 					file.NewReadToolWithTracker(hostFileOps, mediaDescriber, nativeTracker),
 					file.NewWriteTool(hostFileOps),
@@ -434,8 +435,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 					python.NewPythonTool(python.WithWorkDir(cfg.ProjectDir)),
 					eval.NewEvalTool(),
 				})
-				nativeReg.RegisterCommonAliases()
-				return nativeReg
+				hostReg.RegisterCommonAliases()
+				return hostReg
 			}
 			// isolated + bridged both use the sandbox executor
 			return allToolReg
