@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/auto-developer-orchestrator/backend/internal/checkpoint"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -55,11 +56,27 @@ func (h *FileCheckpointHook) OnAfterModel(_ context.Context, _ *core.LoopState, 
 	return nil
 }
 
-func (h *FileCheckpointHook) OnAfterToolCall(_ context.Context, _ *core.LoopState, _ string, _ map[string]any, _ string, _ error) error {
+func (h *FileCheckpointHook) OnAfterToolCall(_ context.Context, state *core.LoopState, toolName string, _ map[string]any, _ string, _ error) error {
+	// Create a snapshot after file-modifying tool calls so each change is restorable
+	switch toolName {
+	case "file_write", "write_file", "file_edit", "edit_file", "bash":
+		snap, err := h.manager.CreateSnapshot(nil, "after-"+toolName, state.Round)
+		if err != nil {
+			h.logger.Printf("checkpoint: post-tool snapshot failed: %v", err)
+		} else if snap.FileCount > 0 {
+			h.logger.Printf("checkpoint: post-%s snapshot %s (%d files)", toolName, snap.ID, snap.FileCount)
+		}
+	}
 	return nil
 }
 
-func (h *FileCheckpointHook) OnAgentEnd(_ context.Context, _ *core.LoopState) error {
+func (h *FileCheckpointHook) OnAgentEnd(_ context.Context, state *core.LoopState) error {
+	// Final snapshot with all tracked files
+	if snap, err := h.manager.CreateSnapshot(nil, "agent-end", state.Round); err != nil {
+		h.logger.Printf("checkpoint: final snapshot failed: %v", err)
+	} else {
+		h.logger.Printf("checkpoint: final snapshot %s (%d files)", snap.ID, snap.FileCount)
+	}
 	if err := h.manager.Close(); err != nil {
 		h.logger.Printf("checkpoint: close failed: %v", err)
 	}
@@ -76,7 +93,8 @@ func (h *FileCheckpointHook) WrapToolCall(
 	switch toolName {
 	case "file_write", "write_file", "file_edit", "edit_file":
 		if path, ok := args["file_path"].(string); ok && path != "" {
-			if v, err := h.manager.TrackBeforeWrite(ctx, path); err != nil {
+			resolved := h.resolveFilePath(path)
+			if v, err := h.manager.TrackBeforeWrite(ctx, resolved); err != nil {
 				h.logger.Printf("checkpoint: track %s failed: %v", path, err)
 			} else if v > 0 {
 				h.logger.Printf("checkpoint: backed up %s (v%d)", path, v)
@@ -96,4 +114,21 @@ func (h *FileCheckpointHook) WrapToolCall(
 	}
 
 	return next(ctx, toolName, args)
+}
+
+// resolveFilePath remaps /sandbox/workspace/ paths to the actual project directory.
+// The file tools do this internally (SimpleSandboxOps.absPath), but the hook
+// sees the raw path from tool args before that remapping happens.
+func (h *FileCheckpointHook) resolveFilePath(p string) string {
+	projectDir := h.manager.ProjectDir()
+	if projectDir == "" {
+		return p
+	}
+	if strings.HasPrefix(p, "/sandbox/workspace/") {
+		return projectDir + p[len("/sandbox/workspace"):]
+	}
+	if p == "/sandbox/workspace" {
+		return projectDir
+	}
+	return p
 }

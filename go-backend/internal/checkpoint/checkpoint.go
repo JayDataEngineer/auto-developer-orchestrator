@@ -67,6 +67,9 @@ func NewManager(sessionID, projectDir, basePath string) *Manager {
 // SessionID returns the session ID this manager is scoped to.
 func (m *Manager) SessionID() string { return m.sessionID }
 
+// ProjectDir returns the project directory.
+func (m *Manager) ProjectDir() string { return m.projectDir }
+
 // TrackBeforeWrite backs up a file before it gets modified.
 // Reads current content, hashes it, skips if unchanged since last backup.
 // filePath can be absolute or relative to projectDir.
