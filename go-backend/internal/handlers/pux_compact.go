@@ -66,8 +66,11 @@ func (h *PuxHandler) compactSession(ctx context.Context, project, agentID string
 
 	tokensBefore := ctxpkg.EstimateTokensFromUsage(ctx, msgs)
 
-	// 4. Resolve LLM provider
-	engine := h.llamaEngine
+	// 4. Resolve LLM provider — prefer worker model for cheaper summarization
+	engine := h.resolveEngineForModel(h.defaultWorker)
+	if engine == nil {
+		engine = h.llamaEngine
+	}
 	if engine == nil {
 		engine = h.clusterEngine
 	}

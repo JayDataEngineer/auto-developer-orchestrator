@@ -275,6 +275,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 	ctxConfig.SpillDir = filepath.Join(cfg.ProjectDir, ".pux", "spill", sess.ID())
 	ctxConfig.LLMProvider = provider // enables LLM-powered summarization
+	// Use the worker model for compaction summaries — cheaper than the CTO model.
+	if cfg.ProviderFactory != nil {
+		if compactProvider := cfg.ProviderFactory(); compactProvider != nil {
+			ctxConfig.CompactProvider = compactProvider
+		}
+	}
 	ctxMgr := ctxpkg.Factory(sess, ctxConfig)
 
 	// Subdirectory hint tracker — discovers AGENTS.md/CLAUDE.md/.cursorrules
@@ -372,9 +378,16 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		if cfg.TaskMgr != nil {
 			pr.SetTaskManager(cfg.TaskMgr)
 		}
-		// Summarize long sub-agent results before returning to CTO
+		// Summarize long sub-agent results before returning to CTO.
+		// Uses the worker model (via ProviderFactory) for cheaper summarization.
+		summarizerProvider := provider
+		if cfg.ProviderFactory != nil {
+			if wp := cfg.ProviderFactory(); wp != nil {
+				summarizerProvider = wp
+			}
+		}
 		pr.SetSummarizer(func(ctx context.Context, text string, targetChars int) (string, error) {
-			return ctxpkg.SummarizeText(ctx, provider, text, targetChars)
+			return ctxpkg.SummarizeText(ctx, summarizerProvider, text, targetChars)
 		})
 		// Persist sub-agent transcripts to DB for later retrieval
 		if cfg.TranscriptDB != nil && cfg.Project != "" {
