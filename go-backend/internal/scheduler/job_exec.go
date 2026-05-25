@@ -5,12 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
+
+// SilentMarker is the response prefix that suppresses delivery.
+// When a cron agent's response starts with this marker, delivery is skipped
+// but the output is still saved to the run log for audit.
+const SilentMarker = "[SILENT]"
+
+// maxContextFromChars limits how much context is injected from upstream jobs.
+const maxContextFromChars = 8000
 
 // executeJob runs a single job execution.
 func (s *Scheduler) executeJob(jobID string) {
@@ -46,6 +55,12 @@ func (s *Scheduler) executeJob(jobID string) {
 		zap.String("project", job.Project),
 	)
 
+	// Build effective message with context from upstream jobs (context chaining)
+	effectiveMessage := job.Message
+	if len(job.ContextFrom) > 0 {
+		effectiveMessage = s.injectContextFrom(job)
+	}
+
 	// Execute via PromptSender — calls /api/pux/prompt (same as orch agent prompt)
 	var output string
 	var err error
@@ -53,7 +68,7 @@ func (s *Scheduler) executeJob(jobID string) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		output, err = s.promptSender(ctx, job.Project, job.AgentID, job.Message, job.Model, job.Org, job.AutoBranch, job.AutoMerge, job.SandboxOnly)
+		output, err = s.promptSender(ctx, job.Project, job.AgentID, effectiveMessage, job.Model, job.Org, job.AutoBranch, job.AutoMerge, job.SandboxOnly)
 	} else {
 		err = fmt.Errorf("no PromptSender configured for scheduled jobs")
 	}
@@ -114,8 +129,13 @@ func (s *Scheduler) executeJob(jobID string) {
 		job.ConsecutiveErrors = 0
 		job.DurationMs = execution.EndedAt.Sub(execution.StartedAt).Milliseconds()
 
-		// Deliver output
-		s.deliverOutput(job, output)
+		// Store last output for context chaining
+		job.LastOutput = util.Truncate(output, maxContextFromChars)
+
+		// Deliver output (unless agent responded with silent marker)
+		if !strings.HasPrefix(strings.TrimSpace(output), SilentMarker) {
+			s.deliverOutput(job, output)
+		}
 
 		if job.Schedule == ScheduleManual {
 			// Manual tasks return to disabled after successful run
@@ -412,4 +432,29 @@ func (s *Scheduler) errorBackoff(consecutiveErrors int) time.Duration {
 		return DefaultBackoffSchedule[len(DefaultBackoffSchedule)-1]
 	}
 	return DefaultBackoffSchedule[idx]
+}
+
+// injectContextFrom builds the effective message with context from upstream jobs.
+// For each job in ContextFrom, the last successful output is prepended.
+func (s *Scheduler) injectContextFrom(job *Job) string {
+	var parts []string
+
+	for _, upstreamID := range job.ContextFrom {
+		upstream, ok := s.jobs[upstreamID]
+		if !ok || upstream.LastOutput == "" {
+			continue
+		}
+		output := upstream.LastOutput
+		if len(output) > maxContextFromChars {
+			output = output[:maxContextFromChars] + "\n[...truncated]"
+		}
+		parts = append(parts, fmt.Sprintf("[Context from job %q (%s)]\n%s",
+			upstream.Name, upstream.ID, output))
+	}
+
+	if len(parts) == 0 {
+		return job.Message
+	}
+
+	return strings.Join(parts, "\n\n") + "\n\n" + job.Message
 }

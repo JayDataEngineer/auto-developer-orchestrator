@@ -1536,7 +1536,7 @@ func (r *ParallelRunner) pendingCount() int {
 // Large tool results are spilled to disk (inside the sandbox workspace) instead
 // of being truncated. The agent gets a preview + file path reference and can
 // read the full output with file_read if needed — same pattern as claude-code.
-func subAgentResultProcessor(projectDir string) func(ctx context.Context, toolName, toolCallID, result string) string {
+func subAgentResultProcessor(projectDir string) func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
 	const spillThreshold = 4000  // bytes — spill anything larger
 	const previewLines = 30      // lines of preview kept in-context
 
@@ -1544,7 +1544,7 @@ func subAgentResultProcessor(projectDir string) func(ctx context.Context, toolNa
 	// Sandbox path for the reference — sub-agent reads via file_read
 	sandboxSpillDir := "/sandbox/workspace/.pux/spill"
 
-	return func(ctx context.Context, toolName, toolCallID, result string) string {
+	return func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
 		if len(result) <= spillThreshold {
 			return result
 		}

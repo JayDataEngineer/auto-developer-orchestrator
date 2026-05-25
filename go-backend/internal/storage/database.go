@@ -640,6 +640,8 @@ type ScheduledJob struct {
 	DurationMs           int64
 	Blocks               string // JSON array
 	BlockedBy            string // JSON array
+	LastOutput           string // last successful output (for context chaining)
+	ContextFrom          string // JSON array of job IDs whose output is injected as context
 	SandboxOnly          bool
 	WebhookToken         string
 	CreatedAt            *time.Time

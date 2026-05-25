@@ -276,6 +276,13 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	ctxConfig.LLMProvider = provider // enables LLM-powered summarization
 	ctxMgr := ctxpkg.Factory(sess, ctxConfig)
 
+	// Subdirectory hint tracker — discovers AGENTS.md/CLAUDE.md/.cursorrules
+	// from directories the agent navigates into via tool calls.
+	var hintTracker *ctxpkg.SubdirectoryHintTracker
+	if cfg.ProjectDir != "" {
+		hintTracker = ctxpkg.NewSubdirectoryHintTracker(cfg.ProjectDir)
+	}
+
 	scratchStore := ctxpkg.NewScratchStore()
 	ctoTools = append(ctoTools,
 		ctxpkg.NewScratchWriteTool(scratchStore),
@@ -505,10 +512,16 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 	ctoToolSpecs := common.ToOpenAITools(ctoToolReg.All())
 
-	toolResultProcessor := func(procCtx context.Context, toolName, toolCallID, result string) string {
+	toolResultProcessor := func(procCtx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
 		processed, err := ctxMgr.ProcessToolResult(procCtx, toolName, toolCallID, result)
 		if err != nil {
 			return truncate.Tail(result, truncate.FileMaxLines, truncate.BashMaxChars).Content
+		}
+		// Enrich with subdirectory context hints (AGENTS.md, CLAUDE.md, .cursorrules)
+		if hintTracker != nil {
+			if hints := hintTracker.CheckToolCall(toolName, toolArgs); hints != "" {
+				processed += hints
+			}
 		}
 		return processed
 	}

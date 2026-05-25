@@ -36,7 +36,8 @@ type AgentLoopConfig struct {
 	// ToolResultProcessor intercepts tool result strings before they enter context.
 	// When set, replaces the hardcoded 6000-char truncation.
 	// Return the processed string the agent should see.
-	ToolResultProcessor func(ctx context.Context, toolName, toolCallID, result string) string
+	// toolArgs contains the arguments from the tool call (for context enrichment).
+	ToolResultProcessor func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string
 }
 
 // AgentLoop runs the full agent loop: generate → parse tool calls → execute → feed back.
@@ -604,7 +605,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				}
 
 				if l.config.ToolResultProcessor != nil {
-					resultStr = l.config.ToolResultProcessor(ctx, tc.Name, tcr.ID, resultStr)
+					resultStr = l.config.ToolResultProcessor(ctx, tc.Name, tcr.ID, resultStr, tc.Args)
 				} else if len(resultStr) > 10000 {
 					// Fallback: keep the end (errors/results matter most)
 					resultStr = resultStr[len(resultStr)-10000:]

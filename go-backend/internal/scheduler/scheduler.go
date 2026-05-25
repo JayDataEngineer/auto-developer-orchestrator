@@ -95,6 +95,7 @@ type Job struct {
 	LastRunAt         time.Time `json:"lastRunAt,omitempty"`
 	LastRunStatus     string    `json:"lastRunStatus,omitempty"`
 	LastError         string    `json:"lastError,omitempty"`
+	LastOutput        string    `json:"lastOutput,omitempty"` // last successful output (for context chaining)
 	NextRunAt         time.Time `json:"nextRunAt,omitempty"`
 	ConsecutiveErrors int       `json:"consecutiveErrors"`
 	CreatedAt         time.Time `json:"createdAt"`
@@ -106,6 +107,10 @@ type Job struct {
 	// Dependencies (task-like)
 	Blocks    []string `json:"blocks,omitempty"`    // job IDs this blocks
 	BlockedBy []string `json:"blockedBy,omitempty"` // job IDs blocking this
+
+	// ContextFrom: job IDs whose last output is injected as context before execution.
+	// Enables chaining: job A collects data → job B processes it.
+	ContextFrom []string `json:"contextFrom,omitempty"`
 
 	// Sandbox-only mode: job can only run bash/file ops inside its sandbox.
 	// Blocks delegation, MCP, browser, desktop, memory, skills, etc.
@@ -328,6 +333,7 @@ func jobToDB(j *Job) *storage.ScheduledJob {
 
 	blocks, _ := json.Marshal(j.Blocks)
 	blockedBy, _ := json.Marshal(j.BlockedBy)
+	contextFrom, _ := json.Marshal(j.ContextFrom)
 
 	return &storage.ScheduledJob{
 		ID:                     j.ID,
@@ -362,6 +368,8 @@ func jobToDB(j *Job) *storage.ScheduledJob {
 		DurationMs:             j.DurationMs,
 		Blocks:                 string(blocks),
 		BlockedBy:              string(blockedBy),
+		LastOutput:             j.LastOutput,
+		ContextFrom:            string(contextFrom),
 		SandboxOnly:            j.SandboxOnly,
 		WebhookToken:           j.WebhookToken,
 		CreatedAt:              createdAt,
@@ -416,6 +424,8 @@ func dbToJob(d *storage.ScheduledJob) *Job {
 	}
 	_ = json.Unmarshal([]byte(d.Blocks), &j.Blocks)
 	_ = json.Unmarshal([]byte(d.BlockedBy), &j.BlockedBy)
+	_ = json.Unmarshal([]byte(d.ContextFrom), &j.ContextFrom)
+	j.LastOutput = d.LastOutput
 	return j
 }
 

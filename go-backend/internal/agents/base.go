@@ -35,7 +35,7 @@ type BaseConfig struct {
 
 	// Extension points.
 	ExtraHooks           []core.LoopHook
-	ToolResultProcessor  func(ctx context.Context, toolName, toolCallID, result string) string
+	ToolResultProcessor  func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string
 	Logger               *log.Logger
 }
 
