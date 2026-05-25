@@ -212,6 +212,13 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/defaults", h.GetDefaults)
 	r.Put("/defaults", h.SetDefaults)
 
+	// File checkpoint management
+	r.Get("/checkpoints", h.ListCheckpoints)
+	r.Get("/checkpoints/{id}/files", h.GetCheckpointFiles)
+	r.Post("/checkpoints/{id}/restore", h.RestoreCheckpoint)
+	r.Get("/checkpoints/file-history", h.GetFileHistory)
+	r.Post("/checkpoints/file-restore", h.RestoreFileVersion)
+
 	// Background task management
 	r.Post("/tasks/{taskID}/background", h.BackgroundTask)
 	r.Get("/tasks", h.ListTasks)
