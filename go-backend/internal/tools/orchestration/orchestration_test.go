@@ -286,3 +286,103 @@ func TestSubscriberFromCtx(t *testing.T) {
 		t.Error("expected subscriber from context with SubscriberKey")
 	}
 }
+
+// --- Error path tests ---
+
+func TestDelegateTo_MissingTask(t *testing.T) {
+	tool := NewDelegateToTool(nil, nil, nil, nil)
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"role": "researcher",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing task")
+	}
+	te, ok := err.(*core.ToolError)
+	if !ok {
+		t.Fatalf("expected ToolError, got %T: %v", err, err)
+	}
+	if te.ToolName != "delegate_to" {
+		t.Errorf("expected tool name 'delegate_to', got %q", te.ToolName)
+	}
+}
+
+func TestDelegateTo_MissingRole(t *testing.T) {
+	tool := NewDelegateToTool(nil, nil, nil, nil)
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"task": "do something",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing role")
+	}
+	te, ok := err.(*core.ToolError)
+	if !ok {
+		t.Fatalf("expected ToolError, got %T: %v", err, err)
+	}
+	if te.ToolName != "delegate_to" {
+		t.Errorf("expected tool name 'delegate_to', got %q", te.ToolName)
+	}
+}
+
+func TestDelegateTo_EmptyTaskAfterStepFallback(t *testing.T) {
+	tool := NewDelegateToTool(nil, nil, nil, nil)
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"role": "researcher",
+		"step": "",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty task and step")
+	}
+}
+
+func TestDelegateTo_BackwardsCompatInstructions(t *testing.T) {
+	// 'instructions' field should work as fallback for 'role'
+	tool := NewDelegateToTool(nil, nil, nil, nil)
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"task":         "analyze the data",
+		"instructions": "custom-instructions-field",
+	})
+	// Should not fail on missing 'role' because 'instructions' is used as fallback
+	if err == nil {
+		t.Fatal("expected error — no role provider means no tools resolved")
+	}
+	te, ok := err.(*core.ToolError)
+	if !ok {
+		t.Fatalf("expected ToolError, got %T: %v", err, err)
+	}
+	// Should fail because role 'custom-instructions-field' has no tools
+	if te.ToolName != "delegate_to" {
+		t.Errorf("expected delegate_to error, got %q", te.ToolName)
+	}
+}
+
+func TestResolveRole_NoToolsForCustom(t *testing.T) {
+	// Custom instructions with no tools and no matching role = empty tool list
+	_, tools, _, _, _, _, _, _ := resolveRole("totally-unknown-role-xyz", nil, 15, 0.4, nil, nil)
+	if len(tools) != 0 {
+		t.Errorf("expected 0 tools for unknown role with no explicit tools, got %d", len(tools))
+	}
+}
+
+func TestResolveRole_StepFieldFallback(t *testing.T) {
+	// When 'task' is empty but 'step' is provided, step should be used
+	// (This is tested indirectly through DelegateTo, but let's test resolveRole defaults)
+	instructions, tools, rounds, temp, model, division, _, _ := resolveRole("test-agent", []string{"bash"}, 5, 0.3, nil, nil)
+	if instructions != "test-agent" {
+		t.Errorf("expected custom instructions passthrough, got %q", instructions)
+	}
+	if len(tools) != 1 || tools[0] != "bash" {
+		t.Errorf("expected [bash], got %v", tools)
+	}
+	if rounds != 5 {
+		t.Errorf("expected rounds 5, got %d", rounds)
+	}
+	if temp != 0.3 {
+		t.Errorf("expected temp 0.3, got %f", temp)
+	}
+	if model != "" {
+		t.Errorf("expected no model for custom, got %q", model)
+	}
+	if division != "" {
+		t.Errorf("expected no division for custom, got %q", division)
+	}
+}

@@ -7,11 +7,39 @@ These tests verify the full round-trip:
   3. Title persistence across requests
 
 Requires: running Go backend with database initialized.
+Tests that need messages also require a working LLM.
 """
 
 import pytest
 
 pytestmark = [pytest.mark.api]
+
+
+def _create_conversation(api_url, api_session, project, agent_id, timeout=90):
+    """Create a conversation by sending a prompt (requires LLM). Returns True if messages were saved."""
+    from utils.sse import post_and_stream
+    try:
+        events = list(post_and_stream(
+            api_session,
+            f"{api_url}/api/pux/prompt",
+            {"message": "say hello", "project": project, "agentId": agent_id},
+            timeout=timeout,
+        ))
+        # Check for errors that mean the LLM didn't work
+        errors = [d for t, d in events if t == "error"]
+        text_deltas = [d for t, d in events if t == "text_delta"]
+        return len(text_deltas) > 0 or len(errors) == 0
+    except Exception:
+        return False
+
+
+def _conversation_exists(api_session, api_url, project, agent_id):
+    """Check if a conversation with messages exists."""
+    resp = api_session.get(f"{api_url}/api/pux/conversations")
+    if resp.status_code != 200:
+        return False
+    conversations = resp.json()
+    return [c for c in conversations if c["project"] == project and c["agentId"] == agent_id]
 
 
 class TestConversationHistory:
@@ -33,23 +61,20 @@ class TestConversationHistory:
 
     def test_conversation_summary_has_required_fields(self, api_url, api_session, test_project):
         """Every conversation summary must have project, agentId, lastMessage, lastAt, messageCount, title."""
-        # First, ensure there's at least one conversation by sending a prompt
-        from utils.sse import stream_prompt
-        agent_id = f"test-conv-{__name__}"
-        try:
-            events = stream_prompt(api_url, api_session, test_project, "say hello", agent_id=agent_id)
-            # We don't care about the response, just that messages were saved
-        except Exception:
-            pass  # Agent might fail but messages should still be saved
+        agent_id = f"test-conv-fields-{__name__}"
+        created = _create_conversation(api_url, api_session, test_project, agent_id)
 
-        resp = api_session.get(f"{api_url}/api/pux/conversations")
+        if not created:
+            # Try existing conversations
+            resp = api_session.get(f"{api_url}/api/pux/conversations")
+            conversations = resp.json()
+            if not conversations:
+                pytest.skip("No conversations exist — LLM unavailable and no prior conversations")
+        else:
+            resp = api_session.get(f"{api_url}/api/pux/conversations")
+            conversations = resp.json()
+
         assert resp.status_code == 200
-        conversations = resp.json()
-
-        if not conversations:
-            pytest.skip("No conversations exist yet — send a prompt first")
-
-        # Check structure of first conversation
         conv = conversations[0]
         assert "project" in conv, "Missing 'project' field"
         assert "agentId" in conv, "Missing 'agentId' field"
@@ -66,36 +91,34 @@ class TestConversationHistory:
         )
 
 
+@pytest.mark.llm
 class TestConversationRename:
-    """PUT /api/pux/conversation/rename — set custom title."""
+    """PUT /api/pux/conversation/rename — set custom title.
+
+    These tests require a working LLM because conversations need messages
+    to appear in the conversations list.
+    """
 
     def test_rename_sets_title(self, api_url, api_session, test_project):
         """Rename a conversation and verify the title appears in conversations."""
-        # Create a conversation by sending a message
-        from utils.sse import stream_prompt
         agent_id = f"test-rename-{__name__}"
-        try:
-            stream_prompt(api_url, api_session, test_project, "say hello", agent_id=agent_id)
-        except Exception:
-            pass
+        created = _create_conversation(api_url, api_session, test_project, agent_id)
+        if not created:
+            pytest.skip("LLM unavailable — cannot create conversation with messages")
 
-        # Rename it — project, agentId, and title go in the JSON body
+        # Rename it
         new_title = "My Custom Title 123"
         resp = api_session.put(
             f"{api_url}/api/pux/conversation/rename",
             json={"project": test_project, "agentId": agent_id, "title": new_title},
         )
         assert resp.status_code == 200, f"Rename failed: {resp.text}"
-        data = resp.json()
-        assert data.get("success") is True
+        assert resp.json().get("success") is True
 
         # Verify title appears in conversations list
-        conv_resp = api_session.get(f"{api_url}/api/pux/conversations")
-        assert conv_resp.status_code == 200
-        conversations = conv_resp.json()
-        match = [c for c in conversations if c["project"] == test_project and c["agentId"] == agent_id]
+        match = _conversation_exists(api_session, api_url, test_project, agent_id)
         assert len(match) == 1, f"Expected 1 conversation, found {len(match)}"
-        assert match[0]["title"] == new_title, f"Title mismatch: expected {new_title!r}, got {match[0]['title']!r}"
+        assert match[0]["title"] == new_title
 
         # Cleanup
         api_session.delete(
@@ -104,12 +127,10 @@ class TestConversationRename:
 
     def test_rename_overwrites_previous_title(self, api_url, api_session, test_project):
         """Second rename replaces the first title."""
-        from utils.sse import stream_prompt
         agent_id = f"test-rename-overwrite-{__name__}"
-        try:
-            stream_prompt(api_url, api_session, test_project, "say hi", agent_id=agent_id)
-        except Exception:
-            pass
+        created = _create_conversation(api_url, api_session, test_project, agent_id)
+        if not created:
+            pytest.skip("LLM unavailable — cannot create conversation with messages")
 
         # First rename
         api_session.put(
@@ -125,9 +146,7 @@ class TestConversationRename:
         assert resp.status_code == 200
 
         # Verify second title won
-        conv_resp = api_session.get(f"{api_url}/api/pux/conversations")
-        conversations = conv_resp.json()
-        match = [c for c in conversations if c["project"] == test_project and c["agentId"] == agent_id]
+        match = _conversation_exists(api_session, api_url, test_project, agent_id)
         assert len(match) == 1
         assert match[0]["title"] == "Second Title"
 
@@ -161,17 +180,20 @@ class TestConversationRename:
         assert resp.json().get("success") is True
 
 
+@pytest.mark.llm
 class TestConversationDelete:
-    """DELETE /api/pux/conversation — delete conversation + title."""
+    """DELETE /api/pux/conversation — delete conversation + title.
+
+    These tests require a working LLM because conversations need messages
+    to appear in the conversations list.
+    """
 
     def test_delete_removes_conversation(self, api_url, api_session, test_project):
         """Create, rename, then delete a conversation — verify it's gone."""
-        from utils.sse import stream_prompt
         agent_id = f"test-delete-{__name__}"
-        try:
-            stream_prompt(api_url, api_session, test_project, "say hello", agent_id=agent_id)
-        except Exception:
-            pass
+        created = _create_conversation(api_url, api_session, test_project, agent_id)
+        if not created:
+            pytest.skip("LLM unavailable — cannot create conversation with messages")
 
         # Rename so we can verify both title and messages are deleted
         api_session.put(
@@ -180,12 +202,10 @@ class TestConversationDelete:
         )
 
         # Confirm it exists
-        conv_resp = api_session.get(f"{api_url}/api/pux/conversations")
-        conversations = conv_resp.json()
-        match = [c for c in conversations if c["project"] == test_project and c["agentId"] == agent_id]
+        match = _conversation_exists(api_session, api_url, test_project, agent_id)
         assert len(match) == 1
 
-        # Delete — uses query params for project and agentId
+        # Delete
         resp = api_session.delete(
             f"{api_url}/api/pux/conversation?project={test_project}&agentId={agent_id}"
         )
@@ -193,9 +213,7 @@ class TestConversationDelete:
         assert resp.json().get("success") is True
 
         # Verify it's gone from conversations
-        conv_resp2 = api_session.get(f"{api_url}/api/pux/conversations")
-        conversations2 = conv_resp2.json()
-        match2 = [c for c in conversations2 if c["project"] == test_project and c["agentId"] == agent_id]
+        match2 = _conversation_exists(api_session, api_url, test_project, agent_id)
         assert len(match2) == 0, f"Conversation still in conversations after delete: {match2}"
 
     def test_delete_nonexistent_conversation_succeeds(self, api_url, api_session):
@@ -213,12 +231,10 @@ class TestConversationDelete:
 
     def test_delete_also_removes_title(self, api_url, api_session, test_project):
         """Verify that deleting a conversation also removes its custom title."""
-        from utils.sse import stream_prompt
         agent_id = f"test-delete-title-{__name__}"
-        try:
-            stream_prompt(api_url, api_session, test_project, "say hello", agent_id=agent_id)
-        except Exception:
-            pass
+        created = _create_conversation(api_url, api_session, test_project, agent_id)
+        if not created:
+            pytest.skip("LLM unavailable — cannot create conversation with messages")
 
         # Rename
         api_session.put(
@@ -233,14 +249,9 @@ class TestConversationDelete:
         assert resp.status_code == 200
 
         # Re-create conversation with same ID — title should be auto-set from new first message
-        try:
-            stream_prompt(api_url, api_session, test_project, "hello again", agent_id=agent_id)
-        except Exception:
-            pass
+        _create_conversation(api_url, api_session, test_project, agent_id)
 
-        conv_resp = api_session.get(f"{api_url}/api/pux/conversations")
-        conversations = conv_resp.json()
-        match = [c for c in conversations if c["project"] == test_project and c["agentId"] == agent_id]
+        match = _conversation_exists(api_session, api_url, test_project, agent_id)
         if match:
             # Title should no longer be the old custom title
             assert match[0]["title"] != "Title To Be Nuked", f"Old custom title should be gone, got: {match[0]['title']!r}"
@@ -251,23 +262,23 @@ class TestConversationDelete:
         )
 
 
+@pytest.mark.llm
 class TestConversationRoundTrip:
-    """Full end-to-end: create -> rename -> verify -> delete -> verify gone."""
+    """Full end-to-end: create -> rename -> verify -> delete -> verify gone.
+
+    Requires a working LLM to create conversations with messages.
+    """
 
     def test_full_lifecycle(self, api_url, api_session, test_project):
-        from utils.sse import stream_prompt
         agent_id = f"test-lifecycle-{__name__}"
 
         # Step 1: Create conversation by sending a prompt
-        try:
-            stream_prompt(api_url, api_session, test_project, "hello world", agent_id=agent_id)
-        except Exception:
-            pass
+        created = _create_conversation(api_url, api_session, test_project, agent_id)
+        if not created:
+            pytest.skip("LLM unavailable — cannot create conversation with messages")
 
         # Step 2: Verify it appears in conversations
-        conv_resp = api_session.get(f"{api_url}/api/pux/conversations")
-        conversations = conv_resp.json()
-        match = [c for c in conversations if c["project"] == test_project and c["agentId"] == agent_id]
+        match = _conversation_exists(api_session, api_url, test_project, agent_id)
         assert len(match) == 1, "Step 2: Conversation not in conversations"
         conv = match[0]
         assert conv["messageCount"] >= 1, f"Step 2: Expected messages, got {conv['messageCount']}"
@@ -282,9 +293,7 @@ class TestConversationRoundTrip:
         assert resp.status_code == 200
 
         # Step 4: Verify new title in conversations
-        conv_resp2 = api_session.get(f"{api_url}/api/pux/conversations")
-        conversations2 = conv_resp2.json()
-        match2 = [c for c in conversations2 if c["project"] == test_project and c["agentId"] == agent_id]
+        match2 = _conversation_exists(api_session, api_url, test_project, agent_id)
         assert len(match2) == 1
         assert match2[0]["title"] == "Integration Test Chat"
 
@@ -304,9 +313,7 @@ class TestConversationRoundTrip:
         assert del_resp.json()["success"] is True
 
         # Step 7: Verify gone from conversations
-        conv_resp3 = api_session.get(f"{api_url}/api/pux/conversations")
-        conversations3 = conv_resp3.json()
-        match3 = [c for c in conversations3 if c["project"] == test_project and c["agentId"] == agent_id]
+        match3 = _conversation_exists(api_session, api_url, test_project, agent_id)
         assert len(match3) == 0, "Step 7: Conversation should be gone after delete"
 
         # Step 8: Verify messages are gone

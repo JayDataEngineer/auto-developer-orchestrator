@@ -132,6 +132,10 @@ class TestBrowserDelegatePipeline:
         if errors:
             err_msgs = [e.get("error", e.get("message", str(e))) for _, e in errors]
             hard = [m for m in err_msgs if "retrying" not in m.lower()]
+            # Skip if Docker/sandbox is unavailable (infrastructure issue, not test failure)
+            docker_errors = [m for m in hard if "docker" in m.lower() or "sandbox unavailable" in m.lower()]
+            if docker_errors:
+                pytest.skip(f"Docker/sandbox unavailable: {docker_errors[0][:120]}")
             assert len(hard) == 0, f"Agent errors: {hard}"
 
         # 2. CTO must have delegated

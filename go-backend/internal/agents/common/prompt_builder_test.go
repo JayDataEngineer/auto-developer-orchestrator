@@ -158,6 +158,12 @@ func TestBuildOrchestratorPromptV2_Fallback(t *testing.T) {
 }
 
 func TestBuildOrchestratorPromptV2_LegacyFallback(t *testing.T) {
+	// Save original builder to restore after test
+	origBuilder := globalBuilder
+	t.Cleanup(func() {
+		globalBuilder = origBuilder
+	})
+
 	// Create a temp dir without prompt_sections
 	tmpDir := t.TempDir()
 	t.Setenv("PROJECT_ROOT", tmpDir)
@@ -173,9 +179,6 @@ func TestBuildOrchestratorPromptV2_LegacyFallback(t *testing.T) {
 	if strings.Contains(prompt, DynamicBoundary) {
 		t.Error("legacy fallback should not contain boundary marker")
 	}
-
-	// Restore — t.Setenv automatically restores on test cleanup
-	ResetGlobalBuilder()
 }
 
 func TestBuildOrchestratorPromptV2_ToolsSection(t *testing.T) {
@@ -244,6 +247,12 @@ func TestPromptBuilder_OrgAfterBoundary(t *testing.T) {
 }
 
 func TestPromptBuilder_SingletonPersists(t *testing.T) {
+	// Save original builder to restore after test
+	origBuilder := globalBuilder
+	t.Cleanup(func() {
+		globalBuilder = origBuilder
+	})
+
 	repoRoot(t)
 	ResetGlobalBuilder()
 
@@ -274,8 +283,6 @@ func TestPromptBuilder_SingletonPersists(t *testing.T) {
 	if prompt1[:idx1] != prompt2[:idx2] {
 		t.Error("stable content should be identical across calls (from cache)")
 	}
-
-	ResetGlobalBuilder()
 }
 
 func TestPromptBuilder_MCPInstructions(t *testing.T) {
