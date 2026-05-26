@@ -9,11 +9,10 @@
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
-import { useAuiState, useAui } from "@assistant-ui/react-ink";
+import { useAuiState, useAui, ComposerPrimitive } from "@assistant-ui/react-ink";
 import { usePuxStore } from "@pux/shared";
 import { getCommands } from "../commands.js";
 import { PathAutocomplete, getCompletions } from "./path-autocomplete.js";
-import { VimInput } from "./vim-input.js";
 import { ComposerQueue } from "./composer-queue.js";
 import { CommandRow } from "./help-overlay.js";
 import { useTerminalSize } from "../use-terminal-size.js";
@@ -182,6 +181,11 @@ function CommandComposer({
 	const aui = useAui();
 	const text = useAuiState((s) => s.composer.text);
 	const draftRef = useRef("");
+	const activeTuiView = usePuxStore((s) => s.activeTuiView);
+
+	// Only enable multiline editing in chat view — frees up/down arrows
+	// for other views (agents, files, tools, conversations)
+	const isMultiLine = activeTuiView === "chat";
 
 	const matches = useMemo(() => {
 		if (!text || !text.startsWith("/")) return [];
@@ -281,7 +285,7 @@ function CommandComposer({
 			}
 			return;
 		}
-	}, [matches, text, aui, selectedIdx, onSelectIdx, pathIdx, onPathIdx, pathCompletions]));
+	}, [matches, text, aui, selectedIdx, onSelectIdx, pathIdx, onPathIdx, pathCompletions, isMultiLine]));
 
 	const handleSubmit = useCallback((submittedText: string) => {
 		const trimmed = submittedText.trim();
@@ -302,9 +306,9 @@ function CommandComposer({
 	}, [aui, onCommand, onOutput]);
 
 	return (
-		<VimInput
+		<ComposerPrimitive.Input
 			submitOnEnter={true}
-			multiLine={true}
+			multiLine={isMultiLine}
 			onSubmit={handleSubmit}
 			placeholder="Message..."
 			autoFocus
