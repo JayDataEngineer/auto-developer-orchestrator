@@ -41,10 +41,6 @@ type ConversationSummary struct {
 	Title        string `json:"title"`
 }
 
-type HistoryResponse struct {
-	Conversations []ConversationSummary `json:"conversations"`
-}
-
 // Prompt request
 type PromptRequest struct {
 	Message       string `json:"message"`

@@ -87,14 +87,14 @@ var agentHistoryCmd = &cobra.Command{
 			return err
 		}
 		client := api.NewClient(serverURL)
-		var result api.HistoryResponse
-		if err := client.Get("/api/pux/history?project="+projectName, &result); err != nil {
+		var conversations []api.ConversationSummary
+		if err := client.Get("/api/pux/conversations?project="+projectName, &conversations); err != nil {
 			return err
 		}
 		if outputFmt == "json" {
-			return printJSON(result)
+			return printJSON(conversations)
 		}
-		for _, c := range result.Conversations {
+		for _, c := range conversations {
 			title := c.Title
 			if title == "" {
 				title = c.LastMessage

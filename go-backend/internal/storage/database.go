@@ -549,13 +549,17 @@ func (d *Database) getConversationHistoryLegacy(ctx context.Context, project, ag
 	return msgs, rows.Err()
 }
 
-// ClearConversationHistory deletes all messages, thinking, tool_executions, and titles for a project+agent.
+// ClearConversationHistory deletes all messages, thinking, tool_executions, titles, and artifacts for a project+agent.
 func (d *Database) ClearConversationHistory(ctx context.Context, project, agentID string) error {
 	// Clear new tables
 	if err := d.Conversations.Clear(ctx, project, agentID); err != nil {
 		return err
 	}
-	// Also clear legacy table and titles
+	// Clear artifacts for this agent
+	_, _ = d.db.ExecContext(ctx,
+		`DELETE FROM artifacts WHERE agent_id = ?`,
+		agentID)
+	// Clear legacy table and titles
 	_, _ = d.db.ExecContext(ctx,
 		Rebind(d.dialect, `DELETE FROM conversation_messages WHERE project = ? AND agent_id = ?`),
 		project, agentID)
