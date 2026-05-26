@@ -97,17 +97,8 @@ export function AssistantMessage() {
 						return null;
 					case "text":
 						if (!part.text?.trim()) return null;
-						// Check if this is the last text part and message is streaming
-						const isLastText = isRunning && !parts.some((p: any, j: number) =>
-							j > i && p.type === "text" && p.text?.trim()
-						);
 						return (
-							<Box key={i} flexDirection="column" paddingLeft={1}>
-								<Text color={colors.text}>{part.text}</Text>
-								{isLastText && (
-									<Text color="yellow"> ...</Text>
-								)}
-							</Box>
+							<Text key={i} color={colors.text}>{part.text}</Text>
 						);
 					case "image":
 						return (
