@@ -59,11 +59,11 @@ export function HelpOverlay() {
 	useInput(
 		useCallback(
 			(_input: string, key: any) => {
-				if (!show) return;
 				if (key.escape || key.return) closeHelp();
 			},
-			[show, closeHelp],
+			[closeHelp],
 		),
+		{ isActive: show },
 	);
 
 	if (!show) return null;
