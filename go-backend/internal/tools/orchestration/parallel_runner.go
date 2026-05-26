@@ -43,70 +43,65 @@ type OrchestratorFactory func(ctx context.Context, cfg SubOrchestratorConfig) (S
 // SummarizerFunc summarizes text (typically a sub-agent result) to a target length.
 type SummarizerFunc func(ctx context.Context, text string, targetChars int) (string, error)
 
+// RunnerConfig holds all configuration for a ParallelRunner.
+// Passed to NewParallelRunner — replaces the old 14 setter methods.
+type RunnerConfig struct {
+	ProviderFactory ProviderFactory
+	ToolSpecs       []core.OpenAITool
+	Executor        core.ToolExecutor
+	BaseSession     core.Session
+	ContextSize     int
+	ModelResolver   ModelResolver
+	Logger          func(format string, args ...interface{})
+
+	// Recursive delegation
+	OrchestratorFactory OrchestratorFactory
+	ProjectDir          string
+	Depth, MaxDepth     int // MaxDepth defaults to 3
+
+	// File change tracking
+	Snapshotter Snapshotter
+
+	// Per-tier executor override
+	ExecutorFactory func(tier string) core.ToolExecutor
+
+	// Vision caching for sub-agent executors
+	VisualContext vision.VisualContext
+	VisionChain  *vision.FallbackChain
+	NativeVision bool // true if sub-agent models support native image_url
+	VisionLogger func(format string, args ...interface{})
+
+	// Auto-director: raise browser window for VNC visibility
+	RaiseBrowserFunc func(ctx context.Context)
+
+	// Scoped delegation tools
+	RoleProvider RoleProvider
+	MCPResolver  MCPResolver
+
+	// Sub-agent result summarization
+	Summarizer SummarizerFunc
+
+	// Ctrl+B backgrounding support
+	TaskMgr *core.TaskManager
+
+	// Scratch pad re-injection
+	ScratchStore *ctxpkg.ScratchStore
+
+	// Sub-agent transcript persistence
+	DB      *storage.Database
+	Project string
+}
+
 // ParallelRunner implements DelegateRunner with goroutine-based parallelism.
 // delegate_async spawns independent sub-agents; collect_results waits for all.
 type ParallelRunner struct {
-	providerFactory ProviderFactory           // creates isolated providers per sub-agent
-	executor        core.ToolExecutor          // for executing sub-agent tools
-	toolSpecs       []core.OpenAITool          // all available tool definitions
-	baseSession     core.Session               // parent session for context inheritance
-	ctxSize         int                        // context size for sub-agent
-	modelResolver   ModelResolver              // resolves model ID to provider (nil = use default)
-	logger          func(format string, args ...interface{})
+	cfg RunnerConfig
 
-	// Recursive delegation
-	orchestratorFactory OrchestratorFactory
-	projectDir          string
-	depth               int
-	maxDepth            int // default 3
-
-	// File change tracking
-	snapshotter Snapshotter // git-based snapshot/diff/revert
-
-	// Per-tier executor override: when set, uses this instead of r.executor
-	executorFactory func(tier string) core.ToolExecutor
-
-	// Visual context for vision caching: when set, sub-agent executors are wrapped
-	// with VisionAwareExecutor to skip vision calls when the page hasn't changed.
-	visualContext   vision.VisualContext
-	visionChain     *vision.FallbackChain
-	nativeVision    bool // true if sub-agent models support native image_url
-	// NOTE: nativeVision is inherited from the CTO's engine. Workers with different
-	// models (e.g. code_ops uses DeepSeek text-only) are safe because DetectImage()
-	// only triggers for browser/desktop tools — workers without those never hit the
-	// vision path. If a future worker mixes browser capability with a text-only model,
-	// this needs per-worker HasVision() resolution.
-	visionLogger    func(format string, args ...interface{})
-
-	// Auto-director: raise browser window for VNC visibility when browser agent starts
-	raiseBrowserFunc func(ctx context.Context) // injected by orchestrator if sandbox available
-
-	// Scoped delegation: when set, sub-agents with delegates_to get scoped delegation tools
-	roleProvider RoleProvider
-	mcpResolver  MCPResolver
-
-	// Sub-agent result summarization: when set, long sub-agent results are summarized
-	// before returning to the CTO instead of just being truncated.
-	summarizer SummarizerFunc
-
-	// Background task manager: when set, synchronous delegations can be
-	// backgrounded by the user (Ctrl+B). The delegation registers as a foreground
-	// task; Ctrl+B signals BackgroundReq; the subagent keeps running.
-	taskMgr *core.TaskManager
-
-	// Shared scratch store for sub-agent scratch pad hooks (same instance as CTO).
-	scratchStore *ctxpkg.ScratchStore
-
-	// Sub-agent transcript persistence: when set, sub-agent messages are stored
-	// in the database so their full chat log can be retrieved later.
-	db             *storage.Database
-	project        string // project name for DB storage
-
-	mu                sync.Mutex
-	tasks             map[string]*asyncTask
-	wg                sync.WaitGroup
-	liveAgents        map[string]*liveAgent // kept-alive sub-agents for continuation
-	completedSnapshots map[string]string    // agentRef → snapshotID for auto-accepted delegates (enables revert)
+	mu                 sync.Mutex
+	tasks              map[string]*asyncTask
+	wg                 sync.WaitGroup
+	liveAgents         map[string]*liveAgent // kept-alive sub-agents for continuation
+	completedSnapshots map[string]string     // agentRef → snapshotID for auto-accepted delegates (enables revert)
 }
 
 // asyncTask is a single in-flight async sub-agent.
@@ -134,79 +129,33 @@ type liveAgent struct {
 }
 
 // NewParallelRunner creates a runner that fans out sub-agents in parallel.
-func NewParallelRunner(executor core.ToolExecutor, toolSpecs []core.OpenAITool, baseSession core.Session, ctxSize int, modelResolver ModelResolver) *ParallelRunner {
+func NewParallelRunner(cfg RunnerConfig) *ParallelRunner {
 	// Enforce minimum context size for sub-agents
-	if ctxSize < 50000 {
-		ctxSize = 50000
+	if cfg.ContextSize < 50000 {
+		cfg.ContextSize = 50000
+	}
+	if cfg.MaxDepth == 0 {
+		cfg.MaxDepth = 3
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = func(format string, args ...interface{}) {}
 	}
 	return &ParallelRunner{
-		executor:      executor,
-		toolSpecs:     toolSpecs,
-		baseSession:   baseSession,
-		ctxSize:       ctxSize,
-		modelResolver: modelResolver,
-		logger:        func(format string, args ...interface{}) {},
-		tasks:             make(map[string]*asyncTask),
-		liveAgents:        make(map[string]*liveAgent),
+		cfg:                cfg,
+		tasks:              make(map[string]*asyncTask),
+		liveAgents:         make(map[string]*liveAgent),
 		completedSnapshots: make(map[string]string),
 	}
-}
-
-// SetProviderFactory sets the factory for creating isolated providers per sub-agent.
-func (r *ParallelRunner) SetProviderFactory(factory ProviderFactory) {
-	r.providerFactory = factory
-}
-
-// SetSnapshotter sets the git-based snapshotter for change tracking.
-func (r *ParallelRunner) SetSnapshotter(s Snapshotter) {
-	r.snapshotter = s
-}
-
-// SetExecutorFactory sets a per-tier executor override.
-// When set, the factory is called with the role's sandbox tier to produce
-// an appropriate executor (e.g., HostExecutor for native tier).
-func (r *ParallelRunner) SetExecutorFactory(f func(tier string) core.ToolExecutor) {
-	r.executorFactory = f
-}
-
-// SetRaiseBrowserFunc sets a callback that raises Chrome to the foreground
-// in the sandbox. Called automatically when browser tools are detected
-// in a delegation, so the VNC stream shows the browser.
-func (r *ParallelRunner) SetRaiseBrowserFunc(f func(ctx context.Context)) {
-	r.raiseBrowserFunc = f
-}
-
-// SetTaskManager enables Ctrl+B backgrounding for synchronous delegations.
-// When set, delegate_to registers as a foreground task; the user can press
-// Ctrl+B to send it to the background while the subagent keeps running.
-func (r *ParallelRunner) SetTaskManager(m *core.TaskManager) {
-	r.taskMgr = m
-}
-
-// SetScratchStore sets the shared scratch store for sub-agent scratch pad hooks.
-// When set, sub-agents get scratch pad re-injection just like the CTO.
-func (r *ParallelRunner) SetScratchStore(s *ctxpkg.ScratchStore) {
-	r.scratchStore = s
-}
-
-// SetVisualContext enables frame-based vision caching for sub-agent executors.
-// When set, sub-agents that produce screenshots will have their vision calls
-// skipped if the page hasn't changed since the last description.
-func (r *ParallelRunner) SetVisualContext(vc vision.VisualContext, chain *vision.FallbackChain, nativeVision bool, logger func(format string, args ...interface{})) {
-	r.visualContext = vc
-	r.visionChain = chain
-	r.nativeVision = nativeVision
-	r.visionLogger = logger
 }
 
 // enrichTask prepends relevant context from the parent session to the task.
 // This gives sub-agents faithful context (original user request + CTO delegation reasoning)
 // instead of just a paraphrased task description.
 func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
-	if r.baseSession == nil {
+	if r.cfg.BaseSession == nil {
 		return task
 	}
-	msgs, err := r.baseSession.BuildContext(ctx)
+	msgs, err := r.cfg.BaseSession.BuildContext(ctx)
 	if err != nil || len(msgs) == 0 {
 		return task
 	}
@@ -245,8 +194,8 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 	// Normalize host paths in the task to /sandbox/workspace/ so the sub-agent
 	// never sees contradictory paths (host path in task vs /sandbox/ in workspace_note).
 	normalizedTask := task
-	if r.projectDir != "" {
-		normalizedTask = strings.ReplaceAll(normalizedTask, r.projectDir, "/sandbox/workspace")
+	if r.cfg.ProjectDir != "" {
+		normalizedTask = strings.ReplaceAll(normalizedTask, r.cfg.ProjectDir, "/sandbox/workspace")
 	}
 
 	b.WriteString("<task>\n")
@@ -254,7 +203,7 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 	b.WriteString("\n</task>")
 
 	// Append workspace path awareness so sub-agents always write to the bind-mounted directory
-	if r.projectDir != "" {
+	if r.cfg.ProjectDir != "" {
 		b.WriteString("\n\n<workspace_note>\n")
 		b.WriteString("Your working directory is /sandbox/workspace/ — this IS the project root. ")
 		b.WriteString("All file operations (read, write, edit, build) target /sandbox/workspace/. ")
@@ -265,7 +214,7 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 		b.WriteString(fmt.Sprintf("\n\n<env>\nPlatform: %s\nDate: %s\n</env>", runtime.GOOS, time.Now().Format("2006-01-02")))
 
 		// Inject project context — CLAUDE.md, build system hints
-		projectCtx := discoverProjectContext(r.projectDir)
+		projectCtx := discoverProjectContext(r.cfg.ProjectDir)
 		if projectCtx != "" {
 			b.WriteString("\n\n<project_context>\n")
 			b.WriteString(projectCtx)
@@ -288,55 +237,20 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 	return enriched
 }
 
-// SetLogger sets the logger function.
-func (r *ParallelRunner) SetLogger(fn func(format string, args ...interface{})) {
-	r.logger = fn
-}
-
-// SetOrchestratorFactory configures the factory for recursive delegation.
-func (r *ParallelRunner) SetOrchestratorFactory(factory OrchestratorFactory) {
-	r.orchestratorFactory = factory
-}
-
-// SetProjectDir sets the project root directory for resolving division paths.
-func (r *ParallelRunner) SetProjectDir(dir string) {
-	r.projectDir = dir
-}
-
-// SetDepth sets the current recursion depth (0 = top-level).
-func (r *ParallelRunner) SetDepth(depth int) {
-	r.depth = depth
-	if r.maxDepth == 0 {
-		r.maxDepth = 3
-	}
-}
-
 // SetRoleProviders configures role resolution for scoped delegation.
-// When set, sub-agents whose roles have DelegatesTo will get scoped delegation tools.
+// Called after construction when role providers become available.
 func (r *ParallelRunner) SetRoleProviders(roleProvider RoleProvider, mcpResolver MCPResolver) {
-	r.roleProvider = roleProvider
-	r.mcpResolver = mcpResolver
-}
-
-func (r *ParallelRunner) SetSummarizer(fn SummarizerFunc) {
-	r.summarizer = fn
-}
-
-// SetTranscriptDB enables sub-agent transcript persistence to the database.
-// When set, sub-agent messages (user, assistant, tool) are stored in conversation_messages
-// with a composite agent_id so they can be retrieved later via the history API.
-func (r *ParallelRunner) SetTranscriptDB(db *storage.Database, project string) {
-	r.db = db
-	r.project = project
+	r.cfg.RoleProvider = roleProvider
+	r.cfg.MCPResolver = mcpResolver
 }
 
 // makeTranscriptID builds a deterministic composite ID for subagent transcript persistence.
 // Returns empty string if baseSession is nil (e.g. in tests).
 func (r *ParallelRunner) makeTranscriptID(agentName string) string {
-	if r.baseSession == nil {
+	if r.cfg.BaseSession == nil {
 		return ""
 	}
-	return r.baseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli())
+	return r.cfg.BaseSession.ID() + ":sub:" + agentName + "-" + fmt.Sprintf("%d", time.Now().UnixMilli())
 }
 
 // subscriberFromCtx extracts the SSE subscriber channel from the context.
@@ -352,6 +266,129 @@ func subscriberFromCtx(ctx context.Context) chan<- core.AgentEvent {
 		return ch
 	}
 	return nil
+}
+
+// drainResult holds the output of an event drain loop.
+type drainResult struct {
+	FinalText    string
+	FirstError   string
+	Backgrounded bool
+	RunErr       error
+}
+
+// drainAndForward drains events from a running sub-agent loop.
+// Accumulates text, tracks first error, forwards tool/text/thinking events
+// to the parent subscriber, and watches for Ctrl+B background signal.
+// If backgrounded, spins up a goroutine to collect remaining events and
+// emit subagent_end when done.
+func (r *ParallelRunner) drainAndForward(
+	ctx context.Context,
+	subscriber chan<- core.AgentEvent,
+	agentName string,
+	events <-chan core.AgentEvent,
+	done <-chan struct{},
+	bgTask *core.BackgroundTask,
+	transcriptID string,
+	task string,
+) drainResult {
+	var finalText string
+	var firstError string
+	var backgrounded bool
+	evtDone := false
+	for !evtDone {
+		select {
+		case <-done:
+			for evt := range events {
+				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+					finalText += evt.Data.Text
+				}
+				if evt.Type == core.EventTypeError && firstError == "" {
+					firstError = evt.Data.Error
+				}
+			}
+			evtDone = true
+		case evt, ok := <-events:
+			if !ok {
+				evtDone = true
+				break
+			}
+			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+				finalText += evt.Data.Text
+			}
+			if evt.Type == core.EventTypeError && firstError == "" {
+				firstError = evt.Data.Error
+				r.cfg.Logger("DELEGATE_LOOP_ERROR: agent=%s error=%s", agentName, firstError)
+			}
+			if subscriber != nil {
+				switch evt.Type {
+				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
+					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+					forwarded := evt
+					forwarded.Data.AgentName = agentName
+					core.SendEvent(subscriber, forwarded)
+				}
+			}
+		case <-func() <-chan struct{} {
+			if bgTask != nil {
+				return bgTask.BackgroundReq
+			}
+			return nil
+		}():
+			backgrounded = true
+			evtDone = true
+		}
+	}
+	return drainResult{FinalText: finalText, FirstError: firstError, Backgrounded: backgrounded}
+}
+
+// handleBackgrounded drains remaining events from a backgrounded sub-agent,
+// completes the task, and emits subagent_end.
+func (r *ParallelRunner) handleBackgrounded(
+	subscriber chan<- core.AgentEvent,
+	agentName string,
+	events <-chan core.AgentEvent,
+	done <-chan struct{},
+	bgTask *core.BackgroundTask,
+	transcriptID string,
+	task string,
+	prefixText string,
+	runErrPtr *error,
+) {
+	var bgText string
+	for evt := range events {
+		if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
+			bgText += evt.Data.Text
+		}
+		if subscriber != nil {
+			switch evt.Type {
+			case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
+				core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+				forwarded := evt
+				forwarded.Data.AgentName = agentName
+				core.SendEvent(subscriber, forwarded)
+			}
+		}
+	}
+	<-done
+	var errStr string
+	if *runErrPtr != nil {
+		errStr = (*runErrPtr).Error()
+	}
+	r.cfg.TaskMgr.CompleteTracked(bgTask.ID, prefixText+bgText, 0, errStr)
+	endStatus := "completed"
+	if *runErrPtr != nil {
+		endStatus = "error"
+	}
+	core.SendEvent(subscriber, core.AgentEvent{
+		Type: core.EventTypeSubAgentEnd,
+		Data: core.AgentEventData{
+			AgentName:    agentName,
+			Status:       endStatus,
+			Task:         truncateTask(task, 120),
+			TranscriptID: transcriptID,
+			Text:         prefixText + bgText,
+		},
+	})
 }
 
 // jsonToToolSpec converts a core.Tool's schema into an OpenAITool spec.
@@ -380,282 +417,20 @@ func (r *ParallelRunner) Close() {
 }
 
 // RunDelegate runs a synchronous sub-agent.
-func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error) {
-	agentName := extractAgentName(instructions)
-	subscriber := subscriberFromCtx(ctx)
-	r.logger("SYNC_DELEGATE: task=%q agent=%s tools=%v model=%q", task, agentName, toolNames, modelID)
-
-	// Generate deterministic transcript ID before emitting event
-	transcriptID := r.makeTranscriptID(agentName)
-
-	// Emit subagent_start to parent subscriber
-	core.SendEvent(subscriber, core.AgentEvent{
-		Type: core.EventTypeSubAgentStart,
-		Data: core.AgentEventData{
-			AgentName:    agentName,
-			Task:         truncateTask(task, 120),
-			ToolName:     "delegate_to",
-			TranscriptID: transcriptID,
-		},
-	})
-
-	// Filter tools to only those requested
-	var selectedTools []core.OpenAITool
-	toolSet := make(map[string]bool)
-	for _, name := range toolNames {
-		toolSet[name] = true
-	}
-	for _, t := range r.toolSpecs {
-		if toolSet[t.Function.Name] {
-			selectedTools = append(selectedTools, t)
-		}
-	}
-	if len(selectedTools) == 0 {
-		r.logger("DELEGATE_FAIL: agent=%s no tools found — requested=%v available=%v", agentName, toolNames, toolNamesFromSpecs(r.toolSpecs))
-		core.SendEvent(subscriber, core.AgentEvent{
-			Type: core.EventTypeSubAgentEnd,
-			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames), TranscriptID: transcriptID},
-		})
-		return nil, core.NewToolError("delegate_to", fmt.Sprintf("none of the requested tools were found: %v", toolNames))
-	}
-
-	// Create isolated provider for this sub-agent via factory.
-	// Each sub-agent gets its own Adapter → own session → own llama-server slot.
-	// If modelID is specified, use the model resolver to pick the right engine instead.
-	provider := r.providerFactory()
-	if provider == nil {
-		r.logger("DELEGATE_FAIL: agent=%s providerFactory returned nil", agentName)
-		core.SendEvent(subscriber, core.AgentEvent{
-			Type: core.EventTypeSubAgentEnd,
-			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: "provider factory returned nil", TranscriptID: transcriptID},
-		})
-		return nil, core.NewToolError("delegate_to", "provider factory returned nil for sub-agent "+agentName)
-	}
-	if modelID != "" && r.modelResolver != nil {
-		if resolved := r.modelResolver(modelID); resolved != nil {
-			// Close the factory-created provider, use the resolved model-specific one instead
-			if closer, ok := provider.(io.Closer); ok {
-				closer.Close()
-			}
-			provider = resolved
-			r.logger("MODEL_OVERRIDE: using %s for sub-agent", modelID)
-		}
-	}
-	defer func() {
-		if closer, ok := provider.(io.Closer); ok {
-			closer.Close()
-		}
-	}()
-
-	// Rewrite delegation context: include original user request + CTO's delegation reasoning.
-	// This gives the sub-agent faithful context instead of a paraphrased task.
-	enrichedTask := r.enrichTask(ctx, task)
-
-	// Auto-director: raise Chrome for VNC visibility when browser tools are detected.
-	if r.raiseBrowserFunc != nil && hasBrowserTools(toolNames) {
-		r.raiseBrowserFunc(ctx)
-	}
-
-	sess := &subSession{
-		parent:    r.baseSession,
-		msgCount:  0,
-		db:        r.db,
-		project:   r.project,
-		dbAgentID: transcriptID,
-	}
-	executor := r.executor
-	if r.executorFactory != nil && sandboxTier != "" {
-		executor = r.executorFactory(sandboxTier)
-	}
-	// Wrap sub-agent executor with vision processing (always)
-	// Native vision: extracts image_url, strips base64 from text
-	// Fallback: describes via chain when model can't see
-	{
-		vExec := vision.NewVisionAwareExecutor(executor, r.visionChain, log.New(io.Discard, "", 0))
-		vExec.SetNativeVision(r.nativeVision)
-		if r.visualContext != nil {
-			vExec.SetVisualContext(r.visualContext)
-		}
-		executor = vExec
-	}
-	// Use BaseAgent so sub-agents get common hooks (scratch pad re-injection, etc.)
-	subAgent := agents.NewBaseAgent(agents.BaseConfig{
-		Provider:        provider,
-		Session:         sess,
-		SystemPrompt:    instructions,
-		ToolSpecs:       selectedTools,
-		Executor:        executor,
-		MaxToolRounds:   maxRounds,
-		MaxTokens:       8192,
-		ContextSize:     r.ctxSize,
-		ProjectDir:      r.projectDir,
-		GenerateOptions: core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
-		ScratchStore:    r.scratchStore,
-		ToolResultProcessor: subAgentResultProcessor(r.projectDir),
-	})
-	loop := subAgent.Loop()
-
-	r.logger("DELEGATE_START: agent=%s tools=%v maxRounds=%d model=%q sandboxTier=%q", agentName, toolNamesFromSpecs(selectedTools), maxRounds, modelID, sandboxTier)
-
-	// Register as foreground task for Ctrl+B backgrounding
-	var bgTask *core.BackgroundTask
-	if r.taskMgr != nil {
-		bgTask, _ = r.taskMgr.StartTracked(
-			fmt.Sprintf("delegate %s", agentName),
-			truncateTask(task, 120),
-		)
-	}
-
-	// Collect events into result
-	events := make(chan core.AgentEvent, 128)
-	done := make(chan struct{})
-	var runErr error
-
-	go func() {
-		defer close(done)
-		defer close(events)
-		runErr = loop.Run(ctx, enrichedTask, events)
-		if runErr != nil {
-			r.logger("DELEGATE_LOOP_ERR: agent=%s err=%v", agentName, runErr)
-		}
-	}()
-
-	// Drain events: accumulate text result + forward tool events to parent subscriber
-	var finalText string
-	var firstError string
-	var backgrounded bool
-	evtDone := false
-	for !evtDone {
-		select {
-		case <-done:
-			// Drain remaining events
-			for evt := range events {
-				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-					finalText += evt.Data.Text
-				}
-				if evt.Type == core.EventTypeError && firstError == "" {
-					firstError = evt.Data.Error
-				}
-			}
-			evtDone = true
-		case evt, ok := <-events:
-			if !ok {
-				evtDone = true
-				break
-			}
-			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-				finalText += evt.Data.Text
-			}
-			if evt.Type == core.EventTypeError && firstError == "" {
-				firstError = evt.Data.Error
-				r.logger("DELEGATE_LOOP_ERROR: agent=%s error=%s", agentName, firstError)
-			}
-			// Forward tool + text/thinking events to parent subscriber with agent context
-			if subscriber != nil {
-				switch evt.Type {
-				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
-					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
-					forwarded := evt
-					forwarded.Data.AgentName = agentName
-					core.SendEvent(subscriber, forwarded)
-				}
-			}
-		case <-func() <-chan struct{} {
-			if bgTask != nil {
-				return bgTask.BackgroundReq
-			}
-			return nil
-		}():
-			backgrounded = true
-			evtDone = true
-		}
-	}
-
-	// Handle backgrounded delegation — subagent keeps running in goroutine
-	if backgrounded && bgTask != nil {
-		go func() {
-			var bgText string
-			for evt := range events {
-				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-					bgText += evt.Data.Text
-				}
-				if subscriber != nil {
-					switch evt.Type {
-					case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
-						core.EventTypeTextDelta, core.EventTypeThinkingDelta:
-						forwarded := evt
-						forwarded.Data.AgentName = agentName
-						core.SendEvent(subscriber, forwarded)
-					}
-				}
-			}
-			<-done
-			var errStr string
-			if runErr != nil {
-				errStr = runErr.Error()
-			}
-			r.taskMgr.CompleteTracked(bgTask.ID, finalText+bgText, 0, errStr)
-			endStatus := "completed"
-			if runErr != nil {
-				endStatus = "error"
-			}
-			core.SendEvent(subscriber, core.AgentEvent{
-				Type: core.EventTypeSubAgentEnd,
-				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120), TranscriptID: transcriptID, Text: finalText + bgText},
-			})
-		}()
-		return map[string]any{
-			"status":  "backgrounded",
-			"task_id": bgTask.ID,
-			"message": fmt.Sprintf("Delegation to %s sent to background. Use task_output with task_id '%s' to check results.", agentName, bgTask.ID),
-		}, nil
-	}
-
-	// Emit subagent_end
-	endStatus := "completed"
-	if runErr != nil {
-		endStatus = "error"
-	}
-	if runErr != nil {
-		r.logger("DELEGATE_DONE: agent=%s status=error err=%v firstLoopError=%s", agentName, runErr, firstError)
-	} else {
-		r.logger("DELEGATE_DONE: agent=%s status=ok textLen=%d", agentName, len(finalText))
-	}
-	core.SendEvent(subscriber, core.AgentEvent{
-		Type: core.EventTypeSubAgentEnd,
-		Data: core.AgentEventData{
-			AgentName:    agentName,
-			Status:       endStatus,
-			Task:         truncateTask(task, 120),
-			TranscriptID: transcriptID,
-			Error:        firstError,
-			Text:         finalText,
-		},
-	})
-
-	if runErr != nil {
-		return map[string]any{"error": runErr.Error(), "partial_result": finalText}, runErr
-	}
-
-	// Return only the final assistant message, not the entire accumulated context
-	artifact := extractLastAssistantFromSession(sess)
-	if artifact == "" {
-		artifact = finalText
-	}
-	artifact = r.maybeSummarize(ctx, artifact)
-
-	return map[string]any{"result": artifact, "status": "completed"}, nil
+// Delegates to RunDelegateTracked with empty agentName and nil delegatesTo.
+func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID, sandboxTier string) (map[string]any, error) {
+	return r.RunDelegateTracked(ctx, task, instructions, "", toolNames, maxRounds, temperature, modelID, sandboxTier, nil)
 }
 
 // RunDivisionDelegate creates a full sub-orchestrator for a division head.
 // The division path points to a sub-directory with its own pux.yaml, roles, etc.
 func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error) {
 	subscriber := subscriberFromCtx(ctx)
-	if r.orchestratorFactory == nil {
+	if r.cfg.OrchestratorFactory == nil {
 		return nil, fmt.Errorf("recursive delegation not available: no orchestrator factory configured")
 	}
-	if r.depth >= r.maxDepth {
-		return nil, fmt.Errorf("max delegation depth (%d) reached", r.maxDepth)
+	if r.cfg.Depth >= r.cfg.MaxDepth {
+		return nil, fmt.Errorf("max delegation depth (%d) reached", r.cfg.MaxDepth)
 	}
 
 	agentName := filepath.Base(divisionPath)
@@ -663,7 +438,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	// Resolve division path relative to project root
 	absPath := divisionPath
 	if !filepath.IsAbs(absPath) {
-		absPath = filepath.Join(r.projectDir, divisionPath)
+		absPath = filepath.Join(r.cfg.ProjectDir, divisionPath)
 	}
 
 	// Verify pux.yaml exists in the division directory
@@ -672,7 +447,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 		return nil, fmt.Errorf("division directory %q has no pux.yaml: %w", absPath, err)
 	}
 
-	r.logger("DIVISION_DELEGATE: path=%s depth=%d model=%q", absPath, r.depth+1, modelID)
+	r.cfg.Logger("DIVISION_DELEGATE: path=%s depth=%d model=%q", absPath, r.cfg.Depth+1, modelID)
 
 	// Emit subagent_start
 	transcriptID := r.makeTranscriptID(agentName)
@@ -686,11 +461,11 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 		},
 	})
 
-	subOrch, err := r.orchestratorFactory(ctx, SubOrchestratorConfig{
+	subOrch, err := r.cfg.OrchestratorFactory(ctx, SubOrchestratorConfig{
 		DivisionPath: absPath,
-		ProjectDir:   r.projectDir,
-		SandboxID:    r.baseSession.ID(),
-		Depth:        r.depth + 1,
+		ProjectDir:   r.cfg.ProjectDir,
+		SandboxID:    r.cfg.BaseSession.ID(),
+		Depth:        r.cfg.Depth + 1,
 		ModelID:      modelID,
 	})
 	if err != nil {
@@ -704,8 +479,8 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 
 	// Register as foreground task for Ctrl+B backgrounding
 	var bgTask *core.BackgroundTask
-	if r.taskMgr != nil {
-		bgTask, _ = r.taskMgr.StartTracked(
+	if r.cfg.TaskMgr != nil {
+		bgTask, _ = r.cfg.TaskMgr.StartTracked(
 			fmt.Sprintf("division %s", agentName),
 			truncateTask(task, 120),
 		)
@@ -722,80 +497,11 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 		runErr = subOrch.Run(ctx, task, events)
 	}()
 
-	var finalText string
-	var backgrounded bool
-	evtDone := false
-	for !evtDone {
-		select {
-		case <-done:
-			for evt := range events {
-				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-					finalText += evt.Data.Text
-				}
-			}
-			evtDone = true
-		case evt, ok := <-events:
-			if !ok {
-				evtDone = true
-				break
-			}
-			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-				finalText += evt.Data.Text
-			}
-			// Forward tool + text/thinking events to parent subscriber with agent context
-			if subscriber != nil {
-				switch evt.Type {
-				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
-					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
-					forwarded := evt
-					forwarded.Data.AgentName = agentName
-					core.SendEvent(subscriber, forwarded)
-				}
-			}
-		case <-func() <-chan struct{} {
-			if bgTask != nil {
-				return bgTask.BackgroundReq
-			}
-			return nil
-		}():
-			backgrounded = true
-			evtDone = true
-		}
-	}
+	dr := r.drainAndForward(ctx, subscriber, agentName, events, done, bgTask, transcriptID, task)
 
 	// Handle backgrounded division delegation
-	if backgrounded && bgTask != nil {
-		go func() {
-			var bgText string
-			for evt := range events {
-				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-					bgText += evt.Data.Text
-				}
-				if subscriber != nil {
-					switch evt.Type {
-					case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
-						core.EventTypeTextDelta, core.EventTypeThinkingDelta:
-						forwarded := evt
-						forwarded.Data.AgentName = agentName
-						core.SendEvent(subscriber, forwarded)
-					}
-				}
-			}
-			<-done
-			var errStr string
-			if runErr != nil {
-				errStr = runErr.Error()
-			}
-			r.taskMgr.CompleteTracked(bgTask.ID, finalText+bgText, 0, errStr)
-			endStatus := "completed"
-			if runErr != nil {
-				endStatus = "error"
-			}
-			core.SendEvent(subscriber, core.AgentEvent{
-				Type: core.EventTypeSubAgentEnd,
-				Data: core.AgentEventData{AgentName: agentName, Status: endStatus, Task: truncateTask(task, 120), TranscriptID: transcriptID, Text: finalText + bgText},
-			})
-		}()
+	if dr.Backgrounded && bgTask != nil {
+		go r.handleBackgrounded(subscriber, agentName, events, done, bgTask, transcriptID, task, dr.FinalText, &runErr)
 		return map[string]any{
 			"status":    "backgrounded",
 			"task_id":   bgTask.ID,
@@ -816,16 +522,16 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 			Status:       endStatus,
 			Task:         truncateTask(task, 120),
 			TranscriptID: transcriptID,
-			Text:         finalText,
+			Text:         dr.FinalText,
 		},
 	})
 
 	if runErr != nil {
-		return map[string]any{"error": runErr.Error(), "partial_result": finalText}, runErr
+		return map[string]any{"error": runErr.Error(), "partial_result": dr.FinalText}, runErr
 	}
 
 	// Summarize long sub-agent results before returning to CTO
-	finalText = r.maybeSummarize(ctx, finalText)
+	finalText := r.maybeSummarize(ctx, dr.FinalText)
 
 	return map[string]any{"result": finalText, "status": "completed", "division": divisionPath}, nil
 }
@@ -838,11 +544,11 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	subscriber := subscriberFromCtx(ctx)
 	// Take pre-snapshot
 	var snapshotID string
-	if r.snapshotter != nil && r.projectDir != "" {
+	if r.cfg.Snapshotter != nil && r.cfg.ProjectDir != "" {
 		var err error
-		snapshotID, err = r.snapshotter.Snapshot(ctx, r.projectDir)
+		snapshotID, err = r.cfg.Snapshotter.Snapshot(ctx, r.cfg.ProjectDir)
 		if err != nil {
-			r.logger("SNAPSHOT_WARN: failed to snapshot: %v", err)
+			r.cfg.Logger("SNAPSHOT_WARN: failed to snapshot: %v", err)
 		}
 	}
 
@@ -872,13 +578,13 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	for _, name := range toolNames {
 		toolSet[name] = true
 	}
-	for _, t := range r.toolSpecs {
+	for _, t := range r.cfg.ToolSpecs {
 		if toolSet[t.Function.Name] {
 			selectedTools = append(selectedTools, t)
 		}
 	}
 	if len(selectedTools) == 0 {
-		r.logger("DELEGATE_FAIL: agent=%s no tools found — requested=%v available=%v", agentName, toolNames, toolNamesFromSpecs(r.toolSpecs))
+		r.cfg.Logger("DELEGATE_FAIL: agent=%s no tools found — requested=%v available=%v", agentName, toolNames, toolNamesFromSpecs(r.cfg.ToolSpecs))
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
 			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames), TranscriptID: transcriptID},
@@ -887,34 +593,36 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	}
 
 	// Inject scoped delegation tools if the sub-agent's role has delegates_to
-	var scopedDelegate, scopedAsync core.Tool
-	if len(delegatesTo) > 0 && r.depth < r.maxDepth && r.roleProvider != nil {
-		scopedDelegate = NewDelegateToToolDynamic(r, r.mcpResolver, r.roleProvider, func() []string { return delegatesTo })
-		scopedAsync = NewDelegateAsyncToolDynamic(r, r.mcpResolver, r.roleProvider, func() []string { return delegatesTo })
+	var scopedDelegate, scopedAsync, scopedCollect core.Tool
+	if len(delegatesTo) > 0 && r.cfg.Depth < r.cfg.MaxDepth && r.cfg.RoleProvider != nil {
+		scopedDelegate = NewDelegateToToolDynamic(r, r.cfg.MCPResolver, r.cfg.RoleProvider, func() []string { return delegatesTo })
+		scopedAsync = NewDelegateAsyncToolDynamic(r, r.cfg.MCPResolver, r.cfg.RoleProvider, func() []string { return delegatesTo })
+		scopedCollect = NewCollectResultsTool(r)
 		selectedTools = append(selectedTools,
 			jsonToToolSpec(scopedDelegate),
 			jsonToToolSpec(scopedAsync),
+			jsonToToolSpec(scopedCollect),
 		)
-		r.logger("SCOPED_DELEGATION: sub-agent %q can delegate to %v", agentName, delegatesTo)
+		r.cfg.Logger("SCOPED_DELEGATION: sub-agent %q can delegate to %v", agentName, delegatesTo)
 	}
 
 	// Create isolated provider — kept alive for delegate_continue
-	provider := r.providerFactory()
+	provider := r.cfg.ProviderFactory()
 	if provider == nil {
-		r.logger("DELEGATE_FAIL: agent=%s providerFactory returned nil", agentName)
+		r.cfg.Logger("DELEGATE_FAIL: agent=%s providerFactory returned nil", agentName)
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
 			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: "provider factory returned nil", TranscriptID: transcriptID},
 		})
 		return nil, core.NewToolError("delegate_to", "provider factory returned nil for sub-agent "+agentName)
 	}
-	if modelID != "" && r.modelResolver != nil {
-		if resolved := r.modelResolver(modelID); resolved != nil {
+	if modelID != "" && r.cfg.ModelResolver != nil {
+		if resolved := r.cfg.ModelResolver(modelID); resolved != nil {
 			if closer, ok := provider.(io.Closer); ok {
 				closer.Close()
 			}
 			provider = resolved
-			r.logger("MODEL_OVERRIDE: using %s for sub-agent", modelID)
+			r.cfg.Logger("MODEL_OVERRIDE: using %s for sub-agent", modelID)
 		}
 	}
 
@@ -922,8 +630,8 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	enrichedTask := r.enrichTask(ctx, task)
 
 	// Auto-director: raise Chrome for VNC visibility when browser tools are detected.
-	if r.raiseBrowserFunc != nil && hasBrowserTools(toolNames) {
-		r.raiseBrowserFunc(ctx)
+	if r.cfg.RaiseBrowserFunc != nil && hasBrowserTools(toolNames) {
+		r.cfg.RaiseBrowserFunc(ctx)
 	}
 
 	// Build sub-agent config
@@ -931,9 +639,9 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		SystemPrompt:   instructions,
 		MaxToolRounds:  maxRounds,
 		MaxTokens:      8192,
-		ContextSize:    r.ctxSize,
+		ContextSize:    r.cfg.ContextSize,
 		Tools:          selectedTools,
-		ToolResultProcessor: subAgentResultProcessor(r.projectDir),
+		ToolResultProcessor: subAgentResultProcessor(r.cfg.ProjectDir),
 		Opts: core.GenerateOptions{
 			MaxTokens:   8192,
 			Temperature: temperature,
@@ -943,30 +651,31 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	}
 
 	sess := &subSession{
-		parent:    r.baseSession,
+		Session:   r.cfg.BaseSession,
 		msgCount:  0,
-		db:        r.db,
-		project:   r.project,
+		db:        r.cfg.DB,
+		project:   r.cfg.Project,
 		dbAgentID: transcriptID,
 	}
-	executor := r.executor
-	if r.executorFactory != nil && sandboxTier != "" {
-		executor = r.executorFactory(sandboxTier)
+	executor := r.cfg.Executor
+	if r.cfg.ExecutorFactory != nil && sandboxTier != "" {
+		executor = r.cfg.ExecutorFactory(sandboxTier)
 	}
 	// If scoped delegation tools were injected, wrap the executor so it can find them
-	if len(delegatesTo) > 0 && r.depth < r.maxDepth {
+	if len(delegatesTo) > 0 && r.cfg.Depth < r.cfg.MaxDepth {
 		executor = &scopedDelegationExecutor{
 			parent:   executor,
 			delegate: scopedDelegate,
 			async:    scopedAsync,
+			collect:  scopedCollect,
 		}
 	}
 	// Wrap sub-agent executor with vision processing (always)
 	{
-		vExec := vision.NewVisionAwareExecutor(executor, r.visionChain, log.New(io.Discard, "", 0))
-		vExec.SetNativeVision(r.nativeVision)
-		if r.visualContext != nil {
-			vExec.SetVisualContext(r.visualContext)
+		vExec := vision.NewVisionAwareExecutor(executor, r.cfg.VisionChain, log.New(io.Discard, "", 0))
+		vExec.SetNativeVision(r.cfg.NativeVision)
+		if r.cfg.VisualContext != nil {
+			vExec.SetVisualContext(r.cfg.VisualContext)
 		}
 		executor = vExec
 	}
@@ -979,20 +688,20 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		Executor:        executor,
 		MaxToolRounds:   maxRounds,
 		MaxTokens:       8192,
-		ContextSize:     r.ctxSize,
-		ProjectDir:      r.projectDir,
+		ContextSize:     r.cfg.ContextSize,
+		ProjectDir:      r.cfg.ProjectDir,
 		GenerateOptions: core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
-		ScratchStore:    r.scratchStore,
-		ToolResultProcessor: subAgentResultProcessor(r.projectDir),
+		ScratchStore:    r.cfg.ScratchStore,
+		ToolResultProcessor: subAgentResultProcessor(r.cfg.ProjectDir),
 	})
 	loop := subAgent.Loop()
 
-	r.logger("DELEGATE_START: agent=%s tools=%v maxRounds=%d model=%q sandboxTier=%q", agentName, toolNamesFromSpecs(selectedTools), maxRounds, modelID, sandboxTier)
+	r.cfg.Logger("DELEGATE_START: agent=%s tools=%v maxRounds=%d model=%q sandboxTier=%q", agentName, toolNamesFromSpecs(selectedTools), maxRounds, modelID, sandboxTier)
 
 	// Register as a foreground task so Ctrl+B can background the delegation
 	var bgTask *core.BackgroundTask
-	if r.taskMgr != nil {
-		bgTask, _ = r.taskMgr.StartTracked(
+	if r.cfg.TaskMgr != nil {
+		bgTask, _ = r.cfg.TaskMgr.StartTracked(
 			fmt.Sprintf("delegate_to %s", agentName),
 			truncateTask(task, 120),
 		)
@@ -1008,108 +717,18 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		defer close(events)
 		runErr = loop.Run(ctx, enrichedTask, events)
 		if runErr != nil {
-			r.logger("DELEGATE_LOOP_ERR: agent=%s err=%v", agentName, runErr)
+			r.cfg.Logger("DELEGATE_LOOP_ERR: agent=%s err=%v", agentName, runErr)
 		}
 	}()
 
 	// Drain events: accumulate text result + forward tool events to parent subscriber
 	// Also watch for background signal (Ctrl+B) if TaskManager is wired in.
-	var finalText string
-	var firstError string
-	var backgrounded bool
-	evtDone := false
-	for !evtDone {
-		select {
-		case <-done:
-			for evt := range events {
-				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-					finalText += evt.Data.Text
-				}
-				if evt.Type == core.EventTypeError && firstError == "" {
-					firstError = evt.Data.Error
-				}
-			}
-			evtDone = true
-		case evt, ok := <-events:
-			if !ok {
-				evtDone = true
-				break
-			}
-			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-				finalText += evt.Data.Text
-			}
-			if evt.Type == core.EventTypeError && firstError == "" {
-				firstError = evt.Data.Error
-				r.logger("DELEGATE_LOOP_ERROR: agent=%s error=%s", agentName, firstError)
-			}
-			if subscriber != nil {
-				switch evt.Type {
-				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
-					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
-					forwarded := evt
-					forwarded.Data.AgentName = agentName
-					core.SendEvent(subscriber, forwarded)
-				}
-			}
-		case <-func() <-chan struct{} {
-			if bgTask != nil {
-				return bgTask.BackgroundReq
-			}
-			return nil // nil channel never fires
-		}():
-			// User pressed Ctrl+B — detach from the blocking loop.
-			// The subagent goroutine keeps running; we'll collect its result
-			// when it finishes and store it in the task.
-			backgrounded = true
-			evtDone = true
-		}
-	}
+	dr := r.drainAndForward(ctx, subscriber, agentName, events, done, bgTask, transcriptID, task)
 
 	// If backgrounded, spin up a goroutine to collect the final result and
 	// store it in the TaskManager so the user can check on it later.
-	if backgrounded && bgTask != nil {
-		go func() {
-			// Drain remaining events from the still-running subagent
-			var bgText string
-			for evt := range events {
-				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-					bgText += evt.Data.Text
-				}
-				// Keep forwarding events to SSE so TUI shows live progress
-				if subscriber != nil {
-					switch evt.Type {
-					case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
-						core.EventTypeTextDelta, core.EventTypeThinkingDelta:
-						forwarded := evt
-						forwarded.Data.AgentName = agentName
-						core.SendEvent(subscriber, forwarded)
-					}
-				}
-			}
-			<-done // wait for loop.Run to return
-
-			var errStr string
-			if runErr != nil {
-				errStr = runErr.Error()
-			}
-			r.taskMgr.CompleteTracked(bgTask.ID, finalText+bgText, 0, errStr)
-
-			// Emit subagent_end for the backgrounded delegation
-			endStatus := "completed"
-			if runErr != nil {
-				endStatus = "error"
-			}
-			core.SendEvent(subscriber, core.AgentEvent{
-				Type: core.EventTypeSubAgentEnd,
-				Data: core.AgentEventData{
-					AgentName:    agentName,
-					Status:       endStatus,
-					Task:         truncateTask(task, 120),
-					TranscriptID: transcriptID,
-					Text:         finalText + bgText,
-				},
-			})
-		}()
+	if dr.Backgrounded && bgTask != nil {
+		go r.handleBackgrounded(subscriber, agentName, events, done, bgTask, transcriptID, task, dr.FinalText, &runErr)
 
 		agentRef := fmt.Sprintf("%s-%d", agentName, time.Now().UnixMilli())
 		return map[string]any{
@@ -1127,9 +746,9 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	}
 	// Log final outcome with error details for debugging insta-failures
 	if runErr != nil {
-		r.logger("DELEGATE_DONE: agent=%s status=error err=%v firstLoopError=%s", agentName, runErr, firstError)
+		r.cfg.Logger("DELEGATE_DONE: agent=%s status=error err=%v firstLoopError=%s", agentName, runErr, dr.FirstError)
 	} else {
-		r.logger("DELEGATE_DONE: agent=%s status=ok textLen=%d", agentName, len(finalText))
+		r.cfg.Logger("DELEGATE_DONE: agent=%s status=ok textLen=%d", agentName, len(dr.FinalText))
 	}
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
@@ -1138,8 +757,8 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 			Status:       endStatus,
 			Task:         truncateTask(task, 120),
 			TranscriptID: transcriptID,
-			Error:        firstError,
-			Text:         finalText,
+			Error:        dr.FirstError,
+			Text:         dr.FinalText,
 		},
 	})
 
@@ -1148,11 +767,11 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 
 	// Compute diff
 	var changes *ChangeSet
-	if r.snapshotter != nil && snapshotID != "" && r.projectDir != "" {
+	if r.cfg.Snapshotter != nil && snapshotID != "" && r.cfg.ProjectDir != "" {
 		var diffErr error
-		changes, diffErr = r.snapshotter.Diff(ctx, r.projectDir, snapshotID)
+		changes, diffErr = r.cfg.Snapshotter.Diff(ctx, r.cfg.ProjectDir, snapshotID)
 		if diffErr != nil {
-			r.logger("DIFF_WARN: failed to diff: %v", diffErr)
+			r.cfg.Logger("DIFF_WARN: failed to diff: %v", diffErr)
 		}
 	}
 
@@ -1182,7 +801,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	// The full transcript is persisted to DB. The CTO only needs the artifact (outcome).
 	if runErr != nil {
 		// On error, include partial text for debugging
-		result := map[string]any{"error": runErr.Error(), "partial_result": finalText, "agent_ref": agentRef}
+		result := map[string]any{"error": runErr.Error(), "partial_result": dr.FinalText, "agent_ref": agentRef}
 		if changes != nil {
 			result["changes"] = map[string]any{
 				"files":   changes.Files,
@@ -1196,7 +815,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	// This is the artifact — the concise summary the CTO needs.
 	artifact := extractLastAssistantFromSession(sess)
 	if artifact == "" {
-		artifact = finalText // fallback if session has no assistant messages
+		artifact = dr.FinalText // fallback if session has no assistant messages
 	}
 	artifact = r.maybeSummarize(ctx, artifact)
 
@@ -1222,18 +841,18 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 		return nil, fmt.Errorf("no live agent with ref %q — agent may have been reverted or expired. Use delegate_to to start a new delegation instead", agentRef)
 	}
 
-	r.logger("CONTINUE: agent=%s feedback_len=%d", la.Role, len(feedback))
+	r.cfg.Logger("CONTINUE: agent=%s feedback_len=%d", la.Role, len(feedback))
 
 	// Compact the session to make room for the feedback
 	la.Session.Compact(ctx, "Context compacted for continuation")
 
 	// Create a new agent loop with the SAME session (has full history)
-	continueExecutor := core.ToolExecutor(r.executor)
+	continueExecutor := core.ToolExecutor(r.cfg.Executor)
 	{
-		vExec := vision.NewVisionAwareExecutor(continueExecutor, r.visionChain, log.New(io.Discard, "", 0))
-		vExec.SetNativeVision(r.nativeVision)
-		if r.visualContext != nil {
-			vExec.SetVisualContext(r.visualContext)
+		vExec := vision.NewVisionAwareExecutor(continueExecutor, r.cfg.VisionChain, log.New(io.Discard, "", 0))
+		vExec.SetNativeVision(r.cfg.NativeVision)
+		if r.cfg.VisualContext != nil {
+			vExec.SetVisualContext(r.cfg.VisualContext)
 		}
 		continueExecutor = vExec
 	}
@@ -1246,9 +865,9 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 		Executor:        continueExecutor,
 		MaxToolRounds:   la.Config.MaxToolRounds,
 		ContextSize:     la.Config.ContextSize,
-		ProjectDir:      r.projectDir,
+		ProjectDir:      r.cfg.ProjectDir,
 		GenerateOptions: la.Config.Opts,
-		ScratchStore:    r.scratchStore,
+		ScratchStore:    r.cfg.ScratchStore,
 		ToolResultProcessor: la.Config.ToolResultProcessor,
 	})
 	loop := continueAgent.Loop()
@@ -1275,36 +894,7 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 		runErr = loop.Continue(ctx, feedback, events)
 	}()
 
-	var finalText string
-	evtDone := false
-	for !evtDone {
-		select {
-		case <-done:
-			for evt := range events {
-				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-					finalText += evt.Data.Text
-				}
-			}
-			evtDone = true
-		case evt, ok := <-events:
-			if !ok {
-				evtDone = true
-				break
-			}
-			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-				finalText += evt.Data.Text
-			}
-			if subscriber != nil {
-				switch evt.Type {
-				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
-					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
-					forwarded := evt
-					forwarded.Data.AgentName = la.Role
-					core.SendEvent(subscriber, forwarded)
-				}
-			}
-		}
-	}
+	dr := r.drainAndForward(ctx, subscriber, la.Role, events, done, nil, la.Session.dbAgentID, feedback)
 
 	// Emit subagent_end
 	endStatus := "completed"
@@ -1318,28 +908,28 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 			Status:       endStatus,
 			Task:         truncateTask(feedback, 120),
 			TranscriptID: la.Session.dbAgentID,
-			Text:         finalText,
+			Text:         dr.FinalText,
 		},
 	})
 
 	// Compute updated diff
 	var changes *ChangeSet
-	if r.snapshotter != nil && la.Snapshot != "" && r.projectDir != "" {
+	if r.cfg.Snapshotter != nil && la.Snapshot != "" && r.cfg.ProjectDir != "" {
 		var diffErr error
-		changes, diffErr = r.snapshotter.Diff(ctx, r.projectDir, la.Snapshot)
+		changes, diffErr = r.cfg.Snapshotter.Diff(ctx, r.cfg.ProjectDir, la.Snapshot)
 		if diffErr != nil {
-			r.logger("DIFF_WARN: failed to diff after continue: %v", diffErr)
+			r.cfg.Logger("DIFF_WARN: failed to diff after continue: %v", diffErr)
 		}
 	}
 
 	enriched := map[string]any{"agent_ref": agentRef}
 	if runErr != nil {
 		enriched["error"] = runErr.Error()
-		enriched["partial_result"] = finalText
+		enriched["partial_result"] = dr.FinalText
 		return enriched, runErr
 	}
 
-	enriched["result"] = r.maybeSummarize(ctx, finalText)
+	enriched["result"] = r.maybeSummarize(ctx, dr.FinalText)
 	enriched["status"] = "continued"
 	if changes != nil {
 		enriched["changes"] = map[string]any{
@@ -1385,9 +975,9 @@ func (r *ParallelRunner) RevertAgent(ctx context.Context, agentRef string) (map[
 
 	// Revert file changes
 	var revertedFiles []string
-	if r.snapshotter != nil && snapshotID != "" && r.projectDir != "" {
-		if err := r.snapshotter.Revert(ctx, r.projectDir, snapshotID); err != nil {
-			r.logger("REVERT_WARN: failed to revert: %v", err)
+	if r.cfg.Snapshotter != nil && snapshotID != "" && r.cfg.ProjectDir != "" {
+		if err := r.cfg.Snapshotter.Revert(ctx, r.cfg.ProjectDir, snapshotID); err != nil {
+			r.cfg.Logger("REVERT_WARN: failed to revert: %v", err)
 			return map[string]any{
 				"status":    "revert_failed",
 				"agent_ref": agentRef,
@@ -1395,13 +985,13 @@ func (r *ParallelRunner) RevertAgent(ctx context.Context, agentRef string) (map[
 			}, err
 		}
 		// Get the list of files that were reverted
-		changes, _ := r.snapshotter.Diff(ctx, r.projectDir, snapshotID)
+		changes, _ := r.cfg.Snapshotter.Diff(ctx, r.cfg.ProjectDir, snapshotID)
 		if changes != nil {
 			revertedFiles = changes.Files
 		}
 	}
 
-	r.logger("REVERT: agent=%s ref=%s files=%v", agentRole, agentRef, revertedFiles)
+	r.cfg.Logger("REVERT: agent=%s ref=%s files=%v", agentRole, agentRef, revertedFiles)
 
 	return map[string]any{
 		"status":         "reverted",
@@ -1411,14 +1001,14 @@ func (r *ParallelRunner) RevertAgent(ctx context.Context, agentRef string) (map[
 }
 
 // RunDelegateAsync launches a sub-agent in a goroutine. Returns immediately.
-func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error) {
+func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, delegatesTo []string) (map[string]any, error) {
 	// Capture subscriber from parent ctx before spawning goroutine.
 	// The goroutine uses context.Background() to survive parent cancellation,
 	// so we re-inject the subscriber into the background context.
 	parentSubscriber := subscriberFromCtx(ctx)
 
-	if r.depth >= r.maxDepth {
-		return nil, fmt.Errorf("max delegation depth (%d) reached", r.maxDepth)
+	if r.cfg.Depth >= r.cfg.MaxDepth {
+		return nil, fmt.Errorf("max delegation depth (%d) reached", r.cfg.MaxDepth)
 	}
 
 	r.mu.Lock()
@@ -1439,7 +1029,7 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 	r.wg.Add(1)
 	r.mu.Unlock()
 
-	r.logger("ASYNC_DELEGATE: task_id=%s task=%q tools=%v", taskID, task, toolNames)
+	r.cfg.Logger("ASYNC_DELEGATE: task_id=%s task=%q tools=%v", taskID, task, toolNames)
 
 	// Launch in background goroutine with DETACHED context.
 	// Using context.Background() ensures async sub-agents survive parent request
@@ -1457,7 +1047,7 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 		defer cancel()
 
 		// Use tracked delegation for file change tracking + agent_ref
-		result, err := r.RunDelegateTracked(bgCtx, task, instructions, agentName, toolNames, maxRounds, temperature, modelID, "", nil)
+		result, err := r.RunDelegateTracked(bgCtx, task, instructions, agentName, toolNames, maxRounds, temperature, modelID, "", delegatesTo)
 
 		// Async delegates don't need to stay alive for continuation.
 		// Clean up the live agent but keep the completedSnapshot for revert.
@@ -1487,7 +1077,7 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 
 // CollectAsyncResults waits for all pending async tasks and returns results.
 func (r *ParallelRunner) CollectAsyncResults(ctx context.Context) (map[string]any, error) {
-	r.logger("COLLECT_ASYNC: waiting for %d pending tasks", r.pendingCount())
+	r.cfg.Logger("COLLECT_ASYNC: waiting for %d pending tasks", r.pendingCount())
 
 	// Create a channel that closes when all tasks complete
 	allDone := make(chan struct{})
@@ -1606,7 +1196,7 @@ func subAgentResultProcessor(projectDir string) func(ctx context.Context, toolNa
 // It wraps a parent session for context inheritance in sub-agents.
 // When db is set, messages are also persisted to the database for transcript retrieval.
 type subSession struct {
-	parent   core.Session
+	core.Session // embed parent — delegates GetTree, Navigate, Branch, Fork, TruncateToolResults, ReplaceToolResults
 	messages []core.Message
 	msgCount int
 	// Transcript persistence
@@ -1615,7 +1205,7 @@ type subSession struct {
 	dbAgentID   string // composite agent_id for DB queries (e.g. "session-sub:marcus-1234")
 }
 
-func (s *subSession) ID() string { return s.parent.ID() + "-sub" }
+func (s *subSession) ID() string { return s.Session.ID() + "-sub" }
 func (s *subSession) Close() error { return nil }
 func (s *subSession) AppendMessage(msg core.Message) error {
 	s.messages = append(s.messages, msg)
@@ -1649,10 +1239,6 @@ func (s *subSession) AppendMessage(msg core.Message) error {
 func (s *subSession) BuildContext(ctx context.Context) ([]core.Message, error) {
 	return s.messages, nil
 }
-func (s *subSession) GetTree() *core.TreeNode    { return nil }
-func (s *subSession) Navigate(nodeID string) error { return fmt.Errorf("sub-sessions do not support navigation") }
-func (s *subSession) Branch(label string) (string, error) { return "", fmt.Errorf("sub-sessions do not support branching") }
-func (s *subSession) Fork(nodeID string) (core.Session, error) { return nil, fmt.Errorf("sub-sessions do not support forking") }
 func (s *subSession) Compact(ctx context.Context, summary string) (string, error) {
 	// Keep recent messages verbatim, truncate older ones.
 	// Sub-agents should have lean context — compact aggressively.
@@ -1699,11 +1285,7 @@ func (s *subSession) Compact(ctx context.Context, summary string) (string, error
 	s.msgCount = len(compacted)
 	return fmt.Sprintf("compacted %d messages, kept %d", removed, kept), nil
 }
-func (s *subSession) TruncateToolResults(keep int) (int, error) { return 0, nil }
-func (s *subSession) ReplaceToolResults(replace func(i int, name, content string) string, keep int) (int, error) {
-	return 0, nil
-}
-func (s *subSession) GetCurrentNode() string { return s.parent.ID() + "-sub" }
+func (s *subSession) GetCurrentNode() string { return s.Session.ID() + "-sub" }
 
 // hasBrowserTools checks if the tool list contains browser/web automation tools.
 // Used by the auto-director to decide whether to raise Chrome for VNC visibility.
@@ -1786,13 +1368,13 @@ func (r *ParallelRunner) maybeSummarize(ctx context.Context, text string) string
 	}
 
 	// Use LLM summarizer if available — compress to concise artifact
-	if r.summarizer != nil {
-		summarized, err := r.summarizer(ctx, text, 400)
+	if r.cfg.Summarizer != nil {
+		summarized, err := r.cfg.Summarizer(ctx, text, 400)
 		if err == nil && len(summarized) >= 50 {
-			r.logger("SUMMARIZE_OK: %d -> %d chars", len(text), len(summarized))
+			r.cfg.Logger("SUMMARIZE_OK: %d -> %d chars", len(text), len(summarized))
 			return summarized
 		}
-		r.logger("SUMMARIZE_FAILED: len=%d err=%v, truncating", len(text), err)
+		r.cfg.Logger("SUMMARIZE_FAILED: len=%d err=%v, truncating", len(text), err)
 	}
 
 	// Fallback: keep only the tail (errors and final status are at the end)
@@ -1997,6 +1579,7 @@ type scopedDelegationExecutor struct {
 	parent   core.ToolExecutor
 	delegate core.Tool
 	async    core.Tool
+	collect  core.Tool
 }
 
 func (e *scopedDelegationExecutor) Execute(ctx context.Context, toolName string, args map[string]any) (any, error) {
@@ -2005,6 +1588,8 @@ func (e *scopedDelegationExecutor) Execute(ctx context.Context, toolName string,
 		return e.delegate.Execute(ctx, args)
 	case "delegate_async":
 		return e.async.Execute(ctx, args)
+	case "collect_results":
+		return e.collect.Execute(ctx, args)
 	default:
 		return e.parent.Execute(ctx, toolName, args)
 	}

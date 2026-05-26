@@ -366,18 +366,6 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 
 	if runner == nil && provider != nil {
-		pr = orchestration.NewParallelRunner(allToolReg, allToolSpecs, sess, cfg.ContextSize, cfg.ModelResolver)
-		pr.SetProviderFactory(cfg.ProviderFactory)
-		pr.SetLogger(func(format string, args ...interface{}) {
-			logger.Printf("PARALLEL_RUNNER: "+format, args...)
-		})
-		pr.SetProjectDir(cfg.ProjectDir)
-		pr.SetDepth(0)
-		pr.SetOrchestratorFactory(makeOrchestratorFactory(provider, cfg))
-		// Enable Ctrl+B backgrounding for synchronous delegations
-		if cfg.TaskMgr != nil {
-			pr.SetTaskManager(cfg.TaskMgr)
-		}
 		// Summarize long sub-agent results before returning to CTO.
 		// Uses the worker model (via ProviderFactory) for cheaper summarization.
 		summarizerProvider := provider
@@ -386,41 +374,30 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 				summarizerProvider = wp
 			}
 		}
-		pr.SetSummarizer(func(ctx context.Context, text string, targetChars int) (string, error) {
-			return ctxpkg.SummarizeText(ctx, summarizerProvider, text, targetChars)
-		})
-		// Persist sub-agent transcripts to DB for later retrieval
-		if cfg.TranscriptDB != nil && cfg.Project != "" {
-			pr.SetTranscriptDB(cfg.TranscriptDB, cfg.Project)
-		}
-		// Subscriber is now injected via context (Contract 3.4 compliance).
-		// No need to call SetSubscriber — subscriberFromCtx() extracts it from ctx.
-		// Wire visual context for sub-agent vision caching
-		if cfg.VisualContext != nil {
-			pr.SetVisualContext(cfg.VisualContext, cfg.VisionChain, cfg.EngineHasVision, func(format string, args ...interface{}) {
-				logger.Printf("SUB_VISION: "+format, args...)
-			})
-		}
+
 		// Wire git-based change tracking for delegate_to / delegate_continue / delegate_revert
 		// Uses host executor — git operates on the host project directory
+		var snapshotter orchestration.Snapshotter
 		gitExec := cfg.HostBash
 		if gitExec == nil {
 			gitExec = cfg.BashExecutor
 		}
 		if gitExec != nil {
-			pr.SetSnapshotter(orchestration.NewGitSnapshotter(gitExec))
+			snapshotter = orchestration.NewGitSnapshotter(gitExec)
 		}
 
 		// Auto-director: raise Chrome window for VNC visibility when browser agent starts
+		var raiseBrowser func(ctx context.Context)
 		if cfg.BashExecutor != nil && cfg.SandboxID != "" {
 			bashExec := cfg.BashExecutor
-			pr.SetRaiseBrowserFunc(func(ctx context.Context) {
+			raiseBrowser = func(ctx context.Context) {
 				_, _ = bashExec.Exec(ctx, "DISPLAY=:99 wmctrl -a 'Google Chrome' 2>/dev/null || true")
-			})
+			}
 		}
+
 		// Per-role sandbox tier: native roles use host executor, others use sandbox.
 		// When there's no sandbox (Docker down), ALL tiers fall through to host executor.
-		pr.SetExecutorFactory(func(tier string) core.ToolExecutor {
+		execFactory := func(tier string) core.ToolExecutor {
 			if tier == "native" || cfg.SandboxID == "" {
 				hostExec := &adapters.HostExecutor{WorkDir: cfg.ProjectDir}
 				hostFileOps := &file.SimpleSandboxOps{BasePath: cfg.ProjectDir}
@@ -440,9 +417,41 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			}
 			// isolated + bridged both use the sandbox executor
 			return allToolReg
+		}
+
+		var visionLogger func(string, ...interface{})
+		if cfg.VisualContext != nil {
+			visionLogger = func(format string, args ...interface{}) {
+				logger.Printf("SUB_VISION: "+format, args...)
+			}
+		}
+
+		pr = orchestration.NewParallelRunner(orchestration.RunnerConfig{
+			ProviderFactory:    cfg.ProviderFactory,
+			ToolSpecs:          allToolSpecs,
+			Executor:           allToolReg,
+			BaseSession:        sess,
+			ContextSize:        cfg.ContextSize,
+			ModelResolver:      cfg.ModelResolver,
+			Logger:             func(format string, args ...interface{}) { logger.Printf("PARALLEL_RUNNER: "+format, args...) },
+			OrchestratorFactory: makeOrchestratorFactory(provider, cfg),
+			ProjectDir:         cfg.ProjectDir,
+			Depth:              0,
+			Snapshotter:        snapshotter,
+			ExecutorFactory:    execFactory,
+			VisualContext:      cfg.VisualContext,
+			VisionChain:        cfg.VisionChain,
+			NativeVision:       cfg.EngineHasVision,
+			VisionLogger:       visionLogger,
+			RaiseBrowserFunc:   raiseBrowser,
+			TaskMgr:            cfg.TaskMgr,
+			ScratchStore:       scratchStore,
+			DB:                 cfg.TranscriptDB,
+			Project:            cfg.Project,
+			Summarizer: func(ctx context.Context, text string, targetChars int) (string, error) {
+				return ctxpkg.SummarizeText(ctx, summarizerProvider, text, targetChars)
+			},
 		})
-		// Share the CTO's scratch store with sub-agents so they get scratch pad re-injection
-		pr.SetScratchStore(scratchStore)
 		runner = pr
 	}
 

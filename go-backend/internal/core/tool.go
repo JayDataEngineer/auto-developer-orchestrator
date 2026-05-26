@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 // Tool is the minimal interface every tool must implement.
@@ -19,6 +20,13 @@ type Tool interface {
 // ToolExecutor is the interface used by the agent loop to dispatch tool calls.
 type ToolExecutor interface {
 	Execute(ctx context.Context, toolName string, args map[string]any) (any, error)
+}
+
+// ToolMetadata is an optional interface that tools implement to declare
+// timeout hints. The agent loop checks for this interface and uses the
+// hint instead of the default tool execution timeout.
+type ToolMetadata interface {
+	TimeoutHint() time.Duration
 }
 
 // ToolRegistry maps tool names to Tool implementations.

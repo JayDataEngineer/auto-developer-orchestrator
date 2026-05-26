@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"log"
+	"time"
 
 	ctxpkg "github.com/auto-developer-orchestrator/backend/internal/context"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -100,6 +101,18 @@ func NewBaseAgent(cfg BaseConfig) *BaseAgent {
 		ProjectDir:          cfg.ProjectDir,
 		SandboxID:           cfg.SandboxID,
 		ToolResultProcessor: cfg.ToolResultProcessor,
+	}
+
+	// Wire ToolMetadata lookup if executor is a ToolRegistry
+	if reg, ok := cfg.Executor.(*core.ToolRegistry); ok {
+		loopCfg.ToolTimeoutHint = func(name string) time.Duration {
+			if t := reg.Get(name); t != nil {
+				if meta, ok := t.(core.ToolMetadata); ok {
+					return meta.TimeoutHint()
+				}
+			}
+			return 0
+		}
 	}
 
 	logger := cfg.Logger

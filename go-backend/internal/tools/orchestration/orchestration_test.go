@@ -234,11 +234,9 @@ func TestRunDelegate_EmitsSubAgentEvents(t *testing.T) {
 	// to the subscriber channel injected via context (Contract 3.4 compliance).
 	events := make(chan core.AgentEvent, 32)
 
-	runner := &ParallelRunner{
-		toolSpecs: []core.OpenAITool{},
-		tasks:     make(map[string]*asyncTask),
-	}
-	runner.SetLogger(func(format string, args ...interface{}) {})
+	runner := NewParallelRunner(RunnerConfig{
+		ToolSpecs: []core.OpenAITool{},
+	})
 
 	// Inject subscriber via context (Contract 3.4 pattern)
 	ctx := context.WithValue(context.Background(), core.SubscriberKey{}, events)

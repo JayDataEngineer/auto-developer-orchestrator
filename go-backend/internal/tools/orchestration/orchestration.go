@@ -4,16 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
 
+// delegationTimeout provides the standard timeout for delegation tools.
+// Embedded by DelegateToTool, DelegateAsyncTool, DelegateContinueTool.
+type delegationTimeout struct{}
+
+func (delegationTimeout) TimeoutHint() time.Duration { return 30 * time.Minute }
+
 // DelegateRunner creates and runs sub-agents for delegate_to/delegate_async.
 type DelegateRunner interface {
 	RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error)
 	RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string) (map[string]any, error)
-	RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string) (map[string]any, error)
+	RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, delegatesTo []string) (map[string]any, error)
 	CollectAsyncResults(ctx context.Context) (map[string]any, error)
 	RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error)
 }
@@ -81,6 +88,7 @@ func resolveRole(instructions string, toolNames []string, maxRounds int, tempera
 // DelegateToTool implements core.Tool for synchronous sub-agent delegation.
 // Returns an agent_ref and file changes for continuation/review.
 type DelegateToTool struct {
+	delegationTimeout
 	runner        DelegateRunner
 	mcpResolver   MCPResolver
 	roleProvider  RoleProvider
@@ -191,6 +199,7 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 // The subagent keeps its session (memory of what it already tried) and receives
 // targeted feedback instead of starting from scratch.
 type DelegateContinueTool struct {
+	delegationTimeout
 	runner DelegateRunner
 }
 
@@ -277,6 +286,7 @@ func (t *DelegateRevertTool) Execute(ctx context.Context, args map[string]any) (
 
 // DelegateAsyncTool implements core.Tool for async sub-agent delegation.
 type DelegateAsyncTool struct {
+	delegationTimeout
 	runner        DelegateRunner
 	mcpResolver   MCPResolver
 	roleProvider  RoleProvider
@@ -364,7 +374,12 @@ func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (a
 		return nil, core.NewToolError("delegate_async", "no tools specified and role '"+role+"' has no default tools")
 	}
 
-	return t.runner.RunDelegateAsync(ctx, taskID, task, resolvedInstructions, role, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel)
+	// Pass scoped delegatesTo (from nameProvider) so async sub-agents get nested delegation
+	var delegatesTo []string
+	if t.nameProvider != nil {
+		delegatesTo = t.nameProvider()
+	}
+	return t.runner.RunDelegateAsync(ctx, taskID, task, resolvedInstructions, role, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, delegatesTo)
 }
 
 // CollectResultsTool waits for all pending async delegates to complete.

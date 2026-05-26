@@ -30,7 +30,8 @@ type AgentLoopConfig struct {
 	// Execution control
 	MaxRetriesPerTool    int // max consecutive failures before forcing a new approach (0 = 3)
 	MaxConsecutiveFails  int // circuit breaker: force yield after N consecutive failures (0 = 5)
-	ToolExecTimeoutSec   int // seconds before a tool call times out (0 = 300, delegation gets 30m)
+	ToolExecTimeoutSec   int // seconds before a tool call times out (0 = 300)
+	ToolTimeoutHint      func(toolName string) time.Duration
 	MaxProviderRetries   int // max retries when the LLM provider fails mid-stream (0 = 2)
 
 	// ToolResultProcessor intercepts tool result strings before they enter context.
@@ -661,8 +662,10 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 // executeTool runs a single tool call with timeout and optional streaming.
 func (l *AgentLoop) executeTool(ctx context.Context, subscriber chan<- AgentEvent, tc ToolCall, state *LoopState) (any, error) {
 	timeout := time.Duration(l.config.ToolExecTimeoutSec) * time.Second
-	if tc.Name == "delegate_to" || tc.Name == "delegate_async" || tc.Name == "delegate_continue" {
-		timeout = 30 * time.Minute
+	if l.config.ToolTimeoutHint != nil {
+		if hint := l.config.ToolTimeoutHint(tc.Name); hint > 0 {
+			timeout = hint
+		}
 	}
 
 	// No timeout: execute directly
