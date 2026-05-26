@@ -185,11 +185,13 @@ function DelegateToolCallDisplay({
 	if (isDone) {
 		return (
 			<Box paddingLeft={2} marginBottom={1}>
-				<Text color={isError ? colors.error : colors.success}>{BLACK_CIRCLE} </Text>
-				<Text bold color={colors.brand}>{agentName}</Text>
-				{taskPreview && <Text color="gray">({taskPreview})</Text>}
-				<Text color="gray">
-					{" "}Done{subToolCount > 0 ? ` (${subToolCount} tool${subToolCount !== 1 ? "s" : ""}${symbols.dot}${duration})` : ""}
+				<Text>
+					<Text color={isError ? colors.error : colors.success}>{BLACK_CIRCLE} </Text>
+					<Text bold color={colors.brand}>{agentName}</Text>
+					{taskPreview && <Text color="gray">({taskPreview})</Text>}
+					<Text color="gray">
+						{" "}Done{subToolCount > 0 ? ` (${subToolCount} tool${subToolCount !== 1 ? "s" : ""}${symbols.dot}${duration})` : ""}
+					</Text>
 				</Text>
 			</Box>
 		);
@@ -204,17 +206,16 @@ function DelegateToolCallDisplay({
 
 	return (
 		<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-			<Box>
+			<Text>
 				<Text color={colors.running}>
-					{isRunning ? <Spinner type="dots" /> : BLACK_CIRCLE}
-					{" "}
+					{isRunning ? <Spinner type="dots" /> : BLACK_CIRCLE}{" "}
 				</Text>
 				<Text bold color={colors.brand}>{agentName}</Text>
 				{taskPreview && <Text color="gray">({taskPreview})</Text>}
 				{subToolCount > 0 && (
 					<Text color="gray"> {symbols.dot} {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
 				)}
-			</Box>
+			</Text>
 
 			{hiddenCount > 0 && (
 				<Box paddingLeft={2}>
@@ -230,18 +231,20 @@ function DelegateToolCallDisplay({
 				const argPreview = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 50);
 				return (
 					<Box key={`${tc.toolName}-${tc.timestamp}-${i}`} paddingLeft={2}>
-						<Text dimColor color="gray">{" └ "}</Text>
-						<Text color={tc.isError ? colors.error : tc.endedAt ? colors.success : colors.running}>
-							{tc.isError ? symbols.toolError : tc.endedAt ? symbols.toolDone : symbols.toolRunning}
+						<Text>
+							<Text dimColor color="gray">{" └ "}</Text>
+							<Text color={tc.isError ? colors.error : tc.endedAt ? colors.success : colors.running}>
+								{tc.isError ? symbols.toolError : tc.endedAt ? symbols.toolDone : symbols.toolRunning}
+							</Text>
+							<Text> </Text>
+							<Text bold color={isActive ? colors.running : undefined}>
+								{tc.toolName}
+							</Text>
+							{argPreview && <Text color="gray"> {argPreview.length > 50 ? argPreview.slice(0, 47) + "..." : argPreview}</Text>}
+							{isActive && isLast && isRunning && (
+								<Text color={colors.running}>{" "}<Spinner type="dots" /></Text>
+							)}
 						</Text>
-						<Text> </Text>
-						<Text bold color={isActive ? colors.running : undefined}>
-							{tc.toolName}
-						</Text>
-						{argPreview && <Text color="gray"> {argPreview.length > 50 ? argPreview.slice(0, 47) + "..." : argPreview}</Text>}
-						{isActive && isLast && isRunning && (
-							<Text color={colors.running}>{" "}<Spinner type="dots" /></Text>
-						)}
 					</Box>
 				);
 			})}
@@ -271,11 +274,10 @@ function ToolCallDisplay({
 	const isDone = result !== undefined;
 	const isRunning = !isDone && !isError;
 
-	// Extract a useful arg preview
 	const argPreview = getToolArgPreview(toolName, args as Record<string, unknown> | undefined);
 
 	return (
-		<Box>
+		<Text>
 			<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>
 				{isRunning ? symbols.toolRunning : isError ? symbols.toolError : symbols.toolDone}
 			</Text>
@@ -284,11 +286,11 @@ function ToolCallDisplay({
 				{toolName}
 			</Text>
 			{argPreview && (
-				<Text color={colors.textMuted}>({argPreview})</Text>
+				<Text color={colors.textMuted}> {argPreview}</Text>
 			)}
 			{isDone && !isError && <Text color={colors.textMuted}> done</Text>}
 			{isError && <Text color={colors.error}> failed</Text>}
-		</Box>
+		</Text>
 	);
 }
 
