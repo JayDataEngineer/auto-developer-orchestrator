@@ -181,12 +181,18 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	backend := m.detectVNCBackend(ctx, containerName)
 	sandbox.VNCBackend = backend
 
-	// Step 0: Blank fluxbox rootCommand so restarts don't clobber pcmanfm,
-	// then kill existing desktop processes. Supervisord will restart them,
-	// but with rootCommand blanked the restart is harmless.
+	// Step 0: Fix configs and kill existing desktop processes.
+	// 1) Blank fluxbox rootCommand — prevents xsetroot from clobbering pcmanfm on restart.
+	// 2) Write pcmanfm config with correct background color. pcmanfm 1.3 uses [*] section
+	//    header and overwrites its config on exit, losing the original settings.
+	// 3) Kill processes — supervisord will restart them with the fixed configs.
 	_, _ = m.execInContainer(ctx, containerName, []string{
 		"bash", "-c",
 		"sed -i 's/session.screen0.rootCommand:.*/session.screen0.rootCommand:/' /root/.fluxbox/init 2>/dev/null; " +
+			"printf '[*]\\nwallpaper_mode=color\\nwallpaper_common=1\\nwallpaper=#1e1e2e\\n" +
+			"desktop_bg=#1e1e2e\\ndesktop_fg=#ffffff\\ndesktop_shadow=#000000\\n" +
+			"desktop_font=Sans 12\\nshow_wm_menu=0\\nshow_documents=0\\nshow_mounts=0\\nshow_trash=0\\n' " +
+			"> /root/.config/pcmanfm/default/desktop-items-0.conf 2>/dev/null; " +
 			"pkill -f 'fluxbox' 2>/dev/null; pkill -f 'pcmanfm --desktop' 2>/dev/null; " +
 			"sleep 0.5",
 	}, false)

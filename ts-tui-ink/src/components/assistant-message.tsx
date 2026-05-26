@@ -14,7 +14,6 @@ import { getToolArgPreview } from "@pux/shared";
 import { usePuxStore } from "@pux/shared";
 import { ReasoningAccordion } from "./reasoning-accordion.js";
 import { BranchPicker } from "./branch-picker.js";
-import { MarkdownText } from "./markdown-text.js";
 import { TerminalImage } from "./terminal-image.js";
 import { useColors, symbols, BLOCKQUOTE_BAR, BLACK_CIRCLE } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
@@ -104,7 +103,7 @@ export function AssistantMessage() {
 						);
 						return (
 							<Box key={i} flexDirection="column" paddingLeft={1}>
-								<MarkdownText text={part.text} color={colors.text} />
+								<Text color={colors.text}>{part.text}</Text>
 								{isLastText && (
 									<Text color="yellow"> ...</Text>
 								)}
