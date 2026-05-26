@@ -30,10 +30,9 @@ function trunc(s: string, max: number): string {
 }
 
 export function AssistantMessage() {
-	const msg = useAuiState((s) => s.message);
+	const parts = useAuiState((s) => s.message.parts);
+	const isRunning = useAuiState((s) => s.message.status?.type === "running");
 	const colors = useColors();
-	const parts = msg.parts;
-	const isRunning = msg.status?.type === "running";
 	const hasContent = parts && parts.some((p: any) =>
 		(p.type === "text" && p.text?.trim()) ||
 		p.type === "tool-call" ||
