@@ -16,3 +16,5 @@ capabilities:
 model: deepseek/deepseek-v4-flash
 max_rounds: 25
 temperature: 0.2
+hooks:
+  - file_checkpoint

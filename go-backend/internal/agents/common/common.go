@@ -45,9 +45,10 @@ type AgentRole struct {
 	MaxRounds   int
 	Temperature float32
 	Model       string
-	Division    string // non-empty = division head, points to sub-dir with pux.yaml
-	SandboxTier string // "isolated" (default), "bridged", "native"
+	Division    string   // non-empty = division head, points to sub-dir with pux.yaml
+	SandboxTier string   // "isolated" (default), "bridged", "native"
 	DelegatesTo []string // if non-empty, this worker gets scoped delegation tools
+	Hooks       []string // named hooks to attach to sub-agents (e.g., "file_checkpoint", "raise_browser")
 }
 
 // agentConfig is the YAML structure for config/roles/<name>/config.yaml (legacy)
@@ -76,6 +77,7 @@ type workerConfig struct {
 	Sandbox      string   `yaml:"sandbox"`
 	Division     string   `yaml:"division,omitempty"`
 	DelegatesTo  []string `yaml:"delegates_to,omitempty"`
+	Hooks        []string `yaml:"hooks,omitempty"` // named hooks: file_checkpoint, raise_browser, etc.
 }
 
 // ToolPackage is a shared tool group (legacy name, still used internally).
@@ -591,6 +593,7 @@ func LoadWorkersFrom(dir string) map[string]*AgentRole {
 			Division:     wc.Division,
 			SandboxTier:  sandboxTier,
 			DelegatesTo:  wc.DelegatesTo,
+			Hooks:        wc.Hooks,
 		}
 	}
 	return roles

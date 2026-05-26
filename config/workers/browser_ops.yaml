@@ -4,3 +4,5 @@ capabilities:
   - browser
 max_rounds: 15
 temperature: 0.3
+hooks:
+  - raise_browser

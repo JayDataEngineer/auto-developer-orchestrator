@@ -17,6 +17,8 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/agents"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	ctxpkg "github.com/auto-developer-orchestrator/backend/internal/context"
+	"github.com/auto-developer-orchestrator/backend/internal/hooks"
+	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
@@ -90,6 +92,13 @@ type RunnerConfig struct {
 	// Sub-agent transcript persistence
 	DB      *storage.Database
 	Project string
+
+	// Sub-agent permission checking (passes through to BaseAgent)
+	PermDecisions *core.DecisionRegistry
+	ToolPerms     *perms.ToolPermissionConfig
+
+	// Sub-agent hook dependencies — used to resolve named hooks from worker YAML
+	HookDeps hooks.HookDeps
 }
 
 // ParallelRunner implements DelegateRunner with goroutine-based parallelism.
@@ -419,7 +428,7 @@ func (r *ParallelRunner) Close() {
 // RunDelegate runs a synchronous sub-agent.
 // Delegates to RunDelegateTracked with empty agentName and nil delegatesTo.
 func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID, sandboxTier string) (map[string]any, error) {
-	return r.RunDelegateTracked(ctx, task, instructions, "", toolNames, maxRounds, temperature, modelID, sandboxTier, nil)
+	return r.RunDelegateTracked(ctx, task, instructions, "", toolNames, maxRounds, temperature, modelID, sandboxTier, nil, nil)
 }
 
 // RunDivisionDelegate creates a full sub-orchestrator for a division head.
@@ -540,7 +549,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 
 // RunDelegateTracked runs a sub-agent with file change tracking.
 // Returns the result, an agent reference for continuation, and file changes.
-func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string) (map[string]any, error) {
+func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string, roleHooks []string) (map[string]any, error) {
 	subscriber := subscriberFromCtx(ctx)
 	// Take pre-snapshot
 	var snapshotID string
@@ -629,9 +638,44 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	// Enrich task with parent context
 	enrichedTask := r.enrichTask(ctx, task)
 
-	// Auto-director: raise Chrome for VNC visibility when browser tools are detected.
+	// Auto-director: if role doesn't request raise_browser hook explicitly but has
+	// browser tools, add it automatically for backward compatibility.
+	resolvedHookNames := roleHooks
 	if r.cfg.RaiseBrowserFunc != nil && hasBrowserTools(toolNames) {
-		r.cfg.RaiseBrowserFunc(ctx)
+		hasRaiseHook := false
+		for _, h := range resolvedHookNames {
+			if h == "raise_browser" {
+				hasRaiseHook = true
+				break
+			}
+		}
+		if !hasRaiseHook {
+			resolvedHookNames = append(resolvedHookNames, "raise_browser")
+		}
+	}
+
+	// Resolve named hooks → concrete LoopHook instances
+	var extraHooks []core.LoopHook
+	if len(resolvedHookNames) > 0 {
+		// Build hook deps from runner config
+		dep := r.cfg.HookDeps
+		// Override session ID for per-sub-agent isolation
+		dep.SessionID = transcriptID
+		// Wire raise_browser function
+		if r.cfg.RaiseBrowserFunc != nil {
+			rbFn := r.cfg.RaiseBrowserFunc
+			dep.RaiseBrowserFunc = func() error {
+				rbFn(ctx)
+				return nil
+			}
+		}
+		resolved, err := hooks.ResolveHooks(resolvedHookNames, dep)
+		if err != nil {
+			r.cfg.Logger("HOOK_RESOLVE_WARN: %v (skipping hooks for %s)", err, agentName)
+		} else {
+			extraHooks = resolved
+			r.cfg.Logger("HOOKS_ATTACHED: agent=%s hooks=%v", agentName, resolvedHookNames)
+		}
 	}
 
 	// Build sub-agent config
@@ -692,6 +736,9 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		ProjectDir:      r.cfg.ProjectDir,
 		GenerateOptions: core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
 		ScratchStore:    r.cfg.ScratchStore,
+		PermDecisions:   r.cfg.PermDecisions,
+		ToolPerms:       r.cfg.ToolPerms,
+		ExtraHooks:      extraHooks,
 		ToolResultProcessor: subAgentResultProcessor(r.cfg.ProjectDir),
 	})
 	loop := subAgent.Loop()
@@ -1047,7 +1094,7 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 		defer cancel()
 
 		// Use tracked delegation for file change tracking + agent_ref
-		result, err := r.RunDelegateTracked(bgCtx, task, instructions, agentName, toolNames, maxRounds, temperature, modelID, "", delegatesTo)
+		result, err := r.RunDelegateTracked(bgCtx, task, instructions, agentName, toolNames, maxRounds, temperature, modelID, "", delegatesTo, nil)
 
 		// Async delegates don't need to stay alive for continuation.
 		// Clean up the live agent but keep the completedSnapshot for revert.

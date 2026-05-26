@@ -426,6 +426,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			}
 		}
 
+		home, _ := os.UserHomeDir()
+
 		pr = orchestration.NewParallelRunner(orchestration.RunnerConfig{
 			ProviderFactory:    cfg.ProviderFactory,
 			ToolSpecs:          allToolSpecs,
@@ -448,8 +450,15 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			ScratchStore:       scratchStore,
 			DB:                 cfg.TranscriptDB,
 			Project:            cfg.Project,
+			PermDecisions:      core.GlobalDecisions,
+			ToolPerms:          cfg.ToolPerms,
 			Summarizer: func(ctx context.Context, text string, targetChars int) (string, error) {
 				return ctxpkg.SummarizeText(ctx, summarizerProvider, text, targetChars)
+			},
+			HookDeps: hooks.HookDeps{
+				ProjectDir:  cfg.ProjectDir,
+				HomeDir:     home,
+				GitExecutor: cfg.GitExecutor,
 			},
 		})
 		runner = pr
@@ -527,9 +536,9 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 
 	// File checkpoint hook — auto-backups before file writes/edits/destructive bash
-	home, _ := os.UserHomeDir()
+	home2, _ := os.UserHomeDir()
 	cpManager := checkpoint.NewManager(sess.ID(), cfg.ProjectDir,
-		filepath.Join(home, ".pi", "agent", "checkpoints", sess.ID()))
+		filepath.Join(home2, ".pi", "agent", "checkpoints", sess.ID()))
 	ctoHooks = append(ctoHooks, hooks.NewFileCheckpointHook(cpManager))
 	logger.Printf("File checkpoint hook enabled (session %s)", sess.ID())
 
