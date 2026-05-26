@@ -79,28 +79,36 @@ function Welcome() {
 			<Text bold color={colors.brand}>
 				{" "}Pux v{puxVersion}
 			</Text>
-			<Box gap={1} marginTop={1}>
-				<Text dimColor>Model:</Text>
-				<Text color={colors.assistant}>{modelLabel}</Text>
+			<Box marginTop={1}>
+				<Text>
+					<Text dimColor>Model: </Text>
+					<Text color={colors.assistant}>{modelLabel}</Text>
+				</Text>
 			</Box>
 			{projectName && (
-				<Box gap={1}>
-					<Text dimColor>Project:</Text>
+				<Text>
+					<Text dimColor>Project: </Text>
 					<Text color={colors.text}>{projectName}</Text>
-				</Box>
+				</Text>
 			)}
 
 			<Box flexDirection="column" marginTop={1}>
 				<Text dimColor>
 					{" "}Type a message to start, or try:
 				</Text>
-				<Box gap={1} marginTop={1}>
-					<Text color="gray">{"  "}/help</Text>
-					<Text dimColor>commands</Text>
-					<Text color="gray">/model</Text>
-					<Text dimColor>switch model</Text>
-					<Text color="gray">/compact</Text>
-					<Text dimColor>free context</Text>
+				<Box flexDirection="column" marginTop={1}>
+					<Text>
+						<Text color="gray">{"  "}/help</Text>
+						<Text dimColor>  commands</Text>
+					</Text>
+					<Text>
+						<Text color="gray">{"  "}/model</Text>
+						<Text dimColor>  switch model</Text>
+					</Text>
+					<Text>
+						<Text color="gray">{"  "}/compact</Text>
+						<Text dimColor>  free context</Text>
+					</Text>
 				</Box>
 			</Box>
 		</Box>
