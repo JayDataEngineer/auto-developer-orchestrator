@@ -181,10 +181,14 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	backend := m.detectVNCBackend(ctx, containerName)
 	sandbox.VNCBackend = backend
 
-	// Step 0: Kill existing desktop processes from supervisord/browser mode.
-	// Without this, we get duplicate window managers and display fighting.
+	// Step 0: Blank fluxbox rootCommand so restarts don't clobber pcmanfm,
+	// then kill existing desktop processes. Supervisord will restart them,
+	// but with rootCommand blanked the restart is harmless.
 	_, _ = m.execInContainer(ctx, containerName, []string{
-		"bash", "-c", "pkill -f 'fluxbox' 2>/dev/null; pkill -f 'pcmanfm --desktop' 2>/dev/null; sleep 0.3",
+		"bash", "-c",
+		"sed -i 's/session.screen0.rootCommand:.*/session.screen0.rootCommand:/' /root/.fluxbox/init 2>/dev/null; " +
+			"pkill -f 'fluxbox' 2>/dev/null; pkill -f 'pcmanfm --desktop' 2>/dev/null; " +
+			"sleep 0.5",
 	}, false)
 
 	// Step 1: Start Xvfb with large virtual screen for RANDR resize support.
@@ -211,6 +215,7 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	}, false)
 
 	// Step 2: Start window manager (fluxbox for menu support, then fallbacks)
+	// Step 2: Start window manager (fluxbox for menu support, then fallbacks)
 	_, err = m.execInContainer(ctx, containerName, []string{
 		"sh", "-c", fmt.Sprintf("DISPLAY=%s fluxbox &>/dev/null || DISPLAY=%s xfwm4 &>/dev/null || DISPLAY=%s openbox &>/dev/null || true", display, display, display),
 	}, true)
@@ -218,11 +223,14 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		m.logger.Warn("window manager start warning", zap.Error(err))
 	}
 
-	// Step 2b: Set desktop background + start pcmanfm for desktop icons.
-	// pcmanfm --desktop manages the root window, so it must start after fluxbox.
-	// The pcmanfm config in /root/.config/pcmanfm/default/ sets the dark background.
+	// Step 2b: Start pcmanfm for desktop icons and background.
+	// pcmanfm --desktop manages the root window (background + icons).
+	// It reads its config from /root/.config/pcmanfm/default/ for colors.
+	// Sleep lets fluxbox initialize before pcmanfm claims the root window.
 	_, _ = m.execInContainer(ctx, containerName, []string{
-		"sh", "-c", fmt.Sprintf("DISPLAY=%s xsetroot -solid '#1e1e2e' 2>/dev/null; DISPLAY=%s pcmanfm --desktop &>/dev/null &", display, display),
+		"bash", "-c", fmt.Sprintf(
+			"sleep 0.5; DISPLAY=%s pcmanfm --desktop &>/tmp/pcmanfm-start.log &",
+			display),
 	}, false)
 
 	// Step 3: Start VNC server — KasmVNC or standard x11vnc
