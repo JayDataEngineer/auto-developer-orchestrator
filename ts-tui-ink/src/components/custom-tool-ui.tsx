@@ -58,6 +58,7 @@ export const DelegateToolUI = makeAssistantToolUI({
 	render: ({ args, result, status, toolCallId }) => {
 		return (
 			<DelegateRenderer
+				toolName="delegate_to"
 				args={args}
 				result={result}
 				status={status}
@@ -72,6 +73,7 @@ export const DelegateAsyncToolUI = makeAssistantToolUI({
 	render: ({ args, result, status, toolCallId }) => {
 		return (
 			<DelegateRenderer
+				toolName="delegate_async"
 				args={args}
 				result={result}
 				status={status}
@@ -82,18 +84,21 @@ export const DelegateAsyncToolUI = makeAssistantToolUI({
 });
 
 function DelegateRenderer({
+	toolName,
 	args,
 	result,
 	status,
 	toolCallId,
 }: {
+	toolName: string;
 	args: unknown;
 	result: unknown;
 	status: { type: string };
 	toolCallId?: string;
 }) {
 	const colors = useColors();
-	const agentName = (args as any)?.agent_id || (args as any)?.agent || "agent";
+	const role = (args as any)?.role || (args as any)?.instructions || "agent";
+	const label = `${toolName} → ${role}`;
 	const task = (args as any)?.task || (args as any)?.prompt || "";
 	const isDone = status.type === "complete";
 	const isRunning = status.type === "running";
@@ -101,7 +106,7 @@ function DelegateRenderer({
 	// Look up sub-agent details from Zustand store
 	const agents = usePuxStore((s) => s.agents);
 	const agentState = [...agents.values()].find(
-		(a) => a.agentName === agentName && a.task === task
+		(a) => a.agentName === role && a.task === task
 	);
 
 	const toolCalls = agentState?.toolCalls ?? [];
@@ -128,7 +133,7 @@ function DelegateRenderer({
 		return (
 			<Box paddingLeft={2} marginBottom={1}>
 				<Text color={colors.success}>{BLACK_CIRCLE} </Text>
-				<Text bold color={colors.brand}>{agentName}</Text>
+				<Text bold color={colors.brand}>{label}</Text>
 				{taskPreview && <Text color="gray">({taskPreview})</Text>}
 				<Text color="gray">
 					{" "}Done{subToolCount > 0 ? ` (${subToolCount} tool${subToolCount !== 1 ? "s" : ""}${symbols.dot}${duration})` : ""}
@@ -153,7 +158,7 @@ function DelegateRenderer({
 					{isRunning ? <Spinner type="dots" /> : BLACK_CIRCLE}
 					{" "}
 				</Text>
-				<Text bold color={colors.brand}>{agentName}</Text>
+				<Text bold color={colors.brand}>{label}</Text>
 				{taskPreview && <Text color="gray">({taskPreview})</Text>}
 				{subToolCount > 0 && (
 					<Text color="gray"> {symbols.dot} {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>

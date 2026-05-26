@@ -157,20 +157,21 @@ function DelegateToolCallDisplay({
 	const isDone = result !== undefined;
 	const isRunning = !isDone && !isError;
 
-	const agentName = (args as any)?.agent_id || (args as any)?.agent || (args as any)?.instructions || "agent";
+	const role = (args as any)?.role || (args as any)?.instructions || "agent";
+	const label = `${toolName} → ${role}`;
 	const task = (args as any)?.task || (args as any)?.prompt || "";
 
 	// Width-aware: paddingLeft(2) + symbol(2) + spacing = ~6 chars overhead
 	// Header: indent(2) + spinner(3) + agent + task + suffix
 	const headerOverhead = 6; // indent + spinner + space
-	const maxTaskLen = Math.max(20, cols - headerOverhead - agentName.length - 10);
+	const maxTaskLen = Math.max(20, cols - headerOverhead - label.length - 10);
 	const taskPreview = trunc(task, Math.min(maxTaskLen, 50));
 
 	// Look up sub-agent details from Zustand store.
 	const agents = usePuxStore((s) => s.agents);
 	const agentState = useMemo(() => {
 		const candidates = [...agents.values()].filter(
-			(a) => a.agentName === agentName,
+			(a) => a.agentName === role,
 		);
 		if (candidates.length === 0) return undefined;
 		if (candidates.length === 1) return candidates[0];
@@ -178,7 +179,7 @@ function DelegateToolCallDisplay({
 			(a) => task.startsWith(a.task) || a.task.startsWith(task),
 		);
 		return byTask ?? candidates.find((a) => a.status === "running") ?? candidates[0];
-	}, [agents, agentName, task]);
+	}, [agents, role, task]);
 
 	const toolCalls = agentState?.toolCalls ?? [];
 	const subToolCount = toolCalls.length;
@@ -211,7 +212,7 @@ function DelegateToolCallDisplay({
 			<Box paddingLeft={2} marginBottom={1}>
 				<Text wrap="truncate-end">
 					<Text color={isError ? colors.error : colors.success}>{BLACK_CIRCLE} </Text>
-					<Text bold color={colors.brand}>{agentName}</Text>
+					<Text bold color={colors.brand}>{label}</Text>
 					{taskPreview && <Text color="gray"> {taskPreview}</Text>}
 					<Text color="gray">{doneSuffix}</Text>
 				</Text>
@@ -232,7 +233,7 @@ function DelegateToolCallDisplay({
 				<Text color={colors.running}>
 					{isRunning ? <Spinner type="dots" /> : BLACK_CIRCLE}{" "}
 				</Text>
-				<Text bold color={colors.brand}>{agentName}</Text>
+				<Text bold color={colors.brand}>{label}</Text>
 				{taskPreview && <Text color="gray"> {taskPreview}</Text>}
 				{subToolCount > 0 && (
 					<Text color="gray"> · {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
