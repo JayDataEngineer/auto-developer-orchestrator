@@ -549,8 +549,48 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 
 // RunDelegateTracked runs a sub-agent with file change tracking.
 // Returns the result, an agent reference for continuation, and file changes.
-func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string, roleHooks []string) (map[string]any, error) {
+// delegateSetup holds the prepared state after the initialization phase.
+type delegateSetup struct {
+	SnapshotID    string
+	AgentName     string
+	TranscriptID  string
+	SelectedTools []core.OpenAITool
+	// Scoped delegation tools (non-nil if sub-agent can delegate further)
+	scopedDelegate, scopedAsync, scopedCollect core.Tool
+}
+
+// subAgentResources holds the provider and hooks resolved for a sub-agent.
+type subAgentResources struct {
+	Provider     core.LLMProvider
+	EnrichedTask string
+	ExtraHooks   []core.LoopHook
+}
+
+// builtAgent holds the fully constructed sub-agent and its dependencies.
+type builtAgent struct {
+	Agent    *agents.BaseAgent
+	Session  *subSession
+	Executor core.ToolExecutor
+	Provider core.LLMProvider
+	Config   core.AgentLoopConfig
+}
+
+// runResult holds the outcome of executing the agent loop.
+type runResult struct {
+	FinalText  string
+	RunErr     error
+	FirstError string
+}
+
+// prepareDelegation handles phase 1: snapshot, naming, tool filtering, scoped delegation.
+func (r *ParallelRunner) prepareDelegation(
+	ctx context.Context,
+	task, agentName, instructions string,
+	toolNames []string,
+	delegatesTo []string,
+) (*delegateSetup, error) {
 	subscriber := subscriberFromCtx(ctx)
+
 	// Take pre-snapshot
 	var snapshotID string
 	if r.cfg.Snapshotter != nil && r.cfg.ProjectDir != "" {
@@ -561,16 +601,13 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 	}
 
-	// Use caller-provided agentName (original role name like "shell_ops"),
-	// fall back to extracting from instructions if empty
+	// Resolve agent name — fall back to extracting from instructions
 	if agentName == "" {
 		agentName = extractAgentName(instructions)
 	}
-
-	// Generate deterministic transcript ID before emitting event
 	transcriptID := r.makeTranscriptID(agentName)
 
-	// Emit subagent_start to parent subscriber
+	// Emit subagent_start
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
 		Data: core.AgentEventData{
@@ -581,7 +618,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		},
 	})
 
-	// Filter tools to only those requested
+	// Filter tools
 	var selectedTools []core.OpenAITool
 	toolSet := make(map[string]bool)
 	for _, name := range toolNames {
@@ -601,7 +638,7 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		return nil, core.NewToolError("delegate_to", fmt.Sprintf("none of the requested tools were found: %v", toolNames))
 	}
 
-	// Inject scoped delegation tools if the sub-agent's role has delegates_to
+	// Inject scoped delegation tools
 	var scopedDelegate, scopedAsync, scopedCollect core.Tool
 	if len(delegatesTo) > 0 && r.cfg.Depth < r.cfg.MaxDepth && r.cfg.RoleProvider != nil {
 		scopedDelegate = NewDelegateToToolDynamic(r, r.cfg.MCPResolver, r.cfg.RoleProvider, func() []string { return delegatesTo })
@@ -615,15 +652,37 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		r.cfg.Logger("SCOPED_DELEGATION: sub-agent %q can delegate to %v", agentName, delegatesTo)
 	}
 
-	// Create isolated provider — kept alive for delegate_continue
+	return &delegateSetup{
+		SnapshotID:      snapshotID,
+		AgentName:       agentName,
+		TranscriptID:    transcriptID,
+		SelectedTools:   selectedTools,
+		scopedDelegate:  scopedDelegate,
+		scopedAsync:     scopedAsync,
+		scopedCollect:   scopedCollect,
+	}, nil
+}
+
+// createSubAgentResources handles phase 2: provider creation, model resolution, hook resolution.
+func (r *ParallelRunner) createSubAgentResources(
+	ctx context.Context,
+	task string,
+	setup *delegateSetup,
+	modelID string,
+	toolNames []string,
+	roleHooks []string,
+) (*subAgentResources, error) {
+	subscriber := subscriberFromCtx(ctx)
+
+	// Create isolated provider
 	provider := r.cfg.ProviderFactory()
 	if provider == nil {
-		r.cfg.Logger("DELEGATE_FAIL: agent=%s providerFactory returned nil", agentName)
+		r.cfg.Logger("DELEGATE_FAIL: agent=%s providerFactory returned nil", setup.AgentName)
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
-			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: "provider factory returned nil", TranscriptID: transcriptID},
+			Data: core.AgentEventData{AgentName: setup.AgentName, Status: "error", Error: "provider factory returned nil", TranscriptID: setup.TranscriptID},
 		})
-		return nil, core.NewToolError("delegate_to", "provider factory returned nil for sub-agent "+agentName)
+		return nil, core.NewToolError("delegate_to", "provider factory returned nil for sub-agent "+setup.AgentName)
 	}
 	if modelID != "" && r.cfg.ModelResolver != nil {
 		if resolved := r.cfg.ModelResolver(modelID); resolved != nil {
@@ -635,11 +694,9 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 	}
 
-	// Enrich task with parent context
 	enrichedTask := r.enrichTask(ctx, task)
 
-	// Auto-director: if role doesn't request raise_browser hook explicitly but has
-	// browser tools, add it automatically for backward compatibility.
+	// Auto-add raise_browser hook for backward compatibility
 	resolvedHookNames := roleHooks
 	if r.cfg.RaiseBrowserFunc != nil && hasBrowserTools(toolNames) {
 		hasRaiseHook := false
@@ -654,14 +711,11 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 	}
 
-	// Resolve named hooks → concrete LoopHook instances
+	// Resolve named hooks
 	var extraHooks []core.LoopHook
 	if len(resolvedHookNames) > 0 {
-		// Build hook deps from runner config
 		dep := r.cfg.HookDeps
-		// Override session ID for per-sub-agent isolation
-		dep.SessionID = transcriptID
-		// Wire raise_browser function
+		dep.SessionID = setup.TranscriptID
 		if r.cfg.RaiseBrowserFunc != nil {
 			rbFn := r.cfg.RaiseBrowserFunc
 			dep.RaiseBrowserFunc = func() error {
@@ -671,20 +725,36 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 		resolved, err := hooks.ResolveHooks(resolvedHookNames, dep)
 		if err != nil {
-			r.cfg.Logger("HOOK_RESOLVE_WARN: %v (skipping hooks for %s)", err, agentName)
+			r.cfg.Logger("HOOK_RESOLVE_WARN: %v (skipping hooks for %s)", err, setup.AgentName)
 		} else {
 			extraHooks = resolved
-			r.cfg.Logger("HOOKS_ATTACHED: agent=%s hooks=%v", agentName, resolvedHookNames)
+			r.cfg.Logger("HOOKS_ATTACHED: agent=%s hooks=%v", setup.AgentName, resolvedHookNames)
 		}
 	}
 
-	// Build sub-agent config
+	return &subAgentResources{
+		Provider:     provider,
+		EnrichedTask: enrichedTask,
+		ExtraHooks:   extraHooks,
+	}, nil
+}
+
+// buildSubAgent handles phase 3: session, executor chain, BaseAgent construction.
+func (r *ParallelRunner) buildSubAgent(
+	instructions string,
+	setup *delegateSetup,
+	resources *subAgentResources,
+	maxRounds int,
+	temperature float32,
+	sandboxTier string,
+	delegatesTo []string,
+) *builtAgent {
 	cfg := core.AgentLoopConfig{
-		SystemPrompt:   instructions,
-		MaxToolRounds:  maxRounds,
-		MaxTokens:      8192,
-		ContextSize:    r.cfg.ContextSize,
-		Tools:          selectedTools,
+		SystemPrompt:        instructions,
+		MaxToolRounds:       maxRounds,
+		MaxTokens:           8192,
+		ContextSize:         r.cfg.ContextSize,
+		Tools:               setup.SelectedTools,
 		ToolResultProcessor: subAgentResultProcessor(r.cfg.ProjectDir),
 		Opts: core.GenerateOptions{
 			MaxTokens:   8192,
@@ -699,22 +769,21 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		msgCount:  0,
 		db:        r.cfg.DB,
 		project:   r.cfg.Project,
-		dbAgentID: transcriptID,
+		dbAgentID: setup.TranscriptID,
 	}
+
 	executor := r.cfg.Executor
 	if r.cfg.ExecutorFactory != nil && sandboxTier != "" {
 		executor = r.cfg.ExecutorFactory(sandboxTier)
 	}
-	// If scoped delegation tools were injected, wrap the executor so it can find them
 	if len(delegatesTo) > 0 && r.cfg.Depth < r.cfg.MaxDepth {
 		executor = &scopedDelegationExecutor{
 			parent:   executor,
-			delegate: scopedDelegate,
-			async:    scopedAsync,
-			collect:  scopedCollect,
+			delegate: setup.scopedDelegate,
+			async:    setup.scopedAsync,
+			collect:  setup.scopedCollect,
 		}
 	}
-	// Wrap sub-agent executor with vision processing (always)
 	{
 		vExec := vision.NewVisionAwareExecutor(executor, r.cfg.VisionChain, log.New(io.Discard, "", 0))
 		vExec.SetNativeVision(r.cfg.NativeVision)
@@ -723,38 +792,56 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 		}
 		executor = vExec
 	}
-	// Use BaseAgent so sub-agents get common hooks (scratch pad re-injection, etc.)
+
 	subAgent := agents.NewBaseAgent(agents.BaseConfig{
-		Provider:        provider,
-		Session:         sess,
-		SystemPrompt:    instructions,
-		ToolSpecs:       selectedTools,
-		Executor:        executor,
-		MaxToolRounds:   maxRounds,
-		MaxTokens:       8192,
-		ContextSize:     r.cfg.ContextSize,
-		ProjectDir:      r.cfg.ProjectDir,
-		GenerateOptions: core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
-		ScratchStore:    r.cfg.ScratchStore,
-		PermDecisions:   r.cfg.PermDecisions,
-		ToolPerms:       r.cfg.ToolPerms,
-		ExtraHooks:      extraHooks,
+		Provider:            resources.Provider,
+		Session:             sess,
+		SystemPrompt:        instructions,
+		ToolSpecs:           setup.SelectedTools,
+		Executor:            executor,
+		MaxToolRounds:       maxRounds,
+		MaxTokens:           8192,
+		ContextSize:         r.cfg.ContextSize,
+		ProjectDir:          r.cfg.ProjectDir,
+		GenerateOptions:     core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
+		ScratchStore:        r.cfg.ScratchStore,
+		PermDecisions:       r.cfg.PermDecisions,
+		ToolPerms:           r.cfg.ToolPerms,
+		ExtraHooks:          resources.ExtraHooks,
 		ToolResultProcessor: subAgentResultProcessor(r.cfg.ProjectDir),
 	})
-	loop := subAgent.Loop()
 
-	r.cfg.Logger("DELEGATE_START: agent=%s tools=%v maxRounds=%d model=%q sandboxTier=%q", agentName, toolNamesFromSpecs(selectedTools), maxRounds, modelID, sandboxTier)
+	return &builtAgent{
+		Agent:    subAgent,
+		Session:  sess,
+		Executor: executor,
+		Provider: resources.Provider,
+		Config:   cfg,
+	}
+}
 
-	// Register as a foreground task so Ctrl+B can background the delegation
+// executeAndDrain handles phase 4: run the agent loop, drain events, handle backgrounding.
+// Returns the run result, and optionally a backgrounded early-return payload.
+func (r *ParallelRunner) executeAndDrain(
+	ctx context.Context,
+	agent *builtAgent,
+	setup *delegateSetup,
+	resources *subAgentResources,
+	task string,
+) (*runResult, map[string]any, bool) {
+	subscriber := subscriberFromCtx(ctx)
+	loop := agent.Agent.Loop()
+
+	r.cfg.Logger("DELEGATE_START: agent=%s tools=%v maxRounds=%d model= sandboxTier=", setup.AgentName, toolNamesFromSpecs(setup.SelectedTools))
+
 	var bgTask *core.BackgroundTask
 	if r.cfg.TaskMgr != nil {
 		bgTask, _ = r.cfg.TaskMgr.StartTracked(
-			fmt.Sprintf("delegate_to %s", agentName),
+			fmt.Sprintf("delegate_to %s", setup.AgentName),
 			truncateTask(task, 120),
 		)
 	}
 
-	// Run the loop
 	events := make(chan core.AgentEvent, 128)
 	done := make(chan struct{})
 	var runErr error
@@ -762,28 +849,23 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	go func() {
 		defer close(done)
 		defer close(events)
-		runErr = loop.Run(ctx, enrichedTask, events)
+		runErr = loop.Run(ctx, resources.EnrichedTask, events)
 		if runErr != nil {
-			r.cfg.Logger("DELEGATE_LOOP_ERR: agent=%s err=%v", agentName, runErr)
+			r.cfg.Logger("DELEGATE_LOOP_ERR: agent=%s err=%v", setup.AgentName, runErr)
 		}
 	}()
 
-	// Drain events: accumulate text result + forward tool events to parent subscriber
-	// Also watch for background signal (Ctrl+B) if TaskManager is wired in.
-	dr := r.drainAndForward(ctx, subscriber, agentName, events, done, bgTask, transcriptID, task)
+	dr := r.drainAndForward(ctx, subscriber, setup.AgentName, events, done, bgTask, setup.TranscriptID, task)
 
-	// If backgrounded, spin up a goroutine to collect the final result and
-	// store it in the TaskManager so the user can check on it later.
 	if dr.Backgrounded && bgTask != nil {
-		go r.handleBackgrounded(subscriber, agentName, events, done, bgTask, transcriptID, task, dr.FinalText, &runErr)
-
-		agentRef := fmt.Sprintf("%s-%d", agentName, time.Now().UnixMilli())
-		return map[string]any{
+		go r.handleBackgrounded(subscriber, setup.AgentName, events, done, bgTask, setup.TranscriptID, task, dr.FinalText, &runErr)
+		agentRef := fmt.Sprintf("%s-%d", setup.AgentName, time.Now().UnixMilli())
+		return nil, map[string]any{
 			"status":    "backgrounded",
 			"task_id":   bgTask.ID,
 			"agent_ref": agentRef,
-			"message":   fmt.Sprintf("Delegation to %s sent to background. Use task_output with task_id '%s' to check results.", agentName, bgTask.ID),
-		}, nil
+			"message":   fmt.Sprintf("Delegation to %s sent to background. Use task_output with task_id '%s' to check results.", setup.AgentName, bgTask.ID),
+		}, true
 	}
 
 	// Emit subagent_end
@@ -791,32 +873,41 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	if runErr != nil {
 		endStatus = "error"
 	}
-	// Log final outcome with error details for debugging insta-failures
 	if runErr != nil {
-		r.cfg.Logger("DELEGATE_DONE: agent=%s status=error err=%v firstLoopError=%s", agentName, runErr, dr.FirstError)
+		r.cfg.Logger("DELEGATE_DONE: agent=%s status=error err=%v firstLoopError=%s", setup.AgentName, runErr, dr.FirstError)
 	} else {
-		r.cfg.Logger("DELEGATE_DONE: agent=%s status=ok textLen=%d", agentName, len(dr.FinalText))
+		r.cfg.Logger("DELEGATE_DONE: agent=%s status=ok textLen=%d", setup.AgentName, len(dr.FinalText))
 	}
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
 		Data: core.AgentEventData{
-			AgentName:    agentName,
+			AgentName:    setup.AgentName,
 			Status:       endStatus,
 			Task:         truncateTask(task, 120),
-			TranscriptID: transcriptID,
+			TranscriptID: setup.TranscriptID,
 			Error:        dr.FirstError,
 			Text:         dr.FinalText,
 		},
 	})
 
-	// Generate agent_ref
-	agentRef := fmt.Sprintf("%s-%d", agentName, time.Now().UnixMilli())
+	return &runResult{FinalText: dr.FinalText, RunErr: runErr, FirstError: dr.FirstError}, nil, false
+}
+
+// finalizeDelegation handles phase 5: diff, agent storage, result construction.
+func (r *ParallelRunner) finalizeDelegation(
+	ctx context.Context,
+	setup *delegateSetup,
+	resources *subAgentResources,
+	agent *builtAgent,
+	runRes *runResult,
+) (map[string]any, error) {
+	agentRef := fmt.Sprintf("%s-%d", setup.AgentName, time.Now().UnixMilli())
 
 	// Compute diff
 	var changes *ChangeSet
-	if r.cfg.Snapshotter != nil && snapshotID != "" && r.cfg.ProjectDir != "" {
+	if r.cfg.Snapshotter != nil && setup.SnapshotID != "" && r.cfg.ProjectDir != "" {
 		var diffErr error
-		changes, diffErr = r.cfg.Snapshotter.Diff(ctx, r.cfg.ProjectDir, snapshotID)
+		changes, diffErr = r.cfg.Snapshotter.Diff(ctx, r.cfg.ProjectDir, setup.SnapshotID)
 		if diffErr != nil {
 			r.cfg.Logger("DIFF_WARN: failed to diff: %v", diffErr)
 		}
@@ -824,57 +915,67 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 
 	// Store in liveAgents for delegate_continue, and completedSnapshots for delegate_revert
 	r.mu.Lock()
-	r.completedSnapshots[agentRef] = snapshotID
-	if runErr == nil {
+	r.completedSnapshots[agentRef] = setup.SnapshotID
+	if runRes.RunErr == nil {
 		r.liveAgents[agentRef] = &liveAgent{
 			ID:        agentRef,
-			Role:      agentName,
-			Task:      task,
-			Session:   sess,
-			Provider:  provider,
-			Config:    cfg,
-			Snapshot:  snapshotID,
+			Role:      setup.AgentName,
+			Task:      "", // not available here, but not used by delegate_continue
+			Session:   agent.Session,
+			Provider:  agent.Provider,
+			Config:    agent.Config,
+			Snapshot:  setup.SnapshotID,
 			StartedAt: time.Now(),
 		}
 	} else {
-		// On error, don't keep alive — close the provider
-		if closer, ok := provider.(io.Closer); ok {
+		if closer, ok := agent.Provider.(io.Closer); ok {
 			closer.Close()
 		}
 	}
 	r.mu.Unlock()
 
-	// Build result — return only the sub-agent's final summary, not its entire context.
-	// The full transcript is persisted to DB. The CTO only needs the artifact (outcome).
-	if runErr != nil {
-		// On error, include partial text for debugging
-		result := map[string]any{"error": runErr.Error(), "partial_result": dr.FinalText, "agent_ref": agentRef}
+	if runRes.RunErr != nil {
+		result := map[string]any{"error": runRes.RunErr.Error(), "partial_result": runRes.FinalText, "agent_ref": agentRef}
 		if changes != nil {
-			result["changes"] = map[string]any{
-				"files":   changes.Files,
-				"summary": changes.Summary,
-			}
+			result["changes"] = map[string]any{"files": changes.Files, "summary": changes.Summary}
 		}
-		return result, runErr
+		return result, runRes.RunErr
 	}
 
-	// Extract the sub-agent's final message (not its entire accumulated output).
-	// This is the artifact — the concise summary the CTO needs.
-	artifact := extractLastAssistantFromSession(sess)
+	artifact := extractLastAssistantFromSession(agent.Session)
 	if artifact == "" {
-		artifact = dr.FinalText // fallback if session has no assistant messages
+		artifact = runRes.FinalText
 	}
 	artifact = r.maybeSummarize(ctx, artifact)
 
 	enriched := map[string]any{"result": artifact, "status": "completed", "agent_ref": agentRef}
 	if changes != nil {
-		enriched["changes"] = map[string]any{
-			"files":   changes.Files,
-			"summary": changes.Summary,
-		}
+		enriched["changes"] = map[string]any{"files": changes.Files, "summary": changes.Summary}
+	}
+	return enriched, nil
+}
+
+// RunDelegateTracked is the main entry point for synchronous sub-agent delegation.
+// Decomposed into 5 phases: prepare → create resources → build agent → execute → finalize.
+func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string, roleHooks []string) (map[string]any, error) {
+	setup, err := r.prepareDelegation(ctx, task, agentName, instructions, toolNames, delegatesTo)
+	if err != nil {
+		return nil, err
 	}
 
-	return enriched, nil
+	resources, err := r.createSubAgentResources(ctx, task, setup, modelID, toolNames, roleHooks)
+	if err != nil {
+		return nil, err
+	}
+
+	agent := r.buildSubAgent(instructions, setup, resources, maxRounds, temperature, sandboxTier, delegatesTo)
+
+	runRes, bgResult, bg := r.executeAndDrain(ctx, agent, setup, resources, task)
+	if bg {
+		return bgResult, nil
+	}
+
+	return r.finalizeDelegation(ctx, setup, resources, agent, runRes)
 }
 
 // RunDelegateContinue sends feedback to an existing sub-agent and continues its work.
