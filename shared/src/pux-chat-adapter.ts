@@ -405,18 +405,33 @@ function readWithTimeout(
 
 // ── ChatModelAdapter ──
 
+function debug(...args: unknown[]) {
+	try {
+		if (typeof process === "undefined" || !process.env) return;
+		const msg = args.map(a => String(a)).join(" ") + "\n";
+		// Write to stderr (visible in terminal scrollback on exit)
+		if (process.stderr?.write) process.stderr.write(msg);
+		// Also write to file for persistent log
+		try {
+			const fs = require("node:fs") as typeof import("node:fs");
+			fs.appendFileSync("/tmp/pux-run-debug.log", msg);
+		} catch {}
+	} catch {}
+}
+
 export const puxChatAdapter: ChatModelAdapter = {
 	async *run({ messages, abortSignal, runConfig }) {
 		const store = usePuxStore.getState();
 		const lastMsg = messages[messages.length - 1];
 		const stack = new Error().stack?.split('\n').slice(2, 6).join(' | ') || 'no stack';
 
-		console.log("[DEBUG] run() ENTERED. messages:", messages.length, "lastMsg role:", lastMsg?.role, "lastMsg text:", typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 50) : 'non-string', "agentId:", store.activeAgentId, "stack:", stack);
+		debug("[run] ENTERED. count:", messages.length, "lastRole:", lastMsg?.role, "lastText:", typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 50) : 'non-string', "agentId:", store.activeAgentId, "stack:", stack);
 
 		if (!lastMsg || lastMsg.role !== "user") {
-			console.log("[DEBUG] run() skipped: not user msg");
+			debug("[run] SKIPPED: not user msg");
 			return;
 		}
+		debug("[run] PROCEEDING TO POST. message:", typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 100) : 'non-string');
 
 		// Extract text from user message
 		const content = lastMsg.content;
