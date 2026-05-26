@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useReducer, useRef } from "react";
 import { Box, Text, useFocus, useInput } from "ink";
 import { useAui, useAuiState } from "@assistant-ui/react-ink";
+import { usePuxStore } from "@pux/shared";
 
 type BufferState = {
   text: string;
@@ -235,6 +236,7 @@ export function VimInput({
   const aui = useAui();
   const storeText = useAuiState((s) => s.composer.text);
   const { isFocused } = useFocus({ autoFocus });
+  const activeTuiView = usePuxStore((s) => s.activeTuiView);
 
   const [state, dispatch] = useReducer(reducer, { text: storeText, cursorOffset: 0, preferredColumn: undefined });
   const stateRef = useRef(state);
@@ -315,8 +317,8 @@ export function VimInput({
 
         if (key.leftArrow) { commit({ type: "move-left" }, { syncText: false }); return; }
         if (key.rightArrow) { commit({ type: "move-right" }, { syncText: false }); return; }
-        if (multiLine && key.upArrow) { commit({ type: "move-up" }, { syncText: false }); return; }
-        if (multiLine && key.downArrow) { commit({ type: "move-down" }, { syncText: false }); return; }
+        if (multiLine && key.upArrow && activeTuiView === "chat") { commit({ type: "move-up" }, { syncText: false }); return; }
+        if (multiLine && key.downArrow && activeTuiView === "chat") { commit({ type: "move-down" }, { syncText: false }); return; }
         if (key.home) { commit({ type: "move-home", multiLine }, { syncText: false }); return; }
         if (key.end) { commit({ type: "move-end", multiLine }, { syncText: false }); return; }
         if (key.backspace) { commit({ type: "delete-backward" }); return; }
@@ -326,7 +328,7 @@ export function VimInput({
           commit({ type: "insert", text: input });
         }
       },
-      [isFocused, commit, multiLine, submitOnEnter, submit],
+      [isFocused, commit, multiLine, submitOnEnter, submit, activeTuiView],
     ),
     { isActive: isFocused },
   );

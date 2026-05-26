@@ -42,6 +42,11 @@ export function ConversationsView() {
 			return;
 		}
 
+		if (key.escape) {
+			usePuxStore.getState().setTuiView("chat");
+			return;
+		}
+
 		if (key.upArrow) {
 			setSelectedIdx(Math.max(0, selectedIdx - 1));
 			return;
@@ -103,7 +108,11 @@ export function ConversationsView() {
 								{"   "}
 							</Text>
 							<Text bold={isSelected} color={isActive ? colors.brand : undefined}>
-								{conv.title || "(untitled)"}
+								{(conv.title && !conv.title.startsWith("REFLECT:") && !conv.title.startsWith("[SYSTEM:"))
+									? conv.title
+									: conv.lastMessage
+										? conv.lastMessage.slice(0, 50)
+										: "(untitled)"}
 							</Text>
 							<Text color="gray">
 								{" "}
@@ -127,7 +136,7 @@ export function ConversationsView() {
 			{/* Controls hint */}
 			<Box marginTop={1}>
 				<Text dimColor>
-					<Text bold>Up/Down</Text> navigate <Text bold>Enter</Text> open <Text bold>D</Text> delete <Text bold>Ctrl+T</Text> back
+					<Text bold>Up/Down</Text> navigate <Text bold>Enter</Text> open <Text bold>D</Text> delete <Text bold>Esc</Text> back
 				</Text>
 			</Box>
 		</Box>
