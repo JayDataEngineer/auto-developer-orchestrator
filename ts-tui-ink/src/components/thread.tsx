@@ -105,10 +105,6 @@ function Welcome() {
 						<Text color="gray">{"  "}/model</Text>
 						<Text dimColor>  switch model</Text>
 					</Text>
-					<Text>
-						<Text color="gray">{"  "}/compact</Text>
-						<Text dimColor>  free context</Text>
-					</Text>
 				</Box>
 			</Box>
 		</Box>
