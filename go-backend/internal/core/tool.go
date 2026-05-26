@@ -21,13 +21,6 @@ type ToolExecutor interface {
 	Execute(ctx context.Context, toolName string, args map[string]any) (any, error)
 }
 
-// ToolExecutorStreaming is an optional interface for tools that stream partial results.
-// If a tool implements this, the agent loop will use it for progressive updates.
-type ToolExecutorStreaming interface {
-	ToolExecutor
-	ExecuteStreaming(ctx context.Context, toolName string, args map[string]any, onUpdate func(string)) (any, error)
-}
-
 // ToolRegistry maps tool names to Tool implementations.
 type ToolRegistry struct {
 	tools    map[string]Tool

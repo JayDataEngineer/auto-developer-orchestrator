@@ -680,26 +680,6 @@ func (sbc *SandboxBrowserClient) ReadPage(ctx context.Context) (*PageData, error
 	return &data, nil
 }
 
-// ExtractPageContent evaluates JavaScript on the active tab to return page content.
-// The browser is a real Chrome — it renders JS, handles cookies, bypasses most anti-bot.
-// Returns raw HTML for processing by MCP process_html, or innerText as fallback.
-func (sbc *SandboxBrowserClient) ExtractPageContent(ctx context.Context, rawHTML bool) (string, error) {
-	var result string
-	jsExpr := `document.body ? document.body.innerText : document.documentElement.outerHTML`
-	if rawHTML {
-		jsExpr = `document.documentElement.outerHTML`
-	}
-	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
-		return chromedp.Run(actCtx,
-			chromedp.Evaluate(jsExpr, &result),
-		)
-	})
-	if err != nil {
-		return "", fmt.Errorf("extract page content: %w", err)
-	}
-	return result, nil
-}
-
 // GetSnapshot returns cached URL, title, and elements.
 func (sbc *SandboxBrowserClient) GetSnapshot() (*PageInfo, error) {
 	sbc.mu.RLock()
@@ -873,14 +853,3 @@ func (sbc *SandboxBrowserClient) GetA11ySnapshot(ctx context.Context) (*A11ySnap
 	return sbc.GetAccessibilityTree(ctx)
 }
 
-// GetPageInfo returns a full PageInfo including both SoM and accessibility elements.
-func (sbc *SandboxBrowserClient) GetPageInfo() *PageInfo {
-	sbc.mu.RLock()
-	defer sbc.mu.RUnlock()
-	return &PageInfo{
-		URL:         sbc.lastURL,
-		Title:       sbc.lastTitle,
-		Elements:    sbc.lastElements,
-		A11yElements: sbc.lastA11yElements,
-	}
-}

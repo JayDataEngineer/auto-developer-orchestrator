@@ -161,17 +161,6 @@ func (b *ComputerUseBridge) DesktopObserve(ctx context.Context, sandboxID string
 	return callHandler(ctx, b.X11.Observe, http.MethodGet, "/api/sandbox/{id}/x11/observe", nil, sandboxID)
 }
 
-// ExtractPageContent gets the page content from the active browser tab via CDP JavaScript evaluation.
-// rawHTML=true returns document.documentElement.outerHTML for processing by MCP process_html.
-// rawHTML=false returns document.body.innerText for quick text extraction.
-func (b *ComputerUseBridge) ExtractPageContent(ctx context.Context, sandboxID string, rawHTML bool) (string, error) {
-	client, err := b.CU.getClient(sandboxID)
-	if err != nil {
-		return "", fmt.Errorf("get browser client: %w", err)
-	}
-	return client.ExtractPageContent(ctx, rawHTML)
-}
-
 // Navigate navigates the browser to a URL and returns page info.
 func (b *ComputerUseBridge) Navigate(ctx context.Context, sandboxID string, url string) (map[string]interface{}, error) {
 	req := map[string]interface{}{"action": "navigate", "url": url}

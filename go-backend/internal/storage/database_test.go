@@ -213,52 +213,6 @@ func TestSetAndGetTaskIndex(t *testing.T) {
 	}
 }
 
-// ── SystemConfig ──────────────────────────────────────────────
-
-func TestGetSystemConfigDefault(t *testing.T) {
-	db := newTestDB(t)
-	ctx := context.Background()
-
-	val, err := db.GetSystemConfig(ctx, "projectsDir")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if val != "/app/projects" {
-		t.Errorf("expected /app/projects, got %q", val)
-	}
-}
-
-func TestGetSystemConfigMissing(t *testing.T) {
-	db := newTestDB(t)
-	_, err := db.GetSystemConfig(context.Background(), "nonexistent")
-	if err == nil {
-		t.Error("expected error for missing key")
-	}
-}
-
-func TestSetAndGetSystemConfig(t *testing.T) {
-	db := newTestDB(t)
-	ctx := context.Background()
-
-	if err := db.SetSystemConfig(ctx, "myKey", "myVal"); err != nil {
-		t.Fatal(err)
-	}
-	val, err := db.GetSystemConfig(ctx, "myKey")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if val != "myVal" {
-		t.Errorf("expected myVal, got %q", val)
-	}
-
-	// Update
-	db.SetSystemConfig(ctx, "myKey", "updated")
-	val, _ = db.GetSystemConfig(ctx, "myKey")
-	if val != "updated" {
-		t.Errorf("expected updated, got %q", val)
-	}
-}
-
 // ── Conversation Messages ─────────────────────────────────────
 
 func TestSaveAndGetUserMessage(t *testing.T) {

@@ -5,13 +5,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
-	"github.com/auto-developer-orchestrator/backend/internal/framestream"
 	"github.com/auto-developer-orchestrator/backend/internal/retry"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"go.uber.org/zap"
@@ -872,74 +870,3 @@ func (h *ComputerUseHandler) DownloadFile(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// StreamStart starts continuous frame capture on a sandbox browser.
-// POST /api/sandbox/{id}/computer-use/stream/start
-func (h *ComputerUseHandler) StreamStart(w http.ResponseWriter, r *http.Request) {
-	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
-		cfg := framestream.DefaultConfig()
-		if fps := r.URL.Query().Get("fps"); fps != "" {
-			if f, err := strconv.ParseFloat(fps, 64); err == nil && f > 0 && f <= 10 {
-				cfg.FPS = f
-			}
-		}
-		client.StartStream(r.Context(), cfg)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"streaming": true,
-			"fps":       cfg.FPS,
-		})
-	})
-}
-
-// StreamStop stops continuous frame capture.
-// POST /api/sandbox/{id}/computer-use/stream/stop
-func (h *ComputerUseHandler) StreamStop(w http.ResponseWriter, r *http.Request) {
-	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
-		client.StopStream()
-		writeJSON(w, http.StatusOK, map[string]bool{"streaming": false})
-	})
-}
-
-// frameSummary is a lightweight frame representation for the API.
-type frameSummary struct {
-	CapturedAt  time.Time `json:"captured_at"`
-	Width       int       `json:"width"`
-	Height      int       `json:"height"`
-	ChangeScore float64   `json:"change_score"`
-	Size        int       `json:"size"`
-}
-
-// StreamFrames returns recent captured frames metadata.
-// GET /api/sandbox/{id}/computer-use/stream/frames?seconds=5
-func (h *ComputerUseHandler) StreamFrames(w http.ResponseWriter, r *http.Request) {
-	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
-		streamer := client.GetStreamer()
-		if streamer == nil {
-			JSONError(w, "frame stream not active", http.StatusNotFound)
-			return
-		}
-
-		seconds := 5
-		if s := r.URL.Query().Get("seconds"); s != "" {
-			if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 60 {
-				seconds = n
-			}
-		}
-
-		frames := streamer.RecentFrames(time.Now().Add(-time.Duration(seconds) * time.Second))
-		summaries := make([]frameSummary, len(frames))
-		for i, f := range frames {
-			summaries[i] = frameSummary{
-				CapturedAt:  f.CapturedAt,
-				Width:       f.Width,
-				Height:      f.Height,
-				ChangeScore: f.ChangeScore,
-				Size:        len(f.Data),
-			}
-		}
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"frames": summaries,
-			"count":  len(summaries),
-		})
-	})
-}

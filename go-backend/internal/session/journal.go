@@ -121,52 +121,6 @@ func (cm *CheckpointManager) RestoreCheckpoint(nodeID string) (*JournalCheckpoin
 	return cp, nil
 }
 
-// ListCheckpoints returns all checkpoint node IDs in order.
-func (cm *CheckpointManager) ListCheckpoints() []string {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-	result := make([]string, len(cm.history))
-	copy(result, cm.history)
-	return result
-}
-
-// GetCheckpoint returns the checkpoint at the given node.
-func (cm *CheckpointManager) GetCheckpoint(nodeID string) *JournalCheckpoint {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-	return cm.checkpoints[nodeID]
-}
-
-// LatestCheckpoint returns the most recent checkpoint.
-func (cm *CheckpointManager) LatestCheckpoint() *JournalCheckpoint {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-	if len(cm.history) == 0 {
-		return nil
-	}
-	return cm.checkpoints[cm.history[len(cm.history)-1]]
-}
-
-// RollbackToCheckpoint navigates to the latest checkpoint for error recovery.
-func (cm *CheckpointManager) RollbackToCheckpoint() (*JournalCheckpoint, error) {
-	latest := cm.LatestCheckpoint()
-	if latest == nil {
-		return nil, fmt.Errorf("no checkpoints available for rollback")
-	}
-	return cm.RestoreCheckpoint(latest.NodeID)
-}
-
-// SaveCheckpointBeforeTool is a convenience method for tool pre-execution checkpoints.
-func (cm *CheckpointManager) SaveCheckpointBeforeTool(toolName string, toolArgs map[string]any, messages []core.Message, toolResults []core.ToolResult, round int, totalTokens int) (string, error) {
-	label := fmt.Sprintf("pre-tool:%s", toolName)
-	return cm.SaveCheckpoint(label, messages, toolResults, round, totalTokens)
-}
-
-// SaveCompactionCheckpoint is a convenience method for pre-compaction snapshots.
-func (cm *CheckpointManager) SaveCompactionCheckpoint(messages []core.Message, toolResults []core.ToolResult, round int, totalTokens int) (string, error) {
-	return cm.SaveCheckpoint("pre-compaction", messages, toolResults, round, totalTokens)
-}
-
 // deepCopyMessages creates a deep copy of message slice.
 func deepCopyMessages(msgs []core.Message) []core.Message {
 	if msgs == nil {

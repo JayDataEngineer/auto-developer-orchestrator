@@ -3,7 +3,6 @@ package llama
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -37,61 +36,7 @@ type Session struct {
 	totalOutputTokens int
 }
 
-// ── New chat completions API methods ───────────────────────────────
-
-// ChatWithTools sends a system + user message with tool definitions.
-// This is the primary entry point for the agent loop.
-func (s *Session) ChatWithTools(system string, userMsg string, tools []OpenAITool, opts GenerateOptions) (<-chan ChatEvent, error) {
-	if s.closed {
-		return nil, fmt.Errorf("session is closed")
-	}
-
-	s.messages = []Message{
-		{Role: "system", Content: system},
-		{Role: "user", Content: userMsg},
-	}
-	s.tools = tools
-
-	return s.generateChatStream(context.Background(), opts), nil
-}
-
-// FeedToolResults appends tool result messages and continues generation.
-// The assistant message is already stored by generateChatStream, so we only add tool results.
-func (s *Session) FeedToolResults(assistantMsg Message, toolResults []ToolResult, goalNudge string, opts GenerateOptions) (<-chan ChatEvent, error) {
-	if s.closed {
-		return nil, fmt.Errorf("session is closed")
-	}
-
-	// Tool result messages (one per tool call)
-	for _, tr := range toolResults {
-		s.messages = append(s.messages, Message{
-			Role:       "tool",
-			Content:    tr.Content,
-			ToolCallID: tr.ToolCallID,
-			Name:       tr.ToolName,
-		})
-	}
-
-	// Inject goal reminder as a user message if provided
-	if goalNudge != "" {
-		s.messages = append(s.messages, Message{
-			Role:    "user",
-			Content: goalNudge,
-		})
-	}
-
-	return s.generateChatStream(context.Background(), opts), nil
-}
-
-// FeedUserMessage appends a user message and continues generation.
-func (s *Session) FeedUserMessage(userMsg string, opts GenerateOptions) (<-chan ChatEvent, error) {
-	if s.closed {
-		return nil, fmt.Errorf("session is closed")
-	}
-
-	s.messages = append(s.messages, Message{Role: "user", Content: userMsg})
-	return s.generateChatStream(context.Background(), opts), nil
-}
+// ── Chat completions API ───────────────────────────────
 
 // GenerateStream runs the model using the session's current messages and tools.
 // Exported for use by the adapter when rebuilding after compaction.
@@ -477,12 +422,7 @@ func tokPerSec(tokens int, d time.Duration) float64 {
 	return float64(tokens) / d.Seconds()
 }
 
-// ── New message-based accessors ───────────────────────────────────
-
-// Messages returns the conversation messages.
-func (s *Session) Messages() []Message {
-	return s.messages
-}
+// ── Message-based accessors ───────────────────────────────────
 
 // SetMessages replaces the message history (used after compaction).
 func (s *Session) SetMessages(messages []Message) {
@@ -494,22 +434,7 @@ func (s *Session) SetTools(tools []OpenAITool) {
 	s.tools = tools
 }
 
-// SetThinkingBudget sets a per-session thinking budget override.
-func (s *Session) SetThinkingBudget(tokens int) {
-	s.thinkingBudget = tokens
-}
-
-// GetTools returns the current tool definitions for this session.
-func (s *Session) GetTools() []OpenAITool {
-	return s.tools
-}
-
 // ── Shared methods ─────────────────────────────────────────────────
-
-// TokenCounts returns total input and output token counts.
-func (s *Session) TokenCounts() (input, output int) {
-	return s.totalInputTokens, s.totalOutputTokens
-}
 
 // ContextUsage returns the current prompt token count and context capacity.
 // Used by the compaction system to decide when to compact.

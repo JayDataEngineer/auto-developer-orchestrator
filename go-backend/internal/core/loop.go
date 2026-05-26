@@ -665,22 +665,8 @@ func (l *AgentLoop) executeTool(ctx context.Context, subscriber chan<- AgentEven
 		timeout = 30 * time.Minute
 	}
 
-	// Check for streaming executor
-	var streamer ToolExecutorStreaming
-	if s, ok := l.executor.(ToolExecutorStreaming); ok {
-		streamer = s
-	}
-
 	// No timeout: execute directly
 	if timeout <= 0 {
-		if streamer != nil {
-			return streamer.ExecuteStreaming(ctx, tc.Name, tc.Args, func(update string) {
-				SendEvent(subscriber, AgentEvent{
-					Type: EventTypeToolUpdate,
-					Data: AgentEventData{ToolName: tc.Name, ToolID: tc.ID, Text: update},
-				})
-			})
-		}
 		return l.executor.Execute(ctx, tc.Name, tc.Args)
 	}
 
@@ -695,18 +681,7 @@ func (l *AgentLoop) executeTool(ctx context.Context, subscriber chan<- AgentEven
 	ch := make(chan toolResult, 1)
 
 	go func() {
-		var val any
-		var err error
-		if streamer != nil {
-			val, err = streamer.ExecuteStreaming(toolCtx, tc.Name, tc.Args, func(update string) {
-				SendEvent(subscriber, AgentEvent{
-					Type: EventTypeToolUpdate,
-					Data: AgentEventData{ToolName: tc.Name, ToolID: tc.ID, Text: update},
-				})
-			})
-		} else {
-			val, err = l.executor.Execute(toolCtx, tc.Name, tc.Args)
-		}
+		val, err := l.executor.Execute(toolCtx, tc.Name, tc.Args)
 		ch <- toolResult{val, err}
 	}()
 

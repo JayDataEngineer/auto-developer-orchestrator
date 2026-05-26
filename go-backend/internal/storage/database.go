@@ -244,27 +244,6 @@ func (d *Database) SetCurrentTaskIndex(ctx context.Context, projectName string, 
 	return err
 }
 
-// GetSystemConfig returns a system configuration value
-func (d *Database) GetSystemConfig(ctx context.Context, key string) (string, error) {
-	var value string
-	err := d.db.QueryRowContext(ctx,
-		Rebind(d.dialect, "SELECT value FROM system_config WHERE key = ?"), key).Scan(&value)
-	if err != nil {
-		return "", err
-	}
-	return value, nil
-}
-
-// SetSystemConfig sets a system configuration value
-func (d *Database) SetSystemConfig(ctx context.Context, key, value string) error {
-	_, err := d.db.ExecContext(ctx, Rebind(d.dialect, `
-		INSERT INTO system_config (key, value)
-		VALUES (?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = ?`),
-		key, value, value)
-	return err
-}
-
 // StoredMessage represents a persisted conversation message.
 type StoredMessage struct {
 	ID         int64  `json:"id"`
@@ -562,46 +541,6 @@ func (d *Database) GetArtifactsByAgent(ctx context.Context, agentID string) ([]*
 		artifacts = append(artifacts, &a)
 	}
 	return artifacts, rows.Err()
-}
-
-// ── Context Transcripts (pre-compaction snapshots) ──────────────────
-
-// Transcript is a saved snapshot of conversation messages before compaction.
-type Transcript struct {
-	ID            int64  `json:"id"`
-	SessionID     string `json:"sessionId"`
-	AgentID       string `json:"agentId"`
-	MessagesJSON  string `json:"messagesJson"`
-	TokenCount    int    `json:"tokenCount"`
-	TriggerReason string `json:"triggerReason"`
-	CreatedAt     string `json:"createdAt"`
-}
-
-// SaveTranscript persists a pre-compaction message snapshot.
-func (d *Database) SaveTranscript(ctx context.Context, sessionID, agentID, messagesJSON, triggerReason string, tokenCount int) (int64, error) {
-	res, err := d.db.ExecContext(ctx, Rebind(d.dialect, `
-		INSERT INTO context_transcripts (session_id, agent_id, messages_json, token_count, trigger_reason)
-		VALUES (?, ?, ?, ?, ?)`),
-		sessionID, agentID, messagesJSON, tokenCount, triggerReason)
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
-}
-
-// GetLatestTranscript returns the most recent transcript for a session.
-func (d *Database) GetLatestTranscript(ctx context.Context, sessionID string) (*Transcript, error) {
-	var t Transcript
-	err := d.db.QueryRowContext(ctx, Rebind(d.dialect, `
-		SELECT id, session_id, agent_id, messages_json, token_count, trigger_reason, created_at
-		FROM context_transcripts
-		WHERE session_id = ?
-		ORDER BY created_at DESC LIMIT 1`),
-		sessionID).Scan(&t.ID, &t.SessionID, &t.AgentID, &t.MessagesJSON, &t.TokenCount, &t.TriggerReason, &t.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &t, nil
 }
 
 // ── Scheduled Jobs ─────────────────────────────────────────────────────
