@@ -28,6 +28,27 @@ func TestAskUserTool_Execute_EmptyQuestion(t *testing.T) {
 	}
 }
 
+func TestAskUserTool_Execute_EmptyOptions(t *testing.T) {
+	tool := NewAskUserTool()
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"question": "Pick one?",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing options")
+	}
+}
+
+func TestAskUserTool_Execute_SingleOption(t *testing.T) {
+	tool := NewAskUserTool()
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"question": "Pick one?",
+		"options":  []interface{}{"Only choice"},
+	})
+	if err == nil {
+		t.Fatal("expected error for single option (need at least 2)")
+	}
+}
+
 func TestAskUserTool_Execute_WithResponse(t *testing.T) {
 	subscriber := make(chan core.AgentEvent, 10)
 	tool := NewAskUserTool()
@@ -100,6 +121,7 @@ func TestAskUserTool_Execute_ContextCancel(t *testing.T) {
 	go func() {
 		val, err := tool.Execute(ctx, map[string]any{
 			"question": "Quick question?",
+			"options":  []interface{}{"Option A", "Option B"},
 		})
 		done <- result{val, err}
 	}()

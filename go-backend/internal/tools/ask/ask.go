@@ -24,7 +24,7 @@ func NewAskUserTool() *AskUserTool {
 
 func (t *AskUserTool) Name() string { return "ask_user" }
 func (t *AskUserTool) Description() string {
-	return "Ask the user a question and wait for their response. Use this when you need clarification, a decision, or input from the user before proceeding. Supports multiple-choice options or free-text."
+	return "Ask the user a question with multiple-choice options and wait for their response. Use this when you need a decision or clarification from the user. You MUST provide at least 2 specific, meaningful options. If none of the options fit, the user can type a custom answer."
 }
 
 func (t *AskUserTool) Schema() json.RawMessage {
@@ -32,11 +32,10 @@ func (t *AskUserTool) Schema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"question": {"type": "string", "description": "The question to ask the user"},
-			"options": {"type": "array", "items": {"type": "string"}, "description": "Multiple choice options. If empty, the user can type a free-text response."},
-			"allow_free_text": {"type": "boolean", "description": "If true, user can type a custom answer even when options are provided (default: true)"},
+			"options": {"type": "array", "items": {"type": "string"}, "minItems": 2, "description": "REQUIRED: At least 2 specific, meaningful choices. The user selects one or types a custom answer if none fit."},
 			"default": {"type": "string", "description": "Default answer if user just presses Enter"}
 		},
-		"required": ["question"]
+		"required": ["question", "options"]
 	}`)
 }
 
@@ -46,7 +45,7 @@ func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (any, er
 		return nil, fmt.Errorf("ask_user: question is required")
 	}
 
-	// Extract options
+	// Extract and validate options — must have at least 2
 	var options []string
 	if raw, ok := args["options"].([]interface{}); ok {
 		for _, o := range raw {
@@ -55,11 +54,11 @@ func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (any, er
 			}
 		}
 	}
+	if len(options) < 2 {
+		return nil, fmt.Errorf("ask_user: must provide at least 2 options, got %d. Provide specific, meaningful choices so the user can make a decision", len(options))
+	}
 
 	allowFreeText := true
-	if v, ok := args["allow_free_text"].(bool); ok {
-		allowFreeText = v
-	}
 
 	questionID := fmt.Sprintf("q_%d", time.Now().UnixNano())
 
