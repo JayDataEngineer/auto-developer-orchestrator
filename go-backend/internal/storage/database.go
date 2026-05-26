@@ -474,7 +474,13 @@ func (d *Database) GetConversationSummaries(ctx context.Context) ([]Conversation
 			) AS last_message,
 			MAX(cm.created_at) AS last_at,
 			COUNT(*) AS message_count,
-			COALESCE(ct.title, '') AS title,
+			COALESCE(
+				NULLIF(ct.title, ''),
+				(SELECT content FROM conversation_messages first_um
+				 WHERE first_um.project = cm.project AND first_um.agent_id = cm.agent_id AND first_um.role = 'user'
+				 ORDER BY first_um.created_at ASC LIMIT 1),
+				''
+			) AS title,
 			COALESCE(ct.status, '') AS status
 		FROM conversation_messages cm
 		LEFT JOIN conversation_titles ct ON ct.project = cm.project AND ct.agent_id = cm.agent_id
