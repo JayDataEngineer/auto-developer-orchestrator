@@ -40,14 +40,24 @@ export function AssistantMessage() {
 		p.type === "source"
 	);
 
+	// Elapsed time counter for waiting spinner
+	const [elapsed, setElapsed] = useState(0);
+	useEffect(() => {
+		if (!isRunning || hasContent) return;
+		setElapsed(0);
+		const timer = setInterval(() => setElapsed((t) => t + 1), 1000);
+		return () => clearInterval(timer);
+	}, [isRunning, hasContent]);
+
 	// Show spinner while running with no visible content yet.
 	// Use "waiting..." — not "thinking" — because the model hasn't
 	// produced any output yet (still connecting / processing prompt).
 	if (isRunning && !hasContent) {
+		const timeStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
 		return (
 			<Box marginTop={1} paddingX={1} gap={1}>
 				<Text color={colors.assistant}><Spinner type="dots" /></Text>
-				<Text color={colors.textDim}>waiting...</Text>
+				<Text color={colors.textDim}>waiting... {timeStr}</Text>
 			</Box>
 		);
 	}
@@ -88,9 +98,16 @@ export function AssistantMessage() {
 						return null;
 					case "text":
 						if (!part.text?.trim()) return null;
+						// Check if this is the last text part and message is streaming
+						const isLastText = isRunning && !parts.some((p: any, j: number) =>
+							j > i && p.type === "text" && p.text?.trim()
+						);
 						return (
 							<Box key={i} flexDirection="column" paddingLeft={1}>
 								<MarkdownText text={part.text} color={colors.text} />
+								{isLastText && (
+									<Text color="yellow"> ...</Text>
+								)}
 							</Box>
 						);
 					case "image":
