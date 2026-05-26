@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/agents/orchestrator"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
@@ -59,6 +61,7 @@ type PuxHandler struct {
 
 	selectedEngines map[string]*llamaeng.LLMClient // per-agent engine override
 	registry       *AgentRegistry                   // tracks running agents
+	activeAgents   sync.Map                         // key="project:agentId" → *orchestrator.Agent for cancel
 	taskMgr        *core.TaskManager                // background task manager
 
 	defaultLogic  string // model ID for CTO/orchestrator (logic)
@@ -184,6 +187,7 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/history", h.GetHistory)
 	r.Get("/conversations", h.GetConversations)
 	r.Get("/agent-status", h.GetAgentStatus)
+	r.Post("/cancel", h.CancelAgent)
 	r.Delete("/conversation", h.DeleteConversation)
 	r.Put("/conversation/rename", h.RenameConversation)
 	r.Put("/conversation/mark-read", h.MarkRead)
@@ -254,6 +258,33 @@ func (h *PuxHandler) GetAgentStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.registry.GetAllRunning())
+}
+
+// CancelAgent aborts a running agent by cancelling its context.
+func (h *PuxHandler) CancelAgent(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+		AgentId string `json:"agentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	key := req.Project + ":" + req.AgentId
+	val, ok := h.activeAgents.Load(key)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not running"})
+		return
+	}
+	agent, ok := val.(*orchestrator.Agent)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "invalid agent type"})
+		return
+	}
+	agent.Loop().Abort()
+	h.activeAgents.Delete(key)
+	h.log.Info("Agent cancelled", zap.String("key", key))
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
 type promptRequest struct {

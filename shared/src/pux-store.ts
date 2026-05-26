@@ -86,6 +86,9 @@ interface PuxState {
 	// Compaction (Contract 2.5)
 	compacting: boolean;
 
+	// CTO running state (set by chat adapter during SSE streaming)
+	ctoRunning: boolean;
+
 	// Conversation
 	activeProject: string;
 	activeProjectPath: string;
@@ -186,6 +189,7 @@ interface PuxState {
 	updateAgentThinking: (agentId: string, text: string) => void;
 	updateAgentText: (agentId: string, text: string) => void;
 	clearAgents: () => void;
+	cancelAgent: (agentId: string) => Promise<void>;
 	setZoomedAgent: (agentId: string | null) => void;
 	toggleAgentSelector: () => void;
 	closeAgentSelector: () => void;
@@ -266,6 +270,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	lastUsage: null,
 	contextMetrics: null,
 	compacting: false,
+	ctoRunning: false,
 	activeProject: "",
 	activeProjectPath: "",
 	activeAgentId: "",
@@ -559,6 +564,29 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	clearAgents: () => set({ agents: new Map() }),
+
+	cancelAgent: async (agentId) => {
+		const { activeProject, activeAgentId } = get();
+		// Cancel the CTO orchestrator (not the sub-agent) — cancelling the
+		// parent context cascades to all sub-agents via Go context propagation.
+		const ctoAgentId = activeAgentId || "default";
+		try {
+			const resp = await getFetch()(apiUrl("/api/pux/cancel"), {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ project: activeProject, agentId: ctoAgentId }),
+			});
+			if (resp.ok) {
+				// Mark all running agents as cancelled
+				const agents = get().agents;
+				for (const [id, a] of agents) {
+					if (a.status === "running") {
+						get().updateAgentStatus(id, "error", "Cancelled by user");
+					}
+				}
+			}
+		} catch { /* backend may be unreachable */ }
+	},
 
 	setZoomedAgent: (agentId) => set({ zoomedAgentId: agentId }),
 

@@ -16,30 +16,21 @@ import { initMouseTracking, disableMouseTracking, filterAndEmitMouseEvents } fro
 
 // ── Stdin fixes (runs before Ink processes any input) ──
 //
+// Kitty keyboard protocol is now handled by Ink's kittyKeyboard render option.
+// Only two fixes remain that Ink doesn't handle:
+//
 // 1. Linux backspace: Ink maps \x7f (DEL) to key.delete but Linux terminals
 //    send \x7f for backspace. Rewrite → \b so Ink maps it to key.backspace.
 //
 // 2. Ctrl+J newline: Ink's ComposerInput inserts \n as a regular character
 //    (it falls through to the catch-all insert path). Rewrite \n → \r so
 //    Ctrl+J acts like Enter (submit) instead of inserting a newline.
-//
-// 3. Mouse tracking: SGR mouse sequences (ESC[<btn;col;rowM/m) pass through
-//    stdin alongside keyboard bytes. Filter them out before Ink sees them
-//    and fire mouse event callbacks.
 
 const origRead = process.stdin.read.bind(process.stdin);
 process.stdin.read = function (size?: number) {
 	const chunk = origRead(size);
 	if (typeof chunk === "string") {
 		let fixed = chunk;
-		// Kitty protocol rewrites — normalize enhanced sequences to raw bytes
-		// so Ink handles them with its standard key parsing.
-		if (fixed.includes("\x1b[")) {
-			// Ctrl+C: CSI 99;5u → \x03 (Kitty sends this instead of raw ETX)
-			fixed = fixed.replace(/\x1b\[99;5u/g, "\x03");
-			// Ctrl+Backspace: CSI 127;5u or CSI 8;5u → Ctrl+W (\x17)
-			fixed = fixed.replace(/\x1b\[(?:127|8);5u/g, "\x17");
-		}
 		// Filter SGR mouse sequences before Ink processes them
 		fixed = filterAndEmitMouseEvents(fixed);
 		// Linux backspace: \x7f → \b (DEL → BS)
@@ -55,41 +46,11 @@ process.stdin.read = function (size?: number) {
 	return chunk;
 } as typeof process.stdin.read;
 
-// ── Kitty keyboard protocol ──
-// Enables enhanced key reporting so Shift+Enter sends CSI 13;2 u
-// (with modifier flags) instead of just CR. Also enables modifyOtherKeys
-// for xterm/tmux. Restore both on exit.
-// Whitelist from Claude Code — only terminals known to support extended keys.
-
-const ENABLE_KITTY_KEYBOARD = "\x1b[>1u";
-const DISABLE_KITTY_KEYBOARD = "\x1b[<u";
-const ENABLE_MODIFY_OTHER_KEYS = "\x1b[>4;2m";
-const DISABLE_MODIFY_OTHER_KEYS = "\x1b[>4m";
-
-const EXTENDED_KEYS_TERMINALS = [
-	"iTerm.app", "kitty", "WezTerm", "ghostty", "tmux", "windows-terminal",
-	"xterm-kitty", "xterm-ghostty",
-];
-
-function supportsExtendedKeys(): boolean {
-	const term = process.env.TERM_PROGRAM ?? process.env.TERM ?? "";
-	return EXTENDED_KEYS_TERMINALS.some((t) => term.includes(t));
-}
-
-const hasExtendedKeys = supportsExtendedKeys();
-if (hasExtendedKeys) {
-	process.stdout.write(ENABLE_KITTY_KEYBOARD + ENABLE_MODIFY_OTHER_KEYS);
-}
-
 function restoreTerminal() {
 	disableMouseTracking();
 	// Restore font size
 	const scale = usePuxStore.getState().fontScale;
 	if (scale !== 1) applyFontScale(1);
-	if (hasExtendedKeys) {
-		const { writeSync } = require("node:fs") as { writeSync: (fd: number, data: string) => void };
-		writeSync(1, DISABLE_MODIFY_OTHER_KEYS + DISABLE_KITTY_KEYBOARD);
-	}
 }
 process.on("exit", restoreTerminal);
 process.on("SIGINT", () => { restoreTerminal(); process.exit(0); });
@@ -239,7 +200,11 @@ const appElement = React.createElement(App, {
 	project: projectName,
 	cwd: cwdName,
 });
-const instance = render(appElement, { exitOnCtrlC: false });
+const instance = render(appElement, {
+	exitOnCtrlC: false,
+	incrementalRendering: true,
+	kittyKeyboard: { mode: "auto" },
+});
 
 // Force Ink to clear and re-render on terminal resize.
 // Without this, scrollback from the old width stays garbled.

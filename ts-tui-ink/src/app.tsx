@@ -149,9 +149,30 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 	const storeModel = usePuxStore((s) => s.activeModel);
 	const [model, setModel] = useState(initialModel || storeModel);
 	const lastCtrlC = useRef(0);
+	const lastEscape = useRef(0);
 
 	// Phase 4: Global keybindings for view cycling and quit
 	useInput(useCallback((input: string, key: any) => {
+		// Double Escape to cancel running agents or active CTO loop
+		if (key.escape) {
+			const store = usePuxStore.getState();
+			let runningCount = 0;
+			for (const a of store.agents.values()) {
+				if (a.status === "running") runningCount++;
+			}
+			// Cancel if sub-agents are running OR the CTO itself is running
+			// (ctoRunning is set by the ComposerBar which has access to AUI state)
+			if (runningCount > 0 || store.ctoRunning) {
+				const now = Date.now();
+				if (now - lastEscape.current < 1000) {
+					store.cancelAgent("all");
+					lastEscape.current = 0;
+				} else {
+					lastEscape.current = now;
+				}
+			}
+			return;
+		}
 		// Double Ctrl+C to quit
 		if (input === "c" && key.ctrl) {
 			const now = Date.now();

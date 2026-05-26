@@ -519,6 +519,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 		let activeSubAgentName: string | null = null;
 
 		// Initial yield — empty, running
+		usePuxStore.setState({ ctoRunning: true });
 		yield buildSnapshot(parts, sources, "running", timing, stepsRef);
 
 		try {
@@ -825,9 +826,8 @@ export const puxChatAdapter: ChatModelAdapter = {
 				}
 			}
 		} catch (err) {
+			usePuxStore.setState({ ctoRunning: false });
 			if (err instanceof Error && err.name === "AbortError") {
-				timing.totalStreamTime = Date.now() - timing.streamStartTime;
-				yield {
 					...buildSnapshot(parts, sources, "running", timing, stepsRef),
 					status: { type: "incomplete" as const, reason: "cancelled" as const },
 				};
@@ -842,6 +842,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		// Stream ended without [DONE] — yield final snapshot
 		timing.totalStreamTime = Date.now() - timing.streamStartTime;
+		usePuxStore.setState({ ctoRunning: false });
 		yield buildSnapshot(parts, sources, "complete", timing, stepsRef);
 	},
 };

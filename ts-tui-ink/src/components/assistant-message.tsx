@@ -3,10 +3,10 @@
  *
  * Renders text, reasoning (collapsed), and tool calls.
  * Reasoning via ReasoningAccordion only (no duplicate from parts loop).
- * Tool calls: single line — ● toolName(args) when running, ● toolName(args) done when complete.
+ * Tool calls: single line with proper truncation to prevent mid-word wrapping.
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useAuiState } from "@assistant-ui/react-ink";
@@ -17,6 +17,17 @@ import { BranchPicker } from "./branch-picker.js";
 import { MarkdownText } from "./markdown-text.js";
 import { TerminalImage } from "./terminal-image.js";
 import { useColors, symbols, BLOCKQUOTE_BAR, BLACK_CIRCLE } from "../theme.js";
+import { useTerminalSize } from "../use-terminal-size.js";
+
+// Truncate at word boundary — never cuts mid-word
+function trunc(s: string, max: number): string {
+	if (s.length <= max) return s;
+	const cut = s.slice(0, max - 1);
+	const lastSpace = cut.lastIndexOf(" ");
+	// If no space found or too close to start, hard truncate
+	if (lastSpace < max * 0.5) return cut + "…";
+	return cut.slice(0, lastSpace) + "…";
+}
 
 export function AssistantMessage() {
 	const msg = useAuiState((s) => s.message);
@@ -30,12 +41,14 @@ export function AssistantMessage() {
 		p.type === "source"
 	);
 
-	// Show spinner while running with no visible content yet
+	// Show spinner while running with no visible content yet.
+	// Use "waiting..." — not "thinking" — because the model hasn't
+	// produced any output yet (still connecting / processing prompt).
 	if (isRunning && !hasContent) {
 		return (
 			<Box marginTop={1} paddingX={1} gap={1}>
 				<Text color={colors.assistant}><Spinner type="dots" /></Text>
-				<Text color={colors.textDim}>thinking...</Text>
+				<Text color={colors.textDim}>waiting...</Text>
 			</Box>
 		);
 	}
@@ -120,13 +133,13 @@ export function AssistantMessage() {
 	);
 }
 
-// ── Tool call display — compact single line ──
+// ── Tool call helpers ──
 
 function isDelegateTool(name: string): boolean {
 	return name === "delegate_to" || name === "delegate_async";
 }
 
-// ── Delegate tool display — shows sub-agent progress with nested snippets ──
+// ── Delegate tool display — sub-agent progress with width-aware truncation ──
 
 function DelegateToolCallDisplay({
 	toolName,
@@ -140,18 +153,22 @@ function DelegateToolCallDisplay({
 	isError?: boolean;
 }) {
 	const colors = useColors();
+	const { cols } = useTerminalSize();
 	const isDone = result !== undefined;
 	const isRunning = !isDone && !isError;
 
 	const agentName = (args as any)?.agent_id || (args as any)?.agent || (args as any)?.instructions || "agent";
 	const task = (args as any)?.task || (args as any)?.prompt || "";
-	const taskPreview = task.length > 50 ? task.slice(0, 47) + "..." : task;
+
+	// Width-aware: paddingLeft(2) + symbol(2) + spacing = ~6 chars overhead
+	// Header: indent(2) + spinner(3) + agent + task + suffix
+	const headerOverhead = 6; // indent + spinner + space
+	const maxTaskLen = Math.max(20, cols - headerOverhead - agentName.length - 10);
+	const taskPreview = trunc(task, Math.min(maxTaskLen, 50));
 
 	// Look up sub-agent details from Zustand store.
-	// Uses agentName match + task prefix match because the backend
-	// truncates task text to 120 chars in subagent_start events.
 	const agents = usePuxStore((s) => s.agents);
-	const agentState = (() => {
+	const agentState = useMemo(() => {
 		const candidates = [...agents.values()].filter(
 			(a) => a.agentName === agentName,
 		);
@@ -161,7 +178,7 @@ function DelegateToolCallDisplay({
 			(a) => task.startsWith(a.task) || a.task.startsWith(task),
 		);
 		return byTask ?? candidates.find((a) => a.status === "running") ?? candidates[0];
-	})();
+	}, [agents, agentName, task]);
 
 	const toolCalls = agentState?.toolCalls ?? [];
 	const subToolCount = toolCalls.length;
@@ -181,23 +198,28 @@ function DelegateToolCallDisplay({
 		return () => clearInterval(timer);
 	}, [isRunning]);
 
-	// Collapsed when done
+	// Width budget for tool call lines: indent(2) + "└ "(3) + symbol(1) + " "(1) = 7
+	const toolIndent = 7;
+	const maxArgLen = Math.max(15, cols - toolIndent - 20);
+
+	// Collapsed when done — single line, no wrapping
 	if (isDone) {
+		const doneSuffix = subToolCount > 0
+			? ` done · ${subToolCount} tool${subToolCount !== 1 ? "s" : ""} · ${duration}`
+			: " done";
 		return (
 			<Box paddingLeft={2} marginBottom={1}>
-				<Text>
+				<Text wrap="truncate-end">
 					<Text color={isError ? colors.error : colors.success}>{BLACK_CIRCLE} </Text>
 					<Text bold color={colors.brand}>{agentName}</Text>
-					{taskPreview && <Text color="gray">({taskPreview})</Text>}
-					<Text color="gray">
-						{" "}Done{subToolCount > 0 ? ` (${subToolCount} tool${subToolCount !== 1 ? "s" : ""}${symbols.dot}${duration})` : ""}
-					</Text>
+					{taskPreview && <Text color="gray"> {taskPreview}</Text>}
+					<Text color="gray">{doneSuffix}</Text>
 				</Text>
 			</Box>
 		);
 	}
 
-	// Running: nested tool snippets
+	// Running: show nested tool snippets
 	const maxShow = 5;
 	const visibleTools = toolCalls.length > maxShow
 		? toolCalls.slice(-maxShow)
@@ -206,57 +228,55 @@ function DelegateToolCallDisplay({
 
 	return (
 		<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-			<Text>
+			<Text wrap="truncate-end">
 				<Text color={colors.running}>
 					{isRunning ? <Spinner type="dots" /> : BLACK_CIRCLE}{" "}
 				</Text>
 				<Text bold color={colors.brand}>{agentName}</Text>
-				{taskPreview && <Text color="gray">({taskPreview})</Text>}
+				{taskPreview && <Text color="gray"> {taskPreview}</Text>}
 				{subToolCount > 0 && (
-					<Text color="gray"> {symbols.dot} {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
+					<Text color="gray"> · {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
 				)}
 			</Text>
 
 			{hiddenCount > 0 && (
-				<Box paddingLeft={2}>
-					<Text dimColor color="gray">
-						{" └ "}{symbols.dot} {hiddenCount} earlier tool{hiddenCount !== 1 ? "s" : ""}
-					</Text>
-				</Box>
+				<Text dimColor color="gray">
+					{"  └ "}{symbols.dot} {hiddenCount} earlier
+				</Text>
 			)}
 
 			{visibleTools.map((tc, i) => {
-				const isLast = i === visibleTools.length - 1;
 				const isActive = !tc.endedAt;
-				const argPreview = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 50);
+				const isLast = i === visibleTools.length - 1;
+				const rawArg = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, maxArgLen);
+				const argPreview = trunc(rawArg, maxArgLen);
+				const sym = tc.isError ? symbols.toolError : tc.endedAt ? symbols.toolDone : symbols.toolRunning;
 				return (
-					<Box key={`${tc.toolName}-${tc.timestamp}-${i}`} paddingLeft={2}>
-						<Text>
-							<Text dimColor color="gray">{" └ "}</Text>
-							<Text color={tc.isError ? colors.error : tc.endedAt ? colors.success : colors.running}>
-								{tc.isError ? symbols.toolError : tc.endedAt ? symbols.toolDone : symbols.toolRunning}
-							</Text>
-							<Text> </Text>
-							<Text bold color={isActive ? colors.running : undefined}>
-								{tc.toolName}
-							</Text>
-							{argPreview && <Text color="gray"> {argPreview.length > 50 ? argPreview.slice(0, 47) + "..." : argPreview}</Text>}
-							{isActive && isLast && isRunning && (
-								<Text color={colors.running}>{" "}<Spinner type="dots" /></Text>
-							)}
+					<Text key={`${tc.toolName}-${tc.timestamp}-${i}`} wrap="truncate-end">
+						<Text dimColor color="gray">{"  └ "}</Text>
+						<Text color={tc.isError ? colors.error : tc.endedAt ? colors.success : colors.running}>
+							{sym}
 						</Text>
-					</Box>
+						<Text> </Text>
+						<Text bold color={isActive ? colors.running : undefined}>
+							{tc.toolName}
+						</Text>
+						{argPreview && <Text color="gray"> {argPreview}</Text>}
+						{isActive && isLast && isRunning && (
+							<Text color={colors.running}> <Spinner type="dots" /></Text>
+						)}
+					</Text>
 				);
 			})}
 
 			{toolCalls.length === 0 && (
-				<Box paddingLeft={2}>
-					<Text dimColor color="gray">{" └ "}Initializing...</Text>
-				</Box>
+				<Text dimColor color="gray">{"  └ "}starting...</Text>
 			)}
 		</Box>
 	);
 }
+
+// ── Regular tool call display — single line ──
 
 function ToolCallDisplay({
 	toolName,
@@ -271,23 +291,23 @@ function ToolCallDisplay({
 	isError?: boolean;
 }) {
 	const colors = useColors();
+	const { cols } = useTerminalSize();
 	const isDone = result !== undefined;
 	const isRunning = !isDone && !isError;
 
-	const argPreview = getToolArgPreview(toolName, args as Record<string, unknown> | undefined);
+	const rawArg = getToolArgPreview(toolName, args as Record<string, unknown> | undefined);
+	// Overhead: symbol(1) + space(1) + toolname(~15) + space(1) + "done"(4) = ~22
+	const maxArgLen = Math.max(10, cols - toolName.length - 24);
+	const argPreview = trunc(rawArg, maxArgLen);
+
+	const sym = isRunning ? symbols.toolRunning : isError ? symbols.toolError : symbols.toolDone;
 
 	return (
-		<Text>
-			<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>
-				{isRunning ? symbols.toolRunning : isError ? symbols.toolError : symbols.toolDone}
-			</Text>
+		<Text wrap="truncate-end">
+			<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>{sym}</Text>
 			<Text> </Text>
-			<Text bold color={isRunning ? colors.running : undefined}>
-				{toolName}
-			</Text>
-			{argPreview && (
-				<Text color={colors.textMuted}> {argPreview}</Text>
-			)}
+			<Text bold color={isRunning ? colors.running : undefined}>{toolName}</Text>
+			{argPreview && <Text color={colors.textMuted}> {argPreview}</Text>}
 			{isDone && !isError && <Text color={colors.textMuted}> done</Text>}
 			{isError && <Text color={colors.error}> failed</Text>}
 		</Text>

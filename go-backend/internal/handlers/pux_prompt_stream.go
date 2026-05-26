@@ -29,6 +29,11 @@ func (h *PuxHandler) rehydrateAndStream(
 	h.registry.Start(req.Project, req.AgentId)
 	defer h.registry.Stop(req.Project, req.AgentId)
 
+	// Track agent instance for cancel support
+	agentKey := req.Project + ":" + req.AgentId
+	h.activeAgents.Store(agentKey, orch)
+	defer h.activeAgents.Delete(agentKey)
+
 	// Rehydrate session tree from SQL history
 	var lastUserContent string
 	if h.db != nil {
