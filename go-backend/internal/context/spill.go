@@ -6,31 +6,45 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
 // SpillStore manages offloaded tool results on disk.
 // Each spill creates a file under the configured spill directory.
 type SpillStore struct {
-	mu       sync.Mutex
-	spillDir string
-	index    map[string]*SpillEntry
+	mu         sync.Mutex
+	spillDir   string
+	sandboxDir string // optional: if set, entries include a SandboxPath for container access
+	index      map[string]*SpillEntry
 }
 
 // SpillEntry tracks a single offloaded result.
 type SpillEntry struct {
-	Ref        string
-	FilePath   string
-	ToolName   string
-	ToolCallID string
-	Size       int64
-	Preview    string
+	Ref         string
+	FilePath    string
+	SandboxPath string // path inside sandbox (empty if not applicable)
+	ToolName    string
+	ToolCallID  string
+	Size        int64
+	Preview     string
+	Lines       int
 }
 
 func NewSpillStore(spillDir string) *SpillStore {
 	return &SpillStore{
 		spillDir: spillDir,
 		index:    make(map[string]*SpillEntry),
+	}
+}
+
+// NewSpillStoreWithSandbox creates a SpillStore that tracks both host and sandbox paths.
+// sandboxDir is the equivalent path inside the sandbox container.
+func NewSpillStoreWithSandbox(spillDir, sandboxDir string) *SpillStore {
+	return &SpillStore{
+		spillDir:   spillDir,
+		sandboxDir: sandboxDir,
+		index:      make(map[string]*SpillEntry),
 	}
 }
 
@@ -51,13 +65,20 @@ func (s *SpillStore) Spill(toolName, toolCallID, content, preview string) (*Spil
 		return nil, fmt.Errorf("spill: write file: %w", err)
 	}
 
+	var sandboxPath string
+	if s.sandboxDir != "" {
+		sandboxPath = filepath.Join(s.sandboxDir, ref+".txt")
+	}
+
 	entry := &SpillEntry{
-		Ref:        ref,
-		FilePath:   filePath,
-		ToolName:   toolName,
-		ToolCallID: toolCallID,
-		Size:       int64(len(content)),
-		Preview:    preview,
+		Ref:         ref,
+		FilePath:    filePath,
+		SandboxPath: sandboxPath,
+		ToolName:    toolName,
+		ToolCallID:  toolCallID,
+		Size:        int64(len(content)),
+		Preview:     preview,
+		Lines:       strings.Count(content, "\n") + 1,
 	}
 	s.index[ref] = entry
 	return entry, nil

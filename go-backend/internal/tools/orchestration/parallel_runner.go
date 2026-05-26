@@ -111,6 +111,7 @@ type ParallelRunner struct {
 	wg                 sync.WaitGroup
 	liveAgents         map[string]*liveAgent // kept-alive sub-agents for continuation
 	completedSnapshots map[string]string     // agentRef → snapshotID for auto-accepted delegates (enables revert)
+	spill              *ctxpkg.SpillStore    // unified spill store for sub-agent result offloading
 }
 
 // asyncTask is a single in-flight async sub-agent.
@@ -149,11 +150,21 @@ func NewParallelRunner(cfg RunnerConfig) *ParallelRunner {
 	if cfg.Logger == nil {
 		cfg.Logger = func(format string, args ...interface{}) {}
 	}
+
+	// Create unified spill store for sub-agent result offloading
+	var spill *ctxpkg.SpillStore
+	if cfg.ProjectDir != "" {
+		hostDir := filepath.Join(cfg.ProjectDir, ".pux", "spill")
+		sandboxDir := "/sandbox/workspace/.pux/spill"
+		spill = ctxpkg.NewSpillStoreWithSandbox(hostDir, sandboxDir)
+	}
+
 	return &ParallelRunner{
 		cfg:                cfg,
 		tasks:              make(map[string]*asyncTask),
 		liveAgents:         make(map[string]*liveAgent),
 		completedSnapshots: make(map[string]string),
+		spill:              spill,
 	}
 }
 
@@ -450,6 +461,10 @@ func (r *ParallelRunner) Close() {
 			closer.Close()
 		}
 		delete(r.liveAgents, ref)
+	}
+
+	if r.spill != nil {
+		r.spill.Cleanup()
 	}
 }
 
@@ -781,7 +796,7 @@ func (r *ParallelRunner) buildSubAgent(
 		MaxTokens:           8192,
 		ContextSize:         r.cfg.ContextSize,
 		Tools:               setup.SelectedTools,
-		ToolResultProcessor: subAgentResultProcessor(r.cfg.ProjectDir),
+		ToolResultProcessor: subAgentResultProcessor(r.spill),
 		Opts: core.GenerateOptions{
 			MaxTokens:   8192,
 			Temperature: temperature,
@@ -834,7 +849,7 @@ func (r *ParallelRunner) buildSubAgent(
 		PermDecisions:       r.cfg.PermDecisions,
 		ToolPerms:           r.cfg.ToolPerms,
 		ExtraHooks:          resources.ExtraHooks,
-		ToolResultProcessor: subAgentResultProcessor(r.cfg.ProjectDir),
+		ToolResultProcessor: subAgentResultProcessor(r.spill),
 	})
 
 	return &builtAgent{
@@ -1305,46 +1320,15 @@ func (r *ParallelRunner) pendingCount() int {
 }
 
 // subAgentResultProcessor returns a ToolResultProcessor for sub-agents.
-// Large tool results are spilled to disk (inside the sandbox workspace) instead
-// of being truncated. The agent gets a preview + file path reference and can
-// read the full output with file_read if needed — same pattern as claude-code.
-func subAgentResultProcessor(projectDir string) func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
-	const spillThreshold = 4000  // bytes — spill anything larger
-	const previewLines = 30      // lines of preview kept in-context
-
-	spillDir := filepath.Join(projectDir, ".pux", "spill")
-	// Sandbox path for the reference — sub-agent reads via file_read
-	sandboxSpillDir := "/sandbox/workspace/.pux/spill"
+// Large tool results are spilled to disk via the shared SpillStore instead
+// of being truncated. The agent gets a preview + sandbox path reference and
+// can read the full output with file_read if needed.
+func subAgentResultProcessor(spill *ctxpkg.SpillStore) func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
+	const previewLines = 30 // lines of preview kept in-context
 
 	return func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
-		if len(result) <= spillThreshold {
+		if spill == nil || len(result) <= ctxpkg.DefaultConfig().OffloadThreshold {
 			return result
-		}
-
-		// Create spill directory on host (maps to sandbox via bind mount)
-		if err := os.MkdirAll(spillDir, 0755); err != nil {
-			// Can't spill — fall back to tail truncation
-			tail := result
-			if len(tail) > 3000 {
-				tail = tail[len(tail)-3000:]
-			}
-			return "...[spill failed, showing tail]\n" + tail
-		}
-
-		// Generate deterministic file name from tool call
-		ref := fmt.Sprintf("%s-%s", toolName, toolCallID)
-		if len(ref) > 60 {
-			ref = ref[:60]
-		}
-		hostPath := filepath.Join(spillDir, ref+".txt")
-
-		// Write full output to disk
-		if err := os.WriteFile(hostPath, []byte(result), 0644); err != nil {
-			tail := result
-			if len(tail) > 3000 {
-				tail = tail[len(tail)-3000:]
-			}
-			return "...[spill write failed, showing tail]\n" + tail
 		}
 
 		// Build preview — first N lines
@@ -1355,12 +1339,25 @@ func subAgentResultProcessor(projectDir string) func(ctx context.Context, toolNa
 		}
 		preview := strings.Join(lines[:previewCount], "\n")
 
-		// Reference path inside sandbox
-		sandboxPath := filepath.Join(sandboxSpillDir, ref+".txt")
+		entry, spillErr := spill.Spill(toolName, toolCallID, result, preview)
+		if spillErr != nil {
+			// Can't spill — fall back to tail truncation
+			tail := result
+			if len(tail) > 3000 {
+				tail = tail[len(tail)-3000:]
+			}
+			return "...[spill failed, showing tail]\n" + tail
+		}
+
+		// Use sandbox path if available (sub-agents read via file_read)
+		readPath := entry.SandboxPath
+		if readPath == "" {
+			readPath = entry.FilePath
+		}
 
 		return fmt.Sprintf(
-			"%s\n\n...[%d lines total. Full output written to %s — use file_read(\"%s\") to read it]",
-			preview, len(lines), sandboxPath, sandboxPath,
+			"%s\n\n...[%d lines total. Full output at %s — use file_read(\"%s\") to read it]",
+			preview, entry.Lines, readPath, readPath,
 		)
 	}
 }
