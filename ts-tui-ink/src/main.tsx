@@ -234,15 +234,20 @@ usePuxStore.subscribe((state, prev) => {
 
 // ── Render ──
 
-const { waitUntilExit } = render(
-	React.createElement(App, {
-		model: modelName,
-		project: projectName,
-		cwd: cwdName,
-	}),
-	{ exitOnCtrlC: false }
-);
+const appElement = React.createElement(App, {
+	model: modelName,
+	project: projectName,
+	cwd: cwdName,
+});
+const instance = render(appElement, { exitOnCtrlC: false });
 
-await waitUntilExit();
+// Force Ink to clear and re-render on terminal resize.
+// Without this, scrollback from the old width stays garbled.
+process.stdout.on("resize", () => {
+	instance.clear();
+	instance.rerender(appElement);
+});
+
+await instance.waitUntilExit();
 restoreTerminal();
 process.exit(0);

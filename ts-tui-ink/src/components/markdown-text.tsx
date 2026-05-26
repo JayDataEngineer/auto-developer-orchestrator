@@ -175,9 +175,10 @@ export function MarkdownText({ text, dim, color }: MarkdownTextProps) {
 
 		// Horizontal rule
 		if (line.match(/^---+$/)) {
+			const width = process.stdout.columns || 80;
 			elements.push(
 				<Text key={i} color="gray">
-					{"─".repeat(40)}
+					{"─".repeat(Math.min(width - 2, 80))}
 				</Text>,
 			);
 			continue;
