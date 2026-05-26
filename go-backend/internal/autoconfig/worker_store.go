@@ -34,6 +34,7 @@ type workerConfig struct {
 	Model        string   `yaml:"model"`
 	Sandbox      string   `yaml:"sandbox"`
 	DelegatesTo  []string `yaml:"delegates_to,omitempty"`
+	Hooks        []string `yaml:"hooks,omitempty"`
 }
 
 // NewWorkerStore creates a persistent worker store.
@@ -101,6 +102,7 @@ func (s *WorkerStore) Get(ctx context.Context, name string) (any, error) {
 		"model":        wc.Model,
 		"sandbox":      wc.Sandbox,
 		"delegates_to": wc.DelegatesTo,
+		"hooks":        wc.Hooks,
 		"jit":          s.jit,
 	}, nil
 }
@@ -298,6 +300,14 @@ func specToWorkerConfig(spec map[string]any) (*workerConfig, error) {
 		for _, item := range v {
 			if s, ok := item.(string); ok {
 				wc.DelegatesTo = append(wc.DelegatesTo, s)
+			}
+		}
+	}
+
+	if v, ok := spec["hooks"].([]any); ok {
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				wc.Hooks = append(wc.Hooks, s)
 			}
 		}
 	}

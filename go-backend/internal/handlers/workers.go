@@ -10,6 +10,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/autoconfig"
+	"github.com/auto-developer-orchestrator/backend/internal/hooks"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
@@ -87,6 +88,7 @@ func NewWorkerHandler(store *autoconfig.WorkerStore, logger *zap.Logger) *Worker
 func (h *WorkerHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/", h.ListWorkers)
 	r.Get("/capabilities", h.ListCapabilities)
+	r.Get("/hooks", h.ListHooks)
 	r.Get("/orgs", h.ListOrgs)
 	r.Post("/", h.CreateWorker)
 	r.Put("/{name}", h.UpdateWorker)
@@ -165,6 +167,13 @@ func (h *WorkerHandler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"workers": workers})
 }
 
+// ListHooks returns all available hook names.
+func (h *WorkerHandler) ListHooks(w http.ResponseWriter, r *http.Request) {
+	names := hooks.AvailableHookNames()
+	sort.Strings(names)
+	writeJSON(w, http.StatusOK, map[string]any{"hooks": names})
+}
+
 // ListCapabilities returns all available capability names.
 func (h *WorkerHandler) ListCapabilities(w http.ResponseWriter, r *http.Request) {
 	pkgs := common.LoadToolPackages()
@@ -188,6 +197,7 @@ func (h *WorkerHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 		Temperature  float64  `json:"temperature"`
 		Sandbox      string   `json:"sandbox"`
 		DelegatesTo  []string `json:"delegatesTo"`
+		Hooks        []string `json:"hooks"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -214,6 +224,7 @@ func (h *WorkerHandler) CreateWorker(w http.ResponseWriter, r *http.Request) {
 		"temperature":  req.Temperature,
 		"sandbox":      req.Sandbox,
 		"delegates_to": req.DelegatesTo,
+		"hooks":        req.Hooks,
 	}
 
 	_, err := h.store.Put(r.Context(), req.Name, spec)
@@ -252,6 +263,7 @@ func (h *WorkerHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 		Temperature  float64  `json:"temperature"`
 		Sandbox      string   `json:"sandbox"`
 		DelegatesTo  []string `json:"delegatesTo"`
+		Hooks        []string `json:"hooks"`
 		Source       string   `json:"source"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -274,6 +286,7 @@ func (h *WorkerHandler) UpdateWorker(w http.ResponseWriter, r *http.Request) {
 		"temperature":  req.Temperature,
 		"sandbox":      req.Sandbox,
 		"delegates_to": req.DelegatesTo,
+		"hooks":        req.Hooks,
 	}
 
 	if _, err := h.store.Put(r.Context(), name, spec); err != nil {
@@ -297,6 +310,7 @@ func (h *WorkerHandler) updateOrgWorker(w http.ResponseWriter, r *http.Request, 
 	Temperature  float64  `json:"temperature"`
 	Sandbox      string   `json:"sandbox"`
 	DelegatesTo  []string `json:"delegatesTo"`
+	Hooks        []string `json:"hooks"`
 	Source       string   `json:"source"`
 }) {
 	// Find the org's roles dir from defaults (fast, no re-discovery)
@@ -348,6 +362,9 @@ func (h *WorkerHandler) updateOrgWorker(w http.ResponseWriter, r *http.Request, 
 	if req.Sandbox != "" {
 		cfgMap["sandbox"] = req.Sandbox
 	}
+	if len(req.Hooks) > 0 {
+		cfgMap["hooks"] = req.Hooks
+	}
 
 	cfgData, err := yaml.Marshal(cfgMap)
 	if err != nil {
@@ -383,6 +400,7 @@ func (h *WorkerHandler) updateOrgWorker(w http.ResponseWriter, r *http.Request, 
 		"max_rounds":   req.MaxRounds,
 		"temperature":  req.Temperature,
 		"sandbox":      req.Sandbox,
+		"hooks":        req.Hooks,
 		"source":       source,
 		"isDefault":    true,
 		"isModified":   h.isOrgModified(key, rolesDir, name),
@@ -488,6 +506,7 @@ func (h *WorkerHandler) revertOrgWorker(w http.ResponseWriter, r *http.Request, 
 		Temperature float64  `yaml:"temperature"`
 		Model       string   `yaml:"model"`
 		Sandbox     string   `yaml:"sandbox"`
+		Hooks       []string `yaml:"hooks"`
 	}
 	yaml.Unmarshal(def.configYAML, &cfg)
 
@@ -499,6 +518,7 @@ func (h *WorkerHandler) revertOrgWorker(w http.ResponseWriter, r *http.Request, 
 		"max_rounds":   cfg.MaxRounds,
 		"temperature":  cfg.Temperature,
 		"sandbox":      cfg.Sandbox,
+		"hooks":        cfg.Hooks,
 		"source":       source,
 		"isDefault":    true,
 		"isModified":   false,

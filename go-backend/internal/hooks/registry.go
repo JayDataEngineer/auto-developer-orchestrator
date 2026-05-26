@@ -77,3 +77,10 @@ func registeredNames() []string {
 	}
 	return names
 }
+
+// AvailableHookNames returns the names of all registered hooks.
+func AvailableHookNames() []string {
+	globalRegistry.mu.RLock()
+	defer globalRegistry.mu.RUnlock()
+	return registeredNames()
+}

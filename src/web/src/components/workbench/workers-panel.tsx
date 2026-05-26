@@ -30,6 +30,7 @@ interface WorkerFormData {
 	hint: string;
 	persona: string;
 	capabilities: string[];
+	hooks: string[];
 	model: string;
 	maxRounds: number | undefined;
 	temperature: number | undefined;
@@ -43,6 +44,7 @@ interface Worker {
 	persona: string;
 	capabilities: string[];
 	imports?: string[];
+	hooks?: string[];
 	model: string;
 	max_rounds: number;
 	temperature: number;
@@ -70,6 +72,7 @@ const emptyForm: WorkerFormData = {
 	hint: "",
 	persona: "",
 	capabilities: [],
+	hooks: [],
 	model: "",
 	maxRounds: undefined,
 	temperature: undefined,
@@ -104,6 +107,15 @@ const workerFields: FieldConfig<WorkerFormData>[] = [
 			{ value: "native", label: "Native" },
 		],
 	},
+	{
+		key: "hooks", type: "multiselect", label: "Hooks",
+		options: [
+			{ value: "file_checkpoint", label: "File Checkpoint" },
+			{ value: "git_checkpoint", label: "Git Checkpoint" },
+			{ value: "raise_browser", label: "Raise Browser" },
+			{ value: "journal_checkpoint", label: "Journal Checkpoint" },
+		],
+	},
 	{ key: "delegatesTo", type: "workers", label: "Can Delegate To" },
 ];
 
@@ -115,6 +127,7 @@ function workerToForm(w: Worker): WorkerFormData {
 		hint: w.hint || "",
 		persona: w.persona || "",
 		capabilities: w.capabilities || [],
+		hooks: w.hooks || [],
 		model: w.model || "",
 		maxRounds: w.max_rounds || undefined,
 		temperature: w.temperature || undefined,
@@ -135,6 +148,7 @@ function buildBody(form: WorkerFormData): Record<string, any> {
 	if (form.temperature != null) body.temperature = form.temperature;
 	if (form.sandbox) body.sandbox = form.sandbox;
 	if (form.delegatesTo.length > 0) body.delegatesTo = form.delegatesTo;
+	if (form.hooks.length > 0) body.hooks = form.hooks;
 	return body;
 }
 
@@ -218,6 +232,9 @@ function WorkerCard({
 						)}
 						{(worker.capabilities || worker.imports || []).map((c: string) => (
 							<Badge key={c} variant="secondary" className="text-[9px]">{c}</Badge>
+						))}
+						{(worker.hooks || []).map((h: string) => (
+							<Badge key={h} variant="outline" className="text-[9px] text-amber-600 border-amber-600/30">{h}</Badge>
 						))}
 						{worker.isModified && (
 							<Badge variant="destructive" className="text-[9px]">modified</Badge>
@@ -489,6 +506,7 @@ export function WorkersPanel() {
 		if (form.model) parts.push(`Model: ${form.model}`);
 		if (form.maxRounds) parts.push(`Max rounds: ${form.maxRounds}`);
 		if (form.temperature != null) parts.push(`Temperature: ${form.temperature}`);
+		if (form.hooks.length > 0) parts.push(`Hooks: ${form.hooks.join(", ")}`);
 		if (form.delegatesTo.length > 0) parts.push(`Can delegate to: ${form.delegatesTo.join(", ")}`);
 		dispatchEvent(new CustomEvent("pux:send-message", { detail: { text: parts.join(" ") } }));
 		setShowForm(false);
