@@ -355,6 +355,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		const projects = get().projects as Array<{ name: string; path?: string }>;
 		const p = projects.find((pr) => pr.name === project);
 		get().markViewed(project, agentId);
+		get().clearAgents();
 		set({
 			activeProject: project,
 			activeProjectPath: p?.path || "",
@@ -363,7 +364,8 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		});
 	},
 
-	clearConversation: () =>
+	clearConversation: () => {
+		get().clearAgents();
 		set({
 			activeAgentId: "",
 			conversationKey: `${get().activeProject}:clear-${Date.now()}`,
@@ -372,7 +374,8 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			contextMetrics: null,
 			compacting: false,
 			lastError: null,
-		}),
+		});
+	},
 
 	loadConversations: async () => {
 		const update = await apiLoad("/api/pux/conversations", (data: unknown) => {
@@ -564,6 +567,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 
 	startNewChat: () => {
 		const { activeProject } = get();
+		get().clearAgents();
 		set({
 			activeAgentId: "",
 			conversationKey: `${activeProject}:new-${Date.now()}`,
