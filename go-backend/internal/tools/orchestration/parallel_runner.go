@@ -1019,6 +1019,168 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	return r.finalizeDelegation(ctx, setup, resources, agent, runRes)
 }
 
+// RunParallel fans out multiple agents concurrently, waits for all to complete,
+// and returns combined results.
+func (r *ParallelRunner) RunParallel(ctx context.Context, specs []ParallelTaskSpec) (map[string]any, error) {
+	if r.cfg.Depth >= r.cfg.MaxDepth {
+		return nil, fmt.Errorf("max delegation depth (%d) reached", r.cfg.MaxDepth)
+	}
+
+	subscriber := subscriberFromCtx(ctx)
+	r.cfg.Logger("PARALLEL_START: count=%d agents=%v", len(specs), specAgentNames(specs))
+
+	// Emit subagent_start for each task upfront
+	for _, sp := range specs {
+		core.SendEvent(subscriber, core.AgentEvent{
+			Type: core.EventTypeSubAgentStart,
+			Data: core.SubAgentStartData{
+				AgentName: sp.AgentName,
+				Task:      truncateTask(sp.Task, 120),
+			},
+		})
+	}
+
+	type parallelResult struct {
+		Index   int
+		Result  map[string]any
+		Err     error
+		Agent   *builtAgent
+		Setup   *delegateSetup
+		Changes *ChangeSet
+	}
+
+	results := make([]parallelResult, len(specs))
+	var wg sync.WaitGroup
+
+	for i, sp := range specs {
+		wg.Add(1)
+		go func(idx int, spec ParallelTaskSpec) {
+			defer wg.Done()
+
+			setup, err := r.prepareDelegation(ctx, spec.Task, spec.AgentName, spec.Instructions, spec.Tools, spec.DelegatesTo)
+			if err != nil {
+				results[idx] = parallelResult{Index: idx, Err: err}
+				return
+			}
+
+			resources, err := r.createSubAgentResources(ctx, spec.Task, setup, spec.ModelID, spec.Tools, spec.RoleHooks)
+			if err != nil {
+				results[idx] = parallelResult{Index: idx, Err: err}
+				return
+			}
+
+			agent := r.buildSubAgent(spec.Instructions, setup, resources, spec.MaxRounds, spec.Temperature, spec.SandboxTier, spec.DelegatesTo)
+
+			runRes, _, bg := r.executeAndDrain(ctx, agent, setup, resources, spec.Task)
+			if bg {
+				results[idx] = parallelResult{Index: idx, Err: fmt.Errorf("backgrounding not supported in parallel mode")}
+				return
+			}
+
+			// Compute diff
+			var changes *ChangeSet
+			if r.cfg.Snapshotter != nil && setup.SnapshotID != "" && r.cfg.ProjectDir != "" {
+				changes, _ = r.cfg.Snapshotter.Diff(ctx, r.cfg.ProjectDir, setup.SnapshotID)
+			}
+
+			// Store live agent for delegate_continue
+			agentRef := fmt.Sprintf("%s-%d", spec.AgentName, time.Now().UnixMilli())
+			r.mu.Lock()
+			r.completedSnapshots[agentRef] = setup.SnapshotID
+			if runRes.RunErr == nil {
+				r.liveAgents[agentRef] = &liveAgent{
+					ID:        agentRef,
+					Role:      spec.AgentName,
+					Session:   agent.Session,
+					Provider:  agent.Provider,
+					Config:    agent.Config,
+					Snapshot:  setup.SnapshotID,
+					StartedAt: time.Now(),
+				}
+			} else {
+				if closer, ok := agent.Provider.(io.Closer); ok {
+					closer.Close()
+				}
+			}
+			r.mu.Unlock()
+
+			finalResult := map[string]any{
+				"agent_ref": agentRef,
+				"result":    runRes.FinalText,
+				"role":      spec.AgentName,
+			}
+			if runRes.RunErr != nil {
+				finalResult["error"] = runRes.RunErr.Error()
+			}
+			if changes != nil {
+				finalResult["changes"] = map[string]any{"files": changes.Files, "summary": changes.Summary}
+			}
+
+			results[idx] = parallelResult{
+				Index:   idx,
+				Result:  finalResult,
+				Err:     runRes.RunErr,
+				Agent:   agent,
+				Setup:   setup,
+				Changes: changes,
+			}
+		}(i, sp)
+	}
+
+	wg.Wait()
+
+	// Emit subagent_end for each task
+	completedCount := 0
+	errorCount := 0
+	var allResults []map[string]any
+	var allChanges []map[string]any
+
+	for _, res := range results {
+		status := "completed"
+		if res.Err != nil {
+			status = "error"
+			errorCount++
+		} else {
+			completedCount++
+		}
+
+		core.SendEvent(subscriber, core.AgentEvent{
+			Type: core.EventTypeSubAgentEnd,
+			Data: core.SubAgentEndData{
+				AgentName: specs[res.Index].AgentName,
+				Status:    status,
+				Task:      truncateTask(specs[res.Index].Task, 120),
+			},
+		})
+
+		if res.Result != nil {
+			allResults = append(allResults, res.Result)
+		}
+		if res.Changes != nil {
+			allChanges = append(allChanges, map[string]any{"files": res.Changes.Files, "summary": res.Changes.Summary})
+		}
+	}
+
+	r.cfg.Logger("PARALLEL_DONE: completed=%d errors=%d", completedCount, errorCount)
+
+	return map[string]any{
+		"results":   allResults,
+		"completed": completedCount,
+		"errors":    errorCount,
+		"total":     len(specs),
+		"changes":   allChanges,
+	}, nil
+}
+
+// specAgentNames returns agent names from specs for logging.
+func specAgentNames(specs []ParallelTaskSpec) []string {
+	names := make([]string, len(specs))
+	for i, s := range specs {
+		names[i] = s.AgentName
+	}
+	return names
+}
+
 // RunDelegateContinue sends feedback to an existing sub-agent and continues its work.
 // The subagent's session is compacted first, then the feedback is added as a new user message.
 func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feedback string) (map[string]any, error) {

@@ -49,7 +49,20 @@ Include ALL of:
 - **Verify** — build command, test command, or how to confirm success
 
 The `role` field selects the agent. Do NOT pass `tools` — the role provides them.
-For parallel work, use `delegate_async` with a task_id, then `collect_results`.
+
+### Parallel Delegation
+When multiple independent tasks can run simultaneously (e.g., scanning 3 code areas), use `parallel_tasks`:
+```json
+{"parallel_tasks": [
+  {"task": "explore the auth module at /src/auth/", "role": "explorer"},
+  {"task": "explore the API layer at /src/api/", "role": "explorer"},
+  {"task": "explore the database layer at /src/db/", "role": "explorer"}
+]}
+```
+All agents run concurrently. You get all results together. Use this instead of delegate_async for parallel work.
+
+### Background Delegation
+For long-running background tasks that shouldn't block the conversation (e.g., large builds, long-running tests), use `delegate_async` with a `task_id`, then `collect_results` to wait.
 
 ## Verification
 After coding delegations, verify: `ls` the output dir, check build artifacts exist.

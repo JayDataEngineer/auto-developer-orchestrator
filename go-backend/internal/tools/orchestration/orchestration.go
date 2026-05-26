@@ -23,6 +23,21 @@ type DelegateRunner interface {
 	RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, delegatesTo []string) (map[string]any, error)
 	CollectAsyncResults(ctx context.Context) (map[string]any, error)
 	RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error)
+	RunParallel(ctx context.Context, specs []ParallelTaskSpec) (map[string]any, error)
+}
+
+// ParallelTaskSpec describes a single agent in a parallel fan-out.
+type ParallelTaskSpec struct {
+	Task         string
+	AgentName    string
+	Instructions string
+	Tools        []string
+	MaxRounds    int
+	Temperature  float32
+	ModelID      string
+	SandboxTier  string
+	DelegatesTo  []string
+	RoleHooks    []string
 }
 
 // MCPResolver resolves an MCP server prefix to a list of tool names.
@@ -135,14 +150,23 @@ func (t *DelegateToTool) Schema() json.RawMessage {
 			"role": {"type": "string", "description": "Agent role to assign. Each role has specialized tools and training.", "enum": %s},
 			"tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names the sub-agent can use (optional if using a role name)"},
 			"max_rounds": {"type": "integer", "description": "Maximum tool rounds (default: from role or 15)"},
-			"temperature": {"type": "number", "description": "Temperature for generation (default: from role or 0.4)"}
+			"temperature": {"type": "number", "description": "Temperature for generation (default: from role or 0.4)"},
+			"parallel_tasks": {"type": "array", "items": {"type": "object", "properties": {"task": {"type": "string", "description": "Task brief for this agent"}, "role": {"type": "string", "description": "Agent role", "enum": %s}}, "required": ["task", "role"]}, "description": "Fan out multiple agents in parallel. All run concurrently, results returned together. Use instead of delegate_async for parallel work where you need all results before continuing."}
 		},
-		"required": ["task", "role"]
-	}`, enumJSON)
+		"anyOf": [
+			{"required": ["task", "role"]},
+			{"required": ["parallel_tasks"]}
+		]
+	}`, enumJSON, enumJSON)
 	return json.RawMessage(schema)
 }
 
 func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	// Parallel delegation: fan out multiple agents concurrently
+	if rawTasks, ok := args["parallel_tasks"].([]any); ok && len(rawTasks) > 0 {
+		return t.executeParallel(ctx, rawTasks, args)
+	}
+
 	task, _ := args["task"].(string)
 	role, _ := args["role"].(string)
 	if role == "" {
@@ -194,6 +218,77 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 	// Pass role name as agentName for correct SSE event labeling
 	agentName := role
 	return t.runner.RunDelegateTracked(ctx, task, resolvedInstructions, agentName, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, sandboxTier, delegatesTo, roleHooks)
+}
+
+// executeParallel handles parallel_tasks — fans out multiple agents concurrently.
+func (t *DelegateToTool) executeParallel(ctx context.Context, rawTasks []any, parentArgs map[string]any) (map[string]any, error) {
+	// Inherit max_rounds / temperature from parent args if set
+	defaultMaxRounds := 15
+	if v, ok := parentArgs["max_rounds"].(float64); ok && v > 0 {
+		defaultMaxRounds = int(v)
+	}
+	defaultTemperature := float32(0.4)
+	if v, ok := parentArgs["temperature"].(float64); ok {
+		defaultTemperature = float32(v)
+	}
+
+	roleMap := t.roleProvider()
+	var specs []ParallelTaskSpec
+
+	for i, raw := range rawTasks {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			return nil, core.NewToolError("delegate_to", fmt.Sprintf("parallel_tasks[%d]: expected object", i))
+		}
+
+		task, _ := entry["task"].(string)
+		role, _ := entry["role"].(string)
+		if task == "" || role == "" {
+			return nil, core.NewToolError("delegate_to", fmt.Sprintf("parallel_tasks[%d]: 'task' and 'role' are required", i))
+		}
+
+		var toolNames []string
+		if raw, ok := entry["tools"].([]any); ok {
+			for _, t := range raw {
+				if name, ok := t.(string); ok {
+					toolNames = append(toolNames, name)
+				}
+			}
+		}
+
+		maxRounds := defaultMaxRounds
+		if v, ok := entry["max_rounds"].(float64); ok && v > 0 {
+			maxRounds = int(v)
+		}
+		temperature := defaultTemperature
+		if v, ok := entry["temperature"].(float64); ok {
+			temperature = float32(v)
+		}
+
+		instructions, resolvedTools, resolvedRounds, resolvedTemp, modelID, division, sandboxTier, delegatesTo, roleHooks := resolveRole(role, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
+
+		if division != "" {
+			return nil, core.NewToolError("delegate_to", fmt.Sprintf("parallel_tasks[%d]: role '%s' is a division head — use delegate_to separately for division delegation", i, role))
+		}
+		if len(resolvedTools) == 0 {
+			return nil, core.NewToolError("delegate_to", fmt.Sprintf("parallel_tasks[%d]: role '%s' has no default tools", i, role))
+		}
+
+		specs = append(specs, ParallelTaskSpec{
+			Task:         task,
+			AgentName:    role,
+			Instructions: instructions,
+			Tools:        resolvedTools,
+			MaxRounds:    resolvedRounds,
+			Temperature:  resolvedTemp,
+			ModelID:      modelID,
+			SandboxTier:  sandboxTier,
+			DelegatesTo:  delegatesTo,
+			RoleHooks:    roleHooks,
+		})
+	}
+
+	return t.runner.RunParallel(ctx, specs)
 }
 
 // DelegateContinueTool sends feedback to an existing sub-agent for continuation.
