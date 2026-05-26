@@ -511,6 +511,56 @@ func (m *Manager) ExecInSandbox(ctx context.Context, id string, cmd []string) (s
 	return output, nil
 }
 
+// ExecInSandboxRaw executes a command inside a sandbox and returns output + exit code.
+// Unlike ExecInSandbox, non-zero exit codes are returned in the result, not as errors.
+func (m *Manager) ExecInSandboxRaw(ctx context.Context, id string, cmd []string) (string, int, error) {
+	m.mu.RLock()
+	sandbox, exists := m.sandboxes[id]
+	m.mu.RUnlock()
+
+	if !exists {
+		return "", -1, fmt.Errorf("sandbox %s not found", id)
+	}
+
+	if sandbox.Status != StatusRunning {
+		return "", -1, fmt.Errorf("sandbox %s is not running (status: %s)", id, sandbox.Status)
+	}
+
+	if m.dockerClient == nil {
+		return "", -1, fmt.Errorf("docker client not available")
+	}
+
+	containerName := m.getContainerName(id)
+
+	execCreate, err := m.dockerClient.ExecCreate(ctx, containerName, client.ExecCreateOptions{
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+		TTY:          true,
+	})
+	if err != nil {
+		return "", -1, fmt.Errorf("exec create failed: %w", err)
+	}
+
+	attach, err := m.dockerClient.ExecAttach(ctx, execCreate.ID, client.ExecAttachOptions{
+		TTY: true,
+	})
+	if err != nil {
+		return "", -1, fmt.Errorf("exec attach failed: %w", err)
+	}
+	defer attach.Close()
+
+	var buf bytes.Buffer
+	io.Copy(&buf, attach.Reader)
+
+	inspect, err := m.dockerClient.ExecInspect(ctx, execCreate.ID, client.ExecInspectOptions{})
+	if err != nil {
+		return buf.String(), -1, nil
+	}
+
+	return buf.String(), inspect.ExitCode, nil
+}
+
 // CopyToSandbox uploads a local file into a sandbox container at the given path.
 // Uses the base64 echo pipe pattern to safely transfer data through Docker exec.
 func (m *Manager) CopyToSandbox(ctx context.Context, sandboxID, localPath, sandboxPath string) error {

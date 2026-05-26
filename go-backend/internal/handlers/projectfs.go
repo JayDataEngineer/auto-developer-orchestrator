@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/env"
 	puxssh "github.com/auto-developer-orchestrator/backend/internal/ssh"
 	"github.com/pkg/sftp"
 )
@@ -127,12 +128,13 @@ func ParseSSHURL(raw string) (info SSHProjectInfo, ok bool) {
 
 // LocalFS implements ProjectFS using the local filesystem.
 type LocalFS struct {
-	root string
+	root     string
+	security *env.SecurityGuard
 }
 
 // NewLocalFS creates a local filesystem ProjectFS rooted at rootPath.
 func NewLocalFS(rootPath string) *LocalFS {
-	return &LocalFS{root: rootPath}
+	return &LocalFS{root: rootPath, security: env.NewSecurityGuard()}
 }
 
 func (fs *LocalFS) Type() string          { return "local" }
@@ -165,6 +167,9 @@ func (fs *LocalFS) WriteFile(relPath string, content []byte) error {
 	if err != nil {
 		return err
 	}
+	if err := fs.security.CheckWritePath(absPath); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return err
 	}
@@ -174,6 +179,9 @@ func (fs *LocalFS) WriteFile(relPath string, content []byte) error {
 func (fs *LocalFS) CreateFile(relPath string) error {
 	absPath, err := fs.Resolve(relPath)
 	if err != nil {
+		return err
+	}
+	if err := fs.security.CheckWritePath(absPath); err != nil {
 		return err
 	}
 	if _, err := os.Stat(absPath); err == nil {
@@ -192,6 +200,9 @@ func (fs *LocalFS) MoveFile(fromRel, toRel string) error {
 	}
 	to, err := fs.Resolve(toRel)
 	if err != nil {
+		return err
+	}
+	if err := fs.security.CheckWritePath(to); err != nil {
 		return err
 	}
 	if _, err := os.Stat(from); os.IsNotExist(err) {
@@ -291,13 +302,14 @@ func buildLocalFileTree(root, currentPath string, maxDepth int) []FileNode {
 
 // SshFS implements ProjectFS using SFTP over an SSH connection.
 type SshFS struct {
-	info    SSHProjectInfo
+	info     SSHProjectInfo
 	sessions *puxssh.SessionManager
+	security *env.SecurityGuard
 }
 
 // NewSshFS creates an SSH-backed ProjectFS.
 func NewSshFS(info SSHProjectInfo, sessions *puxssh.SessionManager) *SshFS {
-	return &SshFS{info: info, sessions: sessions}
+	return &SshFS{info: info, sessions: sessions, security: env.NewSecurityGuard()}
 }
 
 func (fs *SshFS) Type() string            { return "ssh" }
@@ -413,6 +425,9 @@ func (fs *SshFS) WriteFile(relPath string, content []byte) error {
 	defer client.Close()
 
 	fullPath := path.Join(fs.info.Path, absPath)
+	if err := fs.security.CheckWritePath(fullPath); err != nil {
+		return err
+	}
 	if err := client.MkdirAll(path.Dir(fullPath)); err != nil {
 		return err
 	}
@@ -439,6 +454,9 @@ func (fs *SshFS) CreateFile(relPath string) error {
 	defer client.Close()
 
 	fullPath := path.Join(fs.info.Path, absPath)
+	if err := fs.security.CheckWritePath(fullPath); err != nil {
+		return err
+	}
 	if _, err := client.Stat(fullPath); err == nil {
 		return os.ErrExist
 	}
@@ -471,6 +489,9 @@ func (fs *SshFS) MoveFile(fromRel, toRel string) error {
 
 	fromPath := path.Join(fs.info.Path, fromAbs)
 	toPath := path.Join(fs.info.Path, toAbs)
+	if err := fs.security.CheckWritePath(toPath); err != nil {
+		return err
+	}
 
 	if _, err := client.Stat(fromPath); err != nil {
 		return os.ErrNotExist
