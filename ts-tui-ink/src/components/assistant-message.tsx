@@ -78,9 +78,7 @@ export function AssistantMessage() {
 						if (!part.text?.trim()) return null;
 						return (
 							<Box key={i} flexDirection="column" paddingLeft={1}>
-								<Text color={colors.text}>
-									<MarkdownText text={part.text} />
-								</Text>
+								<MarkdownText text={part.text} color={colors.text} />
 							</Box>
 						);
 					case "image":

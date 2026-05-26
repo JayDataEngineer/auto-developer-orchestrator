@@ -63,9 +63,10 @@ function renderSegments(segments: Segment[]): React.ReactNode[] {
 interface MarkdownTextProps {
 	text: string;
 	dim?: boolean;
+	color?: string;
 }
 
-export function MarkdownText({ text, dim }: MarkdownTextProps) {
+export function MarkdownText({ text, dim, color }: MarkdownTextProps) {
 	const colors = useColors();
 	const lines = text.split("\n");
 	const elements: React.ReactNode[] = [];
@@ -184,7 +185,7 @@ export function MarkdownText({ text, dim }: MarkdownTextProps) {
 
 		// Regular text with inline formatting
 		elements.push(
-			<Text key={i} dimColor={dim}>
+			<Text key={i} dimColor={dim} color={color}>
 				{renderSegments(parseInline(line))}
 			</Text>,
 		);
