@@ -38,7 +38,10 @@ export function AgentZoomOverlay() {
 	const { rows, cols } = useTerminalSize();
 
 	const [scrollOffset, setScrollOffset] = useState(0);
-	const [view, setView] = useState<"summary" | "transcript">("summary");
+	const startAgent = zoomedAgentId ? agents.get(zoomedAgentId) : undefined;
+	const [view, setView] = useState<"summary" | "transcript">(
+		startAgent?.transcriptId ? "transcript" : "summary"
+	);
 	const [messages, setMessages] = useState<StoredMessage[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [fetchError, setFetchError] = useState("");
