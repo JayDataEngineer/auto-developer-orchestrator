@@ -46,7 +46,7 @@ import { executeCommand, type CommandContext } from "./commands.js";
 
 // ── Runtime Provider ──
 
-function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
+	function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	const historyAdapter = useMemo(() => createPuxHistoryAdapter(), []);
 	const feedbackAdapter = useMemo<FeedbackAdapter>(
 		() => ({

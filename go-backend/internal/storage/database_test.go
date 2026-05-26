@@ -291,8 +291,9 @@ func TestSaveStreamingMessage(t *testing.T) {
 	if msgs[0].Text != "Hello" {
 		t.Errorf("expected 'Hello', got %q", msgs[0].Text)
 	}
-	if msgs[0].ToolCalls != "[streaming]" {
-		t.Errorf("expected '[streaming]', got %q", msgs[0].ToolCalls)
+	// New schema: no [streaming] sentinel; tool_calls defaults to [] for streaming rows
+	if msgs[0].ToolCalls != "[]" {
+		t.Errorf("expected '[]', got %q", msgs[0].ToolCalls)
 	}
 
 	// Second save updates the existing row

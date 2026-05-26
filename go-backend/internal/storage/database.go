@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // Postgres driver
@@ -16,6 +17,13 @@ type Database struct {
 	db          *sql.DB
 	dialect     Dialect
 	projectsDir string
+	Conversations *ConversationStore // new 3-table conversation persistence
+
+	// lastMsgID tracks the most recent assistant message ID for tool result association.
+	// Updated by SaveAssistantMessage and FinalizeStreamingMessage, read by SaveToolResult.
+	// Safe for sequential access patterns (single agent loop per session).
+	lastMsgMu  sync.Mutex
+	lastMsgID  int64
 }
 
 // NewDatabase creates a new database connection.
@@ -51,6 +59,12 @@ func NewDatabase(dataSource string) (*Database, error) {
 		return nil, fmt.Errorf("failed to create tables (%s): %w", driverName, err)
 	}
 
+	// Initialize new conversation tables (must happen before migrations that reference them)
+	convStore := NewConversationStore(db, dialect)
+	if err := convStore.MigrateNewTables(); err != nil {
+		return nil, fmt.Errorf("failed to create conversation tables: %w", err)
+	}
+
 	// Run schema migrations for existing databases
 	if err := runMigrations(db, dialect); err != nil {
 		return nil, fmt.Errorf("failed to run migrations (%s): %w", driverName, err)
@@ -61,9 +75,10 @@ func NewDatabase(dataSource string) (*Database, error) {
 	_, _ = db.Exec(upsertConfig, "projectsDir", "/app/projects")
 
 	return &Database{
-		db:          db,
-		dialect:     dialect,
-		projectsDir: "/app/projects",
+		db:            db,
+		dialect:       dialect,
+		projectsDir:   "/app/projects",
+		Conversations: convStore,
 	}, nil
 }
 
@@ -71,18 +86,44 @@ func NewDatabase(dataSource string) (*Database, error) {
 // Each migration is idempotent — it checks whether the change is needed before applying.
 func runMigrations(db *sql.DB, dialect Dialect) error {
 	type migration struct {
-		name string
-		sql  string
+		name   string
+		sql    string
+		verify func(*sql.DB) error // optional SQLite verification (checks column exists after ALTER)
+	}
+
+	columnExists := func(table, column string) func(*sql.DB) error {
+		return func(d *sql.DB) error {
+			var count int
+			d.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column).Scan(&count)
+			if count < 1 {
+				return fmt.Errorf("column %q not found in %q", column, table)
+			}
+			return nil
+		}
 	}
 
 	migrations := []migration{
 		{
 			name: "add tool_call_id and tool_name columns",
 			sql:  Rebind(dialect, `ALTER TABLE conversation_messages ADD COLUMN tool_call_id TEXT NOT NULL DEFAULT ''; ALTER TABLE conversation_messages ADD COLUMN tool_name TEXT NOT NULL DEFAULT ''`),
+			verify: func(d *sql.DB) error {
+				var count int
+				d.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('conversation_messages') WHERE name IN ('tool_call_id', 'tool_name')`).Scan(&count)
+				if count < 2 {
+					return fmt.Errorf("tool_call_id and tool_name columns not found in conversation_messages")
+				}
+				return nil
+			},
 		},
 		{
-			name: "add status column to conversation_titles",
-			sql:  Rebind(dialect, `ALTER TABLE conversation_titles ADD COLUMN status TEXT NOT NULL DEFAULT ''`),
+			name:   "add status column to conversation_titles",
+			sql:    Rebind(dialect, `ALTER TABLE conversation_titles ADD COLUMN status TEXT NOT NULL DEFAULT ''`),
+			verify: columnExists("conversation_titles", "status"),
+		},
+		{
+			name:   "add tool_calls column to messages table",
+			sql:    Rebind(dialect, `ALTER TABLE messages ADD COLUMN tool_calls TEXT NOT NULL DEFAULT '[]'`),
+			verify: columnExists("messages", "tool_calls"),
 		},
 	}
 
@@ -97,14 +138,11 @@ func runMigrations(db *sql.DB, dialect Dialect) error {
 
 		// Apply
 		if _, err := db.Exec(m.sql); err != nil {
-			// SQLite ALTER TABLE ADD COLUMN fails if column already exists.
-			// That's fine — mark it as done anyway.
 			if dialect == DialectSQLite {
-				// Verify columns actually exist before marking done
-				var colCount int
-				db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('conversation_messages') WHERE name IN ('tool_call_id', 'tool_name')`).Scan(&colCount)
-				if colCount < 2 {
-					return fmt.Errorf("migration %q failed: %w", m.name, err)
+				if m.verify != nil {
+					if verr := m.verify(db); verr != nil {
+						return fmt.Errorf("migration %q SQL error: %w; verify: %w", m.name, err, verr)
+					}
 				}
 			} else {
 				return fmt.Errorf("migration %q failed: %w", m.name, err)
@@ -262,20 +300,29 @@ type StoredMessage struct {
 // Dialect returns the active database dialect.
 func (d *Database) Dialect() Dialect { return d.dialect }
 
-// SaveUserMessage persists a user message.
+// SaveUserMessage persists a user message to the new messages table.
 func (d *Database) SaveUserMessage(ctx context.Context, project, agentID, content string) (int64, error) {
-	res, err := d.db.ExecContext(ctx,
-		Rebind(d.dialect, `INSERT INTO conversation_messages (project, agent_id, role, content) VALUES (?, ?, 'user', ?)`),
-		project, agentID, content)
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
+	return d.Conversations.SaveUserMessage(ctx, project, agentID, content)
 }
 
-// SaveToolResult persists a tool result message.
-// Stored as role='tool' with dedicated tool_call_id and tool_name columns.
+// SaveToolResult persists a tool result. Inserts a row into tool_executions
+// linked to the most recent assistant message.
 func (d *Database) SaveToolResult(ctx context.Context, project, agentID, toolCallID, toolName, content string) (int64, error) {
+	d.lastMsgMu.Lock()
+	msgID := d.lastMsgID
+	d.lastMsgMu.Unlock()
+
+	if msgID == 0 {
+		d.db.QueryRowContext(ctx,
+			Rebind(d.dialect, `SELECT id FROM messages WHERE project = ? AND agent_id = ? AND role = 'assistant' ORDER BY created_at DESC LIMIT 1`),
+			project, agentID).Scan(&msgID)
+	}
+
+	if msgID > 0 {
+		return d.Conversations.SaveToolExecution(ctx, msgID, toolCallID, toolName, "{}", content, "")
+	}
+
+	// Fallback: insert into legacy table
 	res, err := d.db.ExecContext(ctx,
 		Rebind(d.dialect, `INSERT INTO conversation_messages (project, agent_id, role, content, tool_call_id, tool_name) VALUES (?, ?, 'tool', ?, ?, ?)`),
 		project, agentID, content, toolCallID, toolName)
@@ -285,61 +332,197 @@ func (d *Database) SaveToolResult(ctx context.Context, project, agentID, toolCal
 	return res.LastInsertId()
 }
 
-// SaveAssistantMessage persists an assistant response.
+// SaveAssistantMessage persists an assistant response to the new tables.
+// Inserts a messages row and thinking row (if non-empty). Tool call declarations
+// are stored as JSON in the tool_calls column; execution results go into
+// tool_executions via SaveToolResult.
 func (d *Database) SaveAssistantMessage(ctx context.Context, project, agentID, text, thinking, toolCallsJSON string) (int64, error) {
 	res, err := d.db.ExecContext(ctx,
-		Rebind(d.dialect, `INSERT INTO conversation_messages (project, agent_id, role, text, thinking, tool_calls) VALUES (?, ?, 'assistant', ?, ?, ?)`),
-		project, agentID, text, thinking, toolCallsJSON)
+		Rebind(d.dialect, `INSERT INTO messages (project, agent_id, role, content, tool_calls) VALUES (?, ?, 'assistant', ?, ?)`),
+		project, agentID, text, toolCallsJSON)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	msgID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	d.lastMsgMu.Lock()
+	d.lastMsgID = msgID
+	d.lastMsgMu.Unlock()
+
+	if thinking != "" {
+		_, err = d.db.ExecContext(ctx,
+			Rebind(d.dialect, `INSERT INTO thinking (message_id, content) VALUES (?, ?)`),
+			msgID, thinking)
+		if err != nil {
+			return msgID, err
+		}
+	}
+
+	return msgID, nil
 }
 
-// SaveStreamingMessage creates or updates an in-progress assistant message.
-// Uses '[streaming]' as a sentinel in tool_calls to identify the placeholder row.
+// SaveStreamingMessage creates or updates an in-progress assistant message using the ConversationStore.
 func (d *Database) SaveStreamingMessage(ctx context.Context, project, agentID, text, thinking string) error {
-	var id int64
-	err := d.db.QueryRowContext(ctx,
-		Rebind(d.dialect, `SELECT id FROM conversation_messages
-			WHERE project = ? AND agent_id = ? AND role = 'assistant' AND tool_calls = '[streaming]'
-			ORDER BY created_at DESC LIMIT 1`),
-		project, agentID).Scan(&id)
-
-	if err != nil {
-		// No streaming row exists — insert one
-		_, err = d.db.ExecContext(ctx,
-			Rebind(d.dialect, `INSERT INTO conversation_messages (project, agent_id, role, text, thinking, tool_calls)
-				VALUES (?, ?, 'assistant', ?, ?, '[streaming]')`),
-			project, agentID, text, thinking)
+	sid := d.Conversations.StreamingID()
+	if sid == 0 {
+		_, err := d.Conversations.CreateStreamingRow(ctx, project, agentID)
+		if err != nil {
+			return err
+		}
+	}
+	if err := d.Conversations.UpdateStreamingText(ctx, text); err != nil {
 		return err
 	}
-	// Update existing streaming row
-	_, err = d.db.ExecContext(ctx,
-		Rebind(d.dialect, `UPDATE conversation_messages SET text = ?, thinking = ? WHERE id = ?`),
-		text, thinking, id)
-	return err
+	return d.Conversations.SaveStreamingThinking(ctx, thinking)
 }
 
 // FinalizeStreamingMessage completes a streaming placeholder with final content.
-// If no streaming row exists, returns an error (caller should fall back to SaveAssistantMessage).
+// Returns error if no streaming row exists (caller should fall back to SaveAssistantMessage).
 func (d *Database) FinalizeStreamingMessage(ctx context.Context, project, agentID, text, thinking, toolCallsJSON string) error {
-	result, err := d.db.ExecContext(ctx,
-		Rebind(d.dialect, `UPDATE conversation_messages SET text = ?, thinking = ?, tool_calls = ?
-			WHERE project = ? AND agent_id = ? AND role = 'assistant' AND tool_calls = '[streaming]'`),
-		text, thinking, toolCallsJSON, project, agentID)
+	msgID, err := d.Conversations.FinalizeStreaming(ctx, text, thinking)
 	if err != nil {
 		return err
 	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("no streaming message found")
+
+	// Store message ID for subsequent SaveToolResult calls
+	d.lastMsgMu.Lock()
+	d.lastMsgID = msgID
+	d.lastMsgMu.Unlock()
+
+	// Update tool_calls on the message
+	if toolCallsJSON != "" && toolCallsJSON != "[]" {
+		_, err = d.db.ExecContext(ctx,
+			Rebind(d.dialect, `UPDATE messages SET tool_calls = ? WHERE id = ?`),
+			toolCallsJSON, msgID)
+		if err != nil {
+			return err
+		}
 	}
+
 	return nil
 }
 
 // GetConversationHistory returns messages for a project+agent, ordered by creation time.
+// Reads from the new tables (messages, thinking, tool_executions) with fallback to legacy.
 func (d *Database) GetConversationHistory(ctx context.Context, project, agentID string, limit int) ([]StoredMessage, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+
+	// Try new tables first
+	msgRows, err := d.db.QueryContext(ctx,
+		Rebind(d.dialect, `SELECT m.id, m.project, m.agent_id, m.role, m.content, m.tool_calls,
+			COALESCE(t.content, '') AS thinking,
+			m.created_at
+			FROM messages m
+			LEFT JOIN thinking t ON t.message_id = m.id
+			WHERE m.project = ? AND m.agent_id = ?
+			ORDER BY m.created_at ASC, m.id ASC
+			LIMIT ?`),
+		project, agentID, limit)
+	if err != nil {
+		return d.getConversationHistoryLegacy(ctx, project, agentID, limit)
+	}
+	defer msgRows.Close()
+
+	// Load tool executions for all returned messages in one query
+	// Use a map of message_id → []StoredMessage for tool results
+	type toolExec struct {
+		MessageID  int64
+		ToolCallID string
+		ToolName   string
+		Result     string
+		CreatedAt  string
+	}
+	var msgs []StoredMessage
+	var msgIDs []int64
+	msgIDSet := map[int64]bool{}
+	for msgRows.Next() {
+		var id int64
+		var proj, agID, role, content, toolCalls, thinking, createdAt string
+		if err := msgRows.Scan(&id, &proj, &agID, &role, &content, &toolCalls, &thinking, &createdAt); err != nil {
+			return nil, err
+		}
+
+		if role == "user" {
+			msgs = append(msgs, StoredMessage{
+				ID: id, Project: proj, AgentID: agID,
+				Role: "user", Content: content, CreatedAt: createdAt,
+			})
+		} else if role == "assistant" {
+			// Skip streaming placeholder rows (empty content, no tool_calls)
+			if content == "" && thinking == "" && toolCalls == "[]" {
+				continue
+			}
+			msgs = append(msgs, StoredMessage{
+				ID: id, Project: proj, AgentID: agID,
+				Role: "assistant", Text: content, Thinking: thinking,
+				ToolCalls: toolCalls, CreatedAt: createdAt,
+			})
+			msgIDs = append(msgIDs, id)
+			msgIDSet[id] = true
+		}
+	}
+
+	if len(msgs) == 0 {
+		return d.getConversationHistoryLegacy(ctx, project, agentID, limit)
+	}
+
+	// Load tool executions for the assistant messages
+	if len(msgIDs) > 0 {
+		// Build IN clause
+		query := Rebind(d.dialect, `SELECT message_id, tool_call_id, tool_name, result, created_at
+			FROM tool_executions WHERE message_id IN (`)
+		args := make([]interface{}, len(msgIDs))
+		for i, id := range msgIDs {
+			if i > 0 {
+				query += ","
+			}
+			query += "?"
+			args[i] = id
+		}
+		query += `) ORDER BY id ASC`
+
+		teRows, err := d.db.QueryContext(ctx, query, args...)
+		if err == nil {
+			var toolExecs []toolExec
+			for teRows.Next() {
+				var te toolExec
+				if err := teRows.Scan(&te.MessageID, &te.ToolCallID, &te.ToolName, &te.Result, &te.CreatedAt); err == nil {
+					toolExecs = append(toolExecs, te)
+				}
+			}
+			teRows.Close()
+
+			// Interleave tool results after their parent assistant messages
+			var merged []StoredMessage
+			for _, m := range msgs {
+				merged = append(merged, m)
+				if m.Role == "assistant" {
+					for _, te := range toolExecs {
+						if te.MessageID == m.ID {
+							merged = append(merged, StoredMessage{
+								Role: "tool", Content: te.Result,
+								ToolCallID: te.ToolCallID, ToolName: te.ToolName,
+								Project: m.Project, AgentID: m.AgentID,
+								CreatedAt: te.CreatedAt,
+							})
+						}
+					}
+				}
+			}
+			msgs = merged
+		}
+	}
+
+	return msgs, nil
+}
+
+// getConversationHistoryLegacy reads from the old conversation_messages table as fallback.
+func (d *Database) getConversationHistoryLegacy(ctx context.Context, project, agentID string, limit int) ([]StoredMessage, error) {
 	if limit <= 0 {
 		limit = 200
 	}
@@ -366,67 +549,119 @@ func (d *Database) GetConversationHistory(ctx context.Context, project, agentID 
 	return msgs, rows.Err()
 }
 
-// ClearConversationHistory deletes all messages for a project+agent.
+// ClearConversationHistory deletes all messages, thinking, tool_executions, and titles for a project+agent.
 func (d *Database) ClearConversationHistory(ctx context.Context, project, agentID string) error {
-	_, err := d.db.ExecContext(ctx,
-		Rebind(d.dialect, `DELETE FROM conversation_messages WHERE project = ? AND agent_id = ?`),
-		project, agentID)
-	if err != nil {
+	// Clear new tables
+	if err := d.Conversations.Clear(ctx, project, agentID); err != nil {
 		return err
 	}
+	// Also clear legacy table and titles
+	_, _ = d.db.ExecContext(ctx,
+		Rebind(d.dialect, `DELETE FROM conversation_messages WHERE project = ? AND agent_id = ?`),
+		project, agentID)
 	_, _ = d.db.ExecContext(ctx,
 		Rebind(d.dialect, `DELETE FROM conversation_titles WHERE project = ? AND agent_id = ?`),
 		project, agentID)
 	return nil
 }
 
-// ClearProjectConversations deletes all messages and titles for every conversation in a project.
+// ClearProjectConversations deletes all conversation data for every session in a project.
 func (d *Database) ClearProjectConversations(ctx context.Context, project string) error {
-	_, err := d.db.ExecContext(ctx,
-		Rebind(d.dialect, `DELETE FROM conversation_messages WHERE project = ?`),
-		project)
-	if err != nil {
+	// Clear new tables
+	if _, err := d.db.ExecContext(ctx,
+		Rebind(d.dialect, `DELETE FROM tool_executions WHERE message_id IN (
+			SELECT id FROM messages WHERE project = ?)`),
+		project); err != nil {
 		return err
 	}
+	if _, err := d.db.ExecContext(ctx,
+		Rebind(d.dialect, `DELETE FROM thinking WHERE message_id IN (
+			SELECT id FROM messages WHERE project = ?)`),
+		project); err != nil {
+		return err
+	}
+	if _, err := d.db.ExecContext(ctx,
+		Rebind(d.dialect, `DELETE FROM messages WHERE project = ?`),
+		project); err != nil {
+		return err
+	}
+	// Also clear legacy and titles
+	_, _ = d.db.ExecContext(ctx,
+		Rebind(d.dialect, `DELETE FROM conversation_messages WHERE project = ?`),
+		project)
 	_, _ = d.db.ExecContext(ctx,
 		Rebind(d.dialect, `DELETE FROM conversation_titles WHERE project = ?`),
 		project)
 	return nil
 }
 
-// CompactSession removes old tool-result messages for a project+agent, keeping the most recent ones.
-// Returns the number of messages compacted.
+// CompactSession removes old tool-execution and thinking rows for a project+agent,
+// keeping the most recent ones. Returns the number of items removed.
 func (d *Database) CompactSession(ctx context.Context, project, agentID string) (int, error) {
-	// Get total message count
+	// Count total related items (messages + tool_executions + thinking)
 	var total int
-	err := d.db.QueryRowContext(ctx,
-		Rebind(d.dialect, `SELECT COUNT(*) FROM conversation_messages WHERE project = ? AND agent_id = ?`),
+	d.db.QueryRowContext(ctx,
+		Rebind(d.dialect, `SELECT COUNT(*) FROM messages WHERE project = ? AND agent_id = ?`),
 		project, agentID).Scan(&total)
-	if err != nil {
-		return 0, err
-	}
 
-	// Keep the most recent 20 messages, delete older ones
 	keep := 20
 	if total <= keep {
 		return 0, nil
 	}
 
+	// Keep the most recent `keep` messages; delete older ones and their children
+	removed := 0
+
 	result, err := d.db.ExecContext(ctx, Rebind(d.dialect, `
-		DELETE FROM conversation_messages
+		DELETE FROM tool_executions WHERE message_id IN (
+			SELECT id FROM messages
+			WHERE project = ? AND agent_id = ?
+			  AND id NOT IN (
+			    SELECT id FROM messages
+			    WHERE project = ? AND agent_id = ?
+			    ORDER BY created_at DESC
+			    LIMIT ?
+			  )
+		)`),
+		project, agentID, project, agentID, keep)
+	if err == nil {
+		n, _ := result.RowsAffected()
+		removed += int(n)
+	}
+
+	result, err = d.db.ExecContext(ctx, Rebind(d.dialect, `
+		DELETE FROM thinking WHERE message_id IN (
+			SELECT id FROM messages
+			WHERE project = ? AND agent_id = ?
+			  AND id NOT IN (
+			    SELECT id FROM messages
+			    WHERE project = ? AND agent_id = ?
+			    ORDER BY created_at DESC
+			    LIMIT ?
+			  )
+		)`),
+		project, agentID, project, agentID, keep)
+	if err == nil {
+		n, _ := result.RowsAffected()
+		removed += int(n)
+	}
+
+	result, err = d.db.ExecContext(ctx, Rebind(d.dialect, `
+		DELETE FROM messages
 		WHERE project = ? AND agent_id = ?
 		  AND id NOT IN (
-		    SELECT id FROM conversation_messages
+		    SELECT id FROM messages
 		    WHERE project = ? AND agent_id = ?
 		    ORDER BY created_at DESC
 		    LIMIT ?
 		  )`),
 		project, agentID, project, agentID, keep)
-	if err != nil {
-		return 0, err
+	if err == nil {
+		n, _ := result.RowsAffected()
+		removed += int(n)
 	}
-	affected, _ := result.RowsAffected()
-	return int(affected), nil
+
+	return removed, nil
 }
 
 // SetConversationTitle sets a custom title for a conversation.
@@ -460,8 +695,61 @@ type ConversationSummary struct {
 	Status       string `json:"status,omitempty"` // "running" if agent is active
 }
 
-// GetConversationSummaries returns the latest conversation for each project+agent pair.
+// GetConversationSummaries returns the latest conversation for each project+agent pair
+// using the new messages table (with fallback to legacy).
 func (d *Database) GetConversationSummaries(ctx context.Context) ([]ConversationSummary, error) {
+	// Try new tables first
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT
+			m.project,
+			m.agent_id,
+			COALESCE(
+				(SELECT content FROM messages sub
+				 WHERE sub.project = m.project AND sub.agent_id = m.agent_id AND sub.role = 'user'
+				 ORDER BY sub.created_at DESC LIMIT 1),
+				''
+			) AS last_message,
+			MAX(m.created_at) AS last_at,
+			COUNT(*) AS message_count,
+			COALESCE(
+				NULLIF(ct.title, ''),
+				(SELECT content FROM messages first_um
+				 WHERE first_um.project = m.project AND first_um.agent_id = m.agent_id AND first_um.role = 'user'
+				 ORDER BY first_um.created_at ASC LIMIT 1),
+				''
+			) AS title,
+			COALESCE(ct.status, '') AS status
+		FROM messages m
+		LEFT JOIN conversation_titles ct ON ct.project = m.project AND ct.agent_id = m.agent_id
+		GROUP BY m.project, m.agent_id
+		ORDER BY last_at DESC
+	`)
+	if err != nil {
+		// Fallback to legacy table
+		return d.getConversationSummariesLegacy(ctx)
+	}
+	defer rows.Close()
+
+	var summaries []ConversationSummary
+	for rows.Next() {
+		var s ConversationSummary
+		if err := rows.Scan(&s.Project, &s.AgentID, &s.LastMessage, &s.LastAt, &s.MessageCount, &s.Title, &s.Status); err != nil {
+			return nil, err
+		}
+		if len(s.LastMessage) > 80 {
+			s.LastMessage = s.LastMessage[:80]
+		}
+		summaries = append(summaries, s)
+	}
+	if len(summaries) > 0 {
+		return summaries, nil
+	}
+
+	return d.getConversationSummariesLegacy(ctx)
+}
+
+// getConversationSummariesLegacy queries the old conversation_messages table.
+func (d *Database) getConversationSummariesLegacy(ctx context.Context) ([]ConversationSummary, error) {
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT
 			cm.project,
@@ -498,7 +786,6 @@ func (d *Database) GetConversationSummaries(ctx context.Context) ([]Conversation
 		if err := rows.Scan(&s.Project, &s.AgentID, &s.LastMessage, &s.LastAt, &s.MessageCount, &s.Title, &s.Status); err != nil {
 			return nil, err
 		}
-		// Truncate last message for display
 		if len(s.LastMessage) > 80 {
 			s.LastMessage = s.LastMessage[:80]
 		}

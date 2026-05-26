@@ -646,13 +646,12 @@ func (m *SummarizingContextManager) emitCompactionEvent(compactedMsgs, keptMsgs 
 	}
 	core.SendEvent(m.subCh, core.AgentEvent{
 		Type: core.EventTypeCompactionEnd,
-		Data: core.AgentEventData{
-			CompactionType:   m.metrics.CompactionType,
+		Data: core.CompactionEndData{
+			CompactedMessages: compactedMsgs,
+			KeptMessages:     keptMsgs,
 			ContextTokens:    m.metrics.EstimatedTokens,
 			ContextSize:      m.metrics.ContextSize,
 			ContextUtil:      m.metrics.Utilization,
-			CompactedMessages: compactedMsgs,
-			KeptMessages:     keptMsgs,
 		},
 	})
 }

@@ -354,7 +354,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 
 // writeLlamaSSE converts a llama engine event to SSE and writes it.
 func (h *PuxHandler) writeLlamaSSE(w http.ResponseWriter, evt llamaeng.AgentEvent, canFlush bool, flusher http.Flusher) {
-	sseEvt := h.mapEventToSSE(evt)
+	sseEvt := mapEventToSSE(evt)
 	if sseEvt == nil {
 		return
 	}

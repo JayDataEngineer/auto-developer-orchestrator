@@ -30,8 +30,35 @@ type FunctionDef = core.FunctionDef
 // Event types used by SSE consumers.
 type AgentEventType = core.AgentEventType
 type AgentEvent = core.AgentEvent
-type AgentEventData = core.AgentEventData
+type EventPayload = core.EventPayload
 type ApprovalResponse = core.ApprovalResponse
+
+// Typed event payload aliases
+type TextDelta = core.TextDelta
+type ThinkingDelta = core.ThinkingDelta
+type ToolStart = core.ToolStart
+type ToolEnd = core.ToolEnd
+type ToolUpdate = core.ToolUpdate
+type AgentStartData = core.AgentStartData
+type AgentEndData = core.AgentEndData
+type AgentSpawnedData = core.AgentSpawnedData
+type SubAgentStartData = core.SubAgentStartData
+type SubAgentEndData = core.SubAgentEndData
+type StepStartData = core.StepStartData
+type StepEndData = core.StepEndData
+type ErrorEventData = core.ErrorEventData
+type DecisionRequestData = core.DecisionRequestData
+type SourceEventData = core.SourceEventData
+type CompactionStartData = core.CompactionStartData
+type CompactionEndData = core.CompactionEndData
+type TaskStartedData = core.TaskStartedData
+type TaskCompletedData = core.TaskCompletedData
+type TaskBackgroundData = core.TaskBackgroundData
+type ArtifactCreatedData = core.ArtifactCreatedData
+type ArtifactUpdatedData = core.ArtifactUpdatedData
+type PlanCreatedData = core.PlanCreatedData
+type PlanUpdatedData = core.PlanUpdatedData
+type HookRequestData = core.HookRequestData
 
 // Constants re-exported for convenience.
 const (

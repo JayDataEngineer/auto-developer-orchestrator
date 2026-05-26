@@ -26,27 +26,35 @@ func TestEventTypeConstants(t *testing.T) {
 	}
 }
 
-func TestAgentEventData_Fields(t *testing.T) {
-	data := AgentEventData{
-		Text:     "hello",
-		ToolName: "bash",
-		ToolID:   "t-1",
-		ToolArgs: map[string]any{"cmd": "echo hi"},
-		Result:   "output",
-		Error:    "",
-		Round:    1,
+func TestEventPayload_TypedFields(t *testing.T) {
+	// TextDelta
+	td := TextDelta{Text: "hello"}
+	if td.Text != "hello" {
+		t.Errorf("TextDelta.Text = %q, want %q", td.Text, "hello")
 	}
-	if data.Text != "hello" {
-		t.Errorf("Text = %q, want %q", data.Text, "hello")
+
+	// ToolStart
+	ts := ToolStart{ToolName: "bash", ToolID: "t-1", ToolArgs: map[string]any{"cmd": "echo hi"}}
+	if ts.ToolName != "bash" {
+		t.Errorf("ToolStart.ToolName = %q, want %q", ts.ToolName, "bash")
 	}
-	if data.ToolName != "bash" {
-		t.Errorf("ToolName = %q, want %q", data.ToolName, "bash")
+	if ts.ToolID != "t-1" {
+		t.Errorf("ToolStart.ToolID = %q, want %q", ts.ToolID, "t-1")
 	}
-	if data.ToolID != "t-1" {
-		t.Errorf("ToolID = %q, want %q", data.ToolID, "t-1")
+
+	// ErrorEventData
+	ee := ErrorEventData{Error: "something broke"}
+	if ee.Error != "something broke" {
+		t.Errorf("ErrorEventData.Error = %q, want %q", ee.Error, "something broke")
 	}
-	if data.Round != 1 {
-		t.Errorf("Round = %d, want %d", data.Round, 1)
+
+	// StepEndData
+	se := StepEndData{Round: 1, Decision: "delegate"}
+	if se.Round != 1 {
+		t.Errorf("StepEndData.Round = %d, want %d", se.Round, 1)
+	}
+	if se.Decision != "delegate" {
+		t.Errorf("StepEndData.Decision = %q, want %q", se.Decision, "delegate")
 	}
 }
 
@@ -71,9 +79,7 @@ func TestChatEventTypeValues(t *testing.T) {
 func TestAgentEvent_WrapsData(t *testing.T) {
 	evt := AgentEvent{
 		Type: EventTypeTextDelta,
-		Data: AgentEventData{
-			Text: "hello",
-		},
+		Data: TextDelta{Text: "hello"},
 	}
 	if string(evt.Type) != "text_delta" {
 		t.Errorf("expected type text_delta, got %q", evt.Type)
@@ -107,11 +113,15 @@ func TestSubscriberKeyContextRoundTrip(t *testing.T) {
 	}
 
 	// Verify SendEvent works through the extracted channel
-	SendEvent(extracted, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: "test"}})
+	SendEvent(extracted, AgentEvent{Type: EventTypeTextDelta, Data: TextDelta{Text: "test"}})
 	select {
 	case evt := <-ch:
-		if evt.Data.Text != "test" {
-			t.Errorf("got %q, want %q", evt.Data.Text, "test")
+		td, ok := evt.Data.(TextDelta)
+		if !ok {
+			t.Fatalf("expected TextDelta payload, got %T", evt.Data)
+		}
+		if td.Text != "test" {
+			t.Errorf("got %q, want %q", td.Text, "test")
 		}
 	default:
 		t.Fatal("event not received on channel")

@@ -23,97 +23,12 @@ type ChatEvent struct {
 	Err     error
 }
 
-// AgentEventType identifies the type of an agent event emitted to subscribers.
-type AgentEventType string
-
-const (
-	EventTypeTextDelta       AgentEventType = "text_delta"
-	EventTypeThinkingDelta   AgentEventType = "thinking_delta"
-	EventTypeToolStart       AgentEventType = "tool_execution_start"
-	EventTypeToolEnd         AgentEventType = "tool_execution_end"
-	EventTypeAgentStart      AgentEventType = "agent_start"
-	EventTypeAgentEnd        AgentEventType = "agent_end"
-	EventTypeError           AgentEventType = "error"
-	EventTypeArtifactCreated AgentEventType = "artifact_created"
-	EventTypeArtifactUpdated AgentEventType = "artifact_updated"
-	EventTypePlanCreated     AgentEventType = "plan_created"
-	EventTypePlanUpdated     AgentEventType = "plan_updated"
-	EventTypeSubAgentStart   AgentEventType = "subagent_start"
-	EventTypeSubAgentEnd     AgentEventType = "subagent_end"
-	EventTypeApprovalRequest AgentEventType = "approval_request"
-	EventTypeCompactionStart AgentEventType = "compaction_start"
-	EventTypeCompactionEnd   AgentEventType = "compaction_end"
-	EventTypeToolUpdate      AgentEventType = "tool_update"
-	EventTypeAgentSpawned    AgentEventType = "agent_spawned"
-	EventTypeStepStart       AgentEventType = "step_start"
-	EventTypeStepEnd         AgentEventType = "step_end"
-	EventTypeHookRequest     AgentEventType = "hook_request"
-	EventTypeDecisionRequest AgentEventType = "decision_request" // unified HITL
-	EventTypeUserQuestion    AgentEventType = "user_question"    // legacy, replaced by decision_request
-	EventTypeSource          AgentEventType = "source"            // citation/reference link
-	EventTypeTaskStarted     AgentEventType = "task_started"       // background task registered
-	EventTypeTaskCompleted   AgentEventType = "task_completed"     // background task finished
-	EventTypeTaskBackground  AgentEventType = "task_background"    // foreground → background conversion
-)
-
-// AgentEvent is an event emitted by the agent loop.
+// AgentEvent is an event emitted by the agent loop to SSE subscribers.
+// Data is a typed EventPayload — each event type has its own struct.
 type AgentEvent struct {
-	Type AgentEventType  `json:"type"`
-	Data AgentEventData  `json:"data"`
+	Type AgentEventType `json:"type"`
+	Data EventPayload   `json:"data"`
 	Raw  json.RawMessage `json:"-"`
-}
-
-// AgentEventData holds the payload of an agent event.
-type AgentEventData struct {
-	Text              string         `json:"text,omitempty"`
-	ToolName          string         `json:"toolName,omitempty"`
-	ToolArgs          map[string]any `json:"args,omitempty"`
-	ToolID            string         `json:"toolId,omitempty"`
-	Result            any            `json:"result,omitempty"`
-	Error             string         `json:"error,omitempty"`
-	Input             float64        `json:"input,omitempty"`
-	Output            float64        `json:"output,omitempty"`
-	Cache             float64        `json:"cache,omitempty"`
-	Model             string         `json:"model,omitempty"`
-	ContextWindow     int            `json:"contextWindow,omitempty"`
-	Streaming         bool           `json:"streaming,omitempty"`
-	CompactedMessages int            `json:"compactedMessages,omitempty"`
-	KeptMessages      int            `json:"keptMessages,omitempty"`
-
-	// Context management metrics
-	ContextTokens    int     `json:"contextTokens,omitempty"`
-	ContextSize      int     `json:"contextSize,omitempty"`
-	ContextUtil      float64 `json:"contextUtil,omitempty"`
-	CompactionType   string  `json:"compactionType,omitempty"` // "micro" or "full"
-
-	// Step-level context
-	Round    int    `json:"round,omitempty"`    // current tool round
-	Decision string `json:"decision,omitempty"` // step end decision: "respond", "delegate", "ask", "error"
-
-	// Sub-agent context — set when events come from delegated sub-agents.
-	AgentName    string `json:"agentName,omitempty"`    // e.g. "sarah", "jake"
-	ParentToolID string `json:"parentToolId,omitempty"` // ID of the delegate_to call
-	Task         string `json:"task,omitempty"`         // task description
-	Status       string `json:"status,omitempty"`       // e.g. "running", "completed", "error"
-	TranscriptID string `json:"transcriptId,omitempty"` // composite DB agent_id for transcript retrieval
-
-	// Hook interception — set for hook_request events.
-	HookPoint string `json:"hookPoint,omitempty"` // "tool_call", "tool_result", "context"
-	HookID    string `json:"hookId,omitempty"`    // unique ID to match request → response
-
-	// Rich tool result fields — set on tool_execution_end events
-	Artifact     any    `json:"artifact,omitempty"`     // structured data for rich rendering (diffs, HTML, etc.)
-	ModelContent string `json:"modelContent,omitempty"` // content fed back to the model, separate from display result
-
-	// Source/citation fields — set on source events
-	SourceType string `json:"sourceType,omitempty"` // "url" or "document"
-	SourceURL  string `json:"sourceUrl,omitempty"`  // URL for "url" sources
-	SourceID   string `json:"sourceId,omitempty"`   // unique ID for the source
-
-	// Background task fields — set on task_started, task_completed, task_background events
-	TaskID   string `json:"taskId,omitempty"`
-	Command  string `json:"command,omitempty"`
-	ExitCode int    `json:"exitCode,omitempty"`
 }
 
 // SubscriberKey is a context key for injecting the SSE subscriber channel.
@@ -145,4 +60,17 @@ func SendEvent(ch chan<- AgentEvent, evt AgentEvent) {
 type ApprovalResponse struct {
 	Action  string
 	Message string
+}
+
+// DataAsText returns the text content from a TextDelta or ThinkingDelta payload.
+// Returns empty string for other payload types.
+func DataAsText(d EventPayload) string {
+	switch p := d.(type) {
+	case TextDelta:
+		return p.Text
+	case ThinkingDelta:
+		return p.Text
+	default:
+		return ""
+	}
 }

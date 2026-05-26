@@ -122,12 +122,13 @@ func TestIntegration_FullPipeline(t *testing.T) {
 		if evt.Type != core.EventTypeCompactionEnd {
 			t.Fatalf("expected compaction_end event, got %q", evt.Type)
 		}
-		if evt.Data.CompactionType == "" {
-			t.Fatal("expected compaction type in event")
+		cd, ok := evt.Data.(core.CompactionEndData)
+		if !ok {
+			t.Fatalf("expected CompactionEndData, got %T", evt.Data)
 		}
-		if evt.Data.ContextTokens > 0 {
+		if cd.ContextTokens > 0 {
 			t.Logf("Context metrics in event: %d/%d tokens (%.1f%%)",
-				evt.Data.ContextTokens, evt.Data.ContextSize, evt.Data.ContextUtil*100)
+				cd.ContextTokens, cd.ContextSize, cd.ContextUtil*100)
 		}
 		compactionEvent.Store(&evt)
 	case <-time.After(1 * time.Second):

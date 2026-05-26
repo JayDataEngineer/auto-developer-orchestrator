@@ -78,10 +78,11 @@ func TestAskUserTool_Execute_WithResponse(t *testing.T) {
 		if evt.Type != core.EventTypeDecisionRequest {
 			t.Fatalf("expected decision_request event, got %q", evt.Type)
 		}
-		if evt.Data.ToolName != "ask_user" {
-			t.Fatalf("expected ask_user source tool, got %q", evt.Data.ToolName)
+		d := evt.Data.(core.DecisionRequestData)
+		if d.Type != "question" {
+			t.Fatalf("expected question type, got %q", d.Type)
 		}
-		decisionID = evt.Data.ToolID
+		decisionID = d.ID
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for event")
 	}
@@ -130,7 +131,7 @@ func TestAskUserTool_Execute_ContextCancel(t *testing.T) {
 	var decisionID string
 	select {
 	case evt := <-subscriber:
-		decisionID = evt.Data.ToolID
+		decisionID = evt.Data.(core.DecisionRequestData).ID
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for event")
 	}

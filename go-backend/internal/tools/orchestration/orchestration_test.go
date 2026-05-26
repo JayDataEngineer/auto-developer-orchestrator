@@ -249,8 +249,12 @@ func TestRunDelegate_EmitsSubAgentEvents(t *testing.T) {
 	if evt.Type != core.EventTypeSubAgentStart {
 		t.Errorf("expected subagent_start, got %q", evt.Type)
 	}
-	if evt.Data.AgentName != "sarah" {
-		t.Errorf("expected agentName 'sarah', got %q", evt.Data.AgentName)
+	startData, ok := evt.Data.(core.SubAgentStartData)
+	if !ok {
+		t.Fatalf("expected SubAgentStartData payload, got %T", evt.Data)
+	}
+	if startData.AgentName != "sarah" {
+		t.Errorf("expected agentName 'sarah', got %q", startData.AgentName)
 	}
 
 	// Should get subagent_end
@@ -258,8 +262,12 @@ func TestRunDelegate_EmitsSubAgentEvents(t *testing.T) {
 	if evt.Type != core.EventTypeSubAgentEnd {
 		t.Errorf("expected subagent_end, got %q", evt.Type)
 	}
-	if evt.Data.Status != "error" {
-		t.Errorf("expected status 'error' for no-tools case, got %q", evt.Data.Status)
+	endData, ok := evt.Data.(core.SubAgentEndData)
+	if !ok {
+		t.Fatalf("expected SubAgentEndData payload, got %T", evt.Data)
+	}
+	if endData.Status != "error" {
+		t.Errorf("expected status 'error' for no-tools case, got %q", endData.Status)
 	}
 
 	if err == nil {

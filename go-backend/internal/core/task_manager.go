@@ -143,10 +143,9 @@ func (m *TaskManager) StartTracked(command, description string) (*BackgroundTask
 	m.tasks[taskID] = task
 	m.mu.Unlock()
 
-	m.emitEvent(EventTypeTaskStarted, AgentEventData{
+	m.emitEvent(EventTypeTaskStarted, TaskStartedData{
 		TaskID:  taskID,
 		Command: command,
-		Status:  string(TaskRunning),
 	})
 
 	return task, nil
@@ -177,12 +176,9 @@ func (m *TaskManager) CompleteTracked(taskID string, output string, exitCode int
 
 	close(task.Done)
 
-	m.emitEvent(EventTypeTaskCompleted, AgentEventData{
+	m.emitEvent(EventTypeTaskCompleted, TaskCompletedData{
 		TaskID:   taskID,
-		Command:  task.Command,
-		Status:   string(task.Status),
 		ExitCode: exitCode,
-		Error:    errStr,
 	})
 }
 
@@ -211,10 +207,9 @@ func (m *TaskManager) Start(ctx context.Context, command, description string, ru
 	m.mu.Unlock()
 
 	// Emit task started event
-	m.emitEvent(EventTypeTaskStarted, AgentEventData{
+	m.emitEvent(EventTypeTaskStarted, TaskStartedData{
 		TaskID:  taskID,
 		Command: command,
-		Status:  string(TaskRunning),
 	})
 
 	// Start the command in a goroutine
@@ -258,10 +253,10 @@ func (m *TaskManager) runCommand(task *BackgroundTask, command, workDir string) 
 				task.AppendOutput(chunk)
 				// Emit streaming output event for foreground tasks
 				if !task.IsBackgrounded {
-					m.emitEvent(EventTypeToolUpdate, AgentEventData{
-						TaskID:  task.ID,
-						Text:    chunk,
+					m.emitEvent(EventTypeToolUpdate, ToolUpdate{
+						ToolID:   task.ID,
 						ToolName: "bash",
+						Text:     chunk,
 					})
 				}
 			}
@@ -312,13 +307,9 @@ func (m *TaskManager) onTaskDone(task *BackgroundTask) {
 
 	duration := task.EndTime.Sub(task.StartTime).Round(time.Millisecond)
 
-	m.emitEvent(EventTypeTaskCompleted, AgentEventData{
-		TaskID:  task.ID,
-		Command: task.Command,
-		Status:  string(task.Status),
-		Text:    task.GetOutput(),
+	m.emitEvent(EventTypeTaskCompleted, TaskCompletedData{
+		TaskID:   task.ID,
 		ExitCode: task.ExitCode,
-		Error:   task.Error,
 	})
 
 	// Store duration in the event data
@@ -355,10 +346,8 @@ func (m *TaskManager) Background(taskID string) error {
 	default:
 	}
 
-	m.emitEvent(EventTypeTaskBackground, AgentEventData{
-		TaskID:  taskID,
-		Command: task.Command,
-		Status:  string(TaskBackgrounded),
+	m.emitEvent(EventTypeTaskBackground, TaskBackgroundData{
+		TaskID: taskID,
 	})
 
 	return nil
@@ -467,7 +456,7 @@ func (m *TaskManager) GetOutput(taskID string) (string, error) {
 }
 
 // emitEvent sends an SSE event to the subscriber channel.
-func (m *TaskManager) emitEvent(eventType AgentEventType, data AgentEventData) {
+func (m *TaskManager) emitEvent(eventType AgentEventType, data EventPayload) {
 	if m.subscriber == nil {
 		return
 	}

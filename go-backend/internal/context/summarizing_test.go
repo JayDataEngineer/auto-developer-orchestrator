@@ -769,16 +769,17 @@ func TestEmitCompactionEvent_WithSubscriber(t *testing.T) {
 		if evt.Type != core.EventTypeCompactionEnd {
 			t.Fatalf("expected compaction_end event, got %q", evt.Type)
 		}
-		if evt.Data.CompactionType != "micro" {
-			t.Fatalf("expected compaction type 'micro', got %q", evt.Data.CompactionType)
+		cd, ok := evt.Data.(core.CompactionEndData)
+		if !ok {
+			t.Fatalf("expected CompactionEndData, got %T", evt.Data)
 		}
-		if evt.Data.CompactedMessages != 1 {
-			t.Fatalf("expected 1 compacted message, got %d", evt.Data.CompactedMessages)
+		if cd.CompactedMessages != 1 {
+			t.Fatalf("expected 1 compacted message, got %d", cd.CompactedMessages)
 		}
-		if evt.Data.ContextTokens == 0 {
+		if cd.ContextTokens == 0 {
 			t.Fatal("expected non-zero context tokens")
 		}
-		if evt.Data.ContextSize == 0 {
+		if cd.ContextSize == 0 {
 			t.Fatal("expected non-zero context size")
 		}
 	default:

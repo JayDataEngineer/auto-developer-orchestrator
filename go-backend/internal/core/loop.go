@@ -110,7 +110,7 @@ func (l *AgentLoop) RunWithImages(ctx context.Context, userMsg string, images []
 	// Build initial context from session tree
 	sessCtx, err := l.session.BuildContext(ctx)
 	if err != nil {
-		SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
+		SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: ErrorEventData{Error: err.Error()}})
 		SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 		return err
 	}
@@ -172,7 +172,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 	for {
 		SendEvent(subscriber, AgentEvent{
 			Type: EventTypeStepStart,
-			Data: AgentEventData{Round: round + 1},
+			Data: StepStartData{Round: round + 1},
 		})
 		// Check hook-injected messages before each turn
 		for _, h := range l.config.Hooks {
@@ -217,7 +217,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 
 			sessCtx, err := l.session.BuildContext(ctx)
 			if err != nil {
-				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
+				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: ErrorEventData{Error: err.Error()}})
 				SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 				return err
 			}
@@ -241,7 +241,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				if ClassifyError(err) == ErrorTransient && attempt < l.config.MaxProviderRetries {
 					continue providerRetry
 				}
-				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: err.Error()}})
+				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: ErrorEventData{Error: err.Error()}})
 				SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 				return err
 			}
@@ -291,11 +291,11 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 
 				case ChatEventContent:
 					contentBuf.WriteString(evt.Content)
-					SendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: evt.Content}})
+					SendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: TextDelta{Text: evt.Content}})
 
 				case ChatEventThinking:
 					thinkingBuf.WriteString(evt.Content)
-					SendEvent(subscriber, AgentEvent{Type: EventTypeThinkingDelta, Data: AgentEventData{Text: evt.Content}})
+					SendEvent(subscriber, AgentEvent{Type: EventTypeThinkingDelta, Data: ThinkingDelta{Text: evt.Content}})
 				}
 
 				for _, tc := range evt.Deltas {
@@ -339,7 +339,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				if ClassifyError(streamErr) == ErrorTransient && attempt < l.config.MaxProviderRetries {
 					continue providerRetry
 				}
-				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: streamErr.Error()}})
+				SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: ErrorEventData{Error: streamErr.Error()}})
 				SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 				return streamErr
 			}
@@ -371,7 +371,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 
 		// If all retries exhausted, providerErr holds the last error
 		if providerErr != nil && finishReason == "" {
-			SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: AgentEventData{Error: fmt.Sprintf("Provider failed after %d retries: %v", l.config.MaxProviderRetries, providerErr)}})
+			SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: ErrorEventData{Error: fmt.Sprintf("Provider failed after %d retries: %v", l.config.MaxProviderRetries, providerErr)}})
 			SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 			return providerErr
 		}
@@ -419,7 +419,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			contentStr = thinkingStr
 			thinkingStr = ""
 			// Emit as text delta so the SSE stream includes the response
-			SendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: contentStr}})
+			SendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: TextDelta{Text: contentStr}})
 		}
 
 		assistantMsg := Message{
@@ -460,13 +460,13 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				l.logger.Printf("Circuit breaker tripped: %d consecutive failures", state.ConsecutiveFails)
 				SendEvent(subscriber, AgentEvent{
 					Type: EventTypeError,
-					Data: AgentEventData{Error: fmt.Sprintf("Circuit breaker: %d consecutive tool failures", state.ConsecutiveFails)},
+					Data: ErrorEventData{Error: fmt.Sprintf("Circuit breaker: %d consecutive tool failures", state.ConsecutiveFails)},
 				})
 			}
 
 			SendEvent(subscriber, AgentEvent{
 				Type: EventTypeStepEnd,
-				Data: AgentEventData{Round: round + 1, Decision: decision},
+				Data: StepEndData{Round: round + 1, Decision: decision},
 			})
 
 			for _, h := range l.config.Hooks {
@@ -475,7 +475,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 
 			SendEvent(subscriber, AgentEvent{
 				Type: EventTypeAgentEnd,
-				Data: AgentEventData{
+				Data: AgentEndData{
 					Input:         float64(state.TotalInputTokens),
 					Output:        float64(state.TotalOutputTokens),
 					Model:         l.provider.ModelName(),
@@ -488,7 +488,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 		// Emit step end (continuing with tool execution)
 		SendEvent(subscriber, AgentEvent{
 			Type: EventTypeStepEnd,
-			Data: AgentEventData{Round: round + 1, Decision: "delegate"},
+			Data: StepEndData{Round: round + 1, Decision: "delegate"},
 		})
 
 		// Phase 2: Execute tool calls with retry, timeout, and streaming
@@ -522,7 +522,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 
 			SendEvent(subscriber, AgentEvent{
 				Type: EventTypeToolStart,
-				Data: AgentEventData{ToolName: tc.Name, ToolArgs: tc.Args, ToolID: tc.ID},
+				Data: ToolStart{ToolID: tc.ID, ToolName: tc.Name, ToolArgs: tc.Args},
 			})
 
 			argsJSON, _ := json.Marshal(tc.Args)
@@ -535,7 +535,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				toolResults = append(toolResults, ToolResult{ToolCallID: tcr.ID, ToolName: tc.Name, Content: resultStr})
 				SendEvent(subscriber, AgentEvent{
 					Type: EventTypeToolEnd,
-					Data: AgentEventData{ToolName: tc.Name, ToolID: tc.ID, Error: resultStr},
+					Data: ToolEnd{ToolID: tc.ID, ToolName: tc.Name, Error: resultStr},
 				})
 				continue
 			}
@@ -616,9 +616,9 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 
 			SendEvent(subscriber, AgentEvent{
 				Type: EventTypeToolEnd,
-				Data: AgentEventData{
-					ToolName:     tc.Name,
+				Data: ToolEnd{
 					ToolID:       tc.ID,
+					ToolName:     tc.Name,
 					Result:       resultForSSE,
 					Error:        func() string { if resultErr != nil { return resultErr.Error() }; return "" }(),
 					Artifact:     extractArtifact(tc.Name, resultForSSE),
@@ -739,7 +739,7 @@ func (l *AgentLoop) windDownSummary(ctx context.Context, subscriber chan<- Agent
 	for evt := range chatCh {
 		if evt.Type == ChatEventContent {
 			summary.WriteString(evt.Content)
-			SendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: evt.Content}})
+			SendEvent(subscriber, AgentEvent{Type: EventTypeTextDelta, Data: TextDelta{Text: evt.Content}})
 		}
 		if evt.Type == ChatEventError {
 			return ""
@@ -958,7 +958,7 @@ var urlRegex = regexp.MustCompile(`https?://[^\s)<>"']+`)
 
 // extractSources finds URLs in tool results and returns source events.
 // Limits to 5 sources per tool result to avoid flooding.
-func extractSources(resultStr string) []AgentEventData {
+func extractSources(resultStr string) []SourceEventData {
 	urls := urlRegex.FindAllString(resultStr, 10)
 	if len(urls) == 0 {
 		return nil
@@ -966,7 +966,7 @@ func extractSources(resultStr string) []AgentEventData {
 
 	// Deduplicate
 	seen := make(map[string]bool)
-	var sources []AgentEventData
+	var sources []SourceEventData
 	for _, u := range urls {
 		if seen[u] {
 			continue
@@ -975,7 +975,7 @@ func extractSources(resultStr string) []AgentEventData {
 		if len(sources) >= 5 {
 			break
 		}
-		sources = append(sources, AgentEventData{
+		sources = append(sources, SourceEventData{
 			SourceType: "url",
 			SourceURL:  u,
 			SourceID:   fmt.Sprintf("src_%d", len(sources)+1),

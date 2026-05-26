@@ -82,13 +82,9 @@ func (t *PlanTool) Execute(ctx context.Context, args map[string]any) (any, error
 	if subscriber != nil {
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypePlanCreated,
-			Data: core.AgentEventData{
-				ToolArgs: map[string]any{
-					"planId":   planID,
-					"name":     safeName,
-					"content":  header + content,
-					"filePath": planPath,
-				},
+			Data: core.PlanCreatedData{
+				ID:      planID,
+				Content: header + content,
 			},
 		})
 	}

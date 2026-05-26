@@ -247,7 +247,7 @@ func TestClassifyError(t *testing.T) {
 
 func TestSendEvent(t *testing.T) {
 	ch := make(chan AgentEvent, 1)
-	evt := AgentEvent{Type: EventTypeTextDelta, Data: AgentEventData{Text: "hello"}}
+	evt := AgentEvent{Type: EventTypeTextDelta, Data: TextDelta{Text: "hello"}}
 	SendEvent(ch, evt)
 
 	select {
@@ -255,8 +255,12 @@ func TestSendEvent(t *testing.T) {
 		if received.Type != EventTypeTextDelta {
 			t.Errorf("expected EventTypeTextDelta, got %v", received.Type)
 		}
-		if received.Data.Text != "hello" {
-			t.Errorf("expected text 'hello', got %q", received.Data.Text)
+		td, ok := received.Data.(TextDelta)
+		if !ok {
+			t.Fatalf("expected TextDelta payload, got %T", received.Data)
+		}
+		if td.Text != "hello" {
+			t.Errorf("expected text 'hello', got %q", td.Text)
 		}
 	default:
 		t.Fatal("expected event on channel")

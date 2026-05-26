@@ -100,19 +100,10 @@ func (r *DecisionRegistry) WaitForDecision(
 	if subscriber != nil {
 		SendEvent(subscriber, AgentEvent{
 			Type: EventTypeDecisionRequest,
-			Data: AgentEventData{
-				ToolID:   req.ID,
-				ToolName: req.SourceTool,
-				ToolArgs: map[string]any{
-					"decisionId":   req.ID,
-					"sourceTool":   req.SourceTool,
-					"title":        req.Title,
-					"description":  req.Description,
-					"hint":         string(req.Hint),
-					"options":      req.Options,
-					"allowFreeText": req.AllowFreeText,
-					"metadata":     req.Metadata,
-				},
+			Data: DecisionRequestData{
+				ID:      req.ID,
+				Message: req.Title,
+				Type:    string(req.Hint),
 			},
 		})
 	}

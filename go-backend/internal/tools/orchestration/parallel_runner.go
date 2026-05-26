@@ -246,6 +246,38 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 	return enriched
 }
 
+// stripEnrichmentTags removes enrichment wrapper tags (<original_request>,
+// <cto_context>, <project_context>, <workspace_note>, <env>) from a task string,
+// keeping only the clean <task> content. This prevents enrichment metadata from
+// leaking into persisted user messages.
+func stripEnrichmentTags(enriched string) string {
+	// Extract just the task content if wrapped in <task> tags
+	if start := strings.Index(enriched, "<task>\n"); start != -1 {
+		end := strings.Index(enriched, "\n</task>")
+		if end != -1 && end > start {
+			return strings.TrimSpace(enriched[start+7 : end])
+		}
+	}
+	// Fallback: strip known enrichment tags
+	clean := enriched
+	for _, tag := range []string{"original_request", "cto_context", "project_context", "workspace_note", "env"} {
+		open := "<" + tag + ">"
+		close := "</" + tag + ">"
+		for {
+			start := strings.Index(clean, open)
+			if start == -1 {
+				break
+			}
+			end := strings.Index(clean, close)
+			if end == -1 || end <= start {
+				break
+			}
+			clean = clean[:start] + clean[end+len(close):]
+		}
+	}
+	return strings.TrimSpace(clean)
+}
+
 // SetRoleProviders configures role resolution for scoped delegation.
 // Called after construction when role providers become available.
 func (r *ParallelRunner) SetRoleProviders(roleProvider RoleProvider, mcpResolver MCPResolver) {
@@ -308,11 +340,11 @@ func (r *ParallelRunner) drainAndForward(
 		select {
 		case <-done:
 			for evt := range events {
-				if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-					finalText += evt.Data.Text
+				if evt.Type == core.EventTypeTextDelta {
+					finalText += evt.Data.(core.TextDelta).Text
 				}
 				if evt.Type == core.EventTypeError && firstError == "" {
-					firstError = evt.Data.Error
+					firstError = evt.Data.(core.ErrorEventData).Error
 				}
 			}
 			evtDone = true
@@ -321,20 +353,18 @@ func (r *ParallelRunner) drainAndForward(
 				evtDone = true
 				break
 			}
-			if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-				finalText += evt.Data.Text
+			if evt.Type == core.EventTypeTextDelta {
+				finalText += evt.Data.(core.TextDelta).Text
 			}
 			if evt.Type == core.EventTypeError && firstError == "" {
-				firstError = evt.Data.Error
+				firstError = evt.Data.(core.ErrorEventData).Error
 				r.cfg.Logger("DELEGATE_LOOP_ERROR: agent=%s error=%s", agentName, firstError)
 			}
 			if subscriber != nil {
 				switch evt.Type {
 				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
 					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
-					forwarded := evt
-					forwarded.Data.AgentName = agentName
-					core.SendEvent(subscriber, forwarded)
+					core.SendEvent(subscriber, evt)
 				}
 			}
 		case <-func() <-chan struct{} {
@@ -365,16 +395,14 @@ func (r *ParallelRunner) handleBackgrounded(
 ) {
 	var bgText string
 	for evt := range events {
-		if evt.Type == core.EventTypeTextDelta || evt.Type == core.EventTypeAgentEnd {
-			bgText += evt.Data.Text
+		if evt.Type == core.EventTypeTextDelta {
+			bgText += evt.Data.(core.TextDelta).Text
 		}
 		if subscriber != nil {
 			switch evt.Type {
 			case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
 				core.EventTypeTextDelta, core.EventTypeThinkingDelta:
-				forwarded := evt
-				forwarded.Data.AgentName = agentName
-				core.SendEvent(subscriber, forwarded)
+				core.SendEvent(subscriber, evt)
 			}
 		}
 	}
@@ -390,12 +418,12 @@ func (r *ParallelRunner) handleBackgrounded(
 	}
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
-		Data: core.AgentEventData{
+		Data: core.SubAgentEndData{
 			AgentName:    agentName,
 			Status:       endStatus,
 			Task:         truncateTask(task, 120),
 			TranscriptID: transcriptID,
-			Text:         prefixText + bgText,
+			Result:       prefixText + bgText,
 		},
 	})
 }
@@ -462,10 +490,9 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	transcriptID := r.makeTranscriptID(agentName)
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
-		Data: core.AgentEventData{
+		Data: core.SubAgentStartData{
 			AgentName:    agentName,
 			Task:         truncateTask(task, 120),
-			ToolName:     "delegate_to",
 			TranscriptID: transcriptID,
 		},
 	})
@@ -480,7 +507,7 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	if err != nil {
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
-			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: err.Error(), TranscriptID: transcriptID},
+			Data: core.SubAgentEndData{AgentName: agentName, Status: "error", Error: err.Error(), TranscriptID: transcriptID},
 		})
 		return nil, fmt.Errorf("failed to create division orchestrator: %w", err)
 	}
@@ -526,12 +553,12 @@ func (r *ParallelRunner) RunDivisionDelegate(ctx context.Context, task, division
 	}
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
-		Data: core.AgentEventData{
+		Data: core.SubAgentEndData{
 			AgentName:    agentName,
 			Status:       endStatus,
 			Task:         truncateTask(task, 120),
 			TranscriptID: transcriptID,
-			Text:         dr.FinalText,
+			Result:       dr.FinalText,
 		},
 	})
 
@@ -610,10 +637,9 @@ func (r *ParallelRunner) prepareDelegation(
 	// Emit subagent_start
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
-		Data: core.AgentEventData{
+		Data: core.SubAgentStartData{
 			AgentName:    agentName,
 			Task:         truncateTask(task, 120),
-			ToolName:     "delegate_to",
 			TranscriptID: transcriptID,
 		},
 	})
@@ -633,7 +659,7 @@ func (r *ParallelRunner) prepareDelegation(
 		r.cfg.Logger("DELEGATE_FAIL: agent=%s no tools found — requested=%v available=%v", agentName, toolNames, toolNamesFromSpecs(r.cfg.ToolSpecs))
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
-			Data: core.AgentEventData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames), TranscriptID: transcriptID},
+			Data: core.SubAgentEndData{AgentName: agentName, Status: "error", Error: fmt.Sprintf("none of the requested tools were found: %v", toolNames), TranscriptID: transcriptID},
 		})
 		return nil, core.NewToolError("delegate_to", fmt.Sprintf("none of the requested tools were found: %v", toolNames))
 	}
@@ -680,7 +706,7 @@ func (r *ParallelRunner) createSubAgentResources(
 		r.cfg.Logger("DELEGATE_FAIL: agent=%s providerFactory returned nil", setup.AgentName)
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypeSubAgentEnd,
-			Data: core.AgentEventData{AgentName: setup.AgentName, Status: "error", Error: "provider factory returned nil", TranscriptID: setup.TranscriptID},
+			Data: core.SubAgentEndData{AgentName: setup.AgentName, Status: "error", Error: "provider factory returned nil", TranscriptID: setup.TranscriptID},
 		})
 		return nil, core.NewToolError("delegate_to", "provider factory returned nil for sub-agent "+setup.AgentName)
 	}
@@ -880,13 +906,13 @@ func (r *ParallelRunner) executeAndDrain(
 	}
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
-		Data: core.AgentEventData{
+		Data: core.SubAgentEndData{
 			AgentName:    setup.AgentName,
 			Status:       endStatus,
 			Task:         truncateTask(task, 120),
 			TranscriptID: setup.TranscriptID,
 			Error:        dr.FirstError,
-			Text:         dr.FinalText,
+			Result:       dr.FinalText,
 		},
 	})
 
@@ -1023,10 +1049,9 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	// Emit subagent_start (continuation) — reuse existing session's transcript ID
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentStart,
-		Data: core.AgentEventData{
+		Data: core.SubAgentStartData{
 			AgentName:    la.Role,
 			Task:         truncateTask(fmt.Sprintf("continuation: %s", feedback), 120),
-			ToolName:     "delegate_continue",
 			TranscriptID: la.Session.dbAgentID,
 		},
 	})
@@ -1051,12 +1076,12 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	}
 	core.SendEvent(subscriber, core.AgentEvent{
 		Type: core.EventTypeSubAgentEnd,
-		Data: core.AgentEventData{
+		Data: core.SubAgentEndData{
 			AgentName:    la.Role,
 			Status:       endStatus,
 			Task:         truncateTask(feedback, 120),
 			TranscriptID: la.Session.dbAgentID,
-			Text:         dr.FinalText,
+			Result:       dr.FinalText,
 		},
 	})
 
@@ -1364,7 +1389,10 @@ func (s *subSession) AppendMessage(msg core.Message) error {
 		ctx := context.Background()
 		switch msg.Role {
 		case "user":
-			_, _ = s.db.SaveUserMessage(ctx, s.project, s.dbAgentID, msg.Content)
+			// Strip enrichment tags before persisting — only the clean task
+			// description should be saved, not the CTO context, CLAUDE.md, or env vars.
+			cleanContent := stripEnrichmentTags(msg.Content)
+			_, _ = s.db.SaveUserMessage(ctx, s.project, s.dbAgentID, cleanContent)
 		case "tool":
 			toolName := msg.Name
 			if toolName == "" {

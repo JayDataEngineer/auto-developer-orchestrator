@@ -224,13 +224,21 @@ func TestTaskManager_SSEEvents(t *testing.T) {
 			switch evt.Type {
 			case EventTypeTaskStarted:
 				started = true
-				if evt.Data.TaskID != task.ID {
-					t.Errorf("expected task ID %s, got %s", task.ID, evt.Data.TaskID)
+				d, ok := evt.Data.(TaskStartedData)
+				if !ok {
+					t.Fatalf("expected TaskStartedData, got %T", evt.Data)
+				}
+				if d.TaskID != task.ID {
+					t.Errorf("expected task ID %s, got %s", task.ID, d.TaskID)
 				}
 			case EventTypeTaskCompleted:
 				completed = true
-				if evt.Data.TaskID != task.ID {
-					t.Errorf("expected task ID %s, got %s", task.ID, evt.Data.TaskID)
+				d, ok := evt.Data.(TaskCompletedData)
+				if !ok {
+					t.Fatalf("expected TaskCompletedData, got %T", evt.Data)
+				}
+				if d.TaskID != task.ID {
+					t.Errorf("expected task ID %s, got %s", task.ID, d.TaskID)
 				}
 			}
 		case <-timeout:

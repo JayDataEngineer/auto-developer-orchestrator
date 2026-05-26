@@ -45,237 +45,162 @@ func writeSSE(w http.ResponseWriter, eventType string, data interface{}, canFlus
 }
 
 // mapEventToSSE converts a llama agent event to an SSE event for the frontend.
-// Consumes llamaeng.AgentEvent directly — no intermediate type conversion needed.
-func (h *PuxHandler) mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
+// Uses type assertions on EventPayload to extract typed data.
+func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
+	// Extract the core payload — event.Data is a core.EventPayload
+	payload := event.Data
+
 	switch event.Type {
 	case llamaeng.EventTypeTextDelta:
-		data := map[string]interface{}{"text": event.Data.Text}
-		if event.Data.AgentName != "" {
-			data["agentName"] = event.Data.AgentName
-		}
-		return &sseEvent{
-			Type: "text_delta",
-			Data: data,
-		}
+		p := payload.(llamaeng.TextDelta)
+		data := map[string]interface{}{"text": p.Text}
+		return &sseEvent{Type: "text_delta", Data: data}
 
 	case llamaeng.EventTypeThinkingDelta:
-		data := map[string]interface{}{"text": event.Data.Text}
-		if event.Data.AgentName != "" {
-			data["agentName"] = event.Data.AgentName
-		}
-		return &sseEvent{
-			Type: "thinking_delta",
-			Data: data,
-		}
+		p := payload.(llamaeng.ThinkingDelta)
+		data := map[string]interface{}{"text": p.Text}
+		return &sseEvent{Type: "thinking_delta", Data: data}
 
 	case llamaeng.EventTypeToolStart:
+		p := payload.(llamaeng.ToolStart)
 		data := map[string]interface{}{
-			"toolName": event.Data.ToolName,
-			"args":     event.Data.ToolArgs,
-			"toolId":   event.Data.ToolID,
+			"toolName": p.ToolName,
+			"args":     p.ToolArgs,
+			"toolId":   p.ToolID,
 		}
-		if event.Data.AgentName != "" {
-			data["agentName"] = event.Data.AgentName
-		}
-		return &sseEvent{
-			Type: "tool_execution_start",
-			Data: data,
-		}
+		return &sseEvent{Type: "tool_execution_start", Data: data}
 
 	case llamaeng.EventTypeToolEnd:
+		p := payload.(llamaeng.ToolEnd)
 		data := map[string]interface{}{
-			"toolName": event.Data.ToolName,
-			"toolId":   event.Data.ToolID,
-			"result":   event.Data.Result,
-			"error":    event.Data.Error,
+			"toolName": p.ToolName,
+			"toolId":   p.ToolID,
+			"result":   p.Result,
+			"error":    p.Error,
 		}
-		if event.Data.Artifact != nil {
-			data["artifact"] = event.Data.Artifact
+		if p.Artifact != nil {
+			data["artifact"] = p.Artifact
 		}
-		if event.Data.ModelContent != "" {
-			data["modelContent"] = event.Data.ModelContent
+		if p.ModelContent != "" {
+			data["modelContent"] = p.ModelContent
 		}
-		if event.Data.AgentName != "" {
-			data["agentName"] = event.Data.AgentName
-		}
-		return &sseEvent{
-			Type: "tool_execution_end",
-			Data: data,
-		}
+		return &sseEvent{Type: "tool_execution_end", Data: data}
 
 	case llamaeng.EventTypeToolUpdate:
+		p := payload.(llamaeng.ToolUpdate)
 		data := map[string]interface{}{
-			"toolName": event.Data.ToolName,
-			"toolId":   event.Data.ToolID,
-			"text":     event.Data.Text,
+			"toolName": p.ToolName,
+			"toolId":   p.ToolID,
+			"text":     p.Text,
 		}
-		if event.Data.AgentName != "" {
-			data["agentName"] = event.Data.AgentName
-		}
-		return &sseEvent{
-			Type: "tool_update",
-			Data: data,
-		}
+		return &sseEvent{Type: "tool_update", Data: data}
 
 	case llamaeng.EventTypeAgentStart:
-		return &sseEvent{
-			Type: "agent_start",
-			Data: map[string]interface{}{},
-		}
+		return &sseEvent{Type: "agent_start", Data: map[string]interface{}{}}
 
 	case llamaeng.EventTypeAgentEnd:
+		p := payload.(llamaeng.AgentEndData)
 		data := map[string]interface{}{
-			"input":  event.Data.Input,
-			"output": event.Data.Output,
-			"cache":  event.Data.Cache,
-			"model":  event.Data.Model,
+			"input":  p.Input,
+			"output": p.Output,
+			"cache":  p.Cache,
+			"model":  p.Model,
 		}
-		if event.Data.ContextWindow > 0 {
-			data["contextWindow"] = event.Data.ContextWindow
+		if p.ContextWindow > 0 {
+			data["contextWindow"] = p.ContextWindow
 		}
-		return &sseEvent{
-			Type: "agent_end",
-			Data: data,
-		}
+		return &sseEvent{Type: "agent_end", Data: data}
 
 	case llamaeng.EventTypeCompactionStart:
-		return &sseEvent{
-			Type: "compaction_start",
-			Data: map[string]interface{}{},
-		}
+		return &sseEvent{Type: "compaction_start", Data: map[string]interface{}{}}
 
 	case llamaeng.EventTypeCompactionEnd:
-		return &sseEvent{
-			Type: "compaction_end",
-			Data: map[string]interface{}{
-				"compactedMessages": event.Data.CompactedMessages,
-				"keptMessages":      event.Data.KeptMessages,
-				"contextTokens":     event.Data.ContextTokens,
-				"contextSize":       event.Data.ContextSize,
-				"contextUtil":       event.Data.ContextUtil,
-				"compactionType":    event.Data.CompactionType,
-			},
+		p := payload.(llamaeng.CompactionEndData)
+		data := map[string]interface{}{
+			"compactedMessages": p.CompactedMessages,
+			"keptMessages":      p.KeptMessages,
+			"contextTokens":     p.ContextTokens,
+			"contextSize":       p.ContextSize,
+			"contextUtil":       p.ContextUtil,
 		}
+		return &sseEvent{Type: "compaction_end", Data: data}
 
 	case llamaeng.EventTypeError:
-		return &sseEvent{
-			Type: "error",
-			Data: map[string]string{"error": event.Data.Error},
-		}
+		p := payload.(llamaeng.ErrorEventData)
+		return &sseEvent{Type: "error", Data: map[string]string{"error": p.Error}}
 
-	case llamaeng.EventTypeArtifactCreated:
-		return &sseEvent{Type: "artifact_created", Data: event.Data}
+	case llamaeng.EventTypeArtifactCreated, llamaeng.EventTypeArtifactUpdated:
+		// Artifact events pass through payload as-is
+		return &sseEvent{Type: string(event.Type), Data: payload}
 
-	case llamaeng.EventTypeArtifactUpdated:
-		return &sseEvent{Type: "artifact_updated", Data: event.Data}
+	case llamaeng.EventTypePlanCreated, llamaeng.EventTypePlanUpdated:
+		// Plan events pass through payload as-is
+		return &sseEvent{Type: string(event.Type), Data: payload}
 
 	case llamaeng.EventTypeDecisionRequest:
-		return &sseEvent{
-			Type: "decision_request",
-			Data: map[string]interface{}{
-				"decisionId":   event.Data.ToolArgs["decisionId"],
-				"sourceTool":   event.Data.ToolArgs["sourceTool"],
-				"title":        event.Data.ToolArgs["title"],
-				"description":  event.Data.ToolArgs["description"],
-				"hint":         event.Data.ToolArgs["hint"],
-				"options":      event.Data.ToolArgs["options"],
-				"allowFreeText": event.Data.ToolArgs["allowFreeText"],
-				"metadata":     event.Data.ToolArgs["metadata"],
-			},
-		}
-
-	case llamaeng.EventTypePlanCreated:
-		return &sseEvent{
-			Type: "plan_created",
-			Data: map[string]interface{}{
-				"planId":   event.Data.ToolArgs["planId"],
-				"name":     event.Data.ToolArgs["name"],
-				"content":  event.Data.ToolArgs["content"],
-				"filePath": event.Data.ToolArgs["filePath"],
-			},
-		}
-
-	case llamaeng.EventTypePlanUpdated:
-		return &sseEvent{Type: "plan_updated", Data: event.Data}
+		p := payload.(llamaeng.DecisionRequestData)
+		return &sseEvent{Type: "decision_request", Data: map[string]interface{}{
+			"id":      p.ID,
+			"message": p.Message,
+			"type":    p.Type,
+		}}
 
 	case llamaeng.EventTypeSubAgentStart:
+		p := payload.(llamaeng.SubAgentStartData)
 		data := map[string]interface{}{
-			"agentName": event.Data.AgentName,
-			"task":      event.Data.Task,
-			"toolName":  event.Data.ToolName,
+			"agentName": p.AgentName,
+			"task":      p.Task,
 		}
-		if event.Data.TranscriptID != "" {
-			data["agentId"] = event.Data.TranscriptID
+		if p.TranscriptID != "" {
+			data["agentId"] = p.TranscriptID
 		}
-		return &sseEvent{
-			Type: "subagent_start",
-			Data: data,
-		}
+		return &sseEvent{Type: "subagent_start", Data: data}
 
 	case llamaeng.EventTypeSubAgentEnd:
+		p := payload.(llamaeng.SubAgentEndData)
 		data := map[string]interface{}{
-			"agentName": event.Data.AgentName,
-			"status":    event.Data.Status,
-			"task":      event.Data.Task,
+			"agentName": p.AgentName,
+			"status":    p.Status,
+			"task":      p.Task,
 		}
-		if event.Data.Text != "" {
-			data["result"] = event.Data.Text
+		if p.Result != "" {
+			data["result"] = p.Result
 		}
-		if event.Data.Error != "" {
-			data["error"] = event.Data.Error
+		if p.Error != "" {
+			data["error"] = p.Error
 		}
-		if event.Data.TranscriptID != "" {
-			data["agentId"] = event.Data.TranscriptID
+		if p.TranscriptID != "" {
+			data["agentId"] = p.TranscriptID
 		}
-		return &sseEvent{
-			Type: "subagent_end",
-			Data: data,
-		}
+		return &sseEvent{Type: "subagent_end", Data: data}
 
 	case llamaeng.EventTypeSource:
+		p := payload.(llamaeng.SourceEventData)
 		data := map[string]interface{}{
-			"sourceType": event.Data.SourceType,
-			"id":         event.Data.SourceID,
+			"sourceType": p.SourceType,
+			"id":         p.SourceID,
 		}
-		if event.Data.SourceURL != "" {
-			data["url"] = event.Data.SourceURL
+		if p.SourceURL != "" {
+			data["url"] = p.SourceURL
 		}
-		if event.Data.Text != "" {
-			data["title"] = event.Data.Text
-		}
-		return &sseEvent{
-			Type: "source",
-			Data: data,
-		}
+		return &sseEvent{Type: "source", Data: data}
 
 	case llamaeng.EventTypeHookRequest:
-		return &sseEvent{
-			Type: "hook_request",
-			Data: map[string]interface{}{
-				"hookId":    event.Data.HookID,
-				"hookPoint": event.Data.HookPoint,
-				"toolName":  event.Data.ToolName,
-				"args":      event.Data.ToolArgs,
-				"result":    event.Data.Result,
-			},
+		p := payload.(llamaeng.HookRequestData)
+		data := map[string]interface{}{
+			"hookId":    p.HookID,
+			"hookPoint": p.HookPoint,
+			"message":   p.Message,
 		}
+		return &sseEvent{Type: "hook_request", Data: data}
 
 	case llamaeng.EventTypeStepStart:
-		return &sseEvent{
-			Type: "step_start",
-			Data: map[string]interface{}{
-				"round": event.Data.Round,
-			},
-		}
+		p := payload.(llamaeng.StepStartData)
+		return &sseEvent{Type: "step_start", Data: map[string]interface{}{"round": p.Round}}
 
 	case llamaeng.EventTypeStepEnd:
-		return &sseEvent{
-			Type: "step_end",
-			Data: map[string]interface{}{
-				"round":    event.Data.Round,
-				"decision": event.Data.Decision,
-			},
-		}
+		p := payload.(llamaeng.StepEndData)
+		return &sseEvent{Type: "step_end", Data: map[string]interface{}{"round": p.Round, "decision": p.Decision}}
 
 	default:
 		return nil
