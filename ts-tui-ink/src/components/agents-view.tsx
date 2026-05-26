@@ -46,6 +46,10 @@ export function AgentsView() {
 	// Keyboard navigation
 	useInput((input: string, key: any) => {
 		if (agentList.length === 0) return;
+		if (key.escape) {
+			usePuxStore.getState().setTuiView("chat");
+			return;
+		}
 		if (key.upArrow) {
 			setSelectedIdx(Math.max(0, selectedIdx - 1));
 			return;
@@ -123,7 +127,7 @@ export function AgentsView() {
 			{/* Controls hint */}
 			<Box marginTop={1}>
 				<Text dimColor>
-					<Text bold>Up/Down</Text> navigate <Text bold>Enter</Text> zoom <Text bold>Space</Text> expand <Text bold>Ctrl+T</Text> back to chat
+					<Text bold>Up/Down</Text> navigate <Text bold>Enter</Text> zoom <Text bold>Space</Text> expand <Text bold>Esc</Text> back
 				</Text>
 			</Box>
 		</Box>
