@@ -19,6 +19,7 @@ import { useTerminalSize } from "../use-terminal-size.js";
 
 export function AgentsView() {
 	const agents = usePuxStore((s) => s.agents);
+	const setZoomedAgent = usePuxStore((s) => s.setZoomedAgent);
 	const { rows } = useTerminalSize();
 	const [selectedIdx, setSelectedIdx] = useState(0);
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -53,7 +54,7 @@ export function AgentsView() {
 			setSelectedIdx(Math.min(agentList.length - 1, selectedIdx + 1));
 			return;
 		}
-		if (key.return || input === " ") {
+		if (input === " ") {
 			const agent = agentList[selectedIdx];
 			if (agent) {
 				setExpanded((prev) => {
@@ -65,6 +66,13 @@ export function AgentsView() {
 					}
 					return next;
 				});
+			}
+			return;
+		}
+		if (key.return) {
+			const agent = agentList[selectedIdx];
+			if (agent) {
+				setZoomedAgent(agent.agentId);
 			}
 			return;
 		}
@@ -115,7 +123,7 @@ export function AgentsView() {
 			{/* Controls hint */}
 			<Box marginTop={1}>
 				<Text dimColor>
-					<Text bold>Up/Down</Text> navigate <Text bold>Enter</Text> expand <Text bold>Ctrl+T</Text> back to chat
+					<Text bold>Up/Down</Text> navigate <Text bold>Enter</Text> zoom <Text bold>Space</Text> expand <Text bold>Ctrl+T</Text> back to chat
 				</Text>
 			</Box>
 		</Box>
