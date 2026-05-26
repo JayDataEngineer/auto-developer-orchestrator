@@ -45,7 +45,6 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 		return () => clearTimeout(timer);
 	}, [commandOutput]);
 
-	const isRunning = useAuiState((s) => s.thread.isRunning);
 	const composerText = useAuiState((s) => s.composer.text);
 	const projectPath = usePuxStore((s) => s.activeProjectPath);
 
@@ -88,12 +87,7 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 					onPathIdx={setPathIdx}
 					projectPath={projectPath}
 				/>
-				{/* Cancel button when running */}
-				{isRunning && (
-					<ComposerPrimitive.Cancel>
-						<Text color="red"> cancel</Text>
-					</ComposerPrimitive.Cancel>
-				)}
+
 			</Box>
 			<Text color={colors.subtle}>{"─".repeat(cols)}</Text>
 		</Box>
