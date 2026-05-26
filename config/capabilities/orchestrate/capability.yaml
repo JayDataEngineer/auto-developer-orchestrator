@@ -1,0 +1,6 @@
+description: "Orchestration-only tools — verify results, run builds, delegate to sub-agents"
+tools:
+  - bash
+  - file_read
+  - file_glob
+  - file_grep

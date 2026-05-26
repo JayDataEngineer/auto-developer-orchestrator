@@ -887,9 +887,10 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	}
 
 	// Inject scoped delegation tools if the sub-agent's role has delegates_to
+	var scopedDelegate, scopedAsync core.Tool
 	if len(delegatesTo) > 0 && r.depth < r.maxDepth && r.roleProvider != nil {
-		scopedDelegate := NewDelegateToToolDynamic(r, r.mcpResolver, r.roleProvider, func() []string { return delegatesTo })
-		scopedAsync := NewDelegateAsyncToolDynamic(r, r.mcpResolver, r.roleProvider, func() []string { return delegatesTo })
+		scopedDelegate = NewDelegateToToolDynamic(r, r.mcpResolver, r.roleProvider, func() []string { return delegatesTo })
+		scopedAsync = NewDelegateAsyncToolDynamic(r, r.mcpResolver, r.roleProvider, func() []string { return delegatesTo })
 		selectedTools = append(selectedTools,
 			jsonToToolSpec(scopedDelegate),
 			jsonToToolSpec(scopedAsync),
@@ -951,6 +952,14 @@ func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructi
 	executor := r.executor
 	if r.executorFactory != nil && sandboxTier != "" {
 		executor = r.executorFactory(sandboxTier)
+	}
+	// If scoped delegation tools were injected, wrap the executor so it can find them
+	if len(delegatesTo) > 0 && r.depth < r.maxDepth {
+		executor = &scopedDelegationExecutor{
+			parent:   executor,
+			delegate: scopedDelegate,
+			async:    scopedAsync,
+		}
 	}
 	// Wrap sub-agent executor with vision processing (always)
 	{
@@ -1980,4 +1989,23 @@ func extractRelevantReadme(content string, maxLen int) string {
 		result = result[:maxLen] + "\n...(truncated)"
 	}
 	return result
+}
+
+// scopedDelegationExecutor wraps a parent executor and adds scoped delegate_to/delegate_async
+// tools so sub-agents with delegates_to can execute nested delegations.
+type scopedDelegationExecutor struct {
+	parent   core.ToolExecutor
+	delegate core.Tool
+	async    core.Tool
+}
+
+func (e *scopedDelegationExecutor) Execute(ctx context.Context, toolName string, args map[string]any) (any, error) {
+	switch toolName {
+	case "delegate_to":
+		return e.delegate.Execute(ctx, args)
+	case "delegate_async":
+		return e.async.Execute(ctx, args)
+	default:
+		return e.parent.Execute(ctx, toolName, args)
+	}
 }
