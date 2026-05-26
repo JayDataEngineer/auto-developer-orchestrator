@@ -138,12 +138,7 @@ func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 		return &sseEvent{Type: string(event.Type), Data: payload}
 
 	case llamaeng.EventTypeDecisionRequest:
-		p := payload.(llamaeng.DecisionRequestData)
-		return &sseEvent{Type: "decision_request", Data: map[string]interface{}{
-			"id":      p.ID,
-			"message": p.Message,
-			"type":    p.Type,
-		}}
+		return &sseEvent{Type: "decision_request", Data: payload}
 
 	case llamaeng.EventTypeSubAgentStart:
 		p := payload.(llamaeng.SubAgentStartData)

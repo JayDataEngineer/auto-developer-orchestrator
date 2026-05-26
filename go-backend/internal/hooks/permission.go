@@ -9,6 +9,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 )
 
 // PermissionHook intercepts tool calls and checks permission levels.
@@ -20,6 +21,11 @@ import (
 //   - deny:    return an error immediately
 //
 // Users can grant "always allow for this session" — cached in a session map.
+//
+// For the bash tool, command-level permission evaluation is also performed:
+//   - Read-only commands: auto-approved even in default auto mode
+//   - Dangerous commands (rm -rf, git push --force): elevate to "ask" user
+//   - Hard-deny commands (rm -rf /, nmap): blocked immediately
 type PermissionHook struct {
 	config     *perms.ToolPermissionConfig
 	registry   *core.DecisionRegistry
@@ -75,9 +81,34 @@ func (h *PermissionHook) OnAgentEnd(ctx context.Context, state *core.LoopState) 
 }
 
 // WrapToolCall checks permission before executing. Implements ToolCallWrapper.
+//
+// For the bash tool, command-level evaluation augments the tool-level permission:
+//   - Hard-deny commands are blocked regardless of tool-level permission
+//   - Dangerous commands elevate tool-level "auto" to "confirm" (ask user)
+//   - Read-only commands stay "auto" even if tool-level is "confirm"
 func (h *PermissionHook) WrapToolCall(ctx context.Context, toolName string, args map[string]any, next func(context.Context, string, map[string]any) (any, error)) (any, error) {
-	// Look up permission level, defaulting to auto.
+	// Look up tool-level permission, defaulting to auto.
 	level := h.getPermissionLevel(toolName)
+
+	// For bash, evaluate command-level permissions
+	var bashPerm *bash.BashPermission
+	if toolName == "bash" {
+		if cmd, ok := extractBashCommand(args); ok {
+			p := bash.CheckBashPermission(cmd)
+			bashPerm = &p
+
+			// Command-level deny overrides everything
+			if p.Behavior == "deny" {
+				return nil, fmt.Errorf("bash command blocked: %s", p.Message)
+			}
+
+			// Command-level "ask" elevates auto to confirm
+			if p.Behavior == "ask" && level == perms.PermAutoApprove {
+				level = perms.PermRequireApproval
+			}
+		}
+	}
+
 	switch level {
 	case perms.PermAutoApprove:
 		return next(ctx, toolName, args)
@@ -89,16 +120,19 @@ func (h *PermissionHook) WrapToolCall(ctx context.Context, toolName string, args
 			return next(ctx, toolName, args)
 		}
 
-		// Build description from args
+		// Build description from args, prepending any permission warning
 		desc := formatToolArgs(toolName, args)
+		if bashPerm != nil && bashPerm.Message != "" {
+			desc = "⚠ " + bashPerm.Message + "\n\n" + desc
+		}
 
 		reqID := fmt.Sprintf("perm-%s-%d", toolName, time.Now().UnixNano())
 		req := core.DecisionRequest{
-			ID:         reqID,
-			SourceTool: toolName,
-			Title:      fmt.Sprintf("Allow %q?", toolName),
+			ID:          reqID,
+			SourceTool:  toolName,
+			Title:       fmt.Sprintf("Allow %q?", toolName),
 			Description: desc,
-			Hint:       core.HintApproval,
+			Hint:        core.HintApproval,
 			Metadata: map[string]any{
 				"toolName": toolName,
 				"toolArgs": args,
@@ -150,6 +184,20 @@ func (h *PermissionHook) setSessionAllowed(toolName string) {
 	defer h.mu.Unlock()
 	h.session[toolName] = true
 	h.logger.Printf("PERMISSION: tool %q allowed for session", toolName)
+}
+
+// extractBashCommand extracts the bash command string from tool args.
+func extractBashCommand(args map[string]any) (string, bool) {
+	if cmd, ok := args["command"].(string); ok && cmd != "" {
+		return cmd, true
+	}
+	if cmd, ok := args["code"].(string); ok && cmd != "" {
+		return cmd, true
+	}
+	if cmd, ok := args["cmd"].(string); ok && cmd != "" {
+		return cmd, true
+	}
+	return "", false
 }
 
 // formatToolArgs creates a human-readable description of tool arguments.

@@ -130,9 +130,14 @@ func (ErrorEventData) seal() {}
 
 // DecisionRequestData is the unified human-in-the-loop event.
 type DecisionRequestData struct {
-	ID      string `json:"id,omitempty"`
-	Message string `json:"message,omitempty"`
-	Type    string `json:"type,omitempty"`
+	ID            string         `json:"decisionId,omitempty"`
+	SourceTool    string         `json:"sourceTool,omitempty"`
+	Title         string         `json:"title,omitempty"`
+	Description   string         `json:"description,omitempty"`
+	Hint          string         `json:"hint,omitempty"`
+	Options       []string       `json:"options,omitempty"`
+	AllowFreeText bool           `json:"allowFreeText,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
 }
 
 func (DecisionRequestData) seal() {}

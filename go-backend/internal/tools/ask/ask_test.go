@@ -79,8 +79,8 @@ func TestAskUserTool_Execute_WithResponse(t *testing.T) {
 			t.Fatalf("expected decision_request event, got %q", evt.Type)
 		}
 		d := evt.Data.(core.DecisionRequestData)
-		if d.Type != "question" {
-			t.Fatalf("expected question type, got %q", d.Type)
+		if d.Hint != "question" {
+			t.Fatalf("expected question type, got %q", d.Hint)
 		}
 		decisionID = d.ID
 	case <-time.After(time.Second):

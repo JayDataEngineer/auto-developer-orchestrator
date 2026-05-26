@@ -31,14 +31,14 @@ type Rule struct {
 
 // Validator checks commands against a deny list with override patterns.
 type Validator struct {
-	rules          []Rule
+	rules            []Rule
 	overridePatterns []*regexp.Regexp
 }
 
 // NewDefaultValidator returns a validator with the built-in deny list.
 func NewDefaultValidator() *Validator {
 	return &Validator{
-		rules:          defaultDenyRules(),
+		rules:            defaultDenyRules(),
 		overridePatterns: defaultOverridePatterns(),
 	}
 }
@@ -49,11 +49,10 @@ func (v *Validator) Validate(cmd string) error {
 	lower := strings.ToLower(cmd)
 	for _, rule := range v.rules {
 		if rule.Pattern.MatchString(lower) {
-			// Check if an override pattern exempts this command
 			if rule.AllowOverride {
 				for _, ov := range v.overridePatterns {
 					if ov.MatchString(lower) {
-						return nil // override matches, allow it
+						return nil
 					}
 				}
 			}
@@ -67,129 +66,119 @@ func (v *Validator) Validate(cmd string) error {
 	return nil
 }
 
-// cmdPos is a lookbehind-ish prefix that matches the start of a command position:
-// beginning of string, or after ; & | (shell operators). This prevents false positives
-// when dangerous keywords appear inside string arguments like echo 'nmap'.
-// Usage: cmdPos + `\b` + commandName
-const cmdPos = `(?:^|;\s*|&&\s*|\|\|\s*|\|\s*)`
-
 // defaultDenyRules returns the built-in command deny list.
+// These use the shared patterns from permissions.go to stay consistent.
 func defaultDenyRules() []Rule {
 	return []Rule{
 		// ── Destruction ──
 		{
-			// rm -rf / — but NOT rm -rf /tmp/ or rm -rf /home/user/project/build/
-			// Only block when target is bare / or / followed by a top-level system dir
 			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `rm\s+-[a-zA-Z]*f[a-zA-Z]*\s+/(?:\s|$)`),
 			Category: "destruction",
 			Message:  "recursive force-delete of root filesystem is not allowed",
 		},
 		{
-			// rm -rf /etc, /usr, /var, /bin, /sbin, /boot, /dev, /proc, /sys, /lib, /root
 			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `rm\s+-[a-zA-Z]*f[a-zA-Z]*\s+/(?:etc|usr|var|bin|sbin|boot|dev|proc|sys|lib|lib64|root)(?:/|\s|$)`),
 			Category: "destruction",
 			Message:  "recursive force-delete of system directories is not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `mkfs\b`), // mkfs.ext4 /dev/sda
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `mkfs\b`),
 			Category: "destruction",
 			Message:  "filesystem format commands are not allowed",
 		},
 		{
-			// dd targeting block devices — matches if either input or output is a block device
 			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `dd\s+.*(?:if|of)=/dev/(?:sd|nvme|vd)`),
 			Category: "destruction",
 			Message:  "raw disk operations on block devices are not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)>\s*/dev/sd`), // > /dev/sda (redirect to block device)
+			Pattern:  regexp.MustCompile(`(?i)>\s*/dev/sd`),
 			Category: "destruction",
 			Message:  "writing directly to block devices is not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i):\(\)\s*\{\s*:\|:\&\s*\}\s*;:`), // fork bomb
+			Pattern:  regexp.MustCompile(`(?i):\(\)\s*\{\s*:\|:\&\s*\}\s*;:`),
 			Category: "destruction",
 			Message:  "fork bomb patterns are not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `shred\b`), // shred /dev/sda
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `shred\b`),
 			Category: "destruction",
 			Message:  "file shredding is not allowed",
 		},
 
 		// ── Privilege escalation ──
 		{
-			Pattern:       regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+rm\b`), // sudo rm
+			Pattern:       regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+rm\b`),
 			Category:      "privilege",
 			Message:       "sudo rm is not allowed (use without sudo for project files)",
 			AllowOverride: true,
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+su\b`), // sudo su
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+su\b`),
 			Category: "privilege",
 			Message:  "switching to root shell is not allowed",
 		},
 		{
-			Pattern:       regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+chmod\s+777\b`), // sudo chmod 777
+			Pattern:       regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+chmod\s+777\b`),
 			Category:      "privilege",
 			Message:       "setting world-writable permissions with sudo is not allowed",
 			AllowOverride: true,
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `chmod\s+-[a-zA-Z]*R[a-zA-Z]*\s+777\b`), // chmod -R 777
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `chmod\s+-[a-zA-Z]*R[a-zA-Z]*\s+777\b`),
 			Category: "privilege",
 			Message:  "recursively setting world-writable permissions is not allowed",
 		},
 		{
-			// passwd command (not the word in filenames/paths)
 			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `passwd\b`),
 			Category: "privilege",
 			Message:  "password changes are not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+bash\b`), // sudo bash
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+bash\b`),
 			Category: "privilege",
 			Message:  "spawning root shell is not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+sh\b`), // sudo sh
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+sh\b`),
 			Category: "privilege",
 			Message:  "spawning root shell is not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+zsh\b`), // sudo zsh
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `sudo\s+zsh\b`),
 			Category: "privilege",
 			Message:  "spawning root shell is not allowed",
 		},
 
 		// ── Network attack tools ──
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `nmap\b`), // nmap -sV target
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `nmap\b`),
 			Category: "network_attack",
 			Message:  "network scanning tools are not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `hydra\b`), // hydra -l user -P pass target
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `hydra\b`),
 			Category: "network_attack",
 			Message:  "password cracking tools are not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `aircrack\b`), // aircrack-ng
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `aircrack\b`),
 			Category: "network_attack",
 			Message:  "WiFi cracking tools are not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `netcat\s+-[elp]`), // netcat -e /bin/bash
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `netcat\s+-[elp]`),
 			Category: "network_attack",
 			Message:  "netcat in listen/reverse shell mode is not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `nc\s+-[elp]`), // nc -e /bin/bash
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `nc\s+-[elp]`),
 			Category: "network_attack",
 			Message:  "netcat in listen/reverse shell mode is not allowed",
 		},
 		{
-			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `python[23]?\b.*-c.*import\s+socket.*\b(bind|listen)\b`), // reverse shell pattern
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `python[23]?\b.*-c.*import\s+socket.*\b(bind|listen)\b`),
 			Category: "network_attack",
 			Message:  "raw socket bind/listen patterns are not allowed",
 		},
@@ -197,7 +186,6 @@ func defaultDenyRules() []Rule {
 }
 
 // defaultOverridePatterns returns patterns that bypass specific deny rules.
-// These allow legitimate sudo usage while blocking dangerous combinations.
 func defaultOverridePatterns() []*regexp.Regexp {
 	return []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\bsudo\s+(apt|apt-get)\b`),

@@ -96,14 +96,19 @@ func (r *DecisionRegistry) WaitForDecision(
 ) (DecisionResponse, error) {
 	ch := r.Register(req.ID)
 
-	// Emit decision_request SSE event
+	// Emit decision_request SSE event with full payload
 	if subscriber != nil {
 		SendEvent(subscriber, AgentEvent{
 			Type: EventTypeDecisionRequest,
 			Data: DecisionRequestData{
-				ID:      req.ID,
-				Message: req.Title,
-				Type:    string(req.Hint),
+				ID:            req.ID,
+				SourceTool:    req.SourceTool,
+				Title:         req.Title,
+				Description:   req.Description,
+				Hint:          string(req.Hint),
+				Options:       req.Options,
+				AllowFreeText: req.AllowFreeText,
+				Metadata:      req.Metadata,
 			},
 		})
 	}
