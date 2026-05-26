@@ -828,6 +828,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 		} catch (err) {
 			usePuxStore.setState({ ctoRunning: false });
 			if (err instanceof Error && err.name === "AbortError") {
+				yield {
 					...buildSnapshot(parts, sources, "running", timing, stepsRef),
 					status: { type: "incomplete" as const, reason: "cancelled" as const },
 				};

@@ -229,13 +229,14 @@ export function VNCViewer() {
 
 	// Sandbox exists but no desktop session — auto-polling will catch when it becomes ready
 	if (!sandbox.desktop_session?.is_active) {
+		const isReady = sandbox.status === "running";
 		return (
 			<div ref={containerRef} className="flex h-full flex-col items-center justify-center gap-3">
 				<Monitor className="size-8 animate-pulse text-muted-foreground/50" />
 				<span className="text-xs text-muted-foreground">
-					{sandbox.mode === "cli" ? "Sandbox starting..." : "Connecting..."}
+					{!isReady ? "Sandbox starting..." : sandbox.mode === "cli" ? "Sandbox ready" : "Connecting..."}
 				</span>
-				{sandbox.mode === "cli" && (
+				{isReady && sandbox.mode === "cli" && (
 					<button
 						onClick={enableDesktop}
 						disabled={enabling}
