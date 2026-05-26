@@ -409,8 +409,14 @@ export const puxChatAdapter: ChatModelAdapter = {
 	async *run({ messages, abortSignal, runConfig }) {
 		const store = usePuxStore.getState();
 		const lastMsg = messages[messages.length - 1];
+		const stack = new Error().stack?.split('\n').slice(2, 6).join(' | ') || 'no stack';
 
-		if (!lastMsg || lastMsg.role !== "user") return;
+		console.log("[DEBUG] run() ENTERED. messages:", messages.length, "lastMsg role:", lastMsg?.role, "lastMsg text:", typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 50) : 'non-string', "agentId:", store.activeAgentId, "stack:", stack);
+
+		if (!lastMsg || lastMsg.role !== "user") {
+			console.log("[DEBUG] run() skipped: not user msg");
+			return;
+		}
 
 		// Extract text from user message
 		const content = lastMsg.content;
