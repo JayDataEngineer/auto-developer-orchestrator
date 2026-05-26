@@ -4,17 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/auto-developer-orchestrator/backend/internal/storage"
 )
 
-// ScratchStore is an in-memory scratch pad for externalizing working memory.
+// ScratchStore is a scratch pad for externalizing working memory.
 // Notes survive compaction because they live outside the session tree.
+// When backed by a database, notes also persist across sessions.
 type ScratchStore struct {
-	mu    sync.Mutex
-	notes map[string]ScratchNote
-	order []string
+	mu      sync.Mutex
+	notes   map[string]ScratchNote
+	order   []string
+	db      *storage.Database // optional: nil = in-memory only
+	agentID string            // required when db is set
 }
 
 // ScratchNote is a single scratch pad entry.
@@ -30,28 +36,69 @@ func NewScratchStore() *ScratchStore {
 	return &ScratchStore{notes: make(map[string]ScratchNote)}
 }
 
+// NewPersistentScratchStore creates a ScratchStore backed by the database.
+// Loads existing notes from DB on creation. Future writes sync to DB.
+func NewPersistentScratchStore(db *storage.Database, agentID string) *ScratchStore {
+	s := &ScratchStore{
+		notes:   make(map[string]ScratchNote),
+		db:      db,
+		agentID: agentID,
+	}
+	// Load existing notes from database
+	if db != nil && agentID != "" {
+		ctx := context.Background()
+		dbNotes, err := db.LoadScratchNotes(ctx, agentID)
+		if err != nil {
+			log.Printf("WARN: failed to load scratch notes for agent=%s: %v", agentID, err)
+		} else {
+			for _, n := range dbNotes {
+				var tags []string
+				_ = json.Unmarshal([]byte(n.Tags), &tags)
+				s.notes[n.ID] = ScratchNote{
+					ID:        n.ID,
+					Content:   n.Content,
+					Tags:      tags,
+					UpdatedAt: time.Now(), // use current time; precise time is in DB
+				}
+				s.order = append(s.order, n.ID)
+			}
+		}
+	}
+	return s
+}
+
 func (s *ScratchStore) Write(id, content string, tags []string) ScratchNote {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now()
+	var note ScratchNote
 	if existing, ok := s.notes[id]; ok {
 		existing.Content = content
 		existing.Tags = tags
 		existing.UpdatedAt = now
 		s.notes[id] = existing
-		return existing
+		note = existing
+	} else {
+		note = ScratchNote{
+			ID:        id,
+			Content:   content,
+			Tags:      tags,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		s.notes[id] = note
+		s.order = append(s.order, id)
 	}
 
-	note := ScratchNote{
-		ID:        id,
-		Content:   content,
-		Tags:      tags,
-		CreatedAt: now,
-		UpdatedAt: now,
+	// Persist to database
+	if s.db != nil && s.agentID != "" {
+		tagsJSON, _ := json.Marshal(tags)
+		if err := s.db.SaveScratchNote(context.Background(), s.agentID, id, content, string(tagsJSON)); err != nil {
+			log.Printf("WARN: failed to persist scratch note %s for agent=%s: %v", id, s.agentID, err)
+		}
 	}
-	s.notes[id] = note
-	s.order = append(s.order, id)
+
 	return note
 }
 
@@ -85,7 +132,21 @@ func (s *ScratchStore) Delete(id string) bool {
 			break
 		}
 	}
+	// Delete from database
+	if s.db != nil && s.agentID != "" {
+		if err := s.db.DeleteScratchNote(context.Background(), s.agentID, id); err != nil {
+			log.Printf("WARN: failed to delete scratch note %s for agent=%s: %v", id, s.agentID, err)
+		}
+	}
 	return true
+}
+
+// clearMemory clears all in-memory notes without touching the database.
+func (s *ScratchStore) clearMemory() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notes = make(map[string]ScratchNote)
+	s.order = s.order[:0]
 }
 
 // FormatForContext returns scratch notes formatted for injection into context.
@@ -214,9 +275,13 @@ func (t *ScratchClearTool) Schema() json.RawMessage {
 
 func (t *ScratchClearTool) Execute(_ context.Context, _ map[string]any) (any, error) {
 	notes := t.store.List()
-	for _, n := range notes {
-		t.store.Delete(n.ID)
+	// Clear from database first (single DELETE), then from memory
+	if t.store.db != nil && t.store.agentID != "" {
+		if err := t.store.db.ClearScratchNotes(context.Background(), t.store.agentID); err != nil {
+			log.Printf("WARN: failed to clear scratch notes for agent=%s: %v", t.store.agentID, err)
+		}
 	}
+	t.store.clearMemory()
 	return map[string]any{"cleared": len(notes)}, nil
 }
 

@@ -69,6 +69,7 @@ type Config struct {
 	ArtifactDB       meta.ArtifactStore         // optional: if set, yield_artifact persists to DB
 	TranscriptDB     *storage.Database          // optional: if set, sub-agent messages persist for transcript retrieval
 	Project          string                     // project name for transcript DB storage
+	AgentID          string                     // agent identifier for scratch note persistence (e.g., "default" or composite key)
 	Org              *common.OrgManifest        // optional: org manifest for overlay mode
 	OrgRoles         map[string]*common.AgentRole // optional: org-specific employee roles
 	DBProvider       common.DBProvider          // optional: if set, registers graph/face tools for employees
@@ -163,7 +164,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if cfg.SandboxOnly {
 		logger.Printf("SANDBOX-ONLY mode: only bash + file tools available")
 
-		scratchStore := ctxpkg.NewScratchStore()
+		scratchStore := ctxpkg.NewPersistentScratchStore(cfg.TranscriptDB, cfg.AgentID)
 		ctoTools = append(ctoTools,
 			ctxpkg.NewScratchWriteTool(scratchStore),
 			ctxpkg.NewScratchReadTool(scratchStore),
@@ -290,7 +291,17 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		hintTracker = ctxpkg.NewSubdirectoryHintTracker(cfg.ProjectDir)
 	}
 
-	scratchStore := ctxpkg.NewScratchStore()
+	// Scratch store: persist to DB when available so notes survive session resume
+	scratchAgentID := cfg.AgentID
+	if scratchAgentID == "" && cfg.Project != "" {
+		scratchAgentID = cfg.Project + ":default"
+	}
+	var scratchStore *ctxpkg.ScratchStore
+	if cfg.TranscriptDB != nil && scratchAgentID != "" {
+		scratchStore = ctxpkg.NewPersistentScratchStore(cfg.TranscriptDB, scratchAgentID)
+	} else {
+		scratchStore = ctxpkg.NewScratchStore()
+	}
 	ctoTools = append(ctoTools,
 		ctxpkg.NewScratchWriteTool(scratchStore),
 		ctxpkg.NewScratchReadTool(scratchStore),

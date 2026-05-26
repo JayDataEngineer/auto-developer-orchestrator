@@ -1376,7 +1376,10 @@ type subSession struct {
 }
 
 func (s *subSession) ID() string { return s.Session.ID() + "-sub" }
-func (s *subSession) Close() error { return nil }
+func (s *subSession) Close() error {
+	s.messages = nil
+	return nil
+}
 func (s *subSession) AppendMessage(msg core.Message) error {
 	s.messages = append(s.messages, msg)
 	s.msgCount++
@@ -1389,13 +1392,17 @@ func (s *subSession) AppendMessage(msg core.Message) error {
 			// Strip enrichment tags before persisting — only the clean task
 			// description should be saved, not the CTO context, CLAUDE.md, or env vars.
 			cleanContent := stripEnrichmentTags(msg.Content)
-			_, _ = s.db.SaveUserMessage(ctx, s.project, s.dbAgentID, cleanContent)
+			if _, err := s.db.SaveUserMessage(ctx, s.project, s.dbAgentID, cleanContent); err != nil {
+				log.Printf("WARN: sub-session save user message agent=%s: %v", s.dbAgentID, err)
+			}
 		case "tool":
 			toolName := msg.Name
 			if toolName == "" {
 				toolName = "unknown"
 			}
-			_, _ = s.db.SaveToolResult(ctx, s.project, s.dbAgentID, msg.ToolCallID, toolName, msg.Content)
+			if _, err := s.db.SaveToolResult(ctx, s.project, s.dbAgentID, msg.ToolCallID, toolName, msg.Content); err != nil {
+				log.Printf("WARN: sub-session save tool result agent=%s tool=%s: %v", s.dbAgentID, toolName, err)
+			}
 		case "assistant":
 			toolCallsJSON := "[]"
 			if len(msg.ToolCalls) > 0 {
@@ -1403,7 +1410,9 @@ func (s *subSession) AppendMessage(msg core.Message) error {
 					toolCallsJSON = string(tcJSON)
 				}
 			}
-			_, _ = s.db.SaveAssistantMessage(ctx, s.project, s.dbAgentID, msg.Content, msg.ReasoningContent, toolCallsJSON)
+			if _, err := s.db.SaveAssistantMessage(ctx, s.project, s.dbAgentID, msg.Content, msg.ReasoningContent, toolCallsJSON); err != nil {
+				log.Printf("WARN: sub-session save assistant message agent=%s: %v", s.dbAgentID, err)
+			}
 		}
 	}
 

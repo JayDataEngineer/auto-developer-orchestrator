@@ -1127,3 +1127,63 @@ func (d *Database) PruneRunLogs(ctx context.Context, jobID string, keepN int) er
 		)`), jobID, jobID, keepN)
 	return err
 }
+
+// ── Scratch Notes ──
+
+// ScratchNote is a persisted scratch pad entry.
+type ScratchNote struct {
+	ID        string
+	AgentID   string
+	Content   string
+	Tags      string // JSON array
+	UpdatedAt string
+}
+
+// LoadScratchNotes loads all scratch notes for an agent.
+func (d *Database) LoadScratchNotes(ctx context.Context, agentID string) ([]ScratchNote, error) {
+	rows, err := d.db.QueryContext(ctx,
+		Rebind(d.dialect, `SELECT id, agent_id, content, tags, updated_at FROM scratch_notes WHERE agent_id = ? ORDER BY updated_at`),
+		agentID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var notes []ScratchNote
+	for rows.Next() {
+		var n ScratchNote
+		if err := rows.Scan(&n.ID, &n.AgentID, &n.Content, &n.Tags, &n.UpdatedAt); err != nil {
+			return nil, err
+		}
+		notes = append(notes, n)
+	}
+	return notes, rows.Err()
+}
+
+// SaveScratchNote upserts a single scratch note.
+func (d *Database) SaveScratchNote(ctx context.Context, agentID, id, content, tagsJSON string) error {
+	_, err := d.db.ExecContext(ctx,
+		Rebind(d.dialect, `INSERT INTO scratch_notes (id, agent_id, content, tags, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(agent_id, id) DO UPDATE SET content=excluded.content, tags=excluded.tags, updated_at=excluded.updated_at`),
+		id, agentID, content, tagsJSON,
+	)
+	return err
+}
+
+// DeleteScratchNote deletes a single scratch note.
+func (d *Database) DeleteScratchNote(ctx context.Context, agentID, id string) error {
+	_, err := d.db.ExecContext(ctx,
+		Rebind(d.dialect, `DELETE FROM scratch_notes WHERE agent_id = ? AND id = ?`),
+		agentID, id,
+	)
+	return err
+}
+
+// ClearScratchNotes deletes all scratch notes for an agent.
+func (d *Database) ClearScratchNotes(ctx context.Context, agentID string) error {
+	_, err := d.db.ExecContext(ctx,
+		Rebind(d.dialect, `DELETE FROM scratch_notes WHERE agent_id = ?`),
+		agentID,
+	)
+	return err
+}

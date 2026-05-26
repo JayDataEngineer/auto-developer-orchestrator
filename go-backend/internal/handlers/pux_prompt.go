@@ -153,6 +153,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		ArtifactDB:      h.db,
 		TranscriptDB:    h.db,
 		Project:         req.Project,
+		AgentID:         req.Project + ":" + req.AgentId, // composite key for scratch note persistence
 		BrowserProvider: h.cuBridge, // wire accessibility/cookie/storage tools to employees
 		DesktopProvider: h.cuBridge, // wire desktop screenshot/click/type/key tools to employees
 		ToolPerms:       h.toolPerms, // wire per-tool permission checks

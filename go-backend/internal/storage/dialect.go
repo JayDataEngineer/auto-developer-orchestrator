@@ -204,6 +204,15 @@ CREATE TABLE IF NOT EXISTS scheduler_run_logs (
 
 CREATE INDEX IF NOT EXISTS idx_run_logs_job_created
 	ON scheduler_run_logs(job_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS scratch_notes (
+	id TEXT NOT NULL,
+	agent_id TEXT NOT NULL,
+	content TEXT NOT NULL DEFAULT '',
+	tags TEXT NOT NULL DEFAULT '[]',
+	updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (agent_id, id)
+);
 `
 
 // SQLite DDL — uses AUTOINCREMENT and WAL journal mode params in connection string.
@@ -367,4 +376,13 @@ CREATE TABLE IF NOT EXISTS scheduler_run_logs (
 
 CREATE INDEX IF NOT EXISTS idx_run_logs_job_created
 	ON scheduler_run_logs(job_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS scratch_notes (
+	id TEXT NOT NULL,
+	agent_id TEXT NOT NULL,
+	content TEXT NOT NULL DEFAULT '',
+	tags TEXT NOT NULL DEFAULT '[]',
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (agent_id, id)
+);
 `

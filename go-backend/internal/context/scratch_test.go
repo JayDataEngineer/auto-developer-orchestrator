@@ -1,7 +1,11 @@
 package context
 
 import (
+	"context"
+	"path/filepath"
 	"testing"
+
+	"github.com/auto-developer-orchestrator/backend/internal/storage"
 )
 
 func TestScratchStore_WriteAndRead(t *testing.T) {
@@ -204,4 +208,101 @@ func searchSubstring(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestScratchStore_PersistenceRoundTrip(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "scratch-test.db")
+	db, err := storage.NewDatabase(dbPath)
+	if err != nil {
+		t.Skipf("skip: can't create DB: %v", err)
+	}
+	defer db.Close()
+
+	agentID := "test-project:default"
+
+	// First session: write notes
+	s1 := NewPersistentScratchStore(db, agentID)
+	s1.Write("plan", "Step 1: design\nStep 2: implement", []string{"plan"})
+	s1.Write("findings", "API returns JSON", []string{"api"})
+
+	// Simulate session restart — create a new store (like a new orchestrator)
+	s2 := NewPersistentScratchStore(db, agentID)
+
+	// Notes should survive
+	note, ok := s2.Read("plan")
+	if !ok {
+		t.Fatal("expected plan note to survive session restart")
+	}
+	if note.Content != "Step 1: design\nStep 2: implement" {
+		t.Fatalf("unexpected content: %q", note.Content)
+	}
+
+	note2, ok := s2.Read("findings")
+	if !ok {
+		t.Fatal("expected findings note to survive session restart")
+	}
+	if note2.Content != "API returns JSON" {
+		t.Fatalf("unexpected content: %q", note2.Content)
+	}
+
+	// Update and verify persistence
+	s2.Write("plan", "Updated plan", nil)
+	s3 := NewPersistentScratchStore(db, agentID)
+	note3, ok := s3.Read("plan")
+	if !ok {
+		t.Fatal("expected plan note after update")
+	}
+	if note3.Content != "Updated plan" {
+		t.Fatalf("expected updated content, got %q", note3.Content)
+	}
+
+	// Delete and verify
+	s3.Delete("findings")
+	s4 := NewPersistentScratchStore(db, agentID)
+	_, ok = s4.Read("findings")
+	if ok {
+		t.Fatal("expected findings note to be deleted")
+	}
+	if n := len(s4.List()); n != 1 {
+		t.Fatalf("expected 1 note, got %d", n)
+	}
+
+	// Clear and verify
+	s4.Write("temp", "will be cleared", nil)
+	s4.clearMemory()
+	// DB should still have the notes (clearMemory is internal only)
+	s5 := NewPersistentScratchStore(db, agentID)
+	if len(s5.List()) != 2 {
+		t.Fatalf("expected 2 notes after clearMemory (DB unaffected), got %d", len(s5.List()))
+	}
+}
+
+func TestScratchStore_ClearToolClearsDB(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "scratch-clear-test.db")
+	db, err := storage.NewDatabase(dbPath)
+	if err != nil {
+		t.Skipf("skip: can't create DB: %v", err)
+	}
+	defer db.Close()
+
+	agentID := "test-clear:default"
+	store := NewPersistentScratchStore(db, agentID)
+	store.Write("a", "1", nil)
+	store.Write("b", "2", nil)
+
+	tool := NewScratchClearTool(store)
+	result, err := tool.Execute(context.Background(), map[string]any{})
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	m := result.(map[string]any)
+	if m["cleared"] != 2 {
+		t.Fatalf("expected cleared=2, got %v", m["cleared"])
+	}
+
+	// Verify DB is empty by creating a fresh store
+	s2 := NewPersistentScratchStore(db, agentID)
+	if len(s2.List()) != 0 {
+		t.Fatalf("expected 0 notes after clear, got %d", len(s2.List()))
+	}
 }
