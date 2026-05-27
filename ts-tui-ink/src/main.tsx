@@ -195,6 +195,13 @@ usePuxStore.subscribe((state, prev) => {
 
 // ── Render ──
 
+/** Check if the terminal supports the Kitty keyboard protocol. */
+function supportsKittyKeyboard(): boolean {
+	const term = process.env.TERM_PROGRAM ?? process.env.TERM ?? "";
+	return term === "kitty" || term === "xterm-kitty" || term === "WezTerm" ||
+		(process.env.KITTY_WINDOW_ID !== undefined);
+}
+
 const appElement = React.createElement(App, {
 	model: modelName,
 	project: projectName,
@@ -203,7 +210,7 @@ const appElement = React.createElement(App, {
 const instance = render(appElement, {
 	exitOnCtrlC: false,
 	incrementalRendering: true,
-	kittyKeyboard: { mode: "auto" },
+	kittyKeyboard: supportsKittyKeyboard() ? { mode: "auto" } : false,
 });
 
 // Force Ink to clear and re-render on terminal resize.
