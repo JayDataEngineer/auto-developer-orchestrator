@@ -169,7 +169,7 @@ interface PuxState {
 	respondToDecision: (action: string, value: string) => Promise<void>;
 	loadModels: () => Promise<void>;
 	toggleModelPicker: () => void;
-	loadConversations: () => Promise<void>;
+	loadConversations: (options?: { projectScope?: boolean }) => Promise<void>;
 	loadProjects: () => Promise<void>;
 	removeProject: (name: string) => Promise<void>;
 	setModel: (model: string) => void;
@@ -382,8 +382,13 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		});
 	},
 
-	loadConversations: async () => {
-		const update = await apiLoad("/api/pux/conversations", (data: unknown) => {
+	loadConversations: async (options?: { projectScope?: boolean }) => {
+		const { activeProject } = get();
+		const scoped = options?.projectScope && activeProject;
+		const url = scoped
+			? `/api/pux/conversations?project=${encodeURIComponent(activeProject)}`
+			: "/api/pux/conversations";
+		const update = await apiLoad(url, (data: unknown) => {
 			const convs = Array.isArray(data) ? data as Conversation[] : [];
 			const current = get().conversations;
 			// Order-independent dedup: compare by key, not by array index

@@ -1,7 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import { usePuxStore } from "@pux/shared";
-import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
+import { useColors, symbols } from "../theme.js";
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
 
 export function SessionSwitcher() {
   const show = usePuxStore((s) => s.showSessionSwitcher);
@@ -17,7 +29,7 @@ export function SessionSwitcher() {
   // Load conversations when opened
   useEffect(() => {
     if (show) {
-      usePuxStore.getState().loadConversations();
+      usePuxStore.getState().loadConversations({ projectScope: true });
       setFilter("");
       setIdx(0);
     }
@@ -109,7 +121,7 @@ export function SessionSwitcher() {
                 {conv.title?.slice(0, 40) || "(untitled)"}
               </Text>
               <Text dimColor color="gray">
-                {" "}{conv.messageCount}msgs {symbols.dot} {conv.project}
+                {" "}{conv.messageCount}msgs · {relativeTime(conv.lastAt)}
               </Text>
               {isActive && <Text color={colors.brand}> ←</Text>}
             </Text>
