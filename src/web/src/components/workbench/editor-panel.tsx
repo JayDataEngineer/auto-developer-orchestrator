@@ -24,12 +24,14 @@ import {
 	RefreshCwIcon,
 	ServerIcon,
 	WifiOffIcon,
+	PencilIcon,
 } from "lucide-react";
 import {
 	ContextMenu,
 	ContextMenuTrigger,
 	ContextMenuContent,
 	ContextMenuItem,
+	ContextMenuSeparator,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { usePuxStore } from "@/lib/pux-store";
@@ -138,6 +140,9 @@ function FileTreeItem({
 	onDelete,
 	onCreateFile,
 	onMoveFile,
+	renamingPath,
+	onStartRename,
+	onFinishRename,
 }: {
 	entry: FileEntry;
 	depth: number;
@@ -146,8 +151,38 @@ function FileTreeItem({
 	onDelete: (path: string) => void;
 	onCreateFile: (dirPath: string) => void;
 	onMoveFile: (from: string, to: string) => void;
+	renamingPath: string | null;
+	onStartRename: (path: string) => void;
+	onFinishRename: (oldPath: string, newName: string) => void;
 }) {
 	const [dragOver, setDragOver] = useState(false);
+	const [renameValue, setRenameValue] = useState("");
+	const renameRef = useRef<HTMLInputElement>(null);
+
+	const isRenaming = renamingPath === entry.path;
+
+	useEffect(() => {
+		if (isRenaming) {
+			// Pre-fill with just the name, select the stem (before extension)
+			setRenameValue(entry.name);
+			setTimeout(() => {
+				const input = renameRef.current;
+				if (input) {
+					input.focus();
+					const dotIdx = entry.name.lastIndexOf(".");
+					input.setSelectionRange(0, dotIdx > 0 ? dotIdx : entry.name.length);
+				}
+			}, 0);
+		}
+	}, [isRenaming, entry.name]);
+
+	const submitRename = () => {
+		const trimmed = renameValue.trim();
+		if (trimmed && trimmed !== entry.name) {
+			onFinishRename(entry.path, trimmed);
+		}
+		// onStartRename(null) is called by parent onFinishRename
+	};
 
 	if (entry.type === "dir") {
 		return (
@@ -187,9 +222,25 @@ function FileTreeItem({
 								size={14}
 								className="shrink-0 text-yellow-500 group-data-[state=open]/tree:hidden"
 							/>
-							<span className="truncate">{entry.name}</span>
+							{isRenaming ? (
+								<input
+									ref={renameRef}
+									value={renameValue}
+									onChange={(e) => setRenameValue(e.target.value)}
+									onKeyDown={(e) => {
+										if (e.key === "Enter") { e.stopPropagation(); submitRename(); }
+										if (e.key === "Escape") { onStartRename(""); }
+									}}
+									onBlur={submitRename}
+									onClick={(e) => e.stopPropagation()}
+									className="flex-1 bg-transparent text-xs outline-none ring-1 ring-primary rounded px-0.5"
+								/>
+							) : (
+								<span className="truncate">{entry.name}</span>
+							)}
 						</button>
 					</CollapsibleTrigger>
+					{!isRenaming && (
 					<ContextMenu>
 						<ContextMenuTrigger asChild>
 							<button className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-accent group-hover/tree:opacity-100">
@@ -201,6 +252,11 @@ function FileTreeItem({
 								<PlusIcon size={12} className="mr-1.5" />
 								New File
 							</ContextMenuItem>
+							<ContextMenuItem onClick={() => onStartRename(entry.path)}>
+								<PencilIcon size={12} className="mr-1.5" />
+								Rename
+							</ContextMenuItem>
+							<ContextMenuSeparator />
 							<ContextMenuItem
 								onClick={() => onDelete(entry.path)}
 								className="text-red-500 focus:text-red-500"
@@ -210,6 +266,7 @@ function FileTreeItem({
 							</ContextMenuItem>
 						</ContextMenuContent>
 					</ContextMenu>
+					)}
 				</div>
 				<CollapsibleContent>
 					{entry.children?.map((child) => (
@@ -222,6 +279,9 @@ function FileTreeItem({
 							onDelete={onDelete}
 							onCreateFile={onCreateFile}
 							onMoveFile={onMoveFile}
+							renamingPath={renamingPath}
+							onStartRename={onStartRename}
+							onFinishRename={onFinishRename}
 						/>
 					))}
 				</CollapsibleContent>
@@ -233,8 +293,8 @@ function FileTreeItem({
 		<ContextMenu>
 			<ContextMenuTrigger asChild>
 				<button
-					onClick={() => onSelect(entry.path)}
-					draggable
+					onClick={() => { if (!isRenaming) onSelect(entry.path); }}
+					draggable={!isRenaming}
 					onDragStart={(e) => {
 						e.dataTransfer.setData("text/plain", entry.path);
 						e.dataTransfer.effectAllowed = "move";
@@ -246,10 +306,38 @@ function FileTreeItem({
 					style={{ paddingLeft: `${depth * 12 + 4 + 16}px` }}
 				>
 					{getFileIcon(entry.name)}
-					<span className="truncate">{entry.name}</span>
+					{isRenaming ? (
+						<input
+							ref={renameRef}
+							value={renameValue}
+							onChange={(e) => setRenameValue(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") { e.stopPropagation(); submitRename(); }
+								if (e.key === "Escape") { onStartRename(""); }
+							}}
+							onBlur={submitRename}
+							onClick={(e) => e.stopPropagation()}
+							className="flex-1 bg-transparent text-xs outline-none ring-1 ring-primary rounded px-0.5"
+						/>
+					) : (
+						<span className="truncate">{entry.name}</span>
+					)}
 				</button>
 			</ContextMenuTrigger>
 			<ContextMenuContent>
+				<ContextMenuItem onClick={() => {
+					// New file in the same directory as this file
+					const dir = entry.path.includes("/") ? entry.path.substring(0, entry.path.lastIndexOf("/")) : "";
+					onCreateFile(dir);
+				}}>
+					<PlusIcon size={12} className="mr-1.5" />
+					New File
+				</ContextMenuItem>
+				<ContextMenuItem onClick={() => onStartRename(entry.path)}>
+					<PencilIcon size={12} className="mr-1.5" />
+					Rename
+				</ContextMenuItem>
+				<ContextMenuSeparator />
 				<ContextMenuItem
 					onClick={() => onDelete(entry.path)}
 					className="text-red-500 focus:text-red-500"
@@ -261,6 +349,15 @@ function FileTreeItem({
 		</ContextMenu>
 	);
 }
+
+// ── Undo stack for file operations ──
+
+type UndoAction =
+	| { type: "delete"; path: string; trashPath: string }
+	| { type: "rename"; from: string; to: string }
+	| { type: "create"; path: string };
+
+const undoStack: UndoAction[] = [];
 
 // ── Cache & dirty tracking ──
 
@@ -301,6 +398,7 @@ export function EditorPanel() {
 	const [sshStatus, setSshStatus] = useState<"unknown" | "connected" | "disconnected">("unknown");
 	const [isSshProject, setIsSshProject] = useState(false);
 	const [sshConnecting, setSshConnecting] = useState(false);
+	const [renamingPath, setRenamingPath] = useState<string | null>(null);
 
 	// Refresh file tree
 	const refreshTree = useCallback(() => {
@@ -554,6 +652,7 @@ export function EditorPanel() {
 			if (resp.ok) {
 				const data = await resp.json();
 				const trashPath = data.trashPath as string;
+				undoStack.push({ type: "delete", path, trashPath });
 				fileCache.delete(path);
 				dirtyFiles.delete(path);
 				setDirty(new Set(dirtyFiles));
@@ -594,6 +693,7 @@ export function EditorPanel() {
 				body: JSON.stringify({ project: activeProject, path: name.trim() }),
 			});
 			if (resp.ok) {
+				undoStack.push({ type: "create", path: name.trim() });
 				await new Promise<void>((resolve) => {
 					refreshTree();
 					// Give tree a tick to re-render, then open the new file
@@ -620,6 +720,7 @@ export function EditorPanel() {
 				body: JSON.stringify({ project: activeProject, from, to }),
 			});
 			if (resp.ok) {
+				undoStack.push({ type: "rename", from: to, to: from });
 				fileCache.delete(from);
 				dirtyFiles.delete(from);
 				setDirty(new Set(dirtyFiles));
@@ -629,6 +730,96 @@ export function EditorPanel() {
 		},
 		[activeProject, closeTab, refreshTree],
 	);
+
+	// Rename file/directory
+	const renameItem = useCallback(
+		async (oldPath: string, newName: string) => {
+			if (!activeProject || !newName.trim()) return;
+			const dir = oldPath.includes("/") ? oldPath.substring(0, oldPath.lastIndexOf("/")) : "";
+			const newPath = dir ? `${dir}/${newName}` : newName;
+			if (newPath === oldPath) return;
+			const resp = await fetch("/api/pux/file/move", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ project: activeProject, from: oldPath, to: newPath }),
+			});
+			if (resp.ok) {
+				undoStack.push({ type: "rename", from: newPath, to: oldPath });
+				// Update caches and tabs
+				const cached = fileCache.get(oldPath);
+				if (cached !== undefined) {
+					fileCache.delete(oldPath);
+					fileCache.set(newPath, cached);
+				}
+				if (dirtyFiles.has(oldPath)) {
+					dirtyFiles.delete(oldPath);
+					dirtyFiles.add(newPath);
+					setDirty(new Set(dirtyFiles));
+				}
+				setTabs((prev) =>
+					prev.map((t) => t.path === oldPath ? { path: newPath, name: newName } : t),
+				);
+				if (activePath === oldPath) {
+					setActivePath(newPath);
+				}
+				refreshTree();
+			}
+			setRenamingPath(null);
+		},
+		[activeProject, activePath, refreshTree],
+	);
+
+	// Global undo for file operations (Ctrl+Z when not in editor)
+	const handleUndo = useCallback(async () => {
+		const action = undoStack.pop();
+		if (!action || !activeProject) return;
+		if (action.type === "delete") {
+			// Restore from trash
+			const resp = await fetch("/api/pux/file/restore", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ project: activeProject, trashPath: action.trashPath }),
+			});
+			if (resp.ok) refreshTree();
+		} else if (action.type === "rename") {
+			// Swap back
+			await fetch("/api/pux/file/move", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ project: activeProject, from: action.from, to: action.to }),
+			});
+			refreshTree();
+		} else if (action.type === "create") {
+			// Delete the created file
+			await fetch(
+				`/api/pux/file?project=${encodeURIComponent(activeProject)}&path=${encodeURIComponent(action.path)}`,
+				{ method: "DELETE" },
+			);
+			closeTab(action.path);
+			refreshTree();
+		}
+	}, [activeProject, refreshTree, closeTab]);
+
+	// Global keyboard shortcuts
+	useEffect(() => {
+		const handler = (e: KeyboardEvent) => {
+			// Ctrl+Z / Cmd+Z — only when not in Monaco editor (Monaco handles its own undo)
+			if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+				const target = e.target as HTMLElement;
+				if (target.closest(".monaco-editor")) return; // let Monaco handle it
+				e.preventDefault();
+				handleUndo();
+			}
+			// Ctrl+S / Cmd+S — save when in the file tree area
+			if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+				// saveFile handles the actual save; this catches it when focus is outside Monaco
+				e.preventDefault();
+				saveFile();
+			}
+		};
+		window.addEventListener("keydown", handler);
+		return () => window.removeEventListener("keydown", handler);
+	}, [handleUndo, saveFile]);
 
 	const handleEditorMount: OnMount = (editor) => {
 		editorRef.current = editor;
@@ -849,6 +1040,9 @@ export function EditorPanel() {
 									}, 0);
 								}}
 								onMoveFile={moveFile}
+								renamingPath={renamingPath}
+								onStartRename={(path) => setRenamingPath(path || null)}
+								onFinishRename={renameItem}
 							/>
 						))
 					)}
