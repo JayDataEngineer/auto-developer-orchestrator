@@ -676,14 +676,18 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 							if (toolId) {
 								const updates: Record<string, unknown> = {};
-								if (parsed.error) {
+								const errMsg = parsed.error as string | undefined;
+								if (errMsg) {
+									// Tool failed — store error as result so rendering can show it.
+									// If result is also present, prepend it before the error.
+									const existing = parsed.result;
 									updates.isError = true;
-									// Store error message as result so TUI can display it
-									if (parsed.result === undefined || parsed.result === null) {
-										updates.result = parsed.error;
-									}
+									updates.result = existing
+										? `${typeof existing === "string" ? existing : JSON.stringify(existing)}\n\nError: ${errMsg}`
+										: `Error: ${errMsg}`;
+								} else if (parsed.result !== undefined && parsed.result !== null) {
+									updates.result = parsed.result;
 								}
-								if (parsed.result !== undefined) updates.result = parsed.result;
 								if (parsed.artifact !== undefined) updates.artifact = parsed.artifact;
 								if (parsed.modelContent) {
 									updates.modelContent = [{ type: "text" as const, text: parsed.modelContent as string }];

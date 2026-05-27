@@ -344,8 +344,19 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 		status?.type === "incomplete" && status.reason === "cancelled";
 	const isRunning = status?.type === "running";
 	const isComplete = status?.type === "complete";
-	const hasError = status?.type === "incomplete";
 	const hasResult = result !== undefined && result !== null;
+
+	// Detect tool execution errors: result string starting with "Error:" or
+	// containing "<tool_use_error>" (backend wraps errors this way).
+	const resultStr = typeof result === "string" ? result : "";
+	const hasError = status?.type === "incomplete" ||
+		/^Error:/m.test(resultStr) ||
+		resultStr.includes("<tool_use_error>");
+
+	// Extract clean error message from result
+	const errorText = hasError && resultStr
+		? resultStr.replace(/<\/?tool_use_error>/g, "").trim()
+		: null;
 
 	// Check if this is a screenshot tool before early returns
 	const isScreenshotTool = ["screenshot", "observe", "browser_screenshot",
@@ -450,18 +461,23 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 				onClick={() => hasResult && setExpanded(!expanded)}
 			>
 				<Icon size={12} className={cn("shrink-0", color)} />
-				<span className="font-medium text-muted-foreground">
+				<span className={cn("font-medium", hasError ? "text-red-500" : "text-muted-foreground")}>
 					{label}
 				</span>
-				{preview && (
+				{preview && !hasError && (
 					<span className="truncate text-dim max-w-[200px]">
 						{preview}
+					</span>
+				)}
+				{hasError && errorText && (
+					<span className="truncate text-red-400/80 max-w-[300px]">
+						{errorText.slice(0, 120)}
 					</span>
 				)}
 				{isCancelled && (
 					<span className="text-dim line-through">cancelled</span>
 				)}
-				{hasResult && (
+				{hasResult && !hasError && (
 					<ChevronDownIcon
 						size={10}
 						className={cn(
@@ -512,17 +528,18 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 					/>
 				</div>
 			)}
-			{/* Expandable text result (non-image, non-screenshot) */}
-			{hasResult && expanded && !imageInfo && (
+			{/* Tool error — always visible, red styling */}
+			{hasError && errorText && (
 				<div className="px-2 pb-1 pl-6">
-					<pre
-						className={cn(
-							"whitespace-pre-wrap text-[11px] leading-relaxed rounded-md p-2 max-h-48 overflow-y-auto",
-							hasError
-								? "bg-red-500/5 text-red-400 border border-red-500/20"
-								: "bg-muted/50 text-muted-foreground",
-						)}
-					>
+					<pre className="whitespace-pre-wrap text-[11px] leading-relaxed rounded-md p-2 max-h-48 overflow-y-auto bg-red-500/5 text-red-400 border border-red-500/20">
+						{errorText}
+					</pre>
+				</div>
+			)}
+			{/* Expandable text result (non-image, non-screenshot, non-error) */}
+			{hasResult && expanded && !imageInfo && !hasError && (
+				<div className="px-2 pb-1 pl-6">
+					<pre className="whitespace-pre-wrap text-[11px] leading-relaxed rounded-md p-2 max-h-48 overflow-y-auto bg-muted/50 text-muted-foreground">
 						{typeof result === "string" ? result : JSON.stringify(result, null, 2)}
 					</pre>
 				</div>
