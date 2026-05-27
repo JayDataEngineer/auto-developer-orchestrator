@@ -531,6 +531,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 					// Stream stalled — no data for 30s. Yield complete and return.
 					if (readErr instanceof DOMException && readErr.name === "TimeoutError") {
 						timing.totalStreamTime = Date.now() - timing.streamStartTime;
+						usePuxStore.setState({ ctoRunning: false });
 						yield buildSnapshot(parts, sources, "complete", timing, stepsRef);
 						return;
 					}
@@ -547,6 +548,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 				for (const { event, data } of events) {
 					if (data === "[DONE]") {
 						timing.totalStreamTime = Date.now() - timing.streamStartTime;
+						usePuxStore.setState({ ctoRunning: false });
 						yield buildSnapshot(parts, sources, "complete", timing, stepsRef);
 						return;
 					}
