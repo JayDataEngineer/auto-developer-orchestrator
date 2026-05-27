@@ -1,8 +1,8 @@
 /**
  * AssistantMessage — renders assistant messages.
  *
- * Renders text, reasoning (collapsed), and tool calls.
- * Reasoning via ReasoningAccordion only (no duplicate from parts loop).
+ * All parts (reasoning, tool calls, text, images, sources) rendered
+ * in chronological order from the parts array. No separate accordion.
  * Tool calls: single line with proper truncation to prevent mid-word wrapping.
  */
 
@@ -12,12 +12,29 @@ import Spinner from "ink-spinner";
 import { useAuiState } from "@assistant-ui/react-ink";
 import { getToolArgPreview } from "@pux/shared";
 import { usePuxStore } from "@pux/shared";
-import { ReasoningAccordion } from "./reasoning-accordion.js";
 import { BranchPicker } from "./branch-picker.js";
 import { MarkdownText } from "./markdown-text.js";
 import { TerminalImage } from "./terminal-image.js";
 import { useColors, symbols, BLOCKQUOTE_BAR, BLACK_CIRCLE } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
+
+// Render a single reasoning part inline (collapsed — one line)
+function ReasoningLine({ text, isRunning }: { text: string; isRunning: boolean }) {
+	const colors = useColors();
+	const { cols } = useTerminalSize();
+	const textWidth = cols - 6; // indent + BLOCKQUOTE_BAR + space + label
+	const lines = text.split("\n").filter((l) => l.trim());
+	if (lines.length === 0) return null;
+	const firstLine = lines[0];
+	const label = isRunning ? "Thinking" : "Thought";
+	return (
+		<Box flexDirection="column" marginBottom={1} width={textWidth}>
+			<Text dimColor color={colors.textMuted}>
+				{BLOCKQUOTE_BAR} {label}: {firstLine}
+			</Text>
+		</Box>
+	);
+}
 
 // Truncate at word boundary — never cuts mid-word
 function trunc(s: string, max: number): string {
@@ -69,10 +86,7 @@ export function AssistantMessage() {
 
 	return (
 		<Box flexDirection="column" marginTop={1} paddingX={1} width={textWidth}>
-			{/* Reasoning accordion — handles all reasoning display */}
-			<ReasoningAccordion />
-
-			{/* Parts: tool calls, text. Skip reasoning (handled by accordion above) */}
+			{/* Parts rendered in chronological order */}
 			{parts.map((part: any, i: number) => {
 				switch (part.type) {
 					case "tool-call":
@@ -97,8 +111,10 @@ export function AssistantMessage() {
 							</Box>
 						);
 					case "reasoning":
-						// Handled by ReasoningAccordion above — skip duplicate
-						return null;
+						if (!part.text?.trim()) return null;
+						return (
+							<ReasoningLine key={i} text={part.text} isRunning={isRunning} />
+						);
 					case "text":
 						if (!part.text?.trim()) return null;
 						return (
@@ -278,7 +294,7 @@ function DelegateToolCallDisplay({
 		<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
 			<Text wrap="truncate-end">
 				<Text color={colors.running}>
-					{isRunning ? <Spinner type="dots" /> : BLACK_CIRCLE}{" "}
+					{symbols.toolRunning}{" "}
 				</Text>
 				<Text bold color={colors.brand}>{label}</Text>
 				{taskPreview && <Text color="gray"> {taskPreview}</Text>}
