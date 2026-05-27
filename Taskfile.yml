@@ -48,11 +48,16 @@ tasks:
   # ── Local Development ───────────────────────────────────────────────────
   dev:
     desc: Start Go backend + Vite frontend
+    vars:
+      VERSION:
+        sh: cat VERSION
     cmds:
       - cmd: fuser -k {{.GO_PORT}}/tcp 2>/dev/null; fuser -k {{.JS_PORT}}/tcp 2>/dev/null; true
         ignore_error: true
         silent: true
-      - cmd: cd go-backend && PROJECT_ROOT=$(pwd)/.. OPENSHELL_IMAGE=pux-sandbox:latest LANGFUSE_HOST=http://localhost:3100 LANGFUSE_PUBLIC_KEY=pk-orch-2026-lf-a1b2c3d4e5f6 LANGFUSE_SECRET_KEY=sk-orch-2026-lf-a1b2c3d4e5f6 go run ./cmd/server/ &
+      - cmd: cd go-backend && go build -ldflags "-X github.com/auto-developer-orchestrator/backend/internal.Version={{.VERSION}}" -o server ./cmd/server/
+        desc: Build backend (catch compile errors before backgrounding)
+      - cmd: cd go-backend && PROJECT_ROOT=$(pwd)/.. OPENSHELL_IMAGE=pux-sandbox:latest LANGFUSE_HOST=http://localhost:3100 LANGFUSE_PUBLIC_KEY=pk-orch-2026-lf-a1b2c3d4e5f6 LANGFUSE_SECRET_KEY=sk-orch-2026-lf-a1b2c3d4e5f6 ./server &
         ignore_error: true
       - cmd: npm run dev -- --port {{.JS_PORT }} &
         ignore_error: true
@@ -64,6 +69,9 @@ tasks:
             echo "Backend  http://localhost:{{.GO_PORT}}"
             echo "Frontend http://localhost:{{.JS_PORT}}"
             break
+          fi
+          if [ "$i" -eq 30 ]; then
+            echo "WARNING: services not ready after 30s (Go={{.GO_PORT}} Vite={{.JS_PORT}})"
           fi
           sleep 1
         done
