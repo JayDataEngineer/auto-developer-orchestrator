@@ -32,6 +32,9 @@ export function AssistantMessage() {
 	const parts = useAuiState((s) => s.message.parts);
 	const isRunning = useAuiState((s) => s.message.status?.type === "running");
 	const colors = useColors();
+	const { cols } = useTerminalSize();
+	// Explicit width: paddingX(1) from outer Box = 2 chars total
+	const textWidth = cols - 2;
 	const hasContent = parts && parts.some((p: any) =>
 		(p.type === "text" && p.text?.trim()) ||
 		p.type === "tool-call" ||
@@ -64,7 +67,7 @@ export function AssistantMessage() {
 	if (!parts || parts.length === 0) return null;
 
 	return (
-		<Box flexDirection="column" marginTop={1} paddingX={1}>
+		<Box flexDirection="column" marginTop={1} paddingX={1} width={textWidth}>
 			{/* Reasoning accordion — handles all reasoning display */}
 			<ReasoningAccordion />
 
