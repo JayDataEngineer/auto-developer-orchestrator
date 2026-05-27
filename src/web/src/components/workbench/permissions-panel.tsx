@@ -17,6 +17,8 @@ import {
 	ChevronRight,
 	Lock,
 	Unlock,
+	Plus,
+	X,
 } from "lucide-react";
 
 // ── Types ──
@@ -26,6 +28,18 @@ interface ToolPermission {
 	level: "auto" | "confirm" | "deny";
 	reason?: string;
 	risk?: string;
+}
+
+interface BashCommandRule {
+	id: string;
+	pattern: string;
+	level: "auto" | "confirm" | "deny";
+}
+
+interface SystemRulesSummary {
+	hard_deny: string[];
+	ask_rules: string[];
+	read_only: string[];
 }
 
 // ── Tool metadata (descriptions + categories) ──
@@ -86,7 +100,7 @@ function SummaryBar({ permissions }: { permissions: Record<string, ToolPermissio
 	);
 }
 
-// ── Segmented control (replaces the dropdown) ──
+// ── Segmented control ──
 
 function LevelControl({
 	value,
@@ -122,6 +136,175 @@ function LevelControl({
 					</button>
 				);
 			})}
+		</div>
+	);
+}
+
+// ── Bash sub-panel ──
+
+function BashSubPanel() {
+	const [bashRules, setBashRules] = useState<BashCommandRule[]>([]);
+	const [systemRules, setSystemRules] = useState<SystemRulesSummary | null>(null);
+	const [newPattern, setNewPattern] = useState("");
+	const [newLevel, setNewLevel] = useState<LevelValue>("confirm");
+	const [systemOpen, setSystemOpen] = useState(false);
+	const [adding, setAdding] = useState(false);
+
+	// Fetch both on mount
+	useEffect(() => {
+		fetch("/api/pux/bash-rules")
+			.then((r) => r.ok ? r.json() : [])
+			.then(setBashRules)
+			.catch(() => {});
+		fetch("/api/pux/bash-system-rules")
+			.then((r) => r.ok ? r.json() : null)
+			.then(setSystemRules)
+			.catch(() => {});
+	}, []);
+
+	const addRule = useCallback(async () => {
+		const pattern = newPattern.trim();
+		if (!pattern) return;
+		setAdding(true);
+		try {
+			const resp = await fetch("/api/pux/bash-rules", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ pattern, level: newLevel }),
+			});
+			if (resp.ok) {
+				const rule = await resp.json();
+				setBashRules((prev) => [...prev, rule]);
+				setNewPattern("");
+			}
+		} catch { /* ignore */ } finally {
+			setAdding(false);
+		}
+	}, [newPattern, newLevel]);
+
+	const removeRule = useCallback(async (id: string) => {
+		try {
+			const resp = await fetch(`/api/pux/bash-rules/${id}`, { method: "DELETE" });
+			if (resp.ok) {
+				setBashRules((prev) => prev.filter((r) => r.id !== id));
+			}
+		} catch { /* ignore */ }
+	}, []);
+
+	const levelDot = (level: string) =>
+		level === "auto" ? "bg-green-500" : level === "confirm" ? "bg-yellow-500" : "bg-red-500";
+	const levelLabel = (level: string) =>
+		level === "auto" ? "Allow" : level === "confirm" ? "Confirm" : "Block";
+
+	return (
+		<div className="ml-2 mr-1 mt-1 mb-1 border border-border rounded-md overflow-hidden">
+			{/* System rules */}
+			{systemRules && (
+				<Collapsible open={systemOpen} onOpenChange={setSystemOpen}>
+					<CollapsibleTrigger className="flex items-center gap-1.5 w-full px-2.5 py-1.5 hover:bg-accent/30 text-muted-foreground transition-colors">
+						<ChevronRight className={cn("h-2.5 w-2.5 transition-transform", systemOpen && "rotate-90")} />
+						<span className="text-[10px] font-medium uppercase tracking-wider">System Rules</span>
+					</CollapsibleTrigger>
+					<CollapsibleContent>
+						<div className="px-2.5 pb-2 space-y-1.5">
+							<SystemRuleGroup label="Always Blocked" items={systemRules.hard_deny} dot="bg-red-500" />
+							<SystemRuleGroup label="Ask First" items={systemRules.ask_rules} dot="bg-yellow-500" />
+							<SystemRuleGroup label="Auto-Approved" items={systemRules.read_only} dot="bg-green-500" />
+						</div>
+					</CollapsibleContent>
+				</Collapsible>
+			)}
+
+			{/* User rules */}
+			<div className="border-t border-border px-2.5 py-2">
+				<div className="flex items-center justify-between mb-1.5">
+					<span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Your Rules</span>
+					{bashRules.length > 0 && (
+						<span className="text-[9px] text-muted-foreground/60">{bashRules.length} rule{bashRules.length !== 1 ? "s" : ""}</span>
+					)}
+				</div>
+				{bashRules.length === 0 ? (
+					<p className="text-[10px] text-muted-foreground/60 py-1">No custom rules. Commands use system defaults.</p>
+				) : (
+					<div className="space-y-0.5">
+						{bashRules.map((rule) => (
+							<div key={rule.id} className="flex items-center gap-1.5 py-0.5 group">
+								<span className={cn("h-1.5 w-1.5 rounded-full shrink-0", levelDot(rule.level))} />
+								<code className="text-[10px] font-mono flex-1 truncate">{rule.pattern}</code>
+								<span className={cn(
+									"text-[9px] px-1.5 py-0.5 rounded font-medium",
+									rule.level === "auto" ? "bg-green-500/10 text-green-600 dark:text-green-400"
+									: rule.level === "confirm" ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400"
+									: "bg-red-500/10 text-red-600 dark:text-red-400",
+								)}>
+									{levelLabel(rule.level)}
+								</span>
+								<button
+									onClick={() => removeRule(rule.id)}
+									className="h-4 w-4 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-accent/50 transition-all"
+								>
+									<X className="h-2.5 w-2.5 text-muted-foreground" />
+								</button>
+							</div>
+						))}
+					</div>
+				)}
+			</div>
+
+			{/* Add rule form */}
+			<div className="border-t border-border px-2.5 py-2">
+				<div className="flex items-center gap-1.5">
+					<input
+						type="text"
+						value={newPattern}
+						onChange={(e) => setNewPattern(e.target.value)}
+						onKeyDown={(e) => e.key === "Enter" && addRule()}
+						placeholder="e.g. docker*, rm, git push*"
+						className="flex-1 min-w-0 px-2 py-1 text-[10px] font-mono bg-transparent border border-border rounded placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/50"
+					/>
+					<select
+						value={newLevel}
+						onChange={(e) => setNewLevel(e.target.value as LevelValue)}
+						className="px-1.5 py-1 text-[10px] bg-transparent border border-border rounded focus:outline-none focus:border-primary/50"
+					>
+						<option value="auto">Allow</option>
+						<option value="confirm">Confirm</option>
+						<option value="deny">Block</option>
+					</select>
+					<button
+						onClick={addRule}
+						disabled={adding || !newPattern.trim()}
+						className="h-6 w-6 flex items-center justify-center rounded border border-border hover:bg-accent/50 disabled:opacity-40 transition-colors"
+					>
+						<Plus className="h-3 w-3" />
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function SystemRuleGroup({ label, items, dot }: { label: string; items: string[]; dot: string }) {
+	const MAX_SHOW = 6;
+	if (items.length === 0) return null;
+	const shown = items.slice(0, MAX_SHOW);
+	const rest = items.length - MAX_SHOW;
+	return (
+		<div>
+			<div className="flex items-center gap-1.5 mb-0.5">
+				<span className={cn("h-1.5 w-1.5 rounded-full", dot)} />
+				<span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+			</div>
+			<div className="flex flex-wrap gap-1 pl-3">
+				{shown.map((item, i) => (
+					<span key={i} className="text-[9px] px-1.5 py-0.5 bg-secondary/50 rounded font-mono truncate max-w-[200px]" title={item}>
+						{item}
+					</span>
+				))}
+				{rest > 0 && (
+					<span className="text-[9px] px-1.5 py-0.5 text-muted-foreground/60">+{rest} more</span>
+				)}
+			</div>
 		</div>
 	);
 }
@@ -168,6 +351,51 @@ function ToolRow({
 	);
 }
 
+// ── Bash tool row (expandable) ──
+
+function BashToolRow({
+	perm,
+	saving,
+	onChange,
+}: {
+	perm: ToolPermission;
+	saving: string | null;
+	onChange: (tool: string, level: string) => void;
+}) {
+	const [expanded, setExpanded] = useState(false);
+	const riskColor = perm.risk === "high"
+		? "bg-red-500"
+		: perm.risk === "medium"
+			? "bg-yellow-500"
+			: "bg-green-500";
+
+	return (
+		<div>
+			<div
+				className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-accent/30 transition-colors cursor-pointer group"
+				onClick={() => setExpanded(!expanded)}
+			>
+				<div className="flex items-center gap-2 min-w-0 flex-1">
+					<ChevronRight className={cn("h-2.5 w-2.5 text-muted-foreground transition-transform shrink-0", expanded && "rotate-90")} />
+					<span className={cn("h-1.5 w-1.5 rounded-full shrink-0", riskColor)} />
+					<div className="min-w-0">
+						<span className="text-xs font-medium block truncate">Bash</span>
+						<span className="text-[10px] text-muted-foreground block truncate">Execute shell commands</span>
+					</div>
+				</div>
+				<div onClick={(e) => e.stopPropagation()}>
+					<LevelControl
+						value={perm.level as LevelValue}
+						onChange={(v) => onChange(perm.tool, v)}
+						disabled={saving === perm.tool}
+					/>
+				</div>
+			</div>
+			{expanded && <BashSubPanel />}
+		</div>
+	);
+}
+
 // ── Category section ──
 
 function CategorySection({
@@ -203,9 +431,13 @@ function CategorySection({
 			</CollapsibleTrigger>
 			<CollapsibleContent className="pl-3 pr-1">
 				<div className="flex flex-col gap-0.5 mt-0.5">
-					{tools.map((perm) => (
-						<ToolRow key={perm.tool} perm={perm} saving={saving} onChange={onChange} />
-					))}
+					{tools.map((perm) =>
+						perm.tool === "bash" ? (
+							<BashToolRow key={perm.tool} perm={perm} saving={saving} onChange={onChange} />
+						) : (
+							<ToolRow key={perm.tool} perm={perm} saving={saving} onChange={onChange} />
+						)
+					)}
 				</div>
 			</CollapsibleContent>
 		</Collapsible>

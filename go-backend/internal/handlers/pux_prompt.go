@@ -157,6 +157,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		BrowserProvider: h.cuBridge, // wire accessibility/cookie/storage tools to employees
 		DesktopProvider: h.cuBridge, // wire desktop screenshot/click/type/key tools to employees
 		ToolPerms:       h.toolPerms, // wire per-tool permission checks
+		BashRules:       h.bashRules, // wire user-defined bash command rules
 		SandboxOnly:     req.SandboxOnly, // scheduled jobs: restrict to bash/file ops only
 		TaskMgr:        h.taskMgr,       // background task support for bash commands
 	}

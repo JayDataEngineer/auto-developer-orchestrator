@@ -79,6 +79,7 @@ type Config struct {
 	Subscriber      chan<- core.AgentEvent      // optional: if set, ask_user tool can emit events to TUI
 	Scheduler       any                         // optional: *scheduler.Scheduler — passed through to scheduler tool
 	ToolPerms       *perms.ToolPermissionConfig // optional: if set, enables per-tool permission checks
+	BashRules       *perms.BashRuleStore        // optional: if set, enables user-defined bash command rules
 	SandboxOnly     bool                        // optional: if true, only bash + file tools available (no delegation, MCP, browser, etc.)
 	TaskMgr         *core.TaskManager           // optional: if set, bash tool supports run_in_background + task_output
 }
@@ -196,6 +197,9 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			SandboxID:       cfg.SandboxID,
 			GenerateOptions: core.GenerateOptions{MaxTokens: 16384, Temperature: 0.7, TopP: 0.95, TopK: 20},
 			ScratchStore:    scratchStore,
+			PermDecisions:   core.GlobalDecisions,
+			ToolPerms:       cfg.ToolPerms,
+			BashRules:       cfg.BashRules,
 			Logger:          logger,
 		})
 
@@ -463,6 +467,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			Project:            cfg.Project,
 			PermDecisions:      core.GlobalDecisions,
 			ToolPerms:          cfg.ToolPerms,
+			BashRules:          cfg.BashRules,
 			Summarizer: func(ctx context.Context, text string, targetChars int) (string, error) {
 				return ctxpkg.SummarizeText(ctx, summarizerProvider, text, targetChars)
 			},
@@ -608,6 +613,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		ScratchStore:    scratchStore,
 		PermDecisions:   core.GlobalDecisions,
 		ToolPerms:       cfg.ToolPerms,
+		BashRules:       cfg.BashRules,
 		ExtraHooks:      ctoHooks,
 		ToolResultProcessor: toolResultProcessor,
 		Logger:          logger,

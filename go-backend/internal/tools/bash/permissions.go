@@ -2,7 +2,10 @@ package bash
 
 import (
 	"regexp"
+	"sort"
 	"strings"
+
+	"github.com/auto-developer-orchestrator/backend/internal/perms"
 )
 
 // BashPermission describes the permission level for a bash command.
@@ -58,6 +61,76 @@ func CheckBashPermission(cmd string) BashPermission {
 
 	// 5. Default — allow (tool-level permission system still applies)
 	return BashPermission{Behavior: "allow"}
+}
+
+// CheckBashPermissionWithUserRules evaluates a command against user rules first,
+// then falls through to system rules. Hard-deny rules are always enforced as a
+// safety net — user rules cannot bypass them.
+func CheckBashPermissionWithUserRules(cmd string, userRules []perms.BashCommandRule) BashPermission {
+	stripped := stripEnvVars(cmd)
+	lower := strings.ToLower(stripped)
+
+	// 0. User rules — checked FIRST
+	for _, rule := range userRules {
+		if matchUserRule(lower, rule.Pattern) {
+			// Hard-deny safety net: even user "allow" rules cannot bypass system hard-deny
+			for _, sys := range hardDenyRules {
+				if sys.pattern.MatchString(lower) {
+					return BashPermission{Behavior: "deny", Message: sys.message}
+				}
+			}
+			switch rule.Level {
+			case perms.PermDeny:
+				return BashPermission{Behavior: "deny", Message: "blocked by user rule: " + rule.Pattern}
+			case perms.PermRequireApproval:
+				return BashPermission{Behavior: "ask", Message: "confirmation required by user rule: " + rule.Pattern}
+			case perms.PermAutoApprove:
+				return BashPermission{Behavior: "allow"}
+			}
+		}
+	}
+
+	// Fall through to system rules
+	return CheckBashPermission(cmd)
+}
+
+// matchUserRule checks if a lowercase command matches a user rule pattern.
+// "docker*" → HasPrefix(cmd, "docker")
+// "rm" → first token is exactly "rm"
+// "git push*" → HasPrefix(cmd, "git push")
+func matchUserRule(lowerCmd string, pattern string) bool {
+	p := strings.ToLower(pattern)
+	parts := strings.Fields(lowerCmd)
+	if len(parts) == 0 {
+		return false
+	}
+	if strings.HasSuffix(p, "*") {
+		return strings.HasPrefix(lowerCmd, p[:len(p)-1])
+	}
+	return parts[0] == p
+}
+
+// GetSystemRulesSummary returns human-readable descriptions of system rules
+// grouped by category. Used by the frontend for display.
+func GetSystemRulesSummary() map[string][]string {
+	hardDeny := make([]string, 0, len(hardDenyRules))
+	for _, r := range hardDenyRules {
+		hardDeny = append(hardDeny, r.message)
+	}
+	ask := make([]string, 0, len(dangerousPatterns))
+	for _, r := range dangerousPatterns {
+		ask = append(ask, r.message)
+	}
+	readOnly := make([]string, 0, len(readOnlyCommands))
+	for cmd := range readOnlyCommands {
+		readOnly = append(readOnly, cmd)
+	}
+	sort.Strings(readOnly)
+	return map[string][]string{
+		"hard_deny":  hardDeny,
+		"ask_rules":  ask,
+		"read_only":  readOnly,
+	}
 }
 
 // stripEnvVars removes leading environment variable assignments.

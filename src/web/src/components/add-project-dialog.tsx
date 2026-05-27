@@ -243,6 +243,8 @@ export function AddProjectDialog({
 	const [sshHost, setSshHost] = useState("");
 	const [sshPort, setSshPort] = useState("22");
 	const [sshUser, setSshUser] = useState("");
+	const [tsSshUser, setTsSshUser] = useState("");
+	const [tsConnecting, setTsConnecting] = useState(false);
 	const [sshPassword, setSshPassword] = useState("");
 	const [sshKeyData, setSshKeyData] = useState("");
 	const [sshSessionKey, setSshSessionKey] = useState<string | null>(null);
@@ -275,6 +277,8 @@ export function AddProjectDialog({
 			setNewFolderName("");
 			setCreatingFolder(false);
 			setFocusedIndex(-1);
+			setTsSshUser("");
+			setTsConnecting(false);
 		}
 		prevOpen.current = open;
 	}, [open, sshSessionKey]);
@@ -300,10 +304,13 @@ export function AddProjectDialog({
 	}, [source, sshSessionKey, showHidden]);
 
 	// Fetch on open or when SSH connects or when showHidden changes
+	const prevSource = useRef(source);
 	useEffect(() => {
 		if (open && (source !== "ssh" || sshConnected) && source !== "tailscale" && source !== "manual") {
-			// Reset path when switching sources to avoid using SSH paths for local browsing
-			const pathToFetch = source === "local" ? "" : (currentPath || "");
+			// Reset path when source changes to avoid stale paths
+			const sourceChanged = prevSource.current !== source;
+			prevSource.current = source;
+			const pathToFetch = sourceChanged ? "" : (source === "local" ? "" : (currentPath || ""));
 			fetchDir(pathToFetch);
 		}
 	}, [open, source, sshConnected, showHidden]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -466,28 +473,35 @@ export function AddProjectDialog({
 		}
 	};
 
-	// Tailscale connect — uses SSH with the Tailscale IP
+	// Tailscale connect — auto-connect with tsSshUser, shows SSH form on failure
 	const handleTailscaleConnect = async (device: TailscaleDevice) => {
 		const ip = device.tailscaleIPs?.[0];
 		if (!ip) {
 			setError("No Tailscale IP for this device");
 			return;
 		}
+		const user = tsSshUser.trim();
+		if (!user) {
+			setError("Enter a username above first.");
+			return;
+		}
 		setSshHost(ip);
-		setSshUser("ubuntu");
+		setSshUser(user);
+		setSshPassword("");
+		setSshKeyData("");
 		setSshPort("22");
-		setSource("ssh");
-		// Auto-connect
-		setSshConnecting(true);
+		setTsConnecting(true);
 		setError(null);
 		try {
-			const { sessionKey } = await sshConnect("ubuntu", ip, "22", "", "");
+			const { sessionKey } = await sshConnect(user, ip, "22", "", "");
 			setSshSessionKey(sessionKey);
+			setSource("ssh");
 		} catch (err: unknown) {
-			// Tailscale SSH might need different user, show SSH form for manual adjust
-			setError(err instanceof Error ? err.message : "Tailscale SSH failed. Adjust credentials below.");
+			setSource("ssh");
+			setSshSessionKey(null);
+			setError(err instanceof Error ? err.message : "Connection failed. Adjust credentials below.");
 		} finally {
-			setSshConnecting(false);
+			setTsConnecting(false);
 		}
 	};
 
@@ -698,6 +712,18 @@ export function AddProjectDialog({
 				{/* ── Tailscale tab ── */}
 				{source === "tailscale" && (
 					<div className="flex-1 overflow-y-auto px-4 py-4">
+						{/* SSH user input */}
+						<div className="mb-3">
+							<label className="flex flex-col gap-1 text-sm">
+								<span className="text-xs font-medium text-muted-foreground">SSH User</span>
+								<Input
+									placeholder="e.g. root, ubuntu, user"
+									value={tsSshUser}
+									onChange={(e) => setTsSshUser(e.target.value)}
+									onKeyDown={(e) => { if (e.key === "Enter" && tsDevices.length > 0) handleTailscaleConnect(tsDevices[0]); }}
+								/>
+							</label>
+						</div>
 						{tsLoading ? (
 							<div className="flex items-center justify-center py-12 text-muted-foreground">
 								<Loader2 className="size-5 animate-spin mr-2" /> Discovering devices...

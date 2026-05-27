@@ -96,6 +96,7 @@ type RunnerConfig struct {
 	// Sub-agent permission checking (passes through to BaseAgent)
 	PermDecisions *core.DecisionRegistry
 	ToolPerms     *perms.ToolPermissionConfig
+	BashRules     *perms.BashRuleStore
 
 	// Sub-agent hook dependencies — used to resolve named hooks from worker YAML
 	HookDeps hooks.HookDeps
@@ -849,6 +850,7 @@ func (r *ParallelRunner) buildSubAgent(
 		ScratchStore:        r.cfg.ScratchStore,
 		PermDecisions:       r.cfg.PermDecisions,
 		ToolPerms:           r.cfg.ToolPerms,
+		BashRules:           r.cfg.BashRules,
 		ExtraHooks:          resources.ExtraHooks,
 		ToolResultProcessor: subAgentResultProcessor(r.spill),
 	})

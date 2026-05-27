@@ -28,6 +28,7 @@ import (
 //   - Hard-deny commands (rm -rf /, nmap): blocked immediately
 type PermissionHook struct {
 	config     *perms.ToolPermissionConfig
+	bashRules  *perms.BashRuleStore
 	registry   *core.DecisionRegistry
 	subscriber chan core.AgentEvent
 	timeout    time.Duration
@@ -39,13 +40,15 @@ type PermissionHook struct {
 }
 
 // NewPermissionHook creates a permission hook using the unified decision registry.
+// Pass nil for bashRules to disable user-defined command rules.
 // Pass nil for subscriber to disable SSE events (permissions still checked).
-func NewPermissionHook(cfg *perms.ToolPermissionConfig, registry *core.DecisionRegistry, subscriber chan core.AgentEvent) *PermissionHook {
+func NewPermissionHook(cfg *perms.ToolPermissionConfig, bashRules *perms.BashRuleStore, registry *core.DecisionRegistry, subscriber chan core.AgentEvent) *PermissionHook {
 	if registry == nil {
 		registry = core.GlobalDecisions
 	}
 	return &PermissionHook{
 		config:     cfg,
+		bashRules:  bashRules,
 		registry:   registry,
 		subscriber: subscriber,
 		timeout:    5 * time.Minute,
@@ -94,7 +97,12 @@ func (h *PermissionHook) WrapToolCall(ctx context.Context, toolName string, args
 	var bashPerm *bash.BashPermission
 	if toolName == "bash" {
 		if cmd, ok := extractBashCommand(args); ok {
-			p := bash.CheckBashPermission(cmd)
+			var p bash.BashPermission
+			if h.bashRules != nil {
+				p = bash.CheckBashPermissionWithUserRules(cmd, h.bashRules.AllRules())
+			} else {
+				p = bash.CheckBashPermission(cmd)
+			}
 			bashPerm = &p
 
 			// Command-level deny overrides everything

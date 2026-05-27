@@ -33,6 +33,7 @@ type BaseConfig struct {
 	// Permission checking (shared DecisionRegistry across all agents).
 	PermDecisions *core.DecisionRegistry
 	ToolPerms     *perms.ToolPermissionConfig
+	BashRules     *perms.BashRuleStore
 
 	// Extension points.
 	ExtraHooks           []core.LoopHook
@@ -70,7 +71,7 @@ func NewBaseAgent(cfg BaseConfig) *BaseAgent {
 	}
 
 	if cfg.ToolPerms != nil && cfg.PermDecisions != nil {
-		hks = append(hks, hooks.NewPermissionHook(cfg.ToolPerms, cfg.PermDecisions, nil))
+		hks = append(hks, hooks.NewPermissionHook(cfg.ToolPerms, cfg.BashRules, cfg.PermDecisions, nil))
 	}
 
 	hks = append(hks, cfg.ExtraHooks...)

@@ -2,6 +2,8 @@ package bash
 
 import (
 	"testing"
+
+	"github.com/auto-developer-orchestrator/backend/internal/perms"
 )
 
 func TestCheckBashPermission_Deny(t *testing.T) {
@@ -376,5 +378,128 @@ func TestCheckBashPermission_CaseInsensitive(t *testing.T) {
 		if result.Behavior != "ask" {
 			t.Errorf("expected ask for %q (case insensitive), got %q", cmd, result.Behavior)
 		}
+	}
+}
+
+// ── User rules tests ──
+
+func TestCheckBashPermissionWithUserRules_DenyOverride(t *testing.T) {
+	rules := []perms.BashCommandRule{
+		{ID: "1", Pattern: "docker*", Level: perms.PermDeny},
+	}
+
+	// "docker ps" would normally be allowed, user rule blocks it
+	result := CheckBashPermissionWithUserRules("docker ps", rules)
+	if result.Behavior != "deny" {
+		t.Errorf("expected deny, got %q", result.Behavior)
+	}
+}
+
+func TestCheckBashPermissionWithUserRules_ConfirmOverride(t *testing.T) {
+	rules := []perms.BashCommandRule{
+		{ID: "1", Pattern: "go*", Level: perms.PermRequireApproval},
+	}
+
+	// "go test ./..." would normally be allowed, user rule asks
+	result := CheckBashPermissionWithUserRules("go test ./...", rules)
+	if result.Behavior != "ask" {
+		t.Errorf("expected ask, got %q", result.Behavior)
+	}
+}
+
+func TestCheckBashPermissionWithUserRules_AllowOverride(t *testing.T) {
+	rules := []perms.BashCommandRule{
+		{ID: "1", Pattern: "rm", Level: perms.PermAutoApprove},
+	}
+
+	// "rm -rf ./node_modules" would normally be "ask", user rule allows it
+	result := CheckBashPermissionWithUserRules("rm -rf ./node_modules", rules)
+	if result.Behavior != "allow" {
+		t.Errorf("expected allow, got %q", result.Behavior)
+	}
+}
+
+func TestCheckBashPermissionWithUserRules_HardDenySafetyNet(t *testing.T) {
+	rules := []perms.BashCommandRule{
+		{ID: "1", Pattern: "rm*", Level: perms.PermAutoApprove}, // try to allow all rm
+	}
+
+	// System hard-deny for "rm -rf /" must override user allow
+	result := CheckBashPermissionWithUserRules("rm -rf /", rules)
+	if result.Behavior != "deny" {
+		t.Errorf("expected deny (hard-deny safety net), got %q", result.Behavior)
+	}
+
+	// But non-system-path rm should be allowed by user rule
+	result2 := CheckBashPermissionWithUserRules("rm -rf ./node_modules", rules)
+	if result2.Behavior != "allow" {
+		t.Errorf("expected allow (user rule), got %q", result2.Behavior)
+	}
+}
+
+func TestCheckBashPermissionWithUserRules_HardDenyBlocksWithAllowRule(t *testing.T) {
+	rules := []perms.BashCommandRule{
+		{ID: "1", Pattern: "nmap*", Level: perms.PermAutoApprove},
+	}
+
+	// nmap is hard-denied, user cannot override
+	result := CheckBashPermissionWithUserRules("nmap -sV target", rules)
+	if result.Behavior != "deny" {
+		t.Errorf("expected deny (nmap hard-deny), got %q", result.Behavior)
+	}
+}
+
+func TestCheckBashPermissionWithUserRules_EmptyFallsThrough(t *testing.T) {
+	// Empty rules should behave identically to CheckBashPermission
+	result := CheckBashPermissionWithUserRules("rm -rf ./node_modules", nil)
+	if result.Behavior != "ask" {
+		t.Errorf("expected ask (fallthrough to system), got %q", result.Behavior)
+	}
+
+	result2 := CheckBashPermissionWithUserRules("ls -la", nil)
+	if result2.Behavior != "allow" {
+		t.Errorf("expected allow (fallthrough to system), got %q", result2.Behavior)
+	}
+}
+
+func TestCheckBashPermissionWithUserRules_NoMatchFallsThrough(t *testing.T) {
+	rules := []perms.BashCommandRule{
+		{ID: "1", Pattern: "docker*", Level: perms.PermDeny},
+	}
+
+	// "ls -la" doesn't match any user rule, falls through to system (allow)
+	result := CheckBashPermissionWithUserRules("ls -la", rules)
+	if result.Behavior != "allow" {
+		t.Errorf("expected allow (no user rule match), got %q", result.Behavior)
+	}
+
+	// "git push --force" doesn't match user rule, system catches it as "ask"
+	result2 := CheckBashPermissionWithUserRules("git push --force", rules)
+	if result2.Behavior != "ask" {
+		t.Errorf("expected ask (system rule), got %q", result2.Behavior)
+	}
+}
+
+func TestGetSystemRulesSummary(t *testing.T) {
+	summary := GetSystemRulesSummary()
+	if len(summary["hard_deny"]) == 0 {
+		t.Error("expected non-empty hard_deny")
+	}
+	if len(summary["ask_rules"]) == 0 {
+		t.Error("expected non-empty ask_rules")
+	}
+	if len(summary["read_only"]) == 0 {
+		t.Error("expected non-empty read_only")
+	}
+	// Check some known entries exist
+	found := false
+	for _, msg := range summary["hard_deny"] {
+		if msg == "network scanning tools are not allowed" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'nmap' message in hard_deny")
 	}
 }

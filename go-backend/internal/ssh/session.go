@@ -213,8 +213,8 @@ func (sm *SessionManager) hostKeyCallback(host, port string) (ssh.HostKeyCallbac
 		return ssh.InsecureIgnoreHostKey(), nil
 	}
 
-	// If known_hosts exists, use it for verification
-	if _, err := os.Stat(knownHostsPath); err == nil {
+	// If known_hosts exists and is non-empty, use it for verification
+	if st, err := os.Stat(knownHostsPath); err == nil && st.Size() > 0 {
 		if cb, err := knownhosts.New(knownHostsPath); err == nil {
 			return cb, nil
 		}

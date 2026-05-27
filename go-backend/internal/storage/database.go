@@ -718,7 +718,7 @@ func (d *Database) GetConversationSummaries(ctx context.Context) ([]Conversation
 				 ORDER BY sub.created_at DESC LIMIT 1),
 				''
 			) AS last_message,
-			MAX(m.created_at) AS last_at,
+			MAX(CASE WHEN m.role = 'user' THEN m.created_at END) AS last_at,
 			COUNT(*) AS message_count,
 			COALESCE(
 				NULLIF(ct.title, ''),
@@ -769,7 +769,7 @@ func (d *Database) getConversationSummariesLegacy(ctx context.Context) ([]Conver
 				 ORDER BY sub.created_at DESC LIMIT 1),
 				''
 			) AS last_message,
-			MAX(cm.created_at) AS last_at,
+			MAX(CASE WHEN cm.role = 'user' THEN cm.created_at END) AS last_at,
 			COUNT(*) AS message_count,
 			COALESCE(
 				NULLIF(ct.title, ''),

@@ -13,6 +13,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/agents/orchestrator"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/hooks"
 	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
@@ -37,6 +38,7 @@ type PuxHandler struct {
 	litellmURL string
 	litellmKey string
 	toolPerms  *perms.ToolPermissionConfig
+	bashRules  *perms.BashRuleStore
 
 	llamaEngine     *llamaeng.LLMClient // primary llama-server engine (local GPU)
 	clusterEngine   *llamaeng.LLMClient // Ray cluster LLM (Qwen3.6, always-on remote)
@@ -77,6 +79,12 @@ func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, 
 		logger.Warn("Failed to load tool permissions", zap.Error(err))
 	}
 
+	br := perms.NewBashRuleStore(logger)
+	rulesPath := filepath.Join(os.Getenv("HOME"), ".pi", "agent", "bash_command_rules.json")
+	if err := br.Load(rulesPath); err != nil {
+		logger.Warn("Failed to load bash command rules", zap.Error(err))
+	}
+
 	return &PuxHandler{
 		db:            db,
 		git:           gitOps,
@@ -85,6 +93,7 @@ func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, 
 		litellmURL:    os.Getenv("LITELLM_PROXY_URL"),
 		litellmKey:    os.Getenv("LITELLM_MASTER_KEY"),
 		toolPerms:     tp,
+		bashRules:     br,
 		selectedEngines: make(map[string]*llamaeng.LLMClient),
 		registry:       NewAgentRegistry(),
 		taskMgr:        core.NewTaskManager(filepath.Join(os.Getenv("HOME"), ".pi", "agent", "task-results")),
@@ -184,6 +193,10 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/decision", h.Decision)
 	r.Get("/tool-permissions", h.GetToolPermissions)
 	r.Put("/tool-permissions", h.SetToolPermission)
+	r.Get("/bash-rules", h.GetBashRules)
+	r.Post("/bash-rules", h.AddBashRule)
+	r.Delete("/bash-rules/{id}", h.RemoveBashRule)
+	r.Get("/bash-system-rules", h.GetBashSystemRules)
 	r.Get("/history", h.GetHistory)
 	r.Get("/conversations", h.GetConversations)
 	r.Get("/agent-status", h.GetAgentStatus)
@@ -438,6 +451,57 @@ func (h *PuxHandler) SetToolPermission(w http.ResponseWriter, r *http.Request) {
 		"tool":    req.Tool,
 		"level":   req.Level,
 	})
+}
+
+// GetBashRules returns all user-defined bash command rules.
+// GET /api/pux/bash-rules
+func (h *PuxHandler) GetBashRules(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.bashRules.AllRules())
+}
+
+// AddBashRule creates a new user-defined bash command rule.
+// POST /api/pux/bash-rules
+func (h *PuxHandler) AddBashRule(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeReq[struct {
+		Pattern string `json:"pattern"`
+		Level   string `json:"level"`
+	}](w, r)
+	if !ok {
+		return
+	}
+	if req.Pattern == "" || req.Level == "" {
+		JSONError(w, "pattern and level are required", http.StatusBadRequest)
+		return
+	}
+
+	rule, err := h.bashRules.AddRule(req.Pattern, perms.PermissionLevel(req.Level))
+	if err != nil {
+		JSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	h.log.Info("Bash command rule added", zap.String("pattern", req.Pattern), zap.String("level", req.Level))
+	writeJSON(w, http.StatusOK, rule)
+}
+
+// RemoveBashRule deletes a user-defined bash command rule by ID.
+// DELETE /api/pux/bash-rules/{id}
+func (h *PuxHandler) RemoveBashRule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		JSONError(w, "rule id is required", http.StatusBadRequest)
+		return
+	}
+	if !h.bashRules.RemoveRule(id) {
+		JSONError(w, "rule not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
+}
+
+// GetBashSystemRules returns a summary of built-in system bash command rules.
+// GET /api/pux/bash-system-rules
+func (h *PuxHandler) GetBashSystemRules(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, bash.GetSystemRulesSummary())
 }
 
 // Compact triggers a manual context compaction for the given agent session.

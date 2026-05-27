@@ -65,24 +65,35 @@ func (h *TailscaleHandler) Devices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	devices := make([]TailscaleDevice, 0, len(status.Peer)+1)
-
-	// Add self
-	if status.Self.HostName != "" {
-		devices = append(devices, TailscaleDevice{
-			Name:         status.Self.DNSName,
-			Hostname:     status.Self.HostName,
-			TailscaleIPs: status.Self.TailscaleIPs,
-			OS:           status.Self.OS,
-			Online:       true,
-		})
+	// Collect self IPs to filter them out
+	selfIPs := map[string]bool{}
+	for _, ip := range status.Self.TailscaleIPs {
+		selfIPs[ip] = true
 	}
 
-	// Add peers
+	devices := make([]TailscaleDevice, 0, len(status.Peer))
+
+	// Add peers only (skip self — no point SSHing into yourself)
 	for _, peer := range status.Peer {
 		if !peer.Online {
 			continue
 		}
+		// Skip funnel ingress nodes — they have no SSH server
+		if peer.HostName == "funnel-ingress-node" {
+			continue
+		}
+		// Skip any device whose IPs overlap with self
+		isSelf := true
+		for _, ip := range peer.TailscaleIPs {
+			if !selfIPs[ip] {
+				isSelf = false
+				break
+			}
+		}
+		if isSelf {
+			continue
+		}
+
 		devices = append(devices, TailscaleDevice{
 			Name:         peer.DNSName,
 			Hostname:     peer.HostName,

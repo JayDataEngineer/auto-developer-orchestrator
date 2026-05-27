@@ -15,7 +15,7 @@ export default defineConfig({
 	},
 	server: {
 		port: 5175,
-		allowedHosts: ["pux.athleticnationalauthority.com"],
+		allowedHosts: ["pux.athleticnationalauthority.com", "orchestrator.local", "ubuntu-desktop.tailb1e597.ts.net"],
 		proxy: {
 			"/api": {
 				target: "http://localhost:3847",

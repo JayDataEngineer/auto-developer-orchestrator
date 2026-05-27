@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -487,6 +488,54 @@ func TestGetConversationSummaries(t *testing.T) {
 	}
 	if !projects["proj1"] || !projects["proj2"] {
 		t.Errorf("expected proj1 and proj2, got %v", projects)
+	}
+}
+
+func TestConversationSummaryLastAtUserOnly(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// User message first, then assistant message (created slightly later)
+	userID, _ := db.SaveUserMessage(ctx, "proj", "a1", "Hello")
+	_ = userID
+	db.SaveAssistantMessage(ctx, "proj", "a1", "Hi there, let me think...", "thinking...", "[]")
+
+	summaries, err := db.GetConversationSummaries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+
+	// lastAt should be based on user message, not the later assistant message
+	// The assistant message is created after the user message, so if the query
+	// used MAX(created_at) without the role filter, lastAt would be later.
+	// With the fix, lastAt should match the user message timestamp.
+	s := summaries[0]
+	if s.LastAt == "" {
+		t.Fatal("expected non-empty lastAt")
+	}
+
+	// Verify by comparing user message time directly (parse both to handle format differences)
+	var userAt string
+	row := db.db.QueryRowContext(ctx, `SELECT created_at FROM messages WHERE project = ? AND agent_id = ? AND role = 'user' ORDER BY created_at DESC LIMIT 1`, "proj", "a1")
+	if err := row.Scan(&userAt); err != nil {
+		t.Fatal(err)
+	}
+	lastAtTime, err1 := time.Parse(time.RFC3339Nano, s.LastAt)
+	userAtTime, err2 := time.Parse(time.RFC3339Nano, userAt)
+	if err1 != nil {
+		lastAtTime, err1 = time.Parse("2006-01-02 15:04:05", s.LastAt)
+	}
+	if err2 != nil {
+		userAtTime, err2 = time.Parse("2006-01-02 15:04:05", userAt)
+	}
+	if err1 != nil || err2 != nil {
+		t.Fatalf("failed to parse times: lastAt=%q err=%v, userAt=%q err=%v", s.LastAt, err1, userAt, err2)
+	}
+	if !lastAtTime.Equal(userAtTime) {
+		t.Errorf("lastAt should match user message time: got %v, want %v", lastAtTime, userAtTime)
 	}
 }
 
