@@ -676,8 +676,14 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 							if (toolId) {
 								const updates: Record<string, unknown> = {};
+								if (parsed.error) {
+									updates.isError = true;
+									// Store error message as result so TUI can display it
+									if (parsed.result === undefined || parsed.result === null) {
+										updates.result = parsed.error;
+									}
+								}
 								if (parsed.result !== undefined) updates.result = parsed.result;
-								if (parsed.error) updates.isError = true;
 								if (parsed.artifact !== undefined) updates.artifact = parsed.artifact;
 								if (parsed.modelContent) {
 									updates.modelContent = [{ type: "text" as const, text: parsed.modelContent as string }];

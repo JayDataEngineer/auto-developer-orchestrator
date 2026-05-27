@@ -247,6 +247,26 @@ function DelegateToolCallDisplay({
 		);
 	}
 
+	// Error: tool failed before producing a result
+	if (isError) {
+		const errMsg = typeof result === "string" ? result : "";
+		return (
+			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+				<Text wrap="truncate-end">
+					<Text color={colors.error}>{symbols.toolError} </Text>
+					<Text bold color={colors.brand}>{label}</Text>
+					{taskPreview && <Text color="gray"> {taskPreview}</Text>}
+					<Text color={colors.error}> failed</Text>
+				</Text>
+				{errMsg && (
+					<Box paddingLeft={4}>
+						<Text dimColor color={colors.error}>{trunc(errMsg, cols - 6)}</Text>
+					</Box>
+				)}
+			</Box>
+		);
+	}
+
 	// Running: show nested tool snippets
 	const maxShow = 5;
 	const visibleTools = toolCalls.length > maxShow
@@ -336,16 +356,26 @@ function ToolCallDisplay({
 	const argPreview = trunc(rawArg, maxArgLen);
 
 	const sym = isRunning ? symbols.toolRunning : isError ? symbols.toolError : symbols.toolDone;
+	const errMsg = isError && typeof result === "string" ? result : "";
+	const maxErrLen = Math.max(10, cols - toolName.length - 24);
+	const errPreview = errMsg ? trunc(errMsg, maxErrLen) : "";
 
 	return (
-		<Text wrap="truncate-end">
-			<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>{sym}</Text>
-			<Text> </Text>
-			<Text bold color={isRunning ? colors.running : undefined}>{toolName}</Text>
-			{argPreview && <Text color={colors.textMuted}> {argPreview}</Text>}
-			{isDone && !isError && <Text color={colors.textMuted}> done</Text>}
-			{isError && <Text color={colors.error}> failed</Text>}
-		</Text>
+		<Box flexDirection="column">
+			<Text wrap="truncate-end">
+				<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>{sym}</Text>
+				<Text> </Text>
+				<Text bold color={isRunning ? colors.running : undefined}>{toolName}</Text>
+				{argPreview && <Text color={colors.textMuted}> {argPreview}</Text>}
+				{isDone && !isError && <Text color={colors.textMuted}> done</Text>}
+				{isError && <Text color={colors.error}> failed</Text>}
+			</Text>
+			{errPreview && (
+				<Box paddingLeft={2}>
+					<Text dimColor color={colors.error}>{trunc(errMsg, cols - 4)}</Text>
+				</Box>
+			)}
+		</Box>
 	);
 }
 
