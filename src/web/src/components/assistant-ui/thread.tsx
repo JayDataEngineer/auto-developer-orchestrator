@@ -228,7 +228,7 @@ const Composer: FC = () => {
 				</div>
 			)}
 			<ComposerPrimitive.Root className="flex w-full flex-col">
-				<ComposerPrimitive.AttachmentDropzone className="flex w-full flex-col rounded-2xl border border-input bg-background px-1 pt-2 outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
+				<ComposerPrimitive.AttachmentDropzone className="flex w-full flex-col rounded-2xl border border-input bg-background px-1 pt-2 outline-none transition-all duration-200 has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
 					<ComposerAttachments />
 					<ComposerPrimitive.Input
 						placeholder="Send a message... (type / for commands)"
@@ -382,7 +382,11 @@ const ComposerAction: FC = () => {
 								type="button"
 								variant="default"
 								size="icon"
-								className={cn("rounded-full", isMobile ? "size-10" : "size-8")}
+								className={cn(
+									"rounded-full transition-all duration-200",
+									"disabled:opacity-30 disabled:hover:opacity-30",
+									isMobile ? "size-10" : "size-8",
+								)}
 								aria-label="Send message"
 							>
 								<ArrowUpIcon className={isMobile ? "size-5" : "size-4"} />
@@ -393,9 +397,12 @@ const ComposerAction: FC = () => {
 						<ComposerPrimitive.Cancel asChild>
 							<Button
 								type="button"
-								variant="default"
+								variant="outline"
 								size="icon"
-								className={cn("rounded-full", isMobile ? "size-10" : "size-8")}
+								className={cn(
+									"rounded-full transition-all duration-200 border-border/60 hover:bg-destructive/10 hover:border-destructive/40 hover:text-destructive",
+									isMobile ? "size-10" : "size-8",
+								)}
 								aria-label="Stop generating"
 							>
 								<SquareIcon className={cn("fill-current", isMobile ? "size-4" : "size-3")} />
@@ -509,7 +516,7 @@ const UserMessage: FC = () => {
 			<UserMessageAttachments />
 
 			<div className="relative col-start-2 min-w-0">
-				<div className="rounded-2xl bg-muted px-4 py-2.5 break-words text-foreground">
+				<div className="rounded-2xl border border-border/60 bg-secondary/60 px-4 py-2.5 break-words text-foreground">
 					<MessagePrimitive.Parts />
 				</div>
 				<div className="absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2">
