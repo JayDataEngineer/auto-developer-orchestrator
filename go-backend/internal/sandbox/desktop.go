@@ -183,15 +183,18 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 
 	// Step 0: Fix configs and kill existing desktop processes.
 	// 1) Blank fluxbox rootCommand — prevents xsetroot from clobbering pcmanfm on restart.
-	// 2) Write pcmanfm config with correct background color. pcmanfm 1.3 uses [*] section
-	//    header and overwrites its config on exit, losing the original settings.
+	// 2) Write pcmanfm config with correct background color. CRITICAL: pcmanfm 1.3 uses
+	//    [*] section header (NOT [desktop]). If you use [desktop], pcmanfm ignores the file
+	//    and overwrites it with defaults (desktop_bg=#000000, show_documents=0).
+	//    pcmanfm also rewrites this file on startup/exit, so we must write BEFORE starting it.
 	// 3) Kill processes — supervisord will restart them with the fixed configs.
 	_, _ = m.execInContainer(ctx, containerName, []string{
 		"bash", "-c",
 		"sed -i 's/session.screen0.rootCommand:.*/session.screen0.rootCommand:/' /root/.fluxbox/init 2>/dev/null; " +
 			"printf '[*]\\nwallpaper_mode=color\\nwallpaper_common=1\\nwallpaper=#1e1e2e\\n" +
 			"desktop_bg=#1e1e2e\\ndesktop_fg=#ffffff\\ndesktop_shadow=#000000\\n" +
-			"desktop_font=Sans 12\\nshow_wm_menu=0\\nshow_documents=0\\nshow_mounts=0\\nshow_trash=0\\n' " +
+			"desktop_font=Sans 12\\nshow_wm_menu=0\\nshow_documents=1\\nshow_mounts=0\\nshow_trash=0\\n" +
+			"bg_color=#1e1e2e\\n' " +
 			"> /root/.config/pcmanfm/default/desktop-items-0.conf 2>/dev/null; " +
 			"pkill -f 'fluxbox' 2>/dev/null; pkill -f 'pcmanfm --desktop' 2>/dev/null; " +
 			"sleep 0.5",
@@ -232,12 +235,13 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	// Step 2b: Start pcmanfm for desktop icons and background.
 	// pcmanfm --desktop manages the root window (background + icons).
 	// It reads its config from /root/.config/pcmanfm/default/ for colors.
+	// Must use detach=true so the process survives after exec session ends.
 	// Sleep lets fluxbox initialize before pcmanfm claims the root window.
 	_, _ = m.execInContainer(ctx, containerName, []string{
 		"bash", "-c", fmt.Sprintf(
-			"sleep 0.5; DISPLAY=%s pcmanfm --desktop &>/tmp/pcmanfm-start.log &",
+			"sleep 1; DISPLAY=%s pcmanfm --desktop",
 			display),
-	}, false)
+	}, true)
 
 	// Step 3: Start VNC server — KasmVNC or standard x11vnc
 	if backend == BackendKasm {

@@ -57,7 +57,15 @@ else
     err "desktop only has $ICON_COUNT .desktop files (expected >= 3)"
 fi
 
-# 4. pcmanfm config has background or wallpaper color set
+# 4. pcmanfm config has correct section header ([*] for pcmanfm 1.3)
+SECTION=$(docker exec "$CONTAINER" head -1 /root/.config/pcmanfm/default/desktop-items-0.conf 2>/dev/null)
+if [ "$SECTION" = "[*]" ]; then
+    ok "pcmanfm config uses [*] section header (pcmanfm 1.3 compatible)"
+else
+    err "pcmanfm config section header is '$SECTION' — expected [*] (pcmanfm 1.3 ignores [desktop] and overwrites with defaults)"
+fi
+
+# 5. pcmanfm config has background or wallpaper color set
 BG_COLOR=$(docker exec "$CONTAINER" grep -E "^(wallpaper|desktop_bg)=" /root/.config/pcmanfm/default/desktop-items-0.conf 2>/dev/null | head -1 | sed 's/.*=//')
 if [ -n "$BG_COLOR" ]; then
     ok "pcmanfm background color set: $BG_COLOR"
@@ -65,7 +73,7 @@ else
     err "pcmanfm background color not configured"
 fi
 
-# 5. supervisord has pcmanfm-desktop with autorestart
+# 6. supervisord has pcmanfm-desktop with autorestart
 AUTORESTART=$(docker exec "$CONTAINER" grep -A1 "program:pcmanfm-desktop" /etc/supervisor/conf.d/sandbox.conf 2>/dev/null | grep "autorestart" || true)
 if echo "$AUTORESTART" | grep -q "true"; then
     ok "supervisord pcmanfm-desktop autorestart=true"
@@ -73,7 +81,7 @@ else
     warn "could not verify pcmanfm-desktop autorestart setting"
 fi
 
-# 6. fluxbox hasn't been excessively restarting (sanity check)
+# 7. fluxbox hasn't been excessively restarting (sanity check)
 FLUXBOX_UPTIME=$(docker exec "$CONTAINER" supervisorctl status fluxbox 2>/dev/null | awk '{print $NF}' || echo "unknown")
 if [ "$FLUXBOX_UPTIME" != "unknown" ]; then
     ok "fluxbox uptime: $FLUXBOX_UPTIME"
@@ -81,7 +89,7 @@ else
     warn "could not check fluxbox uptime"
 fi
 
-# 7. Verify desktop icons are readable (not corrupt)
+# 8. Verify desktop icons are readable (not corrupt)
 CHROME_ICON=$(docker exec "$CONTAINER" test -r /root/Desktop/Google-Chrome.desktop && echo "ok" || echo "missing")
 TERM_ICON=$(docker exec "$CONTAINER" test -r /root/Desktop/Terminal.desktop && echo "ok" || echo "missing")
 FILE_ICON=$(docker exec "$CONTAINER" test -r /root/Desktop/File-Browser.desktop && echo "ok" || echo "missing")
@@ -91,7 +99,7 @@ else
     err "desktop icons missing: Chrome=$CHROME_ICON Terminal=$TERM_ICON File-Browser=$FILE_ICON"
 fi
 
-# 8. Trigger fluxbox restart and verify pcmanfm survives
+# 9. Trigger fluxbox restart and verify pcmanfm survives
 echo ""
 echo "Testing fluxbox restart resilience..."
 docker exec "$CONTAINER" bash -c 'DISPLAY=:99 pkill -f fluxbox 2>/dev/null || true'
