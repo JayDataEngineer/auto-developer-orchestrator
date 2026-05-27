@@ -314,6 +314,7 @@ func subscriberFromCtx(ctx context.Context) chan<- core.AgentEvent {
 	if ch, ok := ctx.Value(core.SubscriberKey{}).(chan<- core.AgentEvent); ok {
 		return ch
 	}
+	// Fallback: accept bidirectional chan (tests may set this directly)
 	if ch, ok := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent); ok {
 		return ch
 	}

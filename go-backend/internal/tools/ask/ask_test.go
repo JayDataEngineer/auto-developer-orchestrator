@@ -50,7 +50,8 @@ func TestAskUserTool_Execute_SingleOption(t *testing.T) {
 }
 
 func TestAskUserTool_Execute_WithResponse(t *testing.T) {
-	subscriber := make(chan core.AgentEvent, 10)
+	ch := make(chan core.AgentEvent, 10)
+	var subscriber chan<- core.AgentEvent = ch
 	tool := NewAskUserTool()
 
 	type result struct {
@@ -74,7 +75,7 @@ func TestAskUserTool_Execute_WithResponse(t *testing.T) {
 	// Wait for the decision_request event
 	var decisionID string
 	select {
-	case evt := <-subscriber:
+	case evt := <-ch:
 		if evt.Type != core.EventTypeDecisionRequest {
 			t.Fatalf("expected decision_request event, got %q", evt.Type)
 		}
@@ -107,7 +108,8 @@ func TestAskUserTool_Execute_WithResponse(t *testing.T) {
 }
 
 func TestAskUserTool_Execute_ContextCancel(t *testing.T) {
-	subscriber := make(chan core.AgentEvent, 10)
+	ch := make(chan core.AgentEvent, 10)
+	var subscriber chan<- core.AgentEvent = ch
 	tool := NewAskUserTool()
 
 	type result struct {
@@ -130,7 +132,7 @@ func TestAskUserTool_Execute_ContextCancel(t *testing.T) {
 	// Wait for registration
 	var decisionID string
 	select {
-	case evt := <-subscriber:
+	case evt := <-ch:
 		decisionID = evt.Data.(core.DecisionRequestData).ID
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for event")

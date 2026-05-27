@@ -78,7 +78,7 @@ func (t *PlanTool) Execute(ctx context.Context, args map[string]any) (any, error
 	planID := fmt.Sprintf("p_%d_%s", time.Now().UnixNano(), safeName)
 
 	// Emit plan_created event (Contract 2.7 compliance)
-	subscriber, _ := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent)
+	subscriber, _ := ctx.Value(core.SubscriberKey{}).(chan<- core.AgentEvent)
 	if subscriber != nil {
 		core.SendEvent(subscriber, core.AgentEvent{
 			Type: core.EventTypePlanCreated,

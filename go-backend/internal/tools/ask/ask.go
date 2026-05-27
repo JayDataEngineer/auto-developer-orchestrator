@@ -62,7 +62,7 @@ func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (any, er
 
 	questionID := fmt.Sprintf("q_%d", time.Now().UnixNano())
 
-	subscriber, _ := ctx.Value(core.SubscriberKey{}).(chan core.AgentEvent)
+	subscriber, _ := ctx.Value(core.SubscriberKey{}).(chan<- core.AgentEvent)
 	resp, err := core.GlobalDecisions.WaitForDecision(ctx, core.DecisionRequest{
 		ID:            questionID,
 		SourceTool:    "ask_user",

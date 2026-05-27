@@ -820,6 +820,10 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 						default: {
 							handleMetaEvent(event, parsed, statusRef, parts, stepsRef);
+							// Yield snapshot after decision_request so runtime sees requires-action
+							if (event === "decision_request") {
+								yield buildSnapshot(parts, sources, statusRef[0], timing, stepsRef);
+							}
 							break;
 						}
 					}
