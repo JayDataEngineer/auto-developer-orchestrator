@@ -1,8 +1,8 @@
 /**
  * ReasoningAccordion — collapsible thinking block.
  *
- * Collapsed: single dim line "▎ Thinking..." with preview (truncated to fit terminal)
- * Expanded: full reasoning with blockquote bars.
+ * Collapsed: "▎ Thinking" label + full first line (wraps at terminal width)
+ * Expanded: full reasoning with blockquote bars (each line wraps).
  * Always collapsed when message is complete.
  */
 
@@ -18,6 +18,7 @@ export function ReasoningAccordion() {
 	const isRunning = useAuiState((s) => s.message.status?.type === "running");
 	const colors = useColors();
 	const { cols } = useTerminalSize();
+	const textWidth = cols - 4; // paddingX(1) from parent + BLOCKQUOTE_BAR + space
 
 	// Hooks MUST be called before any early returns (React hooks rules)
 	const [expanded, setExpanded] = useState(false);
@@ -37,34 +38,22 @@ export function ReasoningAccordion() {
 
 	const lines = fullText.split("\n").filter((l: string) => l.trim());
 
-	// Collapsed: show a short preview of the first line
-	// Width budget: bar(2) + "Thinking..."(11) + space(1) = 14 overhead
+	// Collapsed: label + first line, wraps at terminal width
 	if (!expanded) {
-		const maxPreview = Math.max(20, cols - 16);
-		const preview = lines[0]?.slice(0, maxPreview) || "";
-		if (isRunning) {
-			return (
-				<Box marginBottom={1}>
-					<Text color={colors.subtle}>{BLOCKQUOTE_BAR} </Text>
-					<Text dimColor italic color={colors.subtle}>
-						Thinking
-					</Text>
-					{preview && <Text dimColor color={colors.textMuted}> {preview}</Text>}
-				</Box>
-			);
-		}
+		const firstLine = lines[0] || "";
+		const label = isRunning ? "Thinking" : "Thought";
 		return (
-			<Box marginBottom={1}>
-				<Text color={colors.subtle}>{BLOCKQUOTE_BAR} </Text>
-				<Text dimColor color={colors.subtle}>
-					Thought
+			<Box flexDirection="column" marginBottom={1} width={textWidth}>
+				<Text>
+					<Text color={colors.subtle}>{BLOCKQUOTE_BAR} </Text>
+					<Text dimColor italic color={colors.subtle}>{label}</Text>
+					{firstLine && <Text dimColor color={colors.textMuted}> {firstLine}</Text>}
 				</Text>
-				{preview && <Text dimColor color={colors.textMuted}> — {preview}</Text>}
 			</Box>
 		);
 	}
 
-	// Expanded: show all lines with blockquote bars
+	// Expanded: show all lines with blockquote bars, each wraps
 	const maxLines = 8;
 	const truncated = lines.length > maxLines;
 	const displayLines = truncated ? lines.slice(0, maxLines) : lines;
@@ -72,11 +61,11 @@ export function ReasoningAccordion() {
 	return (
 		<Box flexDirection="column" marginBottom={1}>
 			{displayLines.map((line: string, i: number) => (
-				<Box key={i}>
-					<Text color={colors.subtle}>{BLOCKQUOTE_BAR} </Text>
-					<Box flexGrow={1} flexDirection="column">
+				<Box key={i} width={textWidth}>
+					<Text>
+						<Text color={colors.subtle}>{BLOCKQUOTE_BAR} </Text>
 						<Text dimColor italic color={colors.textDim}>{line}</Text>
-					</Box>
+					</Text>
 				</Box>
 			))}
 			{truncated && (
