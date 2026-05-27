@@ -47,6 +47,21 @@ func NewToolRegistry(tools []Tool) *ToolRegistry {
 	return reg
 }
 
+// ToolTimeoutHint returns the timeout hint for a tool by name.
+// Checks the ToolMetadata interface on the underlying tool.
+// Returns 0 if the tool is not found or doesn't implement ToolMetadata.
+func (r *ToolRegistry) ToolTimeoutHint(name string) time.Duration {
+	canonical := r.normalize(name)
+	t := r.tools[canonical]
+	if t == nil {
+		return 0
+	}
+	if tm, ok := t.(ToolMetadata); ok {
+		return tm.TimeoutHint()
+	}
+	return 0
+}
+
 // RegisterAlias adds an alternate name for a canonical tool.
 // The agent loop automatically normalizes tool names through aliases.
 // Skips registration if the alias collides with an actual registered tool

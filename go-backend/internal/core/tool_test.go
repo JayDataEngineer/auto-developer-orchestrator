@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestToolRegistry_New(t *testing.T) {
@@ -295,4 +296,34 @@ func (s *stubTool) Execute(ctx context.Context, args map[string]any) (any, error
 		return s.execute(ctx, args)
 	}
 	return nil, nil
+}
+
+// stubToolWithTimeout implements ToolMetadata
+type stubToolWithTimeout struct {
+	stubTool
+	hint time.Duration
+}
+
+func (s *stubToolWithTimeout) TimeoutHint() time.Duration { return s.hint }
+
+func TestToolRegistry_ToolTimeoutHint(t *testing.T) {
+	reg := NewToolRegistry([]Tool{
+		&stubTool{name: "bash"},
+		&stubToolWithTimeout{stubTool: stubTool{name: "delegate_to"}, hint: 30 * time.Minute},
+	})
+
+	// Tool without ToolMetadata → 0
+	if h := reg.ToolTimeoutHint("bash"); h != 0 {
+		t.Errorf("bash: got %v, want 0", h)
+	}
+
+	// Tool with ToolMetadata → 30 minutes
+	if h := reg.ToolTimeoutHint("delegate_to"); h != 30*time.Minute {
+		t.Errorf("delegate_to: got %v, want 30m", h)
+	}
+
+	// Unknown tool → 0
+	if h := reg.ToolTimeoutHint("nonexistent"); h != 0 {
+		t.Errorf("nonexistent: got %v, want 0", h)
+	}
 }

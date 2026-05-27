@@ -667,6 +667,12 @@ func (l *AgentLoop) executeTool(ctx context.Context, subscriber chan<- AgentEven
 			timeout = hint
 		}
 	}
+	// Check per-tool timeout hint via ToolMetadata interface on the registry
+	if hinter, ok := l.executor.(interface{ ToolTimeoutHint(string) time.Duration }); ok {
+		if hint := hinter.ToolTimeoutHint(tc.Name); hint > 0 {
+			timeout = hint
+		}
+	}
 
 	// No timeout: execute directly
 	if timeout <= 0 {
