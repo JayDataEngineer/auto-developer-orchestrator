@@ -14,6 +14,7 @@ import { getToolArgPreview } from "@pux/shared";
 import { usePuxStore } from "@pux/shared";
 import { ReasoningAccordion } from "./reasoning-accordion.js";
 import { BranchPicker } from "./branch-picker.js";
+import { MarkdownText } from "./markdown-text.js";
 import { TerminalImage } from "./terminal-image.js";
 import { useColors, symbols, BLOCKQUOTE_BAR, BLACK_CIRCLE } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
@@ -101,7 +102,7 @@ export function AssistantMessage() {
 					case "text":
 						if (!part.text?.trim()) return null;
 						return (
-							<Text key={i} color={colors.text}>{part.text}</Text>
+							<MarkdownText key={i} text={part.text} color={colors.text} />
 						);
 					case "image":
 						return (

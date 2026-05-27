@@ -39,15 +39,14 @@ export function ReasoningAccordion() {
 	const lines = fullText.split("\n").filter((l: string) => l.trim());
 
 	// Collapsed: label + first line, wraps at terminal width
+	// Single Text with one style so Ink preserves color across wrapped lines
 	if (!expanded) {
 		const firstLine = lines[0] || "";
 		const label = isRunning ? "Thinking" : "Thought";
 		return (
 			<Box flexDirection="column" marginBottom={1} width={textWidth}>
-				<Text>
-					<Text color={colors.subtle}>{BLOCKQUOTE_BAR} </Text>
-					<Text dimColor italic color={colors.subtle}>{label}</Text>
-					{firstLine && <Text dimColor color={colors.textMuted}> {firstLine}</Text>}
+				<Text dimColor color={colors.textMuted}>
+					{BLOCKQUOTE_BAR} {label}: {firstLine}
 				</Text>
 			</Box>
 		);
