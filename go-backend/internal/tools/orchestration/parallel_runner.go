@@ -376,7 +376,7 @@ func (r *ParallelRunner) drainAndForward(
 				switch evt.Type {
 				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
 					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
-					core.SendEvent(subscriber, evt)
+					core.SendEvent(subscriber, enrichWithAgentName(evt, agentName))
 				}
 			}
 		case <-func() <-chan struct{} {
@@ -1668,6 +1668,33 @@ func hasBrowserTools(toolNames []string) bool {
 		}
 	}
 	return false
+}
+
+// enrichWithAgentName returns a copy of the event with agentName injected
+// into the payload. Used by drainAndForward to tag sub-agent events so
+// the frontend can route them to the correct agent card.
+func enrichWithAgentName(evt core.AgentEvent, agentName string) core.AgentEvent {
+	if agentName == "" {
+		return evt
+	}
+	switch p := evt.Data.(type) {
+	case core.ToolStart:
+		p.AgentName = agentName
+		evt.Data = p
+	case core.ToolEnd:
+		p.AgentName = agentName
+		evt.Data = p
+	case core.ToolUpdate:
+		p.AgentName = agentName
+		evt.Data = p
+	case core.TextDelta:
+		p.AgentName = agentName
+		evt.Data = p
+	case core.ThinkingDelta:
+		p.AgentName = agentName
+		evt.Data = p
+	}
+	return evt
 }
 
 // extractAgentName derives a display name from the instructions/role.

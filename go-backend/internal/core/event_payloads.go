@@ -8,14 +8,16 @@ type EventPayload interface{ seal() }
 
 // TextDelta is a chunk of response text.
 type TextDelta struct {
-	Text string `json:"text,omitempty"`
+	Text      string `json:"text,omitempty"`
+	AgentName string `json:"agentName,omitempty"`
 }
 
 func (TextDelta) seal() {}
 
 // ThinkingDelta is a chunk of reasoning/thinking text.
 type ThinkingDelta struct {
-	Text string `json:"text,omitempty"`
+	Text      string `json:"text,omitempty"`
+	AgentName string `json:"agentName,omitempty"`
 }
 
 func (ThinkingDelta) seal() {}
@@ -24,9 +26,10 @@ func (ThinkingDelta) seal() {}
 
 // ToolStart is emitted when a tool call begins.
 type ToolStart struct {
-	ToolID   string         `json:"toolId,omitempty"`
-	ToolName string         `json:"toolName,omitempty"`
-	ToolArgs map[string]any `json:"args,omitempty"`
+	ToolID    string         `json:"toolId,omitempty"`
+	ToolName  string         `json:"toolName,omitempty"`
+	ToolArgs  map[string]any `json:"args,omitempty"`
+	AgentName string         `json:"agentName,omitempty"`
 }
 
 func (ToolStart) seal() {}
@@ -39,15 +42,17 @@ type ToolEnd struct {
 	Error        string `json:"error,omitempty"`
 	Artifact     any    `json:"artifact,omitempty"`
 	ModelContent string `json:"modelContent,omitempty"`
+	AgentName    string `json:"agentName,omitempty"`
 }
 
 func (ToolEnd) seal() {}
 
 // ToolUpdate is emitted for long-running tool progress updates.
 type ToolUpdate struct {
-	ToolID   string `json:"toolId,omitempty"`
-	ToolName string `json:"toolName,omitempty"`
-	Text     string `json:"text,omitempty"`
+	ToolID    string `json:"toolId,omitempty"`
+	ToolName  string `json:"toolName,omitempty"`
+	Text      string `json:"text,omitempty"`
+	AgentName string `json:"agentName,omitempty"`
 }
 
 func (ToolUpdate) seal() {}

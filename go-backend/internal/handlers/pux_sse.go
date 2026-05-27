@@ -54,11 +54,17 @@ func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 	case llamaeng.EventTypeTextDelta:
 		p := payload.(llamaeng.TextDelta)
 		data := map[string]interface{}{"text": p.Text}
+		if p.AgentName != "" {
+			data["agentName"] = p.AgentName
+		}
 		return &sseEvent{Type: "text_delta", Data: data}
 
 	case llamaeng.EventTypeThinkingDelta:
 		p := payload.(llamaeng.ThinkingDelta)
 		data := map[string]interface{}{"text": p.Text}
+		if p.AgentName != "" {
+			data["agentName"] = p.AgentName
+		}
 		return &sseEvent{Type: "thinking_delta", Data: data}
 
 	case llamaeng.EventTypeToolStart:
@@ -67,6 +73,9 @@ func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 			"toolName": p.ToolName,
 			"args":     p.ToolArgs,
 			"toolId":   p.ToolID,
+		}
+		if p.AgentName != "" {
+			data["agentName"] = p.AgentName
 		}
 		return &sseEvent{Type: "tool_execution_start", Data: data}
 
@@ -77,6 +86,9 @@ func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 			"toolId":   p.ToolID,
 			"result":   p.Result,
 			"error":    p.Error,
+		}
+		if p.AgentName != "" {
+			data["agentName"] = p.AgentName
 		}
 		if p.Artifact != nil {
 			data["artifact"] = p.Artifact

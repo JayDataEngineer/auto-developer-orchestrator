@@ -168,18 +168,18 @@ function DelegateToolCallDisplay({
 	const isRunning = !isDone && !isError;
 
 	const role = (args as any)?.role || (args as any)?.instructions || "agent";
-	const label = `${toolName} → ${role}`;
 	const task = (args as any)?.task || (args as any)?.prompt || "";
-
-	// Width-aware: paddingLeft(2) + symbol(2) + spacing = ~6 chars overhead
-	// Header: indent(2) + spinner(3) + agent + task + suffix
-	const headerOverhead = 6; // indent + spinner + space
-	const maxTaskLen = Math.max(20, cols - headerOverhead - label.length - 10);
-	const taskPreview = trunc(task, Math.min(maxTaskLen, 50));
+	const injectedId = (args as any)?.__agentId as string | undefined;
 
 	// Look up sub-agent details from Zustand store.
+	// Priority: exact ID match > name+task match > running fallback
 	const agents = usePuxStore((s) => s.agents);
 	const agentState = useMemo(() => {
+		// Best: match by injected agentId (handles concurrent same-role agents)
+		if (injectedId) {
+			const byId = agents.get(injectedId);
+			if (byId) return byId;
+		}
 		const candidates = [...agents.values()].filter(
 			(a) => a.agentName === role,
 		);
@@ -189,10 +189,12 @@ function DelegateToolCallDisplay({
 			(a) => task.startsWith(a.task) || a.task.startsWith(task),
 		);
 		return byTask ?? candidates.find((a) => a.status === "running") ?? candidates[0];
-	}, [agents, role, task]);
+	}, [agents, role, task, injectedId]);
 
 	const toolCalls = agentState?.toolCalls ?? [];
 	const subToolCount = toolCalls.length;
+	const thinkingText = agentState?.thinkingText;
+	const agentText = agentState?.text;
 
 	// Duration
 	const duration = agentState
@@ -212,20 +214,35 @@ function DelegateToolCallDisplay({
 	// Width budget for tool call lines: indent(2) + "└ "(3) + symbol(1) + " "(1) = 7
 	const toolIndent = 7;
 	const maxArgLen = Math.max(15, cols - toolIndent - 20);
+	const label = `${toolName} → ${role}`;
+	const headerOverhead = 6;
+	const maxTaskLen = Math.max(20, cols - headerOverhead - label.length - 10);
+	const taskPreview = trunc(task, Math.min(maxTaskLen, 50));
 
-	// Collapsed when done — single line, no wrapping
+	// Collapsed when done — single line with summary
 	if (isDone) {
 		const doneSuffix = subToolCount > 0
 			? ` done · ${subToolCount} tool${subToolCount !== 1 ? "s" : ""} · ${duration}`
 			: " done";
 		return (
-			<Box paddingLeft={2} marginBottom={1}>
+			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
 				<Text wrap="truncate-end">
 					<Text color={isError ? colors.error : colors.success}>{BLACK_CIRCLE} </Text>
 					<Text bold color={colors.brand}>{label}</Text>
 					{taskPreview && <Text color="gray"> {taskPreview}</Text>}
 					<Text color="gray">{doneSuffix}</Text>
 				</Text>
+				{/* Agent output preview when done — first 3 lines */}
+				{agentText && agentText.trim() && (
+					<Box paddingLeft={4}>
+						<Text dimColor color="gray">
+							{agentText.trim().split("\n").slice(0, 3).map((line, i, arr) =>
+								`${BLOCKQUOTE_BAR} ${trunc(line, cols - 6)}${i < arr.length - 1 ? "\n" : ""}`
+							).join("")}
+							{agentText.trim().split("\n").length > 3 ? `\n${BLOCKQUOTE_BAR} ...` : ""}
+						</Text>
+					</Box>
+				)}
 			</Box>
 		);
 	}
@@ -280,8 +297,15 @@ function DelegateToolCallDisplay({
 				);
 			})}
 
-			{toolCalls.length === 0 && (
+			{toolCalls.length === 0 && !thinkingText && (
 				<Text dimColor color="gray">{"  └ "}starting...</Text>
+			)}
+
+			{/* Show agent thinking preview while running */}
+			{thinkingText && isRunning && (
+				<Text dimColor color="gray">
+					{"  └ "}{BLOCKQUOTE_BAR} {trunc(thinkingText.split("\n").pop() || thinkingText, cols - 8)}
+				</Text>
 			)}
 		</Box>
 	);
