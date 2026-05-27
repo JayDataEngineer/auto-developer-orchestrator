@@ -164,7 +164,7 @@ function DelegateToolCallDisplay({
 }) {
 	const colors = useColors();
 	const { cols } = useTerminalSize();
-	const isDone = result !== undefined;
+	const isDone = result !== undefined && !isError;
 	const isRunning = !isDone && !isError;
 
 	const role = (args as any)?.role || (args as any)?.instructions || "agent";
@@ -347,7 +347,7 @@ function ToolCallDisplay({
 }) {
 	const colors = useColors();
 	const { cols } = useTerminalSize();
-	const isDone = result !== undefined;
+	const isDone = result !== undefined && !isError;
 	const isRunning = !isDone && !isError;
 
 	const rawArg = getToolArgPreview(toolName, args as Record<string, unknown> | undefined);
