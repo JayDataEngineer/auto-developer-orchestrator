@@ -371,7 +371,12 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 
 		// If all retries exhausted, providerErr holds the last error
 		if providerErr != nil && finishReason == "" {
-			SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: ErrorEventData{Error: fmt.Sprintf("Provider failed after %d retries: %v", l.config.MaxProviderRetries, providerErr)}})
+			errMsg := fmt.Sprintf("LLM provider error after %d retries: %v", l.config.MaxProviderRetries, providerErr)
+			// Check if it's a provider-side error (5xx) to give clearer message
+			if strings.Contains(providerErr.Error(), "HTTP 5") || strings.Contains(providerErr.Error(), "internal server error") {
+				errMsg = fmt.Sprintf("LLM provider returned an error (%d retries). This is a server-side issue — try sending your message again: %v", l.config.MaxProviderRetries, providerErr)
+			}
+			SendEvent(subscriber, AgentEvent{Type: EventTypeError, Data: ErrorEventData{Error: errMsg}})
 			SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
 			return providerErr
 		}
