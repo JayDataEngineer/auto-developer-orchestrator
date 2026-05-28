@@ -64,10 +64,16 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		if sb := h.sandboxMgr.FindSandboxByProject(projectPath); sb != nil {
 			sandboxID = sb.ID
 		} else {
+			// For SSH projects, don't bind-mount a local path (it doesn't exist locally).
+			// The agent uses SSHExecutor for host commands instead.
+			sbProjectPath := projectPath
+			if sshInfo != nil {
+				sbProjectPath = ""
+			}
 			// No sandbox for this project — auto-create one
 			sb, err := h.sandboxMgr.CreateSandbox(r.Context(), sandbox.SandboxOptions{
 				ID:          sandboxID,
-				ProjectPath: projectPath,
+				ProjectPath: sbProjectPath,
 				InitialMode: sandbox.ModeBrowser,
 			})
 			if err != nil {
@@ -109,14 +115,15 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	// Host executor — CTO reads/writes directly on the host filesystem.
 	// Sub-agents with isolated/bridged sandbox tiers keep using the Docker sandbox.
 	var hostBash bashtools.Executor = &adapters.HostExecutor{WorkDir: projectPath}
-	hostFileOps := &file.SimpleSandboxOps{BasePath: projectPath}
+	var hostFileOps file.SandboxFileOps = &file.SimpleSandboxOps{BasePath: projectPath}
 
-	// SSH project — use SSH-backed bash executor for remote host access.
-	// File ops fall back to bash-based commands via the SSH executor.
+	// SSH project — use SSH-backed bash executor and file ops for remote host access.
 	if sshInfo != nil && h.sshManager != nil {
 		clientKey := fmt.Sprintf("%s@%s:%s", sshInfo.User, sshInfo.Host, sshInfo.Port)
 		if sshClient, ok := h.sshManager.GetClientByKey(clientKey); ok {
-			hostBash = &adapters.SSHExecutor{Client: sshClient, WorkDir: sshInfo.Path}
+			sshExec := &adapters.SSHExecutor{Client: sshClient, WorkDir: sshInfo.Path}
+			hostBash = sshExec
+			hostFileOps = adapters.NewSSHFileOps(sshExec, sshInfo.Path)
 		}
 	}
 
