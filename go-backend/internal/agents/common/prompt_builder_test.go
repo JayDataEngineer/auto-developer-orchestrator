@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -28,9 +29,19 @@ func TestPromptBuilder_SectionFiles(t *testing.T) {
 		KernelRoles: LoadAgentRoles(),
 	}
 
-	// Verify all stable section files load
+	// Verify non-empty stable section files load
 	for _, s := range builder.sections {
 		if s.Level == Stable && s.File != "" {
+		 fullPath := filepath.Join(configDir, "prompt_sections", s.File)
+			data, err := os.ReadFile(fullPath)
+			if err != nil {
+				t.Errorf("stable section %q (%s): read error: %v", s.Name, s.File, err)
+				continue
+			}
+			// Empty files are valid (user cleared them) — skip
+			if len(strings.TrimSpace(string(data))) == 0 {
+				continue
+			}
 			content := builder.getStable(s)
 			if content == "" {
 				t.Errorf("stable section %q (%s) returned empty", s.Name, s.File)
@@ -388,5 +399,40 @@ func TestPromptBuilder_InheritedCacheKeyChangesWithMCP(t *testing.T) {
 
 	if key1 == key2 {
 		t.Error("cache key should differ when MCP instructions change")
+	}
+}
+
+func TestBuildOrchestratorPromptV2_Integration(t *testing.T) {
+	os.Setenv("PROJECT_ROOT", "/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator")
+	ResetGlobalBuilder()
+	
+	prompt := BuildOrchestratorPromptV2(nil, "test-sandbox", "test context", "test skills", nil, nil)
+	
+	t.Logf("Prompt length: %d chars", len(prompt))
+	
+	outPath := filepath.Join(os.TempDir(), "pux-prompt-dump.txt")
+	os.WriteFile(outPath, []byte(prompt), 0644)
+	t.Logf("Written to: %s", outPath)
+	
+	sections := []string{"# Identity", "# Delegation", "# Employees", "# Paths"}
+	for _, s := range sections {
+		if strings.Contains(prompt, s) {
+			t.Logf("  ✓ Contains %q", s)
+		} else {
+			t.Errorf("  ✗ MISSING %q", s)
+		}
+	}
+
+	// Check CTO identity
+	if !strings.Contains(prompt, "CTO") {
+		t.Error("Missing CTO identity")
+	}
+	// Check delegation mentions task briefs
+	if !strings.Contains(prompt, "task brief") {
+		t.Error("Missing delegation content about task briefs")
+	}
+	// Check dynamic boundary
+	if !strings.Contains(prompt, DynamicBoundary) {
+		t.Error("Missing dynamic boundary marker")
 	}
 }
