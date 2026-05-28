@@ -13,7 +13,6 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/agents/orchestrator"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
-	llamaeng "github.com/auto-developer-orchestrator/backend/internal/llama"
 	"github.com/auto-developer-orchestrator/backend/internal/llm"
 	"github.com/auto-developer-orchestrator/backend/internal/observability"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
@@ -94,26 +93,13 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Build provider adapter — user-selected engine → default logic model →
-	// priority chain: local → cluster → gemini → openrouter
-	var engine *llamaeng.LLMClient
-	if sel, ok := h.selectedEngines[key]; ok {
-		engine = sel
-	}
-	if engine == nil && h.defaultLogic != "" {
-		engine = h.resolveEngineForModel(h.defaultLogic)
-	}
-	if engine == nil {
-		engine = h.llamaEngine
-	}
+	// Build provider adapter — priority chain: local → cluster → gemini → openrouter
+	engine := h.llamaEngine
 	if engine == nil {
 		engine = h.clusterEngine
 	}
-	if engine == nil {
-		engine = h.geminiEngine
-	}
-	if engine == nil {
-		engine = h.openrouterEngine
+	if sel, ok := h.selectedEngines[key]; ok {
+		engine = sel
 	}
 	provider := llm.NewAdapter(engine, 0)
 	defer provider.Close()

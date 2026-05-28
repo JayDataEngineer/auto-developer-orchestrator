@@ -75,12 +75,6 @@ func (h *PuxHandler) compactSession(ctx context.Context, project, agentID string
 		engine = h.clusterEngine
 	}
 	if engine == nil {
-		engine = h.geminiEngine
-	}
-	if engine == nil {
-		engine = h.openrouterEngine
-	}
-	if engine == nil {
 		// No LLM available — fall back to micro-compact (truncate tool results)
 		return h.microCompactOnly(ctx, tree, msgs, tokensBefore)
 	}

@@ -50,11 +50,6 @@ func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 	// Extract the core payload — event.Data is a core.EventPayload
 	payload := event.Data
 
-	// Guard against nil payloads (error path, incomplete events)
-	if payload == nil {
-		return nil
-	}
-
 	switch event.Type {
 	case llamaeng.EventTypeTextDelta:
 		p := payload.(llamaeng.TextDelta)
