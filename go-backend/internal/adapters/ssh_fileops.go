@@ -19,6 +19,16 @@ func NewSSHFileOps(exec *SSHExecutor, baseDir string) *SSHFileOps {
 
 func (s *SSHFileOps) absPath(p string) string {
 	if strings.HasPrefix(p, "/") {
+		// Remap sandbox paths to the remote SSH project directory,
+		// same as SimpleSandboxOps does for local projects.
+		if s.baseDir != "" {
+			if strings.HasPrefix(p, "/sandbox/workspace/") {
+				return s.baseDir + p[len("/sandbox/workspace"):]
+			}
+			if p == "/sandbox/workspace" {
+				return s.baseDir
+			}
+		}
 		return p
 	}
 	return path.Join(s.baseDir, p)

@@ -81,8 +81,10 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 
 	runInBackground, _ := args["run_in_background"].(bool)
 
-	// If we have a TaskManager, use the background task system
-	if t.taskMgr != nil {
+	// If we have a TaskManager AND the executor is local (not SSH), use the
+	// background task system. TaskManager runs via local exec.Command which
+	// doesn't work for SSH-backed executors.
+	if t.taskMgr != nil && !isRemoteExecutor(t.executor) {
 		return t.executeWithTaskManager(ctx, cmd, runInBackground)
 	}
 
@@ -179,4 +181,15 @@ func (t *Tool) executeSync(ctx context.Context, cmd string) (any, error) {
 	}
 
 	return map[string]any{"output": result}, nil
+}
+
+// isRemoteExecutor returns true if the executor runs commands on a remote
+// machine (e.g., SSH). Remote executors cannot use the local TaskManager
+// which spawns processes via os/exec.
+func isRemoteExecutor(exec Executor) bool {
+	if exec == nil {
+		return false
+	}
+	name := fmt.Sprintf("%T", exec)
+	return name == "*adapters.SSHExecutor"
 }

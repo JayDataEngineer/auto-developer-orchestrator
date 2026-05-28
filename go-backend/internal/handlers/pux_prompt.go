@@ -105,25 +105,51 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	defer provider.Close()
 
 	// Build infrastructure adapters (shared with scheduler)
-	var bashExec adapters.BashExecutor
-	var fileOps adapters.FileOps
-	if h.sandboxMgr != nil {
-		bashExec = adapters.BashExecutor{Mgr: h.sandboxMgr, SandboxID: sandboxID}
-		fileOps = adapters.FileOps{Mgr: h.sandboxMgr, SandboxID: sandboxID}
+	var bashExec bashtools.Executor
+	var fileOpsInstance file.SandboxFileOps
+	if h.sandboxMgr != nil && sandboxID != "" {
+		bashExec = &adapters.BashExecutor{Mgr: h.sandboxMgr, SandboxID: sandboxID}
+		fileOpsInstance = &file.SimpleSandboxOps{BasePath: "/sandbox/workspace"}
 	}
 
 	// Host executor — CTO reads/writes directly on the host filesystem.
-	// Sub-agents with isolated/bridged sandbox tiers keep using the Docker sandbox.
 	var hostBash bashtools.Executor = &adapters.HostExecutor{WorkDir: projectPath}
 	var hostFileOps file.SandboxFileOps = &file.SimpleSandboxOps{BasePath: projectPath}
 
-	// SSH project — use SSH-backed bash executor and file ops for remote host access.
+	// SSH project — use SSH-backed bash executor and file ops for ALL operations.
+	// Sub-agents inherit SSH executors too, since the Docker sandbox has no
+	// project files for remote SSH projects.
 	if sshInfo != nil && h.sshManager != nil {
 		clientKey := fmt.Sprintf("%s@%s:%s", sshInfo.User, sshInfo.Host, sshInfo.Port)
-		if sshClient, ok := h.sshManager.GetClientByKey(clientKey); ok {
+		sshClient, ok := h.sshManager.GetClientByKey(clientKey)
+		if !ok {
+			// Try auto-connecting using SSH agent or default key
+			h.log.Info("Auto-connecting SSH for prompt",
+				zap.String("key", clientKey),
+				zap.String("host", sshInfo.Host),
+				zap.String("user", sshInfo.User))
+			sessionKey, err := h.sshManager.Connect(sshInfo.User, sshInfo.Host, sshInfo.Port, "", "")
+			if err != nil {
+				h.log.Warn("SSH auto-connect failed — falling back to sandbox/host mode",
+					zap.Error(err),
+					zap.String("key", clientKey))
+			} else {
+				h.log.Info("SSH auto-connected for prompt",
+					zap.String("sessionKey", sessionKey))
+				sshClient, ok = h.sshManager.GetClientByKey(clientKey)
+			}
+		}
+		if ok && sshClient != nil {
 			sshExec := &adapters.SSHExecutor{Client: sshClient, WorkDir: sshInfo.Path}
+			sshFileOps := adapters.NewSSHFileOps(sshExec, sshInfo.Path)
 			hostBash = sshExec
-			hostFileOps = adapters.NewSSHFileOps(sshExec, sshInfo.Path)
+			hostFileOps = sshFileOps
+			// Sub-agents use SSH too (sandbox is empty for SSH projects)
+			bashExec = sshExec
+			fileOpsInstance = sshFileOps
+			h.log.Info("SSH executors wired for project",
+				zap.String("key", clientKey),
+				zap.String("path", sshInfo.Path))
 		}
 	}
 
@@ -159,8 +185,8 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		ContextSize:   32768,
 		MaxToolRounds: 50,
 		WorkDir:       "/sandbox",
-		BashExecutor:  &bashExec,
-		FileOps:       &fileOps,
+		BashExecutor:  bashExec,
+		FileOps:       fileOpsInstance,
 		HostBash:      hostBash,
 		HostFileOps:   hostFileOps,
 		MemoryStore:   memStore,

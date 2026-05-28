@@ -412,10 +412,18 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 		// Per-role sandbox tier: native roles use host executor, others use sandbox.
 		// When there's no sandbox (Docker down), ALL tiers fall through to host executor.
+		// For SSH projects, HostBash/HostFileOps are SSH-backed — use them directly.
 		execFactory := func(tier string) core.ToolExecutor {
 			if tier == "native" || cfg.SandboxID == "" {
-				hostExec := &adapters.HostExecutor{WorkDir: cfg.ProjectDir}
-				hostFileOps := &file.SimpleSandboxOps{BasePath: cfg.ProjectDir}
+				// Use configured host executor (SSH for remote projects, HostExecutor for local)
+				hostExec := cfg.HostBash
+				if hostExec == nil {
+					hostExec = &adapters.HostExecutor{WorkDir: cfg.ProjectDir}
+				}
+				hostFileOps := cfg.HostFileOps
+				if hostFileOps == nil {
+					hostFileOps = &file.SimpleSandboxOps{BasePath: cfg.ProjectDir}
+				}
 				nativeTracker := file.NewFileReadTracker()
 				hostReg := core.NewToolRegistry([]core.Tool{
 					bash.New(hostExec),
