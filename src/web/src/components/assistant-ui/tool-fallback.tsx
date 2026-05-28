@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import {
 	AlertCircleIcon,
 	CheckIcon,
@@ -377,6 +377,13 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 	const imageInfo = hasResult && !isCancelled ? extractScreenshotFromResult(result) : null;
 
 	const [expanded, setExpanded] = useState(false);
+
+	// Auto-expand when a tool completes with a result (unless it's an error or screenshot)
+	useEffect(() => {
+		if (isComplete && hasResult && !hasError && !isScreenshotTool) {
+			setExpanded(true);
+		}
+	}, [isComplete, hasResult, hasError, isScreenshotTool]);
 
 	if (interrupt?.type === "human") {
 		const payload = interrupt.payload as Record<string, unknown> | undefined;
