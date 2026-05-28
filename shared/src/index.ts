@@ -30,6 +30,8 @@ export type {
 	WorkbenchTab,
 	AgentState,
 	ToolCallRecord,
+	PersistedToolCall,
+	SubAgentRecord,
 	TuiView,
 	ModelCost,
 	ModelInfo,

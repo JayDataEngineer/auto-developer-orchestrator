@@ -25,6 +25,7 @@ import {
 	MessageSquare,
 } from "lucide-react";
 import type { ToolCallRecord } from "@/lib/pux-store";
+import type { SubAgentRecord } from "@pux/shared";
 
 // ── Human-readable tool labels ──
 
@@ -310,6 +311,7 @@ function TextSection({ text }: { text: string }) {
 
 export function DelegateRenderer({
 	args,
+	result,
 	status,
 }: {
 	args: Record<string, any>;
@@ -343,9 +345,23 @@ export function DelegateRenderer({
 		);
 		return byTask ?? candidates.find((a) => a.status === "running") ?? candidates[0];
 	})();
-	const toolCalls = agentState?.toolCalls ?? [];
-	const thinkingText = agentState?.thinkingText;
-	const agentText = agentState?.text;
+
+	// Persisted sub-agent trace from tool_calls JSON (available after page reload)
+	const persistedSubAgent = args.__subAgent as SubAgentRecord | undefined;
+
+	// Priority: live Zustand state → persisted subAgent from DB
+	const toolCalls: ToolCallRecord[] = agentState?.toolCalls
+		?? persistedSubAgent?.toolCalls?.map(tc => ({
+			toolName: tc.name,
+			args: tc.args,
+			result: tc.result,
+			isError: !!tc.error,
+			timestamp: 0,
+			endedAt: tc.result != null ? 0 : undefined,
+		}))
+		?? [];
+	const thinkingText = agentState?.thinkingText ?? persistedSubAgent?.thinking;
+	const agentText = agentState?.text ?? persistedSubAgent?.text;
 	const subToolCount = toolCalls.length;
 
 	// Auto-expand while running. useRef tracks whether we've auto-expanded
@@ -360,13 +376,11 @@ export function DelegateRenderer({
 		wasRunning.current = false;
 	}
 
-	const statusLabel = isRunning
-		? "working..."
-		: isComplete
-			? "done"
-			: isError
-				? "failed"
-				: "";
+	// Determine display status: live state takes priority, then persisted subAgent
+	const displayStatus = isRunning ? "working..."
+		: isError ? "failed"
+		: persistedSubAgent?.status === "error" ? "failed"
+		: (agentState || persistedSubAgent) ? "done" : "done";
 
 	const elapsed = agentState
 		? (agentState.endedAt ?? Date.now()) - agentState.startedAt
@@ -395,7 +409,7 @@ export function DelegateRenderer({
 					</span>
 				)}
 				<span className="text-xs text-muted-foreground ml-auto">
-					{statusLabel}
+					{displayStatus}
 				</span>
 				{subToolCount > 0 && (
 					<span className="text-xs text-dim">
@@ -437,8 +451,9 @@ export function DelegateRenderer({
 						</div>
 					)}
 
-					{/* Sub-agent text output */}
+					{/* Sub-agent text output — live state or persisted fallback */}
 					{agentText && <TextSection text={agentText} />}
+					{!agentText && persistedSubAgent?.result && <TextSection text={persistedSubAgent.result} />}
 				</div>
 			)}
 		</div>

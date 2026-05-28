@@ -37,6 +37,21 @@ interface ToolCallRecord {
 	argsText?: string;
 	result?: unknown;
 	error?: string;
+	subAgent?: {
+		name: string;
+		status: string;
+		toolCalls: Array<{
+			id?: string;
+			name: string;
+			args?: Record<string, unknown>;
+			result?: string;
+			error?: string;
+		}>;
+		thinking?: string;
+		text?: string;
+		result?: string;
+		error?: string;
+	};
 }
 
 type ThreadLike =
@@ -102,11 +117,18 @@ export function storedMessagesToThreadLikes(data: StoredMessage[]): ThreadLike[]
 					const callId = tc.id || `tc_${Math.random().toString(36).slice(2)}`;
 					// Re-attach tool result from the tool role message
 					const toolResult = toolResults.get(callId);
+
+					// Build args, injecting subAgent for delegate tools
+					const args = { ...(tc.args || {}) };
+					if (tc.subAgent) {
+						(args as Record<string, unknown>).__subAgent = tc.subAgent;
+					}
+
 					parts.push({
 						type: "tool-call" as const,
 						toolCallId: callId,
 						toolName: tc.name || "unknown",
-						args: tc.args || {},
+						args,
 						argsText:
 							tc.argsText || JSON.stringify(tc.args || {}, null, 2),
 						...(toolResult

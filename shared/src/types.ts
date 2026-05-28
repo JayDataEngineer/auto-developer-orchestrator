@@ -77,6 +77,26 @@ export interface ToolCallRecord {
 	endedAt?: number;
 }
 
+// ── Persisted sub-agent trace (from tool_calls JSON) ──
+
+export interface PersistedToolCall {
+	id?: string;
+	name: string;
+	args?: Record<string, unknown>;
+	result?: string;
+	error?: string;
+}
+
+export interface SubAgentRecord {
+	name: string;
+	status: string;
+	toolCalls: PersistedToolCall[];
+	thinking?: string;
+	text?: string;
+	result?: string;
+	error?: string;
+}
+
 // ── TUI Views ──
 
 export type TuiView = "chat" | "agents" | "tools" | "files" | "conversations";
