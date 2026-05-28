@@ -532,15 +532,18 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 	return req
 }
 
-// prepareRequest applies cloud sanitization, cache breakpoints, and Gemini
-// thought_signature injection to messages BEFORE converting to API wire format.
+// prepareMessages applies cloud sanitization, cache breakpoints, Gemini
+// thought_signature injection, and provider-specific role conversions
+// to messages BEFORE converting to API wire format.
 func (e *LLMClient) prepareMessages(messages []Message) []Message {
 	if !e.IsCloud() {
 		return messages
 	}
 
 	// Inject prompt caching on system messages for providers that support it.
-	if e.supportsCaching() {
+	// Skip for DeepSeek — it does not accept system role messages at all,
+	// so cache breakpoints (which create multiple system messages) are not applicable.
+	if e.supportsCaching() && !e.isDeepSeek() {
 		messages = injectCacheBreakpoints(messages, e.wantsCacheControl())
 	}
 
@@ -558,7 +561,50 @@ func (e *LLMClient) prepareMessages(messages []Message) []Message {
 		}
 	}
 
+	// DeepSeek (via OpenRouter) only accepts user and assistant roles.
+	// Convert any system messages to user messages, prefixing the content
+	// so the model still receives the instructions.
+	if e.isDeepSeek() {
+		for i := range messages {
+			if messages[i].Role == "system" {
+				messages[i].Content = "[System instruction: " + messages[i].Content + "]"
+				messages[i].Role = "user"
+			}
+		}
+		// Merge adjacent user messages — DeepSeek requires alternating
+		// user/assistant roles. Converting system→user can create runs
+		// of consecutive user messages.
+		messages = mergeAdjacentSameRole(messages)
+	}
+
 	return messages
+}
+
+// isDeepSeek returns true if the model is a DeepSeek variant.
+func (e *LLMClient) isDeepSeek() bool {
+	return strings.Contains(strings.ToLower(e.modelName), "deepseek")
+}
+
+// mergeAdjacentSameRole merges consecutive messages with the same role
+// by concatenating their content. This is needed after converting system→user
+// for providers like DeepSeek that require strictly alternating roles.
+func mergeAdjacentSameRole(msgs []Message) []Message {
+	if len(msgs) <= 1 {
+		return msgs
+	}
+	merged := make([]Message, 0, len(msgs))
+	cur := msgs[0]
+	for i := 1; i < len(msgs); i++ {
+		if msgs[i].Role == cur.Role {
+			// Same role — merge content
+			cur.Content = cur.Content + "\n" + msgs[i].Content
+		} else {
+			merged = append(merged, cur)
+			cur = msgs[i]
+		}
+	}
+	merged = append(merged, cur)
+	return merged
 }
 
 // supportsCaching returns true for providers that support prompt caching.
@@ -683,6 +729,11 @@ func (e *LLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletionResp
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		e.logger.Error("chat non-stream failed",
+			zap.String("url", e.baseURL),
+			zap.Int("status", resp.StatusCode),
+			zap.String("response", string(respBody)),
+		)
 		return nil, fmt.Errorf("chat API HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -738,6 +789,12 @@ func (e *LLMClient) chatCompleteStream(ctx context.Context, req ChatCompletionRe
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		e.logger.Error("chat stream failed",
+			zap.String("url", e.baseURL),
+			zap.Int("status", resp.StatusCode),
+			zap.String("response", string(respBody)),
+			zap.String("request", string(body[:min(len(body), 2000)])),
+		)
 		return fmt.Errorf("chat API HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 

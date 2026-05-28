@@ -227,3 +227,78 @@ func TestCacheControlType(t *testing.T) {
 	}
 	var _ *core.CacheControl = cc
 }
+
+func TestMergeAdjacentSameRole(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []Message
+		want []string // expected roles in order
+	}{
+		{
+			name: "empty",
+			in:   []Message{},
+			want: []string{},
+		},
+		{
+			name: "no merge needed",
+			in: []Message{
+				{Role: "user", Content: "hi"},
+				{Role: "assistant", Content: "hello"},
+				{Role: "user", Content: "bye"},
+			},
+			want: []string{"user", "assistant", "user"},
+		},
+		{
+			name: "merge two adjacent users",
+			in: []Message{
+				{Role: "user", Content: "sys"},
+				{Role: "user", Content: "hello"},
+				{Role: "assistant", Content: "hi"},
+			},
+			want: []string{"user", "assistant"},
+		},
+		{
+			name: "merge three adjacent users",
+			in: []Message{
+				{Role: "user", Content: "a"},
+				{Role: "user", Content: "b"},
+				{Role: "user", Content: "c"},
+			},
+			want: []string{"user"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeAdjacentSameRole(tt.in)
+			if len(got) != len(tt.want) {
+				t.Errorf("got %d messages, want %d", len(got), len(tt.want))
+			}
+			for i, m := range got {
+				if m.Role != tt.want[i] {
+					t.Errorf("msg[%d].Role = %q, want %q", i, m.Role, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestPrepareMessages_DeepSeekSystemConversion(t *testing.T) {
+	client := &LLMClient{
+		modelName: "deepseek/deepseek-v4-flash",
+		apiKey:    "test-key", // non-empty = IsCloud() returns true
+	}
+	msgs := []Message{
+		{Role: "system", Content: "You are a helpful assistant."},
+		{Role: "user", Content: "Hello"},
+	}
+	got := client.prepareMessages(msgs)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 merged message (system→user merged with user), got %d", len(got))
+	}
+	if got[0].Role != "user" {
+		t.Errorf("expected role=user, got %q", got[0].Role)
+	}
+	if got[0].Content == "" {
+		t.Error("expected non-empty merged content")
+	}
+}

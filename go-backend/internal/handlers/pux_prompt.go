@@ -93,7 +93,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Build provider adapter — priority chain: local → cluster → gemini → openrouter
+	// Build provider adapter — engine already resolved by outer handler
 	engine := h.llamaEngine
 	if engine == nil {
 		engine = h.clusterEngine

@@ -49,6 +49,9 @@ func writeSSE(w http.ResponseWriter, eventType string, data interface{}, canFlus
 func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 	// Extract the core payload — event.Data is a core.EventPayload
 	payload := event.Data
+	if payload == nil {
+		return nil
+	}
 
 	switch event.Type {
 	case llamaeng.EventTypeTextDelta:

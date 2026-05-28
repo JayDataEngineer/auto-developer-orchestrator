@@ -363,9 +363,9 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3) Use logic default if no model was explicitly resolved (CTO/orchestrator).
+	// 3) Use logic default — always preferred over selectedEngines/local/cluster.
 	// Not stored in selectedEngines so default changes take effect on next prompt.
-	if h.llamaEngine == nil && h.defaultLogic != "" {
+	if h.defaultLogic != "" {
 		if eng := h.resolveEngineForModel(h.defaultLogic); eng != nil {
 			h.llamaEngine = eng
 		}
