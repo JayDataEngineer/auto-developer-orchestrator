@@ -113,13 +113,15 @@ const ThreadScrollToBottom: FC = () => {
 };
 
 const ThreadWelcome: FC = () => {
+	const activeProject = usePuxStore((s) => s.activeProject);
+	const projectName = activeProject || "auto-developer-orchestrator";
 	return (
 		<div className="mx-auto my-auto flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col">
 			<div className="flex w-full flex-grow flex-col items-center justify-center">
 				<div className="flex size-full flex-col justify-center px-8">
 					<div className="text-2xl font-semibold">Pux</div>
 					<div className="text-2xl text-muted-foreground/65">
-						Your AI-powered development orchestrator
+						{projectName}
 					</div>
 				</div>
 			</div>
