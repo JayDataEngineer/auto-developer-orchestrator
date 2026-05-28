@@ -33,15 +33,21 @@ func setSSEHeaders(w http.ResponseWriter) {
 // resolveProjectPath resolves a project name to its filesystem directory path.
 // It checks custom projects from the DB first, then falls back to PROJECT_ROOT/<project>.
 // Returns empty string if no valid directory is found.
-func resolveProjectPath(project string, db *storage.Database) string {
+// ProjectResolution holds the result of resolving a project name.
+type ProjectResolution struct {
+	Path    string        // filesystem path (local or remote)
+	SSHInfo *SSHProjectInfo // non-nil for SSH projects
+}
+
+func resolveProjectFull(project string, db *storage.Database) (ProjectResolution, bool) {
 	if project == "" {
-		return ""
+		return ProjectResolution{}, false
 	}
 
 	// If project is an absolute path that exists, use it directly
-	if filepath.IsAbs(project) {
+	if filepath.IsAbs(project) && !strings.Contains(project, "://") {
 		if info, err := os.Stat(project); err == nil && info.IsDir() {
-			return project
+			return ProjectResolution{Path: project}, true
 		}
 	}
 
@@ -52,14 +58,17 @@ func resolveProjectPath(project string, db *storage.Database) string {
 		if err == nil {
 			for _, p := range customProjects {
 				if p.Name == project {
-					// Skip URL-only paths — they are not filesystem directories
+					// SSH project — return remote path + SSH info
 					if strings.Contains(p.Path, "://") {
-						break
+						info, ok := ParseSSHURL(p.Path)
+						if ok {
+							return ProjectResolution{Path: info.Path, SSHInfo: &info}, true
+						}
 					}
 					if info, err := os.Stat(p.Path); err == nil && info.IsDir() {
-						return p.Path
+						return ProjectResolution{Path: p.Path}, true
 					}
-					break
+					return ProjectResolution{}, false
 				}
 			}
 		}
@@ -75,18 +84,29 @@ func resolveProjectPath(project string, db *storage.Database) string {
 	// (prevents "deep-research-test" from resolving to the ADO root)
 	candidate := filepath.Join(projectsDir, "projects", project)
 	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-		return candidate
+		return ProjectResolution{Path: candidate}, true
 	}
 
 	// Also check PROJECT_ROOT/<project> (but skip if it equals PROJECT_ROOT)
 	candidate = filepath.Join(projectsDir, project)
 	if candidate != projectsDir {
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate
+			return ProjectResolution{Path: candidate}, true
 		}
 	}
 
-	return ""
+	return ProjectResolution{}, false
+}
+
+// resolveProjectPath resolves a project name to its local filesystem directory path.
+// For SSH projects, it returns the remote path (not a local path).
+// Returns empty string if no valid directory is found.
+func resolveProjectPath(project string, db *storage.Database) string {
+	res, ok := resolveProjectFull(project, db)
+	if !ok {
+		return ""
+	}
+	return res.Path
 }
 
 // resolveProjectFS resolves a project name to a ProjectFS (local or SSH).

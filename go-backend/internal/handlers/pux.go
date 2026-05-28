@@ -328,13 +328,14 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		req.AgentId = fmt.Sprintf("agent-%d", time.Now().UnixMilli())
 	}
 
-	projectPath := resolveProjectPath(req.Project, h.db)
-	if projectPath == "" {
+	projectRes, projectOk := resolveProjectFull(req.Project, h.db)
+	if !projectOk {
 		writeJSON(w, http.StatusNotFound, map[string]any{
 			"success": false, "error": "Project not found",
 		})
 		return
 	}
+	projectPath := projectRes.Path
 
 	// Load defaults from settings.json on first call
 	if h.defaultLogic == "" && h.defaultWorker == "" {
@@ -372,7 +373,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 
 	// Library-mode path: always use orchestrator + ephemeral sub-agents
 	if h.llamaEngine != nil && h.llamaEngine.IsLoaded() {
-		h.promptWithOrchestrator(w, r, *req, projectPath)
+		h.promptWithOrchestrator(w, r, *req, projectPath, projectRes.SSHInfo)
 		return
 	}
 
@@ -380,7 +381,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	if eng := h.engineFromSettings("openrouter", "deepseek/deepseek-v4-flash"); eng != nil {
 		h.llamaEngine = eng
 		h.selectedEngines[key] = eng
-		h.promptWithOrchestrator(w, r, *req, projectPath)
+		h.promptWithOrchestrator(w, r, *req, projectPath, projectRes.SSHInfo)
 		return
 	}
 

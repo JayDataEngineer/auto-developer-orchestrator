@@ -18,6 +18,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
+	bashtools "github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
@@ -51,7 +52,7 @@ func (vc *streamerVisualContext) LastChangeScore() float64 {
 
 // promptWithOrchestrator handles prompt requests using the orchestrator agent.
 // This is the default and only path for /api/pux/prompt.
-func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string) {
+func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Request, req promptRequest, projectPath string, sshInfo *SSHProjectInfo) {
 	key := compositeAgentKey(projectPath, req.AgentId)
 
 	// Resolve sandbox — find existing or auto-create
@@ -107,8 +108,17 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 
 	// Host executor — CTO reads/writes directly on the host filesystem.
 	// Sub-agents with isolated/bridged sandbox tiers keep using the Docker sandbox.
-	hostBash := &adapters.HostExecutor{WorkDir: projectPath}
+	var hostBash bashtools.Executor = &adapters.HostExecutor{WorkDir: projectPath}
 	hostFileOps := &file.SimpleSandboxOps{BasePath: projectPath}
+
+	// SSH project — use SSH-backed bash executor for remote host access.
+	// File ops fall back to bash-based commands via the SSH executor.
+	if sshInfo != nil && h.sshManager != nil {
+		clientKey := fmt.Sprintf("%s@%s:%s", sshInfo.User, sshInfo.Host, sshInfo.Port)
+		if sshClient, ok := h.sshManager.GetClientByKey(clientKey); ok {
+			hostBash = &adapters.SSHExecutor{Client: sshClient, WorkDir: sshInfo.Path}
+		}
+	}
 
 	// Project memory (MEMORY.md — legacy, still supported)
 	memStore := memory.NewProjectMemory(projectPath)

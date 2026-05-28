@@ -380,6 +380,7 @@ const ProjectGroup = memo(function ProjectGroup({
 	onSelectConversation: (project: string, agentId: string) => void;
 }) {
 	const displayName = projectKey.split("/").pop() || projectKey;
+	const setProjectStore = usePuxStore((s) => s.setProject);
 	const deleteConversation = usePuxStore((s) => s.deleteConversation);
 	const renameConversation = usePuxStore((s) => s.renameConversation);
 	const removeProject = usePuxStore((s) => s.removeProject);
@@ -392,6 +393,7 @@ const ProjectGroup = memo(function ProjectGroup({
 					<SidebarMenuButton
 						isActive={isActive}
 						tooltip={displayName}
+						onClick={() => setProjectStore(projectKey)}
 					>
 						<ChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden" />
 						<span className="flex-1 truncate">{displayName}</span>
