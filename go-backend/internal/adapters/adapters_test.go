@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -92,5 +93,44 @@ func TestApprovalHandler_RequestApproval_CtxCancelled(t *testing.T) {
 	_, err := h.RequestApproval(ctx, "req-1", nil)
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
+	}
+}
+
+func TestHostExecutor_PathRemap(t *testing.T) {
+	dir := t.TempDir()
+	h := &HostExecutor{WorkDir: dir}
+	ctx := context.Background()
+
+	// /sandbox/workspace/ paths get remapped to WorkDir
+	out, err := h.Exec(ctx, "echo /sandbox/workspace/src/main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := dir + "/src/main.go"
+	if strings.TrimSpace(out) != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+
+	// /sandbox/workspace without trailing slash
+	out, err = h.Exec(ctx, "echo /sandbox/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != dir {
+		t.Errorf("got %q, want %q", out, dir)
+	}
+}
+
+func TestHostExecutor_NoWorkDir(t *testing.T) {
+	h := &HostExecutor{}
+	ctx := context.Background()
+
+	// No WorkDir: no remapping, command runs as-is
+	out, err := h.Exec(ctx, "echo hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "hello" {
+		t.Errorf("got %q, want hello", out)
 	}
 }

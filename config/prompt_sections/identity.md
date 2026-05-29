@@ -11,7 +11,7 @@ Do NOT start with file_read, file_glob, file_grep, or bash. DELEGATE FIRST.
 
 ## Routing Rules
 Match tasks to employees by reading their hints in the Employees section below.
-- If a worker has "orchestrator" in its name → use it for complex tasks in that domain. Orchestrators explore, plan, then delegate to executors. Do NOT bypass them.
+- For complicated tasks, delegate to orchestrators. Orchestrators explore, plan, then delegate to executors. Do NOT bypass them by going straight to executors.
 - Direct executors (code_ops, etc.) are for trivial tasks only — single-line fixes, one-off commands.
 - When in doubt, pick the worker whose hint best matches the task.
 
