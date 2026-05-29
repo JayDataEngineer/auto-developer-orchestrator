@@ -181,20 +181,13 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 		return task
 	}
 
-	// Find the first user message (non-system, non-tool)
+	// Find the first user message (the original request).
+	// This is the ONLY context from the parent session — no CTO reasoning, no assistant messages.
+	// Claude Code sub-agents get the same treatment: task description only, zero parent history.
 	var originalRequest string
 	for _, msg := range msgs {
 		if msg.Role == "user" {
 			originalRequest = msg.Content
-			break
-		}
-	}
-
-	// Find the last assistant message before delegation (CTO's reasoning context)
-	var lastAssistantContext string
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "assistant" {
-			lastAssistantContext = msgs[i].Content
 			break
 		}
 	}
@@ -205,11 +198,6 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 		b.WriteString("<original_request>\n")
 		b.WriteString(originalRequest)
 		b.WriteString("\n</original_request>\n\n")
-	}
-	if lastAssistantContext != "" && len(lastAssistantContext) < 300 {
-		b.WriteString("<cto_context>\n")
-		b.WriteString(lastAssistantContext)
-		b.WriteString("\n</cto_context>\n\n")
 	}
 
 	// Normalize host paths in the task to /sandbox/workspace/ so the sub-agent
@@ -808,11 +796,12 @@ func (r *ParallelRunner) buildSubAgent(
 	}
 
 	sess := &subSession{
-		Session:   r.cfg.BaseSession,
-		msgCount:  0,
-		db:        r.cfg.DB,
-		project:   r.cfg.Project,
-		dbAgentID: setup.TranscriptID,
+		Session:     r.cfg.BaseSession,
+		msgCount:    0,
+		db:          r.cfg.DB,
+		project:     r.cfg.Project,
+		dbAgentID:   setup.TranscriptID,
+		contextSize: r.cfg.ContextSize,
 	}
 
 	executor := r.cfg.Executor
@@ -1538,6 +1527,8 @@ type subSession struct {
 	db          *storage.Database
 	project     string // project name
 	dbAgentID   string // composite agent_id for DB queries (e.g. "session-sub:marcus-1234")
+	// Auto-compaction: context size limit for this sub-agent
+	contextSize int
 }
 
 func (s *subSession) ID() string { return s.Session.ID() + "-sub" }
@@ -1584,36 +1575,58 @@ func (s *subSession) AppendMessage(msg core.Message) error {
 	return nil
 }
 func (s *subSession) BuildContext(ctx context.Context) ([]core.Message, error) {
+	// Auto-compact when message count exceeds threshold.
+	// Sub-agents accumulate messages quickly (file reads, tool results).
+	// Compact aggressively to prevent context overflow, same as Claude Code sub-agents.
+	compactThreshold := 30
+	if s.contextSize > 0 {
+		// Estimate: ~4 messages per 1K context tokens (rough heuristic)
+		compactThreshold = max(s.contextSize/400, 20)
+	}
+	if len(s.messages) > compactThreshold {
+		s.Compact(ctx, "")
+	}
 	return s.messages, nil
 }
 func (s *subSession) Compact(ctx context.Context, summary string) (string, error) {
-	// Keep recent messages verbatim, truncate older ones.
-	// Sub-agents should have lean context — compact aggressively.
+	// Aggressive compaction for sub-agents — inspired by Claude Code's sub-agent context management.
+	// Claude Code sub-agents keep only recent turns and discard old tool results.
+	// This prevents context overflow while preserving the working state.
 	if len(s.messages) <= 6 {
 		return "", nil
 	}
 
+	// Keep: system prompt (if present), first user message (task), last 8 messages (active work)
 	var compacted []core.Message
-	kept := 0
+	keepRecent := 8
+
 	for i, msg := range s.messages {
-		if i >= len(s.messages)-6 {
-			// Keep the last 6 messages verbatim
+		if i == 0 && msg.Role == "system" {
+			// Always keep system prompt
 			compacted = append(compacted, msg)
-			kept++
+		} else if i == 1 && msg.Role == "user" {
+			// Always keep original task
+			compacted = append(compacted, msg)
+		} else if i >= len(s.messages)-keepRecent {
+			// Keep recent messages verbatim
+			compacted = append(compacted, msg)
 		} else {
 			// Older messages: truncate aggressively
 			content := msg.Content
 			switch msg.Role {
 			case "tool":
-				// Tool results: keep first 1000 chars
+				// Tool results: keep first 500 chars (just enough for context)
+				if len(content) > 500 {
+					content = content[:500] + "\n...[compacted]"
+				}
+			case "assistant":
+				// Assistant reasoning: keep first 1000 chars
 				if len(content) > 1000 {
 					content = content[:1000] + "\n...[compacted]"
 				}
-			case "user", "assistant":
-				// User/assistant: keep first 2000 chars
-				if len(content) > 2000 {
-					content = content[:2000] + "\n...[compacted]"
-				}
+			case "user":
+				// Skip intermediate user messages (tool results fed back)
+				continue
 			}
 			if content != "" {
 				compacted = append(compacted, core.Message{
@@ -1622,15 +1635,14 @@ func (s *subSession) Compact(ctx context.Context, summary string) (string, error
 					ToolCallID: msg.ToolCallID,
 					Name:       msg.Name,
 				})
-				kept++
 			}
 		}
 	}
 
-	removed := len(s.messages) - kept
+	removed := len(s.messages) - len(compacted)
 	s.messages = compacted
 	s.msgCount = len(compacted)
-	return fmt.Sprintf("compacted %d messages, kept %d", removed, kept), nil
+	return fmt.Sprintf("sub-agent compacted: %d messages → %d", removed+keepRecent, len(compacted)), nil
 }
 func (s *subSession) GetCurrentNode() string { return s.Session.ID() + "-sub" }
 
