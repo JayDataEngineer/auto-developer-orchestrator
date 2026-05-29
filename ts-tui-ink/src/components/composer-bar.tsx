@@ -35,18 +35,6 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 	const { cols } = useTerminalSize();
 	const colors = useColors();
 
-	// Check if the CTO loop is active — block composer when it is.
-	// This covers: agents running AND the main message still streaming.
-	const runningAgentCount = usePuxStore((s) => {
-		let n = 0;
-		for (const a of s.agents.values()) {
-			if (a.status === "running") n++;
-		}
-		return n;
-	});
-	const ctoRunning = usePuxStore((s) => s.ctoRunning);
-	const isBlocked = runningAgentCount > 0 || ctoRunning;
-
 	// Auto-dismiss command output after 5s
 	useEffect(() => {
 		if (!commandOutput) return;
@@ -85,30 +73,18 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 
 			{/* Input area */}
 			<Text color={colors.subtle}>{"─".repeat(cols)}</Text>
-			{isBlocked ? (
-				<Box paddingX={1} gap={1}>
-					<Text color={colors.running}>●</Text>
-					<Text color={colors.textDim}>
-						{runningAgentCount > 0
-							? `${runningAgentCount} agent${runningAgentCount !== 1 ? "s" : ""} running`
-							: "thinking"
-						} · Esc Esc to cancel
-					</Text>
-				</Box>
-			) : (
-				<Box paddingX={1}>
-					<Text color={colors.brand} bold>{">"} </Text>
-					<CommandComposer
-						onCommand={onCommand}
-						onOutput={setCommandOutput}
-						selectedIdx={selectedIdx}
-						onSelectIdx={setSelectedIdx}
-						pathIdx={pathIdx}
-						onPathIdx={setPathIdx}
-						projectPath={projectPath}
-					/>
-				</Box>
-			)}
+			<Box paddingX={1}>
+				<Text color={colors.brand} bold>{">"} </Text>
+				<CommandComposer
+					onCommand={onCommand}
+					onOutput={setCommandOutput}
+					selectedIdx={selectedIdx}
+					onSelectIdx={setSelectedIdx}
+					pathIdx={pathIdx}
+					onPathIdx={setPathIdx}
+					projectPath={projectPath}
+				/>
+			</Box>
 			<Text color={colors.subtle}>{"─".repeat(cols)}</Text>
 		</Box>
 	);
