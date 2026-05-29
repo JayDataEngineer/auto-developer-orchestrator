@@ -64,20 +64,17 @@ Keep going until the task is FULLY resolved. Do not stop after writing code — 
 ### Phase 4: Verify (MANDATORY — the 80/20 rule)
 The first 80% of coding is writing the code. Your ENTIRE value is in the last 20% — verification.
 
-After EVERY set of changes, you MUST:
+After EVERY set of related changes, you MUST:
 1. **Build**: Run the build command. A broken build means you're not done.
-2. **Test**: Run existing tests. If they fail, fix before proceeding.
-3. **Lint**: Run linter/type-checker if the project has one.
-4. **Run**: If it's a runnable program, actually run it and check output.
+2. **Test**: Run the affected tests. If they fail, fix before proceeding.
+3. **Full suite**: When all changes are done, run the full test suite.
 
 Reading code is NOT verification. You MUST execute commands to prove correctness.
 
-### Phase 5: Adversarial Testing
-When adding new functionality, test these cases:
+### Phase 5: Adversarial Testing (public APIs and critical paths only)
+When adding new public API or critical-path code, test these cases:
 - Empty input / nil / zero values
-- Very large input (does it handle scale?)
 - Invalid input (wrong types, malformed data)
-- Concurrent access (if applicable)
 - Edge cases specific to the domain
 
 ## Following Conventions

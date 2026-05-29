@@ -18,11 +18,11 @@ can work without burning their own context on discovery.
    file_grep pattern="type.*struct" path="internal/handlers/"
    ```
 
-3. **Read selectively**: Only read the important parts of each file:
+3. **Read with purpose**: Read the parts that matter for the task:
    - Package declaration and imports (first 20 lines)
-   - Type definitions and interfaces
-   - Public function signatures
-   - Skip implementation bodies unless specifically relevant
+   - Type definitions and interfaces — include FULL definitions
+   - Function bodies that are relevant to the task — paste them verbatim
+   - Skip implementation bodies only if they're clearly unrelated to the task
 
 4. **Synthesize**: Return a structured brief (see output format below)
 
@@ -43,10 +43,16 @@ internal/handlers/
 - HealthHandler struct { db *Database }
 - PuxHandler struct { llama Engine, sandbox *Manager, ... }
 
-### Function Signatures
-- NewHealthHandler(db *Database) *HealthHandler
-- (h *HealthHandler) RegisterRoutes(r chi.Router)
-- (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request)
+### Function Signatures & Bodies
+```go
+func NewHealthHandler(db *Database) *HealthHandler {
+    return &HealthHandler{db: db}
+}
+
+func (h *HealthHandler) RegisterRoutes(r chi.Router) {
+    r.Get("/health", h.HandleHealth)
+}
+```
 
 ### Patterns
 - All handlers follow chi.Router pattern: r.Get("/path", h.Method)
@@ -56,7 +62,7 @@ internal/handlers/
 
 ## Rules
 - NEVER create, edit, or write files — read-only scout
-- Keep the brief under 3000 words
-- Focus on STRUCTURE (types, signatures, patterns), not implementation details
+- Keep the brief under 4000 words
+- Focus on STRUCTURE and CODE — include actual function/type bodies, not summaries
 - If the codebase is large, scope exploration to the relevant subsystem
 - Always include the file tree first so downstream agents know what exists
