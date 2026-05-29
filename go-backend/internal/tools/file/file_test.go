@@ -682,6 +682,110 @@ func TestAbsPath(t *testing.T) {
 	}
 }
 
+func TestAbsPath_SandboxWorkspaceRemap(t *testing.T) {
+	projectDir := "/home/ubuntu/myproject"
+	ops := &SimpleSandboxOps{BasePath: projectDir}
+
+	// /sandbox/workspace/subpath should remap to projectDir/subpath
+	if p := ops.absPath("/sandbox/workspace/go-backend/main.go"); p != projectDir+"/go-backend/main.go" {
+		t.Errorf("sandbox workspace remap: got %q, want %q", p, projectDir+"/go-backend/main.go")
+	}
+
+	// Exact /sandbox/workspace should remap to projectDir
+	if p := ops.absPath("/sandbox/workspace"); p != projectDir {
+		t.Errorf("sandbox workspace root: got %q, want %q", p, projectDir)
+	}
+
+	// /sandbox/tmp paths should remap to os.TempDir()
+	tmpPath := ops.absPath("/sandbox/tmp/build.log")
+	if !strings.HasPrefix(tmpPath, os.TempDir()) {
+		t.Errorf("sandbox tmp remap: got %q, expected prefix %q", tmpPath, os.TempDir())
+	}
+
+	// Non-sandbox absolute paths should pass through unchanged
+	if p := ops.absPath("/usr/local/bin/go"); p != "/usr/local/bin/go" {
+		t.Errorf("non-sandbox absolute: got %q, want /usr/local/bin/go", p)
+	}
+
+	// Empty BasePath: no remapping, paths pass through
+	emptyOps := &SimpleSandboxOps{}
+	if p := emptyOps.absPath("/sandbox/workspace/foo.go"); p != "/sandbox/workspace/foo.go" {
+		t.Errorf("empty BasePath: got %q, want /sandbox/workspace/foo.go", p)
+	}
+}
+
+func TestAbsPath_WrongBasePath_NoOp(t *testing.T) {
+	// This documents the old bug: BasePath="/sandbox/workspace" creates a no-op remap.
+	// The /sandbox/workspace/ prefix is stripped and replaced with BasePath which is
+	// the same value — the path is unchanged.
+	ops := &SimpleSandboxOps{BasePath: "/sandbox/workspace"}
+	p := ops.absPath("/sandbox/workspace/go-backend/main.go")
+	if p == "/sandbox/workspace/go-backend/main.go" {
+		t.Logf("WARNING: BasePath=/sandbox/workspace causes no-op remap: %q", p)
+	}
+	// After fix, fileOpsInstance should use projectPath as BasePath, not /sandbox/workspace
+}
+
+func TestReadTool_SandboxPathRemap(t *testing.T) {
+	// Simulates sub-agent reading a file via /sandbox/workspace/ path.
+	// The BasePath is set to a real temp dir (simulating projectPath on the host).
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "go-backend", "internal")
+	os.MkdirAll(subDir, 0755)
+	content := "package perms\n"
+	os.WriteFile(filepath.Join(subDir, "perms.go"), []byte(content), 0644)
+
+	ops := &SimpleSandboxOps{BasePath: dir}
+	tool := NewReadTool(ops, nil)
+
+	// Sub-agent uses /sandbox/workspace/ path — should remap to dir
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"file_path": "/sandbox/workspace/go-backend/internal/perms.go",
+	})
+	testutil.AssertNoError(t, err)
+
+	m := result.(map[string]any)
+	text, _ := m["content"].(string)
+	if !strings.Contains(text, "package perms") {
+		t.Errorf("expected file content, got %q", text)
+	}
+}
+
+func TestReadTool_Multimedia_SandboxPathRemap(t *testing.T) {
+	// Verifies that readMultimodal correctly remaps /sandbox/workspace/ paths.
+	// Before the fix, absolute sandbox paths were passed to the media describer as-is,
+	// causing "file not found" on the host filesystem.
+	dir := t.TempDir()
+	imgPath := filepath.Join(dir, "screenshots", "screen.png")
+	os.MkdirAll(filepath.Dir(imgPath), 0755)
+	os.WriteFile(imgPath, []byte("\x89PNG fake"), 0644)
+
+	var receivedPath string
+	media := &mockMediaDescriber{
+		describeFn: func(_ context.Context, absPath string, _ string) (string, error) {
+			receivedPath = absPath
+			return "screenshot description", nil
+		},
+	}
+
+	ops := &SimpleSandboxOps{BasePath: dir}
+	tool := NewReadTool(ops, media)
+
+	// Sub-agent uses /sandbox/workspace/ path for an image
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"file_path": "/sandbox/workspace/screenshots/screen.png",
+	})
+	testutil.AssertNoError(t, err)
+
+	// The media describer should receive the REMAPPED host path, not the sandbox path
+	if receivedPath == "/sandbox/workspace/screenshots/screen.png" {
+		t.Errorf("BUG: media describer received unremapped sandbox path %q", receivedPath)
+	}
+	if receivedPath != imgPath {
+		t.Errorf("media describer received %q, want %q", receivedPath, imgPath)
+	}
+}
+
 // Helper types for mocking Grep/Glob
 type grepFunc func(ctx context.Context, path, pattern string) (string, error)
 

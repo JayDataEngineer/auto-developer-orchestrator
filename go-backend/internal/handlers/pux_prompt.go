@@ -109,7 +109,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	var fileOpsInstance file.SandboxFileOps
 	if h.sandboxMgr != nil && sandboxID != "" {
 		bashExec = &adapters.BashExecutor{Mgr: h.sandboxMgr, SandboxID: sandboxID}
-		fileOpsInstance = &file.SimpleSandboxOps{BasePath: "/sandbox/workspace"}
+		// Use the project path as BasePath so /sandbox/workspace/ remapping works.
+		// SimpleSandboxOps.ReadFile calls absPath() which strips /sandbox/workspace/
+		// and prepends BasePath. If BasePath were "/sandbox/workspace" (the Docker
+		// mount point), the remap would be a no-op and os.ReadFile would fail on the
+		// host where /sandbox/workspace/ doesn't exist.
+		fileOpsInstance = &file.SimpleSandboxOps{BasePath: projectPath}
 	}
 
 	// Host executor — CTO reads/writes directly on the host filesystem.

@@ -394,12 +394,12 @@ func (t *ReadTool) readMultimodal(ctx context.Context, path string, toolName str
 			fmt.Sprintf("cannot read %s file: media analysis not available", ext))
 	}
 
-	// Resolve to absolute path for the media describer
+	// Resolve to absolute path for the media describer.
+	// Must remap /sandbox/workspace/ paths to the host project directory,
+	// otherwise the media describer tries to read from a Docker-only path.
 	absPath := path
-	if !filepath.IsAbs(path) {
-		if baseOps, ok := t.ops.(*SimpleSandboxOps); ok {
-			absPath = baseOps.absPath(path)
-		}
+	if baseOps, ok := t.ops.(*SimpleSandboxOps); ok {
+		absPath = baseOps.absPath(path)
 	}
 
 	desc, err := t.media.Describe(ctx, absPath, toolName)
