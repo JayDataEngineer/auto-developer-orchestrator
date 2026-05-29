@@ -293,6 +293,16 @@ function handleMetaEvent(
 
 type SnapshotStatus = "running" | "complete" | "requires-action";
 
+// Reorder parts so all reasoning comes first, then tool calls, then text.
+// This ensures the library's grouping algorithm sees consecutive reasoning
+// parts and groups them into a single block at the top of the message.
+function reorderParts(parts: Segment[]): Segment[] {
+	const reasoning = parts.filter(p => p.type === "reasoning");
+	const tools = parts.filter(p => p.type === "tool-call");
+	const rest = parts.filter(p => p.type !== "reasoning" && p.type !== "tool-call");
+	return [...reasoning, ...tools, ...rest];
+}
+
 function buildSnapshot(
 	parts: Segment[],
 	sources: SourceMessagePart[],
@@ -300,8 +310,8 @@ function buildSnapshot(
 	timing: TimingAccum,
 	steps: UsageStep[],
 ): ChatModelRunResult {
-	// Build content: parts in arrival order (sequential) + sources appended at end
-	const content: Segment[] = [...parts];
+	// Reorder: reasoning first → tools → text, then append sources at end
+	const content: Segment[] = reorderParts(parts);
 	for (const src of sources) content.push(src);
 
 	const toolCallCount = parts.filter(p => p.type === "tool-call").length;
@@ -518,9 +528,14 @@ export const puxChatAdapter: ChatModelAdapter = {
 		// Sub-agent tracking
 		let activeSubAgentName: string | null = null;
 
-		// Initial yield — empty, running
-		usePuxStore.setState({ ctoRunning: true });
+		// Initial yield — empty, running.
+		// Defer ctoRunning setState via queueMicrotask so it doesn't trigger
+		// a synchronous Zustand render during the adapter's first yield cycle.
+		// Without this, components subscribed to Zustand re-render while the
+		// assistant-ui store is still transitioning (stale text, missing messages)
+		// causing the user to see old state flash for a frame.
 		yield buildSnapshot(parts, sources, "running", timing, stepsRef);
+		queueMicrotask(() => usePuxStore.setState({ ctoRunning: true }));
 
 		try {
 			while (true) {
