@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -22,6 +23,15 @@ func (h *HostExecutor) Exec(ctx context.Context, command string) (string, error)
 	if h.WorkDir != "" {
 		command = strings.ReplaceAll(command, "/sandbox/workspace/", h.WorkDir+"/")
 		command = strings.ReplaceAll(command, "/sandbox/workspace", h.WorkDir)
+
+		// Fix double-nesting: if project basename appears after the WorkDir,
+		// strip it. E.g., WorkDir=.../go-backend, command has .../go-backend/go-backend/
+		baseName := filepath.Base(h.WorkDir)
+		if baseName != "" && baseName != "." {
+			doublePath := h.WorkDir + "/" + baseName + "/"
+			command = strings.ReplaceAll(command, doublePath, h.WorkDir+"/")
+		}
+
 		command = strings.ReplaceAll(command, "/sandbox/tmp/", os.TempDir()+"/")
 		command = strings.ReplaceAll(command, "/sandbox/tmp", os.TempDir())
 	}

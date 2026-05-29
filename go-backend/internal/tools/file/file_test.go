@@ -809,3 +809,4 @@ func (f grepFunc) WriteFile(ctx context.Context, path string, content string, ov
 func (f grepFunc) EditFile(ctx context.Context, path string, oldStr, newStr string, replaceAll bool) (string, error) {
 	return "", nil
 }
+

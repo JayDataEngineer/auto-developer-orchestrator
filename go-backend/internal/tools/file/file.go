@@ -256,7 +256,21 @@ func (s *SimpleSandboxOps) AbsPath(p string) string {
 		// exist on the host — it needs to be mapped to the actual project dir.
 		if s.BasePath != "" {
 			if strings.HasPrefix(p, "/sandbox/workspace/") {
-				return s.BasePath + p[len("/sandbox/workspace"):]
+				remapped := s.BasePath + p[len("/sandbox/workspace"):]
+
+				// Fix double-nesting: if the project basename appears right after
+				// the BasePath, strip it. E.g., if BasePath=.../go-backend and
+				// path=/sandbox/workspace/go-backend/internal/..., the remap would
+				// produce .../go-backend/go-backend/internal/... — fix it to
+				// .../go-backend/internal/...
+				baseName := filepath.Base(s.BasePath)
+				if baseName != "" && baseName != "." {
+					doublePath := s.BasePath + "/" + baseName + "/"
+					if strings.HasPrefix(remapped, doublePath) {
+						remapped = s.BasePath + remapped[len(doublePath)-1:]
+					}
+				}
+				return remapped
 			}
 			if strings.HasPrefix(p, "/sandbox/tmp/") {
 				return os.TempDir() + p[len("/sandbox/tmp"):]
