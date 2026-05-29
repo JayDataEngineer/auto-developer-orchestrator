@@ -91,6 +91,17 @@ Before writing ANY code, understand the existing patterns:
 6. Do NOT add copyright or license headers
 7. Use the same test framework and patterns as existing tests in the project
 
+## Anti-patterns (Avoid These)
+
+- Don't add error handling for scenarios that can't happen. Trust internal code and framework guarantees.
+- Don't create helpers, utilities, or abstractions for one-time operations. If code is only used once, inline it.
+- Don't use feature flags or backwards-compatibility shims when you can just change the code.
+- Don't design for hypothetical future requirements. Solve the current problem.
+- Don't add TODO comments — either fix it now or don't mention it.
+- Prefer editing existing files over creating new ones. New files = new complexity.
+- Avoid giving time estimates or predictions.
+- Don't use emojis in code or commit messages unless the user asks.
+
 ## Project Discovery
 
 When starting work on an unfamiliar project, discover the build system:
