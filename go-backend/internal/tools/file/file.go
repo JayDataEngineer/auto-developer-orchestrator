@@ -62,6 +62,8 @@ type SandboxFileOps interface {
 	EditFile(ctx context.Context, path string, oldStr, newStr string, replaceAll bool) (string, error)
 	Grep(ctx context.Context, path string, pattern string) (string, error)
 	Glob(ctx context.Context, path string, pattern string) (string, error)
+	// AbsPath resolves a (possibly sandbox-relative) path to an absolute host path.
+	AbsPath(p string) string
 }
 
 // SimpleSandboxOps implements SandboxFileOps using the local filesystem.
@@ -70,7 +72,7 @@ type SimpleSandboxOps struct {
 }
 
 func (s *SimpleSandboxOps) ReadFile(ctx context.Context, path string) (string, error) {
-	data, err := os.ReadFile(s.absPath(path))
+	data, err := os.ReadFile(s.AbsPath(path))
 	if err != nil {
 		return "", err
 	}
@@ -78,7 +80,7 @@ func (s *SimpleSandboxOps) ReadFile(ctx context.Context, path string) (string, e
 }
 
 func (s *SimpleSandboxOps) WriteFile(ctx context.Context, path string, content string, overwrite bool) (string, error) {
-	fullPath := s.absPath(path)
+	fullPath := s.AbsPath(path)
 	if !overwrite {
 		if _, err := os.Stat(fullPath); err == nil {
 			return "", fmt.Errorf("file already exists, use overwrite=true")
@@ -95,7 +97,7 @@ func (s *SimpleSandboxOps) WriteFile(ctx context.Context, path string, content s
 }
 
 func (s *SimpleSandboxOps) EditFile(ctx context.Context, path string, oldStr, newStr string, replaceAll bool) (string, error) {
-	data, err := os.ReadFile(s.absPath(path))
+	data, err := os.ReadFile(s.AbsPath(path))
 	if err != nil {
 		return "", err
 	}
@@ -116,7 +118,7 @@ func (s *SimpleSandboxOps) EditFile(ctx context.Context, path string, oldStr, ne
 		count = 1
 	}
 
-	if err := os.WriteFile(s.absPath(path), []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(s.AbsPath(path), []byte(newContent), 0644); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("Replaced %d occurrence(s) in %s", count, path), nil
@@ -136,7 +138,7 @@ var skipDirs = map[string]bool{
 }
 
 func (s *SimpleSandboxOps) Grep(ctx context.Context, path string, pattern string) (string, error) {
-	root := s.absPath(path)
+	root := s.AbsPath(path)
 
 	// Try ripgrep first (respects .gitignore, fast)
 	if rg, _ := exec.LookPath("rg"); rg != "" {
@@ -196,7 +198,7 @@ func (s *SimpleSandboxOps) Grep(ctx context.Context, path string, pattern string
 }
 
 func (s *SimpleSandboxOps) Glob(ctx context.Context, path string, pattern string) (string, error) {
-	root := s.absPath(path)
+	root := s.AbsPath(path)
 
 	// Try ripgrep first (respects .gitignore, fast)
 	if rg, _ := exec.LookPath("rg"); rg != "" {
@@ -247,7 +249,7 @@ func (s *SimpleSandboxOps) Glob(ctx context.Context, path string, pattern string
 	return strings.Join(results, "\n"), nil
 }
 
-func (s *SimpleSandboxOps) absPath(p string) string {
+func (s *SimpleSandboxOps) AbsPath(p string) string {
 	if strings.HasPrefix(p, "/") {
 		// Remap sandbox paths to the host project directory.
 		// When using the native executor (no Docker), /sandbox/workspace/ doesn't
@@ -397,10 +399,7 @@ func (t *ReadTool) readMultimodal(ctx context.Context, path string, toolName str
 	// Resolve to absolute path for the media describer.
 	// Must remap /sandbox/workspace/ paths to the host project directory,
 	// otherwise the media describer tries to read from a Docker-only path.
-	absPath := path
-	if baseOps, ok := t.ops.(*SimpleSandboxOps); ok {
-		absPath = baseOps.absPath(path)
-	}
+	absPath := t.ops.AbsPath(path)
 
 	desc, err := t.media.Describe(ctx, absPath, toolName)
 	if err != nil {

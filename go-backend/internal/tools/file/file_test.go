@@ -635,6 +635,7 @@ func (m *mockFileOps) Glob(ctx context.Context, path string, pattern string) (st
 	}
 	return "", nil
 }
+func (m *mockFileOps) AbsPath(p string) string { return p }
 
 func TestGrepTool_Execute_DefaultPath(t *testing.T) {
 	ops := &mockFileOps{
@@ -674,10 +675,10 @@ func TestGlobTool_Execute_MissingPattern(t *testing.T) {
 
 func TestAbsPath(t *testing.T) {
 	ops := &SimpleSandboxOps{BasePath: "/base"}
-	if p := ops.absPath("/absolute/path"); p != "/absolute/path" {
+	if p := ops.AbsPath("/absolute/path"); p != "/absolute/path" {
 		t.Errorf("expected '/absolute/path', got %q", p)
 	}
-	if p := ops.absPath("relative/path"); p != "/base/relative/path" {
+	if p := ops.AbsPath("relative/path"); p != "/base/relative/path" {
 		t.Errorf("expected '/base/relative/path', got %q", p)
 	}
 }
@@ -687,29 +688,29 @@ func TestAbsPath_SandboxWorkspaceRemap(t *testing.T) {
 	ops := &SimpleSandboxOps{BasePath: projectDir}
 
 	// /sandbox/workspace/subpath should remap to projectDir/subpath
-	if p := ops.absPath("/sandbox/workspace/go-backend/main.go"); p != projectDir+"/go-backend/main.go" {
+	if p := ops.AbsPath("/sandbox/workspace/go-backend/main.go"); p != projectDir+"/go-backend/main.go" {
 		t.Errorf("sandbox workspace remap: got %q, want %q", p, projectDir+"/go-backend/main.go")
 	}
 
 	// Exact /sandbox/workspace should remap to projectDir
-	if p := ops.absPath("/sandbox/workspace"); p != projectDir {
+	if p := ops.AbsPath("/sandbox/workspace"); p != projectDir {
 		t.Errorf("sandbox workspace root: got %q, want %q", p, projectDir)
 	}
 
 	// /sandbox/tmp paths should remap to os.TempDir()
-	tmpPath := ops.absPath("/sandbox/tmp/build.log")
+	tmpPath := ops.AbsPath("/sandbox/tmp/build.log")
 	if !strings.HasPrefix(tmpPath, os.TempDir()) {
 		t.Errorf("sandbox tmp remap: got %q, expected prefix %q", tmpPath, os.TempDir())
 	}
 
 	// Non-sandbox absolute paths should pass through unchanged
-	if p := ops.absPath("/usr/local/bin/go"); p != "/usr/local/bin/go" {
+	if p := ops.AbsPath("/usr/local/bin/go"); p != "/usr/local/bin/go" {
 		t.Errorf("non-sandbox absolute: got %q, want /usr/local/bin/go", p)
 	}
 
 	// Empty BasePath: no remapping, paths pass through
 	emptyOps := &SimpleSandboxOps{}
-	if p := emptyOps.absPath("/sandbox/workspace/foo.go"); p != "/sandbox/workspace/foo.go" {
+	if p := emptyOps.AbsPath("/sandbox/workspace/foo.go"); p != "/sandbox/workspace/foo.go" {
 		t.Errorf("empty BasePath: got %q, want /sandbox/workspace/foo.go", p)
 	}
 }
@@ -719,7 +720,7 @@ func TestAbsPath_WrongBasePath_NoOp(t *testing.T) {
 	// The /sandbox/workspace/ prefix is stripped and replaced with BasePath which is
 	// the same value — the path is unchanged.
 	ops := &SimpleSandboxOps{BasePath: "/sandbox/workspace"}
-	p := ops.absPath("/sandbox/workspace/go-backend/main.go")
+	p := ops.AbsPath("/sandbox/workspace/go-backend/main.go")
 	if p == "/sandbox/workspace/go-backend/main.go" {
 		t.Logf("WARNING: BasePath=/sandbox/workspace causes no-op remap: %q", p)
 	}

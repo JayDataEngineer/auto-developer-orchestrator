@@ -17,7 +17,7 @@ func NewSSHFileOps(exec *SSHExecutor, baseDir string) *SSHFileOps {
 	return &SSHFileOps{exec: exec, baseDir: baseDir}
 }
 
-func (s *SSHFileOps) absPath(p string) string {
+func (s *SSHFileOps) AbsPath(p string) string {
 	if strings.HasPrefix(p, "/") {
 		// Remap sandbox paths to the remote SSH project directory,
 		// same as SimpleSandboxOps does for local projects.
@@ -35,12 +35,12 @@ func (s *SSHFileOps) absPath(p string) string {
 }
 
 func (s *SSHFileOps) ReadFile(ctx context.Context, p string) (string, error) {
-	out, err := s.exec.Exec(ctx, fmt.Sprintf("cat %s", shQuote(s.absPath(p))))
+	out, err := s.exec.Exec(ctx, fmt.Sprintf("cat %s", shQuote(s.AbsPath(p))))
 	return out, err
 }
 
 func (s *SSHFileOps) WriteFile(ctx context.Context, p string, content string, overwrite bool) (string, error) {
-	fullPath := s.absPath(p)
+	fullPath := s.AbsPath(p)
 	// Ensure parent directory exists
 	s.exec.Exec(ctx, fmt.Sprintf("mkdir -p %s", shQuote(path.Dir(fullPath))))
 
@@ -54,7 +54,7 @@ func (s *SSHFileOps) WriteFile(ctx context.Context, p string, content string, ov
 }
 
 func (s *SSHFileOps) EditFile(ctx context.Context, p string, oldStr, newStr string, replaceAll bool) (string, error) {
-	fullPath := s.absPath(p)
+	fullPath := s.AbsPath(p)
 	// Use sed for edit. Escape single quotes in strings.
 	oldEsc := strings.ReplaceAll(oldStr, "'", "'\\''")
 	newEsc := strings.ReplaceAll(newStr, "'", "'\\''")
@@ -71,12 +71,12 @@ func (s *SSHFileOps) EditFile(ctx context.Context, p string, oldStr, newStr stri
 }
 
 func (s *SSHFileOps) Grep(ctx context.Context, p string, pattern string) (string, error) {
-	cmd := fmt.Sprintf("grep -rn %s %s 2>/dev/null || true", shQuote(pattern), shQuote(s.absPath(p)))
+	cmd := fmt.Sprintf("grep -rn %s %s 2>/dev/null || true", shQuote(pattern), shQuote(s.AbsPath(p)))
 	return s.exec.Exec(ctx, cmd)
 }
 
 func (s *SSHFileOps) Glob(ctx context.Context, p string, pattern string) (string, error) {
-	cmd := fmt.Sprintf("find %s -name %s -type f -maxdepth 6 2>/dev/null || true", shQuote(s.absPath(p)), shQuote(pattern))
+	cmd := fmt.Sprintf("find %s -name %s -type f -maxdepth 6 2>/dev/null || true", shQuote(s.AbsPath(p)), shQuote(pattern))
 	return s.exec.Exec(ctx, cmd)
 }
 

@@ -2,11 +2,28 @@ package adapters
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
 )
+
+// fileOpsShim wraps file.SimpleSandboxOps for use in adapter tests.
+type fileOpsShim struct {
+	dir string
+}
+
+func (f *fileOpsShim) WriteFile(ctx context.Context, path, content string, overwrite bool) (string, error) {
+	ops := &file.SimpleSandboxOps{BasePath: f.dir}
+	return ops.WriteFile(ctx, path, content, overwrite)
+}
+
+func (f *fileOpsShim) ReadFile(ctx context.Context, path string) (string, error) {
+	ops := &file.SimpleSandboxOps{BasePath: f.dir}
+	return ops.ReadFile(ctx, path)
+}
 
 func TestShQ(t *testing.T) {
 	tests := []struct {
@@ -132,5 +149,56 @@ func TestHostExecutor_NoWorkDir(t *testing.T) {
 	}
 	if strings.TrimSpace(out) != "hello" {
 		t.Errorf("got %q, want hello", out)
+	}
+}
+
+// TestSubAgentWriteThenRead simulates the exact sub-agent pipeline:
+// file_write with /sandbox/workspace/ path → HostExecutor bash ls → file_read back.
+// This catches the class of bugs where file tools and bash tools resolve paths differently.
+func TestSubAgentWriteThenRead(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	// Same setup as execFactory("native") in orchestrator.go
+	hostExec := &HostExecutor{WorkDir: dir}
+
+	// Use the file package directly — import it
+	fileOps := &fileOpsShim{dir: dir}
+
+	sandboxPath := "/sandbox/workspace/go-backend/internal/mypkg/mypkg.go"
+	content := "package mypkg\n\nfunc Hello() string { return \"hello\" }\n"
+
+	// Step 1: file_write via SimpleSandboxOps (sub-agent uses /sandbox/workspace/ path)
+	_, err := fileOps.WriteFile(ctx, sandboxPath, content, false)
+	if err != nil {
+		t.Fatalf("file_write failed: %v", err)
+	}
+
+	// Step 2: bash ls via HostExecutor — should see the file
+	out, err := hostExec.Exec(ctx, "ls /sandbox/workspace/go-backend/internal/mypkg/")
+	if err != nil {
+		t.Fatalf("bash ls failed: %v", err)
+	}
+	if !strings.Contains(out, "mypkg.go") {
+		t.Errorf("bash ls did not find mypkg.go — file_write may not be persisting. ls output: %q", out)
+	}
+
+	// Step 3: file_read via SimpleSandboxOps — should read back what was written
+	got, err := fileOps.ReadFile(ctx, sandboxPath)
+	if err != nil {
+		t.Fatalf("file_read failed: %v", err)
+	}
+	if got != content {
+		t.Errorf("file_read content mismatch.\ngot:  %q\nwant: %q", got, content)
+	}
+
+	// Step 4: Verify the file exists at the actual host path (not just in sandbox namespace)
+	hostPath := dir + "/go-backend/internal/mypkg/mypkg.go"
+	data, err := os.ReadFile(hostPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile at host path failed: %v (file_write did not persist to disk)", err)
+	}
+	if string(data) != content {
+		t.Errorf("host file content mismatch.\ngot:  %q\nwant: %q", string(data), content)
 	}
 }
