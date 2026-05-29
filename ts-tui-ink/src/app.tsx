@@ -211,9 +211,9 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 	}, [model, project, exit]);
 
 	return (
-		<Box flexDirection="column" height={rows} width={cols}>
-			{/* Content area — clips overflow so composer/status stay visible */}
-			<Box flexGrow={1} flexDirection="column" overflow="hidden">
+		<Box flexDirection="column" width={cols}>
+			{/* Content area — no overflow clipping, old messages in Static are scrollable */}
+			<Box flexDirection="column">
 				<ContentArea />
 			</Box>
 

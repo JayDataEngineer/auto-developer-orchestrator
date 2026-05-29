@@ -39,19 +39,17 @@ export function Thread() {
 	return (
 		<Box flexDirection="column" flexGrow={1}>
 			{/*
-			 * Messages — small window so messages graduate to Static (scrollback)
-			 * quickly. Overscan=4 (library default) absorbs boundary churn so
-			 * content doesn't vanish at the edge.
-			 *
-			 * windowSize=2: last 2 messages stay core live.
-			 * windowOverscan=4: 4 more messages in the live buffer zone.
-			 * Total: 6 live messages. Older → Static → terminal scrollback.
+			 * Messages — windowSize=1 means only the latest message is live.
+			 * All previous messages graduate to Static immediately, becoming
+			 * part of the terminal's scrollback buffer (scroll up to see).
+			 * windowOverscan=2 keeps 2 older messages in the live buffer to
+			 * prevent flickering at the Static boundary.
 			 */}
 			<Box flexDirection="column">
 				<ThreadPrimitive.Empty>
 					<Welcome />
 				</ThreadPrimitive.Empty>
-				<ThreadPrimitive.Messages windowSize={2} windowOverscan={4}>
+				<ThreadPrimitive.Messages windowSize={1} windowOverscan={2}>
 					{() => <MessageWrapper />}
 				</ThreadPrimitive.Messages>
 			</Box>
