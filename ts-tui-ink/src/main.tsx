@@ -210,7 +210,7 @@ const appElement = React.createElement(App, {
 const instance = render(appElement, {
 	exitOnCtrlC: false,
 	incrementalRendering: true,
-	kittyKeyboard: supportsKittyKeyboard() ? { mode: "auto" } : false,
+	kittyKeyboard: false,
 });
 
 // Force Ink to clear and re-render on terminal resize.
