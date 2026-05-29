@@ -413,6 +413,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		// Per-role sandbox tier: native/empty roles use host executor, others use sandbox.
 		// When there's no sandbox (Docker down), ALL tiers fall through to host executor.
 		// For SSH projects, HostBash/HostFileOps are SSH-backed — use them directly.
+		// Employee tools (MCP, browser, desktop, etc.) are always included regardless of tier.
 		execFactory := func(tier string) core.ToolExecutor {
 			needsDocker := tier == "isolated" || tier == "bridged"
 			if !needsDocker || cfg.SandboxID == "" {
@@ -426,7 +427,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 					hostFileOps = &file.SimpleSandboxOps{BasePath: cfg.ProjectDir}
 				}
 				nativeTracker := file.NewFileReadTracker()
-				hostReg := core.NewToolRegistry([]core.Tool{
+				// Start with employee tools (MCP, browser, desktop, graph, app_profile)
+				// then overlay host-specific bash/file tools which have correct path remapping.
+				hostReg := core.NewToolRegistry(append(
+					append([]core.Tool{}, employeeTools...),
 					bash.New(hostExec),
 					file.NewReadToolWithTracker(hostFileOps, mediaDescriber, nativeTracker),
 					file.NewWriteTool(hostFileOps),
@@ -435,7 +439,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 					file.NewGlobTool(hostFileOps),
 					python.NewPythonTool(python.WithWorkDir(cfg.ProjectDir)),
 					eval.NewEvalTool(),
-				})
+				))
 				hostReg.RegisterCommonAliases()
 				return hostReg
 			}
