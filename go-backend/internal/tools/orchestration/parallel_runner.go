@@ -812,7 +812,7 @@ func (r *ParallelRunner) buildSubAgent(
 	}
 
 	executor := r.cfg.Executor
-	if r.cfg.ExecutorFactory != nil && sandboxTier != "" {
+	if r.cfg.ExecutorFactory != nil {
 		executor = r.cfg.ExecutorFactory(sandboxTier)
 	}
 	if len(delegatesTo) > 0 && r.cfg.Depth < r.cfg.MaxDepth {
