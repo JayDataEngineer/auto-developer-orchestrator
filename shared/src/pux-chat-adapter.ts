@@ -289,6 +289,20 @@ function handleMetaEvent(
 	}
 }
 
+// ── Part reordering ──
+
+/** Reorder parts so reasoning comes first, then tool calls, then everything else.
+ *  Within each group, original order is preserved.
+ *  This ensures the library's grouping algorithm sees consecutive reasoning parts
+ *  as a single block (instead of interleaved with tool calls). */
+function reorderParts(parts: Segment[]): Segment[] {
+	if (parts.length <= 1) return parts;
+	const reasoning = parts.filter(p => p.type === "reasoning");
+	const tools = parts.filter(p => p.type === "tool-call");
+	const rest = parts.filter(p => p.type !== "reasoning" && p.type !== "tool-call");
+	return [...reasoning, ...tools, ...rest];
+}
+
 // ── Snapshot builder ──
 
 type SnapshotStatus = "running" | "complete" | "requires-action";
@@ -300,8 +314,8 @@ function buildSnapshot(
 	timing: TimingAccum,
 	steps: UsageStep[],
 ): ChatModelRunResult {
-	// Build content: timeline segments + sources appended at end
-	const content: Segment[] = [...parts];
+	// Build content: reorder parts (reasoning first, tools second) + sources appended at end
+	const content: Segment[] = reorderParts(parts);
 	for (const src of sources) content.push(src);
 
 	const toolCallCount = parts.filter(p => p.type === "tool-call").length;

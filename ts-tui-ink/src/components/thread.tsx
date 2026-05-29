@@ -8,9 +8,11 @@
  * Messages beyond windowSize graduate to Static → written to terminal
  * scrollback → scroll wheel works natively.
  *
- * windowSize is kept small (3) because each message can be many lines
+ * windowSize is kept small (2) because each message can be many lines
  * (thinking + tool calls + sub-agents). Too many live messages overflow
  * the content area and get clipped by overflow="hidden" in app.tsx.
+ * windowOverscan=4 (library default) provides a buffer zone so messages
+ * don't vanish at the scrollback boundary.
  */
 
 import React from "react";
@@ -38,17 +40,18 @@ export function Thread() {
 		<Box flexDirection="column" flexGrow={1}>
 			{/*
 			 * Messages — small window so messages graduate to Static (scrollback)
-			 * quickly. No overscan — we want old messages in scrollback ASAP so
-			 * the terminal's native scroll wheel works.
+			 * quickly. Overscan=4 (library default) absorbs boundary churn so
+			 * content doesn't vanish at the edge.
 			 *
-			 * windowSize=3: last 3 messages stay live (can be re-rendered).
-			 * Everything else → Static → terminal scrollback.
+			 * windowSize=2: last 2 messages stay core live.
+			 * windowOverscan=4: 4 more messages in the live buffer zone.
+			 * Total: 6 live messages. Older → Static → terminal scrollback.
 			 */}
 			<Box flexDirection="column">
 				<ThreadPrimitive.Empty>
 					<Welcome />
 				</ThreadPrimitive.Empty>
-				<ThreadPrimitive.Messages windowSize={3} windowOverscan={0}>
+				<ThreadPrimitive.Messages windowSize={2} windowOverscan={4}>
 					{() => <MessageWrapper />}
 				</ThreadPrimitive.Messages>
 			</Box>

@@ -18,10 +18,8 @@ import { CommandRow } from "./help-overlay.js";
 import { useTerminalSize } from "../use-terminal-size.js";
 import { useColors } from "../theme.js";
 
-// ── Command history (module-level, persists across renders) ──
+// ── Constants ──
 
-const sentHistory: string[] = [];
-let historyBrowsing = false;
 const MAX_HISTORY = 200;
 
 // ── ComposerBar ──
@@ -180,7 +178,7 @@ function CommandComposer({
 }) {
 	const aui = useAui();
 	const text = useAuiState((s) => s.composer.text);
-	const draftRef = useRef("");
+	const historyRef = useRef({ sent: [] as string[], browsing: false, draft: "" });
 	const activeTuiView = usePuxStore((s) => s.activeTuiView);
 
 	// Only enable multiline editing in chat view — frees up/down arrows
@@ -264,24 +262,26 @@ function CommandComposer({
 
 		// History navigation
 		if (key.upArrow) {
-			if (sentHistory.length === 0) return;
-			if (!historyBrowsing) {
-				draftRef.current = text;
-				historyBrowsing = true;
+			const h = historyRef.current;
+			if (h.sent.length === 0) return;
+			if (!h.browsing) {
+				h.draft = text;
+				h.browsing = true;
 			}
-			const idx = sentHistory.indexOf(text);
-			const prevIdx = idx < 0 ? 0 : Math.min(idx + 1, sentHistory.length - 1);
-			aui.composer().setText(sentHistory[prevIdx]);
+			const idx = h.sent.indexOf(text);
+			const prevIdx = idx < 0 ? 0 : Math.min(idx + 1, h.sent.length - 1);
+			aui.composer().setText(h.sent[prevIdx]);
 			return;
 		}
 		if (key.downArrow) {
-			if (!historyBrowsing || sentHistory.length === 0) return;
-			const idx = sentHistory.indexOf(text);
+			const h = historyRef.current;
+			if (!h.browsing || h.sent.length === 0) return;
+			const idx = h.sent.indexOf(text);
 			if (idx > 0) {
-				aui.composer().setText(sentHistory[idx - 1]);
+				aui.composer().setText(h.sent[idx - 1]);
 			} else {
-				historyBrowsing = false;
-				aui.composer().setText(draftRef.current);
+				h.browsing = false;
+				aui.composer().setText(h.draft);
 			}
 			return;
 		}
@@ -295,12 +295,13 @@ function CommandComposer({
 				if (output) onOutput(output);
 			});
 		} else if (trimmed.length > 0) {
-			if (sentHistory.length === 0 || sentHistory[0] !== trimmed) {
-				sentHistory.unshift(trimmed);
-				if (sentHistory.length > MAX_HISTORY) sentHistory.pop();
+			const h = historyRef.current;
+			if (h.sent.length === 0 || h.sent[0] !== trimmed) {
+				h.sent.unshift(trimmed);
+				if (h.sent.length > MAX_HISTORY) h.sent.pop();
 			}
-			historyBrowsing = false;
-			draftRef.current = "";
+			h.browsing = false;
+			h.draft = "";
 			aui.composer().send();
 		}
 	}, [aui, onCommand, onOutput]);

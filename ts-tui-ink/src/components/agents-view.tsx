@@ -93,9 +93,13 @@ export function AgentsView() {
 		);
 	}
 
-	// Limit visible agents to viewport
-	const maxVisible = rows - 6;
-	const visibleAgents = agentList.slice(0, maxVisible);
+	// Limit visible agents to viewport with scroll window
+	const maxVisible = Math.max(3, rows - 6);
+	const scrollOffset = Math.max(0, Math.min(
+		selectedIdx - Math.floor(maxVisible / 2),
+		agentList.length - maxVisible,
+	));
+	const visibleAgents = agentList.slice(scrollOffset, scrollOffset + maxVisible);
 
 	return (
 		<Box flexDirection="column" paddingX={1}>
@@ -113,14 +117,14 @@ export function AgentsView() {
 				<AgentCard
 					key={agent.agentId}
 					agent={agent}
-					isSelected={i === selectedIdx}
+					isSelected={(i + scrollOffset) === selectedIdx}
 					isExpanded={expanded.has(agent.agentId)}
 				/>
 			))}
 
 			{agentList.length > maxVisible && (
 				<Text dimColor color="gray">
-					... +{agentList.length - maxVisible} more (scroll not yet supported)
+					... {scrollOffset + 1}–{scrollOffset + visibleAgents.length} of {agentList.length}
 				</Text>
 			)}
 

@@ -10,7 +10,7 @@
  * not a string. Access status.type for comparison.
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import {
@@ -22,6 +22,7 @@ import {
 import { usePuxStore, getToolArgPreview } from "@pux/shared";
 import { TerminalImage } from "./terminal-image.js";
 import { useColors, symbols, BLACK_CIRCLE, BLOCKQUOTE_BAR } from "../theme.js";
+import { useTerminalSize } from "../use-terminal-size.js";
 
 // ── Bash execution tool UI ──
 
@@ -83,6 +84,15 @@ export const DelegateAsyncToolUI = makeAssistantToolUI({
 	},
 });
 
+// Truncate at word boundary — never cuts mid-word
+function trunc(s: string, max: number): string {
+	if (s.length <= max) return s;
+	const cut = s.slice(0, max - 1);
+	const lastSpace = cut.lastIndexOf(" ");
+	if (lastSpace < max * 0.5) return cut + "…";
+	return cut.slice(0, lastSpace) + "…";
+}
+
 function DelegateRenderer({
 	toolName,
 	args,
@@ -97,21 +107,43 @@ function DelegateRenderer({
 	toolCallId?: string;
 }) {
 	const colors = useColors();
+	const { cols } = useTerminalSize();
 	const role = (args as any)?.role || (args as any)?.instructions || "agent";
 	const label = `${toolName} → ${role}`;
 	const task = (args as any)?.task || (args as any)?.prompt || "";
+	const injectedId = (args as any)?.__agentId as string | undefined;
 	const isDone = status.type === "complete";
 	const isRunning = status.type === "running";
+	const isError = status.type === "incomplete";
 
 	// Look up sub-agent details from Zustand store
+	// Priority: exact ID match > name+task match > running fallback
 	const agents = usePuxStore((s) => s.agents);
-	const agentState = [...agents.values()].find(
-		(a) => a.agentName === role && a.task === task
-	);
+	const agentState = useMemo(() => {
+		if (injectedId) {
+			const byId = agents.get(injectedId);
+			if (byId) return byId;
+		}
+		const candidates = [...agents.values()].filter(a => a.agentName === role);
+		if (candidates.length === 0) return undefined;
+		if (candidates.length === 1) return candidates[0];
+		const byTask = candidates.find(
+			a => task.startsWith(a.task) || a.task.startsWith(task),
+		);
+		return byTask ?? candidates.find(a => a.status === "running") ?? candidates[0];
+	}, [agents, role, task, injectedId]);
 
 	const toolCalls = agentState?.toolCalls ?? [];
 	const subToolCount = toolCalls.length;
-	const taskPreview = task.length > 50 ? task.slice(0, 47) + "..." : task;
+	const thinkingText = agentState?.thinkingText;
+	const agentText = agentState?.text;
+
+	// Width budget for tool call lines
+	const toolIndent = 7;
+	const maxArgLen = Math.max(15, cols - toolIndent - 20);
+	const headerOverhead = 6;
+	const maxTaskLen = Math.max(20, cols - headerOverhead - label.length - 10);
+	const taskPreview = trunc(task, Math.min(maxTaskLen, 50));
 
 	// Duration
 	const duration = agentState
@@ -130,20 +162,53 @@ function DelegateRenderer({
 
 	// ── Collapsed summary when done ──
 	if (isDone) {
+		const doneSuffix = subToolCount > 0
+			? ` done · ${subToolCount} tool${subToolCount !== 1 ? "s" : ""} · ${duration}`
+			: " done";
 		return (
-			<Box paddingLeft={2} marginBottom={1}>
-				<Text color={colors.success}>{BLACK_CIRCLE} </Text>
-				<Text bold color={colors.brand}>{label}</Text>
-				{taskPreview && <Text color="gray">({taskPreview})</Text>}
-				<Text color="gray">
-					{" "}Done{subToolCount > 0 ? ` (${subToolCount} tool${subToolCount !== 1 ? "s" : ""}${symbols.dot}${duration})` : ""}
+			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+				<Text wrap="truncate-end">
+					<Text color={colors.success}>{BLACK_CIRCLE} </Text>
+					<Text bold color={colors.brand}>{label}</Text>
+					{taskPreview && <Text color="gray"> {taskPreview}</Text>}
+					<Text color="gray">{doneSuffix}</Text>
 				</Text>
+				{/* Agent output preview when done — first 3 lines */}
+				{agentText && agentText.trim() && (
+					<Box paddingLeft={4}>
+						<Text dimColor color="gray">
+							{agentText.trim().split("\n").slice(0, 3).map((line, i, arr) =>
+								`${BLOCKQUOTE_BAR} ${trunc(line, cols - 6)}${i < arr.length - 1 ? "\n" : ""}`
+							).join("")}
+							{agentText.trim().split("\n").length > 3 ? `\n${BLOCKQUOTE_BAR} ...` : ""}
+						</Text>
+					</Box>
+				)}
+			</Box>
+		);
+	}
+
+	// ── Error: tool failed before producing a result ──
+	if (isError) {
+		const errMsg = typeof result === "string" ? result : "";
+		return (
+			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+				<Text wrap="truncate-end">
+					<Text color={colors.error}>{symbols.toolError} </Text>
+					<Text bold color={colors.brand}>{label}</Text>
+					{taskPreview && <Text color="gray"> {taskPreview}</Text>}
+					<Text color={colors.error}> failed</Text>
+				</Text>
+				{errMsg && (
+					<Box paddingLeft={4}>
+						<Text dimColor color={colors.error}>{trunc(errMsg, cols - 6)}</Text>
+					</Box>
+				)}
 			</Box>
 		);
 	}
 
 	// ── Running: show nested tool snippets ──
-	// Show the last N tool calls (most recent activity)
 	const maxShow = 5;
 	const visibleTools = toolCalls.length > maxShow
 		? toolCalls.slice(-maxShow)
@@ -152,56 +217,56 @@ function DelegateRenderer({
 
 	return (
 		<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-			{/* Header line */}
-			<Box>
+			<Text wrap="truncate-end">
 				<Text color={colors.running}>
-					{isRunning ? <Spinner type="dots" /> : BLACK_CIRCLE}
-					{" "}
+					{symbols.toolRunning}{" "}
 				</Text>
 				<Text bold color={colors.brand}>{label}</Text>
-				{taskPreview && <Text color="gray">({taskPreview})</Text>}
+				{taskPreview && <Text color="gray"> {taskPreview}</Text>}
 				{subToolCount > 0 && (
-					<Text color="gray"> {symbols.dot} {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
+					<Text color="gray"> · {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
 				)}
-			</Box>
+			</Text>
 
-			{/* Hidden count indicator */}
 			{hiddenCount > 0 && (
-				<Box paddingLeft={2}>
-					<Text dimColor color="gray">
-						{" └ "}{symbols.dot} {hiddenCount} earlier tool{hiddenCount !== 1 ? "s" : ""}
-					</Text>
-				</Box>
+				<Text dimColor color="gray">
+					{"  └ "}{symbols.dot} {hiddenCount} earlier
+				</Text>
 			)}
 
-			{/* Nested tool snippets */}
 			{visibleTools.map((tc, i) => {
-				const isLast = i === visibleTools.length - 1;
 				const isActive = !tc.endedAt;
-				const argPreview = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 50);
+				const isLast = i === visibleTools.length - 1;
+				const rawArg = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, maxArgLen);
+				const argPreview = trunc(rawArg, maxArgLen);
+				const sym = tc.isError ? symbols.toolError : tc.endedAt ? symbols.toolDone : symbols.toolRunning;
 				return (
-					<Box key={`${tc.toolName}-${tc.timestamp}-${i}`} paddingLeft={2}>
-						<Text dimColor color="gray">{" └ "}</Text>
+					<Text key={`${tc.toolName}-${tc.timestamp}-${i}`} wrap="truncate-end">
+						<Text dimColor color="gray">{"  └ "}</Text>
 						<Text color={tc.isError ? colors.error : tc.endedAt ? colors.success : colors.running}>
-							{tc.isError ? symbols.toolError : tc.endedAt ? symbols.toolDone : symbols.toolRunning}
+							{sym}
 						</Text>
 						<Text> </Text>
 						<Text bold color={isActive ? colors.running : undefined}>
 							{tc.toolName}
 						</Text>
-						{argPreview && <Text color="gray"> {argPreview.length > 50 ? argPreview.slice(0, 47) + "..." : argPreview}</Text>}
+						{argPreview && <Text color="gray"> {argPreview}</Text>}
 						{isActive && isLast && isRunning && (
-							<Text color={colors.running}>{" "}<Spinner type="dots" /></Text>
+							<Text color={colors.running}> <Spinner type="dots" /></Text>
 						)}
-					</Box>
+					</Text>
 				);
 			})}
 
-			{/* No tools yet — initializing */}
-			{toolCalls.length === 0 && (
-				<Box paddingLeft={2}>
-					<Text dimColor color="gray">{" └ "}Initializing...</Text>
-				</Box>
+			{toolCalls.length === 0 && !thinkingText && (
+				<Text dimColor color="gray">{"  └ "}starting...</Text>
+			)}
+
+			{/* Show agent thinking preview while running */}
+			{thinkingText && isRunning && (
+				<Text dimColor color="gray">
+					{"  └ "}{BLOCKQUOTE_BAR} {trunc(thinkingText.split("\n").pop() || thinkingText, cols - 8)}
+				</Text>
 			)}
 		</Box>
 	);
