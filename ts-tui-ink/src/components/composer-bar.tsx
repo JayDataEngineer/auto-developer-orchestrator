@@ -263,30 +263,54 @@ function CommandComposer({
 		}
 	}, [matches, text, aui, selectedIdx, onSelectIdx, pathIdx, onPathIdx, pathCompletions, isMultiLine]));
 
-	const handleSubmit = useCallback((submittedText: string) => {
-		const trimmed = submittedText.trim();
-		if (trimmed.startsWith("/")) {
+	// Intercept Enter for slash commands before the library's handler fires.
+	// Our useInput is registered BEFORE the library's (parent mounts first),
+	// so we can clear the text for commands before the library sees it.
+	// For regular messages, we do nothing — the library's submit() calls
+	// send() directly, which batches text clear + user message into one
+	// render (no flash).
+	useInput(useCallback((_input: string, key: any) => {
+		if (key.return && text?.trim().startsWith("/")) {
+			const trimmed = text.trim();
 			aui.composer().setText("");
 			onCommand(trimmed).then((output) => {
 				if (output) onOutput(output);
 			});
-		} else if (trimmed.length > 0) {
-			const h = historyRef.current;
-			if (h.sent.length === 0 || h.sent[0] !== trimmed) {
-				h.sent.unshift(trimmed);
-				if (h.sent.length > MAX_HISTORY) h.sent.pop();
-			}
-			h.browsing = false;
-			h.draft = "";
-			aui.composer().send();
 		}
-	}, [aui, onCommand, onOutput]);
+	}, [text, aui, onCommand, onOutput]), { isActive: true });
 
+	// Track history by watching thread messages
+	const prevMsgCount = useRef(0);
+	const msgs = useAuiState((s) => s.thread.messages);
+	useEffect(() => {
+		if (msgs.length > prevMsgCount.current) {
+			const lastMsg = msgs[msgs.length - 1];
+			if (lastMsg?.role === "user") {
+				const content = typeof lastMsg.content === "string"
+					? lastMsg.content
+					: Array.isArray(lastMsg.content)
+						? lastMsg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("")
+						: "";
+				const trimmed = content.trim();
+				const h = historyRef.current;
+				if (trimmed && !trimmed.startsWith("/") && (h.sent.length === 0 || h.sent[0] !== trimmed)) {
+					h.sent.unshift(trimmed);
+					if (h.sent.length > MAX_HISTORY) h.sent.pop();
+				}
+				h.browsing = false;
+				h.draft = "";
+			}
+		}
+		prevMsgCount.current = msgs.length;
+	}, [msgs]);
+
+	// NO onSubmit — the library calls send() directly for regular messages.
+	// This is the key to preventing the flash: the library's internal send()
+	// batches text clear and user message creation into a single render.
 	return (
 		<ComposerPrimitive.Input
 			submitOnEnter={true}
 			multiLine={isMultiLine}
-			onSubmit={handleSubmit}
 			placeholder=""
 			autoFocus
 		/>
