@@ -205,6 +205,13 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 	normalizedTask := task
 	if r.cfg.ProjectDir != "" {
 		normalizedTask = strings.ReplaceAll(normalizedTask, r.cfg.ProjectDir, "/sandbox/workspace")
+		// Fix double-nesting: if CTO wrote /sandbox/workspace/go-backend/... but project IS go-backend,
+		// the correct path is /sandbox/workspace/... (since /sandbox/workspace/ = project root).
+		projectBase := filepath.Base(r.cfg.ProjectDir)
+		if projectBase != "" && projectBase != "." {
+			doubleNested := "/sandbox/workspace/" + projectBase + "/"
+			normalizedTask = strings.ReplaceAll(normalizedTask, doubleNested, "/sandbox/workspace/")
+		}
 	}
 
 	b.WriteString("<task>\n")
@@ -215,8 +222,8 @@ func (r *ParallelRunner) enrichTask(ctx context.Context, task string) string {
 	if r.cfg.ProjectDir != "" {
 		b.WriteString("\n\n<workspace_note>\n")
 		b.WriteString("Your working directory is /sandbox/workspace/ — this IS the project root. ")
-		b.WriteString("All file operations (read, write, edit, build) target /sandbox/workspace/. ")
-		b.WriteString("Ignore any other paths mentioned in the task — /sandbox/workspace/ is the ONLY path you need.\n")
+		b.WriteString("All file paths use /sandbox/workspace/ as the base (e.g., /sandbox/workspace/internal/mypkg/file.go, /sandbox/workspace/go.mod). ")
+		b.WriteString("Do NOT add any extra directory levels — /sandbox/workspace/ maps directly to the project root.\n")
 		b.WriteString("</workspace_note>")
 
 		// Inject environment info (platform, date) for platform-aware code
@@ -1979,4 +1986,20 @@ func (e *scopedDelegationExecutor) Execute(ctx context.Context, toolName string,
 	default:
 		return e.parent.Execute(ctx, toolName, args)
 	}
+}
+
+// ToolTimeoutHint returns timeout hints for delegation tools (30min) or delegates to parent.
+func (e *scopedDelegationExecutor) ToolTimeoutHint(toolName string) time.Duration {
+	switch toolName {
+	case "delegate_to", "delegate_async":
+		if meta, ok := e.delegate.(core.ToolMetadata); ok {
+			return meta.TimeoutHint()
+		}
+	case "collect_results":
+		return 0
+	}
+	if hinter, ok := e.parent.(interface{ ToolTimeoutHint(string) time.Duration }); ok {
+		return hinter.ToolTimeoutHint(toolName)
+	}
+	return 0
 }

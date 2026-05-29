@@ -36,9 +36,13 @@ type BaseConfig struct {
 	BashRules     *perms.BashRuleStore
 
 	// Extension points.
-	ExtraHooks           []core.LoopHook
-	ToolResultProcessor  func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string
-	Logger               *log.Logger
+	ExtraHooks          []core.LoopHook
+	ToolResultProcessor func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string
+	Logger              *log.Logger
+
+	// ToolExecTimeoutSec sets per-tool timeout (0 = no timeout for sub-agents).
+	// The CTO loop sets this to 600s explicitly.
+	ToolExecTimeoutSec int
 }
 
 // BaseAgent is the common agent foundation for both the CTO orchestrator
@@ -102,6 +106,7 @@ func NewBaseAgent(cfg BaseConfig) *BaseAgent {
 		ProjectDir:          cfg.ProjectDir,
 		SandboxID:           cfg.SandboxID,
 		ToolResultProcessor: cfg.ToolResultProcessor,
+		ToolExecTimeoutSec:  cfg.ToolExecTimeoutSec,
 	}
 
 	// Wire ToolMetadata lookup if executor is a ToolRegistry

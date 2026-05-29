@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
@@ -90,6 +91,14 @@ func (e *VisionAwareExecutor) SetChangeThreshold(threshold float64) {
 }
 
 // Execute delegates to the inner executor, then enhances results with vision if images are found.
+// ToolTimeoutHint delegates to the inner executor's ToolTimeoutHint if available.
+func (e *VisionAwareExecutor) ToolTimeoutHint(toolName string) time.Duration {
+	if hinter, ok := e.inner.(interface{ ToolTimeoutHint(string) time.Duration }); ok {
+		return hinter.ToolTimeoutHint(toolName)
+	}
+	return 0
+}
+
 func (e *VisionAwareExecutor) Execute(ctx context.Context, toolName string, args map[string]any) (any, error) {
 	result, err := e.inner.Execute(ctx, toolName, args)
 	if err != nil {

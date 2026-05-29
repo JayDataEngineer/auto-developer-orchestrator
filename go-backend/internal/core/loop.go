@@ -63,9 +63,8 @@ func NewAgentLoop(provider LLMProvider, executor ToolExecutor, s Session, cfg Ag
 	if cfg.MaxConsecutiveFails == 0 {
 		cfg.MaxConsecutiveFails = 5
 	}
-	if cfg.ToolExecTimeoutSec == 0 {
-		cfg.ToolExecTimeoutSec = 300
-	}
+	// ToolExecTimeoutSec: 0 means "no timeout" (sub-agents are controlled by MaxToolRounds).
+	// Only the CTO loop sets an explicit value (600s) from config.
 	if cfg.MaxProviderRetries == 0 {
 		cfg.MaxProviderRetries = 2
 	}

@@ -202,3 +202,63 @@ func TestSubAgentWriteThenRead(t *testing.T) {
 		t.Errorf("host file content mismatch.\ngot:  %q\nwant: %q", string(data), content)
 	}
 }
+
+// TestDoubleNestingFix verifies that /sandbox/workspace/<projectBasename>/... paths
+// get corrected to avoid double-nesting. When the project dir is .../go-backend,
+// /sandbox/workspace/go-backend/internal/... should resolve to .../go-backend/internal/...
+// NOT .../go-backend/go-backend/internal/...
+func TestDoubleNestingFix(t *testing.T) {
+	// Create a temp dir that ends in "go-backend" to simulate the real project structure
+	parent := t.TempDir()
+	dir := parent + "/go-backend"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	hostExec := &HostExecutor{WorkDir: dir}
+	fileOps := &fileOpsShim{dir: dir}
+
+	// The sub-agent's task references /sandbox/workspace/go-backend/... (double-nesting)
+	doubleNestedPath := "/sandbox/workspace/go-backend/internal/mypkg/mypkg.go"
+	content := "package mypkg\n\nfunc Hello() string { return \"hello\" }\n"
+
+	// file_write should write to dir/internal/mypkg/mypkg.go (NOT dir/go-backend/...)
+	_, err := fileOps.WriteFile(ctx, doubleNestedPath, content, false)
+	if err != nil {
+		t.Fatalf("file_write failed: %v", err)
+	}
+
+	// Verify it wrote to the correct location (no double go-backend)
+	hostPath := dir + "/internal/mypkg/mypkg.go"
+	data, err := os.ReadFile(hostPath)
+	if err != nil {
+		// Check if it went to the wrong place
+		wrongPath := dir + "/go-backend/internal/mypkg/mypkg.go"
+		if _, statErr := os.Stat(wrongPath); statErr == nil {
+			t.Fatalf("double-nesting bug: file written to %q instead of %q", wrongPath, hostPath)
+		}
+		t.Fatalf("file not found at expected path %q: %v", hostPath, err)
+	}
+	if string(data) != content {
+		t.Errorf("content mismatch.\ngot:  %q\nwant: %q", string(data), content)
+	}
+
+	// bash with double-nested path should also work
+	out, err := hostExec.Exec(ctx, "cat /sandbox/workspace/go-backend/internal/mypkg/mypkg.go")
+	if err != nil {
+		t.Fatalf("bash cat failed: %v", err)
+	}
+	if !strings.Contains(out, "package mypkg") {
+		t.Errorf("bash cat did not find file content. output: %q", out)
+	}
+
+	// file_read should also work
+	got, err := fileOps.ReadFile(ctx, doubleNestedPath)
+	if err != nil {
+		t.Fatalf("file_read failed: %v", err)
+	}
+	if got != content {
+		t.Errorf("file_read content mismatch.\ngot:  %q\nwant: %q", got, content)
+	}
+}
