@@ -287,7 +287,7 @@ function CommandComposer({
 			submitOnEnter={true}
 			multiLine={isMultiLine}
 			onSubmit={handleSubmit}
-			placeholder="Message..."
+			placeholder=""
 			autoFocus
 		/>
 	);
