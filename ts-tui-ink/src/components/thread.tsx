@@ -1,10 +1,9 @@
 /**
- * Thread component — Claude Code-style scrolling.
+ * Thread component — messages + composer.
  *
- * windowSize=1 + windowOverscan=2 = 3 live messages.
+ * windowSize=1 + windowOverscan=1 = 2 live messages.
  * Older messages graduate to Ink's <Static> (terminal scrollback).
- * Scroll up with mouse wheel/Page Up to see old messages.
- * Composer lives inside Root context.
+ * ComposerBar is inside ThreadPrimitive.Root (matching library example).
  */
 
 import React from "react";
@@ -22,11 +21,9 @@ import { useColors } from "../theme.js";
 import { createRequire } from "node:module";
 const puxVersion = createRequire(import.meta.url)("../../../package.json").version;
 
-// ── Thread ──
-// Matches example structure exactly:
-// Root > Empty + Messages + StatusIndicator + Composer
+// ── Thread (messages + composer) ──
 
-export function Thread({ onCommand }: { onCommand: (input: string) => Promise<string | null> }) {
+export function Thread() {
 	return (
 		<ThreadPrimitive.Root flexDirection="column">
 			{/* Empty state */}
@@ -34,13 +31,12 @@ export function Thread({ onCommand }: { onCommand: (input: string) => Promise<st
 				<Welcome />
 			</AuiIf>
 
-			{/* Messages — windowSize=1 + windowOverscan=1 = 2 live, rest in scrollback */}
-			<ThreadPrimitive.Messages windowSize={1} windowOverscan={1}>
+			<ThreadPrimitive.Messages>
 				{() => <MessageWrapper />}
 			</ThreadPrimitive.Messages>
 
-			{/* Composer — INSIDE ThreadPrimitive.Root like the example */}
-			<ComposerBar onCommand={onCommand} />
+			{/* Composer — inside ThreadPrimitive.Root like library example */}
+			<ComposerBar />
 		</ThreadPrimitive.Root>
 	);
 }

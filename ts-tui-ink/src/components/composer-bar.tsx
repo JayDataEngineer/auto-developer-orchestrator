@@ -1,39 +1,35 @@
 /**
- * ComposerBar — always-visible input bar with slash command support.
+ * ComposerBar — input bar using library ComposerPrimitive.Input.
  *
- * Extracted from Thread so it renders below every view (chat, agents,
- * conversations, etc.). Without this, switching to a non-chat view
- * removes the only focused input component, and Ink stops processing
- * stdin — the user gets stuck.
+ * Uses @assistant-ui/react-ink's ComposerPrimitive.Input for text editing,
+ * cursor management, and keyboard bindings. Slash commands are intercepted
+ * via the onSubmit callback — the library skips its default send when
+ * onSubmit is provided, giving us full control.
  *
- * Uses a custom input instead of ComposerPrimitive.Input to guarantee
- * synchronous text clearing on Enter — no flash possible.
+ * Keyboard bindings handled by the library:
+ *   Ctrl+A/E (home/end), Ctrl+W (kill-word), Ctrl+U/K (kill-line),
+ *   Ctrl+D (delete-forward), Alt+B/F (word nav), Alt+D (kill-word-forward),
+ *   arrows, backspace, delete, home/end, Enter (submit)
  */
 
-import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import { Box, Text, useInput, useFocus } from "ink";
-import { useAuiState, useAui, ComposerPrimitive, QueueItemPrimitive } from "@assistant-ui/react-ink";
+import React, { useMemo, useCallback, useEffect, useState } from "react";
+import { Box, Text, useApp } from "ink";
+import {
+	ComposerPrimitive,
+	QueueItemPrimitive,
+	useAui,
+	useAuiState,
+} from "@assistant-ui/react-ink";
 import { usePuxStore } from "@pux/shared";
-import { getCommands } from "../commands.js";
-import { PathAutocomplete, getCompletions } from "./path-autocomplete.js";
+import { executeCommand, type CommandContext, getCommands } from "../commands.js";
 import { CommandRow } from "./help-overlay.js";
 import { useTerminalSize } from "../use-terminal-size.js";
 import { useColors, symbols } from "../theme.js";
 
-// ── Constants ──
-
-const MAX_HISTORY = 200;
-
 // ── ComposerBar ──
 
-interface ComposerBarProps {
-	onCommand: (input: string) => Promise<string | null>;
-}
-
-export function ComposerBar({ onCommand }: ComposerBarProps) {
+export function ComposerBar() {
 	const [commandOutput, setCommandOutput] = useState<string | null>(null);
-	const [selectedIdx, setSelectedIdx] = useState(0);
-	const [pathIdx, setPathIdx] = useState(0);
 	const { cols } = useTerminalSize();
 	const colors = useColors();
 
@@ -43,9 +39,6 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 		const timer = setTimeout(() => setCommandOutput(null), 5000);
 		return () => clearTimeout(timer);
 	}, [commandOutput]);
-
-	const composerText = useAuiState((s) => s.composer.text);
-	const projectPath = usePuxStore((s) => s.activeProjectPath);
 
 	return (
 		<Box flexDirection="column">
@@ -60,7 +53,7 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 				</Box>
 			)}
 
-			{/* Composer queue — queued messages */}
+			{/* Composer queue */}
 			<ComposerPrimitive.Queue>
 				{({ queueItem }) => (
 					<Box>
@@ -71,28 +64,13 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 			</ComposerPrimitive.Queue>
 
 			{/* Slash command autocomplete */}
-			<CommandPalette selectedIdx={selectedIdx} onSelectIdx={setSelectedIdx} />
-
-			{/* Path autocomplete */}
-			<PathAutocomplete
-				text={composerText}
-				cwd={projectPath}
-				selectedIdx={pathIdx}
-			/>
+			<CommandPalette />
 
 			{/* Input area */}
 			<Text color={colors.subtle}>{"─".repeat(cols)}</Text>
 			<Box paddingX={1}>
 				<Text color={colors.brand} bold>{">"} </Text>
-				<CommandComposer
-					onCommand={onCommand}
-					onOutput={setCommandOutput}
-					selectedIdx={selectedIdx}
-					onSelectIdx={setSelectedIdx}
-					pathIdx={pathIdx}
-					onPathIdx={setPathIdx}
-					projectPath={projectPath}
-				/>
+				<PuxInput onCommandOutput={setCommandOutput} />
 			</Box>
 			<Text color={colors.subtle}>{"─".repeat(cols)}</Text>
 		</Box>
@@ -101,12 +79,7 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 
 // ── Command palette ──
 
-function CommandPalette({
-	selectedIdx,
-}: {
-	selectedIdx: number;
-	onSelectIdx: (i: number) => void;
-}) {
+function CommandPalette() {
 	const text = useAuiState((s) => s.composer.text);
 
 	const matches = useMemo(() => {
@@ -120,355 +93,87 @@ function CommandPalette({
 
 	if (matches.length === 0) return null;
 
-	const MAX_VISIBLE = 5;
-	const startIdx = Math.max(0, Math.min(selectedIdx - MAX_VISIBLE + 1, matches.length - MAX_VISIBLE));
-	const visible = matches.slice(startIdx, startIdx + MAX_VISIBLE);
-
 	return (
 		<Box flexDirection="column" paddingX={1}>
-			{visible.map((c, i) => {
-				const globalIdx = startIdx + i;
-				return (
-					<CommandRow
-						key={c.name}
-						name={c.name}
-						description={c.desc}
-						selected={globalIdx === selectedIdx}
-					/>
-				);
-			})}
-			<Text dimColor color="gray"> Up/Down navigate · Tab autocomplete</Text>
+			{matches.slice(0, 5).map((c, i) => (
+				<CommandRow
+					key={c.name}
+					name={c.name}
+					description={c.desc}
+					selected={i === 0}
+				/>
+			))}
+			<Text dimColor color="gray"> Enter to execute</Text>
 		</Box>
 	);
 }
 
-// ── Simple grapheme helper ──
+// ── Input with command interception ──
 
-function getGraphemeAt(text: string, offset: number): string {
-	if (offset < 0 || offset >= text.length) return "";
-	// For ASCII-heavy terminal input, code point = grapheme is almost always correct
-	return text[offset];
-}
-
-// ── Command-aware composer (custom input, no library dependency) ──
-
-function CommandComposer({
-	onCommand,
-	onOutput,
-	selectedIdx,
-	onSelectIdx,
-	pathIdx,
-	onPathIdx,
-	projectPath,
+function PuxInput({
+	onCommandOutput,
 }: {
-	onCommand: (input: string) => Promise<string | null>;
-	onOutput: (out: string | null) => void;
-	selectedIdx: number;
-	onSelectIdx: (i: number) => void;
-	pathIdx: number;
-	onPathIdx: (i: number) => void;
-	projectPath: string;
+	onCommandOutput: (out: string | null) => void;
 }) {
 	const aui = useAui();
+	const { exit } = useApp();
 	const storeText = useAuiState((s) => s.composer.text);
-	const historyRef = useRef({ sent: [] as string[], browsing: false, draft: "" });
-	const activeTuiView = usePuxStore((s) => s.activeTuiView);
-	const { isFocused } = useFocus({ autoFocus: true });
 
-	// ── Local buffer (useRef, not useState) ──
-	// Renders from the ref directly. No React state intermediary.
-	// This guarantees: clear the ref → next render shows empty.
-	const bufRef = useRef({ text: "", cursor: 0 });
-	const [, forceRender] = useState(0);
-
-	// Sync FROM store (external setText calls, e.g. path autocomplete)
-	// Skip sync while sending to avoid restoring stale store text
-	useEffect(() => {
-		if (sendingRef.current) return;
-		if (storeText !== bufRef.current.text) {
-			bufRef.current = { text: storeText, cursor: storeText.length };
-			forceRender((n) => n + 1);
-		}
-	}, [storeText]);
-
-	// Send flag — when true, render empty regardless of bufRef
-	const sendingRef = useRef(false);
-	useEffect(() => {
-		if (sendingRef.current && storeText === "") {
-			sendingRef.current = false;
-			forceRender((n) => n + 1);
-		}
-	}, [storeText]);
-
-	const text = sendingRef.current ? "" : bufRef.current.text;
-
+	// Track slash command matches for autocomplete
 	const matches = useMemo(() => {
-		if (!text || !text.startsWith("/")) return [];
-		const query = text.slice(1).toLowerCase();
+		if (!storeText || !storeText.startsWith("/")) return [];
+		const query = storeText.slice(1).toLowerCase();
 		if (query.includes(" ")) return [];
 		return getCommands()
 			.filter((c) => c.name.startsWith(query))
 			.map((c) => c.name);
-	}, [text]);
+	}, [storeText]);
 
-	const pathCompletions = useMemo(() => {
-		if (matches.length > 0) return [];
-		return getCompletions(text || "", projectPath);
-	}, [text, matches.length, projectPath]);
+	// Handle submit — intercept slash commands, pass chat to runtime
+	const handleSubmit = useCallback((text: string) => {
+		const trimmed = text.trim();
+		if (!trimmed) return;
 
-	useEffect(() => {
-		if (matches.length === 0) { onSelectIdx(0); return; }
-		if (selectedIdx >= matches.length) onSelectIdx(0);
-	}, [matches.length, selectedIdx, onSelectIdx]);
+		if (trimmed.startsWith("/")) {
+			const cmdName = trimmed.slice(1).split(" ")[0].toLowerCase();
+			const hasArgs = trimmed.includes(" ");
+			const isExactMatch = getCommands().some((c) => c.name === cmdName);
 
-	useEffect(() => {
-		if (pathCompletions.length === 0) { onPathIdx(0); return; }
-		if (pathIdx >= pathCompletions.length) onPathIdx(0);
-	}, [pathCompletions.length, pathIdx, onPathIdx]);
+			// Autocomplete partial match (only if not already a complete command)
+			if (!isExactMatch && !hasArgs && matches.length === 1) {
+				const completed = "/" + matches[0] + " ";
+				aui.composer().setText(completed);
+				return;
+			}
 
-	// ── Send helper ──
-	const doSend = useCallback(() => {
-		const submitted = bufRef.current.text.trim();
-		if (!submitted) return;
+			// Execute the slash command
+			const ctx: CommandContext = {
+				model: usePuxStore.getState().activeModel || "",
+				project: usePuxStore.getState().activeProject || "",
+				exit,
+				setModel: (m: string) => usePuxStore.getState().setModel(m),
+			};
 
-		// 1. Clear local buffer synchronously
-		bufRef.current = { text: "", cursor: 0 };
-		sendingRef.current = true;
+			// Clear input and execute
+			aui.composer().setText("");
 
-		// 2. Clear store text synchronously
-		aui.composer().setText("");
-
-		// 3. Append message to thread
-		if (submitted.startsWith("/")) {
-			onCommand(submitted).then((output) => {
-				if (output) onOutput(output);
+			executeCommand(trimmed, ctx).then((result) => {
+				if (result.type === "handled" && result.message) {
+					onCommandOutput(result.message);
+				}
 			});
 		} else {
-			aui.thread().append({
-				content: [{ type: "text", text: submitted }],
-				startRun: true,
-			});
+			// Normal chat — send through runtime
+			aui.composer().send();
 		}
-	}, [aui, onCommand, onOutput]);
-
-	// ── Input handler ──
-	useInput(useCallback((_input: string, key: any) => {
-		if (!isFocused) return;
-
-		// When a non-chat view or overlay is active, don't consume arrow keys
-		const s = usePuxStore.getState();
-		const inOverlay = s.agentSelectorOpen || s.zoomedAgentId || s.showProvidersOverlay
-			|| s.showSettingsOverlay || s.showSessionSwitcher || s.showLogViewer
-			|| s.showSearchOverlay || s.showHelpOverlay || s.showMCPOverlay
-			|| !!s.pendingDecision;
-		const inNonChatView = s.activeTuiView !== "chat";
-		if ((inOverlay || inNonChatView) && (key.upArrow || key.downArrow)) {
-			return;
-		}
-
-		// Slash command autocomplete navigation
-		if (matches.length > 0) {
-			if (key.upArrow) {
-				onSelectIdx(selectedIdx <= 0 ? matches.length - 1 : selectedIdx - 1);
-				return;
-			}
-			if (key.downArrow) {
-				onSelectIdx((selectedIdx + 1) % matches.length);
-				return;
-			}
-			if (key.tab) {
-				const newText = "/" + matches[selectedIdx] + " ";
-				bufRef.current = { text: newText, cursor: newText.length };
-				aui.composer().setText(newText);
-				forceRender((n) => n + 1);
-				return;
-			}
-			// Don't process other keys while palette is open
-			if (!key.return) return;
-		}
-
-		// Path autocomplete navigation
-		if (pathCompletions.length > 0) {
-			if (key.upArrow) {
-				onPathIdx(pathIdx <= 0 ? pathCompletions.length - 1 : pathIdx - 1);
-				return;
-			}
-			if (key.downArrow) {
-				onPathIdx((pathIdx + 1) % pathCompletions.length);
-				return;
-			}
-			if (key.tab) {
-				const completion = pathCompletions[pathIdx];
-				const cur = bufRef.current.text;
-				const pathMatch = cur.match(/((?:\.\.?\/|[~/])(?:[^\s"'`|;]*)?)$/);
-				if (pathMatch && completion) {
-					const before = cur.slice(0, pathMatch.index ?? 0);
-					const newText = before + completion.display;
-					bufRef.current = { text: newText, cursor: newText.length };
-					aui.composer().setText(newText);
-					forceRender((n) => n + 1);
-				}
-				return;
-			}
-			if (!key.return && !key.backspace && !_input) return;
-		}
-
-		// Enter → send
-		if (key.return) {
-			doSend();
-			return;
-		}
-
-		// Ctrl shortcuts
-		const lower = _input.toLowerCase();
-		if (key.ctrl) {
-			if (lower === "a") return; // move-home
-			if (lower === "e") return; // move-end
-			if (lower === "w") { // kill-word-backward
-				const cur = bufRef.current;
-				const beforeCursor = cur.text.slice(0, cur.cursor);
-				const afterCursor = cur.text.slice(cur.cursor);
-				const trimmed = beforeCursor.replace(/\S+\s*$/, "");
-				const newText = trimmed + afterCursor;
-				bufRef.current = { text: newText, cursor: trimmed.length };
-				aui.composer().setText(newText);
-				forceRender((n) => n + 1);
-				return;
-			}
-			if (lower === "u") { // kill-start
-				const cur = bufRef.current;
-				const newText = cur.text.slice(cur.cursor);
-				bufRef.current = { text: newText, cursor: 0 };
-				aui.composer().setText(newText);
-				forceRender((n) => n + 1);
-				return;
-			}
-			if (lower === "k") { // kill-end
-				const cur = bufRef.current;
-				const newText = cur.text.slice(0, cur.cursor);
-				bufRef.current = { text: newText, cursor: cur.cursor };
-				aui.composer().setText(newText);
-				forceRender((n) => n + 1);
-				return;
-			}
-			return;
-		}
-
-		// Backspace
-		if (key.backspace) {
-			const cur = bufRef.current;
-			if (cur.cursor > 0) {
-				const newText = cur.text.slice(0, cur.cursor - 1) + cur.text.slice(cur.cursor);
-				bufRef.current = { text: newText, cursor: cur.cursor - 1 };
-				aui.composer().setText(newText);
-				forceRender((n) => n + 1);
-			}
-			return;
-		}
-
-		// Left/Right arrows
-		if (key.leftArrow) {
-			if (bufRef.current.cursor > 0) {
-				bufRef.current.cursor--;
-				forceRender((n) => n + 1);
-			}
-			return;
-		}
-		if (key.rightArrow) {
-			if (bufRef.current.cursor < bufRef.current.text.length) {
-				bufRef.current.cursor++;
-				forceRender((n) => n + 1);
-			}
-			return;
-		}
-
-		// History navigation (up/down when not in multiline)
-		if (key.upArrow) {
-			const h = historyRef.current;
-			if (h.sent.length === 0) return;
-			if (!h.browsing) {
-				h.draft = bufRef.current.text;
-				h.browsing = true;
-			}
-			const idx = h.sent.indexOf(bufRef.current.text);
-			const prevIdx = idx < 0 ? 0 : Math.min(idx + 1, h.sent.length - 1);
-			const newText = h.sent[prevIdx];
-			bufRef.current = { text: newText, cursor: newText.length };
-			aui.composer().setText(newText);
-			forceRender((n) => n + 1);
-			return;
-		}
-		if (key.downArrow) {
-			const h = historyRef.current;
-			if (!h.browsing || h.sent.length === 0) return;
-			const idx = h.sent.indexOf(bufRef.current.text);
-			if (idx > 0) {
-				const newText = h.sent[idx - 1];
-				bufRef.current = { text: newText, cursor: newText.length };
-				aui.composer().setText(newText);
-			} else {
-				h.browsing = false;
-				bufRef.current = { text: h.draft, cursor: h.draft.length };
-				aui.composer().setText(h.draft);
-			}
-			forceRender((n) => n + 1);
-			return;
-		}
-
-		// Printable character insertion
-		if (_input && !key.ctrl && !key.meta) {
-			const cur = bufRef.current;
-			const newText = cur.text.slice(0, cur.cursor) + _input + cur.text.slice(cur.cursor);
-			bufRef.current = { text: newText, cursor: cur.cursor + _input.length };
-			aui.composer().setText(newText);
-			forceRender((n) => n + 1);
-		}
-	}, [isFocused, matches, selectedIdx, onSelectIdx, pathCompletions, pathIdx, onPathIdx, doSend, aui, text, activeTuiView]));
-
-	// Track history by watching thread messages
-	const prevMsgCount = useRef(0);
-	const msgs = useAuiState((s) => s.thread.messages);
-	useEffect(() => {
-		if (msgs.length > prevMsgCount.current) {
-			const lastMsg = msgs[msgs.length - 1];
-			if (lastMsg?.role === "user") {
-				const content = typeof lastMsg.content === "string"
-					? lastMsg.content
-					: Array.isArray(lastMsg.content)
-						? lastMsg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("")
-						: "";
-				const trimmed = content.trim();
-				const h = historyRef.current;
-				if (trimmed && !trimmed.startsWith("/") && (h.sent.length === 0 || h.sent[0] !== trimmed)) {
-					h.sent.unshift(trimmed);
-					if (h.sent.length > MAX_HISTORY) h.sent.pop();
-				}
-				h.browsing = false;
-				h.draft = "";
-			}
-		}
-		prevMsgCount.current = msgs.length;
-	}, [msgs]);
-
-	// ── Render ──
-	const displayText = sendingRef.current ? "" : bufRef.current.text;
-	const cursor = sendingRef.current ? 0 : bufRef.current.cursor;
-	const hasText = displayText.length > 0;
-
-	if (!isFocused) {
-		return <Text>{displayText}</Text>;
-	}
-
-	const before = hasText ? displayText.slice(0, cursor) : "";
-	const charAtCursor = hasText ? getGraphemeAt(displayText, cursor) : "";
-	const atCursor = charAtCursor === "" ? " " : charAtCursor;
-	const after = hasText ? displayText.slice(cursor + charAtCursor.length) : "";
+	}, [aui, exit, matches, onCommandOutput]);
 
 	return (
-		<Text>
-			{before}
-			<Text inverse>{atCursor}</Text>
-			{after}
-		</Text>
+		<ComposerPrimitive.Input
+			submitOnEnter
+			placeholder="Type a message..."
+			autoFocus
+			onSubmit={handleSubmit}
+		/>
 	);
 }

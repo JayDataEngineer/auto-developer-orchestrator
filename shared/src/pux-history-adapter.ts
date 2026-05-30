@@ -182,9 +182,6 @@ export function createPuxHistoryAdapter(): ThreadHistoryAdapter {
 				const fetch = getFetch();
 				const resp = await fetch(apiUrl(`/api/pux/history?${params}`));
 				if (!resp.ok) {
-					console.warn(
-						`[history] API returned ${resp.status} for ${project}/${store.activeAgentId}`,
-					);
 					return { messages: [] };
 				}
 
@@ -200,8 +197,8 @@ export function createPuxHistoryAdapter(): ThreadHistoryAdapter {
 					"@assistant-ui/react"
 				);
 				return ExportedMessageRepository.fromArray(messages);
-			} catch (err) {
-				console.error("[history] Failed to load:", err);
+			} catch {
+				// Silently return empty — Ink is running, console.error causes a flash
 				return { messages: [] };
 			}
 		},

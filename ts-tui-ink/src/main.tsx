@@ -214,6 +214,16 @@ const appElement = React.createElement(App, {
 	project: projectName,
 	cwd: cwdName,
 });
+
+// ── Silence ALL console output while Ink runs ──
+// Any console.log/warn/error while Ink controls the terminal causes a flash.
+// Redirect to /dev/null. Debug writes go to /tmp/pux-run-debug.log instead.
+console.log = () => {};
+console.warn = () => {};
+console.error = () => {};
+process.on("unhandledRejection", () => {});
+process.on("uncaughtException", () => {});
+
 // No alternate screen buffer — we use BSU/ESU write buffering +
 // incrementalRendering to prevent flicker instead. The normal terminal
 // buffer has scrollback, so users can scroll up to see old messages

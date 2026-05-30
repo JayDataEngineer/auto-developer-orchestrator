@@ -16,7 +16,6 @@ import {
 	useAuiState,
 	MessagePrimitive,
 	LoadingPrimitive,
-	ToolCallPrimitive,
 } from "@assistant-ui/react-ink";
 import { MarkdownText } from "./markdown-text.js";
 import { TerminalImage } from "./terminal-image.js";
@@ -101,9 +100,9 @@ export function AssistantMessage() {
 						}
 						case "tool-call": {
 							// Registered tool UIs are resolved via part.toolUI.
-							// If no registered UI, use library fallback.
+							// Unregistered tools get a compact one-line indicator (no animated spinner).
 							if (part.toolUI) return part.toolUI;
-							return <ToolCallPrimitive.Fallback key={part.toolCallId} part={part} />;
+							return <CompactToolCall key={part.toolCallId} part={part} />;
 						}
 						case "image":
 							return (
@@ -141,6 +140,37 @@ export function AssistantMessage() {
 
 			{/* Branch picker for forked messages */}
 			<BranchPicker />
+		</Box>
+	);
+}
+
+// ── Compact tool call (replaces ToolCallPrimitive.Fallback) ──
+// One line per tool call, no animated spinner. Avoids frame accumulation
+// when multiple tool calls run simultaneously.
+
+function CompactToolCall({ part }: { part: any }) {
+	const colors = useColors();
+	const status = part.status?.type;
+	const toolName = part.toolName || "tool";
+	const icon = status === "running" ? "●" : status === "error" ? "✗" : "✓";
+	const color = status === "running" ? colors.running : status === "error" ? "red" : colors.success;
+
+	// Show abbreviated args when running
+	let detail = "";
+	if (status === "running" && part.args) {
+		try {
+			const args = typeof part.args === "string" ? JSON.parse(part.args) : part.args;
+			const goal = args.goal || args.task || args.command || args.path || "";
+			if (goal) detail = `: ${trunc(String(goal), 60)}`;
+		} catch {
+			// args might not be JSON
+		}
+	}
+
+	return (
+		<Box paddingLeft={1}>
+			<Text color={color}>{icon} </Text>
+			<Text color={colors.textMuted}>{toolName}{detail}</Text>
 		</Box>
 	);
 }

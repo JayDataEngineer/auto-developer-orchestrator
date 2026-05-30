@@ -10,9 +10,8 @@
  * Phase 3: Subagent monitoring via Zustand store + AgentsView.
  */
 
-import React, { useMemo, useState, useCallback, useRef } from "react";
+import React, { useMemo, useCallback, useRef } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import { useTerminalSize } from "./use-terminal-size.js";
 import {
 	AssistantRuntimeProvider,
 	useLocalRuntime,
@@ -42,7 +41,6 @@ import { QuestionDialog } from "./components/question-dialog.js";
 import { DecisionDialog } from "./components/decision-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
 import { ThemeProvider } from "./theme.js";
-import { executeCommand, type CommandContext } from "./commands.js";
 
 // ── Runtime Provider ──
 
@@ -130,12 +128,6 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 
 // ── App ──
 
-interface AppProps {
-	model: string;
-	project: string;
-	cwd: string;
-}
-
 // Wrapper that re-keys the runtime provider when conversationKey changes,
 // causing useLocalRuntime to be fully recreated (clears internal message state).
 function PuxRuntimeWrapper({ children }: { children: React.ReactNode }) {
@@ -152,18 +144,22 @@ export function App({ model: initialModel, project }: AppProps) {
 		<PuxRuntimeWrapper>
 			<ThemeProvider>
 				<ToolRegistry />
-				<PuxApp initialModel={initialModel} project={project} />
+				<PuxApp />
 			</ThemeProvider>
 		</PuxRuntimeWrapper>
 	);
 }
 
-function PuxApp({ initialModel, project }: { initialModel: string; project: string }) {
+// Props passed from main.tsx but currently unused by the component tree.
+// Kept for future use (model auto-selection, project display).
+interface AppProps {
+	model: string;
+	project: string;
+	cwd: string;
+}
+
+function PuxApp() {
 	const { exit } = useApp();
-	const { rows, cols } = useTerminalSize();
-	// Sync local model state with the Zustand store's activeModel
-	const storeModel = usePuxStore((s) => s.activeModel);
-	const [model, setModel] = useState(initialModel || storeModel);
 	const lastCtrlC = useRef(0);
 	const lastEscape = useRef(0);
 
@@ -218,32 +214,17 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 		}
 	}, [exit]));
 
-	// Command handler
-	const handleCommand = useCallback(async (input: string): Promise<string | null> => {
-		const ctx: CommandContext = { model, project, exit, setModel };
-		const result = await executeCommand(input, ctx);
-		if (result.type === "handled") return result.message ?? null;
-		return null;
-	}, [model, project, exit]);
-
-	// Height={rows-1} prevents Ink's fullscreen mode (clearTerminal).
-	// When outputHeight >= stdout.rows, Ink wipes ALL scrollback.
-	// Keeping height < rows ensures <Static> messages stay in scrollback.
 	return (
-		<Box flexDirection="column" height={rows - 1} width={cols}>
-			<Box flexDirection="column" flexGrow={1} overflow="hidden">
-				<ContentArea onCommand={handleCommand} />
-			</Box>
-			<Box flexShrink={0}>
-				<StatusBar />
-			</Box>
+		<Box flexDirection="column">
+			<ContentArea />
+			<StatusBar />
 		</Box>
 	);
 }
 
 // ── Content Area ──
 
-function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<string | null> }) {
+function ContentArea() {
 	const activeView = usePuxStore((s) => s.activeTuiView);
 	const pendingDecision = usePuxStore((s) => s.pendingDecision);
 	const showProviders = usePuxStore((s) => s.showProvidersOverlay);
@@ -331,6 +312,6 @@ function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<stri
 			return <ConversationsView />;
 		case "chat":
 		default:
-			return <Thread onCommand={onCommand} />;
+			return <Thread />;
 	}
 }
