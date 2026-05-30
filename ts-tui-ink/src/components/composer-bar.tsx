@@ -5,18 +5,20 @@
  * conversations, etc.). Without this, switching to a non-chat view
  * removes the only focused input component, and Ink stops processing
  * stdin — the user gets stuck.
+ *
+ * Uses a custom input instead of ComposerPrimitive.Input to guarantee
+ * synchronous text clearing on Enter — no flash possible.
  */
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import { Box, Text, useInput } from "ink";
-import { useAuiState, useAui, ComposerPrimitive } from "@assistant-ui/react-ink";
+import { Box, Text, useInput, useFocus } from "ink";
+import { useAuiState, useAui, ComposerPrimitive, QueueItemPrimitive } from "@assistant-ui/react-ink";
 import { usePuxStore } from "@pux/shared";
 import { getCommands } from "../commands.js";
 import { PathAutocomplete, getCompletions } from "./path-autocomplete.js";
-import { ComposerQueue } from "./composer-queue.js";
 import { CommandRow } from "./help-overlay.js";
 import { useTerminalSize } from "../use-terminal-size.js";
-import { useColors } from "../theme.js";
+import { useColors, symbols } from "../theme.js";
 
 // ── Constants ──
 
@@ -59,7 +61,14 @@ export function ComposerBar({ onCommand }: ComposerBarProps) {
 			)}
 
 			{/* Composer queue — queued messages */}
-			<ComposerQueue />
+			<ComposerPrimitive.Queue>
+				{({ queueItem }) => (
+					<Box>
+						<Text color={colors.warning}>{symbols.dot} queued: </Text>
+						<QueueItemPrimitive.Text dimColor />
+					</Box>
+				)}
+			</ComposerPrimitive.Queue>
 
 			{/* Slash command autocomplete */}
 			<CommandPalette selectedIdx={selectedIdx} onSelectIdx={setSelectedIdx} />
@@ -133,7 +142,15 @@ function CommandPalette({
 	);
 }
 
-// ── Command-aware composer ──
+// ── Simple grapheme helper ──
+
+function getGraphemeAt(text: string, offset: number): string {
+	if (offset < 0 || offset >= text.length) return "";
+	// For ASCII-heavy terminal input, code point = grapheme is almost always correct
+	return text[offset];
+}
+
+// ── Command-aware composer (custom input, no library dependency) ──
 
 function CommandComposer({
 	onCommand,
@@ -153,13 +170,37 @@ function CommandComposer({
 	projectPath: string;
 }) {
 	const aui = useAui();
-	const text = useAuiState((s) => s.composer.text);
+	const storeText = useAuiState((s) => s.composer.text);
 	const historyRef = useRef({ sent: [] as string[], browsing: false, draft: "" });
 	const activeTuiView = usePuxStore((s) => s.activeTuiView);
+	const { isFocused } = useFocus({ autoFocus: true });
 
-	// Only enable multiline editing in chat view — frees up/down arrows
-	// for other views (agents, files, tools, conversations)
-	const isMultiLine = activeTuiView === "chat";
+	// ── Local buffer (useRef, not useState) ──
+	// Renders from the ref directly. No React state intermediary.
+	// This guarantees: clear the ref → next render shows empty.
+	const bufRef = useRef({ text: "", cursor: 0 });
+	const [, forceRender] = useState(0);
+
+	// Sync FROM store (external setText calls, e.g. path autocomplete)
+	// Skip sync while sending to avoid restoring stale store text
+	useEffect(() => {
+		if (sendingRef.current) return;
+		if (storeText !== bufRef.current.text) {
+			bufRef.current = { text: storeText, cursor: storeText.length };
+			forceRender((n) => n + 1);
+		}
+	}, [storeText]);
+
+	// Send flag — when true, render empty regardless of bufRef
+	const sendingRef = useRef(false);
+	useEffect(() => {
+		if (sendingRef.current && storeText === "") {
+			sendingRef.current = false;
+			forceRender((n) => n + 1);
+		}
+	}, [storeText]);
+
+	const text = sendingRef.current ? "" : bufRef.current.text;
 
 	const matches = useMemo(() => {
 		if (!text || !text.startsWith("/")) return [];
@@ -185,9 +226,36 @@ function CommandComposer({
 		if (pathIdx >= pathCompletions.length) onPathIdx(0);
 	}, [pathCompletions.length, pathIdx, onPathIdx]);
 
+	// ── Send helper ──
+	const doSend = useCallback(() => {
+		const submitted = bufRef.current.text.trim();
+		if (!submitted) return;
+
+		// 1. Clear local buffer synchronously
+		bufRef.current = { text: "", cursor: 0 };
+		sendingRef.current = true;
+
+		// 2. Clear store text synchronously
+		aui.composer().setText("");
+
+		// 3. Append message to thread
+		if (submitted.startsWith("/")) {
+			onCommand(submitted).then((output) => {
+				if (output) onOutput(output);
+			});
+		} else {
+			aui.thread().append({
+				content: [{ type: "text", text: submitted }],
+				startRun: true,
+			});
+		}
+	}, [aui, onCommand, onOutput]);
+
+	// ── Input handler ──
 	useInput(useCallback((_input: string, key: any) => {
+		if (!isFocused) return;
+
 		// When a non-chat view or overlay is active, don't consume arrow keys
-		// so the active view's own useInput handler can use them
 		const s = usePuxStore.getState();
 		const inOverlay = s.agentSelectorOpen || s.zoomedAgentId || s.showProvidersOverlay
 			|| s.showSettingsOverlay || s.showSessionSwitcher || s.showLogViewer
@@ -198,6 +266,7 @@ function CommandComposer({
 			return;
 		}
 
+		// Slash command autocomplete navigation
 		if (matches.length > 0) {
 			if (key.upArrow) {
 				onSelectIdx(selectedIdx <= 0 ? matches.length - 1 : selectedIdx - 1);
@@ -208,12 +277,17 @@ function CommandComposer({
 				return;
 			}
 			if (key.tab) {
-				aui.composer().setText("/" + matches[selectedIdx] + " ");
+				const newText = "/" + matches[selectedIdx] + " ";
+				bufRef.current = { text: newText, cursor: newText.length };
+				aui.composer().setText(newText);
+				forceRender((n) => n + 1);
 				return;
 			}
-			return;
+			// Don't process other keys while palette is open
+			if (!key.return) return;
 		}
 
+		// Path autocomplete navigation
 		if (pathCompletions.length > 0) {
 			if (key.upArrow) {
 				onPathIdx(pathIdx <= 0 ? pathCompletions.length - 1 : pathIdx - 1);
@@ -225,59 +299,131 @@ function CommandComposer({
 			}
 			if (key.tab) {
 				const completion = pathCompletions[pathIdx];
-				const pathMatch = text?.match(/((?:\.\.?\/|[~/])(?:[^\s"'`|;]*)?)$/);
+				const cur = bufRef.current.text;
+				const pathMatch = cur.match(/((?:\.\.?\/|[~/])(?:[^\s"'`|;]*)?)$/);
 				if (pathMatch && completion) {
-					const before = text?.slice(0, pathMatch.index);
-					const newText = (before || "") + completion.display;
+					const before = cur.slice(0, pathMatch.index ?? 0);
+					const newText = before + completion.display;
+					bufRef.current = { text: newText, cursor: newText.length };
 					aui.composer().setText(newText);
+					forceRender((n) => n + 1);
 				}
+				return;
+			}
+			if (!key.return && !key.backspace && !_input) return;
+		}
+
+		// Enter → send
+		if (key.return) {
+			doSend();
+			return;
+		}
+
+		// Ctrl shortcuts
+		const lower = _input.toLowerCase();
+		if (key.ctrl) {
+			if (lower === "a") return; // move-home
+			if (lower === "e") return; // move-end
+			if (lower === "w") { // kill-word-backward
+				const cur = bufRef.current;
+				const beforeCursor = cur.text.slice(0, cur.cursor);
+				const afterCursor = cur.text.slice(cur.cursor);
+				const trimmed = beforeCursor.replace(/\S+\s*$/, "");
+				const newText = trimmed + afterCursor;
+				bufRef.current = { text: newText, cursor: trimmed.length };
+				aui.composer().setText(newText);
+				forceRender((n) => n + 1);
+				return;
+			}
+			if (lower === "u") { // kill-start
+				const cur = bufRef.current;
+				const newText = cur.text.slice(cur.cursor);
+				bufRef.current = { text: newText, cursor: 0 };
+				aui.composer().setText(newText);
+				forceRender((n) => n + 1);
+				return;
+			}
+			if (lower === "k") { // kill-end
+				const cur = bufRef.current;
+				const newText = cur.text.slice(0, cur.cursor);
+				bufRef.current = { text: newText, cursor: cur.cursor };
+				aui.composer().setText(newText);
+				forceRender((n) => n + 1);
 				return;
 			}
 			return;
 		}
 
-		// History navigation
+		// Backspace
+		if (key.backspace) {
+			const cur = bufRef.current;
+			if (cur.cursor > 0) {
+				const newText = cur.text.slice(0, cur.cursor - 1) + cur.text.slice(cur.cursor);
+				bufRef.current = { text: newText, cursor: cur.cursor - 1 };
+				aui.composer().setText(newText);
+				forceRender((n) => n + 1);
+			}
+			return;
+		}
+
+		// Left/Right arrows
+		if (key.leftArrow) {
+			if (bufRef.current.cursor > 0) {
+				bufRef.current.cursor--;
+				forceRender((n) => n + 1);
+			}
+			return;
+		}
+		if (key.rightArrow) {
+			if (bufRef.current.cursor < bufRef.current.text.length) {
+				bufRef.current.cursor++;
+				forceRender((n) => n + 1);
+			}
+			return;
+		}
+
+		// History navigation (up/down when not in multiline)
 		if (key.upArrow) {
 			const h = historyRef.current;
 			if (h.sent.length === 0) return;
 			if (!h.browsing) {
-				h.draft = text;
+				h.draft = bufRef.current.text;
 				h.browsing = true;
 			}
-			const idx = h.sent.indexOf(text);
+			const idx = h.sent.indexOf(bufRef.current.text);
 			const prevIdx = idx < 0 ? 0 : Math.min(idx + 1, h.sent.length - 1);
-			aui.composer().setText(h.sent[prevIdx]);
+			const newText = h.sent[prevIdx];
+			bufRef.current = { text: newText, cursor: newText.length };
+			aui.composer().setText(newText);
+			forceRender((n) => n + 1);
 			return;
 		}
 		if (key.downArrow) {
 			const h = historyRef.current;
 			if (!h.browsing || h.sent.length === 0) return;
-			const idx = h.sent.indexOf(text);
+			const idx = h.sent.indexOf(bufRef.current.text);
 			if (idx > 0) {
-				aui.composer().setText(h.sent[idx - 1]);
+				const newText = h.sent[idx - 1];
+				bufRef.current = { text: newText, cursor: newText.length };
+				aui.composer().setText(newText);
 			} else {
 				h.browsing = false;
+				bufRef.current = { text: h.draft, cursor: h.draft.length };
 				aui.composer().setText(h.draft);
 			}
+			forceRender((n) => n + 1);
 			return;
 		}
-	}, [matches, text, aui, selectedIdx, onSelectIdx, pathIdx, onPathIdx, pathCompletions, isMultiLine]));
 
-	// Intercept Enter for slash commands before the library's handler fires.
-	// Our useInput is registered BEFORE the library's (parent mounts first),
-	// so we can clear the text for commands before the library sees it.
-	// For regular messages, we do nothing — the library's submit() calls
-	// send() directly, which batches text clear + user message into one
-	// render (no flash).
-	useInput(useCallback((_input: string, key: any) => {
-		if (key.return && text?.trim().startsWith("/")) {
-			const trimmed = text.trim();
-			aui.composer().setText("");
-			onCommand(trimmed).then((output) => {
-				if (output) onOutput(output);
-			});
+		// Printable character insertion
+		if (_input && !key.ctrl && !key.meta) {
+			const cur = bufRef.current;
+			const newText = cur.text.slice(0, cur.cursor) + _input + cur.text.slice(cur.cursor);
+			bufRef.current = { text: newText, cursor: cur.cursor + _input.length };
+			aui.composer().setText(newText);
+			forceRender((n) => n + 1);
 		}
-	}, [text, aui, onCommand, onOutput]), { isActive: true });
+	}, [isFocused, matches, selectedIdx, onSelectIdx, pathCompletions, pathIdx, onPathIdx, doSend, aui, text, activeTuiView]));
 
 	// Track history by watching thread messages
 	const prevMsgCount = useRef(0);
@@ -304,15 +450,25 @@ function CommandComposer({
 		prevMsgCount.current = msgs.length;
 	}, [msgs]);
 
-	// NO onSubmit — the library calls send() directly for regular messages.
-	// This is the key to preventing the flash: the library's internal send()
-	// batches text clear and user message creation into a single render.
+	// ── Render ──
+	const displayText = sendingRef.current ? "" : bufRef.current.text;
+	const cursor = sendingRef.current ? 0 : bufRef.current.cursor;
+	const hasText = displayText.length > 0;
+
+	if (!isFocused) {
+		return <Text>{displayText}</Text>;
+	}
+
+	const before = hasText ? displayText.slice(0, cursor) : "";
+	const charAtCursor = hasText ? getGraphemeAt(displayText, cursor) : "";
+	const atCursor = charAtCursor === "" ? " " : charAtCursor;
+	const after = hasText ? displayText.slice(cursor + charAtCursor.length) : "";
+
 	return (
-		<ComposerPrimitive.Input
-			submitOnEnter={true}
-			multiLine={isMultiLine}
-			placeholder=""
-			autoFocus
-		/>
+		<Text>
+			{before}
+			<Text inverse>{atCursor}</Text>
+			{after}
+		</Text>
 	);
 }

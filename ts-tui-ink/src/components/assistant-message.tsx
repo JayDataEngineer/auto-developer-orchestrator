@@ -16,11 +16,12 @@ import {
 	useAuiState,
 	MessagePrimitive,
 	LoadingPrimitive,
+	ToolCallPrimitive,
 } from "@assistant-ui/react-ink";
 import { MarkdownText } from "./markdown-text.js";
 import { TerminalImage } from "./terminal-image.js";
 import { BranchPicker } from "./branch-picker.js";
-import { useColors, BLOCKQUOTE_BAR, symbols } from "../theme.js";
+import { useColors, BLOCKQUOTE_BAR } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
 
 // ── Truncation helper ──
@@ -67,8 +68,7 @@ export function AssistantMessage() {
 		<Box flexDirection="column" marginTop={1} paddingX={1} width={textWidth}>
 			{showSpinner && (
 				<LoadingPrimitive.Root gap={1}>
-					<LoadingPrimitive.Spinner variant="dots" />
-					<LoadingPrimitive.Text>waiting...</LoadingPrimitive.Text>
+					<LoadingPrimitive.Spinner variant="spinner" type="dots" />
 					<LoadingPrimitive.ElapsedTime />
 				</LoadingPrimitive.Root>
 			)}
@@ -101,9 +101,9 @@ export function AssistantMessage() {
 						}
 						case "tool-call": {
 							// Registered tool UIs are resolved via part.toolUI.
-							// If no registered UI, render a fallback line.
+							// If no registered UI, use library fallback.
 							if (part.toolUI) return part.toolUI;
-							return <ToolFallback key={part.toolCallId} part={part} />;
+							return <ToolCallPrimitive.Fallback key={part.toolCallId} part={part} />;
 						}
 						case "image":
 							return (
@@ -141,33 +141,6 @@ export function AssistantMessage() {
 
 			{/* Branch picker for forked messages */}
 			<BranchPicker />
-		</Box>
-	);
-}
-
-// ── Tool fallback — unregistered tools get a simple line ──
-
-function ToolFallback({ part }: { part: any }) {
-	const colors = useColors();
-	const { cols } = useTerminalSize();
-	const toolName = part.toolName as string;
-	const isDone = part.result !== undefined && !part.isError;
-	const isRunning = !isDone && !part.isError;
-
-	const sym = isRunning ? symbols.toolRunning : part.isError ? symbols.toolError : symbols.toolDone;
-	const maxArgLen = Math.max(10, cols - toolName.length - 24);
-	const argPreview = part.args ? trunc(JSON.stringify(part.args).slice(0, maxArgLen), maxArgLen) : "";
-
-	return (
-		<Box flexDirection="column">
-			<Text wrap="truncate-end">
-				<Text color={part.isError ? colors.error : isDone ? colors.success : colors.running}>{sym}</Text>
-				<Text> </Text>
-				<Text bold color={isRunning ? colors.running : undefined}>{toolName}</Text>
-				{argPreview && <Text color={colors.textMuted}> {argPreview}</Text>}
-				{isDone && !part.isError && <Text color={colors.textMuted}> done</Text>}
-				{part.isError && <Text color={colors.error}> failed</Text>}
-			</Text>
 		</Box>
 	);
 }

@@ -1,72 +1,60 @@
 /**
- * Thread component — message list only.
+ * Thread component — matches official @assistant-ui/react-ink example.
  *
- * The composer/input bar lives in ComposerBar (always rendered).
- * This component only renders the message area.
- *
- * Scrolling: ThreadPrimitive.Messages uses Ink's <Static> internally.
- * Messages beyond windowSize graduate to Static → written to terminal
- * scrollback → scroll wheel works natively.
- *
- * windowSize is kept small (2) because each message can be many lines
- * (thinking + tool calls + sub-agents). Too many live messages overflow
- * the content area and get clipped by overflow="hidden" in app.tsx.
- * windowOverscan=4 (library default) provides a buffer zone so messages
- * don't vanish at the scrollback boundary.
+ * Structure: ThreadPrimitive.Root wraps messages + status + composer,
+ * exactly like the with-react-ink example. windowSize=2 + windowOverscan=4
+ * keeps 6 messages live, older ones graduate to Static (scrollback).
+ * Composer lives inside Root context.
  */
 
 import React from "react";
 import { Box, Text } from "ink";
 import {
 	ThreadPrimitive,
+	AuiIf,
 	useAuiState,
-	useAuiEvent,
 } from "@assistant-ui/react-ink";
 import { AssistantMessage } from "./assistant-message.js";
 import { UserMessage } from "./user-message.js";
+import { ComposerBar } from "./composer-bar.js";
 import { usePuxStore } from "@pux/shared";
 import { useColors } from "../theme.js";
 import { createRequire } from "node:module";
 const puxVersion = createRequire(import.meta.url)("../../../package.json").version;
 
 // ── Thread ──
+// Matches example structure exactly:
+// Root > Empty + Messages + StatusIndicator + Composer
 
-export function Thread() {
-	// Lifecycle hooks
-	useAuiEvent("thread.runStart", () => {});
-	useAuiEvent("thread.runEnd", () => {});
-
+export function Thread({ onCommand }: { onCommand: (input: string) => Promise<string | null> }) {
 	return (
-		<Box flexDirection="column" flexGrow={1}>
-			{/*
-			 * Messages — windowSize=1 means only the latest message is live.
-			 * All previous messages graduate to Static immediately, becoming
-			 * part of the terminal's scrollback buffer (scroll up to see).
-			 * windowOverscan=2 keeps 2 older messages in the live buffer to
-			 * prevent flickering at the Static boundary.
-			 */}
-			<Box flexDirection="column">
-				<ThreadPrimitive.Empty>
-					<Welcome />
-				</ThreadPrimitive.Empty>
-				<ThreadPrimitive.Messages windowSize={1} windowOverscan={2}>
-					{() => <MessageWrapper />}
-				</ThreadPrimitive.Messages>
-			</Box>
-		</Box>
+		<ThreadPrimitive.Root flexDirection="column" flexGrow={1}>
+			{/* Empty state */}
+			<AuiIf condition={(s: any) => s.thread.isEmpty}>
+				<Welcome />
+			</AuiIf>
+
+			{/* Messages — windowSize=2 + windowOverscan=4 = 6 live messages */}
+			<ThreadPrimitive.Messages windowSize={2} windowOverscan={4}>
+				{() => <MessageWrapper />}
+			</ThreadPrimitive.Messages>
+
+			{/* Composer — INSIDE ThreadPrimitive.Root like the example */}
+			<ComposerBar onCommand={onCommand} />
+		</ThreadPrimitive.Root>
 	);
 }
 
 // ── Message wrapper ──
 
-function MessageWrapper() {
+const MessageWrapper = React.memo(function MessageWrapper() {
 	const role = useAuiState((s) => s.message.role);
 	return (
 		<Box flexDirection="column">
 			{role === "user" ? <UserMessage /> : <AssistantMessage />}
 		</Box>
 	);
-}
+});
 
 // ── Welcome ──
 
@@ -74,7 +62,6 @@ function Welcome() {
 	const colors = useColors();
 	const activeModel = usePuxStore((s) => s.activeModel);
 	const modelList = usePuxStore((s) => s.modelList);
-	const projectPath = usePuxStore((s) => s.activeProjectPath);
 	const projectName = usePuxStore((s) => s.activeProject);
 
 	const modelEntry = modelList.find((m) => m.id === activeModel);
@@ -97,11 +84,8 @@ function Welcome() {
 					<Text color={colors.text}>{projectName}</Text>
 				</Text>
 			)}
-
 			<Box flexDirection="column" marginTop={1}>
-				<Text dimColor>
-					{" "}Type a message to start, or try:
-				</Text>
+				<Text dimColor>{" "}Type a message to start, or try:</Text>
 				<Box flexDirection="column" marginTop={1}>
 					<Text>
 						<Text color="gray">{"  "}/help</Text>
@@ -116,4 +100,3 @@ function Welcome() {
 		</Box>
 	);
 }
-
