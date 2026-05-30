@@ -40,7 +40,8 @@ type ChatProvider interface {
 type LLMClient struct {
 	baseURL          string
 	apiKey           string // optional — set for cloud providers (Gemini, OpenAI, etc.)
-	client           *http.Client
+	client           *http.Client // non-streaming requests (has timeout)
+	streamClient     *http.Client // SSE streaming (no timeout — context handles cancellation)
 	logger           *zap.Logger
 	modelName        string
 	disableStreaming bool // proxies without SSE support use non-streaming API
@@ -75,6 +76,7 @@ func NewLLMClient(cfg LLMClientConfig) *LLMClient {
 		baseURL:          cfg.BaseURL,
 		apiKey:           cfg.APIKey,
 		client:           &http.Client{Timeout: 5 * time.Minute},
+		streamClient:     &http.Client{}, // no timeout — SSE streams can run for minutes; context handles cancellation
 		logger:           cfg.Logger,
 		modelName:        cfg.ModelName,
 		disableStreaming: cfg.DisableStreaming,
@@ -513,23 +515,37 @@ type StreamOptions struct {
 // sanitizeRequest strips llama.cpp-specific fields for cloud providers.
 // Cloud APIs (Gemini, OpenRouter, OpenAI) reject unknown fields like
 // top_k, repeat_penalty, presence_penalty, min_p, cache_prompt, and session_id.
-// For providers that support prompt caching, it splits the system message at
-// the DynamicBoundary and marks the stable portion with cache_control.
+// Builds a clean request with only fields cloud providers understand.
 func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionRequest {
 	if !e.IsCloud() {
 		return req
 	}
-	// Zero out sampling params — let the server use its own defaults
-	req.Temperature = 0
-	req.TopP = 0
-	req.TopK = 0
-	req.RepeatPenalty = 0
-	req.PresencePenalty = 0
-	req.MinP = 0
-	req.CachePrompt = false
-	req.SessionID = ""
-
-	return req
+	// Build a clean request — only include fields cloud providers accept.
+	// Do NOT zero fields (which relies on omitempty); construct explicitly.
+	clean := ChatCompletionRequest{
+		Model:    req.Model,
+		Messages: req.Messages,
+		Stream:   req.Stream,
+	}
+	if len(req.Tools) > 0 {
+		clean.Tools = req.Tools
+	}
+	if req.MaxTokens > 0 {
+		clean.MaxTokens = req.MaxTokens
+	}
+	if req.Temperature > 0 {
+		clean.Temperature = req.Temperature
+	}
+	if req.TopP > 0 {
+		clean.TopP = req.TopP
+	}
+	if req.StreamOptions != nil {
+		clean.StreamOptions = req.StreamOptions
+	}
+	if req.ResponseFormat != nil {
+		clean.ResponseFormat = req.ResponseFormat
+	}
+	return clean
 }
 
 // prepareMessages applies cloud sanitization, cache breakpoints, Gemini
@@ -781,7 +797,7 @@ func (e *LLMClient) chatCompleteStream(ctx context.Context, req ChatCompletionRe
 		httpReq.Header.Set("Authorization", "Bearer "+e.apiKey)
 	}
 
-	resp, err := e.client.Do(httpReq)
+	resp, err := e.streamClient.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("chat stream request failed: %w", err)
 	}
