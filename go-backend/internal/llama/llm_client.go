@@ -802,6 +802,7 @@ func (e *LLMClient) chatCompleteStream(ctx context.Context, req ChatCompletionRe
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	chunkCount := 0
+	gotFinish := false
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -847,6 +848,9 @@ func (e *LLMClient) chatCompleteStream(ctx context.Context, req ChatCompletionRe
 
 		if len(event.Choices) > 0 {
 			choice := event.Choices[0]
+			if choice.FinishReason != "" {
+				gotFinish = true
+			}
 			if !onChunk(choice.Delta, choice.FinishReason, event.Usage) {
 				continue
 			}
@@ -859,8 +863,16 @@ func (e *LLMClient) chatCompleteStream(ctx context.Context, req ChatCompletionRe
 	if e.IsCloud() {
 		e.logger.Debug("Cloud stream complete",
 			zap.Int("chunks", chunkCount),
+			zap.Bool("gotFinish", gotFinish),
 			zap.String("model", e.modelName),
 		)
+	}
+
+	// Detect aborted streams — cloud providers sometimes drop the connection
+	// after a few chunks without sending finish_reason or [DONE].
+	// Treat this as a transient error so the caller can retry.
+	if !gotFinish && chunkCount < 10 {
+		return fmt.Errorf("stream aborted after %d chunks (no finish_reason)", chunkCount)
 	}
 
 	return scanner.Err()
