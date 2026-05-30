@@ -34,8 +34,8 @@ export function Thread({ onCommand }: { onCommand: (input: string) => Promise<st
 				<Welcome />
 			</AuiIf>
 
-			{/* Messages — windowSize=1 + windowOverscan=2 = 3 live, rest in scrollback */}
-			<ThreadPrimitive.Messages windowSize={1} windowOverscan={2}>
+			{/* Messages — windowSize=1 + windowOverscan=1 = 2 live, rest in scrollback */}
+			<ThreadPrimitive.Messages windowSize={1} windowOverscan={1}>
 				{() => <MessageWrapper />}
 			</ThreadPrimitive.Messages>
 
