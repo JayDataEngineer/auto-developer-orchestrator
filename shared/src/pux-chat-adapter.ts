@@ -418,10 +418,10 @@ function readWithTimeout(
 function debug(...args: unknown[]) {
 	try {
 		if (typeof process === "undefined" || !process.env) return;
+		// Only log when DEBUG_PUX is set — stderr writes corrupt the TUI
+		// in alt-screen mode (debug text appears on screen mid-render).
+		if (!process.env.DEBUG_PUX) return;
 		const msg = args.map(a => String(a)).join(" ") + "\n";
-		// Write to stderr (visible in terminal scrollback on exit)
-		if (process.stderr?.write) process.stderr.write(msg);
-		// Also write to file for persistent log
 		try {
 			const fs = require("node:fs") as typeof import("node:fs");
 			fs.appendFileSync("/tmp/pux-run-debug.log", msg);
@@ -529,13 +529,12 @@ export const puxChatAdapter: ChatModelAdapter = {
 		let activeSubAgentName: string | null = null;
 
 		// Initial yield — empty, running.
-		// Defer ctoRunning setState via queueMicrotask so it doesn't trigger
-		// a synchronous Zustand render during the adapter's first yield cycle.
-		// Without this, components subscribed to Zustand re-render while the
-		// assistant-ui store is still transitioning (stale text, missing messages)
-		// causing the user to see old state flash for a frame.
+		// ctoRunning is now derived from assistant-ui's isRunning via
+		// CtoRunningBridge component (in app.tsx), so the adapter does NOT
+		// set it directly. This eliminates the cross-store timing issue that
+		// caused the Enter flash (Zustand-triggered renders reading stale
+		// assistant-ui state).
 		yield buildSnapshot(parts, sources, "running", timing, stepsRef);
-		queueMicrotask(() => usePuxStore.setState({ ctoRunning: true }));
 
 		try {
 			while (true) {
@@ -546,7 +545,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 					// Stream stalled — no data for 30s. Yield complete and return.
 					if (readErr instanceof DOMException && readErr.name === "TimeoutError") {
 						timing.totalStreamTime = Date.now() - timing.streamStartTime;
-						usePuxStore.setState({ ctoRunning: false });
 						yield buildSnapshot(parts, sources, "complete", timing, stepsRef);
 						return;
 					}
@@ -563,7 +561,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 				for (const { event, data } of events) {
 					if (data === "[DONE]") {
 						timing.totalStreamTime = Date.now() - timing.streamStartTime;
-						usePuxStore.setState({ ctoRunning: false });
 						yield buildSnapshot(parts, sources, "complete", timing, stepsRef);
 						return;
 					}
@@ -857,7 +854,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 				}
 			}
 		} catch (err) {
-			usePuxStore.setState({ ctoRunning: false });
 			if (err instanceof Error && err.name === "AbortError") {
 				yield {
 					...buildSnapshot(parts, sources, "running", timing, stepsRef),
@@ -874,7 +870,6 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 		// Stream ended without [DONE] — yield final snapshot
 		timing.totalStreamTime = Date.now() - timing.streamStartTime;
-		usePuxStore.setState({ ctoRunning: false });
 		yield buildSnapshot(parts, sources, "complete", timing, stepsRef);
 	},
 };
