@@ -168,6 +168,16 @@ function PuxApp() {
 		// Double Escape to cancel running agents or active CTO loop
 		if (key.escape) {
 			const store = usePuxStore.getState();
+			// Don't interfere when overlays or non-chat views are active —
+			// those components handle their own Escape (zoom, agents, etc.)
+			if (store.zoomedAgentId || store.activeTuiView !== "chat" ||
+				store.agentSelectorOpen || store.showHelpOverlay ||
+				store.showSearchOverlay || store.showLogViewer ||
+				store.showSessionSwitcher || store.showSettingsOverlay ||
+				store.showProvidersOverlay || store.showMCPOverlay ||
+				store.pendingDecision) {
+				return;
+			}
 			let runningCount = 0;
 			for (const a of store.agents.values()) {
 				if (a.status === "running") runningCount++;
