@@ -3,9 +3,24 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
+
+// ensureBrowserReady checks that a sandbox is available and auto-provisions
+// the browser (Chrome/CDP) if the provider supports it. Returns nil if ready.
+func ensureBrowserReady(ctx context.Context, provider BrowserProvider, sandboxID, toolName string) error {
+	if sandboxID == "" {
+		return core.NewToolError(toolName, "no sandbox available — Docker may be unavailable")
+	}
+	if ensurer, ok := provider.(SandboxEnsurer); ok {
+		if err := ensurer.EnsureReady(ctx, sandboxID); err != nil {
+			return core.NewToolError(toolName, fmt.Sprintf("browser not ready: %v", err))
+		}
+	}
+	return nil
+}
 
 // ── Navigate Tool (BrowserProvider) ──
 
@@ -34,8 +49,8 @@ func (t *NavigateProviderTool) Schema() json.RawMessage {
 
 func (t *NavigateProviderTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("browse_to", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "browse_to"); err != nil {
+		return nil, err
 	}
 	url, _ := args["url"].(string)
 	if url == "" {
@@ -79,8 +94,8 @@ func (t *FindElementTool) Schema() json.RawMessage {
 
 func (t *FindElementTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("find_element", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "find_element"); err != nil {
+		return nil, err
 	}
 
 	req := map[string]interface{}{}
@@ -117,8 +132,8 @@ func (t *BrowserScreenshotTool) Schema() json.RawMessage {
 
 func (t *BrowserScreenshotTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("browser_screenshot", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "browser_screenshot"); err != nil {
+		return nil, err
 	}
 	return t.provider.BrowserScreenshot(ctx, sbID)
 }
@@ -145,8 +160,8 @@ func (t *A11ySnapshotTool) Schema() json.RawMessage {
 
 func (t *A11ySnapshotTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("snapshot_a11y", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "snapshot_a11y"); err != nil {
+		return nil, err
 	}
 	return t.provider.A11ySnapshot(ctx, sbID)
 }
@@ -178,8 +193,8 @@ func (t *GetCookiesTool) Schema() json.RawMessage {
 
 func (t *GetCookiesTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("get_cookies", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "get_cookies"); err != nil {
+		return nil, err
 	}
 	urls := []string{}
 	if u, ok := args["url"].(string); ok && u != "" {
@@ -219,8 +234,8 @@ func (t *SetCookieTool) Schema() json.RawMessage {
 
 func (t *SetCookieTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("set_cookie", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "set_cookie"); err != nil {
+		return nil, err
 	}
 	cookie := map[string]interface{}{}
 	for _, key := range []string{"name", "value", "domain", "path"} {
@@ -257,8 +272,8 @@ func (t *ClearCookiesTool) Schema() json.RawMessage {
 
 func (t *ClearCookiesTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("clear_cookies", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "clear_cookies"); err != nil {
+		return nil, err
 	}
 	return t.provider.ClearCookies(ctx, sbID)
 }
@@ -285,8 +300,8 @@ func (t *GetStorageTool) Schema() json.RawMessage {
 
 func (t *GetStorageTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("get_storage", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "get_storage"); err != nil {
+		return nil, err
 	}
 	return t.provider.GetStorage(ctx, sbID)
 }
@@ -318,8 +333,8 @@ func (t *SetStorageTool) Schema() json.RawMessage {
 
 func (t *SetStorageTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("set_storage", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "set_storage"); err != nil {
+		return nil, err
 	}
 	key, _ := args["key"].(string)
 	value, _ := args["value"].(string)
@@ -349,8 +364,8 @@ func (t *ClearStorageTool) Schema() json.RawMessage {
 
 func (t *ClearStorageTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("clear_storage", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "clear_storage"); err != nil {
+		return nil, err
 	}
 	return t.provider.ClearStorage(ctx, sbID)
 }
@@ -404,8 +419,8 @@ func (t *EvaluateJSTool) Schema() json.RawMessage {
 
 func (t *EvaluateJSTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("evaluate_js", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "evaluate_js"); err != nil {
+		return nil, err
 	}
 	code, _ := args["code"].(string)
 	if code == "" {
@@ -435,8 +450,8 @@ func (t *ReadPageProviderTool) Schema() json.RawMessage {
 
 func (t *ReadPageProviderTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("read_page", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "read_page"); err != nil {
+		return nil, err
 	}
 	return t.provider.ReadPage(ctx, sbID)
 }
@@ -469,8 +484,8 @@ func (t *DownloadFileTool) Schema() json.RawMessage {
 
 func (t *DownloadFileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	sbID := t.sandboxID()
-	if sbID == "" {
-		return nil, core.NewToolError("download_file", "no sandbox available")
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "download_file"); err != nil {
+		return nil, err
 	}
 	url, _ := args["url"].(string)
 	if url == "" {

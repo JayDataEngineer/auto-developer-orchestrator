@@ -32,3 +32,10 @@ type BrowserProvider interface {
 	// DownloadFile downloads a file to the sandbox via curl.
 	DownloadFile(ctx context.Context, sandboxID, url, path string) (map[string]interface{}, error)
 }
+
+// SandboxEnsurer is an optional interface that BrowserProvider implementations
+// can satisfy to auto-provision the browser sandbox on first tool call.
+// ComputerUseBridge implements this via EnsureReady().
+type SandboxEnsurer interface {
+	EnsureReady(ctx context.Context, sandboxID string) error
+}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/tools/desktop"
 	"go.uber.org/zap"
@@ -86,6 +87,44 @@ func (b *ComputerUseBridge) IsReady(sandboxID string) bool {
 // Enable enables the sandbox desktop environment.
 func (b *ComputerUseBridge) Enable(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
 	return callHandler(ctx, b.CU.Enable, http.MethodPost, "/api/sandbox/{id}/computer-use/enable", nil, sandboxID)
+}
+
+// EnsureReady ensures the browser (Chrome/CDP) is running in the sandbox.
+// If CDP is already connected, returns immediately (~1ms). Otherwise triggers
+// browser setup (Docker container + Chrome + CDP connect) and waits up to 60s.
+// This mirrors X11Handler.EnsureDesktopMode for desktop auto-escalation.
+func (b *ComputerUseBridge) EnsureReady(ctx context.Context, sandboxID string) error {
+	// Fast path: CDP already connected
+	if b.IsReady(sandboxID) {
+		return nil
+	}
+
+	b.Log.Info("auto-provisioning browser sandbox", zap.String("sandbox_id", sandboxID))
+
+	// Trigger Enable — sends HTTP response immediately, runs backgroundSetup in goroutine
+	_, err := b.Enable(ctx, sandboxID)
+	if err != nil {
+		return fmt.Errorf("enable browser: %w", err)
+	}
+
+	// Poll until CDP client connects (backgroundSetup is async, takes 10-30s)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	timeout := time.After(60 * time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			if b.IsReady(sandboxID) {
+				b.Log.Info("browser sandbox ready", zap.String("sandbox_id", sandboxID))
+				return nil
+			}
+		case <-timeout:
+			return fmt.Errorf("browser setup timed out after 60s for sandbox %s", sandboxID)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // Screenshot takes a browser screenshot via CDP.
