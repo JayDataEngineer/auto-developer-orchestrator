@@ -1,157 +1,143 @@
 /**
- * AssistantMessage — renders assistant messages.
+ * AssistantMessage — renders assistant messages via library pipeline.
  *
- * All parts (reasoning, tool calls, text, images, sources) rendered
- * in chronological order from the parts array. No separate accordion.
- * Tool calls: single line with proper truncation to prevent mid-word wrapping.
+ * Uses MessagePrimitive.Parts with the children render function API.
+ * Registered tool UIs (makeAssistantToolUI) are automatically resolved
+ * via part.toolUI — no manual parts.map() switch/case needed.
+ *
+ * Reasoning parts are reordered in the adapter (reorderParts) so they
+ * come first. We extract all reasoning text and render a single collapsed
+ * "Thought:" line, then the parts pipeline handles the rest.
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React from "react";
 import { Box, Text } from "ink";
-import Spinner from "ink-spinner";
-import { useAuiState } from "@assistant-ui/react-ink";
-import { getToolArgPreview } from "@pux/shared";
-import { usePuxStore } from "@pux/shared";
-import { BranchPicker } from "./branch-picker.js";
+import {
+	useAuiState,
+	MessagePrimitive,
+	LoadingPrimitive,
+} from "@assistant-ui/react-ink";
 import { MarkdownText } from "./markdown-text.js";
 import { TerminalImage } from "./terminal-image.js";
-import { useColors, symbols, BLOCKQUOTE_BAR, BLACK_CIRCLE } from "../theme.js";
+import { BranchPicker } from "./branch-picker.js";
+import { useColors, BLOCKQUOTE_BAR, symbols } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
 
-// Render a single reasoning part inline (collapsed — one line)
-function ReasoningLine({ text, isRunning }: { text: string; isRunning: boolean }) {
-	const colors = useColors();
-	const { cols } = useTerminalSize();
-	const textWidth = cols - 6; // indent + BLOCKQUOTE_BAR + space + label
-	const lines = text.split("\n").filter((l) => l.trim());
-	if (lines.length === 0) return null;
-	const firstLine = lines[0];
-	const label = isRunning ? "Thinking" : "Thought";
-	return (
-		<Box flexDirection="column" marginBottom={1} width={textWidth}>
-			<Text dimColor color={colors.textMuted}>
-				{BLOCKQUOTE_BAR} {label}: {firstLine}
-			</Text>
-		</Box>
-	);
-}
+// ── Truncation helper ──
 
-// Truncate at word boundary — never cuts mid-word
 function trunc(s: string, max: number): string {
 	if (s.length <= max) return s;
 	const cut = s.slice(0, max - 1);
 	const lastSpace = cut.lastIndexOf(" ");
-	// If no space found or too close to start, hard truncate
 	if (lastSpace < max * 0.5) return cut + "…";
 	return cut.slice(0, lastSpace) + "…";
 }
 
+// ── Main component ──
+
 export function AssistantMessage() {
-	const parts = useAuiState((s) => s.message.parts);
-	const isRunning = useAuiState((s) => s.message.status?.type === "running");
 	const colors = useColors();
 	const { cols } = useTerminalSize();
-	// Explicit width: paddingX(1) from outer Box = 2 chars total
 	const textWidth = cols - 2;
+	const isRunning = useAuiState((s) => s.message.status?.type === "running");
+
+	// Extract all reasoning text from parts (reorderParts puts them first)
+	const parts = useAuiState((s) => s.message.parts);
 	const hasContent = parts && parts.some((p: any) =>
 		(p.type === "text" && p.text?.trim()) ||
 		p.type === "tool-call" ||
 		p.type === "reasoning" ||
 		p.type === "source"
 	);
+	const reasoningParts = parts.filter((p: any) => p.type === "reasoning" && p.text?.trim());
+	const allReasoning = reasoningParts.map((p: any) => p.text).join("\n");
+	const hasReasoning = allReasoning.length > 0;
 
-	// Elapsed time counter for waiting spinner
-	const [elapsed, setElapsed] = useState(0);
-	useEffect(() => {
-		if (!isRunning || hasContent) return;
-		setElapsed(0);
-		const timer = setInterval(() => setElapsed((t) => t + 1), 1000);
-		return () => clearInterval(timer);
-	}, [isRunning, hasContent]);
+	// Get the most recent (last) line of reasoning for display
+	const reasoningLines = allReasoning.split("\n").filter((l: string) => l.trim());
+	const lastReasoningLine = reasoningLines.length > 0
+		? reasoningLines[reasoningLines.length - 1]
+		: "";
 
-	// Show spinner while running with no visible content yet.
-	// Use "waiting..." — not "thinking" — because the model hasn't
-	// produced any output yet (still connecting / processing prompt).
-	if (isRunning && !hasContent) {
-		const timeStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
-		return (
-			<Box marginTop={1} paddingX={1} gap={1}>
-				<Text color={colors.assistant}><Spinner type="dots" /></Text>
-				<Text color={colors.textDim}>waiting... {timeStr}</Text>
-			</Box>
-		);
-	}
-
-	if (!parts || parts.length === 0) return null;
+	// Only show waiting spinner for THIS message (message-level running,
+	// not thread-level). Shows only when running AND no content yet.
+	const showSpinner = isRunning && !hasContent;
 
 	return (
 		<Box flexDirection="column" marginTop={1} paddingX={1} width={textWidth}>
-			{/* Parts rendered in chronological order */}
-			{parts.map((part: any, i: number) => {
-				switch (part.type) {
-					case "tool-call":
-						return (
-							<Box key={part.toolCallId || i} flexDirection="column">
-								{isDelegateTool(part.toolName) ? (
-									<DelegateToolCallDisplay
-										toolName={part.toolName}
-										args={part.args}
-										result={part.result}
-										isError={part.isError}
-									/>
-								) : (
-									<ToolCallDisplay
-										toolName={part.toolName}
-										args={part.args}
-										argsText={part.argsText}
-										result={part.result}
-										isError={part.isError}
-									/>
-								)}
-							</Box>
-						);
-					case "reasoning":
-						if (!part.text?.trim()) return null;
-						return (
-							<ReasoningLine key={i} text={part.text} isRunning={isRunning} />
-						);
-					case "text":
-						if (!part.text?.trim()) return null;
-						return (
-							<MarkdownText key={i} text={part.text} color={colors.text} />
-						);
-					case "image":
-						return (
-							<Box key={i} marginTop={1} paddingLeft={1}>
-								<TerminalImage
-									image={part.image}
-									filename={part.filename}
+			{showSpinner && (
+				<LoadingPrimitive.Root gap={1}>
+					<LoadingPrimitive.Spinner variant="dots" />
+					<LoadingPrimitive.Text>waiting...</LoadingPrimitive.Text>
+					<LoadingPrimitive.ElapsedTime />
+				</LoadingPrimitive.Root>
+			)}
+
+			{/* Collapsed reasoning — one line for all thought steps */}
+			{hasReasoning && (
+				<Box marginBottom={1}>
+					<Text dimColor color={colors.textMuted}>
+						{BLOCKQUOTE_BAR} {trunc(lastReasoningLine, cols - 4)}
+					</Text>
+				</Box>
+			)}
+
+			{/* Parts pipeline — children render function (preferred API) */}
+			<MessagePrimitive.Parts>
+				{({ part }) => {
+					switch (part.type) {
+						case "reasoning":
+							// Skip — already rendered above as collapsed block
+							return null;
+						case "text": {
+							if (!part.text?.trim()) return null;
+							return (
+								<MarkdownText
+									key={part.text.slice(0, 20)}
+									text={part.text}
+									color={colors.text}
 								/>
-							</Box>
-						);
-					case "source":
-						return (
-							<Box key={part.id || i} paddingLeft={1}>
-								<Text color="gray">{BLOCKQUOTE_BAR} </Text>
-								<Text color="blue">
-									{part.url
-										? part.title
-											? `${part.title} — ${part.url}`
-											: part.url
-										: part.title || "source"}
-								</Text>
-							</Box>
-						);
-					case "file":
-						return (
-							<Box key={i} paddingLeft={1}>
-								<Text dimColor>{BLOCKQUOTE_BAR} file: {part.name || "(unnamed)"}</Text>
-							</Box>
-						);
-					default:
-						return null;
-				}
-			})}
+							);
+						}
+						case "tool-call": {
+							// Registered tool UIs are resolved via part.toolUI.
+							// If no registered UI, render a fallback line.
+							if (part.toolUI) return part.toolUI;
+							return <ToolFallback key={part.toolCallId} part={part} />;
+						}
+						case "image":
+							return (
+								<Box key={part.image?.slice(0, 20)} marginTop={1} paddingLeft={1}>
+									<TerminalImage
+										image={part.image}
+										filename={(part as any).filename}
+									/>
+								</Box>
+							);
+						case "source":
+							return (
+								<Box key={(part as any).id || part.url} paddingLeft={1}>
+									<Text color="gray">{BLOCKQUOTE_BAR} </Text>
+									<Text color="blue">
+										{part.url
+											? part.title
+												? `${part.title} — ${part.url}`
+												: part.url
+											: part.title || "source"}
+									</Text>
+								</Box>
+							);
+						case "file":
+							return (
+								<Box paddingLeft={1}>
+									<Text dimColor>{BLOCKQUOTE_BAR} file: {(part as any).name || "(unnamed)"}</Text>
+								</Box>
+							);
+						default:
+							return null;
+					}
+				}}
+			</MessagePrimitive.Parts>
 
 			{/* Branch picker for forked messages */}
 			<BranchPicker />
@@ -159,239 +145,29 @@ export function AssistantMessage() {
 	);
 }
 
-// ── Tool call helpers ──
+// ── Tool fallback — unregistered tools get a simple line ──
 
-function isDelegateTool(name: string): boolean {
-	return name === "delegate_to" || name === "delegate_async";
-}
-
-// ── Delegate tool display — sub-agent progress with width-aware truncation ──
-
-function DelegateToolCallDisplay({
-	toolName,
-	args,
-	result,
-	isError,
-}: {
-	toolName: string;
-	args?: unknown;
-	result?: unknown;
-	isError?: boolean;
-}) {
+function ToolFallback({ part }: { part: any }) {
 	const colors = useColors();
 	const { cols } = useTerminalSize();
-	const isDone = result !== undefined && !isError;
-	const isRunning = !isDone && !isError;
+	const toolName = part.toolName as string;
+	const isDone = part.result !== undefined && !part.isError;
+	const isRunning = !isDone && !part.isError;
 
-	const role = (args as any)?.role || (args as any)?.instructions || "agent";
-	const task = (args as any)?.task || (args as any)?.prompt || "";
-	const injectedId = (args as any)?.__agentId as string | undefined;
-
-	// Look up sub-agent details from Zustand store.
-	// Priority: exact ID match > name+task match > running fallback
-	const agents = usePuxStore((s) => s.agents);
-	const agentState = useMemo(() => {
-		// Best: match by injected agentId (handles concurrent same-role agents)
-		if (injectedId) {
-			const byId = agents.get(injectedId);
-			if (byId) return byId;
-		}
-		const candidates = [...agents.values()].filter(
-			(a) => a.agentName === role,
-		);
-		if (candidates.length === 0) return undefined;
-		if (candidates.length === 1) return candidates[0];
-		const byTask = candidates.find(
-			(a) => task.startsWith(a.task) || a.task.startsWith(task),
-		);
-		return byTask ?? candidates.find((a) => a.status === "running") ?? candidates[0];
-	}, [agents, role, task, injectedId]);
-
-	const toolCalls = agentState?.toolCalls ?? [];
-	const subToolCount = toolCalls.length;
-	const thinkingText = agentState?.thinkingText;
-	const agentText = agentState?.text;
-
-	// Duration
-	const duration = agentState
-		? agentState.endedAt
-			? `${((agentState.endedAt - agentState.startedAt) / 1000).toFixed(1)}s`
-			: `${((Date.now() - agentState.startedAt) / 1000).toFixed(1)}s`
-		: "";
-
-	// Tick every second while running
-	const [, setTick] = useState(0);
-	useEffect(() => {
-		if (!isRunning) return;
-		const timer = setInterval(() => setTick((t) => t + 1), 1000);
-		return () => clearInterval(timer);
-	}, [isRunning]);
-
-	// Width budget for tool call lines: indent(2) + "└ "(3) + symbol(1) + " "(1) = 7
-	const toolIndent = 7;
-	const maxArgLen = Math.max(15, cols - toolIndent - 20);
-	const label = `${toolName} → ${role}`;
-	const headerOverhead = 6;
-	const maxTaskLen = Math.max(20, cols - headerOverhead - label.length - 10);
-	const taskPreview = trunc(task, Math.min(maxTaskLen, 50));
-
-	// Collapsed when done — single line with summary
-	if (isDone) {
-		const doneSuffix = subToolCount > 0
-			? ` done · ${subToolCount} tool${subToolCount !== 1 ? "s" : ""} · ${duration}`
-			: " done";
-		return (
-			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-				<Text wrap="truncate-end">
-					<Text color={isError ? colors.error : colors.success}>{BLACK_CIRCLE} </Text>
-					<Text bold color={colors.brand}>{label}</Text>
-					{taskPreview && <Text color="gray"> {taskPreview}</Text>}
-					<Text color="gray">{doneSuffix}</Text>
-				</Text>
-				{/* Agent output preview when done — first 3 lines */}
-				{agentText && agentText.trim() && (
-					<Box paddingLeft={4}>
-						<Text dimColor color="gray">
-							{agentText.trim().split("\n").slice(0, 3).map((line, i, arr) =>
-								`${BLOCKQUOTE_BAR} ${trunc(line, cols - 6)}${i < arr.length - 1 ? "\n" : ""}`
-							).join("")}
-							{agentText.trim().split("\n").length > 3 ? `\n${BLOCKQUOTE_BAR} ...` : ""}
-						</Text>
-					</Box>
-				)}
-			</Box>
-		);
-	}
-
-	// Error: tool failed before producing a result
-	if (isError) {
-		const errMsg = typeof result === "string" ? result : "";
-		return (
-			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-				<Text wrap="truncate-end">
-					<Text color={colors.error}>{symbols.toolError} </Text>
-					<Text bold color={colors.brand}>{label}</Text>
-					{taskPreview && <Text color="gray"> {taskPreview}</Text>}
-					<Text color={colors.error}> failed</Text>
-				</Text>
-				{errMsg && (
-					<Box paddingLeft={4}>
-						<Text dimColor color={colors.error}>{trunc(errMsg, cols - 6)}</Text>
-					</Box>
-				)}
-			</Box>
-		);
-	}
-
-	// Running: show nested tool snippets
-	const maxShow = 5;
-	const visibleTools = toolCalls.length > maxShow
-		? toolCalls.slice(-maxShow)
-		: toolCalls;
-	const hiddenCount = toolCalls.length - visibleTools.length;
-
-	return (
-		<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-			<Text wrap="truncate-end">
-				<Text color={colors.running}>
-					{symbols.toolRunning}{" "}
-				</Text>
-				<Text bold color={colors.brand}>{label}</Text>
-				{taskPreview && <Text color="gray"> {taskPreview}</Text>}
-				{subToolCount > 0 && (
-					<Text color="gray"> · {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
-				)}
-			</Text>
-
-			{hiddenCount > 0 && (
-				<Text dimColor color="gray">
-					{"  └ "}{symbols.dot} {hiddenCount} earlier
-				</Text>
-			)}
-
-			{visibleTools.map((tc, i) => {
-				const isActive = !tc.endedAt;
-				const isLast = i === visibleTools.length - 1;
-				const rawArg = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, maxArgLen);
-				const argPreview = trunc(rawArg, maxArgLen);
-				const sym = tc.isError ? symbols.toolError : tc.endedAt ? symbols.toolDone : symbols.toolRunning;
-				return (
-					<Text key={`${tc.toolName}-${tc.timestamp}-${i}`} wrap="truncate-end">
-						<Text dimColor color="gray">{"  └ "}</Text>
-						<Text color={tc.isError ? colors.error : tc.endedAt ? colors.success : colors.running}>
-							{sym}
-						</Text>
-						<Text> </Text>
-						<Text bold color={isActive ? colors.running : undefined}>
-							{tc.toolName}
-						</Text>
-						{argPreview && <Text color="gray"> {argPreview}</Text>}
-						{isActive && isLast && isRunning && (
-							<Text color={colors.running}> <Spinner type="dots" /></Text>
-						)}
-					</Text>
-				);
-			})}
-
-			{toolCalls.length === 0 && !thinkingText && (
-				<Text dimColor color="gray">{"  └ "}starting...</Text>
-			)}
-
-			{/* Show agent thinking preview while running */}
-			{thinkingText && isRunning && (
-				<Text dimColor color="gray">
-					{"  └ "}{BLOCKQUOTE_BAR} {trunc(thinkingText.split("\n").pop() || thinkingText, cols - 8)}
-				</Text>
-			)}
-		</Box>
-	);
-}
-
-// ── Regular tool call display — single line ──
-
-function ToolCallDisplay({
-	toolName,
-	args,
-	result,
-	isError,
-}: {
-	toolName: string;
-	args?: unknown;
-	argsText?: string;
-	result?: unknown;
-	isError?: boolean;
-}) {
-	const colors = useColors();
-	const { cols } = useTerminalSize();
-	const isDone = result !== undefined && !isError;
-	const isRunning = !isDone && !isError;
-
-	const rawArg = getToolArgPreview(toolName, args as Record<string, unknown> | undefined);
-	// Overhead: symbol(1) + space(1) + toolname(~15) + space(1) + "done"(4) = ~22
+	const sym = isRunning ? symbols.toolRunning : part.isError ? symbols.toolError : symbols.toolDone;
 	const maxArgLen = Math.max(10, cols - toolName.length - 24);
-	const argPreview = trunc(rawArg, maxArgLen);
-
-	const sym = isRunning ? symbols.toolRunning : isError ? symbols.toolError : symbols.toolDone;
-	const errMsg = isError && typeof result === "string" ? result : "";
-	const maxErrLen = Math.max(10, cols - toolName.length - 24);
-	const errPreview = errMsg ? trunc(errMsg, maxErrLen) : "";
+	const argPreview = part.args ? trunc(JSON.stringify(part.args).slice(0, maxArgLen), maxArgLen) : "";
 
 	return (
 		<Box flexDirection="column">
 			<Text wrap="truncate-end">
-				<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>{sym}</Text>
+				<Text color={part.isError ? colors.error : isDone ? colors.success : colors.running}>{sym}</Text>
 				<Text> </Text>
 				<Text bold color={isRunning ? colors.running : undefined}>{toolName}</Text>
 				{argPreview && <Text color={colors.textMuted}> {argPreview}</Text>}
-				{isDone && !isError && <Text color={colors.textMuted}> done</Text>}
-				{isError && <Text color={colors.error}> failed</Text>}
+				{isDone && !part.isError && <Text color={colors.textMuted}> done</Text>}
+				{part.isError && <Text color={colors.error}> failed</Text>}
 			</Text>
-			{errPreview && (
-				<Box paddingLeft={2}>
-					<Text dimColor color={colors.error}>{trunc(errMsg, cols - 4)}</Text>
-				</Box>
-			)}
 		</Box>
 	);
 }
-
