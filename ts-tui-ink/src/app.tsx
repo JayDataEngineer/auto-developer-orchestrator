@@ -16,13 +16,13 @@ import { useTerminalSize } from "./use-terminal-size.js";
 import {
 	AssistantRuntimeProvider,
 	useLocalRuntime,
+	useAuiState,
 } from "@assistant-ui/react-ink";
 import type { FeedbackAdapter, SuggestionAdapter } from "@assistant-ui/react-ink";
 import { puxChatAdapter, createPuxHistoryAdapter, usePuxStore } from "@pux/shared";
 import { getFetch } from "@pux/shared";
 import { apiUrl } from "@pux/shared";
 import { Thread } from "./components/thread.js";
-import { ComposerBar } from "./components/composer-bar.js";
 import { StatusBar } from "./components/status-bar.js";
 import { TabBar } from "./components/tab-bar.js";
 import { AgentsView } from "./components/agents-view.js";
@@ -46,7 +46,22 @@ import { executeCommand, type CommandContext } from "./commands.js";
 
 // ── Runtime Provider ──
 
-	function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
+/**
+ * Bridge component: derives ctoRunning from assistant-ui's isRunning.
+ * Uses useEffect so the Zustand update fires AFTER React commits the
+ * assistant-ui state. This eliminates the cross-store timing issue that
+ * caused the Enter flash (Zustand-triggered renders reading stale
+ * assistant-ui state when the adapter set ctoRunning directly).
+ */
+function CtoRunningBridge() {
+	const isRunning = useAuiState((s) => s.thread.isRunning);
+	React.useEffect(() => {
+		usePuxStore.setState({ ctoRunning: isRunning });
+	}, [isRunning]);
+	return null;
+}
+
+function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	const historyAdapter = useMemo(() => createPuxHistoryAdapter(), []);
 	const feedbackAdapter = useMemo<FeedbackAdapter>(
 		() => ({
@@ -107,6 +122,7 @@ import { executeCommand, type CommandContext } from "./commands.js";
 	});
 	return (
 		<AssistantRuntimeProvider runtime={runtime}>
+			<CtoRunningBridge />
 			{children}
 		</AssistantRuntimeProvider>
 	);
@@ -211,17 +227,10 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 	}, [model, project, exit]);
 
 	return (
-		<Box flexDirection="column" height={rows} width={cols}>
-			{/* Content area — no overflow clipping so messages flow into terminal scrollback */}
-			<Box flexGrow={1} flexDirection="column">
-				<ContentArea />
-			</Box>
-				<ContentArea />
-			</Box>
-
-			{/* Always-visible composer bar — never shrink */}
-			<Box flexShrink={0}>
-				<ComposerBar onCommand={handleCommand} />
+		<Box flexDirection="column" height={rows - 1} width={cols}>
+			{/* Content area — includes thread with embedded composer */}
+			<Box flexDirection="column">
+				<ContentArea onCommand={handleCommand} />
 			</Box>
 
 			{/* Status bar — never shrink */}
@@ -234,7 +243,7 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 
 // ── Content Area ──
 
-function ContentArea() {
+function ContentArea({ onCommand }: { onCommand: (input: string) => Promise<string | null> }) {
 	const activeView = usePuxStore((s) => s.activeTuiView);
 	const pendingDecision = usePuxStore((s) => s.pendingDecision);
 	const showProviders = usePuxStore((s) => s.showProvidersOverlay);
@@ -322,6 +331,6 @@ function ContentArea() {
 			return <ConversationsView />;
 		case "chat":
 		default:
-			return <Thread />;
+			return <Thread onCommand={onCommand} />;
 	}
 }

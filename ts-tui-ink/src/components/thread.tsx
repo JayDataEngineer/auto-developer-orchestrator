@@ -1,9 +1,9 @@
 /**
- * Thread component — matches official @assistant-ui/react-ink example.
+ * Thread component — Claude Code-style scrolling.
  *
- * Structure: ThreadPrimitive.Root wraps messages + status + composer,
- * exactly like the with-react-ink example. windowSize=2 + windowOverscan=4
- * keeps 6 messages live, older ones graduate to Static (scrollback).
+ * windowSize=1 + windowOverscan=2 = 3 live messages.
+ * Older messages graduate to Ink's <Static> (terminal scrollback).
+ * Scroll up with mouse wheel/Page Up to see old messages.
  * Composer lives inside Root context.
  */
 
@@ -34,8 +34,8 @@ export function Thread({ onCommand }: { onCommand: (input: string) => Promise<st
 				<Welcome />
 			</AuiIf>
 
-			{/* Messages — windowSize=2 + windowOverscan=4 = 6 live messages */}
-			<ThreadPrimitive.Messages windowSize={2} windowOverscan={4}>
+			{/* Messages — windowSize=1 + windowOverscan=2 = 3 live, rest in scrollback */}
+			<ThreadPrimitive.Messages windowSize={1} windowOverscan={2}>
 				{() => <MessageWrapper />}
 			</ThreadPrimitive.Messages>
 
