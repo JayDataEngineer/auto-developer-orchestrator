@@ -75,9 +75,13 @@ task down              # Stop everything (backend, frontend, sandboxes)
                     │  CLI (Cobra, Go)          │  Contract: SSE events
 User ───────────────┤                           ├──→ @pux/shared → render
                     │  Web (Vite, React)        │
+                    │  External Agents (API)    │
                     └───────────────────────────┘
                                  │
-                          POST /api/pux/prompt
+                     POST /api/pux/prompt  (TUI, CLI, web)
+                     POST /api/jobs        (external agents)
+                                 │
+                                 ▼
                                  │
                                  ▼
                     Go Kernel (3847) ──────── llama-server (8001)
@@ -91,6 +95,33 @@ User ───────────────┤                           
 The kernel's job is to manage contracts: agent loop, tool execution, sandbox lifecycle.
 Each interface (TUI, CLI, web) is a VIEW of the same SSE stream. They share `PuxChatAdapter`
 and `usePuxStore` from `shared/`. Rendering is the only thing that differs.
+
+### Jobs API (External Agents)
+
+One-shot task submission for external agents (Hermes, CI pipelines, other tools).
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/jobs` | POST | Submit a one-shot task |
+| `/api/jobs/{id}` | GET | Poll job status + output |
+| `/api/jobs/{id}` | DELETE | Cancel/cleanup |
+
+**Request:** `{"task": "Do x...", "project": "~/demad/", "org": "coder", "full_sandbox": true}`
+- `task` (required) — the agent prompt
+- `project`, `org`, `model` — optional overrides
+- `full_sandbox` — sandboxOnly mode
+- `wait` — if true, SSE streams the full response (same contract as `/api/pux/prompt`)
+- `timeout_seconds` — max execution time (default: 600, cap: 1800)
+
+**Async** (`wait=false`, default): Returns `202 Accepted` with `{"jobId": "...", "pollUrl": "/api/jobs/..."}`. Poll `GET /api/jobs/{id}` for status + output.
+
+**Sync** (`wait=true`): SSE stream with `text_delta`, `thinking_delta`, `tool_execution_start`, `tool_execution_end`, `done` events. Same contract as `/api/pux/prompt`.
+
+**Auth:** Optional API key via `X-API-Key` header or `?api_key=`. Configured in `~/.pi/agent/settings.json` → `jobsApiKey`.
+
+**Auto-cleanup:** One-shot jobs are deleted after 24 hours. `CleanupExpiredOneShots` runs every 30 minutes.
+
+**Files:** `handlers/jobs.go`, `handlers/jobs_test.go`, `scheduler/scheduler.go` (cleanup)
 
 ### Design Principles
 
