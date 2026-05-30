@@ -475,7 +475,12 @@ func (s *Session) Close() error {
 	}
 	s.closed = true
 
-	_ = s.freeSlot()
+	// Only free slot for local llama-server (KV cache).
+	// Cloud providers have no slot to free, and sending a request
+	// without a model triggers 404 errors.
+	if !s.engine.IsCloud() {
+		_ = s.freeSlot()
+	}
 
 	zap.L().Debug("Session closed, KV cache freed",
 		zap.String("sessionId", s.sessionID),
