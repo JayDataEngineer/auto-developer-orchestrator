@@ -418,12 +418,14 @@ func (d *Database) GetConversationHistory(ctx context.Context, project, agentID 
 	}
 
 	// Try new tables first
+	// Use a subquery for thinking instead of LEFT JOIN to guarantee exactly
+	// one row per message (LEFT JOIN duplicates rows if multiple thinking
+	// rows exist for the same message_id).
 	msgRows, err := d.db.QueryContext(ctx,
 		Rebind(d.dialect, `SELECT m.id, m.project, m.agent_id, m.role, m.content, m.tool_calls,
-			COALESCE(t.content, '') AS thinking,
+			COALESCE((SELECT content FROM thinking WHERE message_id = m.id ORDER BY id DESC LIMIT 1), '') AS thinking,
 			m.created_at
 			FROM messages m
-			LEFT JOIN thinking t ON t.message_id = m.id
 			WHERE m.project = ? AND m.agent_id = ?
 			ORDER BY m.created_at ASC, m.id ASC
 			LIMIT ?`),
@@ -444,13 +446,21 @@ func (d *Database) GetConversationHistory(ctx context.Context, project, agentID 
 	}
 	var msgs []StoredMessage
 	var msgIDs []int64
-	msgIDSet := map[int64]bool{}
+	seenIDs := map[int64]bool{} // deduplicate by message ID (safety net)
 	for msgRows.Next() {
 		var id int64
 		var proj, agID, role, content, toolCalls, thinking, createdAt string
 		if err := msgRows.Scan(&id, &proj, &agID, &role, &content, &toolCalls, &thinking, &createdAt); err != nil {
 			return nil, err
 		}
+
+		// Deduplicate: if the query somehow returns the same message ID twice,
+		// keep only the first occurrence (which has the latest thinking due to
+		// ORDER BY id DESC LIMIT 1 in the subquery).
+		if seenIDs[id] {
+			continue
+		}
+		seenIDs[id] = true
 
 		if role == "user" {
 			msgs = append(msgs, StoredMessage{
@@ -468,7 +478,6 @@ func (d *Database) GetConversationHistory(ctx context.Context, project, agentID 
 				ToolCalls: toolCalls, CreatedAt: createdAt,
 			})
 			msgIDs = append(msgIDs, id)
-			msgIDSet[id] = true
 		}
 	}
 
@@ -706,6 +715,8 @@ type ConversationSummary struct {
 
 // GetConversationSummaries returns the latest conversation for each project+agent pair
 // using the new messages table (with fallback to legacy).
+// Subagent transcripts (agent_id containing ':sub:') are excluded — their data
+// is already embedded in the parent CTO's tool_calls JSON.
 func (d *Database) GetConversationSummaries(ctx context.Context) ([]ConversationSummary, error) {
 	// Try new tables first
 	rows, err := d.db.QueryContext(ctx, `
@@ -730,6 +741,7 @@ func (d *Database) GetConversationSummaries(ctx context.Context) ([]Conversation
 			COALESCE(ct.status, '') AS status
 		FROM messages m
 		LEFT JOIN conversation_titles ct ON ct.project = m.project AND ct.agent_id = m.agent_id
+		WHERE m.agent_id NOT LIKE '%:sub:%'
 		GROUP BY m.project, m.agent_id
 		ORDER BY last_at DESC
 	`)

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -728,6 +729,79 @@ func TestFullConversationRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDuplicateThinkingRowsDedup(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// Create an assistant message with thinking
+	msgID, err := db.SaveAssistantMessage(ctx, "proj", "agent1", "Hello", "I need to think about this", "[]")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the bug: insert duplicate thinking rows for the same message
+	// (this can happen from the streaming ticker + fallback race)
+	for i := 0; i < 2; i++ {
+		_, err = db.db.ExecContext(ctx,
+			`INSERT INTO thinking (message_id, content) VALUES (?, ?)`,
+			msgID, "duplicate thinking")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// GetConversationHistory should return ONE assistant message, not 3
+	msgs, err := db.GetConversationHistory(ctx, "proj", "agent1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assistantCount := 0
+	for _, m := range msgs {
+		if m.Role == "assistant" {
+			assistantCount++
+		}
+	}
+	if assistantCount != 1 {
+		t.Fatalf("expected 1 assistant message (deduped), got %d", assistantCount)
+	}
+
+	// Verify thinking is the latest (ORDER BY id DESC LIMIT 1 picks the last inserted)
+	for _, m := range msgs {
+		if m.Role == "assistant" {
+			if m.Thinking != "duplicate thinking" {
+				t.Errorf("expected latest thinking content, got %q", m.Thinking)
+			}
+		}
+	}
+}
+
+func TestSubAgentConversationFiltered(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// Main CTO conversation
+	db.SaveUserMessage(ctx, "proj", "default", "Look up anime girls")
+	db.SaveAssistantMessage(ctx, "proj", "default", "", "I should delegate", `[{"id":"tc_1","name":"delegate_to","args":{"role":"browser_ops"}}]`)
+
+	// Subagent transcript — should NOT appear in summaries
+	db.SaveUserMessage(ctx, "proj", "default:sub:browser_ops-1234567890", "Browse bing.com images for cute anime girls")
+	db.SaveAssistantMessage(ctx, "proj", "default:sub:browser_ops-1234567890", "Found results", "Planning search...", "[]")
+
+	summaries, err := db.GetConversationSummaries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should only see the main conversation, not the subagent
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary (CTO only), got %d", len(summaries))
+	}
+	if summaries[0].AgentID != "default" {
+		t.Errorf("expected agent_id 'default', got %q", summaries[0].AgentID)
+	}
+}
+
 func TestMigrationAddsToolColumns(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "migration-test.db")
 	ctx := context.Background()
@@ -791,4 +865,141 @@ func TestMigrationAddsToolColumns(t *testing.T) {
 	if count != 1 {
 		t.Errorf("expected migration to be marked as applied, got count=%d", count)
 	}
+}
+
+// TestSubAgentToolCallsPreservedInHistory verifies that the full delegation pipeline
+// (delegate_to + subAgent trace) survives save → load → render.
+// This is the integration test for the "subagent execution missing on reload" bug.
+func TestSubAgentToolCallsPreservedInHistory(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// Simulate the full flow from pux_prompt_stream.go:
+	// 1. Save user message
+	_, err := db.SaveUserMessage(ctx, "proj", "cto-1", "Find all Go files")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create streaming row (like the ticker does)
+	_, err = db.Conversations.CreateStreamingRow(ctx, "proj", "cto-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Simulate accumulator output: delegate_to with subAgent trace
+	// This is what accum.ToolCallsJSON() produces after processing
+	// SubAgentStart/End events from parallel_runner.go.
+	toolCallsJSON := `[` +
+		`{"id":"tc1","name":"delegate_to","args":{"role":"explorer","task":"find Go files"},` +
+		`"result":"Found 3 files","subAgent":{` +
+		`"name":"explorer","status":"completed",` +
+		`"toolCalls":[` +
+		`{"id":"stc1","name":"bash","args":{"command":"find . -name *.go"},"result":"main.go\ngo.mod\ngo.sum"},` +
+		`{"id":"stc2","name":"file_read","args":{"path":"main.go"},"result":"package main"}` +
+		`],` +
+		`"thinking":"I need to find Go files in the project",` +
+		`"text":"Found 3 Go files: main.go, go.mod, go.sum",` +
+		`"result":"Found 3 Go files: main.go, go.mod, go.sum"` +
+		`}}` +
+		`]`
+
+	// 4. Finalize streaming with accumulated data (like savePartialResults)
+	assistantText := "I delegated to the explorer agent. Here's what they found."
+	thinkingText := "The user wants Go files. I should delegate to explorer."
+	err = db.FinalizeStreamingMessage(ctx, "proj", "cto-1", assistantText, thinkingText, toolCallsJSON)
+	if err != nil {
+		t.Fatalf("FinalizeStreamingMessage: %v", err)
+	}
+
+	// 5. Load history back (simulating page reload)
+	msgs, err := db.GetConversationHistory(ctx, "proj", "cto-1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Expect: user, assistant
+	if len(msgs) < 2 {
+		t.Fatalf("expected at least 2 messages, got %d", len(msgs))
+	}
+
+	// Find the assistant message
+	var assistantMsg *StoredMessage
+	for i := range msgs {
+		if msgs[i].Role == "assistant" {
+			assistantMsg = &msgs[i]
+			break
+		}
+	}
+	if assistantMsg == nil {
+		t.Fatal("no assistant message found")
+	}
+
+	// Verify text and thinking survived
+	if assistantMsg.Text != assistantText {
+		t.Errorf("text mismatch: got %q", assistantMsg.Text)
+	}
+	if assistantMsg.Thinking != thinkingText {
+		t.Errorf("thinking mismatch: got %q", assistantMsg.Thinking)
+	}
+
+	// Verify tool_calls JSON survived with subAgent data intact
+	if assistantMsg.ToolCalls == "" || assistantMsg.ToolCalls == "[]" {
+		t.Fatalf("tool_calls is empty or [], expected subAgent data")
+	}
+
+	// Parse and verify the JSON structure
+	var calls []struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		SubAgent *struct {
+			Name      string `json:"name"`
+			Status    string `json:"status"`
+			Thinking  string `json:"thinking"`
+			Text      string `json:"text"`
+			Result    string `json:"result"`
+			ToolCalls []struct {
+				ID     string `json:"id"`
+				Name   string `json:"name"`
+				Result string `json:"result"`
+			} `json:"toolCalls"`
+		} `json:"subAgent"`
+	}
+
+	if err := json.Unmarshal([]byte(assistantMsg.ToolCalls), &calls); err != nil {
+		t.Fatalf("failed to parse tool_calls JSON: %v\nraw: %s", err, assistantMsg.ToolCalls)
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+
+	tc := calls[0]
+	if tc.Name != "delegate_to" {
+		t.Errorf("expected name=delegate_to, got %s", tc.Name)
+	}
+	if tc.SubAgent == nil {
+		t.Fatal("subAgent is nil — the full execution trace is MISSING from history. " +
+			"This means page reload will not show subagent details in the main chat.")
+	}
+
+	sa := tc.SubAgent
+	if sa.Name != "explorer" {
+		t.Errorf("subAgent.name: got %q, want explorer", sa.Name)
+	}
+	if sa.Status != "completed" {
+		t.Errorf("subAgent.status: got %q, want completed", sa.Status)
+	}
+	if len(sa.ToolCalls) != 2 {
+		t.Errorf("subAgent.toolCalls: got %d, want 2", len(sa.ToolCalls))
+	}
+	if sa.Thinking == "" {
+		t.Error("subAgent.thinking is empty")
+	}
+	if sa.Text == "" {
+		t.Error("subAgent.text is empty")
+	}
+
+	t.Logf("OK: subAgent data fully preserved — %d tool calls, %d chars thinking, %d chars text",
+		len(sa.ToolCalls), len(sa.Thinking), len(sa.Text))
 }

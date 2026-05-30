@@ -20,6 +20,7 @@ import {
 	DiffView,
 } from "@assistant-ui/react-ink";
 import { usePuxStore, getToolArgPreview } from "@pux/shared";
+import type { SubAgentRecord } from "@pux/shared";
 import { TerminalImage } from "./terminal-image.js";
 import { useColors, symbols, BLACK_CIRCLE, BLOCKQUOTE_BAR } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
@@ -133,10 +134,23 @@ function DelegateRenderer({
 		return byTask ?? candidates.find(a => a.status === "running") ?? candidates[0];
 	}, [agents, role, task, injectedId]);
 
-	const toolCalls = agentState?.toolCalls ?? [];
+	// Persisted sub-agent trace from tool_calls JSON (available after reload)
+	const persistedSubAgent = (args as any)?.__subAgent as SubAgentRecord | undefined;
+
+	// Priority: live Zustand state → persisted subAgent from DB
+	const toolCalls = agentState?.toolCalls
+		?? persistedSubAgent?.toolCalls?.map(tc => ({
+			toolName: tc.name,
+			args: tc.args,
+			result: tc.result,
+			isError: !!tc.error,
+			timestamp: 0,
+			endedAt: tc.result != null ? 0 : undefined,
+		}))
+		?? [];
+	const thinkingText = agentState?.thinkingText ?? persistedSubAgent?.thinking;
+	const agentText = agentState?.text ?? persistedSubAgent?.text;
 	const subToolCount = toolCalls.length;
-	const thinkingText = agentState?.thinkingText;
-	const agentText = agentState?.text;
 
 	// Width budget for tool call lines
 	const toolIndent = 7;
