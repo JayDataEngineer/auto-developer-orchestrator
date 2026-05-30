@@ -28,7 +28,7 @@ const puxVersion = createRequire(import.meta.url)("../../../package.json").versi
 
 export function Thread({ onCommand }: { onCommand: (input: string) => Promise<string | null> }) {
 	return (
-		<ThreadPrimitive.Root flexDirection="column" flexGrow={1}>
+		<ThreadPrimitive.Root flexDirection="column">
 			{/* Empty state */}
 			<AuiIf condition={(s: any) => s.thread.isEmpty}>
 				<Welcome />

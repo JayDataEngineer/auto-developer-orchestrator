@@ -12,7 +12,6 @@
 
 import React, { useMemo, useState, useCallback, useRef } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import { useTerminalSize } from "./use-terminal-size.js";
 import {
 	AssistantRuntimeProvider,
 	useLocalRuntime,
@@ -160,7 +159,6 @@ export function App({ model: initialModel, project }: AppProps) {
 
 function PuxApp({ initialModel, project }: { initialModel: string; project: string }) {
 	const { exit } = useApp();
-	const { rows, cols } = useTerminalSize();
 	// Sync local model state with the Zustand store's activeModel
 	const storeModel = usePuxStore((s) => s.activeModel);
 	const [model, setModel] = useState(initialModel || storeModel);
@@ -226,17 +224,13 @@ function PuxApp({ initialModel, project }: { initialModel: string; project: stri
 		return null;
 	}, [model, project, exit]);
 
+	// Document-flow layout: no height constraint.
+	// <Static> messages graduate to terminal scrollback.
+	// Dynamic region (live messages + composer + status bar) stays at bottom.
 	return (
-		<Box flexDirection="column" height={rows - 1} width={cols}>
-			{/* Content area — includes thread with embedded composer */}
-			<Box flexDirection="column">
-				<ContentArea onCommand={handleCommand} />
-			</Box>
-
-			{/* Status bar — never shrink */}
-			<Box flexShrink={0}>
-				<StatusBar />
-			</Box>
+		<Box flexDirection="column">
+			<ContentArea onCommand={handleCommand} />
+			<StatusBar />
 		</Box>
 	);
 }

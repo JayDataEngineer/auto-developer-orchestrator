@@ -26,67 +26,10 @@ import { initMouseTracking, disableMouseTracking, filterAndEmitMouseEvents } fro
 //    (it falls through to the catch-all insert path). Rewrite \n → \r so
 //    Ctrl+J acts like Enter (submit) instead of inserting a newline.
 
-// ── Stdout write buffering (flicker elimination) ──
-//
-// Ink brackets each render cycle with BSU (\x1b[?2026h) and ESU (\x1b[?2026l)
-// escape sequences. Terminals supporting DEC Synchronized Output (mode 2026)
-// buffer all writes between BSU/ESU and render atomically — no flicker.
-//
-// GNOME Terminal does NOT support mode 2026, so the BSU/ESU sequences are
-// invisible no-ops and each write() is rendered immediately. This causes a
-// visible blank gap between the eraseLines() call and the content rewrite.
-//
-// This patch intercepts BSU/ESU to implement software write-buffering:
-// - BSU → start buffering (accumulate writes instead of sending to terminal)
-// - ESU → flush entire buffer as a single write() call
-//
-// The terminal processes the combined erase+content in one batch, eliminating
-// the visible intermediate blank state. This is the same approach Claude Code
-// uses (they forked Ink with a custom cell-diff renderer that avoids
-// eraseLines entirely; our approach is less invasive but achieves the same
-// result by batching).
-//
-// Combined with incrementalRendering: true (line-based diff instead of
-// erase-all + rewrite-all), this eliminates the Enter flash on GNOME Terminal.
-
-const BSU = "\x1b[?2026h";
-const ESU = "\x1b[?2026l";
-let renderBuf: string[] = [];
-let renderBufActive = false;
-const origStdoutWrite = process.stdout.write.bind(process.stdout) as typeof process.stdout.write;
-
-process.stdout.write = function (data: any, ...args: any[]): boolean {
-	if (typeof data === "string") {
-		// Handle combined BSU + data in one write
-		if (data.includes(BSU) || data.includes(ESU)) {
-			const parts = data.split(/(\x1b\[\?2026[hl])/);
-			for (const part of parts) {
-				if (part === BSU) {
-					renderBufActive = true;
-					renderBuf = [];
-				} else if (part === ESU) {
-					renderBufActive = false;
-					if (renderBuf.length > 0) {
-						origStdoutWrite(renderBuf.join(""));
-						renderBuf = [];
-					}
-				} else if (part) {
-					if (renderBufActive) {
-						renderBuf.push(part);
-					} else {
-						origStdoutWrite(part);
-					}
-				}
-			}
-			return true;
-		}
-		if (renderBufActive) {
-			renderBuf.push(data);
-			return true;
-		}
-	}
-	return origStdoutWrite(data, ...args);
-} as typeof process.stdout.write;
+// ── Stdout passthrough ──
+// No buffering or interception. Ink writes directly to stdout.
+// Flicker was caused by console.log writes while Ink was running,
+// not by stdout buffering. Keeping stdout clean is the fix.
 
 const origRead = process.stdin.read.bind(process.stdin);
 process.stdin.read = function (size?: number) {
@@ -113,10 +56,8 @@ function restoreTerminal() {
 	// Restore font size
 	const scale = usePuxStore.getState().fontScale;
 	if (scale !== 1) applyFontScale(1);
-	// Exit alternate screen buffer
-	if (process.stdout.isTTY) {
-		process.stdout.write("\x1b[?1049l");
-	}
+	// No alt-screen buffer — keeps normal terminal scrollback so users can
+	// scroll up to see old messages (graduated to Ink's <Static>).
 }
 process.on("exit", restoreTerminal);
 process.on("SIGINT", () => { restoreTerminal(); process.exit(0); });
@@ -273,24 +214,14 @@ const appElement = React.createElement(App, {
 	project: projectName,
 	cwd: cwdName,
 });
-// Enter alternate screen buffer so Ink's erase-redraw cycles don't
-// produce visible flicker. Without this, GNOME Terminal (which lacks
-// DEC synchronized output mode 2026) shows a brief flash of unstyled
-// text on every render.
-if (process.stdout.isTTY) {
-	process.stdout.write("\x1b[?1049h");
-}
+// No alternate screen buffer — we use BSU/ESU write buffering +
+// incrementalRendering to prevent flicker instead. The normal terminal
+// buffer has scrollback, so users can scroll up to see old messages
+// that graduated to Ink's <Static> component.
 
 const instance = render(appElement, {
 	exitOnCtrlC: false,
 	kittyKeyboard: { mode: "disabled" },
-	// Use incremental (line-diff) rendering instead of erase-all + rewrite-all.
-	// Standard mode erases every line first then rewrites them — visible as a
-	// blank flash on terminals without DEC Synchronized Output (mode 2026)
-	// like GNOME Terminal. Incremental mode diffs each line, only overwrites
-	// changed lines, and writes new content BEFORE erasing old content on
-	// each line — no visible blank gap.
-	incrementalRendering: true,
 });
 
 // Force Ink to clear and re-render on terminal resize.
