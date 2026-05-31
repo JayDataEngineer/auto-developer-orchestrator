@@ -695,28 +695,44 @@ func (m *Manager) FindSandboxByProject(name string) *Sandbox {
 		}
 	}
 
-	// No in-memory match — try to find a stopped Docker container by project name
+	// No in-memory match — try to find a stopped Docker container by project name.
+	// Try both the full path (legacy, when req.Project was an absolute path) and
+	// the basename (current, when ID is derived from filepath.Base).
 	if m.dockerClient != nil {
 		ctx := context.Background()
-		containerName := "orchestrator-sandbox-" + name
-		result, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
-		if err == nil && result.Container.State != nil && !result.Container.State.Running {
+		candidates := []string{name}
+		if base := filepath.Base(name); base != name {
+			candidates = append(candidates, base)
+		}
+		for _, candidate := range candidates {
+			containerName := "orchestrator-sandbox-" + candidate
+			result, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
+			if err != nil {
+				continue
+			}
+			if result.Container.State == nil || result.Container.State.Running {
+				continue
+			}
 			m.logger.Info("found stopped sandbox container, restarting", zap.String("name", containerName))
 			if _, err := m.dockerClient.ContainerStart(ctx, result.Container.ID, client.ContainerStartOptions{}); err != nil {
 				m.logger.Warn("failed to start stopped container", zap.Error(err))
 				return nil
 			}
-			// Recover into in-memory map
+			// Recover into in-memory map using the container's actual sandbox-id label
+			sandboxID := candidate
 			projectPath := ""
 			policy := "developer"
 			if result.Container.Config != nil && result.Container.Config.Labels != nil {
+				if id := result.Container.Config.Labels["openshell.sandbox-id"]; id != "" {
+					sandboxID = id
+				}
 				projectPath = result.Container.Config.Labels["openshell.project-path"]
 				if p := result.Container.Config.Labels["openshell.policy"]; p != "" {
 					policy = p
 				}
 			}
 			sb := &Sandbox{
-				ID:          name,
+				ID:          sandboxID,
 				ContainerID: result.Container.ID,
 				ProjectPath: projectPath,
 				Policy:      policy,
@@ -725,7 +741,7 @@ func (m *Manager) FindSandboxByProject(name string) *Sandbox {
 				CreatedAt:   time.Now(),
 			}
 			m.mu.Lock()
-			m.sandboxes[name] = sb
+			m.sandboxes[sandboxID] = sb
 			m.mu.Unlock()
 			return sb
 		}

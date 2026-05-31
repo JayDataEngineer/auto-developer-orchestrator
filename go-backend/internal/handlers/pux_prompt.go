@@ -56,8 +56,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	key := compositeAgentKey(projectPath, req.AgentId)
 
 	// Resolve sandbox — find existing or auto-create
-	// Sanitize sandbox ID: Docker requires [a-zA-Z0-9][a-zA-Z0-9_.-]
-	sandboxID := strings.ReplaceAll(req.Project, "/", "-")
+	// Derive sandbox ID from the RESOLVED project path basename, not the raw
+	// req.Project string. req.Project could be a short name ("go-backend") or
+	// an absolute path ("/home/ubuntu/.../go-backend") depending on the client.
+	// Using filepath.Base(projectPath) ensures the ID is always consistent.
+	sandboxID := filepath.Base(projectPath)
+	sandboxID = strings.ReplaceAll(sandboxID, "/", "-")
 	sandboxID = strings.ReplaceAll(sandboxID, "_", "-")
 	sandboxID = strings.Trim(sandboxID, "-")
 	if h.sandboxMgr != nil {
