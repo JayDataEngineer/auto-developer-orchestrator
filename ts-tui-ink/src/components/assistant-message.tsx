@@ -17,7 +17,11 @@ import {
 	MessagePrimitive,
 	LoadingPrimitive,
 } from "@assistant-ui/react-ink";
-import { MarkdownText } from "@assistant-ui/react-ink-markdown";
+import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
+// Extend to pass tableTruncate through the spread (not in library's types yet)
+const MarkdownText = _MarkdownText as React.FC<
+	React.ComponentProps<typeof _MarkdownText> & { tableTruncate?: boolean }
+>;
 import { TerminalImage } from "./terminal-image.js";
 import { BranchPicker } from "./branch-picker.js";
 import { useColors, BLOCKQUOTE_BAR } from "../theme.js";
@@ -94,6 +98,7 @@ export function AssistantMessage() {
 								<MarkdownText
 									key={part.text.slice(0, 20)}
 									text={part.text}
+									tableTruncate={false}
 								/>
 							);
 						}
