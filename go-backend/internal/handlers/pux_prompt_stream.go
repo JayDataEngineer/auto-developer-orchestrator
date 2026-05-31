@@ -42,8 +42,21 @@ func (h *PuxHandler) rehydrateAndStream(
 			h.log.Warn("Failed to load conversation history", zap.Error(err))
 		} else {
 			deduped := 0
+			// Buffer for content split from assistant messages with both tool_calls and text.
+			// The StreamAccumulator merges multi-round conversations into one DB row:
+			//   assistant(tool_calls=1) + assistant("response text") → single row
+			// We split the tool_calls part immediately, but buffer the content part
+			// to insert AFTER the tool results that follow.
+			var pendingContent *core.Message
 			for _, stored := range history {
 				msg := core.Message{Role: stored.Role}
+				// Flush buffered content assistant before any non-tool message
+				if pendingContent != nil && stored.Role != "tool" {
+					if err := orch.Session.AppendMessage(*pendingContent); err != nil {
+						h.log.Warn("Failed to append buffered content", zap.Error(err))
+					}
+					pendingContent = nil
+				}
 				switch stored.Role {
 				case "user":
 					msg.Content = stored.Content
@@ -64,6 +77,26 @@ func (h *PuxHandler) rehydrateAndStream(
 					if stored.Text == "" && stored.Thinking == "" && (stored.ToolCalls == "" || stored.ToolCalls == "[]" || stored.ToolCalls == "[streaming]") {
 						continue
 					}
+					// Split assistant messages that have BOTH tool_calls AND content.
+					// Cloud providers require either tool_calls OR content, not both.
+					// Append tool_calls immediately, buffer content for after tool results.
+					if len(msg.ToolCalls) > 0 && msg.Content != "" {
+						toolMsg := core.Message{
+							Role:      "assistant",
+							ToolCalls: msg.ToolCalls,
+						}
+						if err := orch.Session.AppendMessage(toolMsg); err != nil {
+							h.log.Warn("Failed to append split tool message", zap.Error(err))
+						}
+						// Buffer content part — will be flushed after tool results
+						contentMsg := core.Message{
+							Role:             "assistant",
+							Content:          msg.Content,
+							ReasoningContent: msg.ReasoningContent,
+						}
+						pendingContent = &contentMsg
+						continue // don't append msg itself
+					}
 					lastUserContent = ""
 				case "tool":
 					msg.Content = stored.Content
@@ -75,6 +108,12 @@ func (h *PuxHandler) rehydrateAndStream(
 				}
 				if err := orch.Session.AppendMessage(msg); err != nil {
 					h.log.Warn("Failed to append history message", zap.Error(err))
+				}
+			}
+			// Flush any remaining buffered content after all history is processed
+			if pendingContent != nil {
+				if err := orch.Session.AppendMessage(*pendingContent); err != nil {
+					h.log.Warn("Failed to append final buffered content", zap.Error(err))
 				}
 			}
 			if deduped > 0 {

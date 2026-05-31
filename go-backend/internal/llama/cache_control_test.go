@@ -228,6 +228,87 @@ func TestCacheControlType(t *testing.T) {
 	var _ *core.CacheControl = cc
 }
 
+func TestSanitizeRequest_OpenRouterExcludesGMICloud(t *testing.T) {
+	client := &LLMClient{
+		baseURL:   "https://openrouter.ai/api",
+		modelName: "deepseek/deepseek-v4-flash",
+		apiKey:    "test-key",
+	}
+
+	req := ChatCompletionRequest{
+		Model:    "deepseek/deepseek-v4-flash",
+		Messages: []APIChatMessage{{Role: "user", Content: []byte(`"hello"`)}},
+		Stream:   true,
+		Tools:    []OpenAITool{{Type: "function", Function: FunctionDef{Name: "test"}}},
+	}
+
+	result := client.sanitizeRequest(req)
+
+	if result.Provider == nil {
+		t.Fatal("OpenRouter request should have provider routing")
+	}
+	if len(result.Provider.Ignore) != 1 || result.Provider.Ignore[0] != "GMICloud" {
+		t.Errorf("expected GMICloud in ignore list, got %v", result.Provider.Ignore)
+	}
+	// Verify tools are preserved
+	if len(result.Tools) != 1 {
+		t.Errorf("tools should be preserved, got %d", len(result.Tools))
+	}
+}
+
+func TestSanitizeRequest_NonOpenRouterNoProviderRouting(t *testing.T) {
+	client := &LLMClient{
+		baseURL:   "https://generativelanguage.googleapis.com",
+		modelName: "gemini-3-flash-preview",
+		apiKey:    "test-key",
+	}
+
+	req := ChatCompletionRequest{
+		Model:    "gemini-3-flash-preview",
+		Messages: []APIChatMessage{{Role: "user", Content: []byte(`"hello"`)}},
+		Stream:   true,
+	}
+
+	result := client.sanitizeRequest(req)
+
+	if result.Provider != nil {
+		t.Error("Non-OpenRouter request should NOT have provider routing")
+	}
+}
+
+func TestToAPIMessage_AssistantToolCallsNullContent(t *testing.T) {
+	msg := Message{
+		Role:      "assistant",
+		Content:   "",
+		ToolCalls: []ToolCallResponse{{ID: "call_123", Type: "function", Function: FunctionCallData{Name: "bash", Arguments: `{"command":"ls"}`}}},
+	}
+
+	result := toAPIMessage(msg)
+
+	if string(result.Content) != "null" {
+		t.Errorf("assistant with tool_calls and empty content should have null content, got %q", string(result.Content))
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Errorf("tool_calls should be preserved, got %d", len(result.ToolCalls))
+	}
+	if result.ReasoningContent != "" {
+		t.Error("reasoning_content should be stripped from output messages")
+	}
+}
+
+func TestToAPIMessage_AssistantWithContentPreserved(t *testing.T) {
+	msg := Message{
+		Role:    "assistant",
+		Content: "Hello world",
+	}
+
+	result := toAPIMessage(msg)
+
+	if string(result.Content) != `"Hello world"` {
+		t.Errorf("content should be preserved as JSON string, got %q", string(result.Content))
+	}
+}
+
 func TestMergeAdjacentSameRole(t *testing.T) {
 	tests := []struct {
 		name string

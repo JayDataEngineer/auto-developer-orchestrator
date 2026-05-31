@@ -446,6 +446,17 @@ type ChatCompletionRequest struct {
 
 	// Structured output format (OpenAI response_format)
 	ResponseFormat *core.ResponseFormat `json:"response_format,omitempty"`
+
+	// OpenRouter provider routing (ignored by other providers)
+	Provider *ProviderRouting `json:"provider,omitempty"`
+}
+
+// ProviderRouting controls OpenRouter's provider selection.
+type ProviderRouting struct {
+	Order           []string `json:"order,omitempty"`
+	AllowFallbacks  *bool    `json:"allow_fallbacks,omitempty"`
+	Ignore          []string `json:"ignore,omitempty"`
+	Only            []string `json:"only,omitempty"`
 }
 
 // APIChatMessage is the wire format for chat messages sent to /v1/chat/completions.
@@ -475,6 +486,20 @@ type ImageURLPart struct {
 // When the message has images, content is serialized as a multimodal array.
 // Otherwise it's a plain string.
 func toAPIMessage(m Message) APIChatMessage {
+	// Assistant messages with tool calls and empty content should send
+	// content:null (not content:"") — required by OpenAI format and some
+	// providers (e.g. GMICloud) silently fail with content:"".
+	if m.Role == "assistant" && len(m.ToolCalls) > 0 && m.Content == "" {
+		return APIChatMessage{
+			Role:      m.Role,
+			Content:   json.RawMessage("null"),
+			ToolCalls: m.ToolCalls,
+			// NOTE: ReasoningContent intentionally omitted — it's an
+			// output-only field. Sending it in input messages causes
+			// issues with some providers (GMICloud returns prompt_tokens=0).
+		}
+	}
+
 	if len(m.Images) > 0 {
 		parts := make([]ContentPart, 0, 1+len(m.Images))
 		if m.Content != "" {
@@ -488,22 +513,20 @@ func toAPIMessage(m Message) APIChatMessage {
 		}
 		content, _ := json.Marshal(parts)
 		return APIChatMessage{
-			Role:             m.Role,
-			Content:          content,
-			ToolCalls:        m.ToolCalls,
-			ToolCallID:       m.ToolCallID,
-			Name:             m.Name,
-			ReasoningContent: m.ReasoningContent,
+			Role:       m.Role,
+			Content:    content,
+			ToolCalls:  m.ToolCalls,
+			ToolCallID: m.ToolCallID,
+			Name:       m.Name,
 		}
 	}
 	content, _ := json.Marshal(m.Content)
 	return APIChatMessage{
-		Role:             m.Role,
-		Content:          content,
-		ToolCalls:        m.ToolCalls,
-		ToolCallID:       m.ToolCallID,
-		Name:             m.Name,
-		ReasoningContent: m.ReasoningContent,
+		Role:       m.Role,
+		Content:    content,
+		ToolCalls:  m.ToolCalls,
+		ToolCallID: m.ToolCallID,
+		Name:       m.Name,
 	}
 }
 
@@ -545,6 +568,16 @@ func (e *LLMClient) sanitizeRequest(req ChatCompletionRequest) ChatCompletionReq
 	if req.ResponseFormat != nil {
 		clean.ResponseFormat = req.ResponseFormat
 	}
+
+	// OpenRouter provider routing: avoid GMICloud which silently fails
+	// (returns prompt_tokens=0, completion_tokens=0) on large requests
+	// with tool schemas.
+	if e.isOpenRouter() {
+		clean.Provider = &ProviderRouting{
+			Ignore: []string{"GMICloud"},
+		}
+	}
+
 	return clean
 }
 
@@ -599,6 +632,11 @@ func (e *LLMClient) prepareMessages(messages []Message) []Message {
 // isDeepSeek returns true if the model is a DeepSeek variant.
 func (e *LLMClient) isDeepSeek() bool {
 	return strings.Contains(strings.ToLower(e.modelName), "deepseek")
+}
+
+// isOpenRouter returns true if the engine connects to OpenRouter.
+func (e *LLMClient) isOpenRouter() bool {
+	return strings.Contains(e.baseURL, "openrouter.ai")
 }
 
 // mergeAdjacentSameRole merges consecutive messages with the same role
@@ -783,9 +821,39 @@ func (e *LLMClient) chatCompleteStream(ctx context.Context, req ChatCompletionRe
 	// Request usage data in streaming response (like Pi-Mono does)
 	// This makes llama-server send a usage-only chunk at the end of the stream.
 	req.StreamOptions = &StreamOptions{IncludeUsage: true}
-	body, err := json.Marshal(e.sanitizeRequest(req))
+	sanitized := e.sanitizeRequest(req)
+	body, err := json.Marshal(sanitized)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	// Log request structure for cloud providers
+	if e.IsCloud() {
+		msgSummary := make([]string, len(sanitized.Messages))
+		for i, m := range sanitized.Messages {
+			content := string(m.Content)
+			if len(content) > 80 {
+				content = content[:80] + "..."
+			}
+			summary := m.Role
+			if m.ToolCallID != "" {
+				summary += " tool_call_id=" + m.ToolCallID
+			}
+			if len(m.ToolCalls) > 0 {
+				summary += fmt.Sprintf(" tool_calls=%d", len(m.ToolCalls))
+			}
+			if m.Name != "" {
+				summary += " name=" + m.Name
+			}
+			summary += " " + content
+			msgSummary[i] = summary
+		}
+		e.logger.Debug("Cloud request",
+			zap.String("model", sanitized.Model),
+			zap.Int("messages", len(sanitized.Messages)),
+			zap.Strings("msg_roles", msgSummary),
+			zap.Int("tools", len(sanitized.Tools)),
+		)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", e.baseURL+"/v1/chat/completions", bytes.NewReader(body))
@@ -835,7 +903,7 @@ func (e *LLMClient) chatCompleteStream(ctx context.Context, req ChatCompletionRe
 		}
 		jsonStr := line[6:]
 
-		// Debug: log chunks with tool_calls or finish_reason for cloud providers
+		// Debug: log special chunks for cloud providers
 		chunkCount++
 		if e.IsCloud() {
 			hasToolCalls := strings.Contains(jsonStr, `"tool_calls"`)
