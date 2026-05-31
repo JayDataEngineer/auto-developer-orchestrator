@@ -307,7 +307,8 @@ func (t *ReadTool) Description() string {
 	return fmt.Sprintf(
 		"Read file contents. Supports text files (truncated to %d lines or %s), "+
 			"images (png/jpg/gif/webp), documents (pdf/ppt/pptx), and audio (wav/mp3/flac). "+
-			"Use offset/limit for large text files.",
+			"Use offset/limit for large text files. "+
+			"ALWAYS prefer this over bash cat/head/tail — file_read is faster, handles truncation, and returns structured output.",
 		truncate.FileMaxLines, truncate.FormatSize(truncate.FileMaxBytes),
 	)
 }

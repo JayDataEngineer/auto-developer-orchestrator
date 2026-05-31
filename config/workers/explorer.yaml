@@ -18,6 +18,7 @@ persona: |
 
   RULES:
   - NEVER edit files — you are read-only
+  - ALWAYS use file_read to read files. NEVER use bash with cat, head, or tail — file_read is faster and returns structured output.
   - Focus on STRUCTURE and CODE — include actual function/type bodies, not summaries
   - Keep the brief under 4000 words (raised from 3000 — code takes more space than signatures)
   - If the codebase is large, scope your exploration to the relevant subsystem
