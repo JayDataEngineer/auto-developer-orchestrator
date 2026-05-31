@@ -66,6 +66,25 @@ interface MarkdownTextProps {
 	color?: string;
 }
 
+/** Wrap text to a max width, prefixing continuation lines with indent. */
+function wrapText(text: string, maxWidth: number, indent: string): string[] {
+	if (text.length <= maxWidth) return [text];
+	const lines: string[] = [];
+	let remaining = text;
+	while (remaining.length > 0) {
+		if (remaining.length <= maxWidth) {
+			lines.push(remaining);
+			break;
+		}
+		// Find break point at last space before maxWidth
+		let cut = remaining.lastIndexOf(" ", maxWidth);
+		if (cut < maxWidth * 0.4) cut = maxWidth; // no good break point — hard cut
+		lines.push(remaining.slice(0, cut));
+		remaining = indent + remaining.slice(cut).trimStart();
+	}
+	return lines;
+}
+
 export function MarkdownText({ text, dim, color }: MarkdownTextProps) {
 	const colors = useColors();
 	const lines = text.split("\n");
@@ -139,12 +158,19 @@ export function MarkdownText({ text, dim, color }: MarkdownTextProps) {
 		// Bullet points
 		if (line.match(/^[-*]\s/)) {
 			const content = line.replace(/^[-*]\s/, "");
-			elements.push(
-				<Text key={i} dimColor={dim}>
-					<Text color="gray">{"  "}{BLOCKQUOTE_BAR} </Text>
-					{renderSegments(parseInline(content))}
-				</Text>,
-			);
+			const prefix = "  " + BLOCKQUOTE_BAR + " ";
+			const wrapWidth = (process.stdout.columns || 80) - prefix.length - 2;
+			const wrapped = wrapText(content, wrapWidth, "    ");
+			for (let wi = 0; wi < wrapped.length; wi++) {
+				const lineContent = wi === 0 ? wrapped[wi] : wrapped[wi];
+				elements.push(
+					<Text key={`${i}-${wi}`} dimColor={dim}>
+						{wi === 0
+							? <><Text color="gray">{prefix}</Text>{renderSegments(parseInline(lineContent))}</>
+							: <>{renderSegments(parseInline(lineContent))}</>}
+					</Text>,
+				);
+			}
 			continue;
 		}
 
@@ -152,12 +178,18 @@ export function MarkdownText({ text, dim, color }: MarkdownTextProps) {
 		if (line.match(/^\d+\.\s/)) {
 			const content = line.replace(/^\d+\.\s/, "");
 			const num = line.match(/^\d+/)?.[0] || "1";
-			elements.push(
-				<Text key={i} dimColor={dim}>
-					<Text color="gray">{num}. </Text>
-					{renderSegments(parseInline(content))}
-				</Text>,
-			);
+			const prefix = num + ". ";
+			const wrapWidth = (process.stdout.columns || 80) - prefix.length - 2;
+			const wrapped = wrapText(content, wrapWidth, "   ");
+			for (let wi = 0; wi < wrapped.length; wi++) {
+				elements.push(
+					<Text key={`${i}-${wi}`} dimColor={dim}>
+						{wi === 0
+							? <><Text color="gray">{prefix}</Text>{renderSegments(parseInline(wrapped[wi]))}</>
+							: <>{renderSegments(parseInline(wrapped[wi]))}</>}
+					</Text>,
+				);
+			}
 			continue;
 		}
 
