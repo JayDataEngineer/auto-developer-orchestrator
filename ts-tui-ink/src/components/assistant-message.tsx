@@ -17,7 +17,7 @@ import {
 	MessagePrimitive,
 	LoadingPrimitive,
 } from "@assistant-ui/react-ink";
-import { MarkdownText } from "./markdown-text.js";
+import { MarkdownText } from "@assistant-ui/react-ink-markdown";
 import { TerminalImage } from "./terminal-image.js";
 import { BranchPicker } from "./branch-picker.js";
 import { useColors, BLOCKQUOTE_BAR } from "../theme.js";
@@ -94,7 +94,6 @@ export function AssistantMessage() {
 								<MarkdownText
 									key={part.text.slice(0, 20)}
 									text={part.text}
-									color={colors.text}
 								/>
 							);
 						}
