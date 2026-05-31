@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 )
 
 // ScratchStore is a scratch pad for externalizing working memory.
@@ -285,7 +286,8 @@ func (t *ScratchClearTool) Execute(_ context.Context, _ map[string]any) (any, er
 	return map[string]any{"cleared": len(notes)}, nil
 }
 
-// LoadSpilledTool retrieves the full content of a previously offloaded tool result.
+// LoadSpilledTool retrieves a previously offloaded tool result by its spill reference.
+// Applies the same line/byte truncation as file_read to prevent re-bloating context.
 type LoadSpilledTool struct {
 	mgr ContextManager
 }
@@ -297,14 +299,20 @@ func NewLoadSpilledTool(mgr ContextManager) *LoadSpilledTool {
 func (t *LoadSpilledTool) Name() string { return "load_spilled" }
 
 func (t *LoadSpilledTool) Description() string {
-	return "Retrieve the full content of a previously offloaded tool result by its spill reference (e.g., 'spill-a3f2b1'). Use this when you need the complete output that was too large for context."
+	return fmt.Sprintf(
+		"Retrieve a previously offloaded tool result by its spill reference (e.g., 'spill-a3f2b1'). "+
+			"Returns up to %d lines or %s, same limits as file_read. Use offset/limit for paginated access.",
+		truncate.FileMaxLines, truncate.FormatSize(truncate.FileMaxBytes),
+	)
 }
 
 func (t *LoadSpilledTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"ref": {"type": "string", "description": "The spill reference ID (e.g., 'spill-a3f2b1')"}
+			"ref": {"type": "string", "description": "The spill reference ID (e.g., 'spill-a3f2b1')"},
+			"offset": {"type": "integer", "description": "1-based line number to start from (default: 1)"},
+			"limit": {"type": "integer", "description": "Max lines to return (default: 2000)"}
 		},
 		"required": ["ref"]
 	}`)
@@ -319,5 +327,45 @@ func (t *LoadSpilledTool) Execute(_ context.Context, args map[string]any) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return content, nil
+
+	// Paginate: offset/limit slice before truncation (same as file_read)
+	userOffset, _ := args["offset"].(float64)
+	userLimit, _ := args["limit"].(float64)
+	lines := truncate.SplitLines(content)
+	totalLines := len(lines)
+
+	startIdx := 0
+	if userOffset > 0 {
+		startIdx = int(userOffset) - 1 // 1-based → 0-based
+		if startIdx >= totalLines {
+			return nil, fmt.Errorf("load_spilled: offset %d exceeds total lines %d", int(userOffset), totalLines)
+		}
+	}
+
+	endIdx := totalLines
+	if userLimit > 0 && startIdx+int(userLimit) < totalLines {
+		endIdx = startIdx + int(userLimit)
+	}
+
+	sliced := strings.Join(lines[startIdx:endIdx], "\n")
+
+	// Apply same truncation as file_read
+	tr := truncate.Head(sliced, truncate.FileMaxLines, truncate.FileMaxBytes)
+	result := tr.Content
+
+	if tr.Truncated {
+		actualStart := startIdx + 1
+		actualEnd := actualStart + tr.OutputLines - 1
+		result += fmt.Sprintf(
+			"\n\n[Showing lines %d-%d of %d (%s limit). Use offset=%d to continue.]",
+			actualStart, actualEnd, totalLines, truncate.FormatSize(truncate.FileMaxBytes), actualEnd+1,
+		)
+	} else if userLimit > 0 && endIdx < totalLines {
+		result += fmt.Sprintf(
+			"\n\n[%d more lines available. Use offset=%d to continue.]",
+			totalLines-endIdx, endIdx+1,
+		)
+	}
+
+	return result, nil
 }

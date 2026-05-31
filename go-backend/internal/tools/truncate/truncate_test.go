@@ -323,9 +323,9 @@ func TestSplitLines(t *testing.T) {
 		{"a\nb\nc\nd", 4},
 	}
 	for _, tt := range tests {
-		lines := splitLines(tt.input)
+		lines := SplitLines(tt.input)
 		if len(lines) != tt.count {
-			t.Errorf("splitLines(%q): got %d lines, want %d", tt.input, len(lines), tt.count)
+			t.Errorf("SplitLines(%q): got %d lines, want %d", tt.input, len(lines), tt.count)
 		}
 	}
 }

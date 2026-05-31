@@ -59,7 +59,7 @@ func Head(content string, maxLines, maxBytes int) Result {
 	}
 
 	totalBytes := len(content)
-	lines := splitLines(content)
+	lines := SplitLines(content)
 	totalLines := len(lines)
 
 	// No truncation needed
@@ -133,7 +133,7 @@ func Tail(content string, maxLines, maxBytes int) Result {
 	}
 
 	totalBytes := len(content)
-	lines := splitLines(content)
+	lines := SplitLines(content)
 	totalLines := len(lines)
 
 	// No truncation needed
@@ -193,7 +193,7 @@ func MiddleOut(content string, maxChars int) Result {
 
 	totalBytes := len(content)
 	if totalBytes <= maxChars {
-		lines := splitLines(content)
+		lines := SplitLines(content)
 		return Result{
 			Content:     content,
 			Truncated:   false,
@@ -211,7 +211,7 @@ func MiddleOut(content string, maxChars int) Result {
 	truncatedLines := strings.Count(middle, "\n") + 1
 
 	result := fmt.Sprintf("%s\n\n... [%d lines truncated] ...\n\n%s", start, truncatedLines, end)
-	lines := splitLines(result)
+	lines := SplitLines(result)
 	return Result{
 		Content:     result,
 		Truncated:   true,
@@ -290,10 +290,10 @@ func FormatBashTruncation(tr Result) string {
 	return fmt.Sprintf("\n\n... [%d lines truncated, showing last %d] ...", removed, tr.OutputLines)
 }
 
-// splitLines splits content into lines, preserving empty lines.
+// SplitLines splits content into lines, preserving empty lines.
 // Unlike strings.Split, does not produce a trailing empty element
 // for content ending in \n.
-func splitLines(content string) []string {
+func SplitLines(content string) []string {
 	if content == "" {
 		return []string{}
 	}
