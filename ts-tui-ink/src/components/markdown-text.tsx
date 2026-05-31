@@ -216,30 +216,63 @@ export function MarkdownText({ text, dim, color }: MarkdownTextProps) {
 			continue;
 		}
 
-		// Table rows — preserve column alignment, truncate to terminal width
+		// Table rows — collect into blocks, then render with aligned columns
 		if (line.startsWith("|")) {
-			const width = (process.stdout.columns || 80) - 2;
-			const isSeparator = /^\|[\s\-:]+\|/.test(line);
-			const cells = line.split("|").filter(Boolean).map((c) => c.trim());
-			if (isSeparator) {
-				// Render separator with ─ characters
-				elements.push(
-					<Text key={i} color="gray">
-						{" " + cells.map(() => "────────").join("│").slice(0, width)}
-					</Text>,
-				);
-			} else if (cells.length > 0) {
-				// Render cells with │ separator
-				elements.push(
-					<Text key={i}>
-						{" "}{cells.map((cell, ci) => (
-							<React.Fragment key={ci}>
-								{ci > 0 && <Text color="gray">│</Text>}
-								{renderSegments(parseInline(cell))}
-							</React.Fragment>
-						))}
-					</Text>,
-				);
+			// Collect consecutive table lines
+			const tableLines: string[] = [];
+			while (i < lines.length && lines[i].startsWith("|")) {
+				tableLines.push(lines[i]);
+				i++;
+			}
+			i--; // back up one since the outer loop will increment
+
+			// Parse all rows into cells
+			const rows = tableLines.map((tl) =>
+				tl.split("|").slice(1, -1).map((c) => c.trim())
+			);
+
+			// Calculate column widths (max cell width per column)
+			const colCount = Math.max(...rows.map((r) => r.length));
+			const colWidths: number[] = [];
+			for (let c = 0; c < colCount; c++) {
+				colWidths[c] = Math.max(...rows.map((r) => (r[c] || "").length), 3);
+			}
+
+			// Limit total width to terminal
+			const termWidth = (process.stdout.columns || 80) - 4;
+			const sep = " │ ";
+			const totalSep = sep.length * (colCount - 1);
+			let totalWidth = colWidths.reduce((a, b) => a + b, 0) + totalSep;
+
+			// Shrink columns proportionally if too wide
+			if (totalWidth > termWidth) {
+				const scale = termWidth / (colWidths.reduce((a, b) => a + b, 0) + totalSep);
+				for (let c = 0; c < colCount; c++) {
+					colWidths[c] = Math.max(3, Math.floor(colWidths[c] * scale));
+				}
+			}
+
+			// Render each row
+			for (let ri = 0; ri < rows.length; ri++) {
+				const isSeparator = /^\|[\s\-:]+\|/.test(tableLines[ri]);
+				if (isSeparator) {
+					const sepLine = colWidths.map((w) => "─".repeat(w)).join("─┼─");
+					elements.push(<Text key={`tbl-${i}-${ri}`} color="gray">{"  "}{sepLine}</Text>);
+				} else {
+					const paddedCells = rows[ri].map((cell, ci) => {
+						const w = colWidths[ci] || 3;
+						const truncated = cell.length > w ? cell.slice(0, w - 1) + "…" : cell;
+						return truncated.padEnd(w);
+					});
+					// Join with │, apply inline formatting to each cell
+					const cellNodes = paddedCells.map((cell, ci) => (
+						<React.Fragment key={ci}>
+							{ci > 0 && <Text color="gray">│</Text>}
+							<Text>{cell}</Text>
+						</React.Fragment>
+					));
+					elements.push(<Text key={`tbl-${i}-${ri}`}>{"  "}{cellNodes}</Text>);
+				}
 			}
 			continue;
 		}
