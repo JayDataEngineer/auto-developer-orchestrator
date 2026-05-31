@@ -216,6 +216,34 @@ export function MarkdownText({ text, dim, color }: MarkdownTextProps) {
 			continue;
 		}
 
+		// Table rows — preserve column alignment, truncate to terminal width
+		if (line.startsWith("|")) {
+			const width = (process.stdout.columns || 80) - 2;
+			const isSeparator = /^\|[\s\-:]+\|/.test(line);
+			const cells = line.split("|").filter(Boolean).map((c) => c.trim());
+			if (isSeparator) {
+				// Render separator with ─ characters
+				elements.push(
+					<Text key={i} color="gray">
+						{" " + cells.map(() => "────────").join("│").slice(0, width)}
+					</Text>,
+				);
+			} else if (cells.length > 0) {
+				// Render cells with │ separator
+				elements.push(
+					<Text key={i}>
+						{" "}{cells.map((cell, ci) => (
+							<React.Fragment key={ci}>
+								{ci > 0 && <Text color="gray">│</Text>}
+								{renderSegments(parseInline(cell))}
+							</React.Fragment>
+						))}
+					</Text>,
+				);
+			}
+			continue;
+		}
+
 		// Regular text with inline formatting
 		elements.push(
 			<Text key={i} dimColor={dim} color={color}>
