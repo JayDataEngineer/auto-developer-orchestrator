@@ -100,33 +100,12 @@ func (t *YieldArtifactTool) Execute(ctx context.Context, args map[string]any) (a
 	if customPath != "" {
 		filePath = customPath
 	} else {
-		// Default: /sandbox/workspace/memos/<type>-<slugified-title>.md
-		slug := slugify(title)
-		filePath = fmt.Sprintf("/sandbox/workspace/memos/%s-%s.md", artifactType, slug)
+		filePath = fmt.Sprintf("/sandbox/workspace/memos/%s-%s.md", artifactType, Slugify(title))
 	}
 
-	// 1. Write file to sandbox
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-		return nil, fmt.Errorf("yield_artifact: failed to create memo dir: %w", err)
-	}
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		return nil, fmt.Errorf("yield_artifact: failed to write file: %w", err)
-	}
-
-	// 2. Persist to artifact DB (if configured)
-	if t.db != nil {
-		artifactID := t.agentID + ":" + artifactType + ":" + slugify(title)
-		if err := t.db.SaveArtifact(ctx, &storage.DBArtifact{
-			ID:      artifactID,
-			AgentID: t.agentID,
-			Type:    artifactType,
-			Title:   title,
-			Content: content,
-		}); err != nil {
-			// Non-fatal — file is the primary storage
-			// Log but don't fail the tool call
-			_ = err
-		}
+	filePath, err := WriteArtifact(ctx, t.db, filePath, t.agentID, artifactType, title, content)
+	if err != nil {
+		return nil, err
 	}
 
 	return map[string]any{
@@ -137,7 +116,35 @@ func (t *YieldArtifactTool) Execute(ctx context.Context, args map[string]any) (a
 	}, nil
 }
 
-func slugify(s string) string {
+// WriteArtifact writes content to a file and persists metadata to the artifact DB.
+// Shared by YieldArtifactTool (LLM-initiated) and auto-memo persistence (sub-agent completion).
+// Returns the file path on success.
+func WriteArtifact(ctx context.Context, db ArtifactStore, filePath, agentID, artifactType, title, content string) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return "", fmt.Errorf("yield_artifact: failed to create memo dir: %w", err)
+	}
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		return "", fmt.Errorf("yield_artifact: failed to write file: %w", err)
+	}
+
+	if db != nil {
+		artifactID := agentID + ":" + artifactType + ":" + Slugify(title)
+		if err := db.SaveArtifact(ctx, &storage.DBArtifact{
+			ID:      artifactID,
+			AgentID: agentID,
+			Type:    artifactType,
+			Title:   title,
+			Content: content,
+		}); err != nil {
+			_ = err // non-fatal — file is the primary storage
+		}
+	}
+
+	return filePath, nil
+}
+
+// Slugify converts a string to a lowercase, dash-separated slug.
+func Slugify(s string) string {
 	result := make([]byte, 0, len(s))
 	prevDash := false
 	for _, r := range s {

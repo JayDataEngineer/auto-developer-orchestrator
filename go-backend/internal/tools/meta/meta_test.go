@@ -55,9 +55,9 @@ func TestSlugify(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
-			got := slugify(tc.input)
+			got := Slugify(tc.input)
 			if got != tc.want {
-				t.Errorf("slugify(%q) = %q, want %q", tc.input, got, tc.want)
+				t.Errorf("Slugify(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
 	}

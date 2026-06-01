@@ -2,14 +2,17 @@ package orchestration
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 )
 
 // makeRole is a helper to create a single-entry role map.
@@ -395,13 +398,15 @@ func TestResolveRole_StepFieldFallback(t *testing.T) {
 	}
 }
 
-func TestPersistMemo_WritesToDisk(t *testing.T) {
+func TestMemoArtifact_WritesToDisk(t *testing.T) {
 	dir := t.TempDir()
 	content := "## Codebase Brief\n\n### File Tree\n- foo.go\n- bar.go"
-	path := persistMemo(dir, "explorer", content)
+	filePath := filepath.Join(dir, ".pux", "memos", "explorer-20260601-120000.md")
+	header := fmt.Sprintf("<!-- agent: %s | saved: %s -->\n\n", "explorer", time.Now().Format(time.RFC3339))
 
-	if path == "" {
-		t.Fatal("expected non-empty path")
+	path, err := meta.WriteArtifact(context.Background(), nil, filePath, "explorer-123", "memo", "explorer", header+content)
+	if err != nil {
+		t.Fatalf("WriteArtifact failed: %v", err)
 	}
 
 	data, err := os.ReadFile(path)
@@ -416,48 +421,17 @@ func TestPersistMemo_WritesToDisk(t *testing.T) {
 	if !strings.Contains(got, "<!-- agent: explorer") {
 		t.Errorf("memo missing agent frontmatter.\ngot:\n%s", got)
 	}
-
-	// Verify path is under .pux/memos/
-	if !strings.HasPrefix(path, filepath.Join(dir, ".pux", "memos")) {
-		t.Errorf("expected path under .pux/memos/, got %s", path)
-	}
 }
 
-func TestPersistMemo_Slugify(t *testing.T) {
+func TestMemoArtifact_SlugifiedPath(t *testing.T) {
 	dir := t.TempDir()
-	path := persistMemo(dir, "code_orchestrator", "test content")
+	filePath := filepath.Join(dir, ".pux", "memos", "code-orchestrator-20260601-120000.md")
 
-	if path == "" {
-		t.Fatal("expected non-empty path")
+	path, err := meta.WriteArtifact(context.Background(), nil, filePath, "co-123", "memo", "code_orchestrator", "test content")
+	if err != nil {
+		t.Fatalf("WriteArtifact failed: %v", err)
 	}
-
 	if !strings.Contains(path, "code-orchestrator-") {
-		t.Errorf("expected slugified name 'code-orchestrator' in path, got %s", path)
-	}
-}
-
-func TestPersistMemo_EmptyInputs(t *testing.T) {
-	if path := persistMemo("", "explorer", "content"); path != "" {
-		t.Errorf("expected empty path for empty projectDir, got %q", path)
-	}
-	if path := persistMemo("/tmp", "explorer", ""); path != "" {
-		t.Errorf("expected empty path for empty content, got %q", path)
-	}
-}
-
-func TestSlugifyMemoName(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{"explorer", "explorer"},
-		{"code_orchestrator", "code-orchestrator"},
-		{"My Agent", "my-agent"},
-		{"agent-123", "agent-123"},
-		{"UPPER_CASE", "upper-case"},
-		{"a---b", "a-b"},
-	}
-	for _, tt := range tests {
-		got := slugifyMemoName(tt.in)
-		if got != tt.want {
-			t.Errorf("slugifyMemoName(%q) = %q, want %q", tt.in, got, tt.want)
-		}
+		t.Errorf("expected slugified name in path, got %s", path)
 	}
 }

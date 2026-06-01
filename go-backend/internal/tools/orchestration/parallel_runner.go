@@ -20,6 +20,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/hooks"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
 )
@@ -1025,7 +1026,16 @@ func (r *ParallelRunner) finalizeDelegation(
 	if memoContent == "" {
 		memoContent = artifact
 	}
-	memoPath := persistMemo(r.cfg.ProjectDir, setup.AgentName, memoContent)
+	var memoPath string
+	if r.cfg.ProjectDir != "" && memoContent != "" {
+		slug := meta.Slugify(setup.AgentName)
+		ts := time.Now().Format("20060102-150405")
+		filePath := filepath.Join(r.cfg.ProjectDir, ".pux", "memos", slug+"-"+ts+".md")
+		header := fmt.Sprintf("<!-- agent: %s | saved: %s -->\n\n", setup.AgentName, time.Now().Format(time.RFC3339))
+		if p, err := meta.WriteArtifact(ctx, r.cfg.DB, filePath, setup.TranscriptID, "memo", setup.AgentName, header+memoContent); err == nil {
+			memoPath = p
+		}
+	}
 
 	artifact = r.maybeSummarize(ctx, artifact)
 
@@ -1797,46 +1807,6 @@ func (r *ParallelRunner) maybeSummarize(ctx context.Context, text string) string
 		return "...[truncated]\n" + text[len(text)-500:]
 	}
 	return text
-}
-
-// persistMemo writes a sub-agent's output to .pux/memos/<agentName>-<timestamp>.md
-// so it survives context compaction and is readable by other agents via file_read.
-// Returns the file path on success, or empty string on failure. Failures are non-fatal.
-func persistMemo(projectDir, agentName, content string) string {
-	if projectDir == "" || content == "" {
-		return ""
-	}
-	memosDir := filepath.Join(projectDir, ".pux", "memos")
-	if err := os.MkdirAll(memosDir, 0755); err != nil {
-		return ""
-	}
-	slug := slugifyMemoName(agentName)
-	ts := time.Now().Format("20060102-150405")
-	path := filepath.Join(memosDir, slug+"-"+ts+".md")
-
-	// Add frontmatter so it's self-describing
-	header := fmt.Sprintf("<!-- agent: %s | saved: %s -->\n\n", agentName, time.Now().Format(time.RFC3339))
-	if err := os.WriteFile(path, []byte(header+content), 0644); err != nil {
-		return ""
-	}
-	return path
-}
-
-func slugifyMemoName(s string) string {
-	result := make([]byte, 0, len(s))
-	for _, r := range s {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
-			result = append(result, byte(r))
-		} else if r >= 'A' && r <= 'Z' {
-			result = append(result, byte(r+32))
-		} else if len(result) > 0 && result[len(result)-1] != '-' {
-			result = append(result, '-')
-		}
-	}
-	if len(result) > 0 && result[len(result)-1] == '-' {
-		result = result[:len(result)-1]
-	}
-	return string(result)
 }
 
 // extractLastAssistantFromSession returns the content of the last assistant message
