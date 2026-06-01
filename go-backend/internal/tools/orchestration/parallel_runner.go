@@ -787,28 +787,56 @@ func (r *ParallelRunner) buildSubAgent(
 	sandboxTier string,
 	delegatesTo []string,
 ) *builtAgent {
+	// Create raw message store and full context management stack
+	store := &subMsgStore{id: setup.TranscriptID}
+	ctxConfig := ctxpkg.Config{
+		ContextSize:           r.cfg.ContextSize,
+		OffloadThreshold:      4096,
+		PreviewSize:           500,
+		HardTruncateSize:      6000,
+		MicroCompactThreshold: 0.55,
+		MaskThreshold:         0.65,
+		PruneThreshold:        0.70,
+		FullCompactThreshold:  0.75,
+		KeepResults:           4,
+		EnableSummary:         false, // no LLM summarization for sub-agents
+	}
+	ctxMgr := ctxpkg.Factory(store, ctxConfig)
+
+	// Add load_spilled tool so sub-agents can retrieve offloaded results
+	loadSpilled := ctxpkg.NewLoadSpilledTool(ctxMgr)
+	setup.SelectedTools = append(setup.SelectedTools, core.OpenAITool{
+		Type: "function",
+		Function: core.FunctionDef{
+			Name:        loadSpilled.Name(),
+			Description: loadSpilled.Description(),
+			Parameters:  loadSpilled.Schema(),
+		},
+	})
+
+	sess := &subSession{
+		Session:   r.cfg.BaseSession,
+		store:     store,
+		ctxMgr:    ctxMgr,
+		msgCount:  0,
+		db:        r.cfg.DB,
+		project:   r.cfg.Project,
+		dbAgentID: setup.TranscriptID,
+	}
+
 	cfg := core.AgentLoopConfig{
 		SystemPrompt:        instructions,
 		MaxToolRounds:       maxRounds,
 		MaxTokens:           8192,
 		ContextSize:         r.cfg.ContextSize,
 		Tools:               setup.SelectedTools,
-		ToolResultProcessor: subAgentResultProcessor(r.spill),
+		ToolResultProcessor: newCtxMgrProcessor(ctxMgr),
 		Opts: core.GenerateOptions{
 			MaxTokens:   8192,
 			Temperature: temperature,
 			TopP:        0.95,
 			TopK:        20,
 		},
-	}
-
-	sess := &subSession{
-		Session:     r.cfg.BaseSession,
-		msgCount:    0,
-		db:          r.cfg.DB,
-		project:     r.cfg.Project,
-		dbAgentID:   setup.TranscriptID,
-		contextSize: r.cfg.ContextSize,
 	}
 
 	executor := r.cfg.Executor
@@ -832,6 +860,7 @@ func (r *ParallelRunner) buildSubAgent(
 		executor = vExec
 	}
 
+	processor := newCtxMgrProcessor(ctxMgr)
 	subAgent := agents.NewBaseAgent(agents.BaseConfig{
 		Provider:            resources.Provider,
 		Session:             sess,
@@ -848,7 +877,7 @@ func (r *ParallelRunner) buildSubAgent(
 		ToolPerms:           r.cfg.ToolPerms,
 		BashRules:           r.cfg.BashRules,
 		ExtraHooks:          resources.ExtraHooks,
-		ToolResultProcessor: subAgentResultProcessor(r.spill),
+		ToolResultProcessor: processor,
 	})
 
 	return &builtAgent{
@@ -988,7 +1017,13 @@ func (r *ParallelRunner) finalizeDelegation(
 	}
 	artifact = r.maybeSummarize(ctx, artifact)
 
+	// Persist memo to disk so it survives context compaction
+	memoPath := persistMemo(r.cfg.ProjectDir, setup.AgentName, artifact)
+
 	enriched := map[string]any{"result": artifact, "status": "completed", "agent_ref": agentRef}
+	if memoPath != "" {
+		enriched["memo_path"] = memoPath
+	}
 	if changes != nil {
 		enriched["changes"] = map[string]any{"files": changes.Files, "summary": changes.Summary}
 	}
@@ -1480,71 +1515,102 @@ func (r *ParallelRunner) pendingCount() int {
 	return len(r.tasks)
 }
 
-// subAgentResultProcessor returns a ToolResultProcessor for sub-agents.
-// Large tool results are spilled to disk via the shared SpillStore instead
-// of being truncated. The agent gets a preview + sandbox path reference and
-// can read the full output with file_read if needed.
-func subAgentResultProcessor(spill *ctxpkg.SpillStore) func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
-	const previewLines = 30 // lines of preview kept in-context
-
+// newCtxMgrProcessor creates a ToolResultProcessor that delegates to the context
+// manager's ProcessToolResult method. Large tool results get offloaded to spill
+// files with previews; sub-agents use load_spilled to retrieve full content.
+func newCtxMgrProcessor(ctxMgr ctxpkg.ContextManager) func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
 	return func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
-		if spill == nil || len(result) <= ctxpkg.DefaultConfig().OffloadThreshold {
+		processed, err := ctxMgr.ProcessToolResult(ctx, toolName, toolCallID, result)
+		if err != nil {
+			log.Printf("WARN: sub-agent ctxMgr ProcessToolResult error: %v", err)
 			return result
 		}
-
-		// Build preview — first N lines
-		lines := strings.Split(result, "\n")
-		previewCount := previewLines
-		if previewCount > len(lines) {
-			previewCount = len(lines)
-		}
-		preview := strings.Join(lines[:previewCount], "\n")
-
-		entry, spillErr := spill.Spill(toolName, toolCallID, result, preview)
-		if spillErr != nil {
-			// Can't spill — fall back to tail truncation
-			tail := result
-			if len(tail) > 3000 {
-				tail = tail[len(tail)-3000:]
-			}
-			return "...[spill failed, showing tail]\n" + tail
-		}
-
-		// Use sandbox path if available (sub-agents read via file_read)
-		readPath := entry.SandboxPath
-		if readPath == "" {
-			readPath = entry.FilePath
-		}
-
-		return fmt.Sprintf(
-			"%s\n\n...[%d lines total. Full output at %s — use file_read(\"%s\") to read it]",
-			preview, entry.Lines, readPath, readPath,
-		)
+		return processed
 	}
 }
 
-// subSession is a minimal session that stores messages in memory.
-// It wraps a parent session for context inheritance in sub-agents.
-// When db is set, messages are also persisted to the database for transcript retrieval.
-type subSession struct {
-	core.Session // embed parent — delegates GetTree, Navigate, Branch, Fork, TruncateToolResults, ReplaceToolResults
+// subMsgStore is the raw message store for sub-agent context management.
+// It implements core.Session with only the methods that ctxpkg.Factory needs.
+// The context manager wraps this — subSession delegates to the context manager.
+type subMsgStore struct {
 	messages []core.Message
-	msgCount int
+	id       string
+}
+
+func (s *subMsgStore) ID() string                                                { return s.id }
+func (s *subMsgStore) BuildContext(_ context.Context) ([]core.Message, error)    { return s.messages, nil }
+func (s *subMsgStore) AppendMessage(msg core.Message) error                      { s.messages = append(s.messages, msg); return nil }
+func (s *subMsgStore) Close() error                                              { return nil }
+func (s *subMsgStore) GetTree() *core.TreeNode                                   { return nil }
+func (s *subMsgStore) GetCurrentNode() string                                    { return s.id }
+func (s *subMsgStore) Navigate(_ string) error                                   { return nil }
+func (s *subMsgStore) Branch(_ string) (string, error)                           { return "", nil }
+func (s *subMsgStore) Fork(_ string) (core.Session, error)                       { return s, nil }
+func (s *subMsgStore) Compact(_ context.Context, _ string) (string, error)       { return "", nil }
+func (s *subMsgStore) SetSubscriber(_ chan<- core.AgentEvent)                    {}
+
+func (s *subMsgStore) TruncateToolResults(keep int) (int, error) {
+	truncated := 0
+	// Count tool results from the end
+	toolCount := 0
+	for i := len(s.messages) - 1; i >= 0; i-- {
+		if s.messages[i].Role == "tool" {
+			toolCount++
+			if toolCount > keep {
+				content := s.messages[i].Content
+				if len(content) > 500 {
+					s.messages[i].Content = content[:500] + "\n...[compacted]"
+					truncated++
+				}
+			}
+		}
+	}
+	return truncated, nil
+}
+
+func (s *subMsgStore) ReplaceToolResults(replace func(i int, name, content string) string, keep int) (int, error) {
+	replaced := 0
+	toolCount := 0
+	for i := len(s.messages) - 1; i >= 0; i-- {
+		if s.messages[i].Role == "tool" {
+			toolCount++
+			if toolCount > keep {
+				newContent := replace(i, s.messages[i].Name, s.messages[i].Content)
+				if newContent != s.messages[i].Content {
+					s.messages[i].Content = newContent
+					replaced++
+				}
+			}
+		}
+	}
+	return replaced, nil
+}
+
+// subSession wraps the context manager for sub-agents.
+// Delegates BuildContext/AppendMessage to the context manager stack.
+// Adds DB persistence on top of raw message storage in subMsgStore.
+type subSession struct {
+	core.Session // embed parent — delegates GetTree, Navigate, Branch, Fork
+	store        *subMsgStore
+	ctxMgr       ctxpkg.ContextManager // full context management stack (offloading + compaction)
+	msgCount     int
 	// Transcript persistence
-	db          *storage.Database
-	project     string // project name
-	dbAgentID   string // composite agent_id for DB queries (e.g. "session-sub:marcus-1234")
-	// Auto-compaction: context size limit for this sub-agent
-	contextSize int
+	db        *storage.Database
+	project   string // project name
+	dbAgentID string // composite agent_id for DB queries
 }
 
 func (s *subSession) ID() string { return s.Session.ID() + "-sub" }
 func (s *subSession) Close() error {
-	s.messages = nil
+	s.store.messages = nil
+	if s.ctxMgr != nil {
+		s.ctxMgr.Close()
+	}
 	return nil
 }
 func (s *subSession) AppendMessage(msg core.Message) error {
-	s.messages = append(s.messages, msg)
+	// Store in raw message store (context manager reads from here)
+	s.store.AppendMessage(msg)
 	s.msgCount++
 
 	// Persist to database if transcript storage is enabled
@@ -1582,76 +1648,23 @@ func (s *subSession) AppendMessage(msg core.Message) error {
 	return nil
 }
 func (s *subSession) BuildContext(ctx context.Context) ([]core.Message, error) {
-	// Auto-compact when message count exceeds threshold.
-	// Sub-agents accumulate messages quickly (file reads, tool results).
-	// Compact aggressively to prevent context overflow, same as Claude Code sub-agents.
-	compactThreshold := 30
-	if s.contextSize > 0 {
-		// Estimate: ~4 messages per 1K context tokens (rough heuristic)
-		compactThreshold = max(s.contextSize/400, 20)
+	if s.ctxMgr != nil {
+		return s.ctxMgr.BuildContext(ctx)
 	}
-	if len(s.messages) > compactThreshold {
-		s.Compact(ctx, "")
-	}
-	return s.messages, nil
+	return s.store.messages, nil
 }
 func (s *subSession) Compact(ctx context.Context, summary string) (string, error) {
-	// Aggressive compaction for sub-agents — inspired by Claude Code's sub-agent context management.
-	// Claude Code sub-agents keep only recent turns and discard old tool results.
-	// This prevents context overflow while preserving the working state.
-	if len(s.messages) <= 6 {
-		return "", nil
-	}
-
-	// Keep: system prompt (if present), first user message (task), last 8 messages (active work)
-	var compacted []core.Message
-	keepRecent := 8
-
-	for i, msg := range s.messages {
-		if i == 0 && msg.Role == "system" {
-			// Always keep system prompt
-			compacted = append(compacted, msg)
-		} else if i == 1 && msg.Role == "user" {
-			// Always keep original task
-			compacted = append(compacted, msg)
-		} else if i >= len(s.messages)-keepRecent {
-			// Keep recent messages verbatim
-			compacted = append(compacted, msg)
-		} else {
-			// Older messages: truncate aggressively
-			content := msg.Content
-			switch msg.Role {
-			case "tool":
-				// Tool results: keep first 500 chars (just enough for context)
-				if len(content) > 500 {
-					content = content[:500] + "\n...[compacted]"
-				}
-			case "assistant":
-				// Assistant reasoning: keep first 1000 chars
-				if len(content) > 1000 {
-					content = content[:1000] + "\n...[compacted]"
-				}
-			case "user":
-				// Skip intermediate user messages (tool results fed back)
-				continue
-			}
-			if content != "" {
-				compacted = append(compacted, core.Message{
-					Role:       msg.Role,
-					Content:    content,
-					ToolCallID: msg.ToolCallID,
-					Name:       msg.Name,
-				})
-			}
-		}
-	}
-
-	removed := len(s.messages) - len(compacted)
-	s.messages = compacted
-	s.msgCount = len(compacted)
-	return fmt.Sprintf("sub-agent compacted: %d messages → %d", removed+keepRecent, len(compacted)), nil
+	// Context manager handles compaction now — this is a no-op fallback
+	return "", nil
 }
 func (s *subSession) GetCurrentNode() string { return s.Session.ID() + "-sub" }
+func (s *subSession) TruncateToolResults(keep int) (int, error) {
+	return s.store.TruncateToolResults(keep)
+}
+func (s *subSession) ReplaceToolResults(replace func(i int, name, content string) string, keep int) (int, error) {
+	return s.store.ReplaceToolResults(replace, keep)
+}
+func (s *subSession) SetSubscriber(_ chan<- core.AgentEvent) {}
 
 // hasBrowserTools checks if the tool list contains browser/web automation tools.
 // Used by the auto-director to decide whether to raise Chrome for VNC visibility.
@@ -1777,11 +1790,51 @@ func (r *ParallelRunner) maybeSummarize(ctx context.Context, text string) string
 	return text
 }
 
+// persistMemo writes a sub-agent's output to .pux/memos/<agentName>-<timestamp>.md
+// so it survives context compaction and is readable by other agents via file_read.
+// Returns the file path on success, or empty string on failure. Failures are non-fatal.
+func persistMemo(projectDir, agentName, content string) string {
+	if projectDir == "" || content == "" {
+		return ""
+	}
+	memosDir := filepath.Join(projectDir, ".pux", "memos")
+	if err := os.MkdirAll(memosDir, 0755); err != nil {
+		return ""
+	}
+	slug := slugifyMemoName(agentName)
+	ts := time.Now().Format("20060102-150405")
+	path := filepath.Join(memosDir, slug+"-"+ts+".md")
+
+	// Add frontmatter so it's self-describing
+	header := fmt.Sprintf("<!-- agent: %s | saved: %s -->\n\n", agentName, time.Now().Format(time.RFC3339))
+	if err := os.WriteFile(path, []byte(header+content), 0644); err != nil {
+		return ""
+	}
+	return path
+}
+
+func slugifyMemoName(s string) string {
+	result := make([]byte, 0, len(s))
+	for _, r := range s {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			result = append(result, byte(r))
+		} else if r >= 'A' && r <= 'Z' {
+			result = append(result, byte(r+32))
+		} else if len(result) > 0 && result[len(result)-1] != '-' {
+			result = append(result, '-')
+		}
+	}
+	if len(result) > 0 && result[len(result)-1] == '-' {
+		result = result[:len(result)-1]
+	}
+	return string(result)
+}
+
 // extractLastAssistantFromSession returns the content of the last assistant message
 // in the sub-session. This is the sub-agent's final summary — not its entire reasoning
 // history. Used instead of accumulating all text_delta events across all turns.
 func extractLastAssistantFromSession(sess *subSession) string {
-	msgs := sess.messages
+	msgs := sess.store.messages
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == "assistant" && msgs[i].Content != "" {
 			return msgs[i].Content

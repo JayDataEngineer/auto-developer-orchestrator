@@ -2,8 +2,10 @@ package orchestration
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
@@ -390,5 +392,72 @@ func TestResolveRole_StepFieldFallback(t *testing.T) {
 	}
 	if division != "" {
 		t.Errorf("expected no division for custom, got %q", division)
+	}
+}
+
+func TestPersistMemo_WritesToDisk(t *testing.T) {
+	dir := t.TempDir()
+	content := "## Codebase Brief\n\n### File Tree\n- foo.go\n- bar.go"
+	path := persistMemo(dir, "explorer", content)
+
+	if path == "" {
+		t.Fatal("expected non-empty path")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read memo: %v", err)
+	}
+
+	got := string(data)
+	if !strings.Contains(got, content) {
+		t.Errorf("memo file doesn't contain original content.\ngot:\n%s", got)
+	}
+	if !strings.Contains(got, "<!-- agent: explorer") {
+		t.Errorf("memo missing agent frontmatter.\ngot:\n%s", got)
+	}
+
+	// Verify path is under .pux/memos/
+	if !strings.HasPrefix(path, filepath.Join(dir, ".pux", "memos")) {
+		t.Errorf("expected path under .pux/memos/, got %s", path)
+	}
+}
+
+func TestPersistMemo_Slugify(t *testing.T) {
+	dir := t.TempDir()
+	path := persistMemo(dir, "code_orchestrator", "test content")
+
+	if path == "" {
+		t.Fatal("expected non-empty path")
+	}
+
+	if !strings.Contains(path, "code-orchestrator-") {
+		t.Errorf("expected slugified name 'code-orchestrator' in path, got %s", path)
+	}
+}
+
+func TestPersistMemo_EmptyInputs(t *testing.T) {
+	if path := persistMemo("", "explorer", "content"); path != "" {
+		t.Errorf("expected empty path for empty projectDir, got %q", path)
+	}
+	if path := persistMemo("/tmp", "explorer", ""); path != "" {
+		t.Errorf("expected empty path for empty content, got %q", path)
+	}
+}
+
+func TestSlugifyMemoName(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"explorer", "explorer"},
+		{"code_orchestrator", "code-orchestrator"},
+		{"My Agent", "my-agent"},
+		{"agent-123", "agent-123"},
+		{"UPPER_CASE", "upper-case"},
+		{"a---b", "a-b"},
+	}
+	for _, tt := range tests {
+		got := slugifyMemoName(tt.in)
+		if got != tt.want {
+			t.Errorf("slugifyMemoName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
