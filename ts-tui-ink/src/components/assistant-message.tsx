@@ -86,7 +86,7 @@ export function AssistantMessage() {
 	const showSpinner = isRunning && !hasContent;
 
 	return (
-		<Box flexDirection="column" marginTop={1} paddingX={1} width={textWidth}>
+		<Box flexDirection="column" marginTop={1} width={cols}>
 			{showSpinner && (
 				<LoadingPrimitive.Root gap={1}>
 					<LoadingPrimitive.Spinner variant="spinner" type="dots" />
@@ -94,11 +94,11 @@ export function AssistantMessage() {
 				</LoadingPrimitive.Root>
 			)}
 
-			{/* Collapsed reasoning — one line for all thought steps */}
+			{/* Collapsed reasoning — wrapped, not truncated */}
 			{hasReasoning && (
 				<Box marginBottom={1}>
-					<Text dimColor color={colors.textMuted}>
-						{BLOCKQUOTE_BAR} {trunc(lastReasoningLine, cols - 4)}
+					<Text dimColor color={colors.textMuted} wrap="wrap">
+						{BLOCKQUOTE_BAR} {lastReasoningLine}
 					</Text>
 				</Box>
 			)}
@@ -191,7 +191,7 @@ function CompactToolCall({ part }: { part: any }) {
 	}
 
 	return (
-		<Box paddingLeft={1}>
+		<Box>
 			<Text color={color}>{icon} </Text>
 			<Text color={colors.textMuted}>{toolName}{detail}</Text>
 		</Box>

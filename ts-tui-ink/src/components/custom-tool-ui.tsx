@@ -37,7 +37,7 @@ export const BashToolUI = makeAssistantToolUI({
 		const cmdPreview = command.length > 80 ? command.slice(0, 77) + "..." : command;
 
 		return (
-			<Box paddingLeft={2} marginBottom={1}>
+			<Box marginBottom={1}>
 				<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>
 					{BLACK_CIRCLE}{" "}
 				</Text>
@@ -180,7 +180,7 @@ function DelegateRenderer({
 			? ` done · ${subToolCount} tool${subToolCount !== 1 ? "s" : ""} · ${duration}`
 			: " done";
 		return (
-			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+			<Box flexDirection="column" marginBottom={1}>
 				<Text wrap="truncate-end">
 					<Text color={colors.success}>{BLACK_CIRCLE} </Text>
 					<Text bold color={colors.brand}>{label}</Text>
@@ -189,7 +189,7 @@ function DelegateRenderer({
 				</Text>
 				{/* Agent output preview when done — first 3 lines */}
 				{agentText && agentText.trim() && (
-					<Box paddingLeft={4}>
+					<Box paddingLeft={2}>
 						<Text dimColor color="gray">
 							{agentText.trim().split("\n").slice(0, 3).map((line, i, arr) =>
 								`${BLOCKQUOTE_BAR} ${trunc(line, cols - 6)}${i < arr.length - 1 ? "\n" : ""}`
@@ -206,7 +206,7 @@ function DelegateRenderer({
 	if (isError) {
 		const errMsg = typeof result === "string" ? result : "";
 		return (
-			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+			<Box flexDirection="column" marginBottom={1}>
 				<Text wrap="truncate-end">
 					<Text color={colors.error}>{symbols.toolError} </Text>
 					<Text bold color={colors.brand}>{label}</Text>
@@ -214,7 +214,7 @@ function DelegateRenderer({
 					<Text color={colors.error}> failed</Text>
 				</Text>
 				{errMsg && (
-					<Box paddingLeft={4}>
+					<Box paddingLeft={2}>
 						<Text dimColor color={colors.error}>{trunc(errMsg, cols - 6)}</Text>
 					</Box>
 				)}
@@ -230,7 +230,7 @@ function DelegateRenderer({
 	const hiddenCount = toolCalls.length - visibleTools.length;
 
 	return (
-		<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1}>
 			<Text wrap="truncate-end">
 				<Text color={colors.running}>
 					{symbols.toolRunning}{" "}
@@ -298,7 +298,7 @@ export const FileEditToolUI = makeAssistantToolUI({
 		const isRunning = status.type === "running";
 
 		return (
-			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+			<Box flexDirection="column" marginBottom={1}>
 				<Box>
 					<Text
 						color={
@@ -355,7 +355,7 @@ function EditDiffRenderer({
 	const newLines = newStr.split("\n");
 
 	return (
-		<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1}>
 			<Box>
 				<Text
 					color={
@@ -425,7 +425,7 @@ export const FileReadToolUI = makeAssistantToolUI({
 		const isRunning = status.type === "running";
 
 		return (
-			<Box paddingLeft={2} marginBottom={1}>
+			<Box marginBottom={1}>
 				<Text
 					color={isDone ? colors.success : colors.running}
 				>
@@ -515,7 +515,7 @@ function ScreenshotRenderer(p: { result?: unknown; isError?: boolean; status: { 
   const isDone = p.status.type === "complete";
   const imageUri = isDone && !p.isError ? extractScreenshotURI(p.result) : null;
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <Box flexDirection="column" marginBottom={1}>
       <Box>
         <Text color={p.isError ? colors.error : isDone ? colors.success : colors.running}>
           {p.isError ? symbols.toolError : isDone ? symbols.toolDone : symbols.toolRunning}
@@ -599,7 +599,7 @@ export const TodoToolUI = makeAssistantToolUI({
 
 		if (isRunning && todos.length === 0) {
 			return (
-				<Box paddingLeft={2} marginBottom={1}>
+				<Box marginBottom={1}>
 					<Text color={colors.running}>{BLACK_CIRCLE} </Text>
 					<Text bold color={colors.running}>todo</Text>
 					<Text color="gray"> loading...</Text>
@@ -610,7 +610,7 @@ export const TodoToolUI = makeAssistantToolUI({
 		if (todos.length === 0) return null;
 
 		return (
-			<Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+			<Box flexDirection="column" marginBottom={1}>
 				<Box>
 					<Text color={isDone ? colors.success : colors.running}>
 						{BLACK_CIRCLE}{" "}
