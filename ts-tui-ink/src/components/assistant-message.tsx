@@ -18,10 +18,28 @@ import {
 	LoadingPrimitive,
 } from "@assistant-ui/react-ink";
 import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
+import type { Theme as MarkdansiTheme } from "markdansi";
 // Extend to pass tableTruncate through the spread (not in library's types yet)
 const MarkdownText = _MarkdownText as React.FC<
 	React.ComponentProps<typeof _MarkdownText> & { tableTruncate?: boolean }
 >;
+
+// Markdansi theme matching Claude Code's palette — no dark gray
+const mdTheme: MarkdansiTheme = {
+	heading: { bold: true, color: "#ffffff" },
+	strong: { bold: true, color: "#ffffff" },
+	emph: { italic: true },
+	inlineCode: { color: "#d77757" },
+	blockCode: { color: "#b0b0b0" },
+	code: { color: "#d77757" },
+	link: { color: "#73daca", underline: true },
+	quote: { color: "#6a737d" },
+	hr: { color: "#505050" },
+	listMarker: { color: "#999999" },
+	tableHeader: { bold: true, color: "#ffffff" },
+	tableCell: { color: "#cccccc" },
+};
+
 import { TerminalImage } from "./terminal-image.js";
 import { BranchPicker } from "./branch-picker.js";
 import { useColors, BLOCKQUOTE_BAR } from "../theme.js";
@@ -99,6 +117,7 @@ export function AssistantMessage() {
 									key={part.text.slice(0, 20)}
 									text={part.text}
 									tableTruncate={false}
+									theme={mdTheme}
 								/>
 							);
 						}
