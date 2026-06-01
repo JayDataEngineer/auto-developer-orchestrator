@@ -46,19 +46,19 @@ const themeDefs: ThemeDef[] = [
 	{
 		id: "default",
 		name: "Default",
-		desc: "Magenta brand + high contrast chalk colors",
+		desc: "Claude Code-inspired palette",
 		colors: {
-			brand: "magenta",
-			user: "greenBright",
-			assistant: "cyan",
-			success: "green",
-			error: "red",
-			warning: "yellow",
-			running: "cyan",
-			text: "white",
-			textDim: "gray",
-			textMuted: "gray",
-			subtle: "blackBright",
+			brand: "#d77757",       // Claude orange
+			user: "#4eba65",        // bright green
+			assistant: "#b1b9f9",   // light blue-purple
+			success: "#4eba65",     // bright green
+			error: "#ff6b80",       // bright red
+			warning: "#e0af68",     // amber
+			running: "#73daca",     // teal
+			text: "#ffffff",        // white
+			textDim: "#999999",     // light gray (was "gray" — too dark)
+			textMuted: "#6a737d",   // medium gray (was "gray" — too dark)
+			subtle: "#505050",      // dark gray
 		},
 	},
 	{
