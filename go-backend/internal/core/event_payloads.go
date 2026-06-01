@@ -66,11 +66,12 @@ func (AgentStartData) seal() {}
 
 // AgentEndData is emitted when an agent loop completes, with usage metrics.
 type AgentEndData struct {
-	Input         float64 `json:"input,omitempty"`
-	Output        float64 `json:"output,omitempty"`
+	Input         float64 `json:"input,omitempty"`          // cumulative total input tokens
+	Output        float64 `json:"output,omitempty"`         // cumulative total output tokens
 	Cache         float64 `json:"cache,omitempty"`
 	Model         string  `json:"model,omitempty"`
-	ContextWindow int     `json:"contextWindow,omitempty"`
+	ContextWindow int     `json:"contextWindow,omitempty"`  // model's max context window
+	ContextTokens int     `json:"contextTokens,omitempty"`  // actual prompt tokens in last API call (current context size)
 }
 
 func (AgentEndData) seal() {}

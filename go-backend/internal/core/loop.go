@@ -484,6 +484,7 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 					Output:        float64(state.TotalOutputTokens),
 					Model:         l.provider.ModelName(),
 					ContextWindow: l.provider.ContextSize(),
+					ContextTokens: state.TurnInputTokens,
 				},
 			})
 			return nil

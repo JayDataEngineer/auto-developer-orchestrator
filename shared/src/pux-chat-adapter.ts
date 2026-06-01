@@ -212,8 +212,12 @@ function handleMetaEvent(
 			const outputTokens = (data.output as number) || 0;
 			stepsRef.push({ inputTokens, outputTokens });
 
+			// Use actual context tokens from last API call (not cumulative total)
+			const contextTokens = (data.contextTokens as number) || 0;
 			const contextWindow = (data.contextWindow as number) || 0;
-			const contextUtil = contextWindow > 0 ? inputTokens / contextWindow : 0;
+			const contextUtil = contextWindow > 0 && contextTokens > 0
+				? contextTokens / contextWindow
+				: 0;
 
 			const actualModel = (data.model as string) || undefined;
 
@@ -225,7 +229,7 @@ function handleMetaEvent(
 					model: actualModel,
 				},
 				contextMetrics: {
-					contextTokens: inputTokens,
+					contextTokens: contextTokens || inputTokens,
 					contextSize: contextWindow,
 					contextUtil,
 					compactionType: "",

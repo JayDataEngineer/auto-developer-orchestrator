@@ -124,6 +124,9 @@ func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 		if p.ContextWindow > 0 {
 			data["contextWindow"] = p.ContextWindow
 		}
+		if p.ContextTokens > 0 {
+			data["contextTokens"] = p.ContextTokens
+		}
 		return &sseEvent{Type: "agent_end", Data: data}
 
 	case llamaeng.EventTypeCompactionStart:

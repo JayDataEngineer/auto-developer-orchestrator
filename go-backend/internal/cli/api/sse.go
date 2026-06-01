@@ -84,6 +84,7 @@ type AgentEndData struct {
 	Cache         int     `json:"cache"`
 	Model         string  `json:"model"`
 	ContextWindow int     `json:"contextWindow,omitempty"`
+	ContextTokens int     `json:"contextTokens,omitempty"`
 }
 
 // SubagentStartData is the payload for subagent_start events.
