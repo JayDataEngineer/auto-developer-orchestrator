@@ -56,9 +56,9 @@ const themeDefs: ThemeDef[] = [
 			warning: "#e0af68",     // amber
 			running: "#73daca",     // teal
 			text: "#ffffff",        // white
-			textDim: "#999999",     // light gray (was "gray" — too dark)
-			textMuted: "#6a737d",   // medium gray (was "gray" — too dark)
-			subtle: "#505050",      // dark gray
+			textDim: "#aaaaaa",     // light gray
+			textMuted: "#888888",   // medium gray — visible on dark terminals
+			subtle: "#666666",      // dark gray
 		},
 	},
 	{

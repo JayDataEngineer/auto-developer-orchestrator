@@ -97,7 +97,7 @@ export function AssistantMessage() {
 			{/* Collapsed reasoning — wrapped, not truncated */}
 			{hasReasoning && (
 				<Box marginBottom={1}>
-					<Text dimColor color={colors.textMuted} wrap="wrap">
+					<Text color={colors.textMuted} wrap="wrap">
 						{BLOCKQUOTE_BAR} {lastReasoningLine}
 					</Text>
 				</Box>
