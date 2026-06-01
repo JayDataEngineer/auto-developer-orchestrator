@@ -1015,10 +1015,19 @@ func (r *ParallelRunner) finalizeDelegation(
 	if artifact == "" {
 		artifact = runRes.FinalText
 	}
-	artifact = r.maybeSummarize(ctx, artifact)
 
-	// Persist memo to disk so it survives context compaction
-	memoPath := persistMemo(r.cfg.ProjectDir, setup.AgentName, artifact)
+	// Persist FULL text to disk BEFORE summarization so the memo isn't mangled.
+	// Use FinalText (all accumulated SSE text deltas) for the memo — it captures
+	// the complete output across all rounds. extractLastAssistantFromSession only
+	// gets the last single assistant message, which is often an intermediate
+	// "Let me do X" from a tool-call round, not the final brief.
+	memoContent := runRes.FinalText
+	if memoContent == "" {
+		memoContent = artifact
+	}
+	memoPath := persistMemo(r.cfg.ProjectDir, setup.AgentName, memoContent)
+
+	artifact = r.maybeSummarize(ctx, artifact)
 
 	enriched := map[string]any{"result": artifact, "status": "completed", "agent_ref": agentRef}
 	if memoPath != "" {
