@@ -45,7 +45,7 @@ export function ComposerBar() {
 			{/* Command output overlay */}
 			{commandOutput && (
 				<Box flexDirection="column" paddingX={1} marginBottom={0}>
-					<Text dimColor color="gray">
+					<Text color={colors.textMuted}>
 						{commandOutput.split("\n").map((line, i) => (
 							<Text key={i}>{line}</Text>
 						))}
@@ -103,7 +103,7 @@ function CommandPalette() {
 					selected={i === 0}
 				/>
 			))}
-			<Text dimColor color="gray"> Enter to execute</Text>
+			<Text color={colors.textMuted}> Enter to execute</Text>
 		</Box>
 	);
 }

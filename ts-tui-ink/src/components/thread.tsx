@@ -1,7 +1,7 @@
 /**
  * Thread component — messages + composer.
  *
- * windowSize=1 + windowOverscan=1 = 2 live messages.
+ * windowSize=2 + windowOverscan=4 = 6 live messages.
  * Older messages graduate to Ink's <Static> (terminal scrollback).
  * ComposerBar is inside ThreadPrimitive.Root (matching library example).
  */
@@ -11,6 +11,7 @@ import { Box, Text } from "ink";
 import {
 	ThreadPrimitive,
 	AuiIf,
+	LoadingPrimitive,
 	useAuiState,
 } from "@assistant-ui/react-ink";
 import { AssistantMessage } from "./assistant-message.js";
@@ -31,9 +32,16 @@ export function Thread() {
 				<Welcome />
 			</AuiIf>
 
-			<ThreadPrimitive.Messages>
+			<ThreadPrimitive.Messages windowSize={2} windowOverscan={4}>
 				{() => <MessageWrapper />}
 			</ThreadPrimitive.Messages>
+
+			{/* Thread-level loading indicator */}
+			<LoadingPrimitive.Root gap={1}>
+				<LoadingPrimitive.Spinner variant="dots" />
+				<LoadingPrimitive.Text />
+				<LoadingPrimitive.ElapsedTime />
+			</LoadingPrimitive.Root>
 
 			{/* Composer — inside ThreadPrimitive.Root like library example */}
 			<ComposerBar />

@@ -60,7 +60,6 @@ function trunc(s: string, max: number): string {
 export function AssistantMessage() {
 	const colors = useColors();
 	const { cols } = useTerminalSize();
-	const textWidth = cols - 2;
 	const isRunning = useAuiState((s) => s.message.status?.type === "running");
 
 	// Extract all reasoning text from parts (reorderParts puts them first)
@@ -139,7 +138,7 @@ export function AssistantMessage() {
 						case "source":
 							return (
 								<Box key={(part as any).id || part.url} paddingLeft={1}>
-									<Text color="gray">{BLOCKQUOTE_BAR} </Text>
+									<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} </Text>
 									<Text color="blue">
 										{part.url
 											? part.title
@@ -152,7 +151,7 @@ export function AssistantMessage() {
 						case "file":
 							return (
 								<Box paddingLeft={1}>
-									<Text dimColor>{BLOCKQUOTE_BAR} file: {(part as any).name || "(unnamed)"}</Text>
+									<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} file: {(part as any).name || "(unnamed)"}</Text>
 								</Box>
 							);
 						default:

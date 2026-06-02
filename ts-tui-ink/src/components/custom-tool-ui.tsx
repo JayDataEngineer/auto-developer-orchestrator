@@ -44,8 +44,8 @@ export const BashToolUI = makeAssistantToolUI({
 				<Text bold color={isRunning ? colors.running : undefined}>
 					bash
 				</Text>
-				<Text color="gray">({cmdPreview})</Text>
-				{isDone && !isError && <Text color="gray"> done</Text>}
+				<Text color={colors.textMuted}>({cmdPreview})</Text>
+				{isDone && !isError && <Text color={colors.textMuted}> done</Text>}
 				{isError && <Text color={colors.error}> failed</Text>}
 			</Box>
 		);
@@ -174,48 +174,33 @@ function DelegateRenderer({
 		return () => clearInterval(timer);
 	}, [isRunning]);
 
-	// ── Collapsed summary when done ──
-	if (isDone) {
-		const doneSuffix = subToolCount > 0
-			? ` done · ${subToolCount} tool${subToolCount !== 1 ? "s" : ""} · ${duration}`
-			: " done";
+	// ── Collapsed summary when done or incomplete ──
+	// "incomplete" = cancelled/interrupted, still show as completed with result
+	if (isDone || isError) {
+		const hadError = !isDone;
+		const iconColor = hadError ? colors.error : colors.success;
+		const icon = hadError ? symbols.toolError : BLACK_CIRCLE;
+		const suffix = subToolCount > 0
+			? ` ${hadError ? "failed" : "done"} · ${subToolCount} tool${subToolCount !== 1 ? "s" : ""} · ${duration}`
+			: hadError ? " failed" : " done";
+
 		return (
 			<Box flexDirection="column" marginBottom={1}>
 				<Text wrap="truncate-end">
-					<Text color={colors.success}>{BLACK_CIRCLE} </Text>
+					<Text color={iconColor}>{icon} </Text>
 					<Text bold color={colors.brand}>{label}</Text>
-					{taskPreview && <Text color="gray"> {taskPreview}</Text>}
-					<Text color="gray">{doneSuffix}</Text>
+					{taskPreview && <Text color={colors.textMuted}> {taskPreview}</Text>}
+					<Text color={colors.textMuted}>{suffix}</Text>
 				</Text>
-				{/* Agent output preview when done — first 3 lines */}
+				{/* Agent output preview — first 3 lines */}
 				{agentText && agentText.trim() && (
 					<Box paddingLeft={2}>
-						<Text dimColor color="gray">
+						<Text color={colors.textMuted}>
 							{agentText.trim().split("\n").slice(0, 3).map((line, i, arr) =>
 								`${BLOCKQUOTE_BAR} ${trunc(line, cols - 6)}${i < arr.length - 1 ? "\n" : ""}`
 							).join("")}
 							{agentText.trim().split("\n").length > 3 ? `\n${BLOCKQUOTE_BAR} ...` : ""}
 						</Text>
-					</Box>
-				)}
-			</Box>
-		);
-	}
-
-	// ── Error: tool failed before producing a result ──
-	if (isError) {
-		const errMsg = typeof result === "string" ? result : "";
-		return (
-			<Box flexDirection="column" marginBottom={1}>
-				<Text wrap="truncate-end">
-					<Text color={colors.error}>{symbols.toolError} </Text>
-					<Text bold color={colors.brand}>{label}</Text>
-					{taskPreview && <Text color="gray"> {taskPreview}</Text>}
-					<Text color={colors.error}> failed</Text>
-				</Text>
-				{errMsg && (
-					<Box paddingLeft={2}>
-						<Text dimColor color={colors.error}>{trunc(errMsg, cols - 6)}</Text>
 					</Box>
 				)}
 			</Box>
@@ -236,14 +221,14 @@ function DelegateRenderer({
 					{symbols.toolRunning}{" "}
 				</Text>
 				<Text bold color={colors.brand}>{label}</Text>
-				{taskPreview && <Text color="gray"> {taskPreview}</Text>}
+				{taskPreview && <Text color={colors.textMuted}> {taskPreview}</Text>}
 				{subToolCount > 0 && (
-					<Text color="gray"> · {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
+					<Text color={colors.textMuted}> · {subToolCount} tool{subToolCount !== 1 ? "s" : ""}</Text>
 				)}
 			</Text>
 
 			{hiddenCount > 0 && (
-				<Text dimColor color="gray">
+				<Text color={colors.textMuted}>
 					{"  └ "}{symbols.dot} {hiddenCount} earlier
 				</Text>
 			)}
@@ -256,7 +241,7 @@ function DelegateRenderer({
 				const sym = tc.isError ? symbols.toolError : tc.endedAt ? symbols.toolDone : symbols.toolRunning;
 				return (
 					<Text key={`${tc.toolName}-${tc.timestamp}-${i}`} wrap="truncate-end">
-						<Text dimColor color="gray">{"  └ "}</Text>
+						<Text color={colors.textMuted}>{"  └ "}</Text>
 						<Text color={tc.isError ? colors.error : tc.endedAt ? colors.success : colors.running}>
 							{sym}
 						</Text>
@@ -264,7 +249,7 @@ function DelegateRenderer({
 						<Text bold color={isActive ? colors.running : undefined}>
 							{tc.toolName}
 						</Text>
-						{argPreview && <Text color="gray"> {argPreview}</Text>}
+						{argPreview && <Text color={colors.textMuted}> {argPreview}</Text>}
 						{isActive && isLast && isRunning && (
 							<Text color={colors.running}> <Spinner type="dots" /></Text>
 						)}
@@ -273,12 +258,12 @@ function DelegateRenderer({
 			})}
 
 			{toolCalls.length === 0 && !thinkingText && (
-				<Text dimColor color="gray">{"  └ "}starting...</Text>
+				<Text color={colors.textMuted}>{"  └ "}starting...</Text>
 			)}
 
 			{/* Show agent thinking preview while running */}
 			{thinkingText && isRunning && (
-				<Text dimColor color="gray">
+				<Text color={colors.textMuted}>
 					{"  └ "}{BLOCKQUOTE_BAR} {trunc(thinkingText.split("\n").pop() || thinkingText, cols - 8)}
 				</Text>
 			)}
@@ -314,7 +299,7 @@ export const FileEditToolUI = makeAssistantToolUI({
 					<Text bold color={isRunning ? colors.running : undefined}>
 						write
 					</Text>
-					<Text color="gray"> {path.slice(0, 60)}</Text>
+					<Text color={colors.textMuted}> {path.slice(0, 60)}</Text>
 					{isDone && !isError && (
 						<Text color={colors.success}> {symbols.check}</Text>
 					)}
@@ -371,7 +356,7 @@ function EditDiffRenderer({
 				<Text bold color={isRunning ? colors.running : undefined}>
 					edit
 				</Text>
-				<Text color="gray"> {path.slice(0, 60)}</Text>
+				<Text color={colors.textMuted}> {path.slice(0, 60)}</Text>
 				{isDone && !isError && (
 					<Text color={colors.success}> {symbols.check}</Text>
 				)}
@@ -397,7 +382,7 @@ function EditDiffRenderer({
 						</Box>
 					)}
 					{(oldLines.length > 8 || newLines.length > 8) && (
-						<Text dimColor color="gray">
+						<Text color={colors.textMuted}>
 							{"  "}... diff truncated
 						</Text>
 					)}
@@ -434,7 +419,7 @@ export const FileReadToolUI = makeAssistantToolUI({
 				<Text bold color={isRunning ? colors.running : undefined}>
 					read
 				</Text>
-				<Text color="gray"> {path.slice(0, 60)}</Text>
+				<Text color={colors.textMuted}> {path.slice(0, 60)}</Text>
 			</Box>
 		);
 	},
@@ -530,7 +515,7 @@ function ScreenshotRenderer(p: { result?: unknown; isError?: boolean; status: { 
       )}
       {!imageUri && isDone && !p.isError && (
         <Box paddingLeft={2}>
-          <Text dimColor>  {BLOCKQUOTE_BAR} (image not available in terminal)</Text>
+          <Text color={colors.textMuted}>  {BLOCKQUOTE_BAR} (image not available in terminal)</Text>
         </Box>
       )}
       {p.isError && (
@@ -602,7 +587,7 @@ export const TodoToolUI = makeAssistantToolUI({
 				<Box marginBottom={1}>
 					<Text color={colors.running}>{BLACK_CIRCLE} </Text>
 					<Text bold color={colors.running}>todo</Text>
-					<Text color="gray"> loading...</Text>
+					<Text color={colors.textMuted}> loading...</Text>
 				</Box>
 			);
 		}
@@ -618,7 +603,7 @@ export const TodoToolUI = makeAssistantToolUI({
 					<Text bold color={isRunning ? colors.running : undefined}>
 						todo
 					</Text>
-					<Text color="gray"> {todos.length} item{todos.length !== 1 ? "s" : ""}</Text>
+					<Text color={colors.textMuted}> {todos.length} item{todos.length !== 1 ? "s" : ""}</Text>
 				</Box>
 				{todos.map((item, i) => {
 					const s = item.status ?? "pending";
