@@ -844,6 +844,9 @@ func (r *ParallelRunner) buildSubAgent(
 	if r.cfg.ExecutorFactory != nil {
 		executor = r.cfg.ExecutorFactory(sandboxTier)
 	}
+	// Wrap executor to handle load_spilled calls — the tool spec is in SelectedTools
+	// but the actual implementation needs this sub-agent's ctxMgr
+	executor = &loadSpilledExecutor{inner: executor, tool: loadSpilled}
 	if len(delegatesTo) > 0 && r.cfg.Depth < r.cfg.MaxDepth {
 		executor = &scopedDelegationExecutor{
 			parent:   executor,
@@ -1546,6 +1549,32 @@ func newCtxMgrProcessor(ctxMgr ctxpkg.ContextManager) func(ctx context.Context, 
 		}
 		return processed
 	}
+}
+
+// loadSpilledExecutor wraps an executor to intercept load_spilled tool calls.
+// The load_spilled tool needs a per-sub-agent ContextManager, so it can't be
+// pre-registered in the shared ToolRegistry. This wrapper routes load_spilled
+// calls to the sub-agent's own LoadSpilledTool instance.
+type loadSpilledExecutor struct {
+	inner core.ToolExecutor
+	tool  *ctxpkg.LoadSpilledTool
+}
+
+func (e *loadSpilledExecutor) Execute(ctx context.Context, toolName string, args map[string]any) (any, error) {
+	if toolName == "load_spilled" {
+		return e.tool.Execute(ctx, args)
+	}
+	return e.inner.Execute(ctx, toolName, args)
+}
+
+func (e *loadSpilledExecutor) ToolTimeoutHint(name string) time.Duration {
+	if name == "load_spilled" {
+		return 30 * time.Second
+	}
+	if reg, ok := e.inner.(*core.ToolRegistry); ok {
+		return reg.ToolTimeoutHint(name)
+	}
+	return 0
 }
 
 // subMsgStore is the raw message store for sub-agent context management.
