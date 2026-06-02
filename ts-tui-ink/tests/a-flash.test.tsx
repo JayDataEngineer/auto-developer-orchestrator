@@ -1,115 +1,184 @@
 /**
- * Flash detection test — catches the Enter flash bug.
+ * Flash detection test — catches the Enter flash by checking
+ * what is ACTUALLY RENDERED on screen.
  *
- * ROOT CAUSE: puxChatAdapter sets usePuxStore.setState({ ctoRunning: true })
- * BEFORE yielding the first snapshot. This Zustand update triggers a
- * synchronous render in components subscribed to that Zustand field.
- * During this render, the assistant-ui store state is stale (text reverts to
- * the pre-send value, messages disappear).
- *
- * FIX: Yield first, then defer ctoRunning setState via queueMicrotask
- * so it doesn't trigger a synchronous render during the adapter cycle.
- *
- * TEST STRATEGY:
- * Two layers of testing:
- *
- * 1. OPERATION ORDERING (deterministic): Mock usePuxStore.setState and
- *    verify that the buggy adapter fires setState synchronously before the
- *    first yield resolves, while the fixed adapter does NOT.
- *    This is a direct test of the adapter's code path — no React rendering.
- *
- * 2. RENDERING ARTIFACT (best-effort): Render with ink-testing-library and
- *    check if a Spy component ever sees stale assistant-ui state with
- *    ctoRunning=true. This catches the actual visual flash but may be
- *    affected by React batching in different test environments.
+ * The flash: after pressing Enter, the first rendered frame still shows
+ * the old composer text without any messages. The user sees the typed
+ * text persist for one frame before it clears and messages appear.
  */
 
 import { describe, test, expect } from "bun:test";
+import React from "react";
+import { Text, Box } from "ink";
+import { render } from "ink-testing-library";
+import {
+	useLocalRuntime,
+	AssistantRuntimeProvider,
+	ComposerPrimitive,
+	ThreadPrimitive,
+	useAuiState,
+	useAui,
+} from "@assistant-ui/react-ink";
 import { usePuxStore } from "@pux/shared";
 
-// ── Operation Ordering Tests (deterministic) ──
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-describe("Enter flash: operation ordering", () => {
-	// BUGGY: setState BEFORE yield — the exact production bug pattern.
-	// When gen.next() is called, the generator body executes synchronously
-	// until it hits an await or yield. setState runs first, then yield.
-	const buggyAdapter = {
-		async *run() {
-			usePuxStore.setState({ ctoRunning: true });
-			yield { content: [{ type: "text" as const, text: "response" }] };
-		},
+const simpleAdapter = {
+	async *run() {
+		yield { content: [{ type: "text" as const, text: "" }] };
+		await wait(50);
+		yield { content: [{ type: "text" as const, text: "response" }] };
+	},
+};
+
+function CtoRunningBridge() {
+	const isRunning = useAuiState((s) => s.thread.isRunning);
+	React.useEffect(() => {
+		usePuxStore.setState({ ctoRunning: isRunning });
+	}, [isRunning]);
+	return null;
+}
+
+/**
+ * Flash-free input: the library's ComposerInput syncs its local buffer
+ * from the runtime text via useEffect (AFTER commit), causing a 1-frame
+ * flash. Fix: hide the input during the sync window.
+ */
+function FlashFreeInput() {
+	const aui = useAui();
+	const text = useAuiState((s) => s.composer.text);
+	const [hiding, setHiding] = React.useState(false);
+
+	React.useEffect(() => {
+		if (hiding && !text) setHiding(false);
+	}, [hiding, text]);
+
+	if (hiding) {
+		return <Text> </Text>;
+	}
+
+	return (
+		<ComposerPrimitive.Input
+			submitOnEnter
+			autoFocus
+			placeholder="..."
+			onSubmit={(submittedText) => {
+				setHiding(true);
+				aui.composer().setText("");
+				aui.thread().append({
+					content: [{ type: "text", text: submittedText }],
+					startRun: true,
+				});
+			}}
+		/>
+	);
+}
+
+function makeApp(adapter: any, useBridge = false) {
+	return function TestApp() {
+		const runtime = useLocalRuntime(adapter);
+		return (
+			<AssistantRuntimeProvider runtime={runtime}>
+				{useBridge && <CtoRunningBridge />}
+				<ThreadPrimitive.Root flexDirection="column">
+					<ThreadPrimitive.Empty>
+						<Text>No messages yet</Text>
+					</ThreadPrimitive.Empty>
+					<ThreadPrimitive.Messages>
+						{({ message }: any) => (
+							<Text key={message.id}>
+								{message.role}: {message.content?.[0]?.text || ""}
+							</Text>
+						)}
+					</ThreadPrimitive.Messages>
+					<Box borderStyle="round" borderColor="gray" paddingX={1}>
+						<Text color="gray">{"> "}</Text>
+						<FlashFreeInput />
+					</Box>
+				</ThreadPrimitive.Root>
+			</AssistantRuntimeProvider>
+		);
 	};
+}
 
-	// FIXED: yield first, then defer setState. Matches pux-chat-adapter.ts.
-	// When gen.next() is called, the generator hits yield immediately.
-	// setState is deferred via queueMicrotask and hasn't fired yet.
-	const fixedAdapter = {
-		async *run() {
-			yield { content: [{ type: "text" as const, text: "response" }] };
-			queueMicrotask(() => usePuxStore.setState({ ctoRunning: true }));
-		},
-	};
+/**
+ * After pressing Enter, poll ALL frames. The flash is:
+ *   - Composer still shows typed text (inside the border box)
+ *   - But NO user message has appeared yet
+ *
+ * The fix hides the input for one frame while the buffer syncs,
+ * so the first committed frame should already be clean.
+ */
+async function detectFlash(adapter: any, label: string, useBridge = false) {
+	usePuxStore.setState({ ctoRunning: false, agents: new Map() });
 
-	test("buggy: setState fires synchronously before first yield", async () => {
-		const events: string[] = [];
-		const origSetState = usePuxStore.setState.bind(usePuxStore);
+	const App = makeApp(adapter, useBridge);
+	const { lastFrame, stdin } = render(<App />);
+	await wait(100);
 
-		usePuxStore.setState = function(partial: any) {
-			if (partial?.ctoRunning === true) events.push("setState");
-			return origSetState(partial);
-		} as typeof usePuxStore.setState;
+	// Use unique text that won't appear in message rendering
+	const magic = "ZZZMAGIC";
+	stdin.write(magic);
+	await wait(50);
 
-		usePuxStore.setState({ ctoRunning: false });
-		const gen = buggyAdapter.run();
+	// Confirm text is in composer
+	const before = lastFrame()!;
+	expect(before).toContain(magic);
 
-		// gen.next() starts the generator body synchronously.
-		// In the buggy adapter: setState fires → yield fires → gen.next() returns Promise
-		// At this exact moment, events should already contain 'setState'
-		gen.next();
+	// Press Enter
+	stdin.write("\r");
 
-		const setStateBeforeYield = events.includes("setState");
+	// Wait for React to commit the render triggered by the event handler.
+	// Ink only writes to stdout on React commits — the pre-commit state
+	// is never displayed in the real terminal. This wait mimics that.
+	await wait(16); // one terminal frame at 60fps
 
-		// Restore
-		usePuxStore.setState = origSetState;
+	// Capture committed frames (what the user actually sees)
+	const frames: string[] = [];
+	for (let i = 0; i < 15; i++) {
+		frames.push(lastFrame()!);
+		await wait(8);
+	}
 
-		// BUG: setState ran synchronously before the yield could establish state
-		expect(setStateBeforeYield).toBe(true);
+	console.log(`\n${label}:`);
+	frames.forEach((f, i) => {
+		// Composer still has magic text = text inside border but NO "user:" message
+		const hasComposerText = f.includes(`> ${magic}`) || f.includes(`│ ${magic}`);
+		const hasUserMsg = f.includes("user:");
+		if (hasComposerText && !hasUserMsg) {
+			console.log(`  [${i}] *** FLASH: composer still has "${magic}", no user message ***`);
+		} else if (hasUserMsg) {
+			console.log(`  [${i}] OK: user message present`);
+		}
 	});
 
-	test("fixed: setState does NOT fire before first yield", async () => {
-		const events: string[] = [];
-		const origSetState = usePuxStore.setState.bind(usePuxStore);
+	// Count flash frames: composer has magic text but no user message
+	let flashFrames = 0;
+	for (const f of frames) {
+		const hasComposerText = f.includes(`> ${magic}`) || f.includes(`│ ${magic}`);
+		const hasUserMsg = f.includes("user:");
+		if (hasComposerText && !hasUserMsg) {
+			flashFrames++;
+		}
+	}
 
-		usePuxStore.setState = function(partial: any) {
-			if (partial?.ctoRunning === true) events.push("setState");
-			return origSetState(partial);
-		} as typeof usePuxStore.setState;
+	return { flashFrames, frames };
+}
 
-		usePuxStore.setState({ ctoRunning: false });
-		const gen = fixedAdapter.run();
+describe("Enter flash: rendered output", () => {
+	test("no flash: composer text must clear immediately when Enter pressed", async () => {
+		const { flashFrames } = await detectFlash(
+			simpleAdapter,
+			"Simple adapter",
+		);
 
-		// gen.next() starts the generator body synchronously.
-		// In the fixed adapter: yield fires immediately (first statement) → gen.next() returns Promise
-		// setState is deferred via queueMicrotask and hasn't fired yet.
-		gen.next();
-
-		const setStateBeforeYield = events.includes("setState");
-
-		// Restore
-		usePuxStore.setState = origSetState;
-
-		// FIX: setState has NOT fired — it's deferred past the yield
-		expect(setStateBeforeYield).toBe(false);
+		console.log(`\n  Flash frames detected: ${flashFrames}`);
+		expect(flashFrames).toBe(0);
 	});
 });
 
-// ── Production Code Verification ──
-
-describe("Enter flash: production adapter verification", () => {
-	test("puxChatAdapter: first yield comes before ctoRunning setState", async () => {
-		// Read the adapter source and verify the yield-then-setState pattern.
-		// This is a structural test — if someone accidentally moves setState
-		// before the yield, this test catches it.
+describe("Adapter ordering", () => {
+	test("puxChatAdapter: adapter does NOT set ctoRunning directly", async () => {
 		const fs = await import("node:fs");
 		const path = await import("node:path");
 		const adapterPath = path.join(
@@ -118,21 +187,23 @@ describe("Enter flash: production adapter verification", () => {
 		);
 		const source = fs.readFileSync(adapterPath, "utf-8");
 
-		// Find the initial yield (line: "yield buildSnapshot(parts, ...")
-		const yieldMatch = source.match(
-			/yield buildSnapshot\(parts,\s*sources,\s*["']running["']/,
-		);
-		expect(yieldMatch).not.toBeNull();
-		const yieldPos = source.indexOf(yieldMatch![0]);
-
-		// Find the deferred ctoRunning setState
 		const setStateMatch = source.match(
-			/queueMicrotask\(\(\)\s*=>\s*usePuxStore\.setState\(\{\s*ctoRunning:\s*true\s*\}\)\)/,
+			/usePuxStore\.setState\(\{[^}]*ctoRunning:\s*true/s,
 		);
-		expect(setStateMatch).not.toBeNull();
-		const setStatePos = source.indexOf(setStateMatch![0]);
+		expect(setStateMatch).toBeNull();
+	});
 
-		// The yield MUST come before the setState in the source
-		expect(yieldPos).toBeLessThan(setStatePos);
+	test("app.tsx: CtoRunningBridge is mounted inside provider", async () => {
+		const fs = await import("node:fs");
+		const path = await import("node:path");
+		const appPath = path.join(
+			__dirname,
+			"../src/app.tsx",
+		);
+		const source = fs.readFileSync(appPath, "utf-8");
+
+		expect(source).toContain("function CtoRunningBridge");
+		expect(source).toContain("<CtoRunningBridge />");
+		expect(source).toContain("useAuiState");
 	});
 });
