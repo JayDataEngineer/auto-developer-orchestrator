@@ -1,6 +1,11 @@
 package sandbox
 
-import "go.uber.org/zap"
+import (
+	"context"
+
+	"github.com/moby/moby/client"
+	"go.uber.org/zap"
+)
 
 // NewTestManager creates a Manager for testing without Docker.
 func NewTestManager() *Manager {
@@ -39,4 +44,19 @@ func (m *Manager) SetTestContainerIP(sandboxID, ip string) {
 		m.testContainerIPs = make(map[string]string)
 	}
 	m.testContainerIPs[sandboxID] = ip
+}
+
+// SandboxHealthy checks whether the Docker daemon (used by sandbox containers) is reachable.
+// Returns true if Docker responds to a ping, false otherwise.
+func SandboxHealthy(ctx context.Context) bool {
+	dockerClient, err := client.New(client.FromEnv)
+	if err != nil {
+		return false
+	}
+	defer dockerClient.Close()
+
+	if _, err := dockerClient.Ping(ctx, client.PingOptions{}); err != nil {
+		return false
+	}
+	return true
 }
