@@ -181,6 +181,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// Start interval/at timers
 	go s.runIntervalLoop(ctx)
 
+	// Start one-shot cleanup loop
+	go s.runCleanupLoop(ctx)
+
 	s.logger.Info("scheduler started", zap.Int("jobs", len(s.jobs)))
 	return nil
 }
@@ -190,6 +193,61 @@ func (s *Scheduler) Stop() {
 	close(s.stopCh)
 	s.cronScheduler.Stop()
 	s.logger.Info("scheduler stopped")
+}
+
+// CleanupExpiredOneShots removes one-shot manual jobs older than maxAge.
+// A one-shot is identified by Description == "oneshot".
+// Returns the number of jobs cleaned up.
+func (s *Scheduler) CleanupExpiredOneShots(maxAge time.Duration) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	ctx := context.Background()
+	var cleaned int
+
+	for id, job := range s.jobs {
+		if job.Description != "oneshot" {
+			continue
+		}
+		if job.Schedule != ScheduleManual {
+			continue
+		}
+		if job.Status == StatusRunning {
+			continue
+		}
+		if job.LastRunAt.IsZero() {
+			continue
+		}
+		if now.Sub(job.LastRunAt) > maxAge {
+			delete(s.jobs, id)
+			s.db.DeleteScheduledJob(ctx, id)
+			s.db.PruneRunLogs(ctx, id, 0) // delete all logs for this job
+			cleaned++
+		}
+	}
+
+	return cleaned
+}
+
+// runCleanupLoop periodically removes expired one-shot jobs.
+func (s *Scheduler) runCleanupLoop(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			cleaned := s.CleanupExpiredOneShots(24 * time.Hour)
+			if cleaned > 0 {
+				s.logger.Info("cleaned up expired one-shot jobs", zap.Int("count", cleaned))
+			}
+		}
+	}
 }
 
 // SetSessionInjector sets the session delivery callback.

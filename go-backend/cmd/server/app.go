@@ -57,6 +57,7 @@ type App struct {
 	computerUseHandler *handlers.ComputerUseHandler
 	x11Handler         *handlers.X11Handler
 	sched              *scheduler.Scheduler
+	jobsHandler        *handlers.JobsHandler
 	promPusher         *observability.MetricsPusher
 	extMgr             *extensions.Manager
 	imageServer        *vision.ImageServer
@@ -417,6 +418,21 @@ func (a *App) initScheduler() {
 	if a.puxHandler != nil {
 		a.puxHandler.SetSchedulerTool(&schedulerBackend{inner: a.sched})
 	}
+
+	// Jobs API handler (one-shot task submission for external agents)
+	a.jobsHandler = handlers.NewJobsHandler(a.sched, "http://localhost:3847", a.logger)
+	if home, err := os.UserHomeDir(); err == nil {
+		settingsPath := filepath.Join(home, ".pi", "agent", "settings.json")
+		if data, err := os.ReadFile(settingsPath); err == nil {
+			var cfg struct {
+				JobsAPIKey string `json:"jobsApiKey"`
+			}
+			if json.Unmarshal(data, &cfg) == nil && cfg.JobsAPIKey != "" {
+				a.jobsHandler.SetAPIKey(cfg.JobsAPIKey)
+				a.logger.Info("jobs API key configured")
+			}
+		}
+	}
 }
 
 // schedulerBackend adapts *scheduler.Scheduler to schedulertool.Backend.
@@ -718,6 +734,13 @@ func (a *App) buildRouter(
 		r.Route("/scheduler", func(r chi.Router) {
 			schedulerHandler.RegisterRoutes(r)
 		})
+
+		// Jobs API (one-shot task submission for external agents)
+		if a.jobsHandler != nil {
+			r.Route("/jobs", func(r chi.Router) {
+				a.jobsHandler.RegisterRoutes(r)
+			})
+		}
 
 		// Workers
 		workersDir := filepath.Join(common.FindKernelConfigDir(), "workers")
