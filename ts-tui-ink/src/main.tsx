@@ -231,7 +231,9 @@ process.on("uncaughtException", () => {});
 
 const instance = render(appElement, {
 	exitOnCtrlC: false,
-	kittyKeyboard: { mode: "disabled" },
+	kittyKeyboard: supportsKittyKeyboard()
+		? { mode: "enabled" }
+		: { mode: "disabled" },
 });
 
 // Force Ink to clear and re-render on terminal resize.
