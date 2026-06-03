@@ -36,12 +36,8 @@ export function Thread() {
 				{() => <MessageWrapper />}
 			</ThreadPrimitive.Messages>
 
-			{/* Thread-level loading indicator */}
-			<LoadingPrimitive.Root gap={1}>
-				<LoadingPrimitive.Spinner variant="dots" />
-				<LoadingPrimitive.Text />
-				<LoadingPrimitive.ElapsedTime />
-			</LoadingPrimitive.Root>
+			{/* Thread-level braille spinner */}
+			<LoadingPrimitive.Spinner />
 
 			{/* Composer — inside ThreadPrimitive.Root like library example */}
 			<ComposerBar />
