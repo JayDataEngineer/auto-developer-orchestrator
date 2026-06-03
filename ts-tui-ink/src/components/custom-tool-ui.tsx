@@ -233,6 +233,13 @@ function DelegateRenderer({
 				</Text>
 			)}
 
+			{/* Show agent thinking preview while running — above tools */}
+			{thinkingText && isRunning && (
+				<Text color={colors.textMuted}>
+					{"  └ "}{BLOCKQUOTE_BAR} {trunc(thinkingText.split("\n").pop() || thinkingText, cols - 8)}
+				</Text>
+			)}
+
 			{visibleTools.map((tc, i) => {
 				const isActive = !tc.endedAt;
 				const isLast = i === visibleTools.length - 1;
@@ -259,13 +266,6 @@ function DelegateRenderer({
 
 			{toolCalls.length === 0 && !thinkingText && (
 				<Text color={colors.textMuted}>{"  └ "}starting...</Text>
-			)}
-
-			{/* Show agent thinking preview while running */}
-			{thinkingText && isRunning && (
-				<Text color={colors.textMuted}>
-					{"  └ "}{BLOCKQUOTE_BAR} {trunc(thinkingText.split("\n").pop() || thinkingText, cols - 8)}
-				</Text>
 			)}
 		</Box>
 	);

@@ -832,6 +832,7 @@ func (r *ParallelRunner) buildSubAgent(
 		ContextSize:         r.cfg.ContextSize,
 		Tools:               setup.SelectedTools,
 		ToolResultProcessor: newCtxMgrProcessor(ctxMgr),
+		ToolExecTimeoutSec:  300, // 5 min per tool — prevents MCP scrapes from hanging forever
 		Opts: core.GenerateOptions{
 			MaxTokens:   8192,
 			Temperature: temperature,
@@ -1571,8 +1572,8 @@ func (e *loadSpilledExecutor) ToolTimeoutHint(name string) time.Duration {
 	if name == "load_spilled" {
 		return 30 * time.Second
 	}
-	if reg, ok := e.inner.(*core.ToolRegistry); ok {
-		return reg.ToolTimeoutHint(name)
+	if hinter, ok := e.inner.(interface{ ToolTimeoutHint(string) time.Duration }); ok {
+		return hinter.ToolTimeoutHint(name)
 	}
 	return 0
 }
