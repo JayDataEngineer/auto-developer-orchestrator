@@ -1,22 +1,24 @@
-# PUX - AiO Ai Harness Hub
+# PUX - Agent Orcastrator System
 
-Pux is a system crafted for maximum, streamlined control over the AI system that you use.
+Pux is a system crafted for streamlined control over an AI Orcastrator with a focus on customization.
+
+## Interfaces
+
+There are three interfaces that can be used.
+
+a) Web interface - The main focus for the interface. Features a view for the Sandbox as well as a text editor.
+b) TUI interface - WIP, a standard interface for AI Agents.
+c) CLI interface / MCP interface. This allows for integratation with tools such as the Hermes series of programs.
 
 ## Make Pux your own with Text Files
 
 Through the WebUI, agents and orchestrators can be made on the fly. Get your agent just the way you like it.
-
-Tasks can be specific, like coding, or something more generalized, such as a specialized, no code deep research pipeline.
-
-Proudly unopinionated.
+Features tooling for coding tasks, and an easy to extend the skill based interface to extend the toolkit for tasks such as deep research.
 
 ## Tooling to get the Job Done
 
 Native to Pux is a sandboxed desktop, browser, text editor, and vision toolkit. This gives an edge to Pux when dealing with web development, or integrating it with tools such as telegram or game development.
-
-There is a WebUI, as well as an early alpha release of the Terminal Interface.
-
-Coming soon, scheduled jobs. This allows jobs to be run entirely in a safe, sandboxed environment.
+Coming soon, scheduled jobs. This allows jobs to be run entirely in a safe, sandboxed environments.
 
 ## Stay Soverign at any Step
 
@@ -32,7 +34,7 @@ In the fast paced corporate world of today, it is easy to get 'locked in' to a c
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Prerequisites
 - **Go 1.26+**
@@ -57,7 +59,7 @@ Access the web UI at **http://localhost:5174**. Then add a provider (OpenRouter,
 
 ---
 
-## 🏗 Build System (Taskfile)
+## Build System (Taskfile)
 
 The project uses **[Task](https://taskfile.dev)** for all operations. Run `task --list` to see everything available.
 
@@ -75,7 +77,7 @@ The project uses **[Task](https://taskfile.dev)** for all operations. Run `task 
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 - `/go-backend` — Go API server, agent loop, orchestrator, tool registry
 - `/ts-tui-ink` — Terminal UI (React 19 + Ink 6 + @assistant-ui/react-ink)
@@ -83,10 +85,3 @@ The project uses **[Task](https://taskfile.dev)** for all operations. Run `task 
 - `/shared` — Shared package (`@pux/shared`): PuxChatAdapter, Zustand store, SSE types
 - `/config` — Kernel config: CTO prompt, employee roles, tool packages, worker definitions
 
----
-
-## 📝 Documentation
-
-- [Architecture Guide](ARCHITECTURE.md) - Deep dive into system design
-- [Changelog](docs/CHANGELOG.md) - Implementation history and status
-- [Manifesto](MANIFESTO.md) - Project vision and philosophy
