@@ -46,10 +46,9 @@ go-backend/server
 go-backend/tmp/
 go-backend/go-backend/
 
-# Data and sessions
+# Runtime data (sessions, memory, memos, trash, spill)
 data/
-**/.pux/sessions/
-**/.pux/spill/
+**/.pux/
 
 # Keys and credentials
 ref_docs/
@@ -66,8 +65,9 @@ reference/
 projects/
 go-backend/projects/
 
-# Scratch docs (auto-generated, one-off notes)
+# Scratch docs and old scaffolding (auto-generated, one-off notes)
 docs/
+docs-template/
 
 # Bun lockfiles in workspace packages (root manages deps)
 shared/bun.lock
@@ -96,12 +96,12 @@ _archive/
 # Pi config directory (session data, not source)
 pi-config/
 
-# One-off planning docs (moved to docs/)
-docs/OPENSHELL_INTEGRATION_PLAN.md
-docs/SCHEDULER_PLAN.md
-
-# Runtime data
+# Local runtime / MCP config
 .antigravitycli/
+.mcp.json
+
+# Agent-generated reports
+**/memos/
 
 # Stray images from agent/sandbox runs
 /*.jpg
