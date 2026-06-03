@@ -81,6 +81,7 @@ export function ComposerBar() {
 
 function CommandPalette() {
 	const text = useAuiState((s) => s.composer.text);
+	const colors = useColors();
 
 	const matches = useMemo(() => {
 		if (!text || !text.startsWith("/")) return [];
