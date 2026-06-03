@@ -3,12 +3,36 @@
 ## Quick Start
 
 ```bash
-task model             # Start llama-server (vision + thinking, default)
+task install           # Install dependencies (first time)
 task dev               # Start Go backend + Vite frontend
-# Ctrl+C to stop dev, then:
-task model-down        # Stop llama-server
-task down              # Stop everything (backend, frontend, sandboxes)
+task chat              # Start TUI
+task down              # Stop everything
 ```
+
+Then add a provider through the TUI or web UI model picker — no `.env` keys or config files needed. The system is blank until you bring your own LLM endpoint.
+
+## Provider System
+
+Pux doesn't ship with hardcoded model endpoints. Users add providers through the UI, which saves to `~/.pi/agent/settings.json`.
+
+**Adding a provider:**
+- **TUI**: `/model` → type provider name → select "Add provider" → enter baseUrl, API key, models
+- **Web**: Click model name in composer → "Add Provider" → fill in details
+- **API**: `POST /api/pux/providers` with `{id, baseUrl, apiKey, models: [{id, name, contextWindow}]}`
+
+**Any OpenAI-compatible endpoint works:** local llama-server, OpenRouter, Together, Groq, vLLM, Ollama, etc.
+
+**Model resolution** (`resolveEngineForModel`):
+1. Settings.json providers (user-configured) — first match by model ID
+2. Hardcoded dev engines (local llama-server, cluster, Gemini, OpenRouter) — only on dev machines
+
+**Defaults** — two persistent model defaults set from the model picker:
+- **Logic** (`defaultLogic`): CTO/orchestrator model (reasoning-heavy)
+- **Worker** (`defaultWorker`): Sub-agent model (faster execution)
+- **API**: `GET/PUT /api/pux/defaults` → `{logic, worker}`
+
+**Resolution priority (CTO):** per-agent selection → inline `--model` → logic default → error
+**Resolution priority (workers):** role `model:` field → worker default → CTO's engine
 
 ## Taskfile Commands
 
@@ -82,14 +106,13 @@ User ───────────────┤                           
                      POST /api/jobs        (external agents)
                                  │
                                  ▼
-                                 │
-                                 ▼
-                    Go Kernel (3847) ──────── llama-server (8001)
-                         │                        │
-                    Docker Sandboxes         MCP Servers
-                    ┌────┴────┐              ┌────┴────┐
-                    Chrome CDP  xdotool      web       media
-                    (browser)  (desktop)    (research) (vision)
+                    Go Kernel (3847) ──────── LLM Providers (user-configured)
+                         │                   settings.json: OpenRouter, local,
+                    Docker Sandboxes         cluster, Gemini, vLLM, Ollama...
+                    ┌────┴────┐
+                    Chrome CDP  xdotool      MCP Servers
+                    (browser)  (desktop)    ┌────┴────┐
+                                               web    media
 ```
 
 The kernel's job is to manage contracts: agent loop, tool execution, sandbox lifecycle.
@@ -206,32 +229,11 @@ my-org/
 - **Vision-in-the-loop**: browser screenshots auto-described via vision provider chain
 - **SoM labeler**: JS injection labels interactive elements with numbered boxes, 50-element cap
 
-### Model Defaults (Logic & Worker)
+### Model Defaults
 
-The system supports two persistent model defaults configured from the model selector:
-
-| Default | Purpose | API field |
-|---------|---------|-----------|
-| **Logic** | CTO/orchestrator — reasoning-heavy, planning | `defaultLogic` |
-| **Worker** | Sub-agents/employees — faster execution | `defaultWorker` |
-
-**How it works:**
-1. Set defaults via the model picker dropdown (click the model name in the composer)
-   - **Web**: dropdown shows current defaults at top, "Set as Logic Default" / "Set as Worker Default" buttons
-   - **TUI**: `l` to set highlighted model as logic, `w` to set as worker
-2. Defaults are persisted in `~/.pi/agent/settings.json` under `"defaults"`
-3. Logic default is used for CTO prompts when no explicit model is selected
-4. Worker default is used by `ProviderFactory` for sub-agents without a `model:` field in their role config
-5. If a worker default isn't set, sub-agents fall through to the CTO's engine
-
-**Resolution priority (CTO):** per-agent selection → inline `--model` → logic default → fallback chain
-**Resolution priority (workers):** role `model:` field → worker default → CTO's engine
-
-**API:**
-- `GET /api/pux/defaults` — returns `{logic, worker}`
-- `PUT /api/pux/defaults` — sets `{logic, worker}`
-
-**Files:** `go-backend/internal/handlers/pux.go` (fields + Prompt wiring), `pux_models.go` (handlers + persistence), `pux_prompt.go` (ProviderFactory wiring), `shared/src/pux-store.ts` (state + actions), `src/web/src/components/assistant-ui/thread.tsx` (UI), `ts-tui-ink/src/components/model-picker.tsx` (TUI)
+See **Provider System** section above for how logic/worker defaults work.
+**TUI**: `l` to set logic default, `w` to set worker default in model picker.
+**API**: `GET/PUT /api/pux/defaults` → `{logic, worker}`
 
 ## Key Packages
 
