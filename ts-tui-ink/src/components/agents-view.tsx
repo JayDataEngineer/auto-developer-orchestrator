@@ -45,11 +45,11 @@ export function AgentsView() {
 
 	// Keyboard navigation
 	useInput((input: string, key: any) => {
-		if (agentList.length === 0) return;
 		if (key.escape) {
 			usePuxStore.getState().setTuiView("chat");
 			return;
 		}
+		if (agentList.length === 0) return;
 		if (key.upArrow) {
 			setSelectedIdx(Math.max(0, selectedIdx - 1));
 			return;
@@ -87,7 +87,10 @@ export function AgentsView() {
 			<Box flexDirection="column" paddingX={2} paddingY={1}>
 				<Text bold color={colors.brand}>Subagents</Text>
 				<Box marginTop={1}>
-					<Text dimColor>No agents running. Agents appear when the CTO delegates tasks.</Text>
+					<Text color={colors.textMuted}>No agents yet. Agents appear when the CTO delegates tasks.</Text>
+				</Box>
+				<Box marginTop={1}>
+					<Text color={colors.textMuted}><Text bold>Esc</Text> back to chat</Text>
 				</Box>
 			</Box>
 		);
@@ -106,7 +109,7 @@ export function AgentsView() {
 			{/* Header */}
 			<Box marginBottom={1}>
 				<Text bold color={colors.brand}>Subagents</Text>
-				<Text color="gray"> {symbols.dot} </Text>
+				<Text color={colors.textMuted}> {symbols.dot} </Text>
 				{running > 0 && <Text color={colors.running}>{running} running </Text>}
 				{completed > 0 && <Text color={colors.success}>{completed} done </Text>}
 				{failed > 0 && <Text color={colors.error}>{failed} failed </Text>}
@@ -123,7 +126,7 @@ export function AgentsView() {
 			))}
 
 			{agentList.length > maxVisible && (
-				<Text dimColor color="gray">
+				<Text color={colors.textMuted}>
 					... {scrollOffset + 1}–{scrollOffset + visibleAgents.length} of {agentList.length}
 				</Text>
 			)}
@@ -170,14 +173,14 @@ function AgentCard({
 				<Text bold color={isSelected ? colors.brand : undefined}>
 					{agent.agentName}
 				</Text>
-				<Text color="gray"> {symbols.dot} </Text>
+				<Text color={colors.textMuted}> {symbols.dot} </Text>
 				<Text color={statusColor}>{duration}</Text>
-				<Text color="gray"> {symbols.dot} </Text>
+				<Text color={colors.textMuted}> {symbols.dot} </Text>
 				<Text dimColor>{agent.toolCalls.length} tools</Text>
 			</Box>
 
 			{/* Task preview */}
-			<Text dimColor color="gray">
+			<Text color={colors.textMuted}>
 				{"  "}{BLOCKQUOTE_BAR} {agent.task.slice(0, 80)}
 				{agent.task.length > 80 ? "..." : ""}
 			</Text>
@@ -196,7 +199,7 @@ function AgentCard({
 									</Text>
 									<Text dimColor>{tc.toolName}</Text>
 									{tc.result !== undefined && (
-										<Text color="gray">
+										<Text color={colors.textMuted}>
 											{" "}
 											{typeof tc.result === "string"
 												? tc.result.slice(0, 40)
@@ -206,7 +209,7 @@ function AgentCard({
 								</Box>
 							))}
 							{agent.toolCalls.length > 10 && (
-								<Text dimColor color="gray">
+								<Text color={colors.textMuted}>
 									{"  "}... +{agent.toolCalls.length - 10} more
 								</Text>
 							)}
@@ -223,7 +226,7 @@ function AgentCard({
 								</Text>
 							))}
 							{agent.result.split("\n").length > 5 && (
-								<Text dimColor color="gray">
+								<Text color={colors.textMuted}>
 									{"  "}... +{agent.result.split("\n").length - 5} more lines
 								</Text>
 							)}
