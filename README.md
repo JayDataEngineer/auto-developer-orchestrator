@@ -32,61 +32,56 @@ In the fast paced corporate world of today, it is easy to get 'locked in' to a c
 
 ---
 
-## 🚀 Quick Start (Local)
+## 🚀 Quick Start
 
 ### 1. Prerequisites
-- **Node.js 22+**
-- **Go 1.24+**
-- **Docker & Docker Compose** (optional, recommended for full infra)
+- **Go 1.26+**
+- **Bun** (for TUI)
+- **Docker** (optional, for sandboxes and local model server)
+- **Task** ([taskfile.dev](https://taskfile.dev)) — `sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin`
 
 ### 2. Setup
 ```bash
-# Clone and install dependencies
 git clone https://github.com/JayDataEngineer/auto-developer-orchestrator.git
 cd auto-developer-orchestrator
-make install
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your JULES_API_KEY and GITHUB_TOKEN
+task install
 ```
 
 ### 3. Run
 ```bash
-# Start the full stack locally (Native)
-make dev
-
-# OR start with Docker (Recommended for Traefik/LiteLLM/Langfuse integration)
-make up
+task dev     # Start Go backend + Vite frontend
+task chat    # Start TUI
 ```
-Access at **http://localhost:5174** (Native) or **http://orchestrator.local** (Docker).
+
+Access the web UI at **http://localhost:5174**. Then add a provider (OpenRouter, local llama-server, etc.) through the model picker — no config files needed.
 
 ---
 
-## 🏗 Build System (Makefile)
+## 🏗 Build System (Taskfile)
 
-The project uses a unified **Makefile** for all operations:
+The project uses **[Task](https://taskfile.dev)** for all operations. Run `task --list` to see everything available.
 
 | Command | Description |
 |---------|-------------|
-| `make install` | Install all dependencies (JS, Go, Python) |
-| `make dev` | Start everything locally (Native) |
-| `make up` | Start Docker development environment |
-| `make down` | Stop Docker environment |
-| `make test` | Run all unit and E2E tests |
-| `make lint` | Run all code formatters/linters |
-| `make db-backup` | Backup the SQLite database |
-| `make infra-check` | Check health of shared-docker-infra |
+| `task install` | Install all dependencies (JS, Go) |
+| `task dev` | Start Go backend (3847) + Vite frontend (5174) |
+| `task chat` | Start the TUI (terminal interface) |
+| `task build` | Build server and CLI binaries |
+| `task down` | Stop everything — backend, frontend, sandboxes |
+| `task model` | Start local llama-server (requires NVIDIA GPU) |
+| `task test-go` | Run Go unit tests |
+| `task test-e2e` | Run Playwright E2E tests |
+| `task infra-check` | Check health of shared infrastructure |
 
 ---
 
 ## 📂 Project Structure
 
-- `/go-backend`: Go API server and business logic
-- `/python-agent`: Python FastAPI service for complex AI workflows
-- `/src`: React frontend source code
-- `/projects`: Local storage for cloned repositories
-- `/data`: Persistent storage for SQLite database and logs
+- `/go-backend` — Go API server, agent loop, orchestrator, tool registry
+- `/ts-tui-ink` — Terminal UI (React 19 + Ink 6 + @assistant-ui/react-ink)
+- `/src` — Web frontend (Vite + React)
+- `/shared` — Shared package (`@pux/shared`): PuxChatAdapter, Zustand store, SSE types
+- `/config` — Kernel config: CTO prompt, employee roles, tool packages, worker definitions
 
 ---
 
