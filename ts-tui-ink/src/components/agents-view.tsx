@@ -191,23 +191,22 @@ function AgentCard({
 					{/* Tool calls */}
 					{agent.toolCalls.length > 0 && (
 						<Box flexDirection="column">
-							<Text dimColor bold>Tools:</Text>
-							{agent.toolCalls.slice(0, 10).map((tc, i) => (
-								<Box key={i}>
-									<Text color={tc.isError ? colors.error : colors.success}>
-										{tc.isError ? "  ✕" : "  ●"}{" "}
-									</Text>
-									<Text dimColor>{tc.toolName}</Text>
-									{tc.result !== undefined && (
-										<Text color={colors.textMuted}>
-											{" "}
-											{typeof tc.result === "string"
-												? tc.result.slice(0, 40)
-												: JSON.stringify(tc.result).slice(0, 40)}
-										</Text>
-									)}
-								</Box>
-							))}
+							{agent.toolCalls.slice(0, 10).map((tc, i) => {
+								const done = !!tc.endedAt;
+								const icon = tc.isError ? "✕" : done ? "●" : "○";
+								const iconColor = tc.isError ? colors.error : done ? colors.success : colors.running;
+								const label = toolLabel(tc);
+								return (
+									<Box key={i}>
+										<Text color={iconColor}>  {icon} </Text>
+										<Text color={colors.textMuted}>{tc.toolName}</Text>
+										{label && <Text color={colors.textMuted}> {label}</Text>}
+										{tc.endedAt && (
+											<Text color={colors.textMuted}> · {((tc.endedAt - tc.timestamp) / 1000).toFixed(1)}s</Text>
+										)}
+									</Box>
+								);
+							})}
 							{agent.toolCalls.length > 10 && (
 								<Text color={colors.textMuted}>
 									{"  "}... +{agent.toolCalls.length - 10} more
@@ -245,4 +244,26 @@ function AgentCard({
 			)}
 		</Box>
 	);
+}
+
+/** Extract a short label from tool call args — URL, query, file path, etc. */
+function toolLabel(tc: AgentState["toolCalls"][number]): string {
+	const args = tc.args as Record<string, unknown> | undefined;
+	if (!args || typeof args !== "object") return "";
+	// URL-based tools
+	const url = args.url as string | undefined;
+	if (url) return url.replace(/^https?:\/\//, "").slice(0, 50);
+	// Search/research tools
+	const query = (args.query || args.search_query || args.keywords) as string | undefined;
+	if (query) return query.slice(0, 60);
+	// File-based tools
+	const path = (args.path || args.file_path || args.filename) as string | undefined;
+	if (path) return path.replace(/^\/sandbox\/workspace\//, "").slice(0, 60);
+	// Bash commands
+	const cmd = (args.command || args.cmd) as string | undefined;
+	if (cmd) return cmd.slice(0, 60);
+	// Generic: first string arg
+	const first = Object.values(args).find((v) => typeof v === "string") as string | undefined;
+	if (first) return first.slice(0, 60);
+	return "";
 }
