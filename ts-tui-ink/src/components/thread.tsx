@@ -36,8 +36,10 @@ export function Thread() {
 				{() => <MessageWrapper />}
 			</ThreadPrimitive.Messages>
 
-			{/* Thread-level braille spinner */}
-			<LoadingPrimitive.Spinner />
+			{/* Thread-level braille spinner — only visible while loading */}
+			<LoadingPrimitive.Root>
+				<LoadingPrimitive.Spinner />
+			</LoadingPrimitive.Root>
 
 			{/* Composer — inside ThreadPrimitive.Root like library example */}
 			<ComposerBar />
