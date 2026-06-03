@@ -41,6 +41,7 @@ import { QuestionDialog } from "./components/question-dialog.js";
 import { DecisionDialog } from "./components/decision-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
 import { ThemeProvider } from "./theme.js";
+import { useTerminalSize } from "./use-terminal-size.js";
 
 // ── Runtime Provider ──
 
@@ -224,9 +225,13 @@ function PuxApp() {
 		}
 	}, [exit]));
 
+	const { rows } = useTerminalSize();
+
 	return (
-		<Box flexDirection="column">
-			<ContentArea />
+		<Box flexDirection="column" height={rows}>
+			<Box flexGrow={1}>
+				<ContentArea />
+			</Box>
 			<StatusBar />
 		</Box>
 	);

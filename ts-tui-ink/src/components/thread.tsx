@@ -11,7 +11,6 @@ import { Box, Text } from "ink";
 import {
 	ThreadPrimitive,
 	AuiIf,
-	LoadingPrimitive,
 	useAuiState,
 } from "@assistant-ui/react-ink";
 import { AssistantMessage } from "./assistant-message.js";
@@ -26,7 +25,7 @@ const puxVersion = createRequire(import.meta.url)("../../../package.json").versi
 
 export function Thread() {
 	return (
-		<ThreadPrimitive.Root flexDirection="column">
+		<ThreadPrimitive.Root flexDirection="column" flexGrow={1}>
 			{/* Empty state */}
 			<AuiIf condition={(s: any) => s.thread.isEmpty}>
 				<Welcome />
@@ -35,11 +34,6 @@ export function Thread() {
 			<ThreadPrimitive.Messages windowSize={2} windowOverscan={4}>
 				{() => <MessageWrapper />}
 			</ThreadPrimitive.Messages>
-
-			{/* Thread-level braille spinner — only visible while loading */}
-			<LoadingPrimitive.Root>
-				<LoadingPrimitive.Spinner />
-			</LoadingPrimitive.Root>
 
 			{/* Composer — inside ThreadPrimitive.Root like library example */}
 			<ComposerBar />
