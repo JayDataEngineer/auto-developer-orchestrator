@@ -10,6 +10,7 @@ package truncate
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -317,4 +318,27 @@ func truncateStringFromEnd(s string, maxBytes int) string {
 		start++
 	}
 	return s[start:]
+}
+
+// AddLineNumbers prepends right-aligned line numbers to each line.
+// startLine is 1-indexed. Same format as file_read output.
+func AddLineNumbers(content string, startLine int) string {
+	if content == "" {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	maxLine := startLine + len(lines) - 1
+	width := len(strconv.Itoa(maxLine))
+	if width < 4 {
+		width = 4
+	}
+
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "%*d|%s", width, startLine+i, line)
+	}
+	return b.String()
 }

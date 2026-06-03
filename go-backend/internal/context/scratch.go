@@ -351,21 +351,20 @@ func (t *LoadSpilledTool) Execute(_ context.Context, args map[string]any) (any, 
 
 	// Apply same truncation as file_read
 	tr := truncate.Head(sliced, truncate.FileMaxLines, truncate.FileMaxBytes)
-	result := tr.Content
 
-	if tr.Truncated {
-		actualStart := startIdx + 1
-		actualEnd := actualStart + tr.OutputLines - 1
-		result += fmt.Sprintf(
-			"\n\n[Showing lines %d-%d of %d (%s limit). Use offset=%d to continue.]",
-			actualStart, actualEnd, totalLines, truncate.FormatSize(truncate.FileMaxBytes), actualEnd+1,
-		)
-	} else if userLimit > 0 && endIdx < totalLines {
-		result += fmt.Sprintf(
-			"\n\n[%d more lines available. Use offset=%d to continue.]",
-			totalLines-endIdx, endIdx+1,
-		)
+	// Add line numbers (same format as file_read)
+	offset := startIdx + 1
+	output := truncate.AddLineNumbers(tr.Content, offset)
+	contMsg := truncate.FormatFileContinuation(tr, offset, int(userLimit), totalLines)
+	if contMsg != "" {
+		output += contMsg
 	}
 
-	return result, nil
+	return map[string]any{
+		"content":     output,
+		"path":        ref,
+		"total_lines": totalLines,
+		"start_line":  offset,
+		"shown_lines": tr.OutputLines,
+	}, nil
 }

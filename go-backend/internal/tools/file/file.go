@@ -388,7 +388,7 @@ func (t *ReadTool) Execute(ctx context.Context, args map[string]any) (any, error
 	tr := truncate.Head(selectedContent, truncate.FileMaxLines, truncate.FileMaxBytes)
 
 	// Build output with line numbers and continuation message
-	output := addLineNumbers(tr.Content, offset)
+	output := truncate.AddLineNumbers(tr.Content, offset)
 	contMsg := truncate.FormatFileContinuation(tr, offset, userLimit, totalLines)
 	if contMsg != "" {
 		output += contMsg
@@ -454,29 +454,6 @@ func intArg(args map[string]any, key string, def int) int {
 		return i
 	}
 	return def
-}
-
-// addLineNumbers prepends line numbers to each line, starting at startLine.
-func addLineNumbers(content string, startLine int) string {
-	if content == "" {
-		return ""
-	}
-	lines := strings.Split(content, "\n")
-	// Determine width for alignment
-	maxLine := startLine + len(lines) - 1
-	width := len(strconv.Itoa(maxLine))
-	if width < 4 {
-		width = 4
-	}
-
-	var b strings.Builder
-	for i, line := range lines {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		fmt.Fprintf(&b, "%*d|%s", width, startLine+i, line)
-	}
-	return b.String()
 }
 
 // WriteTool implements core.Tool for writing files.
