@@ -66,17 +66,8 @@ reference/
 projects/
 go-backend/projects/
 
-# Docs scaffolding (not in use)
-docs-old/
-docs-template/
-docs/.next/
-docs/next-env.d.ts
-docs/next.config.mjs
-docs/package-lock.json
-docs/package.json
-docs/postcss.config.mjs
-docs/src/
-docs/tsconfig.json
+# Scratch docs (auto-generated, one-off notes)
+docs/
 
 # Bun lockfiles in workspace packages (root manages deps)
 shared/bun.lock
@@ -105,9 +96,12 @@ _archive/
 # Pi config directory (session data, not source)
 pi-config/
 
-# One-off planning docs
+# One-off planning docs (moved to docs/)
 docs/OPENSHELL_INTEGRATION_PLAN.md
 docs/SCHEDULER_PLAN.md
+
+# Runtime data
+.antigravitycli/
 
 # Stray images from agent/sandbox runs
 /*.jpg
@@ -127,8 +121,6 @@ main.py
 models.py
 pacman.html
 review_target.py
-sample.txt
-test.txt
 test_is_prime.py
 test_primes.py
 wordfreq.py
