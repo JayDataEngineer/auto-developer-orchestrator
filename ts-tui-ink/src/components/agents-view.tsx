@@ -1,25 +1,44 @@
 /**
- * AgentsView — live subagent monitoring panel.
+ * AgentsView — subagent conversation panel.
  *
- * Shows a tree of running/completed/failed agents with:
- * - Agent name and task
- * - Status icon and duration
- * - Tool call count and result preview
- * - Collapsible detail for each agent
+ * Shows agents as conversation cards. Collapsed: status + task preview.
+ * Expanded: thinking, tool calls with args/results, text response, error.
  *
  * Data comes from the Zustand store, populated by subagent SSE events
- * in pux-chat-adapter.ts.
+ * in pux-chat-adapter.ts. Completed agents fetch full transcript for
+ * tool results via /api/pux/history.
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
-import { usePuxStore, type AgentState } from "@pux/shared";
+import {
+	usePuxStore,
+	type AgentState,
+	getToolArgPreview,
+	apiUrl,
+	getFetch,
+} from "@pux/shared";
 import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
 
+// ── StoredMessage shape (matches pux-history-adapter.ts) ──
+
+interface StoredMessage {
+	id: number;
+	role: string;
+	content: string;
+	text: string;
+	thinking: string;
+	toolCalls: string;
+	toolCallId: string;
+	toolName: string;
+	createdAt: string;
+}
+
+// ── Agents view (list + conversation) ──
+
 export function AgentsView() {
 	const agents = usePuxStore((s) => s.agents);
-	const setZoomedAgent = usePuxStore((s) => s.setZoomedAgent);
 	const { rows } = useTerminalSize();
 	const [selectedIdx, setSelectedIdx] = useState(0);
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -58,7 +77,7 @@ export function AgentsView() {
 			setSelectedIdx(Math.min(agentList.length - 1, selectedIdx + 1));
 			return;
 		}
-		if (input === " ") {
+		if (key.return || input === " ") {
 			const agent = agentList[selectedIdx];
 			if (agent) {
 				setExpanded((prev) => {
@@ -70,13 +89,6 @@ export function AgentsView() {
 					}
 					return next;
 				});
-			}
-			return;
-		}
-		if (key.return) {
-			const agent = agentList[selectedIdx];
-			if (agent) {
-				setZoomedAgent(agent.agentId);
 			}
 			return;
 		}
@@ -96,7 +108,7 @@ export function AgentsView() {
 		);
 	}
 
-	// Limit visible agents to viewport with scroll window
+	// Limit visible agents to viewport
 	const maxVisible = Math.max(3, rows - 6);
 	const scrollOffset = Math.max(0, Math.min(
 		selectedIdx - Math.floor(maxVisible / 2),
@@ -115,9 +127,9 @@ export function AgentsView() {
 				{failed > 0 && <Text color={colors.error}>{failed} failed </Text>}
 			</Box>
 
-			{/* Agent list */}
+			{/* Agent cards */}
 			{visibleAgents.map((agent, i) => (
-				<AgentCard
+				<AgentConversationCard
 					key={agent.agentId}
 					agent={agent}
 					isSelected={(i + scrollOffset) === selectedIdx}
@@ -133,15 +145,17 @@ export function AgentsView() {
 
 			{/* Controls hint */}
 			<Box marginTop={1}>
-				<Text dimColor>
-					<Text bold>Up/Down</Text> navigate <Text bold>Enter</Text> zoom <Text bold>Space</Text> expand <Text bold>Esc</Text> back
+				<Text color={colors.textMuted}>
+					<Text bold>Up/Down</Text> navigate <Text bold>Enter/Space</Text> expand <Text bold>Esc</Text> back
 				</Text>
 			</Box>
 		</Box>
 	);
 }
 
-function AgentCard({
+// ── Agent conversation card ──
+
+function AgentConversationCard({
 	agent,
 	isSelected,
 	isExpanded,
@@ -151,6 +165,12 @@ function AgentCard({
 	isExpanded: boolean;
 }) {
 	const colors = useColors();
+	const activeProject = usePuxStore((s) => s.activeProject);
+
+	// Transcript data for completed agents
+	const [toolResultMap, setToolResultMap] = useState<Map<string, string>>(new Map());
+	const [transcriptLoaded, setTranscriptLoaded] = useState(false);
+
 	const statusIcon = agent.status === "running"
 		? symbols.toolRunning
 		: agent.status === "error"
@@ -166,62 +186,119 @@ function AgentCard({
 		? `${((agent.endedAt - agent.startedAt) / 1000).toFixed(1)}s`
 		: `${((Date.now() - agent.startedAt) / 1000).toFixed(1)}s`;
 
+	// Fetch transcript when expanded for completed agents
+	useEffect(() => {
+		if (!isExpanded || !agent.transcriptId || !activeProject || transcriptLoaded) return;
+		if (agent.status === "running") return;
+
+		const params = new URLSearchParams({
+			project: activeProject,
+			agentId: agent.transcriptId,
+			limit: "200",
+		});
+
+		getFetch()(apiUrl(`/api/pux/history?${params}`))
+			.then((resp) => resp.ok ? resp.json() : [])
+			.then((data: StoredMessage[]) => {
+				if (!Array.isArray(data)) return;
+				const results = new Map<string, string>();
+				for (const msg of data) {
+					if (msg.role === "tool" && msg.toolCallId) {
+						results.set(msg.toolCallId, msg.content || "");
+					}
+				}
+				setToolResultMap(results);
+				setTranscriptLoaded(true);
+			})
+			.catch(() => {});
+	}, [isExpanded, agent.transcriptId, agent.status, activeProject, transcriptLoaded]);
+
 	return (
 		<Box flexDirection="column" marginBottom={1}>
+			{/* Header line — always visible */}
 			<Box>
 				<Text color={statusColor}>{statusIcon} </Text>
 				<Text bold color={isSelected ? colors.brand : undefined}>
 					{agent.agentName}
 				</Text>
-				<Text color={colors.textMuted}> {symbols.dot} </Text>
-				<Text color={statusColor}>{duration}</Text>
-				<Text color={colors.textMuted}> {symbols.dot} </Text>
-				<Text dimColor>{agent.toolCalls.length} tools</Text>
+				<Text color={colors.textMuted}> {symbols.dot} {agent.toolCalls.length} tools {symbols.dot} {duration}</Text>
 			</Box>
 
-			{/* Task preview */}
-			<Text color={colors.textMuted}>
-				{"  "}{BLOCKQUOTE_BAR} {agent.task.slice(0, 80)}
-				{agent.task.length > 80 ? "..." : ""}
-			</Text>
+			{/* Collapsed: task preview only */}
+			{!isExpanded && (
+				<Text color={colors.textMuted}>
+					{"  "}{BLOCKQUOTE_BAR} {agent.task.slice(0, 80)}
+					{agent.task.length > 80 ? "..." : ""}
+				</Text>
+			)}
 
-			{/* Expanded detail */}
+			{/* Expanded: conversation blocks */}
 			{isExpanded && (
-				<Box flexDirection="column" paddingLeft={3} marginTop={0}>
-					{/* Tool calls */}
-					{agent.toolCalls.length > 0 && (
-						<Box flexDirection="column">
-							{agent.toolCalls.slice(0, 10).map((tc, i) => {
-								const done = !!tc.endedAt;
-								const icon = tc.isError ? "✕" : done ? "●" : "○";
-								const iconColor = tc.isError ? colors.error : done ? colors.success : colors.running;
-								const label = toolLabel(tc);
-								return (
-									<Box key={i}>
-										<Text color={iconColor}>  {icon} </Text>
-										<Text color={colors.textMuted}>{tc.toolName}</Text>
-										{label && <Text color={colors.textMuted}> {label}</Text>}
-										{tc.endedAt && (
-											<Text color={colors.textMuted}> · {((tc.endedAt - tc.timestamp) / 1000).toFixed(1)}s</Text>
-										)}
-									</Box>
-								);
-							})}
-							{agent.toolCalls.length > 10 && (
-								<Text color={colors.textMuted}>
-									{"  "}... +{agent.toolCalls.length - 10} more
-								</Text>
-							)}
-						</Box>
+				<Box flexDirection="column" paddingLeft={2}>
+					{/* Task */}
+					<Text color={colors.textMuted}>
+						{BLOCKQUOTE_BAR} {agent.task.slice(0, 120)}
+						{agent.task.length > 120 ? "..." : ""}
+					</Text>
+
+					{/* Thinking block */}
+					{agent.thinkingText && (
+						<ThinkingBlock text={agent.thinkingText} />
 					)}
 
-					{/* Result */}
-					{agent.result && agent.status === "complete" && (
-						<Box flexDirection="column" marginTop={0}>
-							<Text dimColor bold>Result:</Text>
-							{agent.result.split("\n").slice(0, 5).map((line: string, i: number) => (
-								<Text key={i} dimColor>
-									{"  "}{BLOCKQUOTE_BAR} {line.slice(0, 100)}
+					{/* Tool calls */}
+					{agent.toolCalls.map((tc, i) => {
+						const done = !!tc.endedAt;
+						const icon = tc.isError ? "✕" : done ? "●" : "○";
+						const iconColor = tc.isError ? colors.error : done ? colors.success : colors.running;
+						const label = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 50);
+						const tcDuration = tc.endedAt
+							? `${((tc.endedAt - tc.timestamp) / 1000).toFixed(1)}s`
+							: "";
+
+						// Tool result: from real-time data or transcript
+						const result = tc.result as string | undefined;
+						const transcriptResult = (tc as any).toolCallId
+							? toolResultMap.get((tc as any).toolCallId as string)
+							: undefined;
+						const resultText = typeof result === "string" ? result : transcriptResult;
+
+						return (
+							<Box key={i} flexDirection="column">
+								<Box>
+									<Text color={iconColor}>  {icon} </Text>
+									<Text color={colors.textMuted}>{tc.toolName}</Text>
+									{label && <Text color={colors.textMuted}> {label}</Text>}
+									{tcDuration && <Text color={colors.textMuted}> · {tcDuration}</Text>}
+								</Box>
+								{/* Tool result preview */}
+								{resultText && (
+									<ResultPreview text={resultText} />
+								)}
+							</Box>
+						);
+					})}
+
+					{/* Text response */}
+					{agent.text && (
+						<Text color={colors.text}>
+							{agent.text.split("\n").slice(0, 8).map((line, i) => (
+								<Text key={i}>
+									{i > 0 ? "\n" : ""}{line.slice(0, 120)}
+								</Text>
+							))}
+							{agent.text.split("\n").length > 8 && (
+								<Text color={colors.textMuted}>{"\n"}  ... +{agent.text.split("\n").length - 8} more lines</Text>
+							)}
+						</Text>
+					)}
+
+					{/* Final result (if different from text) */}
+					{agent.result && agent.result !== agent.text && agent.status === "complete" && (
+						<Box flexDirection="column">
+							{agent.result.split("\n").slice(0, 5).map((line, i) => (
+								<Text key={i} color={colors.textMuted}>
+									{"  "}{BLOCKQUOTE_BAR} {line.slice(0, 120)}
 								</Text>
 							))}
 							{agent.result.split("\n").length > 5 && (
@@ -236,7 +313,7 @@ function AgentCard({
 					{agent.error && (
 						<Box marginTop={0}>
 							<Text color={colors.error}>
-								{symbols.cross} {agent.error.slice(0, 100)}
+								{symbols.cross} {agent.error.slice(0, 150)}
 							</Text>
 						</Box>
 					)}
@@ -246,24 +323,48 @@ function AgentCard({
 	);
 }
 
-/** Extract a short label from tool call args — URL, query, file path, etc. */
-function toolLabel(tc: AgentState["toolCalls"][number]): string {
-	const args = tc.args as Record<string, unknown> | undefined;
-	if (!args || typeof args !== "object") return "";
-	// URL-based tools
-	const url = args.url as string | undefined;
-	if (url) return url.replace(/^https?:\/\//, "").slice(0, 50);
-	// Search/research tools
-	const query = (args.query || args.search_query || args.keywords) as string | undefined;
-	if (query) return query.slice(0, 60);
-	// File-based tools
-	const path = (args.path || args.file_path || args.filename) as string | undefined;
-	if (path) return path.replace(/^\/sandbox\/workspace\//, "").slice(0, 60);
-	// Bash commands
-	const cmd = (args.command || args.cmd) as string | undefined;
-	if (cmd) return cmd.slice(0, 60);
-	// Generic: first string arg
-	const first = Object.values(args).find((v) => typeof v === "string") as string | undefined;
-	if (first) return first.slice(0, 60);
-	return "";
+// ── Thinking block (collapsed preview) ──
+
+function ThinkingBlock({ text }: { text: string }) {
+	const colors = useColors();
+	const lines = text.split("\n").filter((l) => l.trim());
+	if (lines.length === 0) return null;
+
+	return (
+		<Box flexDirection="column">
+			{lines.slice(0, 3).map((line, i) => (
+				<Text key={i} color={colors.textMuted}>
+					{BLOCKQUOTE_BAR} {line.slice(0, 120)}
+				</Text>
+			))}
+			{lines.length > 3 && (
+				<Text color={colors.textMuted}>
+					{BLOCKQUOTE_BAR} ... {lines.length - 3} more lines
+				</Text>
+			)}
+		</Box>
+	);
+}
+
+// ── Tool result preview (first 2 lines) ──
+
+function ResultPreview({ text }: { text: string }) {
+	const colors = useColors();
+	const lines = text.split("\n").filter((l) => l.trim());
+	if (lines.length === 0) return null;
+
+	return (
+		<Box flexDirection="column" paddingLeft={3}>
+			{lines.slice(0, 2).map((line, i) => (
+				<Text key={i} color={colors.textMuted}>
+					{BLOCKQUOTE_BAR} {line.slice(0, 100)}
+				</Text>
+			))}
+			{lines.length > 2 && (
+				<Text color={colors.textMuted}>
+					{"  "}{BLOCKQUOTE_BAR} ... {lines.length - 2} more
+				</Text>
+			)}
+		</Box>
+	);
 }
