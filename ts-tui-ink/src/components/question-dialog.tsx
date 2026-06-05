@@ -1,17 +1,21 @@
 /**
- * QuestionDialog — HITL question overlay for the unified decision protocol.
+ * QuestionDialog — HITL question overlay.
  *
- * Style: yellow question header with numbered options and text input.
+ * Clean, minimal design matching the TUI theme. Uses theme colors
+ * instead of hardcoded ANSI colors. Options rendered as a simple
+ * numbered list with selection indicators.
  */
 
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { usePuxStore } from "@pux/shared";
+import { useColors } from "../theme.js";
 
 export function QuestionDialog() {
 	const pending = usePuxStore((s) => s.pendingDecision);
 	const respond = usePuxStore((s) => s.respondToDecision);
 	const [input, setInput] = useState("");
+	const colors = useColors();
 
 	useInput((ch, key) => {
 		if (!pending) return;
@@ -40,35 +44,52 @@ export function QuestionDialog() {
 	const options = pending.options || [];
 
 	return (
-		<Box flexDirection="column" paddingY={1} paddingX={1}>
-			<Box backgroundColor="yellow" paddingX={1}>
-				<Text bold>? Question</Text>
+		<Box flexDirection="column" paddingY={1} paddingX={2}>
+			{/* Header */}
+			<Box>
+				<Text color={colors.warning} bold>? </Text>
+				<Text bold>{pending.title}</Text>
 			</Box>
-			<Box marginTop={1}>
-				<Text>{pending.title}</Text>
-			</Box>
-			{options.length > 0 && (
-				<Box flexDirection="column" marginTop={1}>
-					{options.map((opt, i) => (
-						<Text key={i}>
-							<Text backgroundColor="magenta" bold>{` ${i + 1} `}</Text>
-							<Text> {opt}</Text>
-						</Text>
-					))}
+
+			{/* Description */}
+			{pending.description && (
+				<Box marginTop={1}>
+					<Text color={colors.textMuted}>{pending.description}</Text>
 				</Box>
 			)}
+
+			{/* Options */}
+			{options.length > 0 && (
+				<Box flexDirection="column" marginTop={1}>
+					{options.map((opt, i) => {
+						const numStr = String(i + 1);
+						const isSelected = input === numStr;
+						return (
+							<Box key={i}>
+								<Text color={colors.textMuted}>  </Text>
+								<Text color={isSelected ? colors.brand : colors.textMuted} bold>
+									{numStr}.
+								</Text>
+								<Text> {opt}</Text>
+							</Box>
+						);
+					})}
+				</Box>
+			)}
+
+			{/* Input */}
 			<Box marginTop={1}>
-				<Text color="magenta" bold>{">"} </Text>
+				<Text color={colors.brand} bold>{">"} </Text>
 				<Text>{input}</Text>
-				<Text dimColor>{"\u2588"}</Text>
+				<Text color={colors.textMuted}>{"\u2588"}</Text>
 			</Box>
-			<Box>
-				<Text dimColor color="gray">
-					{pending.allowFreeText
-						? "Type answer or number, Enter to submit"
-						: "Type option number, Enter to select"}
-				</Text>
-			</Box>
+
+			{/* Help */}
+			<Text color={colors.textMuted}>
+				{pending.allowFreeText
+					? "Type answer or number, Enter to submit"
+					: "Type option number, Enter to select"}
+			</Text>
 		</Box>
 	);
 }

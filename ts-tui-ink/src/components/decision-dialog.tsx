@@ -2,8 +2,7 @@
  * DecisionDialog — unified HITL decision overlay.
  *
  * Handles approval and plan_review hints from the unified PendingDecision.
- * Approval: Y/N prompt.
- * Plan review: Accept/Revise/Reject with optional feedback input.
+ * Clean theme-colored design matching the question dialog style.
  */
 
 import React, { useState } from "react";
@@ -18,8 +17,7 @@ export function DecisionDialog() {
 	const [feedbackMode, setFeedbackMode] = useState(false);
 	const colors = useColors();
 
-	// Detect if this is a tool permission request: sourceTool is set and
-	// the title follows the "Allow %q?" pattern or metadata has toolName.
+	// Detect if this is a tool permission request
 	const isToolPerm = pending?.metadata &&
 		(typeof pending.metadata.toolName === "string" ||
 		 (pending.sourceTool && pending.sourceTool !== "ask_user" && pending.sourceTool !== "create_plan"));
@@ -42,7 +40,6 @@ export function DecisionDialog() {
 
 		if (pending.hint === "approval") {
 			if (isToolPerm) {
-				// Tool permission dialog: Y = once, A = always, N = reject
 				if (ch === "y" || ch === "Y") {
 					respond("approve", "");
 				} else if (ch === "a" || ch === "A") {
@@ -51,7 +48,6 @@ export function DecisionDialog() {
 					respond("reject", "");
 				}
 			} else {
-				// Standard approval
 				if (ch === "y" || ch === "Y") {
 					respond("approve", "");
 				} else if (ch === "n" || ch === "N") {
@@ -77,77 +73,72 @@ export function DecisionDialog() {
 		: null;
 
 	return (
-		<Box flexDirection="column" paddingY={1} paddingX={1}>
-			{isApproval ? (
-				<Box backgroundColor="yellow" paddingX={1}>
-					<Text bold>
-						{symbols.cross}
-						{isToolPerm ? ` Tool Permission: ${toolName}` : " Approval Required"}
-					</Text>
-				</Box>
-			) : (
-				<Box backgroundColor="magenta" paddingX={1}>
-					<Text bold>? Plan Review</Text>
-				</Box>
-			)}
+		<Box flexDirection="column" paddingY={1} paddingX={2}>
+			{/* Header */}
+			<Box>
+				<Text color={isApproval ? colors.warning : colors.brand} bold>
+					{isApproval ? `${symbols.cross} ` : "? "}
+				</Text>
+				<Text bold>
+					{isApproval
+						? isToolPerm ? `Tool Permission: ${toolName}` : "Approval Required"
+						: "Plan Review"}
+				</Text>
+			</Box>
 
+			{/* Title */}
 			{pending.title && (
 				<Box marginTop={1}>
 					<Text bold>{pending.title}</Text>
 				</Box>
 			)}
 
-			{/* Tool permission description — show args in monospace style */}
+			{/* Description */}
 			{pending.description && (
 				<Box marginTop={1} flexDirection="column">
-					{isToolPerm ? (
-						pending.description.split("\n").map((line, i) => (
-							<Text key={i} color="gray">{line}</Text>
-						))
-					) : (
-						<Text color="gray">{pending.description}</Text>
-					)}
+					{pending.description.split("\n").map((line, i) => (
+						<Text key={i} color={colors.textMuted}>{line}</Text>
+					))}
 				</Box>
 			)}
 
+			{/* Actions */}
 			{feedbackMode ? (
 				<Box flexDirection="column" marginTop={1}>
 					<Text bold>Feedback:</Text>
 					<Box>
 						<Text color={colors.brand} bold>{">"} </Text>
 						<Text>{feedback}</Text>
-						<Text dimColor>{"\u2588"}</Text>
+						<Text color={colors.textMuted}>{"\u2588"}</Text>
 					</Box>
-					<Text dimColor color="gray">Enter submit · Esc cancel</Text>
+					<Text color={colors.textMuted}>Enter submit · Esc cancel</Text>
 				</Box>
 			) : isApproval && isToolPerm ? (
 				<Box marginTop={1} flexDirection="column">
-					<Box>
-						<Text backgroundColor="green" bold>{" Y "}</Text>
-						<Text> Allow once  </Text>
-						<Text backgroundColor="cyan" bold>{" A "}</Text>
-						<Text> Always allow (session)  </Text>
-					</Box>
-					<Box marginTop={1}>
-						<Text backgroundColor="red" bold>{" N "}</Text>
-						<Text> Reject</Text>
-					</Box>
+					<Text>
+						<Text color={colors.success} bold>Y</Text>
+						<Text color={colors.textMuted}> Allow once   </Text>
+						<Text color={colors.brand} bold>A</Text>
+						<Text color={colors.textMuted}> Always (session)   </Text>
+						<Text color={colors.error} bold>N</Text>
+						<Text color={colors.textMuted}> Reject</Text>
+					</Text>
 				</Box>
 			) : isApproval ? (
 				<Box marginTop={1}>
-					<Text backgroundColor="green" bold>{" Y "}</Text>
-					<Text> Approve  </Text>
-					<Text backgroundColor="red" bold>{" N "}</Text>
-					<Text> Reject</Text>
+					<Text color={colors.success} bold>Y</Text>
+					<Text color={colors.textMuted}> Approve   </Text>
+					<Text color={colors.error} bold>N</Text>
+					<Text color={colors.textMuted}> Reject</Text>
 				</Box>
 			) : (
 				<Box marginTop={1}>
-					<Text backgroundColor="green" bold>{" A "}</Text>
-					<Text> Accept  </Text>
-					<Text backgroundColor="red" bold>{" R "}</Text>
-					<Text> Reject  </Text>
-					<Text backgroundColor="magenta" bold>{" F "}</Text>
-					<Text> Feedback</Text>
+					<Text color={colors.success} bold>A</Text>
+					<Text color={colors.textMuted}> Accept   </Text>
+					<Text color={colors.error} bold>R</Text>
+					<Text color={colors.textMuted}> Reject   </Text>
+					<Text color={colors.brand} bold>F</Text>
+					<Text color={colors.textMuted}> Feedback</Text>
 				</Box>
 			)}
 		</Box>
