@@ -360,7 +360,6 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		const projects = get().projects as Array<{ name: string; path?: string }>;
 		const p = projects.find((pr) => pr.name === project);
 		get().markViewed(project, agentId);
-		get().clearAgents();
 		set({
 			activeProject: project,
 			activeProjectPath: p?.path || "",
