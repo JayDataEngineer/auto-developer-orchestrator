@@ -11,6 +11,7 @@ import type { ThreadHistoryAdapter } from "@assistant-ui/react";
 import { usePuxStore } from "./pux-store";
 import { getFetch } from "./fetch-provider";
 import { apiUrl } from "./server-url";
+import type { AgentState, ToolCallRecord as StoreToolCall } from "./types";
 
 // ── Backend StoredMessage shape ──
 
@@ -164,6 +165,71 @@ export function storedMessagesToThreadLikes(data: StoredMessage[]): ThreadLike[]
 	return messages;
 }
 
+// ── Reconstruct agents from persisted subAgent traces ──
+
+/**
+ * Scans StoredMessages for delegate_to/delegate_async tool calls that
+ * contain subAgent traces (persisted by the Go backend). Reconstructs
+ * AgentState entries and adds them to the Zustand store — but only if
+ * the agent isn't already tracked (avoids overwriting live agents).
+ */
+function restoreAgentsFromHistory(data: StoredMessage[]) {
+	const store = usePuxStore.getState();
+	const existing = store.agents;
+
+	for (const msg of data) {
+		if (msg.role !== "assistant" || !msg.toolCalls || msg.toolCalls === "[]") continue;
+		try {
+			const calls: ToolCallRecord[] = JSON.parse(msg.toolCalls);
+			for (const tc of calls) {
+				if (!tc.subAgent) continue;
+				if (tc.name !== "delegate_to" && tc.name !== "delegate_async") continue;
+
+				const sa = tc.subAgent;
+				// Build a stable agentId from tool call id or name+timestamp
+				const agentId = tc.id
+					? `hist_${tc.id}`
+					: `hist_${sa.name}_${msg.id}`;
+
+				// Skip if already tracked (live agent or previously restored)
+				if (existing.has(agentId)) continue;
+
+				const toolCalls: StoreToolCall[] = sa.toolCalls.map((stc, i) => ({
+					toolName: stc.name,
+					args: stc.args,
+					result: stc.result,
+					isError: !!stc.error,
+					timestamp: new Date(msg.createdAt).getTime() + i,
+					endedAt: new Date(msg.createdAt).getTime() + i + 1,
+				}));
+
+				const agent: AgentState = {
+					agentId,
+					agentName: sa.name,
+					task: (tc.args?.task as string) || (tc.args?.prompt as string) || (tc.args?.role as string) || "",
+					status: sa.status === "error" ? "error" : "complete",
+					startedAt: new Date(msg.createdAt).getTime(),
+					endedAt: new Date(msg.createdAt).getTime() + 1,
+					toolCalls,
+					thinkingText: sa.thinking,
+					text: sa.text,
+					result: sa.result,
+					error: sa.error,
+				};
+
+				existing.set(agentId, agent);
+			}
+		} catch {
+			// Skip malformed tool calls
+		}
+	}
+
+	// Batch update — only if we added anything
+	if (existing.size !== store.agents.size) {
+		usePuxStore.setState({ agents: new Map(existing) });
+	}
+}
+
 // ── Adapter ──
 
 export function createPuxHistoryAdapter(): ThreadHistoryAdapter {
@@ -189,6 +255,9 @@ export function createPuxHistoryAdapter(): ThreadHistoryAdapter {
 				if (!Array.isArray(data) || data.length === 0) {
 					return { messages: [] };
 				}
+
+				// Reconstruct sub-agent state from persisted traces
+				restoreAgentsFromHistory(data);
 
 				const messages = storedMessagesToThreadLikes(data);
 

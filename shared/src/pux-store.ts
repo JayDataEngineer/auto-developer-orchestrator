@@ -360,15 +360,36 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		const projects = get().projects as Array<{ name: string; path?: string }>;
 		const p = projects.find((pr) => pr.name === project);
 		get().markViewed(project, agentId);
+		// Clear restored (historical) agents — they'll be re-populated from
+		// the new conversation's history by restoreAgentsFromHistory().
+		// Live agents (from real-time SSE) are preserved.
+		const agents = get().agents;
+		let pruned = false;
+		for (const [id] of agents) {
+			if (id.startsWith("hist_")) {
+				agents.delete(id);
+				pruned = true;
+			}
+		}
 		set({
 			activeProject: project,
 			activeProjectPath: p?.path || "",
 			activeAgentId: agentId || "",
 			conversationKey: `${project}:${agentId || "default"}`,
+			...(pruned ? { agents: new Map(agents) } : {}),
 		});
 	},
 
 	clearConversation: () => {
+		// Clear restored agents (hist_ prefix) on new chat
+		const agents = get().agents;
+		let pruned = false;
+		for (const [id] of agents) {
+			if (id.startsWith("hist_")) {
+				agents.delete(id);
+				pruned = true;
+			}
+		}
 		set({
 			activeAgentId: "",
 			conversationKey: `${get().activeProject}:clear-${Date.now()}`,
@@ -377,6 +398,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			contextMetrics: null,
 			compacting: false,
 			lastError: null,
+			...(pruned ? { agents: new Map(agents) } : {}),
 		});
 	},
 
