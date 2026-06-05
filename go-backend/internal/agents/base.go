@@ -38,6 +38,7 @@ type BaseConfig struct {
 	// Extension points.
 	ExtraHooks          []core.LoopHook
 	ToolResultProcessor func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string
+	ContextMetricsFunc  func() core.ContextMetricsSnapshot
 	Logger              *log.Logger
 
 	// ToolExecTimeoutSec sets per-tool timeout (0 = no timeout for sub-agents).
@@ -107,6 +108,7 @@ func NewBaseAgent(cfg BaseConfig) *BaseAgent {
 		SandboxID:           cfg.SandboxID,
 		ToolResultProcessor: cfg.ToolResultProcessor,
 		ToolExecTimeoutSec:  cfg.ToolExecTimeoutSec,
+		ContextMetricsFunc:  cfg.ContextMetricsFunc,
 	}
 
 	// Wire ToolMetadata lookup if executor is a ToolRegistry

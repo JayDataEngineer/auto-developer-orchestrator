@@ -101,6 +101,11 @@ type RunnerConfig struct {
 
 	// Sub-agent hook dependencies — used to resolve named hooks from worker YAML
 	HookDeps hooks.HookDeps
+
+	// BrowserPreWarmFunc pre-warms the browser sandbox (Docker + Chrome + CDP)
+	// before the sub-agent loop starts. Called when browser tools are detected.
+	// Moves cold-start latency from first browse_to call to delegation setup.
+	BrowserPreWarmFunc func(ctx context.Context, sandboxID string) error
 }
 
 // ParallelRunner implements DelegateRunner with goroutine-based parallelism.
@@ -863,6 +868,22 @@ func (r *ParallelRunner) buildSubAgent(
 			vExec.SetVisualContext(r.cfg.VisualContext)
 		}
 		executor = vExec
+	}
+
+	// Pre-warm browser sandbox if sub-agent has browser tools.
+	// Moves cold-start latency (Docker + Chrome + CDP ~60-100s) from first
+	// browse_to call to delegation setup, so the user sees "warming browser..."
+	// during the delegate_to overhead instead of a 100s tool execution.
+	if r.cfg.BrowserPreWarmFunc != nil && hasBrowserTools(toolNamesFromSpecs(setup.SelectedTools)) {
+		sandboxID := r.cfg.BaseSession.ID()
+		r.cfg.Logger("BROWSER_PREWARM: warming sandbox %s for agent=%s", sandboxID, setup.AgentName)
+		preWarmCtx, preWarmCancel := context.WithTimeout(context.Background(), 90*time.Second)
+		if err := r.cfg.BrowserPreWarmFunc(preWarmCtx, sandboxID); err != nil {
+			r.cfg.Logger("BROWSER_PREWARM_WARN: failed (non-fatal, will retry on first call): %v", err)
+		} else {
+			r.cfg.Logger("BROWSER_PREWARM: sandbox %s ready", sandboxID)
+		}
+		preWarmCancel()
 	}
 
 	processor := newCtxMgrProcessor(ctxMgr)

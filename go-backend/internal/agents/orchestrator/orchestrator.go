@@ -474,6 +474,12 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			NativeVision:       cfg.EngineHasVision,
 			VisionLogger:       visionLogger,
 			RaiseBrowserFunc:   raiseBrowser,
+			BrowserPreWarmFunc: func(ctx context.Context, sandboxID string) error {
+				if ensurer, ok := cfg.BrowserProvider.(browsertools.SandboxEnsurer); ok {
+					return ensurer.EnsureReady(ctx, sandboxID)
+				}
+				return nil
+			},
 			TaskMgr:            cfg.TaskMgr,
 			ScratchStore:       scratchStore,
 			DB:                 cfg.TranscriptDB,
@@ -629,6 +635,14 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		BashRules:       cfg.BashRules,
 		ExtraHooks:      ctoHooks,
 		ToolResultProcessor: toolResultProcessor,
+		ContextMetricsFunc: func() core.ContextMetricsSnapshot {
+			m := ctxMgr.Usage()
+			return core.ContextMetricsSnapshot{
+				EstimatedTokens: m.EstimatedTokens,
+				ContextSize:     m.ContextSize,
+				Utilization:     m.Utilization,
+			}
+		},
 		Logger:          logger,
 	})
 

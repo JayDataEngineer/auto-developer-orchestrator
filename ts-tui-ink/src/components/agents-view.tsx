@@ -22,7 +22,7 @@ import {
 	apiUrl,
 	getFetch,
 } from "@pux/shared";
-import { useColors, symbols } from "../theme.js";
+import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
 import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
 // Extend for tableTruncate (not in library types yet)
@@ -280,6 +280,15 @@ function AgentCard({
 						{agent.task.slice(0, cols - 12)}{agent.task.length > cols - 12 ? "..." : ""}
 					</Text>
 				</Box>
+
+				{/* Thinking — collapsed last line */}
+				{agent.thinkingText && (
+					<Box marginTop={0}>
+						<Text color={colors.textMuted}>
+							{BLOCKQUOTE_BAR} {agent.thinkingText.split("\n").filter((l: string) => l.trim()).pop()?.slice(0, cols - 8) || ""}
+						</Text>
+					</Box>
+				)}
 
 				{/* Tool calls — one line each */}
 				{visibleTools.length > 0 && (

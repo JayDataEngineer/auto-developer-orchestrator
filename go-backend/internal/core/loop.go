@@ -39,6 +39,18 @@ type AgentLoopConfig struct {
 	// Return the processed string the agent should see.
 	// toolArgs contains the arguments from the tool call (for context enrichment).
 	ToolResultProcessor func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string
+
+	// ContextMetricsFunc returns current context metrics from the context manager.
+	// When set, the agent_end event uses these metrics instead of raw API prompt_tokens,
+	// which can be inaccurate for providers with prompt caching (DeepSeek, etc.).
+	ContextMetricsFunc func() ContextMetricsSnapshot
+}
+
+// ContextMetricsSnapshot is a portable snapshot of context manager metrics.
+type ContextMetricsSnapshot struct {
+	EstimatedTokens int
+	ContextSize     int
+	Utilization     float64
 }
 
 // AgentLoop runs the full agent loop: generate → parse tool calls → execute → feed back.
@@ -477,14 +489,25 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				h.OnAgentEnd(ctx, state)
 			}
 
+			// Build context metrics: prefer context manager's token estimate
+			// over raw API prompt_tokens (which can undercount for cached providers
+			// like DeepSeek that report only non-cached tokens).
+			endCtxTokens := state.TurnInputTokens
+			endCtxWindow := l.provider.ContextSize()
+			if l.config.ContextMetricsFunc != nil {
+				if cm := l.config.ContextMetricsFunc(); cm.EstimatedTokens > 0 {
+					endCtxTokens = cm.EstimatedTokens
+				}
+			}
+
 			SendEvent(subscriber, AgentEvent{
 				Type: EventTypeAgentEnd,
 				Data: AgentEndData{
 					Input:         float64(state.TotalInputTokens),
 					Output:        float64(state.TotalOutputTokens),
 					Model:         l.provider.ModelName(),
-					ContextWindow: l.provider.ContextSize(),
-					ContextTokens: state.TurnInputTokens,
+					ContextWindow: endCtxWindow,
+					ContextTokens: endCtxTokens,
 				},
 			})
 			return nil
