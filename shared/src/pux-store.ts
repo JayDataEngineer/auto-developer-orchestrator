@@ -370,7 +370,6 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	clearConversation: () => {
-		get().clearAgents();
 		set({
 			activeAgentId: "",
 			conversationKey: `${get().activeProject}:clear-${Date.now()}`,
@@ -600,7 +599,6 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 
 	startNewChat: () => {
 		const { activeProject } = get();
-		get().clearAgents();
 		set({
 			activeAgentId: "",
 			conversationKey: `${activeProject}:new-${Date.now()}`,
