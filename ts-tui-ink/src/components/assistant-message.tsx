@@ -192,7 +192,7 @@ export function AssistantMessage() {
 			{/* Completion time — shown after message finishes */}
 			{!isRunning && hasContent && (
 				<Box marginTop={1}>
-					<Text color={colors.textMuted}>✻ Completed in {fmtTime(elapsed || Math.floor((Date.now() - startRef.current) / 1000))}</Text>
+					<Text color={colors.textMuted}>● Completed in {fmtTime(elapsed || Math.floor((Date.now() - startRef.current) / 1000))}</Text>
 				</Box>
 			)}
 		</Box>
