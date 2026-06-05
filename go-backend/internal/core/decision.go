@@ -113,14 +113,25 @@ func (r *DecisionRegistry) WaitForDecision(
 		})
 	}
 
+	if timeout > 0 {
+		select {
+		case resp := <-ch:
+			return resp, nil
+		case <-ctx.Done():
+			r.Cleanup(req.ID)
+			return DecisionResponse{}, ctx.Err()
+		case <-time.After(timeout):
+			r.Cleanup(req.ID)
+			return DecisionResponse{}, fmt.Errorf("decision timed out after %v", timeout)
+		}
+	}
+
+	// No timeout — wait indefinitely for user response
 	select {
 	case resp := <-ch:
 		return resp, nil
 	case <-ctx.Done():
 		r.Cleanup(req.ID)
 		return DecisionResponse{}, ctx.Err()
-	case <-time.After(timeout):
-		r.Cleanup(req.ID)
-		return DecisionResponse{}, fmt.Errorf("decision timed out after %v", timeout)
 	}
 }

@@ -23,6 +23,9 @@ func NewAskUserTool() *AskUserTool {
 }
 
 func (t *AskUserTool) Name() string { return "ask_user" }
+
+// TimeoutHint returns 0 — ask_user waits indefinitely for user response.
+func (t *AskUserTool) TimeoutHint() time.Duration { return 0 }
 func (t *AskUserTool) Description() string {
 	return "Ask the user a question with multiple-choice options and wait for their response. Use this when you need a decision or clarification from the user. You MUST provide at least 2 specific, meaningful options. If none of the options fit, the user can type a custom answer."
 }
@@ -70,7 +73,7 @@ func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (any, er
 		Hint:          core.HintQuestion,
 		Options:       options,
 		AllowFreeText: allowFreeText,
-	}, subscriber, 5*time.Minute)
+	}, subscriber, 0)
 	if err != nil {
 		return nil, fmt.Errorf("ask_user: %w", err)
 	}
