@@ -92,7 +92,7 @@ func (h *PuxHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 		engine = h.openrouterEngine
 	default:
 		if req.Provider != "llamacpp" && req.Provider != "" {
-			if eng := h.engineFromSettings(req.Provider, req.ModelID); eng != nil {
+			if eng := h.engineFromSettings(req.Provider, req.ModelID, 0); eng != nil {
 				engine = eng
 			}
 		}
@@ -221,7 +221,8 @@ func (h *PuxHandler) providerAvailable(name string) bool {
 
 // engineFromSettings reads a provider's apiKey and baseUrl from settings.json
 // and creates a temporary LLMClient for it.
-func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.LLMClient {
+// contextWindow is the model's configured context window (from settings.json), 0 if unknown.
+func (h *PuxHandler) engineFromSettings(providerID, modelID string, contextWindow int) *llamaeng.LLMClient {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -248,16 +249,18 @@ func (h *PuxHandler) engineFromSettings(providerID, modelID string) *llamaeng.LL
 	}
 
 	eng := llamaeng.NewLLMClient(llamaeng.LLMClientConfig{
-		BaseURL:   p.BaseURL,
-		APIKey:    p.APIKey,
-		ModelName: modelID,
-		Logger:    h.log,
+		BaseURL:       p.BaseURL,
+		APIKey:        p.APIKey,
+		ModelName:     modelID,
+		ContextWindow: contextWindow,
+		Logger:        h.log,
 	})
 	if err := eng.LoadModel(); err != nil {
 		h.log.Warn("Failed to create engine from settings", zap.String("provider", providerID), zap.String("url", p.BaseURL), zap.Error(err))
 		return nil
 	}
-	h.log.Info("Created engine from settings", zap.String("provider", providerID), zap.String("url", p.BaseURL), zap.String("model", modelID))
+	h.log.Info("Created engine from settings", zap.String("provider", providerID), zap.String("url", p.BaseURL), zap.String("model", modelID),
+		zap.Int("contextWindow", contextWindow))
 	return eng
 }
 
@@ -274,7 +277,8 @@ func (h *PuxHandler) resolveEngineForModel(modelID string) *llamaeng.LLMClient {
 					BaseURL string `json:"baseUrl"`
 					APIKey  string `json:"apiKey"`
 					Models  []struct {
-						ID string `json:"id"`
+						ID            string `json:"id"`
+						ContextWindow int    `json:"contextWindow"`
 					} `json:"models"`
 				} `json:"providers"`
 			}
@@ -282,7 +286,7 @@ func (h *PuxHandler) resolveEngineForModel(modelID string) *llamaeng.LLMClient {
 				for providerName, provider := range settings.Providers {
 					for _, m := range provider.Models {
 						if m.ID == modelID {
-							return h.engineFromSettings(providerName, modelID)
+							return h.engineFromSettings(providerName, modelID, m.ContextWindow)
 						}
 					}
 				}

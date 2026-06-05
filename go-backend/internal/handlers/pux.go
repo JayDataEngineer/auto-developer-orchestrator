@@ -378,7 +378,7 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Try to bootstrap from settings.json (cloud providers)
-	if eng := h.engineFromSettings("openrouter", "deepseek/deepseek-v4-flash"); eng != nil {
+	if eng := h.engineFromSettings("openrouter", "deepseek/deepseek-v4-flash", 0); eng != nil {
 		h.llamaEngine = eng
 		h.selectedEngines[key] = eng
 		h.promptWithOrchestrator(w, r, *req, projectPath, projectRes.SSHInfo)

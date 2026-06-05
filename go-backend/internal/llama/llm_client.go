@@ -58,6 +58,7 @@ type LLMClientConfig struct {
 	APIKey           string // optional Bearer token for cloud providers
 	ModelName        string // model ID sent in requests and used for logs/events
 	DisableStreaming bool   // use non-streaming API (for proxies that don't support SSE)
+	ContextWindow    int    // optional: pre-set context window (from settings.json). 0 = fetch from API.
 	Logger           *zap.Logger
 }
 
@@ -80,6 +81,7 @@ func NewLLMClient(cfg LLMClientConfig) *LLMClient {
 		logger:           cfg.Logger,
 		modelName:        cfg.ModelName,
 		disableStreaming: cfg.DisableStreaming,
+		contextWindow:    cfg.ContextWindow, // pre-set from settings.json; 0 = will fetch from API
 	}
 }
 

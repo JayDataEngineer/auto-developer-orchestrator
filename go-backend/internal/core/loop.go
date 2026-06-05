@@ -489,14 +489,18 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				h.OnAgentEnd(ctx, state)
 			}
 
-			// Build context metrics: prefer context manager's token estimate
-			// over raw API prompt_tokens (which can undercount for cached providers
-			// like DeepSeek that report only non-cached tokens).
+			// Build context metrics: use the best available token estimate.
+			// API prompt_tokens is authoritative but can undercount for cached
+			// providers (DeepSeek reports only non-cached tokens). The context
+			// manager uses real API data when available, falling back to char
+			// heuristic. Take the max of both to avoid undercounting.
 			endCtxTokens := state.TurnInputTokens
 			endCtxWindow := l.provider.ContextSize()
 			if l.config.ContextMetricsFunc != nil {
 				if cm := l.config.ContextMetricsFunc(); cm.EstimatedTokens > 0 {
-					endCtxTokens = cm.EstimatedTokens
+					if cm.EstimatedTokens > endCtxTokens {
+						endCtxTokens = cm.EstimatedTokens
+					}
 				}
 			}
 

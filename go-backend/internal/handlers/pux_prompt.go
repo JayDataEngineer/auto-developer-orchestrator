@@ -187,11 +187,18 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	// Create event channel early so the ask_user tool can emit events to the TUI
 	events := make(chan core.AgentEvent, 256)
 
+	// Determine context size from the model's actual context window.
+	// Falls back to 32K if the provider doesn't report it.
+	contextSize := 32768
+	if cw := engine.ContextWindow(); cw > 0 {
+		contextSize = cw
+	}
+
 	cfg := orchestrator.Config{
 		ProjectDir:    projectPath,
 		SandboxID:     sandboxID,
 		SessionPath:   sessionPath,
-		ContextSize:   32768,
+		ContextSize:   contextSize,
 		MaxToolRounds: 50,
 		WorkDir:       "/sandbox",
 		BashExecutor:  bashExec,
