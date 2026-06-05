@@ -112,12 +112,13 @@ export function AssistantMessage() {
 						case "text": {
 							if (!part.text?.trim()) return null;
 							return (
-								<MarkdownText
-									key={part.text.slice(0, 20)}
-									text={part.text}
-									tableTruncate={false}
-									theme={mdTheme}
-								/>
+								<Box key={part.text.slice(0, 20)} paddingLeft={2}>
+									<MarkdownText
+										text={part.text}
+										tableTruncate={false}
+										theme={mdTheme}
+									/>
+								</Box>
 							);
 						}
 						case "tool-call": {
