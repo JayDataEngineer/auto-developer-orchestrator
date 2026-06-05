@@ -109,7 +109,7 @@ export function AssistantMessage() {
 	}
 
 	return (
-		<Box flexDirection="column" marginTop={1}>
+		<Box flexDirection="column" marginTop={1} paddingRight={1}>
 			{/* Initial spinner — shown while waiting for first content */}
 			{showSpinner && (
 				<Box gap={1}>
