@@ -66,7 +66,7 @@ function Welcome() {
 	return (
 		<Box flexDirection="column" paddingY={1} paddingX={2}>
 			<Text bold color={colors.brand}>
-				{" "}Pux v{puxVersion}
+				Pux v{puxVersion}
 			</Text>
 			<Box marginTop={1}>
 				<Text>
@@ -81,14 +81,14 @@ function Welcome() {
 				</Text>
 			)}
 			<Box flexDirection="column" marginTop={1}>
-				<Text dimColor>{" "}Type a message to start, or try:</Text>
+				<Text dimColor>Type a message to start, or try:</Text>
 				<Box flexDirection="column" marginTop={1}>
 					<Text>
-						<Text color="gray">{"  "}/help</Text>
+						<Text color={colors.textMuted}>/help</Text>
 						<Text dimColor>  commands</Text>
 					</Text>
 					<Text>
-						<Text color="gray">{"  "}/model</Text>
+						<Text color={colors.textMuted}>/model</Text>
 						<Text dimColor>  switch model</Text>
 					</Text>
 				</Box>
