@@ -85,7 +85,7 @@ export function AssistantMessage() {
 	const showSpinner = isRunning && !hasContent;
 
 	return (
-		<Box flexDirection="column" marginTop={1} width={cols}>
+		<Box flexDirection="column" marginTop={1} width={cols - 2}>
 			{showSpinner && (
 				<LoadingPrimitive.Root gap={1}>
 					<LoadingPrimitive.Spinner variant="spinner" type="dots" />
