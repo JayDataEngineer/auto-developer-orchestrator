@@ -508,7 +508,7 @@ describe("loadModels", () => {
 		vi.mocked(mockFetch).mockResolvedValueOnce({
 			ok: true,
 			json: () => Promise.resolve([{ id: "m1", name: "Model One", provider: "openai" }]),
-		});
+		} as any);
 
 		await usePuxStore.getState().loadModels();
 
@@ -523,7 +523,7 @@ describe("loadModels", () => {
 		vi.mocked(mockFetch).mockResolvedValueOnce({
 			ok: true,
 			json: () => Promise.resolve({ models: [{ id: "m2", name: "M2" }] }),
-		});
+		} as any);
 
 		await usePuxStore.getState().loadModels();
 		expect(usePuxStore.getState().modelList).toEqual([{ id: "m2", name: "M2", provider: "" }]);
@@ -532,7 +532,7 @@ describe("loadModels", () => {
 	it("does not update state when API fails", async () => {
 		const { getFetch } = await import("../fetch-provider");
 		const mockFetch = getFetch();
-		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: false });
+		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: false } as any);
 		usePuxStore.setState({ modelList: [{ id: "existing", name: "E", provider: "" }] });
 
 		await usePuxStore.getState().loadModels();
@@ -550,7 +550,7 @@ describe("loadConversations", () => {
 		vi.mocked(mockFetch).mockResolvedValueOnce({
 			ok: true,
 			json: () => Promise.resolve(convs),
-		});
+		} as any);
 
 		await usePuxStore.getState().loadConversations();
 		expect(usePuxStore.getState().conversations).toEqual(convs);
@@ -564,7 +564,7 @@ describe("loadProjects", () => {
 		vi.mocked(mockFetch).mockResolvedValueOnce({
 			ok: true,
 			json: () => Promise.resolve([{ name: "proj1", path: "/p1" }]),
-		});
+		} as any);
 
 		await usePuxStore.getState().loadProjects();
 
@@ -580,7 +580,7 @@ describe("loadProjects", () => {
 		vi.mocked(mockFetch).mockResolvedValueOnce({
 			ok: true,
 			json: () => Promise.resolve([{ name: "new-proj", path: "/new" }]),
-		});
+		} as any);
 
 		await usePuxStore.getState().loadProjects();
 
@@ -602,7 +602,7 @@ describe("deleteConversation", () => {
 
 		const { getFetch } = await import("../fetch-provider");
 		const mockFetch = getFetch();
-		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true });
+		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true } as any);
 
 		await usePuxStore.getState().deleteConversation("p1", "a1");
 
@@ -625,7 +625,7 @@ describe("deleteConversation", () => {
 
 		const { getFetch } = await import("../fetch-provider");
 		const mockFetch = getFetch();
-		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true });
+		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true } as any);
 
 		await usePuxStore.getState().deleteConversation("p1", "a2");
 
@@ -644,7 +644,7 @@ describe("removeProject", () => {
 
 		const { getFetch } = await import("../fetch-provider");
 		const mockFetch = getFetch();
-		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true });
+		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true } as any);
 
 		await usePuxStore.getState().removeProject("proj1");
 
@@ -678,7 +678,7 @@ describe("respondToDecision", () => {
 
 		const { getFetch } = await import("../fetch-provider");
 		const mockFetch = getFetch();
-		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true });
+		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true } as any);
 
 		await usePuxStore.getState().respondToDecision("approve", "yes");
 
@@ -696,7 +696,7 @@ describe("selectModel", () => {
 
 		const { getFetch } = await import("../fetch-provider");
 		const mockFetch = getFetch();
-		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true });
+		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true } as any);
 
 		await usePuxStore.getState().selectModel("openai", "gpt-4");
 
@@ -711,7 +711,7 @@ describe("setDefaults", () => {
 	it("sets defaultLogic and defaultWorker in state", async () => {
 		const { getFetch } = await import("../fetch-provider");
 		const mockFetch = getFetch();
-		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true });
+		vi.mocked(mockFetch).mockResolvedValueOnce({ ok: true } as any);
 
 		await usePuxStore.getState().setDefaults("gpt-4", "gpt-3.5");
 
@@ -727,7 +727,7 @@ describe("loadDefaults", () => {
 		vi.mocked(mockFetch).mockResolvedValueOnce({
 			ok: true,
 			json: () => Promise.resolve({ logic: "llama3", worker: "phi3" }),
-		});
+		} as any);
 
 		await usePuxStore.getState().loadDefaults();
 
@@ -746,7 +746,7 @@ describe("loadProviders", () => {
 		vi.mocked(mockFetch).mockResolvedValueOnce({
 			ok: true,
 			json: () => Promise.resolve({ providers }),
-		});
+		} as any);
 
 		await usePuxStore.getState().loadProviders();
 		expect(usePuxStore.getState().providers).toEqual(providers);
@@ -761,7 +761,7 @@ describe("loadMCPServers", () => {
 		vi.mocked(mockFetch).mockResolvedValueOnce({
 			ok: true,
 			json: () => Promise.resolve(servers),
-		});
+		} as any);
 
 		await usePuxStore.getState().loadMCPServers();
 		expect(usePuxStore.getState().mcpServers).toEqual(servers);
@@ -845,7 +845,7 @@ describe("viewedConversations with loadConversations auto-mark", () => {
 				Promise.resolve([
 					{ project: "p1", agentId: "a1", lastMessage: "hi", lastAt: "2024-01-01", messageCount: 1, title: "Chat" },
 				]),
-		});
+		} as any);
 
 		await usePuxStore.getState().loadConversations();
 

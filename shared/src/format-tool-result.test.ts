@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { formatToolResult } from "./format-tool-result";
 
 describe("formatToolResult", () => {

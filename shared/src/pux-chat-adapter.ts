@@ -439,13 +439,13 @@ export const puxChatAdapter: ChatModelAdapter = {
 		const lastMsg = messages[messages.length - 1];
 		const stack = new Error().stack?.split('\n').slice(2, 6).join(' | ') || 'no stack';
 
-		debug("[run] ENTERED. count:", messages.length, "lastRole:", lastMsg?.role, "lastText:", typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 50) : 'non-string', "agentId:", store.activeAgentId, "stack:", stack);
+		debug("[run] ENTERED. count:", messages.length, "lastRole:", lastMsg?.role, "lastText:", typeof lastMsg?.content === 'string' ? String(lastMsg.content).slice(0, 50) : 'non-string', "agentId:", store.activeAgentId, "stack:", stack);
 
 		if (!lastMsg || lastMsg.role !== "user") {
 			debug("[run] SKIPPED: not user msg");
 			return;
 		}
-		debug("[run] PROCEEDING TO POST. message:", typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 100) : 'non-string');
+		debug("[run] PROCEEDING TO POST. message:", typeof lastMsg.content === 'string' ? String(lastMsg.content).slice(0, 100) : 'non-string');
 
 		// Extract text from user message
 		const content = lastMsg.content;

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { getToolArgPreview } from "./tool-arg-preview";
 
 describe("getToolArgPreview", () => {
@@ -23,14 +23,14 @@ describe("getToolArgPreview", () => {
     const long = "a".repeat(80);
     const result = getToolArgPreview("bash", { command: long });
     expect(result).toHaveLength(60);
-    expect(result).toEndWith("...");
+    expect(result.endsWith("...")).toBe(true);
   });
 
   test("truncates to custom maxLen", () => {
     const long = "a".repeat(80);
     const result = getToolArgPreview("bash", { command: long }, 20);
     expect(result).toHaveLength(20);
-    expect(result).toEndWith("...");
+    expect(result.endsWith("...")).toBe(true);
   });
 
   // delegate_to / delegate_async
@@ -59,7 +59,7 @@ describe("getToolArgPreview", () => {
     const long = "/very/long/".repeat(10) + "file.ts";
     const result = getToolArgPreview("file_read", { path: long });
     expect(result).toHaveLength(60);
-    expect(result).toEndWith("...");
+    expect(result.endsWith("...")).toBe(true);
   });
 
   // generic fallback — single string value
@@ -73,7 +73,7 @@ describe("getToolArgPreview", () => {
     const long = "x".repeat(80);
     const result = getToolArgPreview("search", { query: long });
     expect(result).toHaveLength(60);
-    expect(result).toEndWith("...");
+    expect(result.endsWith("...")).toBe(true);
   });
 
   // generic fallback — key-value pairs
