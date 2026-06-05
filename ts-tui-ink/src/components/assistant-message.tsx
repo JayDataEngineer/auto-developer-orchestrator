@@ -10,12 +10,11 @@
  * "Thought:" line, then the parts pipeline handles the rest.
  */
 
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import {
 	useAuiState,
 	MessagePrimitive,
-	LoadingPrimitive,
 } from "@assistant-ui/react-ink";
 import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
 import type { Theme as MarkdansiTheme } from "markdansi";
@@ -62,6 +61,24 @@ export function AssistantMessage() {
 	const { cols } = useTerminalSize();
 	const isRunning = useAuiState((s) => s.message.status?.type === "running");
 
+	// Track elapsed time — persists after completion
+	const startRef = useRef(Date.now());
+	const [elapsed, setElapsed] = useState(0);
+	useEffect(() => {
+		if (!isRunning) return;
+		const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 200);
+		return () => clearInterval(timer);
+	}, [isRunning]);
+
+	// Spinner animation
+	const [frame, setFrame] = useState(0);
+	useEffect(() => {
+		if (!isRunning) return;
+		const timer = setInterval(() => setFrame((f) => (f + 1) % 10), 80);
+		return () => clearInterval(timer);
+	}, [isRunning]);
+	const spinnerChars = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+
 	// Extract all reasoning text from parts (reorderParts puts them first)
 	const parts = useAuiState((s) => s.message.parts);
 	const hasContent = parts && parts.some((p: any) =>
@@ -80,17 +97,25 @@ export function AssistantMessage() {
 		? reasoningLines[reasoningLines.length - 1]
 		: "";
 
-	// Only show waiting spinner for THIS message (message-level running,
-	// not thread-level). Shows only when running AND no content yet.
+	// Only show initial spinner when no content yet
 	const showSpinner = isRunning && !hasContent;
+
+	// Format elapsed time string
+	function fmtTime(secs: number): string {
+		if (secs < 60) return `${secs}s`;
+		const m = Math.floor(secs / 60);
+		const s = secs % 60;
+		return `${m}m ${s}s`;
+	}
 
 	return (
 		<Box flexDirection="column" marginTop={1}>
+			{/* Initial spinner — shown while waiting for first content */}
 			{showSpinner && (
-				<LoadingPrimitive.Root gap={1}>
-					<LoadingPrimitive.Spinner variant="spinner" type="dots" />
-					<LoadingPrimitive.ElapsedTime />
-				</LoadingPrimitive.Root>
+				<Box gap={1}>
+					<Text color={colors.running}>{spinnerChars[frame]}</Text>
+					<Text color={colors.textMuted}>({fmtTime(elapsed)})</Text>
+				</Box>
 			)}
 
 			{/* Collapsed reasoning — wrapped, not truncated */}
@@ -163,6 +188,13 @@ export function AssistantMessage() {
 
 			{/* Branch picker for forked messages */}
 			<BranchPicker />
+
+			{/* Completion time — shown after message finishes */}
+			{!isRunning && hasContent && (
+				<Box marginTop={1}>
+					<Text color={colors.textMuted}>✻ Completed in {fmtTime(elapsed || Math.floor((Date.now() - startRef.current) / 1000))}</Text>
+				</Box>
+			)}
 		</Box>
 	);
 }
