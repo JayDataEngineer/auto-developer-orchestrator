@@ -4,16 +4,16 @@
  * Shows agents in a list. Expanded agents render conversation-style
  * blocks with left-border separation, matching OpenCode's tool rendering:
  *
- * ┃ researcher · 115.5s
+ * ● researcher · 115.5s
  * ┃ Task: Find the weather in New York
- * ┃  └ Bash: curl wttr.in/new+york · 1.2s
- * ┃  └ Search: weather NYC · 0.8s
+ * ┃  └ bash: curl wttr.in/new+york · 1.2s
+ * ┃  └ search: weather NYC · 0.8s
  * ┃ Result text here...
  *
  * Data from Zustand store + transcript fetch for completed agents.
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Box, Text, useInput } from "ink";
 import {
 	usePuxStore,
@@ -24,6 +24,11 @@ import {
 } from "@pux/shared";
 import { useColors, symbols } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
+import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
+// Extend for tableTruncate (not in library types yet)
+const MarkdownText = _MarkdownText as React.FC<
+	React.ComponentProps<typeof _MarkdownText> & { tableTruncate?: boolean }
+>;
 
 // ── StoredMessage shape (matches pux-history-adapter.ts) ──
 
@@ -39,11 +44,17 @@ interface StoredMessage {
 	createdAt: string;
 }
 
+// ── Friendly names for internal tools ──
+
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+	load_spilled: "read_output",
+};
+
 // ── Agents view ──
 
 export function AgentsView() {
 	const agents = usePuxStore((s) => s.agents);
-	const { rows } = useTerminalSize();
+	const { rows, cols } = useTerminalSize();
 	const [selectedIdx, setSelectedIdx] = useState(0);
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
 	const colors = useColors();
@@ -64,6 +75,9 @@ export function AgentsView() {
 	const running = agentList.filter((a) => a.status === "running").length;
 	const completed = agentList.filter((a) => a.status === "complete").length;
 	const failed = agentList.filter((a) => a.status === "error").length;
+
+	// When any agent is expanded, show it full-height (no pagination)
+	const hasExpanded = expanded.size > 0;
 
 	useInput((input: string, key: any) => {
 		if (key.escape || key.rightArrow) {
@@ -107,12 +121,18 @@ export function AgentsView() {
 		);
 	}
 
-	const maxVisible = Math.max(3, rows - 6);
-	const scrollOffset = Math.max(0, Math.min(
-		selectedIdx - Math.floor(maxVisible / 2),
-		agentList.length - maxVisible,
-	));
-	const visibleAgents = agentList.slice(scrollOffset, scrollOffset + maxVisible);
+	// When expanded, show only the selected agent full-height.
+	// Otherwise, show a paginated list.
+	const maxVisible = hasExpanded ? agentList.length : Math.max(3, rows - 6);
+	const scrollOffset = hasExpanded
+		? 0
+		: Math.max(0, Math.min(
+			selectedIdx - Math.floor(maxVisible / 2),
+			agentList.length - maxVisible,
+		));
+	const visibleAgents = hasExpanded
+		? agentList
+		: agentList.slice(scrollOffset, scrollOffset + maxVisible);
 
 	return (
 		<Box flexDirection="column" paddingX={1}>
@@ -131,10 +151,11 @@ export function AgentsView() {
 					agent={agent}
 					isSelected={(i + scrollOffset) === selectedIdx}
 					isExpanded={expanded.has(agent.agentId)}
+					cols={cols}
 				/>
 			))}
 
-			{agentList.length > maxVisible && (
+			{!hasExpanded && agentList.length > maxVisible && (
 				<Text color={colors.textMuted}>
 					... {scrollOffset + 1}–{scrollOffset + visibleAgents.length} of {agentList.length}
 				</Text>
@@ -155,10 +176,12 @@ function AgentCard({
 	agent,
 	isSelected,
 	isExpanded,
+	cols,
 }: {
 	agent: AgentState;
 	isSelected: boolean;
 	isExpanded: boolean;
+	cols: number;
 }) {
 	const colors = useColors();
 	const activeProject = usePuxStore((s) => s.activeProject);
@@ -207,6 +230,15 @@ function AgentCard({
 			.catch(() => {});
 	}, [isExpanded, agent.transcriptId, agent.status, activeProject, transcriptLoaded]);
 
+	// Tool calls with friendly display names
+	const visibleTools = useMemo(
+		() => agent.toolCalls.map((tc) => ({
+			...tc,
+			toolName: TOOL_DISPLAY_NAMES[tc.toolName] || tc.toolName,
+		})),
+		[agent.toolCalls],
+	);
+
 	// Collapsed: one-line summary
 	if (!isExpanded) {
 		return (
@@ -216,7 +248,7 @@ function AgentCard({
 					<Text bold color={isSelected ? colors.brand : undefined}>
 						{agent.agentName}
 					</Text>
-					<Text color={colors.textMuted}> {symbols.dot} {agent.toolCalls.length} tools {symbols.dot} {duration}</Text>
+					<Text color={colors.textMuted}> {symbols.dot} {visibleTools.length} tools {symbols.dot} {duration}</Text>
 				</Box>
 				<Text color={colors.textMuted}>
 					{"  "}{agent.task.slice(0, 80)}{agent.task.length > 80 ? "..." : ""}
@@ -225,7 +257,9 @@ function AgentCard({
 		);
 	}
 
-	// Expanded: bordered block with conversation flow
+	// Width budget for a tool call line: cols - border(1) - padding(1) - prefix(7: " └ ● ")
+	const toolLineWidth = Math.max(20, cols - 9);
+
 	return (
 		<Box flexDirection="column" marginBottom={1}>
 			{/* Agent header */}
@@ -240,60 +274,62 @@ function AgentCard({
 			{/* Bordered content block */}
 			<Box flexDirection="column" paddingLeft={1} borderStyle="bold" borderLeft={true} borderColor={colors.textMuted}>
 				{/* Task description */}
-				<Text color={colors.textMuted}>
-					{agent.task.slice(0, 120)}{agent.task.length > 120 ? "..." : ""}
-				</Text>
+				<Box>
+					<Text color={colors.textMuted} bold>Task: </Text>
+					<Text color={colors.textMuted} italic>
+						{agent.task.slice(0, cols - 12)}{agent.task.length > cols - 12 ? "..." : ""}
+					</Text>
+				</Box>
 
-				{/* Tool calls with └ nesting */}
-				{agent.toolCalls.length > 0 && (
+				{/* Tool calls — one line each */}
+				{visibleTools.length > 0 && (
 					<Box flexDirection="column" marginTop={0}>
-						{agent.toolCalls.map((tc, i) => {
+						{visibleTools.map((tc, i) => {
 							const done = !!tc.endedAt;
 							const icon = tc.isError ? "✕" : done ? "●" : "○";
 							const iconColor = tc.isError ? colors.error : done ? colors.success : colors.running;
-							const label = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 50);
+							const label = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 40);
 							const tcDuration = tc.endedAt
 								? `${((tc.endedAt - tc.timestamp) / 1000).toFixed(1)}s`
 								: "";
 							const action = !done ? getToolAction(tc.toolName) : "";
 
+							// Build the line and truncate to fit one row
+							let line = `${icon} ${tc.toolName}`;
+							if (label) line += ` ${label}`;
+							if (tcDuration) line += ` · ${tcDuration}`;
+							if (action) line += ` ${action}`;
+							if (line.length > toolLineWidth) {
+								line = line.slice(0, toolLineWidth - 1) + "…";
+							}
+
 							return (
-								<Box key={i} flexDirection="column">
-									<Box>
-										<Text color={colors.textMuted}> └ </Text>
-										<Text color={iconColor}>{icon} </Text>
-										<Text bold color={colors.textMuted}>{tc.toolName}</Text>
-										{label && <Text color={colors.textMuted}> {label}</Text>}
-										{tcDuration && <Text color={colors.textMuted}> · {tcDuration}</Text>}
-										{action && <Text color={colors.textMuted}> {action}</Text>}
-									</Box>
+								<Box key={i}>
+									<Text color={colors.textMuted}> └ </Text>
+									<Text color={iconColor}>{line}</Text>
 								</Box>
 							);
 						})}
 					</Box>
 				)}
 
-				{/* Text response */}
+				{/* Text response — rendered as markdown */}
 				{agent.text && (
 					<Box flexDirection="column" marginTop={0}>
-						{agent.text.split("\n").slice(0, 10).map((line, i) => (
-							<Text key={i}>{line.slice(0, 120)}</Text>
-						))}
-						{agent.text.split("\n").length > 10 && (
-							<Text color={colors.textMuted}>  ... +{agent.text.split("\n").length - 10} more lines</Text>
-						)}
+						<MarkdownText
+							text={agent.text}
+							tableTruncate={false}
+						/>
 					</Box>
 				)}
 
 				{/* Final result (if different from text) */}
 				{agent.result && agent.result !== agent.text && agent.status === "complete" && (
 					<Box flexDirection="column" marginTop={0}>
-						{agent.result.split("\n").slice(0, 5).map((line, i) => (
-							<Text key={i} color={colors.textMuted}>  {line.slice(0, 120)}</Text>
-						))}
-						{agent.result.split("\n").length > 5 && (
-							<Text color={colors.textMuted}>  ... +{agent.result.split("\n").length - 5} more lines</Text>
-						)}
+						<MarkdownText
+							text={agent.result}
+							tableTruncate={false}
+						/>
 					</Box>
 				)}
 
