@@ -51,7 +51,7 @@ func (m *OffloadingContextManager) BuildContext(ctx context.Context) ([]core.Mes
 			entry, spillErr := m.spill.Spill(msg.Name, msg.ToolCallID, msg.Content, preview)
 			if spillErr == nil {
 				msgs[i].Content = fmt.Sprintf(
-				"%s\n\n...[result offloaded (%d bytes). Use load_spilled(\"%s\") to retrieve full content]",
+				"%s\n\n...[result offloaded (%d bytes). Use read_output(\"%s\") to retrieve full content]",
 					preview, entry.Size, entry.Ref,
 				)
 			}
@@ -75,7 +75,7 @@ func (m *OffloadingContextManager) ProcessToolResult(ctx context.Context, toolNa
 		entry, spillErr := m.spill.Spill(toolName, toolCallID, result, preview)
 		if spillErr == nil {
 			return fmt.Sprintf(
-			"%s\n\n...[result offloaded (%d bytes). Use load_spilled(\"%s\") to retrieve full content]",
+			"%s\n\n...[result offloaded (%d bytes). Use read_output(\"%s\") to retrieve full content]",
 				preview, entry.Size, entry.Ref,
 			), nil
 		}

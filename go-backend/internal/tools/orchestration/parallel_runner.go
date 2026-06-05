@@ -809,7 +809,7 @@ func (r *ParallelRunner) buildSubAgent(
 	}
 	ctxMgr := ctxpkg.Factory(store, ctxConfig)
 
-	// Add load_spilled tool so sub-agents can retrieve offloaded results
+	// Add read_output tool so sub-agents can retrieve offloaded results
 	loadSpilled := ctxpkg.NewLoadSpilledTool(ctxMgr)
 	setup.SelectedTools = append(setup.SelectedTools, core.OpenAITool{
 		Type: "function",
@@ -850,7 +850,7 @@ func (r *ParallelRunner) buildSubAgent(
 	if r.cfg.ExecutorFactory != nil {
 		executor = r.cfg.ExecutorFactory(sandboxTier)
 	}
-	// Wrap executor to handle load_spilled calls — the tool spec is in SelectedTools
+	// Wrap executor to handle read_output calls — the tool spec is in SelectedTools
 	// but the actual implementation needs this sub-agent's ctxMgr
 	executor = &loadSpilledExecutor{inner: executor, tool: loadSpilled}
 	if len(delegatesTo) > 0 && r.cfg.Depth < r.cfg.MaxDepth {
@@ -1561,7 +1561,7 @@ func (r *ParallelRunner) pendingCount() int {
 
 // newCtxMgrProcessor creates a ToolResultProcessor that delegates to the context
 // manager's ProcessToolResult method. Large tool results get offloaded to spill
-// files with previews; sub-agents use load_spilled to retrieve full content.
+// files with previews; sub-agents use read_output to retrieve full content.
 func newCtxMgrProcessor(ctxMgr ctxpkg.ContextManager) func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
 	return func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string {
 		processed, err := ctxMgr.ProcessToolResult(ctx, toolName, toolCallID, result)
@@ -1573,9 +1573,9 @@ func newCtxMgrProcessor(ctxMgr ctxpkg.ContextManager) func(ctx context.Context, 
 	}
 }
 
-// loadSpilledExecutor wraps an executor to intercept load_spilled tool calls.
-// The load_spilled tool needs a per-sub-agent ContextManager, so it can't be
-// pre-registered in the shared ToolRegistry. This wrapper routes load_spilled
+// loadSpilledExecutor wraps an executor to intercept read_output tool calls.
+// The read_output tool needs a per-sub-agent ContextManager, so it can't be
+// pre-registered in the shared ToolRegistry. This wrapper routes read_output
 // calls to the sub-agent's own LoadSpilledTool instance.
 type loadSpilledExecutor struct {
 	inner core.ToolExecutor
@@ -1583,14 +1583,14 @@ type loadSpilledExecutor struct {
 }
 
 func (e *loadSpilledExecutor) Execute(ctx context.Context, toolName string, args map[string]any) (any, error) {
-	if toolName == "load_spilled" {
+	if toolName == "read_output" {
 		return e.tool.Execute(ctx, args)
 	}
 	return e.inner.Execute(ctx, toolName, args)
 }
 
 func (e *loadSpilledExecutor) ToolTimeoutHint(name string) time.Duration {
-	if name == "load_spilled" {
+	if name == "read_output" {
 		return 30 * time.Second
 	}
 	if hinter, ok := e.inner.(interface{ ToolTimeoutHint(string) time.Duration }); ok {

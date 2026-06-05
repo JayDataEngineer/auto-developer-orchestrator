@@ -81,8 +81,8 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	if len(processed) >= len(largeResult) {
 		t.Fatal("expected large result to be reduced (offloaded)")
 	}
-	if !strings.Contains(processed, "load_spilled") {
-		t.Fatalf("expected load_spilled reference in processed result, got: %s", processed[:min(len(processed), 200)])
+	if !strings.Contains(processed, "read_output") {
+		t.Fatalf("expected read_output reference in processed result, got: %s", processed[:min(len(processed), 200)])
 	}
 
 	// Verify the spill file exists
@@ -145,10 +145,10 @@ func TestIntegration_FullPipeline(t *testing.T) {
 
 	// --- Step 7: Load spilled content ---
 	// Extract the spill reference from the processed result
-	// Format: load_spilled("spill-XXXXXX")
-	refStart := strings.Index(processed, "load_spilled(\"")
+	// Format: read_output("spill-XXXXXX")
+	refStart := strings.Index(processed, "read_output(\"")
 	if refStart >= 0 {
-		refPart := processed[refStart+len("load_spilled(\""):]
+		refPart := processed[refStart+len("read_output(\""):]
 		refEnd := strings.Index(refPart, "\"")
 		if refEnd > 0 {
 			ref := refPart[:refEnd]

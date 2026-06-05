@@ -296,12 +296,12 @@ func NewLoadSpilledTool(mgr ContextManager) *LoadSpilledTool {
 	return &LoadSpilledTool{mgr: mgr}
 }
 
-func (t *LoadSpilledTool) Name() string { return "load_spilled" }
+func (t *LoadSpilledTool) Name() string { return "read_output" }
 
 func (t *LoadSpilledTool) Description() string {
 	return fmt.Sprintf(
-		"Retrieve a previously offloaded tool result by its spill reference (e.g., 'spill-a3f2b1'). "+
-			"Returns up to %d lines or %s, same limits as file_read. Use offset/limit for paginated access.",
+		"Read a previously offloaded tool result by its reference (e.g., 'spill-a3f2b1'). "+
+			"Returns up to %d lines or %s. Use offset/limit for paginated access.",
 		truncate.FileMaxLines, truncate.FormatSize(truncate.FileMaxBytes),
 	)
 }
@@ -321,7 +321,7 @@ func (t *LoadSpilledTool) Schema() json.RawMessage {
 func (t *LoadSpilledTool) Execute(_ context.Context, args map[string]any) (any, error) {
 	ref, _ := args["ref"].(string)
 	if ref == "" {
-		return nil, fmt.Errorf("load_spilled: missing required parameter 'ref'")
+		return nil, fmt.Errorf("read_output: missing required parameter 'ref'")
 	}
 	content, err := t.mgr.LoadSpilledContent(ref)
 	if err != nil {
@@ -338,7 +338,7 @@ func (t *LoadSpilledTool) Execute(_ context.Context, args map[string]any) (any, 
 	if userOffset > 0 {
 		startIdx = int(userOffset) - 1 // 1-based → 0-based
 		if startIdx >= totalLines {
-			return nil, fmt.Errorf("load_spilled: offset %d exceeds total lines %d", int(userOffset), totalLines)
+			return nil, fmt.Errorf("read_output: offset %d exceeds total lines %d", int(userOffset), totalLines)
 		}
 	}
 
