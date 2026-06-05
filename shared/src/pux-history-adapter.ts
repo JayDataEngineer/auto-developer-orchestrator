@@ -259,6 +259,10 @@ export function createPuxHistoryAdapter(): ThreadHistoryAdapter {
 				// Reconstruct sub-agent state from persisted traces
 				restoreAgentsFromHistory(data);
 
+				// Estimate context metrics from loaded history so the status bar
+				// shows context usage immediately (not just after next agent_end)
+				estimateContextFromHistory(data);
+
 				const messages = storedMessagesToThreadLikes(data);
 
 				// Import dynamically to avoid circular deps
@@ -276,4 +280,48 @@ export function createPuxHistoryAdapter(): ThreadHistoryAdapter {
 			// Backend persists messages during SSE stream — no frontend save needed
 		},
 	};
+}
+
+// ── Estimate context metrics from history ──
+
+/**
+ * Estimates context token usage from loaded history messages using
+ * the same char-to-token heuristic as the Go backend (chars * 0.3).
+ * Sets contextMetrics in the store so the status bar shows context
+ * usage immediately on resume, not just after the next agent_end.
+ */
+function estimateContextFromHistory(data: StoredMessage[]) {
+	if (data.length === 0) return;
+
+	// Sum characters from all message content fields
+	let totalChars = 0;
+	for (const msg of data) {
+		totalChars += (msg.content || "").length;
+		totalChars += (msg.text || "").length;
+		totalChars += (msg.thinking || "").length;
+		if (msg.toolCalls && msg.toolCalls !== "[]") {
+			totalChars += msg.toolCalls.length;
+		}
+	}
+
+	const estimatedTokens = Math.round(totalChars * 0.3);
+	if (estimatedTokens === 0) return;
+
+	// Look up context window from model list
+	const store = usePuxStore.getState();
+	const activeModel = store.activeModel || store.lastUsage?.model || "";
+	const modelEntry = store.modelList?.find((m) => m.id === activeModel);
+	const contextWindow = modelEntry?.contextWindow || 0;
+
+	// Only set if we have a context window (otherwise wait for agent_end)
+	if (contextWindow > 0) {
+		usePuxStore.setState({
+			contextMetrics: {
+				contextTokens: estimatedTokens,
+				contextSize: contextWindow,
+				contextUtil: estimatedTokens / contextWindow,
+				compactionType: "",
+			},
+		});
+	}
 }

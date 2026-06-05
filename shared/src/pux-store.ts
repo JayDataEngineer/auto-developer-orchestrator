@@ -98,7 +98,7 @@ interface PuxState {
 
 	// Model
 	activeModel: string;
-	modelList: Array<{ id: string; name: string; provider: string }>;
+	modelList: Array<{ id: string; name: string; provider: string; contextWindow?: number }>;
 	defaultLogic: string;
 	defaultWorker: string;
 
@@ -326,10 +326,11 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	loadModels: async () => {
 		const update = await apiLoad("/api/pux/models", (data: unknown) => {
 			const raw = Array.isArray(data) ? data : (data as Record<string, unknown>)?.models || [];
-			const models = (raw as Record<string, string>[]).map((m) => ({
+			const models = (raw as Record<string, any>[]).map((m) => ({
 				id: m.id || m.name,
 				name: m.name || m.id,
 				provider: m.provider || "",
+				contextWindow: m.contextWindow || 0,
 			}));
 			// Skip if unchanged (order-independent: compare by id set)
 			const current = get().modelList;
