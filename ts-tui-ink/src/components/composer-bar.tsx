@@ -13,7 +13,7 @@
  */
 
 import React, { useMemo, useCallback, useEffect, useState } from "react";
-import { Box, Text, useApp } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
 import {
 	ComposerPrimitive,
 	QueueItemPrimitive,
@@ -32,6 +32,14 @@ export function ComposerBar() {
 	const [commandOutput, setCommandOutput] = useState<string | null>(null);
 	const { cols } = useTerminalSize();
 	const colors = useColors();
+	const composerText = useAuiState((s) => s.composer.text);
+
+	// Left arrow on empty input → agents view
+	useInput(useCallback((_input: string, key: any) => {
+		if (key.leftArrow && (!composerText || composerText.length === 0)) {
+			usePuxStore.getState().setTuiView("agents");
+		}
+	}, [composerText]));
 
 	// Auto-dismiss command output after 5s
 	useEffect(() => {

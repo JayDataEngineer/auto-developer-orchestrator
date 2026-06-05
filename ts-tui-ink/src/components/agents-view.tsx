@@ -64,7 +64,7 @@ export function AgentsView() {
 
 	// Keyboard navigation
 	useInput((input: string, key: any) => {
-		if (key.escape) {
+		if (key.escape || key.rightArrow) {
 			usePuxStore.getState().setTuiView("chat");
 			return;
 		}
@@ -146,7 +146,7 @@ export function AgentsView() {
 			{/* Controls hint */}
 			<Box marginTop={1}>
 				<Text color={colors.textMuted}>
-					<Text bold>Up/Down</Text> navigate <Text bold>Enter/Space</Text> expand <Text bold>Esc</Text> back
+					<Text bold>Up/Down</Text> navigate <Text bold>Enter/Space</Text> expand <Text bold>Esc/Right</Text> back
 				</Text>
 			</Box>
 		</Box>
