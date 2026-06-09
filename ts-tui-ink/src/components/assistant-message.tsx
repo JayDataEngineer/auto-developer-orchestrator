@@ -75,6 +75,19 @@ function wrapText(text: string, maxWidth: number): string[] {
 	return lines.length > 0 ? lines : [""];
 }
 
+// ── Text normalizer ──
+// Models stream text with \n between words (streaming artifacts).
+// MarkdownText respects each \n as a line break, creating one-word-per-line.
+// This collapses single newlines to spaces, keeping \n\n as paragraph breaks.
+
+function normalizeText(text: string): string {
+	return text
+		.split(/\n\n+/)
+		.map(para => para.replace(/\n/g, " ").replace(/ +/g, " ").trim())
+		.filter(para => para.length > 0)
+		.join("\n\n");
+}
+
 // ── Main component ──
 
 export function AssistantMessage() {
@@ -162,10 +175,11 @@ export function AssistantMessage() {
 							return null;
 						case "text": {
 							if (!part.text?.trim()) return null;
+							const normalized = normalizeText(part.text);
 							return (
 								<Box key={part.text.slice(0, 20)} paddingLeft={2}>
 									<MarkdownText
-										text={part.text}
+										text={normalized}
 										tableTruncate={false}
 										theme={mdTheme}
 									/>

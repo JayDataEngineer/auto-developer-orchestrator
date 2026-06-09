@@ -65,6 +65,17 @@ function wrapText(text: string, maxWidth: number): string[] {
 	return lines.length > 0 ? lines : [""];
 }
 
+// ── Text normalizer ──
+// Collapse single newlines to spaces, keep paragraph breaks.
+
+function normalizeText(text: string): string {
+	return text
+		.split(/\n\n+/)
+		.map(p => p.replace(/\n/g, " ").replace(/ +/g, " ").trim())
+		.filter(p => p.length > 0)
+		.join("\n\n");
+}
+
 // ── Agents view ──
 
 export function AgentsView() {
@@ -358,36 +369,37 @@ function AgentCard({
 				)}
 
 				{/* Text response — wrapped plain text */}
-				{agent.text && (
-					<Box flexDirection="column" marginTop={0}>
-						{(() => {
-							const textWidth = Math.max(20, cols - 6);
-							const lines: string[] = [];
-							for (const para of agent.text.split("\n")) {
-								lines.push(...wrapText(para, textWidth));
-							}
-							return lines.slice(0, 30).map((line, i) => (
-								<Text key={i} color={colors.text}>{line}</Text>
-							));
-						})()}
-					</Box>
-				)}
-
-				{/* Final result (if different from text) */}
-				{agent.result && agent.result !== agent.text && agent.status === "complete" && (
-					<Box flexDirection="column" marginTop={0}>
-						{(() => {
-							const textWidth = Math.max(20, cols - 6);
-							const lines: string[] = [];
-							for (const para of agent.result.split("\n")) {
-								lines.push(...wrapText(para, textWidth));
-							}
-							return lines.slice(0, 20).map((line, i) => (
-								<Text key={i} color={colors.textMuted}>{line}</Text>
-							));
-						})()}
-					</Box>
-				)}
+				{(() => {
+					const normText = agent.text ? normalizeText(agent.text) : "";
+					const normResult = agent.result ? normalizeText(agent.result) : "";
+					// Only show result separately if it's substantively different
+					const showResult = normResult && normResult !== normText && agent.status === "complete";
+					if (!normText && !showResult) return null;
+					return (
+						<Box flexDirection="column" marginTop={0}>
+							{normText && (() => {
+								const textWidth = Math.max(20, cols - 6);
+								const lines: string[] = [];
+								for (const para of normText.split("\n")) {
+									lines.push(...wrapText(para, textWidth));
+								}
+								return lines.slice(0, 30).map((line, i) => (
+									<Text key={i} color={colors.text}>{line}</Text>
+								));
+							})()}
+							{showResult && (() => {
+								const textWidth = Math.max(20, cols - 6);
+								const lines: string[] = [];
+								for (const para of normResult.split("\n")) {
+									lines.push(...wrapText(para, textWidth));
+								}
+								return lines.slice(0, 20).map((line, i) => (
+									<Text key={`r${i}`} color={colors.textMuted}>{line}</Text>
+								));
+							})()}
+						</Box>
+					);
+				})()}
 
 				{/* Error */}
 				{agent.error && (
