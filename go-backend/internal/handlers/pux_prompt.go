@@ -83,11 +83,13 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			if err != nil {
 				// Docker unavailable — continue in host-only mode.
 				// CTO tools use HostBash/HostFileOps (host filesystem).
-				// Sub-agent delegation will fail, but CTO-only tasks work fine.
-				h.log.Warn("Sandbox creation failed — running in host-only mode",
+				// Browser tools fall back to host Chrome using the sandboxID.
+				// The executor factory detects nil BashExecutor and uses host exec.
+				h.log.Warn("Sandbox creation failed — running in host-only mode (browser uses host Chrome)",
 					zap.Error(err),
 					zap.String("project", req.Project))
-				sandboxID = "" // no sandbox
+				// Keep sandboxID non-empty so browser tools can identify host Chrome.
+				// bashExec stays nil — orchestrator detects this and uses host executor.
 			} else {
 				sandboxID = sb.ID
 				h.log.Info("Auto-created sandbox for prompt",

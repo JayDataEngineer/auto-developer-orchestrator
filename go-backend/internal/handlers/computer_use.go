@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,10 @@ type ComputerUseHandler struct {
 	logger       *zap.Logger
 	clients      map[string]*browser.SandboxBrowserClient
 	mu           sync.RWMutex
+
+	// Host Chrome fallback (when Docker is unavailable)
+	hostChromeCmd  *exec.Cmd
+	hostChromePort int
 }
 
 // NewComputerUseHandler creates a new computer use handler
@@ -79,10 +84,8 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("enabling computer use", zap.String("sandbox_id", sandboxID))
 
-	if h.manager == nil {
-		JSONError(w, "sandbox manager not available", http.StatusServiceUnavailable)
-		return
-	}
+	// When no sandbox manager (Docker down), we fall back to host Chrome.
+	// The backgroundSetup goroutine handles both paths.
 
 	// Fast path: already have a connected CDP client — pure in-memory check (~1ms).
 	h.mu.RLock()
@@ -91,14 +94,19 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 	h.mu.RUnlock()
 
 	if isConnected {
-		sandbox, _ := h.manager.GetSandbox(sandboxID)
-		cdpPort := 19222
-		viewerURL := fmt.Sprintf("/sandbox/%s/viewer", sandboxID)
-		novncPort := 6080
-		if sandbox != nil && sandbox.DesktopSession != nil {
-			cdpPort = sandbox.DesktopSession.CDPPort
-			viewerURL = sandbox.DesktopSession.ViewerURL
-			novncPort = sandbox.DesktopSession.NoVNCPort
+		cdpPort := 9222 // host Chrome default
+		viewerURL := ""
+		novncPort := 0
+		if h.manager != nil {
+			sandbox, _ := h.manager.GetSandbox(sandboxID)
+			cdpPort = 19222
+			viewerURL = fmt.Sprintf("/sandbox/%s/viewer", sandboxID)
+			novncPort = 6080
+			if sandbox != nil && sandbox.DesktopSession != nil {
+				cdpPort = sandbox.DesktopSession.CDPPort
+				viewerURL = sandbox.DesktopSession.ViewerURL
+				novncPort = sandbox.DesktopSession.NoVNCPort
+			}
 		}
 		h.logger.Info("computer use already enabled (fast path)", zap.String("sandbox_id", sandboxID))
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -128,12 +136,30 @@ func (h *ComputerUseHandler) Enable(w http.ResponseWriter, r *http.Request) {
 
 // backgroundSetup runs all Docker/CDP operations after the HTTP response has been sent.
 // Errors are logged, not returned to the client.
+// Falls back to host Chrome when Docker is unavailable.
 func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID string) {
 	h.logger.Info("background: setting up computer use", zap.String("sandbox_id", sandboxID))
 
-	// Step 1: Enable desktop mode (Xvfb + VNC + Chrome on display) so the user
-	// can SEE the agent's actions in the center panel VNC viewer.
-	// First ensure the sandbox exists (create/recover if needed).
+	// Docker path — only if manager is available
+	if h.manager != nil {
+		if h.dockerSetup(ctx, sandboxID) {
+			return // success
+		}
+		h.logger.Info("background: Docker setup failed, falling back to host Chrome", zap.String("sandbox_id", sandboxID))
+	} else {
+		h.logger.Info("background: no sandbox manager, using host Chrome", zap.String("sandbox_id", sandboxID))
+	}
+
+	// Host Chrome fallback — runs Chrome directly on the host
+	if err := h.setupHostChrome(ctx, sandboxID); err != nil {
+		h.logger.Error("background: host Chrome setup also failed", zap.String("sandbox_id", sandboxID), zap.Error(err))
+	}
+}
+
+// dockerSetup creates a Docker sandbox, enables browser mode, and connects CDP.
+// Returns true on success, false on failure (caller should try host Chrome).
+func (h *ComputerUseHandler) dockerSetup(ctx context.Context, sandboxID string) bool {
+	// Step 1: Ensure the sandbox exists (create/recover if needed).
 	if _, err := h.manager.GetSandbox(sandboxID); err != nil {
 		h.logger.Info("background: sandbox not found, creating", zap.String("sandbox_id", sandboxID), zap.Error(err))
 		_, createErr := h.manager.CreateSandbox(ctx, sandbox.SandboxOptions{ID: sandboxID})
@@ -142,25 +168,23 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 			recoverErr := h.manager.RecoverSandbox(ctx, sandboxID)
 			if recoverErr != nil {
 				h.logger.Error("background: failed to create or recover sandbox", zap.Error(createErr), zap.Error(recoverErr))
-				return
+				return false
 			}
 		}
 	}
 
-	// Try browser mode first — the OpenShell image already provides a full
-	// desktop via supervisord (Xvfb + fluxbox + Chrome + websockify on 6080).
-	// Only fall back to desktop mode for bare containers that need everything started.
+	// Step 2: Try browser mode first, fall back to desktop mode.
 	session, err := h.manager.EnableBrowserMode(ctx, sandboxID)
 	if err != nil {
 		h.logger.Info("background: browser mode not available, starting desktop mode", zap.String("sandbox_id", sandboxID), zap.Error(err))
 		session, err = h.manager.EnableDesktopMode(ctx, sandboxID)
 		if err != nil {
 			h.logger.Error("background: desktop mode also failed", zap.Error(err))
-			return
+			return false
 		}
 	}
 
-	// Step 2: Create SandboxBrowserClient
+	// Step 3: Create SandboxBrowserClient
 	client, err := h.getOrCreateClient(sandboxID, session.CDPPort)
 	if err != nil {
 		// Stale container — destroy and retry
@@ -171,7 +195,7 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 		_, createErr := h.manager.CreateSandbox(ctx, sandbox.SandboxOptions{ID: sandboxID})
 		if createErr != nil {
 			h.logger.Error("background: fresh sandbox creation failed", zap.Error(createErr))
-			return
+			return false
 		}
 
 		session, sessionErr := h.manager.EnableBrowserMode(ctx, sandboxID)
@@ -180,18 +204,18 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 			session, sessionErr = h.manager.EnableDesktopMode(ctx, sandboxID)
 			if sessionErr != nil {
 				h.logger.Error("background: desktop mode on fresh sandbox also failed", zap.Error(sessionErr))
-				return
+				return false
 			}
 		}
 
 		client, err = h.getOrCreateClient(sandboxID, session.CDPPort)
 		if err != nil {
 			h.logger.Error("background: client creation on fresh sandbox failed", zap.Error(err))
-			return
+			return false
 		}
 	}
 
-	// Step 3: Connect via CDP (with exponential backoff)
+	// Step 4: Connect via CDP (with exponential backoff)
 	cfg := retry.Long
 	connectErr := retry.Do(ctx, cfg, func() error {
 		err := client.Connect(ctx)
@@ -202,17 +226,99 @@ func (h *ComputerUseHandler) backgroundSetup(ctx context.Context, sandboxID stri
 	})
 	if connectErr != nil {
 		h.logger.Warn("background: CDP connect failed after retries", zap.String("sandbox_id", sandboxID), zap.Error(connectErr))
-		return
+		return false
 	}
 
-	// Step 4: Install X11 automation tools (xdotool, imagemagick) BEFORE writing
-	// the landing page so the sandbox is fully ready when /viewer returns 200.
+	// Step 5: Install X11 tools + write landing page
 	h.installX11Tools(ctx, sandboxID)
-
-	// Step 5: Write landing page — signals "ready" to polling clients
 	h.writeLandingPage(ctx, sandboxID, session.DisplayNum)
 
 	h.logger.Info("background: computer use setup complete", zap.String("sandbox_id", sandboxID))
+	return true
+}
+
+// setupHostChrome launches Chrome directly on the host (no Docker) and connects
+// via CDP. Used as a fallback when Docker is unavailable.
+func (h *ComputerUseHandler) setupHostChrome(ctx context.Context, sandboxID string) error {
+	const cdpPort = 9222
+
+	// Launch Chrome if not already running
+	if !h.isHostChromeReady(cdpPort) {
+		chromePath, err := exec.LookPath("google-chrome")
+		if err != nil {
+			chromePath, err = exec.LookPath("chromium")
+			if err != nil {
+				return fmt.Errorf("no Chrome/Chromium binary found: %w", err)
+			}
+		}
+
+		h.logger.Info("background: launching host Chrome", zap.String("path", chromePath), zap.Int("port", cdpPort))
+		cmd := exec.Command(chromePath,
+			"--headless=new",
+			fmt.Sprintf("--remote-debugging-port=%d", cdpPort),
+			"--no-sandbox",
+			"--disable-gpu",
+			"--no-first-run",
+			"--disable-extensions",
+			"--user-data-dir=/tmp/pux-chrome",
+		)
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to start Chrome: %w", err)
+		}
+		h.mu.Lock()
+		h.hostChromeCmd = cmd
+		h.hostChromePort = cdpPort
+		h.mu.Unlock()
+
+		// Wait for CDP to be ready (up to 30s)
+		for i := 0; i < 30; i++ {
+			if h.isHostChromeReady(cdpPort) {
+				break
+			}
+			select {
+			case <-time.After(time.Second):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if !h.isHostChromeReady(cdpPort) {
+			return fmt.Errorf("Chrome did not become ready on port %d", cdpPort)
+		}
+	}
+
+	h.logger.Info("background: host Chrome ready", zap.Int("port", cdpPort))
+
+	// Create browser client pointing at localhost
+	client, err := browser.NewSandboxBrowserClient(cdpPort, "localhost", h.logger)
+	if err != nil {
+		return fmt.Errorf("create client: %w", err)
+	}
+
+	// Connect via CDP
+	cfg := retry.Long
+	if err := retry.Do(ctx, cfg, func() error {
+		return client.Connect(ctx)
+	}); err != nil {
+		return fmt.Errorf("CDP connect: %w", err)
+	}
+
+	h.mu.Lock()
+	h.clients[sandboxID] = client
+	h.mu.Unlock()
+
+	h.logger.Info("background: host Chrome setup complete", zap.String("sandbox_id", sandboxID))
+	return nil
+}
+
+// isHostChromeReady checks if Chrome CDP is reachable on the given port.
+func (h *ComputerUseHandler) isHostChromeReady(port int) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/json/version", port))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == 200
 }
 
 // installX11Tools installs xdotool and imagemagick in the sandbox container
@@ -507,6 +613,13 @@ func (h *ComputerUseHandler) Shutdown() {
 	for id, client := range h.clients {
 		client.Close()
 		delete(h.clients, id)
+	}
+
+	// Kill host Chrome process if we launched one
+	if h.hostChromeCmd != nil && h.hostChromeCmd.Process != nil {
+		h.logger.Info("shutting down host Chrome", zap.Int("port", h.hostChromePort))
+		_ = h.hostChromeCmd.Process.Kill()
+		h.hostChromeCmd = nil
 	}
 }
 

@@ -416,7 +416,11 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		// Employee tools (MCP, browser, desktop, etc.) are always included regardless of tier.
 		execFactory := func(tier string) core.ToolExecutor {
 			needsDocker := tier == "isolated" || tier == "bridged"
-			if !needsDocker || cfg.SandboxID == "" {
+			// Use host executor when: tier doesn't need Docker, OR no sandbox ID,
+			// OR Docker is unavailable (BashExecutor is nil). In the last case,
+			// SandboxID is still set (project name) so browser tools can identify
+			// host Chrome, but bash/file ops must use the host executor.
+			if !needsDocker || cfg.SandboxID == "" || cfg.BashExecutor == nil {
 				// Use configured host executor (SSH for remote projects, HostExecutor for local)
 				hostExec := cfg.HostBash
 				if hostExec == nil {
@@ -466,6 +470,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			Logger:             func(format string, args ...interface{}) { logger.Printf("PARALLEL_RUNNER: "+format, args...) },
 			OrchestratorFactory: makeOrchestratorFactory(provider, cfg),
 			ProjectDir:         cfg.ProjectDir,
+			SandboxID:          cfg.SandboxID,
 			Depth:              0,
 			Snapshotter:        snapshotter,
 			ExecutorFactory:    execFactory,

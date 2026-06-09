@@ -62,6 +62,11 @@ type RunnerConfig struct {
 	ProjectDir          string
 	Depth, MaxDepth     int // MaxDepth defaults to 3
 
+	// SandboxID — the project-based sandbox identifier used by browser tools.
+	// Must match cfg.SandboxID in the orchestrator so prewarm and browse_to
+	// use the same key to look up Chrome in h.clients map.
+	SandboxID string
+
 	// File change tracking
 	Snapshotter Snapshotter
 
@@ -875,7 +880,10 @@ func (r *ParallelRunner) buildSubAgent(
 	// browse_to call to delegation setup, so the user sees "warming browser..."
 	// during the delegate_to overhead instead of a 100s tool execution.
 	if r.cfg.BrowserPreWarmFunc != nil && hasBrowserTools(toolNamesFromSpecs(setup.SelectedTools)) {
-		sandboxID := r.cfg.BaseSession.ID()
+		sandboxID := r.cfg.SandboxID
+		if sandboxID == "" {
+			sandboxID = r.cfg.BaseSession.ID() // fallback for legacy configs
+		}
 		r.cfg.Logger("BROWSER_PREWARM: warming sandbox %s for agent=%s", sandboxID, setup.AgentName)
 		preWarmCtx, preWarmCancel := context.WithTimeout(context.Background(), 90*time.Second)
 		if err := r.cfg.BrowserPreWarmFunc(preWarmCtx, sandboxID); err != nil {
