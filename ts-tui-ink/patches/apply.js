@@ -27,7 +27,7 @@ if (!fs.existsSync(file)) {
 let src = fs.readFileSync(file, "utf8");
 
 // Check if already patched
-if (src.includes("kill-word-forward") && src.includes('key.backspace && key.ctrl')) {
+if (src.includes("kill-word-forward") && src.includes('key.backspace && key.ctrl') && src.includes('if (key.tab) return')) {
 	process.exit(0);
 }
 
@@ -46,6 +46,15 @@ if (!src.includes("key.backspace && key.ctrl")) {
 	src = src.replace(
 		marker,
 		'if (key.backspace && key.ctrl) {\n\t\t\tcommitAction({ type: "kill-word-backward" });\n\t\t\treturn;\n\t\t}\n\t\tif (key.backspace) {\n\t\t\tcommitAction({ type: "delete-backward" })'
+	);
+}
+
+// Skip Tab in library (handled by our useInput for autocomplete)
+if (!src.includes('if (key.tab) return')) {
+	const marker = 'if (key.delete) {\n\t\t\tcommitAction({ type: "delete-forward" });\n\t\t\treturn;\n\t\t}\n\t\tif (input && !key.ctrl && !key.meta)';
+	src = src.replace(
+		marker,
+		'if (key.delete) {\n\t\t\tcommitAction({ type: "delete-forward" });\n\t\t\treturn;\n\t\t}\n\t\tif (key.tab) return;\n\t\tif (input && !key.ctrl && !key.meta)'
 	);
 }
 

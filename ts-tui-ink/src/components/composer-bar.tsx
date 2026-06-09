@@ -33,13 +33,48 @@ export function ComposerBar() {
 	const { cols } = useTerminalSize();
 	const colors = useColors();
 	const composerText = useAuiState((s) => s.composer.text);
+	const aui = useAui();
+	const [selectedIdx, setSelectedIdx] = useState(0);
+
+	// Slash command matches (shared between palette + input handlers)
+	const matches = useMemo(() => {
+		if (!composerText || !composerText.startsWith("/")) return [];
+		const query = composerText.slice(1).toLowerCase();
+		if (query.includes(" ")) return [];
+		return getCommands()
+			.filter((c) => c.name.startsWith(query))
+			.map((c) => ({ name: c.name, desc: c.description }));
+	}, [composerText]);
+
+	// Reset selection when matches change
+	useEffect(() => { setSelectedIdx(0); }, [composerText]);
 
 	// Left arrow on empty input → agents view
+	// Arrow navigation + Tab autocomplete when palette is visible
 	useInput(useCallback((_input: string, key: any) => {
 		if (key.leftArrow && (!composerText || composerText.length === 0)) {
 			usePuxStore.getState().setTuiView("agents");
+			return;
 		}
-	}, [composerText]));
+		// Only handle these when palette is visible
+		if (matches.length === 0) return;
+		const maxVisible = Math.min(5, matches.length);
+		if (key.upArrow) {
+			setSelectedIdx((prev) => (prev - 1 + maxVisible) % maxVisible);
+			return;
+		}
+		if (key.downArrow) {
+			setSelectedIdx((prev) => (prev + 1) % maxVisible);
+			return;
+		}
+		if (key.tab) {
+			const selected = matches[selectedIdx];
+			if (selected) {
+				aui.composer().setText("/" + selected.name + " ");
+			}
+			return;
+		}
+	}, [composerText, matches, selectedIdx, aui]));
 
 	// Auto-dismiss command output after 5s
 	useEffect(() => {
@@ -72,7 +107,7 @@ export function ComposerBar() {
 			</ComposerPrimitive.Queue>
 
 			{/* Slash command autocomplete */}
-			<CommandPalette />
+			<CommandPalette matches={matches} selectedIdx={selectedIdx} />
 
 			{/* Input area */}
 			<Text color={colors.subtle}>{"─".repeat(cols)}</Text>
@@ -87,18 +122,14 @@ export function ComposerBar() {
 
 // ── Command palette ──
 
-function CommandPalette() {
-	const text = useAuiState((s) => s.composer.text);
+function CommandPalette({
+	matches,
+	selectedIdx,
+}: {
+	matches: { name: string; desc: string }[];
+	selectedIdx: number;
+}) {
 	const colors = useColors();
-
-	const matches = useMemo(() => {
-		if (!text || !text.startsWith("/")) return [];
-		const query = text.slice(1).toLowerCase();
-		if (query.includes(" ")) return [];
-		return getCommands()
-			.filter((c) => c.name.startsWith(query))
-			.map((c) => ({ name: c.name, desc: c.description }));
-	}, [text]);
 
 	if (matches.length === 0) return null;
 
@@ -109,10 +140,10 @@ function CommandPalette() {
 					key={c.name}
 					name={c.name}
 					description={c.desc}
-					selected={i === 0}
+					selected={i === selectedIdx}
 				/>
 			))}
-			<Text color={colors.textMuted}> Enter to execute</Text>
+			<Text color={colors.textMuted}> Enter to execute  Tab to complete</Text>
 		</Box>
 	);
 }
@@ -126,17 +157,6 @@ function PuxInput({
 }) {
 	const aui = useAui();
 	const { exit } = useApp();
-	const storeText = useAuiState((s) => s.composer.text);
-
-	// Track slash command matches for autocomplete
-	const matches = useMemo(() => {
-		if (!storeText || !storeText.startsWith("/")) return [];
-		const query = storeText.slice(1).toLowerCase();
-		if (query.includes(" ")) return [];
-		return getCommands()
-			.filter((c) => c.name.startsWith(query))
-			.map((c) => c.name);
-	}, [storeText]);
 
 	// Handle submit — intercept slash commands, pass chat to runtime
 	const handleSubmit = useCallback((text: string) => {
@@ -145,15 +165,6 @@ function PuxInput({
 
 		if (trimmed.startsWith("/")) {
 			const cmdName = trimmed.slice(1).split(" ")[0].toLowerCase();
-			const hasArgs = trimmed.includes(" ");
-			const isExactMatch = getCommands().some((c) => c.name === cmdName);
-
-			// Autocomplete partial match (only if not already a complete command)
-			if (!isExactMatch && !hasArgs && matches.length === 1) {
-				const completed = "/" + matches[0] + " ";
-				aui.composer().setText(completed);
-				return;
-			}
 
 			// Execute the slash command
 			const ctx: CommandContext = {
@@ -175,7 +186,7 @@ function PuxInput({
 			// Normal chat — send through runtime
 			aui.composer().send();
 		}
-	}, [aui, exit, matches, onCommandOutput]);
+	}, [aui, exit, onCommandOutput]);
 
 	return (
 		<ComposerPrimitive.Input
