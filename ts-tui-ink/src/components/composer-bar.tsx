@@ -58,13 +58,13 @@ export function ComposerBar() {
 		}
 		// Only handle these when palette is visible
 		if (matches.length === 0) return;
-		const maxVisible = Math.min(5, matches.length);
+		const total = matches.length;
 		if (key.upArrow) {
-			setSelectedIdx((prev) => (prev - 1 + maxVisible) % maxVisible);
+			setSelectedIdx((prev) => (prev - 1 + total) % total);
 			return;
 		}
 		if (key.downArrow) {
-			setSelectedIdx((prev) => (prev + 1) % maxVisible);
+			setSelectedIdx((prev) => (prev + 1) % total);
 			return;
 		}
 		if (key.tab) {
@@ -130,17 +130,23 @@ function CommandPalette({
 	selectedIdx: number;
 }) {
 	const colors = useColors();
+	const VISIBLE = 5;
 
 	if (matches.length === 0) return null;
 
+	// Scroll window to keep the selected item visible
+	const maxOffset = Math.max(0, matches.length - VISIBLE);
+	const scrollOffset = Math.max(0, Math.min(selectedIdx - VISIBLE + 1, maxOffset));
+	const visible = matches.slice(scrollOffset, scrollOffset + VISIBLE);
+
 	return (
 		<Box flexDirection="column" paddingX={1}>
-			{matches.slice(0, 5).map((c, i) => (
+			{visible.map((c, i) => (
 				<CommandRow
 					key={c.name}
 					name={c.name}
 					description={c.desc}
-					selected={i === selectedIdx}
+					selected={scrollOffset + i === selectedIdx}
 				/>
 			))}
 			<Text color={colors.textMuted}> Enter to execute  Tab to complete</Text>
