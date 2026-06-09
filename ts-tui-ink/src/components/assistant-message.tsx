@@ -91,11 +91,8 @@ export function AssistantMessage() {
 	const allReasoning = reasoningParts.map((p: any) => p.text).join("\n");
 	const hasReasoning = allReasoning.length > 0;
 
-	// Get the most recent (last) line of reasoning for display
+	// Split reasoning into lines for blockquote-style display
 	const reasoningLines = allReasoning.split("\n").filter((l: string) => l.trim());
-	const lastReasoningLine = reasoningLines.length > 0
-		? reasoningLines[reasoningLines.length - 1]
-		: "";
 
 	// Only show initial spinner when no content yet
 	const showSpinner = isRunning && !hasContent;
@@ -118,12 +115,14 @@ export function AssistantMessage() {
 				</Box>
 			)}
 
-			{/* Collapsed reasoning — wrapped, not truncated */}
+			{/* Reasoning — all lines, blockquote-style */}
 			{hasReasoning && (
-				<Box marginBottom={1} paddingLeft={2}>
-					<Text color={colors.textMuted} wrap="wrap">
-						{BLOCKQUOTE_BAR} {lastReasoningLine}
-					</Text>
+				<Box marginBottom={1} paddingLeft={2} flexDirection="column">
+					{reasoningLines.map((line, i) => (
+						<Text key={i} color={colors.textMuted} wrap="wrap">
+							{BLOCKQUOTE_BAR} {line}
+						</Text>
+					))}
 				</Box>
 			)}
 
