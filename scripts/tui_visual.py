@@ -74,6 +74,8 @@ SPECIAL_KEYS = {
     "ctrl+g":      "\x07",
     "ctrl+u":      "\x15",
     "ctrl+w":      "\x17",
+    "ctrl+delete": "\x1b[3;5~",
+    "ctrl+backspace": "\x08",
     "ctrl+a":      "\x01",
     "ctrl+e":      "\x05",
     "ctrl+n":      "\x0e",
