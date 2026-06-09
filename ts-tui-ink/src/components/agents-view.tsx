@@ -24,11 +24,6 @@ import {
 } from "@pux/shared";
 import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
-import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
-// Extend for tableTruncate (not in library types yet)
-const MarkdownText = _MarkdownText as React.FC<
-	React.ComponentProps<typeof _MarkdownText> & { tableTruncate?: boolean }
->;
 
 // ── StoredMessage shape (matches pux-history-adapter.ts) ──
 
@@ -49,6 +44,26 @@ interface StoredMessage {
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
 	load_spilled: "read_output",
 };
+
+// ── Word-wrap helper ──
+
+function wrapText(text: string, maxWidth: number): string[] {
+	const words = text.split(/\s+/);
+	const lines: string[] = [];
+	let current = "";
+	for (const word of words) {
+		if (current.length === 0) {
+			current = word;
+		} else if (current.length + 1 + word.length <= maxWidth) {
+			current += " " + word;
+		} else {
+			lines.push(current);
+			current = word;
+		}
+	}
+	if (current) lines.push(current);
+	return lines.length > 0 ? lines : [""];
+}
 
 // ── Agents view ──
 
@@ -273,20 +288,40 @@ function AgentCard({
 
 			{/* Bordered content block */}
 			<Box flexDirection="column" paddingLeft={1} borderStyle="bold" borderLeft={true} borderColor={colors.textMuted}>
-				{/* Task description */}
-				<Box>
-					<Text color={colors.textMuted} bold>Task: </Text>
-					<Text color={colors.textMuted} italic>
-						{agent.task.slice(0, cols - 12)}{agent.task.length > cols - 12 ? "..." : ""}
-					</Text>
-				</Box>
+				{/* Task description — wrapped */}
+				{(() => {
+					const taskWidth = Math.max(20, cols - 8);
+					const taskLines = wrapText(agent.task, taskWidth);
+					return (
+						<Box flexDirection="column">
+							<Text color={colors.textMuted} bold>
+								Task: {taskLines[0]}
+							</Text>
+							{taskLines.slice(1).map((line, i) => (
+								<Text key={i} color={colors.textMuted} italic>
+									{"      "}{line}
+								</Text>
+							))}
+						</Box>
+					);
+				})()}
 
-				{/* Thinking — collapsed last line */}
+				{/* Thinking — all lines, wrapped with blockquote bar */}
 				{agent.thinkingText && (
-					<Box marginTop={0}>
-						<Text color={colors.textMuted}>
-							{BLOCKQUOTE_BAR} {agent.thinkingText.split("\n").filter((l: string) => l.trim()).pop()?.slice(0, cols - 8) || ""}
-						</Text>
+					<Box flexDirection="column" marginTop={0}>
+						{(() => {
+							const thinkWidth = Math.max(20, cols - 8);
+							const lines: string[] = [];
+							for (const para of agent.thinkingText.split("\n")) {
+								if (!para.trim()) continue;
+								lines.push(...wrapText(para, thinkWidth));
+							}
+							return lines.map((line, i) => (
+								<Text key={i} color={colors.textMuted}>
+									{BLOCKQUOTE_BAR} {line}
+								</Text>
+							));
+						})()}
 					</Box>
 				)}
 
@@ -322,23 +357,35 @@ function AgentCard({
 					</Box>
 				)}
 
-				{/* Text response — rendered as markdown */}
+				{/* Text response — wrapped plain text */}
 				{agent.text && (
 					<Box flexDirection="column" marginTop={0}>
-						<MarkdownText
-							text={agent.text}
-							tableTruncate={false}
-						/>
+						{(() => {
+							const textWidth = Math.max(20, cols - 6);
+							const lines: string[] = [];
+							for (const para of agent.text.split("\n")) {
+								lines.push(...wrapText(para, textWidth));
+							}
+							return lines.slice(0, 30).map((line, i) => (
+								<Text key={i} color={colors.text}>{line}</Text>
+							));
+						})()}
 					</Box>
 				)}
 
 				{/* Final result (if different from text) */}
 				{agent.result && agent.result !== agent.text && agent.status === "complete" && (
 					<Box flexDirection="column" marginTop={0}>
-						<MarkdownText
-							text={agent.result}
-							tableTruncate={false}
-						/>
+						{(() => {
+							const textWidth = Math.max(20, cols - 6);
+							const lines: string[] = [];
+							for (const para of agent.result.split("\n")) {
+								lines.push(...wrapText(para, textWidth));
+							}
+							return lines.slice(0, 20).map((line, i) => (
+								<Text key={i} color={colors.textMuted}>{line}</Text>
+							));
+						})()}
 					</Box>
 				)}
 

@@ -54,6 +54,27 @@ function trunc(s: string, max: number): string {
 	return cut.slice(0, lastSpace) + "…";
 }
 
+// ── Word-wrap helper ──
+// Wraps text to maxWidth chars, returns array of visual lines.
+
+function wrapText(text: string, maxWidth: number): string[] {
+	const words = text.split(/\s+/);
+	const lines: string[] = [];
+	let current = "";
+	for (const word of words) {
+		if (current.length === 0) {
+			current = word;
+		} else if (current.length + 1 + word.length <= maxWidth) {
+			current += " " + word;
+		} else {
+			lines.push(current);
+			current = word;
+		}
+	}
+	if (current) lines.push(current);
+	return lines.length > 0 ? lines : [""];
+}
+
 // ── Main component ──
 
 export function AssistantMessage() {
@@ -91,8 +112,14 @@ export function AssistantMessage() {
 	const allReasoning = reasoningParts.map((p: any) => p.text).join("\n");
 	const hasReasoning = allReasoning.length > 0;
 
-	// Split reasoning into lines for blockquote-style display
-	const reasoningLines = allReasoning.split("\n").filter((l: string) => l.trim());
+	// Wrap reasoning into visual lines so every line gets a blockquote bar.
+	// Available width = cols - paddingRight(1) - paddingLeft(2) - "▎ "(2)
+	const textWidth = Math.max(20, cols - 5);
+	const reasoningLines: string[] = [];
+	for (const para of allReasoning.split("\n")) {
+		if (!para.trim()) continue;
+		reasoningLines.push(...wrapText(para, textWidth));
+	}
 
 	// Only show initial spinner when no content yet
 	const showSpinner = isRunning && !hasContent;
@@ -115,11 +142,11 @@ export function AssistantMessage() {
 				</Box>
 			)}
 
-			{/* Reasoning — all lines, blockquote-style */}
+			{/* Reasoning — all visual lines, blockquote-style */}
 			{hasReasoning && (
 				<Box marginBottom={1} paddingLeft={2} flexDirection="column">
 					{reasoningLines.map((line, i) => (
-						<Text key={i} color={colors.textMuted} wrap="wrap">
+						<Text key={i} color={colors.textMuted}>
 							{BLOCKQUOTE_BAR} {line}
 						</Text>
 					))}
