@@ -24,6 +24,25 @@ import {
 } from "@pux/shared";
 import { useColors, symbols, BLOCKQUOTE_BAR } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
+import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
+import type { Theme as MarkdansiTheme } from "markdansi";
+const MarkdownText = _MarkdownText as React.FC<
+	React.ComponentProps<typeof _MarkdownText> & { tableTruncate?: boolean }
+>;
+const mdTheme: MarkdansiTheme = {
+	heading: { bold: true, color: "#ffffff" },
+	strong: { bold: true, color: "#ffffff" },
+	emph: { italic: true },
+	inlineCode: { color: "#d77757" },
+	blockCode: { color: "#b0b0b0" },
+	code: { color: "#d77757" },
+	link: { color: "#73daca", underline: true },
+	quote: { color: "#6a737d" },
+	hr: { color: "#505050" },
+	listMarker: { color: "#999999" },
+	tableHeader: { bold: true, color: "#ffffff" },
+	tableCell: { color: "#cccccc" },
+};
 
 // ── StoredMessage shape (matches pux-history-adapter.ts) ──
 
@@ -283,131 +302,87 @@ function AgentCard({
 		);
 	}
 
-	// Width budget for a tool call line: cols - border(1) - padding(1) - prefix(7: " └ ● ")
-	const toolLineWidth = Math.max(20, cols - 9);
+	// Width budget for a tool call line: cols - paddingLeft(2) - prefix(2: "● ")
+	const toolLineWidth = Math.max(20, cols - 4);
+	// Text width for thinking: cols - paddingRight(1) - paddingLeft(2) - "▎ "(2)
+	const thinkWidth = Math.max(20, cols - 5);
+
+	// Thinking lines (same as main chat: ▎ on every visual line)
+	const thinkingLines: string[] = [];
+	if (agent.thinkingText) {
+		const normThinking = normalizeText(agent.thinkingText);
+		for (const para of normThinking.split("\n")) {
+			if (!para.trim()) continue;
+			thinkingLines.push(...wrapText(para, thinkWidth));
+		}
+	}
+
+	// Normalized text (dedup text vs result)
+	const normText = agent.text ? normalizeText(agent.text) : "";
+	const normResult = agent.result ? normalizeText(agent.result) : "";
 
 	return (
-		<Box flexDirection="column" marginBottom={1}>
-			{/* Agent header */}
-			<Box>
-				<Text color={statusColor}>{statusIcon} </Text>
-				<Text bold color={isSelected ? colors.brand : undefined}>
-					{agent.agentName}
-				</Text>
-				<Text color={colors.textMuted}> {symbols.dot} {duration}</Text>
-			</Box>
+		<Box flexDirection="column" marginTop={1} paddingRight={1}>
+			{/* Thinking — same blockquote style as main chat */}
+			{thinkingLines.length > 0 && (
+				<Box marginBottom={1} paddingLeft={2} flexDirection="column">
+					{thinkingLines.map((line, i) => (
+						<Text key={i} color={colors.textMuted}>
+							{BLOCKQUOTE_BAR} {line}
+						</Text>
+					))}
+				</Box>
+			)}
 
-			{/* Bordered content block */}
-			<Box flexDirection="column" paddingLeft={1} borderStyle="bold" borderLeft={true} borderColor={colors.textMuted}>
-				{/* Task description — wrapped */}
-				{(() => {
-					const taskWidth = Math.max(20, cols - 8);
-					const taskLines = wrapText(agent.task, taskWidth);
-					return (
-						<Box flexDirection="column">
-							<Text color={colors.textMuted} bold>
-								Task: {taskLines[0]}
-							</Text>
-							{taskLines.slice(1).map((line, i) => (
-								<Text key={i} color={colors.textMuted} italic>
-									{"      "}{line}
-								</Text>
-							))}
-						</Box>
-					);
-				})()}
+			{/* Tool calls — same CompactToolCall style as main chat */}
+			{visibleTools.map((tc, i) => {
+				const done = !!tc.endedAt;
+				const icon = tc.isError ? "✗" : done ? "✓" : "●";
+				const iconColor = tc.isError ? colors.error : done ? colors.success : colors.running;
+				const label = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 50);
+				const tcDuration = tc.endedAt
+					? ` · ${((tc.endedAt - tc.timestamp) / 1000).toFixed(1)}s`
+					: "";
 
-				{/* Thinking — all lines, wrapped with blockquote bar */}
-				{agent.thinkingText && (
-					<Box flexDirection="column" marginTop={0}>
-						{(() => {
-							const thinkWidth = Math.max(20, cols - 8);
-							const lines: string[] = [];
-							for (const para of agent.thinkingText.split("\n")) {
-								if (!para.trim()) continue;
-								lines.push(...wrapText(para, thinkWidth));
-							}
-							return lines.map((line, i) => (
-								<Text key={i} color={colors.textMuted}>
-									{BLOCKQUOTE_BAR} {line}
-								</Text>
-							));
-						})()}
+				let line = tc.toolName;
+				if (label) line += ` ${label}`;
+				line += tcDuration;
+				if (line.length > toolLineWidth) {
+					line = line.slice(0, toolLineWidth - 1) + "…";
+				}
+
+				return (
+					<Box key={i}>
+						<Text color={iconColor}>{icon} </Text>
+						<Text color={colors.textMuted}>{line}</Text>
 					</Box>
-				)}
+				);
+			})}
 
-				{/* Tool calls — one line each */}
-				{visibleTools.length > 0 && (
-					<Box flexDirection="column" marginTop={0}>
-						{visibleTools.map((tc, i) => {
-							const done = !!tc.endedAt;
-							const icon = tc.isError ? "✕" : done ? "●" : "○";
-							const iconColor = tc.isError ? colors.error : done ? colors.success : colors.running;
-							const label = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 40);
-							const tcDuration = tc.endedAt
-								? `${((tc.endedAt - tc.timestamp) / 1000).toFixed(1)}s`
-								: "";
-							const action = !done ? getToolAction(tc.toolName) : "";
+			{/* Text response — same MarkdownText as main chat */}
+			{normText && (
+				<Box paddingLeft={2}>
+					<MarkdownText
+						text={normText}
+						tableTruncate={false}
+						theme={mdTheme}
+					/>
+				</Box>
+			)}
 
-							// Build the line and truncate to fit one row
-							let line = `${icon} ${tc.toolName}`;
-							if (label) line += ` ${label}`;
-							if (tcDuration) line += ` · ${tcDuration}`;
-							if (action) line += ` ${action}`;
-							if (line.length > toolLineWidth) {
-								line = line.slice(0, toolLineWidth - 1) + "…";
-							}
+			{/* Error */}
+			{agent.error && (
+				<Box paddingLeft={2}>
+					<Text color={colors.error}>{agent.error.slice(0, 200)}</Text>
+				</Box>
+			)}
 
-							return (
-								<Box key={i}>
-									<Text color={colors.textMuted}> └ </Text>
-									<Text color={iconColor}>{line}</Text>
-								</Box>
-							);
-						})}
-					</Box>
-				)}
-
-				{/* Text response — wrapped plain text */}
-				{(() => {
-					const normText = agent.text ? normalizeText(agent.text) : "";
-					const normResult = agent.result ? normalizeText(agent.result) : "";
-					// Only show result separately if it's substantively different
-					const showResult = normResult && normResult !== normText && agent.status === "complete";
-					if (!normText && !showResult) return null;
-					return (
-						<Box flexDirection="column" marginTop={0}>
-							{normText && (() => {
-								const textWidth = Math.max(20, cols - 6);
-								const lines: string[] = [];
-								for (const para of normText.split("\n")) {
-									lines.push(...wrapText(para, textWidth));
-								}
-								return lines.slice(0, 30).map((line, i) => (
-									<Text key={i} color={colors.text}>{line}</Text>
-								));
-							})()}
-							{showResult && (() => {
-								const textWidth = Math.max(20, cols - 6);
-								const lines: string[] = [];
-								for (const para of normResult.split("\n")) {
-									lines.push(...wrapText(para, textWidth));
-								}
-								return lines.slice(0, 20).map((line, i) => (
-									<Text key={`r${i}`} color={colors.textMuted}>{line}</Text>
-								));
-							})()}
-						</Box>
-					);
-				})()}
-
-				{/* Error */}
-				{agent.error && (
-					<Box marginTop={0}>
-						<Text color={colors.error}>  {agent.error.slice(0, 150)}</Text>
-					</Box>
-				)}
-			</Box>
+			{/* Completion — same style as main chat */}
+			{agent.status !== "running" && (
+				<Box marginTop={1}>
+					<Text color={colors.textMuted}>● Completed in {duration}</Text>
+				</Box>
+			)}
 		</Box>
 	);
 }
