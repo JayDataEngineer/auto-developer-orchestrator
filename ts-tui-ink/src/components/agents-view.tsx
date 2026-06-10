@@ -85,12 +85,16 @@ function wrapText(text: string, maxWidth: number): string[] {
 }
 
 // ── Text normalizer ──
-// Collapse single newlines to spaces, keep paragraph breaks.
+// Collapse single newlines to spaces, fix sentence boundary gaps from streaming.
 
 function normalizeText(text: string): string {
 	return text
 		.split(/\n\n+/)
-		.map(p => p.replace(/\n/g, " ").replace(/ +/g, " ").trim())
+		.map(p => p
+			.replace(/\n/g, " ")
+			.replace(/\.([A-Z])/g, ". $1")
+			.replace(/ +/g, " ")
+			.trim())
 		.filter(p => p.length > 0)
 		.join("\n\n");
 }

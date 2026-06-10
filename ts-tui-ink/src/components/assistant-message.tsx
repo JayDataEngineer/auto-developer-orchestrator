@@ -76,14 +76,17 @@ function wrapText(text: string, maxWidth: number): string[] {
 }
 
 // ── Text normalizer ──
-// Models stream text with \n between words (streaming artifacts).
-// MarkdownText respects each \n as a line break, creating one-word-per-line.
-// This collapses single newlines to spaces, keeping \n\n as paragraph breaks.
+// Models stream text with \n between words and missing spaces between deltas.
+// This collapses single newlines to spaces and fixes sentence boundary gaps.
 
 function normalizeText(text: string): string {
 	return text
 		.split(/\n\n+/)
-		.map(para => para.replace(/\n/g, " ").replace(/ +/g, " ").trim())
+		.map(para => para
+			.replace(/\n/g, " ")       // collapse single newlines
+			.replace(/\.([A-Z])/g, ". $1") // fix "Tesla.The" → "Tesla. The"
+			.replace(/ +/g, " ")        // collapse multiple spaces
+			.trim())
 		.filter(para => para.length > 0)
 		.join("\n\n");
 }
