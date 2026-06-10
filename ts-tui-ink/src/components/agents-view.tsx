@@ -234,7 +234,7 @@ function AgentCard({
 }) {
 	const colors = useColors();
 	const activeProject = usePuxStore((s) => s.activeProject);
-	const [toolResultMap, setToolResultMap] = useState<Map<string, string>>(new Map());
+	const [transcript, setTranscript] = useState<StoredMessage[]>([]);
 	const [transcriptLoaded, setTranscriptLoaded] = useState(false);
 
 	const statusIcon = agent.status === "running"
@@ -252,7 +252,7 @@ function AgentCard({
 		? `${((agent.endedAt - agent.startedAt) / 1000).toFixed(1)}s`
 		: `${((Date.now() - agent.startedAt) / 1000).toFixed(1)}s`;
 
-	// Fetch transcript for completed agents when expanded
+	// Fetch full transcript for completed agents when expanded
 	useEffect(() => {
 		if (!isExpanded || !agent.transcriptId || !activeProject || transcriptLoaded) return;
 		if (agent.status === "running") return;
@@ -267,13 +267,7 @@ function AgentCard({
 			.then((resp) => resp.ok ? resp.json() : [])
 			.then((data: StoredMessage[]) => {
 				if (!Array.isArray(data)) return;
-				const results = new Map<string, string>();
-				for (const msg of data) {
-					if (msg.role === "tool" && msg.toolCallId) {
-						results.set(msg.toolCallId, msg.content || "");
-					}
-				}
-				setToolResultMap(results);
+				setTranscript(data);
 				setTranscriptLoaded(true);
 			})
 			.catch(() => {});
@@ -306,72 +300,45 @@ function AgentCard({
 		);
 	}
 
-	// Width budget for a tool call line: cols - paddingLeft(2) - prefix(2: "● ")
+	// Width budgets
 	const toolLineWidth = Math.max(20, cols - 4);
-	// Text width for thinking: cols - paddingRight(1) - paddingLeft(2) - "▎ "(2)
 	const thinkWidth = Math.max(20, cols - 5);
 
-	// Thinking lines (same as main chat: ▎ on every visual line)
-	const thinkingLines: string[] = [];
-	if (agent.thinkingText) {
-		const normThinking = normalizeText(agent.thinkingText);
-		for (const para of normThinking.split("\n")) {
-			if (!para.trim()) continue;
-			thinkingLines.push(...wrapText(para, thinkWidth));
-		}
-	}
-
-	// Normalized text (dedup text vs result)
+	// Normalized text
 	const normText = agent.text ? normalizeText(agent.text) : "";
-	const normResult = agent.result ? normalizeText(agent.result) : "";
 
 	return (
 		<Box flexDirection="column" marginTop={1} paddingRight={1}>
-			{/* Thinking — same blockquote style as main chat */}
-			{thinkingLines.length > 0 && (
-				<Box marginBottom={1} paddingLeft={2} flexDirection="column">
-					{thinkingLines.map((line, i) => (
-						<Text key={i} color={colors.textMuted}>
-							{BLOCKQUOTE_BAR} {line}
-						</Text>
+			{/* Header — agent name, status, duration */}
+			<Box>
+				<Text color={statusColor}>{statusIcon} </Text>
+				<Text bold color={colors.brand}>{agent.agentName}</Text>
+				<Text color={colors.textMuted}> {symbols.dot} {visibleTools.length} tools {symbols.dot} {duration}</Text>
+			</Box>
+
+			{/* Completed agent with transcript — multi-turn conversation */}
+			{transcriptLoaded && transcript.length > 0 ? (
+				<TranscriptConversation transcript={transcript} cols={cols} />
+			) : (
+				<>
+					{/* Running agent (no transcript yet) — flat view from AgentState */}
+					{/* Thinking */}
+					{agent.thinkingText && (
+						<ThinkingBlock text={agent.thinkingText} thinkWidth={thinkWidth} />
+					)}
+
+					{/* Tool calls */}
+					{visibleTools.map((tc, i) => (
+						<ToolCallLine key={i} tc={tc} toolLineWidth={toolLineWidth} />
 					))}
-				</Box>
-			)}
 
-			{/* Tool calls — same CompactToolCall style as main chat */}
-			{visibleTools.map((tc, i) => {
-				const done = !!tc.endedAt;
-				const icon = tc.isError ? "✗" : done ? "✓" : "●";
-				const iconColor = tc.isError ? colors.error : done ? colors.success : colors.running;
-				const label = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 50);
-				const tcDuration = tc.endedAt
-					? ` · ${((tc.endedAt - tc.timestamp) / 1000).toFixed(1)}s`
-					: "";
-
-				let line = tc.toolName;
-				if (label) line += ` ${label}`;
-				line += tcDuration;
-				if (line.length > toolLineWidth) {
-					line = line.slice(0, toolLineWidth - 1) + "…";
-				}
-
-				return (
-					<Box key={i}>
-						<Text color={iconColor}>{icon} </Text>
-						<Text color={colors.textMuted}>{line}</Text>
-					</Box>
-				);
-			})}
-
-			{/* Text response — same MarkdownText as main chat */}
-			{normText && (
-				<Box paddingLeft={2}>
-					<MarkdownText
-						text={normText}
-						tableTruncate={false}
-						theme={mdTheme}
-					/>
-				</Box>
+					{/* Text response */}
+					{normText && (
+						<Box paddingLeft={2}>
+							<MarkdownText text={normText} tableTruncate={false} theme={mdTheme} />
+						</Box>
+					)}
+				</>
 			)}
 
 			{/* Error */}
@@ -381,12 +348,170 @@ function AgentCard({
 				</Box>
 			)}
 
-			{/* Completion — same style as main chat */}
+			{/* Completion */}
 			{agent.status !== "running" && (
 				<Box marginTop={1}>
 					<Text color={colors.textMuted}>● Completed in {duration}</Text>
 				</Box>
 			)}
+		</Box>
+	);
+}
+
+// ── Thinking block with ▎ bars ──
+
+function ThinkingBlock({ text, thinkWidth }: { text: string; thinkWidth: number }) {
+	const colors = useColors();
+	const lines: string[] = [];
+	const norm = normalizeText(text);
+	for (const para of norm.split("\n")) {
+		if (!para.trim()) continue;
+		lines.push(...wrapText(para, thinkWidth));
+	}
+	if (lines.length === 0) return null;
+	return (
+		<Box marginTop={1} marginBottom={1} paddingLeft={2} flexDirection="column">
+			{lines.map((line, i) => (
+				<Text key={i} color={colors.textMuted}>
+					{BLOCKQUOTE_BAR} {line}
+				</Text>
+			))}
+		</Box>
+	);
+}
+
+// ── Single tool call line ──
+
+function ToolCallLine({ tc, toolLineWidth }: { tc: any; toolLineWidth: number }) {
+	const colors = useColors();
+	const done = !!tc.endedAt;
+	const icon = tc.isError ? "✗" : done ? "✓" : "●";
+	const iconColor = tc.isError ? colors.error : done ? colors.success : colors.running;
+	const label = getToolArgPreview(tc.toolName, tc.args as Record<string, unknown> | undefined, 50);
+	const tcDuration = tc.endedAt
+		? ` · ${((tc.endedAt - tc.timestamp) / 1000).toFixed(1)}s`
+		: "";
+
+	let line = tc.toolName;
+	if (label) line += ` ${label}`;
+	line += tcDuration;
+	if (line.length > toolLineWidth) {
+		line = line.slice(0, toolLineWidth - 1) + "…";
+	}
+
+	return (
+		<Box>
+			<Text color={iconColor}>{icon}</Text>
+			<Text color={colors.textMuted}> {line}</Text>
+		</Box>
+	);
+}
+
+// ── Transcript-based multi-turn conversation ──
+
+function TranscriptConversation({ transcript, cols }: { transcript: StoredMessage[]; cols: number }) {
+	const colors = useColors();
+	const thinkWidth = Math.max(20, cols - 5);
+	const toolLineWidth = Math.max(20, cols - 4);
+
+	// Build tool result lookup
+	const toolResults = new Map<string, { result: string; isError: boolean }>();
+	for (const msg of transcript) {
+		if (msg.role === "tool" && msg.toolCallId) {
+			let isError = false;
+			try {
+				const parsed = JSON.parse(msg.content || "");
+				if (parsed.error) isError = true;
+			} catch { /* not JSON */ }
+			toolResults.set(msg.toolCallId, { result: msg.content || "", isError });
+		}
+	}
+
+	return (
+		<Box flexDirection="column" marginTop={1}>
+			{transcript.map((msg) => {
+				if (msg.role === "tool") return null;
+
+				// User message — show task
+				if (msg.role === "user") {
+					return (
+						<Box key={`msg-${msg.id}`} paddingLeft={1} marginTop={1}>
+							<Text color={colors.brand} bold>{">"}</Text>
+							<Text> {msg.content.slice(0, 120)}</Text>
+						</Box>
+					);
+				}
+
+				// Assistant message — thinking + tools + text
+				const blocks: React.ReactNode[] = [];
+
+				// Thinking
+				if (msg.thinking) {
+					const normThink = normalizeText(msg.thinking);
+					const thinkLines: string[] = [];
+					for (const para of normThink.split("\n")) {
+						if (!para.trim()) continue;
+						thinkLines.push(...wrapText(para, thinkWidth));
+					}
+					if (thinkLines.length > 0) {
+						blocks.push(
+							<Box key={`think-${msg.id}`} marginBottom={1} paddingLeft={2} flexDirection="column">
+								{thinkLines.map((line, i) => (
+									<Text key={i} color={colors.textMuted}>
+										{BLOCKQUOTE_BAR} {line}
+									</Text>
+								))}
+							</Box>
+						);
+					}
+				}
+
+				// Tool calls
+				if (msg.toolCalls && msg.toolCalls !== "[]") {
+					try {
+						const calls: { id?: string; name?: string; args?: Record<string, unknown>; argsText?: string }[] = JSON.parse(msg.toolCalls);
+						for (const tc of calls) {
+							const callId = tc.id || "";
+							const tr = toolResults.get(callId);
+							const displayName = TOOL_DISPLAY_NAMES[tc.name || ""] || tc.name || "unknown";
+							const argPreview = getToolArgPreview(displayName, tc.args, 50);
+							const icon = tr ? (tr.isError ? "✗" : "✓") : "●";
+							const iconColor = tr ? (tr.isError ? colors.error : colors.success) : colors.running;
+
+							let line = displayName;
+							if (argPreview) line += ` ${argPreview}`;
+
+							if (line.length > toolLineWidth) {
+								line = line.slice(0, toolLineWidth - 1) + "…";
+							}
+
+							blocks.push(
+								<Box key={`tc-${msg.id}-${callId}`}>
+									<Text color={iconColor}>{icon}</Text>
+									<Text color={colors.textMuted}> {line}</Text>
+								</Box>
+							);
+						}
+					} catch { /* skip malformed */ }
+				}
+
+				// Text
+				if (msg.text) {
+					const normText = normalizeText(msg.text);
+					blocks.push(
+						<Box key={`text-${msg.id}`} paddingLeft={2}>
+							<MarkdownText text={normText} tableTruncate={false} theme={mdTheme} />
+						</Box>
+					);
+				}
+
+				if (blocks.length === 0) return null;
+				return (
+					<Box key={`msg-${msg.id}`} flexDirection="column">
+						{blocks}
+					</Box>
+				);
+			})}
 		</Box>
 	);
 }
