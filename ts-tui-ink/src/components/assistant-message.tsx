@@ -81,6 +81,7 @@ function wrapText(text: string, maxWidth: number): string[] {
 
 function normalizeText(text: string): string {
 	return text
+		.replace(/\r/g, "")
 		.split(/\n\n+/)
 		.map(para => para
 			.replace(/\n/g, " ")       // collapse single newlines
@@ -198,6 +199,7 @@ export function AssistantMessage() {
 											text={normalizedAllText}
 											tableTruncate={false}
 											theme={mdTheme}
+											width={cols - 3}
 										/>
 									</Box>
 								);

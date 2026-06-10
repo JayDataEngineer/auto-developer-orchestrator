@@ -591,27 +591,40 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		set({ agents });
 	},
 
-	// Update the last tool call in the agent's current round (for tool_execution_end).
+	// Update matching tool call in agent's current round (for tool_execution_end).
+	// Searches backwards for last tool without endedAt — handles nested tools
+	// where parent ends after children (research → search → scrape → research-end).
 	updateAgentRoundToolCall: (agentId, updates) => {
 		const agents = new Map(get().agents);
 		const existing = agents.get(agentId);
 		if (!existing) return;
 		const rounds = [...existing.rounds];
 		if (rounds.length === 0) return;
+		// Search backwards in last round for tool without endedAt
 		const lastRound = { ...rounds[rounds.length - 1], toolCalls: [...rounds[rounds.length - 1].toolCalls] };
-		const lastTool = lastRound.toolCalls[lastRound.toolCalls.length - 1];
-		if (lastTool && !lastTool.endedAt) {
-			lastRound.toolCalls[lastRound.toolCalls.length - 1] = { ...lastTool, ...updates };
+		let roundUpdated = false;
+		for (let i = lastRound.toolCalls.length - 1; i >= 0; i--) {
+			if (!lastRound.toolCalls[i].endedAt) {
+				lastRound.toolCalls[i] = { ...lastRound.toolCalls[i], ...updates };
+				roundUpdated = true;
+				break;
+			}
 		}
-		rounds[rounds.length - 1] = lastRound;
-		// Also update flat toolCalls
+		if (roundUpdated) rounds[rounds.length - 1] = lastRound;
+		// Also update flat toolCalls — search backwards
 		const flatCalls = [...existing.toolCalls];
-		const flatLast = flatCalls[flatCalls.length - 1];
-		if (flatLast && !flatLast.endedAt) {
-			flatCalls[flatCalls.length - 1] = { ...flatLast, ...updates };
+		let flatUpdated = false;
+		for (let i = flatCalls.length - 1; i >= 0; i--) {
+			if (!flatCalls[i].endedAt) {
+				flatCalls[i] = { ...flatCalls[i], ...updates };
+				flatUpdated = true;
+				break;
+			}
 		}
-		agents.set(agentId, { ...existing, rounds, toolCalls: flatCalls });
-		set({ agents });
+		if (roundUpdated || flatUpdated) {
+			agents.set(agentId, { ...existing, rounds, toolCalls: flatCalls });
+			set({ agents });
+		}
 	},
 
 	// Append text to the agent's current round. Creates a round if needed.

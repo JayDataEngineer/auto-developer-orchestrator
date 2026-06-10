@@ -27,7 +27,7 @@ import { useTerminalSize } from "../use-terminal-size.js";
 import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
 import type { Theme as MarkdansiTheme } from "markdansi";
 const MarkdownText = _MarkdownText as React.FC<
-	React.ComponentProps<typeof _MarkdownText> & { tableTruncate?: boolean }
+	React.ComponentProps<typeof _MarkdownText> & { tableTruncate?: boolean; width?: number }
 >;
 const mdTheme: MarkdansiTheme = {
 	heading: { bold: true, color: "#ffffff" },
@@ -89,6 +89,7 @@ function wrapText(text: string, maxWidth: number): string[] {
 
 function normalizeText(text: string): string {
 	return text
+		.replace(/\r/g, "")
 		.split(/\n\n+/)
 		.map(p => p
 			.replace(/\n/g, " ")
@@ -327,7 +328,7 @@ function AgentCard({
 					))}
 					{agent.text && (
 						<Box paddingLeft={2}>
-							<MarkdownText text={normalizeText(agent.text)} tableTruncate={false} theme={mdTheme} />
+							<MarkdownText text={normalizeText(agent.text)} tableTruncate={false} theme={mdTheme} width={cols - 3} />
 						</Box>
 					)}
 				</>
@@ -492,7 +493,7 @@ function TranscriptConversation({ transcript, cols }: { transcript: StoredMessag
 					const normText = normalizeText(msg.text);
 					blocks.push(
 						<Box key={`text-${msg.id}`} paddingLeft={2}>
-							<MarkdownText text={normText} tableTruncate={false} theme={mdTheme} />
+							<MarkdownText text={normText} tableTruncate={false} theme={mdTheme} width={cols - 3} />
 						</Box>
 					);
 				}
