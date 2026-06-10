@@ -553,8 +553,11 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		if (!existing) return;
 		const rounds = [...existing.rounds];
 		const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null;
-		const hasCompletedTools = lastRound && lastRound.toolCalls.some(tc => tc.endedAt);
-		if (!lastRound || hasCompletedTools) {
+		// Only start a new round if ALL tools in the current round have completed.
+		// Starting a new round when only SOME tools completed causes updateAgentRoundToolCall
+		// to miss still-running tools that are now in the previous round.
+		const allToolsCompleted = lastRound && lastRound.toolCalls.length > 0 && lastRound.toolCalls.every(tc => tc.endedAt);
+		if (!lastRound || allToolsCompleted) {
 			// Start a new round
 			rounds.push({ thinking: text, toolCalls: [] });
 		} else {
@@ -591,26 +594,28 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		set({ agents });
 	},
 
-	// Update matching tool call in agent's current round (for tool_execution_end).
-	// Searches backwards for last tool without endedAt — handles nested tools
-	// where parent ends after children (research → search → scrape → research-end).
+	// Update matching tool call in agent's rounds (for tool_execution_end).
+	// Searches ALL rounds backwards for the last tool without endedAt.
+	// This handles cases where a new round was created while a tool was still running.
 	updateAgentRoundToolCall: (agentId, updates) => {
 		const agents = new Map(get().agents);
 		const existing = agents.get(agentId);
 		if (!existing) return;
 		const rounds = [...existing.rounds];
-		if (rounds.length === 0) return;
-		// Search backwards in last round for tool without endedAt
-		const lastRound = { ...rounds[rounds.length - 1], toolCalls: [...rounds[rounds.length - 1].toolCalls] };
+		// Search ALL rounds backwards for last tool without endedAt
 		let roundUpdated = false;
-		for (let i = lastRound.toolCalls.length - 1; i >= 0; i--) {
-			if (!lastRound.toolCalls[i].endedAt) {
-				lastRound.toolCalls[i] = { ...lastRound.toolCalls[i], ...updates };
-				roundUpdated = true;
-				break;
+		for (let r = rounds.length - 1; r >= 0 && !roundUpdated; r--) {
+			const tc = rounds[r].toolCalls;
+			for (let i = tc.length - 1; i >= 0; i--) {
+				if (!tc[i].endedAt) {
+					const updatedRound = { ...rounds[r], toolCalls: [...tc] };
+					updatedRound.toolCalls[i] = { ...tc[i], ...updates };
+					rounds[r] = updatedRound;
+					roundUpdated = true;
+					break;
+				}
 			}
 		}
-		if (roundUpdated) rounds[rounds.length - 1] = lastRound;
 		// Also update flat toolCalls — search backwards
 		const flatCalls = [...existing.toolCalls];
 		let flatUpdated = false;

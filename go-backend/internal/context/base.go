@@ -37,7 +37,7 @@ func (m *BaseContextManager) BuildContext(ctx context.Context) ([]core.Message, 
 		maxSize = 6000
 	}
 	for i, msg := range msgs {
-		if msg.Role == "tool" && len(msg.Content) > maxSize {
+		if msg.Role == "tool" && len(msg.Content) > maxSize && !isOffloadExempt(msg.Name, m.config.OffloadExemptTools) {
 			tail := msg.Content[len(msg.Content)-maxSize:]
 			if idx := strings.Index(tail, "\n"); idx >= 0 && idx < 200 {
 				tail = tail[idx+1:]

@@ -4,9 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
+
+// isOffloadExempt checks whether a tool name is exempt from auto-offloading.
+func isOffloadExempt(toolName string, exempt []string) bool {
+	return slices.Contains(exempt, toolName)
+}
 
 // OffloadingContextManager decorates any ContextManager with automatic
 // offloading of large tool results to spill files.
@@ -43,7 +49,7 @@ func (m *OffloadingContextManager) BuildContext(ctx context.Context) ([]core.Mes
 	}
 
 	for i, msg := range msgs {
-		if msg.Role == "tool" && len(msg.Content) > threshold {
+		if msg.Role == "tool" && len(msg.Content) > threshold && !isOffloadExempt(msg.Name, m.config.OffloadExemptTools) {
 			preview := msg.Content
 			if len(preview) > m.config.PreviewSize {
 				preview = preview[:m.config.PreviewSize]
@@ -66,6 +72,11 @@ func (m *OffloadingContextManager) AppendMessage(msg core.Message) error {
 }
 
 func (m *OffloadingContextManager) ProcessToolResult(ctx context.Context, toolName, toolCallID, result string) (string, error) {
+	// Exempt tools keep full results in context regardless of size.
+	// Return directly — don't pass to inner which would hard-truncate.
+	if isOffloadExempt(toolName, m.config.OffloadExemptTools) {
+		return result, nil
+	}
 	// If the result is large enough to offload
 	if len(result) > m.config.OffloadThreshold {
 		preview := result

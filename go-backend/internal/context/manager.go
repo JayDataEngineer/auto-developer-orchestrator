@@ -106,6 +106,12 @@ type Config struct {
 	// ReinjectFileCount is the number of recently-read file paths to
 	// re-inject into the summary after compaction. 0 = disable. Default 5.
 	ReinjectFileCount int
+
+	// OffloadExemptTools is a set of tool names that should never be
+	// auto-offloaded. Their full results are kept in context regardless
+	// of size. Useful for tools where the model needs the complete output
+	// (e.g., scrape, research). Default: ["scrape", "research"].
+	OffloadExemptTools []string
 }
 
 // DefaultConfig returns sensible defaults matching current behavior.
@@ -123,6 +129,7 @@ func DefaultConfig() Config {
 		EnableSummary:          true,
 		ConversationLogEnabled: true,
 		ReinjectFileCount:      5,
+		OffloadExemptTools:     []string{"scrape", "research"},
 	}
 }
 

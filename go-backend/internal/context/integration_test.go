@@ -285,3 +285,111 @@ func TestIntegration_ScratchpadSurvivesCompaction(t *testing.T) {
 		t.Fatal("scratchpad content should survive compaction")
 	}
 }
+
+// TestIntegration_OffloadExemptTools verifies that tools in the exempt list
+// keep their full results in context, while non-exempt tools get offloaded.
+func TestIntegration_OffloadExemptTools(t *testing.T) {
+	dir := t.TempDir()
+	spillDir := filepath.Join(dir, "spill")
+
+	cfg := Config{
+		ContextSize:        10000,
+		SpillDir:           spillDir,
+		OffloadThreshold:   200,
+		PreviewSize:        50,
+		HardTruncateSize:   6000,
+		EnableSummary:      false,
+		OffloadExemptTools: []string{"scrape", "research"},
+	}
+
+	sess := &mockSession{id: "exempt-test"}
+	mgr := Factory(sess, cfg)
+
+	largeResult := strings.Repeat("web page content ", 500) // 9000+ chars
+
+	// Non-exempt tool (bash) should be offloaded
+	processed, err := mgr.ProcessToolResult(context.Background(), "bash", "tc-1", largeResult)
+	if err != nil {
+		t.Fatalf("ProcessToolResult error: %v", err)
+	}
+	if !strings.Contains(processed, "read_output") {
+		t.Fatal("expected bash result to be offloaded")
+	}
+	if len(processed) >= len(largeResult) {
+		t.Fatal("expected bash result to be shorter than original")
+	}
+
+	// Exempt tool (scrape) should keep full content
+	processed2, err := mgr.ProcessToolResult(context.Background(), "scrape", "tc-2", largeResult)
+	if err != nil {
+		t.Fatalf("ProcessToolResult error: %v", err)
+	}
+	if strings.Contains(processed2, "read_output") {
+		t.Fatal("scrape result should NOT be offloaded (exempt)")
+	}
+	if len(processed2) != len(largeResult) {
+		t.Fatalf("expected scrape result to be full length %d, got %d", len(largeResult), len(processed2))
+	}
+
+	// Exempt tool (research) should keep full content
+	processed3, err := mgr.ProcessToolResult(context.Background(), "research", "tc-3", largeResult)
+	if err != nil {
+		t.Fatalf("ProcessToolResult error: %v", err)
+	}
+	if strings.Contains(processed3, "read_output") {
+		t.Fatal("research result should NOT be offloaded (exempt)")
+	}
+
+	mgr.Close()
+}
+
+// TestIntegration_OffloadExemptInBuildContext verifies that exempt tools
+// are not offloaded during BuildContext's second pass.
+func TestIntegration_OffloadExemptInBuildContext(t *testing.T) {
+	dir := t.TempDir()
+	spillDir := filepath.Join(dir, "spill")
+
+	cfg := Config{
+		ContextSize:        10000,
+		SpillDir:           spillDir,
+		OffloadThreshold:   200,
+		PreviewSize:        50,
+		EnableSummary:      false,
+		OffloadExemptTools: []string{"scrape"},
+	}
+
+	largeContent := strings.Repeat("x", 5000)
+	sess := &mockSession{id: "ctx-exempt-test"}
+	sess.mu.Lock()
+	sess.messages = []core.Message{
+		{Role: "tool", Content: largeContent, Name: "scrape", ToolCallID: "tc-1"},
+		{Role: "tool", Content: largeContent, Name: "bash", ToolCallID: "tc-2"},
+	}
+	sess.mu.Unlock()
+
+	mgr := Factory(sess, cfg)
+	msgs, err := mgr.BuildContext(context.Background())
+	if err != nil {
+		t.Fatalf("BuildContext error: %v", err)
+	}
+
+	// Find the scrape tool result — should NOT be offloaded
+	// Find the bash tool result — SHOULD be offloaded
+	for _, msg := range msgs {
+		if msg.Role == "tool" && msg.Name == "scrape" {
+			if strings.Contains(msg.Content, "read_output") {
+				t.Fatal("scrape result should NOT be offloaded in BuildContext (exempt)")
+			}
+			if len(msg.Content) != len(largeContent) {
+				t.Fatalf("scrape result should be full size %d, got %d", len(largeContent), len(msg.Content))
+			}
+		}
+		if msg.Role == "tool" && msg.Name == "bash" {
+			if !strings.Contains(msg.Content, "read_output") {
+				t.Fatal("bash result SHOULD be offloaded in BuildContext")
+			}
+		}
+	}
+
+	mgr.Close()
+}
