@@ -234,11 +234,19 @@ function DelegateRenderer({
 			)}
 
 			{/* Show agent thinking preview while running — above tools */}
-			{thinkingText && isRunning && (
-				<Text color={colors.textMuted}>
-					{"  └ "}{BLOCKQUOTE_BAR} {trunc(thinkingText.split("\n").pop() || thinkingText, cols - 8)}
-				</Text>
-			)}
+			{thinkingText && isRunning && (() => {
+				// Normalize: collapse streaming single-newlines, get last paragraph
+				const normalized = thinkingText
+					.replace(/\n\n+/g, "\n\n")
+					.replace(/\.([A-Z])/g, ". $1");
+				const paragraphs = normalized.split("\n\n").filter(p => p.trim());
+				const lastPara = paragraphs[paragraphs.length - 1] || thinkingText;
+				return (
+					<Text color={colors.textMuted}>
+						{"  └ "}{BLOCKQUOTE_BAR} {trunc(lastPara.replace(/\n/g, " ").replace(/ +/g, " ").trim(), cols - 8)}
+					</Text>
+				);
+			})()}
 
 			{visibleTools.map((tc, i) => {
 				const isActive = !tc.endedAt;
