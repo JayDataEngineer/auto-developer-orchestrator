@@ -585,14 +585,14 @@ export const puxChatAdapter: ChatModelAdapter = {
 
 						case "thinking_delta": {
 							const thinkingText = (parsed.text as string) || "";
-							// Sub-agent thinking → Zustand store for delegation card
+							// Sub-agent thinking → round-based Zustand store
 							if (parsed.agentName) {
 								const agents = usePuxStore.getState().agents;
 								const agent = [...agents.values()].find(
 									(a) => a.agentName === parsed.agentName,
 								);
 								if (agent && thinkingText) {
-									usePuxStore.getState().updateAgentThinking(agent.agentId, thinkingText);
+									usePuxStore.getState().appendAgentRoundThinking(agent.agentId, thinkingText);
 								}
 								break;
 							}
@@ -605,7 +605,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 						}
 
 						case "text_delta": {
-							// Sub-agent text → Zustand store for delegation card
+							// Sub-agent text → round-based Zustand store
 							if (parsed.agentName) {
 								const text = (parsed.text as string) || "";
 								if (text) {
@@ -614,7 +614,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 										(a) => a.agentName === parsed.agentName,
 									);
 									if (agent) {
-										usePuxStore.getState().updateAgentText(agent.agentId, text);
+										usePuxStore.getState().appendAgentRoundText(agent.agentId, text);
 									}
 								}
 								break;
@@ -638,14 +638,14 @@ export const puxChatAdapter: ChatModelAdapter = {
 							const toolArgs = (parsed.toolArgs || parsed.args || {}) as Record<string, unknown>;
 							const toolAgentName = parsed.agentName as string | undefined;
 
-							// Route sub-agent tool calls to Zustand store
+							// Route sub-agent tool calls to Zustand store (round-based)
 							if (toolAgentName) {
 								const agents = usePuxStore.getState().agents;
 								const agent = [...agents.values()].find(
 									(a) => a.agentName === toolAgentName && a.status === "running",
 								);
 								if (agent) {
-									usePuxStore.getState().addAgentToolCall(agent.agentId, {
+									usePuxStore.getState().appendAgentRoundToolCall(agent.agentId, {
 										toolName,
 										args: toolArgs,
 										timestamp: Date.now(),
@@ -670,24 +670,17 @@ export const puxChatAdapter: ChatModelAdapter = {
 							const toolId = parsed.toolId as string;
 							const toolAgentName = parsed.agentName as string | undefined;
 
-							// Sub-agent tool completion — update Zustand store
+							// Sub-agent tool completion — update round-based Zustand store
 							if (toolAgentName) {
 								const agents = usePuxStore.getState().agents;
 								const agent = [...agents.values()].find(
 									(a) => a.agentName === toolAgentName && a.status === "running",
 								);
 								if (agent) {
-									const lastTool = agent.toolCalls[agent.toolCalls.length - 1];
-									if (lastTool && !lastTool.endedAt) {
-										const updated = { ...lastTool, endedAt: Date.now() };
-										if (parsed.result !== undefined) updated.result = parsed.result;
-										if (parsed.error) updated.isError = true;
-										const newCalls = [...agent.toolCalls];
-										newCalls[newCalls.length - 1] = updated;
-										const newAgents = new Map(agents);
-										newAgents.set(agent.agentId, { ...agent, toolCalls: newCalls });
-										usePuxStore.setState({ agents: newAgents });
-									}
+									const updates: Record<string, unknown> = { endedAt: Date.now() };
+									if (parsed.result !== undefined) updates.result = parsed.result;
+									if (parsed.error) updates.isError = true;
+									usePuxStore.getState().updateAgentRoundToolCall(agent.agentId, updates);
 									break;
 								}
 							}
@@ -786,6 +779,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 									task,
 									status: "running",
 									startedAt: Date.now(),
+									rounds: [],
 									toolCalls: [],
 									transcriptId,
 								});
@@ -819,14 +813,22 @@ export const puxChatAdapter: ChatModelAdapter = {
 										(a) => a.agentName === agentName && a.status === "running",
 									);
 							if (match) {
+								// Close any open tool calls in rounds
 								const hasOpenTools = match.toolCalls.some((t) => !t.endedAt);
 								if (hasOpenTools) {
 									const now = Date.now();
 									const newCalls = match.toolCalls.map((t) =>
 										t.endedAt ? t : { ...t, endedAt: now },
 									);
+									// Also close in rounds
+									const newRounds = match.rounds.map(r => ({
+										...r,
+										toolCalls: r.toolCalls.map(t =>
+											t.endedAt ? t : { ...t, endedAt: now },
+										),
+									}));
 									const newAgents = new Map(agents);
-									newAgents.set(match.agentId, { ...match, toolCalls: newCalls });
+									newAgents.set(match.agentId, { ...match, toolCalls: newCalls, rounds: newRounds });
 									usePuxStore.setState({ agents: newAgents });
 								}
 								const finalStatus = endStatus === "error" ? "error" : "complete";

@@ -304,9 +304,6 @@ function AgentCard({
 	const toolLineWidth = Math.max(20, cols - 4);
 	const thinkWidth = Math.max(20, cols - 5);
 
-	// Normalized text
-	const normText = agent.text ? normalizeText(agent.text) : "";
-
 	return (
 		<Box flexDirection="column" marginTop={1} paddingRight={1}>
 			{/* Header — agent name, status, duration */}
@@ -319,23 +316,41 @@ function AgentCard({
 			{/* Completed agent with transcript — multi-turn conversation */}
 			{transcriptLoaded && transcript.length > 0 ? (
 				<TranscriptConversation transcript={transcript} cols={cols} />
+			) : (agent.rounds?.length ?? 0) > 0 ? (
+				/* Round-based live view — thinking→tools→text per round */
+				agent.rounds.map((round, ri) => (
+					<Box key={ri} flexDirection="column" marginTop={ri > 0 ? 1 : 0}>
+						{/* Thinking */}
+						{round.thinking && (
+							<ThinkingBlock text={round.thinking} thinkWidth={thinkWidth} />
+						)}
+						{/* Tool calls */}
+						{round.toolCalls.map((tc, ti) => (
+							<ToolCallLine key={ti} tc={tc} toolLineWidth={toolLineWidth} />
+						))}
+						{/* Text */}
+						{round.text && (() => {
+							const normText = normalizeText(round.text);
+							return (
+								<Box paddingLeft={2}>
+									<MarkdownText text={normText} tableTruncate={false} theme={mdTheme} />
+								</Box>
+							);
+						})()}
+					</Box>
+				))
 			) : (
+				/* Fallback: no rounds yet, flat view */
 				<>
-					{/* Running agent (no transcript yet) — flat view from AgentState */}
-					{/* Thinking */}
 					{agent.thinkingText && (
 						<ThinkingBlock text={agent.thinkingText} thinkWidth={thinkWidth} />
 					)}
-
-					{/* Tool calls */}
 					{visibleTools.map((tc, i) => (
 						<ToolCallLine key={i} tc={tc} toolLineWidth={toolLineWidth} />
 					))}
-
-					{/* Text response */}
-					{normText && (
+					{agent.text && (
 						<Box paddingLeft={2}>
-							<MarkdownText text={normText} tableTruncate={false} theme={mdTheme} />
+							<MarkdownText text={normalizeText(agent.text)} tableTruncate={false} theme={mdTheme} />
 						</Box>
 					)}
 				</>

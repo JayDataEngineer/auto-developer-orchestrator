@@ -150,6 +150,7 @@ function DelegateRenderer({
 		?? [];
 	const thinkingText = agentState?.thinkingText ?? persistedSubAgent?.thinking;
 	const agentText = agentState?.text ?? persistedSubAgent?.text;
+	const rounds = agentState?.rounds ?? [];
 	const subToolCount = toolCalls.length;
 
 	// Width budget for tool call lines
@@ -233,14 +234,17 @@ function DelegateRenderer({
 				</Text>
 			)}
 
-			{/* Show agent thinking preview while running — above tools */}
-			{thinkingText && isRunning && (() => {
-				// Normalize: collapse streaming single-newlines, get last paragraph
-				const normalized = thinkingText
+			{/* Show last round's thinking preview while running */}
+			{isRunning && (() => {
+				// Use last round's thinking if available, otherwise flat thinkingText
+				const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null;
+				const rawThink = lastRound?.thinking || thinkingText;
+				if (!rawThink) return null;
+				const normalized = rawThink
 					.replace(/\n\n+/g, "\n\n")
 					.replace(/\.([A-Z])/g, ". $1");
 				const paragraphs = normalized.split("\n\n").filter(p => p.trim());
-				const lastPara = paragraphs[paragraphs.length - 1] || thinkingText;
+				const lastPara = paragraphs[paragraphs.length - 1] || rawThink;
 				return (
 					<Text color={colors.textMuted}>
 						{"  └ "}{BLOCKQUOTE_BAR} {trunc(lastPara.replace(/\n/g, " ").replace(/ +/g, " ").trim(), cols - 8)}

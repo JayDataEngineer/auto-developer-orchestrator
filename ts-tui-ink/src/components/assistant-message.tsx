@@ -128,9 +128,8 @@ export function AssistantMessage() {
 	const allReasoning = reasoningParts.map((p: any) => p.text).join("\n");
 	const hasReasoning = allReasoning.length > 0;
 
-	// Merge ALL text parts into one string before rendering.
-	// The library creates separate text parts per streaming delta,
-	// so we join + normalize once, then skip individual parts in the pipeline.
+	// Merge ALL text parts into one string for clean rendering.
+	// Render inline at the FIRST text part's position to preserve event ordering.
 	const textParts = parts.filter((p: any) => p.type === "text" && p.text);
 	const allText = textParts.map((p: any) => p.text).join("");
 	const normalizedAllText = allText ? normalizeText(allText) : "";
@@ -144,6 +143,9 @@ export function AssistantMessage() {
 		if (!para.trim()) continue;
 		reasoningLines.push(...wrapText(para, textWidth));
 	}
+
+	// Track which text part we're on so we render merged text only at the first one
+	let textRendered = false;
 
 	// Only show initial spinner when no content yet
 	const showSpinner = isRunning && !hasContent;
@@ -177,17 +179,6 @@ export function AssistantMessage() {
 				</Box>
 			)}
 
-			{/* Text response — merged from all text parts, rendered as one */}
-			{hasText && (
-				<Box paddingLeft={2}>
-					<MarkdownText
-						text={normalizedAllText}
-						tableTruncate={false}
-						theme={mdTheme}
-					/>
-				</Box>
-			)}
-
 			{/* Parts pipeline — children render function (preferred API) */}
 			<MessagePrimitive.Parts>
 				{({ part }) => {
@@ -195,9 +186,24 @@ export function AssistantMessage() {
 						case "reasoning":
 							// Skip — already rendered above as collapsed block
 							return null;
-						case "text":
-							// Skip — already rendered above as merged block
+						case "text": {
+							// Render merged text at the FIRST text part's position.
+							// Skip subsequent text parts — all merged into one.
+							if (!textRendered) {
+								textRendered = true;
+								if (!hasText) return null;
+								return (
+									<Box paddingLeft={2}>
+										<MarkdownText
+											text={normalizedAllText}
+											tableTruncate={false}
+											theme={mdTheme}
+										/>
+									</Box>
+								);
+							}
 							return null;
+						}
 						case "tool-call": {
 							// Registered tool UIs are resolved via part.toolUI.
 							// Unregistered tools get a compact one-line indicator (no animated spinner).

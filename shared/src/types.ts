@@ -53,6 +53,12 @@ export type WorkbenchTab = "vnc" | "editor" | "scheduler" | "workers" | "setting
 
 // ── Agent monitoring ──
 
+export interface AgentRound {
+	thinking?: string;
+	toolCalls: ToolCallRecord[];
+	text?: string;
+}
+
 export interface AgentState {
 	agentId: string;
 	agentName: string;
@@ -60,6 +66,7 @@ export interface AgentState {
 	status: "running" | "complete" | "error";
 	startedAt: number;
 	endedAt?: number;
+	rounds: AgentRound[];
 	toolCalls: ToolCallRecord[];
 	thinkingText?: string;
 	text?: string;

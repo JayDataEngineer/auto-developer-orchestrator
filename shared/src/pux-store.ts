@@ -188,6 +188,10 @@ interface PuxState {
 	addAgentToolCall: (agentId: string, toolCall: ToolCallRecord) => void;
 	updateAgentThinking: (agentId: string, text: string) => void;
 	updateAgentText: (agentId: string, text: string) => void;
+	appendAgentRoundThinking: (agentId: string, text: string) => void;
+	appendAgentRoundToolCall: (agentId: string, toolCall: ToolCallRecord) => void;
+	updateAgentRoundToolCall: (agentId: string, updates: Partial<ToolCallRecord>) => void;
+	appendAgentRoundText: (agentId: string, text: string) => void;
 	clearAgents: () => void;
 	cancelAgent: (agentId: string) => Promise<void>;
 	setZoomedAgent: (agentId: string | null) => void;
@@ -534,7 +538,97 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 
 	addAgent: (agent) => {
 		const agents = new Map(get().agents);
+		// Ensure rounds array exists (backwards compat)
+		if (!agent.rounds) agent.rounds = [];
 		agents.set(agent.agentId, agent);
+		set({ agents });
+	},
+
+	// Append thinking to the agent's current round. If the current round
+	// already has tool calls, start a new round (think→tool→think transition).
+	appendAgentRoundThinking: (agentId, text) => {
+		const agents = new Map(get().agents);
+		const existing = agents.get(agentId);
+		if (!existing) return;
+		const rounds = [...existing.rounds];
+		if (rounds.length === 0 || rounds[rounds.length - 1].toolCalls.length > 0) {
+			// Start a new round
+			rounds.push({ thinking: text, toolCalls: [] });
+		} else {
+			// Append to current round's thinking
+			const last = { ...rounds[rounds.length - 1] };
+			last.thinking = (last.thinking || "") + text;
+			rounds[rounds.length - 1] = last;
+		}
+		agents.set(agentId, {
+			...existing,
+			rounds,
+			thinkingText: (existing.thinkingText || "") + text,
+		});
+		set({ agents });
+	},
+
+	// Add a tool call to the agent's current round. Creates a round if needed.
+	appendAgentRoundToolCall: (agentId, toolCall) => {
+		const agents = new Map(get().agents);
+		const existing = agents.get(agentId);
+		if (!existing) return;
+		const rounds = [...existing.rounds];
+		if (rounds.length === 0) {
+			rounds.push({ toolCalls: [toolCall] });
+		} else {
+			const last = { ...rounds[rounds.length - 1], toolCalls: [...rounds[rounds.length - 1].toolCalls, toolCall] };
+			rounds[rounds.length - 1] = last;
+		}
+		agents.set(agentId, {
+			...existing,
+			rounds,
+			toolCalls: [...existing.toolCalls, toolCall],
+		});
+		set({ agents });
+	},
+
+	// Update the last tool call in the agent's current round (for tool_execution_end).
+	updateAgentRoundToolCall: (agentId, updates) => {
+		const agents = new Map(get().agents);
+		const existing = agents.get(agentId);
+		if (!existing) return;
+		const rounds = [...existing.rounds];
+		if (rounds.length === 0) return;
+		const lastRound = { ...rounds[rounds.length - 1], toolCalls: [...rounds[rounds.length - 1].toolCalls] };
+		const lastTool = lastRound.toolCalls[lastRound.toolCalls.length - 1];
+		if (lastTool && !lastTool.endedAt) {
+			lastRound.toolCalls[lastRound.toolCalls.length - 1] = { ...lastTool, ...updates };
+		}
+		rounds[rounds.length - 1] = lastRound;
+		// Also update flat toolCalls
+		const flatCalls = [...existing.toolCalls];
+		const flatLast = flatCalls[flatCalls.length - 1];
+		if (flatLast && !flatLast.endedAt) {
+			flatCalls[flatCalls.length - 1] = { ...flatLast, ...updates };
+		}
+		agents.set(agentId, { ...existing, rounds, toolCalls: flatCalls });
+		set({ agents });
+	},
+
+	// Append text to the agent's current round. Creates a round if needed.
+	appendAgentRoundText: (agentId, text) => {
+		const agents = new Map(get().agents);
+		const existing = agents.get(agentId);
+		if (!existing) return;
+		const rounds = [...existing.rounds];
+		if (rounds.length === 0) {
+			rounds.push({ text, toolCalls: [] });
+		} else {
+			const last = { ...rounds[rounds.length - 1] };
+			last.text = (last.text || "") + text;
+			rounds[rounds.length - 1] = last;
+		}
+		agents.set(agentId, {
+			...existing,
+			rounds,
+			text: (existing.text || "") + text,
+		});
 		set({ agents });
 	},
 
