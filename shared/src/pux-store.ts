@@ -544,14 +544,17 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		set({ agents });
 	},
 
-	// Append thinking to the agent's current round. If the current round
-	// already has tool calls, start a new round (think→tool→think transition).
+	// Append thinking to the agent's current round. Start a new round when
+	// the current round has at least one completed tool call (endedAt set),
+	// which means we finished a think→tool cycle and are starting a new think phase.
 	appendAgentRoundThinking: (agentId, text) => {
 		const agents = new Map(get().agents);
 		const existing = agents.get(agentId);
 		if (!existing) return;
 		const rounds = [...existing.rounds];
-		if (rounds.length === 0 || rounds[rounds.length - 1].toolCalls.length > 0) {
+		const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null;
+		const hasCompletedTools = lastRound && lastRound.toolCalls.some(tc => tc.endedAt);
+		if (!lastRound || hasCompletedTools) {
 			// Start a new round
 			rounds.push({ thinking: text, toolCalls: [] });
 		} else {

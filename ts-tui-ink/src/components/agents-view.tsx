@@ -316,31 +316,8 @@ function AgentCard({
 			{/* Completed agent with transcript — multi-turn conversation */}
 			{transcriptLoaded && transcript.length > 0 ? (
 				<TranscriptConversation transcript={transcript} cols={cols} />
-			) : (agent.rounds?.length ?? 0) > 0 ? (
-				/* Round-based live view — thinking→tools→text per round */
-				agent.rounds.map((round, ri) => (
-					<Box key={ri} flexDirection="column" marginTop={ri > 0 ? 1 : 0}>
-						{/* Thinking */}
-						{round.thinking && (
-							<ThinkingBlock text={round.thinking} thinkWidth={thinkWidth} />
-						)}
-						{/* Tool calls */}
-						{round.toolCalls.map((tc, ti) => (
-							<ToolCallLine key={ti} tc={tc} toolLineWidth={toolLineWidth} />
-						))}
-						{/* Text */}
-						{round.text && (() => {
-							const normText = normalizeText(round.text);
-							return (
-								<Box paddingLeft={2}>
-									<MarkdownText text={normText} tableTruncate={false} theme={mdTheme} />
-								</Box>
-							);
-						})()}
-					</Box>
-				))
 			) : (
-				/* Fallback: no rounds yet, flat view */
+				/* Running/recent agent — flat view: thinking → tools → text */
 				<>
 					{agent.thinkingText && (
 						<ThinkingBlock text={agent.thinkingText} thinkWidth={thinkWidth} />
