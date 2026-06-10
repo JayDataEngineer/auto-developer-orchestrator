@@ -128,6 +128,14 @@ export function AssistantMessage() {
 	const allReasoning = reasoningParts.map((p: any) => p.text).join("\n");
 	const hasReasoning = allReasoning.length > 0;
 
+	// Merge ALL text parts into one string before rendering.
+	// The library creates separate text parts per streaming delta,
+	// so we join + normalize once, then skip individual parts in the pipeline.
+	const textParts = parts.filter((p: any) => p.type === "text" && p.text);
+	const allText = textParts.map((p: any) => p.text).join("");
+	const normalizedAllText = allText ? normalizeText(allText) : "";
+	const hasText = normalizedAllText.length > 0;
+
 	// Wrap reasoning into visual lines so every line gets a blockquote bar.
 	// Available width = cols - paddingRight(1) - paddingLeft(2) - "▎ "(2)
 	const textWidth = Math.max(20, cols - 5);
@@ -169,6 +177,17 @@ export function AssistantMessage() {
 				</Box>
 			)}
 
+			{/* Text response — merged from all text parts, rendered as one */}
+			{hasText && (
+				<Box paddingLeft={2}>
+					<MarkdownText
+						text={normalizedAllText}
+						tableTruncate={false}
+						theme={mdTheme}
+					/>
+				</Box>
+			)}
+
 			{/* Parts pipeline — children render function (preferred API) */}
 			<MessagePrimitive.Parts>
 				{({ part }) => {
@@ -176,19 +195,9 @@ export function AssistantMessage() {
 						case "reasoning":
 							// Skip — already rendered above as collapsed block
 							return null;
-						case "text": {
-							if (!part.text?.trim()) return null;
-							const normalized = normalizeText(part.text);
-							return (
-								<Box key={part.text.slice(0, 20)} paddingLeft={2}>
-									<MarkdownText
-										text={normalized}
-										tableTruncate={false}
-										theme={mdTheme}
-									/>
-								</Box>
-							);
-						}
+						case "text":
+							// Skip — already rendered above as merged block
+							return null;
 						case "tool-call": {
 							// Registered tool UIs are resolved via part.toolUI.
 							// Unregistered tools get a compact one-line indicator (no animated spinner).
