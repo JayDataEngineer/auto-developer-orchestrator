@@ -37,6 +37,7 @@ func TestSSEConsistency(t *testing.T) {
 		{EventHookRequest, llama.EventTypeHookRequest},
 		{EventStepStart, llama.EventTypeStepStart},
 		{EventStepEnd, llama.EventTypeStepEnd},
+		{EventContextUpdate, llama.EventTypeContextUpdate},
 	}
 
 	for _, tt := range tests {

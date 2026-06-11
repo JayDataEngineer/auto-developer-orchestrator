@@ -24,6 +24,9 @@ func TestEventTypeConstants(t *testing.T) {
 	if EventTypeError != "error" {
 		t.Errorf("EventTypeError = %q, want %q", EventTypeError, "error")
 	}
+	if EventTypeContextUpdate != "context_update" {
+		t.Errorf("EventTypeContextUpdate = %q, want %q", EventTypeContextUpdate, "context_update")
+	}
 }
 
 func TestEventPayload_TypedFields(t *testing.T) {
