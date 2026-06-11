@@ -228,14 +228,37 @@ function handleMetaEvent(
 					cache: (data.cache as number) || 0,
 					model: actualModel,
 				},
-				contextMetrics: {
-					contextTokens: contextTokens || inputTokens,
-					contextSize: contextWindow,
-					contextUtil,
-					compactionType: "",
-				},
+				// Only update contextMetrics if backend provided real data.
+				// Do NOT fall back to inputTokens (cumulative total) — that
+				// massively overcounts context size.
+				...(contextTokens > 0 ? {
+					contextMetrics: {
+						contextTokens,
+						contextSize: contextWindow,
+						contextUtil,
+						compactionType: "",
+					},
+				} : {}),
 				...(actualModel ? { activeModel: actualModel } : {}),
 			});
+			break;
+		}
+		case "context_update": {
+			// Per-round context metrics from the Go backend.
+			// Fires after every LLM API call so the indicator stays current.
+			const ctxTokens = (data.contextTokens as number) || 0;
+			const ctxWindow = (data.contextWindow as number) || 0;
+			const ctxUtil = (data.contextUtil as number) || 0;
+			if (ctxTokens > 0 && ctxWindow > 0) {
+				usePuxStore.setState({
+					contextMetrics: {
+						contextTokens: ctxTokens,
+						contextSize: ctxWindow,
+						contextUtil: ctxUtil,
+						compactionType: "",
+					},
+				});
+			}
 			break;
 		}
 		case "error": {
