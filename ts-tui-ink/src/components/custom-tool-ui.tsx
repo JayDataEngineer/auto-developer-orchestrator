@@ -193,15 +193,14 @@ function DelegateRenderer({
 					{taskPreview && <Text color={colors.textMuted}> {taskPreview}</Text>}
 					<Text color={colors.textMuted}>{suffix}</Text>
 				</Text>
-				{/* Agent output preview — first 3 lines */}
+				{/* Agent output — full report */}
 				{agentText && agentText.trim() && (
-					<Box paddingLeft={2}>
-						<Text color={colors.textMuted}>
-							{agentText.trim().split("\n").slice(0, 3).map((line, i, arr) =>
-								`${BLOCKQUOTE_BAR} ${trunc(line, cols - 6)}${i < arr.length - 1 ? "\n" : ""}`
-							).join("")}
-							{agentText.trim().split("\n").length > 3 ? `\n${BLOCKQUOTE_BAR} ...` : ""}
-						</Text>
+					<Box paddingLeft={2} flexDirection="column">
+						{agentText.trim().split("\n").map((line, i) =>
+							<Text key={i} color={colors.textMuted} wrap="wrap">
+								{`${BLOCKQUOTE_BAR} ${line}`}
+							</Text>
+						)}
 					</Box>
 				)}
 			</Box>
