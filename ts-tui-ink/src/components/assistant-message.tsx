@@ -17,7 +17,7 @@ import {
 	MessagePrimitive,
 } from "@assistant-ui/react-ink";
 import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
-import type { Theme as MarkdansiTheme } from "markdansi";
+import { render as renderMd, type Theme as MarkdansiTheme } from "markdansi";
 // Extend to pass tableTruncate through the spread (not in library's types yet)
 const MarkdownText = _MarkdownText as React.FC<
 	React.ComponentProps<typeof _MarkdownText> & { tableTruncate?: boolean }
@@ -90,6 +90,13 @@ function normalizeText(text: string): string {
 			.trim())
 		.filter(para => para.length > 0)
 		.join("\n\n");
+}
+
+// ── Render markdown paragraph with trailing newline stripped ──
+
+function renderMarkdown(text: string, cols: number, theme: MarkdansiTheme): string {
+	const rendered = renderMd(text, { width: cols - 3, theme });
+	return rendered.replace(/\n$/, "");
 }
 
 // ── Main component ──
@@ -214,15 +221,7 @@ export function AssistantMessage() {
 								return (
 									<Box paddingLeft={2} flexDirection="column">
 										{paragraphs.map((para: string, i: number) => (
-											<React.Fragment key={i}>
-												{i > 0 && <Text>{" "}</Text>}
-												<MarkdownText
-													text={para}
-													tableTruncate={false}
-													theme={mdTheme}
-													width={cols - 3}
-												/>
-											</React.Fragment>
+											<Text key={i}>{renderMarkdown(para, cols, mdTheme)}</Text>
 										))}
 									</Box>
 								);
