@@ -125,9 +125,6 @@ export function AssistantMessage() {
 		p.type === "reasoning" ||
 		p.type === "source"
 	);
-	const reasoningParts = parts.filter((p: any) => p.type === "reasoning" && p.text?.trim());
-	const allReasoning = reasoningParts.map((p: any) => p.text).join("\n");
-	const hasReasoning = allReasoning.length > 0;
 
 	// Merge ALL text parts into one string for clean rendering.
 	// Render inline at the FIRST text part's position to preserve event ordering.
@@ -139,11 +136,6 @@ export function AssistantMessage() {
 	// Wrap reasoning into visual lines so every line gets a blockquote bar.
 	// Available width = cols - paddingRight(1) - paddingLeft(2) - "▎ "(2)
 	const textWidth = Math.max(20, cols - 5);
-	const reasoningLines: string[] = [];
-	for (const para of allReasoning.split("\n")) {
-		if (!para.trim()) continue;
-		reasoningLines.push(...wrapText(para, textWidth));
-	}
 
 	// Track which text part we're on so we render merged text only at the first one
 	let textRendered = false;
@@ -169,24 +161,31 @@ export function AssistantMessage() {
 				</Box>
 			)}
 
-			{/* Reasoning — all visual lines, blockquote-style */}
-			{hasReasoning && (
-				<Box marginBottom={1} paddingLeft={2} flexDirection="column">
-					{reasoningLines.map((line, i) => (
-						<Text key={i} color={colors.textMuted}>
-							{BLOCKQUOTE_BAR} {line}
-						</Text>
-					))}
-				</Box>
-			)}
-
 			{/* Parts pipeline — children render function (preferred API) */}
 			<MessagePrimitive.Parts>
 				{({ part }) => {
 					switch (part.type) {
-						case "reasoning":
-							// Skip — already rendered above as collapsed block
-							return null;
+						case "reasoning": {
+							// Render each reasoning part as its own blockquote block.
+							// This keeps thinking blocks separate when tool calls appear between them.
+							const rText = (part as any).text || "";
+							if (!rText.trim()) return null;
+							const rLines: string[] = [];
+							for (const para of rText.split("\n")) {
+								if (!para.trim()) continue;
+								rLines.push(...wrapText(para, textWidth));
+							}
+							if (rLines.length === 0) return null;
+							return (
+								<Box marginBottom={1} paddingLeft={2} flexDirection="column">
+									{rLines.map((line, i) => (
+										<Text key={i} color={colors.textMuted}>
+											{BLOCKQUOTE_BAR} {line}
+										</Text>
+									))}
+								</Box>
+							);
+						}
 						case "text": {
 							// Render merged text at the FIRST text part's position.
 							// Skip subsequent text parts — all merged into one.
