@@ -167,7 +167,7 @@ export function AssistantMessage() {
 					switch (part.type) {
 						case "reasoning": {
 							// Render each reasoning part as its own blockquote block.
-							// Cap at 6 lines to avoid walls of text. Show last lines (most relevant).
+							// This keeps thinking blocks separate when tool calls appear between them.
 							const rText = (part as any).text || "";
 							if (!rText.trim()) return null;
 							const rLines: string[] = [];
@@ -176,15 +176,9 @@ export function AssistantMessage() {
 								rLines.push(...wrapText(para, textWidth));
 							}
 							if (rLines.length === 0) return null;
-							const maxThinkLines = 6;
-							const hidden = Math.max(0, rLines.length - maxThinkLines);
-							const visible = hidden > 0 ? rLines.slice(-maxThinkLines) : rLines;
 							return (
-								<Box paddingLeft={2} flexDirection="column">
-									{hidden > 0 && (
-										<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} ... {hidden} earlier lines</Text>
-									)}
-									{visible.map((line, i) => (
+								<Box marginBottom={1} paddingLeft={2} flexDirection="column">
+									{rLines.map((line, i) => (
 										<Text key={i} color={colors.textMuted}>
 											{BLOCKQUOTE_BAR} {line}
 										</Text>
@@ -199,7 +193,7 @@ export function AssistantMessage() {
 								textRendered = true;
 								if (!hasText) return null;
 								return (
-									<Box paddingLeft={2} marginTop={1}>
+									<Box paddingLeft={2}>
 										<MarkdownText
 											text={normalizedAllText}
 											tableTruncate={false}
@@ -256,7 +250,7 @@ export function AssistantMessage() {
 
 			{/* Completion time — shown after message finishes */}
 			{!isRunning && hasContent && (
-				<Box marginTop={1} marginBottom={1}>
+				<Box marginTop={1}>
 					<Text color={colors.textMuted}>● Completed in {fmtTime(elapsed || Math.floor((Date.now() - startRef.current) / 1000))}</Text>
 				</Box>
 			)}
