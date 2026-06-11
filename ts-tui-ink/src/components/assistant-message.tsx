@@ -214,14 +214,15 @@ export function AssistantMessage() {
 								return (
 									<Box paddingLeft={2} flexDirection="column">
 										{paragraphs.map((para: string, i: number) => (
-											<Box key={i} marginTop={i > 0 ? 1 : 0}>
+											<React.Fragment key={i}>
+												{i > 0 && <Text>{" "}</Text>}
 												<MarkdownText
 													text={para}
 													tableTruncate={false}
 													theme={mdTheme}
 													width={cols - 3}
 												/>
-											</Box>
+											</React.Fragment>
 										))}
 									</Box>
 								);
