@@ -197,6 +197,7 @@ function PuxInput({
 	return (
 		<ComposerPrimitive.Input
 			submitOnEnter
+			multiLine
 			placeholder="Type a message..."
 			autoFocus
 			onSubmit={handleSubmit}
