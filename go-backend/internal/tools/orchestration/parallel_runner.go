@@ -1842,9 +1842,11 @@ func truncateTask(task string, maxLen int) string {
 	return util.TruncateEllipsis(task, maxLen)
 }
 
-// maybeSummarize summarizes sub-agent results aggressively before returning to the CTO.
-// Sub-agents should return artifacts, not their entire context.
-// Falls back to tail-truncation if no summarizer is set or summarization fails.
+// maybeSummarize summarizes sub-agent results before returning to the CTO.
+// When an LLM summarizer is available, compresses long results to concise artifacts.
+// Without a summarizer, returns the full text — the context manager handles
+// offloading/spilling large tool results, so preemptive truncation here
+// only loses information the CTO needs.
 func (r *ParallelRunner) maybeSummarize(ctx context.Context, text string) string {
 	const summarizeThreshold = 500
 	if len(text) <= summarizeThreshold {
@@ -1858,13 +1860,10 @@ func (r *ParallelRunner) maybeSummarize(ctx context.Context, text string) string
 			r.cfg.Logger("SUMMARIZE_OK: %d -> %d chars", len(text), len(summarized))
 			return summarized
 		}
-		r.cfg.Logger("SUMMARIZE_FAILED: len=%d err=%v, truncating", len(text), err)
+		r.cfg.Logger("SUMMARIZE_FAILED: len=%d err=%v, returning full text", len(text), err)
 	}
 
-	// Fallback: keep only the tail (errors and final status are at the end)
-	if len(text) > 600 {
-		return "...[truncated]\n" + text[len(text)-500:]
-	}
+	// No summarizer — return full text. Context manager handles overflow.
 	return text
 }
 
