@@ -17,17 +17,12 @@ coverage/
 *.swo
 *~
 
-# Environment / secrets — NEVER commit
+# Environment / secrets
 .env*
 !.env.example
 .pi/
-pux-config/
 **/settings.json
 **/auth.json
-**/*api-key*
-**/*apikey*
-**/*credentials*
-passwords.txt
 
 # Logs
 *.log
@@ -44,83 +39,21 @@ go-backend/orch
 go-backend/orch-dev
 go-backend/server
 go-backend/tmp/
-go-backend/go-backend/
 
-# Runtime data (sessions, memory, memos, trash, spill)
+# Runtime data
 data/
 **/.pux/
 
-# Keys and credentials
-ref_docs/
-
 # Test artifacts
 playwright-report/
-playwright-report-lit/
 test-results/
-tests/e2e/screenshots/
-tests/python/frontend/screenshots/
 
-# Sandbox / external reference repos (large, not source)
+# Sandbox / reference repos
 reference/
 projects/
-go-backend/projects/
 
-# Scratch docs and old scaffolding (auto-generated, one-off notes)
-docs/
-docs-template/
-
-# Bun lockfiles in workspace packages (root manages deps)
-shared/bun.lock
-ts-tui-ink/bun.lock
-
-# Reference UI code (not source)
-tool-ui/
-
-# Experimental Next.js app
-src/web/next-app/
-
-# Session scratch files
+# Scratch files
 CONV.txt
 convo.txt
 PROGRESS.md
-go-backend/CONV.txt
-go-backend/convo.txt
-
-# LLM progress reports
 llms*.txt
-research_field_report.md
-
-# Archived / legacy code
-_archive/
-
-# Pi config directory (session data, not source)
-pi-config/
-
-# Local runtime / MCP config
-.antigravitycli/
-.mcp.json
-
-# Agent-generated reports
-**/memos/
-
-# Stray images from agent/sandbox runs
-/*.jpg
-/*.png
-/*.jpeg
-/*.webp
-
-# Agent artifact files from sandbox use case runs
-/httpserver/
-ctx_test2.py
-database.py
-fib_bench.py
-hello.txt
-is_prime.py
-llms_txt_report.md
-main.py
-models.py
-pacman.html
-review_target.py
-test_is_prime.py
-test_primes.py
-wordfreq.py
