@@ -283,19 +283,26 @@ function AgentCard({
 		[agent.toolCalls],
 	);
 
-	// Collapsed: one-line summary
+	// Collapsed: one-line summary with thinking/text preview
 	if (!isExpanded) {
+		// Show last few words of text or thinking for a conversational preview
+		const preview = agent.text
+			? agent.text.replace(/\n+/g, " ").trim().slice(0, 80)
+			: agent.thinkingText
+				? agent.thinkingText.replace(/\n+/g, " ").trim().slice(0, 80)
+				: agent.task.slice(0, 80);
+
 		return (
 			<Box flexDirection="column" marginBottom={1}>
-				<Box>
+				<Text wrap="truncate-end">
 					<Text color={statusColor}>{statusIcon} </Text>
 					<Text bold color={isSelected ? colors.brand : undefined}>
 						{agent.agentName}
 					</Text>
 					<Text color={colors.textMuted}> {symbols.dot} {visibleTools.length} tools {symbols.dot} {duration}</Text>
-				</Box>
+				</Text>
 				<Text color={colors.textMuted}>
-					{"  "}{agent.task.slice(0, 80)}{agent.task.length > 80 ? "..." : ""}
+					{"  "}{BLOCKQUOTE_BAR} {preview}{preview.length >= 80 ? "..." : ""}
 				</Text>
 			</Box>
 		);
@@ -308,11 +315,11 @@ function AgentCard({
 	return (
 		<Box flexDirection="column" marginTop={1} paddingRight={1}>
 			{/* Header — agent name, status, duration */}
-			<Box>
+			<Text wrap="truncate-end">
 				<Text color={statusColor}>{statusIcon} </Text>
 				<Text bold color={colors.brand}>{agent.agentName}</Text>
 				<Text color={colors.textMuted}> {symbols.dot} {visibleTools.length} tools {symbols.dot} {duration}</Text>
-			</Box>
+			</Text>
 
 			{/* Completed agent with transcript — multi-turn conversation */}
 			{transcriptLoaded && transcript.length > 0 ? (
@@ -328,7 +335,12 @@ function AgentCard({
 					))}
 					{agent.text && (
 						<Box paddingLeft={2}>
-							<MarkdownText text={normalizeText(agent.text)} tableTruncate={false} theme={mdTheme} width={cols - 3} />
+							<MarkdownText
+								text={normalizeText(agent.text.length > 2000 ? agent.text.slice(0, 2000) + "\n..." : agent.text)}
+								tableTruncate={false}
+								theme={mdTheme}
+								width={cols - 3}
+							/>
 						</Box>
 					)}
 				</>
@@ -362,9 +374,15 @@ function ThinkingBlock({ text, thinkWidth }: { text: string; thinkWidth: number 
 		lines.push(...wrapText(para, thinkWidth));
 	}
 	if (lines.length === 0) return null;
+	// Cap at 8 lines — show last paragraphs (most relevant)
+	const visible = lines.length > 8 ? lines.slice(-8) : lines;
+	const hidden = lines.length - visible.length;
 	return (
 		<Box marginTop={1} marginBottom={1} paddingLeft={2} flexDirection="column">
-			{lines.map((line, i) => (
+			{hidden > 0 && (
+				<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} ... {hidden} earlier lines</Text>
+			)}
+			{visible.map((line, i) => (
 				<Text key={i} color={colors.textMuted}>
 					{BLOCKQUOTE_BAR} {line}
 				</Text>
@@ -393,10 +411,10 @@ function ToolCallLine({ tc, toolLineWidth }: { tc: any; toolLineWidth: number })
 	}
 
 	return (
-		<Box>
+		<Text wrap="truncate-end">
 			<Text color={iconColor}>{icon}</Text>
 			<Text color={colors.textMuted}> {line}</Text>
-		</Box>
+		</Text>
 	);
 }
 
@@ -422,13 +440,13 @@ function TranscriptConversation({ transcript, cols }: { transcript: StoredMessag
 
 	return (
 		<Box flexDirection="column" marginTop={1}>
-			{transcript.map((msg) => {
+			{transcript.map((msg, msgIdx) => {
 				if (msg.role === "tool") return null;
 
 				// User message — show task
 				if (msg.role === "user") {
 					return (
-						<Box key={`msg-${msg.id}`} paddingLeft={1} marginTop={1}>
+						<Box key={`msg-${msg.id}`} paddingLeft={1} marginTop={msgIdx > 0 ? 1 : 0}>
 							<Text color={colors.brand} bold>{">"}</Text>
 							<Text> {msg.content.slice(0, 120)}</Text>
 						</Box>
@@ -479,10 +497,10 @@ function TranscriptConversation({ transcript, cols }: { transcript: StoredMessag
 							}
 
 							blocks.push(
-								<Box key={`tc-${msg.id}-${callId}`}>
+								<Text key={`tc-${msg.id}-${callId}`} wrap="truncate-end">
 									<Text color={iconColor}>{icon}</Text>
 									<Text color={colors.textMuted}> {line}</Text>
-								</Box>
+								</Text>
 							);
 						}
 					} catch { /* skip malformed */ }
@@ -509,24 +527,3 @@ function TranscriptConversation({ transcript, cols }: { transcript: StoredMessag
 	);
 }
 
-// ── Tool action text (shown while running) ──
-
-function getToolAction(name: string): string {
-	const actions: Record<string, string> = {
-		bash: "Running...",
-		research: "Searching...",
-		search: "Searching...",
-		scrape: "Fetching...",
-		extract: "Extracting...",
-		file_read: "Reading...",
-		file_write: "Writing...",
-		file_edit: "Editing...",
-		file_grep: "Searching...",
-		file_glob: "Finding...",
-		delegate_to: "Delegating...",
-		delegate_async: "Delegating...",
-		memory: "Storing...",
-		skill: "Loading...",
-	};
-	return actions[name] || "Working...";
-}

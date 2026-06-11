@@ -160,9 +160,9 @@ export function AgentZoomOverlay() {
 			<Box paddingX={1}>
 				<Text color={statusColor}>{statusIcon} </Text>
 				<Text bold color={colors.brand}>{agent.agentName}</Text>
-				<Text color="gray"> {symbols.dot} </Text>
+				<Text color={colors.textMuted}> {symbols.dot} </Text>
 				<Text color={statusColor}>{agent.status}</Text>
-				<Text color="gray"> {symbols.dot} {duration} {symbols.dot} {agent.toolCalls.length} tool{agent.toolCalls.length !== 1 ? "s" : ""}</Text>
+				<Text color={colors.textMuted}> {symbols.dot} {duration} {symbols.dot} {agent.toolCalls.length} tool{agent.toolCalls.length !== 1 ? "s" : ""}</Text>
 				{view === "transcript" && <Text color={colors.brand}> {symbols.dot} transcript</Text>}
 			</Box>
 
@@ -208,8 +208,8 @@ function buildSummaryLines(agent: ReturnType<typeof usePuxStore.getState>["agent
 				</Text>
 				<Text> </Text>
 				<Text bold>{tc.toolName}</Text>
-				{argPreview && <Text color="gray"> {argPreview}</Text>}
-				{tcDuration && <Text color="gray"> {symbols.dot} {tcDuration}</Text>}
+				{argPreview && <Text color={colors.textMuted}> {argPreview}</Text>}
+				{tcDuration && <Text color={colors.textMuted}> {symbols.dot} {tcDuration}</Text>}
 			</Box>
 		);
 	});
@@ -224,7 +224,7 @@ function buildSummaryLines(agent: ReturnType<typeof usePuxStore.getState>["agent
 		resultLines.forEach((line, i) => {
 			lines.push(
 				<Box key={`result-${i}`} paddingLeft={1}>
-					<Text color="gray">{BLOCKQUOTE_BAR} </Text>
+					<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} </Text>
 					<Text dimColor>{line}</Text>
 				</Box>
 			);
@@ -352,7 +352,7 @@ function buildTranscriptLines(
 							</Text>
 							<Text> </Text>
 							<Text bold>{tc.name || "unknown"}</Text>
-							{argPreview && <Text color="gray"> {argPreview}</Text>}
+							{argPreview && <Text color={colors.textMuted}> {argPreview}</Text>}
 						</Box>
 					);
 
@@ -362,7 +362,7 @@ function buildTranscriptLines(
 						resultPreview.forEach((line, i) => {
 							lines.push(
 								<Box key={`tr-${msg.id}-${callId}-${i}`} paddingLeft={3}>
-									<Text color="gray">{BLOCKQUOTE_BAR} </Text>
+									<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} </Text>
 									<Text dimColor>{line.slice(0, 100)}</Text>
 								</Box>
 							);
