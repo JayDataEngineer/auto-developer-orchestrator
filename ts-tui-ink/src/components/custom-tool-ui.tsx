@@ -38,15 +38,17 @@ export const BashToolUI = makeAssistantToolUI({
 
 		return (
 			<Box marginBottom={1}>
-				<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>
-					{BLACK_CIRCLE}{" "}
+				<Text wrap="truncate-end">
+					<Text color={isError ? colors.error : isDone ? colors.success : colors.running}>
+						{BLACK_CIRCLE}{" "}
+					</Text>
+					<Text bold color={isRunning ? colors.running : undefined}>
+						bash
+					</Text>
+					<Text color={colors.textMuted}>({cmdPreview})</Text>
+					{isDone && !isError && <Text color={colors.textMuted}> done</Text>}
+					{isError && <Text color={colors.error}> failed</Text>}
 				</Text>
-				<Text bold color={isRunning ? colors.running : undefined}>
-					bash
-				</Text>
-				<Text color={colors.textMuted}>({cmdPreview})</Text>
-				{isDone && !isError && <Text color={colors.textMuted}> done</Text>}
-				{isError && <Text color={colors.error}> failed</Text>}
 			</Box>
 		);
 	},
@@ -295,7 +297,7 @@ export const FileEditToolUI = makeAssistantToolUI({
 
 		return (
 			<Box flexDirection="column" marginBottom={1}>
-				<Box>
+				<Text wrap="truncate-end">
 					<Text
 						color={
 							isError
@@ -314,7 +316,7 @@ export const FileEditToolUI = makeAssistantToolUI({
 					{isDone && !isError && (
 						<Text color={colors.success}> {symbols.check}</Text>
 					)}
-				</Box>
+				</Text>
 				{isDone && !isError && content && (
 					<Box paddingLeft={0} marginTop={1}>
 						<DiffView
@@ -352,7 +354,7 @@ function EditDiffRenderer({
 
 	return (
 		<Box flexDirection="column" marginBottom={1}>
-			<Box>
+			<Text wrap="truncate-end">
 				<Text
 					color={
 						isError
@@ -371,7 +373,7 @@ function EditDiffRenderer({
 				{isDone && !isError && (
 					<Text color={colors.success}> {symbols.check}</Text>
 				)}
-			</Box>
+			</Text>
 			{isDone && !isError && (oldStr || newStr) && (
 				<Box flexDirection="column" paddingLeft={0} marginTop={1}>
 					{oldStr && (
@@ -422,15 +424,17 @@ export const FileReadToolUI = makeAssistantToolUI({
 
 		return (
 			<Box marginBottom={1}>
-				<Text
-					color={isDone ? colors.success : colors.running}
-				>
-					{BLACK_CIRCLE}{" "}
+				<Text wrap="truncate-end">
+					<Text
+						color={isDone ? colors.success : colors.running}
+					>
+						{BLACK_CIRCLE}{" "}
+					</Text>
+					<Text bold color={isRunning ? colors.running : undefined}>
+						read
+					</Text>
+					<Text color={colors.textMuted}> {path.slice(0, 60)}</Text>
 				</Text>
-				<Text bold color={isRunning ? colors.running : undefined}>
-					read
-				</Text>
-				<Text color={colors.textMuted}> {path.slice(0, 60)}</Text>
 			</Box>
 		);
 	},
@@ -512,13 +516,13 @@ function ScreenshotRenderer(p: { result?: unknown; isError?: boolean; status: { 
   const imageUri = isDone && !p.isError ? extractScreenshotURI(p.result) : null;
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Box>
+      <Text wrap="truncate-end">
         <Text color={p.isError ? colors.error : isDone ? colors.success : colors.running}>
           {p.isError ? symbols.toolError : isDone ? symbols.toolDone : symbols.toolRunning}
         </Text>
         <Text> </Text>
         <Text bold>screenshot</Text>
-      </Box>
+      </Text>
       {imageUri && !p.isError && (
         <Box paddingLeft={2} marginTop={1}>
           <TerminalImage image={imageUri} filename="screenshot.png" />
@@ -596,9 +600,11 @@ export const TodoToolUI = makeAssistantToolUI({
 		if (isRunning && todos.length === 0) {
 			return (
 				<Box marginBottom={1}>
-					<Text color={colors.running}>{BLACK_CIRCLE} </Text>
-					<Text bold color={colors.running}>todo</Text>
-					<Text color={colors.textMuted}> loading...</Text>
+					<Text wrap="truncate-end">
+						<Text color={colors.running}>{BLACK_CIRCLE} </Text>
+						<Text bold color={colors.running}>todo</Text>
+						<Text color={colors.textMuted}> loading...</Text>
+					</Text>
 				</Box>
 			);
 		}
@@ -607,7 +613,7 @@ export const TodoToolUI = makeAssistantToolUI({
 
 		return (
 			<Box flexDirection="column" marginBottom={1}>
-				<Box>
+				<Text wrap="truncate-end">
 					<Text color={isDone ? colors.success : colors.running}>
 						{BLACK_CIRCLE}{" "}
 					</Text>
@@ -615,18 +621,18 @@ export const TodoToolUI = makeAssistantToolUI({
 						todo
 					</Text>
 					<Text color={colors.textMuted}> {todos.length} item{todos.length !== 1 ? "s" : ""}</Text>
-				</Box>
+				</Text>
 				{todos.map((item, i) => {
 					const s = item.status ?? "pending";
 					let icon = "○";
-					let color = "gray";
+					let color = colors.textMuted;
 					if (s === "completed") { icon = symbols.check; color = colors.success; }
 					else if (s === "in_progress") { icon = "●"; color = colors.running; }
 					return (
 						<Box key={i} paddingLeft={2}>
 							<Text color={color}>{icon} </Text>
 							<Text
-								color={s === "completed" ? "gray" : undefined}
+								color={s === "completed" ? colors.textMuted : undefined}
 								strikethrough={s === "completed"}
 							>
 								{item.content ?? "untitled"}
