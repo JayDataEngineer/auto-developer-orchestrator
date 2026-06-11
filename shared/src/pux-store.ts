@@ -595,19 +595,24 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	// Update matching tool call in agent's rounds (for tool_execution_end).
-	// Searches ALL rounds backwards for the last tool without endedAt.
-	// This handles cases where a new round was created while a tool was still running.
+	// When updates contain a toolCallId, matches by ID for precise targeting.
+	// Otherwise falls back to searching backwards for the last tool without endedAt.
 	updateAgentRoundToolCall: (agentId, updates) => {
 		const agents = new Map(get().agents);
 		const existing = agents.get(agentId);
 		if (!existing) return;
 		const rounds = [...existing.rounds];
-		// Search ALL rounds backwards for last tool without endedAt
+		const matchId = updates.toolCallId as string | undefined;
+
+		// Search rounds for matching tool call
 		let roundUpdated = false;
 		for (let r = rounds.length - 1; r >= 0 && !roundUpdated; r--) {
 			const tc = rounds[r].toolCalls;
 			for (let i = tc.length - 1; i >= 0; i--) {
-				if (!tc[i].endedAt) {
+				const matches = matchId
+					? tc[i].toolCallId === matchId
+					: !tc[i].endedAt;
+				if (matches) {
 					const updatedRound = { ...rounds[r], toolCalls: [...tc] };
 					updatedRound.toolCalls[i] = { ...tc[i], ...updates };
 					rounds[r] = updatedRound;
@@ -616,11 +621,14 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 				}
 			}
 		}
-		// Also update flat toolCalls — search backwards
+		// Also update flat toolCalls
 		const flatCalls = [...existing.toolCalls];
 		let flatUpdated = false;
 		for (let i = flatCalls.length - 1; i >= 0; i--) {
-			if (!flatCalls[i].endedAt) {
+			const matches = matchId
+				? flatCalls[i].toolCallId === matchId
+				: !flatCalls[i].endedAt;
+			if (matches) {
 				flatCalls[i] = { ...flatCalls[i], ...updates };
 				flatUpdated = true;
 				break;

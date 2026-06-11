@@ -647,6 +647,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 								if (agent) {
 									usePuxStore.getState().appendAgentRoundToolCall(agent.agentId, {
 										toolName,
+										toolCallId: toolId,
 										args: toolArgs,
 										timestamp: Date.now(),
 									});
@@ -678,6 +679,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 								);
 								if (agent) {
 									const updates: Record<string, unknown> = { endedAt: Date.now() };
+									if (toolId) updates.toolCallId = toolId;
 									if (parsed.result !== undefined) updates.result = parsed.result;
 									if (parsed.error) updates.isError = true;
 									usePuxStore.getState().updateAgentRoundToolCall(agent.agentId, updates);

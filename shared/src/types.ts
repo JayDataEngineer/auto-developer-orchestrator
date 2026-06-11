@@ -77,6 +77,7 @@ export interface AgentState {
 
 export interface ToolCallRecord {
 	toolName: string;
+	toolCallId?: string;
 	args?: unknown;
 	result?: unknown;
 	isError?: boolean;
