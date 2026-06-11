@@ -23,7 +23,7 @@ export function UserMessage() {
 	const firstLine = lines[0];
 
 	return (
-		<Box flexDirection="column" marginTop={1} paddingX={1}>
+		<Box flexDirection="column" marginTop={1} marginBottom={1} paddingX={1}>
 			<Text>
 				<Text color={colors.brand} bold>{">"}</Text>
 				<Text> </Text>
