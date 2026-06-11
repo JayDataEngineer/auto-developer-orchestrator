@@ -167,14 +167,19 @@ export function AssistantMessage() {
 					switch (part.type) {
 						case "reasoning": {
 							// Render each reasoning part as its own blockquote block.
-							// This keeps thinking blocks separate when tool calls appear between them.
+							// Split on blank lines to add gap between paragraphs.
 							const rText = (part as any).text || "";
 							if (!rText.trim()) return null;
+							const rParagraphs = rText.split(/\n\n+/).filter((p: string) => p.trim());
+							if (rParagraphs.length === 0) return null;
 							const rLines: string[] = [];
-							for (const para of rText.split("\n")) {
-								if (!para.trim()) continue;
-								rLines.push(...wrapText(para, textWidth));
-							}
+							rParagraphs.forEach((para: string, pIdx: number) => {
+								if (pIdx > 0) rLines.push(""); // blank line between paragraphs
+								for (const line of para.split("\n")) {
+									if (!line.trim()) continue;
+									rLines.push(...wrapText(line, textWidth));
+								}
+							});
 							if (rLines.length === 0) return null;
 							return (
 								<Box marginBottom={1} paddingLeft={2} flexDirection="column">
@@ -188,18 +193,36 @@ export function AssistantMessage() {
 						}
 						case "text": {
 							// Render merged text at the FIRST text part's position.
-							// Skip subsequent text parts — all merged into one.
+							// Split into paragraphs and render each with a gap between them.
 							if (!textRendered) {
 								textRendered = true;
 								if (!hasText) return null;
+								// Split on double newlines (paragraph breaks)
+								const paragraphs = normalizedAllText.split(/\n\n+/).filter((p: string) => p.trim());
+								if (paragraphs.length <= 1) {
+									return (
+										<Box paddingLeft={2}>
+											<MarkdownText
+												text={normalizedAllText}
+												tableTruncate={false}
+												theme={mdTheme}
+												width={cols - 3}
+											/>
+										</Box>
+									);
+								}
 								return (
-									<Box paddingLeft={2}>
-										<MarkdownText
-											text={normalizedAllText}
-											tableTruncate={false}
-											theme={mdTheme}
-											width={cols - 3}
-										/>
+									<Box paddingLeft={2} flexDirection="column">
+										{paragraphs.map((para: string, i: number) => (
+											<Box key={i} marginTop={i > 0 ? 1 : 0}>
+												<MarkdownText
+													text={para}
+													tableTruncate={false}
+													theme={mdTheme}
+													width={cols - 3}
+												/>
+											</Box>
+										))}
 									</Box>
 								);
 							}
