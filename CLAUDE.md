@@ -63,31 +63,31 @@ Pux doesn't ship with hardcoded model endpoints. Users add providers through the
 ## Go Backend
 
 - **Port**: 3847
-- **Build**: `cd go-backend && go build -o server ./cmd/server/` (no CGo)
-- **CLI Build**: `cd go-backend && go build -o orch ./cmd/cli/` (the `orch` binary)
+- **Build**: `cd backend && go build -o server ./cmd/server/` (no CGo)
+- **CLI Build**: `cd backend && go build -o orch ./cmd/cli/` (the `orch` binary)
 - **Non-fatal startup**: runs in sandbox/API-only mode when llama-server is down
 - **PROJECT_ROOT**: must be set to repo root when running binary directly
 
 ## Interfaces — THREE ways to use the system
 
 ### 1. TUI (Terminal UI) — `task chat` or `orch`
-- React 19 + Ink 6 + `@assistant-ui/react-ink` TUI via bun (`ts-tui-ink/`)
-- Shares `PuxChatAdapter` and `usePuxStore` with web UI via `shared/` package
+- React 19 + Ink 6 + `@assistant-ui/react-ink` TUI via bun (`frontend/tui/`)
+- Shares `PuxChatAdapter` and `usePuxStore` with web UI via `frontend/shared/` package
 - Streams SSE from Go backend, renders thinking/tool calls/assistant text in terminal
-- Files: `ts-tui-ink/src/` (app.tsx is root, components/ are Ink components)
-- Run: `task chat` or `cd ts-tui-ink && bun run src/main.tsx --project myproject`
-- Tests: `cd ts-tui-ink && bun test`
+- Files: `frontend/tui/src/` (app.tsx is root, components/ are Ink components)
+- Run: `task chat` or `cd frontend/tui && bun run src/main.tsx --project myproject`
+- Tests: `cd frontend/tui && bun test`
 
 ### 2. CLI (scripting) — `orch agent prompt "message"`
 - Cobra subcommands for scripting/CI: `orch agent prompt`, `orch agent history`, `orch sandbox`, `orch project`, etc.
 - `orch agent prompt "do the thing" -p myproject` — streams SSE as text or JSON (`-o json`)
-- Files: `go-backend/internal/cli/cmd/` (agent.go, sandbox.go, etc.)
-- SSE client: `go-backend/internal/cli/api/client.go`
+- Files: `backend/internal/cli/cmd/` (agent.go, sandbox.go, etc.)
+- SSE client: `backend/internal/cli/api/client.go`
 
 ### 3. Frontend (web) — Vite React app on port 5174
 - `task dev` starts both Go backend + Vite frontend
-- SSE via `fetch` + `ReadableStream.getReader()` in `src/hooks/useSSEStream.ts`
-- State: `src/hooks/agentReducer.ts`, `src/hooks/usePuxAgent.ts`
+- SSE via `fetch` + `ReadableStream.getReader()` in `frontend/web/src/hooks/useSSEStream.ts`
+- State: `frontend/web/src/hooks/agentReducer.ts`, `frontend/web/src/hooks/usePuxAgent.ts`
 - Vite proxies `/api/*` to Go backend on 3847
 
 **When testing, use the CLI or TUI — NOT curl.** Curl is a last-resort debug tool with its own timeout issues.
@@ -117,7 +117,7 @@ User ───────────────┤                           
 
 The kernel's job is to manage contracts: agent loop, tool execution, sandbox lifecycle.
 Each interface (TUI, CLI, web) is a VIEW of the same SSE stream. They share `PuxChatAdapter`
-and `usePuxStore` from `shared/`. Rendering is the only thing that differs.
+and `usePuxStore` from `frontend/shared/`. Rendering is the only thing that differs.
 
 ### Jobs API (External Agents)
 
@@ -153,7 +153,7 @@ One-shot task submission for external agents (Hermes, CI pipelines, other tools)
 3. **One agent, one loop, one model.** The orchestrator IS the agent. There is no separate "generalist mode" vs "orchestrator mode." Every prompt goes through the same agent loop. The model calls tools, reads results, calls more tools, then responds. The user sees one thinking block + one response.
 4. **CTO/Employee split.** Pux (the CTO) only has delegation tools + basic bash/file ops. Browser, desktop, MCP, and vision tools live exclusively on employees. This forces the model to delegate instead of doing work itself. Employees have distinct, non-overlapping capabilities so the CTO picks the right person for the job.
 5. **Simple over clever.** Flat agent loops beat deep hierarchies (Agent-S S3 proved this — 72.6% on OSWorld by removing DAG planning). One loop with reflection > nested orchestration.
-6. **Pull from the best.** Reference repos in `reference/` contain proven patterns. Port the best ideas, don't reinvent.
+6. **Pull from the best.** Port proven patterns from established agent frameworks — don't reinvent.
 
 ### Kernel Config Structure
 
@@ -239,12 +239,12 @@ See **Provider System** section above for how logic/worker defaults work.
 
 | Package | Purpose |
 |---------|---------|
-| `go-backend/cmd/server` | Entry point, wiring |
-| `go-backend/internal/llama` | Agent loop, orchestrator, HTTP engine, sessions, tool registry |
-| `go-backend/internal/handlers` | HTTP handlers (agent, sandbox, computer-use, scheduler) |
-| `go-backend/internal/browser` | CDP client, SoM labeler, vision client |
-| `go-backend/internal/sandbox` | Docker sandbox lifecycle |
-| `go-backend/internal/llama/grounding.go` | Coordinate normalization, cycle detection, element caching |
+| `backend/cmd/server` | Entry point, wiring |
+| `backend/internal/llama` | Agent loop, orchestrator, HTTP engine, sessions, tool registry |
+| `backend/internal/handlers` | HTTP handlers (agent, sandbox, computer-use, scheduler) |
+| `backend/internal/browser` | CDP client, SoM labeler, vision client |
+| `backend/internal/sandbox` | Docker sandbox lifecycle |
+| `backend/internal/llama/grounding.go` | Coordinate normalization, cycle detection, element caching |
 
 ## E2E Tests
 

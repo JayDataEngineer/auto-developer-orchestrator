@@ -3,16 +3,16 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: [
-      "src/**/*.test.{ts,tsx}",
-      "shared/src/__tests__/**/*.test.{ts,tsx}",
-      "ts-tui-ink/**/*.test.{ts,tsx}",
+      "frontend/web/src/**/*.test.{ts,tsx}",
+      "frontend/shared/src/__tests__/**/*.test.{ts,tsx}",
+      "frontend/tui/**/*.test.{ts,tsx}",
     ],
     exclude: [
       "**/node_modules/**",
       // shared/ tests using bun:test — run with `bun test` instead
-      "shared/src/format-tool-result.test.ts",
-      "shared/src/relative-time.test.ts",
-      "shared/src/tool-arg-preview.test.ts",
+      "frontend/shared/src/format-tool-result.test.ts",
+      "frontend/shared/src/relative-time.test.ts",
+      "frontend/shared/src/tool-arg-preview.test.ts",
     ],
   },
 });

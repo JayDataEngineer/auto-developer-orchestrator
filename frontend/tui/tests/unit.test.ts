@@ -3,7 +3,7 @@
  *
  * These test pure functions with no Ink/React dependency.
  *
- * Run: cd ts-tui-ink && bun test
+ * Run: cd frontend/tui && bun test
  */
 
 import { describe, test, expect, mock } from "bun:test";

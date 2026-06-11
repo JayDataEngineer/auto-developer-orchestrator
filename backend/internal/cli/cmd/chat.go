@@ -12,8 +12,8 @@ import (
 
 // runChat launches the pi-mono TUI (ts-tui-pi) via bun.
 func runChat(cmd *cobra.Command, args []string) error {
-	// Find the ts-tui-pi directory relative to the repo root.
-	// The orch binary is at go-backend/orch, ts-tui-pi is at repo root.
+	// Find the frontend/tui directory relative to the repo root.
+	// The orch binary is at backend/orch, frontend/tui is at repo root.
 	exe, _ := os.Executable()
 	repoRoot := findRepoRoot(exe)
 
@@ -78,13 +78,13 @@ func findRepoRoot(binPath string) string {
 		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 			return dir
 		}
-		if _, err := os.Stat(filepath.Join(dir, "go-backend")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "backend")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
-		if parent == dir || strings.HasSuffix(parent, "go-backend") {
-			// If we're inside go-backend/, go up one more
-			if strings.HasSuffix(parent, "go-backend") {
+		if parent == dir || strings.HasSuffix(parent, "backend") {
+			// If we're inside backend/, go up one more
+			if strings.HasSuffix(parent, "backend") {
 				return filepath.Dir(parent)
 			}
 			return dir

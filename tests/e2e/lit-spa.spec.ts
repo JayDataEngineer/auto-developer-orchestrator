@@ -1,5 +1,5 @@
 /**
- * E2E tests for the web SPA (src/web/).
+ * E2E tests for the web SPA (frontend/web/).
  *
  * Tests chat input, message rendering, and SSE streaming.
  * Uses Playwright with mocked backend routes.

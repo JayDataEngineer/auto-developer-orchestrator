@@ -1,8 +1,0 @@
-{
-  "name": "pux-gateway-discord",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "start": "bun run src/index.ts"
-  }
-}

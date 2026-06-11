@@ -5,7 +5,7 @@
  * Covers rendering, states (empty/loaded/running/error), keyboard interaction,
  * and boundary conditions for each component.
  *
- * Run: cd ts-tui-ink && bun test
+ * Run: cd frontend/tui && bun test
  */
 
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";

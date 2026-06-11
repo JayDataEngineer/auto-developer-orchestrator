@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test.describe('Build Verification Tests', () => {
   test('should have source files', () => {
-    const srcPath = path.join(__dirname, '../../src/web/src');
+    const srcPath = path.join(__dirname, '../../frontend/web/src');
     expect(fs.existsSync(srcPath)).toBe(true);
 
     const files = fs.readdirSync(srcPath);
@@ -16,7 +16,7 @@ test.describe('Build Verification Tests', () => {
   });
 
   test('should have App component', () => {
-    const appPath = path.join(__dirname, '../../src/web/src/app.tsx');
+    const appPath = path.join(__dirname, '../../frontend/web/src/app.tsx');
     expect(fs.existsSync(appPath)).toBe(true);
 
     const content = fs.readFileSync(appPath, 'utf-8');
@@ -24,7 +24,7 @@ test.describe('Build Verification Tests', () => {
   });
 
   test('should have main entry point', () => {
-    const mainPath = path.join(__dirname, '../../src/web/src/main.tsx');
+    const mainPath = path.join(__dirname, '../../frontend/web/src/main.tsx');
     expect(fs.existsSync(mainPath)).toBe(true);
 
     const content = fs.readFileSync(mainPath, 'utf-8');
@@ -32,17 +32,17 @@ test.describe('Build Verification Tests', () => {
   });
 
   test('should have thread component', () => {
-    const threadPath = path.join(__dirname, '../../src/web/src/components/assistant-ui/thread.tsx');
+    const threadPath = path.join(__dirname, '../../frontend/web/src/components/assistant-ui/thread.tsx');
     expect(fs.existsSync(threadPath)).toBe(true);
   });
 
   test('should have vite config', () => {
-    const vitePath = path.join(__dirname, '../../src/web/vite.config.ts');
+    const vitePath = path.join(__dirname, '../../frontend/web/vite.config.ts');
     expect(fs.existsSync(vitePath)).toBe(true);
   });
 
   test('should have playwright config', () => {
-    const pwPath = path.join(__dirname, '../../playwright.config.ts');
+    const pwPath = path.join(__dirname, '../playwright.config.ts');
     expect(fs.existsSync(pwPath)).toBe(true);
   });
 });

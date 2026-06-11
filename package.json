@@ -3,14 +3,13 @@
   "private": true,
   "version": "3.0.0",
   "type": "module",
-  "workspaces": ["shared", "ts-tui-ink"],
+  "workspaces": ["frontend/shared", "frontend/tui"],
   "scripts": {
-    "dev": "vite --config src/web/vite.config.ts --host 0.0.0.0",
-    "build": "vite build --config src/web/vite.config.ts",
+    "dev": "vite --config frontend/web/vite.config.ts --host 0.0.0.0",
+    "build": "vite build --config frontend/web/vite.config.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist-web",
-    "test-js": "vitest run",
-    "test:playwright": "node node_modules/@playwright/test/cli.js test --config playwright.config.ts"
+    "test-js": "vitest run"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.14.5",

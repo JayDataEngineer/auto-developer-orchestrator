@@ -24,7 +24,7 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
-    command: 'npx vite --config src/web/vite.config.ts --port 5175',
+    command: 'npx vite --config frontend/web/vite.config.ts --port 5175',
     url: 'http://localhost:5175',
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,

@@ -10,8 +10,8 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawn, type Subprocess } from "bun";
 import { resolve } from "node:path";
 
-const PROJECT_ROOT = resolve(import.meta.dir, "../..");
-const TUI_ENTRY = resolve(PROJECT_ROOT, "ts-tui-ink/src/main.tsx");
+const PROJECT_ROOT = resolve(import.meta.dir, "../../..");
+const TUI_ENTRY = resolve(PROJECT_ROOT, "frontend/tui/src/main.tsx");
 
 // PTY helper — uses node-pty via a small helper script
 const PTY_HELPER = resolve(import.meta.dir, "pty-helper.ts");

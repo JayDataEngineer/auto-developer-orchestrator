@@ -24,26 +24,24 @@ dotenv: [".env"]
 tasks:
   # ── Installation ────────────────────────────────────────────────────────
   install:
-    desc: Install dependencies (npm, Go, docs)
+    desc: Install dependencies (npm, Go)
     cmds:
       - npm install --no-audit --no-fund
-      - cmd: cd go-backend && go mod tidy
-        ignore_error: true
-      - cmd: cd docs && npm install --no-audit --no-fund
+      - cmd: cd backend && go mod tidy
         ignore_error: true
       - echo "Done — all dependencies installed."
 
   # ── Build ──────────────────────────────────────────────────────────────
   build:
     desc: Build server and CLI binaries
-    dir: go-backend
+    dir: backend
     vars:
       VERSION:
         sh: cat ../VERSION
     cmds:
       - go build -ldflags "-X github.com/auto-developer-orchestrator/backend/internal.Version={{.VERSION}}" -o server ./cmd/server/
       - go build -ldflags "-X github.com/auto-developer-orchestrator/backend/internal.Version={{.VERSION}}" -o orch ./cmd/cli/
-      - echo "Built go-backend/server and go-backend/orch (v{{.VERSION}})"
+      - echo "Built backend/server and backend/orch (v{{.VERSION}})"
 
   # ── Local Development ───────────────────────────────────────────────────
   dev:
@@ -55,9 +53,9 @@ tasks:
       - cmd: fuser -k {{.GO_PORT}}/tcp 2>/dev/null; fuser -k {{.JS_PORT}}/tcp 2>/dev/null; true
         ignore_error: true
         silent: true
-      - cmd: cd go-backend && go build -ldflags "-X github.com/auto-developer-orchestrator/backend/internal.Version={{.VERSION}}" -o server ./cmd/server/
+      - cmd: cd backend && go build -ldflags "-X github.com/auto-developer-orchestrator/backend/internal.Version={{.VERSION}}" -o server ./cmd/server/
         desc: Build backend (catch compile errors before backgrounding)
-      - cmd: cd go-backend && PROJECT_ROOT=$(pwd)/.. OPENSHELL_IMAGE=pux-sandbox:latest LANGFUSE_HOST=http://localhost:3100 LANGFUSE_PUBLIC_KEY=pk-orch-2026-lf-a1b2c3d4e5f6 LANGFUSE_SECRET_KEY=sk-orch-2026-lf-a1b2c3d4e5f6 ./server &
+      - cmd: cd backend && PROJECT_ROOT=$(pwd)/.. OPENSHELL_IMAGE=pux-sandbox:latest LANGFUSE_HOST=http://localhost:3100 LANGFUSE_PUBLIC_KEY=pk-orch-2026-lf-a1b2c3d4e5f6 LANGFUSE_SECRET_KEY=sk-orch-2026-lf-a1b2c3d4e5f6 ./server &
         ignore_error: true
       - cmd: npm run dev -- --port {{.JS_PORT }} &
         ignore_error: true
@@ -83,32 +81,26 @@ tasks:
 
   dev-backend:
     desc: Start Go backend only
-    dir: go-backend
+    dir: backend
     cmds:
       - OPENSHELL_IMAGE=pux-sandbox:latest PROJECT_ROOT=$(pwd)/.. go run ./cmd/server/
-
-  docs:
-    desc: Start documentation site (port 3001)
-    dir: docs
-    cmds:
-      - npx next dev -p 3001 --webpack
 
   # ── CLI ─────────────────────────────────────────────────────────────────
   cli:
     desc: Run the orch CLI (pass extra args via CLI_ARGS)
-    dir: go-backend
+    dir: backend
     cmds:
       - go run ./cmd/cli/ {{.CLI_ARGS}}
 
   chat:
-    desc: Launch the interactive TUI (ts-tui-ink via bun)
-    dir: ts-tui-ink
+    desc: Launch the interactive TUI (frontend/tui via bun)
+    dir: frontend/tui
     cmds:
       - bun run src/main.tsx {{.CLI_ARGS}}
 
   code:
     desc: Launch TUI in code mode (current repo, DeepSeek V4 Flash)
-    dir: ts-tui-ink
+    dir: frontend/tui
     cmds:
       - cmd: |
           curl -sf http://localhost:3847/api/projects 2>/dev/null | grep -q auto-developer-orchestrator || \
@@ -147,7 +139,7 @@ tasks:
     desc: Start dev environment with hot reload (Docker)
     cmds:
       - task: down
-      - docker compose -f docker-compose.dev.yml up -d --build
+      - docker compose -f infra/compose/docker-compose.dev.yml up -d --build
       - echo "Dev services started → http://orchestrator.local"
 
   down:
@@ -156,10 +148,10 @@ tasks:
       - cmd: fuser -k {{.GO_PORT}}/tcp 2>/dev/null; fuser -k {{.JS_PORT}}/tcp 2>/dev/null; true
         ignore_error: true
         silent: true
-      - cmd: docker compose -f docker-compose.dev.yml down --remove-orphans 2>/dev/null; true
+      - cmd: docker compose -f infra/compose/docker-compose.dev.yml down --remove-orphans 2>/dev/null; true
         ignore_error: true
         silent: true
-      - cmd: docker compose -f docker-compose.yml down --remove-orphans 2>/dev/null; true
+      - cmd: docker compose -f infra/compose/docker-compose.yml down --remove-orphans 2>/dev/null; true
         ignore_error: true
         silent: true
       - cmd: docker rm -f orchestrator-llama 2>/dev/null; true
@@ -177,19 +169,19 @@ tasks:
   logs:
     desc: Follow all logs
     cmds:
-      - docker compose -f docker-compose.dev.yml logs -f
+      - docker compose -f infra/compose/docker-compose.dev.yml logs -f
 
   # ── Production ──────────────────────────────────────────────────────────
   prod-up:
     desc: Start production environment
     cmds:
-      - docker compose -f docker-compose.yml up -d --build
+      - docker compose -f infra/compose/docker-compose.yml up -d --build
       - echo "Production services started → http://orchestrator.local"
 
   prod-down:
     desc: Stop production environment (compose + dynamic sandboxes)
     cmds:
-      - docker compose -f docker-compose.yml down
+      - docker compose -f infra/compose/docker-compose.yml down
       - cmd: docker ps -q --filter "name=orchestrator-sandbox-" | xargs -r docker rm -f
         ignore_error: true
 
@@ -207,13 +199,13 @@ tasks:
 
   test-go:
     desc: Run Go backend tests
-    dir: go-backend
+    dir: backend
     cmds:
       - go test -count=1 ./...
 
   test-tui:
     desc: Run TUI (Bun) tests
-    dir: ts-tui-ink
+    dir: frontend/tui
     cmds:
       - bun test
 
@@ -225,13 +217,13 @@ tasks:
 
   test-go-cli:
     desc: Run Go CLI tests only
-    dir: go-backend
+    dir: backend
     cmds:
       - go test -count=1 ./internal/cli/...
 
   test-go-mcp:
     desc: Run MCP client tests
-    dir: go-backend
+    dir: backend
     cmds:
       - go test -count=1 ./internal/mcp/...
 
@@ -242,7 +234,7 @@ tasks:
 
   test-integration:
     desc: Run integration tests (requires running backend on :3847)
-    dir: go-backend
+    dir: backend
     cmds:
       - go test -count=1 ./internal/handlers/...
       - cmd: npx vitest run tests/integration/
@@ -335,13 +327,13 @@ tasks:
         if [ -z "$PROJECT" ]; then
           PROJECT="{{.USER_WORKING_DIR}}"
         fi
-        cd go-backend && ./orch agent prompt "$PROMPT" --org test-suite -p "$PROJECT"
+        cd backend && ./orch agent prompt "$PROMPT" --org test-suite -p "$PROJECT"
 
   # ── Linting ─────────────────────────────────────────────────────────────
   lint:
     desc: Run all linters
     cmds:
-      - cmd: cd go-backend && go fmt ./... && go vet ./...
+      - cmd: cd backend && go fmt ./... && go vet ./...
       - npm run lint
 
   # ── Sandbox images ───────────────────────────────────────────────────────
@@ -359,9 +351,9 @@ tasks:
   clean:
     desc: Remove build artifacts and all docker resources
     cmds:
-      - rm -rf dist dist-web go-backend/bin go-backend/orch go-backend/server
-      - docker compose -f docker-compose.dev.yml down -v --remove-orphans
-      - cmd: docker compose -f docker-compose.yml down -v
+      - rm -rf dist dist-web backend/bin backend/orch backend/server
+      - docker compose -f infra/compose/docker-compose.dev.yml down -v --remove-orphans
+      - cmd: docker compose -f infra/compose/docker-compose.yml down -v
         ignore_error: true
       - cmd: docker ps -aq --filter "name=orchestrator-sandbox-" | xargs -r docker rm -f
         ignore_error: true
@@ -569,12 +561,12 @@ tasks:
       - cmd: |
           sed -i 's/"version": ".*"/"version": "{{.VERSION}}"/' package.json
       - cmd: |
-          cd ts-tui-ink && sed -i 's/"version": ".*"/"version": "{{.VERSION}}"/' package.json
+          cd frontend/tui && sed -i 's/"version": ".*"/"version": "{{.VERSION}}"/' package.json
         ignore_error: true
       - cmd: |
-          cd shared && sed -i 's/"version": ".*"/"version": "{{.VERSION}}"/' package.json
+          cd frontend/shared && sed -i 's/"version": ".*"/"version": "{{.VERSION}}"/' package.json
         ignore_error: true
-      - git add VERSION package.json ts-tui-ink/package.json shared/package.json
+      - git add VERSION package.json frontend/tui/package.json frontend/shared/package.json
       - cmd: |
           git commit -m "release: v{{.VERSION}}"
       - cmd: |

@@ -1,2 +1,0 @@
-- [ ] E2E Test Task 1
-- [x] E2E Test Task 2

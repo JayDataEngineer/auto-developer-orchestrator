@@ -32,13 +32,13 @@ coverage/
 __pycache__/
 
 # Go binaries
-go-backend/bin/
-go-backend/cli
-go-backend/main
-go-backend/orch
-go-backend/orch-dev
-go-backend/server
-go-backend/tmp/
+backend/bin/
+backend/cli
+backend/main
+backend/orch
+backend/orch-dev
+backend/server
+backend/tmp/
 
 # Runtime data
 data/
@@ -48,8 +48,7 @@ data/
 playwright-report/
 test-results/
 
-# Sandbox / reference repos
-reference/
+# Sandbox / projects
 projects/
 
 # Scratch files
@@ -57,3 +56,4 @@ CONV.txt
 convo.txt
 PROGRESS.md
 llms*.txt
+reference/
