@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { makeAssistantToolUI } from "@assistant-ui/react";
 import { usePuxStore } from "@/lib/pux-store";
 import { cn } from "@/lib/utils";
@@ -364,22 +364,8 @@ export function DelegateRenderer({
 	const agentText = agentState?.text ?? persistedSubAgent?.text;
 	const subToolCount = toolCalls.length;
 
-	// Auto-expand while running OR when restored from history with persisted data.
-	// useRef tracks whether we've auto-expanded so user can freely toggle after.
+	// Tools default to closed — user clicks to expand.
 	const [expanded, setExpanded] = useState(false);
-	const wasRunning = useRef(false);
-	const hasPersistedData = !agentState && persistedSubAgent && subToolCount > 0;
-	if (isRunning && !wasRunning.current) {
-		wasRunning.current = true;
-		setExpanded(true);
-	}
-	if (!isRunning && wasRunning.current) {
-		wasRunning.current = false;
-	}
-	// Auto-expand persisted delegate cards on reload (no live state to interact with)
-	if (hasPersistedData && !expanded) {
-		setExpanded(true);
-	}
 
 	// Determine display status: live state takes priority, then persisted subAgent
 	const displayStatus = isRunning ? "working..."
