@@ -299,7 +299,7 @@ func TestIntegration_OffloadExemptTools(t *testing.T) {
 		PreviewSize:        50,
 		HardTruncateSize:   6000,
 		EnableSummary:      false,
-		OffloadExemptTools: []string{"scrape", "research"},
+		OffloadExemptTools: []string{"scrape", "research", "delegate_to", "delegate_async"},
 	}
 
 	sess := &mockSession{id: "exempt-test"}
@@ -338,6 +338,20 @@ func TestIntegration_OffloadExemptTools(t *testing.T) {
 	}
 	if strings.Contains(processed3, "read_output") {
 		t.Fatal("research result should NOT be offloaded (exempt)")
+	}
+
+	// Exempt tool (delegate_to) should keep full content
+	// This prevents the CTO from entering an infinite offload loop
+	// where it tries to read the spill reference which gets offloaded again.
+	processed4, err := mgr.ProcessToolResult(context.Background(), "delegate_to", "tc-4", largeResult)
+	if err != nil {
+		t.Fatalf("ProcessToolResult error: %v", err)
+	}
+	if strings.Contains(processed4, "read_output") {
+		t.Fatal("delegate_to result should NOT be offloaded (exempt)")
+	}
+	if len(processed4) != len(largeResult) {
+		t.Fatalf("expected delegate_to result to be full length %d, got %d", len(largeResult), len(processed4))
 	}
 
 	mgr.Close()

@@ -109,8 +109,11 @@ type Config struct {
 
 	// OffloadExemptTools is a set of tool names that should never be
 	// auto-offloaded. Their full results are kept in context regardless
-	// of size. Useful for tools where the model needs the complete output
-	// (e.g., scrape, research). Default: ["scrape", "research"].
+	// of size. Useful for tools where the model needs the complete output.
+	// Default: ["scrape", "research", "delegate_to", "delegate_async"].
+	// delegate_to/async are exempt because the CTO needs the full subagent
+	// report — offloading creates an infinite loop where the CTO tries to
+	// read the spill reference, which gets offloaded again.
 	OffloadExemptTools []string
 }
 
@@ -129,7 +132,7 @@ func DefaultConfig() Config {
 		EnableSummary:          true,
 		ConversationLogEnabled: true,
 		ReinjectFileCount:      5,
-		OffloadExemptTools:     []string{"scrape", "research"},
+		OffloadExemptTools:     []string{"scrape", "research", "delegate_to", "delegate_async"},
 	}
 }
 
