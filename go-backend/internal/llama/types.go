@@ -51,6 +51,7 @@ type DecisionRequestData = core.DecisionRequestData
 type SourceEventData = core.SourceEventData
 type CompactionStartData = core.CompactionStartData
 type CompactionEndData = core.CompactionEndData
+type ContextUpdateData = core.ContextUpdateData
 type TaskStartedData = core.TaskStartedData
 type TaskCompletedData = core.TaskCompletedData
 type TaskBackgroundData = core.TaskBackgroundData
@@ -99,4 +100,5 @@ const (
 	EventTypeUserQuestion    = core.EventTypeUserQuestion
 	EventTypeDecisionRequest = core.EventTypeDecisionRequest
 	EventTypeSource          = core.EventTypeSource
+	EventTypeContextUpdate   = core.EventTypeContextUpdate
 )

@@ -31,4 +31,5 @@ const (
 	EventTypeTaskStarted     AgentEventType = "task_started"     // background task registered
 	EventTypeTaskCompleted   AgentEventType = "task_completed"   // background task finished
 	EventTypeTaskBackground  AgentEventType = "task_background"  // foreground → background conversion
+	EventTypeContextUpdate   AgentEventType = "context_update"   // per-round context metrics
 )

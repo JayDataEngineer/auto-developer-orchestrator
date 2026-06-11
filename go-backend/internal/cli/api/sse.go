@@ -38,6 +38,7 @@ const (
 	EventHookRequest     = "hook_request"
 	EventStepStart       = "step_start"
 	EventStepEnd         = "step_end"
+	EventContextUpdate   = "context_update"
 )
 
 // TextDeltaData is the payload for text_delta events.

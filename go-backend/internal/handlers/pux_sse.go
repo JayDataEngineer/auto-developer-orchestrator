@@ -143,6 +143,16 @@ func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 		}
 		return &sseEvent{Type: "compaction_end", Data: data}
 
+	case llamaeng.EventTypeContextUpdate:
+		p := payload.(llamaeng.ContextUpdateData)
+		data := map[string]interface{}{
+			"contextTokens": p.ContextTokens,
+			"contextWindow": p.ContextWindow,
+			"contextUtil":   p.ContextUtil,
+			"round":         p.Round,
+		}
+		return &sseEvent{Type: "context_update", Data: data}
+
 	case llamaeng.EventTypeError:
 		p := payload.(llamaeng.ErrorEventData)
 		return &sseEvent{Type: "error", Data: map[string]string{"error": p.Error}}

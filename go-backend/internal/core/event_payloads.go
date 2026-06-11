@@ -179,6 +179,20 @@ type CompactionEndData struct {
 
 func (CompactionEndData) seal() {}
 
+// --- Context metrics (per-round) ---
+
+// ContextUpdateData is emitted after each LLM API call with real context metrics.
+// This lets the TUI update its context indicator in real-time during multi-round loops,
+// not just at agent_end.
+type ContextUpdateData struct {
+	ContextTokens int     `json:"contextTokens,omitempty"` // prompt_tokens from last API call
+	ContextWindow int     `json:"contextWindow,omitempty"` // model's max context window
+	ContextUtil   float64 `json:"contextUtil,omitempty"`   // contextTokens / contextWindow
+	Round         int     `json:"round,omitempty"`         // which round this is from
+}
+
+func (ContextUpdateData) seal() {}
+
 // --- Background tasks ---
 
 // TaskStartedData is emitted when a background task is registered.

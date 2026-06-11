@@ -413,6 +413,31 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 		}
 		state.TurnModel = l.provider.ModelName()
 
+		// Emit context metrics after every LLM call so the TUI indicator
+		// stays current during multi-round tool loops — not just at agent_end.
+		{
+			ctxTokens := state.TurnInputTokens
+			ctxWindow := l.provider.ContextSize()
+			// ContextMetricsFunc uses real API data + heuristic, can be more
+			// accurate for cached providers. Take max of both.
+			if l.config.ContextMetricsFunc != nil {
+				if cm := l.config.ContextMetricsFunc(); cm.EstimatedTokens > ctxTokens {
+					ctxTokens = cm.EstimatedTokens
+				}
+			}
+			if ctxTokens > 0 && ctxWindow > 0 {
+				SendEvent(subscriber, AgentEvent{
+					Type: EventTypeContextUpdate,
+					Data: ContextUpdateData{
+						ContextTokens: ctxTokens,
+						ContextWindow: ctxWindow,
+						ContextUtil:   float64(ctxTokens) / float64(ctxWindow),
+						Round:         round + 1,
+					},
+				})
+			}
+		}
+
 		// Collect tool calls in index order
 		var toolCalls []ToolCallResponse
 		indices := make([]int, 0, len(toolCallAccum))
