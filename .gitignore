@@ -50,10 +50,3 @@ test-results/
 
 # Sandbox / projects
 projects/
-
-# Scratch files
-CONV.txt
-convo.txt
-PROGRESS.md
-llms*.txt
-reference/
