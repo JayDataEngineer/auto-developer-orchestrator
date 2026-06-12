@@ -273,9 +273,18 @@ See **Provider System** section above for how logic/worker defaults work.
 ## E2E Tests
 
 ```bash
-cd tests/python
-python3 -m pytest test_web_forum_fillout.py -v    # Browser automation
-python3 -m pytest test_sse_contract.py -v          # SSE event validation
+# Playwright (web frontend, mocked backend)
+task test-e2e
+
+# Playwright (web frontend, real backend)
+task test-integration
+
+# Python (agent, API, browser, desktop, SSE, TUI)
+task test-python
+task test-python-api       # API only
+task test-python-sse       # SSE contract
+task test-tui-e2e          # TUI visual (requires task tui-visual)
+task test-webui-e2e        # WebUI chat (Playwright + route mocking)
 ```
 
 Tests auto-skip when required services are unreachable.

@@ -9,7 +9,7 @@ import {
   gotoApp,
   apiPut,
   TEST_PROJECT, TEST_MODEL,
-} from './helpers';
+} from './real-helpers';
 
 // ─── App Loading ────────────────────────────────────────────────────
 

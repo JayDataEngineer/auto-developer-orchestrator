@@ -18,8 +18,8 @@ import time
 import threading
 
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TUI_ENTRY = os.path.join(PROJECT_ROOT, "ts-tui-ink", "src", "main.tsx")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TUI_ENTRY = os.path.join(PROJECT_ROOT, "frontend", "tui", "src", "main.tsx")
 BUN = "/home/ubuntu/.bun/bin/bun"
 
 MAGIC1 = "FIRSTMSG"

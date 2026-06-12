@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
 import {
   apiGet, apiPut, streamPrompt,
   TEST_PROJECT, TEST_AGENT, TEST_MODEL,
-} from './helpers';
+} from './real-helpers';
 
 // ─── Pre-flight: ensure model is set ────────────────────────────────
 

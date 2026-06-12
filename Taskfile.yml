@@ -233,12 +233,9 @@ tasks:
       - npx vitest run
 
   test-integration:
-    desc: Run integration tests (requires running backend on :3847)
-    dir: backend
+    desc: Run real-backend Playwright tests (requires running backend + frontend)
     cmds:
-      - go test -count=1 ./internal/handlers/...
-      - cmd: npx vitest run tests/integration/
-        ignore_error: true
+      - npx playwright test --config=tests/playwright.config.ts --project=real {{.CLI_ARGS}}
 
   test-python:
     desc: Run Python E2E tests (all domains)
@@ -283,9 +280,9 @@ tasks:
       - python3 -m pytest -v --tb=short -m vision {{.CLI_ARGS}}
 
   test-e2e:
-    desc: Run Playwright E2E tests
+    desc: Run Playwright E2E tests (mocked backend)
     cmds:
-      - npm run test:playwright
+      - npx playwright test --config=tests/playwright.config.ts --project=mocked {{.CLI_ARGS}}
 
   test-tui-e2e:
     desc: Run TUI visual E2E tests (requires task tui-visual)
@@ -300,12 +297,14 @@ tasks:
       - python3 -m pytest frontend/test_webui_chat.py -v --tb=short {{.CLI_ARGS}}
 
   test-all:
-    desc: Run everything sequentially (CI mode)
+    desc: Run all unit + E2E tests sequentially (CI mode)
     cmds:
       - task: test-go
       - task: test-js
       - task: test-tui
       - task: test-e2e
+      - task: test-tui-e2e
+      - task: test-webui-e2e
 
   # ── AI Test Suite (Pux Org) ─────────────────────────────────────────────
   test-ai:

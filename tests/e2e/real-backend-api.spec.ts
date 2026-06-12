@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
 import {
   apiGet, apiPost, apiPut, apiDelete,
   TEST_PROJECT, TEST_AGENT,
-} from './helpers';
+} from './real-helpers';
 
 // ─── Backend Health ────────────────────────────────────────────────
 
