@@ -514,7 +514,7 @@ describe("loadModels", () => {
 
 		const models = usePuxStore.getState().modelList;
 		expect(models).toHaveLength(1);
-		expect(models[0]).toEqual({ id: "m1", name: "Model One", provider: "openai" });
+		expect(models[0]).toEqual({ id: "m1", name: "Model One", provider: "openai", contextWindow: 0 });
 	});
 
 	it("sets modelList from API response (object with .models)", async () => {
@@ -526,7 +526,7 @@ describe("loadModels", () => {
 		} as any);
 
 		await usePuxStore.getState().loadModels();
-		expect(usePuxStore.getState().modelList).toEqual([{ id: "m2", name: "M2", provider: "" }]);
+		expect(usePuxStore.getState().modelList).toEqual([{ id: "m2", name: "M2", provider: "", contextWindow: 0 }]);
 	});
 
 	it("does not update state when API fails", async () => {

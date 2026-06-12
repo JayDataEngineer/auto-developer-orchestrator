@@ -1,102 +1,42 @@
-# E2E Tests with Playwright
+# Tests
 
-Automated end-to-end tests with visual screenshot capture.
+## Structure
 
-## Quick Start
-
-```bash
-# Install Playwright browsers
-task test:playwright:install
-
-# Run all tests
-task test:e2e
-
-# Run visual screenshot tests
-task test:screenshot
-
-# Run tests with UI
-task test:playwright:ui
+```
+tests/
+├── e2e/                    # Playwright tests for web frontend
+│   ├── fixtures.ts         # Mock data + SSE builders + route mocking
+│   ├── real-helpers.ts     # Helpers for real-backend tests
+│   ├── *.spec.ts           # Mocked tests (no backend)
+│   └── real-*.spec.ts      # Real-backend integration tests
+├── python/                 # Python pytest suite
+│   ├── api/                # REST API tests (no LLM)
+│   ├── sse/                # SSE streaming contract tests
+│   ├── agent/              # Agent loop tests (requires LLM)
+│   ├── browser/            # Browser automation tests
+│   ├── desktop/            # Desktop/xdotool automation
+│   ├── frontend/           # WebUI chat tests (Playwright)
+│   └── tui/                # TUI visual tests (requires task tui-visual)
+└── playwright.config.ts    # Playwright config (mocked + real projects)
 ```
 
-## Test Commands
+## Commands
 
-| Command | Description |
+| Command | What it runs |
 |---------|-------------|
-| `task test:e2e` | Run all E2E tests |
-| `task test:screenshot` | Run visual tests & capture screenshots |
-| `task test:playwright:ui` | Open Playwright UI |
-| `task test:playwright:headed` | Run tests in visible browser |
-| `task test:playwright:debug` | Debug tests |
+| `task test` | All unit tests (Go + JS + TUI) in parallel, then E2E |
+| `task test-go` | Go backend tests |
+| `task test-js` | Frontend shared tests (vitest) |
+| `task test-tui` | TUI tests (bun test) |
+| `task test-e2e` | Playwright E2E (mocked backend) |
+| `task test-integration` | Playwright E2E (real backend) |
+| `task test-python` | Python pytest suite (all domains) |
+| `task test-tui-e2e` | TUI visual E2E (requires task tui-visual) |
+| `task test-webui-e2e` | WebUI chat E2E (Playwright + route mocking) |
 
-## Screenshot Tests
+## Frameworks
 
-Visual tests capture screenshots of:
-
-1. **Main page** - Full application view
-2. **Sidebar** - Navigation panel
-3. **Terminal** - Log output panel
-4. **Header** - Top bar with controls
-5. **Activity tab** - Activity view
-6. **Project selector** - Project dropdown
-7. **Mobile view** - Responsive (375x667)
-8. **Tablet view** - Responsive (768x1024)
-9. **Desktop wide** - Responsive (1920x1080)
-10. **UI theme** - Glass morphism styling
-
-Screenshots are saved to: `tests/e2e/screenshots/`
-
-## Test Files
-
-- `tests/e2e/visual.spec.ts` - Visual/screenshot tests
-- `tests/e2e/functional.spec.ts` - Functional tests
-- `playwright.config.ts` - Playwright configuration
-
-## Configuration
-
-The Playwright config is set to:
-- **Base URL:** http://localhost:5174
-- **Browsers:** Chromium, Firefox, WebKit
-- **Screenshots:** On failure only
-- **Video:** On failure only
-- **Trace:** On first retry
-
-## CI/CD Integration
-
-```yaml
-# Example GitHub Actions
-- name: Install Playwright
-  run: task test:playwright:install
-
-- name: Run E2E tests
-  run: task test:e2e
-```
-
-## Debugging
-
-```bash
-# Debug specific test
-npx playwright test tests/e2e/visual.spec.ts --debug
-
-# Run with browser visible
-npx playwright test --headed
-
-# Run with UI
-npx playwright test --ui
-```
-
-## Troubleshooting
-
-### Tests fail to connect
-Make sure dev server is running:
-```bash
-task dev:up
-```
-
-### Browser not found
-Install browsers:
-```bash
-task test:playwright:install
-```
-
-### Port conflicts
-Update `playwright.config.ts` baseURL to match your dev server port.
+- **Go**: `go test` — co-located with source in `backend/internal/`
+- **JS/TS**: vitest (shared) + bun:test (TUI)
+- **Python**: pytest with markers (`api`, `sse`, `agent`, `browser`, `desktop`, `tui`)
+- **Playwright**: web frontend tests (mocked + real backend)
