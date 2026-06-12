@@ -4,9 +4,9 @@ services:
   # ===========================================
   # Go Backend with Hot Reload (Air) + Pi Agent
   # ===========================================
-  go-backend:
+  backend:
     build:
-      context: ./go-backend
+      context: ./backend
       dockerfile: Dockerfile.dev
     container_name: orchestrator-go-dev
     environment:
@@ -26,7 +26,7 @@ services:
       - OPENSHELL_IMAGE=pux-sandbox:latest
       - OPENSHELL_NETWORK=shared-infra
     volumes:
-      - ./go-backend:/app
+      - ./backend:/app
       - ./projects:/app/projects
       - ./data:/data
       - pi-config:/root/.pi

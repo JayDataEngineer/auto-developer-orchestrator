@@ -4,9 +4,9 @@ services:
   # ===========================================
   # Go Backend API Server (with Pi Agent)
   # ===========================================
-  go-backend:
+  backend:
     build:
-      context: ./go-backend
+      context: ./backend
       dockerfile: Dockerfile
     container_name: orchestrator-go
     restart: always

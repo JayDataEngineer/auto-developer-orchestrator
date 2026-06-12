@@ -128,7 +128,7 @@ class TestSubAgentDelegation:
         """A coding prompt should trigger delegate_to, not direct tool use."""
         result = _collect_prompt(
             api_session,
-            "Create a simple Go package at go-backend/internal/echotest/ "
+            "Create a simple Go package at backend/internal/echotest/ "
             "with a single function Echo(s string) string that returns s. "
             "Write the code, run 'go build ./internal/echotest/' to verify it compiles.",
             timeout=600,
@@ -146,7 +146,7 @@ class TestSubAgentDelegation:
         """Sub-agent should finish within 10 minutes (no 5-min tool timeout)."""
         result = _collect_prompt(
             api_session,
-            "Create a Go file at go-backend/internal/timeouttest/hello.go "
+            "Create a Go file at backend/internal/timeouttest/hello.go "
             "with package timeouttest and a function Hello() string. "
             "Build it with 'go build ./internal/timeouttest/'. "
             "This is a trivial task — should complete quickly.",
@@ -177,7 +177,7 @@ class TestFilePathRemapping:
         pkg_name = f"pathtest{uuid.uuid4().hex[:6]}"
         result = _collect_prompt(
             api_session,
-            f"Create a Go file at go-backend/internal/{pkg_name}/util.go "
+            f"Create a Go file at backend/internal/{pkg_name}/util.go "
             f"with 'package {pkg_name}' and a function Version() string "
             f"that returns '1.0'. Build it.",
             timeout=600,
@@ -193,7 +193,7 @@ class TestFilePathRemapping:
         repo_root = os.environ.get("PROJECT_ROOT", os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "..")
         ))
-        expected_path = os.path.join(repo_root, "go-backend", "internal", pkg_name, "util.go")
+        expected_path = os.path.join(repo_root, "backend", "internal", pkg_name, "util.go")
 
         if os.path.exists(expected_path):
             content = open(expected_path).read()
@@ -208,7 +208,7 @@ class TestFilePathRemapping:
         else:
             # Check for double-nesting bug
             double_nested = os.path.join(
-                repo_root, "go-backend", "go-backend", "internal", pkg_name, "util.go"
+                repo_root, "backend", "backend", "internal", pkg_name, "util.go"
             )
             if os.path.exists(double_nested):
                 pytest.fail(

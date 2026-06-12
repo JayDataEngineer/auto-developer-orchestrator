@@ -126,7 +126,7 @@ try {
 if (!backendOnline) {
 	process.stderr.write(
 		`\x1b[33m⚠  Backend not reachable at ${serverUrl}\x1b[0m\n` +
-		`\x1b[90m   Start it with: task dev   (or cd go-backend && go run ./cmd/server/)\x1b[0m\n` +
+		`\x1b[90m   Start it with: task dev   (or cd backend && go run ./cmd/server/)\x1b[0m\n` +
 		`\x1b[90m   The TUI will work but prompts will fail until backend starts.\x1b[0m\n\n`
 	);
 }

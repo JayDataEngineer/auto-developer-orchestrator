@@ -1,4 +1,4 @@
-import { createExtension } from "../../ts-tui-pi/packages/extension-sdk/index.ts";
+import { createExtension } from "../../frontend/tui/packages/extension-sdk/index.ts";
 
 const ext = createExtension("test_hello");
 

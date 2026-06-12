@@ -520,7 +520,7 @@ def main():
     parser.add_argument("--extra-args", type=str, default="", help="Extra CLI args passed to TUI")
     args = parser.parse_args()
 
-    tui_dir = Path(__file__).parent.parent / "ts-tui-ink"
+    tui_dir = Path(__file__).parent.parent / "frontend" / "tui"
     if not tui_dir.exists():
         print(f"TUI directory not found: {tui_dir}")
         sys.exit(1)

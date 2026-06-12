@@ -79,9 +79,9 @@ The project uses **[Task](https://taskfile.dev)** for all operations. Run `task 
 
 ## Project Structure
 
-- `/go-backend` — Go API server, agent loop, orchestrator, tool registry
-- `/ts-tui-ink` — Terminal UI (React 19 + Ink 6 + @assistant-ui/react-ink)
-- `/src` — Web frontend (Vite + React)
-- `/shared` — Shared package (`@pux/shared`): PuxChatAdapter, Zustand store, SSE types
+- `/backend` — Go API server, agent loop, orchestrator, tool registry
+- `/frontend/tui` — Terminal UI (React 19 + Ink 6 + @assistant-ui/react-ink)
+- `/frontend/web` — Web frontend (Vite + React)
+- `/frontend/shared` — Shared package (`@pux/shared`): PuxChatAdapter, Zustand store, SSE types
 - `/config` — Kernel config: CTO prompt, employee roles, tool packages, worker definitions
 

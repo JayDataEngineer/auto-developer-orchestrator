@@ -4,7 +4,7 @@ Unit tests for TUI pure functions (helpers extracted from source).
 These test the logic isolated from Ink/React — no visual server needed.
 
 Run with: python3 -m pytest tests/test_unit_helpers.py -v
-Or:       uv run --with pytest python3 -m pytest ts-tui-ink/tests/test_unit_helpers.py -v
+Or:       uv run --with pytest python3 -m pytest frontend/tui/tests/test_unit_helpers.py -v
 """
 
 # ── cleanModelName (from status-bar.tsx) ──

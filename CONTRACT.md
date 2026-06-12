@@ -158,7 +158,7 @@ type Tool interface {
 
 All tools enter the kernel through ONE of these paths:
 
-1. **Compiled tools** — Go code in `go-backend/internal/tools/`. Fast, for core operations (bash, file ops, delegation).
+1. **Compiled tools** — Go code in `backend/internal/tools/`. Fast, for core operations (bash, file ops, delegation).
 2. **MCP tools** — External MCP servers. Wrapped by `MCPTool` adapter. For research, vision, etc.
 3. **Extension tools** — TypeScript MCP servers. Discovered, started, wrapped by `MCPTool`. For user-defined capabilities.
 4. **Future: Ray tools** — Ray Serve deployments. Will be wrapped by same `MCPTool` adapter. For GPU workloads.

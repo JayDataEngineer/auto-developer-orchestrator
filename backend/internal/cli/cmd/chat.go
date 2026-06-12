@@ -10,21 +10,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// runChat launches the pi-mono TUI (ts-tui-pi) via bun.
+// runChat launches the TUI (frontend/tui) via bun.
 func runChat(cmd *cobra.Command, args []string) error {
 	// Find the frontend/tui directory relative to the repo root.
 	// The orch binary is at backend/orch, frontend/tui is at repo root.
 	exe, _ := os.Executable()
 	repoRoot := findRepoRoot(exe)
 
-	tuiDir := filepath.Join(repoRoot, "ts-tui-pi")
-	if _, err := os.Stat(filepath.Join(tuiDir, "src", "main.ts")); err != nil {
+	tuiDir := filepath.Join(repoRoot, "frontend", "tui")
+	if _, err := os.Stat(filepath.Join(tuiDir, "src", "main.tsx")); err != nil {
 		// Fallback: look relative to cwd
 		cwd, _ := os.Getwd()
-		tuiDir = filepath.Join(cwd, "ts-tui-pi")
+		tuiDir = filepath.Join(cwd, "frontend", "tui")
 	}
-	if _, err := os.Stat(filepath.Join(tuiDir, "src", "main.ts")); err != nil {
-		return fmt.Errorf("ts-tui-pi not found. Expected at %s or relative to repo root.", tuiDir)
+	if _, err := os.Stat(filepath.Join(tuiDir, "src", "main.tsx")); err != nil {
+		return fmt.Errorf("frontend/tui not found. Expected at %s or relative to repo root.", tuiDir)
 	}
 
 	// Resolve --org to project path

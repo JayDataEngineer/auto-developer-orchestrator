@@ -13,9 +13,9 @@ Uses the visual testing server at :9877 (/screen, /key, /input endpoints).
 Requires: Go backend running on :3847, bun installed.
 
 Usage:
-    uv run --with requests ts-tui-ink/tests/e2e_scroll.py
+    uv run --with requests frontend/tui/tests/e2e_scroll.py
     # or with explicit server start:
-    python3 ts-tui-ink/tests/e2e_scroll.py [--start-server] [--keep-server]
+    python3 frontend/tui/tests/e2e_scroll.py [--start-server] [--keep-server]
 """
 
 import argparse
