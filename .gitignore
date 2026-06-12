@@ -48,5 +48,8 @@ data/
 playwright-report/
 test-results/
 
+# Reference repos (cloned, not tracked)
+reference/
+
 # Sandbox / projects
 projects/
