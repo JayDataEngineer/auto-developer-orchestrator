@@ -7,10 +7,17 @@
  * text persist for one frame before it clears and messages appear.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, mock } from "bun:test";
 import React from "react";
 import { Text, Box } from "ink";
 import { render } from "ink-testing-library";
+
+// ── Fix dependency: @assistant-ui/tap/react-shim missing from installed version ──
+mock.module("@assistant-ui/tap/react-shim", () => ({
+	useDebugValue: () => {},
+	useSyncExternalStore: (_sub: any, getSnapshot: any) => getSnapshot(),
+}));
+
 import {
 	useLocalRuntime,
 	AssistantRuntimeProvider,

@@ -3,7 +3,10 @@
   "private": true,
   "version": "3.0.0",
   "type": "module",
-  "workspaces": ["frontend/shared", "frontend/tui"],
+  "workspaces": [
+    "frontend/shared",
+    "frontend/tui"
+  ],
   "scripts": {
     "dev": "vite --config frontend/web/vite.config.ts --host 0.0.0.0",
     "build": "vite build --config frontend/web/vite.config.ts",
@@ -14,6 +17,7 @@
   "dependencies": {
     "@assistant-ui/react": "^0.14.5",
     "@assistant-ui/react-markdown": "^0.14.0",
+    "@assistant-ui/tap": "^0.7.1",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-collapsible": "^1.1.12",

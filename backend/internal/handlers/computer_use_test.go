@@ -76,8 +76,10 @@ func TestEnableNilManager(t *testing.T) {
 
 	handler.Enable(w, req)
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", w.Code)
+	// Nil manager now falls back to host Chrome — returns 200 immediately,
+	// setup happens in background goroutine.
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
 	}
 }
 

@@ -8,8 +8,8 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
-import { usePuxStore } from "../../shared/src/pux-store";
-import type { AgentState, ToolCallRecord } from "../../shared/src/types";
+import { usePuxStore } from "@pux/shared";
+import type { AgentState, ToolCallRecord } from "@pux/shared";
 
 // Reset store before each test
 beforeEach(() => {

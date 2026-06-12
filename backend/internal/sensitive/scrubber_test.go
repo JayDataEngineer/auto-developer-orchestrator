@@ -22,7 +22,7 @@ func TestScrubText_GitHubToken(t *testing.T) {
 	if strings.Contains(result, "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij") {
 		t.Errorf("GitHub token not redacted: %s", result)
 	}
-	if !strings.Contains(result, "[REDACTED_GH_TOKEN]") {
+	if !strings.Contains(result, "[REDACTED_GITHUB_TOKEN]") {
 		t.Errorf("expected redaction marker, got: %s", result)
 	}
 }

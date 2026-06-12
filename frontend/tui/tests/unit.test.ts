@@ -6,57 +6,17 @@
  * Run: cd frontend/tui && bun test
  */
 
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, afterAll } from "bun:test";
 
-// ── Mock @pux/shared for commands ──
-const mockStore = {
-	activeProject: "test-project",
-	activeAgentId: "agent-123",
-	activeConversationId: "conv-456",
-	activeTuiView: "chat",
-	lastUsage: null,
-	contextMetrics: null,
-	agents: new Map(),
-	compacting: false,
-};
-
-const storeActions = {
-	toggleHelpOverlay: mock(() => {}),
-	toggleSearchOverlay: mock(() => {}),
-	toggleLogViewer: mock(() => {}),
-	toggleSessionSwitcher: mock(() => {}),
-	toggleSettingsOverlay: mock(() => {}),
-	toggleMCPOverlay: mock(() => {}),
-	toggleProvidersOverlay: mock(() => {}),
-	clearConversation: mock(() => {}),
-	setTuiView: mock(() => {}),
-	setState: mock(() => {}),
-};
-
-mock.module("@pux/shared", () => ({
-	usePuxStore: (selector?: any) => {
-		const state = { ...mockStore, ...storeActions };
-		return selector ? selector(state) : state;
-	},
-	usePuxStore: Object.assign(
-		(selector?: any) => {
-			const state = { ...mockStore, ...storeActions };
-			return selector ? selector(state) : state;
-		},
-		{
-			getState: () => ({ ...mockStore, ...storeActions }),
-			setState: (update: any) => Object.assign(mockStore, update),
-		}
-	),
-	apiUrl: (path: string) => path,
-	getFetch: () => globalThis.fetch,
-	setBaseUrl: mock(() => {}),
-	setFetch: mock(() => {}),
-}));
+// ── Restore mocks after all tests so other test files get the real module ──
+afterAll(() => {
+	mock.restore();
+});
 
 import { parseCommand, getCommandNames, getCommands } from "../src/commands.js";
 import { PROVIDER_CATALOG, TYPE_COLORS, TYPE_LABELS } from "../src/provider-catalog.js";
 import { symbols } from "../src/theme.js";
+import { usePuxStore } from "@pux/shared";
 
 // ═══════════════════════════════════════════════════════
 // 1. COMMANDS MODULE
