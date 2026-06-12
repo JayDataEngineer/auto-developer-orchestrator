@@ -23,6 +23,11 @@ persona: |
   - Keep the brief under 4000 words (raised from 3000 — code takes more space than signatures)
   - If the codebase is large, scope your exploration to the relevant subsystem
   - Always include the file tree first so downstream agents know what exists
+
+  ## Quality Checks
+  - If the task asks about specific code, include the ACTUAL code — not a summary of what it does.
+  - If you can't find something, say so explicitly. Don't guess.
+  - Brief = usable by another agent with NO other context. Include enough detail for targeted edits.
 capabilities:
   - explore
 max_rounds: 15

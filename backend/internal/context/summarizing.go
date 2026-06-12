@@ -366,25 +366,34 @@ func SummarizeMessages(ctx context.Context, provider core.LLMProvider, msgs []co
 	if prevSummary != "" {
 		summaryPrompt = `You are merging NEW conversation content into an EXISTING summary above.
 
-Update the structured summary to incorporate the new information. Preserve:
-1. The user's original goal/intent (update if it changed)
-2. Key decisions made and why (add new decisions)
-3. Important findings, facts, or data discovered (accumulate)
-4. Tools used and their results (add new ones, brief)
-5. Any errors encountered and how they were resolved
-6. Current state of progress (reflect latest state)
+Update EACH section to incorporate the new information:
+1. TASK — update if the goal changed
+2. COMPLETED — add new work done, files created/modified
+3. DISCOVERIES — add new technical constraints, decisions, errors and fixes
+4. DEAD ENDS — add approaches that failed and why
+5. NEXT STEPS — update based on latest state
+6. FILES — add any newly read/created/modified files with full paths
+7. USER PREFERENCES — add any new style requirements or constraints
+8. CONTEXT — add domain-specific details that aren't obvious
+9. STATE — reflect the current working state
 
 Output the complete updated summary. Be concise but comprehensive.`
 	} else {
-		summaryPrompt = `Summarize the conversation above into a structured summary that preserves:
-1. The user's original goal/intent
-2. Key decisions made and why
-3. Important findings, facts, or data discovered
-4. Tools used and their results (brief)
-5. Any errors encountered and how they were resolved
-6. Current state of progress
+		summaryPrompt = `Create a detailed summary of the conversation above. This summary will be placed at the start of a continuing session; newer messages will follow after it. Summarize thoroughly so that someone reading only this summary can fully understand what happened and continue the work.
 
-Be concise but comprehensive. The agent needs this summary to continue working effectively.`
+Your summary MUST include these sections:
+
+1. TASK: The user's core request and success criteria
+2. COMPLETED: What has been done so far — files created/modified (with paths), key outputs produced
+3. DISCOVERIES: Technical constraints uncovered, decisions made and why, errors encountered and how they were resolved
+4. DEAD ENDS: What approaches were tried that didn't work (and why) — prevents repeating mistakes
+5. NEXT STEPS: Specific actions needed to complete the task, in priority order
+6. FILES: Every file that was read, created, or modified — list with full paths
+7. USER PREFERENCES: Style requirements or constraints the user specified — preserve verbatim
+8. CONTEXT: Domain-specific details that aren't obvious from the code
+9. STATE: Current state — what's working, what's broken, what's pending
+
+Be concise but complete. Err on the side of including information that would prevent duplicate work.`
 	}
 
 	summarizeMessages := []core.Message{
