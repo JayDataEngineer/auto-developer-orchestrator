@@ -68,6 +68,30 @@ Pux doesn't ship with hardcoded model endpoints. Users add providers through the
 - **Non-fatal startup**: runs in sandbox/API-only mode when llama-server is down
 - **PROJECT_ROOT**: must be set to repo root when running binary directly
 
+## Repo Structure
+
+```
+auto-developer-orchestrator/
+├── backend/              # Go kernel (was go-backend/)
+│   ├── cmd/server/       # HTTP server entry point
+│   ├── cmd/cli/          # CLI (orch binary)
+│   └── internal/         # Agent loop, handlers, session, tools, sandbox
+├── frontend/
+│   ├── tui/              # Terminal UI (Ink 6, bun)
+│   ├── web/              # Web UI (Vite, React)
+│   └── shared/           # Shared TS between TUI and web (@pux/shared)
+├── config/               # Agent configs (prompts, workers, capabilities)
+├── infra/                # Dockerfiles, compose files, nginx.conf
+├── extensions/           # TypeScript MCP extension servers
+├── sandbox/              # Docker sandbox images and scripts
+├── test-suite/           # AI-powered test organization
+├── tests/                # E2E and integration tests
+├── scripts/              # Helper scripts (visual testing, etc.)
+├── sdk/                  # Python SDK for the API
+├── Taskfile.yml          # All task commands
+└── VERSION               # Current version
+```
+
 ## Interfaces — THREE ways to use the system
 
 ### 1. TUI (Terminal UI) — `task chat` or `orch`
@@ -255,6 +279,15 @@ python3 -m pytest test_sse_contract.py -v          # SSE event validation
 ```
 
 Tests auto-skip when required services are unreachable.
+
+## TUI Rewind
+
+Double-Escape when the agent is idle opens the rewind overlay. Shows a list of prior user messages (checkpoints). Select one, then choose "Restore conversation" to navigate the session tree back to that point. The TUI reloads with truncated history.
+
+- **Backend**: `GET/POST /api/pux/rewind` — lists checkpoints and navigates session tree
+- **Session tree**: `Navigate(nodeID)` moves the current pointer, `GetUserCheckpoints()` returns user messages
+- **Files**: `backend/internal/handlers/pux_rewind.go`, `frontend/tui/src/components/rewind-overlay.tsx`
+- **Not yet**: file checkpointing ("Restore code"), "Summarize from here"
 
 ## Remote LLM Access (Tech Noir Ray Cluster — Tailscale)
 
