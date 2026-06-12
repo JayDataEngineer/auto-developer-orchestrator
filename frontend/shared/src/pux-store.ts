@@ -136,6 +136,9 @@ interface PuxState {
 	// Session switcher
 	showSessionSwitcher: boolean;
 
+	// Rewind overlay
+	showRewindOverlay: boolean;
+
 	// Log viewer
 	showLogViewer: boolean;
 
@@ -211,6 +214,8 @@ interface PuxState {
 	setFontScale: (scale: number) => void;
 	toggleSessionSwitcher: () => void;
 	closeSessionSwitcher: () => void;
+	openRewindOverlay: () => void;
+	closeRewindOverlay: () => void;
 	toggleLogViewer: () => void;
 	closeLogViewer: () => void;
 	toggleSearchOverlay: () => void;
@@ -237,6 +242,7 @@ const overlayKeys = [
 	"showProvidersOverlay",
 	"showSettingsOverlay",
 	"showSessionSwitcher",
+	"showRewindOverlay",
 	"showLogViewer",
 	"showSearchOverlay",
 	"showHelpOverlay",
@@ -289,6 +295,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	showProvidersOverlay: false,
 	showSettingsOverlay: false,
 	showSessionSwitcher: false,
+	showRewindOverlay: false,
 	showLogViewer: false,
 	showSearchOverlay: false,
 	showHelpOverlay: false,
@@ -873,6 +880,9 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	closeSessionSwitcher: () => set({ showSessionSwitcher: false }),
+
+	openRewindOverlay: () => set(openOverlay("showRewindOverlay")),
+	closeRewindOverlay: () => set({ showRewindOverlay: false }),
 
 	toggleLogViewer: () => {
 		const show = !get().showLogViewer;

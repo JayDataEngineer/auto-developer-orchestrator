@@ -118,6 +118,7 @@ func (m *mockSession) ReplaceToolResults(replace func(i int, name, content strin
 }
 func (m *mockSession) GetTree() *TreeNode { return nil }
 func (m *mockSession) GetCurrentNode() string { return "root" }
+func (m *mockSession) GetUserCheckpoints() []Checkpoint { return nil }
 func (m *mockSession) Close() error {
 	m.closed = true
 	return nil

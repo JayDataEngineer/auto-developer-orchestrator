@@ -236,6 +236,10 @@ func (h *PuxHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/checkpoints/file-history", h.GetFileHistory)
 	r.Post("/checkpoints/file-restore", h.RestoreFileVersion)
 
+	// Session rewind
+	r.Get("/rewind", h.GetRewindCheckpoints)
+	r.Post("/rewind", h.RewindSession)
+
 	// Background task management
 	r.Post("/tasks/{taskID}/background", h.BackgroundTask)
 	r.Get("/tasks", h.ListTasks)

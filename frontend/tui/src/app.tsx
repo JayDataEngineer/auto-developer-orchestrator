@@ -37,6 +37,7 @@ import { LogViewer } from "./components/log-viewer.js";
 import { SearchOverlay } from "./components/search-overlay.js";
 import { MCPOverlay } from "./components/mcp-overlay.js";
 import { HelpOverlay } from "./components/help-overlay.js";
+import { RewindOverlay } from "./components/rewind-overlay.js";
 import { QuestionDialog } from "./components/question-dialog.js";
 import { DecisionDialog } from "./components/decision-dialog.js";
 import { ToolRegistry } from "./components/custom-tool-ui.js";
@@ -175,6 +176,7 @@ function PuxApp() {
 				store.showSearchOverlay || store.showLogViewer ||
 				store.showSessionSwitcher || store.showSettingsOverlay ||
 				store.showProvidersOverlay || store.showMCPOverlay ||
+				store.showRewindOverlay ||
 				store.pendingDecision) {
 				return;
 			}
@@ -182,12 +184,19 @@ function PuxApp() {
 			for (const a of store.agents.values()) {
 				if (a.status === "running") runningCount++;
 			}
+			const now = Date.now();
 			// Cancel if sub-agents are running OR the CTO itself is running
-			// (ctoRunning is set by the ComposerBar which has access to AUI state)
 			if (runningCount > 0 || store.ctoRunning) {
-				const now = Date.now();
 				if (now - lastEscape.current < 1000) {
 					store.cancelAgent("all");
+					lastEscape.current = 0;
+				} else {
+					lastEscape.current = now;
+				}
+			} else {
+				// Agent is idle — open rewind overlay on double-Escape
+				if (now - lastEscape.current < 1000) {
+					store.openRewindOverlay();
 					lastEscape.current = 0;
 				} else {
 					lastEscape.current = now;
@@ -244,6 +253,7 @@ function ContentArea() {
 	const showSearch = usePuxStore((s) => s.showSearchOverlay);
 	const showHelp = usePuxStore((s) => s.showHelpOverlay);
 	const showMCP = usePuxStore((s) => s.showMCPOverlay);
+	const showRewind = usePuxStore((s) => s.showRewindOverlay);
 	const zoomedAgentId = usePuxStore((s) => s.zoomedAgentId);
 	const agentSelectorOpen = usePuxStore((s) => s.agentSelectorOpen);
 
@@ -298,6 +308,11 @@ function ContentArea() {
 	// Session switcher overlay
 	if (showSwitcher) {
 		return <SessionSwitcher />;
+	}
+
+	// Rewind overlay
+	if (showRewind) {
+		return <RewindOverlay />;
 	}
 
 	// Settings overlay

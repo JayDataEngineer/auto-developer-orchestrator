@@ -1621,6 +1621,7 @@ func (s *subMsgStore) AppendMessage(msg core.Message) error                     
 func (s *subMsgStore) Close() error                                              { return nil }
 func (s *subMsgStore) GetTree() *core.TreeNode                                   { return nil }
 func (s *subMsgStore) GetCurrentNode() string                                    { return s.id }
+func (s *subMsgStore) GetUserCheckpoints() []core.Checkpoint                     { return nil }
 func (s *subMsgStore) Navigate(_ string) error                                   { return nil }
 func (s *subMsgStore) Branch(_ string) (string, error)                           { return "", nil }
 func (s *subMsgStore) Fork(_ string) (core.Session, error)                       { return s, nil }

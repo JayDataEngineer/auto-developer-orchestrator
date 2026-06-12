@@ -54,8 +54,19 @@ type Session interface {
 	// GetCurrentNode returns the current tree node ID.
 	GetCurrentNode() string
 
+	// GetUserCheckpoints returns user message entries along the current path.
+	// Used by the rewind feature to show conversation checkpoints.
+	GetUserCheckpoints() []Checkpoint
+
 	// Close releases any resources held by the session.
 	Close() error
+}
+
+// Checkpoint is a user message entry that can be rewound to.
+type Checkpoint struct {
+	ID        string    `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Preview   string    `json:"preview"` // truncated user message text
 }
 
 // TreeNode is a node in the session tree.

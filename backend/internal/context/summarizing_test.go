@@ -57,6 +57,7 @@ func (s *mockSession) ReplaceToolResults(replace func(i int, name, content strin
 }
 func (s *mockSession) GetTree() *core.TreeNode                              { return nil }
 func (s *mockSession) GetCurrentNode() string                                { return "root" }
+func (s *mockSession) GetUserCheckpoints() []core.Checkpoint                 { return nil }
 func (s *mockSession) Close() error                                          { return nil }
 
 type mockProvider struct {

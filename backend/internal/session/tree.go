@@ -524,6 +524,39 @@ func (t *SessionTree) GetCurrentNode() string {
 	return t.current
 }
 
+// GetUserCheckpoints returns user message entries along the path from root to current node.
+// Each checkpoint includes a truncated preview of the user's message text.
+func (t *SessionTree) GetUserCheckpoints() []core.Checkpoint {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	path := t.walkPath(t.session.ID, t.current)
+	if path == nil {
+		return nil
+	}
+
+	var checkpoints []core.Checkpoint
+	for _, node := range path {
+		if node.Entry.Type != core.EntryTypeUserMessage {
+			continue
+		}
+		var msg core.Message
+		if err := json.Unmarshal(node.Entry.Data, &msg); err != nil {
+			continue
+		}
+		preview := msg.Content
+		if len(preview) > 120 {
+			preview = preview[:117] + "..."
+		}
+		checkpoints = append(checkpoints, core.Checkpoint{
+			ID:        node.Entry.ID,
+			Timestamp: node.Entry.Timestamp,
+			Preview:   preview,
+		})
+	}
+	return checkpoints
+}
+
 // Close releases the file handle.
 func (t *SessionTree) Close() error {
 	t.mu.Lock()
