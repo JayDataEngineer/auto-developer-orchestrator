@@ -271,25 +271,28 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		}
 	}
 
-	// Step 5: Start Chrome with CDP
+	// Step 5: Start Chrome with CDP.
+	// Chrome always binds to 127.0.0.1 for CDP, so we use socat on a separate
+	// external port to bridge 0.0.0.0 → 127.0.0.1 (same pattern as base image).
+	// DISPLAY must be set as an env var — Chrome ignores the --display flag.
+	cdpExternalPort := cdpPort + 10000 // e.g. 9223 → 19223
 	_, err = m.execInContainer(ctx, containerName, []string{
-		"google-chrome",
-		"--no-sandbox",
-		"--disable-dev-shm-usage",
-		"--disable-gpu",
-		"--enable-features=WebContentsForceDark",
-		fmt.Sprintf("--remote-debugging-port=%d", cdpPort),
-		"--window-size=1280,800",
-		fmt.Sprintf("--display=%s", display),
+		"bash", "-c",
+		fmt.Sprintf("env DISPLAY=%s google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu "+
+			"--no-first-run --disable-extensions "+
+			"--remote-debugging-port=%d --user-data-dir=/tmp/chrome-desktop-profile "+
+			"--window-size=1280,800 &>/tmp/chrome-desktop.log",
+			display, cdpPort),
 	}, true)
 	if err != nil {
 		m.logger.Warn("chrome start warning", zap.Error(err))
 	}
 
-	// Step 5b: Forward CDP port to 0.0.0.0 via socat
+	// Step 5b: Bridge CDP to an external port via socat (same pattern as base image)
 	_, socatErr := m.execInContainer(ctx, containerName, []string{
-		"socat", fmt.Sprintf("TCP-LISTEN:%d,fork,bind=0.0.0.0", cdpPort),
-		fmt.Sprintf("TCP:127.0.0.1:%d", cdpPort),
+		"bash", "-c",
+		fmt.Sprintf("sleep 1 && socat TCP-LISTEN:%d,fork,bind=0.0.0.0 TCP:127.0.0.1:%d &>/tmp/socat-cdp.log",
+			cdpExternalPort, cdpPort),
 	}, true)
 	if socatErr != nil {
 		m.logger.Warn("socat forward warning", zap.Error(socatErr))
@@ -300,7 +303,7 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 		Mode:       ModeDesktop,
 		DisplayNum: displayNum,
 		VNCPort:    vncPort,
-		CDPPort:    cdpPort,
+		CDPPort:    cdpExternalPort, // External port (socat-forwarded)
 		NoVNCPort:  novncPort,
 		ViewerURL:  fmt.Sprintf("/sandbox/%s/viewer", sandboxID),
 		IsActive:   true,
@@ -359,35 +362,41 @@ func (m *Manager) disableModeLocked(ctx context.Context, sandboxID string) error
 
 	session := sandbox.DesktopSession
 	containerName := m.getContainerName(sandboxID)
-	display := fmt.Sprintf(":%d", session.DisplayNum)
 
 	m.logger.Info("disabling mode",
 		zap.String("sandbox_id", sandboxID),
 		zap.String("current_mode", string(sandbox.Mode)),
 	)
 
-	// Kill processes in reverse order: Chrome → x11vnc → Xvfb → websockify
-	killCmds := [][]string{
-		{"pkill", "-f", fmt.Sprintf("--display=%s", display)},
-		{"pkill", "-f", fmt.Sprintf("rfbport %d", session.VNCPort)},
-		{"pkill", "-f", fmt.Sprintf("Xvfb %s", display)},
-		{"pkill", "-f", fmt.Sprintf("websockify.*%d", session.NoVNCPort)},
-	}
+	// Browser mode reuses the base image's supervisord-managed processes
+	// (Xvfb, Chrome, x11vnc, websockify). We must NOT kill them — only
+	// desktop mode starts its own processes that need cleanup.
+	if sandbox.Mode == ModeDesktop {
+		display := fmt.Sprintf(":%d", session.DisplayNum)
 
-	for _, cmd := range killCmds {
-		_, err := m.execInContainer(ctx, containerName, cmd, false)
-		if err != nil {
-			m.logger.Debug("kill command (expected if process not running)",
-				zap.Strings("cmd", cmd),
-				zap.Error(err),
-			)
+		// Kill processes in reverse order: Chrome → x11vnc → Xvfb → websockify
+		killCmds := [][]string{
+			{"pkill", "-f", fmt.Sprintf("--display=%s", display)},
+			{"pkill", "-f", fmt.Sprintf("rfbport %d", session.VNCPort)},
+			{"pkill", "-f", fmt.Sprintf("Xvfb %s", display)},
+			{"pkill", "-f", fmt.Sprintf("websockify.*%d", session.NoVNCPort)},
 		}
-	}
 
-	// Release allocated ports
-	m.portMutex.Lock()
-	m.portAllocator.ReleasePorts(session.DisplayNum, session.VNCPort, session.CDPPort, session.NoVNCPort)
-	m.portMutex.Unlock()
+		for _, cmd := range killCmds {
+			_, err := m.execInContainer(ctx, containerName, cmd, false)
+			if err != nil {
+				m.logger.Debug("kill command (expected if process not running)",
+					zap.Strings("cmd", cmd),
+					zap.Error(err),
+				)
+			}
+		}
+
+		// Release allocated ports (desktop mode only — browser mode uses fixed ports)
+		m.portMutex.Lock()
+		m.portAllocator.ReleasePorts(session.DisplayNum, session.VNCPort, session.CDPPort, session.NoVNCPort)
+		m.portMutex.Unlock()
+	}
 
 	delete(m.desktopSessions, sandboxID)
 	sandbox.Mode = ModeCLI

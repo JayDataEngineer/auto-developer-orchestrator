@@ -12,8 +12,8 @@ func TestNewPortAllocator(t *testing.T) {
 	if p.nextVNCPort != 5901 {
 		t.Errorf("expected VNC 5901, got %d", p.nextVNCPort)
 	}
-	if p.nextCDPPort != 9222 {
-		t.Errorf("expected CDP 9222, got %d", p.nextCDPPort)
+	if p.nextCDPPort != 9223 {
+		t.Errorf("expected CDP 9223, got %d", p.nextCDPPort)
 	}
 	if p.nextNoVNCPort != 6081 {
 		t.Errorf("expected noVNC 6081, got %d", p.nextNoVNCPort)
@@ -31,8 +31,8 @@ func TestAllocatePorts_Increments(t *testing.T) {
 	if v1 != 5901 || v2 != 5902 {
 		t.Errorf("VNC ports: got %d and %d, want 5901 and 5902", v1, v2)
 	}
-	if c1 != 9222 || c2 != 9223 {
-		t.Errorf("CDP ports: got %d and %d, want 9222 and 9223", c1, c2)
+	if c1 != 9223 || c2 != 9224 {
+		t.Errorf("CDP ports: got %d and %d, want 9223 and 9224", c1, c2)
 	}
 	if n1 != 6081 || n2 != 6082 {
 		t.Errorf("noVNC ports: got %d and %d, want 6081 and 6082", n1, n2)

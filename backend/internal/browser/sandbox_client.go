@@ -91,6 +91,11 @@ type SandboxBrowserClient struct {
 	mu sync.RWMutex
 }
 
+// CDPPort returns the CDP port this client is configured to use.
+func (sbc *SandboxBrowserClient) CDPPort() int {
+	return sbc.cdpPort
+}
+
 // NewSandboxBrowserClient creates a new browser client for a sandbox Chrome instance.
 // hostname should be the Docker container name so the Go backend can reach Chrome
 // via the shared Docker network.

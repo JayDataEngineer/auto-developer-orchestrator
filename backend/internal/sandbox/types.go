@@ -102,7 +102,7 @@ func NewPortAllocator() *PortAllocator {
 	return &PortAllocator{
 		nextDisplayNum: 1,
 		nextVNCPort:    5901,
-		nextCDPPort:    9222,
+		nextCDPPort:    9223, // 9222 is used by base image's Chrome
 		nextNoVNCPort:  6081,
 		usedDisplays:   make(map[int]bool),
 		usedVNC:        make(map[int]bool),

@@ -122,7 +122,7 @@ func TestGetViewerDesktopMode(t *testing.T) {
 		SandboxID:  "sb-desktop",
 		Mode:       sandbox.ModeDesktop,
 		DisplayNum: 1,
-		CDPPort:    9222,
+		CDPPort:    9223,
 		NoVNCPort:  6081,
 		VNCPort:    5901,
 	})
@@ -421,7 +421,7 @@ func TestVNCProxyDesktopModePort6081(t *testing.T) {
 		SandboxID:  "sb-desktop",
 		Mode:       sandbox.ModeDesktop,
 		DisplayNum: 1,
-		CDPPort:    9222,
+		CDPPort:    9223,
 		NoVNCPort:  6081,
 		VNCPort:    5901,
 	})
@@ -650,10 +650,10 @@ func TestCDPURLBrowserPort(t *testing.T) {
 }
 
 func TestCDPURLDesktopPort(t *testing.T) {
-	session := &sandbox.DesktopSession{CDPPort: 9222}
+	session := &sandbox.DesktopSession{CDPPort: 9223}
 	url := getCDPURL(session)
-	if !strings.Contains(url, ":9222") {
-		t.Errorf("desktop mode CDP URL should contain :9222, got %q", url)
+	if !strings.Contains(url, ":9223") {
+		t.Errorf("desktop mode CDP URL should contain :9223, got %q", url)
 	}
 }
 

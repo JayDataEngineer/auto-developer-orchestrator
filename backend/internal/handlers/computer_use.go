@@ -487,16 +487,31 @@ func (h *ComputerUseHandler) Act(w http.ResponseWriter, r *http.Request) {
 
 // getClient returns the SandboxBrowserClient for a sandbox, auto-reconnecting if needed.
 func (h *ComputerUseHandler) getClient(sandboxID string) (*browser.SandboxBrowserClient, error) {
+	// Get current session port for cache validation (detects mode switches)
+	var currentCDPPort int
+	if h.manager != nil {
+		if sb, err := h.manager.GetSandbox(sandboxID); err == nil && sb.DesktopSession != nil {
+			currentCDPPort = sb.DesktopSession.CDPPort
+		}
+	}
+
 	h.mu.RLock()
 	client, ok := h.clients[sandboxID]
 	h.mu.RUnlock()
 
 	if ok {
-		if client.IsConnected() {
+		// Invalidate if the port changed (e.g. browser→desktop mode switch)
+		portMismatch := currentCDPPort > 0 && client.CDPPort() != currentCDPPort
+		if portMismatch {
+			h.logger.Info("CDP port changed, invalidating cached client",
+				zap.Int("old_port", client.CDPPort()),
+				zap.Int("new_port", currentCDPPort),
+				zap.String("sandbox_id", sandboxID))
+		} else if client.IsConnected() {
 			return client, nil
+		} else {
+			h.logger.Info("removing stale CDP client", zap.String("sandbox_id", sandboxID))
 		}
-		// Stale client — remove and fall through to auto-reconnect
-		h.logger.Info("removing stale CDP client", zap.String("sandbox_id", sandboxID))
 		client.Close()
 		h.mu.Lock()
 		delete(h.clients, sandboxID)
@@ -587,7 +602,12 @@ func (h *ComputerUseHandler) getOrCreateClient(sandboxID string, cdpPort int) (*
 	defer h.mu.Unlock()
 
 	if client, ok := h.clients[sandboxID]; ok {
-		return client, nil
+		if client.CDPPort() == cdpPort {
+			return client, nil
+		}
+		// Port changed (mode switch) — discard old client
+		client.Close()
+		delete(h.clients, sandboxID)
 	}
 
 	// Resolve container IP directly to avoid Docker DNS failures
