@@ -17,33 +17,15 @@ import sys
 import uuid
 
 import pytest
-import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from conftest import API_BASE_URL
 from utils.sse import post_and_stream
 
 pytestmark = [pytest.mark.agent, pytest.mark.slow, pytest.mark.llm]
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:3847")
 MODEL = os.environ.get("E2E_MODEL", "deepseek/deepseek-v4-flash")
 PROJECT = "auto-developer-orchestrator"
-
-
-@pytest.fixture(scope="module")
-def api_session():
-    s = requests.Session()
-    s.headers.update({"Content-Type": "application/json"})
-    return s
-
-
-@pytest.fixture(scope="module", autouse=True)
-def check_services(api_session):
-    """Skip if backend is unreachable."""
-    try:
-        r = api_session.get(f"{API_BASE_URL}/api/health", timeout=5)
-        r.raise_for_status()
-    except Exception:
-        pytest.skip("API server unreachable")
 
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,6 @@ package handlers_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,30 +10,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/auto-developer-orchestrator/backend/internal/core/testutil"
 	"github.com/auto-developer-orchestrator/backend/internal/handlers"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
 )
 
 func newChecklistRouter(t *testing.T) (*chi.Mux, *storage.Database, string) {
 	t.Helper()
-	logger := zap.NewNop()
+	logger := testutil.NopLogger()
+	db := testutil.NewTempDB(t)
 
 	projectsDir := t.TempDir()
 	projectDir := filepath.Join(projectsDir, "test-proj")
-	os.MkdirAll(projectDir, 0755)
-
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := storage.NewDatabase(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
+	os.MkdirAll(projectDir, 0o755)
 
 	// Register project in DB so GetProjectDir finds it
-	ctx := context.Background()
-	if err := db.AddCustomProject(ctx, "test-proj", projectDir); err != nil {
+	if err := db.AddCustomProject(context.Background(), "test-proj", projectDir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,66 +41,54 @@ func newChecklistRouter(t *testing.T) (*chi.Mux, *storage.Database, string) {
 	return r, db, projectDir
 }
 
+// doRaw sends a raw body (no JSON marshalling) through the router. Used for
+// malformed-JSON tests that must send invalid bytes.
+func doRaw(t *testing.T, r http.Handler, method, path string, body []byte) (int, *httptest.ResponseRecorder) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w.Code, w
+}
+
 // ── Get ───────────────────────────────────────────────────────
 
 func TestChecklistGetMissingProject(t *testing.T) {
 	r, _, _ := newChecklistRouter(t)
-
-	req := httptest.NewRequest("GET", "/checklist", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
+	code := testutil.DoJSON(t, r, "GET", "/checklist", nil, nil)
+	testutil.AssertStatus(t, code, http.StatusBadRequest)
 }
 
 func TestChecklistGetEmpty(t *testing.T) {
 	r, _, _ := newChecklistRouter(t)
 
-	req := httptest.NewRequest("GET", "/checklist?project=test-proj", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	var resp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&resp)
-	tasks, ok := resp["tasks"].([]interface{})
+	var resp map[string]any
+	code := testutil.DoJSON(t, r, "GET", "/checklist?project=test-proj", nil, &resp)
+	testutil.AssertStatus(t, code, http.StatusOK)
+	tasks, ok := resp["tasks"].([]any)
 	if !ok {
 		t.Fatal("expected tasks array")
 	}
-	if len(tasks) != 0 {
-		t.Errorf("expected 0 tasks, got %d", len(tasks))
-	}
+	testutil.AssertEqual(t, len(tasks), 0)
 }
 
 func TestChecklistGetWithTasks(t *testing.T) {
 	r, _, dir := newChecklistRouter(t)
 
-	os.WriteFile(filepath.Join(dir, "TASKS.md"), []byte("- [ ] Task one\n- [x] Task two\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "TASKS.md"), []byte("- [ ] Task one\n- [x] Task two\n"), 0o644)
 
-	req := httptest.NewRequest("GET", "/checklist?project=test-proj", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	var resp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&resp)
-	tasks := resp["tasks"].([]interface{})
+	var resp map[string]any
+	code := testutil.DoJSON(t, r, "GET", "/checklist?project=test-proj", nil, &resp)
+	testutil.AssertStatus(t, code, http.StatusOK)
+	tasks := resp["tasks"].([]any)
 	if len(tasks) != 2 {
 		t.Fatalf("expected 2 tasks, got %d", len(tasks))
 	}
-	task0 := tasks[0].(map[string]interface{})
+	task0 := tasks[0].(map[string]any)
 	if task0["completed"] != false {
 		t.Error("task 0 should not be completed")
 	}
-	task1 := tasks[1].(map[string]interface{})
+	task1 := tasks[1].(map[string]any)
 	if task1["completed"] != true {
 		t.Error("task 1 should be completed")
 	}
@@ -117,22 +97,19 @@ func TestChecklistGetWithTasks(t *testing.T) {
 func TestChecklistGetInProgress(t *testing.T) {
 	r, db, dir := newChecklistRouter(t)
 
-	os.WriteFile(filepath.Join(dir, "TASKS.md"), []byte("- [ ] First\n- [ ] Second\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "TASKS.md"), []byte("- [ ] First\n- [ ] Second\n"), 0o644)
 	db.SetCurrentTaskIndex(context.Background(), "test-proj", 1)
 
-	req := httptest.NewRequest("GET", "/checklist?project=test-proj", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	var resp map[string]any
+	code := testutil.DoJSON(t, r, "GET", "/checklist?project=test-proj", nil, &resp)
+	testutil.AssertStatus(t, code, http.StatusOK)
+	tasks := resp["tasks"].([]any)
 
-	var resp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&resp)
-	tasks := resp["tasks"].([]interface{})
-
-	task0 := tasks[0].(map[string]interface{})
+	task0 := tasks[0].(map[string]any)
 	if task0["status"] != "pending" {
 		t.Errorf("task 0 should be pending, got %v", task0["status"])
 	}
-	task1 := tasks[1].(map[string]interface{})
+	task1 := tasks[1].(map[string]any)
 	if task1["status"] != "in-progress" {
 		t.Errorf("task 1 should be in-progress, got %v", task1["status"])
 	}
@@ -142,48 +119,31 @@ func TestChecklistGetInProgress(t *testing.T) {
 
 func TestChecklistUpdateInvalidJSON(t *testing.T) {
 	r, _, _ := newChecklistRouter(t)
-
-	req := httptest.NewRequest("PUT", "/checklist", bytes.NewBufferString("{bad"))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
+	code, _ := doRaw(t, r, "PUT", "/checklist", []byte("{bad"))
+	testutil.AssertStatus(t, code, http.StatusBadRequest)
 }
 
 func TestChecklistUpdateMissingProject(t *testing.T) {
 	r, _, _ := newChecklistRouter(t)
-
-	body, _ := json.Marshal(map[string]interface{}{
+	body := map[string]any{
 		"tasks": []handlers.Task{{ID: "1", Text: "Test", Completed: false}},
-	})
-	req := httptest.NewRequest("PUT", "/checklist", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
 	}
+	code := testutil.DoJSON(t, r, "PUT", "/checklist", body, nil)
+	testutil.AssertStatus(t, code, http.StatusBadRequest)
 }
 
 func TestChecklistUpdateSuccess(t *testing.T) {
 	r, _, dir := newChecklistRouter(t)
 
-	body, _ := json.Marshal(map[string]interface{}{
+	body := map[string]any{
 		"project": "test-proj",
 		"tasks": []handlers.Task{
 			{ID: "0", Text: "Build feature", Completed: false},
 			{ID: "1", Text: "Write tests", Completed: true},
 		},
-	})
-	req := httptest.NewRequest("PUT", "/checklist", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
+	code := testutil.DoJSON(t, r, "PUT", "/checklist", body, nil)
+	testutil.AssertStatus(t, code, http.StatusOK)
 
 	content, err := os.ReadFile(filepath.Join(dir, "TASKS.md"))
 	if err != nil {
@@ -201,56 +161,30 @@ func TestChecklistUpdateSuccess(t *testing.T) {
 
 func TestChecklistMergeInvalidJSON(t *testing.T) {
 	r, _, _ := newChecklistRouter(t)
-
-	req := httptest.NewRequest("POST", "/checklist/merge", bytes.NewBufferString("{bad"))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
+	code, _ := doRaw(t, r, "POST", "/checklist/merge", []byte("{bad"))
+	testutil.AssertStatus(t, code, http.StatusBadRequest)
 }
 
 func TestChecklistMergeMissingProject(t *testing.T) {
 	r, _, _ := newChecklistRouter(t)
-
-	body, _ := json.Marshal(map[string]string{})
-	req := httptest.NewRequest("POST", "/checklist/merge", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
+	code := testutil.DoJSON(t, r, "POST", "/checklist/merge", map[string]string{}, nil)
+	testutil.AssertStatus(t, code, http.StatusBadRequest)
 }
 
 func TestChecklistMergeNoChecklist(t *testing.T) {
 	r, _, _ := newChecklistRouter(t)
-
-	body, _ := json.Marshal(map[string]string{"project": "test-proj"})
-	req := httptest.NewRequest("POST", "/checklist/merge", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", w.Code)
-	}
+	code := testutil.DoJSON(t, r, "POST", "/checklist/merge", map[string]string{"project": "test-proj"}, nil)
+	testutil.AssertStatus(t, code, http.StatusNotFound)
 }
 
 func TestChecklistMergeSuccess(t *testing.T) {
 	r, db, dir := newChecklistRouter(t)
 
-	os.WriteFile(filepath.Join(dir, "TASKS.md"), []byte("- [ ] Implement login\n- [ ] Write docs\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "TASKS.md"), []byte("- [ ] Implement login\n- [ ] Write docs\n"), 0o644)
 	db.SetCurrentTaskIndex(context.Background(), "test-proj", 0)
 
-	body, _ := json.Marshal(map[string]string{"project": "test-proj"})
-	req := httptest.NewRequest("POST", "/checklist/merge", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	code := testutil.DoJSON(t, r, "POST", "/checklist/merge", map[string]string{"project": "test-proj"}, nil)
+	testutil.AssertStatus(t, code, http.StatusOK)
 
 	content, _ := os.ReadFile(filepath.Join(dir, "TASKS.md"))
 	if !strings.Contains(string(content), "[x] Implement login") {
@@ -265,43 +199,26 @@ func TestChecklistMergeSuccess(t *testing.T) {
 
 func TestChecklistGenerateInvalidJSON(t *testing.T) {
 	r, _, _ := newChecklistRouter(t)
-
-	req := httptest.NewRequest("POST", "/checklist/generate", bytes.NewBufferString("{bad"))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
+	code, _ := doRaw(t, r, "POST", "/checklist/generate", []byte("{bad"))
+	testutil.AssertStatus(t, code, http.StatusBadRequest)
 }
 
 func TestChecklistGenerateMissingProject(t *testing.T) {
 	r, _, _ := newChecklistRouter(t)
-
-	body, _ := json.Marshal(map[string]string{"prompt": "test"})
-	req := httptest.NewRequest("POST", "/checklist/generate", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
+	code := testutil.DoJSON(t, r, "POST", "/checklist/generate", map[string]string{"prompt": "test"}, nil)
+	testutil.AssertStatus(t, code, http.StatusBadRequest)
 }
 
 func TestChecklistGenerateSuccess(t *testing.T) {
 	r, _, dir := newChecklistRouter(t)
 
-	body, _ := json.Marshal(map[string]string{"project": "test-proj", "prompt": "Custom task"})
-	req := httptest.NewRequest("POST", "/checklist/generate", bytes.NewReader(body))
+	// SSE endpoint: we need the recorder to inspect the Content-Type header.
+	req := testutil.NewJSONRequest(t, "POST", "/checklist/generate", map[string]string{"project": "test-proj", "prompt": "Custom task"})
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
+	testutil.AssertStatus(t, w.Code, http.StatusOK)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	ct := w.Header().Get("Content-Type")
-	if ct != "text/event-stream" {
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
 		t.Errorf("expected text/event-stream, got %q", ct)
 	}
 

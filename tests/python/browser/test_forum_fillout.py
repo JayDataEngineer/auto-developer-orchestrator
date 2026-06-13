@@ -99,29 +99,9 @@ def _wait_for_ready(api_session, timeout=60):
     raise TimeoutError(f"Sandbox not ready after {timeout}s")
 
 
-@pytest.fixture(scope="module")
-def api_session():
-    import requests
-    from requests.adapters import HTTPAdapter
-    from urllib3.util.retry import Retry
-
-    s = requests.Session()
-    retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
-    adapter = HTTPAdapter(max_retries=retry)
-    s.mount("http://", adapter)
-    s.mount("https://", adapter)
-    s.headers.update({"Content-Type": "application/json"})
-    return s
-
-
 @pytest.fixture(scope="module", autouse=True)
 def setup_sandbox(api_session):
     """Create sandbox and enable computer use for all tests."""
-    # Check backend is running
-    resp = api_session.get(f"{API_URL}/api/health", timeout=5)
-    if resp.status_code != 200:
-        pytest.skip("Backend not running")
-
     # Fast path: check if CDP already works (sandbox + computer use from prior run)
     try:
         r = api_session.get(

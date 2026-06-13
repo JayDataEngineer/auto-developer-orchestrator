@@ -15,7 +15,7 @@ import uuid
 import pytest
 
 from conftest import API_BASE_URL
-from utils.sse import post_and_stream, stream_pux_prompt
+from utils.sse import post_and_stream, stream_prompt
 from utils.contract import validate_sse_event
 
 pytestmark = [pytest.mark.api, pytest.mark.sse, pytest.mark.slow, pytest.mark.llm]
@@ -33,7 +33,7 @@ _mod_session = None
 
 def _pux(message, timeout=600):
     """Send a prompt and return all SSE events."""
-    return stream_pux_prompt(API, _mod_session, TEST_PROJECT, message, timeout=timeout)
+    return stream_prompt(API, _mod_session, TEST_PROJECT, message, timeout=timeout)
 
 
 def get_text(events):

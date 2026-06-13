@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { usePuxStore } from "../pux-store";
 
-// Mock fetch-provider
+// Mock fetch-provider (factory must be inline — vi.mock is hoisted above imports)
 vi.mock("../fetch-provider", () => {
 	const mockFetch = vi.fn().mockResolvedValue({
 		ok: true,

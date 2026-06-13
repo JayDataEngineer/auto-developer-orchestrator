@@ -9,9 +9,10 @@ import type {
 	WorkbenchTab,
 	TuiView,
 } from "../types";
+import { makeAgent, makeToolCall } from "./helpers";
 
 // ── Mock fetch-provider so API calls never hit a real server ──
-
+// (vi.mock factories are hoisted above imports, so the factory must be inline.)
 vi.mock("../fetch-provider", () => {
 	const mockFetch = vi.fn().mockResolvedValue({
 		ok: true,
@@ -59,29 +60,7 @@ beforeEach(() => {
 });
 
 // ── Helpers ──
-
-function makeAgent(overrides: Partial<AgentState> = {}): AgentState {
-	return {
-		agentId: "agent-1",
-		agentName: "Test Agent",
-		task: "Do something",
-		status: "running",
-		startedAt: 1000,
-		toolCalls: [],
-		...overrides,
-	};
-}
-
-function makeToolCall(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
-	return {
-		toolName: "bash",
-		args: { command: "echo hi" },
-		result: "hi",
-		isError: false,
-		timestamp: 2000,
-		...overrides,
-	};
-}
+// makeAgent / makeToolCall are imported from ./helpers (shared across store tests).
 
 // ══════════════════════════════════════════
 // 1. Initial State

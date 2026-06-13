@@ -151,11 +151,10 @@ class TestChatActuallyShowsContent:
     If these fail: the user sees a blank infinite loading icon and nothing else.
     """
 
-    @staticmethod
-    def _stream(message, model=TEST_MODEL):
+    def _stream(self, session, message, model=TEST_MODEL):
         """Send a prompt and collect ALL SSE events."""
         return list(post_and_stream(
-            requests.Session(),
+            session,
             f"{API}/api/pux/prompt",
             {
                 "message": message,
@@ -166,12 +165,12 @@ class TestChatActuallyShowsContent:
             timeout=90,
         ))
 
-    def test_user_sees_response_text(self):
+    def test_user_sees_response_text(self, api_session):
         """
         After sending a prompt, the user must see actual response text.
         If text_delta events are empty or missing, the chat shows a blank area.
         """
-        events = self._stream("Say exactly: 'Hello, this is my response' and nothing else.")
+        events = self._stream(api_session, "Say exactly: 'Hello, this is my response' and nothing else.")
 
         text_deltas = [d for t, d in events if t == "text_delta"]
         full_text = "".join(d.get("text", "") for d in text_deltas if isinstance(d, dict))
@@ -190,12 +189,12 @@ class TestChatActuallyShowsContent:
 
         print(f"  ✓ User sees text: '{full_text[:100]}...'")
 
-    def test_spinner_stops_after_response(self):
+    def test_spinner_stops_after_response(self, api_session):
         """
         The spinner MUST stop. If agent_end is never received,
         the user sees an infinite loading spinner forever.
         """
-        events = self._stream("Say ok")
+        events = self._stream(api_session, "Say ok")
 
         event_types = [t for t, _ in events]
         assert "agent_end" in event_types, (
@@ -204,7 +203,7 @@ class TestChatActuallyShowsContent:
             f"The loading spinner will spin forever."
         )
 
-    def test_tool_use_shows_tool_name(self):
+    def test_tool_use_shows_tool_name(self, api_session):
         """
         When the agent uses a tool (like bash), the user should see
         the tool NAME, not a blank spinner.
@@ -213,6 +212,7 @@ class TestChatActuallyShowsContent:
         sees "Running tool..." with no label.
         """
         events = self._stream(
+            api_session,
             "Run this bash command: echo HELLO_TOOL_TEST"
         )
 
@@ -237,12 +237,13 @@ class TestChatActuallyShowsContent:
                 f"User sees blank infinite spinner."
             )
 
-    def test_thinking_content_is_visible(self):
+    def test_thinking_content_is_visible(self, api_session):
         """
         When the model thinks, the user should see thinking text,
         not a blank spinner. The thinking_delta events must contain text.
         """
         events = self._stream(
+            api_session,
             "Think step by step and solve: what is 17 * 23?"
         )
 
@@ -267,12 +268,13 @@ class TestChatActuallyShowsContent:
         if response_text.strip():
             print(f"  ✓ Response text: '{response_text[:80]}...'")
 
-    def test_no_blank_tool_execution_cards(self):
+    def test_no_blank_tool_execution_cards(self, api_session):
         """
         Tool execution cards must show args/results, not be blank.
         Every tool_execution_end must have a result or error.
         """
         events = self._stream(
+            api_session,
             "Use the bash tool to run: echo TOOL_RESULT_CHECK"
         )
 
@@ -287,7 +289,7 @@ class TestChatActuallyShowsContent:
                 f"User sees a blank tool card."
             )
 
-    def test_full_conversation_flow_visible(self):
+    def test_full_conversation_flow_visible(self, api_session):
         """
         End-to-end: send a prompt, verify the user would see:
         1. Their message appear
@@ -297,6 +299,7 @@ class TestChatActuallyShowsContent:
         5. Spinner stops
         """
         events = self._stream(
+            api_session,
             "List the files in the current directory. Use the bash tool to run: ls"
         )
 

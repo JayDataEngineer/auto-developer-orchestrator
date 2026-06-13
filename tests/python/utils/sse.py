@@ -48,32 +48,24 @@ def post_and_stream(session, url, payload, timeout=120):
 
 
 def stream_prompt(api_url, api_session, project, message,
-                  agent_id="default", model="qwen-local-primary", timeout=120):
-    """Send a prompt to a Pi agent and collect all SSE events."""
+                  agent_id="default", model=None, timeout=120):
+    """
+    Send a prompt to the Pux agent endpoint and collect all SSE events.
+
+    When *model* is None the backend resolves the model via its defaults
+    (logic/worker). Pass an explicit model ID to override.
+    """
+    payload = {
+        "message": message,
+        "project": project,
+        "agentId": agent_id,
+    }
+    if model is not None:
+        payload["model"] = model
     return list(post_and_stream(
         api_session,
         f"{api_url}/api/pux/prompt",
-        {
-            "message": message,
-            "project": project,
-            "agentId": agent_id,
-            "model": model,
-        },
-        timeout=timeout,
-    ))
-
-
-def stream_pux_prompt(api_url, api_session, project, message,
-                      agent_id="default", timeout=300):
-    """Send a prompt via the Pux agent endpoint and collect all SSE events."""
-    return list(post_and_stream(
-        api_session,
-        f"{api_url}/api/pux/prompt",
-        {
-            "message": message,
-            "project": project,
-            "agentId": agent_id,
-        },
+        payload,
         timeout=timeout,
     ))
 
