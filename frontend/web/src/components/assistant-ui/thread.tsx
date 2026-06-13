@@ -70,7 +70,7 @@ export const Thread: FC = () => {
 		>
 			<ThreadPrimitive.Viewport
 				turnAnchor="top"
-				className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth px-4 pt-4"
+				className="relative flex flex-1 flex-col overflow-x-hidden overflow-y-scroll scroll-smooth px-4 pt-4"
 			>
 				<AuiIf condition={(s) => s.thread.isEmpty}>
 					<ThreadWelcome />
@@ -271,7 +271,9 @@ const ComposerAction: FC = () => {
 		return map;
 	}, [modelList]);
 
-	const currentName = modelList.find((m) => m.id === activeModel)?.name || activeModel || "Default";
+	// Effective model display: explicit selection > logic default > worker default > "Default"
+	const effectiveModelId = activeModel || defaultLogic || defaultWorker;
+	const currentName = modelList.find((m) => m.id === effectiveModelId)?.name || effectiveModelId || "Default";
 	const logicName = modelList.find((m) => m.id === defaultLogic)?.name || defaultLogic || "none";
 	const workerName = modelList.find((m) => m.id === defaultWorker)?.name || defaultWorker || "none";
 
@@ -283,8 +285,7 @@ const ComposerAction: FC = () => {
 				<div className="flex items-center gap-1">
 					<ComposerAddAttachment />
 					{!isMobile && (
-					<Select value={activeModel || "__none__"} onValueChange={(val) => {
-						if (val === "__none__") return;
+					<Select value={activeModel} onValueChange={(val) => {
 						if (val === "__clear_logic") { setDefaults("", defaultWorker); return; }
 						if (val === "__clear_worker") { setDefaults(defaultLogic, ""); return; }
 						setModel(val);
