@@ -9,7 +9,7 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": resolve(__dirname, "src"),
-			"@pux/shared": resolve(__dirname, "../../shared/src/index.ts"),
+			"@pux/shared": resolve(__dirname, "../shared/src/index.ts"),
 		},
 		dedupe: ["react", "react-dom", "zustand", "@assistant-ui/react", "@assistant-ui/react-markdown"],
 	},

@@ -15,8 +15,8 @@
     "test-js": "vitest run"
   },
   "dependencies": {
-    "@assistant-ui/react": "^0.14.5",
-    "@assistant-ui/react-markdown": "^0.14.0",
+    "@assistant-ui/react": "^0.14.18",
+    "@assistant-ui/react-markdown": "^0.14.3",
     "@assistant-ui/tap": "^0.7.1",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-avatar": "^1.1.11",
