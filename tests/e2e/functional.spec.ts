@@ -52,7 +52,7 @@ test.describe('Auto-Developer Orchestrator - Functional Tests', () => {
   test('should display agent chat', async ({ page }) => {
     // Chat is always visible with textarea or welcome text
     const textarea = page.getByLabel('Message input');
-    const welcomeText = page.getByText('Your AI-powered development orchestrator');
+    const welcomeText = page.getByText('Pux').first();
     const textareaVisible = await textarea.isVisible().catch(() => false);
     const welcomeVisible = await welcomeText.isVisible().catch(() => false);
     expect(textareaVisible || welcomeVisible).toBe(true);

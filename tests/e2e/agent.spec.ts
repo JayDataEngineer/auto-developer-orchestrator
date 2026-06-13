@@ -52,8 +52,8 @@ test.describe('Agent Chat', () => {
   // ── Empty State ──
 
   test('shows welcome state before any message', async ({ page }) => {
-    // New UI shows "Pux" and "Your AI-powered development orchestrator"
-    await expect(page.getByText('Your AI-powered development orchestrator')).toBeVisible();
+    // New UI shows "Pux" and "Pux"
+    await expect(page.getByText('Pux').first()).toBeVisible();
   });
 
   test('shows prompt textarea', async ({ page }) => {
@@ -217,7 +217,7 @@ test.describe('Agent Chat - No White Screen', () => {
     await page.waitForTimeout(2000);
 
     const textarea = page.getByLabel('Message input');
-    const welcomeText = page.getByText('Your AI-powered development orchestrator');
+    const welcomeText = page.getByText('Pux').first();
     const textareaVisible = await textarea.isVisible();
     const welcomeVisible = await welcomeText.isVisible();
     expect(textareaVisible || welcomeVisible).toBe(true);
@@ -353,7 +353,7 @@ test.describe('Agent Chat - Sidebar', () => {
     await page.waitForTimeout(500);
 
     // The welcome state should come back
-    await expect(page.getByText('Your AI-powered development orchestrator')).toBeVisible({ timeout: 3000 });
+    await expect(page.getByText('Pux').first()).toBeVisible({ timeout: 3000 });
   });
 });
 

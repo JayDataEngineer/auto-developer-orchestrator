@@ -13,7 +13,7 @@ import { defineConfig, devices } from '@playwright/test';
  * Run with UI:           npx playwright test --ui
  */
 export default defineConfig({
-  testDir: './tests/e2e',
+  testDir: './e2e',
   testMatch: '*.spec.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

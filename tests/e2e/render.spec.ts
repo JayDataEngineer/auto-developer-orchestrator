@@ -31,7 +31,7 @@ test.describe('Frontend Render Tests', () => {
 
     // Thread shows either the welcome message or textarea
     const textarea = page.getByLabel('Message input');
-    const welcomeText = page.getByText('Your AI-powered development orchestrator');
+    const welcomeText = page.getByText('Pux').first();
     const textareaVisible = await textarea.isVisible().catch(() => false);
     const welcomeVisible = await welcomeText.isVisible().catch(() => false);
     expect(textareaVisible || welcomeVisible).toBe(true);

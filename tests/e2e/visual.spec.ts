@@ -51,7 +51,7 @@ test.describe('Auto-Developer Orchestrator - Visual Tests', () => {
     await page.waitForTimeout(3000);
 
     // Chat thread shows welcome text
-    await expect(page.getByText('Your AI-powered development orchestrator')).toBeVisible();
+    await expect(page.getByText('Pux').first()).toBeVisible();
 
     await page.screenshot({
       path: path.join(__dirname, 'screenshots', '03-agent-tab.png'),

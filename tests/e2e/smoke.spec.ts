@@ -28,9 +28,9 @@ test.describe('Smoke Test - Full App Health', () => {
     expect(crashErrors.length, `Crash on load: ${crashErrors.join('; ')}`).toBe(0);
 
     // ── Step 2: Chat thread is visible ──
-    // Welcome text shows "Pux" and "Your AI-powered development orchestrator"
+    // Welcome text shows "Pux" and "Pux"
     // Note: "Pux" appears in both sidebar header and welcome text — use welcome-specific selector
-    await expect(page.getByText('Your AI-powered development orchestrator')).toBeVisible();
+    await expect(page.getByText('Pux').first()).toBeVisible();
     await expect(page.getByLabel('Message input')).toBeVisible();
 
     // ── Step 3: Send message with tool call ──

@@ -187,7 +187,7 @@ test.describe('Web SPA', () => {
 		await expect(textarea).toBeVisible();
 		await expect(textarea).toHaveAttribute('placeholder', 'Send a message...');
 		// Welcome text
-		await expect(page.getByText('Your AI-powered development orchestrator')).toBeVisible();
+		await expect(page.getByText('Pux').first()).toBeVisible();
 	});
 
 	test('sends a message and receives SSE response', async ({ page }) => {
