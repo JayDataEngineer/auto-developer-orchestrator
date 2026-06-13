@@ -262,3 +262,15 @@ type HookRequestData struct {
 }
 
 func (HookRequestData) seal() {}
+
+// --- Visual mouse overlay ---
+
+// MouseActionData is emitted before a browser/desktop tool executes,
+// carrying normalized (0-1) coordinates for the frontend visual cursor.
+type MouseActionData struct {
+	NormX  float64 `json:"normX"`           // 0-1, normalized X position
+	NormY  float64 `json:"normY"`           // 0-1, normalized Y position
+	Action string  `json:"action"`           // "click", "type", "scroll", "move"
+}
+
+func (MouseActionData) seal() {}

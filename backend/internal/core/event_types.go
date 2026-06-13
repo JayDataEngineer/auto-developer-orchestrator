@@ -32,4 +32,5 @@ const (
 	EventTypeTaskCompleted   AgentEventType = "task_completed"   // background task finished
 	EventTypeTaskBackground  AgentEventType = "task_background"  // foreground → background conversion
 	EventTypeContextUpdate   AgentEventType = "context_update"   // per-round context metrics
+	EventTypeMouseAction     AgentEventType = "mouse_action"     // visual mouse overlay for sandbox
 )

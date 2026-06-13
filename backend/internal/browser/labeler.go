@@ -249,7 +249,7 @@ const labelerJS = `
 	}
 
 	document.body.appendChild(overlay);
-	return JSON.stringify(elements);
+	return JSON.stringify({elements: elements, vw: vw, vh: vh});
 })();
 
 function buildSelector(el) {
@@ -268,13 +268,27 @@ function buildSelector(el) {
 }
 `
 
-// parseElements parses the JSON string returned by the labeler JS
-func parseElements(jsonStr string) []LabeledElement {
+// labelerResult is the structured JSON returned by the labeler JS.
+type labelerResult struct {
+	Elements []LabeledElement `json:"elements"`
+	VW       int              `json:"vw"`
+	VH       int              `json:"vh"`
+}
+
+// parseElements parses the JSON string returned by the labeler JS.
+// Supports both the new format ({elements, vw, vh}) and the legacy format (plain array).
+func parseElements(jsonStr string) ([]LabeledElement, int, int) {
+	// Try new structured format first
+	var result labelerResult
+	if err := json.Unmarshal([]byte(jsonStr), &result); err == nil && len(result.Elements) > 0 {
+		return result.Elements, result.VW, result.VH
+	}
+	// Fallback: legacy plain array format
 	var elements []LabeledElement
 	if err := json.Unmarshal([]byte(jsonStr), &elements); err != nil {
-		return []LabeledElement{}
+		return []LabeledElement{}, 0, 0
 	}
-	return elements
+	return elements, 0, 0
 }
 
 // parseImageURLs parses the JSON string returned by the image extractor JS

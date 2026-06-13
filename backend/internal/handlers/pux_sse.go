@@ -225,6 +225,14 @@ func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 		p := payload.(llamaeng.StepEndData)
 		return &sseEvent{Type: "step_end", Data: map[string]interface{}{"round": p.Round, "decision": p.Decision}}
 
+	case llamaeng.EventTypeMouseAction:
+		p := payload.(llamaeng.MouseActionData)
+		return &sseEvent{Type: "mouse_action", Data: map[string]interface{}{
+			"normX":  p.NormX,
+			"normY":  p.NormY,
+			"action": p.Action,
+		}}
+
 	default:
 		return nil
 	}

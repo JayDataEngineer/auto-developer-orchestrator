@@ -82,6 +82,7 @@ type Config struct {
 	BashRules       *perms.BashRuleStore        // optional: if set, enables user-defined bash command rules
 	SandboxOnly     bool                        // optional: if true, only bash + file tools available (no delegation, MCP, browser, etc.)
 	TaskMgr         *core.TaskManager           // optional: if set, bash tool supports run_in_background + task_output
+	MouseCoordinateResolver func(toolName string, args map[string]any) (normX, normY float64, action string) // optional: visual mouse overlay
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -648,6 +649,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 				Utilization:     m.Utilization,
 			}
 		},
+		MouseCoordinateResolver: cfg.MouseCoordinateResolver,
 		Logger:          logger,
 	})
 

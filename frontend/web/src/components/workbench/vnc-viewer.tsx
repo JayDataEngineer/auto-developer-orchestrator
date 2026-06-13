@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Monitor, PowerIcon } from "lucide-react";
 import { usePuxStore } from "@pux/shared";
+import { MouseOverlay } from "./mouse-overlay";
 
 interface DesktopSession {
 	is_active: boolean;
@@ -263,12 +264,13 @@ export function VNCViewer() {
 	const wsPath = `api/sandbox/vnc/${sandbox.id}/websockify`;
 
 	return (
-		<div ref={containerRef} className="h-full w-full">
+		<div ref={containerRef} className="h-full w-full relative">
 			<iframe
 				src={`/api/sandbox/vnc/${sandbox.id}/vnc.html?autoconnect=true&resize=remote&reconnect=true&reconnect_delay=2000&path=${encodeURIComponent(wsPath)}`}
 				className="h-full w-full border-0"
 				title="Sandbox VNC"
 			/>
+			<MouseOverlay containerRef={containerRef} />
 		</div>
 	);
 }

@@ -736,6 +736,15 @@ export const puxChatAdapter: ChatModelAdapter = {
 									activeSubAgentToolId = null;
 								}
 							}
+							// Mouse overlay: add click marker and clear after tool completes
+							const overlay = usePuxStore.getState().mouseOverlay;
+							if (overlay) {
+								usePuxStore.getState().addClickMarker(overlay.normX, overlay.normY);
+								usePuxStore.getState().setMouseOverlay({ ...overlay, state: "click" });
+								setTimeout(() => {
+									usePuxStore.getState().clearMouseOverlay();
+								}, 1500);
+							}
 							yield buildSnapshot(parts, sources, statusRef[0], timing, stepsRef);
 							break;
 						}
@@ -754,6 +763,21 @@ export const puxChatAdapter: ChatModelAdapter = {
 								if (updated) {
 									yield buildSnapshot(parts, sources, statusRef[0], timing, stepsRef);
 								}
+							}
+							break;
+						}
+
+						// Mouse overlay — visual cursor for browser/desktop tools
+						case "mouse_action": {
+							const normX = parsed.normX as number;
+							const normY = parsed.normY as number;
+							const action = (parsed.action as string) || "click";
+							if (typeof normX === "number" && typeof normY === "number") {
+								usePuxStore.getState().setMouseOverlay({
+									state: action === "type" ? "typing" : "moving",
+									normX,
+									normY,
+								});
 							}
 							break;
 						}

@@ -402,8 +402,8 @@ func (sbc *SandboxBrowserClient) clickBySelector(ctx context.Context, selector s
 		return nil, found, fmt.Errorf("click by selector: %w", err)
 	}
 
-	elements := parseElements(elementsJSON)
-	sbc.updateState(currentURL, title, elements, screenshotBuf)
+	elements, vw, vh := parseElements(elementsJSON)
+	sbc.updateState(currentURL, title, elements, screenshotBuf, vw, vh)
 	found.Action = "clicked"
 
 	return &PageInfo{
@@ -466,8 +466,8 @@ func (sbc *SandboxBrowserClient) typeBySelector(ctx context.Context, selector, t
 		return nil, fmt.Errorf("type by selector: %w", err)
 	}
 
-	elements := parseElements(elementsJSON)
-	sbc.updateState(currentURL, title, elements, screenshotBuf)
+	elements, vw, vh := parseElements(elementsJSON)
+	sbc.updateState(currentURL, title, elements, screenshotBuf, vw, vh)
 
 	return &PageInfo{
 		URL:        currentURL,

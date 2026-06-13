@@ -44,6 +44,10 @@ type AgentLoopConfig struct {
 	// When set, the agent_end event uses these metrics instead of raw API prompt_tokens,
 	// which can be inaccurate for providers with prompt caching (DeepSeek, etc.).
 	ContextMetricsFunc func() ContextMetricsSnapshot
+
+	// MouseCoordinateResolver resolves normalized (0-1) coordinates for the visual mouse overlay.
+	// Called before browser/desktop tools execute. Returns (normX, normY, action) or (0, 0, "").
+	MouseCoordinateResolver func(toolName string, args map[string]any) (normX, normY float64, action string)
 }
 
 // ContextMetricsSnapshot is a portable snapshot of context manager metrics.
@@ -581,6 +585,16 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 				Type: EventTypeToolStart,
 				Data: ToolStart{ToolID: tc.ID, ToolName: tc.Name, ToolArgs: tc.Args},
 			})
+
+			// Emit mouse_action for visual overlay before browser/desktop tools execute
+			if l.config.MouseCoordinateResolver != nil {
+				if nx, ny, act := l.config.MouseCoordinateResolver(tc.Name, tc.Args); act != "" {
+					SendEvent(subscriber, AgentEvent{
+						Type: EventTypeMouseAction,
+						Data: MouseActionData{NormX: nx, NormY: ny, Action: act},
+					})
+				}
+			}
 
 			argsJSON, _ := json.Marshal(tc.Args)
 			l.logger.Printf("AGENT TOOL CALL: round=%d tool=%s args=%s", round, tc.Name, string(argsJSON))

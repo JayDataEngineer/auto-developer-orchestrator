@@ -60,6 +60,7 @@ type ArtifactUpdatedData = core.ArtifactUpdatedData
 type PlanCreatedData = core.PlanCreatedData
 type PlanUpdatedData = core.PlanUpdatedData
 type HookRequestData = core.HookRequestData
+type MouseActionData = core.MouseActionData
 
 // Constants re-exported for convenience.
 const (
@@ -101,4 +102,5 @@ const (
 	EventTypeDecisionRequest = core.EventTypeDecisionRequest
 	EventTypeSource          = core.EventTypeSource
 	EventTypeContextUpdate   = core.EventTypeContextUpdate
+	EventTypeMouseAction     = core.EventTypeMouseAction
 )

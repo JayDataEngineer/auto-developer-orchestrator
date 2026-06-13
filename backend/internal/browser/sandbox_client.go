@@ -82,6 +82,8 @@ type SandboxBrowserClient struct {
 	lastElements     []LabeledElement
 	lastScreenshot   []byte
 	lastA11yElements []AccessibleElement
+	lastVW           int // viewport width from last labeler run
+	lastVH           int // viewport height from last labeler run
 
 	// Frame streamer for continuous visual monitoring
 	streamer *framestream.Streamer
@@ -396,13 +398,15 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 		}()
 	}
 
-	elements := parseElements(elementsJSON)
+	elements, vw, vh := parseElements(elementsJSON)
 	imageURLs := parseImageURLs(imageURLsJSON)
 	sbc.mu.Lock()
 	sbc.lastURL = currentURL
 	sbc.lastTitle = title
 	sbc.lastElements = elements
 	sbc.lastScreenshot = screenshotBuf
+	sbc.lastVW = vw
+	sbc.lastVH = vh
 	sbc.mu.Unlock()
 
 	sbc.logger.Info("navigated successfully",
@@ -470,9 +474,9 @@ func (sbc *SandboxBrowserClient) clickInner(ctx context.Context, elementID int) 
 		return nil, fmt.Errorf("click failed: %w", err)
 	}
 
-	elements := parseElements(elementsJSON)
+	elements, vw, vh := parseElements(elementsJSON)
 	imageURLs := parseImageURLs(imageURLsJSON)
-	sbc.updateState(currentURL, title, elements, screenshotBuf)
+	sbc.updateState(currentURL, title, elements, screenshotBuf, vw, vh)
 
 	return &PageInfo{
 		URL:        currentURL,
@@ -548,9 +552,9 @@ func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, t
 		return nil, fmt.Errorf("type failed: %w", err)
 	}
 
-	elements := parseElements(elementsJSON)
+	elements, vw, vh := parseElements(elementsJSON)
 	imageURLs := parseImageURLs(imageURLsJSON)
-	sbc.updateState(currentURL, title, elements, screenshotBuf)
+	sbc.updateState(currentURL, title, elements, screenshotBuf, vw, vh)
 
 	return &PageInfo{
 		URL:        currentURL,
@@ -605,9 +609,9 @@ func (sbc *SandboxBrowserClient) scrollInner(ctx context.Context, direction stri
 		return nil, fmt.Errorf("scroll failed: %w", err)
 	}
 
-	elements := parseElements(elementsJSON)
+	elements, vw, vh := parseElements(elementsJSON)
 	imageURLs := parseImageURLs(imageURLsJSON)
-	sbc.updateState(currentURL, title, elements, screenshotBuf)
+	sbc.updateState(currentURL, title, elements, screenshotBuf, vw, vh)
 
 	return &PageInfo{
 		URL:        currentURL,
@@ -690,6 +694,14 @@ func (sbc *SandboxBrowserClient) GetSnapshot() (*PageInfo, error) {
 		Title:    sbc.lastTitle,
 		Elements: sbc.lastElements,
 	}, nil
+}
+
+// LastViewportSize returns the viewport dimensions from the last labeler run.
+// Returns (0, 0) if no labeling has occurred yet.
+func (sbc *SandboxBrowserClient) LastViewportSize() (int, int) {
+	sbc.mu.RLock()
+	defer sbc.mu.RUnlock()
+	return sbc.lastVW, sbc.lastVH
 }
 
 // Close releases the allocator connection and closes the active tab.
@@ -803,12 +815,14 @@ func (sbc *SandboxBrowserClient) IsConnected() bool {
 }
 
 // updateState caches the current page state.
-func (sbc *SandboxBrowserClient) updateState(url, title string, elements []LabeledElement, screenshot []byte) {
+func (sbc *SandboxBrowserClient) updateState(url, title string, elements []LabeledElement, screenshot []byte, vw, vh int) {
 	sbc.mu.Lock()
 	sbc.lastURL = url
 	sbc.lastTitle = title
 	sbc.lastElements = elements
 	sbc.lastScreenshot = screenshot
+	sbc.lastVW = vw
+	sbc.lastVH = vh
 	sbc.mu.Unlock()
 }
 

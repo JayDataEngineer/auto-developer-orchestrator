@@ -168,6 +168,14 @@ interface PuxState {
 	backgroundTasks: Map<string, BackgroundTask>;
 	foregroundTaskId: string | null;
 
+	// Mouse overlay (visual cursor on VNC for browser/desktop tools)
+	mouseOverlay: {
+		state: "thinking" | "moving" | "click" | "typing";
+		normX: number;
+		normY: number;
+	} | null;
+	clickTrail: Array<{ normX: number; normY: number; ts: number }>;
+
 	// ── Actions ──
 	respondToDecision: (action: string, value: string) => Promise<void>;
 	loadModels: () => Promise<void>;
@@ -233,6 +241,9 @@ interface PuxState {
 	updateBackgroundTask: (id: string, update: Partial<BackgroundTask>) => void;
 	setForegroundTask: (id: string | null) => void;
 	backgroundCurrentTask: () => Promise<void>;
+	setMouseOverlay: (overlay: { state: "thinking" | "moving" | "click" | "typing"; normX: number; normY: number } | null) => void;
+	clearMouseOverlay: () => void;
+	addClickMarker: (normX: number, normY: number) => void;
 }
 
 // ── Overlay helpers ──
@@ -317,6 +328,8 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	activePlan: null,
 	backgroundTasks: new Map(),
 	foregroundTaskId: null,
+	mouseOverlay: null,
+	clickTrail: [],
 
 	respondToDecision: async (action, value) => {
 		const { pendingDecision } = get();
@@ -1030,6 +1043,17 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 		} catch {
 			// Best-effort — TUI may not have network access
 		}
+	},
+
+	// ── Mouse overlay actions ──
+
+	setMouseOverlay: (overlay) => set({ mouseOverlay: overlay }),
+	clearMouseOverlay: () => set({ mouseOverlay: null }),
+	addClickMarker: (normX, normY) => {
+		const trail = [...get().clickTrail, { normX, normY, ts: Date.now() }];
+		// Keep last 5 markers
+		if (trail.length > 5) trail.splice(0, trail.length - 5);
+		set({ clickTrail: trail });
 	},
 }));
 

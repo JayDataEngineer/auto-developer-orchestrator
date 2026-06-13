@@ -13,7 +13,7 @@ import (
 
 func TestParseElements(t *testing.T) {
 	input := `[{"id":1,"tag":"a","text":"Click me","selector":"#btn"},{"id":2,"tag":"input","text":"Email","selector":"#email"}]`
-	elements := parseElements(input)
+	elements, _, _ := parseElements(input)
 	if len(elements) != 2 {
 		t.Fatalf("expected 2 elements, got %d", len(elements))
 	}
@@ -26,16 +26,27 @@ func TestParseElements(t *testing.T) {
 }
 
 func TestParseElementsEmpty(t *testing.T) {
-	elements := parseElements("[]")
+	elements, _, _ := parseElements("[]")
 	if len(elements) != 0 {
 		t.Errorf("expected 0 elements, got %d", len(elements))
 	}
 }
 
 func TestParseElementsInvalidJSON(t *testing.T) {
-	elements := parseElements("not json")
+	elements, _, _ := parseElements("not json")
 	if len(elements) != 0 {
 		t.Errorf("expected 0 elements for invalid JSON, got %d", len(elements))
+	}
+}
+
+func TestParseElementsWithViewport(t *testing.T) {
+	input := `{"elements":[{"id":1,"tag":"a","text":"Click","selector":"#btn"}],"vw":1920,"vh":1080}`
+	elements, vw, vh := parseElements(input)
+	if len(elements) != 1 {
+		t.Fatalf("expected 1 element, got %d", len(elements))
+	}
+	if vw != 1920 || vh != 1080 {
+		t.Errorf("expected viewport 1920x1080, got %dx%d", vw, vh)
 	}
 }
 
@@ -118,7 +129,7 @@ func TestSandboxBrowserClientUpdateState(t *testing.T) {
 	client, _ := NewSandboxBrowserClient(9222, "localhost", zap.NewNop())
 
 	elements := []LabeledElement{{ID: 1, Tag: "a", Selector: "#link"}}
-	client.updateState("http://example.com", "Example", elements, []byte("png"))
+	client.updateState("http://example.com", "Example", elements, []byte("png"), 1920, 1080)
 
 	snapshot, _ := client.GetSnapshot()
 	if snapshot.URL != "http://example.com" {

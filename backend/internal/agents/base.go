@@ -39,6 +39,7 @@ type BaseConfig struct {
 	ExtraHooks          []core.LoopHook
 	ToolResultProcessor func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string
 	ContextMetricsFunc  func() core.ContextMetricsSnapshot
+	MouseCoordinateResolver func(toolName string, args map[string]any) (normX, normY float64, action string)
 	Logger              *log.Logger
 
 	// ToolExecTimeoutSec sets per-tool timeout (0 = no timeout for sub-agents).
@@ -109,6 +110,7 @@ func NewBaseAgent(cfg BaseConfig) *BaseAgent {
 		ToolResultProcessor: cfg.ToolResultProcessor,
 		ToolExecTimeoutSec:  cfg.ToolExecTimeoutSec,
 		ContextMetricsFunc:  cfg.ContextMetricsFunc,
+		MouseCoordinateResolver: cfg.MouseCoordinateResolver,
 	}
 
 	// Wire ToolMetadata lookup if executor is a ToolRegistry
