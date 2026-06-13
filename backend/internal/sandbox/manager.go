@@ -683,6 +683,11 @@ func (m *Manager) FindSandboxByProject(name string) *Sandbox {
 			continue
 		}
 		if filepath.Base(sb.ProjectPath) == name || strings.HasSuffix(sb.ProjectPath, "/"+name) {
+			// Skip sandboxes whose project path doesn't actually match —
+			// avoids routing to a sandbox with different bind mounts.
+			if sb.ProjectPath != name {
+				continue
+			}
 			candidates = append(candidates, sb)
 		}
 	}
@@ -730,6 +735,19 @@ func (m *Manager) FindSandboxByProject(name string) *Sandbox {
 				if p := result.Container.Config.Labels["openshell.policy"]; p != "" {
 					policy = p
 				}
+			}
+			// Validate: the restarted sandbox's mount must match the requested project.
+			// A mismatch means an old container with different bind mounts — using it
+			// would cause file visibility bugs (CTO and sub-agents write to different dirs).
+			if projectPath != name {
+				m.logger.Warn("stopped sandbox has different project path, discarding",
+					zap.String("container", containerName),
+					zap.String("sandbox_project", projectPath),
+					zap.String("requested", name))
+				// Stop the container we just started — CreateSandbox will make a fresh one
+				timeout := 5
+				_, _ = m.dockerClient.ContainerStop(ctx, result.Container.ID, client.ContainerStopOptions{Timeout: &timeout})
+				return nil
 			}
 			sb := &Sandbox{
 				ID:          sandboxID,

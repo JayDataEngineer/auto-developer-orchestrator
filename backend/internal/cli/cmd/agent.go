@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/term"
 
@@ -37,6 +39,14 @@ var agentPromptCmd = &cobra.Command{
 		message := args[0]
 
 		effectiveProject := projectName
+		// Resolve relative paths (e.g., ".") to absolute paths before sending.
+		// The backend resolves project names via PROJECT_ROOT/projects/<name>,
+		// so sending "." would incorrectly resolve to PROJECT_ROOT/projects/.
+		if effectiveProject != "" && !filepath.IsAbs(effectiveProject) && !strings.Contains(effectiveProject, "://") {
+			if abs, err := filepath.Abs(effectiveProject); err == nil {
+				effectiveProject = abs
+			}
+		}
 		effectiveOrg := ""
 		// If --org is set, resolve it and pass as separate field
 		if orgName != "" {

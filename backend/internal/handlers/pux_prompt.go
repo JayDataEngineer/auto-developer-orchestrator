@@ -65,9 +65,23 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	sandboxID = strings.ReplaceAll(sandboxID, "_", "-")
 	sandboxID = strings.Trim(sandboxID, "-")
 	if h.sandboxMgr != nil {
+		var existingSandbox *sandbox.Sandbox
 		if sb := h.sandboxMgr.FindSandboxByProject(projectPath); sb != nil {
-			sandboxID = sb.ID
-		} else {
+			// Validate: the sandbox's bind mount must match the current project path.
+			// A mismatch (e.g., restarted old container with different ProjectPath) causes
+			// file visibility bugs — CTO and sub-agents write to different directories.
+			if sb.ProjectPath == projectPath {
+				existingSandbox = sb
+				sandboxID = sb.ID
+			} else {
+				h.log.Warn("Sandbox project path mismatch — destroying and recreating",
+					zap.String("sandbox_project", sb.ProjectPath),
+					zap.String("requested", projectPath),
+					zap.String("sandbox_id", sb.ID))
+				_ = h.sandboxMgr.DestroySandbox(r.Context(), sb.ID)
+			}
+		}
+		if existingSandbox == nil {
 			// For SSH projects, don't bind-mount a local path (it doesn't exist locally).
 			// The agent uses SSHExecutor for host commands instead.
 			sbProjectPath := projectPath
@@ -226,6 +240,11 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	// Wire visual context for frame-based vision caching (skips vision API when page hasn't changed)
 	if h.cuBridge != nil && sandboxID != "" {
 		cfg.VisualContext = &streamerVisualContext{cu: h.cuBridge.CU, sandboxID: sandboxID}
+	}
+
+	// Wire mouse coordinate resolver for visual cursor overlay
+	if h.cuBridge != nil && sandboxID != "" {
+		cfg.MouseCoordinateResolver = newMouseResolver(h.cuBridge.CU, sandboxID)
 	}
 
 	// Detect org mode — explicit org path takes priority, then check project dir
