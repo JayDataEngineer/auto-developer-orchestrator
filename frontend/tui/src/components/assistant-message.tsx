@@ -6,8 +6,8 @@
  * via part.toolUI — no manual parts.map() switch/case needed.
  *
  * Reasoning parts are reordered in the adapter (reorderParts) so they
- * come first. We extract all reasoning text and render a single collapsed
- * "Thought:" line, then the parts pipeline handles the rest.
+ * come first. Text and tool-call parts stay in their natural stream order
+ * so delegations appear between the text that surrounds them.
  */
 
 import React, { useState, useEffect, useRef } from "react";
@@ -133,19 +133,14 @@ export function AssistantMessage() {
 		p.type === "source"
 	);
 
-	// Merge ALL text parts into one string for clean rendering.
-	// Render inline at the FIRST text part's position to preserve event ordering.
-	const textParts = parts.filter((p: any) => p.type === "text" && p.text);
-	const allText = textParts.map((p: any) => p.text).join("");
-	const normalizedAllText = allText ? normalizeText(allText) : "";
-	const hasText = normalizedAllText.length > 0;
+	// Render each text part individually at its own position in the stream.
+	// The adapter already merges consecutive text deltas into single segments,
+	// so each text part in the parts array is a coherent block. Text parts
+	// that come AFTER a tool-call are separate segments and must render below it.
 
 	// Wrap reasoning into visual lines so every line gets a blockquote bar.
 	// Available width = cols - paddingRight(1) - paddingLeft(2) - "▎ "(2)
 	const textWidth = Math.max(20, cols - 5);
-
-	// Track which text part we're on so we render merged text only at the first one
-	let textRendered = false;
 
 	// Only show initial spinner when no content yet
 	const showSpinner = isRunning && !hasContent;
@@ -199,34 +194,34 @@ export function AssistantMessage() {
 							);
 						}
 						case "text": {
-							// Render merged text at the FIRST text part's position.
-							// Split into paragraphs and render each with a gap between them.
-							if (!textRendered) {
-								textRendered = true;
-								if (!hasText) return null;
-								// Split on double newlines (paragraph breaks)
-								const paragraphs = normalizedAllText.split(/\n\n+/).filter((p: string) => p.trim());
-								if (paragraphs.length <= 1) {
-									return (
-										<Box paddingLeft={2}>
-											<MarkdownText
-												text={normalizedAllText}
-												tableTruncate={false}
-												theme={mdTheme}
-												width={cols - 3}
-											/>
-										</Box>
-									);
-								}
+							// Render this text part at its own position in the stream.
+							// The adapter merges consecutive text deltas into single segments,
+							// so each text part is already a coherent block. Text that comes
+							// after a tool-call is a separate segment and renders below it.
+							const rawText = (part as any).text || "";
+							if (!rawText.trim()) return null;
+							const normalized = normalizeText(rawText);
+							if (!normalized) return null;
+							const paragraphs = normalized.split(/\n\n+/).filter((p: string) => p.trim());
+							if (paragraphs.length <= 1) {
 								return (
-									<Box paddingLeft={2} flexDirection="column">
-										{paragraphs.map((para: string, i: number) => (
-											<Text key={i}>{renderMarkdown(para, cols, mdTheme)}</Text>
-										))}
+									<Box paddingLeft={2}>
+										<MarkdownText
+											text={normalized}
+											tableTruncate={false}
+											theme={mdTheme}
+											width={cols - 3}
+										/>
 									</Box>
 								);
 							}
-							return null;
+							return (
+								<Box paddingLeft={2} flexDirection="column">
+									{paragraphs.map((para: string, i: number) => (
+										<Text key={i}>{renderMarkdown(para, cols, mdTheme)}</Text>
+									))}
+								</Box>
+							);
 						}
 						case "tool-call": {
 							// Registered tool UIs are resolved via part.toolUI.

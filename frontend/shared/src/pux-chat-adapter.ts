@@ -324,10 +324,12 @@ type SnapshotStatus = "running" | "complete" | "requires-action";
 // This ensures the library's grouping algorithm sees consecutive reasoning
 // parts and groups them into a single block at the top of the message.
 function reorderParts(parts: Segment[]): Segment[] {
+	// Only move reasoning to the front. Tool calls and text stay in their
+	// original stream order so delegations appear between the text that
+	// surrounds them, not all bunched above.
 	const reasoning = parts.filter(p => p.type === "reasoning");
-	const tools = parts.filter(p => p.type === "tool-call");
-	const rest = parts.filter(p => p.type !== "reasoning" && p.type !== "tool-call");
-	return [...reasoning, ...tools, ...rest];
+	const rest = parts.filter(p => p.type !== "reasoning");
+	return [...reasoning, ...rest];
 }
 
 function buildSnapshot(
