@@ -7,7 +7,7 @@
     "dev": "bun run src/main.tsx",
     "start": "bun run src/main.tsx",
     "test": "bun test",
-    "postinstall": "node -e 'const fs=require(\"fs\"),p=\"node_modules/@pux/shared\";if(fs.existsSync(p)){const s=fs.lstatSync(p);if(s.isSymbolicLink())process.exit(0);fs.rmSync(p,{recursive:true})}fs.symlinkSync(\"../../shared\",p)' && node patches/apply.js"
+    "postinstall": "node -e 'const fs=require(\"fs\"),p=\"node_modules/@pux/shared\";if(fs.existsSync(p)){const s=fs.lstatSync(p);if(s.isSymbolicLink())process.exit(0);fs.rmSync(p,{recursive:true})}fs.symlinkSync(\"../../../shared\",p)' && node patches/apply.js"
   },
   "dependencies": {
     "@assistant-ui/react-ink": "^0.0.18",

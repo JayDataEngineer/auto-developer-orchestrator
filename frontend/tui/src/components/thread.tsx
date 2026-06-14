@@ -19,7 +19,7 @@ import { ComposerBar } from "./composer-bar.js";
 import { usePuxStore } from "@pux/shared";
 import { useColors } from "../theme.js";
 import { createRequire } from "node:module";
-const puxVersion = createRequire(import.meta.url)("../../../package.json").version;
+const puxVersion = createRequire(import.meta.url)("../../../../package.json").version;
 
 // ── Thread (messages + composer) ──
 
