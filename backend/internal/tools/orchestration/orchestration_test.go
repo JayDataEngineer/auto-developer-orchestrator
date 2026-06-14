@@ -455,22 +455,16 @@ func TestDrainAndForward_MouseActionForwarded(t *testing.T) {
 
 	events := make(chan core.AgentEvent, 8)
 	done := make(chan struct{})
-	received := make(chan core.AgentEvent, 8)
 	subscriber := make(chan core.AgentEvent, 8)
 
-	// Drain subscriber into received for assertions.
-	go func() {
-		for evt := range subscriber {
-			received <- evt
-		}
-	}()
-
-	// Feed representative events: mouse_action, tool_start, text_delta.
+	// Feed representative events: tool_start, mouse_action, text_delta.
 	events <- core.AgentEvent{Type: core.EventTypeToolStart, Data: core.ToolStart{ToolName: "click_element"}}
 	events <- core.AgentEvent{Type: core.EventTypeMouseAction, Data: core.MouseActionData{NormX: 0.5, NormY: 0.25, Action: "click"}}
 	events <- core.AgentEvent{Type: core.EventTypeTextDelta, Data: core.TextDelta{Text: "hi"}}
 	close(events)
-	close(done)
+	// NOTE: do NOT close `done` here — closing done makes drainAndForward
+	// take the early-exit path that drains events without forwarding them.
+	// Closing events alone is enough to terminate the function.
 
 	res := r.drainAndForward(context.Background(), subscriber, "browser_ops", events, done, nil, "t1", "test")
 
@@ -478,10 +472,9 @@ func TestDrainAndForward_MouseActionForwarded(t *testing.T) {
 		t.Fatalf("expected final text 'hi', got %q", res.FinalText)
 	}
 	close(subscriber)
-	close(received)
 
 	var types []core.AgentEventType
-	for evt := range received {
+	for evt := range subscriber {
 		types = append(types, evt.Type)
 	}
 
