@@ -623,6 +623,10 @@ export const puxChatAdapter: ChatModelAdapter = {
 							}
 							if (timing.firstTokenTime === null) {
 								timing.firstTokenTime = Date.now();
+								// Clear retry status — streaming succeeded
+								if (usePuxStore.getState().providerRetry) {
+									usePuxStore.setState({ providerRetry: null });
+								}
 							}
 							appendThinking(parts, thinkingText);
 							yield buildSnapshot(parts, sources, statusRef[0], timing, stepsRef);
@@ -888,6 +892,25 @@ export const puxChatAdapter: ChatModelAdapter = {
 							break;
 						}
 						// ── Error events → visible error text ──
+
+						case "provider_retry": {
+							// LLM provider retrying after transient error (500, rate limit, etc.)
+							// Show status to user via Zustand store
+							const attempt = (parsed.attempt as number) || 1;
+							const maxRetry = (parsed.maxRetry as number) || 5;
+							const backoffMs = (parsed.backoffMs as number) || 0;
+							const retryErr = (parsed.error as string) || "";
+							const secs = Math.ceil(backoffMs / 1000);
+							usePuxStore.setState({
+								providerRetry: {
+									attempt,
+									maxRetry,
+									backoffSecs: secs,
+									error: retryErr,
+								},
+							});
+							break;
+						}
 
 						case "error": {
 							const errMsg = (parsed.error as string) || "Unknown error";

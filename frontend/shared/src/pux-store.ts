@@ -86,6 +86,9 @@ interface PuxState {
 	// Compaction (Contract 2.5)
 	compacting: boolean;
 
+	// Provider retry status (shown to user when LLM provider retries)
+	providerRetry: { attempt: number; maxRetry: number; backoffSecs: number; error: string } | null;
+
 	// CTO running state (set by chat adapter during SSE streaming)
 	ctoRunning: boolean;
 
@@ -291,6 +294,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	lastUsage: null,
 	contextMetrics: null,
 	compacting: false,
+	providerRetry: null,
 	ctoRunning: false,
 	activeProject: "",
 	activeProjectPath: "",
@@ -422,6 +426,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			lastUsage: null,
 			contextMetrics: null,
 			compacting: false,
+			providerRetry: null,
 			lastError: null,
 			...(pruned ? { agents: new Map(agents) } : {}),
 		});
@@ -771,6 +776,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 			lastUsage: null,
 			contextMetrics: null,
 			compacting: false,
+			providerRetry: null,
 			lastError: null,
 			zoomedAgentId: null,
 			agentSelectorOpen: false,

@@ -41,6 +41,7 @@ const mdTheme: MarkdansiTheme = {
 import { TerminalImage } from "./terminal-image.js";
 import { BranchPicker } from "./branch-picker.js";
 import { DelegateRenderer } from "./custom-tool-ui.js";
+import { usePuxStore } from "@pux/shared";
 import { useColors, BLOCKQUOTE_BAR } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
 
@@ -141,6 +142,7 @@ export function AssistantMessage() {
 
 	const textWidth = Math.max(20, cols - 5);
 	const showSpinner = isRunning && !hasContent;
+	const providerRetry = usePuxStore((s) => s.providerRetry);
 
 	function fmtTime(secs: number): string {
 		if (secs < 60) return `${secs}s`;
@@ -266,10 +268,20 @@ export function AssistantMessage() {
 	return (
 		<Box flexDirection="column" marginTop={1} paddingRight={1}>
 			{/* Initial spinner */}
-			{showSpinner && (
+			{showSpinner && !providerRetry && (
 				<Box gap={1}>
 					<Text color={colors.running}>{spinnerChars[frame]}</Text>
 					<Text color={colors.textMuted}>({fmtTime(elapsed)})</Text>
+				</Box>
+			)}
+
+			{/* Provider retry indicator — shows retry status to user */}
+			{providerRetry && (
+				<Box gap={1}>
+					<Text color={colors.running}>{spinnerChars[frame]}</Text>
+					<Text color={colors.textMuted}>
+						Retrying ({providerRetry.attempt}/{providerRetry.maxRetry}) in {providerRetry.backoffSecs}s — {providerRetry.error.slice(0, 60)}
+					</Text>
 				</Box>
 			)}
 

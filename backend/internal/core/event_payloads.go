@@ -274,3 +274,16 @@ type MouseActionData struct {
 }
 
 func (MouseActionData) seal() {}
+
+// --- Provider retry ---
+
+// ProviderRetryData is sent when the LLM provider fails and the agent loop
+// retries with exponential backoff. The frontend shows retry status to the user.
+type ProviderRetryData struct {
+	Attempt  int    `json:"attempt"`           // current retry number (1-based)
+	MaxRetry int    `json:"maxRetry"`          // total retries configured
+	Backoff  int64  `json:"backoffMs"`         // backoff delay in milliseconds
+	Error    string `json:"error"`             // the error that triggered the retry
+}
+
+func (ProviderRetryData) seal() {}

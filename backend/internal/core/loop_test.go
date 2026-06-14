@@ -19,8 +19,8 @@ func TestNewAgentLoop_Defaults(t *testing.T) {
 	if l.config.ToolExecTimeoutSec != 0 {
 		t.Errorf("expected default ToolExecTimeoutSec 0 (no timeout), got %d", l.config.ToolExecTimeoutSec)
 	}
-	if l.config.MaxProviderRetries != 2 {
-		t.Errorf("expected default MaxProviderRetries 2, got %d", l.config.MaxProviderRetries)
+	if l.config.MaxProviderRetries != 5 {
+		t.Errorf("expected default MaxProviderRetries 5, got %d", l.config.MaxProviderRetries)
 	}
 }
 

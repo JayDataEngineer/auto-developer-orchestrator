@@ -82,7 +82,7 @@ func NewAgentLoop(provider LLMProvider, executor ToolExecutor, s Session, cfg Ag
 	// ToolExecTimeoutSec: 0 means "no timeout" (sub-agents are controlled by MaxToolRounds).
 	// Only the CTO loop sets an explicit value (600s) from config.
 	if cfg.MaxProviderRetries == 0 {
-		cfg.MaxProviderRetries = 2
+		cfg.MaxProviderRetries = 5
 	}
 	return &AgentLoop{
 		provider: provider,
@@ -213,8 +213,18 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 	providerRetry:
 		for attempt := 0; attempt <= l.config.MaxProviderRetries; attempt++ {
 			if attempt > 0 {
-				backoff := retry.Config{BaseDelay: 1 * time.Second, MaxDelay: 30 * time.Second, Jitter: true}.Delay(attempt - 1)
+				backoff := retry.Config{BaseDelay: 2 * time.Second, MaxDelay: 60 * time.Second, Jitter: true}.Delay(attempt - 1)
 				l.logger.Printf("Provider retry %d/%d after %v (error: %v)", attempt, l.config.MaxProviderRetries, backoff, providerErr)
+				// Notify frontend so user sees retry status
+				SendEvent(subscriber, AgentEvent{
+					Type: EventTypeProviderRetry,
+					Data: ProviderRetryData{
+						Attempt:  attempt,
+						MaxRetry: l.config.MaxProviderRetries,
+						Backoff:  backoff.Milliseconds(),
+						Error:    providerErr.Error(),
+					},
+				})
 				select {
 				case <-ctx.Done():
 					SendEvent(subscriber, AgentEvent{Type: EventTypeAgentEnd})
