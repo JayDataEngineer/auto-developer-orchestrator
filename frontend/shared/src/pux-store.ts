@@ -300,7 +300,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	compacting: false,
 	providerRetry: null,
 	ctoRunning: false,
-	thinkingExpanded: false,
+	thinkingExpanded: true,
 	activeProject: "",
 	activeProjectPath: "",
 	activeAgentId: "",

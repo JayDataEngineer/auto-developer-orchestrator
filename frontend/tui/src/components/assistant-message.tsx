@@ -1,19 +1,21 @@
 /**
- * AssistantMessage — renders assistant messages by reading parts directly
- * from assistant-ui state and mapping over them in order.
+ * AssistantMessage — renders assistant messages via library pipeline.
  *
- * We do NOT use MessagePrimitive.Parts — we read parts from useAuiState
- * and render them in a simple .map() loop. This gives us FULL CONTROL over
- * ordering. The parts array order IS the render order. No library grouping,
- * no reordering, no surprises.
+ * Uses MessagePrimitive.Parts with the children render function API.
+ * Registered tool UIs (makeAssistantToolUI) are automatically resolved
+ * via part.toolUI.
  *
- * Reasoning parts are already moved to the front by reorderParts() in the
- * adapter. Everything else stays in natural stream order: text → tool → text.
+ * Reasoning parts are reordered in the adapter (reorderParts) so they
+ * come first. Text and tool-call parts stay in their natural stream order.
+ * Thinking blocks are collapsible via Ctrl+E.
  */
 
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
-import { useAuiState } from "@assistant-ui/react-ink";
+import {
+	useAuiState,
+	MessagePrimitive,
+} from "@assistant-ui/react-ink";
 import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
 import { render as renderMd, type Theme as MarkdansiTheme } from "markdansi";
 import { usePuxStore } from "@pux/shared";
@@ -40,8 +42,6 @@ const mdTheme: MarkdansiTheme = {
 
 import { TerminalImage } from "./terminal-image.js";
 import { BranchPicker } from "./branch-picker.js";
-import { DelegateRenderer } from "./custom-tool-ui.js";
-import { usePuxStore } from "@pux/shared";
 import { useColors, BLOCKQUOTE_BAR } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
 
@@ -97,12 +97,6 @@ function renderMarkdown(text: string, cols: number, theme: MarkdansiTheme): stri
 	return rendered.replace(/\n$/, "");
 }
 
-// ── Tool name → renderer mapping ──
-// Maps tool names to their DelegateRenderer (for delegation tools)
-// or a compact inline renderer for everything else.
-
-const DELEGATION_TOOLS = new Set(["delegate_to", "delegate_async"]);
-
 // ── Main component ──
 
 export function AssistantMessage() {
@@ -110,7 +104,6 @@ export function AssistantMessage() {
 	const { cols } = useTerminalSize();
 	const isRunning = useAuiState((s) => s.message.status?.type === "running");
 
-	// Track elapsed time
 	const startRef = useRef(Date.now());
 	const [elapsed, setElapsed] = useState(0);
 	useEffect(() => {
@@ -119,7 +112,6 @@ export function AssistantMessage() {
 		return () => clearInterval(timer);
 	}, [isRunning]);
 
-	// Spinner animation
 	const [frame, setFrame] = useState(0);
 	useEffect(() => {
 		if (!isRunning) return;
@@ -128,11 +120,7 @@ export function AssistantMessage() {
 	}, [isRunning]);
 	const spinnerChars = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
 
-	// ── READ PARTS DIRECTLY FROM STATE ──
-	// This is the key change: we bypass MessagePrimitive.Parts entirely.
-	// The parts array order IS the render order. No library processing.
-	const parts = useAuiState((s) => s.message.parts) as any[] | undefined;
-
+	const parts = useAuiState((s) => s.message.parts);
 	const hasContent = parts && parts.some((p: any) =>
 		(p.type === "text" && p.text?.trim()) ||
 		p.type === "tool-call" ||
@@ -152,137 +140,6 @@ export function AssistantMessage() {
 		return `${m}m ${s}s`;
 	}
 
-	// ── Render a single part ──
-	// This function is called for each part in array order.
-	// The output order matches the parts array order EXACTLY.
-
-	function renderPart(part: any, index: number): React.ReactNode {
-		switch (part.type) {
-			case "reasoning": {
-				const rText = part.text || "";
-				if (!rText.trim()) return null;
-				const rParagraphs = rText.split(/\n\n+/).filter((p: string) => p.trim());
-				if (rParagraphs.length === 0) return null;
-				const rLines: string[] = [];
-				rParagraphs.forEach((para: string, pIdx: number) => {
-					if (pIdx > 0) rLines.push("");
-					for (const line of para.split("\n")) {
-						if (!line.trim()) continue;
-						rLines.push(...wrapText(line, textWidth));
-					}
-				});
-				if (rLines.length === 0) return null;
-
-				// Collapsed: show one-line header with line count
-				if (!thinkingExpanded) {
-					return (
-						<Box key={`reasoning-${index}`} marginBottom={1}>
-							<Text color={colors.textMuted}>
-								{BLOCKQUOTE_BAR} {"\u25B6"} Thinking ({rLines.length} lines){"  "}
-								<Text dimColor>Ctrl+E to expand</Text>
-							</Text>
-						</Box>
-					);
-				}
-
-				// Expanded: full thinking text
-				return (
-					<Box key={`reasoning-${index}`} marginBottom={1} paddingLeft={2} flexDirection="column">
-						<Text color={colors.textMuted} marginBottom={0}>
-							{BLOCKQUOTE_BAR} {"\u25BC"} Thinking
-						</Text>
-						{rLines.map((line, i) => (
-							<Text key={i} color={colors.textMuted}>
-								{BLOCKQUOTE_BAR} {line}
-							</Text>
-						))}
-					</Box>
-				);
-			}
-			case "text": {
-				// Render this text part at its OWN position in the stream.
-				// The adapter merges consecutive text deltas into single segments.
-				// Text that comes AFTER a tool-call is a separate segment and
-				// renders below it — no merging across tool call boundaries.
-				const rawText = part.text || "";
-				if (!rawText.trim()) return null;
-				const normalized = normalizeText(rawText);
-				if (!normalized) return null;
-				const paragraphs = normalized.split(/\n\n+/).filter((p: string) => p.trim());
-				if (paragraphs.length <= 1) {
-					return (
-						<Box key={`text-${index}`} paddingLeft={2}>
-							<MarkdownText
-								text={normalized}
-								tableTruncate={false}
-								theme={mdTheme}
-								width={cols - 3}
-							/>
-						</Box>
-					);
-				}
-				return (
-					<Box key={`text-${index}`} paddingLeft={2} flexDirection="column">
-						{paragraphs.map((para: string, i: number) => (
-							<Text key={i}>{renderMarkdown(para, cols, mdTheme)}</Text>
-						))}
-					</Box>
-				);
-			}
-			case "tool-call": {
-				// Delegate tools → DelegateRenderer (shows sub-agent activity)
-				if (DELEGATION_TOOLS.has(part.toolName)) {
-					return (
-						<DelegateRenderer
-							key={`tool-${index}`}
-							toolName={part.toolName}
-							args={part.args}
-							result={(part as any).result}
-							status={part.status?.type === "complete"
-								? { type: "complete" }
-								: part.status?.type === "running"
-									? { type: "running" }
-									: { type: "incomplete" }}
-							toolCallId={part.toolCallId}
-						/>
-					);
-				}
-				// Everything else → compact inline renderer
-				return <CompactToolCall key={`tool-${index}`} part={part} />;
-			}
-			case "image":
-				return (
-					<Box key={`image-${index}`} marginTop={1} paddingLeft={1}>
-						<TerminalImage
-							image={part.image}
-							filename={(part as any).filename}
-						/>
-					</Box>
-				);
-			case "source":
-				return (
-					<Box key={`source-${index}`} paddingLeft={1}>
-						<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} </Text>
-						<Text color="blue">
-							{part.url
-								? part.title
-									? `${part.title} — ${part.url}`
-									: part.url
-								: part.title || "source"}
-						</Text>
-					</Box>
-				);
-			case "file":
-				return (
-					<Box key={`file-${index}`} paddingLeft={1}>
-						<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} file: {(part as any).name || "(unnamed)"}</Text>
-					</Box>
-				);
-			default:
-				return null;
-		}
-	}
-
 	return (
 		<Box flexDirection="column" marginTop={1} paddingRight={1}>
 			{/* Initial spinner */}
@@ -293,7 +150,7 @@ export function AssistantMessage() {
 				</Box>
 			)}
 
-			{/* Provider retry indicator — shows retry status to user */}
+			{/* Provider retry indicator */}
 			{providerRetry && (
 				<Box gap={1}>
 					<Text color={colors.running}>{spinnerChars[frame]}</Text>
@@ -303,15 +160,112 @@ export function AssistantMessage() {
 				</Box>
 			)}
 
-			{/* ── DIRECT PARTS RENDERING ──
-			    We map over the parts array directly. The order of elements
-			    in this map IS the order they appear on screen. No library
-			    grouping, no reordering. Source of truth: parts array order. */}
-			{parts && parts.length > 0 && (
-				<>
-					{parts.map((part: any, index: number) => renderPart(part, index))}
-				</>
-			)}
+			{/* Parts pipeline — children render function */}
+			<MessagePrimitive.Parts>
+				{({ part }) => {
+					switch (part.type) {
+						case "reasoning": {
+							const rText = (part as any).text || "";
+							if (!rText.trim()) return null;
+							const rParagraphs = rText.split(/\n\n+/).filter((p: string) => p.trim());
+							if (rParagraphs.length === 0) return null;
+							const rLines: string[] = [];
+							rParagraphs.forEach((para: string, pIdx: number) => {
+								if (pIdx > 0) rLines.push("");
+								for (const line of para.split("\n")) {
+									if (!line.trim()) continue;
+									rLines.push(...wrapText(line, textWidth));
+								}
+							});
+							if (rLines.length === 0) return null;
+
+							// Collapsed: one-line header
+							if (!thinkingExpanded) {
+								return (
+									<Box marginBottom={1}>
+										<Text color={colors.textMuted}>
+											{BLOCKQUOTE_BAR} {"\u25B6"} Thinking ({rLines.length} lines){"  "}
+											<Text dimColor>Ctrl+E to expand</Text>
+										</Text>
+									</Box>
+								);
+							}
+
+							// Expanded: full thinking text
+							return (
+								<Box marginBottom={1} paddingLeft={2} flexDirection="column">
+									{rLines.map((line, i) => (
+										<Text key={i} color={colors.textMuted}>
+											{BLOCKQUOTE_BAR} {line}
+										</Text>
+									))}
+								</Box>
+							);
+						}
+						case "text": {
+							const rawText = (part as any).text || "";
+							if (!rawText.trim()) return null;
+							const normalized = normalizeText(rawText);
+							if (!normalized) return null;
+							const paragraphs = normalized.split(/\n\n+/).filter((p: string) => p.trim());
+							if (paragraphs.length <= 1) {
+								return (
+									<Box paddingLeft={2}>
+										<MarkdownText
+											text={normalized}
+											tableTruncate={false}
+											theme={mdTheme}
+											width={cols - 3}
+										/>
+									</Box>
+								);
+							}
+							return (
+								<Box paddingLeft={2} flexDirection="column">
+									{paragraphs.map((para: string, i: number) => (
+										<Text key={i}>{renderMarkdown(para, cols, mdTheme)}</Text>
+									))}
+								</Box>
+							);
+						}
+						case "tool-call": {
+							// Registered tool UIs are resolved via part.toolUI.
+							if (part.toolUI) return part.toolUI;
+							return <CompactToolCall key={part.toolCallId} part={part} />;
+						}
+						case "image":
+							return (
+								<Box key={part.image?.slice(0, 20)} marginTop={1} paddingLeft={1}>
+									<TerminalImage
+										image={part.image}
+										filename={(part as any).filename}
+									/>
+								</Box>
+							);
+						case "source":
+							return (
+								<Box key={(part as any).id || part.url} paddingLeft={1}>
+									<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} </Text>
+									<Text color="blue">
+										{part.url
+											? part.title
+												? `${part.title} — ${part.url}`
+												: part.url
+											: part.title || "source"}
+									</Text>
+								</Box>
+							);
+						case "file":
+							return (
+								<Box paddingLeft={1}>
+									<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} file: {(part as any).name || "(unnamed)"}</Text>
+								</Box>
+							);
+						default:
+							return null;
+					}
+				}}
+			</MessagePrimitive.Parts>
 
 			{/* Branch picker for forked messages */}
 			<BranchPicker />
@@ -326,7 +280,7 @@ export function AssistantMessage() {
 	);
 }
 
-// ── Compact tool call (for non-delegation tools) ──
+// ── Compact tool call (for unregistered tools) ──
 
 function CompactToolCall({ part }: { part: any }) {
 	const colors = useColors();
@@ -341,9 +295,7 @@ function CompactToolCall({ part }: { part: any }) {
 			const args = typeof part.args === "string" ? JSON.parse(part.args) : part.args;
 			const goal = args.goal || args.task || args.command || args.path || "";
 			if (goal) detail = `: ${trunc(String(goal), 60)}`;
-		} catch {
-			// args might not be JSON
-		}
+		} catch {}
 	}
 
 	return (
