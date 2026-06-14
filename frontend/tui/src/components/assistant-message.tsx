@@ -187,7 +187,7 @@ export function AssistantMessage() {
 									<Box marginBottom={1}>
 										<Text color={colors.textMuted}>
 											{BLOCKQUOTE_BAR} {"\u25B6"} Thinking ({rLines.length} lines){"  "}
-											<Text dimColor>Ctrl+L to expand</Text>
+											<Text dimColor>Ctrl+P to expand</Text>
 										</Text>
 									</Box>
 								);

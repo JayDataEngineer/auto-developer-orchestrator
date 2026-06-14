@@ -6,14 +6,13 @@
   "scripts": {
     "dev": "bun run src/main.tsx",
     "start": "bun run src/main.tsx",
-    "test": "bun test",
-    "postinstall": "node -e 'const fs=require(\"fs\"),p=\"node_modules/@pux/shared\";if(fs.existsSync(p)){const s=fs.lstatSync(p);if(s.isSymbolicLink())process.exit(0);fs.rmSync(p,{recursive:true})}fs.symlinkSync(\"../../../shared\",p)' && node patches/apply.js"
+    "test": "bun test"
   },
   "dependencies": {
     "@assistant-ui/react-ink": "^0.0.26",
     "@assistant-ui/react-ink-markdown": "^0.0.25",
     "@assistant-ui/tap": "^0.8.1",
-    "@pux/shared": "file:../shared",
+    "@pux/shared": "workspace:*",
     "ink": "^6.0.0",
     "ink-scroll-view": "^0.3.7",
     "ink-spinner": "^5.0.0",
