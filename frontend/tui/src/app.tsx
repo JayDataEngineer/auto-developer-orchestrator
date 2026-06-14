@@ -218,8 +218,8 @@ function PuxApp() {
 			usePuxStore.getState().cycleTuiView();
 			return;
 		}
-		// Ctrl+H: toggle thinking blocks collapse/expand
-		if (input === "h" && key.ctrl) {
+		// Ctrl+E: toggle thinking blocks collapse/expand
+		if (input === "e" && key.ctrl) {
 			usePuxStore.getState().toggleThinking();
 			return;
 		}

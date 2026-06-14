@@ -179,7 +179,7 @@ export function AssistantMessage() {
 						<Box key={`reasoning-${index}`} marginBottom={1}>
 							<Text color={colors.textMuted}>
 								{BLOCKQUOTE_BAR} {"\u25B6"} Thinking ({rLines.length} lines){"  "}
-								<Text dimColor>Ctrl+H to expand</Text>
+								<Text dimColor>Ctrl+E to expand</Text>
 							</Text>
 						</Box>
 					);
