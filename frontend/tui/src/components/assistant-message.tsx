@@ -44,6 +44,7 @@ import { TerminalImage } from "./terminal-image.js";
 import { BranchPicker } from "./branch-picker.js";
 import { useColors, BLOCKQUOTE_BAR } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
+import { onClick } from "../mouse.js";
 
 // ── Truncation helper ──
 
@@ -132,6 +133,15 @@ export function AssistantMessage() {
 	const showSpinner = isRunning && !hasContent;
 	const providerRetry = usePuxStore((s) => s.providerRetry);
 	const thinkingExpanded = usePuxStore((s) => s.thinkingExpanded);
+	const toggleThinking = usePuxStore((s) => s.toggleThinking);
+
+	// Register click handler — clicking on screen toggles thinking blocks
+	useEffect(() => {
+		onClick((_col: number, _row: number) => {
+			toggleThinking();
+		});
+		return () => onClick(null);
+	}, [toggleThinking]);
 
 	function fmtTime(secs: number): string {
 		if (secs < 60) return `${secs}s`;
