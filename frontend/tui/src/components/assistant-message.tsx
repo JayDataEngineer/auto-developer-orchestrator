@@ -1,23 +1,22 @@
 /**
- * AssistantMessage — renders assistant messages via library pipeline.
+ * AssistantMessage — renders assistant messages by reading parts directly
+ * from assistant-ui state and mapping over them in order.
  *
- * Uses MessagePrimitive.Parts with the children render function API.
- * Registered tool UIs (makeAssistantToolUI) are automatically resolved
- * via part.toolUI — no manual parts.map() switch/case needed.
+ * We do NOT use MessagePrimitive.Parts — we read parts from useAuiState
+ * and render them in a simple .map() loop. This gives us FULL CONTROL over
+ * ordering. The parts array order IS the render order. No library grouping,
+ * no reordering, no surprises.
  *
- * Reasoning parts are reordered in the adapter (reorderParts) so they
- * come first. Text and tool-call parts stay in their natural stream order
- * so delegations appear between the text that surrounds them.
+ * Reasoning parts are already moved to the front by reorderParts() in the
+ * adapter. Everything else stays in natural stream order: text → tool → text.
  */
 
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
-import {
-	useAuiState,
-	MessagePrimitive,
-} from "@assistant-ui/react-ink";
+import { useAuiState } from "@assistant-ui/react-ink";
 import { MarkdownText as _MarkdownText } from "@assistant-ui/react-ink-markdown";
 import { render as renderMd, type Theme as MarkdansiTheme } from "markdansi";
+import { usePuxStore } from "@pux/shared";
 // Extend to pass tableTruncate through the spread (not in library's types yet)
 const MarkdownText = _MarkdownText as React.FC<
 	React.ComponentProps<typeof _MarkdownText> & { tableTruncate?: boolean }
@@ -41,6 +40,7 @@ const mdTheme: MarkdansiTheme = {
 
 import { TerminalImage } from "./terminal-image.js";
 import { BranchPicker } from "./branch-picker.js";
+import { DelegateRenderer } from "./custom-tool-ui.js";
 import { useColors, BLOCKQUOTE_BAR } from "../theme.js";
 import { useTerminalSize } from "../use-terminal-size.js";
 
@@ -55,7 +55,6 @@ function trunc(s: string, max: number): string {
 }
 
 // ── Word-wrap helper ──
-// Wraps text to maxWidth chars, returns array of visual lines.
 
 function wrapText(text: string, maxWidth: number): string[] {
 	const words = text.split(/\s+/);
@@ -76,28 +75,32 @@ function wrapText(text: string, maxWidth: number): string[] {
 }
 
 // ── Text normalizer ──
-// Models stream text with \n between words and missing spaces between deltas.
-// This collapses single newlines to spaces and fixes sentence boundary gaps.
 
 function normalizeText(text: string): string {
 	return text
 		.replace(/\r/g, "")
 		.split(/\n\n+/)
 		.map(para => para
-			.replace(/\n/g, " ")       // collapse single newlines
-			.replace(/\.([A-Z])/g, ". $1") // fix "Tesla.The" → "Tesla. The"
-			.replace(/ +/g, " ")        // collapse multiple spaces
+			.replace(/\n/g, " ")
+			.replace(/\.([A-Z])/g, ". $1")
+			.replace(/ +/g, " ")
 			.trim())
 		.filter(para => para.length > 0)
 		.join("\n\n");
 }
 
-// ── Render markdown paragraph with trailing newline stripped ──
+// ── Render markdown paragraph ──
 
 function renderMarkdown(text: string, cols: number, theme: MarkdansiTheme): string {
 	const rendered = renderMd(text, { width: cols - 3, theme });
 	return rendered.replace(/\n$/, "");
 }
+
+// ── Tool name → renderer mapping ──
+// Maps tool names to their DelegateRenderer (for delegation tools)
+// or a compact inline renderer for everything else.
+
+const DELEGATION_TOOLS = new Set(["delegate_to", "delegate_async"]);
 
 // ── Main component ──
 
@@ -106,7 +109,7 @@ export function AssistantMessage() {
 	const { cols } = useTerminalSize();
 	const isRunning = useAuiState((s) => s.message.status?.type === "running");
 
-	// Track elapsed time — persists after completion
+	// Track elapsed time
 	const startRef = useRef(Date.now());
 	const [elapsed, setElapsed] = useState(0);
 	useEffect(() => {
@@ -124,8 +127,11 @@ export function AssistantMessage() {
 	}, [isRunning]);
 	const spinnerChars = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
 
-	// Extract all reasoning text from parts (reorderParts puts them first)
-	const parts = useAuiState((s) => s.message.parts);
+	// ── READ PARTS DIRECTLY FROM STATE ──
+	// This is the key change: we bypass MessagePrimitive.Parts entirely.
+	// The parts array order IS the render order. No library processing.
+	const parts = useAuiState((s) => s.message.parts) as any[] | undefined;
+
 	const hasContent = parts && parts.some((p: any) =>
 		(p.type === "text" && p.text?.trim()) ||
 		p.type === "tool-call" ||
@@ -133,19 +139,9 @@ export function AssistantMessage() {
 		p.type === "source"
 	);
 
-	// Render each text part individually at its own position in the stream.
-	// The adapter already merges consecutive text deltas into single segments,
-	// so each text part in the parts array is a coherent block. Text parts
-	// that come AFTER a tool-call are separate segments and must render below it.
-
-	// Wrap reasoning into visual lines so every line gets a blockquote bar.
-	// Available width = cols - paddingRight(1) - paddingLeft(2) - "▎ "(2)
 	const textWidth = Math.max(20, cols - 5);
-
-	// Only show initial spinner when no content yet
 	const showSpinner = isRunning && !hasContent;
 
-	// Format elapsed time string
 	function fmtTime(secs: number): string {
 		if (secs < 60) return `${secs}s`;
 		const m = Math.floor(secs / 60);
@@ -153,9 +149,123 @@ export function AssistantMessage() {
 		return `${m}m ${s}s`;
 	}
 
+	// ── Render a single part ──
+	// This function is called for each part in array order.
+	// The output order matches the parts array order EXACTLY.
+
+	function renderPart(part: any, index: number): React.ReactNode {
+		switch (part.type) {
+			case "reasoning": {
+				const rText = part.text || "";
+				if (!rText.trim()) return null;
+				const rParagraphs = rText.split(/\n\n+/).filter((p: string) => p.trim());
+				if (rParagraphs.length === 0) return null;
+				const rLines: string[] = [];
+				rParagraphs.forEach((para: string, pIdx: number) => {
+					if (pIdx > 0) rLines.push("");
+					for (const line of para.split("\n")) {
+						if (!line.trim()) continue;
+						rLines.push(...wrapText(line, textWidth));
+					}
+				});
+				if (rLines.length === 0) return null;
+				return (
+					<Box key={`reasoning-${index}`} marginBottom={1} paddingLeft={2} flexDirection="column">
+						{rLines.map((line, i) => (
+							<Text key={i} color={colors.textMuted}>
+								{BLOCKQUOTE_BAR} {line}
+							</Text>
+						))}
+					</Box>
+				);
+			}
+			case "text": {
+				// Render this text part at its OWN position in the stream.
+				// The adapter merges consecutive text deltas into single segments.
+				// Text that comes AFTER a tool-call is a separate segment and
+				// renders below it — no merging across tool call boundaries.
+				const rawText = part.text || "";
+				if (!rawText.trim()) return null;
+				const normalized = normalizeText(rawText);
+				if (!normalized) return null;
+				const paragraphs = normalized.split(/\n\n+/).filter((p: string) => p.trim());
+				if (paragraphs.length <= 1) {
+					return (
+						<Box key={`text-${index}`} paddingLeft={2}>
+							<MarkdownText
+								text={normalized}
+								tableTruncate={false}
+								theme={mdTheme}
+								width={cols - 3}
+							/>
+						</Box>
+					);
+				}
+				return (
+					<Box key={`text-${index}`} paddingLeft={2} flexDirection="column">
+						{paragraphs.map((para: string, i: number) => (
+							<Text key={i}>{renderMarkdown(para, cols, mdTheme)}</Text>
+						))}
+					</Box>
+				);
+			}
+			case "tool-call": {
+				// Delegate tools → DelegateRenderer (shows sub-agent activity)
+				if (DELEGATION_TOOLS.has(part.toolName)) {
+					return (
+						<DelegateRenderer
+							key={`tool-${index}`}
+							toolName={part.toolName}
+							args={part.args}
+							result={(part as any).result}
+							status={part.status?.type === "complete"
+								? { type: "complete" }
+								: part.status?.type === "running"
+									? { type: "running" }
+									: { type: "incomplete" }}
+							toolCallId={part.toolCallId}
+						/>
+					);
+				}
+				// Everything else → compact inline renderer
+				return <CompactToolCall key={`tool-${index}`} part={part} />;
+			}
+			case "image":
+				return (
+					<Box key={`image-${index}`} marginTop={1} paddingLeft={1}>
+						<TerminalImage
+							image={part.image}
+							filename={(part as any).filename}
+						/>
+					</Box>
+				);
+			case "source":
+				return (
+					<Box key={`source-${index}`} paddingLeft={1}>
+						<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} </Text>
+						<Text color="blue">
+							{part.url
+								? part.title
+									? `${part.title} — ${part.url}`
+									: part.url
+								: part.title || "source"}
+						</Text>
+					</Box>
+				);
+			case "file":
+				return (
+					<Box key={`file-${index}`} paddingLeft={1}>
+						<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} file: {(part as any).name || "(unnamed)"}</Text>
+					</Box>
+				);
+			default:
+				return null;
+		}
+	}
+
 	return (
 		<Box flexDirection="column" marginTop={1} paddingRight={1}>
-			{/* Initial spinner — shown while waiting for first content */}
+			{/* Initial spinner */}
 			{showSpinner && (
 				<Box gap={1}>
 					<Text color={colors.running}>{spinnerChars[frame]}</Text>
@@ -163,110 +273,20 @@ export function AssistantMessage() {
 				</Box>
 			)}
 
-			{/* Parts pipeline — children render function (preferred API) */}
-			<MessagePrimitive.Parts>
-				{({ part }) => {
-					switch (part.type) {
-						case "reasoning": {
-							// Render each reasoning part as its own blockquote block.
-							// Split on blank lines to add gap between paragraphs.
-							const rText = (part as any).text || "";
-							if (!rText.trim()) return null;
-							const rParagraphs = rText.split(/\n\n+/).filter((p: string) => p.trim());
-							if (rParagraphs.length === 0) return null;
-							const rLines: string[] = [];
-							rParagraphs.forEach((para: string, pIdx: number) => {
-								if (pIdx > 0) rLines.push(""); // blank line between paragraphs
-								for (const line of para.split("\n")) {
-									if (!line.trim()) continue;
-									rLines.push(...wrapText(line, textWidth));
-								}
-							});
-							if (rLines.length === 0) return null;
-							return (
-								<Box marginBottom={1} paddingLeft={2} flexDirection="column">
-									{rLines.map((line, i) => (
-										<Text key={i} color={colors.textMuted}>
-											{BLOCKQUOTE_BAR} {line}
-										</Text>
-									))}
-								</Box>
-							);
-						}
-						case "text": {
-							// Render this text part at its own position in the stream.
-							// The adapter merges consecutive text deltas into single segments,
-							// so each text part is already a coherent block. Text that comes
-							// after a tool-call is a separate segment and renders below it.
-							const rawText = (part as any).text || "";
-							if (!rawText.trim()) return null;
-							const normalized = normalizeText(rawText);
-							if (!normalized) return null;
-							const paragraphs = normalized.split(/\n\n+/).filter((p: string) => p.trim());
-							if (paragraphs.length <= 1) {
-								return (
-									<Box paddingLeft={2}>
-										<MarkdownText
-											text={normalized}
-											tableTruncate={false}
-											theme={mdTheme}
-											width={cols - 3}
-										/>
-									</Box>
-								);
-							}
-							return (
-								<Box paddingLeft={2} flexDirection="column">
-									{paragraphs.map((para: string, i: number) => (
-										<Text key={i}>{renderMarkdown(para, cols, mdTheme)}</Text>
-									))}
-								</Box>
-							);
-						}
-						case "tool-call": {
-							// Registered tool UIs are resolved via part.toolUI.
-							// Unregistered tools get a compact one-line indicator (no animated spinner).
-							if (part.toolUI) return part.toolUI;
-							return <CompactToolCall key={part.toolCallId} part={part} />;
-						}
-						case "image":
-							return (
-								<Box key={part.image?.slice(0, 20)} marginTop={1} paddingLeft={1}>
-									<TerminalImage
-										image={part.image}
-										filename={(part as any).filename}
-									/>
-								</Box>
-							);
-						case "source":
-							return (
-								<Box key={(part as any).id || part.url} paddingLeft={1}>
-									<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} </Text>
-									<Text color="blue">
-										{part.url
-											? part.title
-												? `${part.title} — ${part.url}`
-												: part.url
-											: part.title || "source"}
-									</Text>
-								</Box>
-							);
-						case "file":
-							return (
-								<Box paddingLeft={1}>
-									<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} file: {(part as any).name || "(unnamed)"}</Text>
-								</Box>
-							);
-						default:
-							return null;
-					}
-				}}
-			</MessagePrimitive.Parts>
+			{/* ── DIRECT PARTS RENDERING ──
+			    We map over the parts array directly. The order of elements
+			    in this map IS the order they appear on screen. No library
+			    grouping, no reordering. Source of truth: parts array order. */}
+			{parts && parts.length > 0 && (
+				<>
+					{parts.map((part: any, index: number) => renderPart(part, index))}
+				</>
+			)}
 
 			{/* Branch picker for forked messages */}
 			<BranchPicker />
 
-			{/* Completion time — shown after message finishes */}
+			{/* Completion time */}
 			{!isRunning && hasContent && (
 				<Box marginTop={1}>
 					<Text color={colors.textMuted}>● Completed in {fmtTime(elapsed || Math.floor((Date.now() - startRef.current) / 1000))}</Text>
@@ -276,9 +296,7 @@ export function AssistantMessage() {
 	);
 }
 
-// ── Compact tool call (replaces ToolCallPrimitive.Fallback) ──
-// One line per tool call, no animated spinner. Avoids frame accumulation
-// when multiple tool calls run simultaneously.
+// ── Compact tool call (for non-delegation tools) ──
 
 function CompactToolCall({ part }: { part: any }) {
 	const colors = useColors();
@@ -287,7 +305,6 @@ function CompactToolCall({ part }: { part: any }) {
 	const icon = status === "running" ? "●" : status === "error" ? "✗" : "✓";
 	const color = status === "running" ? colors.running : status === "error" ? "red" : colors.success;
 
-	// Show abbreviated args when running
 	let detail = "";
 	if (status === "running" && part.args) {
 		try {
@@ -300,7 +317,7 @@ function CompactToolCall({ part }: { part: any }) {
 	}
 
 	return (
-		<Box>
+		<Box marginBottom={1}>
 			<Text color={color}>{icon} </Text>
 			<Text color={colors.textMuted}>{toolName}{detail}</Text>
 		</Box>

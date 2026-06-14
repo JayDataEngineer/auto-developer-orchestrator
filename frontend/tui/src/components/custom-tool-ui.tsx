@@ -96,7 +96,7 @@ function trunc(s: string, max: number): string {
 	return cut.slice(0, lastSpace) + "…";
 }
 
-function DelegateRenderer({
+export function DelegateRenderer({
 	toolName,
 	args,
 	result,
