@@ -92,6 +92,9 @@ interface PuxState {
 	// CTO running state (set by chat adapter during SSE streaming)
 	ctoRunning: boolean;
 
+	// Thinking blocks collapse state (Ctrl+T to toggle)
+	thinkingExpanded: boolean;
+
 	// Conversation
 	activeProject: string;
 	activeProjectPath: string;
@@ -193,6 +196,7 @@ interface PuxState {
 	renameConversation: (project: string, agentId: string, title: string) => Promise<void>;
 	clearConversation: () => void;
 	clearError: () => void;
+	toggleThinking: () => void;
 	setWorkbenchTab: (tab: WorkbenchTab) => void;
 	bumpWorkbenchLayout: () => void;
 	setTuiView: (view: TuiView) => void;
@@ -296,6 +300,7 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	compacting: false,
 	providerRetry: null,
 	ctoRunning: false,
+	thinkingExpanded: false,
 	activeProject: "",
 	activeProjectPath: "",
 	activeAgentId: "",
@@ -548,6 +553,8 @@ export const usePuxStore = create<PuxState>((set, get) => ({
 	},
 
 	clearError: () => set({ lastError: null }),
+
+	toggleThinking: () => set((s) => ({ thinkingExpanded: !s.thinkingExpanded })),
 
 	setWorkbenchTab: (tab) => set({ activeWorkbenchTab: tab }),
 	bumpWorkbenchLayout: () => set((s) => ({ workbenchLayoutVersion: s.workbenchLayoutVersion + 1 })),

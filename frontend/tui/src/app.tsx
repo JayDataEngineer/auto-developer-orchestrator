@@ -218,6 +218,11 @@ function PuxApp() {
 			usePuxStore.getState().cycleTuiView();
 			return;
 		}
+		// Ctrl+H: toggle thinking blocks collapse/expand
+		if (input === "h" && key.ctrl) {
+			usePuxStore.getState().toggleThinking();
+			return;
+		}
 		// Ctrl+O: toggle agent selector
 		if (input === "o" && key.ctrl) {
 			usePuxStore.getState().toggleAgentSelector();

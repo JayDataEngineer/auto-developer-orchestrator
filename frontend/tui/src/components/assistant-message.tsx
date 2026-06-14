@@ -143,6 +143,7 @@ export function AssistantMessage() {
 	const textWidth = Math.max(20, cols - 5);
 	const showSpinner = isRunning && !hasContent;
 	const providerRetry = usePuxStore((s) => s.providerRetry);
+	const thinkingExpanded = usePuxStore((s) => s.thinkingExpanded);
 
 	function fmtTime(secs: number): string {
 		if (secs < 60) return `${secs}s`;
@@ -171,8 +172,25 @@ export function AssistantMessage() {
 					}
 				});
 				if (rLines.length === 0) return null;
+
+				// Collapsed: show one-line header with line count
+				if (!thinkingExpanded) {
+					return (
+						<Box key={`reasoning-${index}`} marginBottom={1}>
+							<Text color={colors.textMuted}>
+								{BLOCKQUOTE_BAR} {"\u25B6"} Thinking ({rLines.length} lines){"  "}
+								<Text dimColor>Ctrl+H to expand</Text>
+							</Text>
+						</Box>
+					);
+				}
+
+				// Expanded: full thinking text
 				return (
 					<Box key={`reasoning-${index}`} marginBottom={1} paddingLeft={2} flexDirection="column">
+						<Text color={colors.textMuted} marginBottom={0}>
+							{BLOCKQUOTE_BAR} {"\u25BC"} Thinking
+						</Text>
 						{rLines.map((line, i) => (
 							<Text key={i} color={colors.textMuted}>
 								{BLOCKQUOTE_BAR} {line}
