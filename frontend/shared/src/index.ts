@@ -29,6 +29,7 @@ export type {
 	Project,
 	WorkbenchTab,
 	AgentState,
+	AgentRound,
 	ToolCallRecord,
 	PersistedToolCall,
 	SubAgentRecord,

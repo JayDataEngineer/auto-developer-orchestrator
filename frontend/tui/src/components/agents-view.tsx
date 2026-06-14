@@ -2,13 +2,11 @@
  * AgentsView — subagent conversation panel.
  *
  * Shows agents in a list. Expanded agents render conversation-style
- * blocks with left-border separation, matching OpenCode's tool rendering:
+ * blocks with left-border separation, matching OpenCode's tool rendering.
  *
- * ● researcher · 115.5s
- * ┃ Task: Find the weather in New York
- * ┃  └ bash: curl wttr.in/new+york · 1.2s
- * ┃  └ search: weather NYC · 0.8s
- * ┃ Result text here...
+ * Round-based rendering: each round (think→act→respond) is shown as its
+ * own block, preserving the natural conversational flow. No flat
+ * concatenation of all thinking or all tools.
  *
  * Data from Zustand store + transcript fetch for completed agents.
  */
@@ -18,6 +16,7 @@ import { Box, Text, useInput } from "ink";
 import {
 	usePuxStore,
 	type AgentState,
+	type AgentRound,
 	getToolArgPreview,
 	apiUrl,
 	getFetch,
@@ -44,7 +43,7 @@ const mdTheme: MarkdansiTheme = {
 	tableCell: { color: "#cccccc" },
 };
 
-// ── StoredMessage shape (matches pux-history-adapter.ts) ──
+// ── StoredMessage shape ──
 
 interface StoredMessage {
 	id: number;
@@ -85,7 +84,6 @@ function wrapText(text: string, maxWidth: number): string[] {
 }
 
 // ── Text normalizer ──
-// Collapse single newlines to spaces, fix sentence boundary gaps from streaming.
 
 function normalizeText(text: string): string {
 	return text
@@ -109,7 +107,6 @@ export function AgentsView() {
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
 	const colors = useColors();
 
-	// Force re-render every second for running durations
 	const [, setTick] = useState(0);
 	useEffect(() => {
 		const timer = setInterval(() => setTick((t) => t + 1), 1000);
@@ -126,7 +123,6 @@ export function AgentsView() {
 	const completed = agentList.filter((a) => a.status === "complete").length;
 	const failed = agentList.filter((a) => a.status === "error").length;
 
-	// When any agent is expanded, show it full-height (no pagination)
 	const hasExpanded = expanded.size > 0;
 
 	useInput((input: string, key: any) => {
@@ -171,8 +167,6 @@ export function AgentsView() {
 		);
 	}
 
-	// When expanded, show only the selected agent full-height.
-	// Otherwise, show a paginated list.
 	const maxVisible = hasExpanded ? agentList.length : Math.max(3, rows - 6);
 	const scrollOffset = hasExpanded
 		? 0
@@ -186,7 +180,6 @@ export function AgentsView() {
 
 	return (
 		<Box flexDirection="column" paddingX={1}>
-			{/* Header */}
 			<Box marginBottom={1}>
 				<Text bold color={colors.brand}>Subagents</Text>
 				<Text color={colors.textMuted}> {symbols.dot} </Text>
@@ -253,7 +246,6 @@ function AgentCard({
 		? `${((agent.endedAt - agent.startedAt) / 1000).toFixed(1)}s`
 		: `${((Date.now() - agent.startedAt) / 1000).toFixed(1)}s`;
 
-	// Fetch full transcript for completed agents when expanded
 	useEffect(() => {
 		if (!isExpanded || !agent.transcriptId || !activeProject || transcriptLoaded) return;
 		if (agent.status === "running") return;
@@ -274,22 +266,16 @@ function AgentCard({
 			.catch(() => {});
 	}, [isExpanded, agent.transcriptId, agent.status, activeProject, transcriptLoaded]);
 
-	// Tool calls with friendly display names
-	const visibleTools = useMemo(
-		() => agent.toolCalls.map((tc) => ({
-			...tc,
-			toolName: TOOL_DISPLAY_NAMES[tc.toolName] || tc.toolName,
-		})),
-		[agent.toolCalls],
-	);
-
-	// Collapsed: one-line summary with thinking/text preview
+	// Collapsed: one-line summary
 	if (!isExpanded) {
-		// Show last few words of text or thinking for a conversational preview
+		// Use LAST round's thinking (most recent), not cumulative thinkingText
+		// which concatenates all rounds and creates garbled duplicates.
+		const lastRound = agent.rounds?.length > 0 ? agent.rounds[agent.rounds.length - 1] : null;
+		const lastThink = lastRound?.thinking || "";
 		const preview = agent.text
 			? agent.text.replace(/\n+/g, " ").trim().slice(0, 80)
-			: agent.thinkingText
-				? agent.thinkingText.replace(/\n+/g, " ").trim().slice(0, 80)
+			: lastThink
+				? lastThink.replace(/\n+/g, " ").trim().slice(0, 80)
 				: agent.task.slice(0, 80);
 
 		return (
@@ -299,7 +285,7 @@ function AgentCard({
 					<Text bold color={isSelected ? colors.brand : undefined}>
 						{agent.agentName}
 					</Text>
-					<Text color={colors.textMuted}> {symbols.dot} {visibleTools.length} tools {symbols.dot} {duration}</Text>
+					<Text color={colors.textMuted}> {symbols.dot} {agent.toolCalls.length} tools {symbols.dot} {duration}</Text>
 				</Text>
 				<Text color={colors.textMuted}>
 					{"  "}{BLOCKQUOTE_BAR} {preview}{preview.length >= 80 ? "..." : ""}
@@ -308,55 +294,106 @@ function AgentCard({
 		);
 	}
 
-	// Width budgets
-	const toolLineWidth = Math.max(20, cols - 4);
-	const thinkWidth = Math.max(20, cols - 5);
-
 	return (
 		<Box flexDirection="column" marginTop={1} paddingRight={1}>
-			{/* Header — agent name, status, duration */}
 			<Text wrap="truncate-end">
 				<Text color={statusColor}>{statusIcon} </Text>
 				<Text bold color={colors.brand}>{agent.agentName}</Text>
-				<Text color={colors.textMuted}> {symbols.dot} {visibleTools.length} tools {symbols.dot} {duration}</Text>
+				<Text color={colors.textMuted}> {symbols.dot} {agent.toolCalls.length} tools {symbols.dot} {duration}</Text>
 			</Text>
 
-			{/* Completed agent with transcript — multi-turn conversation */}
 			{transcriptLoaded && transcript.length > 0 ? (
 				<TranscriptConversation transcript={transcript} cols={cols} />
 			) : (
-				/* Running/recent agent — flat view: thinking → tools → text */
-				<>
-					{agent.thinkingText && (
-						<ThinkingBlock text={agent.thinkingText} thinkWidth={thinkWidth} />
-					)}
-					{visibleTools.map((tc, i) => (
-						<ToolCallLine key={i} tc={tc} toolLineWidth={toolLineWidth} />
-					))}
-					{agent.text && (
-						<Box paddingLeft={2}>
-							<MarkdownText
-								text={normalizeText(agent.text.length > 2000 ? agent.text.slice(0, 2000) + "\n..." : agent.text)}
-								tableTruncate={false}
-								theme={mdTheme}
-								width={cols - 3}
-							/>
-						</Box>
-					)}
-				</>
+				<RoundConversation agent={agent} cols={cols} />
 			)}
 
-			{/* Error */}
 			{agent.error && (
 				<Box paddingLeft={2}>
 					<Text color={colors.error}>{agent.error.slice(0, 200)}</Text>
 				</Box>
 			)}
 
-			{/* Completion */}
 			{agent.status !== "running" && (
 				<Box marginTop={1}>
 					<Text color={colors.textMuted}>● Completed in {duration}</Text>
+				</Box>
+			)}
+		</Box>
+	);
+}
+
+// ── Round-based conversation (running/recent agent) ──
+// Renders each round separately: thinking → tools → text.
+// This preserves the natural conversational flow and prevents
+// the garbled duplicates that come from cumulative thinkingText.
+
+function RoundConversation({ agent, cols }: { agent: AgentState; cols: number }) {
+	const thinkWidth = Math.max(20, cols - 5);
+	const toolLineWidth = Math.max(20, cols - 4);
+
+	// If no rounds, show flat tool calls
+	if (agent.rounds.length === 0) {
+		return (
+			<Box flexDirection="column" marginTop={1}>
+				{agent.toolCalls.map((tc, i) => {
+					const displayName = TOOL_DISPLAY_NAMES[tc.toolName] || tc.toolName;
+					return (
+						<ToolCallLine
+							key={`flat-tc-${i}`}
+							tc={{ ...tc, toolName: displayName }}
+							toolLineWidth={toolLineWidth}
+						/>
+					);
+				})}
+			</Box>
+		);
+	}
+
+	return (
+		<Box flexDirection="column" marginTop={1}>
+			{agent.rounds.map((round, roundIdx) => (
+				<Box key={`round-${roundIdx}`} flexDirection="column" marginTop={roundIdx > 0 ? 1 : 0}>
+					{/* Round thinking */}
+					{round.thinking && round.thinking.trim() && (
+						<ThinkingBlock text={round.thinking} thinkWidth={thinkWidth} />
+					)}
+
+					{/* Round tool calls */}
+					{round.toolCalls.map((tc, i) => {
+						const displayName = TOOL_DISPLAY_NAMES[tc.toolName] || tc.toolName;
+						return (
+							<ToolCallLine
+								key={`r${roundIdx}-tc-${i}`}
+								tc={{ ...tc, toolName: displayName }}
+								toolLineWidth={toolLineWidth}
+							/>
+						);
+					})}
+
+					{/* Round response text */}
+					{round.text && round.text.trim() && (
+						<Box paddingLeft={2} marginTop={round.toolCalls.length > 0 ? 1 : 0}>
+							<MarkdownText
+								text={normalizeText(round.text.length > 2000 ? round.text.slice(0, 2000) + "\n..." : round.text)}
+								tableTruncate={false}
+								theme={mdTheme}
+								width={cols - 3}
+							/>
+						</Box>
+					)}
+				</Box>
+			))}
+
+			{/* If there's text that didn't end up in a round, show it at the end */}
+			{agent.text && agent.rounds.every(r => !r.text) && (
+				<Box paddingLeft={2} marginTop={1}>
+					<MarkdownText
+						text={normalizeText(agent.text.length > 2000 ? agent.text.slice(0, 2000) + "\n..." : agent.text)}
+						tableTruncate={false}
+						theme={mdTheme}
+						width={cols - 3}
+					/>
 				</Box>
 			)}
 		</Box>
@@ -374,7 +411,6 @@ function ThinkingBlock({ text, thinkWidth }: { text: string; thinkWidth: number 
 		lines.push(...wrapText(para, thinkWidth));
 	}
 	if (lines.length === 0) return null;
-	// Cap at 8 lines — show last paragraphs (most relevant)
 	const visible = lines.length > 8 ? lines.slice(-8) : lines;
 	const hidden = lines.length - visible.length;
 	return (
@@ -418,14 +454,13 @@ function ToolCallLine({ tc, toolLineWidth }: { tc: any; toolLineWidth: number })
 	);
 }
 
-// ── Transcript-based multi-turn conversation ──
+// ── Transcript-based multi-turn conversation (completed agents) ──
 
 function TranscriptConversation({ transcript, cols }: { transcript: StoredMessage[]; cols: number }) {
 	const colors = useColors();
 	const thinkWidth = Math.max(20, cols - 5);
 	const toolLineWidth = Math.max(20, cols - 4);
 
-	// Build tool result lookup
 	const toolResults = new Map<string, { result: string; isError: boolean }>();
 	for (const msg of transcript) {
 		if (msg.role === "tool" && msg.toolCallId) {
@@ -443,7 +478,6 @@ function TranscriptConversation({ transcript, cols }: { transcript: StoredMessag
 			{transcript.map((msg, msgIdx) => {
 				if (msg.role === "tool") return null;
 
-				// User message — show task
 				if (msg.role === "user") {
 					return (
 						<Box key={`msg-${msg.id}`} paddingLeft={1} marginTop={msgIdx > 0 ? 1 : 0}>
@@ -453,10 +487,8 @@ function TranscriptConversation({ transcript, cols }: { transcript: StoredMessag
 					);
 				}
 
-				// Assistant message — thinking + tools + text
 				const blocks: React.ReactNode[] = [];
 
-				// Thinking
 				if (msg.thinking) {
 					const normThink = normalizeText(msg.thinking);
 					const thinkLines: string[] = [];
@@ -477,7 +509,6 @@ function TranscriptConversation({ transcript, cols }: { transcript: StoredMessag
 					}
 				}
 
-				// Tool calls
 				if (msg.toolCalls && msg.toolCalls !== "[]") {
 					try {
 						const calls: { id?: string; name?: string; args?: Record<string, unknown>; argsText?: string }[] = JSON.parse(msg.toolCalls);
@@ -506,7 +537,6 @@ function TranscriptConversation({ transcript, cols }: { transcript: StoredMessag
 					} catch { /* skip malformed */ }
 				}
 
-				// Text
 				if (msg.text) {
 					const normText = normalizeText(msg.text);
 					blocks.push(
@@ -526,4 +556,3 @@ function TranscriptConversation({ transcript, cols }: { transcript: StoredMessag
 		</Box>
 	);
 }
-
