@@ -8,7 +8,7 @@
 import { render } from "ink";
 import { parseArgs } from "node:util";
 import { homedir } from "node:os";
-import { join, basename } from "node:path";
+import { join, basename, resolve } from "node:path";
 import { setBaseUrl, setFetch, usePuxStore } from "@pux/shared";
 import React from "react";
 import { App } from "./app.js";
@@ -109,6 +109,10 @@ if (opts.org && typeof opts.org === "string") {
 
 // ── Environment setup ──
 
+// Resolve cwd to absolute path so the backend can find the project files.
+// Without this, the backend falls back to PROJECT_ROOT/projects/<name>.
+opts.cwd = resolve(opts.cwd as string);
+
 const serverUrl = opts.server as string;
 setBaseUrl(serverUrl);
 setFetch(globalThis.fetch);
@@ -131,8 +135,9 @@ if (!backendOnline) {
 	);
 }
 
-// Register org project with backend
-if (opts.org && typeof opts.org === "string" && backendOnline) {
+// Register project with backend so prompts resolve to the right directory.
+// Without this, the backend looks for PROJECT_ROOT/projects/<name> which doesn't exist.
+if (backendOnline) {
 	try {
 		await fetch(`${serverUrl}/api/projects`, {
 			method: "POST",
@@ -152,6 +157,9 @@ const cwdName = opts.cwd as string;
 
 usePuxStore.getState().setModel(modelName);
 usePuxStore.getState().setProject(projectName);
+// Store the resolved cwd path so the chat adapter sends an absolute path
+// to the backend (avoids PROJECT_ROOT/projects/<name> fallback 404).
+usePuxStore.setState({ activeProjectPath: cwdName });
 await usePuxStore.getState().loadProjects();
 await usePuxStore.getState().loadConversations();
 

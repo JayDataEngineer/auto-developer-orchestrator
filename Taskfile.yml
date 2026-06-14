@@ -106,9 +106,9 @@ tasks:
           curl -sf http://localhost:3847/api/projects 2>/dev/null | grep -q auto-developer-orchestrator || \
             curl -sf -X POST http://localhost:3847/api/projects/add \
               -H "Content-Type: application/json" \
-              -d "{\"name\":\"auto-developer-orchestrator\",\"path\":\"$(cd .. && pwd)\"}" 2>/dev/null || true
+              -d "{\"name\":\"auto-developer-orchestrator\",\"path\":\"$(cd ../.. && pwd)\"}" 2>/dev/null || true
         silent: true
-      - bun run src/main.tsx --project auto-developer-orchestrator --cwd .. --model deepseek/deepseek-v4-flash
+      - bun run src/main.tsx --project auto-developer-orchestrator --cwd ../.. --model deepseek/deepseek-v4-flash
 
   tui-visual:
     desc: Start TUI visual testing server (autonomous dev loop)

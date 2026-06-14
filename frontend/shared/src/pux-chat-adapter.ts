@@ -496,7 +496,7 @@ export const puxChatAdapter: ChatModelAdapter = {
 		const model = (custom?.model as string) || store.activeModel || undefined;
 		const temperature = (custom?.temperature as number) || undefined;
 
-		const project = store.activeProject || "auto-developer-orchestrator";
+		const project = store.activeProjectPath || store.activeProject || "auto-developer-orchestrator";
 		const fetch = getFetch();
 
 		// POST to Pux backend
