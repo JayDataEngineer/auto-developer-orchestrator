@@ -211,11 +211,12 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	}
 
 	cfg := orchestrator.Config{
-		ProjectDir:    projectPath,
-		SandboxID:     sandboxID,
-		SessionPath:   sessionPath,
-		ContextSize:   contextSize,
-		MaxToolRounds: 50,
+		ProjectDir:      projectPath,
+		SandboxID:       sandboxID,
+		SessionPath:     sessionPath,
+		ContextSize:     contextSize,
+		MaxToolRounds:   50,
+		ProviderRetries: h.providerRetries,
 		WorkDir:       "/sandbox",
 		BashExecutor:  bashExec,
 		FileOps:       fileOpsInstance,

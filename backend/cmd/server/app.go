@@ -228,6 +228,7 @@ func (a *App) initHandlers() {
 
 	// Pux handler
 	a.puxHandler = handlers.NewPuxHandler(a.db, gitOps, githubHandler, logger)
+	a.puxHandler.SetProviderRetries(modelCfg.ProviderRetries())
 
 	// SSH session manager for remote filesystem browsing
 	sshManager := puxssh.NewSessionManager(logger)

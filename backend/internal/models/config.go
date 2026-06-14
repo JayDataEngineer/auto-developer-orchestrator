@@ -26,16 +26,18 @@ type settingsFile struct {
 	DefaultModel    string     `json:"defaultModel"`
 	MainModel       *ModelEntry `json:"mainModel,omitempty"`
 	ToolModel       *ModelEntry `json:"toolModel,omitempty"`
+	ProviderRetries int        `json:"providerRetries,omitempty"`
 }
 
 // ModelConfig is a thread-safe, persisted configuration for the two-model system.
 // Load it once at startup via LoadModelConfig, then use the getters/setters.
 type ModelConfig struct {
-	mu     sync.RWMutex
-	main   ModelEntry
-	tool   ModelEntry
-	path   string
-	logger *zap.Logger
+	mu              sync.RWMutex
+	main            ModelEntry
+	tool            ModelEntry
+	providerRetries int
+	path            string
+	logger          *zap.Logger
 }
 
 // LoadModelConfig reads ~/.pi/agent/settings.json and returns a ModelConfig.
@@ -80,6 +82,9 @@ func LoadModelConfig(logger *zap.Logger) (*ModelConfig, error) {
 		cfg.tool = cfg.main
 	}
 
+	// Provider retries: 0 = use agent loop default (5)
+	cfg.providerRetries = sf.ProviderRetries
+
 	logger.Info("Model config loaded",
 		zap.String("mainProvider", cfg.main.Provider),
 		zap.String("mainModel", cfg.main.ModelId),
@@ -110,6 +115,13 @@ func (c *ModelConfig) ToolModel() ModelEntry {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.tool
+}
+
+// ProviderRetries returns the configured provider retry count (0 = default).
+func (c *ModelConfig) ProviderRetries() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.providerRetries
 }
 
 // ProviderForModel returns the provider name for a given model ID.

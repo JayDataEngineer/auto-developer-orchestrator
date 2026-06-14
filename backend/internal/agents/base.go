@@ -45,6 +45,10 @@ type BaseConfig struct {
 	// ToolExecTimeoutSec sets per-tool timeout (0 = no timeout for sub-agents).
 	// The CTO loop sets this to 600s explicitly.
 	ToolExecTimeoutSec int
+
+	// ProviderRetries overrides the default LLM provider retry count.
+	// 0 = use AgentLoop default (5).
+	ProviderRetries int
 }
 
 // BaseAgent is the common agent foundation for both the CTO orchestrator
@@ -109,6 +113,7 @@ func NewBaseAgent(cfg BaseConfig) *BaseAgent {
 		SandboxID:           cfg.SandboxID,
 		ToolResultProcessor: cfg.ToolResultProcessor,
 		ToolExecTimeoutSec:  cfg.ToolExecTimeoutSec,
+		MaxProviderRetries:  cfg.ProviderRetries,
 		ContextMetricsFunc:  cfg.ContextMetricsFunc,
 		MouseCoordinateResolver: cfg.MouseCoordinateResolver,
 	}

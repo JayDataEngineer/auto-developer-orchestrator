@@ -68,7 +68,12 @@ type PuxHandler struct {
 
 	defaultLogic  string // model ID for CTO/orchestrator (logic)
 	defaultWorker string // model ID for sub-agents/employees (worker)
+
+	providerRetries int // LLM provider retry count (0 = default 5)
 }
+
+// SetProviderRetries configures the LLM provider retry count.
+func (h *PuxHandler) SetProviderRetries(n int) { h.providerRetries = n }
 
 // NewPuxHandler creates a new Pux handler.
 func NewPuxHandler(db *storage.Database, gitOps *git.GitOps, gh *GitHubHandler, logger *zap.Logger) *PuxHandler {

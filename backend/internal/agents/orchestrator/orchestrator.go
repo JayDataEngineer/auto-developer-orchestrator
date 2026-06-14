@@ -47,6 +47,7 @@ type Config struct {
 	SandboxID       string
 	ContextSize     int
 	MaxToolRounds   int
+	ProviderRetries int // 0 = use agent loop default (5)
 	SessionPath     string
 	WorkDir         string
 	MemoryStore     *memory.Store
@@ -196,6 +197,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			ContextSize:     cfg.ContextSize,
 			ProjectDir:      cfg.ProjectDir,
 			SandboxID:       cfg.SandboxID,
+			ProviderRetries: cfg.ProviderRetries,
 			GenerateOptions: core.GenerateOptions{MaxTokens: 16384, Temperature: 0.7, TopP: 0.95, TopK: 20},
 			ScratchStore:    scratchStore,
 			PermDecisions:   core.GlobalDecisions,
@@ -632,6 +634,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		MaxTokens:       16384,
 		ContextSize:     cfg.ContextSize,
 		ThinkingBudget:  4096,
+		ProviderRetries: cfg.ProviderRetries,
 		ProjectDir:      cfg.ProjectDir,
 		SandboxID:       cfg.SandboxID,
 		GenerateOptions: core.GenerateOptions{MaxTokens: 16384, Temperature: 0.7, TopP: 0.95, TopK: 20},

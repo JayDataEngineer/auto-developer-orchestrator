@@ -50,6 +50,7 @@ import {
 	CpuIcon,
 	DownloadIcon,
 	HardDriveIcon,
+	Loader2Icon,
 	PencilIcon,
 	PlusIcon,
 	RefreshCwIcon,
@@ -79,6 +80,8 @@ export const Thread: FC = () => {
 				<ThreadPrimitive.Messages>
 					{() => <ThreadMessage />}
 				</ThreadPrimitive.Messages>
+
+				<ProviderRetryBanner />
 
 				<ThreadPrimitive.ViewportFooter className="sticky bottom-0 mx-auto mt-auto flex w-full max-w-[var(--thread-max-width)] flex-col gap-4 overflow-visible rounded-t-3xl bg-background pb-4">
 					<ThreadScrollToBottom />
@@ -593,5 +596,21 @@ const BranchPicker: FC<{ className?: string }> = ({
 				</TooltipIconButton>
 			</BranchPickerPrimitive.Next>
 		</BranchPickerPrimitive.Root>
+	);
+};
+
+// ── Provider retry banner ──
+// Shows when the LLM provider fails and the backend retries.
+const ProviderRetryBanner: FC = () => {
+	const retry = usePuxStore((s) => s.providerRetry);
+	if (!retry) return null;
+	return (
+		<div className="mx-auto flex w-full max-w-[var(--thread-max-width)] items-center gap-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-600 dark:text-yellow-400">
+			<Loader2Icon className="size-4 animate-spin" />
+			<span>
+				Retrying ({retry.attempt}/{retry.maxRetry}) in {retry.backoffSecs}s
+				{retry.error ? ` — ${retry.error.slice(0, 80)}` : ""}
+			</span>
+		</div>
 	);
 };
