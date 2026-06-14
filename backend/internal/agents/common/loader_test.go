@@ -50,13 +50,16 @@ func TestLoadAgentRoles(t *testing.T) {
 		t.Errorf("desktop_ops: expected sandbox 'bridged', got %q", desktopOps.SandboxTier)
 	}
 
-	// Test researcher model override
+	// Researcher intentionally has no hardcoded model — it inherits the
+	// worker default (set by the user via /api/pux/defaults). Hardcoding a
+	// model in the role would override the user's choice. See fix for the
+	// stuck-researcher bug where qwen3.6-27b-q5_k_s was hardcoded.
 	researcher := GetAgentRole("researcher")
 	if researcher == nil {
 		t.Fatal("researcher worker not found")
 	}
-	if researcher.Model != "qwen3.6-27b-q5_k_s" {
-		t.Errorf("researcher: expected model 'qwen3.6-27b-q5_k_s', got %q", researcher.Model)
+	if researcher.Model != "" {
+		t.Errorf("researcher: expected empty model (inherits worker default), got %q", researcher.Model)
 	}
 
 	// Test FormatAgentList includes all workers

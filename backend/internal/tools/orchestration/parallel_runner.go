@@ -111,6 +111,13 @@ type RunnerConfig struct {
 	// before the sub-agent loop starts. Called when browser tools are detected.
 	// Moves cold-start latency from first browse_to call to delegation setup.
 	BrowserPreWarmFunc func(ctx context.Context, sandboxID string) error
+
+	// MouseCoordinateResolver resolves normalized (0-1) coordinates for the
+	// visual mouse cursor overlay on the VNC viewer. Forwarded to sub-agent
+	// loops so browser/desktop tool calls emit mouse_action SSE events that
+	// surface on the orchestrator's stream. Without this, the overlay stays
+	// empty because sub-agent events are the only source of mouse_action.
+	MouseCoordinateResolver func(toolName string, args map[string]any) (normX, normY float64, action string)
 }
 
 // ParallelRunner implements DelegateRunner with goroutine-based parallelism.
@@ -382,7 +389,7 @@ func (r *ParallelRunner) drainAndForward(
 			if subscriber != nil {
 				switch evt.Type {
 				case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
-					core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+					core.EventTypeTextDelta, core.EventTypeThinkingDelta, core.EventTypeMouseAction:
 					core.SendEvent(subscriber, enrichWithAgentName(evt, agentName))
 				}
 			}
@@ -420,7 +427,7 @@ func (r *ParallelRunner) handleBackgrounded(
 		if subscriber != nil {
 			switch evt.Type {
 			case core.EventTypeToolStart, core.EventTypeToolEnd, core.EventTypeToolUpdate,
-				core.EventTypeTextDelta, core.EventTypeThinkingDelta:
+				core.EventTypeTextDelta, core.EventTypeThinkingDelta, core.EventTypeMouseAction:
 				core.SendEvent(subscriber, evt)
 			}
 		}
@@ -896,22 +903,23 @@ func (r *ParallelRunner) buildSubAgent(
 
 	processor := newCtxMgrProcessor(ctxMgr)
 	subAgent := agents.NewBaseAgent(agents.BaseConfig{
-		Provider:            resources.Provider,
-		Session:             sess,
-		SystemPrompt:        instructions,
-		ToolSpecs:           setup.SelectedTools,
-		Executor:            executor,
-		MaxToolRounds:       maxRounds,
-		MaxTokens:           8192,
-		ContextSize:         r.cfg.ContextSize,
-		ProjectDir:          r.cfg.ProjectDir,
-		GenerateOptions:     core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
-		ScratchStore:        r.cfg.ScratchStore,
-		PermDecisions:       r.cfg.PermDecisions,
-		ToolPerms:           r.cfg.ToolPerms,
-		BashRules:           r.cfg.BashRules,
-		ExtraHooks:          resources.ExtraHooks,
-		ToolResultProcessor: processor,
+		Provider:               resources.Provider,
+		Session:                sess,
+		SystemPrompt:           instructions,
+		ToolSpecs:              setup.SelectedTools,
+		Executor:               executor,
+		MaxToolRounds:          maxRounds,
+		MaxTokens:              8192,
+		ContextSize:            r.cfg.ContextSize,
+		ProjectDir:             r.cfg.ProjectDir,
+		GenerateOptions:        core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
+		ScratchStore:           r.cfg.ScratchStore,
+		PermDecisions:          r.cfg.PermDecisions,
+		ToolPerms:              r.cfg.ToolPerms,
+		BashRules:              r.cfg.BashRules,
+		ExtraHooks:             resources.ExtraHooks,
+		ToolResultProcessor:    processor,
+		MouseCoordinateResolver: r.cfg.MouseCoordinateResolver,
 	})
 
 	return &builtAgent{
@@ -1295,17 +1303,18 @@ func (r *ParallelRunner) RunDelegateContinue(ctx context.Context, agentRef, feed
 	}
 	// Use BaseAgent for continuation so sub-agents keep getting common hooks
 	continueAgent := agents.NewBaseAgent(agents.BaseConfig{
-		Provider:        la.Provider,
-		Session:         la.Session,
-		SystemPrompt:    la.Config.SystemPrompt,
-		ToolSpecs:       la.Config.Tools,
-		Executor:        continueExecutor,
-		MaxToolRounds:   la.Config.MaxToolRounds,
-		ContextSize:     la.Config.ContextSize,
-		ProjectDir:      r.cfg.ProjectDir,
-		GenerateOptions: la.Config.Opts,
-		ScratchStore:    r.cfg.ScratchStore,
-		ToolResultProcessor: la.Config.ToolResultProcessor,
+		Provider:               la.Provider,
+		Session:                la.Session,
+		SystemPrompt:           la.Config.SystemPrompt,
+		ToolSpecs:              la.Config.Tools,
+		Executor:               continueExecutor,
+		MaxToolRounds:          la.Config.MaxToolRounds,
+		ContextSize:            la.Config.ContextSize,
+		ProjectDir:             r.cfg.ProjectDir,
+		GenerateOptions:        la.Config.Opts,
+		ScratchStore:           r.cfg.ScratchStore,
+		ToolResultProcessor:    la.Config.ToolResultProcessor,
+		MouseCoordinateResolver: r.cfg.MouseCoordinateResolver,
 	})
 	loop := continueAgent.Loop()
 

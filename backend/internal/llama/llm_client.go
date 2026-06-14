@@ -22,7 +22,7 @@ import (
 // Used by AgentLoop, OrchestratorLoop, and related subsystems.
 // Mocks can implement this for testing.
 type ChatProvider interface {
-	chatComplete(req ChatCompletionRequest) (*ChatCompletionResponse, error)
+	chatComplete(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionResponse, error)
 	chatCompleteStream(ctx context.Context, req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error
 	NewSession(ctxSize int) (*Session, error)
 	IsLoaded() bool
@@ -403,7 +403,7 @@ func (e *LLMClient) WarmUp() error {
 	}
 
 	t0 := time.Now()
-	_, err := e.chatComplete(req)
+	_, err := e.chatComplete(context.Background(), req)
 	if err != nil {
 		e.logger.Warn("Warm-up request had error (non-fatal)", zap.Error(err))
 	} else {
@@ -758,13 +758,13 @@ type ChatMessage struct {
 }
 
 // chatComplete sends a chat completion request (non-streaming).
-func (e *LLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletionResponse, error) {
+func (e *LLMClient) chatComplete(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionResponse, error) {
 	body, err := json.Marshal(e.sanitizeRequest(req))
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", e.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", e.baseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

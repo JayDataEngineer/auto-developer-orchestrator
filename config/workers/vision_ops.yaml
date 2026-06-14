@@ -2,6 +2,5 @@ hint: "Analyze and describe images and visual assets"
 persona: "Creative Director — analyze and describe images and visual assets."
 capabilities:
   - vision
-model: gemini-3-flash-preview
 max_rounds: 10
 temperature: 0.4

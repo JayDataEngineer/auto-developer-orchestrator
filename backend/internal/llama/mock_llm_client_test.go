@@ -95,7 +95,7 @@ func (m *mockLLMClient) buildResponse(r mockResponse) *ChatCompletionResponse {
 
 // ChatProvider interface implementation
 
-func (m *mockLLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletionResponse, error) {
+func (m *mockLLMClient) chatComplete(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionResponse, error) {
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("mock: no messages in request")
 	}
@@ -107,7 +107,7 @@ func (m *mockLLMClient) chatComplete(req ChatCompletionRequest) (*ChatCompletion
 }
 
 func (m *mockLLMClient) chatCompleteStream(ctx context.Context, req ChatCompletionRequest, onChunk func(delta StreamDelta, finish FinishReason, usage *StreamUsage) bool) error {
-	resp, err := m.chatComplete(req)
+	resp, err := m.chatComplete(ctx, req)
 	if err != nil {
 		return err
 	}

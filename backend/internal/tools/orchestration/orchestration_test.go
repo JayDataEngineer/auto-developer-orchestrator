@@ -66,8 +66,12 @@ func TestResolveRole_KernelRole(t *testing.T) {
 	if len(tools) == 0 {
 		t.Error("expected tools from kernel role after MCP expansion")
 	}
-	if model == "" {
-		t.Errorf("expected non-empty model from kernel role 'researcher', got empty")
+	// Model is intentionally empty in researcher.yaml so the worker default
+	// (set by the user via /api/pux/defaults) is respected. Hardcoding a model
+	// in the role config would override the user's choice — see fix for the
+	// stuck-researcher bug where qwen3.6-27b-q5_k_s was hardcoded.
+	if model != "" {
+		t.Errorf("expected empty model from kernel role 'researcher' (should inherit worker default), got %q", model)
 	}
 }
 
@@ -433,5 +437,62 @@ func TestMemoArtifact_SlugifiedPath(t *testing.T) {
 	}
 	if !strings.Contains(path, "code-orchestrator-") {
 		t.Errorf("expected slugified name in path, got %s", path)
+	}
+}
+
+// TestDrainAndForward_MouseActionForwarded is a regression test for the
+// mouse_action forwarding bug. drainAndForward previously filtered out
+// EventTypeMouseAction, so the visual cursor overlay never received events
+// for browser/desktop tool calls executed by sub-agents.
+//
+// This test directly drives drainAndForward by feeding it events through
+// the events channel and confirms that mouse_action survives the filter
+// and reaches the parent subscriber.
+func TestDrainAndForward_MouseActionForwarded(t *testing.T) {
+	r := &ParallelRunner{cfg: RunnerConfig{
+		Logger: func(string, ...interface{}) {},
+	}}
+
+	events := make(chan core.AgentEvent, 8)
+	done := make(chan struct{})
+	received := make(chan core.AgentEvent, 8)
+	subscriber := make(chan core.AgentEvent, 8)
+
+	// Drain subscriber into received for assertions.
+	go func() {
+		for evt := range subscriber {
+			received <- evt
+		}
+	}()
+
+	// Feed representative events: mouse_action, tool_start, text_delta.
+	events <- core.AgentEvent{Type: core.EventTypeToolStart, Data: core.ToolStart{ToolName: "click_element"}}
+	events <- core.AgentEvent{Type: core.EventTypeMouseAction, Data: core.MouseActionData{NormX: 0.5, NormY: 0.25, Action: "click"}}
+	events <- core.AgentEvent{Type: core.EventTypeTextDelta, Data: core.TextDelta{Text: "hi"}}
+	close(events)
+	close(done)
+
+	res := r.drainAndForward(context.Background(), subscriber, "browser_ops", events, done, nil, "t1", "test")
+
+	if res.FinalText != "hi" {
+		t.Fatalf("expected final text 'hi', got %q", res.FinalText)
+	}
+	close(subscriber)
+	close(received)
+
+	var types []core.AgentEventType
+	for evt := range received {
+		types = append(types, evt.Type)
+	}
+
+	// Expect all three types to be forwarded, including mouse_action.
+	want := []core.AgentEventType{core.EventTypeToolStart, core.EventTypeMouseAction, core.EventTypeTextDelta}
+	if len(types) != len(want) {
+		t.Fatalf("expected %d forwarded events, got %d: %v", len(want), len(types), types)
+	}
+	for i, w := range want {
+		if types[i] != w {
+			t.Fatalf("event %d: want %s, got %s", i, w, types[i])
+		}
 	}
 }

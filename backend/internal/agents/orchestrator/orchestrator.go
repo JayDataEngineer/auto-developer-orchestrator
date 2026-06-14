@@ -488,13 +488,14 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 				}
 				return nil
 			},
-			TaskMgr:            cfg.TaskMgr,
-			ScratchStore:       scratchStore,
-			DB:                 cfg.TranscriptDB,
-			Project:            cfg.Project,
-			PermDecisions:      core.GlobalDecisions,
-			ToolPerms:          cfg.ToolPerms,
-			BashRules:          cfg.BashRules,
+			TaskMgr:                 cfg.TaskMgr,
+			ScratchStore:            scratchStore,
+			DB:                      cfg.TranscriptDB,
+			Project:                 cfg.Project,
+			PermDecisions:           core.GlobalDecisions,
+			ToolPerms:               cfg.ToolPerms,
+			BashRules:               cfg.BashRules,
+			MouseCoordinateResolver: cfg.MouseCoordinateResolver,
 			Summarizer: func(ctx context.Context, text string, targetChars int) (string, error) {
 				return ctxpkg.SummarizeText(ctx, summarizerProvider, text, targetChars)
 			},
@@ -751,6 +752,7 @@ func makeOrchestratorFactory(provider core.LLMProvider, parentCfg Config) orches
 			DBProvider:    parentCfg.DBProvider,
 			LLMProvider:   parentCfg.LLMProvider,
 			DesktopProvider: parentCfg.DesktopProvider,
+			MouseCoordinateResolver: parentCfg.MouseCoordinateResolver,
 		}
 
 		subOrch, err := New(subProvider, cfg)

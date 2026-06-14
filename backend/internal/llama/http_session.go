@@ -66,7 +66,7 @@ func (s *Session) generateChatStream(ctx context.Context, opts GenerateOptions) 
 		// Fall back to non-streaming and convert the response into streaming events.
 		if llm, ok := s.engine.(*LLMClient); ok && llm.StreamingDisabled() {
 			req.Stream = false
-			resp, err := s.engine.chatComplete(req)
+			resp, err := s.engine.chatComplete(ctx, req)
 			if err == nil && len(resp.Choices) > 0 {
 				choice := resp.Choices[0]
 				delta := streamDeltaFromResponse(choice)
@@ -496,6 +496,10 @@ func (s *Session) freeSlot() error {
 		CachePrompt: false,
 		SessionID:   s.sessionID,
 	}
-	_, err := s.engine.chatComplete(req)
+	// Bounded timeout — Close() has no caller ctx, and we don't want KV-cache
+	// cleanup to hang forever if the backend is unresponsive.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := s.engine.chatComplete(ctx, req)
 	return err
 }
