@@ -160,8 +160,10 @@ export function AssistantMessage() {
 				</Box>
 			)}
 
-			{/* Parts pipeline — children render function */}
-			<MessagePrimitive.Parts>
+			{/* Parts pipeline — children render function.
+			    key forces re-render when thinkingExpanded changes so
+			    collapsed/expanded reasoning actually updates. */}
+			<MessagePrimitive.Parts key={thinkingExpanded ? 'expanded' : 'collapsed'}>
 				{({ part }) => {
 					switch (part.type) {
 						case "reasoning": {
@@ -185,7 +187,7 @@ export function AssistantMessage() {
 									<Box marginBottom={1}>
 										<Text color={colors.textMuted}>
 											{BLOCKQUOTE_BAR} {"\u25B6"} Thinking ({rLines.length} lines){"  "}
-											<Text dimColor>Ctrl+E to expand</Text>
+											<Text dimColor>Ctrl+L to expand</Text>
 										</Text>
 									</Box>
 								);
