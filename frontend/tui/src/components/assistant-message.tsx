@@ -196,19 +196,20 @@ export function AssistantMessage() {
 								return (
 									<Box marginBottom={1}>
 										<Text color={colors.textMuted}>
-											{BLOCKQUOTE_BAR} {"\u25B6"} Thinking ({rLines.length} lines){"  "}
+											{"\u25B6"} Thought ({rLines.length} lines){"  "}
 											<Text dimColor>Ctrl+P to expand</Text>
 										</Text>
 									</Box>
 								);
 							}
 
-							// Expanded: full thinking text
+							// Expanded: full thinking text with label
 							return (
-								<Box marginBottom={1} paddingLeft={2} flexDirection="column">
+								<Box marginBottom={1} flexDirection="column">
+									<Text color={colors.textMuted}>{"\u25BC"} Thought</Text>
 									{rLines.map((line, i) => (
 										<Text key={i} color={colors.textMuted}>
-											{BLOCKQUOTE_BAR} {line}
+											{line}
 										</Text>
 									))}
 								</Box>
@@ -219,24 +220,15 @@ export function AssistantMessage() {
 							if (!rawText.trim()) return null;
 							const normalized = normalizeText(rawText);
 							if (!normalized) return null;
-							const paragraphs = normalized.split(/\n\n+/).filter((p: string) => p.trim());
-							if (paragraphs.length <= 1) {
-								return (
-									<Box paddingLeft={2}>
-										<MarkdownText
-											text={normalized}
-											tableTruncate={false}
-											theme={mdTheme}
-											width={cols - 3}
-										/>
-									</Box>
-								);
-							}
+							// Render as single block — markdansi handles paragraph spacing
 							return (
-								<Box paddingLeft={2} flexDirection="column">
-									{paragraphs.map((para: string, i: number) => (
-										<Text key={i}>{renderMarkdown(para, cols, mdTheme)}</Text>
-									))}
+								<Box paddingLeft={2}>
+									<MarkdownText
+										text={normalized}
+										tableTruncate={false}
+										theme={mdTheme}
+										width={cols - 3}
+									/>
 								</Box>
 							);
 						}
