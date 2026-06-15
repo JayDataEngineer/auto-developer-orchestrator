@@ -333,7 +333,7 @@ function RoundConversation({ agent, cols }: { agent: AgentState; cols: number })
 	const toolLineWidth = Math.max(20, cols - 4);
 
 	// If no rounds, show flat tool calls
-	if (agent.rounds.length === 0) {
+	if (!agent.rounds || agent.rounds.length === 0) {
 		return (
 			<Box flexDirection="column" marginTop={1}>
 				{agent.toolCalls.map((tc, i) => {
