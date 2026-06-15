@@ -289,6 +289,47 @@ task test-webui-e2e        # WebUI chat (Playwright + route mocking)
 
 Tests auto-skip when required services are unreachable.
 
+## TUI Regression Tests
+
+**ALWAYS run before committing TUI changes.** Catches bugs that have already been fixed.
+
+```bash
+cd frontend/tui && bun test tests/regression.test.tsx
+```
+
+Covers: store shape (toggleThinking, providerRetry), event ordering (text→tool→text interleaving), agent rounds (restored agents have rounds), thinking rendering (no blockquote bars), @pux/shared symlink resolves correctly, provider retry (500 classified as transient).
+
+Full TUI test suite (includes regression + all other tests):
+```bash
+cd frontend/tui && bun test tests/
+```
+
+Note: `b-flash-pty.test.ts` needs port 9877 free (kill `task tui-visual` first).
+
+## TUI Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+P` | Toggle thinking blocks collapse/expand |
+| `Ctrl+T` | Cycle TUI views (chat → agents → tools → files) |
+| `Ctrl+O` | Agent selector overlay |
+| `Ctrl+B` | Background current foreground task |
+| `Ctrl+C` ×2 | Quit |
+| `Esc` ×2 (running) | Cancel running agents |
+| `Esc` ×2 (idle) | Open rewind overlay (history) |
+
+## Provider Retry
+
+LLM provider errors (500, 502, 503, 504, rate limit, overloaded) are automatically retried with exponential backoff. Configurable in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "providerRetries": 5
+}
+```
+
+Default: 5 retries. Backoff: 2s base, 60s max, with jitter. Shows "Retrying (2/5) in 4s — HTTP 500" in both TUI and WebUI during retry.
+
 ## TUI Rewind
 
 Double-Escape when the agent is idle opens the rewind overlay. Shows a list of prior user messages (checkpoints). Select one, then choose "Restore conversation" to navigate the session tree back to that point. The TUI reloads with truncated history.
