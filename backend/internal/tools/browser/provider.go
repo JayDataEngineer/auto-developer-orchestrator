@@ -39,6 +39,16 @@ type BrowserProvider interface {
 	SaveSession(ctx context.Context, sandboxID, path string) (map[string]interface{}, error)
 	// RestoreSession restores cookies + localStorage from a saved file.
 	RestoreSession(ctx context.Context, sandboxID, path string) (map[string]interface{}, error)
+	// InjectFile writes a file (base64-encoded content) into the sandbox filesystem.
+	// Use this to upload a resume PDF, profile picture, or any other file for form filling.
+	InjectFile(ctx context.Context, sandboxID, destPath, contentBase64 string) (map[string]interface{}, error)
+	// CredentialGet reads credentials for a service from environment variables.
+	// Looks up {SERVICE}_USERNAME and {SERVICE}_PASSWORD (or _EMAIL and _PASS).
+	// Use this to get login credentials without hardcoding them in prompts.
+	CredentialGet(ctx context.Context, sandboxID, service string) (map[string]interface{}, error)
+	// UserProfile reads the user's profile information from a JSON config file.
+	// The profile is read from PROFILE_PATH, ~/.pux/user_profile.json, or PROJECT_ROOT/user_profile.json.
+	UserProfile(ctx context.Context, sandboxID string) (map[string]interface{}, error)
 }
 
 // SandboxEnsurer is an optional interface that BrowserProvider implementations

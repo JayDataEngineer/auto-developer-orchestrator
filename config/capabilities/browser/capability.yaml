@@ -14,3 +14,10 @@ tools:
   - evaluate_js
   - read_page
   - download_file
+  - select_option
+  - upload_file
+  - save_session
+  - restore_session
+  - inject_file
+  - credential_get
+  - user_profile

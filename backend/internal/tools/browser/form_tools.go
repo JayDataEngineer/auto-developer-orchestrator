@@ -156,3 +156,106 @@ func (t *RestoreSessionTool) Execute(ctx context.Context, args map[string]any) (
 func formatError(tool string, err error) error {
 	return fmt.Errorf("%s failed: %w", tool, err)
 }
+
+// ── Inject File Tool ──
+// Writes a base64-encoded file into the sandbox filesystem.
+
+type InjectFileTool struct {
+	provider  BrowserProvider
+	sandboxID func() string
+}
+
+func NewInjectFileTool(p BrowserProvider, sandboxID func() string) *InjectFileTool {
+	return &InjectFileTool{provider: p, sandboxID: sandboxID}
+}
+
+func (t *InjectFileTool) Name() string { return "inject_file" }
+func (t *InjectFileTool) Description() string {
+	return "Write a file (base64-encoded) into the sandbox filesystem. Use this to upload resume PDFs, profile pictures, cover letters, or any other file needed for form filling that isn't already in the sandbox. The file will be decoded and saved at the specified path."
+}
+func (t *InjectFileTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"dest_path": {"type": "string", "description": "Destination path in the sandbox (e.g., '/sandbox/workspace/resume.pdf')"},
+			"content_base64": {"type": "string", "description": "Base64-encoded file content"}
+		},
+		"required": ["dest_path", "content_base64"]
+	}`)
+}
+
+func (t *InjectFileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	destPath, _ := args["dest_path"].(string)
+	contentB64, _ := args["content_base64"].(string)
+	if destPath == "" {
+		return nil, fmt.Errorf("inject_file: dest_path is required")
+	}
+	if contentB64 == "" {
+		return nil, fmt.Errorf("inject_file: content_base64 is required")
+	}
+	return t.provider.InjectFile(ctx, sbID, destPath, contentB64)
+}
+
+// ── Credential Get Tool ──
+// Reads credentials from environment variables for a given service.
+
+type CredentialGetTool struct {
+	provider  BrowserProvider
+	sandboxID func() string
+}
+
+func NewCredentialGetTool(p BrowserProvider, sandboxID func() string) *CredentialGetTool {
+	return &CredentialGetTool{provider: p, sandboxID: sandboxID}
+}
+
+func (t *CredentialGetTool) Name() string { return "credential_get" }
+func (t *CredentialGetTool) Description() string {
+	return "Get saved login credentials for a service. Looks up service-specific environment variables (e.g., LINKEDIN_USERNAME, LINKEDIN_PASSWORD). Use this to log into job portals, email, or any other service without hardcoding credentials in prompts."
+}
+func (t *CredentialGetTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"service": {"type": "string", "description": "Service name (e.g., 'linkedin', 'indeed', 'glassdoor'). Case-insensitive."}
+		},
+		"required": ["service"]
+	}`)
+}
+
+func (t *CredentialGetTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	service, _ := args["service"].(string)
+	if service == "" {
+		return nil, fmt.Errorf("credential_get: service is required")
+	}
+	return t.provider.CredentialGet(ctx, sbID, service)
+}
+
+// ── User Profile Tool ──
+// Reads the user's profile information from a JSON config file.
+
+type UserProfileTool struct {
+	provider  BrowserProvider
+	sandboxID func() string
+}
+
+func NewUserProfileTool(p BrowserProvider, sandboxID func() string) *UserProfileTool {
+	return &UserProfileTool{provider: p, sandboxID: sandboxID}
+}
+
+func (t *UserProfileTool) Name() string { return "user_profile" }
+func (t *UserProfileTool) Description() string {
+	return "Read your profile information (name, email, phone, resume path, skills, work history) from a saved JSON config file. The config is loaded from PROFILE_PATH env var, ~/.pux/user_profile.json, or the project root. Use this to quickly fill profile fields on applications without repeating yourself."
+}
+func (t *UserProfileTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {}
+	}`)
+}
+
+func (t *UserProfileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	return t.provider.UserProfile(ctx, sbID)
+}

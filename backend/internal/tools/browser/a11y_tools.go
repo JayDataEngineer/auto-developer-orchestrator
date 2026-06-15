@@ -393,6 +393,9 @@ func RegisterBrowserTools(tools []core.Tool, p BrowserProvider, sandboxID func()
 		NewUploadFileTool(p, sandboxID),
 		NewSaveSessionTool(p, sandboxID),
 		NewRestoreSessionTool(p, sandboxID),
+		NewInjectFileTool(p, sandboxID),
+		NewCredentialGetTool(p, sandboxID),
+		NewUserProfileTool(p, sandboxID),
 	)
 }
 

@@ -3,9 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -67,6 +70,9 @@ func (h *ComputerUseHandler) RegisterRoutes(r interface {
 	r.Get("/read-page", h.ReadPage)
 	r.Post("/download", h.DownloadFile)
 	r.Post("/upload-file", h.UploadFile)
+	r.Post("/inject-file", h.InjectFile)
+	r.Get("/credential/{service}", h.CredentialGet)
+	r.Get("/user-profile", h.UserProfile)
 }
 
 // Enable enables computer use mode on a sandbox: creates desktop mode (VNC + Chrome) + SandboxBrowserClient
@@ -1036,5 +1042,129 @@ func (h *ComputerUseHandler) UploadFile(w http.ResponseWriter, r *http.Request) 
 			"uploaded": result["uploaded"],
 		})
 	})
+}
+
+// InjectFileRequest is the request body for the inject-file endpoint.
+type InjectFileRequest struct {
+	DestPath      string `json:"dest_path"`
+	ContentBase64 string `json:"content_base64"`
+}
+
+// InjectFile writes a base64-encoded file into the sandbox filesystem.
+// POST /api/sandbox/{id}/computer-use/inject-file
+func (h *ComputerUseHandler) InjectFile(w http.ResponseWriter, r *http.Request) {
+	sandboxID := r.PathValue("id")
+	req, ok := decodeReq[InjectFileRequest](w, r)
+	if !ok {
+		return
+	}
+	if req.DestPath == "" || req.ContentBase64 == "" {
+		JSONError(w, "dest_path and content_base64 are required", http.StatusBadRequest)
+		return
+	}
+	if h.manager == nil {
+		JSONError(w, "sandbox manager not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Decode and verify base64
+	decoded, err := base64.StdEncoding.DecodeString(req.ContentBase64)
+	if err != nil {
+		JSONError(w, fmt.Sprintf("invalid base64 content: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Write to sandbox via heredoc + base64 -d
+	cmd := []string{
+		"bash", "-c",
+		fmt.Sprintf("mkdir -p $(dirname '%s') && base64 -d > '%s' << 'B64EOF'\n%s\nB64EOF",
+			req.DestPath, req.DestPath, req.ContentBase64),
+	}
+	if _, err := h.manager.ExecInSandbox(r.Context(), sandboxID, cmd); err != nil {
+		JSONError(w, fmt.Sprintf("inject file failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"path":     req.DestPath,
+		"size":     len(decoded),
+		"injected": true,
+	})
+}
+
+// CredentialGet reads credentials from environment variables for a service.
+// GET /api/sandbox/{id}/computer-use/credential/{service}
+func (h *ComputerUseHandler) CredentialGet(w http.ResponseWriter, r *http.Request) {
+	service := r.PathValue("service")
+	if service == "" {
+		JSONError(w, "service is required", http.StatusBadRequest)
+		return
+	}
+
+	upperService := strings.ToUpper(service)
+	username := os.Getenv(upperService + "_USERNAME")
+	if username == "" {
+		username = os.Getenv(upperService + "_EMAIL")
+	}
+	password := os.Getenv(upperService + "_PASSWORD")
+	if password == "" {
+		password = os.Getenv(upperService + "_PASS")
+	}
+
+	if username == "" && password == "" {
+		JSONError(w, fmt.Sprintf("no credentials found for service %q. Set %s_USERNAME and %s_PASSWORD env vars",
+			service, upperService, upperService), http.StatusNotFound)
+		return
+	}
+
+	result := map[string]interface{}{
+		"service": service,
+		"found":   username != "",
+	}
+	if username != "" {
+		result["username"] = username
+	}
+	if password != "" {
+		result["password"] = password
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// UserProfile reads the user's profile from a JSON config file.
+// GET /api/sandbox/{id}/computer-use/user-profile
+func (h *ComputerUseHandler) UserProfile(w http.ResponseWriter, r *http.Request) {
+	paths := []string{
+		os.Getenv("PROFILE_PATH"),
+		filepath.Join(os.Getenv("HOME"), ".pux", "user_profile.json"),
+		filepath.Join(os.Getenv("PROJECT_ROOT"), "user_profile.json"),
+	}
+
+	var data []byte
+	var usedPath string
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if d, err := os.ReadFile(p); err == nil {
+			data = d
+			usedPath = p
+			break
+		}
+	}
+
+	if data == nil {
+		JSONError(w, "user profile not found. Create ~/.pux/user_profile.json", http.StatusNotFound)
+		return
+	}
+
+	var profile map[string]interface{}
+	if err := json.Unmarshal(data, &profile); err != nil {
+		JSONError(w, fmt.Sprintf("failed to parse profile: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	profile["_source"] = usedPath
+	profile["found"] = true
+	writeJSON(w, http.StatusOK, profile)
 }
 

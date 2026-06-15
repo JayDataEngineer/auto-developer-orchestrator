@@ -98,6 +98,15 @@ func (m *mockBrowserProvider) RestoreSession(ctx context.Context, sandboxID, pat
 	if m.restoreSessionFn != nil { return m.restoreSessionFn(ctx, sandboxID, path) }
 	return map[string]interface{}{"note": "restored", "path": path}, nil
 }
+func (m *mockBrowserProvider) InjectFile(ctx context.Context, sandboxID, destPath, contentBase64 string) (map[string]interface{}, error) {
+	return map[string]interface{}{"path": destPath, "size": len(contentBase64), "injected": true}, nil
+}
+func (m *mockBrowserProvider) CredentialGet(ctx context.Context, sandboxID, service string) (map[string]interface{}, error) {
+	return map[string]interface{}{"service": service, "username": "test@example.com", "password": "secret123", "found": true}, nil
+}
+func (m *mockBrowserProvider) UserProfile(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	return map[string]interface{}{"name": "Test User", "email": "test@example.com", "found": true}, nil
+}
 
 func defaultMockProvider() *mockBrowserProvider {
 	return &mockBrowserProvider{}
@@ -387,6 +396,7 @@ func TestRegisterBrowserTools_IncludesNewFormTools(t *testing.T) {
 		"get_storage", "set_storage", "clear_storage",
 		"evaluate_js", "read_page", "download_file",
 		"select_option", "upload_file", "save_session", "restore_session",
+		"inject_file", "credential_get", "user_profile",
 	}
 	for _, name := range expected {
 		if !names[name] {
@@ -429,6 +439,9 @@ func TestAllBrowserProviderTools_NamesInOrder(t *testing.T) {
 		"upload_file",
 		"save_session",
 		"restore_session",
+		"inject_file",
+		"credential_get",
+		"user_profile",
 	}
 	testutil.AssertToolNames(t, tools, expected)
 }

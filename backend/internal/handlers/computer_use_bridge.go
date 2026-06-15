@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -454,4 +456,109 @@ func (b *ComputerUseBridge) RestoreSession(ctx context.Context, sandboxID, path 
 		result["errors"] = errors
 	}
 	return result, nil
+}
+
+// ── Inject File ──
+
+// InjectFile writes base64-encoded content to a file in the sandbox.
+func (b *ComputerUseBridge) InjectFile(ctx context.Context, sandboxID, destPath, contentBase64 string) (map[string]interface{}, error) {
+	if b.CU.manager == nil {
+		return nil, fmt.Errorf("sandbox manager not available")
+	}
+
+	// Create parent directory and decode base64 to destination file.
+	// Base64 only contains [A-Za-z0-9+/=] so heredoc delimiters are safe.
+	_, err := b.CU.manager.ExecInSandbox(ctx, sandboxID, []string{
+		"bash", "-c",
+		fmt.Sprintf("mkdir -p $(dirname '%s') && base64 -d > '%s' << 'B64EOF'\n%s\nB64EOF",
+			destPath, destPath, contentBase64),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("inject file: %w", err)
+	}
+
+	// Get file size for confirmation
+	sizeOutput, _ := b.CU.manager.ExecInSandbox(ctx, sandboxID, []string{
+		"bash", "-c", fmt.Sprintf("stat -c '%%s' '%s' 2>/dev/null || echo '0'", destPath),
+	})
+	fileSize := strings.TrimSpace(sizeOutput)
+
+	return map[string]interface{}{
+		"path":      destPath,
+		"injected":  true,
+		"size":      fileSize,
+	}, nil
+}
+
+// ── Credential Get ──
+
+// CredentialGet reads credentials from environment variables for a given service.
+func (b *ComputerUseBridge) CredentialGet(ctx context.Context, sandboxID, service string) (map[string]interface{}, error) {
+	upperService := strings.ToUpper(service)
+
+	// Try various env var naming conventions
+	username := os.Getenv(upperService + "_USERNAME")
+	if username == "" {
+		username = os.Getenv(upperService + "_EMAIL")
+	}
+	password := os.Getenv(upperService + "_PASSWORD")
+	if password == "" {
+		password = os.Getenv(upperService + "_PASS")
+	}
+
+	if username == "" && password == "" {
+		return nil, fmt.Errorf("no credentials found for service %q. Set %s_USERNAME and %s_PASSWORD environment variables",
+			service, upperService, upperService)
+	}
+
+	result := map[string]interface{}{
+		"service":  service,
+		"found":    username != "",
+	}
+	if username != "" {
+		result["username"] = username
+	}
+	if password != "" {
+		result["password"] = password
+	}
+	return result, nil
+}
+
+// ── User Profile ──
+
+// UserProfile reads the user's profile from a JSON config file.
+func (b *ComputerUseBridge) UserProfile(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
+	// Check multiple paths in priority order
+	paths := []string{
+		os.Getenv("PROFILE_PATH"),
+		filepath.Join(os.Getenv("HOME"), ".pux", "user_profile.json"),
+		filepath.Join(os.Getenv("PROJECT_ROOT"), "user_profile.json"),
+	}
+
+	var data []byte
+	var usedPath string
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if d, err := os.ReadFile(p); err == nil {
+			data = d
+			usedPath = p
+			break
+		}
+	}
+
+	if data == nil {
+		return nil, fmt.Errorf("user profile not found. Create ~/.pux/user_profile.json with your profile info")
+	}
+
+	var profile map[string]interface{}
+	if err := json.Unmarshal(data, &profile); err != nil {
+		return nil, fmt.Errorf("failed to parse profile from %s: %w", usedPath, err)
+	}
+
+	profile["_source"] = usedPath
+	profile["found"] = true
+
+	return profile, nil
 }
