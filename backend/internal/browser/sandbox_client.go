@@ -524,7 +524,7 @@ func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, t
 	escaped := strings.ReplaceAll(text, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
 	escaped = strings.ReplaceAll(escaped, "\n", `\n`)
-	typeJS := fmt.Sprintf(`(function(){ var el = document.querySelector('%s'); if(el){el.value='%s'; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); %s} })()`,
+	typeJS := fmt.Sprintf(`(function(){ var el = document.querySelector('%s'); if(el){el.value=''; el.value='%s'; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); %s} })()`,
 		selector, escaped,
 		func() string {
 			if submit {
@@ -669,6 +669,32 @@ func (sbc *SandboxBrowserClient) EvaluateJS(ctx context.Context, code string) (s
 		return raw, "string", nil
 	}
 	return parsed.R, parsed.T, nil
+}
+
+// UploadFile sets a file on an <input type="file"> element via CDP's DOM.setFileInputFiles.
+// This is the proper CDP method — far more reliable than JS-based approaches.
+// filePaths should be absolute paths inside the sandbox container (e.g., /sandbox/workspace/resume.pdf).
+func (sbc *SandboxBrowserClient) UploadFile(ctx context.Context, selector string, filePaths []string) (map[string]string, error) {
+	var result map[string]string
+	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
+		return chromedp.Run(actCtx,
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				return chromedp.SetUploadFiles(selector, filePaths, chromedp.NodeVisible).Do(ctx)
+			}),
+			// Dispatch change event so JS handlers know a file was uploaded
+			chromedp.Evaluate(fmt.Sprintf(`(function(){
+				var el = document.querySelector('%s');
+				if(el) el.dispatchEvent(new Event('change', {bubbles: true}));
+			})()`, selector), nil),
+		)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("upload file failed: %w", err)
+	}
+	result = map[string]string{
+		"uploaded": filePaths[0],
+	}
+	return result, nil
 }
 
 // ReadPage extracts structured content from the current page: title, URL, text,
