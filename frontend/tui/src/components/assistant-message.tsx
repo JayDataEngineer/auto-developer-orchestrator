@@ -205,7 +205,7 @@ export function AssistantMessage() {
 
 							// Expanded: full thinking text with label
 							return (
-								<Box marginBottom={1} flexDirection="column">
+								<Box marginBottom={1} paddingLeft={2} flexDirection="column">
 									<Text color={colors.textMuted}>{"\u25BC"} Thought</Text>
 									{rLines.map((line, i) => (
 										<Text key={i} color={colors.textMuted}>

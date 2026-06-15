@@ -210,6 +210,11 @@ function restoreAgentsFromHistory(data: StoredMessage[]) {
 					status: sa.status === "error" ? "error" : "complete",
 					startedAt: new Date(msg.createdAt).getTime(),
 					endedAt: new Date(msg.createdAt).getTime() + 1,
+					rounds: [{
+						thinking: sa.thinking,
+						toolCalls: toolCalls,
+						text: sa.text,
+					}],
 					toolCalls,
 					thinkingText: sa.thinking,
 					text: sa.text,
