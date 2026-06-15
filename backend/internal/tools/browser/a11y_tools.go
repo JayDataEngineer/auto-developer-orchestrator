@@ -389,6 +389,10 @@ func RegisterBrowserTools(tools []core.Tool, p BrowserProvider, sandboxID func()
 		NewEvaluateJSTool(p, sandboxID),
 		NewReadPageProviderTool(p, sandboxID),
 		NewDownloadFileTool(p, sandboxID),
+		NewSelectOptionTool(p, sandboxID),
+		NewUploadFileTool(p, sandboxID),
+		NewSaveSessionTool(p, sandboxID),
+		NewRestoreSessionTool(p, sandboxID),
 	)
 }
 

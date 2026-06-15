@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/tools/desktop"
@@ -281,4 +282,176 @@ func (b *ComputerUseBridge) ReadPage(ctx context.Context, sandboxID string) (map
 func (b *ComputerUseBridge) DownloadFile(ctx context.Context, sandboxID, url, path string) (map[string]interface{}, error) {
 	return callHandler(ctx, b.CU.DownloadFile, http.MethodPost, "/api/sandbox/{id}/computer-use/download",
 		map[string]interface{}{"url": url, "path": path}, sandboxID)
+}
+
+// SelectOption selects an option in a <select> dropdown by value or visible text.
+func (b *ComputerUseBridge) SelectOption(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error) {
+	selector, _ := req["selector"].(string)
+	if selector == "" {
+		selector = "select"
+	}
+	value, _ := req["value"].(string)
+	text, _ := req["text"].(string)
+
+	// Escape single quotes to prevent JS injection
+	escape := func(s string) string {
+		return strings.ReplaceAll(s, "'", "\\'")
+	}
+
+	// Build JS: set value by option value or visible text, dispatch change event
+	var js string
+	if value != "" {
+		escapedVal := escape(value)
+		js = fmt.Sprintf(`(function(){var s=document.querySelector('%s');if(!s)return{error:'select not found'};s.value='%s';if(!s.value)s.value='%s';s.dispatchEvent(new Event('change',{bubbles:true}));s.dispatchEvent(new Event('input',{bubbles:true}));return{selected:s.value,selectedIndex:s.selectedIndex}})()`,
+			selector, escapedVal, escapedVal)
+	} else {
+		// Find by visible text
+		escapedText := escape(text)
+		js = fmt.Sprintf(`(function(){var s=document.querySelector('%s');if(!s)return{error:'select not found'};for(var i=0;i<s.options.length;i++){if(s.options[i].textContent.trim()==='%s'){s.selectedIndex=i;s.dispatchEvent(new Event('change',{bubbles:true}));s.dispatchEvent(new Event('input',{bubbles:true}));return{selected:s.value,selectedIndex:i}}}return{error:'option not found: %s'}})()`,
+			selector, escapedText, escapedText)
+	}
+	return b.EvaluateJS(ctx, sandboxID, js)
+}
+
+// UploadFile uploads a file to an <input type="file"> element via CDP.
+// Uses DOM.setFileInputFiles which is the proper CDP method, far more reliable than JS.
+func (b *ComputerUseBridge) UploadFile(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error) {
+	filePath, _ := req["file_path"].(string)
+	selector, _ := req["selector"].(string)
+
+	if filePath == "" {
+		return nil, fmt.Errorf("file_path is required")
+	}
+
+	body := map[string]interface{}{
+		"file_path": filePath,
+	}
+	if selector != "" {
+		body["selector"] = selector
+	}
+
+	return callHandler(ctx, b.CU.UploadFile, http.MethodPost, "/api/sandbox/{id}/computer-use/upload-file", body, sandboxID)
+}
+
+// SaveSession saves cookies + localStorage to a file for persistence.
+// Writes directly to the sandbox container filesystem.
+func (b *ComputerUseBridge) SaveSession(ctx context.Context, sandboxID, path string) (map[string]interface{}, error) {
+	if b.CU.manager == nil {
+		return nil, fmt.Errorf("sandbox manager not available")
+	}
+
+	// Get cookies via handler
+	cookiesResult, err := b.GetCookies(ctx, sandboxID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get cookies: %w", err)
+	}
+
+	// Get localStorage via handler
+	storageResult, err := b.GetStorage(ctx, sandboxID)
+	if err != nil {
+		return nil, fmt.Errorf("get storage: %w", err)
+	}
+
+	// Build session JSON
+	session := map[string]interface{}{
+		"cookies":   cookiesResult,
+		"storage":   storageResult,
+		"savedAt":   time.Now().Format(time.RFC3339),
+		"sandboxID": sandboxID,
+	}
+	sessionJSON, _ := json.MarshalIndent(session, "", "  ")
+
+	// Write to file using sandbox manager
+	_, err = b.CU.manager.ExecInSandbox(ctx, sandboxID, []string{
+		"bash", "-c",
+		fmt.Sprintf(`cat > '%s' << 'SESSEOF'
+%s
+SESSEOF`, path, string(sessionJSON)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("write session file: %w", err)
+	}
+
+	return map[string]interface{}{
+		"session_path": path,
+		"saved":        true,
+		"savedAt":      session["savedAt"],
+	}, nil
+}
+
+// RestoreSession restores cookies + localStorage from a saved session file.
+// Reads the session file from the sandbox container and restores cookies/storage.
+func (b *ComputerUseBridge) RestoreSession(ctx context.Context, sandboxID, path string) (map[string]interface{}, error) {
+	if b.CU.manager == nil {
+		return nil, fmt.Errorf("sandbox manager not available")
+	}
+
+	// Read session file
+	output, err := b.CU.manager.ExecInSandbox(ctx, sandboxID, []string{
+		"bash", "-c",
+		fmt.Sprintf("cat '%s'", path),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read session file: %w", err)
+	}
+
+	// Parse session JSON
+	var session struct {
+		Cookies json.RawMessage `json:"cookies"`
+		Storage json.RawMessage `json:"storage"`
+	}
+	if err := json.Unmarshal([]byte(output), &session); err != nil {
+		return nil, fmt.Errorf("parse session file: %w (content: %.200s)", err, output)
+	}
+
+	restored := []string{}
+	errors := []string{}
+
+	// Restore cookies if present
+	if len(session.Cookies) > 0 && string(session.Cookies) != "null" {
+		var cookiesData map[string]interface{}
+		if err := json.Unmarshal(session.Cookies, &cookiesData); err == nil {
+			if cookiesList, ok := cookiesData["cookies"].([]interface{}); ok {
+				for _, c := range cookiesList {
+					if cookie, ok := c.(map[string]interface{}); ok {
+						_, err := b.SetCookie(ctx, sandboxID, cookie)
+						if err != nil {
+							errors = append(errors, fmt.Sprintf("cookie: %v", err))
+						} else {
+							if name, _ := cookie["name"].(string); name != "" {
+								restored = append(restored, "cookie:"+name)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Restore localStorage if present
+	if len(session.Storage) > 0 && string(session.Storage) != "null" {
+		var storageData map[string]interface{}
+		if err := json.Unmarshal(session.Storage, &storageData); err == nil {
+			if entries, ok := storageData["entries"].(map[string]interface{}); ok {
+				for key, value := range entries {
+					valStr, _ := value.(string)
+					_, err := b.SetStorage(ctx, sandboxID, key, valStr)
+					if err != nil {
+						errors = append(errors, fmt.Sprintf("storage:%s: %v", key, err))
+					} else {
+						restored = append(restored, "storage:"+key)
+					}
+				}
+			}
+		}
+	}
+
+	result := map[string]interface{}{
+		"restored": restored,
+		"count":    len(restored),
+	}
+	if len(errors) > 0 {
+		result["errors"] = errors
+	}
+	return result, nil
 }

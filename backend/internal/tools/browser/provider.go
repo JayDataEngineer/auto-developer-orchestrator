@@ -31,6 +31,14 @@ type BrowserProvider interface {
 	ReadPage(ctx context.Context, sandboxID string) (map[string]interface{}, error)
 	// DownloadFile downloads a file to the sandbox via curl.
 	DownloadFile(ctx context.Context, sandboxID, url, path string) (map[string]interface{}, error)
+	// SelectOption selects an option in a <select> dropdown.
+	SelectOption(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error)
+	// UploadFile uploads a file to an <input type="file"> element.
+	UploadFile(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error)
+	// SaveSession saves cookies + localStorage to a file for persistence.
+	SaveSession(ctx context.Context, sandboxID, path string) (map[string]interface{}, error)
+	// RestoreSession restores cookies + localStorage from a saved file.
+	RestoreSession(ctx context.Context, sandboxID, path string) (map[string]interface{}, error)
 }
 
 // SandboxEnsurer is an optional interface that BrowserProvider implementations
