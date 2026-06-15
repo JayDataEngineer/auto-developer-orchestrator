@@ -197,7 +197,7 @@ export function DelegateRenderer({
 				</Text>
 				{/* Agent output — full report */}
 				{agentText && agentText.trim() && (
-					<Box flexDirection="column">
+					<Box paddingLeft={2} flexDirection="column">
 						{agentText.trim().split("\n").map((line, i) =>
 							<Text key={i} color={colors.textMuted} wrap="wrap">
 								{line}
