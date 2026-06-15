@@ -365,6 +365,7 @@ func TestComputerUseHandlerRegisterRoutes(t *testing.T) {
 		{"POST", "/evaluate-js"},
 		{"GET", "/read-page"},
 		{"POST", "/download"},
+		{"POST", "/upload-file"},
 	}
 
 	if len(router.routes) != len(expectedRoutes) {

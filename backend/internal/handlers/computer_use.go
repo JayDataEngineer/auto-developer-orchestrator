@@ -66,6 +66,7 @@ func (h *ComputerUseHandler) RegisterRoutes(r interface {
 	r.Post("/evaluate-js", h.EvaluateJS)
 	r.Get("/read-page", h.ReadPage)
 	r.Post("/download", h.DownloadFile)
+	r.Post("/upload-file", h.UploadFile)
 }
 
 // Enable enables computer use mode on a sandbox: creates desktop mode (VNC + Chrome) + SandboxBrowserClient
@@ -1000,6 +1001,40 @@ func (h *ComputerUseHandler) DownloadFile(w http.ResponseWriter, r *http.Request
 		"size":        fileSize,
 		"url":         req.URL,
 		"http_status": statusCode,
+	})
+}
+
+// UploadFileRequest is the request body for the upload-file endpoint.
+type UploadFileRequest struct {
+	Selector string `json:"selector"`
+	FilePath string `json:"file_path"`
+}
+
+// UploadFile uploads a file to an <input type="file"> element via CDP.
+// POST /api/sandbox/{id}/computer-use/upload-file
+func (h *ComputerUseHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeReq[UploadFileRequest](w, r)
+	if !ok {
+		return
+	}
+	if req.FilePath == "" {
+		JSONError(w, "file_path is required", http.StatusBadRequest)
+		return
+	}
+	selector := req.Selector
+	if selector == "" {
+		selector = "input[type=file]"
+	}
+
+	h.withClient(w, r, func(client *browser.SandboxBrowserClient) {
+		result, err := client.UploadFile(r.Context(), selector, []string{req.FilePath})
+		if err != nil {
+			JSONError(w, fmt.Sprintf("upload file failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"uploaded": result["uploaded"],
+		})
 	})
 }
 
