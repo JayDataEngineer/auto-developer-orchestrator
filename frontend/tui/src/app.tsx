@@ -265,12 +265,7 @@ function ContentArea() {
 	// HITL decision dialog takes priority over everything
 	if (pendingDecision) {
 		return (
-			<Box
-				flexDirection="column"
-				justifyContent="flex-end"
-				paddingX={1}
-				flexGrow={1}
-			>
+			<Box flexDirection="column" paddingX={1}>
 				{pendingDecision.hint === "question" ? (
 					<QuestionDialog />
 				) : (
