@@ -414,13 +414,14 @@ function ThinkingBlock({ text, thinkWidth }: { text: string; thinkWidth: number 
 	const visible = lines.length > 8 ? lines.slice(-8) : lines;
 	const hidden = lines.length - visible.length;
 	return (
-		<Box marginTop={1} marginBottom={1} paddingLeft={2} flexDirection="column">
+		<Box marginTop={1} marginBottom={1} flexDirection="column">
+			<Text color={colors.textMuted}>{"\u25BC"} Thought</Text>
 			{hidden > 0 && (
-				<Text color={colors.textMuted}>{BLOCKQUOTE_BAR} ... {hidden} earlier lines</Text>
+				<Text color={colors.textMuted}>... {hidden} earlier lines</Text>
 			)}
 			{visible.map((line, i) => (
 				<Text key={i} color={colors.textMuted}>
-					{BLOCKQUOTE_BAR} {line}
+					{line}
 				</Text>
 			))}
 		</Box>
@@ -498,10 +499,11 @@ function TranscriptConversation({ transcript, cols }: { transcript: StoredMessag
 					}
 					if (thinkLines.length > 0) {
 						blocks.push(
-							<Box key={`think-${msg.id}`} marginBottom={1} paddingLeft={2} flexDirection="column">
+							<Box key={`think-${msg.id}`} marginBottom={1} flexDirection="column">
+								<Text color={colors.textMuted}>{"\u25BC"} Thought</Text>
 								{thinkLines.map((line, i) => (
 									<Text key={i} color={colors.textMuted}>
-										{BLOCKQUOTE_BAR} {line}
+										{line}
 									</Text>
 								))}
 							</Box>

@@ -197,10 +197,10 @@ export function DelegateRenderer({
 				</Text>
 				{/* Agent output — full report */}
 				{agentText && agentText.trim() && (
-					<Box paddingLeft={2} flexDirection="column">
+					<Box flexDirection="column">
 						{agentText.trim().split("\n").map((line, i) =>
 							<Text key={i} color={colors.textMuted} wrap="wrap">
-								{`${BLOCKQUOTE_BAR} ${line}`}
+								{line}
 							</Text>
 						)}
 					</Box>
@@ -248,7 +248,7 @@ export function DelegateRenderer({
 				const lastPara = paragraphs[paragraphs.length - 1] || rawThink;
 				return (
 					<Text color={colors.textMuted}>
-						{"  └ "}{BLOCKQUOTE_BAR} {trunc(lastPara.replace(/\n/g, " ").replace(/ +/g, " ").trim(), cols - 8)}
+						{"  └ "}{trunc(lastPara.replace(/\n/g, " ").replace(/ +/g, " ").trim(), cols - 6)}
 					</Text>
 				);
 			})()}

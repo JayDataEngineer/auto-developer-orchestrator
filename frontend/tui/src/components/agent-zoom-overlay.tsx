@@ -317,20 +317,20 @@ function buildTranscriptLines(
 			const thinkLines = msg.thinking.split("\n");
 			lines.push(
 				<Box key={`think-h-${msg.id}`} paddingLeft={1} marginTop={0}>
-					<Text dimColor italic>thinking...</Text>
+					<Text dimColor italic>Thought</Text>
 				</Box>
 			);
 			thinkLines.slice(0, 6).forEach((line, i) => {
 				lines.push(
 					<Box key={`think-${msg.id}-${i}`} paddingLeft={2}>
-						<Text dimColor>{BLOCKQUOTE_BAR} {line.slice(0, 80)}</Text>
+						<Text dimColor>{line.slice(0, 80)}</Text>
 					</Box>
 				);
 			});
 			if (thinkLines.length > 6) {
 				lines.push(
 					<Box key={`think-more-${msg.id}`} paddingLeft={2}>
-						<Text dimColor>{BLOCKQUOTE_BAR} ... ({thinkLines.length - 6} more lines)</Text>
+						<Text dimColor>... ({thinkLines.length - 6} more lines)</Text>
 					</Box>
 				);
 			}
