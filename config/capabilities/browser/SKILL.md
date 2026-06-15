@@ -4,6 +4,13 @@ A Chrome browser runs inside the sandbox, visible on VNC. All navigation and
 interaction happens through CDP (Chrome DevTools Protocol) — the same Chrome
 window you see on screen is the one the tools control.
 
+The browser uses **stealth patches** (navigator.webdriver, plugins, languages,
+permissions, WebGL, hardwareConcurrency, deviceMemory, chrome.runtime) to
+avoid bot detection. These are injected via CDP's `Page.addScriptToEvaluateOnNewDocument`
+based on puppeteer-extra-plugin-stealth evasions. The stealth JavaScript source
+is in `backend/internal/browser/stealth.go` and can be updated when upstream
+evasions change.
+
 ## Tools
 
 ### browse_to

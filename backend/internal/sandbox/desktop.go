@@ -279,7 +279,7 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	_, err = m.execInContainer(ctx, containerName, []string{
 		"bash", "-c",
 		fmt.Sprintf("env DISPLAY=%s google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu "+
-			"--no-first-run --disable-extensions "+
+			"--no-first-run --disable-extensions --disable-blink-features=AutomationControlled "+
 			"--remote-debugging-port=%d --user-data-dir=/tmp/chrome-desktop-profile "+
 			"--window-size=1280,800 &>/tmp/chrome-desktop.log",
 			display, cdpPort),

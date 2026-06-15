@@ -355,7 +355,17 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 		chromedp.WithTargetID(target.ID(newTargetID)),
 	)
 
-	// Step 3: Navigate using chromedp (waits for page load event) then collect data.
+	// Step 3: Apply stealth evasions BEFORE navigation so they run on the very first document.
+	chromedp.Run(tabCtx, chromedp.ActionFunc(func(actCtx context.Context) error {
+		if _, err := page.AddScriptToEvaluateOnNewDocument(AllStealthScripts()).Do(actCtx); err != nil {
+			sbc.logger.Warn("stealth injection failed (non-fatal)", zap.Error(err))
+			return nil // non-fatal — navigation proceeds even if stealth fails
+		}
+		sbc.logger.Debug("stealth patches registered for new tab")
+		return nil
+	}))
+
+	// Step 4: Navigate using chromedp (waits for page load event) then collect data.
 	err = chromedp.Run(tabCtx,
 		network.Enable(),                      // required for GetCookies, SetCookie, etc.
 		chromedp.Navigate(url),
