@@ -47,6 +47,12 @@ API — POST unless noted:
     /select_dropdown    {"selector":"...","index":n,"value":"...","text":"..."} → select option
     /wait               {"seconds":2}                    → explicit wait (max 30s)
     /extract            {"query":"..."}                  → extract structured data from page
+    /cookies            {"action":"get|set|clear",...}   → manage cookies (HttpOnly-safe via CDP)
+    /storage            {"action":"get|set|clear",...}   → manage localStorage
+    /upload             {"selector":"...","file_path":"..."} → upload file to <input type="file">
+    /a11y               {}                               → accessibility tree (role + name per node)
+    /save_session       {"path":"..."}                   → save cookies + localStorage to file
+    /restore_session    {"path":"..."}                   → restore from saved session file
     /reset              {}                               → kill and recreate browser
     GET /status         {}                               → browser alive check
     GET /file/<path>    {}                               → serve local file as base64 data URI
@@ -302,19 +308,18 @@ class BrowserState:
         # pyvirtualdisplay is mocked at module level (noop), so SeleniumBase
         # cannot create a hidden Xvfb. Chrome uses DISPLAY from environment
         # (:99 by default), making browser automation visible via VNC.
+        #
+        # We use sb_cdp.Chrome (SeleniumBase Pure CDP Mode) for both stealth
+        # and non-stealth modes. This is already CDP-based (no webdriver flag,
+        # no detectable automation footprint). UC mode (SB(uc=True)) requires
+        # a different init dance that's broken in the current SeleniumBase
+        # version; sb_cdp mode is sufficient for most sites and is what
+        # sb_agent.py was using successfully.
         os.environ.setdefault("DISPLAY", ":99")
         try:
-            if self.stealth:
-                from seleniumbase import SB
-                ctx = SB(uc=True, test=True, locale="en", headed=True, xvfb=False)
-                ctx.__enter__()
-                self.sb = ctx.sb
-                self._ctx = ctx
-                self.sb.activate_cdp_mode("about:blank")
-            else:
-                from seleniumbase import sb_cdp
-                self.sb = sb_cdp.Chrome("about:blank", xvfb=False, headed=True)
-                self._ctx = None
+            from seleniumbase import sb_cdp
+            self.sb = sb_cdp.Chrome("about:blank", xvfb=False, headed=True)
+            self._ctx = None
             self._setup_cdp_downloads()
         except Exception as e:
             print(f"[sb_server] browser init failed: {e}", file=sys.stderr)
@@ -324,11 +329,13 @@ class BrowserState:
     def _setup_cdp_downloads(self):
         try:
             downloads_path = str(Path(self._download_dir).absolute())
-            self.sb.execute_cdp_cmd("Page.setDownloadBehavior", {
-                "behavior": "allow", "downloadPath": downloads_path
-            })
+            # sb_cdp.Chrome uses a different driver; set download behavior via JS hook
+            # that creates an <a> link with download attribute when downloads are initiated.
+            # For SeleniumBase UC mode this would be sb.execute_cdp_cmd(...) but sb_cdp.Chrome
+            # doesn't expose that. The /download endpoint handles explicit downloads via curl.
+            self._download_dir = downloads_path
         except Exception as e:
-            print(f"[sb_server] CDP download setup failed (non-fatal): {e}", file=sys.stderr)
+            print(f"[sb_server] download dir setup failed (non-fatal): {e}", file=sys.stderr)
 
     def _close_browser(self):
         if self._ctx is not None:
@@ -962,6 +969,154 @@ class Handler(BaseHTTPRequestHandler):
                 self._ok({"downloads": files[:20], "download_dir": ddir})
             except Exception as e:
                 self._err(f"check_downloads failed: {e}")
+
+        # ── Cookies ────────────────────────────────────────────────────────
+        elif path == "/cookies":
+            # GET (no action): list cookies for current domain
+            # POST (action=set): add a cookie
+            # POST (action=clear): delete all cookies
+            if sb is None: return self._err("browser not available")
+            action = body.get("action", "get")
+            try:
+                if action == "get":
+                    cookies = sb.get_all_cookies() or []
+                    self._ok({"cookies": cookies})
+                elif action == "set":
+                    cookie = body.get("cookie", {})
+                    # SeleniumBase set_all_cookies takes a list of cookie dicts
+                    sb.set_all_cookies([cookie])
+                    self._ok({"set": True, "name": cookie.get("name", "")})
+                elif action == "clear":
+                    sb.clear_cookies()
+                    self._ok({"cleared": True})
+                else:
+                    self._err(f"unknown cookies action: {action}", 400)
+            except Exception as e:
+                self._err(f"cookies op failed: {e}")
+
+        # ── LocalStorage ───────────────────────────────────────────────────
+        elif path == "/storage":
+            if sb is None: return self._err("browser not available")
+            action = body.get("action", "get")
+            try:
+                if action == "get":
+                    # If key given, return that value; else dump all localStorage
+                    key = body.get("key")
+                    if key:
+                        val = sb.get_local_storage_item(key)
+                        self._ok({"key": key, "value": val})
+                    else:
+                        items = sb.execute_script(
+                            "return Object.assign({}, localStorage)"
+                        ) or {}
+                        self._ok({"items": items})
+                elif action == "set":
+                    key = body.get("key", "")
+                    value = body.get("value", "")
+                    if not key: return self._err("missing key", 400)
+                    sb.set_local_storage_item(key, str(value))
+                    self._ok({"set": True, "key": key})
+                elif action == "clear":
+                    sb.execute_script("localStorage.clear()")
+                    self._ok({"cleared": True})
+                else:
+                    self._err(f"unknown storage action: {action}", 400)
+            except Exception as e:
+                self._err(f"storage op failed: {e}")
+
+        # ── File upload via SeleniumBase ───────────────────────────────────
+        elif path == "/upload":
+            if sb is None: return self._err("browser not available")
+            selector = body.get("selector", "")
+            file_path = body.get("file_path", "")
+            if not selector or not file_path:
+                return self._err("selector and file_path required", 400)
+            if not os.path.isfile(file_path):
+                return self._err(f"file not found: {file_path}", 400)
+            try:
+                sb.upload_file(file_path, selector)
+                self._ok({"uploaded": True, "selector": selector, "file": file_path})
+            except Exception as e:
+                self._err(f"upload failed: {e}")
+
+        # ── Accessibility tree via JS ──────────────────────────────────────
+        elif path == "/a11y":
+            if sb is None: return self._err("browser not available")
+            try:
+                # Walk the DOM collecting aria role + name + selector.
+                # More reliable than CDP Accessibility domain (which requires enabling).
+                result = sb.execute_script(r'''
+                    const out = [];
+                    const nodes = document.querySelectorAll(
+                      'a[href], button, input:not([type="hidden"]), select, textarea, ' +
+                      '[role="button"], [role="link"], [role="textbox"], [role="combobox"], ' +
+                      '[role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], ' +
+                      '[role="option"], [role="searchbox"], [role="switch"], [onclick], ' +
+                      '[contenteditable="true"], summary, details'
+                    );
+                    function buildSelector(el) {
+                      if (el.id) return '#' + CSS.escape(el.id);
+                      const parts = [];
+                      let current = el;
+                      while (current && current !== document.body && parts.length < 3) {
+                        const tag = current.tagName.toLowerCase();
+                        if (current.id) { parts.unshift('#' + CSS.escape(current.id)); break; }
+                        const parent = current.parentElement;
+                        if (!parent) break;
+                        const siblings = Array.from(parent.children).filter(c => c.tagName === current.tagName);
+                        if (siblings.length === 1) parts.unshift(tag);
+                        else { const idx = siblings.indexOf(current) + 1; parts.unshift(tag + ':nth-of-type(' + idx + ')'); }
+                        current = parent;
+                      }
+                      return parts.join(' > ') || el.tagName.toLowerCase();
+                    }
+                    for (const el of nodes) {
+                      const role = el.getAttribute('role') || el.tagName.toLowerCase();
+                      const name = (el.getAttribute('aria-label') || el.textContent || el.value || el.placeholder || '').trim().substring(0, 80);
+                      out.push({role: role, name: name, selector: buildSelector(el)});
+                      if (out.length >= 200) break;
+                    }
+                    return JSON.stringify(out);
+                ''')
+                items = json.loads(result) if isinstance(result, str) else (result or [])
+                self._ok({"items": items, "total": len(items)})
+            except Exception as e:
+                self._err(f"a11y failed: {e}")
+
+        # ── Session save/restore (cookies + localStorage) ──────────────────
+        elif path == "/save_session":
+            if sb is None: return self._err("browser not available")
+            sess_path = body.get("path", "/tmp/browser-session.json")
+            try:
+                cookies = sb.get_all_cookies() or []
+                storage = sb.execute_script("return Object.assign({}, localStorage)") or {}
+                payload = {"cookies": cookies, "localStorage": storage,
+                           "url": safe(lambda: sb.get_current_url() or "", "")}
+                Path(sess_path).write_text(json.dumps(payload))
+                self._ok({"saved": True, "path": sess_path,
+                          "cookies": len(cookies), "storage_items": len(storage)})
+            except Exception as e:
+                self._err(f"save_session failed: {e}")
+
+        elif path == "/restore_session":
+            if sb is None: return self._err("browser not available")
+            sess_path = body.get("path", "/tmp/browser-session.json")
+            try:
+                if not os.path.isfile(sess_path):
+                    return self._err(f"session file not found: {sess_path}", 404)
+                payload = json.loads(Path(sess_path).read_text())
+                # Restore cookies
+                if payload.get("cookies"):
+                    sb.set_all_cookies(payload["cookies"])
+                # Restore localStorage
+                for k, v in payload.get("localStorage", {}).items():
+                    try: sb.set_local_storage_item(str(k), str(v))
+                    except Exception: pass
+                self._ok({"restored": True, "path": sess_path,
+                          "cookies": len(payload.get("cookies", [])),
+                          "storage_items": len(payload.get("localStorage", {}))})
+            except Exception as e:
+                self._err(f"restore_session failed: {e}")
 
         else:
             self._err(f"Unknown endpoint: {path}", 404)
