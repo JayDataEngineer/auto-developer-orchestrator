@@ -30,9 +30,9 @@ func (p *MCPProvider) IsAvailable(ctx context.Context) bool {
 }
 
 func (p *MCPProvider) Describe(ctx context.Context, img ImageInput) (Description, error) {
-	imageURL, err := p.imageServer.Save(img.Base64, img.MIMEType)
+	imageURL, err := uploadToMCP(ctx, p.client, img.Base64, img.MIMEType)
 	if err != nil {
-		return Description{}, fmt.Errorf("save temp image: %w", err)
+		return Description{}, fmt.Errorf("upload to MCP: %w", err)
 	}
 
 	prompt := img.Prompt
@@ -74,53 +74,31 @@ func extractMCPText(raw string) string {
 	return raw
 }
 
-// Phi4Provider describes images via the MCP phi4_vision tool on the media server.
-// Uses Gemma-based phi4 model for high-quality scene understanding — better for
-// browser/desktop screenshots where you need layout, text, and button understanding.
-type Phi4Provider struct {
-	client      *mcp.MultiClient
-	imageServer *ImageServer
-}
-
-// NewPhi4Provider creates a vision provider backed by the phi4_vision MCP tool.
-func NewPhi4Provider(client *mcp.MultiClient, imageServer *ImageServer) *Phi4Provider {
-	return &Phi4Provider{client: client, imageServer: imageServer}
-}
-
-func (p *Phi4Provider) Name() string { return "phi4" }
-
-func (p *Phi4Provider) IsAvailable(ctx context.Context) bool {
-	if p.client == nil {
-		return false
-	}
-	return p.client.HasTool("phi4_vision")
-}
-
-func (p *Phi4Provider) Describe(ctx context.Context, img ImageInput) (Description, error) {
-	imageURL, err := p.imageServer.Save(img.Base64, img.MIMEType)
-	if err != nil {
-		return Description{}, fmt.Errorf("save temp image: %w", err)
-	}
-
-	prompt := img.Prompt
-	if prompt == "" {
-		prompt = "Describe what you see in this image in detail."
-	}
-
-	result, err := p.client.CallTool(ctx, "phi4_vision", map[string]any{
-		"imageSource": imageURL,
-		"prompt":      prompt,
+// uploadToMCP uploads base64 image data to the MCP server via its "upload" tool
+// and returns a local URL (accessible from the MCP server itself) for use with
+// vision tools like ground_ui and analyze_image.
+// This avoids needing the MCP server to reach back to our Tailscale IP.
+func uploadToMCP(ctx context.Context, client *mcp.MultiClient, b64, mimeType string) (string, error) {
+	result, err := client.CallTool(ctx, "upload", map[string]any{
+		"data":      b64,
+		"mime_type": mimeType,
 	})
 	if err != nil {
-		return Description{}, fmt.Errorf("MCP phi4_vision: %w", err)
+		return "", fmt.Errorf("MCP upload: %w", err)
 	}
 
-	text := extractMCPText(result)
-
-	return Description{
-		Text:     text,
-		Provider: "phi4",
-	}, nil
+	// Parse JSON result to extract the URL
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(result), &obj); err == nil {
+		if url, ok := obj["url"].(string); ok && url != "" {
+			return url, nil
+		}
+	}
+	// Some MCP servers return plain URL text
+	if result != "" {
+		return result, nil
+	}
+	return "", fmt.Errorf("upload returned no URL")
 }
 
 // NativeProvider wraps the browser.VisionClient for llama.cpp-based vision.

@@ -257,7 +257,7 @@ func (b *ComputerUseBridge) ClearStorage(ctx context.Context, sandboxID string) 
 // BrowserScreenshot takes a CDP screenshot of the current browser page.
 // Returns image data as {"image_b64": "..."} for the vision pipeline.
 func (b *ComputerUseBridge) BrowserScreenshot(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
-	result, err := callHandler(ctx, b.CU.Screenshot, http.MethodGet, "/api/sandbox/{id}/computer-use/screenshot?format=json", nil, sandboxID)
+	result, err := callHandler(ctx, b.CU.Screenshot, http.MethodGet, "/api/sandbox/{id}/computer-use/screenshot?describe=true&format=json", nil, sandboxID)
 	if err != nil {
 		return nil, err
 	}

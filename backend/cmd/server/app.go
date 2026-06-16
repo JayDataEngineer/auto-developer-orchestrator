@@ -274,7 +274,7 @@ func (a *App) initHandlers() {
 	visionClient := browser.NewVisionClient(visionURL, visionKey, modelCfg)
 
 	// Computer Use + X11
-	a.computerUseHandler = handlers.NewComputerUseHandler(sandboxMgr, visionClient, logger)
+	a.computerUseHandler = handlers.NewComputerUseHandler(sandboxMgr, visionClient, nil, nil, logger)
 	a.x11Handler = handlers.NewX11Handler(sandboxMgr, logger)
 	x11Handler := a.x11Handler
 
@@ -397,6 +397,10 @@ func (a *App) initMCP() {
 		}
 		a.puxHandler.SetMCPMulti(mcpMulti)
 		a.puxHandler.SetMCPClient(webResearchClient)
+		if a.computerUseHandler != nil {
+			a.computerUseHandler.SetMCPMulti(mcpMulti, a.imageServer)
+			a.logger.Info("ComputerUseHandler wired with MCP vision")
+		}
 		a.logger.Info("MCP servers ready")
 	} else {
 		a.logger.Info("MCP servers not available — search/scrape will use browser fallback")

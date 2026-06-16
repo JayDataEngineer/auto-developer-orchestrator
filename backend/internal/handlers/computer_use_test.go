@@ -20,7 +20,7 @@ func TestEnableReturns200Immediately(t *testing.T) {
 	// This prevents ERR_NETWORK_CHANGED from aborting the response body stream.
 	mgr := sandbox.NewTestManager()
 	logger := zap.NewNop()
-	handler := handlers.NewComputerUseHandler(mgr, nil, logger)
+	handler := handlers.NewComputerUseHandler(mgr, nil, nil, nil, logger)
 
 	req := httptest.NewRequest("POST", "/api/sandbox/sb-1/computer-use/enable", nil)
 	req.SetPathValue("id", "sb-1")
@@ -54,7 +54,7 @@ func TestEnableReturns200Immediately(t *testing.T) {
 
 func TestEnableMissingSandboxID(t *testing.T) {
 	mgr := sandbox.NewTestManager()
-	handler := handlers.NewComputerUseHandler(mgr, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(mgr, nil, nil, nil, zap.NewNop())
 
 	req := httptest.NewRequest("POST", "/api/sandbox//computer-use/enable", nil)
 	req.SetPathValue("id", "")
@@ -68,7 +68,7 @@ func TestEnableMissingSandboxID(t *testing.T) {
 }
 
 func TestEnableNilManager(t *testing.T) {
-	handler := handlers.NewComputerUseHandler(nil, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(nil, nil, nil, nil, zap.NewNop())
 
 	req := httptest.NewRequest("POST", "/api/sandbox/sb-1/computer-use/enable", nil)
 	req.SetPathValue("id", "sb-1")
@@ -109,7 +109,7 @@ func TestEnableFastPathAlreadyConnected(t *testing.T) {
 		ViewerURL: "/sandbox/sb-fast/viewer",
 	})
 
-	handler := handlers.NewComputerUseHandler(mgr, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(mgr, nil, nil, nil, zap.NewNop())
 
 	// First enable — creates a client (will fail to connect but that's fine,
 	// we need the client in the map). Use ExportGetClient to inject one.
@@ -137,7 +137,7 @@ func TestEnableResponseSentBeforeBackgroundSetup(t *testing.T) {
 	// Verify that the HTTP response is complete before any Docker operations start.
 	// The Enable handler sends the response body and THEN starts backgroundSetup.
 	mgr := sandbox.NewTestManager()
-	handler := handlers.NewComputerUseHandler(mgr, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(mgr, nil, nil, nil, zap.NewNop())
 
 	start := time.Now()
 	req := httptest.NewRequest("POST", "/api/sandbox/sb-timing/computer-use/enable", nil)
@@ -160,7 +160,7 @@ func TestEnableResponseSentBeforeBackgroundSetup(t *testing.T) {
 // ─── Disable Handler ─────────────────────────────────────────
 
 func TestDisableReturns200(t *testing.T) {
-	handler := handlers.NewComputerUseHandler(nil, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(nil, nil, nil, nil, zap.NewNop())
 
 	req := httptest.NewRequest("POST", "/api/sandbox/sb-1/computer-use/disable", nil)
 	req.SetPathValue("id", "sb-1")
@@ -184,7 +184,7 @@ func TestDisableCleansUpClient(t *testing.T) {
 	// After disable, Screenshot should return 404.
 	// Use a nil manager so no background goroutines are spawned by Enable
 	// and getClient auto-reconnect returns early.
-	handler := handlers.NewComputerUseHandler(nil, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(nil, nil, nil, nil, zap.NewNop())
 
 	// Disable should succeed even without an active client
 	req := httptest.NewRequest("POST", "/api/sandbox/sb-cleanup/computer-use/disable", nil)
@@ -210,7 +210,7 @@ func TestDisableCleansUpClient(t *testing.T) {
 // ─── Screenshot/Snapshot/Act Handler Error Tests ─────────────
 
 func TestScreenshotNotEnabled(t *testing.T) {
-	handler := handlers.NewComputerUseHandler(nil, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(nil, nil, nil, nil, zap.NewNop())
 
 	req := httptest.NewRequest("GET", "/api/sandbox/sb-none/computer-use/screenshot?describe=true", nil)
 	req.SetPathValue("id", "sb-none")
@@ -224,7 +224,7 @@ func TestScreenshotNotEnabled(t *testing.T) {
 }
 
 func TestSnapshotNotEnabled(t *testing.T) {
-	handler := handlers.NewComputerUseHandler(nil, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(nil, nil, nil, nil, zap.NewNop())
 
 	req := httptest.NewRequest("GET", "/api/sandbox/sb-none/computer-use/snapshot", nil)
 	req.SetPathValue("id", "sb-none")
@@ -238,7 +238,7 @@ func TestSnapshotNotEnabled(t *testing.T) {
 }
 
 func TestActInvalidJSON(t *testing.T) {
-	handler := handlers.NewComputerUseHandler(nil, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(nil, nil, nil, nil, zap.NewNop())
 
 	req := httptest.NewRequest("POST", "/api/sandbox/sb-1/computer-use/act", bytes.NewBufferString("{bad"))
 	req.SetPathValue("id", "sb-1")
@@ -256,7 +256,7 @@ func TestActUnknownAction(t *testing.T) {
 	// When there IS a client but unknown action, it should 400.
 	// Test both paths.
 	t.Run("no client - returns 404", func(t *testing.T) {
-		handler := handlers.NewComputerUseHandler(nil, nil, zap.NewNop())
+		handler := handlers.NewComputerUseHandler(nil, nil, nil, nil, zap.NewNop())
 
 		body, _ := json.Marshal(handlers.ActRequest{Action: "teleport"})
 		req := httptest.NewRequest("POST", "/api/sandbox/sb-1/computer-use/act", bytes.NewReader(body))
@@ -340,7 +340,7 @@ func TestActRequestFieldParsing(t *testing.T) {
 // ─── RegisterRoutes ──────────────────────────────────────────
 
 func TestComputerUseHandlerRegisterRoutes(t *testing.T) {
-	handler := handlers.NewComputerUseHandler(nil, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(nil, nil, nil, nil, zap.NewNop())
 
 	router := &mockRouter{}
 	handler.RegisterRoutes(router)
@@ -388,7 +388,7 @@ func TestComputerUseHandlerRegisterRoutes(t *testing.T) {
 // ─── Shutdown ────────────────────────────────────────────────
 
 func TestComputerUseShutdown(t *testing.T) {
-	handler := handlers.NewComputerUseHandler(nil, nil, zap.NewNop())
+	handler := handlers.NewComputerUseHandler(nil, nil, nil, nil, zap.NewNop())
 	handler.Shutdown() // should not panic
 }
 

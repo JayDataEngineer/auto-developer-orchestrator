@@ -45,7 +45,7 @@ func NewClient(prefix, endpoint string, logger *zap.Logger) *Client {
 		prefix:   prefix,
 		endpoint: endpoint,
 		httpClient: &http.Client{
-			Timeout: 90 * time.Second, // MCP research can be slow (search + scrape)
+			Timeout: 300 * time.Second, // MCP tools can be slow (AI vision models, search, scrape)
 		},
 		logger: logger,
 		sem:    make(chan struct{}, 2), // max 2 concurrent MCP requests
