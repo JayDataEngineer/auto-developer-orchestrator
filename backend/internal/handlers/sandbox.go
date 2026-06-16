@@ -85,6 +85,25 @@ func (h *SandboxHandler) GetSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-recover DesktopSession if sandbox is running but session was lost
+	// (e.g., server restart). The container already has Chrome/VNC running
+	// via supervisord — we just need to recreate the in-memory session.
+	if s.DesktopSession == nil && s.Status == sandbox.StatusRunning {
+		h.logger.Info("auto-recovering desktop session for sandbox info",
+			zap.String("sandbox_id", id),
+			zap.String("mode", string(s.Mode)),
+		)
+		if autoSession, autoErr := h.manager.EnableBrowserMode(r.Context(), id); autoErr != nil {
+			h.logger.Warn("auto-recover browser mode failed",
+				zap.Error(autoErr),
+				zap.String("sandbox_id", id),
+			)
+			// Don't fail the request — return sandbox info without session
+		} else {
+			s.DesktopSession = autoSession
+		}
+	}
+
 	writeJSON(w, http.StatusOK, s)
 }
 
@@ -276,8 +295,21 @@ func (h *SandboxHandler) GetDesktopViewer(w http.ResponseWriter, r *http.Request
 
 	session, err := h.manager.GetDesktopSession(id)
 	if err != nil {
-		JSONError(w, err.Error(), http.StatusNotFound)
-		return
+		// No session yet — auto-enable browser mode so the viewer works
+		// without the frontend having to call /enable first.
+		// This handles server restarts where DesktopSession is lost from memory.
+		h.logger.Info("auto-enabling browser mode for viewer", zap.String("sandbox_id", id))
+		if autoSession, autoErr := h.manager.EnableBrowserMode(r.Context(), id); autoErr != nil {
+			// Try desktop mode as fallback
+			if autoSession2, autoErr2 := h.manager.EnableDesktopMode(r.Context(), id); autoErr2 != nil {
+				JSONError(w, fmt.Sprintf("auto-enable failed: %v / %v", autoErr, autoErr2), http.StatusNotFound)
+				return
+			} else {
+				session = autoSession2
+			}
+		} else {
+			session = autoSession
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
