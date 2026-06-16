@@ -13,6 +13,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/agents/orchestrator"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
+	browsertools "github.com/auto-developer-orchestrator/backend/internal/tools/browser"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	"github.com/auto-developer-orchestrator/backend/internal/git"
 	"github.com/auto-developer-orchestrator/backend/internal/hooks"
@@ -46,6 +47,7 @@ type PuxHandler struct {
 	openrouterEngine *llamaeng.LLMClient // optional OpenRouter cloud provider
 	sandboxMgr   *sandbox.Manager
 	cuBridge     *ComputerUseBridge // bridges llama executor to CU/X11 handlers
+	sbBridge     *SeleniumBaseBridge // alternative: SeleniumBase (sb_server.py) — lazy-init
 	mcpClient    *mcp.Client        // optional: MCP research server for search/scrape
 	mcpMulti     *mcp.MultiClient   // optional: multi-server MCP routing
 
@@ -142,6 +144,24 @@ func (h *PuxHandler) SetSandboxOnly(sandboxMgr *sandbox.Manager, cu *ComputerUse
 	if cu != nil {
 		h.cuBridge = &ComputerUseBridge{CU: cu, X11: x11, Log: h.log}
 	}
+}
+
+// browserProvider returns the active BrowserProvider based on BROWSER_BACKEND env var.
+// "seleniumbase" -> route through Python sb_server.py (stealthy, ~50ms overhead/call)
+// "chromedp" (default) -> drive Chrome directly via Go chromedp (faster, less stealth)
+// The SeleniumBase bridge is wired with the same MCP client so find_element_visual
+// still works (it calls ground_ui directly regardless of backend).
+func (h *PuxHandler) browserProvider() browsertools.BrowserProvider {
+	if os.Getenv("BROWSER_BACKEND") == "seleniumbase" {
+		if h.sbBridge == nil {
+			h.sbBridge = NewSeleniumBaseBridge(h.log)
+			if h.mcpMulti != nil {
+				h.sbBridge.SetMCP(h.mcpMulti)
+			}
+		}
+		return h.sbBridge
+	}
+	return h.cuBridge
 }
 
 // SetSSHManager wires the SSH session manager for remote filesystem browsing.

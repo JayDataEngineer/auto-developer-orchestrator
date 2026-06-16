@@ -26,23 +26,24 @@ import (
 //   - Supports file uploads via file chooser interception
 //   - Manages cookies including HttpOnly (via SeleniumBase get_all_cookies)
 //
-// The bridge talks to sb_server.py via the sandbox HTTP interface: each call
-// becomes a docker exec + curl. Per-call overhead is ~50-100ms but agent steps
-// take 1-3s anyway, so the latency is invisible in practice.
+// The bridge talks to sb_server.py via the orchestrator's /api/sandbox/{id}/sb/*
+// proxy endpoint, which docker-execs curl inside the sandbox. Per-call overhead
+// is ~50-100ms but agent steps take 1-3s anyway, so the latency is invisible.
+//
+// Bridge is stateless w.r.t. sandbox: the sandboxID parameter on each method
+// is forwarded into the proxy URL.
 type SeleniumBaseBridge struct {
-	sandboxID string
-	logger    *zap.Logger
-	http      *http.Client
+	logger *zap.Logger
+	http   *http.Client
 	// mcpMulti is set by SetMCP and is used only by FindElementVisual (which
 	// calls ground_ui directly — it never reaches sb_server.py).
 	mcpMulti *mcp.MultiClient
 }
 
-// NewSeleniumBaseBridge creates a bridge that talks to sb_server.py in sandboxID.
-func NewSeleniumBaseBridge(sandboxID string, logger *zap.Logger) *SeleniumBaseBridge {
+// NewSeleniumBaseBridge creates a stateless bridge.
+func NewSeleniumBaseBridge(logger *zap.Logger) *SeleniumBaseBridge {
 	return &SeleniumBaseBridge{
-		sandboxID: sandboxID,
-		logger:    logger,
+		logger: logger,
 		http: &http.Client{
 			Timeout: 60 * time.Second,
 		},
@@ -57,8 +58,7 @@ func (b *SeleniumBaseBridge) EnsureReady(ctx context.Context, sandboxID string) 
 	if sandboxID == "" {
 		return fmt.Errorf("seleniumbase: no sandbox available")
 	}
-	b.sandboxID = sandboxID
-	resp, err := b.call(ctx, "GET", "/status", nil)
+	resp, err := b.call(ctx, sandboxID, "GET", "/status", nil)
 	if err != nil {
 		return fmt.Errorf("seleniumbase not reachable: %w", err)
 	}
@@ -75,12 +75,12 @@ func (b *SeleniumBaseBridge) EnsureReady(ctx context.Context, sandboxID string) 
 // 127.0.0.1:9876 inside the container without port publishing.
 //
 // body may be nil for GET requests.
-func (b *SeleniumBaseBridge) call(ctx context.Context, method, path string, body map[string]interface{}) (map[string]interface{}, error) {
+func (b *SeleniumBaseBridge) call(ctx context.Context, sandboxID, method, path string, body map[string]interface{}) (map[string]interface{}, error) {
 	// Build the orchestrator URL that proxies to sb_server.py inside the sandbox.
 	// If the orchestrator doesn't have that proxy, fall back to direct localhost
 	// (works when the orchestrator runs INSIDE the sandbox, e.g., for tests).
 	urls := []string{
-		"http://localhost:3847/api/sandbox/" + b.sandboxID + "/sb" + path,
+		"http://localhost:3847/api/sandbox/" + sandboxID + "/sb" + path,
 		"http://127.0.0.1:9876" + path,
 	}
 
@@ -131,7 +131,7 @@ func (b *SeleniumBaseBridge) call(ctx context.Context, method, path string, body
 
 // Navigate calls /navigate and returns the page data + element map.
 func (b *SeleniumBaseBridge) Navigate(ctx context.Context, sandboxID string, url string) (map[string]interface{}, error) {
-	resp, err := b.call(ctx, "POST", "/navigate", map[string]interface{}{"url": url})
+	resp, err := b.call(ctx, sandboxID, "POST", "/navigate", map[string]interface{}{"url": url})
 	if err != nil {
 		return nil, err
 	}
@@ -144,10 +144,10 @@ func (b *SeleniumBaseBridge) Navigate(ctx context.Context, sandboxID string, url
 // shape as ComputerUseBridge.FindElement (role, name, label, text, selector).
 func (b *SeleniumBaseBridge) FindElement(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error) {
 	// First refresh the labeler so /a11y results are current
-	if _, err := b.call(ctx, "POST", "/label", nil); err != nil {
+	if _, err := b.call(ctx, sandboxID, "POST", "/label", nil); err != nil {
 		return nil, err
 	}
-	a11y, err := b.call(ctx, "POST", "/a11y", nil)
+	a11y, err := b.call(ctx, sandboxID, "POST", "/a11y", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +170,7 @@ func (b *SeleniumBaseBridge) FindElement(ctx context.Context, sandboxID string, 
 	case "":
 		// find-only
 	case "click":
-		clickResp, err := b.call(ctx, "POST", "/click", map[string]interface{}{"selector": selector})
+		clickResp, err := b.call(ctx, sandboxID, "POST", "/click", map[string]interface{}{"selector": selector})
 		if err != nil {
 			return out, err
 		}
@@ -178,7 +178,7 @@ func (b *SeleniumBaseBridge) FindElement(ctx context.Context, sandboxID string, 
 	case "type":
 		text, _ := req["type_text"].(string)
 		submit, _ := req["submit"].(bool)
-		typeResp, err := b.call(ctx, "POST", "/type", map[string]interface{}{
+		typeResp, err := b.call(ctx, sandboxID, "POST", "/type", map[string]interface{}{
 			"selector": selector,
 			"text":     text,
 			"submit":   submit,
@@ -205,11 +205,11 @@ func (b *SeleniumBaseBridge) FindElementVisual(ctx context.Context, sandboxID st
 		return nil, fmt.Errorf("find_element_visual: MCP ground_ui not available")
 	}
 	// Take a screenshot via sb_server for the vision model
-	if _, err := b.call(ctx, "POST", "/screenshot", map[string]interface{}{"path": "/tmp/sb_visual.png"}); err != nil {
+	if _, err := b.call(ctx, sandboxID, "POST", "/screenshot", map[string]interface{}{"path": "/tmp/sb_visual.png"}); err != nil {
 		return nil, fmt.Errorf("find_element_visual: screenshot: %w", err)
 	}
 	// Read the file via /file/ endpoint and base64-encode
-	fileResp, err := b.call(ctx, "GET", "/file//tmp/sb_visual.png", nil)
+	fileResp, err := b.call(ctx, sandboxID, "GET", "/file//tmp/sb_visual.png", nil)
 	if err != nil {
 		return nil, fmt.Errorf("find_element_visual: read screenshot: %w", err)
 	}
@@ -261,7 +261,7 @@ func (b *SeleniumBaseBridge) FindElementVisual(ctx context.Context, sandboxID st
 		if x == 0 && y == 0 {
 			return coords, fmt.Errorf("find_element_visual: refusing to click (0,0)")
 		}
-		clickResp, err := b.call(ctx, "POST", "/evaluate", map[string]interface{}{
+		clickResp, err := b.call(ctx, sandboxID, "POST", "/evaluate", map[string]interface{}{
 			"code": fmt.Sprintf(`document.elementFromPoint(%f,%f) && document.elementFromPoint(%f,%f).click()`, x, y, x, y),
 		})
 		if err != nil {
@@ -276,46 +276,46 @@ func (b *SeleniumBaseBridge) FindElementVisual(ctx context.Context, sandboxID st
 
 // A11ySnapshot returns the accessibility tree.
 func (b *SeleniumBaseBridge) A11ySnapshot(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
-	return b.call(ctx, "POST", "/a11y", nil)
+	return b.call(ctx, sandboxID, "POST", "/a11y", nil)
 }
 
 // GetCookies returns all browser cookies.
 func (b *SeleniumBaseBridge) GetCookies(ctx context.Context, sandboxID string, urls []string) (map[string]interface{}, error) {
-	return b.call(ctx, "POST", "/cookies", map[string]interface{}{"action": "get"})
+	return b.call(ctx, sandboxID, "POST", "/cookies", map[string]interface{}{"action": "get"})
 }
 
 // SetCookie sets a cookie.
 func (b *SeleniumBaseBridge) SetCookie(ctx context.Context, sandboxID string, cookie map[string]interface{}) (map[string]interface{}, error) {
-	return b.call(ctx, "POST", "/cookies", map[string]interface{}{"action": "set", "cookie": cookie})
+	return b.call(ctx, sandboxID, "POST", "/cookies", map[string]interface{}{"action": "set", "cookie": cookie})
 }
 
 // ClearCookies clears all cookies.
 func (b *SeleniumBaseBridge) ClearCookies(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
-	return b.call(ctx, "POST", "/cookies", map[string]interface{}{"action": "clear"})
+	return b.call(ctx, sandboxID, "POST", "/cookies", map[string]interface{}{"action": "clear"})
 }
 
 // GetStorage returns localStorage.
 func (b *SeleniumBaseBridge) GetStorage(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
-	return b.call(ctx, "POST", "/storage", map[string]interface{}{"action": "get"})
+	return b.call(ctx, sandboxID, "POST", "/storage", map[string]interface{}{"action": "get"})
 }
 
 // SetStorage sets a localStorage item.
 func (b *SeleniumBaseBridge) SetStorage(ctx context.Context, sandboxID string, key, value string) (map[string]interface{}, error) {
-	return b.call(ctx, "POST", "/storage", map[string]interface{}{"action": "set", "key": key, "value": value})
+	return b.call(ctx, sandboxID, "POST", "/storage", map[string]interface{}{"action": "set", "key": key, "value": value})
 }
 
 // ClearStorage clears localStorage.
 func (b *SeleniumBaseBridge) ClearStorage(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
-	return b.call(ctx, "POST", "/storage", map[string]interface{}{"action": "clear"})
+	return b.call(ctx, sandboxID, "POST", "/storage", map[string]interface{}{"action": "clear"})
 }
 
 // BrowserScreenshot takes a screenshot.
 func (b *SeleniumBaseBridge) BrowserScreenshot(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
 	// Save to file, then read via /file/ to get base64
-	if _, err := b.call(ctx, "POST", "/screenshot", map[string]interface{}{"path": "/tmp/sb_shot.png"}); err != nil {
+	if _, err := b.call(ctx, sandboxID, "POST", "/screenshot", map[string]interface{}{"path": "/tmp/sb_shot.png"}); err != nil {
 		return nil, err
 	}
-	fileResp, err := b.call(ctx, "GET", "/file//tmp/sb_shot.png", nil)
+	fileResp, err := b.call(ctx, sandboxID, "GET", "/file//tmp/sb_shot.png", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -332,12 +332,12 @@ func (b *SeleniumBaseBridge) BrowserScreenshot(ctx context.Context, sandboxID st
 
 // EvaluateJS executes JavaScript in the browser.
 func (b *SeleniumBaseBridge) EvaluateJS(ctx context.Context, sandboxID, code string) (map[string]interface{}, error) {
-	return b.call(ctx, "POST", "/evaluate", map[string]interface{}{"code": code})
+	return b.call(ctx, sandboxID, "POST", "/evaluate", map[string]interface{}{"code": code})
 }
 
 // ReadPage extracts structured page content.
 func (b *SeleniumBaseBridge) ReadPage(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
-	resp, err := b.call(ctx, "POST", "/read", nil)
+	resp, err := b.call(ctx, sandboxID, "POST", "/read", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +346,7 @@ func (b *SeleniumBaseBridge) ReadPage(ctx context.Context, sandboxID string) (ma
 
 // DownloadFile downloads a URL to the sandbox via curl.
 func (b *SeleniumBaseBridge) DownloadFile(ctx context.Context, sandboxID, url, path string) (map[string]interface{}, error) {
-	return b.call(ctx, "POST", "/download", map[string]interface{}{"url": url, "path": path})
+	return b.call(ctx, sandboxID, "POST", "/download", map[string]interface{}{"url": url, "path": path})
 }
 
 // SelectOption selects an option in a <select> dropdown.
@@ -365,7 +365,7 @@ func (b *SeleniumBaseBridge) SelectOption(ctx context.Context, sandboxID string,
 	if text != "" {
 		body["text"] = text
 	}
-	resp, err := b.call(ctx, "POST", "/select_dropdown", body)
+	resp, err := b.call(ctx, sandboxID, "POST", "/select_dropdown", body)
 	if err != nil {
 		return out, err
 	}
@@ -380,7 +380,7 @@ func (b *SeleniumBaseBridge) UploadFile(ctx context.Context, sandboxID string, r
 	if selector == "" || filePath == "" {
 		return nil, fmt.Errorf("upload_file: selector and file_path required")
 	}
-	return b.call(ctx, "POST", "/upload", map[string]interface{}{
+	return b.call(ctx, sandboxID, "POST", "/upload", map[string]interface{}{
 		"selector":  selector,
 		"file_path": filePath,
 	})
@@ -391,7 +391,7 @@ func (b *SeleniumBaseBridge) SaveSession(ctx context.Context, sandboxID, path st
 	if path == "" {
 		path = "/tmp/browser-session.json"
 	}
-	return b.call(ctx, "POST", "/save_session", map[string]interface{}{"path": path})
+	return b.call(ctx, sandboxID, "POST", "/save_session", map[string]interface{}{"path": path})
 }
 
 // RestoreSession restores cookies + localStorage from a file.
@@ -399,7 +399,7 @@ func (b *SeleniumBaseBridge) RestoreSession(ctx context.Context, sandboxID, path
 	if path == "" {
 		path = "/tmp/browser-session.json"
 	}
-	return b.call(ctx, "POST", "/restore_session", map[string]interface{}{"path": path})
+	return b.call(ctx, sandboxID, "POST", "/restore_session", map[string]interface{}{"path": path})
 }
 
 // InjectFile writes base64 content into the sandbox filesystem.

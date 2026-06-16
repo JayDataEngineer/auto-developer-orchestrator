@@ -230,8 +230,8 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		TranscriptDB:    h.db,
 		Project:         req.Project,
 		AgentID:         req.Project + ":" + req.AgentId, // composite key for scratch note persistence
-		BrowserProvider: h.cuBridge, // wire accessibility/cookie/storage tools to employees
-		DesktopProvider: h.cuBridge, // wire desktop screenshot/click/type/key tools to employees
+		BrowserProvider: h.browserProvider(), // chromedp (default) or seleniumbase (env-var selectable)
+		DesktopProvider: h.cuBridge, // desktop tools always go through ComputerUseBridge (X11)
 		ToolPerms:       h.toolPerms, // wire per-tool permission checks
 		BashRules:       h.bashRules, // wire user-defined bash command rules
 		SandboxOnly:     req.SandboxOnly, // scheduled jobs: restrict to bash/file ops only
