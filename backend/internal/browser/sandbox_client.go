@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -89,6 +90,13 @@ type SandboxBrowserClient struct {
 	// Frame streamer for continuous visual monitoring
 	streamer *framestream.Streamer
 
+	// SeleniumBase mode: when set, all methods delegate to sb_server.py
+	// instead of driving Chrome via chromedp. The sbBaseURL is the
+	// orchestrator's SBProxy endpoint for this sandbox, e.g.
+	// "http://localhost:3847/api/sandbox/{id}/sb".
+	sbBaseURL string
+	sbHTTP    *http.Client
+
 	mu sync.RWMutex
 }
 
@@ -117,9 +125,69 @@ func NewSandboxBrowserClient(cdpPort int, hostname string, logger *zap.Logger) (
 	}, nil
 }
 
+// SetSBProxy enables SeleniumBase mode. When set, all subsequent browser
+// operations route through sb_server.py via the given SBProxy URL instead
+// of chromedp. The URL should include the sandbox ID, e.g.:
+// "http://localhost:3847/api/sandbox/test-sb-1/sb"
+func (sbc *SandboxBrowserClient) SetSBProxy(baseURL string) {
+	sbc.sbBaseURL = baseURL
+	sbc.sbHTTP = &http.Client{Timeout: 90 * time.Second}
+}
+
+// sbCall dispatches an HTTP request to sb_server.py via the orchestrator's
+// SBProxy endpoint. Only used when sb mode is enabled.
+func (sbc *SandboxBrowserClient) sbCall(ctx context.Context, method, path string, reqBody map[string]any) (map[string]interface{}, error) {
+	if sbc.sbHTTP == nil {
+		return nil, fmt.Errorf("SeleniumBase: SetSBProxy not called")
+	}
+	url := sbc.sbBaseURL + path
+	var bodyReader io.Reader
+	if reqBody != nil {
+		b, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("SeleniumBase marshal: %w", err)
+		}
+		bodyReader = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("SeleniumBase req: %w", err)
+	}
+	if reqBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := sbc.sbHTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("SeleniumBase %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("SeleniumBase decode %s: %w (raw: %s)", path, err, truncateStrSH(string(raw), 200))
+	}
+	if ok, _ := parsed["ok"].(bool); !ok {
+		errMsg, _ := parsed["error"].(string)
+		return parsed, fmt.Errorf("SeleniumBase %s: %s", path, errMsg)
+	}
+	return parsed, nil
+}
+
+func truncateStrSH(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
 // Connect verifies Chrome CDP is reachable, creates the allocator, and
 // finds or creates a persistent tab. The tab is the one the user sees in VNC.
 func (sbc *SandboxBrowserClient) Connect(ctx context.Context) error {
+	// In SeleniumBase mode, the browser is already managed by sb_server.
+	// No need to connect via CDP directly.
+	if sbc.sbBaseURL != "" {
+		return nil
+	}
 	sbc.mu.Lock()
 	defer sbc.mu.Unlock()
 
@@ -222,6 +290,11 @@ func (sbc *SandboxBrowserClient) runOnActiveTab(timeout time.Duration, fn func(c
 
 // Screenshot takes a screenshot via CDP and returns raw PNG bytes.
 func (sbc *SandboxBrowserClient) Screenshot(ctx context.Context) ([]byte, error) {
+	// SeleniumBase mode
+	if sbc.sbBaseURL != "" {
+		return sbc.sbScreenshot(ctx)
+	}
+
 	var screenshotBuf []byte
 	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
@@ -244,6 +317,7 @@ func (sbc *SandboxBrowserClient) Screenshot(ctx context.Context) ([]byte, error)
 // ScreenshotRaw captures raw PNG bytes via CDP without updating cached state.
 // Used by the frame streamer for lightweight background captures.
 func (sbc *SandboxBrowserClient) ScreenshotRaw(ctx context.Context) ([]byte, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbScreenshot(ctx) }
 	var buf []byte
 	err := sbc.runOnActiveTab(10*time.Second, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx, chromedp.ActionFunc(func(ctx context.Context) error {
@@ -301,6 +375,7 @@ func (sbc *SandboxBrowserClient) GetStreamer() *framestream.Streamer {
 // Creates a new Chrome tab for the navigation and keeps it alive for subsequent actions.
 // Also enriches results with accessibility tree elements when available.
 func (sbc *SandboxBrowserClient) Navigate(ctx context.Context, url string) (*PageInfo, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbNavigate(ctx, url) }
 	info, err := retry.DoWithResult(ctx, retry.Short, func() (*PageInfo, error) {
 		info, err := sbc.navigateInner(ctx, url)
 		if err != nil {
@@ -442,6 +517,7 @@ func (sbc *SandboxBrowserClient) navigateInner(ctx context.Context, url string) 
 
 // Click clicks an element by its label ID.
 func (sbc *SandboxBrowserClient) Click(ctx context.Context, elementID int) (*PageInfo, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbClick(ctx, elementID) }
 	return retry.DoWithResult(ctx, retry.Short, func() (*PageInfo, error) {
 		info, err := sbc.clickInner(ctx, elementID)
 		if err != nil {
@@ -550,6 +626,7 @@ func (sbc *SandboxBrowserClient) ClickXY(ctx context.Context, x, y float64) (*Pa
 
 // Type types text into an element by its label ID.
 func (sbc *SandboxBrowserClient) Type(ctx context.Context, elementID int, text string, submit bool) (*PageInfo, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbType(ctx, elementID, text, submit) }
 	return retry.DoWithResult(ctx, retry.Short, func() (*PageInfo, error) {
 		info, err := sbc.typeInner(ctx, elementID, text, submit)
 		if err != nil {
@@ -628,6 +705,7 @@ func (sbc *SandboxBrowserClient) typeInner(ctx context.Context, elementID int, t
 
 // Scroll scrolls the page in a direction.
 func (sbc *SandboxBrowserClient) Scroll(ctx context.Context, direction string, amount int) (*PageInfo, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbScroll(ctx, direction, amount) }
 	return retry.DoWithResult(ctx, retry.Short, func() (*PageInfo, error) {
 		info, err := sbc.scrollInner(ctx, direction, amount)
 		if err != nil {
@@ -704,6 +782,7 @@ const readPageJS = `
 // EvaluateJS executes arbitrary JavaScript in the active browser tab and returns
 // the stringified result and its JS type.
 func (sbc *SandboxBrowserClient) EvaluateJS(ctx context.Context, code string) (string, string, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbEvaluate(ctx, code) }
 	wrapped := fmt.Sprintf(
 		`(function(){ var __r = %s; return JSON.stringify({r: String(__r), t: typeof __r}); })()`,
 		code,
@@ -731,6 +810,7 @@ func (sbc *SandboxBrowserClient) EvaluateJS(ctx context.Context, code string) (s
 // This is the proper CDP method — far more reliable than JS-based approaches.
 // filePaths should be absolute paths inside the sandbox container (e.g., /sandbox/workspace/resume.pdf).
 func (sbc *SandboxBrowserClient) UploadFile(ctx context.Context, selector string, filePaths []string) (map[string]string, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbUpload(ctx, selector, filePaths) }
 	var result map[string]string
 	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx,
@@ -756,6 +836,7 @@ func (sbc *SandboxBrowserClient) UploadFile(ctx context.Context, selector string
 // ReadPage extracts structured content from the current page: title, URL, text,
 // images (src + alt), and links (text + url).
 func (sbc *SandboxBrowserClient) ReadPage(ctx context.Context) (*PageData, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbReadPage(ctx) }
 	var raw string
 	err := sbc.runOnActiveTab(defaultTimeout, func(actCtx context.Context) error {
 		return chromedp.Run(actCtx, chromedp.Evaluate(readPageJS, &raw))
@@ -773,6 +854,7 @@ func (sbc *SandboxBrowserClient) ReadPage(ctx context.Context) (*PageData, error
 
 // GetSnapshot returns cached URL, title, and elements.
 func (sbc *SandboxBrowserClient) GetSnapshot() (*PageInfo, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbGetSnapshot(), nil }
 	sbc.mu.RLock()
 	defer sbc.mu.RUnlock()
 
@@ -898,6 +980,9 @@ func (sbc *SandboxBrowserClient) closeStaleTabs(ctx context.Context, currentTabC
 func (sbc *SandboxBrowserClient) IsConnected() bool {
 	sbc.mu.RLock()
 	defer sbc.mu.RUnlock()
+	if sbc.sbBaseURL != "" {
+		return true
+	}
 	return sbc.allocator != nil && sbc.persistentTargetID != ""
 }
 

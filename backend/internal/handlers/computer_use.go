@@ -313,12 +313,20 @@ func (h *ComputerUseHandler) setupHostChrome(ctx context.Context, sandboxID stri
 		return fmt.Errorf("create client: %w", err)
 	}
 
-	// Connect via CDP
-	cfg := retry.Long
-	if err := retry.Do(ctx, cfg, func() error {
-		return client.Connect(ctx)
-	}); err != nil {
-		return fmt.Errorf("CDP connect: %w", err)
+	// In SeleniumBase mode, skip CDP — all operations go through sb_server.py.
+	// The browser is already running inside the sandbox (managed by supervisord).
+	if os.Getenv("BROWSER_BACKEND") == "seleniumbase" || os.Getenv("BROWSER_BACKEND") == "" {
+		sbURL := fmt.Sprintf("http://localhost:3847/api/sandbox/%s/sb", sandboxID)
+		client.SetSBProxy(sbURL)
+		h.logger.Info("SeleniumBase mode: routing through sb_server.py", zap.String("url", sbURL))
+	} else {
+		// Connect via CDP
+		cfg := retry.Long
+		if err := retry.Do(ctx, cfg, func() error {
+			return client.Connect(ctx)
+		}); err != nil {
+			return fmt.Errorf("CDP connect: %w", err)
+		}
 	}
 
 	h.mu.Lock()
@@ -661,6 +669,13 @@ func (h *ComputerUseHandler) getOrCreateClient(sandboxID string, cdpPort int) (*
 	client, err := browser.NewSandboxBrowserClient(cdpPort, containerIP, h.logger)
 	if err != nil {
 		return nil, err
+	}
+
+	// SeleniumBase mode: route through sb_server.py instead of CDP
+	backend := os.Getenv("BROWSER_BACKEND")
+	if backend == "seleniumbase" || backend == "" {
+		sbURL := fmt.Sprintf("http://localhost:3847/api/sandbox/%s/sb", sandboxID)
+		client.SetSBProxy(sbURL)
 	}
 
 	h.clients[sandboxID] = client
