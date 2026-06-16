@@ -712,6 +712,9 @@ func (a *App) buildRouter(
 			r.Route("/{id}/computer-use", func(r chi.Router) {
 				a.computerUseHandler.RegisterRoutes(r)
 			})
+			// SeleniumBase proxy — bridge.SBProxy forwards to sb_server.py:9876 inside the sandbox.
+			// Method-agnostic so the bridge can call any sb_server endpoint.
+			r.HandleFunc("/{id}/sb/*", a.sandboxHandler.SBProxy)
 			r.Route("/{id}/x11", func(r chi.Router) {
 				a.x11Handler.RegisterRoutes(r)
 			})

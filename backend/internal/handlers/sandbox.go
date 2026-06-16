@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -133,6 +134,66 @@ func (h *SandboxHandler) ExecCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"output": output})
+}
+
+// SBProxy forwards an HTTP request to sb_server.py (SeleniumBase) running
+// inside the sandbox on localhost:9876. The bridge uses this to talk to
+// SeleniumBase without publishing port 9876.
+//
+// The path after /sb is forwarded verbatim. The method is preserved.
+// Body is passed through base64-encoded (avoids shell escaping).
+//
+// Examples:
+//   GET  /api/sandbox/{id}/sb/status
+//   POST /api/sandbox/{id}/sb/navigate   {"url":"https://example.com"}
+//   POST /api/sandbox/{id}/sb/click      {"selector":"#login"}
+func (h *SandboxHandler) SBProxy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sbPath := r.PathValue("rest")
+	if sbPath == "" {
+		sbPath = strings.TrimPrefix(r.URL.Path, "/api/sandbox/"+id+"/sb")
+	}
+	if !strings.HasPrefix(sbPath, "/") {
+		sbPath = "/" + sbPath
+	}
+
+	body, _ := io.ReadAll(r.Body)
+	method := r.Method
+	if method == "" {
+		method = "GET"
+	}
+
+	var args []string
+	if len(body) > 0 {
+		// Encode body as base64, decode inside sandbox, send via curl.
+		// Avoids all shell-escaping issues.
+		b64 := base64.StdEncoding.EncodeToString(body)
+		args = []string{"bash", "-c",
+			fmt.Sprintf("echo %s | base64 -d | curl -sS -X %s -m 60 "+
+				"-H 'Content-Type: application/json' --data-binary @- "+
+				"http://127.0.0.1:9876%s", b64, method, sbPath)}
+	} else {
+		args = []string{"bash", "-c",
+			fmt.Sprintf("curl -sS -X %s -m 60 http://127.0.0.1:9876%s", method, sbPath)}
+	}
+
+	output, err := h.manager.ExecInSandbox(r.Context(), id, args)
+	if err != nil {
+		JSONError(w, fmt.Sprintf("sb proxy: %v (output: %s)", err, truncateStr(output, 300)),
+			http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, output)
+}
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // EnableBrowserModeRequest is the request body for enabling browser mode
