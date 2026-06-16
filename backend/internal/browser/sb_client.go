@@ -52,6 +52,15 @@ func (sbc *SandboxBrowserClient) sbRefreshCache(ctx context.Context) {
 			sbc.lastURL = u
 		}
 	}
+	// Extract viewport dimensions from page_stats (needed by mouse resolver)
+	if ps, ok := readResp["page_stats"].(map[string]any); ok {
+		if vw := int(numToFloat(ps["viewport_w"])); vw > 0 {
+			sbc.lastVW = vw
+		}
+		if vh := int(numToFloat(ps["viewport_h"])); vh > 0 {
+			sbc.lastVH = vh
+		}
+	}
 	// Try element_map from /read first (some sb_server versions include it)
 	if em, ok := readResp["element_map"].([]any); ok && len(em) > 0 {
 		sbc.lastElements = sbParseElements(em)
@@ -107,11 +116,8 @@ func (sbc *SandboxBrowserClient) sbNavigate(ctx context.Context, url string) (*P
 			}
 		}
 	}
-	// Cache screenshot
-	// Also ensure lastURL/lastTitle are set (sbRefreshCache may not be atomic
-	// with sbScreenshot for downstream Snapshot callers)
-	sbc.lastURL = info.URL
-	sbc.lastTitle = info.Title
+	// Cache screenshot (sbRefreshCache inside sbScreenshot updates
+	// URL/Title/Elements/Viewport under lock)
 	shotBytes, err2 := sbc.sbScreenshot(ctx)
 	if err2 == nil {
 		sbc.mu.Lock()

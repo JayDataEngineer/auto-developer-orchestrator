@@ -311,18 +311,45 @@ class BrowserState:
         #
         # We use sb_cdp.Chrome (SeleniumBase Pure CDP Mode) for both stealth
         # and non-stealth modes. This is already CDP-based (no webdriver flag,
-        # no detectable automation footprint). UC mode (SB(uc=True)) requires
-        # a different init dance that's broken in the current SeleniumBase
-        # version; sb_cdp mode is sufficient for most sites and is what
-        # sb_agent.py was using successfully.
+        # no detectable automation footprint).
+        #
+        # ── Single Chrome instance ──────────────────────────────────────────
+        # The sandbox container runs ONE Chrome via supervisord (PID 43, CDP
+        # port 9222). sb_server ATTACHES to that Chrome instead of launching a
+        # separate one (sb_cdp.Chrome supports this via host+port parameters).
+        # This ensures:
+        #   1. VNC shows the browser the agent is using (same X display :99)
+        #   2. No orphan Chrome processes on restart (sb_server disconnects,
+        #      Chrome keeps running, sb_server reconnects next time)
+        #   3. EnableBrowserMode (port 9222 check) keeps working
+        #
+        # Stray Chrome processes from previous sb_server versions (which use
+        # user data dir /tmp/uc_*) are killed here so only ONE browser window
+        # appears on the VNC screen.
         os.environ.setdefault("DISPLAY", ":99")
+        import subprocess as _sp
+        import time as _t
+        for _pat in ("google-chrome", "chromium-browser", "chromium"):
+            try:
+                _sp.run(
+                    ["pkill", "-9", "-f", "%s.*--user-data-dir=/tmp/uc_" % _pat],
+                    capture_output=True, timeout=5,
+                )
+            except Exception:
+                pass
+        _t.sleep(0.5)
+
         try:
             from seleniumbase import sb_cdp
-            self.sb = sb_cdp.Chrome("about:blank", xvfb=False, headed=True)
+            # Attach to the supervisord Chrome (port 9222) instead of launching
+            # a new instance. This way VNC shows the browser being automated.
+            self.sb = sb_cdp.Chrome("about:blank", host="127.0.0.1", port=9222)
             self._ctx = None
             self._setup_cdp_downloads()
         except Exception as e:
             print(f"[sb_server] browser init failed: {e}", file=sys.stderr)
+            import traceback as _tb
+            _tb.print_exc(file=sys.stderr)
             self.sb = None
             self._ctx = None
 
