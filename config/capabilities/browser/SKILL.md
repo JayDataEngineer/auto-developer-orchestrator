@@ -43,7 +43,36 @@ find_element({role: "button", name: "Search", action: "click"})
 find_element({selector: "a[href='/login']"})
 ```
 
-### snapshot_a11y
+### find_element_visual
+**Visual grounding fallback** — locate an element by natural-language description when DOM tools fail. Uses MCP `ground_ui` (ShowUI-2B vision model).
+
+**WHEN TO USE THIS (strict):**
+- Canvas / WebGL apps (Excalidraw, Figma, Google Maps, video players) — no DOM nodes exist inside the canvas
+- Image maps, SVG icons without text, screenshots embedded as images
+- Heavily obfuscated SPAs where class names are random and `find_element` can't match
+- After `find_element` / `snapshot_a11y` / `evaluate_js` returned nothing useful
+
+**WHEN NOT TO USE THIS:**
+- Ordinary HTML forms, buttons, inputs — use `find_element` instead
+- Pages where `snapshot_a11y` already lists the target
+- As a substitute for `browse_to` or `read_page`
+
+Parameters:
+- `query` (required) — specific description: "the red rectangle tool icon in the left toolbar", NOT just "button"
+- `action` (optional) — `"click"` to dispatch a CDP mouse click at the returned pixel coordinates
+
+Returns: `{x, y, width, height, x_norm, y_norm}` — viewport pixel coordinates plus normalized [0..1] values.
+
+Examples:
+```
+find_element_visual({query: "the green color picker swatch in the toolbar"})
+find_element_visual({query: "the play button on the video player", action: "click"})
+find_element_visual({query: "the canvas drawing area center"})
+```
+
+**FALLBACK PROTOCOL:** Try `find_element` → `snapshot_a11y` → `evaluate_js` first. If all return nothing useful, use `find_element_visual`. Do NOT guess coordinates.
+
+
 Get the accessibility tree of the current page — lists all interactive elements with
 their ARIA role, name, and CSS selector. Use this to discover what's on the page before
 interacting.

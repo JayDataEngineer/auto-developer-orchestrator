@@ -9,6 +9,10 @@ type BrowserProvider interface {
 	Navigate(ctx context.Context, sandboxID string, url string) (map[string]interface{}, error)
 	// FindElement finds an element by semantic criteria and optionally performs an action.
 	FindElement(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error)
+	// FindElementVisual locates an element via the MCP ground_ui vision tool
+	// for canvas/WebGL/obfuscated interfaces where DOM tools fail.
+	// Returns ground_ui's coordinate payload; optionally clicks the located coords.
+	FindElementVisual(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error)
 	// A11ySnapshot returns the accessibility tree.
 	A11ySnapshot(ctx context.Context, sandboxID string) (map[string]interface{}, error)
 	// GetCookies returns browser cookies.

@@ -111,6 +111,63 @@ func (t *FindElementTool) Execute(ctx context.Context, args map[string]any) (any
 	return t.provider.FindElement(ctx, sbID, req)
 }
 
+// ── Find Element Visual Tool (ground_ui fallback) ──
+
+// FindElementVisualTool wraps MCP ground_ui (ShowUI-2B) for canvas/WebGL apps
+// where DOM-based find_element cannot see the target. The agent calls this
+// when SoM/a11y/selector queries return nothing useful.
+type FindElementVisualTool struct {
+	provider  BrowserProvider
+	sandboxID func() string
+}
+
+func NewFindElementVisualTool(p BrowserProvider, sandboxID func() string) *FindElementVisualTool {
+	return &FindElementVisualTool{provider: p, sandboxID: sandboxID}
+}
+
+func (t *FindElementVisualTool) Name() string { return "find_element_visual" }
+
+func (t *FindElementVisualTool) Description() string {
+	return "Locate a UI element by visual description when DOM tools fail. " +
+		"Uses the MCP ground_ui tool (ShowUI-2B vision model) to find pixel coordinates. " +
+		"REQUIRED for canvas/WebGL apps (Excalidraw, Figma, maps), image maps, " +
+		"or obfuscated SPAs where elements have no DOM node. " +
+		"Do NOT use for ordinary HTML — use find_element or snapshot_a11y instead."
+}
+
+func (t *FindElementVisualTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"query": {
+				"type": "string",
+				"description": "Natural-language description of the visual target. Be specific: 'the red rectangle tool icon in the left toolbar', 'the blue Submit button in the modal', NOT just 'button'."
+			},
+			"action": {
+				"type": "string",
+				"description": "Optional: 'click' to dispatch a mouse click at the returned coordinates. Omit for find-only."
+			}
+		},
+		"required": ["query"]
+	}`)
+}
+
+func (t *FindElementVisualTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	sbID := t.sandboxID()
+	if err := ensureBrowserReady(ctx, t.provider, sbID, "find_element_visual"); err != nil {
+		return nil, err
+	}
+	query, _ := args["query"].(string)
+	if query == "" {
+		return nil, core.NewToolError("find_element_visual", "missing required parameter 'query'")
+	}
+	req := map[string]interface{}{"query": query}
+	if action, ok := args["action"].(string); ok && action != "" {
+		req["action"] = action
+	}
+	return t.provider.FindElementVisual(ctx, sbID, req)
+}
+
 // ── Browser Screenshot Tool ──
 
 type BrowserScreenshotTool struct {
@@ -379,6 +436,7 @@ func RegisterBrowserTools(tools []core.Tool, p BrowserProvider, sandboxID func()
 		NewNavigateProviderTool(p, sandboxID),
 		NewBrowserScreenshotTool(p, sandboxID),
 		NewFindElementTool(p, sandboxID),
+		NewFindElementVisualTool(p, sandboxID),
 		NewA11ySnapshotTool(p, sandboxID),
 		NewGetCookiesTool(p, sandboxID),
 		NewSetCookieTool(p, sandboxID),

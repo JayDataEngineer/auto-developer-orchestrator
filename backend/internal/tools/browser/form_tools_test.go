@@ -38,6 +38,9 @@ func (m *mockBrowserProvider) FindElement(ctx context.Context, sandboxID string,
 	if m.findElementFn != nil { return m.findElementFn(ctx, sandboxID, req) }
 	return map[string]interface{}{"status": "ok"}, nil
 }
+func (m *mockBrowserProvider) FindElementVisual(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error) {
+	return map[string]interface{}{"status": "ok", "x": 100.0, "y": 100.0}, nil
+}
 func (m *mockBrowserProvider) A11ySnapshot(ctx context.Context, sandboxID string) (map[string]interface{}, error) {
 	if m.a11ySnapshotFn != nil { return m.a11ySnapshotFn(ctx, sandboxID) }
 	return map[string]interface{}{"status": "ok"}, nil
@@ -425,6 +428,7 @@ func TestAllBrowserProviderTools_NamesInOrder(t *testing.T) {
 		"browse_to",
 		"browser_screenshot",
 		"find_element",
+		"find_element_visual",
 		"snapshot_a11y",
 		"get_cookies",
 		"set_cookie",

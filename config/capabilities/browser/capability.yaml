@@ -4,6 +4,7 @@ tools:
   - browse_to
   - browser_screenshot
   - find_element
+  - find_element_visual
   - snapshot_a11y
   - get_cookies
   - set_cookie
