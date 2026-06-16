@@ -1026,6 +1026,7 @@ func (sbc *SandboxBrowserClient) enrichA11yBackground(parentCtx context.Context,
 
 // GetA11ySnapshot returns the accessibility tree elements from cache or fetches them.
 func (sbc *SandboxBrowserClient) GetA11ySnapshot(ctx context.Context) (*A11ySnapshot, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbGetA11ySnapshot(ctx) }
 	sbc.mu.RLock()
 	cached := sbc.lastA11yElements
 	url := sbc.lastURL

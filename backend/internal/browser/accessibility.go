@@ -17,6 +17,7 @@ import (
 const a11yElementCap = 80
 
 func (sbc *SandboxBrowserClient) GetAccessibilityTree(ctx context.Context) (*A11ySnapshot, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbGetA11ySnapshot(ctx) }
 	var nodes []*accessibility.Node
 	var title, currentURL string
 	var selectors map[accessibility.NodeID]string
@@ -246,6 +247,7 @@ func resolveTag(role string) string {
 }
 
 func (sbc *SandboxBrowserClient) FindElement(ctx context.Context, criteria FindCriteria) (*FoundElement, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbFindElement(ctx, criteria) }
 	if criteria.Selector != "" {
 		return sbc.findBySelector(ctx, criteria)
 	}
@@ -352,6 +354,7 @@ func (sbc *SandboxBrowserClient) findBySelector(ctx context.Context, criteria Fi
 }
 
 func (sbc *SandboxBrowserClient) FindAndClick(ctx context.Context, criteria FindCriteria) (*PageInfo, *FoundElement, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbFindAndClick(ctx, criteria) }
 	found, err := sbc.FindElement(ctx, criteria)
 	if err != nil {
 		return nil, nil, err
@@ -361,6 +364,7 @@ func (sbc *SandboxBrowserClient) FindAndClick(ctx context.Context, criteria Find
 }
 
 func (sbc *SandboxBrowserClient) FindAndType(ctx context.Context, criteria FindCriteria, text string, submit bool) (*PageInfo, *FoundElement, error) {
+	if sbc.sbBaseURL != "" { return sbc.sbFindAndType(ctx, criteria, text, submit) }
 	found, err := sbc.FindElement(ctx, criteria)
 	if err != nil {
 		return nil, nil, err
