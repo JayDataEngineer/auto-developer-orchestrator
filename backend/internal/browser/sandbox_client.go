@@ -13,6 +13,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/framestream"
 	"github.com/auto-developer-orchestrator/backend/internal/retry"
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/target"
@@ -487,6 +488,51 @@ func (sbc *SandboxBrowserClient) clickInner(ctx context.Context, elementID int) 
 	})
 	if err != nil {
 		return nil, fmt.Errorf("click failed: %w", err)
+	}
+
+	elements, vw, vh := parseElements(elementsJSON)
+	imageURLs := parseImageURLs(imageURLsJSON)
+	sbc.updateState(currentURL, title, elements, screenshotBuf, vw, vh)
+
+	return &PageInfo{
+		URL:        currentURL,
+		Title:      title,
+		Elements:   elements,
+		ImageURLs:  imageURLs,
+		Screenshot: base64.StdEncoding.EncodeToString(screenshotBuf),
+	}, nil
+}
+
+// ClickXY clicks at viewport coordinates (x, y) using CDP Input.dispatchMouseEvent.
+// Used by find_element_visual after ground_ui returns pixel coordinates.
+// Useful for canvas/WebGL apps where no DOM element exists to click.
+func (sbc *SandboxBrowserClient) ClickXY(ctx context.Context, x, y float64) (*PageInfo, error) {
+	var title, currentURL string
+	var screenshotBuf []byte
+	var elementsJSON, imageURLsJSON string
+
+	err := sbc.runOnActiveTab(navigationTimeout, func(actCtx context.Context) error {
+		return chromedp.Run(actCtx,
+			input.DispatchMouseEvent(input.MousePressed, x, y).
+				WithButton(input.Left).
+				WithClickCount(1),
+			input.DispatchMouseEvent(input.MouseReleased, x, y).
+				WithButton(input.Left).
+				WithClickCount(1),
+			chromedp.Sleep(settleDelay),
+			chromedp.Title(&title),
+			chromedp.Location(&currentURL),
+			chromedp.Evaluate(labelerJS, &elementsJSON),
+			chromedp.Evaluate(imageExtractorJS, &imageURLsJSON),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				var err error
+				screenshotBuf, err = page.CaptureScreenshot().Do(ctx)
+				return err
+			}),
+		)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("click_xy failed: %w", err)
 	}
 
 	elements, vw, vh := parseElements(elementsJSON)
