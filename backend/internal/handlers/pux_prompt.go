@@ -310,10 +310,20 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	}
 	cfg.ExtraHooks = extraHooks
 
-	// Build vision fallback chain — always configured as fallback when native vision is
-	// unavailable or fails. Priority: phi4 (capable) → MCP Florence-2 (fast) → Native llama.cpp.
-	// The VisionAwareExecutor uses native image_url when EngineHasVision=true,
-	// and falls back to text description via this chain when false.
+	// Build vision fallback chain — only used as a last-resort fallback when the
+	// native engine lacks vision AND the agent needs to understand an image.
+	//
+	// Per the architecture decision (see describeScreenshot + find_element_visual docs):
+	// DOM tools (snapshot_a11y, evaluate_js, read_page) are the primary source of
+	// page understanding. MCP vision models are NOT used for description because:
+	//   - They add 30-90s latency per screenshot
+	//   - The agent already gets richer context from DOM tools
+	//   - ground_ui specifically returns one element's coordinates, not a description
+	//
+	// ground_ui is still exposed as a direct agent tool (find_element_visual) for
+	// canvas/WebGL cases — that path is wired through the browser capability, not here.
+	//
+	// Priority here: Native llama.cpp (fast if local) → MCP Florence-2 (slow fallback).
 	var visionChain *vision.FallbackChain
 	engineHasVision := false
 	if engine != nil {
@@ -322,17 +332,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	{
 		var providers []vision.Provider
 
-		// Tier 1: phi4_vision (high quality, good for browser/desktop screenshots)
-		if h.mcpMulti != nil && h.mcpMulti.HasTool("phi4_vision") {
-			providers = append(providers, vision.NewPhi4Provider(h.mcpMulti, h.imageServer))
-		}
-
-		// Tier 2: MCP Florence-2 (fast, structured descriptions)
-		if h.mcpMulti != nil && h.mcpMulti.HasTool("analyze_image") {
-			providers = append(providers, vision.NewMCPProvider(h.mcpMulti, h.imageServer))
-		}
-
-		// Tier 3: Native local llama.cpp vision (flexible, handles complex scenes)
+		// Tier 1: Native local llama.cpp vision (fast when running, no network hop)
 		if h.visionClient != nil {
 			vc := h.visionClient
 			providers = append(providers, vision.NewNativeProvider(vision.NativeProviderOpt{
@@ -347,6 +347,11 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 					return vc.CheckHealth(ctx)
 				},
 			}))
+		}
+
+		// Tier 2: MCP Florence-2 (slow, structured descriptions — last resort)
+		if h.mcpMulti != nil && h.mcpMulti.HasTool("analyze_image") {
+			providers = append(providers, vision.NewMCPProvider(h.mcpMulti, h.imageServer))
 		}
 
 		if len(providers) > 0 {

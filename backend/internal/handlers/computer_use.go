@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/browser"
+	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/retry"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
+	"github.com/auto-developer-orchestrator/backend/internal/vision"
 	"go.uber.org/zap"
 )
 
@@ -23,6 +25,8 @@ import (
 type ComputerUseHandler struct {
 	manager      *sandbox.Manager
 	visionClient *browser.VisionClient
+	mcpMulti     *mcp.MultiClient       // MCP tools (process, analyze_image, ground_ui)
+	imageServer  *vision.ImageServer    // serves temp images to MCP vision tools
 	logger       *zap.Logger
 	clients      map[string]*browser.SandboxBrowserClient
 	mu           sync.RWMutex
@@ -33,10 +37,12 @@ type ComputerUseHandler struct {
 }
 
 // NewComputerUseHandler creates a new computer use handler
-func NewComputerUseHandler(manager *sandbox.Manager, visionClient *browser.VisionClient, logger *zap.Logger) *ComputerUseHandler {
+func NewComputerUseHandler(manager *sandbox.Manager, visionClient *browser.VisionClient, mcpMulti *mcp.MultiClient, imageServer *vision.ImageServer, logger *zap.Logger) *ComputerUseHandler {
 	return &ComputerUseHandler{
 		manager:      manager,
 		visionClient: visionClient,
+		mcpMulti:     mcpMulti,
+		imageServer:  imageServer,
 		logger:       logger,
 		clients:      make(map[string]*browser.SandboxBrowserClient),
 	}
@@ -45,6 +51,12 @@ func NewComputerUseHandler(manager *sandbox.Manager, visionClient *browser.Visio
 // VisionClient returns the vision client (nil if vision is not available).
 func (h *ComputerUseHandler) VisionClient() *browser.VisionClient {
 	return h.visionClient
+}
+
+// SetMCPMulti wires MCP multi-client for vision (process, analyze_image, ground_ui).
+func (h *ComputerUseHandler) SetMCPMulti(mcpMulti *mcp.MultiClient, imageServer *vision.ImageServer) {
+	h.mcpMulti = mcpMulti
+	h.imageServer = imageServer
 }
 
 // RegisterRoutes registers computer use routes on a chi.Router
@@ -368,6 +380,29 @@ func (h *ComputerUseHandler) Disable(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"disabled": true})
 }
 
+// describeScreenshot returns a text description of the screenshot for non-vision LLMs.
+//
+// In line with the architecture decision to trust DOM tools (snapshot_a11y,
+// evaluate_js, read_page) for page understanding, this function:
+//
+//   - Returns "" immediately if no vision client is wired (typical case when
+//     llama-server is down — the agent's DOM tools already provide rich context)
+//   - Does NOT call MCP ground_ui / phi4_vision / analyze_image for description
+//     — those tools are slow (30-90s) and the agent doesn't use the output.
+//     ground_ui is exposed as a direct agent tool (find_element_visual) for
+//     canvas/WebGL cases where DOM tools genuinely can't see the target.
+//   - Falls back to the local llama.cpp vision client if available, since
+//     that path is already wired and doesn't add MCP latency.
+func (h *ComputerUseHandler) describeScreenshot(ctx context.Context, pngBytes []byte) (string, error) {
+	if h.visionClient != nil {
+		return h.visionClient.DescribePage(ctx, pngBytes)
+	}
+	// No vision client wired — return empty description. The agent's DOM tools
+	// (browse_to element list, snapshot_a11y, read_page, evaluate_js) provide
+	// structured page context without requiring a vision model.
+	return "", nil
+}
+
 // ScreenshotResponse is the JSON response for the screenshot endpoint
 type ScreenshotResponse struct {
 	Image       string `json:"image,omitempty"`       // base64 PNG
@@ -405,13 +440,13 @@ func (h *ComputerUseHandler) Screenshot(w http.ResponseWriter, r *http.Request) 
 		}
 
 		// Optionally describe via vision model
-		if describe && h.visionClient != nil {
-			description, err := h.visionClient.DescribePage(r.Context(), pngBytes)
+		if describe {
+			desc, err := h.describeScreenshot(r.Context(), pngBytes)
 			if err != nil {
 				h.logger.Warn("vision description failed", zap.Error(err))
 				resp.Description = fmt.Sprintf("(vision description failed: %v)", err)
 			} else {
-				resp.Description = description
+				resp.Description = desc
 			}
 		}
 
