@@ -147,12 +147,22 @@ func (h *PuxHandler) SetSandboxOnly(sandboxMgr *sandbox.Manager, cu *ComputerUse
 }
 
 // browserProvider returns the active BrowserProvider based on BROWSER_BACKEND env var.
-// "seleniumbase" -> route through Python sb_server.py (stealthy, ~50ms overhead/call)
-// "chromedp" (default) -> drive Chrome directly via Go chromedp (faster, less stealth)
+// Default (unset or "seleniumbase") -> route through Python sb_server.py
+//   - Stealthy (no webdriver fingerprint, SeleniumBase anti-bot stack)
+//   - ~50ms overhead per call (docker exec + curl)
+//   - Drives the same Chrome instance visible on noVNC
+// "chromedp" -> drive Chrome directly via Go chromedp
+//   - Faster (~1-5ms per call)
+//   - Less stealth (puppeteer-extra-stealth JS patches only)
+//   - Kept as opt-in for benchmarks / debugging
 // The SeleniumBase bridge is wired with the same MCP client so find_element_visual
 // still works (it calls ground_ui directly regardless of backend).
 func (h *PuxHandler) browserProvider() browsertools.BrowserProvider {
-	if os.Getenv("BROWSER_BACKEND") == "seleniumbase" {
+	backend := os.Getenv("BROWSER_BACKEND")
+	if backend == "" {
+		backend = "seleniumbase"
+	}
+	if backend == "seleniumbase" {
 		if h.sbBridge == nil {
 			h.sbBridge = NewSeleniumBaseBridge(h.log)
 			if h.mcpMulti != nil {

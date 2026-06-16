@@ -253,6 +253,28 @@ my-org/
 - **Vision-in-the-loop**: browser screenshots auto-described via vision provider chain
 - **SoM labeler**: JS injection labels interactive elements with numbered boxes, 50-element cap
 
+### Browser Backend (SeleniumBase default)
+
+The agent drives Chrome via **SeleniumBase** by default (sb_server.py inside
+the sandbox on port 9876). Stealthy CDP-only mode — no webdriver fingerprint.
+Same Chrome instance stays visible on noVNC; mouse clicks render visibly.
+
+Toggle via env var:
+
+| Env | Backend | When to use |
+|-----|---------|-------------|
+| `BROWSER_BACKEND=seleniumbase` (default) | Python sb_server.py → SeleniumBase CDP | Stealth, anti-bot, full feature set |
+| `BROWSER_BACKEND=chromedp` | Go chromedp direct | Benchmarks, faster per-call (~50ms saved) |
+
+Both backends implement `BrowserProvider` and support all 19 browser tools
+including `find_element_visual` (MCP ground_ui — runs independently of backend).
+
+Files:
+- `sandbox/scripts/sb_server.py` — Python HTTP server with 26 endpoints
+- `backend/internal/handlers/seleniumbase_bridge.go` — Go HTTP client to sb_server
+- `backend/internal/handlers/sandbox.go:SBProxy` — proxies /api/sandbox/{id}/sb/* to localhost:9876
+- `backend/internal/handlers/pux.go:browserProvider()` — env-var switch
+
 ### Model Defaults
 
 See **Provider System** section above for how logic/worker defaults work.
