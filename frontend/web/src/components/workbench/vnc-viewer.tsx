@@ -23,6 +23,7 @@ export function VNCViewer() {
 	const [starting, setStarting] = useState(false);
 	const [enabling, setEnabling] = useState(false);
 	const [vncReady, setVncReady] = useState(false);
+	const [startError, setStartError] = useState<string | null>(null);
 	const activeProject = usePuxStore((s) => s.activeProject);
 	const activeProjectPath = usePuxStore((s) => s.activeProjectPath);
 	const layoutVersion = usePuxStore((s) => s.workbenchLayoutVersion);
@@ -164,6 +165,7 @@ export function VNCViewer() {
 	const startSandbox = async () => {
 		if (!activeProject) return;
 		setStarting(true);
+		setStartError(null);
 		try {
 			const resp = await fetch("/api/sandbox/", {
 				method: "POST",
@@ -173,9 +175,19 @@ export function VNCViewer() {
 			if (resp.ok) {
 				const data = await resp.json();
 				setSandbox(data);
+			} else {
+				// Surface server error to the user. The body is JSON with a
+				// `message` field (from JSONError) — fall back to status text.
+				let msg = `HTTP ${resp.status}`;
+				try {
+					const body = await resp.json();
+					if (body?.message) msg = body.message;
+					else if (body?.error) msg = body.error;
+				} catch { /* not JSON */ }
+				setStartError(msg);
 			}
-		} catch {
-			// ignore
+		} catch (e) {
+			setStartError(e instanceof Error ? e.message : "Network error");
 		} finally {
 			setStarting(false);
 		}
@@ -211,9 +223,14 @@ export function VNCViewer() {
 
 	if (!sandbox) {
 		return (
-			<div ref={containerRef} className="flex h-full flex-col items-center justify-center gap-3">
+			<div ref={containerRef} className="flex h-full flex-col items-center justify-center gap-3 px-6">
 				<Monitor className="size-8 text-muted-foreground/50" />
 				<span className="text-xs text-muted-foreground">No sandbox for this project</span>
+				{startError && (
+					<div className="max-w-md rounded-md border border-destructive/40 bg-destructive/10 p-3 text-center text-[11px] leading-relaxed text-destructive">
+						{startError}
+					</div>
+				)}
 				{activeProject && (
 					<button
 						onClick={startSandbox}
@@ -221,7 +238,7 @@ export function VNCViewer() {
 						className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
 					>
 						<PowerIcon className="size-3" />
-						{starting ? "Starting..." : "Start sandbox"}
+						{starting ? "Starting..." : startError ? "Try again" : "Start sandbox"}
 					</button>
 				)}
 			</div>
