@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -59,19 +60,27 @@ func (h *SandboxHandler) CreateSandbox(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sandbox, err := h.manager.CreateSandbox(r.Context(), sandbox.SandboxOptions{
+	sb, err := h.manager.CreateSandbox(r.Context(), sandbox.SandboxOptions{
 		ID:          req.ID,
 		ProjectPath: req.ProjectPath,
 		Policy:      req.Policy,
 		InitialMode: sandbox.SandboxMode(req.InitialMode),
 	})
 	if err != nil {
+		// Validation errors (bad input) → 400 so callers can distinguish
+		// from genuine internal failures (500).
+		var ve *sandbox.ValidationError
+		if errors.As(err, &ve) {
+			h.logger.Info("sandbox create rejected (validation)", zap.Error(err))
+			JSONError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		h.logger.Error("failed to create sandbox", zap.Error(err))
 		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, sandbox)
+	writeJSON(w, http.StatusCreated, sb)
 }
 
 // GetSandbox returns a sandbox by ID

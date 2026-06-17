@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,6 +24,7 @@ func setupSandboxRouter(t *testing.T) (*chi.Mux, *sandbox.Manager) {
 	r := chi.NewRouter()
 	r.Route("/api/sandbox", func(r chi.Router) {
 		r.Get("/", handler.ListSandboxes)
+		r.Post("/", handler.CreateSandbox)
 		r.Get("/{id}", handler.GetSandbox)
 		r.Get("/{id}/viewer", handler.GetDesktopViewer)
 		r.Post("/{id}/browser-mode", handler.EnableBrowserMode)
@@ -879,5 +881,106 @@ func TestVNCWebSocketProxyUpstreamUnreachable(t *testing.T) {
 		t.Error("expected error/close when upstream is unreachable, but got a message")
 	} else {
 		t.Logf("Got expected error after upstream failure: %v", err)
+	}
+}
+
+// ─── CreateSandbox URL scheme regression ─────────────────────────
+// Regression: the frontend POSTs {"project_path":"ssh://..."} when an SSH
+// project is active. Without input validation, the URL's colons corrupt
+// Docker's `-v host:container[:mode]` parsing and Docker returns the cryptic
+// "invalid mode: /sandbox/workspace". These tests pin the contract:
+//   - URL schemes (ssh://, file://, http://) → 400 with actionable message
+//   - Local absolute paths → fall through to docker create (which fails with
+//     a different error in tests because there's no docker, but it must NOT
+//     be the validation error)
+
+func postCreate(t *testing.T, r http.Handler, body string) (*httptest.ResponseRecorder, ErrorResponse) {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/api/sandbox/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var errBody ErrorResponse
+	if w.Body.Len() > 0 {
+		_ = json.Unmarshal(w.Body.Bytes(), &errBody)
+	}
+	return w, errBody
+}
+
+func TestCreateSandboxRejectsSSHURL(t *testing.T) {
+	r, _ := setupSandboxRouter(t)
+	w, errBody := postCreate(t, r, `{"project_path":"ssh://user@100.86.69.57/home/user/project"}`)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for ssh:// URL, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(errBody.Message, "ssh URL") {
+		t.Errorf("error message should mention 'ssh URL', got: %q", errBody.Message)
+	}
+	if !strings.Contains(errBody.Message, "local filesystem path") {
+		t.Errorf("error message should explain the constraint, got: %q", errBody.Message)
+	}
+	// Must NOT contain the Docker daemon's confusing error — that's the regression
+	if strings.Contains(errBody.Message, "invalid mode") {
+		t.Errorf("error message must not leak Docker's 'invalid mode' — got: %q", errBody.Message)
+	}
+}
+
+func TestCreateSandboxRejectsFileURL(t *testing.T) {
+	r, _ := setupSandboxRouter(t)
+	w, errBody := postCreate(t, r, `{"project_path":"file:///home/user/project"}`)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for file:// URL, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(errBody.Message, "file URL") {
+		t.Errorf("error message should mention 'file URL', got: %q", errBody.Message)
+	}
+}
+
+func TestCreateSandboxRejectsHTTPURL(t *testing.T) {
+	r, _ := setupSandboxRouter(t)
+	w, _ := postCreate(t, r, `{"project_path":"https://github.com/user/repo"}`)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for https:// URL, got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateSandboxAcceptsLocalPath(t *testing.T) {
+	// A real local path must NOT be rejected by URL validation. In the test
+	// manager there's no Docker client, so CreateSandbox will fail later with
+	// "docker client not available" — that's fine, we only care that the URL
+	// validation passes.
+	r, _ := setupSandboxRouter(t)
+	w, errBody := postCreate(t, r, `{"project_path":"/home/ubuntu/projects/test-repo"}`)
+
+	if w.Code == http.StatusBadRequest {
+		t.Fatalf("local path must not be rejected as 400 — got: %d (body: %s). Error: %q",
+			w.Code, w.Body.String(), errBody.Message)
+	}
+	// 500 with "docker client not available" is the expected test-environment failure.
+	if !strings.Contains(errBody.Message, "docker client not available") {
+		t.Logf("note: local path produced status=%d msg=%q (expected docker client error in tests)", w.Code, errBody.Message)
+	}
+}
+
+func TestCreateSandboxValidationErrorIsTyped(t *testing.T) {
+	// Verify the manager returns the sentinel *ValidationError type so
+	// handlers can distinguish input validation from internal failures.
+	mgr := sandbox.NewTestManager()
+	_, err := mgr.CreateSandbox(t.Context(), sandbox.SandboxOptions{
+		ProjectPath: "ssh://user@host/path",
+	})
+	if err == nil {
+		t.Fatal("expected ValidationError, got nil")
+	}
+	var ve *sandbox.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("expected *sandbox.ValidationError, got %T: %v", err, err)
+	}
+	if !strings.Contains(ve.Error(), "ssh URL") {
+		t.Errorf("ValidationError.Error() should describe the scheme, got: %q", ve.Error())
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,6 +20,18 @@ import (
 	"github.com/moby/moby/client"
 	"go.uber.org/zap"
 )
+
+// ValidationError is returned when sandbox options fail input validation
+// (e.g. an unsupported URL scheme in ProjectPath). Handlers should map this
+// to HTTP 400 Bad Request — distinct from internal failures (HTTP 500).
+type ValidationError struct{ msg string }
+
+func (e *ValidationError) Error() string { return e.msg }
+
+// newValidationError wraps a plain message into a ValidationError sentinel.
+func newValidationError(format string, args ...any) error {
+	return &ValidationError{msg: fmt.Sprintf(format, args...)}
+}
 
 // Manager handles OpenShell sandbox lifecycle
 type Manager struct {
@@ -151,6 +164,23 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	if projectPath == "" {
 		projectPath = "/app/projects"
 	}
+
+	// Reject URL-style project paths (ssh://, file://, http://, ...).
+	// Docker bind mounts require a local filesystem path. URL schemes contain
+	// colons that corrupt Docker's `-v host:container[:mode]` parsing — for
+	// ssh://user@host/path the container path `/sandbox/workspace` ends up in
+	// the mode slot and Docker returns "invalid mode: /sandbox/workspace".
+	// SSH projects are designed to run via SSHExecutor on the host, not inside
+	// a local Docker sandbox, so this combination is unsupported.
+	if parsed, perr := url.Parse(projectPath); perr == nil && parsed.Scheme != "" {
+		m.mu.Unlock()
+		return nil, newValidationError(
+			"sandboxes require a local filesystem path; received %s URL %q. "+
+				"Open a local project in the sidebar, or for remote projects use the host agent loop (SSHExecutor) instead of a sandbox.",
+			parsed.Scheme, projectPath,
+		)
+	}
+
 	// Docker requires absolute paths for bind mounts
 	if absPath, err := filepath.Abs(projectPath); err == nil {
 		projectPath = absPath
