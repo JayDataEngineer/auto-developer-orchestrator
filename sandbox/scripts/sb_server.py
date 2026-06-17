@@ -1072,7 +1072,13 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 # Walk the DOM collecting aria role + name + selector.
                 # More reliable than CDP Accessibility domain (which requires enabling).
+                # Wrap in an IIFE so `const`/`function` declarations don't leak
+                # into the persistent CDP compilation context. Without this,
+                # calling /a11y twice in the same page throws
+                # "Identifier 'out' has already been declared". No top-level
+                # `return` — CDP Runtime.evaluate runs raw, not in a function.
                 result = sb.execute_script(r'''
+                    (function() {
                     const out = [];
                     const nodes = document.querySelectorAll(
                       'a[href], button, input:not([type="hidden"]), select, textarea, ' +
@@ -1104,6 +1110,7 @@ class Handler(BaseHTTPRequestHandler):
                       if (out.length >= 200) break;
                     }
                     return JSON.stringify(out);
+                    })()
                 ''')
                 items = json.loads(result) if isinstance(result, str) else (result or [])
                 self._ok({"items": items, "total": len(items)})
