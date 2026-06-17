@@ -56,14 +56,50 @@ import {
 	RefreshCwIcon,
 	SquareIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Component, type FC, type ReactNode } from "react";
 import { getWebCommands } from "@/lib/commands";
+
+// ── Error boundary for Thread ──
+class ThreadErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
+	constructor(props: { children: ReactNode }) {
+		super(props);
+		this.state = { hasError: false, error: null };
+	}
+	static getDerivedStateFromError(error: Error) {
+		return { hasError: true, error };
+	}
+	componentDidCatch(error: Error, info: React.ErrorInfo) {
+		console.error("Thread crashed:", error, info.componentStack);
+	}
+	render() {
+		if (this.state.hasError) {
+			return (
+				<div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-muted-foreground">
+					<div className="text-lg">💥</div>
+					<div className="font-medium">Chat thread crashed</div>
+					<div className="max-w-md text-xs opacity-70">{this.state.error?.message}</div>
+					<button
+						className="mt-2 rounded-md border border-border bg-background px-4 py-1.5 text-xs hover:bg-accent"
+						onClick={() => {
+							this.setState({ hasError: false, error: null });
+							window.location.reload();
+						}}
+					>
+						Reload
+					</button>
+				</div>
+			);
+		}
+		return this.props.children;
+	}
+}
 
 export const Thread: FC = () => {
 	const isMobile = useIsMobile();
 
 	return (
-		<ThreadPrimitive.Root
+		<ThreadErrorBoundary>
+			<ThreadPrimitive.Root
 			className="flex h-full flex-col bg-background text-sm"
 			style={{
 				["--thread-max-width" as string]: isMobile ? "100%" : "44rem",
@@ -89,6 +125,7 @@ export const Thread: FC = () => {
 				</ThreadPrimitive.ViewportFooter>
 			</ThreadPrimitive.Viewport>
 		</ThreadPrimitive.Root>
+	</ThreadErrorBoundary>
 	);
 };
 
