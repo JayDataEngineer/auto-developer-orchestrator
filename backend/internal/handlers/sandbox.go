@@ -302,6 +302,15 @@ func (h *SandboxHandler) DisableMode(w http.ResponseWriter, r *http.Request) {
 func (h *SandboxHandler) GetDesktopViewer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
+	// Reject unknown sandbox IDs up front. Without this, the auto-recover
+	// path below calls EnableBrowserMode → dockerClient.ContainerInspect on a
+	// nonexistent container, which dereferences a nil docker client in tests
+	// (and produces a confusing 500 in production).
+	if _, err := h.manager.GetSandbox(id); err != nil {
+		JSONError(w, "sandbox not found: "+id, http.StatusNotFound)
+		return
+	}
+
 	session, err := h.manager.GetDesktopSession(id)
 	if err != nil {
 		// No session yet — auto-enable browser mode so the viewer works
