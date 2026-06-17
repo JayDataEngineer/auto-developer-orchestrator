@@ -419,6 +419,18 @@ export function parseSSE(
 		}
 	}
 
+	// If an event: line was seen but no data: followed it in this chunk,
+	// include the event line in remaining so the next parseSSE call can
+	// re-process it together with the data: line. Without this, an event
+	// split across two read() chunks (event: in chunk1, data: in chunk2)
+	// loses its event type — the data line would emit with event: "".
+	if (currentEvent) {
+		return {
+			events,
+			remaining: `event: ${currentEvent}\n${remaining}`,
+		};
+	}
+
 	return { events, remaining };
 }
 

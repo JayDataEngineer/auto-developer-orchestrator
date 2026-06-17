@@ -89,16 +89,15 @@ describe("parseSSE: adversarial buffer splits", () => {
 		const chunk1 = "event: text_delta\ndata: {\"text\":\"hel";
 		const r1 = parseSSE(chunk1);
 		expect(r1.events).toEqual([]);
-		// Only the partial last line goes to remaining. parseSSE pops the last
-		// split element (which has no trailing \n) and processes complete lines.
-		// So remaining is just "data: {..." — NOT including the already-processed
-		// "event:" line above it.
-		expect(r1.remaining).toBe("data: {\"text\":\"hel");
+		// The event: line was processed but no data: line completed in this
+		// chunk. parseSSE preserves the event: line in remaining so the next
+		// call can re-process it together with the rest of the data: line.
+		// Without this, the event type ("text_delta") would be lost — the
+		// data: line would emit with event: "" instead.
+		expect(r1.remaining).toBe("event: text_delta\ndata: {\"text\":\"hel");
 
-		// Simulate adapter's buffer accumulation: prepend remaining to next chunk.
-		// The "event: text_delta" line was already consumed, so we need to
-		// re-emit it in the next chunk for the event to fire.
-		const buffer = "event: text_delta\n" + r1.remaining + "lo\"}\n\n";
+		// Next chunk completes the data: line — adapter concatenates remaining
+		const buffer = r1.remaining + "lo\"}\n\n";
 		const r2 = parseSSE(buffer);
 		expect(r2.events).toEqual([
 			{ event: "text_delta", data: '{"text":"hello"}' },
