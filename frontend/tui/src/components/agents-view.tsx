@@ -328,7 +328,7 @@ function AgentCard({
 // This preserves the natural conversational flow and prevents
 // the garbled duplicates that come from cumulative thinkingText.
 
-function RoundConversation({ agent, cols }: { agent: AgentState; cols: number }) {
+export function RoundConversation({ agent, cols }: { agent: AgentState; cols: number }) {
 	const thinkWidth = Math.max(20, cols - 5);
 	const toolLineWidth = Math.max(20, cols - 4);
 

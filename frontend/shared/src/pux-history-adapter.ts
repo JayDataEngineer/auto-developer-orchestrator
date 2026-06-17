@@ -173,7 +173,7 @@ export function storedMessagesToThreadLikes(data: StoredMessage[]): ThreadLike[]
  * AgentState entries and adds them to the Zustand store — but only if
  * the agent isn't already tracked (avoids overwriting live agents).
  */
-function restoreAgentsFromHistory(data: StoredMessage[]) {
+export function restoreAgentsFromHistory(data: StoredMessage[]) {
 	const store = usePuxStore.getState();
 	const existing = store.agents;
 

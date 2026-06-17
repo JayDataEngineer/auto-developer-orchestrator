@@ -396,7 +396,7 @@ function buildSnapshot(
 
 // ── SSE Parser ──
 
-function parseSSE(
+export function parseSSE(
 	buffer: string,
 ): { events: Array<{ event: string; data: string }>; remaining: string } {
 	const events: Array<{ event: string; data: string }> = [];
