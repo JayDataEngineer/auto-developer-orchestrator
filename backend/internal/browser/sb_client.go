@@ -213,10 +213,23 @@ func (sbc *SandboxBrowserClient) sbUpload(ctx context.Context, selector string, 
 	return out, nil
 }
 
+// sbGetSnapshot returns the cached page info, refreshing from sb_server first
+// if the cache is empty. Without this refresh, find_element clicks never emit
+// mouse_action events: the resolver reads GetSnapshot() before any screenshot
+// has populated the cache, gets nil, and returns empty coords.
 func (sbc *SandboxBrowserClient) sbGetSnapshot() *PageInfo {
+	// Refresh-on-miss: fetch /read + /label so the resolver has coordinates
+	// even when no screenshot has been taken yet. Cheap (~50ms) and only
+	// runs once per page navigation.
+	sbc.mu.RLock()
+	empty := sbc.lastURL == "" && sbc.lastScreenshot == nil && len(sbc.lastElements) == 0
+	sbc.mu.RUnlock()
+	if empty {
+		sbc.sbRefreshCache(context.Background())
+	}
 	sbc.mu.RLock()
 	defer sbc.mu.RUnlock()
-	if sbc.lastURL == "" && sbc.lastScreenshot == nil {
+	if sbc.lastURL == "" && sbc.lastScreenshot == nil && len(sbc.lastElements) == 0 {
 		return nil
 	}
 	return &PageInfo{
