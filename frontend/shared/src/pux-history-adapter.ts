@@ -295,7 +295,7 @@ export function createPuxHistoryAdapter(): ThreadHistoryAdapter {
  * Sets contextMetrics in the store so the status bar shows context
  * usage immediately on resume, not just after the next agent_end.
  */
-function estimateContextFromHistory(data: StoredMessage[]) {
+export function estimateContextFromHistory(data: StoredMessage[]) {
 	if (data.length === 0) return;
 
 	// Sum characters from all message content fields
