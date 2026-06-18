@@ -247,11 +247,22 @@ my-org/
 ### Agent Pipeline
 
 - **Pux (CTO)** receives prompt, delegates to employees via `delegate_to` / `delegate_async`
-- **CTO tools**: bash, file ops, memory, skills, delegate_to, delegate_async, collect_results
+- **CTO tools**: bash, file ops, memory, skills, todo, python, eval (JS), make_script/run_script/list_scripts/edit_script/show_script (self-evolving Python toolkit), delegate_to, delegate_async, collect_results
 - **Employees** get their specific tool packages — browser, research, vision, code, shell, desktop
 - **Sub-agents** run in separate agent loops with their role's tools + prompt
 - **Vision-in-the-loop**: browser screenshots auto-described via vision provider chain
 - **SoM labeler**: JS injection labels interactive elements with numbered boxes, 50-element cap
+
+### Self-Evolving Script Toolkit
+
+The CTO can write, edit, and run small Python helpers on the fly via `make_script` / `run_script` / `list_scripts` / `edit_script` / `show_script`. Scripts persist at `/sandbox/workspace/scripts/` (project-scoped, survives sandbox restarts) and are syntax-validated before saving. Helpers under `/sandbox/` (e.g. `twitter_helpers.py`, `session.py`) are auto-importable — the runner sets `PYTHONPATH=/sandbox`.
+
+This is the substrate for the DeepSeek V4 Flash "command-and-control" architecture: the agent writes a 10-line Python helper once, then calls it by name forever. Selectors change → agent edits the script. New behavior needed → agent writes a new script. Zero Go code, zero redeploys. **When adding new agent capabilities, prefer "ship a Python helper + teach via SKILL.md" over "write a new Go tool."**
+
+| File | Purpose |
+|------|---------|
+| `sandbox/scripts/scripts.py` | Pure-Python CLI backing impl (make/run/list/edit/show/rm). JSON output. |
+| `backend/internal/tools/scripting/scripting.go` | Go tool wrappers (5 structs + `AllTools()`). Subprocess to scripts.py. |
 
 ### Browser Backend (SeleniumBase default)
 
@@ -290,6 +301,7 @@ See **Provider System** section above for how logic/worker defaults work.
 | `backend/internal/handlers` | HTTP handlers (agent, sandbox, computer-use, scheduler) |
 | `backend/internal/browser` | CDP client, SoM labeler, vision client |
 | `backend/internal/sandbox` | Docker sandbox lifecycle |
+| `backend/internal/tools/scripting` | Self-evolving Python toolkit (make/run/list/edit/show_script) |
 | `backend/internal/llama/grounding.go` | Coordinate normalization, cycle detection, element caching |
 
 ## E2E Tests

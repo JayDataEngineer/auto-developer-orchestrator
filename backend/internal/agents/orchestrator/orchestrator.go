@@ -31,6 +31,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/tools/eval"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/memory"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/python"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/scripting"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	_ "github.com/auto-developer-orchestrator/backend/internal/tools/plan" // plan tool: removed from CTO, kept for re-enable
 	schedulertool "github.com/auto-developer-orchestrator/backend/internal/tools/scheduler"
@@ -252,6 +253,9 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// Python tool — subprocess execution with timeout
 	ctoTools = append(ctoTools, python.NewPythonTool())
 
+	// Scripting tools — make/run/list/edit ad-hoc Python helpers (self-evolving toolkit)
+	ctoTools = append(ctoTools, scripting.AllTools()...)
+
 	// Register skills (auto-load from standard paths if not provided)
 	skillStore := cfg.Skills
 	if skillStore == nil {
@@ -447,6 +451,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 					python.NewPythonTool(python.WithWorkDir(cfg.ProjectDir)),
 					eval.NewEvalTool(),
 				))
+				// Scripting tools (make/run/list/edit ad-hoc helpers) — same as CTO
+				hostReg = core.NewToolRegistry(append(hostReg.All(), scripting.AllTools()...))
 				hostReg.RegisterCommonAliases()
 				return hostReg
 			}
