@@ -1,0 +1,8 @@
+description: "Personal assistant — Telegram notes, mentions, and messaging via agent-written scripts"
+imports: []
+tools:
+  - bash
+  - python
+max_rounds: 12
+temperature: 0.4
+model: "deepseek/deepseek-v4-flash"

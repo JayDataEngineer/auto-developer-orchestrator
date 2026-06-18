@@ -1,0 +1,9 @@
+description: "Engagement manager — monitors mentions, replies to followers, posts content"
+imports:
+  - browser
+tools:
+  - bash
+mcp_servers:
+  - media-analysis
+max_rounds: 15
+temperature: 0.5

@@ -1,0 +1,6 @@
+description: "Execution Manager — Manages trade execution, journaling, and reporting. Delegates to trader and reporter."
+division: "./divisions/execution"
+max_rounds: 15
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

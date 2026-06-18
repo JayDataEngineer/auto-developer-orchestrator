@@ -1,0 +1,7 @@
+description: "Gameplay Programmer — Godot 4.6 scenes, scripts, shaders, tests"
+imports:
+  - godot
+  - code
+sandbox: native
+max_rounds: 20
+temperature: 0.2

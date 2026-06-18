@@ -1,0 +1,4 @@
+name: video-production
+version: "1.0.0"
+description: "Video Producer — Full-stack educational video production: research, storyboard, Manim/ffmpeg visuals, Kokoro TTS narration, QC, archival, and delivery"
+manifesto: prompt.md

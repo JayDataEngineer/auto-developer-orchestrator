@@ -1,0 +1,4 @@
+description: "Studio vision — scene analysis, asset QA, vibe reports, batch playtest"
+mcp_servers:
+  - qwen-vision
+tools: []

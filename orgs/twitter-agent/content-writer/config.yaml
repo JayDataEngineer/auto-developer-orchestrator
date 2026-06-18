@@ -1,0 +1,10 @@
+description: "Twitter content writer — drafts tweets, threads, and visual content"
+imports:
+  - browser
+tools:
+  - bash
+mcp_servers:
+  - media-analysis
+max_rounds: 15
+temperature: 0.8
+model: "deepseek/deepseek-v4-flash"

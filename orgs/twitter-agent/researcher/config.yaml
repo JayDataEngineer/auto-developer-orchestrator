@@ -1,0 +1,8 @@
+description: "Trend researcher — finds fitness/book trends, competitor analysis, content ideas"
+imports:
+  - researcher
+tools:
+  - bash
+max_rounds: 20
+temperature: 0.4
+model: "deepseek/deepseek-v4-flash"

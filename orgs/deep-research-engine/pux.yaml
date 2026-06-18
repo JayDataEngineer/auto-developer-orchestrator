@@ -1,0 +1,92 @@
+# Pux Org Manifest — Deep Research Engine
+name: deep-research-engine
+version: "1.0.0"
+description: "Config-driven multi-agent research engine — data in, knowledge out, artifacts generated"
+
+# Org overlay
+manifesto: MANIFESTO.md
+staff_root: roles
+
+# App tools (callable by other Pux apps)
+tools:
+  - name: deep_research
+    handler: "python3 -m deep_research_engine research {query}"
+    description: "Run a full multi-agent deep research pipeline on a topic"
+  - name: analyze_document
+    handler: "python3 -m deep_research_engine pdf {path}"
+    description: "Analyze and summarize a PDF document"
+  - name: ingest_telegram
+    handler: "python3 -m deep_research_engine ingest {export_path}"
+    description: "Ingest and analyze a Telegram chat export"
+  - name: scrape_url
+    handler: "python3 -m deep_research_engine scrape {url}"
+    description: "Scrape and extract structured data from a URL"
+
+requires:
+  - bash
+  - file_read
+  - file_write
+  - mcp_research
+  - mcp_search
+  - mcp_scrape
+  - mcp_crawl
+  - mcp_extract
+  - mcp_analyze_image
+  - mcp_transcribe_audio
+  - mcp_detect_faces
+  - mcp_classify_audio
+
+prompts:
+  deep_research:
+    file: prompts/deep_research.md
+  document_analysis:
+    file: prompts/document_analysis.md
+  telegram_ingest:
+    file: prompts/telegram_ingest.md
+  quick_summary:
+    text: |
+      Research {topic} and provide a concise 3-paragraph summary.
+      Include 3-5 key sources. Focus on the most recent developments.
+
+sandbox:
+  init_files:
+    - sandbox/neo4j_client.py
+    - sandbox/vector_search.py
+    - sandbox/entity_extract.py
+    - sandbox/content_cluster.py
+    - sandbox/telegram_parser.py
+    - sandbox/face_client.py
+  pip_packages:
+    - neo4j
+    - psycopg2-binary
+    - kreuzberg
+    - beautifulsoup4
+    - lxml
+    - hdbscan
+    - numpy
+
+# Database connections for Go tools (graph_query, vector_search, face_recognize, etc.)
+databases:
+  neo4j:
+    uri: bolt://172.17.0.9:7687
+    username: neo4j
+    password_env: NEO4J_PASSWORD
+  postgres:
+    url: postgresql://localhost:25432/shared_db
+    password_env: PG_PASSWORD
+  compreface:
+    base_url: http://172.17.0.14:8080
+    api_key_env: COMPREFACE_API_KEY
+
+schedule: {}
+
+commands:
+  research:
+    description: "Run multi-agent deep research on a query"
+    exec: "python -m deep_research_engine research {query} --config configs/rag.yaml"
+  pdf:
+    description: "Summarize a PDF document"
+    exec: "python -m deep_research_engine pdf {path} --config configs/pdf_summarizer.yaml"
+  ingest:
+    description: "Ingest Telegram export for analysis"
+    exec: "python -m deep_research_engine ingest {export_path} --config configs/telegram_ingest.yaml"

@@ -1,0 +1,8 @@
+description: "Explore — codebase comprehension. Reads code, searches files, understands structure."
+tools:
+  - bash
+  - file_read
+  - file_glob
+  - file_grep
+max_rounds: 15
+temperature: 0.2

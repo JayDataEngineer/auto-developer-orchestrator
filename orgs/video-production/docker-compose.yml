@@ -1,0 +1,50 @@
+# Video Production Org — containerized video producer
+#
+# Provides: Python 3.11 + Manim + Kokoro TTS + ffmpeg + poppler + LaTeX
+# Access: docker compose exec video-producer <command>
+#         or via the orchestrator's bash tool targeting this container.
+#
+# The video production workspace is persisted in a named volume.
+# Final videos live at /workspace/video-productions/jobs/<slug>/exports/
+#
+# Bring up:
+#   cd orgs/video-production && ./bootstrap.sh
+#
+# Tear down (keeps workspace):
+#   docker compose down
+#
+# Wipe workspace (fresh start):
+#   docker compose down -v
+
+services:
+  video-producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: research-video-producer
+    restart: unless-stopped
+    environment:
+      - VIDEO_PRODUCTION_ROOT=/workspace/video-productions
+      - KOKORO_VOICE=af_heart
+      - KOKORO_LANG_CODE=a
+      # GPU passthrough — disabled by default (Kokoro ONNX runs on CPU)
+      # Enable with: VIDEO_PROD_ENABLE_GPU=true docker compose up -d
+    volumes:
+      - video_prod_workspace:/workspace/video-productions
+    networks:
+      - deep-research
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  video_prod_workspace:
+    name: research_video_prod_workspace
+
+networks:
+  deep-research:
+    external: true
+    name: deep-research-engine_default

@@ -1,0 +1,6 @@
+description: "Artifact Director — Takes research/ingestion output and produces final artifacts: reports, docs, llms.txt, podcasts, code. Selects the right writer for the format."
+division: "./divisions/generation"
+max_rounds: 20
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

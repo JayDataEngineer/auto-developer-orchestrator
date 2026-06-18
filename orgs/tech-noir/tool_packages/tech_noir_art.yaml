@@ -1,0 +1,4 @@
+description: "Art pipeline — 3D gen, voice, music, scene generation, asset processing"
+mcp_servers:
+  - tech_noir
+tools: []

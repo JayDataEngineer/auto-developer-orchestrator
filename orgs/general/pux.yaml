@@ -1,0 +1,10 @@
+name: general
+version: "1.0.0"
+description: "General-purpose testing project for Pux agent"
+
+tools: []
+requires: []
+
+sandbox:
+  init_files: []
+  pip_packages: []

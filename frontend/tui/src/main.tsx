@@ -76,34 +76,70 @@ const { values: opts } = parseArgs({
 	strict: false,
 });
 
-// ── Org resolution ──
+// ── Org resolution (reads ~/.pux/orgs/ — the canonical org registry) ──
 
 if (opts.org && typeof opts.org === "string") {
 	const fs = await import("node:fs");
 	const path = await import("node:path");
-	const orgAliases: Record<string, string> = { code: "dev-bot", dev: "dev-bot" };
+	const orgAliases: Record<string, string> = {
+		code: "dev-bot",
+		dev: "dev-bot",
+		trading: "invest",
+		research: "deep-research-engine",
+		social: "twitter-agent",
+		telegram: "telegram-agent",
+		game: "tech-noir",
+		gamedev: "tech-noir",
+	};
 	const orgName = orgAliases[opts.org] || opts.org;
-	const candidates = [
-		path.join(homedir(), "Documents", "programs", "dev", orgName),
-		path.join(homedir(), "Documents", "programs", "dev", orgName + "-bot"),
-		path.join(process.cwd(), orgName),
-		path.join(process.cwd(), "..", orgName),
-	];
-	let found = false;
-	for (const dir of candidates) {
+	const orgsDir = path.join(homedir(), ".pux", "orgs");
+
+	// Try exact match in ~/.pux/orgs/
+	let orgPath = path.join(orgsDir, orgName);
+	try {
+		const stat = fs.statSync(orgPath);
+		// Resolve symlinks to get the real path
+		if (stat.isDirectory()) {
+			const resolved = fs.realpathSync(orgPath);
+			if (fs.existsSync(path.join(resolved, "pux.yaml"))) {
+				opts.cwd = resolved;
+				opts.project = orgName;
+			} else {
+				throw new Error("no pux.yaml");
+			}
+		}
+	} catch {
+		// Fallback: scan ~/.pux/orgs/ for a matching name in pux.yaml
 		try {
-			fs.statSync(path.join(dir, "pux.yaml"));
-			opts.cwd = dir;
-			opts.project = path.basename(dir);
-			found = true;
-			break;
-		} catch {}
-	}
-	if (!found) {
-		process.stderr.write(
-			`\x1b[31mOrganization '${opts.org}' not found.\x1b[0m\n`
-		);
-		process.exit(1);
+			const entries = fs.readdirSync(orgsDir);
+			let found = false;
+			for (const entry of entries) {
+				const candidate = path.join(orgsDir, entry);
+				const puxPath = path.join(candidate, "pux.yaml");
+				if (fs.existsSync(puxPath)) {
+					const fileContent = fs.readFileSync(puxPath, "utf-8");
+					const match = fileContent.match(/^name:\s*(.+)$/m);
+					if (match && match[1].trim() === orgName) {
+						const resolved = fs.realpathSync(candidate);
+						opts.cwd = resolved;
+						opts.project = path.basename(resolved);
+						found = true;
+						break;
+					}
+				}
+			}
+			if (!found) throw new Error("org not found");
+		} catch {
+			const available = fs.readdirSync(orgsDir).filter((e: string) => {
+				try { return fs.statSync(path.join(orgsDir, e)).isDirectory(); }
+				catch { return false; }
+			}).join(", ");
+			process.stderr.write(
+				`\x1b[31mOrganization '${opts.org}' not found in ~/.pux/orgs/.\n` +
+				`Available orgs: ${available}\x1b[0m\n`
+			);
+			process.exit(1);
+		}
 	}
 }
 

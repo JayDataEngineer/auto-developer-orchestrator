@@ -1,0 +1,4 @@
+description: "Godot test harness — run tests, take screenshots, validate scenes"
+mcp_servers:
+  - godot
+tools: []

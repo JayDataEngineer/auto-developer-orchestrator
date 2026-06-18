@@ -1,0 +1,7 @@
+description: "Narrative Designer — Creative writing, dialogue, lore, characters, scenes"
+imports:
+  - research
+  - studio_vision
+sandbox: isolated
+max_rounds: 15
+temperature: 0.7

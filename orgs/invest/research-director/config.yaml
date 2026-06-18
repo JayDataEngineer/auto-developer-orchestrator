@@ -1,0 +1,6 @@
+description: "Research Director — Manages market data collection, signal analysis, regime detection, and alpha research. Delegates to signal-analyst, regime-analyst, and researcher."
+division: "./divisions/research"
+max_rounds: 25
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

@@ -1,0 +1,7 @@
+description: "Design Researcher — Research game design topics, produce actionable reports"
+imports:
+  - research
+  - studio_vision
+sandbox: isolated
+max_rounds: 15
+temperature: 0.3

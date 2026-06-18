@@ -1,0 +1,7 @@
+description: "SRE — deployment, CI/CD, monitoring, infrastructure. Ships and maintains."
+imports:
+  - code
+mcp_servers:
+  - web
+max_rounds: 20
+temperature: 0.2

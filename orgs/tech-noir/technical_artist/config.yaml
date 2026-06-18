@@ -1,0 +1,9 @@
+description: "Technical Artist — YAML-driven build pipeline for characters, audio, environments, 3D props"
+imports:
+  - tech_noir_art
+  - comfyui
+  - studio_vision
+  - code
+sandbox: native
+max_rounds: 20
+temperature: 0.2

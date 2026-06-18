@@ -1,0 +1,10 @@
+description: "Video Producer — Full-stack educational video production: research, storyboard, Manim/ffmpeg visuals, Kokoro TTS narration, QC, archival, and delivery. Produces explainers, paper walkthroughs, lecture recaps, daily summaries."
+division: "./divisions/video-production"
+max_rounds: 60
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell
+  - filesystem
+capabilities:
+  - web-search
+  - media-vision

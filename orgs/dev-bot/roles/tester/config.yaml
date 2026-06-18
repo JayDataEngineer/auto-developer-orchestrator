@@ -1,0 +1,5 @@
+description: "Tester — writes and runs tests, catches regressions, validates behavior."
+imports:
+  - code
+max_rounds: 20
+temperature: 0.2

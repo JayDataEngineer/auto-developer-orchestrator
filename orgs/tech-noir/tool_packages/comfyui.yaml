@@ -1,0 +1,4 @@
+description: "Image generation — ComfyUI Agent co-pilot for VFX and sprite generation"
+mcp_servers:
+  - comfyui
+tools: []

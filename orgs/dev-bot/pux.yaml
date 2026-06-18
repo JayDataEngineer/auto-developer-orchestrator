@@ -1,0 +1,19 @@
+name: dev-bot
+version: "1.0.0"
+description: "Software development organization — explore, architect, and implement code"
+
+manifesto: MANIFESTO.md
+staff_root: roles
+
+tools: []
+requires:
+  - bash
+  - file_read
+  - file_write
+  - file_edit
+  - file_glob
+  - file_grep
+
+sandbox:
+  init_files: []
+  pip_packages: []
