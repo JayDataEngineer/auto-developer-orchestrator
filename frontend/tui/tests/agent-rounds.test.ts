@@ -7,7 +7,7 @@
  * 3. Subagent output text is never truncated
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach } from "vitest";
 import { usePuxStore } from "@pux/shared";
 import type { AgentState, ToolCallRecord } from "@pux/shared";
 

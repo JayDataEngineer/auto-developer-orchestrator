@@ -9,7 +9,7 @@
  * simulating its behavior: read parts, map over them, check output order.
  */
 
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import React from "react";
 import { Text, Box } from "ink";
 import { render } from "ink-testing-library";

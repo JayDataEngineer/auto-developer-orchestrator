@@ -7,13 +7,13 @@
  * first text position. This test catches both regressions.
  */
 
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import React from "react";
 import { Text, Box } from "ink";
 import { render } from "ink-testing-library";
 
 // ── Fix dependency: @assistant-ui/tap/react-shim ──
-mock.module("@assistant-ui/tap/react-shim", () => ({
+vi.mock("@assistant-ui/tap/react-shim", () => ({
 	useDebugValue: () => {},
 	useSyncExternalStore: (_sub: any, getSnapshot: any) => getSnapshot(),
 }));

@@ -2,12 +2,6 @@
 /**
  * round-conversation — mount REAL RoundConversation via React Testing Library.
  *
- * Placed in frontend/shared (not frontend/tui) because the bun:test runner
- * in TUI can't resolve the @assistant-ui/react-ink-markdown import chain
- * (pre-existing tap version conflict — see components.test.tsx which is
- * also broken with the same SyntaxError). Vitest's vi.mock intercepts the
- * import properly, so we can mount the real component here.
- *
  * RoundConversation renders each round separately:
  *   thinking (▼ Thought block) → tool calls (✓ lines) → text (markdown)
  *
@@ -28,8 +22,6 @@ import React from "react";
 import { render } from "@testing-library/react";
 
 // ── Mock @assistant-ui/react-ink-markdown before importing agents-view ──
-// The real MarkdownText pulls in @assistant-ui/store → @assistant-ui/tap
-// chain that has a version conflict in this workspace.
 vi.mock("@assistant-ui/react-ink-markdown", () => ({
 	MarkdownText: ({ text }: { text: string }) => {
 		return React.createElement("div", { "data-testid": "md" }, text);
@@ -37,9 +29,7 @@ vi.mock("@assistant-ui/react-ink-markdown", () => ({
 }));
 
 // ── Mock TUI theme — agents-view pulls useColors/symbols from ../theme.js ──
-// ThemeProvider context isn't mounted in this isolated test, so we feed a
-// stable color/symbol shape directly.
-vi.mock("../../../tui/src/theme.js", () => ({
+vi.mock("../src/theme.js", () => ({
 	useColors: () => ({
 		brand: "#ff0000",
 		textMuted: "#888",
@@ -72,7 +62,7 @@ vi.mock("@pux/shared", async () => {
 });
 
 // ── NOW we can import the component under test ──
-import { RoundConversation } from "../../../tui/src/components/agents-view.js";
+import { RoundConversation } from "../src/components/agents-view.js";
 import type { AgentState } from "@pux/shared";
 
 // ── AgentState factory ──────────────────────────────────────────

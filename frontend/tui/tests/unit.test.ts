@@ -3,15 +3,10 @@
  *
  * These test pure functions with no Ink/React dependency.
  *
- * Run: cd frontend/tui && bun test
+ * Run: npx vitest run --project tui
  */
 
-import { describe, test, expect, mock, afterAll } from "bun:test";
-
-// ── Restore mocks after all tests so other test files get the real module ──
-afterAll(() => {
-	mock.restore();
-});
+import { describe, test, expect, vi } from "vitest";
 
 import { parseCommand, getCommandNames, getCommands } from "../src/commands.js";
 import { PROVIDER_CATALOG, TYPE_COLORS, TYPE_LABELS } from "../src/provider-catalog.js";
@@ -142,7 +137,7 @@ describe("getCommands", () => {
 
 	test("all handlers return promise-like", () => {
 		const cmds = getCommands();
-		const ctx = { model: "test", project: "test", exit: mock(() => {}), setModel: mock(() => {}) };
+		const ctx = { model: "test", project: "test", exit: vi.fn(), setModel: vi.fn() };
 		cmds.forEach((cmd) => {
 			const result = cmd.handler("", ctx);
 			if (result && typeof result.then === "function") {

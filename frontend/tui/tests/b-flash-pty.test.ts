@@ -6,15 +6,14 @@
  * text without any user message for one frame. This is what the user sees.
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { spawn, type Subprocess } from "bun";
+import { describe, test, expect } from "vitest";
 import { resolve } from "node:path";
 
-const PROJECT_ROOT = resolve(import.meta.dir, "../../..");
+const PROJECT_ROOT = resolve(import.meta.dirname, "../../..");
 const TUI_ENTRY = resolve(PROJECT_ROOT, "frontend/tui/src/main.tsx");
 
 // PTY helper — uses node-pty via a small helper script
-const PTY_HELPER = resolve(import.meta.dir, "pty-helper.ts");
+const PTY_HELPER = resolve(import.meta.dirname, "pty-helper.ts");
 
 async function sleep(ms: number) {
 	return new Promise((r) => setTimeout(r, ms));

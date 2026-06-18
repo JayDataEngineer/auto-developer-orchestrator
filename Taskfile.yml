@@ -204,10 +204,9 @@ tasks:
       - go test -count=1 ./...
 
   test-tui:
-    desc: Run TUI (Bun) tests
-    dir: frontend/tui
+    desc: Run TUI vitest tests
     cmds:
-      - bun test
+      - npx vitest run --project tui
 
   test-cli:
     desc: Run Go CLI + TUI tests

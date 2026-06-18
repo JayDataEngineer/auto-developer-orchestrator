@@ -5,119 +5,133 @@
  * Covers rendering, states (empty/loaded/running/error), keyboard interaction,
  * and boundary conditions for each component.
  *
- * Run: cd frontend/tui && bun test
+ * Run: npx vitest run --project tui components
  */
 
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, vi } from "vitest";
 import React from "react";
 import { Text, Box } from "ink";
 import { render } from "ink-testing-library";
 
-// ── Mock @pux/shared ──
+// ── Mock state lives inside vi.hoisted() so it's available to vi.mock factories.
+// vi.mock factories are hoisted above all imports & const/let declarations —
+// any outer-scope variable referenced from a factory MUST come from vi.hoisted
+// or you hit TDZ. We expose a stable `currentState` object whose properties
+// tests mutate in place (`currentState.foo = bar`).
+const M = vi.hoisted(() => {
+	const mockStoreState: Record<string, any> = {
+		activeModel: "gemma-4-26b-it",
+		modelList: [
+			{ id: "gemma-4-26b-it", name: "Gemma 4 27B", provider: "llamacpp", contextWindow: 32000, maxTokens: 8192, cost: { input: 0, output: 0 }, input: ["text"] },
+			{ id: "openai/gpt-4o", name: "GPT-4o", provider: "openai", contextWindow: 128000, maxTokens: 16384, cost: { input: 0.01, output: 0.03 }, input: ["text", "image"] },
+		],
+		activeProject: "test-project",
+		activeProjectPath: "/tmp/test",
+		activeAgentId: "agent-123",
+		activeConversationId: "conv-456",
+		conversationKey: "test:agent-123",
+		agents: new Map(),
+		conversations: [],
+		ctoRunning: false,
+		pendingDecision: null,
+		showProvidersOverlay: false,
+		showSettingsOverlay: false,
+		showSessionSwitcher: false,
+		showLogViewer: false,
+		showSearchOverlay: false,
+		showHelpOverlay: false,
+		showMCPOverlay: false,
+		showModelPicker: false,
+		zoomedAgentId: null,
+		agentSelectorOpen: false,
+		activeTuiView: "chat",
+		theme: "default",
+		fontScale: 1,
+		lastUsage: null,
+		contextMetrics: null,
+		compacting: false,
+		foregroundTaskId: null,
+		backgroundTasks: new Map(),
+		providers: {},
+		mcpServers: [],
+		defaultLogic: "gemma-4-26b-it",
+		defaultWorker: "openai/gpt-4o",
+		ideFix: false,
+		composer: { queue: [] },
+	};
 
-const mockStoreState: Record<string, any> = {
-	activeModel: "gemma-4-26b-it",
-	modelList: [
-		{ id: "gemma-4-26b-it", name: "Gemma 4 27B", provider: "llamacpp", contextWindow: 32000, maxTokens: 8192, cost: { input: 0, output: 0 }, input: ["text"] },
-		{ id: "openai/gpt-4o", name: "GPT-4o", provider: "openai", contextWindow: 128000, maxTokens: 16384, cost: { input: 0.01, output: 0.03 }, input: ["text", "image"] },
-	],
-	activeProject: "test-project",
-	activeProjectPath: "/tmp/test",
-	activeAgentId: "agent-123",
-	activeConversationId: "conv-456",
-	conversationKey: "test:agent-123",
-	agents: new Map(),
-	conversations: [],
-	ctoRunning: false,
-	pendingDecision: null,
-	showProvidersOverlay: false,
-	showSettingsOverlay: false,
-	showSessionSwitcher: false,
-	showLogViewer: false,
-	showSearchOverlay: false,
-	showHelpOverlay: false,
-	showMCPOverlay: false,
-	showModelPicker: false,
-	zoomedAgentId: null,
-	agentSelectorOpen: false,
-	activeTuiView: "chat",
-	theme: "default",
-	fontScale: 1,
-	lastUsage: null,
-	contextMetrics: null,
-	compacting: false,
-	foregroundTaskId: null,
-	backgroundTasks: new Map(),
-	providers: {},
-	mcpServers: [],
-	defaultLogic: "gemma-4-26b-it",
-	defaultWorker: "openai/gpt-4o",
-	ideFix: false,
-	composer: { queue: [] },
-};
+	const mockActions: Record<string, any> = {
+		setModel: vi.fn(),
+		setProject: vi.fn(),
+		cycleTuiView: vi.fn(),
+		setTuiView: vi.fn(),
+		toggleProvidersOverlay: vi.fn(),
+		closeProvidersOverlay: vi.fn(),
+		toggleSettingsOverlay: vi.fn(),
+		closeSettingsOverlay: vi.fn(),
+		toggleSessionSwitcher: vi.fn(),
+		closeSessionSwitcher: vi.fn(),
+		toggleLogViewer: vi.fn(),
+		closeLogViewer: vi.fn(),
+		toggleSearchOverlay: vi.fn(),
+		closeSearchOverlay: vi.fn(),
+		toggleHelpOverlay: vi.fn(),
+		closeHelpOverlay: vi.fn(),
+		toggleMCPOverlay: vi.fn(),
+		closeMCPOverlay: vi.fn(),
+		toggleModelPicker: vi.fn(),
+		clearConversation: vi.fn(),
+		setConversation: vi.fn(),
+		deleteConversation: vi.fn(),
+		setZoomedAgent: vi.fn(),
+		toggleAgentSelector: vi.fn(),
+		selectModel: vi.fn(),
+		addProvider: vi.fn(() => Promise.resolve()),
+		addMCPServer: vi.fn(() => Promise.resolve()),
+		removeMCPServer: vi.fn(),
+		setTheme: vi.fn(),
+		setFontScale: vi.fn(),
+		setDefaults: vi.fn(),
+		loadDefaults: vi.fn(() => Promise.resolve()),
+		loadConversations: vi.fn(() => Promise.resolve()),
+		loadModels: vi.fn(() => Promise.resolve()),
+		cancelAgent: vi.fn(),
+		backgroundCurrentTask: vi.fn(),
+		respondToDecision: vi.fn(),
+	};
 
-const mockActions: Record<string, any> = {
-	setModel: mock(() => {}),
-	setProject: mock(() => {}),
-	cycleTuiView: mock(() => {}),
-	setTuiView: mock(() => {}),
-	toggleProvidersOverlay: mock(() => {}),
-	closeProvidersOverlay: mock(() => {}),
-	toggleSettingsOverlay: mock(() => {}),
-	closeSettingsOverlay: mock(() => {}),
-	toggleSessionSwitcher: mock(() => {}),
-	closeSessionSwitcher: mock(() => {}),
-	toggleLogViewer: mock(() => {}),
-	closeLogViewer: mock(() => {}),
-	toggleSearchOverlay: mock(() => {}),
-	closeSearchOverlay: mock(() => {}),
-	toggleHelpOverlay: mock(() => {}),
-	closeHelpOverlay: mock(() => {}),
-	toggleMCPOverlay: mock(() => {}),
-	closeMCPOverlay: mock(() => {}),
-	toggleModelPicker: mock(() => {}),
-	clearConversation: mock(() => {}),
-	setConversation: mock(() => {}),
-	deleteConversation: mock(() => {}),
-	setZoomedAgent: mock(() => {}),
-	toggleAgentSelector: mock(() => {}),
-	selectModel: mock(() => {}),
-	addProvider: mock(() => Promise.resolve()),
-	addMCPServer: mock(() => Promise.resolve()),
-	removeMCPServer: mock(() => {}),
-	setTheme: mock(() => {}),
-	setFontScale: mock(() => {}),
-	setDefaults: mock(() => {}),
-	loadDefaults: mock(() => Promise.resolve()),
-	loadConversations: mock(() => Promise.resolve()),
-	loadModels: mock(() => Promise.resolve()),
-	cancelAgent: mock(() => {}),
-	backgroundCurrentTask: mock(() => {}),
-	respondToDecision: mock(() => {}),
-};
+	const storeSubscribers: Array<(state: any, prev: any) => void> = [];
+	// Stable mutable bag — tests mutate its properties in place.
+	const currentState: Record<string, any> = { ...mockStoreState };
 
-let storeSubscribers: Array<(state: any, prev: any) => void> = [];
-let currentState = { ...mockStoreState };
+	const mockUsePuxStore = (selector?: (s: any) => any) => {
+		if (!selector) return { ...currentState, ...mockActions };
+		return selector({ ...currentState, ...mockActions });
+	};
+	(mockUsePuxStore as any).getState = () => ({ ...currentState, ...mockActions });
+	(mockUsePuxStore as any).setState = (update: any) => {
+		Object.assign(currentState, update);
+		storeSubscribers.forEach((cb) => cb(currentState, {}));
+	};
+	(mockUsePuxStore as any).subscribe = (cb: any) => {
+		storeSubscribers.push(cb);
+		return () => {
+			const i = storeSubscribers.indexOf(cb);
+			if (i >= 0) storeSubscribers.splice(i, 1);
+		};
+	};
 
-const mockUsePuxStore = (selector?: (s: any) => any) => {
-	if (!selector) return { ...currentState, ...mockActions };
-	return selector({ ...currentState, ...mockActions });
-};
+	return { mockStoreState, mockActions, currentState, mockUsePuxStore };
+});
 
-mockUsePuxStore.getState = () => ({ ...currentState, ...mockActions });
-mockUsePuxStore.setState = (update: any) => {
-	Object.assign(currentState, update);
-	storeSubscribers.forEach((cb) => cb(currentState, {}));
-};
-mockUsePuxStore.subscribe = (cb: any) => {
-	storeSubscribers.push(cb);
-	return () => { storeSubscribers = storeSubscribers.filter((s) => s !== cb); };
-};
+// Expose currentState as a stable outer reference — test code mutates
+// its properties directly (`currentState.compacting = true`).
+const currentState: Record<string, any> = M.currentState;
 
-mock.module("@pux/shared", () => ({
-	usePuxStore: mockUsePuxStore,
-	setBaseUrl: mock(() => {}),
-	setFetch: mock(() => {}),
+vi.mock("@pux/shared", () => ({
+	usePuxStore: M.mockUsePuxStore,
+	setBaseUrl: () => {},
+	setFetch: () => {},
 	apiUrl: (path: string) => path,
 	getFetch: () => globalThis.fetch,
 	getToolArgPreview: (toolName: string, args: any, maxLen?: number) => {
@@ -131,36 +145,38 @@ mock.module("@pux/shared", () => ({
 		if (typeof result === "string") return result.split("\n").slice(0, maxLines);
 		return [JSON.stringify(result).slice(0, 80)];
 	},
-	relativeTime: (iso: string) => "5m ago",
+	relativeTime: (_iso: string) => "5m ago",
 }));
 
 // ── Mock @assistant-ui/react-ink ──
+const AUI = vi.hoisted(() => {
+	const auiState: Record<string, any> = {
+		composer: { text: "" },
+		thread: {
+			messages: [],
+			isRunning: false,
+		},
+		message: {
+			role: "assistant",
+			parts: [],
+			status: { type: "complete" },
+			branchCount: 3,
+			branchNumber: 2,
+		},
+	};
+	return { auiState };
+});
 
-const auiState: Record<string, any> = {
-	composer: { text: "" },
-	thread: {
-		messages: [],
-		isRunning: false,
-	},
-	message: {
-		role: "assistant",
-		parts: [],
-		status: { type: "complete" },
-		branchCount: 3,
-		branchNumber: 2,
-	},
-};
-
-mock.module("@assistant-ui/react-ink", () => ({
+vi.mock("@assistant-ui/react-ink", () => ({
 	useAuiState: (selector?: (s: any) => any) => {
-		if (!selector) return auiState;
-		return selector(auiState);
+		if (!selector) return AUI.auiState;
+		return selector(AUI.auiState);
 	},
 	useAui: () => ({
 		composer: () => ({
-			setText: mock(() => {}),
+			setText: () => {},
 		}),
-		switchToThread: mock(() => {}),
+		switchToThread: () => {},
 	}),
 	useLocalRuntime: (adapter: any, opts?: any) => ({ adapter, opts }),
 	AssistantRuntimeProvider: ({ children }: any) => <>{children}</>,
@@ -174,17 +190,18 @@ mock.module("@assistant-ui/react-ink", () => ({
 		Parts: ({ children }: any) => <>{typeof children === "function" ? children({}) : children}</>,
 	},
 	ComposerPrimitive: {
-		Input: (props: any) => <Text>composer-input</Text>,
+		Input: (_props: any) => <Text>composer-input</Text>,
 	},
 	BranchPickerPrimitive: {
 		Root: ({ children }: any) => <>{children}</>,
-		Previous: () => <Text>{"<"}</Text>,
-		Next: () => <Text>{">"}</Text>,
-		Count: () => <Text>3</Text>,
+		Previous: ({ children }: any) => <>{children}</>,
+		Next: ({ children }: any) => <>{children}</>,
+		Number: ({ children }: any) => <Text>{children ?? "2"}</Text>,
+		Count: ({ children }: any) => <Text>{children ?? "3"}</Text>,
 	},
 	LoadingPrimitive: {
 		Root: ({ children }: any) => <>{children}</>,
-		Spinner: ({ variant }: any) => <Text>spinner</Text>,
+		Spinner: (_props: any) => <Text>spinner</Text>,
 		Text: ({ children }: any) => <Text>{children}</Text>,
 		ElapsedTime: () => <Text>1.2s</Text>,
 	},
@@ -203,35 +220,35 @@ mock.module("@assistant-ui/react-ink", () => ({
 }));
 
 // ── Mock ink-spinner ──
-mock.module("ink-spinner", () => ({
+vi.mock("ink-spinner", () => ({
 	default: function Spinner() { return <Text>spinner</Text>; },
 }));
 
 // ── Mock ink-text-input ──
-mock.module("ink-text-input", () => ({
-	default: ({ value, onChange, focus, mask, placeholder }: any) => (
+vi.mock("ink-text-input", () => ({
+	default: ({ value, mask, placeholder }: any) => (
 		<Text>{mask ? "••••" : value || placeholder || ""}</Text>
 	),
 }));
 
 // ── Mock fs/path ──
-mock.module("node:fs", () => ({
+vi.mock("node:fs", () => ({
 	readdirSync: () => ["file1.ts", "file2.ts", "dir1"],
 	statSync: () => ({ isDirectory: () => false }),
 }));
-mock.module("node:path", () => ({
+vi.mock("node:path", () => ({
 	join: (...parts: string[]) => parts.join("/"),
 	basename: (p: string) => p.split("/").pop(),
 	dirname: (p: string) => p.split("/").slice(0, -1).join("/"),
 }));
 
 // ── Mock createRequire ──
-mock.module("node:module", () => ({
+vi.mock("node:module", () => ({
 	createRequire: () => () => ({ version: "0.1.0-test" }),
 }));
 
-// ── Mock @assistant-ui/tap (version mismatch: store expects tap/react-shim which doesn't exist) ──
-mock.module("@assistant-ui/tap/react-shim", () => ({
+// ── Mock @assistant-ui/tap/react-shim (version mismatch: store expects tap/react-shim which doesn't exist) ──
+vi.mock("@assistant-ui/tap/react-shim", () => ({
 	useDebugValue: () => {},
 	useSyncExternalStore: (_sub: any, getSnapshot: any) => getSnapshot(),
 }));
@@ -241,12 +258,15 @@ mock.module("@assistant-ui/tap/react-shim", () => ({
 // ═══════════════════════════════════════════════════════
 
 // ── Mock @assistant-ui/react-ink-markdown (native dependency not available in test env) ──
-const MockMarkdownText = ({ text, ...props }: { text: string; dim?: boolean; color?: string }) => (
+vi.mock("@assistant-ui/react-ink-markdown", () => ({
+	MarkdownText: ({ text, ...props }: { text: string; dim?: boolean; color?: string }) => (
+		<Text {...(props.dim ? { dimColor: true } : {})} {...(props.color ? { color: props.color } : {})}>{text}</Text>
+	),
+}));
+const MarkdownText = ({ text, ...props }: { text: string; dim?: boolean; color?: string }) => (
 	<Text {...(props.dim ? { dimColor: true } : {})} {...(props.color ? { color: props.color } : {})}>{text}</Text>
 );
 
-// Use mock directly — real MarkdownText comes from @assistant-ui/react-ink-markdown via assistant-message
-const MarkdownText = MockMarkdownText;
 import { colors, symbols, ThemeProvider, useColors } from "../src/theme.js";
 import { HelpOverlay, CommandRow } from "../src/components/help-overlay.js";
 import { ModelPicker } from "../src/components/model-picker.js";
@@ -275,7 +295,13 @@ import { UserMessage } from "../src/components/user-message.js";
 // ═══════════════════════════════════════════════════════
 
 function resetStore() {
-	currentState = { ...mockStoreState, agents: new Map(), conversations: [], ...mockActions };
+	// Mutate the stable bag in place — do NOT reassign (outer `currentState`
+	// is a const reference to the same object vi.hoisted captured).
+	Object.keys(currentState).forEach((k) => { delete currentState[k]; });
+	Object.assign(currentState, M.mockStoreState, {
+		agents: new Map(),
+		conversations: [],
+	});
 }
 
 // ═══════════════════════════════════════════════════════
