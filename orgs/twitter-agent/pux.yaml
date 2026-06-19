@@ -1,106 +1,36 @@
-name: "Twitter Content Division"
-version: 1.0.0
-description: "Social media manager for The Grind & Read — content generation, engagement strategy, and automated posting"
+# Pux Org Manifest — Twitter Content Division
+name: twitter-agent
+description: "Social media manager — content generation, engagement strategy, automated posting"
 
-# Org overlay fields — kernel reads these when pux.yaml is detected
-manifesto: "./MANIFESTO.md"
-staff_root: "./roles"
-tool_packages_root: "./tool_packages"
-skills_dir: "./skills"
+manifesto: MANIFESTO.md
+staff_root: roles
+tool_packages_root: tool_packages
+skills_dir: skills
 
-sandbox:
-  pip_packages:
-    - requests
-    - beautifulsoup4
-    - seleniumbase
-    - browser_cookie3      # yt-dlp-style cookie import from host browser
-  init_files:
-    - sandbox/post.py
-    - sandbox/read.py
-    - sandbox/calendar.py
-    - sandbox/engage.py
-    - sandbox/session.py
-    - config/voices.yaml
-
-tools:
-  - name: post_tweet
-    handler: python3 /sandbox/post.py
-    description: Post a tweet via browser automation with saved session cookies
-
-  - name: read_twitter
-    handler: python3 /sandbox/read.py
-    description: Read timeline, mentions, search Twitter — uses saved session cookies
-
-  - name: manage_session
-    handler: python3 /sandbox/session.py
-    description: Bootstrap Twitter session (VNC login), check/export cookies, sync from host browser
-
-  - name: sync_session
-    handler: python3 /sandbox/session.py --cookies-from-browser firefox
-    description: Pull live Twitter cookies from host browser (yt-dlp pattern). Use when session is expired or missing.
-
-  - name: content_calendar
-    handler: python3 /sandbox/calendar.py
-    description: Manage content calendar — view upcoming posts, add drafts
-
-  - name: check_engagement
-    handler: python3 /sandbox/engage.py
-    description: Check mentions, replies, and notifications
-
-  - name: generate_content
-    handler: prompts/generate.md
-    description: Generate social media content for the club
-
-prompts:
-  morning_post:
-    file: prompts/morning_post.md
-  afternoon_post:
-    file: prompts/afternoon_post.md
-  engagement_check:
-    file: prompts/engagement_check.md
-  weekly_strategy:
-    file: prompts/weekly_strategy.md
-
-# Org schedules — list format with role delegation
-# Each schedule specifies which employee role handles it
 schedules:
-  - name: "morning_post"
-    cron: "0 0 8 * * *"
-    prompt: "./prompts/morning_post.md"
-    role: "content-writer"
-    model: "deepseek/deepseek-v4-flash"
+  - name: morning_post
+    cron: "0 8 * * *"
+    prompt: prompts/morning_post.md
+    role: content-writer
+    model: deepseek/deepseek-v4-flash
     enabled: true
 
-  - name: "afternoon_post"
-    cron: "0 0 13 * * *"
-    prompt: "./prompts/afternoon_post.md"
-    role: "content-writer"
-    model: "deepseek/deepseek-v4-flash"
+  - name: afternoon_post
+    cron: "0 13 * * *"
+    prompt: prompts/afternoon_post.md
+    role: content-writer
+    model: deepseek/deepseek-v4-flash
     enabled: false
 
-  - name: "engagement_check"
-    cron: "0 0 18 * * *"
-    prompt: "./prompts/engagement_check.md"
-    role: "engagement-manager"
+  - name: engagement_check
+    cron: "0 18 * * *"
+    prompt: prompts/engagement_check.md
+    role: engagement-manager
     enabled: false
 
-  - name: "weekly_strategy"
-    cron: "0 0 10 * * 1"
-    prompt: "./prompts/weekly_strategy.md"
-    role: "researcher"
-    model: "deepseek/deepseek-v4-flash"
+  - name: weekly_strategy
+    cron: "0 10 * * 1"
+    prompt: prompts/weekly_strategy.md
+    role: researcher
+    model: deepseek/deepseek-v4-flash
     enabled: false
-
-commands:
-  post:
-    description: Generate and post a tweet now
-    exec: python3 /sandbox/post.py --post
-  draft:
-    description: Generate a draft tweet without posting
-    exec: python3 /sandbox/post.py --draft
-  calendar:
-    description: Show content calendar
-    exec: python3 /sandbox/calendar.py --show
-  engage:
-    description: Check engagement and reply to mentions
-    exec: python3 /sandbox/engage.py --check

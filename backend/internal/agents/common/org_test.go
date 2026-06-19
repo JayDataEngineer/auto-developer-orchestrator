@@ -4,23 +4,32 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 )
 
-func TestLoadOrgManifest(t *testing.T) {
-	// Use twitter-agent as integration test if available
-	twitterPath := "/home/ubuntu/Documents/programs/dev/twitter-agent"
-	if _, err := os.Stat(twitterPath); os.IsNotExist(err) {
-		t.Skip("twitter-agent not found at", twitterPath)
+// resolveOrg returns the canonical path to a consolidated org under orgs/.
+// Falls back to t.Skip if the org dir isn't found (e.g. running outside the repo).
+func resolveOrg(t *testing.T, name string) string {
+	t.Helper()
+	_, thisFile, _, _ := runtime.Caller(0)
+	// backend/internal/agents/common/org_test.go → repo root = ../../../..
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
+	candidate := filepath.Join(repoRoot, "orgs", name)
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		t.Skipf("org %s not found at %s", name, candidate)
 	}
+	return candidate
+}
 
-	org := LoadOrgManifest(twitterPath)
+func TestLoadOrgManifest(t *testing.T) {
+	org := LoadOrgManifest(resolveOrg(t, "twitter-agent"))
 	if org == nil {
 		t.Fatal("expected org to be loaded from twitter-agent")
 	}
 
-	if org.Name != "Twitter Content Division" {
-		t.Errorf("expected name 'Twitter Content Division', got %q", org.Name)
+	if org.Name != "twitter-agent" {
+		t.Errorf("expected name 'twitter-agent', got %q", org.Name)
 	}
 
 	if org.RolesDir() == "" {
@@ -35,7 +44,7 @@ func TestLoadOrgManifest(t *testing.T) {
 		t.Errorf("expected 4 schedules, got %d", len(org.Schedules))
 	}
 
-	// Check first schedule has role
+	// First schedule (morning_post) should be enabled and assigned to content-writer
 	if org.Schedules[0].Role != "content-writer" {
 		t.Errorf("expected role 'content-writer', got %q", org.Schedules[0].Role)
 	}
@@ -45,12 +54,7 @@ func TestLoadOrgManifest(t *testing.T) {
 }
 
 func TestLoadOrgRolesFromTwitterAgent(t *testing.T) {
-	twitterPath := "/home/ubuntu/Documents/programs/dev/twitter-agent"
-	if _, err := os.Stat(twitterPath); os.IsNotExist(err) {
-		t.Skip("twitter-agent not found at", twitterPath)
-	}
-
-	org := LoadOrgManifest(twitterPath)
+	org := LoadOrgManifest(resolveOrg(t, "twitter-agent"))
 	if org == nil {
 		t.Fatal("expected org")
 	}
@@ -60,23 +64,15 @@ func TestLoadOrgRolesFromTwitterAgent(t *testing.T) {
 		t.Fatalf("expected 3 roles, got %d", len(roles))
 	}
 
-	expected := []string{"content-writer", "researcher", "engagement-manager"}
-	for _, name := range expected {
+	for _, name := range []string{"content-writer", "researcher", "engagement-manager"} {
 		if _, ok := roles[name]; !ok {
 			t.Errorf("missing role: %s", name)
 		}
 	}
 
-	// Check content-writer has browser import
+	// content-writer should import browser
 	cw := roles["content-writer"]
-	found := false
-	for _, imp := range cw.Imports {
-		if imp == "browser" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(cw.Imports, "browser") {
 		t.Error("content-writer should import 'browser'")
 	}
 	if cw.Model != "deepseek/deepseek-v4-flash" {
@@ -102,171 +98,12 @@ func TestOrgManifestEmptyName(t *testing.T) {
 	}
 }
 
-func TestLoadInvestDivisionHeads(t *testing.T) {
-	investPath := "/home/ubuntu/Documents/programs/dev/invest"
-	if _, err := os.Stat(investPath); os.IsNotExist(err) {
-		t.Skip("invest project not found at", investPath)
-	}
-
-	org := LoadOrgManifest(investPath)
-	if org == nil {
-		t.Fatal("expected org to be loaded from invest project")
-	}
-
-	if org.RolesDir() == "" {
-		t.Error("expected RolesDir to be set")
-	}
-
-	roles := LoadAgentRolesFrom(org.RolesDir())
-	if len(roles) < 3 {
-		t.Fatalf("expected at least 3 division head roles, got %d", len(roles))
-	}
-
-	// Check division heads
-	rd := roles["research-director"]
-	if rd == nil {
-		t.Fatal("research-director role not found")
-	}
-	if rd.Division != "./divisions/research" {
-		t.Errorf("research-director: expected division './divisions/research', got %q", rd.Division)
-	}
-
-	ro := roles["risk-officer"]
-	if ro == nil {
-		t.Fatal("risk-officer role not found")
-	}
-	if ro.Division != "./divisions/risk" {
-		t.Errorf("risk-officer: expected division './divisions/risk', got %q", ro.Division)
-	}
-
-	em := roles["execution-manager"]
-	if em == nil {
-		t.Fatal("execution-manager role not found")
-	}
-	if em.Division != "./divisions/execution" {
-		t.Errorf("execution-manager: expected division './divisions/execution', got %q", em.Division)
-	}
-}
-
-func TestLoadDREOrg(t *testing.T) {
-	drePath := "/home/ubuntu/Documents/programs/deep-research-engine"
-	if _, err := os.Stat(drePath); os.IsNotExist(err) {
-		t.Skip("deep-research-engine not found at", drePath)
-	}
-
-	org := LoadOrgManifest(drePath)
-	if org == nil {
-		t.Fatal("expected org from deep-research-engine")
-	}
-
-	roles := LoadAgentRolesFrom(org.RolesDir())
-	if len(roles) < 3 {
-		t.Fatalf("expected at least 3 division head roles, got %d", len(roles))
-	}
-
-	// Check division heads
-	for _, name := range []string{"research-director", "ingestion-director", "artifact-director"} {
-		role := roles[name]
-		if role == nil {
-			t.Errorf("missing division head: %s", name)
-			continue
-		}
-		if role.Division == "" {
-			t.Errorf("%s: expected division field, got empty", name)
-		}
-	}
-
-	// Load research division
-	rd := roles["research-director"]
-	researchOrg := LoadOrgManifest(filepath.Join(drePath, rd.Division))
-	if researchOrg == nil {
-		t.Fatal("research division pux.yaml not found")
-	}
-	researchRoles := LoadAgentRolesFrom(researchOrg.RolesDir())
-	if len(researchRoles) != 3 {
-		t.Errorf("expected 3 research workers, got %d", len(researchRoles))
-	}
-
-	// Load ingestion division
-	id := roles["ingestion-director"]
-	ingestOrg := LoadOrgManifest(filepath.Join(drePath, id.Division))
-	if ingestOrg == nil {
-		t.Fatal("ingestion division pux.yaml not found")
-	}
-	ingestRoles := LoadAgentRolesFrom(ingestOrg.RolesDir())
-	if len(ingestRoles) != 5 {
-		t.Errorf("expected 5 ingestion workers (incl. face-recognition-specialist), got %d", len(ingestRoles))
-	}
-	for _, name := range []string{"audio-processor", "image-analyst", "text-extractor", "content-clusterer", "face-recognition-specialist"} {
-		if ingestRoles[name] == nil {
-			t.Errorf("missing ingestion role: %s", name)
-		}
-	}
-
-	// Load generation division
-	ad := roles["artifact-director"]
-	genOrg := LoadOrgManifest(filepath.Join(drePath, ad.Division))
-	if genOrg == nil {
-		t.Fatal("generation division pux.yaml not found")
-	}
-	genRoles := LoadAgentRolesFrom(genOrg.RolesDir())
-	if len(genRoles) != 5 {
-		t.Errorf("expected 5 generation workers, got %d", len(genRoles))
-	}
-
-	// Verify databases section is parsed
-	if len(org.Databases) != 3 {
-		t.Fatalf("expected 3 database configs, got %d", len(org.Databases))
-	}
-
-	// Neo4j config
-	neo4j, ok := org.Databases["neo4j"]
-	if !ok {
-		t.Fatal("missing neo4j database config")
-	}
-	if neo4j.URI != "bolt://172.17.0.9:7687" {
-		t.Errorf("neo4j uri: expected bolt://172.17.0.9:7687, got %q", neo4j.URI)
-	}
-	if neo4j.Username != "neo4j" {
-		t.Errorf("neo4j username: expected neo4j, got %q", neo4j.Username)
-	}
-	if neo4j.PasswordEnv != "NEO4J_PASSWORD" {
-		t.Errorf("neo4j password_env: expected NEO4J_PASSWORD, got %q", neo4j.PasswordEnv)
-	}
-
-	// Postgres config
-	pg, ok := org.Databases["postgres"]
-	if !ok {
-		t.Fatal("missing postgres database config")
-	}
-	if pg.URL != "postgresql://localhost:25432/shared_db" {
-		t.Errorf("postgres url: expected postgresql://localhost:25432/shared_db, got %q", pg.URL)
-	}
-
-	// CompreFace config
-	cf, ok := org.Databases["compreface"]
-	if !ok {
-		t.Fatal("missing compreface database config")
-	}
-	if cf.BaseURL != "http://172.17.0.14:8080" {
-		t.Errorf("compreface base_url: expected http://172.17.0.14:8080, got %q", cf.BaseURL)
-	}
-	if cf.APIKeyEnv != "COMPREFACE_API_KEY" {
-		t.Errorf("compreface api_key_env: expected COMPREFACE_API_KEY, got %q", cf.APIKeyEnv)
-	}
-}
-
 func TestTechNoirOrg(t *testing.T) {
-	techNoirPath := "/home/ubuntu/Documents/projects/creative/tech-noir/pux-org"
-	if _, err := os.Stat(techNoirPath); os.IsNotExist(err) {
-		t.Skip("tech-noir pux-org not found at", techNoirPath)
-	}
-
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
 	t.Setenv("PROJECT_ROOT", repoRoot)
 
-	org := LoadOrgManifest(techNoirPath)
+	org := LoadOrgManifest(resolveOrg(t, "tech-noir"))
 	if org == nil {
 		t.Fatal("expected org to be loaded from tech-noir")
 	}
@@ -330,12 +167,7 @@ func TestTechNoirOrg(t *testing.T) {
 	if ta.Temperature != 0.2 {
 		t.Errorf("technical_artist: expected temperature 0.2, got %f", ta.Temperature)
 	}
-	hasArtImport := false
-	for _, imp := range ta.Imports {
-		if imp == "tech_noir_art" {
-			hasArtImport = true
-		}
-	}
+	hasArtImport := slices.Contains(ta.Imports, "tech_noir_art")
 	if !hasArtImport {
 		t.Error("technical_artist should import 'tech_noir_art'")
 	}
@@ -352,16 +184,8 @@ func TestTechNoirOrg(t *testing.T) {
 	if gp.SandboxTier != "native" {
 		t.Errorf("gameplay_programmer: expected sandbox 'native', got %q", gp.SandboxTier)
 	}
-	hasGodotImport := false
-	hasCodeImport := false
-	for _, imp := range gp.Imports {
-		if imp == "godot" {
-			hasGodotImport = true
-		}
-		if imp == "code" {
-			hasCodeImport = true
-		}
-	}
+	hasGodotImport := slices.Contains(gp.Imports, "godot")
+	hasCodeImport := slices.Contains(gp.Imports, "code")
 	if !hasGodotImport {
 		t.Error("gameplay_programmer should import 'godot'")
 	}
@@ -386,8 +210,7 @@ func TestTechNoirOrg(t *testing.T) {
 	}
 
 	// Verify org tool packages are resolvable via imports
-	// Simulate pux_prompt.go flow: warm kernel cache → merge org packages → load roles
-	_ = LoadToolPackages() // ensure kernel packages are cached first
+	_ = LoadToolPackages() // warm kernel cache
 	dir := org.ToolPkgsDir()
 	if dir == "" {
 		t.Fatal("ToolPkgsDir is empty")
@@ -398,7 +221,6 @@ func TestTechNoirOrg(t *testing.T) {
 	roles = LoadAgentRolesFrom(org.RolesDir())
 
 	// technical_artist imports tech_noir_art + comfyui + studio_vision + code
-	// Should have MCP servers: tech_noir, comfyui, qwen-vision
 	ta = roles["technical_artist"]
 	if ta == nil {
 		t.Fatal("technical_artist role not found after reload")
@@ -427,7 +249,6 @@ func TestTechNoirOrg(t *testing.T) {
 	}
 
 	// gameplay_programmer imports godot + code
-	// Should have MCP server: godot
 	gp = roles["gameplay_programmer"]
 	if gp == nil {
 		t.Fatal("gameplay_programmer role not found after reload")
@@ -466,9 +287,11 @@ func TestOrgPromptMergesKernelRoles(t *testing.T) {
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
 	t.Setenv("PROJECT_ROOT", repoRoot)
 
-	testSuitePath := "/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator/test-suite"
+	// test-suite/ is at the repo root (not under orgs/) — it's a project-local
+	// org used by the AI test runner. Resolve directly.
+	testSuitePath := filepath.Join(repoRoot, "test-suite")
 	if _, err := os.Stat(testSuitePath); os.IsNotExist(err) {
-		t.Skip("test-suite not found at", testSuitePath)
+		t.Skipf("test-suite not found at %s", testSuitePath)
 	}
 
 	org := LoadOrgManifest(testSuitePath)
@@ -476,26 +299,22 @@ func TestOrgPromptMergesKernelRoles(t *testing.T) {
 		t.Fatal("expected org to be loaded from test-suite")
 	}
 
-	// Load org roles
 	orgRoles := LoadAgentRolesFrom(org.RolesDir())
 	if len(orgRoles) == 0 {
 		t.Fatal("expected org roles to be loaded")
 	}
 
-	// Build prompt with org
 	prompt := BuildOrchestratorPromptWithOrg(nil, "", "", "", org, orgRoles)
 
 	// Verify kernel workers appear in the merged prompt
-	kernelNames := []string{"browser_ops", "desktop_ops", "researcher", "code_ops", "vision_ops", "shell_ops"}
-	for _, name := range kernelNames {
+	for _, name := range []string{"browser_ops", "desktop_ops", "researcher", "code_ops", "vision_ops", "shell_ops"} {
 		if !contains(prompt, name) {
 			t.Errorf("kernel role %q missing from merged prompt — org should add to kernel, not replace", name)
 		}
 	}
 
 	// Verify org roles also appear
-	orgNames := []string{"api_auditor", "interaction_tester", "visual_auditor", "regression_hunter"}
-	for _, name := range orgNames {
+	for _, name := range []string{"api_auditor", "interaction_tester", "visual_auditor", "regression_hunter"} {
 		if !contains(prompt, name) {
 			t.Errorf("org role %q missing from merged prompt", name)
 		}
@@ -504,47 +323,5 @@ func TestOrgPromptMergesKernelRoles(t *testing.T) {
 	// Verify manifesto is prepended
 	if !contains(prompt, "AI QA Organization") {
 		t.Error("manifesto content not found in prompt")
-	}
-}
-
-func TestLoadInvestSubDivisionRoles(t *testing.T) {
-	investPath := "/home/ubuntu/Documents/programs/dev/invest"
-	if _, err := os.Stat(investPath); os.IsNotExist(err) {
-		t.Skip("invest project not found at", investPath)
-	}
-
-	// Load research division
-	researchOrg := LoadOrgManifest(filepath.Join(investPath, "divisions", "research"))
-	if researchOrg == nil {
-		t.Fatal("expected org from research division")
-	}
-	roles := LoadAgentRolesFrom(researchOrg.RolesDir())
-	if len(roles) != 3 {
-		t.Fatalf("expected 3 research roles, got %d", len(roles))
-	}
-	for _, name := range []string{"signal-analyst", "regime-analyst", "researcher"} {
-		if roles[name] == nil {
-			t.Errorf("missing research role: %s", name)
-		}
-	}
-
-	// Load risk division
-	riskOrg := LoadOrgManifest(filepath.Join(investPath, "divisions", "risk"))
-	if riskOrg == nil {
-		t.Fatal("expected org from risk division")
-	}
-	riskRoles := LoadAgentRolesFrom(riskOrg.RolesDir())
-	if len(riskRoles) != 2 {
-		t.Fatalf("expected 2 risk roles, got %d", len(riskRoles))
-	}
-
-	// Load execution division
-	execOrg := LoadOrgManifest(filepath.Join(investPath, "divisions", "execution"))
-	if execOrg == nil {
-		t.Fatal("expected org from execution division")
-	}
-	execRoles := LoadAgentRolesFrom(execOrg.RolesDir())
-	if len(execRoles) != 2 {
-		t.Fatalf("expected 2 execution roles, got %d", len(execRoles))
 	}
 }

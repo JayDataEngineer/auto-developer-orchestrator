@@ -1,10 +1,6 @@
+# Pux Org Manifest — General (sandbox org for testing the kernel with no overlay)
 name: general
-version: "1.0.0"
-description: "General-purpose testing project for Pux agent"
+description: "General-purpose testing project — no roles, no skills, just kernel defaults"
 
-tools: []
-requires: []
-
-sandbox:
-  init_files: []
-  pip_packages: []
+# Deliberately no manifesto / staff_root — this org exercises the kernel's
+# fallback path (kernel workers only, no org overlay).

@@ -1,5 +1,7 @@
+# Pux Org Manifest — Tech Noir Studio
 name: tech-noir
 description: "Tech Noir Studio — 2.5D cyberpunk survival horror. Godot 4.6, AI-driven asset pipeline."
+
 manifesto: MANIFESTO.md
 staff_root: roles
 tool_packages_root: tool_packages

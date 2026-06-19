@@ -1,5 +1,4 @@
 description: "Research Director — Plans research, delegates to web/RAG researchers, reviews quality, directs synthesis. No rigid graph — iterate until good enough."
-division: "./divisions/research"
 max_rounds: 30
 model: "deepseek/deepseek-v4-flash"
 imports:

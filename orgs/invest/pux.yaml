@@ -1,123 +1,31 @@
-# Pux App Manifest — Investment Bot
-name: invest-bot
-version: "3.0.0"
-description: "Market analysis and Alpaca paper trading bot with technical + fundamental analysis"
+# Pux Org Manifest — Investment Bot
+name: invest
+description: "Market analysis and Alpaca paper trading — technical + fundamental analysis, regime detection, risk-aware execution"
 
-# Organization overlay
 manifesto: MANIFESTO.md
 staff_root: roles
 
-# Division head roles (CTO delegates to these)
-# Each division head points to a sub-directory with its own pux.yaml
+# Scheduled scans — actual code (fetch_data.py, trade.py, backtest.py, etc.)
+# lives in ~/Documents/programs/dev/invest/ — this org is the Pux-side charter
+# only (CTO + 3 directors: research, risk, execution).
+schedules:
+  - name: morning_scan
+    cron: "30 9 * * 1-5"
+    prompt: prompts/morning_scan.md
+    role: research-director
+    model: deepseek/deepseek-v4-flash
+    enabled: true
 
-# Tools the app exposes to the OS (callable by other apps via app_ prefix)
-tools:
-  - name: execute_trade
-    handler: "python3 /sandbox/trade.py --signals /sandbox/signals.json"
-    description: "Execute paper trades from signals file via Alpaca API"
-  - name: market_snapshot
-    handler: "python3 /sandbox/fetch_data.py"
-    description: "Full market data snapshot with fundamentals (stocks + crypto)"
-  - name: portfolio_status
-    handler: "python3 /sandbox/trade.py --status"
-    description: "Current Alpaca paper portfolio status"
-  - name: portfolio_ledger
-    handler: "python3 /sandbox/trade.py --ledger"
-    description: "Portfolio P&L history — starting equity, daily changes, total returns, position breakdown"
-  - name: backtest
-    handler: "python3 /sandbox/backtest.py --date {date}"
-    description: "Time-travel backtest — fetch historical snapshot for a date, evaluate past predictions, score report"
-  - name: metrics
-    handler: "python3 /sandbox/record_metrics.py"
-    description: "Collect all portfolio metrics (equity, Sharpe, drawdown, regime, heat, accuracy) for Langfuse dashboard tracking"
-  - name: historical_metrics
-    handler: "python3 /sandbox/record_metrics.py --mode simulation"
-    description: "Collect simulation metrics from historical.py results (Sharpe, Sortino, drawdown, win rate, profit factor, return vs SPY)"
+  - name: midday_review
+    cron: "0 13 * * 1-5"
+    prompt: prompts/portfolio_review.md
+    role: research-director
+    model: deepseek/deepseek-v4-flash
+    enabled: true
 
-# Tools the app requires from the OS
-requires:
-  - bash
-  - file_read
-  - file_write
-  - mcp_research
-  - mcp_search
-  - mcp_scrape
-
-# Environment variables needed in the sandbox
-env:
-  ALPACA_API_KEY: "${ALPACA_API_KEY}"
-  ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY}"
-
-# Sandbox initialization — files uploaded and deps installed on `project add`
-sandbox:
-  init_files:
-    - sandbox/fetch_data.py
-    - sandbox/trade.py
-    - sandbox/backtest.py
-    - sandbox/record_metrics.py
-    - config/watchlist.json
-  pip_packages:
-    - yfinance
-    - alpaca-py
-    - pycoingecko
-
-# Prompt templates
-prompts:
-  morning_scan:
-    file: prompts/morning_scan.md
-  portfolio_review:
-    file: prompts/portfolio_review.md
-  backtest_scan:
-    file: prompts/backtest_scan.md
-  quick_analysis:
-    text: |
-      Analyze {symbol} for trading opportunity.
-      Consider: PE ratio, forward PE, PEG, margins, revenue growth,
-      debt/equity, analyst consensus, and technical indicators (RSI, MACD).
-      Provide: sentiment, key factors, recommendation, risk level.
-
-# Scheduled jobs — auto-registered on project add
-schedule:
-  morning_scan:
-    cron: "0 30 9 * * 1-5"
-    prompt: morning_scan
-    description: "Morning market scan at open (9:30 AM ET weekdays)"
-    model: "deepseek/deepseek-v4-flash"
-  midday_review:
-    cron: "0 0 13 * * 1-5"
-    prompt: portfolio_review
-    description: "Midday portfolio review (1:00 PM ET weekdays)"
-    model: "deepseek/deepseek-v4-flash"
-  eod_scan:
-    cron: "0 30 15 * * 1-5"
-    prompt: morning_scan
-    description: "End-of-day scan (3:30 PM ET weekdays)"
-    model: "deepseek/deepseek-v4-flash"
-  eod_snapshot:
-    cron: "0 0 16 * * 1-5"
-    prompt: "Run portfolio_status to check the current state, then record it"
-    description: "End-of-day portfolio snapshot (4:00 PM ET weekdays, after market close)"
-    model: "deepseek/deepseek-v4-flash"
-  eod_metrics:
-    cron: "0 30 16 * * 1-5"
-    prompt: "Run the metrics tool to collect today's portfolio metrics for Langfuse tracking"
-    description: "End-of-day metrics collection for dashboard tracking (4:30 PM ET weekdays)"
-    model: "deepseek/deepseek-v4-flash"
-
-# CLI commands
-commands:
-  scan:
-    description: "Run market scan + trade execution via orchestrator agent"
-    exec: "python3 bot.py orch-session"
-  status:
-    description: "Show current Alpaca paper portfolio status"
-    exec: "python3 /sandbox/trade.py --status"
-  fetch:
-    description: "Fetch market data with fundamentals (no trading)"
-    exec: "python3 /sandbox/fetch_data.py"
-  signals:
-    description: "Execute pending signals via Alpaca"
-    exec: "python3 /sandbox/trade.py"
-  ledger:
-    description: "Show portfolio P&L history and money trail"
-    exec: "python3 /sandbox/trade.py --ledger"
+  - name: eod_scan
+    cron: "30 15 * * 1-5"
+    prompt: prompts/morning_scan.md
+    role: research-director
+    model: deepseek/deepseek-v4-flash
+    enabled: true

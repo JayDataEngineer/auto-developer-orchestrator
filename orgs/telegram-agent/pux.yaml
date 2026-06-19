@@ -1,36 +1,7 @@
-name: "Telegram Notes & Automation"
-version: 1.0.0
+# Pux Org Manifest — Telegram Notes & Automation
+name: telegram-agent
 description: "Personal Telegram automation — post to Saved Messages, read mentions, send messages without ever opening the app"
 
-# Org overlay fields — kernel reads these when pux.yaml is detected
-manifesto: "./MANIFESTO.md"
-staff_root: "./roles"
-tool_packages_root: "./tool_packages"
-skills_dir: "./skills"
-
-sandbox:
-  pip_packages:
-    - telethon            # MTProto client (replaces SeleniumBase for Telegram)
-    - cryptg              # C extension for fast Telegram encryption (10x speedup)
-  init_files:
-    - sandbox/session.py
-    - sandbox/telegram_helpers.py
-
-tools:
-  - name: telegram_session_status
-    handler: python3 /sandbox/session.py --check
-    description: Check if saved Telegram session is alive. Run this before any messaging op.
-
-  - name: telegram_bootstrap
-    handler: python3 /sandbox/session.py --bootstrap
-    description: One-time interactive login (phone + SMS code). Only run if session is dead.
-
-  - name: telegram_setup_credentials
-    handler: python3 /sandbox/session.py --setup-credentials
-    description: Write api_id + api_hash + phone to credentials file (required before first bootstrap)
-
-prompts:
-  morning_note:
-    file: prompts/morning_note.md
-  read_saved_messages:
-    file: prompts/read_saved_messages.md
+manifesto: MANIFESTO.md
+staff_root: roles
+skills_dir: skills

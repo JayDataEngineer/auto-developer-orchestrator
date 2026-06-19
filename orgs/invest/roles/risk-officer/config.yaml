@@ -1,5 +1,4 @@
 description: "Risk Officer — Manages risk assessment, position sizing, and stop-loss placement. Delegates to risk-analyst and position-sizer."
-division: "./divisions/risk"
 max_rounds: 20
 model: "deepseek/deepseek-v4-flash"
 imports:
