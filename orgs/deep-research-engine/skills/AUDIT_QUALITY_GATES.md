@@ -48,6 +48,16 @@ curl -sX POST http://localhost:8000/surreal/sql \
 
 **Common failure cause:** ASR provider 429'd mid-batch. Re-delegate INGEST_AUDIO_DIARIZATION with the explicit list of missing IDs.
 
+**Silent videos — legitimate edge case:** some videos are recorded with no microphone input (audio measures -91 dB = digital silence). ASR correctly returns empty text. The pipeline writes a transcript with `text="[no speech detected ...]"` and `is_silent: true` so the audit reflects reality rather than masking silence as a failure. The query above counts these as success because `text` is non-empty. If you want to see how many transcripts are silent markers vs real speech:
+
+```bash
+curl -sX POST http://localhost:8000/surreal/sql \
+    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
+    -u "root:$SURREAL_PASSWORD" \
+    -d "RETURN { speech: count(SELECT id FROM transcript WHERE is_silent != true), silent: count(SELECT id FROM transcript WHERE is_silent = true) }" \
+    | jq -r '.[0].result'
+```
+
 ## Check 2 — sender_names_clean
 
 **Goal:** zero `sender` values contain a timestamp. Target: 0.

@@ -35,6 +35,7 @@ DEFINE TABLE IF NOT EXISTS transcript;        -- ASR output, first-class (linked
 DEFINE TABLE IF NOT EXISTS speaker_turn;      -- VAD segment within a transcript; has voice_embedding[256]
 DEFINE TABLE IF NOT EXISTS face_appearance;   -- Face detection within an item; has embedding[512]
 DEFINE TABLE IF NOT EXISTS pending_link;      -- Multimodal deferrals (multi-face ambiguous cases)
+DEFINE TABLE IF NOT EXISTS ingestion_run;     -- Tracks each pipeline run (started_at, models, stats)
 
 -- --- Relations (TYPE RELATION, no FROM/TO constraint in v3) -----------------
 DEFINE TABLE IF NOT EXISTS mentions TYPE RELATION;        -- topic -> item
