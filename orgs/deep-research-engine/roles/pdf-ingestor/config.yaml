@@ -1,0 +1,5 @@
+description: "PDF Ingestor — extract structured knowledge from PDF files (text, tables, images, metadata). Returns findings the synthesizer can merge."
+max_rounds: 20
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

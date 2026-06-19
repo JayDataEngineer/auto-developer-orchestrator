@@ -1,0 +1,5 @@
+description: "Social Post Writer — Twitter/X threads, Mastodon, Bluesky posts from a cited brief. Adapts voice per platform."
+max_rounds: 12
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

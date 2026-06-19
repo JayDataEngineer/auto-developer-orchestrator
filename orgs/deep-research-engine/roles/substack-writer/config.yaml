@@ -1,0 +1,5 @@
+description: "Substack Writer — longform article from a cited brief. Section structure, narrative arc, footnoted citations."
+max_rounds: 20
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

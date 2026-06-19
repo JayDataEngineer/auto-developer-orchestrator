@@ -1,0 +1,6 @@
+description: "Web Researcher — search + scrape + summarize with citations. Returns structured findings the synthesizer can merge."
+max_rounds: 25
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - research
+  - shell
