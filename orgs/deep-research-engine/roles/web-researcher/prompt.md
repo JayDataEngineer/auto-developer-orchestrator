@@ -24,6 +24,7 @@ See `skills/RESEARCH_WEB_WORKFLOW.md` for the full checklist. Summary:
    - Direct quote (≤2 sentences) from the source
    - Source URL + publication date + author
    - Your confidence (high / medium / low) and why
+   - **ALSO** write a `source` record to SurrealDB via `surreal_client.py save-source` (see RESEARCH_WEB_WORKFLOW.md Step 5b). This makes the finding queryable by future agents — without it, your work is ephemeral.
 5. **Stop conditions** — Stop when:
    - You have ≥3 independent sources per sub-question
    - You've hit `max_rounds`

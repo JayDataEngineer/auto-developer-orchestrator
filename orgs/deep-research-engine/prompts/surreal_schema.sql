@@ -64,6 +64,10 @@ DEFINE INDEX IF NOT EXISTS idx_transcript_embedding
     ON transcript FIELDS embedding HNSW DIMENSION 1024;
 DEFINE INDEX IF NOT EXISTS idx_topic_centroid_embedding
     ON topic FIELDS centroid_embedding HNSW DIMENSION 1024;
+DEFINE INDEX IF NOT EXISTS idx_item_text_embedding
+    ON item FIELDS text_embedding HNSW DIMENSION 1024;
+DEFINE INDEX IF NOT EXISTS idx_source_embedding
+    ON source FIELDS embedding HNSW DIMENSION 1024;
 
 -- --- Convenience indexes for common lookups ---------------------------------
 DEFINE INDEX IF NOT EXISTS idx_item_type ON item FIELDS type;

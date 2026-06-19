@@ -90,8 +90,11 @@ Read `raw.txt`. Identify:
 
 - **Citations / footnotes** — record verbatim. These become your "secondary sources" pointer.
 
-### Step 4 — Pull findings
-For each section relevant to the user's query, write `artifacts/pdf/<doc-slug>/<section-slug>.md`:
+### Step 4 — Pull findings (markdown + SurrealDB source record)
+
+**Two writes per finding.** Skipping the DB write means future agents can't query past research — the world stays ephemeral.
+
+**(a) Markdown finding** at `artifacts/pdf/<doc-slug>/<section-slug>.md`:
 
 ```markdown
 # <section heading> (p. <N>)
@@ -103,6 +106,31 @@ For each section relevant to the user's query, write `artifacts/pdf/<doc-slug>/<
 
 ## Type
 **<primary|secondary|tertiary>** — <why>
+```
+
+**(b) SurrealDB source record** — one per PDF document (not per section). Run this once after extracting the document:
+
+```bash
+python3 /sandbox/surreal_client.py save-source \
+  --kind pdf \
+  --path "/abs/path/to/document.pdf" \
+  --title "<title from pdfinfo>" \
+  --author "<author from pdfinfo>" \
+  --published-at "<CreationDate ISO-formatted>" \
+  --content-file "artifacts/pdf/<doc-slug>/raw.txt" \
+  --topic-ids "topic:abc123"
+```
+
+This atomically:
+1. Embeds the extracted text (1024-dim via Ollama mxbai-embed-large, capped at 8k chars)
+2. INSERTs a `source` record (idempotent on path)
+3. RELATEs topic_ids via `extracted_from` edge
+
+**For sections that reference existing topics or persons**, create additional extracted_from edges manually:
+
+```bash
+python3 /sandbox/surreal_client.py relate \
+  --src "topic:abc123" --edge extracted_from --tgt "source:<source_id>"
 ```
 
 ### Step 5 — Build the index

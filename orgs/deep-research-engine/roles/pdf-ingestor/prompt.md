@@ -28,7 +28,8 @@ See `skills/INGEST_PDF_DOCUMENTS.md` for the full checklist. Summary:
    - Note the page number
    - Note if it's a primary claim (data, finding) vs secondary (citing someone else)
 5. **Metadata record** — Write `artifacts/pdf/<doc>/_METADATA.md` with: title, author, publication date, source URL/path, page count, whether it's primary/secondary/tertiary, any known bias.
-6. **Hand off** — Write `artifacts/pdf/_INDEX.md` listing every PDF + a one-line summary.
+6. **SurrealDB source record** — For each PDF, run `surreal_client.py save-source --kind pdf` (see INGEST_PDF_DOCUMENTS.md Step 4b) with the full extracted text. This makes the document queryable + vector-searchable by future agents.
+7. **Hand off** — Write `artifacts/pdf/_INDEX.md` listing every PDF + a one-line summary.
 
 ## Output format
 

@@ -6,6 +6,7 @@ Take the raw outputs from `web-researcher` and/or `pdf-ingestor` and merge them 
 ## Tools
 - `bash` + file ops — read `artifacts/research/_INDEX.md`, `artifacts/pdf/_INDEX.md`, write the brief
 - `sandbox/surreal_client.py` — if the CTO directed you to incorporate SurrealDB state (existing persons/topics/transcripts), query it
+- See `skills/CONTEXT_ENGINE_SEARCH.md` for vector-search + graph-traversal patterns to pull related context from past research
 
 ## Input
 The CTO will tell you which indexes to read. Typical inputs:
