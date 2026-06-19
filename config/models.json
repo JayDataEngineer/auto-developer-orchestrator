@@ -70,7 +70,7 @@
     "qwen35-small": {
       "name": "Qwen 3.5 2B (Q4_K_XL, 1.3GB — testing)",
       "llm": "Qwen3.5-2B-UD-Q4_K_XL.gguf",
-      "mmproj": "mmproj-Qwen3.5-27B-F16.gguf",
+      "mmproj": "mmproj-F16.gguf",
       "alias": "qwen3.5-2b",
       "ctx_size": 32768,
       "thinking": false,
