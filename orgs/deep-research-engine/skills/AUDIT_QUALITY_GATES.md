@@ -164,3 +164,21 @@ If check #2 still returns 0 after planting bad data, the regex check is broken.
 Report `overall: pass`. The CTO can now safely delegate to the artifact-generation phase (research-director + artifact-director) knowing the underlying knowledge graph is trustworthy.
 
 If any check still fails after 5 iteration rounds, escalate to the user with the concrete failure mode + proposed fix. Don't keep retrying the same thing hoping it works.
+
+## Manual verification (human-in-the-loop)
+
+After all 6 pass, run the file sorter so a human can spot-check the embeddings against the source files. This catches data-quality bugs that the 6 quantitative checks can't — e.g., a voice message attributed to the wrong sender, a face cluster that groups two different people, a centroid that's literally identical between two person records.
+
+```bash
+cd ~/Documents/programs/deep-research-engine
+python3 sandbox/export_for_verification.py
+# → writes output/verify/ with browsable HTML
+# Open: file://$(pwd)/output/verify/index.html
+```
+
+Output tree:
+- `faces/<sender>/` — every photo with detected faces, rendered with red bbox overlays. Click any photo to see the boxes positioned over the image.
+- `voices/<sender>/` — audio + transcript `.txt` side-by-side. Listen and read at the same time.
+- `embeddings/` — JSON dump of every face/voice embedding + cosine-similarity matrices for centroids. Surfaces "two centroids are literally identical" or "intra-cluster similarity is 0.05 (clusters are noise)" type bugs.
+
+Use `--copy` instead of symlinks if you need to move the folder off the host.
