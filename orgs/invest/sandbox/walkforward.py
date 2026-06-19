@@ -23,6 +23,7 @@ from datetime import datetime
 from itertools import product
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
 import signals
 
 # ── Config ─────────────────────────────────────────────────────────
@@ -41,7 +42,7 @@ DEFAULT_CONFIG = {
     },
 }
 
-VALIDATION_FILE = os.environ.get("WALKFORWARD_REPORT", "/sandbox/walkforward_report.json")
+VALIDATION_FILE = paths.WALKFORWARD_REPORT
 
 
 # ── Indicator Computation ──────────────────────────────────────────
@@ -133,7 +134,7 @@ def fetch_historical(ticker, period="1y"):
 
 def load_market_data():
     """Load current market data for fundamentals + VIX."""
-    path = os.environ.get("MARKET_DATA_FILE", "/sandbox/market_data.json")
+    path = paths.MARKET_DATA_FILE
     if not os.path.exists(path):
         return {}, 18.0
     with open(path) as f:
@@ -547,7 +548,7 @@ def main():
     sub.add_parser("report")
 
     args = p.parse_args()
-    cfg = load_config("/sandbox/walkforward_config.json")
+    cfg = load_config(paths.WALKFORWARD_CONFIG)
     {"backtest": cmd_backtest, "optimize": cmd_optimize,
      "compare": cmd_compare, "report": cmd_report}.get(
         args.command, lambda *_: p.print_help())(args, cfg)

@@ -9,8 +9,8 @@ Macro data refreshes weekly (FRED) + monthly (CPI, GDP, jobs). Use this scan to:
 ## Workflow
 1. Refresh FRED data + macro tickers:
    ```bash
-   python3 /sandbox/macro.py detect
-   python3 /sandbox/macro.py calendar  # upcoming macro events this week
+   python3 sandbox/macro.py detect
+   python3 sandbox/macro.py calendar  # upcoming macro events this week
    ```
 
 2. Delegate to **regime-analyst** with full-mode message:

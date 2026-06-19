@@ -6,17 +6,17 @@ Full pipeline: signal + regime + news + filings + crypto context. Confidence thr
 ## Evaluate Past Predictions
 Before scanning, evaluate yesterday's signals:
 ```bash
-python3 /sandbox/journal.py evaluate
-python3 /sandbox/journal.py stats
+python3 sandbox/journal.py evaluate
+python3 sandbox/journal.py stats
 ```
 Use these to calibrate confidence for today's signals.
 
 ## Delegation Workflow
 Delegate to your three division heads in order:
 
-1. **research-director**: "Run the Base-mode morning research pipeline. Generate ranked signals across stocks + crypto with multi-signal fusion, get regime + macro context, research news and SEC filings for the top 3 actionable assets, get crypto on-chain confirmation for any crypto signals. Save signals to /sandbox/signals.json and yield a research report artifact."
+1. **research-director**: "Run the Base-mode morning research pipeline. Generate ranked signals across stocks + crypto with multi-signal fusion, get regime + macro context, research news and SEC filings for the top 3 actionable assets, get crypto on-chain confirmation for any crypto signals. Save signals to data/signals.json and yield a research report artifact."
 
-2. **risk-officer**: "The research director has completed analysis. Review /sandbox/signals.json and run multi-asset risk assessment (stock heat + crypto heat + combined). Size positions for approved trades (confidence ≥ 0.6). Update signals.json with risk-adjusted positions and generate stop orders. Only approve trades that pass all risk checks."
+2. **risk-officer**: "The research director has completed analysis. Review data/signals.json and run multi-asset risk assessment (stock heat + crypto heat + combined). Size positions for approved trades (confidence ≥ 0.6). Update signals.json with risk-adjusted positions and generate stop orders. Only approve trades that pass all risk checks."
 
 3. **execution-manager**: "Risk officer has approved trades. Record predictions in the journal FIRST, then execute trades via Alpaca (stocks + crypto), and generate a summary report."
 

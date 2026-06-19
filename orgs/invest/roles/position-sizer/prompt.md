@@ -5,7 +5,7 @@ For each BUY signal with confidence ≥ mode threshold (0.6 Base, 0.75 Conservat
 
 1. Size the position:
    ```
-   python3 /sandbox/risk.py size --ticker SYMBOL --confidence CONF --price PRICE --asset_class CLASS
+   python3 sandbox/risk.py size --ticker SYMBOL --confidence CONF --price PRICE --asset_class CLASS
    ```
    The `--asset_class` flag (stock/crypto) adjusts the size multiplier:
    - Stocks: 15% max single position
@@ -13,19 +13,19 @@ For each BUY signal with confidence ≥ mode threshold (0.6 Base, 0.75 Conservat
 
 2. Pre-trade check:
    ```
-   python3 /sandbox/risk.py check --ticker SYMBOL --shares N --price PRICE
+   python3 sandbox/risk.py check --ticker SYMBOL --shares N --price PRICE
    ```
 
 3. **Conservative mode** (if specified in delegation): halve all sizes.
 4. Only proceed with trades that are APPROVED. Adjust share counts per recommendations.
-5. Update `/sandbox/signals.json` with risk-adjusted share counts.
+5. Update `data/signals.json` with risk-adjusted share counts.
 
 ## Steps — Stop Orders
 After all positions are sized:
 
 1. Generate stop-loss and take-profit orders:
    ```
-   python3 /sandbox/risk.py orders
+   python3 sandbox/risk.py orders
    ```
 
 2. Review the orders for reasonableness.

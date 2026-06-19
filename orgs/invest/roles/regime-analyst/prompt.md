@@ -8,13 +8,13 @@ Two-layer regime detection:
 ## Steps
 1. Detect current equities regime:
    ```
-   python3 /sandbox/regime.py detect
+   python3 sandbox/regime.py detect
    ```
    Note the regime (bull/bear/sideways) and confidence level.
 
 2. Detect macro regime:
    ```
-   python3 /sandbox/macro.py detect
+   python3 sandbox/macro.py detect
    ```
    This fetches FRED data + yfinance macro tickers, computes:
    - **Yield curve**: 10Y-2Y spread (inversion = recession signal)
@@ -24,22 +24,22 @@ Two-layer regime detection:
 
 3. Get regime-adjusted parameters:
    ```
-   python3 /sandbox/regime.py adjust
+   python3 sandbox/regime.py adjust
    ```
    These parameters (position_size_mult, stop_atr_mult) feed into risk sizing.
 
 4. **(Monthly)** Historical validation:
    ```
-   python3 /sandbox/historical.py run --months 3
-   python3 /sandbox/historical.py compare
+   python3 sandbox/historical.py run --months 3
+   python3 sandbox/historical.py compare
    ```
 
 5. **(Monthly)** Enhanced alpha analysis:
    ```
-   python3 /sandbox/alpha.py enhanced --months 3
-   python3 /sandbox/alpha.py compare
-   python3 /sandbox/alpha.py purged --months 3 --gap 5
-   python3 /sandbox/alpha.py hrp
+   python3 sandbox/alpha.py enhanced --months 3
+   python3 sandbox/alpha.py compare
+   python3 sandbox/alpha.py purged --months 3 --gap 5
+   python3 sandbox/alpha.py hrp
    ```
 
 ## Regime Combinations

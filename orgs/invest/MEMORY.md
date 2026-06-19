@@ -56,8 +56,8 @@ The `web` MCP server (`backend/cmd/server/app.go:347-348`) provides: `research`,
 ### 5. World is not ephemeral (2026-06-19)
 Per `feedback_persistent_pipeline_state.md`:
 - **Predictions** stored in SQLite (`journal.db`) — immutable once recorded
-- **Signals** written to `/sandbox/signals.json` — current pending
-- **Memos** in `/sandbox/workspace/memos/` — research reports by date
+- **Signals** written to `data/signals.json` — current pending
+- **Memos** in `workspace/memos/` — research reports by date
 - **alt_data.py cache** wraps web MCP responses (1h TTL default)
 
 The CTO consults [[CONTEXT_ENGINE_QUERY]] before any scan to avoid duplicate work.

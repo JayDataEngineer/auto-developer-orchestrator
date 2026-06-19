@@ -6,28 +6,28 @@ Time-travel test: fetch a historical market snapshot for a specific date, run th
 ## Workflow
 1. Load backtest snapshot:
    ```bash
-   python3 /sandbox/backtest.py --date {date}
+   python3 sandbox/backtest.py --date {date}
    ```
    This fetches historical data for that date in the same JSON format as a live scan.
 
 2. Delegate to **research-director** with a Lightning-mode prefix:
-   "Lightning mode: analyze the historical snapshot from /sandbox/backtest_snapshot.json. Generate signals for that date. Save to /sandbox/signals.json. Yield a brief report."
+   "Lightning mode: analyze the historical snapshot from sandbox/backtest_snapshot.json. Generate signals for that date. Save to data/signals.json. Yield a brief report."
 
 3. Record each signal for backtest scoring:
    ```bash
-   python3 /sandbox/backtest.py --record-signal "SYMBOL,ACTION,CONFIDENCE,{date}"
+   python3 sandbox/backtest.py --record-signal "SYMBOL,ACTION,CONFIDENCE,{date}"
    ```
 
 4. Evaluate all predictions:
    ```bash
-   python3 /sandbox/backtest.py --evaluate
-   python3 /sandbox/backtest.py --report
+   python3 sandbox/backtest.py --evaluate
+   python3 sandbox/backtest.py --report
    ```
 
 5. Also run the strategy backtester for context:
    ```bash
-   python3 /sandbox/historical.py run --months 3
-   python3 /sandbox/historical.py compare
+   python3 sandbox/historical.py run --months 3
+   python3 sandbox/historical.py compare
    ```
 
 ## Output

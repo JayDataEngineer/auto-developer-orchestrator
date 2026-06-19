@@ -23,6 +23,7 @@ import tempfile
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
 import signals
 import regime
 import walkforward
@@ -43,8 +44,7 @@ DEFAULT_CONFIG = {
     "months": 3,
 }
 
-RESULTS_FILE = os.environ.get(
-    "HISTORICAL_RESULTS", "/sandbox/historical_results.json")
+RESULTS_FILE = paths.HISTORICAL_RESULTS
 
 AI_DEFAULT_API = "http://localhost:8001"
 AI_MODEL = os.environ.get("AI_MODEL", "gemma-4-26b")

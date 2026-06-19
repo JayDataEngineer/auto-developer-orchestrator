@@ -14,10 +14,13 @@ import os
 import sys
 import argparse
 
-SIGNALS_CONFIG_FILE = os.environ.get("SIGNALS_CONFIG", "/sandbox/signals_config.json")
-MARKET_DATA_FILE = os.environ.get("MARKET_DATA_FILE", "/sandbox/market_data.json")
-SIGNALS_FILE = os.environ.get("SIGNALS_FILE", "/sandbox/signals.json")
-JOURNAL_FILE = os.environ.get("JOURNAL_FILE", "/sandbox/journal.json")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
+
+SIGNALS_CONFIG_FILE = paths.SIGNALS_CONFIG
+MARKET_DATA_FILE = paths.MARKET_DATA_FILE
+SIGNALS_FILE = paths.SIGNALS_FILE
+JOURNAL_FILE = paths.JOURNAL_FILE
 
 DEFAULT_CONFIG = {
     "weights": {

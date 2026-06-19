@@ -6,7 +6,7 @@ Run technical analysis across the full multi-asset watchlist (stocks + crypto + 
 ## Steps
 1. Fetch market data:
    ```
-   python3 /sandbox/fetch_data.py
+   python3 sandbox/fetch_data.py
    ```
    This now returns stocks + crypto + macro sections in one JSON.
 
@@ -19,32 +19,32 @@ Run technical analysis across the full multi-asset watchlist (stocks + crypto + 
 
 3. Run multi-signal fusion:
    ```
-   python3 /sandbox/signals.py rank
+   python3 sandbox/signals.py rank
    ```
    Review the ranked signal table.
 
 4. Get consensus composite:
    ```
-   python3 /sandbox/signals.py consensus
+   python3 sandbox/signals.py consensus
    ```
    If you disagree with the composite, explain why.
 
 5. **(Weekly)** Walk-forward validation:
    ```
-   python3 /sandbox/walkforward.py report
+   python3 sandbox/walkforward.py report
    ```
    If score-return correlation < 0.1, consider optimizing:
    ```
-   python3 /sandbox/walkforward.py optimize
+   python3 sandbox/walkforward.py optimize
    ```
 
 6. **(Monthly)** Enhanced alpha analysis:
    ```
-   python3 /sandbox/alpha.py enhanced --months 3
-   python3 /sandbox/alpha.py compare
+   python3 sandbox/alpha.py enhanced --months 3
+   python3 sandbox/alpha.py compare
    ```
 
-7. Save signals to `/sandbox/signals.json`:
+7. Save signals to `data/signals.json`:
    ```json
    [
      {
@@ -82,4 +82,4 @@ Return:
 1. **Ranked Signals Table** — top 10 by composite score, broken down by asset class
 2. **Confidence Distribution** — how many signals at each confidence band
 3. **Walk-Forward Status** — last validation date, score-return correlation
-4. **Signals File** — confirmation that `/sandbox/signals.json` was written
+4. **Signals File** — confirmation that `data/signals.json` was written

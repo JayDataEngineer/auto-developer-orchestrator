@@ -18,11 +18,14 @@ import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
-JOURNAL_FILE = os.environ.get("JOURNAL_FILE", "/sandbox/journal.json")
-SIGNALS_FILE = os.environ.get("SIGNALS_FILE", "/sandbox/signals.json")
-MARKET_DATA_FILE = os.environ.get("MARKET_DATA_FILE", "/sandbox/market_data.json")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
+
+JOURNAL_FILE = paths.JOURNAL_FILE
+SIGNALS_FILE = paths.SIGNALS_FILE
+MARKET_DATA_FILE = paths.MARKET_DATA_FILE
 MAX_PREDICTIONS = 500
-ARCHIVE_FILE = os.environ.get("JOURNAL_ARCHIVE", "/sandbox/journal_archive.json")
+ARCHIVE_FILE = paths.JOURNAL_ARCHIVE
 
 # ── Data I/O ──────────────────────────────────────────────────────────
 
@@ -228,8 +231,10 @@ def fetch_price_alpaca(ticker):
     """Fetch current price via Alpaca (if available in sandbox)."""
     try:
         from alpaca.trading.client import TradingClient
-        API_KEY = os.environ.get("ALPACA_API_KEY", "PKRSCFAUIFMGNE4LQTBG5GAFXD")
-        SECRET = os.environ.get("ALPACA_SECRET_KEY", "4uAsxThg7vGadJ6VWnYgVUjryML2TwMLGeM4QLVgTVvQ")
+        API_KEY = os.environ.get("ALPACA_API_KEY")
+        SECRET = os.environ.get("ALPACA_SECRET_KEY")
+        if not API_KEY or not SECRET:
+            return None  # no keys → fall through to yfinance
         client = TradingClient(API_KEY, SECRET, paper=True)
         quote = client.get_stock_latest_quote(ticker)
         if quote:

@@ -8,12 +8,12 @@ Multi-asset execution:
 ## Steps
 1. Read the current signals with risk-adjusted positions:
    ```bash
-   cat /sandbox/signals.json
+   cat data/signals.json
    ```
 
 2. Execute trades:
    ```
-   python3 /sandbox/trade.py
+   python3 sandbox/trade.py
    ```
    This handles both stocks and crypto. For each signal:
    - Stock + market open → market order
@@ -22,7 +22,7 @@ Multi-asset execution:
 
 3. Check portfolio status after execution:
    ```
-   python3 /sandbox/trade.py --status
+   python3 sandbox/trade.py --status
    ```
 
 ## Notes

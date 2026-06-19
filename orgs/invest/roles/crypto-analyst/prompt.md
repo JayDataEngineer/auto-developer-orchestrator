@@ -8,7 +8,7 @@ See [[CRYPTO_ONCHAIN]] for the full reference.
 ## Steps
 1. Run crypto on-chain analysis:
    ```
-   python3 /sandbox/crypto.py analyze
+   python3 sandbox/crypto.py analyze
    ```
    Outputs JSON with per-coin metrics.
 

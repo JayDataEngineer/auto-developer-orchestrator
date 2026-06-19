@@ -6,20 +6,20 @@ You are the Reporter in the Execution Division. You record predictions in the jo
 ## Steps
 1. **(Before fills)** Evaluate past predictions:
    ```
-   python3 /sandbox/journal.py evaluate
-   python3 /sandbox/journal.py stats
+   python3 sandbox/journal.py evaluate
+   python3 sandbox/journal.py stats
    ```
    Use these to calibrate confidence for future signals. If accuracy < 50% on a given signal type, that's a yellow flag — flag it in the summary.
 
 2. **(Before fills)** Record today's signals as predictions:
    ```
-   python3 /sandbox/journal.py record-signals
+   python3 sandbox/journal.py record-signals
    ```
    Each prediction records: symbol, action, confidence, timestamp, expected move (e.g., "+5% in 5 days"), signal reasoning.
 
 3. **(After fills)** Generate summary:
    ```
-   python3 /sandbox/journal.py summary
+   python3 sandbox/journal.py summary
    ```
 
 ## Summary Format

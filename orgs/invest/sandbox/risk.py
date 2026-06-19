@@ -17,8 +17,11 @@ import sys
 import argparse
 from datetime import datetime
 
-RISK_CONFIG_FILE = os.environ.get("RISK_CONFIG", "/sandbox/risk_config.json")
-MARKET_DATA_FILE = os.environ.get("MARKET_DATA_FILE", "/sandbox/market_data.json")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
+
+RISK_CONFIG_FILE = paths.RISK_CONFIG
+MARKET_DATA_FILE = paths.MARKET_DATA_FILE
 
 DEFAULT_CONFIG = {
     "max_position_pct": 0.15,
@@ -110,10 +113,14 @@ def fetch_atr_batch(symbols, period=14):
 
 
 def get_alpaca_client():
-    """Get Alpaca TradingClient."""
+    """Get Alpaca TradingClient. Exits with code 2 if no keys configured."""
+    import sys
+    key = os.environ.get("ALPACA_API_KEY")
+    secret = os.environ.get("ALPACA_SECRET_KEY")
+    if not key or not secret:
+        print("ERROR: ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in env.", file=sys.stderr)
+        sys.exit(2)
     from alpaca.trading.client import TradingClient
-    key = os.environ.get("ALPACA_API_KEY", "PKRSCFAUIFMGNE4LQTBG5GAFXD")
-    secret = os.environ.get("ALPACA_SECRET_KEY", "4uAsxThg7vGadJ6VWnYgVUjryML2TwMLGeM4QLVgTVvQ")
     return TradingClient(key, secret, paper=True)
 
 
@@ -159,7 +166,7 @@ def get_sector(symbol, market_data=None):
 def get_journal_stats(ticker=None):
     """Get accuracy stats from journal.py via subprocess."""
     try:
-        cmd = [sys.executable, "/sandbox/journal.py", "stats"]
+        cmd = [sys.executable, paths.sibling("journal.py"), "stats"]
         if ticker:
             cmd += ["--ticker", ticker]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)

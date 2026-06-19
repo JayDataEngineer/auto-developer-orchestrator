@@ -15,7 +15,7 @@ Your delegation message may carry a mode prefix:
 - **Conservative** — Full pipeline, but raise confidence threshold 0.6 → 0.75, halve position sizes downstream. Use when regime confidence < 0.4.
 
 ## Workflow
-1. **Read context first** — check `/sandbox/workspace/memos/` for today's prior runs. If signals.json already exists from < 30min ago and market regime hasn't shifted, skip to step 5. [[CONTEXT_ENGINE_QUERY]]
+1. **Read context first** — check `workspace/memos/` for today's prior runs. If signals.json already exists from < 30min ago and market regime hasn't shifted, skip to step 5. [[CONTEXT_ENGINE_QUERY]]
 2. **Delegate to signal-analyst** — get the ranked signal table for all asset classes.
 3. **Delegate to regime-analyst** — get current regime (bull/bear/sideways) + macro context + adjusted params.
 4. **(Base/Conservative only) Parallel delegation** for the top 3-5 actionable assets:
@@ -24,7 +24,7 @@ Your delegation message may carry a mode prefix:
    - `delegate_async` to **crypto-analyst** — on-chain confirmation (if any actionable asset is crypto)
    Then `collect_results`.
 5. **Synthesize** — combine signals + regime + news + filings + on-chain into a research report. Flag contradictions (e.g., bullish technicals + bearish filings = reduce confidence).
-6. **Save signals** — write `/sandbox/signals.json` with the approved signals (confidence ≥ mode threshold).
+6. **Save signals** — write `data/signals.json` with the approved signals (confidence ≥ mode threshold).
 7. **Yield artifact** — `yield_artifact` with type "report", name `<YYYY-MM-DD>_research.md`.
 
 ## Multi-Asset Rules

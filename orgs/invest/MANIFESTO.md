@@ -15,8 +15,8 @@ The org CTO runs a sequential pipeline with explicit stop conditions:
 scan → research → risk → execute → journal
 ```
 
-1. **scan** — Delegate to `research-director` for market data + multi-signal fusion + regime + news + filings + crypto context. Output: `/sandbox/signals.json` + research report artifact.
-2. **risk** — Delegate to `risk-officer`. Reads signals, runs portfolio heat / concentration / drawdown checks, sizes positions, generates stop orders. Updates `/sandbox/signals.json` in place with risk-adjusted positions.
+1. **scan** — Delegate to `research-director` for market data + multi-signal fusion + regime + news + filings + crypto context. Output: `data/signals.json` + research report artifact.
+2. **risk** — Delegate to `risk-officer`. Reads signals, runs portfolio heat / concentration / drawdown checks, sizes positions, generates stop orders. Updates `data/signals.json` in place with risk-adjusted positions.
 3. **execute** — Delegate to `execution-manager`. Executes approved trades via Alpaca, journals predictions BEFORE fills (so we can eval accuracy later), generates summary report.
 4. **journal** — Always run, even if no trades. The reporter evaluates past predictions and updates accuracy stats.
 
@@ -40,7 +40,7 @@ The mode is passed to `research-director` as a prefix on the delegation message.
 4. **Multi-asset awareness** — crypto trades 24/7, stocks don't. Macro regime colors everything.
 5. **Walk-forward validated** — strategy weights validated out-of-sample, not in-sample
 6. **Journal everything** — record predictions BEFORE execution, evaluate accuracy weekly. Past predictions are the ground truth for signal weight tuning.
-7. **The world isn't ephemeral** — past analyses live in `/sandbox/workspace/memos/` and the journal. Always read before re-analyzing. See `[[CONTEXT_ENGINE_QUERY]]`.
+7. **The world isn't ephemeral** — past analyses live in `workspace/memos/` and the journal. Always read before re-analyzing. See `[[CONTEXT_ENGINE_QUERY]]`.
 
 ## What This Org Is Not
 - Not a HFT system — decisions are minute-to-hour scale, not microsecond
@@ -49,7 +49,38 @@ The mode is passed to `research-director` as a prefix on the delegation message.
 - Not a replacement for human judgment — paper trade first, learn, then maybe go live
 
 ## Reference
-- Sandbox scripts: `/sandbox/{fetch_data,trade,signals,regime,risk,alpha,historical,walkforward,journal,record_metrics,macro,crypto,alt_data}.py`
-- Watchlist: `/sandbox/config/watchlist.json`
-- Signals contract: `/sandbox/signals.json` (list of `{symbol, action, confidence, reasoning, shares?, stop?, target?}`)
-- Memos: `/sandbox/workspace/memos/<YYYY-MM-DD>_<topic>.md` via `yield_artifact`
+- Sandbox scripts: `sandbox/{fetch_data,trade,signals,regime,risk,alpha,historical,walkforward,journal,record_metrics,macro,crypto,alt_data,paths}.py`
+- Watchlist: `config/watchlist.json`
+- Signals contract: `data/signals.json` (list of `{symbol, action, confidence, reasoning, shares?, stop?, target?}`)
+- Memos: `workspace/memos/<YYYY-MM-DD>_<topic>.md` via `yield_artifact`
+
+## Path Conventions (read this first)
+
+All paths in role prompts + skills are **relative to the project root** (the dir passed to `--project` or `-p`). The orchestrator sets the workdir to the project root automatically.
+
+```
+<project-root>/
+├── sandbox/           ← scripts (run as `python3 sandbox/X.py`)
+├── config/            ← watchlist + per-script configs
+├── data/              ← script outputs (signals.json, journal.json, market_data.json, ...)
+├── workspace/memos/   ← research reports via yield_artifact
+└── .cache/            ← alt_data web MCP cache
+```
+
+**Python scripts auto-discover** their location via `sandbox/paths.py` — no env vars required. The discovery order:
+1. `INVEST_PROJECT_DIR` env (if set)
+2. If script lives at `/sandbox/` (Docker mount layout) → PROJECT_DIR is `/workspace`
+3. Otherwise → PROJECT_DIR is the parent of `sandbox/`
+
+This means the same script works:
+- **On host**: `python3 sandbox/regime.py detect` from project root, OR `python3 /abs/path/sandbox/regime.py detect` from anywhere
+- **In Docker sandbox**: `python3 /sandbox/regime.py detect` (legacy layout)
+
+To override individual file locations (rarely needed):
+```bash
+INVEST_DATA_DIR=/tmp/mydata python3 sandbox/regime.py detect
+# or per-file:
+SIGNALS_FILE=/tmp/signals.json python3 sandbox/risk.py assess
+```
+
+Run `python3 sandbox/paths.py` to see all resolved paths for debugging.

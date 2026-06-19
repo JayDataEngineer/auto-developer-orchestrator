@@ -1,6 +1,6 @@
 """
 Alpaca paper trading executor — runs inside the sandbox.
-Reads signals from /sandbox/signals.json, executes paper trades
+Reads signals from data/signals.json, executes paper trades
 via Alpaca's API, outputs trade summary as JSON.
 
 Usage: python3 trade.py [--signals signals.json]
@@ -11,6 +11,9 @@ import sys
 import os
 import argparse
 from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
@@ -25,7 +28,7 @@ if not API_KEY or not SECRET_KEY:
     print("ERROR: ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in env.", file=sys.stderr)
     sys.exit(2)
 
-SIGNALS_FILE = "/sandbox/signals.json"
+SIGNALS_FILE = paths.SIGNALS_FILE
 MAX_POSITION_PCT = 0.15  # Max 15% of equity in single position
 MIN_CONFIDENCE = 0.6
 

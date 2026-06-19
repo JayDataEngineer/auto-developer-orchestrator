@@ -32,10 +32,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
+
 
 CACHE_DIR = Path(os.environ.get(
     "ALT_DATA_CACHE_DIR",
-    "/sandbox/workspace/cache/alt_data"
+    os.path.join(paths.CACHE_DIR, "alt_data")
 ))
 
 

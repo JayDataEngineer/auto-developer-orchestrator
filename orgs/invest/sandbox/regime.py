@@ -20,6 +20,9 @@ import os
 import sys
 from datetime import datetime
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
+
 # ── Config ─────────────────────────────────────────────────────────
 
 DEFAULT_CONFIG = {
@@ -60,7 +63,7 @@ DEFAULT_CONFIG = {
     },
 }
 
-HISTORY_FILE = os.environ.get("REGIME_HISTORY", "/sandbox/regime_history.json")
+HISTORY_FILE = paths.REGIME_HISTORY
 
 
 # ── Indicator Helpers ──────────────────────────────────────────────
@@ -252,7 +255,7 @@ def fetch_ticker_prices(tickers, period="6mo"):
 
 def load_vix():
     """Load VIX from market_data.json."""
-    path = os.environ.get("MARKET_DATA_FILE", "/sandbox/market_data.json")
+    path = paths.MARKET_DATA_FILE
     if not os.path.exists(path):
         return 18.0
     with open(path) as f:
@@ -473,7 +476,7 @@ def main():
     sig.add_argument("--ticker", required=True)
 
     args = p.parse_args()
-    cfg = load_config("/sandbox/regime_config.json")
+    cfg = load_config(paths.REGIME_CONFIG)
 
     {"detect": cmd_detect, "adjust": cmd_adjust,
      "history": cmd_history, "signal": cmd_signal}.get(

@@ -306,7 +306,7 @@ STEP 2: Generate trading signals. For each asset, output:
   - confidence: 0.0 to 1.0 (only trade if >= 0.6)
   - reasoning: 1-2 sentences
 
-STEP 3: Save signals to /sandbox/signals.json as a JSON array:
+STEP 3: Save signals to data/signals.json as a JSON array:
   [{{"symbol": "AAPL", "action": "buy", "confidence": 0.75, "reasoning": "..."}}]
 
 Market data:

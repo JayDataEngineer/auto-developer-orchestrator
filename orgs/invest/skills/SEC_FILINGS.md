@@ -113,7 +113,7 @@ User-Agent: "Invest Research Bot contact@example.com"
 Rate limit: 10 requests/second per IP. Web MCP handles throttling.
 
 ## Caching Strategy
-SEC filings don't change after filing. The `alt_data.py` script caches filings by URL+content-hash so re-analyzing the same filing is free. Cache location: `/sandbox/workspace/cache/sec_filings/`.
+SEC filings don't change after filing. The `alt_data.py` script caches filings by URL+content-hash so re-analyzing the same filing is free. Cache location: `.cache/sec_filings/`.
 
 ## Earnings Reports
 

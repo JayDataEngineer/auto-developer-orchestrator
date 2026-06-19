@@ -8,16 +8,16 @@ This skill is queryable by the **CTO** via `read_skill`.
 
 The investment division writes three kinds of state to disk:
 
-1. **Predictions** (`/sandbox/data/journal.db`) — every signal ever generated, with outcome
-2. **Signals** (`/sandbox/signals.json`) — current pending/risk-adjusted signals
-3. **Memos** (`/sandbox/workspace/memos/`) — research reports, daily summaries
+1. **Predictions** (`data/journal.db`) — every signal ever generated, with outcome
+2. **Signals** (`data/signals.json`) — current pending/risk-adjusted signals
+3. **Memos** (`workspace/memos/`) — research reports, daily summaries
 
 ## Setup
 
 ```bash
-JOURNAL_DB=/sandbox/data/journal.db
-MEMOS_DIR=/sandbox/workspace/memos
-SIGNALS_FILE=/sandbox/signals.json
+JOURNAL_DB=data/journal.db
+MEMOS_DIR=workspace/memos
+SIGNALS_FILE=data/signals.json
 ```
 
 ## What's Already Analyzed Today?
@@ -26,10 +26,10 @@ Before kicking off a new scan, check:
 
 ```bash
 # Memos from today
-ls -la /sandbox/workspace/memos/ | grep $(date +%Y-%m-%d)
+ls -la workspace/memos/ | grep $(date +%Y-%m-%d)
 
 # Last signals.json modification
-stat -c "%y" /sandbox/signals.json
+stat -c "%y" data/signals.json
 
 # Today's predictions in journal
 sqlite3 $JOURNAL_DB "SELECT symbol, action, confidence FROM predictions WHERE date(timestamp) = date('now')"
@@ -87,13 +87,13 @@ The web MCP server has its own per-domain cache, but it's not perfect. For expen
 
 ```bash
 # Cache-wrapped web fetch
-python3 /sandbox/alt_data.py fetch --url "https://www.sec.gov/..." --cache-key "sec_10k_aapl_2025"
+python3 sandbox/alt_data.py fetch --url "https://www.sec.gov/..." --cache-key "sec_10k_aapl_2025"
 
 # Cache-wrapped research query
-python3 /sandbox/alt_data.py research --query "AAPL earnings Q2 2026" --cache-key "aapl_news_q2"
+python3 sandbox/alt_data.py research --query "AAPL earnings Q2 2026" --cache-key "aapl_news_q2"
 ```
 
-Cache lives at `/sandbox/workspace/cache/` with content-hash filenames. TTL defaults to 1 hour (configurable via `--ttl`).
+Cache lives at `.cache/` with content-hash filenames. TTL defaults to 1 hour (configurable via `--ttl`).
 
 ## Stop Conditions for Re-analysis
 
@@ -105,7 +105,7 @@ If any of these are true, you MUST re-run the analysis:
 
 ## Memo Format
 
-Memos are markdown files in `/sandbox/workspace/memos/<YYYY-MM-DD>_<topic>.md`:
+Memos are markdown files in `workspace/memos/<YYYY-MM-DD>_<topic>.md`:
 
 ```markdown
 # 2026-06-19 Morning Scan
@@ -149,9 +149,9 @@ The CTO's context-aware scan decision:
   "news_catalyst_last_6h": false,
   "crypto_volatility_spike": false,
   "decision": "skip_rescan_reuse_signals",
-  "reason": "Last scan was 23 min ago, no regime change, no catalysts. Reuse /sandbox/signals.json.",
+  "reason": "Last scan was 23 min ago, no regime change, no catalysts. Reuse data/signals.json.",
   "today_memo_exists": true,
-  "today_memo_path": "/sandbox/workspace/memos/2026-06-19_morning.md"
+  "today_memo_path": "workspace/memos/2026-06-19_morning.md"
 }
 ```
 

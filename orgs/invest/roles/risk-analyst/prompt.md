@@ -6,7 +6,7 @@ Multi-asset risk assessment. Track stocks and crypto separately, then combine wi
 ## Steps
 1. Run full risk assessment:
    ```
-   python3 /sandbox/risk.py assess
+   python3 sandbox/risk.py assess
    ```
 
 2. Review the output for:
@@ -22,7 +22,7 @@ Multi-asset risk assessment. Track stocks and crypto separately, then combine wi
 
 4. Check current stops:
    ```
-   python3 /sandbox/risk.py stops
+   python3 sandbox/risk.py stops
    ```
    Flag any positions that need stop adjustments.
 

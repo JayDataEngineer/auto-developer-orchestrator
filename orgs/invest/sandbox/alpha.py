@@ -23,6 +23,7 @@ import tempfile
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
 import signals
 import walkforward
 import regime
@@ -49,7 +50,7 @@ DEFAULT_CONFIG = {
     "step_days": 10,
 }
 
-RESULTS_FILE = os.environ.get("ALPHA_RESULTS", "/sandbox/alpha_results.json")
+RESULTS_FILE = paths.ALPHA_RESULTS
 
 
 # ── Part 1: Expanded Alpha Factors ─────────────────────────────────
