@@ -9,20 +9,41 @@ structured intelligence report with zero human-in-the-loop decisions.
 - Bulk audio (interviews, voice messages) → searchable knowledge graph
 - Mixed media corpus → entity-rich narrative report
 
+## The CTO loop: ingest → audit → refine → re-ingest
+
+The previous pipeline ran ingestion once and assumed success. The new pipeline
+runs ingestion, then delegates to the **auditor** role, which checks 6 measurable
+success criteria. If any fail, the CTO re-delegates ingestion with refined scope
+(max 5 rounds). See `skills/AUDIT_QUALITY_GATES.md` for the full checklist.
+
+The 6 criteria, all must pass:
+
+1. Every `item` of type `voice` has a `transcript` with non-empty `text` (34/34 on Telegram dataset)
+2. Zero `sender` values match `\d{2}\.\d{2}\.\d{4}` (timestamp pollution)
+3. Sender="Unknown" rate < 5% (<36/720 on Telegram dataset)
+4. `topic` table has ≥5 rows
+5. ≥3 distinct `person` clusters from faces+voices
+6. ≥1 `person` node has both `face_centroid` AND `voice_centroid` (proves cross-modal linking)
+
 ## Pipeline
 
 ```
-[1] Survey        →  count files by type (audio/image/text/other)
-[2] Parse         →  telegram_parser.py → items.json (text + media refs)
-[3] Audio         →  audio_client.py process per file → transcripts/*.json
-                     (Parakeet ASR + Pyannote diarization + speaker alignment)
-[4] Entities      →  entity_extract.py batch → entities.json
-                     (LLM extracts people/organizations/topics/locations/dates
-                      per chunk)
-[5] Knowledge Graph → surreal_client.py → SurrealDB
-                     (transcript records + entities + mention edges)
-[6] Synthesis     →  LLM reads whole corpus → intelligence_report.md
-                     (structured markdown: actors, themes, timeline, warnings)
+[1] Survey             →  count files by type (audio/image/text/other)
+[2] Parse              →  telegram_parser.py → items.json (text + media refs)
+[3] Audio              →  audio_client.py + voice_activity + embed_voice per file
+                          (Parakeet ASR + Silero VAD + WeSpeaker embeddings + Pyannote diarization)
+[4] Face clustering    →  INGEST_FACE_CLUSTERING_V2
+                          (InsightFace SCRFD + MobileFaceNet + HDBSCAN)
+[5] Cross-modal link   →  INGEST_MULTIMODAL_PERSONS
+                          (lip-sync heuristic via temporal co-occurrence)
+[6] Entities           →  entity_extract.py batch → entities.json
+                          (LLM extracts people/organizations/topics/locations/dates per chunk)
+[7] Knowledge Graph    →  surreal_client.py → SurrealDB
+                          (item + transcript + speaker_turn + face_appearance + person + topic)
+[8] Audit              →  AUDIT_QUALITY_GATES (6 criteria)
+                          (if any fail, re-delegate the responsible ingestion step)
+[9] Synthesis          →  LLM reads whole corpus → intelligence_report.md
+                          (structured markdown: actors, themes, timeline, warnings)
 ```
 
 ## Usage

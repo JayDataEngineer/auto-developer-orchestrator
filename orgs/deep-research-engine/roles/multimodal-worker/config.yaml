@@ -1,0 +1,5 @@
+description: "Multimodal Worker — Cross-modal person linking. Drives the lip-sync heuristic via detect_faces + embed_voice + temporal reasoning. Resolves face clusters to voice clusters to canonical person nodes."
+max_rounds: 30
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

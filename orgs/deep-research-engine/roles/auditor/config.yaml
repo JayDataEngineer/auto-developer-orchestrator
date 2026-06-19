@@ -1,0 +1,5 @@
+description: "Auditor — Peer worker that checks ingestion quality. Catches empty transcripts, sender-name pollution, all-Unknown senders, missing topic discovery, broken join tables. Returns gap report."
+max_rounds: 20
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

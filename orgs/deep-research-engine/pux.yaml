@@ -6,17 +6,14 @@ manifesto: MANIFESTO.md
 staff_root: roles
 skills_dir: skills
 
-# Database connections for Go tools (graph_query, vector_search, face_recognize).
+# Database connections for Go tools (graph_query, vector_search).
 # Pipeline code lives in ~/Documents/programs/deep-research-engine/ — this org
 # is the Pux-side charter only (CTO + 3 directors: research, ingestion, artifact).
+# Face/voice identity is handled by media-mcp (InsightFace + WeSpeaker + HDBSCAN).
 databases:
-  neo4j:
-    uri: bolt://172.17.0.9:7687
-    username: neo4j
-    password_env: NEO4J_PASSWORD
-  postgres:
-    url: postgresql://localhost:25432/shared_db
-    password_env: PG_PASSWORD
-  compreface:
-    base_url: http://172.17.0.14:8080
-    api_key_env: COMPREFACE_API_KEY
+  surrealdb:
+    url: http://localhost:8000/surreal
+    namespace: research
+    database: main
+    username: root
+    password_env: SURREAL_PASSWORD

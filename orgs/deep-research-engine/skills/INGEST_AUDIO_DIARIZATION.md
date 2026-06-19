@@ -15,6 +15,21 @@ Do NOT run this skill until you have:
 - `./bootstrap.sh` has run (brings up `research-media-mcp` on `:8102`).
 - `MEDIA_PYANNOTE_TOKEN` set in `.env` (HF token with pyannote licenses accepted).
 
+## Identity resolution — embed_voice is now preferred
+
+Pyannote gives **turn-taking** (who speaks when within this clip). It does NOT
+give **cross-clip identity** (is "speaker_0" in clip A the same person as
+"speaker_0" in clip B?). To cluster speakers across clips, use `embed_voice`
+(WeSpeaker CAM++ 256-d embedding) and `cluster_embeddings` (HDBSCAN).
+
+The full pipeline is now:
+1. `transcribe_audio` → text per clip
+2. `voice_activity(return_embeddings=true)` → speech segments + WeSpeaker embedding per segment
+3. `cluster_embeddings` over all voice embeddings → cross-clip speaker identities
+4. (Optional) `diarize_audio` for within-clip turn-taking if you need finer granularity than VAD segments
+
+`diarize_audio` is still useful for **multi-speaker clips** (interviews, meetings) where VAD alone won't separate speakers. For single-speaker voice messages (the Telegram case), `embed_voice` per clip is enough.
+
 ## Tool
 
 `sandbox/audio_client.py` — wraps the local media MCP HTTP API. Four subcommands:
@@ -37,7 +52,6 @@ the docker bridge IP `172.17.0.1`. To override (e.g., use Tailscale), set
 ### Step 1 — Process one audio file (transcribe + diarize + align)
 
 ```bash
-set -a && . ./.env.local && set +a   # picks up COMPREFACE_API_KEY etc.
 export MEDIA_MCP_URL=http://localhost:8102
 
 python3 sandbox/audio_client.py process \

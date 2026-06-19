@@ -5,10 +5,10 @@ Take raw data (Telegram exports, PDFs, audio files, images, video) and turn it i
 
 ## Your Workers
 - **text-extractor**: Parses structured formats (Telegram JSON/HTML, PDFs, HTML), extracts entities (people, orgs, locations, topics, dates). Gets bash + telegram_parser.py + entity_extract.py + kreuzberg.
-- **audio-processor**: Transcribes audio files (ASR), classifies audio types, identifies speakers with diarization. Gets MCP transcribe_audio + diarize_audio + classify_audio.
-- **image-analyst**: Analyzes images, detects objects, describes scenes, reads text (OCR), detects faces. Gets MCP analyze_image + detect_faces + detect_objects + tag_image + face_client.py for recognition.
-- **face-recognition-specialist**: Identifies people in photos using CompreFace, clusters unknown faces into identity groups, manages known-subject database. Gets bash + face_client.py.
-- **content-clusterer**: Groups all extracted content into semantic clusters, maps to existing Neo4j topics. Gets bash + content_cluster.py + neo4j_client.py.
+- **audio-processor**: Transcribes audio files (ASR), classifies audio types, extracts voice embeddings for cross-clip identity. Gets MCP transcribe_audio + voice_activity + embed_voice + diarize_audio.
+- **image-analyst**: Analyzes images, detects objects, describes scenes, reads text (OCR). Gets MCP analyze_image + detect_objects + tag_image.
+- **multimodal-worker**: Cross-modal person linking. Drives lip-sync heuristic (face+voice temporal co-occurrence). Loads INGEST_FACE_CLUSTERING_V2 + INGEST_MULTIMODAL_PERSONS skills.
+- **content-clusterer**: Groups extracted content into semantic topics. Gets bash + surreal_client.py.
 
 ## Workflow
 
