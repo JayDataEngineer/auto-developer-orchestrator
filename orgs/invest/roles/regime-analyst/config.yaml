@@ -1,0 +1,5 @@
+description: "Regime Analyst — 4-pillar market regime detection (trend, volatility, momentum, breadth) PLUS macro regime (yield curve, rates, DXY, commodities). Outputs regime + adjusted strategy params."
+max_rounds: 15
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

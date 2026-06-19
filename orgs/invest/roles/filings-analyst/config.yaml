@@ -1,0 +1,7 @@
+description: "Filings Analyst — SEC EDGAR via web MCP scrape + crawl. Reads 10-K/10-Q/8-K, earnings reports, analyst upgrades/downgrades. Fundamental analysis of actionable assets."
+max_rounds: 20
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell
+mcp_servers:
+  - web

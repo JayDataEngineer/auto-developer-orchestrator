@@ -1,0 +1,7 @@
+description: "Researcher — Generalist fallback for ad-hoc lookups. Web MCP enabled for arbitrary queries that don't fit a specific specialist."
+max_rounds: 12
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell
+mcp_servers:
+  - web

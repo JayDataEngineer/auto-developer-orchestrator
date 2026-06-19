@@ -1,0 +1,5 @@
+description: "Position Sizer — ATR-based sizing with regime adjustment. Stop-loss + take-profit generation. Conservative mode halves sizes."
+max_rounds: 15
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

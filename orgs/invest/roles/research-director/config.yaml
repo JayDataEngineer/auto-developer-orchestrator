@@ -1,5 +1,5 @@
-description: "Research Director — Manages market data collection, signal analysis, regime detection, and alpha research. Delegates to signal-analyst, regime-analyst, and researcher."
-max_rounds: 25
+description: "Research Director — Manages market data collection, multi-signal fusion, regime detection, news, SEC filings, crypto context, and alpha research. Delegates to 6 specialists."
+max_rounds: 30
 model: "deepseek/deepseek-v4-flash"
 imports:
   - shell

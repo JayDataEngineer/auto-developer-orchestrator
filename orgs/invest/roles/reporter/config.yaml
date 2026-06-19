@@ -1,0 +1,5 @@
+description: "Reporter — Records predictions in the journal BEFORE fills, evaluates accuracy, generates summary reports. See JOURNAL_PREDICTIONS skill."
+max_rounds: 15
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

@@ -1,0 +1,20 @@
+# Python dependencies for the invest org sandbox scripts.
+# Install via: uv pip install -r requirements.txt
+
+# Market data
+yfinance>=0.2.40
+pycoingecko>=1.5.2
+
+# Trading
+alpaca-py>=0.20.0
+
+# Macro data (FRED)
+fredapi>=0.5.2
+
+# Numerics
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+
+# Note: requests is a dep of yfinance + alpaca-py, but pinned here for sanity.
+requests>=2.31.0

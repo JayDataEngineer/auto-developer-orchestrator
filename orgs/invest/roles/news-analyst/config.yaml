@@ -1,0 +1,7 @@
+description: "News Analyst — News + social sentiment via web MCP. Uses research (search + scrape in one call) and extract (news schema for structured headlines/dates). Covers Reddit, X, financial news."
+max_rounds: 20
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell
+mcp_servers:
+  - web

@@ -1,0 +1,7 @@
+description: "Crypto Analyst — On-chain metrics, funding rates, exchange reserves, whale flows. 24/7 aware. Crypto-specific signal overlay for BTC/ETH/SOL."
+max_rounds: 20
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell
+mcp_servers:
+  - web

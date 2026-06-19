@@ -1,13 +1,14 @@
-# Pux Org Manifest — Investment Bot
+# Pux Org Manifest — Investment Division (Multi-Asset)
 name: invest
-description: "Market analysis and Alpaca paper trading — technical + fundamental analysis, regime detection, risk-aware execution"
+description: "Multi-asset investment org — stocks + crypto + macro context via Alpaca paper trading. Multi-signal fusion with risk-aware execution and prediction journaling."
 
 manifesto: MANIFESTO.md
 staff_root: roles
+skills_dir: skills
 
-# Scheduled scans — actual code (fetch_data.py, trade.py, backtest.py, etc.)
-# lives in ~/Documents/programs/dev/invest/ — this org is the Pux-side charter
-# only (CTO + 3 directors: research, risk, execution).
+# Sandbox scripts (canonical location): orgs/invest/sandbox/
+# Deployed to target project via bootstrap.sh.
+# Pipeline code at /sandbox/{fetch_data,trade,signals,...}.py inside the container.
 schedules:
   - name: morning_scan
     cron: "30 9 * * 1-5"
@@ -26,6 +27,36 @@ schedules:
   - name: eod_scan
     cron: "30 15 * * 1-5"
     prompt: prompts/morning_scan.md
+    role: research-director
+    model: deepseek/deepseek-v4-flash
+    enabled: true
+
+  - name: eod_snapshot
+    cron: "0 16 * * 1-5"
+    prompt: "Run portfolio_status to check the current state, then record it"
+    role: execution-manager
+    model: deepseek/deepseek-v4-flash
+    enabled: true
+
+  - name: eod_metrics
+    cron: "30 16 * * 1-5"
+    prompt: "Run the metrics tool to collect today's portfolio metrics for Langfuse tracking"
+    role: execution-manager
+    model: deepseek/deepseek-v4-flash
+    enabled: true
+
+  # Crypto markets are 24/7 — hourly fast scan
+  - name: crypto_hourly
+    cron: "7 * * * *"
+    prompt: prompts/crypto_hourly.md
+    role: research-director
+    model: deepseek/deepseek-v4-flash
+    enabled: true
+
+  # Sunday macro review — FRED updates weekly, regime params need refresh
+  - name: macro_weekly
+    cron: "0 19 * * 0"
+    prompt: prompts/macro_weekly.md
     role: research-director
     model: deepseek/deepseek-v4-flash
     enabled: true

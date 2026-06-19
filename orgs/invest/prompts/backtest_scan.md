@@ -1,32 +1,39 @@
-You are an investment analyst running a market scan.
+You are running a historical backtest scan for the Investment Division.
 
-STEP 1: Use bash to load the backtest snapshot:
-  python3 /sandbox/backtest.py --date {date} 2>/dev/null
+## Purpose
+Time-travel test: fetch a historical market snapshot for a specific date, run the full pipeline against it, record signals, then evaluate past predictions against actual subsequent price action.
 
-This produces the same JSON format as a live market scan. Analyze it.
+## Workflow
+1. Load backtest snapshot:
+   ```bash
+   python3 /sandbox/backtest.py --date {date}
+   ```
+   This fetches historical data for that date in the same JSON format as a live scan.
 
-STEP 2: Analyze each asset in the data:
-  - RSI levels (overbought >70, oversold <30)
-  - Moving average crossovers (EMA12 vs EMA26)
-  - Bollinger Band position
-  - Price momentum and volume trends
+2. Delegate to **research-director** with a Lightning-mode prefix:
+   "Lightning mode: analyze the historical snapshot from /sandbox/backtest_snapshot.json. Generate signals for that date. Save to /sandbox/signals.json. Yield a brief report."
 
-STEP 3: Generate trading signals. For each asset, output:
-  - action: strong_buy, buy, hold, sell, strong_sell
-  - confidence: 0.0 to 1.0 (only trade if >= 0.6)
-  - reasoning: 1-2 sentences
+3. Record each signal for backtest scoring:
+   ```bash
+   python3 /sandbox/backtest.py --record-signal "SYMBOL,ACTION,CONFIDENCE,{date}"
+   ```
 
-STEP 4: Use file_write to save signals to /sandbox/signals.json as a JSON array:
-  [{"symbol": "AAPL", "action": "buy", "confidence": 0.75, "reasoning": "..."}, ...]
+4. Evaluate all predictions:
+   ```bash
+   python3 /sandbox/backtest.py --evaluate
+   python3 /sandbox/backtest.py --report
+   ```
 
-STEP 5: Record each signal for backtest scoring using bash:
-  python3 /sandbox/backtest.py --record-signal "SYMBOL,ACTION,CONFIDENCE,{date}"
+5. Also run the strategy backtester for context:
+   ```bash
+   python3 /sandbox/historical.py run --months 3
+   python3 /sandbox/historical.py compare
+   ```
 
-STEP 6: Evaluate all predictions using bash:
-  python3 /sandbox/backtest.py --evaluate
-  python3 /sandbox/backtest.py --report
-
-STEP 7: Report the results:
-  - What you would buy/sell/hold
-  - The evaluation — how correct were past predictions at each horizon
-  - Accuracy, average return, best and worst calls
+## Output
+Return a backtest report with:
+1. **Signals Generated** — what the strategy would have done on {date}
+2. **Evaluation** — how correct were past predictions at each horizon (1d, 5d, 21d)
+3. **Accuracy Metrics** — overall accuracy, average return, best and worst calls
+4. **Strategy Performance** — 3-month walk-forward: total return, Sharpe, win rate vs SPY buy-and-hold
+5. **Calibration** — confidence vs realized return correlation (should be positive)

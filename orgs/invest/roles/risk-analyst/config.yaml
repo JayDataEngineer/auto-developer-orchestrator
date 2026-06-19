@@ -1,0 +1,5 @@
+description: "Risk Analyst — Portfolio heat, sector concentration, position limits, drawdown warnings. Multi-asset aware (crypto + stocks heat tracked separately and combined)."
+max_rounds: 15
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell
