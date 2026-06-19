@@ -53,3 +53,11 @@ reference/
 
 # Sandbox / projects
 projects/
+
+# Browser-test cruft (one-off artifacts from Selenium/xdotool runs)
+downloaded_files/
+form.html
+
+# Orphan venvs (root .venv/ is covered above; this catches siblings)
+.venv-*/
+
