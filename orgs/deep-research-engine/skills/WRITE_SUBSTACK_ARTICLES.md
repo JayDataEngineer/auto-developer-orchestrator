@@ -107,6 +107,19 @@ grep -oE '^\[\^[0-9]+\]:' artifacts/article.md | wc -l           # definitions
 
 Numbers should match. Each definition should point to a real source from the brief.
 
+### Step 6b — Persist the article to SurrealDB
+Save the article as a `source` record so future agents can find it via vector search ("have we written about X before?"):
+
+```bash
+python3 /sandbox/surreal_client.py save-source \
+  --kind article \
+  --path "artifacts/article.md" \
+  --content-file "artifacts/article.md" \
+  --title "<headline>"
+```
+
+If the brief already saved a `source` record with kind=brief, this article gets its own kind=article record (different `path`, so they don't collide). The CTO can later query `SELECT * FROM source WHERE kind='article'` to list all published articles.
+
 ### Step 7 — Headline options
 Write 3 headline options. Substack headlines that work:
 

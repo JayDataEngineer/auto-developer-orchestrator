@@ -53,6 +53,19 @@ The CTO will tell you which indexes to read. Typical inputs:
    [2] ...
    ```
 
+4b. **Persist the brief to SurrealDB** — After writing, save the brief as a `source` record so future agents can find it:
+
+   ```bash
+   python3 /sandbox/surreal_client.py save-source \
+     --kind brief \
+     --path "artifacts/brief.md" \
+     --content-file "artifacts/brief.md" \
+     --title "Brief: <topic>" \
+     --topic-ids "<topic:xxx if known>"
+   ```
+
+   This makes the brief vector-searchable (e.g., "what have we written about X?") and graph-linked to the topics it covers.
+
 5. **Stop conditions**:
    - Every claim in the brief has ≥1 citation
    - Conflicts are surfaced, not papered over

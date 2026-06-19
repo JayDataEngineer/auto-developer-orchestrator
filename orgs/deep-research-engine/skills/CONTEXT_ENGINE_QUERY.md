@@ -43,6 +43,29 @@ Sample output:
 }
 ```
 
+## What tasks have we worked on? (cross-session history)
+
+The `task_run` table records every CTO task — what the user asked, who the CTO delegated to, what artifacts were produced, and the outcome. Query this when the user asks "what did we do last week?" or "have we researched X before?"
+
+```bash
+# Recent tasks
+curl -sX POST $URL "${HDR[@]}" $AUTH \
+    -d "SELECT id, prompt, mode, started_at, completed_at, delegated_to, artifacts_produced, status, summary FROM task_run ORDER BY started_at DESC LIMIT 20" \
+    | jq -c '.[0].result[]'
+
+# Tasks that produced an article
+curl -sX POST $URL "${HDR[@]}" $AUTH \
+    -d "SELECT prompt, started_at, summary FROM task_run WHERE 'artifacts/article.md' IN artifacts_produced" \
+    | jq -c '.[0].result[]'
+
+# Still-running tasks (should usually be empty)
+curl -sX POST $URL "${HDR[@]}" $AUTH \
+    -d "SELECT prompt, started_at FROM task_run WHERE status = 'running'" \
+    | jq -c '.[0].result[]'
+```
+
+The CTO writes one `task_run` record per user request: `start-task` at the beginning, `complete-task` at the end. Tasks that errored mid-loop show `status='running'` until manually cleaned up.
+
 ## Current state of the DB
 
 Quick row counts for every table:

@@ -34,6 +34,21 @@ See `skills/WRITE_SOCIAL_POSTS.md` for the full checklist. Summary:
    - Every factual claim has a citation in front-matter
    - No quote marks around text that isn't an actual quote
    - Tone matches platform (LinkedIn ≠ Twitter)
+4b. **Persist each post to SurrealDB** — After drafting, save each post as a source record so future agents can find prior posts on a topic:
+
+   ```bash
+   for f in artifacts/posts/*.md; do
+     [ "$(basename "$f")" = "_INDEX.md" ] && continue
+     python3 /sandbox/surreal_client.py save-source \
+       --kind post \
+       --path "$f" \
+       --content-file "$f" \
+       --title "$(basename "$f" .md)"
+   done
+   ```
+
+   This makes past posts vector-searchable (e.g., "have we already tweeted about X?").
+
 5. **Stop conditions**:
    - Posts cover the brief's load-bearing claims (not every claim — pick what matters)
    - Character counts validated

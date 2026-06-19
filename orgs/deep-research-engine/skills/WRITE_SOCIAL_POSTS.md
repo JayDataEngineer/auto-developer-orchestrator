@@ -65,6 +65,22 @@ n = len(post.content)
 assert n <= 280, f"Too long: {n}"
 ```
 
+### Step 3b — Persist each post to SurrealDB
+After drafting, save every post file as a `source` record so future agents can find prior posts by content:
+
+```bash
+for f in artifacts/posts/*.md; do
+  [ "$(basename "$f")" = "_INDEX.md" ] && continue
+  python3 /sandbox/surreal_client.py save-source \
+    --kind post \
+    --path "$f" \
+    --content-file "$f" \
+    --title "$(basename "$f" .md)"
+done
+```
+
+Why: lets a future CTO vector-search "have we already posted about doxing in Flathead?" before commissioning a new thread. Without this, posts only exist on disk and get rediscovered by grep.
+
 ### Step 5 — Citation audit
 For each post, list which brief sources it cites in `citations:` front-matter. Every factual claim must trace to one of those sources.
 

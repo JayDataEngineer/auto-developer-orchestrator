@@ -36,6 +36,7 @@ DEFINE TABLE IF NOT EXISTS speaker_turn;      -- VAD segment within a transcript
 DEFINE TABLE IF NOT EXISTS face_appearance;   -- Face detection within an item; has embedding[512]
 DEFINE TABLE IF NOT EXISTS pending_link;      -- Multimodal deferrals (multi-face ambiguous cases)
 DEFINE TABLE IF NOT EXISTS ingestion_run;     -- Tracks each pipeline run (started_at, models, stats)
+DEFINE TABLE IF NOT EXISTS task_run;          -- Cross-session task history (CTO loop writes one per user request)
 
 -- --- Relations (TYPE RELATION, no FROM/TO constraint in v3) -----------------
 DEFINE TABLE IF NOT EXISTS mentions TYPE RELATION;        -- topic -> item
@@ -81,6 +82,11 @@ DEFINE INDEX IF NOT EXISTS idx_speaker_turn_cluster ON speaker_turn FIELDS voice
 DEFINE INDEX IF NOT EXISTS idx_face_appearance_cluster ON face_appearance FIELDS cluster_id;
 DEFINE INDEX IF NOT EXISTS idx_face_appearance_item ON face_appearance FIELDS item_id;
 DEFINE INDEX IF NOT EXISTS idx_speaker_turn_transcript ON speaker_turn FIELDS transcript_id;
+
+-- --- task_run indexes (cross-session task history) --------------------------
+DEFINE INDEX IF NOT EXISTS idx_task_run_started ON task_run FIELDS started_at;
+DEFINE INDEX IF NOT EXISTS idx_task_run_status ON task_run FIELDS status;
+DEFINE INDEX IF NOT EXISTS idx_task_run_prompt ON task_run FIELDS prompt;
 
 -- ============================================================================
 -- Auditor queries (6 success criteria) — see skills/AUDIT_QUALITY_GATES.md

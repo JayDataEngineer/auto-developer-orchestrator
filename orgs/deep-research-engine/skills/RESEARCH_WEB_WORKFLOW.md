@@ -96,7 +96,18 @@ This atomically:
 
 **When to link topic_ids**: if your finding already maps to an existing topic, link it. If you discovered a new theme, defer linking — the synthesizer or CTO will create the topic later. Don't fabricate topic IDs.
 
-**When to link person_ids**: only when the source directly discusses or quotes a person who already exists in the DB. Don't link names you only mention in passing.
+**When to link person_ids**: only when the source directly discusses or quotes a person. If the person doesn't exist in the DB yet, create them via `upsert-person`:
+
+```bash
+# Creates person if missing; returns existing ID if found. Idempotent on canonical_name.
+python3 /sandbox/surreal_client.py upsert-person \
+  --name "Elon Musk" \
+  --source-id "source:abc123" \
+  --role "subject" \
+  --notes "CEO of SpaceX, quoted in this article about Starship"
+```
+
+Only create persons for individuals the source is **about** or **quotes directly** — not every proper noun. Use your judgment.
 
 ### Step 6 — Build the index
 Write `artifacts/research/_INDEX.md`:

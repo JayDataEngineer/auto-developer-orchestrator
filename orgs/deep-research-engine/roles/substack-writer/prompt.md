@@ -26,6 +26,16 @@ See `skills/WRITE_SUBSTACK_ARTICLES.md` for the full checklist. Summary:
    - AI-tells ("delve into", "navigate the complexities of", "in today's world")
    - Any sentence that doesn't either advance the argument or provide necessary context
 6. **Citation audit** — every load-bearing claim has a footnote. Cut claims you can't source.
+6b. **Persist the article to SurrealDB** — After publishing-ready draft, save it as a source record so future agents can find it:
+
+   ```bash
+   python3 /sandbox/surreal_client.py save-source \
+     --kind article \
+     --path "artifacts/article.md" \
+     --content-file "artifacts/article.md" \
+     --title "<headline>"
+   ```
+
 7. **Stop conditions**:
    - 1500-3500 words
    - Clear single-sentence thesis
