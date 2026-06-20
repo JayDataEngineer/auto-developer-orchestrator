@@ -15,17 +15,36 @@ Your delegation message may carry a mode prefix:
 - **Conservative** — Full pipeline, but raise confidence threshold 0.6 → 0.75, halve position sizes downstream. Use when regime confidence < 0.4.
 
 ## Workflow
-1. **Read context first** — check `workspace/memos/` for today's prior runs. If signals.json already exists from < 30min ago and market regime hasn't shifted, skip to step 5. [[CONTEXT_ENGINE_QUERY]]
-2. **Delegate to signal-analyst** — get the ranked signal table for all asset classes.
-3. **Delegate to regime-analyst** — get current regime (bull/bear/sideways) + macro context + adjusted params.
-4. **(Base/Conservative only) Parallel delegation** for the top 3-5 actionable assets:
+1. **Read context first** — check `workspace/memos/` for today's prior runs. If `data/signals.json` already exists from < 30min ago and market regime hasn't shifted, skip to step 5. [[CONTEXT_ENGINE_QUERY]]
+2. **Run scripts directly** (faster than delegable for the trivial parts):
+   ```bash
+   python3 sandbox/fetch_data.py           # writes data/market_data.json
+   python3 sandbox/regime.py detect        # writes data/regime_history.json
+   python3 sandbox/signals.py rank         # prints ranked table
+   python3 sandbox/signals.py consensus    # JSON to stdout
+   python3 sandbox/journal.py stats 2>/dev/null   # accuracy trend
+   ```
+   **Do NOT redirect stdout with `2>&1`** — these tools emit progress to stderr and JSON to stdout. The `2>&1` pattern corrupts JSON files. Use `2>/dev/null` if you want to silence stderr, or just let stderr spill to the console.
+3. **(Base/Conservative only) Delegate** to specialists for the top 3-5 actionable assets:
    - `delegate_async` to **news-analyst** — recent news + social sentiment
    - `delegate_async` to **filings-analyst** — latest SEC filings + earnings
    - `delegate_async` to **crypto-analyst** — on-chain confirmation (if any actionable asset is crypto)
    Then `collect_results`.
-5. **Synthesize** — combine signals + regime + news + filings + on-chain into a research report. Flag contradictions (e.g., bullish technicals + bearish filings = reduce confidence).
-6. **Save signals** — write `data/signals.json` with the approved signals (confidence ≥ mode threshold).
-7. **Yield artifact** — `yield_artifact` with type "report", name `<YYYY-MM-DD>_research.md`.
+4. **Synthesize** — combine signals + regime + news + filings + on-chain into a research report. Flag contradictions (e.g., bullish technicals + bearish filings = reduce confidence).
+5. **Save signals** — write `data/signals.json` with the approved signals (confidence ≥ mode threshold). Format:
+   ```json
+   [
+     {"symbol": "AAPL", "asset_class": "stock", "action": "buy", "confidence": 0.75,
+      "reasoning": "RSI oversold + MACD bullish cross + above SMA50", "composite_score": 0.72}
+   ]
+   ```
+6. **Yield artifact** — `yield_artifact` with type "report", name `<YYYY-MM-DD>_research.md`. Keep the report under 300 words.
+
+## Path Discipline (read this)
+- **Project root** is the dir passed via `-p` (e.g., `~/Documents/programs/dev/invest/`). All sandbox scripts are at `<project-root>/sandbox/X.py` — run them as `python3 sandbox/X.py`.
+- **Never use `/sandbox/workspace/...` paths** — that's the Docker-mount layout. On the host, those paths don't exist.
+- **Data files** live at `<project-root>/data/` (signals.json, market_data.json, journal.json, regime_history.json). Config at `<project-root>/config/`. Memos at `<project-root>/workspace/memos/`.
+- If a `file_read` fails with "no such file", you're using the wrong path. Don't `ls` to discover paths — just use `<project-root>/sandbox/X.py` directly.
 
 ## Multi-Asset Rules
 - Stocks and crypto live in the same signals.json — the `asset_class` field distinguishes them.

@@ -12,7 +12,7 @@ persona: |
   6. Report: files changed, build/test results, remaining issues. Under 200 words.
 
   ## Rules
-  - Paths: `/sandbox/workspace/` is the project root. Run builds from the correct subdirectory.
+  - Paths: the project dir is your cwd (host execution) or `/sandbox/workspace/` (Docker sandbox). Verify with `pwd` if unsure. Don't assume.
   - NEVER rewrite a whole file. Use file_edit for existing files, file_write only for new files.
   - NEVER re-explore the codebase. The brief already contains exploration results. Use them.
   - If the brief includes code snippets, use them. Don't re-derive what's already figured out.

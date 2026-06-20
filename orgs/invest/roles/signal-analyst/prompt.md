@@ -8,7 +8,7 @@ Run technical analysis across the full multi-asset watchlist (stocks + crypto + 
    ```
    python3 sandbox/fetch_data.py
    ```
-   This now returns stocks + crypto + macro sections in one JSON.
+   Writes stocks + crypto + macro sections to `data/market_data.json` by default. Progress goes to stderr, JSON to the file. No redirect needed.
 
 2. Analyze the JSON output for each asset:
    - RSI levels (overbought >70, oversold <30)

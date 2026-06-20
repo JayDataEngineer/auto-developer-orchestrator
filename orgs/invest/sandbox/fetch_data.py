@@ -1,18 +1,27 @@
 """
 Market data fetcher — runs inside the sandbox.
 Fetches stock + crypto prices, technical indicators, and FUNDAMENTALS.
-Outputs JSON to stdout for the orchestrator agent to analyze.
 
-Usage: python3 fetch_data.py [--watchlist watchlist.json] [--history-days 90]
+Default behavior: writes JSON to data/market_data.json (auto-discovered via paths.py).
+Progress messages go to stderr, JSON goes to the file.
+
+Usage:
+  python3 fetch_data.py                                     # writes to data/market_data.json
+  python3 fetch_data.py --output /tmp/market.json           # custom output path
+  python3 fetch_data.py --stdout                            # print JSON to stdout (legacy)
 """
 
 import json
 import sys
 import os
 import argparse
+import tempfile
 import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths  # noqa: E402
 
 import yfinance as yf
 
@@ -318,11 +327,22 @@ def add_indicators(asset):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--watchlist", default=None, help="Path to watchlist.json")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[1] if __doc__ else None)
+    parser.add_argument("--watchlist", default=None, help="Path to watchlist.json (default: built-in multi-asset list)")
     parser.add_argument("--history-days", type=int, default=90)
     parser.add_argument("--skip-macro", action="store_true", help="Skip macro tickers (FRED + commodities)")
+    parser.add_argument("--crypto-only", action="store_true",
+                        help="Fetch only crypto assets (stocks + macro skipped)")
+    parser.add_argument("--stocks-only", action="store_true",
+                        help="Fetch only stocks (crypto + macro skipped)")
+    parser.add_argument("--output", default=None,
+                        help=f"Write JSON to this path (default: {paths.MARKET_DATA_FILE})")
+    parser.add_argument("--stdout", action="store_true",
+                        help="Print JSON to stdout instead of writing to file (legacy mode)")
     args = parser.parse_args()
+
+    if args.crypto_only and args.stocks_only:
+        parser.error("--crypto-only and --stocks-only are mutually exclusive")
 
     # Default watchlist — multi-asset
     stocks = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "AMZN", "META"]
@@ -344,27 +364,41 @@ def main():
     range_str = f"{args.history_days}d"
     results = {"timestamp": datetime.now().isoformat(), "assets": [], "macro": {}}
 
-    print(f"Fetching {len(stocks)} stocks + {len(crypto)} crypto + {len(macro_tickers)} macro tickers...", file=sys.stderr)
+    # Mode flags short-circuit unrelated asset classes
+    do_stocks = not args.crypto_only
+    do_crypto = not args.stocks_only
+    do_macro = not args.skip_macro and not args.crypto_only and not args.stocks_only
 
-    for sym in stocks:
-        data = fetch_yahoo_chart(sym, range=range_str)
-        if "error" not in data:
-            add_indicators(data)
-            data["asset_class"] = "stock"
-            fund = fetch_fundamentals(sym)
-            if "error" not in fund:
-                data["fundamentals"] = fund
-        results["assets"].append(data)
+    scope_parts = []
+    if do_stocks:
+        scope_parts.append(f"{len(stocks)} stocks")
+    if do_crypto:
+        scope_parts.append(f"{len(crypto)} crypto")
+    if do_macro:
+        scope_parts.append(f"{len(macro_tickers)} macro tickers")
+    print(f"Fetching {' + '.join(scope_parts)}...", file=sys.stderr)
 
-    for coin in crypto:
-        data = fetch_coingecko(coin, days=args.history_days)
-        if "error" not in data:
-            add_indicators(data)
-            data["asset_class"] = "crypto"
-        results["assets"].append(data)
+    if do_stocks:
+        for sym in stocks:
+            data = fetch_yahoo_chart(sym, range=range_str)
+            if "error" not in data:
+                add_indicators(data)
+                data["asset_class"] = "stock"
+                fund = fetch_fundamentals(sym)
+                if "error" not in fund:
+                    data["fundamentals"] = fund
+            results["assets"].append(data)
+
+    if do_crypto:
+        for coin in crypto:
+            data = fetch_coingecko(coin, days=args.history_days)
+            if "error" not in data:
+                add_indicators(data)
+                data["asset_class"] = "crypto"
+            results["assets"].append(data)
 
     # Market indices + macro tickers
-    if not args.skip_macro:
+    if do_macro:
         print("Fetching macro tickers + indices...", file=sys.stderr)
         for ticker in macro_tickers + ["^GSPC", "^IXIC", "^VIX"]:
             idx_data = fetch_yahoo_chart(ticker, range="5d")
@@ -401,7 +435,30 @@ def main():
     for a in ok:
         a["prices"] = a.get("prices", [])[-30:]
 
-    print(json.dumps(results, indent=2))
+    payload = json.dumps(results, indent=2)
+
+    # Default: write to file (atomic). --stdout forces legacy behavior.
+    if args.stdout:
+        print(payload)
+        return
+
+    output_path = args.output or paths.MARKET_DATA_FILE
+    out_dir = os.path.dirname(output_path) or "."
+    os.makedirs(out_dir, exist_ok=True)
+
+    tmp = tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, dir=out_dir)
+    try:
+        tmp.write(payload)
+        tmp.close()
+        os.replace(tmp.name, output_path)
+    except Exception:
+        if os.path.exists(tmp.name):
+            os.unlink(tmp.name)
+        raise
+
+    print(f"Wrote {len(payload):,} bytes → {output_path}", file=sys.stderr)
+    print(f"OK: {len(ok)} assets + {len(results['macro'])} macro entries", file=sys.stderr)
 
 
 if __name__ == "__main__":

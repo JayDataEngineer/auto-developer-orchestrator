@@ -87,11 +87,14 @@ Persistent memory at `.pux/memory/`. Use the `memory` tool:
 - `delete` — remove a doc
 
 ## Paths
-- `/sandbox/workspace/` → project directory (visible on host)
-- `/sandbox/tmp/` → temporary files
+Two layouts exist — verify with `pwd` before assuming:
+- **Host**: project dir is the cwd. `python3 sandbox/X.py`, `data/Y.json`, `config/Z.json`.
+- **Docker sandbox**: project dir mounted at `/sandbox/workspace/`. `python3 /sandbox/workspace/sandbox/X.py`.
+
+If a path fails, switch to the other layout. See `paths.md` for full rules.
 
 ## Artifacts
-Agents write artifacts via `yield_artifact` → `/sandbox/workspace/memos/`.
+Agents write artifacts via `yield_artifact` → `<project>/workspace/memos/` (host) or `/sandbox/workspace/memos/` (Docker). Tool handles resolution.
 For pipelines (research → code), tell the next agent to read the previous agent's artifact file.
 
 {{if .SandboxID}}
