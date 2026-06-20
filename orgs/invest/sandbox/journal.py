@@ -31,7 +31,12 @@ ARCHIVE_FILE = paths.JOURNAL_ARCHIVE
 
 
 def load_journal(path=None):
-    """Load journal from disk. Returns empty structure on missing/corrupt file."""
+    """Load journal from disk. Returns empty structure on missing/corrupt file.
+
+    Normalizes legacy predictions written by agents that used a different
+    schema (date+symbol+composite_score) into the canonical schema
+    (timestamp+ticker+confidence+evaluations+outcome) so evaluate/stats work.
+    """
     path = path or JOURNAL_FILE
     if not os.path.exists(path):
         return {"version": 1, "predictions": []}
@@ -40,6 +45,44 @@ def load_journal(path=None):
             data = json.load(f)
         if "predictions" not in data:
             data["predictions"] = []
+        # Normalize any legacy prediction rows in-place
+        normalized = []
+        changed = False
+        for p in data["predictions"]:
+            if "timestamp" not in p and "date" in p:
+                # Legacy schema — promote to canonical
+                ts = p["date"]
+                if len(ts) == 10:  # date only — add midnight time
+                    ts = ts + "T00:00:00"
+                ticker = p.get("ticker") or p.get("symbol", "")
+                action = p.get("action", "hold")
+                pred_id = p.get("id") or make_prediction_id(ticker, action, ts)
+                canon = {
+                    "id": pred_id,
+                    "timestamp": ts,
+                    "ticker": ticker,
+                    "action": action,
+                    "confidence": float(p.get("confidence", 0.5)),
+                    "price": float(p.get("price", 0.0) or 0.0),
+                    "reasoning": p.get("reasoning", ""),
+                    "indicators": p.get("indicators", {}) or {},
+                    "market": p.get("market", {}) or {},
+                    "evaluations": p.get("evaluations") or {"1d": None, "7d": None, "30d": None},
+                    "outcome": p.get("outcome"),
+                }
+                # Preserve extra fields (asset_class, regime, mode, composite_score) as extras
+                for k, v in p.items():
+                    if k not in canon and k not in ("date", "symbol", "composite_score"):
+                        canon[k] = v
+                if "composite_score" in p:
+                    canon.setdefault("indicators", {})["composite_score"] = p["composite_score"]
+                normalized.append(canon)
+                changed = True
+            else:
+                normalized.append(p)
+        if changed:
+            data["predictions"] = normalized
+            save_journal(data, path)
         return data
     except (json.JSONDecodeError, OSError):
         return {"version": 1, "predictions": []}

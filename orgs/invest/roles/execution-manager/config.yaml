@@ -3,3 +3,6 @@ max_rounds: 15
 model: "deepseek/deepseek-v4-flash"
 imports:
   - shell
+delegates_to:
+  - trader
+  - reporter

@@ -62,6 +62,8 @@ type agentConfig struct {
 	Model       string   `yaml:"model"`
 	Division    string   `yaml:"division"`
 	Sandbox     string   `yaml:"sandbox"`
+	DelegatesTo []string `yaml:"delegates_to,omitempty"`
+	Hooks       []string `yaml:"hooks,omitempty"`
 }
 
 // workerConfig is the YAML structure for config/workers/<name>.yaml (new)
@@ -517,6 +519,8 @@ func loadRoleFromFolder(folder string) *AgentRole {
 		Model:       ac.Model,
 		Division:    ac.Division,
 		SandboxTier: ac.Sandbox,
+		DelegatesTo: ac.DelegatesTo,
+		Hooks:       ac.Hooks,
 	}
 }
 

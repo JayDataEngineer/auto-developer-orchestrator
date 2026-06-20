@@ -3,3 +3,10 @@ max_rounds: 30
 model: "deepseek/deepseek-v4-flash"
 imports:
   - shell
+delegates_to:
+  - signal-analyst
+  - regime-analyst
+  - news-analyst
+  - filings-analyst
+  - crypto-analyst
+  - researcher

@@ -25,11 +25,13 @@ Your delegation message may carry a mode prefix:
    python3 sandbox/journal.py stats 2>/dev/null   # accuracy trend
    ```
    **Do NOT redirect stdout with `2>&1`** — these tools emit progress to stderr and JSON to stdout. The `2>&1` pattern corrupts JSON files. Use `2>/dev/null` if you want to silence stderr, or just let stderr spill to the console.
-3. **(Base/Conservative only) Delegate** to specialists for the top 3-5 actionable assets:
-   - `delegate_async` to **news-analyst** — recent news + social sentiment
-   - `delegate_async` to **filings-analyst** — latest SEC filings + earnings
-   - `delegate_async` to **crypto-analyst** — on-chain confirmation (if any actionable asset is crypto)
-   Then `collect_results`.
+3. **MANDATORY in Base/Conservative mode — Delegate to research agents.** Do not skip. Do not run web research yourself. The specialists exist for this; your job is orchestration.
+   - For the **top 3 actionable assets by composite score**: `delegate_async` to **news-analyst** with the symbol list — "Get recent news + social sentiment for [SYMBOL, SYMBOL, SYMBOL]"
+   - For **every stock in the actionable list**: `delegate_async` to **filings-analyst** with the symbol list — "Pull latest 10-Q/8-K and recent earnings for [SYMBOL, ...]"
+   - **If any actionable asset is crypto** (BTC/ETH/SOL in top signals): `delegate_async` to **crypto-analyst** — "On-chain metrics + funding rates for [COIN, ...]". Do NOT skip this even if the prior run printed "geo-restricted" — the crypto-analyst has web MCP and can find public sources.
+   - Then `collect_results`.
+   - **Fallback rule**: if any specialist returns empty / error / unhelpful, re-dispatch the same question to **researcher** (generalist with web MCP). Document the fallback in your report ("filings-analyst returned no data for NVDA; researcher filled in via web scrape").
+   - **Silent-skip ban**: "crypto data unavailable" or "no recent news" in your final report without an actual delegate_async call is a critical bug. If you did not delegate, do not claim the data is missing.
 4. **Synthesize** — combine signals + regime + news + filings + on-chain into a research report. Flag contradictions (e.g., bullish technicals + bearish filings = reduce confidence).
 5. **Save signals** — write `data/signals.json` with the approved signals (confidence ≥ mode threshold). Format:
    ```json

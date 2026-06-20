@@ -3,3 +3,6 @@ max_rounds: 20
 model: "deepseek/deepseek-v4-flash"
 imports:
   - shell
+delegates_to:
+  - risk-analyst
+  - position-sizer
