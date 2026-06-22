@@ -1,6 +1,3 @@
-# Pux Org Manifest — General (sandbox org for testing the kernel with no overlay)
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build general`.
 name: general
-description: "General-purpose testing project — no roles, no skills, just kernel defaults"
-
-# Deliberately no manifesto / staff_root — this org exercises the kernel's
-# fallback path (kernel workers only, no org overlay).
+description: General-purpose testing project — no roles, no skills, just kernel defaults

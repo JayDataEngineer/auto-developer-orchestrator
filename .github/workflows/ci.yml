@@ -45,3 +45,21 @@ jobs:
           working-directory: backend
           version: latest
           args: --timeout=5m
+
+  org-build:
+    # Stage 3 org templating — every org.toml must render cleanly to the
+    # checked-in YAML tree. Drift = renderer output != checked-in file.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Renderer drift check
+        run: uv run --with jinja2 python3 scripts/org_build.py --check
+
+      - name: Renderer self-tests
+        run: uv run --with jinja2,pytest,pyyaml pytest scripts/test_org_build.py -v

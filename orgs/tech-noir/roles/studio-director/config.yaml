@@ -1,0 +1,14 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
+description: "Studio Director — owns the autonomous build/QA/iterate loop. Delegates parallel work to specialists, collects results, runs QA, decides iterate vs yield vs abort. Logs every cycle to SurrealDB."
+imports:
+  - shell
+  - code
+model: deepseek/deepseek-v4-flash
+max_rounds: 30
+delegates_to:
+  - technical_artist
+  - gameplay_programmer
+  - narrative_designer
+  - design_researcher
+  - qa_tester
+  - docs-writer

@@ -387,6 +387,18 @@ tasks:
       - cmd: 'echo -n "Evaluator: " && (curl -sf http://localhost:3100/api/public/scores -u "pk-orch-2026-lf-a1b2c3d4e5f6:sk-orch-2026-lf-a1b2c3d4e5f6" > /dev/null && echo "OK" || echo "DOWN")'
         ignore_error: true
 
+  # ── Org Templating (Stage 3) ───────────────────────────────────────────
+  org-build:
+    desc: "Render org trees from org.toml + Jinja2 (Stage 3). Pass org names: `task org-build -- invest tech-noir`"
+    cmds:
+      - uv run --with jinja2 python3 scripts/org_build.py {{.CLI_ARGS}}
+
+  org-build-check:
+    desc: "Verify rendered org trees match checked-in (CI mode)"
+    cmds:
+      - uv run --with jinja2,pytest,pyyaml python3 scripts/org_build.py --check
+      - uv run --with jinja2,pytest,pyyaml pytest scripts/test_org_build.py
+
   # ── llama.cpp Model Server ────────────────────────────────────────────
   model:
     desc: |

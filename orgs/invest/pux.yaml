@@ -1,62 +1,49 @@
-# Pux Org Manifest — Investment Division (Multi-Asset)
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build invest`.
 name: invest
-description: "Multi-asset investment org — stocks + crypto + macro context via Alpaca paper trading. Multi-signal fusion with risk-aware execution and prediction journaling."
-
+description: Multi-asset investment org — stocks + crypto + macro context via Alpaca paper trading. Multi-signal fusion with risk-aware execution and prediction journaling.
 manifesto: MANIFESTO.md
 staff_root: roles
 skills_dir: skills
-
-# Sandbox scripts (canonical location): orgs/invest/sandbox/
-# Deployed to target project via bootstrap.sh.
-# Pipeline code at /sandbox/{fetch_data,trade,signals,...}.py inside the container.
 schedules:
   - name: morning_scan
     cron: "30 9 * * 1-5"
-    prompt: prompts/morning_scan.md
+    prompt: "prompts/morning_scan.md"
     role: research-director
-    model: deepseek/deepseek-v4-flash
+    model: deepseek-chat
     enabled: true
-
   - name: midday_review
     cron: "0 13 * * 1-5"
-    prompt: prompts/portfolio_review.md
+    prompt: "prompts/portfolio_review.md"
     role: research-director
-    model: deepseek/deepseek-v4-flash
+    model: deepseek-chat
     enabled: true
-
   - name: eod_scan
     cron: "30 15 * * 1-5"
-    prompt: prompts/morning_scan.md
+    prompt: "prompts/morning_scan.md"
     role: research-director
-    model: deepseek/deepseek-v4-flash
+    model: deepseek-chat
     enabled: true
-
   - name: eod_snapshot
     cron: "0 16 * * 1-5"
-    prompt: "Run portfolio_status to check the current state, then record it"
+    prompt: Run portfolio_status to check the current state, then record it
     role: execution-manager
-    model: deepseek/deepseek-v4-flash
+    model: deepseek-chat
     enabled: true
-
   - name: eod_metrics
     cron: "30 16 * * 1-5"
-    prompt: "Run the metrics tool to collect today's portfolio metrics for Langfuse tracking"
+    prompt: Run the metrics tool to collect today's portfolio metrics for Langfuse tracking
     role: execution-manager
-    model: deepseek/deepseek-v4-flash
+    model: deepseek-chat
     enabled: true
-
-  # Crypto markets are 24/7 — hourly fast scan
   - name: crypto_hourly
     cron: "7 * * * *"
-    prompt: prompts/crypto_hourly.md
+    prompt: "prompts/crypto_hourly.md"
     role: research-director
-    model: deepseek/deepseek-v4-flash
+    model: deepseek-chat
     enabled: true
-
-  # Sunday macro review — FRED updates weekly, regime params need refresh
   - name: macro_weekly
     cron: "0 19 * * 0"
-    prompt: prompts/macro_weekly.md
+    prompt: "prompts/macro_weekly.md"
     role: research-director
-    model: deepseek/deepseek-v4-flash
+    model: deepseek-chat
     enabled: true

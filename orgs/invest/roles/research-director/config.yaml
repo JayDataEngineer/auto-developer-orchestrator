@@ -1,8 +1,11 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Research Director — Manages market data collection, multi-signal fusion, regime detection, news, SEC filings, crypto context, and alpha research. Delegates to 6 specialists."
-max_rounds: 30
-model: "deepseek/deepseek-v4-flash"
 imports:
   - shell
+model: deepseek-chat
+max_rounds: 30
+tools:
+  - yield_artifact
 delegates_to:
   - signal-analyst
   - regime-analyst

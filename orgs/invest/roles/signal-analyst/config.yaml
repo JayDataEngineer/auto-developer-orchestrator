@@ -1,5 +1,6 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Signal Analyst — Multi-signal fusion across stocks, crypto, and macro tickers. Computes RSI/MACD/BB/EMA + alpha factors (OBV, ADX, CCI, Williams %R, MFI, Stochastic, ROC, VWAP, CMF). Outputs ranked signal table."
-max_rounds: 20
-model: "deepseek/deepseek-v4-flash"
 imports:
   - shell
+model: deepseek-chat
+max_rounds: 12

@@ -1,0 +1,19 @@
+# org.toml — Video Production
+#
+# Full-stack educational video production: research, storyboard, Manim/ffmpeg
+# visuals, Kokoro TTS narration, QC, archival, delivery.
+
+name = "video-production"
+description = "Full-stack educational video production org — research, storyboard, Manim/ffmpeg visuals, Kokoro TTS narration, QC, archival, delivery"
+
+manifesto = "MANIFESTO.md"
+staff_root = "roles"
+skills_dir = "skills"
+
+[[roles]]
+name = "video-producer"
+description = "Video Producer — Full-stack educational video production: research, storyboard, Manim/ffmpeg visuals, Kokoro TTS narration, QC, archival, and delivery. Produces explainers, paper walkthroughs, lecture recaps, daily summaries."
+max_rounds = 60
+model = "deepseek/deepseek-v4-flash"
+imports = ["shell", "filesystem"]
+capabilities = ["web-search", "media-vision"]

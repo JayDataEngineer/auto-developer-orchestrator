@@ -1,0 +1,105 @@
+# org.toml — Social Media Pipeline
+#
+# Research → draft → present → post pipeline for Twitter + Telegram content.
+# Human-in-the-loop checkpoint before any posting.
+
+name = "social-media-pipeline"
+description = "Research → draft → present → post pipeline for Twitter + Telegram content. Human-in-the-loop checkpoint before any posting."
+
+manifesto = "MANIFESTO.md"
+staff_root = "roles"
+skills_dir = "skills"
+data_dir = "data"
+
+# SurrealDB task logging — same instance as deep-research-engine so all
+# pipeline runs are queryable from one place.
+[databases.surrealdb]
+url = "http://localhost:8000/surreal"
+namespace = "research"
+database = "main"
+username = "root"
+password_env = "SURREAL_PASSWORD"
+
+# Sandbox setup — uploaded into the container at /sandbox/ on every init.
+# MCP_HUB_ENDPOINT points at the Ray cluster's Forge API for image generation.
+# SURREALDB_* vars use host.docker.internal so the container can reach the
+# host-bound SurrealDB behind Caddy on :8000.
+[sandbox]
+init_files = [
+  "@shared/forge_client.py",
+  "sandbox/twitter_helpers.py",
+  "sandbox/twitter_session.py",
+  "sandbox/telegram_helpers.py",
+  "sandbox/telegram_session.py",
+  "@shared/surreal_client.py",
+]
+pip_packages = ["browser-cookie3", "requests", "telethon"]
+
+[sandbox.env]
+MCP_HUB_ENDPOINT = "http://100.86.69.57:30080"
+SURREALDB_URL = "http://host.docker.internal:8000/surreal"
+SURREALDB_NS = "research"
+SURREALDB_DB = "main"
+SURREALDB_USER = "root"
+SURREALDB_PASS = "root"
+PUX_ORG_PATH = "/sandbox/workspace"
+
+[[roles]]
+name = "content-director"
+description = "Content Director — owns Phase C. Delegates to image-gen-worker + creative-writer, bundles output for presentation."
+max_rounds = 20
+model = "deepseek/deepseek-v4-flash"
+imports = ["shell"]
+delegates_to = ["image-gen-worker", "creative-writer"]
+
+[[roles]]
+name = "creative-writer"
+description = "Creative Writer — reads research findings, writes 5-10 tweet/thread options with distinct angles. Uses images as inspiration."
+max_rounds = 12
+model = "deepseek/deepseek-v4-flash"
+imports = ["shell", "vision"]
+temperature = 0.85
+
+[[roles]]
+name = "distribution-director"
+description = "Distribution Director — owns Phase D execute step. Delegates to publisher with user's selection."
+max_rounds = 8
+model = "deepseek/deepseek-v4-flash"
+imports = ["shell"]
+delegates_to = ["publisher"]
+
+[[roles]]
+name = "image-gen-worker"
+description = "Image Generation Worker — calls Forge API on the Ray cluster to generate images. One prompt = one image."
+max_rounds = 8
+model = "deepseek/deepseek-v4-flash"
+imports = ["shell"]
+
+[[roles]]
+name = "publisher"
+description = "Publisher — posts approved content to Twitter + Telegram. Uses twitter_helpers and telegram_helpers."
+max_rounds = 8
+model = "deepseek/deepseek-v4-flash"
+imports = ["shell"]
+
+[[roles]]
+name = "research-director"
+description = "Research Director — owns Phase B. Delegates to twitter + telegram researchers, collects findings, summarizes for content team."
+max_rounds = 20
+model = "deepseek/deepseek-v4-flash"
+imports = ["shell"]
+delegates_to = ["twitter-researcher", "telegram-researcher"]
+
+[[roles]]
+name = "telegram-researcher"
+description = "Telegram Researcher — reads saved messages + monitored channels via Telethon. Returns interesting finds as JSON."
+max_rounds = 15
+model = "deepseek/deepseek-v4-flash"
+imports = ["browser", "vision", "shell"]
+
+[[roles]]
+name = "twitter-researcher"
+description = "Twitter Researcher — scrapes Twitter/X timeline + notifications using injected cookies. Returns trending/interesting tweets as JSON."
+max_rounds = 15
+model = "deepseek/deepseek-v4-flash"
+imports = ["browser", "vision", "shell"]

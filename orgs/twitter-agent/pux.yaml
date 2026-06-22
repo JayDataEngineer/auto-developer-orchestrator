@@ -1,36 +1,31 @@
-# Pux Org Manifest — Twitter Content Division
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build twitter-agent`.
 name: twitter-agent
-description: "Social media manager — content generation, engagement strategy, automated posting"
-
+description: Social media manager — content generation, engagement strategy, automated posting
 manifesto: MANIFESTO.md
 staff_root: roles
 tool_packages_root: tool_packages
 skills_dir: skills
-
 schedules:
   - name: morning_post
     cron: "0 8 * * *"
-    prompt: prompts/morning_post.md
+    prompt: "prompts/morning_post.md"
     role: content-writer
     model: deepseek/deepseek-v4-flash
     enabled: true
-
   - name: afternoon_post
     cron: "0 13 * * *"
-    prompt: prompts/afternoon_post.md
+    prompt: "prompts/afternoon_post.md"
     role: content-writer
     model: deepseek/deepseek-v4-flash
     enabled: false
-
   - name: engagement_check
     cron: "0 18 * * *"
-    prompt: prompts/engagement_check.md
+    prompt: "prompts/engagement_check.md"
     role: engagement-manager
     enabled: false
-
   - name: weekly_strategy
     cron: "0 10 * * 1"
-    prompt: prompts/weekly_strategy.md
+    prompt: "prompts/weekly_strategy.md"
     role: researcher
     model: deepseek/deepseek-v4-flash
     enabled: false

@@ -1,5 +1,8 @@
-description: "Social Post Writer — Twitter/X threads, Mastodon, Bluesky posts from a cited brief. Adapts voice per platform."
-max_rounds: 12
-model: "deepseek/deepseek-v4-flash"
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
+description: "Social Post Writer — Twitter/X threads, Mastodon, Bluesky posts from a cited brief. Adapts voice per platform, can self-verify claims."
 imports:
   - shell
+  - research
+  - vision
+model: deepseek/deepseek-v4-flash
+max_rounds: 12

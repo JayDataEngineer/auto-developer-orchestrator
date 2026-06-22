@@ -1,5 +1,6 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Trader — Executes trades via Alpaca API for stocks (market hours) + crypto (24/7). Handles market-closed gracefully for stocks; crypto executes immediately."
-max_rounds: 10
-model: "deepseek/deepseek-v4-flash"
 imports:
   - shell
+model: deepseek-chat
+max_rounds: 10

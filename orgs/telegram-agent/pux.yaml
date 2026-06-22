@@ -1,7 +1,6 @@
-# Pux Org Manifest — Telegram Notes & Automation
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build telegram-agent`.
 name: telegram-agent
-description: "Personal Telegram automation — post to Saved Messages, read mentions, send messages without ever opening the app"
-
+description: Personal Telegram automation — post to Saved Messages, read mentions, send messages without ever opening the app
 manifesto: MANIFESTO.md
 staff_root: roles
 skills_dir: skills

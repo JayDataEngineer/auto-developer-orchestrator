@@ -1,9 +1,10 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Engagement manager — monitors mentions, replies to followers, posts content"
 imports:
   - browser
+max_rounds: 15
+temperature: 0.5
 tools:
   - bash
 mcp_servers:
   - media-analysis
-max_rounds: 15
-temperature: 0.5

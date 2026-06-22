@@ -1,3 +1,4 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Tester — writes and runs tests, catches regressions, validates behavior."
 imports:
   - code

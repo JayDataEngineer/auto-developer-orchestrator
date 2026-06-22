@@ -1,4 +1,4 @@
-description: "Godot test harness — run tests, take screenshots, validate scenes"
-mcp_servers:
-  - godot
-tools: []
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
+description: "Godot editor control via HTTP bridge to IvanMurzak/Godot-MCP server. Opens scenes, runs scripts, queries nodes, captures screenshots for QA. Used by gameplay_programmer and qa_tester."
+tools:
+  - bash

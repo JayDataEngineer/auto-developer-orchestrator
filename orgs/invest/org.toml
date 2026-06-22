@@ -1,0 +1,182 @@
+# org.toml — Investment Division (Multi-Asset)
+#
+# Multi-asset investment org — stocks + crypto + macro context via Alpaca
+# paper trading. Multi-signal fusion with risk-aware execution and prediction
+# journaling.
+#
+# Sandbox scripts (canonical location): orgs/invest/sandbox/
+# Deployed to target project via bootstrap.sh.
+# Pipeline code at /sandbox/{fetch_data,trade,signals,...}.py inside the container.
+
+name = "invest"
+description = "Multi-asset investment org — stocks + crypto + macro context via Alpaca paper trading. Multi-signal fusion with risk-aware execution and prediction journaling."
+
+manifesto = "MANIFESTO.md"
+staff_root = "roles"
+skills_dir = "skills"
+
+[[schedules]]
+name = "morning_scan"
+cron = "30 9 * * 1-5"
+prompt = "prompts/morning_scan.md"
+role = "research-director"
+model = "deepseek-chat"
+enabled = true
+
+[[schedules]]
+name = "midday_review"
+cron = "0 13 * * 1-5"
+prompt = "prompts/portfolio_review.md"
+role = "research-director"
+model = "deepseek-chat"
+enabled = true
+
+[[schedules]]
+name = "eod_scan"
+cron = "30 15 * * 1-5"
+prompt = "prompts/morning_scan.md"
+role = "research-director"
+model = "deepseek-chat"
+enabled = true
+
+[[schedules]]
+name = "eod_snapshot"
+cron = "0 16 * * 1-5"
+prompt = "Run portfolio_status to check the current state, then record it"
+role = "execution-manager"
+model = "deepseek-chat"
+enabled = true
+
+[[schedules]]
+name = "eod_metrics"
+cron = "30 16 * * 1-5"
+prompt = "Run the metrics tool to collect today's portfolio metrics for Langfuse tracking"
+role = "execution-manager"
+model = "deepseek-chat"
+enabled = true
+
+# Crypto markets are 24/7 — hourly fast scan
+[[schedules]]
+name = "crypto_hourly"
+cron = "7 * * * *"
+prompt = "prompts/crypto_hourly.md"
+role = "research-director"
+model = "deepseek-chat"
+enabled = true
+
+# Sunday macro review — FRED updates weekly, regime params need refresh
+[[schedules]]
+name = "macro_weekly"
+cron = "0 19 * * 0"
+prompt = "prompts/macro_weekly.md"
+role = "research-director"
+model = "deepseek-chat"
+enabled = true
+
+[[roles]]
+name = "crypto-analyst"
+description = "Crypto Analyst — On-chain metrics, funding rates, exchange reserves, whale flows. 24/7 aware. Crypto-specific signal overlay for BTC/ETH/SOL."
+max_rounds = 12
+model = "deepseek-chat"
+imports = ["shell"]
+mcp_servers = ["web"]
+
+[[roles]]
+name = "execution-manager"
+description = "Execution Manager — Manages trade execution, journaling, and reporting. Delegates to trader and reporter. Multi-asset aware (stocks + crypto)."
+max_rounds = 15
+model = "deepseek-chat"
+imports = ["shell"]
+tools = ["yield_artifact"]
+delegates_to = ["trader", "reporter"]
+
+[[roles]]
+name = "filings-analyst"
+description = "Filings Analyst — SEC EDGAR via web MCP scrape + crawl. Reads 10-K/10-Q/8-K, earnings reports, analyst upgrades/downgrades. Fundamental analysis of actionable assets."
+max_rounds = 12
+model = "deepseek-chat"
+imports = ["shell"]
+mcp_servers = ["web"]
+
+[[roles]]
+name = "news-analyst"
+description = "News Analyst — News + social sentiment via web MCP. Uses research (search + scrape in one call) and extract (news schema for structured headlines/dates). Covers Reddit, X, financial news."
+max_rounds = 12
+model = "deepseek-chat"
+imports = ["shell"]
+mcp_servers = ["web"]
+
+[[roles]]
+name = "position-sizer"
+description = "Position Sizer — ATR-based sizing with regime adjustment. Stop-loss + take-profit generation. Conservative mode halves sizes."
+max_rounds = 15
+model = "deepseek-chat"
+imports = ["shell"]
+
+[[roles]]
+name = "regime-analyst"
+description = "Regime Analyst — 4-pillar market regime detection (trend, volatility, momentum, breadth) PLUS macro regime (yield curve, rates, DXY, commodities). Outputs regime + adjusted strategy params."
+max_rounds = 15
+model = "deepseek-chat"
+imports = ["shell"]
+
+[[roles]]
+name = "reporter"
+description = "Reporter — Records predictions in the journal BEFORE fills, evaluates accuracy, generates summary reports. See JOURNAL_PREDICTIONS skill."
+max_rounds = 15
+model = "deepseek-chat"
+imports = ["shell"]
+
+[[roles]]
+name = "research-director"
+description = "Research Director — Manages market data collection, multi-signal fusion, regime detection, news, SEC filings, crypto context, and alpha research. Delegates to 6 specialists."
+max_rounds = 30
+model = "deepseek-chat"
+imports = ["shell"]
+tools = ["yield_artifact"]
+delegates_to = [
+  "signal-analyst",
+  "regime-analyst",
+  "news-analyst",
+  "filings-analyst",
+  "crypto-analyst",
+  "researcher",
+]
+
+[[roles]]
+name = "researcher"
+description = "Researcher — Generalist fallback for ad-hoc lookups. Web MCP enabled for arbitrary queries that don't fit a specific specialist."
+max_rounds = 12
+model = "deepseek-chat"
+imports = ["shell"]
+mcp_servers = ["web"]
+
+[[roles]]
+name = "risk-analyst"
+description = "Risk Analyst — Portfolio heat, sector concentration, position limits, drawdown warnings. Multi-asset aware (crypto + stocks heat tracked separately and combined)."
+max_rounds = 15
+model = "deepseek-chat"
+imports = ["shell"]
+
+[[roles]]
+name = "risk-officer"
+description = "Risk Officer — Manages risk assessment, position sizing, and stop-loss placement across multi-asset portfolio. Delegates to risk-analyst and position-sizer."
+max_rounds = 20
+model = "deepseek-chat"
+imports = ["shell"]
+tools = ["yield_artifact"]
+delegates_to = ["risk-analyst", "position-sizer"]
+
+[[roles]]
+name = "signal-analyst"
+description = "Signal Analyst — Multi-signal fusion across stocks, crypto, and macro tickers. Computes RSI/MACD/BB/EMA + alpha factors (OBV, ADX, CCI, Williams %R, MFI, Stochastic, ROC, VWAP, CMF). Outputs ranked signal table."
+max_rounds = 12
+model = "deepseek-chat"
+imports = ["shell"]
+
+[[roles]]
+name = "trader"
+description = "Trader — Executes trades via Alpaca API for stocks (market hours) + crypto (24/7). Handles market-closed gracefully for stocks; crypto executes immediately."
+max_rounds = 10
+model = "deepseek-chat"
+imports = ["shell"]

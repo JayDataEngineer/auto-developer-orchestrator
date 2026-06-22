@@ -1,0 +1,7 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
+description: "Documentation Writer — MDX author targeting the tech-noir docs-site (Next.js 15 + MDX + Tailwind 4). Reads source via file_*, follows DOCS_AUTHORING skill for design tokens, updates Search.tsx index for new pages."
+imports:
+  - docs-author
+  - research
+model: deepseek/deepseek-v4-flash
+max_rounds: 20

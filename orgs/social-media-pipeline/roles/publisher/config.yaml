@@ -1,5 +1,6 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Publisher — posts approved content to Twitter + Telegram. Uses twitter_helpers and telegram_helpers."
-max_rounds: 8
-model: "deepseek/deepseek-v4-flash"
 imports:
   - shell
+model: deepseek/deepseek-v4-flash
+max_rounds: 8

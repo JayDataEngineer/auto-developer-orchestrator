@@ -1,8 +1,11 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Execution Manager — Manages trade execution, journaling, and reporting. Delegates to trader and reporter. Multi-asset aware (stocks + crypto)."
-max_rounds: 15
-model: "deepseek/deepseek-v4-flash"
 imports:
   - shell
+model: deepseek-chat
+max_rounds: 15
+tools:
+  - yield_artifact
 delegates_to:
   - trader
   - reporter

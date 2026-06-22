@@ -1,3 +1,4 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Developer — implementation specialist. Writes code, fixes bugs, runs tests."
 imports:
   - code

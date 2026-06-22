@@ -1,6 +1,5 @@
-# Pux Org Manifest — Dev Bot
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build dev-bot`.
 name: dev-bot
-description: "Software development organization — explore, architect, implement, review, test, operate"
-
+description: Software development organization — explore, architect, implement, review, test, operate
 manifesto: MANIFESTO.md
 staff_root: roles

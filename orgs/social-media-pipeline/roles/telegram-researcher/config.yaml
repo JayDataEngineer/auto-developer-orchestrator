@@ -1,7 +1,8 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Telegram Researcher — reads saved messages + monitored channels via Telethon. Returns interesting finds as JSON."
-max_rounds: 15
-model: "deepseek/deepseek-v4-flash"
 imports:
   - browser
   - vision
   - shell
+model: deepseek/deepseek-v4-flash
+max_rounds: 15

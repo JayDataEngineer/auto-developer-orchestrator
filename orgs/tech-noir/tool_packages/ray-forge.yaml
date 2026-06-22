@@ -1,0 +1,4 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
+description: "Ray cluster Forge API client for image/3D/music generation. Wraps forge_client.py with bash CLI commands for asset pipeline stages."
+tools:
+  - bash

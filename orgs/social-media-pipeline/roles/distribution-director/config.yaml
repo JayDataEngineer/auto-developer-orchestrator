@@ -1,7 +1,8 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Distribution Director — owns Phase D execute step. Delegates to publisher with user's selection."
-max_rounds: 8
-model: "deepseek/deepseek-v4-flash"
 imports:
   - shell
+model: deepseek/deepseek-v4-flash
+max_rounds: 8
 delegates_to:
   - publisher

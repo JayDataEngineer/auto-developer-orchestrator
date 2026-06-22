@@ -1,5 +1,8 @@
-description: "Substack Writer — longform article from a cited brief. Section structure, narrative arc, footnoted citations."
-max_rounds: 20
-model: "deepseek/deepseek-v4-flash"
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
+description: "Substack Writer — longform article from a cited brief. Section structure, narrative arc, footnoted citations, can self-verify."
 imports:
   - shell
+  - research
+  - vision
+model: deepseek/deepseek-v4-flash
+max_rounds: 20

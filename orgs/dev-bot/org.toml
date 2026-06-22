@@ -1,0 +1,54 @@
+# org.toml — Dev Bot
+#
+# Software development org: explore → architect → develop → review → test → sre.
+# Six roles, all using kernel-level tool packages (no org-local tool_packages).
+
+name = "dev-bot"
+description = "Software development organization — explore, architect, implement, review, test, operate"
+
+manifesto = "MANIFESTO.md"
+staff_root = "roles"
+
+[[roles]]
+name = "architect"
+description = "Architect — system design, task breakdown, code review. Writes spec artifacts."
+imports = ["code"]
+mcp_servers = ["web"]
+max_rounds = 20
+temperature = 0.3
+
+[[roles]]
+name = "developer"
+description = "Developer — implementation specialist. Writes code, fixes bugs, runs tests."
+imports = ["code"]
+max_rounds = 25
+temperature = 0.2
+
+[[roles]]
+name = "explore"
+description = "Explore — codebase comprehension. Reads code, searches files, understands structure."
+tools = ["bash", "file_read", "file_glob", "file_grep"]
+max_rounds = 15
+temperature = 0.2
+
+[[roles]]
+name = "reviewer"
+description = "Reviewer — code quality, structure, DRY, spaghetti detection. Read-only, never edits."
+tools = ["bash", "file_read", "file_glob", "file_grep"]
+max_rounds = 15
+temperature = 0.2
+
+[[roles]]
+name = "sre"
+description = "SRE — deployment, CI/CD, monitoring, infrastructure. Ships and maintains."
+imports = ["code"]
+mcp_servers = ["web"]
+max_rounds = 20
+temperature = 0.2
+
+[[roles]]
+name = "tester"
+description = "Tester — writes and runs tests, catches regressions, validates behavior."
+imports = ["code"]
+max_rounds = 20
+temperature = 0.2

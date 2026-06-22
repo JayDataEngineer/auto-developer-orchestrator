@@ -1,0 +1,58 @@
+{# pux.yaml.j2 — renders the org manifest read by LoadOrgManifest. #}
+{# Required context: name, description. Optional: manifest, staff_root, #}
+{# tool_packages_root, skills_dir, data_dir, extensions_dir, schedules, #}
+{# databases, sandbox, mcp_servers. #}
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build {{ name }}`.
+name: {{ name }}
+description: {{ description }}
+{% if manifesto %}
+manifesto: {{ manifesto }}
+{% endif %}
+{% if staff_root %}
+staff_root: {{ staff_root }}
+{% endif %}
+{% if tool_packages_root %}
+tool_packages_root: {{ tool_packages_root }}
+{% endif %}
+{% if skills_dir %}
+skills_dir: {{ skills_dir }}
+{% endif %}
+{% if data_dir %}
+data_dir: {{ data_dir }}
+{% endif %}
+{% if extensions_dir %}
+extensions_dir: {{ extensions_dir }}
+{% endif %}
+{% if schedules %}
+schedules:
+{% for s in schedules %}
+  - name: {{ s.name }}
+    cron: "{{ s.cron }}"
+    prompt: {{ s.prompt if ' ' in s.prompt else '"' + s.prompt + '"' }}
+    role: {{ s.role }}
+{% if s.model %}    model: {{ s.model }}
+{% endif %}    enabled: {{ s.enabled | default(true) | lower }}
+{% endfor %}
+{% endif %}
+{% if databases %}
+databases:
+{% for name, cfg in databases.items() %}
+  {{ name }}:
+{% for k, v in cfg.items() if v is not none %}    {{ k }}: {{ v if v is string else v | tojson }}
+{% endfor %}{% endfor %}
+{% endif %}
+{% if sandbox.init_files or sandbox.pip_packages or sandbox.env %}
+sandbox:
+{% if sandbox.init_files %}  init_files:
+{% for f in sandbox.init_files %}    - "{{ f }}"
+{% endfor %}{% endif %}{% if sandbox.pip_packages %}  pip_packages:
+{% for p in sandbox.pip_packages %}    - {{ p }}
+{% endfor %}{% endif %}{% if sandbox.env %}  env:
+{% for k, v in sandbox.env.items() %}    {{ k }}: "{{ v }}"
+{% endfor %}{% endif %}
+{% endif %}
+{% if mcp_servers %}
+mcp_servers:
+{% for s in mcp_servers %}  - name: {{ s.name }}
+    endpoint: {{ s.endpoint }}
+{% endfor %}{% endif %}

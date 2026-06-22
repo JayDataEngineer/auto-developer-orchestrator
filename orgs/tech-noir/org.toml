@@ -1,0 +1,132 @@
+# org.toml — Tech Noir Studio
+#
+# 2.5D cyberpunk survival horror in Godot 4.6. Autonomous build → QA → iterate
+# loop with Forge + ComfyUI on the Tech Noir Ray cluster, Godot editor driven
+# via IvanMurzak/Godot-MCP HTTP bridge, and MDX docs authoring.
+
+name = "tech-noir"
+description = "Tech Noir Studio — 2.5D cyberpunk survival horror in Godot 4.6. Autonomous build → QA → iterate loop with Forge + ComfyUI on the Tech Noir Ray cluster, Godot editor driven via IvanMurzak/Godot-MCP HTTP bridge, and MDX docs authoring."
+
+manifesto = "MANIFESTO.md"
+staff_root = "roles"
+tool_packages_root = "tool_packages"
+skills_dir = "skills"
+
+[sandbox]
+init_files = [
+  "@shared/forge_client.py",
+  "sandbox/godot_client.py",
+  "sandbox/comfyui_client.py",
+  "@shared/surreal_client.py",
+]
+pip_packages = ["requests", "pillow"]
+
+[sandbox.env]
+MCP_HUB_ENDPOINT = "http://100.86.69.57:30080"
+FORGE_URL = "http://100.86.69.57:30080/forge"
+COMFYUI_URL = "http://100.86.69.57:30080/image/comfyui"
+GODOT_MCP_URL = "http://host.docker.internal:8080"
+SURREALDB_URL = "http://host.docker.internal:8000/surreal"
+SURREALDB_NS = "studio"
+SURREALDB_DB = "tech-noir"
+SURREALDB_USER = "root"
+SURREALDB_PASS = "root"
+DOCS_SITE_PATH = "/workspace/docs-site"
+GAME_REPO_PATH = "/workspace/game"
+PUX_ORG_PATH = "/sandbox/workspace"
+
+# Org-local tool packages (kernel-level packages like shell/code are imported
+# by roles without redeclaration).
+[[tool_packages]]
+name = "comfyui"
+description = "ComfyUI workflow execution via Ray cluster proxy. Posts workflow JSON to /image/comfyui/prompt and polls for outputs. Used for VFX generation, sprite distillation, and batch texture processing when Forge's image mode isn't flexible enough."
+tools = ["bash"]
+
+[[tool_packages]]
+name = "docs-author"
+description = "MDX documentation authoring for the tech-noir docs-site (Next.js 15 + MDX + Tailwind 4). Reads source via file_*, follows DOCS_AUTHORING skill for design tokens, updates Search.tsx index for new pages."
+tools = ["bash", "file_read", "file_write", "file_edit", "file_glob", "file_grep"]
+
+[[tool_packages]]
+name = "godot"
+description = "Godot editor control via HTTP bridge to IvanMurzak/Godot-MCP server. Opens scenes, runs scripts, queries nodes, captures screenshots for QA. Used by gameplay_programmer and qa_tester."
+tools = ["bash"]
+
+[[tool_packages]]
+name = "ray-forge"
+description = "Ray cluster Forge API client for image/3D/music generation. Wraps forge_client.py with bash CLI commands for asset pipeline stages."
+tools = ["bash"]
+
+[[tool_packages]]
+name = "studio_vision"
+description = "Studio vision — scene analysis, asset QA, vibe reports, batch playtest review. Uses the kernel media-analysis MCP server (image description, OCR, object detection, NSFW classification, face detection)."
+tools = []
+mcp_servers = ["media"]
+
+[[tool_packages]]
+name = "tech_noir_art"
+description = "Tech Noir art pipeline — Forge (image/3D/music) + ComfyUI (VFX) + media-analysis (QA). Drives the full asset build: generate, process, vibe-check, deliver to game/assets/."
+tools = ["bash"]
+mcp_servers = ["media"]
+
+[[roles]]
+name = "design_researcher"
+description = "Design Researcher — Research game design topics, produce actionable reports"
+imports = ["research", "studio_vision"]
+sandbox = "isolated"
+max_rounds = 15
+temperature = 0.3
+
+[[roles]]
+name = "docs-writer"
+description = "Documentation Writer — MDX author targeting the tech-noir docs-site (Next.js 15 + MDX + Tailwind 4). Reads source via file_*, follows DOCS_AUTHORING skill for design tokens, updates Search.tsx index for new pages."
+max_rounds = 20
+model = "deepseek/deepseek-v4-flash"
+imports = ["docs-author", "research"]
+
+[[roles]]
+name = "gameplay_programmer"
+description = "Gameplay Programmer — Godot 4.6 scenes, scripts, shaders, tests"
+imports = ["godot", "code"]
+sandbox = "native"
+max_rounds = 20
+temperature = 0.2
+
+[[roles]]
+name = "narrative_designer"
+description = "Narrative Designer — Creative writing, dialogue, lore, characters, scenes"
+imports = ["research", "studio_vision"]
+sandbox = "isolated"
+max_rounds = 15
+temperature = 0.7
+
+[[roles]]
+name = "qa_tester"
+description = "QA Tester — Evaluate game scenes, run test harness, produce vibe reports"
+imports = ["godot", "studio_vision"]
+sandbox = "native"
+max_rounds = 10
+temperature = 0.3
+
+[[roles]]
+name = "studio-director"
+description = "Studio Director — owns the autonomous build/QA/iterate loop. Delegates parallel work to specialists, collects results, runs QA, decides iterate vs yield vs abort. Logs every cycle to SurrealDB."
+max_rounds = 30
+model = "deepseek/deepseek-v4-flash"
+imports = ["shell", "code"]
+delegates_to = [
+  "technical_artist",
+  "gameplay_programmer",
+  "narrative_designer",
+  "design_researcher",
+  "qa_tester",
+  "docs-writer",
+]
+
+[[roles]]
+name = "technical_artist"
+description = "Technical Artist — YAML-driven build pipeline for characters, audio, environments, 3D props"
+imports = ["tech_noir_art", "comfyui", "studio_vision", "code"]
+sandbox = "native"
+max_rounds = 20
+temperature = 0.2

@@ -1,16 +1,10 @@
-# Pux Org Manifest — Deep Research Engine
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build deep-research-engine`.
 name: deep-research-engine
-description: "Config-driven multi-agent research engine — data in, knowledge out, artifacts generated"
-
+description: Config-driven multi-agent research engine — data in, knowledge out, artifacts generated
 manifesto: MANIFESTO.md
 staff_root: roles
 skills_dir: skills
 data_dir: data
-
-# Database connections for Go tools (graph_query, vector_search).
-# Pipeline code lives in ~/Documents/programs/deep-research-engine/ — this org
-# is the Pux-side charter only (CTO + 3 directors: research, ingestion, artifact).
-# Face/voice identity is handled by media-mcp (InsightFace + WeSpeaker + HDBSCAN).
 databases:
   surrealdb:
     url: http://localhost:8000/surreal
@@ -18,27 +12,21 @@ databases:
     database: main
     username: root
     password_env: SURREAL_PASSWORD
-
-# Sandbox setup — uploaded into the container at /sandbox/ on every init.
-# host.docker.internal resolves to the docker bridge gateway (10.10.0.1) and
-# lets the container reach host-bound services (SurrealDB behind Caddy on :8000).
-# PUX_ORG_PATH points at the bind-mounted /sandbox/workspace so surreal_client.py
-# can locate prompts/surreal_schema.sql via its _load_schema_sql() lookup.
 sandbox:
   init_files:
     - "@shared/surreal_client.py"
-    - sandbox/context_engine.py
-    - sandbox/vector_search.py
-    - sandbox/entity_extract.py
-    - sandbox/content_cluster.py
-    - sandbox/telegram_parser.py
-    - sandbox/face_client.py
-    - sandbox/audio_client.py
-    - sandbox/neo4j_client.py
+    - "sandbox/context_engine.py"
+    - "sandbox/vector_search.py"
+    - "sandbox/entity_extract.py"
+    - "sandbox/content_cluster.py"
+    - "sandbox/telegram_parser.py"
+    - "sandbox/face_client.py"
+    - "sandbox/audio_client.py"
+    - "sandbox/neo4j_client.py"
   env:
-    SURREALDB_URL: http://host.docker.internal:8000/surreal
-    SURREALDB_NS: research
-    SURREALDB_DB: main
-    SURREALDB_USER: root
-    SURREALDB_PASS: root
-    PUX_ORG_PATH: /sandbox/workspace
+    SURREALDB_URL: "http://host.docker.internal:8000/surreal"
+    SURREALDB_NS: "research"
+    SURREALDB_DB: "main"
+    SURREALDB_USER: "root"
+    SURREALDB_PASS: "root"
+    PUX_ORG_PATH: "/sandbox/workspace"

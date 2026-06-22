@@ -1,5 +1,8 @@
-description: "Synthesizer — merge multiple research/ingestion outputs into a single cited brief. Resolves conflicts, flags uncertainty."
-max_rounds: 15
-model: "deepseek/deepseek-v4-flash"
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
+description: "Synthesizer — merge multiple research/ingestion outputs into a single cited brief. Resolves conflicts, flags uncertainty, can self-verify."
 imports:
   - shell
+  - research
+  - vision
+model: deepseek/deepseek-v4-flash
+max_rounds: 15

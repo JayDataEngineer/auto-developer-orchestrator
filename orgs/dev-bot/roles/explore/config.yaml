@@ -1,8 +1,9 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "Explore — codebase comprehension. Reads code, searches files, understands structure."
+max_rounds: 15
+temperature: 0.2
 tools:
   - bash
   - file_read
   - file_glob
   - file_grep
-max_rounds: 15
-temperature: 0.2

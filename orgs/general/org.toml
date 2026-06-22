@@ -1,0 +1,7 @@
+# org.toml — General (sandbox org for testing the kernel with no overlay)
+#
+# Deliberately minimal: no manifesto, no roles, no tool_packages, no sandbox.
+# Exercises the kernel's fallback path (kernel workers only, no org overlay).
+
+name = "general"
+description = "General-purpose testing project — no roles, no skills, just kernel defaults"

@@ -1,0 +1,20 @@
+# org.toml — Telegram Notes & Automation
+#
+# Personal Telegram automation — post to Saved Messages, read mentions, send
+# messages without ever opening the app.
+
+name = "telegram-agent"
+description = "Personal Telegram automation — post to Saved Messages, read mentions, send messages without ever opening the app"
+
+manifesto = "MANIFESTO.md"
+staff_root = "roles"
+skills_dir = "skills"
+
+[[roles]]
+name = "personal-assistant"
+description = "Personal assistant — Telegram notes, mentions, and messaging via agent-written scripts"
+imports = []
+tools = ["bash", "python"]
+max_rounds = 12
+temperature = 0.4
+model = "deepseek/deepseek-v4-flash"

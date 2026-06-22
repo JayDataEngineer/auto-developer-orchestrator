@@ -1,5 +1,7 @@
-description: "Multimodal Worker — Cross-modal person linking. Drives the lip-sync heuristic via detect_faces + embed_voice + temporal reasoning. Resolves face clusters to voice clusters to canonical person nodes."
-max_rounds: 30
-model: "deepseek/deepseek-v4-flash"
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
+description: "Multimodal Worker — Cross-modal person linking. Drives the lip-sync heuristic via face + voice + temporal reasoning. Resolves face clusters to voice clusters to canonical person nodes."
 imports:
   - shell
+  - vision
+model: deepseek/deepseek-v4-flash
+max_rounds: 30

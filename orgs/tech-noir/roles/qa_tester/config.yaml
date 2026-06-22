@@ -1,7 +1,8 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
 description: "QA Tester — Evaluate game scenes, run test harness, produce vibe reports"
 imports:
   - godot
   - studio_vision
-sandbox: native
 max_rounds: 10
 temperature: 0.3
+sandbox: native
