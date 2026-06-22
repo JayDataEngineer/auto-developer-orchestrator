@@ -62,6 +62,7 @@ type App struct {
 	extMgr             *extensions.Manager
 	imageServer        *vision.ImageServer
 	sshManager         *puxssh.SessionManager
+	toolsHandler       *handlers.ToolsHandler
 }
 
 // NewApp initializes all components and assembles the application.
@@ -303,7 +304,8 @@ func (a *App) initHandlers() {
 	// Other handlers
 	fileHandler := handlers.NewFileHandler(sandboxMgr, logger)
 	clusterHandler := handlers.NewClusterHandler(logger)
-	toolsHandler := handlers.NewToolsHandler(sandboxMgr, nil, nil, logger) // MCP wired later
+	toolsHandler := handlers.NewToolsHandler(sandboxMgr, nil, nil, logger) // MCP wired in initMCP
+	a.toolsHandler = toolsHandler
 	artifactHandler := handlers.NewArtifactHandler(a.db, logger)
 
 	// Project handler setup
@@ -339,16 +341,27 @@ func (a *App) initHandlers() {
 func (a *App) initMCP() {
 	mcpMulti := mcp.NewMultiClient(a.logger)
 
-	hubBase := os.Getenv("MCP_HUB_ENDPOINT")
-	if hubBase == "" {
-		hubBase = "http://100.86.69.57:30080"
+	// Tailscale cloud node hosts all MCPs. Each URL is env-var overridable
+	// so future swaps don't need a recompile. Requires MagicDNS on the host:
+	//   sudo tailscale set --accept-dns=true
+	tsCloud := "https://cloud.tailb1e597.ts.net:10000"
+	var webResearchClient *mcp.Client
+	for prefix, path := range map[string]string{
+		"web":      "/research/mcp",
+		"media":    "/media/mcp",
+		"meta":     "/meta/mcp",
+		"equibles": "/equibles/mcp",
+	} {
+		url := os.Getenv("MCP_" + strings.ToUpper(prefix) + "_URL")
+		if url == "" {
+			url = tsCloud + path
+		}
+		client := mcp.NewClient(prefix, url, a.logger)
+		if prefix == "web" {
+			webResearchClient = client
+		}
+		mcpMulti.AddClient(prefix, client)
 	}
-
-	webResearchClient := mcp.NewClient("web", hubBase+"/mcp/web", a.logger)
-	mcpMulti.AddClient("web", webResearchClient)
-
-	mediaAnalysisClient := mcp.NewClient("media", hubBase+"/mcp/media", a.logger)
-	mcpMulti.AddClient("media", mediaAnalysisClient)
 
 	// Start extension subprocesses
 	a.extMgr = extensions.NewManager(a.logger)
@@ -401,9 +414,28 @@ func (a *App) initMCP() {
 			a.computerUseHandler.SetMCPMulti(mcpMulti, a.imageServer)
 			a.logger.Info("ComputerUseHandler wired with MCP vision")
 		}
+		// Wire the toolsHandler with the MCP clients so /api/tools and
+		// /api/tools/exec see the same prefixed tool names the agent loop sees.
+		if a.toolsHandler != nil {
+			a.toolsHandler.SetMCP(mcpMulti, webResearchClient)
+		}
 		a.logger.Info("MCP servers ready")
 	} else {
 		a.logger.Info("MCP servers not available — search/scrape will use browser fallback")
+	}
+
+	// Capability resolver: picks the live implementation per capability
+	// (cloud MCP vs bash-ddg floor) once at boot, then freezes the result
+	// for the kernel process lifetime. See pux-declarative-stack.md §Stage 2.
+	resolver := common.NewResolver(mcpMulti)
+	common.SetGlobalResolver(resolver)
+	resolved := resolver.ResolveAll()
+	for capName, impl := range resolved {
+		a.logger.Info("Capability resolved",
+			zap.String("capability", capName),
+			zap.String("implementation", impl.Name),
+			zap.String("type", impl.Type),
+		)
 	}
 }
 
@@ -827,6 +859,9 @@ func makeLocalPromptSender(baseURL, projectRoot string, logger *zap.Logger) sche
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "text/event-stream")
+		// Scheduled jobs have no human watching — auto-approve "ask" bash patterns
+		// instead of hanging 5min for a decision that won't arrive.
+		req.Header.Set("X-Pux-Non-Interactive", "1")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

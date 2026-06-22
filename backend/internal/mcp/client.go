@@ -29,14 +29,10 @@ type Client struct {
 
 // NewClient creates a new MCP client. The endpoint should be the MCP server URL.
 // The prefix identifies this server for tool routing and instruction registration.
-// If endpoint is empty, it falls back to the MCP_RESEARCH_ENDPOINT env var,
-// then to "http://100.86.69.57:8327/mcp".
+// If endpoint is empty, it falls back to the MCP_RESEARCH_ENDPOINT env var.
 func NewClient(prefix, endpoint string, logger *zap.Logger) *Client {
 	if endpoint == "" {
 		endpoint = os.Getenv("MCP_RESEARCH_ENDPOINT")
-	}
-	if endpoint == "" {
-		endpoint = "http://100.86.69.57:8327/mcp"
 	}
 	if logger == nil {
 		logger = zap.NewNop()
@@ -287,6 +283,14 @@ func (c *Client) ListTools(ctx context.Context) ([]MCPTool, error) {
 	return result.Tools, nil
 }
 
+// truncateString truncates a string to maxLen for debug logging.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "...(truncated)"
+}
+
 // Endpoint returns the MCP server endpoint URL.
 func (c *Client) Endpoint() string {
 	return c.endpoint
@@ -418,6 +422,17 @@ func (m *MultiClient) AddClient(prefix string, client *Client) {
 func (m *MultiClient) HasClient(prefix string) bool {
 	_, ok := m.clients[prefix]
 	return ok
+}
+
+// ClientForPrefix returns the registered client for a server prefix, or nil
+// if no server is registered under that prefix. Used by capability resolution
+// to health-check a specific tier (e.g. "is the web server up?").
+func (m *MultiClient) ClientForPrefix(prefix string) *Client {
+	c, ok := m.clients[prefix]
+	if !ok {
+		return nil
+	}
+	return c
 }
 
 // RemoveClient removes a server by prefix and cleans up its tool entries.

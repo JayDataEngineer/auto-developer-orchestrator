@@ -45,6 +45,7 @@ type AgentRole struct {
 	MaxRounds   int
 	Temperature float32
 	Model       string
+	Thinking    bool   // enable extended thinking (CoT) on supporting models
 	Division    string   // non-empty = division head, points to sub-dir with pux.yaml
 	SandboxTier string   // "isolated" (default), "bridged", "native"
 	DelegatesTo []string // if non-empty, this worker gets scoped delegation tools
@@ -84,6 +85,7 @@ type RoleConfig struct {
 	MaxRounds   int     `yaml:"max_rounds"`
 	Temperature float64 `yaml:"temperature"`
 	Model       string  `yaml:"model"`
+	Thinking    bool    `yaml:"thinking"`
 
 	// Delegation / sandbox / lifecycle
 	Division    string   `yaml:"division,omitempty"`
@@ -94,20 +96,46 @@ type RoleConfig struct {
 
 // ToolPackage is a shared tool group (legacy name, still used internally).
 type ToolPackage struct {
-	Name        string
-	Description string
-	Tools       []string
-	MCPServers  []string
-	Skill       string // SKILL.md content from capability folder
+	Name           string
+	Description    string
+	Tools          []string
+	MCPServers     []string
+	Skill          string // SKILL.md content from capability folder
+	Implementations []Implementation // raw parsed from capability.yaml; nil for legacy
+	ActiveImpl     *Implementation // set by CapabilityResolver at boot; nil for legacy or unresolved
+	Dir            string // capability folder path (for prompt_file resolution)
+}
+
+// Implementation is a single tier of a polymorphic capability. See
+// pux-declarative-stack.md RFC axis 2. Lower Priority wins. Health check
+// determines live-or-down at boot. Sticky for kernel lifetime.
+type Implementation struct {
+	Name       string      `yaml:"name"`
+	Type       string      `yaml:"type"`                 // "mcp" | "bash" | "http" (informational)
+	Priority   int         `yaml:"priority"`             // lower = preferred
+	MCPServers []string    `yaml:"mcp_servers,omitempty"` // MCP tier: server prefixes to wire
+	Tools      []string    `yaml:"tools,omitempty"`       // bash tier: tool names to expose
+	Script     string      `yaml:"script,omitempty"`      // bash tier: absolute path inside sandbox
+	Prompt     string      `yaml:"prompt,omitempty"`      // inline prompt (mutually exclusive with PromptFile)
+	PromptFile string      `yaml:"prompt_file,omitempty"` // file rel to capability dir; resolved into Prompt
+	Health     HealthCheck `yaml:"health"`
+}
+
+// HealthCheck probes whether an Implementation is usable at boot.
+type HealthCheck struct {
+	Kind   string `yaml:"kind"`             // "mcp-available" | "http-get" | "always-true"
+	Server string `yaml:"server,omitempty"` // for mcp-available: server prefix
+	URL    string `yaml:"url,omitempty"`    // for http-get: URL to GET
 }
 
 // toolPackageConfig is the YAML structure for config/tool_packages/<name>.yaml (legacy)
 // and config/capabilities/<name>/capability.yaml (new).
 type toolPackageConfig struct {
-	Description  string   `yaml:"description"`
-	Tools        []string `yaml:"tools"`
-	MCPServers   []string `yaml:"mcp_servers"`
-	SandboxTier  string   `yaml:"sandbox_tier"`
+	Description     string           `yaml:"description"`
+	Tools           []string         `yaml:"tools"`
+	MCPServers      []string         `yaml:"mcp_servers"`
+	SandboxTier     string           `yaml:"sandbox_tier"`
+	Implementations []Implementation `yaml:"implementations,omitempty"`
 }
 
 // promptData holds template variables for the main system prompt.
@@ -125,19 +153,27 @@ var (
 	promptMu      sync.RWMutex
 	promptModTime = make(map[string]time.Time)
 
-	agentRoles    map[string]*AgentRole
-	agentMu       sync.RWMutex
-	agentModTime  = make(map[string]time.Time)
+	agentRoles     map[string]*AgentRole
+	agentMu        sync.RWMutex
+	agentModTime   = make(map[string]time.Time)
+	agentConfigDir string
 
-	toolPackages   map[string]*ToolPackage
-	toolPkgMu      sync.RWMutex
-	toolPkgModTime = make(map[string]time.Time)
+	toolPackages    map[string]*ToolPackage
+	toolPkgMu       sync.RWMutex
+	toolPkgModTime  = make(map[string]time.Time)
+	toolPkgConfigDir string
 )
 
 // FindKernelConfigDir resolves the kernel config/ directory by searching
 // multiple locations. Returns "" if not found. This works regardless of
 // whether PROJECT_ROOT points at the repo root, a projects parent, or
 // is unset.
+//
+// If PROJECT_ROOT is set, it is treated as authoritative — the function
+// checks it and returns "" if no config/ lives there. No fall-through to
+// walk-up discovery. This keeps the contract honest: PROJECT_ROOT says
+// "the kernel lives here," and if it doesn't, that's a real state worth
+// surfacing rather than papering over with a guessed location.
 func FindKernelConfigDir() string {
 	root := os.Getenv("PROJECT_ROOT")
 
@@ -145,12 +181,16 @@ func FindKernelConfigDir() string {
 	type dirSrc struct {
 		path string
 	}
-	candidates := []dirSrc{}
 
-	// 1. PROJECT_ROOT itself
+	// 1. PROJECT_ROOT — authoritative if set
 	if root != "" {
-		candidates = append(candidates, dirSrc{root})
+		if _, err := os.Stat(filepath.Join(root, "config", "prompt.md")); err == nil {
+			return filepath.Join(root, "config")
+		}
+		return ""
 	}
+
+	candidates := []dirSrc{}
 
 	// 2. Walk up from executable binary
 	if exe, err := os.Executable(); err == nil {
@@ -161,10 +201,13 @@ func FindKernelConfigDir() string {
 		}
 	}
 
-	// 3. Working directory and parents
+	// 3. Working directory and parents (deep walk-up so tests run from
+	// deeply-nested package dirs — e.g. backend/internal/agents/common/ —
+	// can still locate config/prompt.md at the repo root when PROJECT_ROOT
+	// is unset).
 	if wd, err := os.Getwd(); err == nil {
 		dir := wd
-		for range 3 {
+		for range 8 {
 			candidates = append(candidates, dirSrc{dir})
 			dir = filepath.Dir(dir)
 		}
@@ -277,11 +320,13 @@ func ReloadPromptTemplate() {
 	agentMu.Lock()
 	agentRoles = nil
 	agentModTime = map[string]time.Time{}
+	agentConfigDir = ""
 	agentMu.Unlock()
 
 	toolPkgMu.Lock()
 	toolPackages = nil
 	toolPkgModTime = map[string]time.Time{}
+	toolPkgConfigDir = ""
 	toolPkgMu.Unlock()
 
 	// Also invalidate capabilities cache
@@ -291,8 +336,10 @@ func ReloadPromptTemplate() {
 // LoadToolPackages reads capabilities from config/capabilities/ (new) then
 // config/tool_packages/ (legacy), then org-specific dirs. Auto-reloads on change.
 func LoadToolPackages() map[string]*ToolPackage {
+	curDir := FindKernelConfigDir()
+
 	toolPkgMu.RLock()
-	if toolPackages != nil && !dirChanged("tool_packages", toolPkgModTime) && !dirChanged("capabilities", toolPkgModTime) {
+	if toolPackages != nil && toolPkgConfigDir == curDir && !dirChanged("tool_packages", toolPkgModTime) && !dirChanged("capabilities", toolPkgModTime) {
 		pkgs := toolPackages
 		toolPkgMu.RUnlock()
 		return pkgs
@@ -302,11 +349,12 @@ func LoadToolPackages() map[string]*ToolPackage {
 	toolPkgMu.Lock()
 	defer toolPkgMu.Unlock()
 
-	if toolPackages != nil && !dirChanged("tool_packages", toolPkgModTime) && !dirChanged("capabilities", toolPkgModTime) {
+	curDir = FindKernelConfigDir()
+	if toolPackages != nil && toolPkgConfigDir == curDir && !dirChanged("tool_packages", toolPkgModTime) && !dirChanged("capabilities", toolPkgModTime) {
 		return toolPackages
 	}
 
-	configDir := FindKernelConfigDir()
+	configDir := curDir
 
 	// Start with legacy tool_packages (flat YAML files)
 	legacyDir := "config/tool_packages"
@@ -325,6 +373,7 @@ func LoadToolPackages() map[string]*ToolPackage {
 		toolPackages[name] = pkg // new overrides legacy
 	}
 
+	toolPkgConfigDir = configDir
 	updateModTime("tool_packages", legacyDir, toolPkgModTime)
 	updateModTime("capabilities", capDir, toolPkgModTime)
 	return toolPackages
@@ -353,10 +402,12 @@ func LoadToolPackagesFrom(dir string) map[string]*ToolPackage {
 			continue
 		}
 		pkgs[name] = &ToolPackage{
-			Name:        name,
-			Description: pc.Description,
-			Tools:       pc.Tools,
-			MCPServers:  pc.MCPServers,
+			Name:           name,
+			Description:    pc.Description,
+			Tools:          pc.Tools,
+			MCPServers:     pc.MCPServers,
+			Implementations: pc.Implementations,
+			Dir:            dir,
 		}
 	}
 	return pkgs
@@ -364,6 +415,9 @@ func LoadToolPackagesFrom(dir string) map[string]*ToolPackage {
 
 // LoadCapabilitiesFrom scans a directory for capability folders (new format).
 // Each subfolder should contain capability.yaml and optionally SKILL.md.
+// Implementations with PromptFile have their prompt content resolved into Prompt
+// (relative to the capability folder). Implementations with inline Prompt are
+// left untouched.
 func LoadCapabilitiesFrom(dir string) map[string]*ToolPackage {
 	pkgs := make(map[string]*ToolPackage)
 
@@ -377,7 +431,8 @@ func LoadCapabilitiesFrom(dir string) map[string]*ToolPackage {
 			continue
 		}
 		name := entry.Name()
-		cfgPath := filepath.Join(dir, name, "capability.yaml")
+		capDir := filepath.Join(dir, name)
+		cfgPath := filepath.Join(capDir, "capability.yaml")
 		data, err := os.ReadFile(cfgPath)
 		if err != nil {
 			continue
@@ -387,21 +442,60 @@ func LoadCapabilitiesFrom(dir string) map[string]*ToolPackage {
 			continue
 		}
 
-		// Load SKILL.md if present
+		// Resolve PromptFile → Prompt for each implementation. We keep PromptFile
+		// on the struct for debugging; Prompt is the canonical field downstream.
+		for i := range pc.Implementations {
+			impl := &pc.Implementations[i]
+			if impl.Prompt == "" && impl.PromptFile != "" {
+				if body, err := os.ReadFile(filepath.Join(capDir, impl.PromptFile)); err == nil {
+					impl.Prompt = string(body)
+				}
+			}
+		}
+
+		// Load SKILL.md if present (kept for backward compat; polymorphic
+		// capabilities will route through ActiveImpl.Prompt instead)
 		skill := ""
-		if skillData, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md")); err == nil {
+		if skillData, err := os.ReadFile(filepath.Join(capDir, "SKILL.md")); err == nil {
 			skill = string(skillData)
 		}
 
 		pkgs[name] = &ToolPackage{
-			Name:        name,
-			Description: pc.Description,
-			Tools:       pc.Tools,
-			MCPServers:  pc.MCPServers,
-			Skill:       skill,
+			Name:           name,
+			Description:    pc.Description,
+			Tools:          pc.Tools,
+			MCPServers:     pc.MCPServers,
+			Skill:          skill,
+			Implementations: pc.Implementations,
+			Dir:            capDir,
+		}
+
+		// Boot-safe default: if implementations[] exists but no resolver has
+		// run yet (tests, early boot, or unconfigured env), pick the highest-
+		// priority impl as a stand-in ActiveImpl. The resolver overrides this
+		// at boot via ResolveAll(). Without this, callers that load
+		// capabilities directly get an empty tool list.
+		if len(pc.Implementations) > 0 {
+			pkgs[name].ActiveImpl = pickDefaultImplementation(pc.Implementations)
 		}
 	}
 	return pkgs
+}
+
+// pickDefaultImplementation returns the highest-priority (lowest priority
+// number) implementation. Used as a boot-safe stand-in when the resolver
+// has not run. Ties broken by first-declared order.
+func pickDefaultImplementation(imps []Implementation) *Implementation {
+	if len(imps) == 0 {
+		return nil
+	}
+	best := &imps[0]
+	for i := 1; i < len(imps); i++ {
+		if imps[i].Priority < best.Priority {
+			best = &imps[i]
+		}
+	}
+	return best
 }
 
 // GetCapabilitySkill returns the SKILL.md content for a capability by name.
@@ -416,6 +510,13 @@ func GetCapabilitySkill(name string) string {
 // BuildWorkerPrompt assembles a worker's full prompt from persona + capability skills.
 // The prompt ends with a DynamicBoundary so the HTTP layer can split and cache
 // the stable portion (persona + SKILL.md) separately from any future dynamic content.
+//
+// For polymorphic capabilities (those with implementations[]), the active
+// implementation's Prompt is preferred over the legacy SKILL.md. This is the
+// morphing-prompt hook: when infrastructure is degraded and the resolver picks
+// the bash tier, the worker's prompt rewrites itself to describe the bash-tier
+// tools instead of the cloud-tier MCP. Legacy capabilities without
+// implementations[] continue to use SKILL.md verbatim.
 func BuildWorkerPrompt(persona string, capabilities []string) string {
 	var sb strings.Builder
 	if persona != "" {
@@ -423,7 +524,7 @@ func BuildWorkerPrompt(persona string, capabilities []string) string {
 		sb.WriteString("\n\n")
 	}
 	for _, capName := range capabilities {
-		skill := GetCapabilitySkill(capName)
+		skill := capabilityPrompt(capName)
 		if skill != "" {
 			fmt.Fprintf(&sb, "--- %s capability ---\n%s\n\n", capName, skill)
 		}
@@ -432,7 +533,29 @@ func BuildWorkerPrompt(persona string, capabilities []string) string {
 	return sb.String()
 }
 
+// capabilityPrompt returns the prompt text for a capability, preferring the
+// resolver-selected implementation's Prompt over the legacy SKILL.md. Returns
+// "" if neither is set (capability will be omitted from the worker prompt).
+func capabilityPrompt(capName string) string {
+	if r := GetGlobalResolver(); r != nil {
+		if impl := r.Resolve(capName); impl != nil && impl.Prompt != "" {
+			return impl.Prompt
+		}
+	}
+	return GetCapabilitySkill(capName)
+}
+
 // ResolveImports expands a list of tool package names into concrete tools + mcp_servers.
+//
+// Polymorphic packages (those with an ActiveImpl set by CapabilityResolver)
+// route through the active implementation's Tools/MCPServers — NOT the
+// top-level Tools/MCPServers on the package. This is the load-bearing fix
+// for capability polymorphism: when the resolver downgrades a capability
+// from cloud to bash, the tools list swaps to the bash tier's tools and the
+// MCP server list drops the dead server. Without this, workers would receive
+// the morphed prompt ("use bash") but the dead MCP tools — a contradiction.
+//
+// Legacy packages (no ActiveImpl) use the top-level fields as before.
 func ResolveImports(imports []string) (tools []string, mcpServers []string) {
 	pkgs := LoadToolPackages()
 	seenTools := make(map[string]bool)
@@ -447,13 +570,22 @@ func ResolveImports(imports []string) (tools []string, mcpServers []string) {
 			}
 			continue
 		}
-		for _, t := range pkg.Tools {
+
+		// Pick the source of truth: active impl if resolver set one, else legacy.
+		implTools := pkg.Tools
+		implServers := pkg.MCPServers
+		if pkg.ActiveImpl != nil {
+			implTools = pkg.ActiveImpl.Tools
+			implServers = pkg.ActiveImpl.MCPServers
+		}
+
+		for _, t := range implTools {
 			if !seenTools[t] {
 				seenTools[t] = true
 				tools = append(tools, t)
 			}
 		}
-		for _, s := range pkg.MCPServers {
+		for _, s := range implServers {
 			if !seenServers[s] {
 				seenServers[s] = true
 				mcpServers = append(mcpServers, s)
@@ -466,8 +598,10 @@ func ResolveImports(imports []string) (tools []string, mcpServers []string) {
 // LoadAgentRoles reads workers from config/workers/.
 // Auto-reloads when files change on disk.
 func LoadAgentRoles() map[string]*AgentRole {
+	curDir := FindKernelConfigDir()
+
 	agentMu.RLock()
-	if agentRoles != nil && !dirChanged("workers", agentModTime) {
+	if agentRoles != nil && agentConfigDir == curDir && !dirChanged("workers", agentModTime) {
 		roles := agentRoles
 		agentMu.RUnlock()
 		return roles
@@ -477,11 +611,12 @@ func LoadAgentRoles() map[string]*AgentRole {
 	agentMu.Lock()
 	defer agentMu.Unlock()
 
-	if agentRoles != nil && !dirChanged("workers", agentModTime) {
+	curDir = FindKernelConfigDir()
+	if agentRoles != nil && agentConfigDir == curDir && !dirChanged("workers", agentModTime) {
 		return agentRoles
 	}
 
-	configDir := FindKernelConfigDir()
+	configDir := curDir
 
 	// Load workers (flat YAML format)
 	workersDir := "config/workers"
@@ -490,6 +625,7 @@ func LoadAgentRoles() map[string]*AgentRole {
 	}
 	agentRoles = LoadWorkersFrom(workersDir)
 
+	agentConfigDir = configDir
 	updateModTime("workers", workersDir, agentModTime)
 	return agentRoles
 }
@@ -569,6 +705,7 @@ func loadRoleFromFolder(folder string) *AgentRole {
 		MaxRounds:   maxRounds,
 		Temperature: temp,
 		Model:       rc.Model,
+		Thinking:    rc.Thinking,
 		Division:    rc.Division,
 		SandboxTier: rc.Sandbox,
 		DelegatesTo: rc.DelegatesTo,
@@ -656,6 +793,7 @@ func LoadWorkersFrom(dir string) map[string]*AgentRole {
 			MaxRounds:    maxRounds,
 			Temperature:  temp,
 			Model:        wc.Model,
+			Thinking:     wc.Thinking,
 			Division:     wc.Division,
 			SandboxTier:  sandboxTier,
 			DelegatesTo:  wc.DelegatesTo,
