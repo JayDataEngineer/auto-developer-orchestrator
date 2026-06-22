@@ -1,0 +1,7 @@
+description: "Twitter Researcher — scrapes Twitter/X timeline + notifications using injected cookies. Returns trending/interesting tweets as JSON."
+max_rounds: 15
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - browser
+  - vision
+  - shell

@@ -1,0 +1,43 @@
+# Pux Org Manifest — Social Media Pipeline
+name: social-media-pipeline
+description: "Research → draft → present → post pipeline for Twitter + Telegram content. Human-in-the-loop checkpoint before any posting."
+
+manifesto: MANIFESTO.md
+staff_root: roles
+skills_dir: skills
+data_dir: data
+
+# SurrealDB task logging — same instance as deep-research-engine so all
+# pipeline runs are queryable from one place.
+databases:
+  surrealdb:
+    url: http://localhost:8000/surreal
+    namespace: research
+    database: main
+    username: root
+    password_env: SURREAL_PASSWORD
+
+# Sandbox setup — uploaded into the container at /sandbox/ on every init.
+# MCP_HUB_ENDPOINT points at the Ray cluster's Forge API for image generation.
+# SURREALDB_* vars use host.docker.internal so the container can reach the
+# host-bound SurrealDB behind Caddy on :8000.
+sandbox:
+  init_files:
+    - sandbox/forge_client.py
+    - sandbox/twitter_helpers.py
+    - sandbox/twitter_session.py
+    - sandbox/telegram_helpers.py
+    - sandbox/telegram_session.py
+    - sandbox/surreal_client.py
+  pip_packages:
+    - browser-cookie3
+    - requests
+    - telethon
+  env:
+    MCP_HUB_ENDPOINT: http://100.86.69.57:30080
+    SURREALDB_URL: http://host.docker.internal:8000/surreal
+    SURREALDB_NS: research
+    SURREALDB_DB: main
+    SURREALDB_USER: root
+    SURREALDB_PASS: root
+    PUX_ORG_PATH: /sandbox/workspace

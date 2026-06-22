@@ -1,0 +1,5 @@
+description: "Image Generation Worker — calls Forge API on the Ray cluster to generate images. One prompt = one image."
+max_rounds: 8
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

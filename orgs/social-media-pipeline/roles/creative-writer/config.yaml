@@ -1,0 +1,7 @@
+description: "Creative Writer — reads research findings, writes 5-10 tweet/thread options with distinct angles. Uses images as inspiration."
+max_rounds: 12
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell
+  - vision
+temperature: 0.85

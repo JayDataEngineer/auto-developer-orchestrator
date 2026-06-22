@@ -1,0 +1,8 @@
+description: "Research Director — owns Phase B. Delegates to twitter + telegram researchers, collects findings, summarizes for content team."
+max_rounds: 20
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell
+delegates_to:
+  - twitter-researcher
+  - telegram-researcher

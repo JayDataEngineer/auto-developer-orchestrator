@@ -1,0 +1,7 @@
+description: "Distribution Director — owns Phase D execute step. Delegates to publisher with user's selection."
+max_rounds: 8
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell
+delegates_to:
+  - publisher

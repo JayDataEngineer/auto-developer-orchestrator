@@ -1,0 +1,5 @@
+description: "Publisher — posts approved content to Twitter + Telegram. Uses twitter_helpers and telegram_helpers."
+max_rounds: 8
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell

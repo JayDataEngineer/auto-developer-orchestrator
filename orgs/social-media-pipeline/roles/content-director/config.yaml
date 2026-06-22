@@ -1,0 +1,8 @@
+description: "Content Director — owns Phase C. Delegates to image-gen-worker + creative-writer, bundles output for presentation."
+max_rounds: 20
+model: "deepseek/deepseek-v4-flash"
+imports:
+  - shell
+delegates_to:
+  - image-gen-worker
+  - creative-writer
