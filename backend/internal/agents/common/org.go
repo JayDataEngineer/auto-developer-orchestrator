@@ -1,6 +1,7 @@
 package common
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,9 +16,11 @@ type DatabaseConfig struct {
 	Username    string `yaml:"username"`     // for neo4j
 	Password    string `yaml:"password"`     // for neo4j
 	PasswordEnv string `yaml:"password_env"` // env var name for password
-	URL         string `yaml:"url"`          // for postgres
+	URL         string `yaml:"url"`          // for postgres / surrealdb
 	BaseURL     string `yaml:"base_url"`     // for compreface
-	APIKeyEnv   string `yaml:"api_key_env"` // for compreface
+	APIKeyEnv   string `yaml:"api_key_env"`  // for compreface
+	Namespace   string `yaml:"namespace"`    // for surrealdb
+	Database    string `yaml:"database"`     // for surrealdb
 }
 
 // OrgManifest is the parsed pux.yaml — the "Corporate Charter" for an organization.
@@ -31,6 +34,7 @@ type OrgManifest struct {
 	ToolPkgsRoot  string                    `yaml:"tool_packages_root"`
 	ExtensionsDir string                    `yaml:"extensions_dir"` // org-scoped extension servers
 	SkillsDir     string                    `yaml:"skills_dir"`     // org-scoped skill definitions
+	DataDir       string                    `yaml:"data_dir"`       // where input data lives (Telegram dumps, PDFs, etc.)
 	Schedules     []OrgSchedule             `yaml:"schedules"`
 	Databases     map[string]DatabaseConfig `yaml:"databases"`
 
@@ -106,6 +110,15 @@ func (o *OrgManifest) SkillsDirPath() string {
 	return o.resolvePath(o.SkillsDir)
 }
 
+// DataDirPath returns the absolute path to the org's declared input-data directory.
+// Returns empty string if no data_dir is configured.
+func (o *OrgManifest) DataDirPath() string {
+	if o.DataDir == "" {
+		return ""
+	}
+	return o.resolvePath(o.DataDir)
+}
+
 // ManifestoContent reads and returns the org's manifesto markdown.
 // Returns empty string if no manifesto is configured or file doesn't exist.
 func (o *OrgManifest) ManifestoContent() string {
@@ -128,6 +141,110 @@ func (o *OrgManifest) PromptContent(promptPath string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// Validate checks cross-field invariants on the parsed manifest.
+// Returns a list of error strings; an empty list means the manifest is
+// internally consistent.
+//
+// Checks:
+//   - databases.<kind> entries have the kind-specific required fields
+//     (surrealdb needs namespace + database; postgres needs url; neo4j
+//     needs uri; compreface needs base_url)
+//   - sandbox.init_files entries with the "@shared/" prefix resolve to
+//     files that actually exist in orgs/_shared/clients/
+//
+// This runs at audit time, not load time — LoadOrgManifest stays lenient
+// so a half-broken manifest can still be inspected.
+func (o *OrgManifest) Validate() []string {
+	var errs []string
+
+	// Database kind → required fields. Anything declared in the databases
+	// map must at least have its anchor field set, otherwise the org's
+	// tools will fail at first call.
+	for name, db := range o.Databases {
+		switch name {
+		case "surrealdb":
+			if db.URL == "" {
+				errs = append(errs, "databases.surrealdb: url is required")
+			}
+			if db.Namespace == "" {
+				errs = append(errs, "databases.surrealdb: namespace is required (surreal_client.py fails without it)")
+			}
+			if db.Database == "" {
+				errs = append(errs, "databases.surrealdb: database is required")
+			}
+		case "postgres":
+			if db.URL == "" {
+				errs = append(errs, "databases.postgres: url is required")
+			}
+		case "neo4j":
+			if db.URI == "" {
+				errs = append(errs, "databases.neo4j: uri is required")
+			}
+			if db.Username == "" {
+				errs = append(errs, "databases.neo4j: username is required")
+			}
+		case "compreface":
+			if db.BaseURL == "" {
+				errs = append(errs, "databases.compreface: base_url is required")
+			}
+			if db.APIKeyEnv == "" {
+				errs = append(errs, "databases.compreface: api_key_env is required")
+			}
+		}
+	}
+
+	// @shared/ init_files must resolve to files that exist on disk. The
+	// finder logic lives in FindSharedClientsDir; if it returns empty we
+	// can't validate, so we skip (the upload path will error at runtime).
+	if len(o.sharedDir()) > 0 {
+		for _, rel := range o.SandboxInitFiles() {
+			if !strings.HasPrefix(rel, "@shared/") {
+				continue
+			}
+			path := filepath.Join(o.sharedDir(), strings.TrimPrefix(rel, "@shared/"))
+			if _, err := os.Stat(path); err != nil {
+				errs = append(errs, fmt.Sprintf("sandbox.init_files: %s does not exist in orgs/_shared/clients/", rel))
+			}
+		}
+	}
+
+	return errs
+}
+
+// sharedDir returns the orgs/_shared/clients/ path (cached via FindSharedClientsDir).
+func (o *OrgManifest) sharedDir() string { return FindSharedClientsDir() }
+
+// SandboxInitFiles returns the init_files list from the manifest's sandbox block,
+// if any. Loaded lazily so Validate() doesn't require the sandbox block to be
+// present.
+func (o *OrgManifest) SandboxInitFiles() []string {
+	// OrgManifest doesn't parse the sandbox block directly — it lives in the
+	// manifest package's PuxManifest. We re-read it here via a minimal struct
+	// so Validate() can check @shared/ references without forcing callers to
+	// wire both manifest types together.
+	type sandboxBlock struct {
+		InitFiles []string `yaml:"init_files"`
+	}
+	type wrapper struct {
+		Sandbox *sandboxBlock `yaml:"sandbox"`
+	}
+	if o.baseDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(o.baseDir, "pux.yaml"))
+	if err != nil {
+		return nil
+	}
+	var w wrapper
+	if err := yaml.Unmarshal(data, &w); err != nil {
+		return nil
+	}
+	if w.Sandbox == nil {
+		return nil
+	}
+	return w.Sandbox.InitFiles
 }
 
 func (o *OrgManifest) resolvePath(p string) string {

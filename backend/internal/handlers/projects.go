@@ -91,7 +91,11 @@ func (si *sandboxInit) runInit(ctx context.Context, sandboxID string, sandboxCfg
 
 	// Upload init_files
 	for _, relPath := range sandboxCfg.InitFiles {
-		localPath := filepath.Join(projectDir, relPath)
+		localPath, err := resolveInitFileLocalPath(relPath, projectDir)
+		if err != nil {
+			result.Errors = append(result.Errors, err.Error())
+			continue
+		}
 		sandboxPath := filepath.Join("/sandbox", filepath.Base(relPath))
 		if err := si.manager.CopyToSandbox(ctx, sandboxID, localPath, sandboxPath); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("upload %s: %v", relPath, err))
@@ -126,6 +130,25 @@ func (si *sandboxInit) runInit(ctx context.Context, sandboxID string, sandboxCfg
 		zap.Int("errors", len(result.Errors)),
 	)
 	return result
+}
+
+// resolveInitFileLocalPath maps a pux.yaml init_files entry to its source path
+// on the host. Entries with the "@shared/" prefix resolve against
+// orgs/_shared/clients/ (canonical shared Python clients); everything else
+// resolves against the project directory.
+//
+// Returns an error when an "@shared/" entry is given but the shared clients
+// directory cannot be located — this is a deployment misconfiguration, not a
+// runtime miss.
+func resolveInitFileLocalPath(relPath, projectDir string) (string, error) {
+	if strings.HasPrefix(relPath, "@shared/") {
+		sharedDir := common.FindSharedClientsDir()
+		if sharedDir == "" {
+			return "", fmt.Errorf("upload %s: orgs/_shared/clients/ not found (set PROJECT_ROOT)", relPath)
+		}
+		return filepath.Join(sharedDir, strings.TrimPrefix(relPath, "@shared/")), nil
+	}
+	return filepath.Join(projectDir, relPath), nil
 }
 
 // NewProjectHandler creates a new ProjectHandler

@@ -439,7 +439,10 @@ def _load_schema_sql() -> str:
     env_org = os.environ.get("PUX_ORG_PATH")
     if env_org:
         candidates.append(Path(env_org) / "prompts" / "surreal_schema.sql")
-    candidates.append(Path(__file__).resolve().parents[2] / "orgs" / "deep-research-engine" / "prompts" / "surreal_schema.sql")
+    try:
+        candidates.append(Path(__file__).resolve().parents[2] / "orgs" / "deep-research-engine" / "prompts" / "surreal_schema.sql")
+    except IndexError:
+        pass
 
     for p in candidates:
         if p.is_file():
@@ -457,11 +460,12 @@ def init_schema(client: SurrealClient) -> dict[str, Any]:
     # Phase 1: namespace + database (requires root, no NS/DB context).
     # USE statement switches context mid-query so DEFINE DATABASE knows
     # which namespace to create the database in.
-    # IF NOT EXISTS makes this idempotent.
+    # IF NOT EXISTS makes this idempotent. Backtick-escape NS/DB names so
+    # hyphenated identifiers (e.g. "tech-noir") aren't parsed as subtraction.
     root_sql = (
-        f"DEFINE NAMESPACE IF NOT EXISTS {client.ns};\n"
-        f"USE NS {client.ns};\n"
-        f"DEFINE DATABASE IF NOT EXISTS {client.db};\n"
+        f"DEFINE NAMESPACE IF NOT EXISTS `{client.ns}`;\n"
+        f"USE NS `{client.ns}`;\n"
+        f"DEFINE DATABASE IF NOT EXISTS `{client.db}`;\n"
     )
     client.query_root(root_sql)
     # Phase 2: schema (with NS/DB context)

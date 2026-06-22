@@ -44,6 +44,16 @@ backend/tmp/
 data/
 **/.pux/
 
+# Org-scoped runtime artifacts (article bodies, backtest outputs, parsed
+# chat dumps, memos, etc.) — written by the agent during runs, not source.
+artifacts/
+**/artifacts/
+**/workspace/
+**/memos/
+**/telegram_parsed.json
+**/walkthrough_progress.json
+**/INVEST-TRACKER.md
+
 # Test artifacts
 playwright-report/
 test-results/

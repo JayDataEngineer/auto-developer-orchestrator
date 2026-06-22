@@ -23,12 +23,12 @@ databases:
 # host-bound SurrealDB behind Caddy on :8000.
 sandbox:
   init_files:
-    - sandbox/forge_client.py
+    - "@shared/forge_client.py"
     - sandbox/twitter_helpers.py
     - sandbox/twitter_session.py
     - sandbox/telegram_helpers.py
     - sandbox/telegram_session.py
-    - sandbox/surreal_client.py
+    - "@shared/surreal_client.py"
   pip_packages:
     - browser-cookie3
     - requests

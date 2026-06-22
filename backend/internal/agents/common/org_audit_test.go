@@ -44,6 +44,11 @@ func TestOrgsDirectoryAudit(t *testing.T) {
 			continue
 		}
 		name := entry.Name()
+		// Skip underscore-prefixed dirs — they're shared resource pools
+		// (orgs/_shared/clients/, etc.), not orgs.
+		if strings.HasPrefix(name, "_") {
+			continue
+		}
 		t.Run(name, func(t *testing.T) {
 			auditOrg(t, filepath.Join(orgsDir, name), name)
 		})
@@ -120,6 +125,11 @@ func auditOrg(t *testing.T, orgPath, name string) {
 		}
 	}
 
+	// Cross-field invariants on the manifest.
+	for _, msg := range org.Validate() {
+		t.Errorf("%s: invalid manifest: %s", name, msg)
+	}
+
 	// Schedules — if any are enabled, role must exist in staff_root
 	if len(org.Schedules) > 0 && org.StaffRoot != "" {
 		roles := LoadAgentRolesFrom(org.RolesDir())
@@ -170,6 +180,52 @@ func findOrgsDir(t *testing.T) string {
 		dir = parent
 	}
 	return ""
+}
+
+// TestFindSharedClientsDir verifies the @shared/ resolver can locate
+// orgs/_shared/clients/ from this repo. If this fails, every org that
+// references "@shared/foo.py" in init_files will fail to upload that file.
+func TestFindSharedClientsDir(t *testing.T) {
+	dir := FindSharedClientsDir()
+	if dir == "" {
+		t.Fatal("FindSharedClientsDir returned empty — orgs/_shared/clients/ not found. PROJECT_ROOT must point at repo root.")
+	}
+
+	// Canonical files must exist in the resolved dir.
+	mustExist := []string{
+		"surreal_client.py",
+		"forge_client.py",
+	}
+	for _, name := range mustExist {
+		p := filepath.Join(dir, name)
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected %s to exist in _shared/clients/: %v", name, err)
+		}
+	}
+}
+
+// TestSharedClientCanonical verifies the canonical surreal_client.py in
+// _shared/ carries the hyphen-in-NS/DB fix. Catches drift if someone copies
+// an older broken version over the shared one.
+func TestSharedClientCanonical(t *testing.T) {
+	dir := FindSharedClientsDir()
+	if dir == "" {
+		t.Skip("shared clients dir not found")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "surreal_client.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+
+	// The hyphen-bug fix uses backtick-escaped identifiers.
+	if !strings.Contains(body, "DEFINE NAMESPACE IF NOT EXISTS `{client.ns}`") {
+		t.Error("canonical surreal_client.py lost the backtick-escape fix for hyphenated NS/DB names")
+	}
+	// The IndexError guard for parents[2] when running from /sandbox/.
+	if !strings.Contains(body, "except IndexError") {
+		t.Error("canonical surreal_client.py lost the IndexError guard for _load_schema_sql()")
+	}
 }
 
 func sortedKeys(m map[string]*AgentRole) string {

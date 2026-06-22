@@ -126,10 +126,10 @@ func TestTechNoirOrg(t *testing.T) {
 		t.Errorf("manifesto missing 'Tech Noir Studio', got:\n%s", manifesto[:100])
 	}
 
-	// Load all 5 roles
+	// Load all 7 roles (5 original + studio-director + docs-writer from Phase 3)
 	roles := LoadAgentRolesFrom(org.RolesDir())
-	if len(roles) != 5 {
-		t.Fatalf("expected 5 roles, got %d", len(roles))
+	if len(roles) != 7 {
+		t.Fatalf("expected 7 roles, got %d", len(roles))
 	}
 
 	expectedRoles := []string{
@@ -138,6 +138,8 @@ func TestTechNoirOrg(t *testing.T) {
 		"gameplay_programmer",
 		"qa_tester",
 		"design_researcher",
+		"studio-director",
+		"docs-writer",
 	}
 	for _, name := range expectedRoles {
 		role := roles[name]
@@ -220,54 +222,35 @@ func TestTechNoirOrg(t *testing.T) {
 	// Reload roles so they pick up the merged packages
 	roles = LoadAgentRolesFrom(org.RolesDir())
 
-	// technical_artist imports tech_noir_art + comfyui + studio_vision + code
+	// technical_artist imports tech_noir_art + comfyui + studio_vision + code.
+	// Phase 3 redesign: Ray/ComfyUI/Godot are now Python HTTP bridges driven
+	// by bash, not MCP servers. The only MCP server technical_artist should
+	// pick up is `media` (from tech_noir_art + studio_vision).
 	ta = roles["technical_artist"]
 	if ta == nil {
 		t.Fatal("technical_artist role not found after reload")
 	}
-	hasTechNoirMCP := false
-	hasComfyuiMCP := false
-	hasQwenVisionMCP := false
+	hasMediaMCP := false
 	for _, s := range ta.MCPServers {
 		switch s {
-		case "tech_noir":
-			hasTechNoirMCP = true
-		case "comfyui":
-			hasComfyuiMCP = true
-		case "qwen-vision":
-			hasQwenVisionMCP = true
+		case "media":
+			hasMediaMCP = true
+		case "tech_noir", "comfyui", "qwen-vision":
+			t.Errorf("technical_artist should NOT have legacy %q MCP server (Phase 3 switched to HTTP bridges)", s)
 		}
 	}
-	if !hasTechNoirMCP {
-		t.Error("technical_artist missing 'tech_noir' MCP server from tech_noir_art package")
-	}
-	if !hasComfyuiMCP {
-		t.Error("technical_artist missing 'comfyui' MCP server from comfyui package")
-	}
-	if !hasQwenVisionMCP {
-		t.Error("technical_artist missing 'qwen-vision' MCP server from studio_vision package")
+	if !hasMediaMCP {
+		t.Error("technical_artist missing 'media' MCP server (needed for QA vibe reports)")
 	}
 
-	// gameplay_programmer imports godot + code
+	// gameplay_programmer imports godot + code. godot is now an HTTP bridge
+	// via bash + godot_client.py — no MCP servers at all.
 	gp = roles["gameplay_programmer"]
 	if gp == nil {
 		t.Fatal("gameplay_programmer role not found after reload")
 	}
-	hasGodotMCP := false
 	for _, s := range gp.MCPServers {
-		if s == "godot" {
-			hasGodotMCP = true
-		}
-	}
-	if !hasGodotMCP {
-		t.Error("gameplay_programmer missing 'godot' MCP server from godot package")
-	}
-
-	// Verify non-imported MCP servers are NOT present
-	for _, s := range gp.MCPServers {
-		if s == "comfyui" || s == "tech_noir" || s == "qwen-vision" {
-			t.Errorf("gameplay_programmer should NOT have %q MCP server", s)
-		}
+		t.Errorf("gameplay_programmer should have NO MCP servers (godot is HTTP bridge), got %q", s)
 	}
 
 	// Verify kernel packages still resolve alongside org packages

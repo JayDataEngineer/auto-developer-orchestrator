@@ -51,35 +51,45 @@ type AgentRole struct {
 	Hooks       []string // named hooks to attach to sub-agents (e.g., "file_checkpoint", "raise_browser")
 }
 
-// agentConfig is the YAML structure for config/roles/<name>/config.yaml (legacy)
-type agentConfig struct {
-	Description string   `yaml:"description"`
-	Tools       []string `yaml:"tools"`
-	MCPServers  []string `yaml:"mcp_servers"`
-	Imports     []string `yaml:"imports"`
-	MaxRounds   int      `yaml:"max_rounds"`
-	Temperature float64  `yaml:"temperature"`
-	Model       string   `yaml:"model"`
-	Division    string   `yaml:"division"`
-	Sandbox     string   `yaml:"sandbox"`
+// RoleConfig is the single YAML structure for ALL role config files:
+//   - config/roles/<name>/config.yaml     (legacy: description + sibling prompt.md)
+//   - config/workers/<name>.yaml          (new: persona + capabilities)
+//   - orgs/<org>/roles/<name>/config.yaml (org: same as legacy)
+//
+// Both `imports` and `capabilities` are accepted and treated as aliases —
+// both are lists of tool-package names expanded by ResolveImports. Legacy
+// roles tend to use `imports`; new workers tend to use `capabilities`.
+//
+// Adding a new YAML field here automatically makes it available to every
+// loader (legacy, worker, org, autoconfig). There is no second struct to
+// keep in sync.
+type RoleConfig struct {
+	// Worker-only cosmetic fields
+	Hint string `yaml:"hint,omitempty"` // CTO-facing one-liner shown in agent picker
+
+	// Identity. Legacy uses Description; workers use Persona. Either is valid;
+	// loaders pick whichever is populated.
+	Description string `yaml:"description,omitempty"`
+	Persona     string `yaml:"persona,omitempty"`
+
+	// Tool-package expansion. Aliases — both feed ResolveImports.
+	Imports      []string `yaml:"imports,omitempty"`
+	Capabilities []string `yaml:"capabilities,omitempty"`
+
+	// Direct (bypass package expansion)
+	Tools      []string `yaml:"tools,omitempty"`
+	MCPServers []string `yaml:"mcp_servers,omitempty"`
+
+	// Behavior
+	MaxRounds   int     `yaml:"max_rounds"`
+	Temperature float64 `yaml:"temperature"`
+	Model       string  `yaml:"model"`
+
+	// Delegation / sandbox / lifecycle
+	Division    string   `yaml:"division,omitempty"`
+	Sandbox     string   `yaml:"sandbox,omitempty"`
 	DelegatesTo []string `yaml:"delegates_to,omitempty"`
 	Hooks       []string `yaml:"hooks,omitempty"`
-}
-
-// workerConfig is the YAML structure for config/workers/<name>.yaml (new)
-type workerConfig struct {
-	Hint         string   `yaml:"hint,omitempty"` // CTO-facing one-liner
-	Persona      string   `yaml:"persona"`
-	Capabilities []string `yaml:"capabilities"`
-	Tools        []string `yaml:"tools,omitempty"`
-	MCPServers   []string `yaml:"mcp_servers,omitempty"`
-	MaxRounds    int      `yaml:"max_rounds"`
-	Temperature  float64  `yaml:"temperature"`
-	Model        string   `yaml:"model"`
-	Sandbox      string   `yaml:"sandbox"`
-	Division     string   `yaml:"division,omitempty"`
-	DelegatesTo  []string `yaml:"delegates_to,omitempty"`
-	Hooks        []string `yaml:"hooks,omitempty"` // named hooks: file_checkpoint, raise_browser, etc.
 }
 
 // ToolPackage is a shared tool group (legacy name, still used internally).
@@ -167,6 +177,41 @@ func FindKernelConfigDir() string {
 		}
 	}
 
+	return ""
+}
+
+// FindSharedClientsDir resolves the repo's orgs/_shared/clients/ directory.
+// Used by the sandbox init loader to resolve `@shared/<name>` references in
+// pux.yaml init_files — lets orgs share canonical client scripts instead of
+// each carrying their own copy.
+func FindSharedClientsDir() string {
+	root := os.Getenv("PROJECT_ROOT")
+
+	candidates := []string{}
+	if root != "" {
+		candidates = append(candidates, root)
+	}
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		for range 6 {
+			candidates = append(candidates, dir)
+			dir = filepath.Dir(dir)
+		}
+	}
+	if wd, err := os.Getwd(); err == nil {
+		dir := wd
+		for range 10 {
+			candidates = append(candidates, dir)
+			dir = filepath.Dir(dir)
+		}
+	}
+
+	for _, c := range candidates {
+		p := filepath.Join(c, "orgs", "_shared", "clients")
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			return p
+		}
+	}
 	return ""
 }
 
@@ -472,15 +517,15 @@ func LoadAgentRolesFrom(dir string) map[string]*AgentRole {
 }
 
 // loadRoleFromFolder reads config.yaml + prompt.md from a role folder.
-// If config.yaml has an `imports` field, resolves it into Tools + MCPServers.
+// Both `imports` and `capabilities` are accepted and merged (they are aliases).
 func loadRoleFromFolder(folder string) *AgentRole {
 	cfg, err := os.ReadFile(filepath.Join(folder, "config.yaml"))
 	if err != nil {
 		return nil
 	}
 
-	var ac agentConfig
-	if err := yaml.Unmarshal(cfg, &ac); err != nil {
+	var rc RoleConfig
+	if err := yaml.Unmarshal(cfg, &rc); err != nil {
 		return nil
 	}
 
@@ -489,38 +534,45 @@ func loadRoleFromFolder(folder string) *AgentRole {
 		return nil
 	}
 
-	maxRounds := ac.MaxRounds
+	maxRounds := rc.MaxRounds
 	if maxRounds == 0 {
 		maxRounds = 15
 	}
 
 	temp := float32(0.4)
-	if ac.Temperature != 0 {
-		temp = float32(ac.Temperature)
+	if rc.Temperature != 0 {
+		temp = float32(rc.Temperature)
 	}
 
-	// Resolve imports → concrete tools + mcp_servers
-	tools := ac.Tools
-	mcpServers := ac.MCPServers
-	if len(ac.Imports) > 0 {
-		importTools, importMCPServers := ResolveImports(ac.Imports)
-		tools = append(tools, importTools...)
-		mcpServers = append(mcpServers, importMCPServers...)
+	// imports + capabilities are aliases — merge and expand together
+	packages := append([]string{}, rc.Imports...)
+	packages = append(packages, rc.Capabilities...)
+	tools := rc.Tools
+	mcpServers := rc.MCPServers
+	if len(packages) > 0 {
+		pkgTools, pkgMCP := ResolveImports(packages)
+		tools = append(tools, pkgTools...)
+		mcpServers = append(mcpServers, pkgMCP...)
+	}
+
+	description := rc.Description
+	if description == "" {
+		description = rc.Persona
 	}
 
 	return &AgentRole{
-		Description: ac.Description,
+		Description: description,
 		Prompt:      string(prompt),
 		Tools:       tools,
 		MCPServers:  mcpServers,
-		Imports:     ac.Imports,
+		Imports:     packages,
 		MaxRounds:   maxRounds,
 		Temperature: temp,
-		Model:       ac.Model,
-		Division:    ac.Division,
-		SandboxTier: ac.Sandbox,
-		DelegatesTo: ac.DelegatesTo,
-		Hooks:       ac.Hooks,
+		Model:       rc.Model,
+		Division:    rc.Division,
+		SandboxTier: rc.Sandbox,
+		DelegatesTo: rc.DelegatesTo,
+		Hooks:       rc.Hooks,
 	}
 }
 
@@ -545,11 +597,12 @@ func LoadWorkersFrom(dir string) map[string]*AgentRole {
 		if err != nil {
 			continue
 		}
-		var wc workerConfig
+		var wc RoleConfig
 		if err := yaml.Unmarshal(data, &wc); err != nil {
 			continue
 		}
-		if wc.Persona == "" && len(wc.Capabilities) == 0 {
+		// Workers require persona OR capabilities to be identifiable
+		if wc.Persona == "" && len(wc.Capabilities) == 0 && wc.Description == "" {
 			continue
 		}
 
@@ -562,10 +615,12 @@ func LoadWorkersFrom(dir string) map[string]*AgentRole {
 			temp = float32(wc.Temperature)
 		}
 
-		// Resolve capabilities → tools + mcp_servers + skills
+		// imports + capabilities both expand; merge so workers can use either
+		packages := append([]string{}, wc.Capabilities...)
+		packages = append(packages, wc.Imports...)
 		var tools, mcpServers []string
-		if len(wc.Capabilities) > 0 {
-			resolvedTools, resolvedMCP := ResolveImports(wc.Capabilities)
+		if len(packages) > 0 {
+			resolvedTools, resolvedMCP := ResolveImports(packages)
 			tools = append(tools, resolvedTools...)
 			mcpServers = append(mcpServers, resolvedMCP...)
 		}
@@ -573,24 +628,31 @@ func LoadWorkersFrom(dir string) map[string]*AgentRole {
 		tools = append(tools, wc.Tools...)
 		mcpServers = append(mcpServers, wc.MCPServers...)
 
+		// Persona is the canonical worker identity; fall back to description
+		// so legacy-style worker YAMLs still produce a usable prompt.
+		persona := wc.Persona
+		if persona == "" {
+			persona = wc.Description
+		}
+
 		// Build prompt from persona + capability skills
-		prompt := BuildWorkerPrompt(wc.Persona, wc.Capabilities)
+		prompt := BuildWorkerPrompt(persona, packages)
 
 		// Determine sandbox tier: worker override > highest capability requirement
 		sandboxTier := wc.Sandbox
 		if sandboxTier == "" {
-			sandboxTier = highestSandboxTier(wc.Capabilities)
+			sandboxTier = highestSandboxTier(packages)
 		}
 
 		roles[name] = &AgentRole{
 			Name:         name,
 			Hint:         wc.Hint,
-			Description:  wc.Persona,
+			Description:  persona,
 			Prompt:       prompt,
 			Tools:        tools,
 			MCPServers:   mcpServers,
 			Capabilities: wc.Capabilities,
-			Imports:      wc.Capabilities, // for FormatAgentList compat
+			Imports:      packages, // for FormatAgentList compat
 			MaxRounds:    maxRounds,
 			Temperature:  temp,
 			Model:        wc.Model,

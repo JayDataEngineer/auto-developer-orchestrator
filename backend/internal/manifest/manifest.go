@@ -86,6 +86,37 @@ func LoadManifest(projectDir string) (*PuxManifest, error) {
 	return &m, nil
 }
 
+// Validate checks cross-field invariants on the sandbox config's env block.
+// Catches the "SURREALDB_URL set but SURREALDB_NS missing" class of typo
+// that silently breaks every surreal_client.py call at runtime.
+//
+// Returns a list of errors; an empty list means the config is valid.
+func (s *SandboxConfig) Validate() []string {
+	if s == nil {
+		return nil
+	}
+	var errs []string
+
+	// SurrealDB envs come as a group — any one of URL/NS/DB set implies
+	// the other two should be set too. USER/PASS default to "root"/"root"
+	// in surreal_client.py, so we don't require them.
+	sbURL, sbNS, sbDB := s.Env["SURREALDB_URL"], s.Env["SURREALDB_NS"], s.Env["SURREALDB_DB"]
+	sbAny := sbURL != "" || sbNS != "" || sbDB != ""
+	if sbAny {
+		if sbURL == "" {
+			errs = append(errs, "sandbox.env: SURREALDB_NS/DB set but SURREALDB_URL is empty")
+		}
+		if sbNS == "" {
+			errs = append(errs, "sandbox.env: SURREALDB_URL set but SURREALDB_NS is empty (surreal_client.py needs this)")
+		}
+		if sbDB == "" {
+			errs = append(errs, "sandbox.env: SURREALDB_URL set but SURREALDB_DB is empty (surreal_client.py needs this)")
+		}
+	}
+
+	return errs
+}
+
 // ResolvePrompt returns the prompt text for the given prompt name.
 // If the prompt uses a file reference, it reads the file relative to projectDir.
 func (m *PuxManifest) ResolvePrompt(projectDir, promptName string) (string, error) {

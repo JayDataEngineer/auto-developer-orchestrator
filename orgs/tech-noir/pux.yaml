@@ -1,7 +1,31 @@
 # Pux Org Manifest — Tech Noir Studio
 name: tech-noir
-description: "Tech Noir Studio — 2.5D cyberpunk survival horror. Godot 4.6, AI-driven asset pipeline."
+description: "Tech Noir Studio — 2.5D cyberpunk survival horror in Godot 4.6. Autonomous build → QA → iterate loop with Forge + ComfyUI on the Tech Noir Ray cluster, Godot editor driven via IvanMurzak/Godot-MCP HTTP bridge, and MDX docs authoring."
 
 manifesto: MANIFESTO.md
 staff_root: roles
 tool_packages_root: tool_packages
+skills_dir: skills
+
+sandbox:
+  init_files:
+    - "@shared/forge_client.py"
+    - sandbox/godot_client.py
+    - sandbox/comfyui_client.py
+    - "@shared/surreal_client.py"
+  pip_packages:
+    - requests
+    - pillow
+  env:
+    MCP_HUB_ENDPOINT: http://100.86.69.57:30080
+    FORGE_URL: http://100.86.69.57:30080/forge
+    COMFYUI_URL: http://100.86.69.57:30080/image/comfyui
+    GODOT_MCP_URL: http://host.docker.internal:8080
+    SURREALDB_URL: http://host.docker.internal:8000/surreal
+    SURREALDB_NS: studio
+    SURREALDB_DB: tech-noir
+    SURREALDB_USER: root
+    SURREALDB_PASS: root
+    DOCS_SITE_PATH: /workspace/docs-site
+    GAME_REPO_PATH: /workspace/game
+    PUX_ORG_PATH: /sandbox/workspace
