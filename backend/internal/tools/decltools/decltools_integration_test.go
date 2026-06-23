@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
+	"github.com/auto-developer-orchestrator/backend/internal/core/testutil"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 )
 
@@ -46,9 +47,7 @@ var _ bash.Executor = hostExec{}
 // This is the "prove" test per user testing preference: integration-style,
 // real input → real output, not a unit mock.
 func TestDdgSearchIntegration(t *testing.T) {
-	if os.Getenv("PUX_RUN_NETWORK_TESTS") == "" {
-		t.Skip("skipping network integration test; set PUX_RUN_NETWORK_TESTS=1 to enable")
-	}
+	testutil.Network(t, "ddg_search hits the real DuckDuckGo HTML endpoint")
 
 	// Resolve ddg.py. Production sandboxes mount it at /sandbox/ddg.py;
 	// for host dev test runs we use the source path directly.
