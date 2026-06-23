@@ -80,6 +80,7 @@ func NewPromptBuilder(configDir string) *PromptBuilder {
 		{Name: "actions", Level: Stable, File: "actions.md"},
 		{Name: "planning", Level: Stable, File: "planning.md"},
 		{Name: "artifacts", Level: Stable, File: "artifacts.md"},
+		{Name: "scripts", Level: Stable, File: "scripts.md"},
 		{Name: "paths", Level: Stable, File: "paths.md"},
 
 		// --- Inherited sections (cached per-config-change) ---

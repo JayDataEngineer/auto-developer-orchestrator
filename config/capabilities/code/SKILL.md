@@ -135,3 +135,56 @@ When you finish a task, end with a concise summary. Include:
 - Any remaining issues or follow-ups needed
 
 Keep the summary under 200 words. The CTO only needs the outcome, not the step-by-step process.
+
+## Writing reusable Python helpers
+
+When you find yourself inlining Python in bash, or repeating the same logic, write a script instead. Scripts persist across sessions at `/sandbox/workspace/scripts/`.
+
+### Pattern
+
+```python
+make_script(
+  name="fetch_stock_price",
+  description="Get current price for a ticker symbol.",
+  code='''
+import sys, json, urllib.request
+ticker = sys.argv[1]
+url = f"https://api.example.com/quote/{ticker}"
+data = json.loads(urllib.request.urlopen(url).read())
+print(data["price"])
+''',
+  hints='''
+Use when the user asks for a stock's current price.
+Returns float on stdout, exits non-zero on failure.
+Pitfall: tickers with dots (BRK.B) must be URL-encoded.
+Pitfall: returns -1.0 when market is closed.
+''',
+)
+```
+
+Then call forever after:
+
+```
+run_script(name="fetch_stock_price", args=["AAPL"])
+```
+
+### When to write a script
+
+- You're about to inline more than ~5 lines of Python in bash
+- You'll call the same logic more than once
+- A website's selectors changed and you need to update behavior in one place
+
+### Hints convention
+
+Hints are AI-authored usage guidance stored in the docstring's `hints:` section. Always set them for scripts you'll call again — the CTO on the next session sees them in `<available_scripts>` and picks the right helper without re-reading your code.
+
+One bullet per line, no leading dashes needed:
+- When to use it
+- What it returns
+- Pitfalls (rate limits, required args, failure modes)
+
+### Edit, don't rewrite
+
+Use `edit_script(name, code)` to update a script — description and hints are preserved by default. Only pass `hints=` when you want to change them (empty string clears).
+
+Use `read_script(name)` to peek at code + hints before calling. Mirrors `read_skill` for the discoverable-scripts-as-skills pattern.

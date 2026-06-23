@@ -128,6 +128,76 @@ func runScriptsPy(args []string, stdin string, timeout time.Duration) map[string
 	return result
 }
 
+// AvailableScriptsBlock builds the <available_scripts> XML block injected into
+// the CTO system prompt so the model knows what helpers already exist (with
+// their hints) without needing to call list_scripts first.
+//
+// Mirrors skills.FormatAvailableSkills for the discoverable-scripts-as-skills
+// pattern. Returns "" (silent no-op) when:
+//   - scripts.py is unreachable (timeout, missing binary, etc.)
+//   - zero scripts exist in the project dir
+//
+// Caps output at 20 scripts. Larger catalogs require the model to call
+// list_scripts. Each entry is one line: "name: description — hints_first_line"
+// truncated to ~120 chars total so the block stays cheap even at the cap.
+func AvailableScriptsBlock() string {
+	const maxScripts = 20
+	const maxLineChars = 120
+
+	res := runScriptsPy([]string{"--list"}, "", 5*time.Second)
+	scripts, _ := res["scripts"].([]any)
+	if len(scripts) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n\nThe following scripts are reusable Python helpers you authored in past sessions.\n")
+	b.WriteString("Call run_script(name) to use one; call read_script(name) to peek at code + hints first.\n\n")
+	b.WriteString("<available_scripts>\n")
+
+	count := 0
+	for _, s := range scripts {
+		if count >= maxScripts {
+			remaining := len(scripts) - maxScripts
+			if remaining > 0 {
+				fmt.Fprintf(&b, "  (and %d more — use list_scripts to see all)\n", remaining)
+			}
+			break
+		}
+		rec, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := rec["name"].(string)
+		desc, _ := rec["description"].(string)
+		hints, _ := rec["hints"].(string)
+		if name == "" {
+			continue
+		}
+
+		// "name: description — first hint line"
+		line := name
+		if desc != "" {
+			line += ": " + desc
+		}
+		// Take only the first hint (before any ' | ' separator) for compactness.
+		if hints != "" {
+			firstHint := hints
+			if idx := strings.Index(hints, " | "); idx >= 0 {
+				firstHint = hints[:idx]
+			}
+			line += " — " + firstHint
+		}
+		if len(line) > maxLineChars {
+			line = line[:maxLineChars-3] + "..."
+		}
+		fmt.Fprintf(&b, "  - %s\n", line)
+		count++
+	}
+	b.WriteString("</available_scripts>")
+	return b.String()
+}
+
 // ─── MakeScriptTool ────────────────────────────────────────────────────────
 
 // MakeScriptTool creates a new named Python script in the project's script dir.
@@ -140,7 +210,9 @@ func (MakeScriptTool) Description() string {
 		"Use this to build up a toolkit of small scripts (like_tweet, read_mentions, etc.) " +
 		"instead of inlining Python in bash each time. Scripts live in /sandbox/workspace/scripts/ " +
 		"and can be called later via run_script. Validates Python syntax before saving. " +
-		"If a script with the same name exists, returns an error — use edit_script to modify."
+		"If a script with the same name exists, returns an error — use edit_script to modify. " +
+		"Pass 'hints' to attach AI-authored usage guidance — these are surfaced in list_scripts " +
+		"and read_script so future-you can pick the right helper without re-reading the code."
 }
 
 func (MakeScriptTool) Schema() json.RawMessage {
@@ -159,6 +231,10 @@ func (MakeScriptTool) Schema() json.RawMessage {
 			"code": {
 				"type": "string",
 				"description": "Python source code. Can be multi-line. Will be syntax-validated before saving. To accept CLI args, read sys.argv. Print output is captured as stdout in the result."
+			},
+			"hints": {
+				"type": "string",
+				"description": "Optional AI-authored usage guidance. Multi-line — one bullet per line, no leading dashes needed. Example: 'Use when user asks to post a note.\\nReturns message_id on success.\\nPitfall: rate-limited above 5 calls/sec.' Surfaced in list_scripts and read_script so the agent can pick the right helper without re-reading code. Always set this for scripts you'll call again."
 			}
 		},
 		"required": ["name", "description", "code"]
@@ -169,6 +245,7 @@ func (t MakeScriptTool) Execute(ctx context.Context, args map[string]any) (any, 
 	name, _ := args["name"].(string)
 	description, _ := args["description"].(string)
 	code, _ := args["code"].(string)
+	hints, _ := args["hints"].(string)
 
 	if name == "" || code == "" {
 		return map[string]any{"error": "both 'name' and 'code' are required"}, nil
@@ -176,6 +253,9 @@ func (t MakeScriptTool) Execute(ctx context.Context, args map[string]any) (any, 
 
 	// Pass code via stdin to avoid shell-escaping nightmares
 	cliArgs := []string{"--make", "--name", name, "--desc", description, "--stdin"}
+	if hints != "" {
+		cliArgs = append(cliArgs, "--hints", hints)
+	}
 	return runScriptsPy(cliArgs, code, 30*time.Second), nil
 }
 
@@ -278,7 +358,8 @@ func (EditScriptTool) Name() string { return "edit_script" }
 func (EditScriptTool) Description() string {
 	return "Replace the source code of an existing script. Use this to fix bugs, " +
 		"update behavior (e.g. when a website changes its selectors), or add features. " +
-		"Validates Python syntax before saving. Description is preserved unless a new one is given."
+		"Validates Python syntax before saving. Description is preserved unless a new one is given. " +
+		"Hints are preserved unless new ones are given — pass hints=\"\" to clear."
 }
 
 func (EditScriptTool) Schema() json.RawMessage {
@@ -296,6 +377,10 @@ func (EditScriptTool) Schema() json.RawMessage {
 			"description": {
 				"type": "string",
 				"description": "Optional new description. If omitted, the existing description is preserved."
+			},
+			"hints": {
+				"type": "string",
+				"description": "Optional new AI-authored hints. Omit to preserve existing hints. Pass empty string to clear. Multi-line — one bullet per line."
 			}
 		},
 		"required": ["name", "code"]
@@ -315,19 +400,63 @@ func (t EditScriptTool) Execute(ctx context.Context, args map[string]any) (any, 
 	if description != "" {
 		cliArgs = append(cliArgs, "--desc", description)
 	}
+	// Distinguish "omitted" (preserve existing) from "empty string" (clear).
+	// Go's type assertion to string succeeds only when the key is present as a string.
+	if rawHints, present := args["hints"]; present {
+		if hintsStr, ok := rawHints.(string); ok {
+			cliArgs = append(cliArgs, "--hints", hintsStr)
+		}
+	}
 	return runScriptsPy(cliArgs, code, 30*time.Second), nil
 }
 
-// ─── ShowScriptTool ────────────────────────────────────────────────────────
+// ─── ReadScriptTool ────────────────────────────────────────────────────────
 
-// ShowScriptTool prints the full source of a script.
+// ReadScriptTool returns the full source + metadata (description, hints) of a
+// script. Mirrors read_skill — lets the agent peek before calling.
+type ReadScriptTool struct{}
+
+func (ReadScriptTool) Name() string { return "read_script" }
+
+func (ReadScriptTool) Description() string {
+	return "Read the full source code AND metadata of a script. Use this to peek at a script " +
+		"before running it — read its description, AI-authored hints (usage guidance, pitfalls, " +
+		"return shape), and code. Returns {name, description, hints, code, size, modified}. " +
+		"Mirrors read_skill for the discoverable-scripts-as-skills pattern."
+}
+
+func (ReadScriptTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"name": {
+				"type": "string",
+				"description": "Name of the script to read."
+			}
+		},
+		"required": ["name"]
+	}`)
+}
+
+func (t ReadScriptTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	name, _ := args["name"].(string)
+	if name == "" {
+		return map[string]any{"error": "'name' is required"}, nil
+	}
+	return runScriptsPy([]string{"--show", "--name", name}, "", 10*time.Second), nil
+}
+
+// ─── ShowScriptTool (deprecated alias) ──────────────────────────────────────
+
+// ShowScriptTool is a deprecated alias for ReadScriptTool. Kept for one release
+// so existing prompts/agents that call show_script keep working.
 type ShowScriptTool struct{}
 
 func (ShowScriptTool) Name() string { return "show_script" }
 
 func (ShowScriptTool) Description() string {
-	return "Print the full source code of a script. Use this to inspect what a script does " +
-		"before running it, or to remind yourself of its structure before editing."
+	return "(Deprecated — use read_script instead.) Returns the source code of a script. " +
+		"Prefer read_script, which returns the same code plus description and hints."
 }
 
 func (ShowScriptTool) Schema() json.RawMessage {
@@ -351,6 +480,42 @@ func (t ShowScriptTool) Execute(ctx context.Context, args map[string]any) (any, 
 	return runScriptsPy([]string{"--show", "--name", name}, "", 10*time.Second), nil
 }
 
+// ─── RemoveScriptTool ──────────────────────────────────────────────────────
+
+// RemoveScriptTool deletes a script. Useful when a script is no longer needed
+// or was created by mistake and would otherwise clutter list_scripts output.
+type RemoveScriptTool struct{}
+
+func (RemoveScriptTool) Name() string { return "remove_script" }
+
+func (RemoveScriptTool) Description() string {
+	return "Delete a script by name. Use this to clean up scripts that are no longer needed, " +
+		"were superseded by a better implementation, or were created by mistake. " +
+		"Removal is permanent — there is no undo. If you just want to fix a script, " +
+		"prefer edit_script over remove+remake."
+}
+
+func (RemoveScriptTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"name": {
+				"type": "string",
+				"description": "Name of the script to delete."
+			}
+		},
+		"required": ["name"]
+	}`)
+}
+
+func (t RemoveScriptTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	name, _ := args["name"].(string)
+	if name == "" {
+		return map[string]any{"error": "'name' is required"}, nil
+	}
+	return runScriptsPy([]string{"--rm", "--name", name}, "", 10*time.Second), nil
+}
+
 // ─── Registration helper ───────────────────────────────────────────────────
 
 // AllTools returns all scripting tools for registration in the orchestrator.
@@ -361,6 +526,8 @@ func AllTools() []core.Tool {
 		RunScriptTool{},
 		ListScriptsTool{},
 		EditScriptTool{},
-		ShowScriptTool{},
+		ReadScriptTool{},
+		ShowScriptTool{},   // deprecated alias for read_script
+		RemoveScriptTool{},
 	}
 }

@@ -728,6 +728,9 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if skillStore.Count() > 0 {
 		skillsStr = skillStore.FormatAvailableSkills()
 	}
+	// Append the available_scripts block so the CTO sees its reusable helpers
+	// alongside discoverable skills. Silent no-op when no scripts exist.
+	skillsStr += scripting.AvailableScriptsBlock()
 	systemPrompt := common.BuildOrchestratorPromptV2WithCtx(ctoToolReg.All(), cfg.SandboxID, "", skillsStr, cfg.Org, cfg.OrgRoles, cfg.OrgSandboxed)
 
 	ctoToolSpecs := common.ToOpenAITools(ctoToolReg.All())
