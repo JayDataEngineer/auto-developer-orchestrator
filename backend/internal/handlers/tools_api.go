@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -31,6 +32,14 @@ func NewToolsHandler(mgr *sandbox.Manager, mcpMulti *mcp.MultiClient, mcpClient 
 		mcpClient: mcpClient,
 		logger:    logger,
 	}
+}
+
+// SetMCP wires the MCP clients after the multi-client has finished initializing.
+// Called from app.go's initMCP so /api/tools and /api/tools/exec see the same
+// prefixed tool names the agent loop sees.
+func (h *ToolsHandler) SetMCP(mcpMulti *mcp.MultiClient, mcpClient *mcp.Client) {
+	h.mcpMulti = mcpMulti
+	h.mcpClient = mcpClient
 }
 
 // toolsExecRequest is the request body for POST /api/tools/exec.
@@ -110,8 +119,16 @@ func (h *ToolsHandler) ToolsList(w http.ResponseWriter, r *http.Request) {
 	if h.mcpMulti != nil {
 		allTools := h.mcpMulti.AllTools()
 		for _, t := range allTools {
+			prefix := ""
+			if c := h.mcpMulti.ClientForTool(t.Name); c != nil {
+				prefix = c.Prefix()
+			}
+			displayName := t.Name
+			if prefix != "" {
+				displayName = fmt.Sprintf("mcp__%s__%s", prefix, t.Name)
+			}
 			tools = append(tools, map[string]string{
-				"name":        t.Name,
+				"name":        displayName,
 				"category":    "mcp",
 				"description": t.Description,
 			})
@@ -138,15 +155,31 @@ func (h *ToolsHandler) ToolsList(w http.ResponseWriter, r *http.Request) {
 
 // --- Tool implementations ---
 
+// mcpToolNamePattern is mcp__{server}__{rawname} (double-underscore separators).
+// Legacy single-underscore form (mcp_{rawname}) is also accepted for backwards compat.
+var mcpToolNamePattern = regexp.MustCompile(`^mcp__(?P<server>[^_]+)__(?P<name>.+)$`)
+
+// stripMCPPrefix returns the raw MCP tool name (as the MultiClient knows it)
+// from either the new prefixed form (mcp__web__research → research) or the
+// legacy form (mcp_research → research). Returns the input unchanged if it
+// doesn't match either pattern.
+func stripMCPPrefix(toolName string) string {
+	if m := mcpToolNamePattern.FindStringSubmatch(toolName); m != nil {
+		return m[2]
+	}
+	return strings.TrimPrefix(toolName, "mcp_")
+}
+
 func (h *ToolsHandler) isMCPTool(name string) bool {
 	if h.mcpMulti != nil {
-		return h.mcpMulti.HasTool(name) || h.mcpMulti.HasTool(strings.TrimPrefix(name, "mcp_"))
+		raw := stripMCPPrefix(name)
+		return h.mcpMulti.HasTool(raw) || h.mcpMulti.HasTool(name)
 	}
 	return false
 }
 
 func (h *ToolsHandler) execMCP(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
-	mcpName := strings.TrimPrefix(toolName, "mcp_")
+	mcpName := stripMCPPrefix(toolName)
 
 	// Try multi-client first
 	if h.mcpMulti != nil {

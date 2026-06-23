@@ -61,6 +61,11 @@ type PlanCreatedData = core.PlanCreatedData
 type PlanUpdatedData = core.PlanUpdatedData
 type HookRequestData = core.HookRequestData
 type MouseActionData = core.MouseActionData
+type ProviderRetryData = core.ProviderRetryData
+type SafeguardFallbackData = core.SafeguardFallbackData
+type ResourceConflictData = core.ResourceConflictData
+type AgentMessageData = core.AgentMessageData
+type AgentStatusData = core.AgentStatusData
 
 // Constants re-exported for convenience.
 const (
@@ -103,4 +108,9 @@ const (
 	EventTypeSource          = core.EventTypeSource
 	EventTypeContextUpdate   = core.EventTypeContextUpdate
 	EventTypeMouseAction     = core.EventTypeMouseAction
+	EventTypeProviderRetry     = core.EventTypeProviderRetry
+	EventTypeSafeguardFallback = core.EventTypeSafeguardFallback
+	EventTypeResourceConflict  = core.EventTypeResourceConflict
+	EventTypeAgentMessage      = core.EventTypeAgentMessage
+	EventTypeAgentStatus       = core.EventTypeAgentStatus
 )

@@ -260,6 +260,189 @@ def test_validation_rejects_missing_description(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Sandbox profile (K8s-style abstractions on Docker substrate)
+# --------------------------------------------------------------------------- #
+
+SANDBOX_ORG_TOML = """\
+name = "acme"
+description = "Sandbox-profile fixture"
+
+manifesto = "MANIFESTO.md"
+staff_root = "roles"
+
+[sandbox]
+image = "acme-sandbox:latest"
+runtime_class = "gvisor"
+warm_pool = 2
+init_files = ["sandbox/run.py"]
+
+[sandbox.resources.requests]
+cpu = "250m"
+memory = "256Mi"
+
+[sandbox.resources.limits]
+cpu = "1"
+memory = "1Gi"
+
+[[roles]]
+name = "worker"
+description = "Worker"
+max_rounds = 5
+imports = ["shell"]
+"""
+
+
+@pytest.fixture
+def sandbox_org(tmp_path: Path) -> Path:
+    org = tmp_path / "acme"
+    roles_dir = org / "roles" / "worker"
+    roles_dir.mkdir(parents=True)
+    (org / "org.toml").write_text(SANDBOX_ORG_TOML)
+    (org / "MANIFESTO.md").write_text("# acme")
+    (roles_dir / "prompt.md").write_text("worker")
+    return org
+
+
+def test_sandbox_compose_rendered_when_block_present(sandbox_org: Path) -> None:
+    """Orgs declaring [sandbox] get a docker-compose.yml alongside pux.yaml."""
+    env = org_build._make_env()
+    org_build.render_org(sandbox_org, env)
+    compose = sandbox_org / "docker-compose.yml"
+    assert compose.exists(), "docker-compose.yml should be generated"
+    text = compose.read_text()
+    assert text.startswith(org_build.GENERATED_HEADER)
+    assert "acme-sandbox:latest" in text
+    assert "runtime: runsc" in text, "gvisor runtime_class must map to runsc"
+    assert "scale: 2" in text, "warm_pool=2 must emit scale: 2"
+
+
+def test_sandbox_compose_omitted_when_no_block(tmp_org: Path) -> None:
+    """Orgs without [sandbox] do NOT get a docker-compose.yml."""
+    env = org_build._make_env()
+    org_build.render_org(tmp_org, env)
+    assert not (tmp_org / "docker-compose.yml").exists()
+
+
+def test_sandbox_runc_omits_runtime_line(tmp_path: Path) -> None:
+    """runtime_class=runc (Docker default) must not emit a runtime: line."""
+    org = tmp_path / "acme"
+    (org / "roles" / "worker").mkdir(parents=True)
+    (org / "roles" / "worker" / "prompt.md").write_text("p")
+    (org / "MANIFESTO.md").write_text("m")
+    (org / "org.toml").write_text(
+        MINIMAL_ORG_TOML
+        + '\n[sandbox]\nruntime_class = "runc"\ninit_files = ["sandbox/x.py"]\n'
+    )
+    env = org_build._make_env()
+    org_build.render_org(org, env)
+    text = (org / "docker-compose.yml").read_text()
+    assert "runtime:" not in text, "runc is Docker default — must not emit"
+
+
+def test_sandbox_profile_in_pux_yaml(sandbox_org: Path) -> None:
+    """The K8s-style profile fields surface in pux.yaml for kernel opt-in."""
+    yaml = pytest.importorskip("yaml")
+    env = org_build._make_env()
+    org_build.render_org(sandbox_org, env)
+    data = yaml.safe_load((sandbox_org / "pux.yaml").read_text())
+    sb = data["sandbox"]
+    assert sb["image"] == "acme-sandbox:latest"
+    assert sb["runtime_class"] == "gvisor"
+    assert sb["warm_pool"] == 2
+    assert sb["resources"]["requests"]["cpu"] == "250m"
+    assert sb["resources"]["limits"]["memory"] == "1Gi"
+
+
+def test_validation_rejects_bad_runtime_class(tmp_path: Path) -> None:
+    errs = org_build.validate_org_data(
+        {
+            "name": "acme",
+            "description": "x",
+            "sandbox": {"runtime_class": "fake-runtime"},
+        },
+        "acme",
+        tmp_path,
+    )
+    assert any("runtime_class" in e for e in errs)
+
+
+def test_validation_rejects_zero_warm_pool(tmp_path: Path) -> None:
+    errs = org_build.validate_org_data(
+        {
+            "name": "acme",
+            "description": "x",
+            "sandbox": {"warm_pool": 0},
+        },
+        "acme",
+        tmp_path,
+    )
+    assert any("warm_pool" in e for e in errs)
+
+
+def test_sandbox_compose_yaml_parses(sandbox_org: Path) -> None:
+    """Generated compose must be valid YAML."""
+    yaml = pytest.importorskip("yaml")
+    env = org_build._make_env()
+    org_build.render_org(sandbox_org, env)
+    data = yaml.safe_load((sandbox_org / "docker-compose.yml").read_text())
+    assert "services" in data
+    assert "acme-sandbox" in data["services"]
+
+
+def test_sandbox_service_name_overrides_default(tmp_path: Path) -> None:
+    """sandbox.service_name overrides the default '<org>-sandbox' service name
+    so existing docs/scripts that hard-code the original name keep working."""
+    org = tmp_path / "acme"
+    (org / "roles" / "worker").mkdir(parents=True)
+    (org / "roles" / "worker" / "prompt.md").write_text("p")
+    (org / "MANIFESTO.md").write_text("m")
+    (org / "org.toml").write_text(
+        MINIMAL_ORG_TOML
+        + '\n[sandbox]\nservice_name = "video-producer"\ninit_files = ["sandbox/x.py"]\n'
+    )
+    env = org_build._make_env()
+    org_build.render_org(org, env)
+    text = (org / "docker-compose.yml").read_text()
+    assert "video-producer:" in text
+    assert "acme-sandbox" not in text
+
+
+def test_sandbox_docker_name_without_external_does_not_emit_external_flag(
+    tmp_path: Path,
+) -> None:
+    """Regression: video-production's volume was being marked external=true just
+    because it had a custom Docker name. `docker_name` only sets the physical
+    name; `external` is a separate explicit flag."""
+    org = tmp_path / "acme"
+    (org / "roles" / "worker").mkdir(parents=True)
+    (org / "roles" / "worker" / "prompt.md").write_text("p")
+    (org / "MANIFESTO.md").write_text("m")
+    (org / "org.toml").write_text(
+        MINIMAL_ORG_TOML
+        + '\n[sandbox]\ninit_files = ["sandbox/x.py"]\n'
+        "\n[[sandbox.volumes]]\n"
+        'type = "volume"\n'
+        'name = "workspace"\n'
+        'docker_name = "acme_workspace"\n'
+        'container = "/workspace"\n'
+        "\n[[sandbox.networks]]\n"
+        'name = "backend"\n'
+        'docker_name = "acme_backend"\n'
+        "external = true\n"
+    )
+    env = org_build._make_env()
+    org_build.render_org(org, env)
+    text = (org / "docker-compose.yml").read_text()
+    # Volume: name override present, NOT followed by external: true
+    assert "name: acme_workspace" in text
+    assert "name: acme_workspace\n    external: true" not in text, (
+        "Volume with docker_name but no external flag must not be marked external"
+    )
+    # Network: name override present AND external: true follows it
+    assert "name: acme_backend\n    external: true" in text
+
+
+# --------------------------------------------------------------------------- #
 # Integration with the real orgs/ tree
 # --------------------------------------------------------------------------- #
 

@@ -550,14 +550,17 @@ func TestDeduplicateToolCalls_ByID(t *testing.T) {
 }
 
 func TestDeduplicateToolCalls_ByNameArgs(t *testing.T) {
+	// Two calls with same name+args but different IDs must BOTH be kept.
+	// Dropping by name+args leaves the assistant message referencing an ID
+	// that has no tool result → HTTP 400 on strict providers (DeepSeek, OpenAI).
 	calls := []ToolCallResponse{
-		{Function: FunctionCallData{Name: "bash", Arguments: `{"cmd":"ls"}`}},
-		{Function: FunctionCallData{Name: "bash", Arguments: `{"cmd":"ls"}`}},
-		{Function: FunctionCallData{Name: "bash", Arguments: `{"cmd":"pwd"}`}},
+		{ID: "call_a", Function: FunctionCallData{Name: "bash", Arguments: `{"cmd":"ls"}`}},
+		{ID: "call_b", Function: FunctionCallData{Name: "bash", Arguments: `{"cmd":"ls"}`}},
+		{ID: "call_c", Function: FunctionCallData{Name: "bash", Arguments: `{"cmd":"pwd"}`}},
 	}
 	result := deduplicateToolCalls(calls)
-	if len(result) != 2 {
-		t.Fatalf("expected 2 deduplicated calls, got %d", len(result))
+	if len(result) != 3 {
+		t.Fatalf("expected 3 distinct-ID calls preserved, got %d", len(result))
 	}
 }
 

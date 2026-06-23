@@ -14,6 +14,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/agents/orchestrator"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/llm"
+	"github.com/auto-developer-orchestrator/backend/internal/mcp"
 	"github.com/auto-developer-orchestrator/backend/internal/observability"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
@@ -141,6 +142,14 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	var hostBash bashtools.Executor = &adapters.HostExecutor{WorkDir: projectPath}
 	var hostFileOps file.SandboxFileOps = &file.SimpleSandboxOps{BasePath: projectPath}
 
+	// Detect org mode early — drives the isolation swap below.
+	orgModeActive := req.Org != ""
+	if !orgModeActive {
+		if org := common.LoadOrgManifest(projectPath); org != nil {
+			orgModeActive = true
+		}
+	}
+
 	// SSH project — use SSH-backed bash executor and file ops for ALL operations.
 	// Sub-agents inherit SSH executors too, since the Docker sandbox has no
 	// project files for remote SSH projects.
@@ -178,6 +187,24 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	// ── Org isolation boundary ──
+	// When an org is active AND a Docker sandbox is provisioned, route the CTO
+	// through the sandbox executor. The agent then runs INSIDE the container
+	// with only /sandbox/workspace/ mounted — it cannot read .env files in the
+	// parent repo, SSH keys, ~/.aws, or anything outside the org workspace.
+	//
+	// SSH projects skip this: the SSH executor already provides isolation by
+	// only seeing its WorkDir on the remote host.
+	orgSandboxed := false
+	if orgModeActive && sshInfo == nil && bashExec != nil {
+		hostBash = bashExec
+		hostFileOps = fileOpsInstance
+		orgSandboxed = true
+		h.log.Info("Org isolation active — CTO routed through sandbox executor",
+			zap.String("project", projectPath),
+			zap.String("sandbox_id", sandboxID))
+	}
+
 	// Project memory (MEMORY.md — legacy, still supported)
 	memStore := memory.NewProjectMemory(projectPath)
 
@@ -188,6 +215,19 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	credStore := sensitive.NewStore()
 	if ghToken := os.Getenv("GITHUB_TOKEN"); ghToken != "" {
 		credStore.Set("github", "token", ghToken)
+	}
+	// Load org-scoped secrets from ~/.pux/credentials/<org>.json.
+	// Secrets become available as <secret>domain.key</secret> placeholders in
+	// bash commands and via the get_secret tool. Never written to disk inside
+	// the workspace, never returned via bash stdout (scrubber catches them).
+	if orgNameForCreds := req.Org; orgNameForCreds != "" {
+		if n, err := sensitive.LoadOrgCredentials(credStore, orgNameForCreds); err != nil {
+			h.log.Warn("failed to load org credentials",
+				zap.String("org", orgNameForCreds), zap.Error(err))
+		} else if n > 0 {
+			h.log.Info("org credentials loaded",
+				zap.String("org", orgNameForCreds), zap.Int("secrets", n))
+		}
 	}
 
 	// Approval handler via unified decision registry (Decision endpoint)
@@ -217,11 +257,13 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		ContextSize:     contextSize,
 		MaxToolRounds:   50,
 		ProviderRetries: h.providerRetries,
-		WorkDir:       "/sandbox",
+		WorkDir:       "/sandbox/workspace",
 		BashExecutor:  bashExec,
 		FileOps:       fileOpsInstance,
 		HostBash:      hostBash,
 		HostFileOps:   hostFileOps,
+		CredStore:     credStore,
+		OrgSandboxed:  orgSandboxed,
 		MemoryStore:   memStore,
 		MemoryFolder:  memFolder,
 		ApprovalHandler: approvalHandler,
@@ -234,6 +276,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 		DesktopProvider: h.cuBridge, // desktop tools always go through ComputerUseBridge (X11)
 		ToolPerms:       h.toolPerms, // wire per-tool permission checks
 		BashRules:       h.bashRules, // wire user-defined bash command rules
+		NonInteractive:  isNonInteractiveRequest(r), // jobs/schedulers: auto-approve "ask" patterns
 		SandboxOnly:     req.SandboxOnly, // scheduled jobs: restrict to bash/file ops only
 		TaskMgr:        h.taskMgr,       // background task support for bash commands
 	}
@@ -284,6 +327,30 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 				cfg.DBProvider = dbProvider
 				h.log.Info("DBProvider created from org config",
 					zap.Int("databases", len(org.Databases)))
+			}
+
+			// Register org-declared remote MCP servers. Dedup by prefix —
+			// kernel-level + extension + user-settings MCPs already wired at
+			// boot win; org additions only fill gaps. Idempotent across
+			// prompts (HasClient guard).
+			if h.mcpMulti != nil {
+				added := 0
+				for _, s := range org.MCPServers {
+					if h.mcpMulti.HasClient(s.Name) {
+						continue
+					}
+					h.mcpMulti.AddClient(s.Name, mcp.NewClient(s.Name, s.Endpoint, h.log))
+					h.log.Info("Org MCP server registered",
+						zap.String("org", org.Name),
+						zap.String("prefix", s.Name),
+						zap.String("endpoint", s.Endpoint))
+					added++
+				}
+				if added > 0 {
+					if err := h.mcpMulti.RefreshTools(context.Background()); err != nil {
+						h.log.Warn("Org MCP refresh had errors", zap.Error(err))
+					}
+				}
 			}
 		}
 	}
@@ -430,4 +497,14 @@ func readAgentsMD(projectPath string) string {
 		return ""
 	}
 	return string(data)
+}
+
+// isNonInteractiveRequest returns true when the caller has marked the request
+// as having no human in the loop (a scheduled job, a one-shot job submitted
+// via /api/jobs, or any caller that sets the X-Pux-Non-Interactive header).
+// Non-interactive requests auto-approve "ask" bash patterns instead of
+// hanging 5min for a decision that won't arrive.
+func isNonInteractiveRequest(r *http.Request) bool {
+	return r.Header.Get("X-Pux-Non-Interactive") == "1" ||
+		r.URL.Query().Get("non_interactive") == "1"
 }

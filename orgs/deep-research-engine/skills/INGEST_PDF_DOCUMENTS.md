@@ -4,7 +4,7 @@ The pdf-ingestor's checklist. Loaded automatically into the pdf-ingestor's promp
 
 ## Tool reference
 
-PDFs are extracted via shell tools (`pdftotext`, `pdfinfo`, `pdftoppm`) + Python (`pypdf`, `pymupdf`) + media MCP for OCR.
+PDFs are extracted via shell tools (`pdftotext`, `pdfinfo`, `pdftoppm`) + Python (`pypdf`, `pymupdf`) + media-mcp for OCR. The media-mcp tool names are auto-injected at runtime under the `mcp__media__` prefix — check your tool list for the exact names. The OCR-flavored tool is what you want for scanned pages; the caption/tagging-flavored tools are for figures and charts.
 
 | Tool | When | Install |
 |---|---|---|
@@ -15,20 +15,18 @@ PDFs are extracted via shell tools (`pdftotext`, `pdfinfo`, `pdftoppm`) + Python
 | `pypdf` (Python) | When you need page-level access, bookmarks, annotations. | `pip install pypdf` |
 | `pymupdf` (Python) | Tables, form fields, image extraction. | `pip install pymupdf` |
 | `qpdf --decrypt` | Encrypted PDFs (if user has the right to access). | `apt install qpdf` |
-| `mcp__media__kosmos_ocr` | Scanned/image-only PDFs. Returns structured markdown. | Media MCP, port 8101 |
-| `mcp__media__tag_image` | For figures/charts in the PDF. | Media MCP |
-| `mcp__media__extract_colors` | For charts/graphs. | Media MCP |
 
 ## Workflow
 
 ### Step 1 — Inventory
+
 For each PDF in the input path:
 
 ```bash
 pdfinfo "<path>"
 # Capture: Pages, Title, Author, CreationDate, ModDate, Encrypted
 ls -la "<path>"  # File size
-md5sum "<path>"  # So you can de-dupe if user gives the same PDF twice
+md5sum "<path>"  # De-dupe if user gives the same PDF twice
 ```
 
 Write to `artifacts/pdf/<doc-slug>/_METADATA.md`:
@@ -49,6 +47,7 @@ Write to `artifacts/pdf/<doc-slug>/_METADATA.md`:
 ```
 
 ### Step 2 — Extract text
+
 First try the fast path:
 
 ```bash
@@ -59,10 +58,11 @@ wc -l "artifacts/pdf/<doc-slug>/raw.txt"
 
 **If `raw.txt` is empty or garbage:**
 1. Rasterize: `pdftoppm -r 200 "<path>" "artifacts/pdf/<doc-slug>/page" -png`
-2. For each page PNG, call `mcp__media__kosmos_ocr` with `mode=markdown`
+2. For each page PNG, call the OCR-flavored media-mcp tool with `mode=markdown`
 3. Concatenate results into `raw.txt`
 
 ### Step 3 — Extract structure
+
 Read `raw.txt`. Identify:
 - **Section headers** — numbered ("1.", "1.1", "II.") or styled ("## Methodology")
 - **Tables** — if `pdftotext -layout` mangled them, use pymupdf:
@@ -86,7 +86,7 @@ Read `raw.txt`. Identify:
           pix.save(f"artifacts/pdf/<doc-slug>/figures/p{xref}.png")
   ```
 
-  For each significant figure, optionally call `mcp__media__tag_image` to get a content description.
+  For each significant figure, optionally call a caption-flavored media-mcp tool to get a content description.
 
 - **Citations / footnotes** — record verbatim. These become your "secondary sources" pointer.
 
@@ -134,6 +134,7 @@ python3 /sandbox/surreal_client.py relate \
 ```
 
 ### Step 5 — Build the index
+
 Write `artifacts/pdf/_INDEX.md`:
 
 ```markdown

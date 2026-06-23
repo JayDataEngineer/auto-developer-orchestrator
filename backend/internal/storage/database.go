@@ -130,6 +130,11 @@ func runMigrations(db *sql.DB, dialect Dialect) error {
 			sql:    Rebind(dialect, `ALTER TABLE scheduled_jobs ADD COLUMN last_output TEXT NOT NULL DEFAULT ''; ALTER TABLE scheduled_jobs ADD COLUMN context_from TEXT NOT NULL DEFAULT '[]'`),
 			verify: columnExists("scheduled_jobs", "last_output"),
 		},
+		{
+			name:   "add timeout_seconds column to scheduled_jobs",
+			sql:    Rebind(dialect, `ALTER TABLE scheduled_jobs ADD COLUMN timeout_seconds INTEGER NOT NULL DEFAULT 600`),
+			verify: columnExists("scheduled_jobs", "timeout_seconds"),
+		},
 	}
 
 	for _, m := range migrations {
@@ -897,6 +902,7 @@ type ScheduledJob struct {
 	ContextFrom          string // JSON array of job IDs whose output is injected as context
 	SandboxOnly          bool
 	WebhookToken         string
+	TimeoutSeconds       int
 	CreatedAt            *time.Time
 	UpdatedAt            *time.Time
 }
@@ -908,7 +914,7 @@ const scheduledJobCols = `id, name, description, project, agent_id, message, mod
 	failure_alert_after, failure_alert_webhook_url,
 	status, last_run_at, last_run_status, last_error, next_run_at,
 	consecutive_errors, input_tokens, output_tokens, duration_ms,
-	blocks, blocked_by, last_output, context_from, sandbox_only, webhook_token, created_at, updated_at`
+	blocks, blocked_by, last_output, context_from, sandbox_only, webhook_token, timeout_seconds, created_at, updated_at`
 
 func scanScheduledJob(row interface{ Scan(...interface{}) error }, j *ScheduledJob) error {
 	return row.Scan(
@@ -919,15 +925,15 @@ func scanScheduledJob(row interface{ Scan(...interface{}) error }, j *ScheduledJ
 		&j.FailureAlertAfter, &j.FailureAlertWebhookURL,
 		&j.Status, &j.LastRunAt, &j.LastRunStatus, &j.LastError, &j.NextRunAt,
 		&j.ConsecutiveErrors, &j.InputTokens, &j.OutputTokens, &j.DurationMs,
-		&j.Blocks, &j.BlockedBy, &j.LastOutput, &j.ContextFrom, &j.SandboxOnly, &j.WebhookToken, &j.CreatedAt, &j.UpdatedAt,
-	)
+		&j.Blocks, &j.BlockedBy, &j.LastOutput, &j.ContextFrom, &j.SandboxOnly, &j.WebhookToken, &j.TimeoutSeconds, &j.CreatedAt, &j.UpdatedAt,
+		)
 }
 
 // SaveScheduledJob upserts a scheduled job.
 func (d *Database) SaveScheduledJob(ctx context.Context, j *ScheduledJob) error {
 	_, err := d.db.ExecContext(ctx, Rebind(d.dialect, `
 		INSERT INTO scheduled_jobs (`+scheduledJobCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?,  ?, ?, ?,  ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?,  ?, ?, ?,  ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name, description=excluded.description, project=excluded.project,
 			agent_id=excluded.agent_id, message=excluded.message, model=excluded.model, org=excluded.org,
@@ -944,7 +950,8 @@ func (d *Database) SaveScheduledJob(ctx context.Context, j *ScheduledJob) error 
 			blocks=excluded.blocks, blocked_by=excluded.blocked_by,
 			last_output=excluded.last_output, context_from=excluded.context_from,
 			sandbox_only=excluded.sandbox_only,
-			webhook_token=excluded.webhook_token, updated_at=CURRENT_TIMESTAMP`),
+			webhook_token=excluded.webhook_token,
+				timeout_seconds=excluded.timeout_seconds, updated_at=CURRENT_TIMESTAMP`),
 		j.ID, j.Name, j.Description, j.Project, j.AgentID, j.Message, j.Model, j.Org,
 		j.ScheduleType, j.CronExpr, j.Timezone, j.EverySeconds, j.AtTime,
 		j.AutoBranch, j.AutoMerge, j.Enabled,
@@ -952,7 +959,7 @@ func (d *Database) SaveScheduledJob(ctx context.Context, j *ScheduledJob) error 
 		j.FailureAlertAfter, j.FailureAlertWebhookURL,
 		j.Status, j.LastRunAt, j.LastRunStatus, j.LastError, j.NextRunAt,
 		j.ConsecutiveErrors, j.InputTokens, j.OutputTokens, j.DurationMs,
-		j.Blocks, j.BlockedBy, j.LastOutput, j.ContextFrom, j.SandboxOnly, j.WebhookToken, j.CreatedAt, j.UpdatedAt,
+		j.Blocks, j.BlockedBy, j.LastOutput, j.ContextFrom, j.SandboxOnly, j.WebhookToken, j.TimeoutSeconds, j.CreatedAt, j.UpdatedAt,
 	)
 	return err
 }

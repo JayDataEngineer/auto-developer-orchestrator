@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/tools"
 )
 
 // Driver abstracts CDP/browser automation.
@@ -71,7 +72,7 @@ func (t *NavigateTool) Execute(ctx context.Context, args map[string]any) (any, e
 	if err != nil {
 		return nil, err
 	}
-	return pc, nil
+	return tools.QuarantineResult(pc), nil
 }
 
 // ClickTool implements core.Tool for clicking page elements.
@@ -116,7 +117,7 @@ func (t *ClickTool) Execute(ctx context.Context, args map[string]any) (any, erro
 	if err != nil {
 		return nil, err
 	}
-	return pc, nil
+	return tools.QuarantineResult(pc), nil
 }
 
 // TypeTool implements core.Tool for typing into form elements.
@@ -163,7 +164,7 @@ func (t *TypeTool) Execute(ctx context.Context, args map[string]any) (any, error
 	if err != nil {
 		return nil, err
 	}
-	return pc, nil
+	return tools.QuarantineResult(pc), nil
 }
 
 // ReadPageTool implements core.Tool for re-reading current page elements.
@@ -187,7 +188,7 @@ func (t *ReadPageTool) Execute(ctx context.Context, args map[string]any) (any, e
 	if err != nil {
 		return nil, err
 	}
-	return pc, nil
+	return tools.QuarantineResult(pc), nil
 }
 
 // ScrollTool implements core.Tool for scrolling the page.
@@ -220,7 +221,7 @@ func (t *ScrollTool) Execute(ctx context.Context, args map[string]any) (any, err
 	if err != nil {
 		return nil, err
 	}
-	return pc, nil
+	return tools.QuarantineResult(pc), nil
 }
 
 // ObserveTool implements core.Tool for taking a screenshot and analyzing.
@@ -244,7 +245,7 @@ func (t *ObserveTool) Execute(ctx context.Context, args map[string]any) (any, er
 	if err != nil {
 		return nil, err
 	}
-	return pc, nil
+	return tools.QuarantineResult(pc), nil
 }
 
 // SearchWebTool implements core.Tool for searching the web.
@@ -278,5 +279,5 @@ func (t *SearchWebTool) Execute(ctx context.Context, args map[string]any) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return pc, nil
+	return tools.QuarantineResult(pc), nil
 }

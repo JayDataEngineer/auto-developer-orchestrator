@@ -4,3 +4,10 @@ description: Full-stack educational video production org — research, storyboar
 manifesto: MANIFESTO.md
 staff_root: roles
 skills_dir: skills
+sandbox:
+  runtime_class: runc
+  warm_pool: 1
+  env:
+    VIDEO_PRODUCTION_ROOT: "/workspace/video-productions"
+    KOKORO_VOICE: "af_heart"
+    KOKORO_LANG_CODE: "a"

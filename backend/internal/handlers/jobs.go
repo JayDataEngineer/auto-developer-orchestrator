@@ -91,8 +91,8 @@ func (h *JobsHandler) SubmitJob(w http.ResponseWriter, r *http.Request) {
 	if timeout <= 0 {
 		timeout = 600
 	}
-	if timeout > 1800 {
-		timeout = 1800
+	if timeout > 3600 {
+		timeout = 3600
 	}
 
 	// Resolve org to project path
@@ -116,6 +116,7 @@ func (h *JobsHandler) SubmitJob(w http.ResponseWriter, r *http.Request) {
 		Schedule:    scheduler.ScheduleManual,
 		Enabled:     false,
 		SandboxOnly: req.FullSandbox,
+			TimeoutSeconds: timeout,
 	}
 
 	if err := h.scheduler.CreateJob(job); err != nil {
@@ -180,6 +181,9 @@ func (h *JobsHandler) proxySSEStream(w http.ResponseWriter, r *http.Request, job
 	}
 	promptReq.Header.Set("Content-Type", "application/json")
 	promptReq.Header.Set("Accept", "text/event-stream")
+	// Mark as non-interactive: the job's CTO has no human watching, so the
+	// permission hook should auto-approve "ask" patterns instead of hanging 5min.
+	promptReq.Header.Set("X-Pux-Non-Interactive", "1")
 
 	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
 	resp, err := client.Do(promptReq)

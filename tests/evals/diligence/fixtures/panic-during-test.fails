@@ -1,0 +1,3 @@
+# Expected failure keywords for the panic fixture.
+panic
+nil pointer

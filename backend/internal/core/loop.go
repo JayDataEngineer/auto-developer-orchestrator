@@ -463,6 +463,16 @@ func (l *AgentLoop) runLoop(ctx context.Context, subscriber chan<- AgentEvent) e
 			toolCalls = append(toolCalls, *toolCallAccum[idx])
 		}
 
+		// Deduplicate tool calls by ID BEFORE storing in the session. Some
+		// providers (DeepSeek) emit the same tool_call_id twice in a single
+		// response. If we store the duplicates in the assistant message but
+		// only execute one, strict providers (DeepSeek, OpenAI) reject the
+		// next round's request with HTTP 400 "insufficient tool messages".
+		// Dedup here so the stored message matches the tool results we'll
+		// produce. (Dedup by name+args is intentionally NOT done — see
+		// deduplicateToolCalls comment.)
+		toolCalls = deduplicateToolCalls(toolCalls)
+
 		// Store assistant message in session
 		contentStr := contentBuf.String()
 		thinkingStr := thinkingBuf.String()
@@ -877,27 +887,27 @@ func reorderSystemFirst(msgs []Message) []Message {
 	return append(system, rest...)
 }
 
-// deduplicateToolCalls removes duplicate tool calls that have the same function
-// name and arguments, or the same ID. Some models (e.g. DeepSeek) emit identical
-// tool calls multiple times in a single response.
+// deduplicateToolCalls removes duplicate tool calls that share the same ID.
+// Some models (e.g. DeepSeek) emit the same tool_call_id twice in a single
+// response, which causes "insufficient tool messages" HTTP 400 errors on the
+// next round because the assistant message references IDs that get deduped
+// away from execution but not from the stored message.
+//
+// NOTE: we intentionally do NOT dedup by name+args. Two legitimate parallel
+// calls (e.g., `bash` twice with the same command) must both execute and both
+// have tool results, otherwise the assistant message's tool_calls list points
+// at IDs that have no matching tool messages — and strict providers (DeepSeek,
+// OpenAI) reject the next request with HTTP 400.
 func deduplicateToolCalls(calls []ToolCallResponse) []ToolCallResponse {
-	seenKey := make(map[string]bool)
 	seenID := make(map[string]bool)
 	result := make([]ToolCallResponse, 0, len(calls))
 	for _, tc := range calls {
-		// Dedup by ID first (most reliable for API correctness)
 		if tc.ID != "" {
 			if seenID[tc.ID] {
 				continue
 			}
 			seenID[tc.ID] = true
 		}
-		// Also dedup by name+args
-		key := tc.Function.Name + "\x00" + tc.Function.Arguments
-		if seenKey[key] {
-			continue
-		}
-		seenKey[key] = true
 		result = append(result, tc)
 	}
 	return result

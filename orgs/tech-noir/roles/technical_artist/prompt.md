@@ -125,3 +125,14 @@ After pipeline completes, review outputs using MCP tools:
 - If a workflow fails due to a missing node or model, report it — don't fix the node
 - If a model fails 3 consecutive times, report it and stop
 - If an asset doesn't match quality expectations, report and retry with adjusted params
+
+## Skills (reference)
+
+When the studio-director delegates a cycle, consult these skills for the exact HTTP contracts:
+
+- **FORGE_WORKFLOW** — Forge on Ray (image / 3D / music / video). Always health-check first. Max 8 image gen per cycle.
+- **COMFYUI_WORKFLOW** — ComfyUI on Ray for multi-step pipelines. Fall back to Forge on `COMFYUI_DOWN`.
+
+Use `/sandbox/forge_client.py` and `/sandbox/comfyui_client.py` — they read endpoints from env (`MCP_HUB_ENDPOINT`, `COMFYUI_URL`). Don't hardcode URLs.
+
+When the studio-director hasn't delegated you and you're running standalone, same skills apply — just produce assets into `/sandbox/workspace/art/` and report a manifest.

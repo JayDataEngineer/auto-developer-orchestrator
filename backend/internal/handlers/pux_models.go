@@ -84,21 +84,17 @@ func (h *PuxHandler) SetModel(w http.ResponseWriter, r *http.Request) {
 	}](w, r)
 	if !ok { return }
 
+	// Resolve engine: user-configured providers take priority over hardcoded engines.
+	// resolveEngineForModel already does the right thing (settings first, hardcoded fallback).
 	var engine *llamaeng.LLMClient
-	switch {
-	case req.ModelID == "gemini-3-flash-preview" && h.geminiEngine != nil:
-		engine = h.geminiEngine
-	case strings.Contains(req.ModelID, "deepseek") && h.openrouterEngine != nil:
-		engine = h.openrouterEngine
-	default:
-		if req.Provider != "llamacpp" && req.Provider != "" {
-			if eng := h.engineFromSettings(req.Provider, req.ModelID, 0); eng != nil {
-				engine = eng
-			}
-		}
-		if engine == nil {
-			engine = h.llamaEngine
-		}
+	if req.Provider != "" && req.Provider != "llamacpp" {
+		engine = h.engineFromSettings(req.Provider, req.ModelID, 0)
+	}
+	if engine == nil {
+		engine = h.resolveEngineForModel(req.ModelID)
+	}
+	if engine == nil {
+		engine = h.llamaEngine
 	}
 
 	if engine == nil {

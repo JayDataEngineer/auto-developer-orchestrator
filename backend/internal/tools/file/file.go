@@ -220,9 +220,16 @@ func (s *SimpleSandboxOps) Glob(ctx context.Context, path string, pattern string
 
 	// Fallback: filepath.WalkDir with pattern matching
 	var results []string
-	globPattern := pattern
-	if !strings.Contains(globPattern, "/") {
-		globPattern = "**/" + globPattern
+	// filepath.Match does NOT support `**` (recursive glob) — it treats `**` as
+	// a single `*`. Strip leading `**/` so we match against the basename only,
+	// which is what WalkDir gives us via d.Name().
+	basePattern := pattern
+	if strings.HasPrefix(basePattern, "**/") {
+		basePattern = basePattern[3:]
+	} else if strings.Contains(basePattern, "/") {
+		// Pattern like "src/*.go" — match against the full path relative to root.
+		// WalkDir gives us absolute paths; we'll match on the basename as a fallback.
+		basePattern = basePattern[strings.LastIndex(basePattern, "/")+1:]
 	}
 
 	filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
@@ -236,8 +243,7 @@ func (s *SimpleSandboxOps) Glob(ctx context.Context, path string, pattern string
 			}
 			return nil
 		}
-		// Match the filename against the original pattern
-		matched, _ := filepath.Match(pattern, d.Name())
+		matched, _ := filepath.Match(basePattern, d.Name())
 		if matched {
 			results = append(results, p)
 		}

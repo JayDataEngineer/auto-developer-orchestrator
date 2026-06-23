@@ -104,14 +104,22 @@ export function AssistantMessage() {
 	const colors = useColors();
 	const { cols } = useTerminalSize();
 	const isRunning = useAuiState((s) => s.message.status?.type === "running");
+	// metadata.timing is populated by puxChatAdapter on completion. For messages
+	// restored from history there's no timing data — we skip the "Completed in"
+	// marker rather than showing the misleading "Completed in 0s" that comes
+	// from Date.now() - mountTime.
+	const timing = useAuiState((s) => (s.message as any).metadata?.timing) as
+		| { streamStartTime?: number; totalStreamTime?: number }
+		| undefined;
 
 	const startRef = useRef(Date.now());
 	const [elapsed, setElapsed] = useState(0);
 	useEffect(() => {
 		if (!isRunning) return;
-		const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 200);
+		const start = timing?.streamStartTime || startRef.current;
+		const timer = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 200);
 		return () => clearInterval(timer);
-	}, [isRunning]);
+	}, [isRunning, timing?.streamStartTime]);
 
 	const [frame, setFrame] = useState(0);
 	useEffect(() => {
@@ -274,10 +282,11 @@ export function AssistantMessage() {
 			{/* Branch picker for forked messages */}
 			<BranchPicker />
 
-			{/* Completion time */}
-			{!isRunning && hasContent && (
+			{/* Completion time — only when timing metadata is present.
+			    Restored (historical) messages have no timing, so they skip this. */}
+			{!isRunning && hasContent && timing?.totalStreamTime != null && (
 				<Box marginTop={1}>
-					<Text color={colors.textMuted}>● Completed in {fmtTime(elapsed || Math.floor((Date.now() - startRef.current) / 1000))}</Text>
+					<Text color={colors.textMuted}>● Completed in {fmtTime(Math.floor(timing.totalStreamTime / 1000))}</Text>
 				</Box>
 			)}
 		</Box>

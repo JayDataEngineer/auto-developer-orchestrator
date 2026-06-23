@@ -22,9 +22,6 @@ type MetricsPusher struct {
 // Set PROMETHEUS_PUSHGATEWAY_URL to enable (defaults to cluster Pushgateway).
 func NewMetricsPusher(gatherer prometheus.Gatherer, logger *zap.Logger) *MetricsPusher {
 	url := os.Getenv("PROMETHEUS_PUSHGATEWAY_URL")
-	if url == "" {
-		url = "http://100.86.69.57:9091"
-	}
 
 	hostname, _ := os.Hostname()
 	if hostname == "" {

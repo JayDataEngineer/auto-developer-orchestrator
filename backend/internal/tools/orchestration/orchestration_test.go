@@ -55,7 +55,7 @@ func setupProjectRoot(t *testing.T) {
 func TestResolveRole_KernelRole(t *testing.T) {
 	setupProjectRoot(t)
 
-	instructions, tools, _, _, model, division, _, _, _ := resolveRole("researcher", nil, 15, 0.4, webMCPServer, nil)
+	instructions, tools, _, _, model, division, _, _, _, _ := resolveRole("researcher", nil, 15, 0.4, webMCPServer, nil)
 
 	if division != "" {
 		t.Errorf("expected no division for kernel role, got %q", division)
@@ -79,7 +79,7 @@ func TestResolveRole_OrgRoleOverridesKernel(t *testing.T) {
 	roleMap := makeRole("sarah", "Org-specific Sarah", "You are org-sarah.", "custom-model",
 		[]string{"bash", "read_file"}, 10, "", 0.8)
 
-	instructions, tools, rounds, temp, model, division, _, _, _ := resolveRole("sarah", nil, 15, 0.4, nil, roleMap)
+	instructions, tools, rounds, temp, model, division, _, _, _, _ := resolveRole("sarah", nil, 15, 0.4, nil, roleMap)
 
 	if instructions != "You are org-sarah." {
 		t.Errorf("expected org-specific prompt, got %q", instructions)
@@ -105,7 +105,7 @@ func TestResolveRole_DivisionHead(t *testing.T) {
 	roleMap := makeRole("research-director", "Research Division Head", "You manage research analysts.",
 		"deepseek/deepseek-v4-flash", nil, 25, "./divisions/research", 0)
 
-	instructions, _, _, _, model, division, _, _, _ := resolveRole("research-director", nil, 15, 0.4, nil, roleMap)
+	instructions, _, _, _, model, division, _, _, _, _ := resolveRole("research-director", nil, 15, 0.4, nil, roleMap)
 
 	if division != "./divisions/research" {
 		t.Errorf("expected division './divisions/research', got %q", division)
@@ -120,7 +120,7 @@ func TestResolveRole_DivisionHead(t *testing.T) {
 
 func TestResolveRole_CustomInstructions(t *testing.T) {
 	customInstructions := "Analyze this dataset and find anomalies"
-	instructions, tools, rounds, temp, model, division, _, _, _ := resolveRole(customInstructions, []string{"bash", "grep"}, 20, 0.6, nil, nil)
+	instructions, tools, rounds, temp, model, division, _, _, _, _ := resolveRole(customInstructions, []string{"bash", "grep"}, 20, 0.6, nil, nil)
 
 	if instructions != customInstructions {
 		t.Errorf("expected custom instructions to pass through, got %q", instructions)
@@ -145,7 +145,7 @@ func TestResolveRole_CustomInstructions(t *testing.T) {
 func TestResolveRole_ExplicitToolsOverrideRole(t *testing.T) {
 	roleMap := makeRole("alex", "IT Ops", "You are alex.", "", []string{"bash", "memory"}, 10, "", 0)
 
-	_, tools, _, _, _, _, _, _, _ := resolveRole("alex", []string{"bash", "read_file", "write_file"}, 15, 0.4, nil, roleMap)
+	_, tools, _, _, _, _, _, _, _, _ := resolveRole("alex", []string{"bash", "read_file", "write_file"}, 15, 0.4, nil, roleMap)
 
 	if len(tools) != 3 {
 		t.Errorf("expected 3 explicit tools, got %d: %v", len(tools), tools)
@@ -157,7 +157,7 @@ func TestResolveRole_MCPExpansion(t *testing.T) {
 		[]string{"bash"}, 15, "", 0)
 	roleMap["scout"].MCPServers = []string{"web", "media"}
 
-	_, tools, _, _, _, _, _, _, _ := resolveRole("scout", nil, 15, 0.4, webMCPServer, roleMap)
+	_, tools, _, _, _, _, _, _, _, _ := resolveRole("scout", nil, 15, 0.4, webMCPServer, roleMap)
 
 	expectedCount := 5 // bash + 3 web tools + 1 media tool
 	if len(tools) != expectedCount {
@@ -187,7 +187,7 @@ func TestResolveRole_DefaultOverrides(t *testing.T) {
 		[]string{"bash"}, 25, "", 0.9)
 
 	// Default values (15, 0.4) should be overridden by role
-	_, _, rounds, temp, _, _, _, _, _ := resolveRole("custom", nil, 15, 0.4, nil, roleMap)
+	_, _, rounds, temp, _, _, _, _, _, _ := resolveRole("custom", nil, 15, 0.4, nil, roleMap)
 	if rounds != 25 {
 		t.Errorf("expected rounds 25 from role, got %d", rounds)
 	}
@@ -196,7 +196,7 @@ func TestResolveRole_DefaultOverrides(t *testing.T) {
 	}
 
 	// Non-default values should be preserved
-	_, _, rounds2, temp2, _, _, _, _, _ := resolveRole("custom", nil, 30, 0.7, nil, roleMap)
+	_, _, rounds2, temp2, _, _, _, _, _, _ := resolveRole("custom", nil, 30, 0.7, nil, roleMap)
 	if rounds2 != 30 {
 		t.Errorf("expected explicit rounds 30, got %d", rounds2)
 	}
@@ -251,7 +251,7 @@ func TestRunDelegate_EmitsSubAgentEvents(t *testing.T) {
 	ctx := context.WithValue(context.Background(), core.SubscriberKey{}, events)
 
 	// RunDelegate with no tools should still emit start+end events
-	_, err := runner.RunDelegate(ctx, "test task", "sarah", []string{"nonexistent_tool"}, 5, 0.4, "", "")
+	_, err := runner.RunDelegate(ctx, "test task", "sarah", []string{"nonexistent_tool"}, 5, 0.4, "", "", false)
 
 	// Should get subagent_start
 	evt := <-events
@@ -372,7 +372,7 @@ func TestDelegateTo_BackwardsCompatInstructions(t *testing.T) {
 
 func TestResolveRole_NoToolsForCustom(t *testing.T) {
 	// Custom instructions with no tools and no matching role = empty tool list
-	_, tools, _, _, _, _, _, _, _ := resolveRole("totally-unknown-role-xyz", nil, 15, 0.4, nil, nil)
+	_, tools, _, _, _, _, _, _, _, _ := resolveRole("totally-unknown-role-xyz", nil, 15, 0.4, nil, nil)
 	if len(tools) != 0 {
 		t.Errorf("expected 0 tools for unknown role with no explicit tools, got %d", len(tools))
 	}
@@ -381,7 +381,7 @@ func TestResolveRole_NoToolsForCustom(t *testing.T) {
 func TestResolveRole_StepFieldFallback(t *testing.T) {
 	// When 'task' is empty but 'step' is provided, step should be used
 	// (This is tested indirectly through DelegateTo, but let's test resolveRole defaults)
-	instructions, tools, rounds, temp, model, division, _, _, _ := resolveRole("test-agent", []string{"bash"}, 5, 0.3, nil, nil)
+	instructions, tools, rounds, temp, model, division, _, _, _, _ := resolveRole("test-agent", []string{"bash"}, 5, 0.3, nil, nil)
 	if instructions != "test-agent" {
 		t.Errorf("expected custom instructions passthrough, got %q", instructions)
 	}

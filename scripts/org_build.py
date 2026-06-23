@@ -39,6 +39,15 @@ ORGS_DIR = REPO_ROOT / "orgs"
 TEMPLATES_DIR = REPO_ROOT / "scripts" / "templates" / "org"
 GENERATED_HEADER = "# AUTO-GENERATED"
 
+# Map K8s-style runtime_class names to Docker --runtime values.
+# K8s uses gVisor/Kata brand names; Docker uses the binary name installed by
+# the runtime class installer. "runc" is Docker's default — emit nothing.
+RUNTIME_CLASS_MAP: dict[str, str | None] = {
+    "runc": None,
+    "gvisor": "runsc",
+    "kata": "kata",
+}
+
 
 # --------------------------------------------------------------------------- #
 # Schema validation                                                           #
@@ -86,6 +95,100 @@ def validate_org_data(data: dict[str, Any], org_name: str, org_dir: Path) -> lis
         if not isinstance(cfg, dict):
             errs.append(f"org.toml: databases.{k} must be a table")
 
+    # Sandbox profile validation. Only validates the K8s-style sandbox
+    # abstractions (runtime_class, warm_pool, resources). init_files /
+    # pip_packages / env are validated downstream by the Go kernel when it
+    # boots the sandbox.
+    sandbox = data.get("sandbox")
+    if isinstance(sandbox, dict):
+        rc = sandbox.get("runtime_class", "runc")
+        if rc not in RUNTIME_CLASS_MAP:
+            errs.append(
+                f"org.toml: sandbox.runtime_class={rc!r} must be one of "
+                f"{sorted(RUNTIME_CLASS_MAP)}"
+            )
+        wp = sandbox.get("warm_pool", 1)
+        if not isinstance(wp, int) or wp < 1:
+            errs.append(
+                f"org.toml: sandbox.warm_pool={wp!r} must be a positive integer"
+            )
+        res = sandbox.get("resources")
+        if res is not None and not isinstance(res, dict):
+            errs.append("org.toml: sandbox.resources must be a table")
+        else:
+            for tier in ("requests", "limits"):
+                block = (res or {}).get(tier)
+                if block is None:
+                    continue
+                if not isinstance(block, dict):
+                    errs.append(f"org.toml: sandbox.resources.{tier} must be a table")
+                    continue
+                for k in ("cpu", "memory"):
+                    v = block.get(k)
+                    if v is not None and not isinstance(v, str):
+                        errs.append(
+                            f"org.toml: sandbox.resources.{tier}.{k} must be a "
+                            f"string like '200m' or '256Mi'"
+                        )
+
+        # Build context — must have either image OR build, not both preferrable
+        build = sandbox.get("build")
+        if build is not None:
+            if not isinstance(build, dict):
+                errs.append("org.toml: sandbox.build must be a table")
+            elif not build.get("context") and not build.get("dockerfile"):
+                errs.append(
+                    "org.toml: sandbox.build requires at least context or dockerfile"
+                )
+
+        # Restart policy
+        valid_restarts = {"", "no", "always", "on-failure", "unless-stopped"}
+        if sandbox.get("restart", "") not in valid_restarts:
+            errs.append(
+                f"org.toml: sandbox.restart={sandbox.get('restart')!r} must be "
+                f"one of {sorted(valid_restarts)}"
+            )
+
+        # Volumes
+        for i, v in enumerate(sandbox.get("volumes") or []):
+            if not isinstance(v, dict):
+                errs.append(f"org.toml: sandbox.volumes[{i}] must be a table")
+                continue
+            vtype = v.get("type", "volume")
+            if vtype not in ("volume", "bind"):
+                errs.append(
+                    f"org.toml: sandbox.volumes[{i}].type must be 'volume' or 'bind'"
+                )
+                continue
+            if not v.get("container"):
+                errs.append(
+                    f"org.toml: sandbox.volumes[{i}].container is required"
+                )
+            if vtype == "bind" and not v.get("host"):
+                errs.append(
+                    f"org.toml: sandbox.volumes[{i}].host is required for type=bind"
+                )
+            if vtype == "volume" and not v.get("name"):
+                errs.append(
+                    f"org.toml: sandbox.volumes[{i}].name is required for type=volume"
+                )
+
+        # Networks
+        for i, n in enumerate(sandbox.get("networks") or []):
+            if not isinstance(n, dict):
+                errs.append(f"org.toml: sandbox.networks[{i}] must be a table")
+                continue
+            if not n.get("name"):
+                errs.append(f"org.toml: sandbox.networks[{i}].name is required")
+
+        # Healthcheck
+        hc = sandbox.get("healthcheck")
+        if hc is not None:
+            if not isinstance(hc, dict):
+                errs.append("org.toml: sandbox.healthcheck must be a table")
+            elif not hc.get("test"):
+                errs.append("org.toml: sandbox.healthcheck.test is required")
+
     return errs
 
 
@@ -120,6 +223,66 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     sandbox.setdefault("init_files", [])
     sandbox.setdefault("pip_packages", [])
     sandbox.setdefault("env", {})
+    sandbox.setdefault("runtime_class", "runc")
+    sandbox.setdefault("warm_pool", 1)
+    sandbox.setdefault("resources", {})
+    sandbox.setdefault("build", {})
+    sandbox.setdefault("container_name", "")
+    sandbox.setdefault("restart", "")
+    sandbox.setdefault("working_dir", "")
+    sandbox.setdefault("command", [])
+    sandbox.setdefault("volumes", [])
+    sandbox.setdefault("networks", [])
+    sandbox.setdefault("healthcheck", {})
+    sandbox.setdefault("network_mode_disabled", False)
+    sandbox.setdefault("service_name", "")
+    sandbox.setdefault("image", "")
+    # For orgs without a build context and without an explicit image, default
+    # to the stock kernel sandbox image. Orgs with a Dockerfile don't need
+    # a stock image pushed at them — `docker compose build` tags the result.
+    if not sandbox.get("build") and not sandbox.get("image"):
+        sandbox["image"] = "pux-sandbox:latest"
+    # Pre-fill optional sub-keys on volumes/networks so StrictUndefined
+    # doesn't trip when the template probes docker_name / external.
+    sandbox["volumes"] = [
+        {"type": "volume", "docker_name": "", "external": False, **v}
+        for v in sandbox["volumes"]
+        if isinstance(v, dict)
+    ]
+    sandbox["networks"] = [
+        {"docker_name": "", "external": False, **n}
+        for n in sandbox["networks"]
+        if isinstance(n, dict)
+    ]
+    # Pre-fill healthcheck sub-keys so StrictUndefined doesn't trip on the
+    # interval/timeout/start_period/retries probes. `test` defaults to []
+    # so the outer `{% if sandbox.healthcheck %}` check still needs to be
+    # gated by whether the user actually declared a healthcheck.
+    if isinstance(sandbox["healthcheck"], dict):
+        hc = sandbox["healthcheck"]
+        hc.setdefault("test", [])
+        for k in ("interval", "timeout", "start_period"):
+            hc.setdefault(k, "")
+        hc.setdefault("retries", 0)
+        # Empty healthcheck table — treat as undeclared so the template's
+        # outer `{% if sandbox.healthcheck %}` gate works as a presence check.
+        if not any(hc.values()):
+            sandbox["healthcheck"] = {}
+    else:
+        sandbox["healthcheck"] = {}
+    # Pre-fill requests/limits so StrictUndefined doesn't trip in pux.yaml.j2.
+    # Both default to {} so the `{% if requests or limits %}` guard is falsy.
+    resources = sandbox["resources"]
+    if isinstance(resources, dict):
+        resources.setdefault("requests", {})
+        resources.setdefault("limits", {})
+    else:
+        sandbox["resources"] = {"requests": {}, "limits": {}}
+    # Translate K8s runtime_class name to Docker --runtime value. Invalid
+    # values fall through to None (no `runtime:` line) and the schema check
+    # in validate_org_data flags them.
+    raw_runtime = sandbox.get("runtime_class") or "runc"
+    sandbox["runtime_class_docker"] = RUNTIME_CLASS_MAP.get(raw_runtime)
 
     return {
         "name": data.get("name", ""),
@@ -176,6 +339,17 @@ def render_org(org_dir: Path, env: Environment, target_dir: Path | None = None) 
     pux_path = write_root / "pux.yaml"
     _atomic_write(pux_path, pux_out, allow_overwrite_header=True)
     written.append(pux_path)
+
+    # docker-compose.yml — only for orgs that declare a [sandbox] block.
+    # The compose file is the ops view of the sandbox profile; the kernel
+    # still uses its own Docker SDK for sandbox lifecycle (compose is for
+    # `docker compose up` by humans/CI and for documenting intent).
+    # Standard filename so `docker compose <cmd>` works with no -f flag.
+    if raw.get("sandbox"):
+        compose_out = _render_template(env, "sandbox.compose.yml.j2", data)
+        compose_path = write_root / "docker-compose.yml"
+        _atomic_write(compose_path, compose_out, allow_overwrite_header=True)
+        written.append(compose_path)
 
     # roles/<name>/config.yaml
     role_defaults = {

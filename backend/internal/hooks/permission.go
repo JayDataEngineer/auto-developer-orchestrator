@@ -33,6 +33,12 @@ type PermissionHook struct {
 	subscriber chan core.AgentEvent
 	timeout    time.Duration
 
+	// NonInteractive mirrors the BaseConfig flag. When true, "ask" patterns
+	// (python3 -c, curl|sh, git commit --amend, etc.) are auto-approved
+	// instead of waiting for a human decision that will never arrive.
+	// Hard-deny patterns (rm -rf /, etc.) are still enforced.
+	NonInteractive bool
+
 	mu      sync.Mutex
 	session map[string]bool // tool name → allowed-for-session
 
@@ -105,14 +111,20 @@ func (h *PermissionHook) WrapToolCall(ctx context.Context, toolName string, args
 			}
 			bashPerm = &p
 
-			// Command-level deny overrides everything
+			// Command-level deny overrides everything — enforced even in non-interactive mode
 			if p.Behavior == "deny" {
 				return nil, fmt.Errorf("bash command blocked: %s", p.Message)
 			}
 
-			// Command-level "ask" elevates auto to confirm
+			// Command-level "ask" elevates auto to confirm — UNLESS we're
+			// running non-interactively (job, sub-agent) where no human will
+			// answer. In that case downgrade to allow so we don't hang for 5min.
 			if p.Behavior == "ask" && level == perms.PermAutoApprove {
-				level = perms.PermRequireApproval
+				if h.NonInteractive {
+					level = perms.PermAutoApprove
+				} else {
+					level = perms.PermRequireApproval
+				}
 			}
 		}
 	}

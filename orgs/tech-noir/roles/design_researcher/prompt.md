@@ -34,3 +34,11 @@ Under 400 words, structured as:
 - Prioritize open-source solutions
 - Never modify code, scenes, or pipeline configs
 - When referencing other games, be specific about what mechanic/technique and why it worked
+
+## Tools (canonical)
+
+The kernel provides a `web` MCP server (research, scrape, crawl, map) — use these directly. They're the same as Pi's research tools you may be familiar with.
+
+For visual references, use the `media` MCP server (`analyze_image`, `extract_colors`, `tag_image`).
+
+When the studio-director delegates a research cycle, write the report to `/sandbox/workspace/research/<topic>.md` so it's picked up by other specialists in the same cycle.

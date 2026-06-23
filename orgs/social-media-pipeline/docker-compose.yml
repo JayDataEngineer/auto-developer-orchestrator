@@ -1,0 +1,28 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build social-media-pipeline`.
+
+services:
+  social-media-pipeline-sandbox:
+    image: pux-sandbox:latest
+    runtime: runsc
+    environment:
+      MCP_HUB_ENDPOINT: "http://100.86.69.57:30080"
+      SURREALDB_URL: "http://host.docker.internal:8000/surreal"
+      SURREALDB_NS: "research"
+      SURREALDB_DB: "main"
+      SURREALDB_USER: "root"
+      SURREALDB_PASS: "root"
+      PUX_ORG_PATH: "/sandbox/workspace"
+    deploy:
+      resources:
+        reservations:
+          cpus: '250m'
+          memory: 256Mi
+        limits:
+          cpus: '1'
+          memory: 1Gi
+    volumes:
+      - social-media-pipeline-workspace:/workspace
+    network_mode: host
+
+volumes:
+  social-media-pipeline-workspace:

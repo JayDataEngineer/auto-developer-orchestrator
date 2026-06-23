@@ -29,6 +29,9 @@ password_env = "SURREAL_PASSWORD"
 # PUX_ORG_PATH points at the bind-mounted /sandbox/workspace so surreal_client.py
 # can locate prompts/surreal_schema.sql via its _load_schema_sql() lookup.
 [sandbox]
+image = "pux-sandbox:latest"
+runtime_class = "gvisor"
+warm_pool = 1
 init_files = [
   "@shared/surreal_client.py",
   "sandbox/context_engine.py",
@@ -40,6 +43,19 @@ init_files = [
   "sandbox/audio_client.py",
   "sandbox/neo4j_client.py",
 ]
+
+[sandbox.resources.requests]
+cpu = "500m"
+memory = "512Mi"
+
+[sandbox.resources.limits]
+cpu = "2"
+memory = "2Gi"
+
+[[sandbox.volumes]]
+type = "volume"
+name = "deep-research-engine-workspace"
+container = "/workspace"
 
 [sandbox.env]
 SURREALDB_URL = "http://host.docker.internal:8000/surreal"

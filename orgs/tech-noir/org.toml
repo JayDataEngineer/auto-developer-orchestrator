@@ -13,6 +13,9 @@ tool_packages_root = "tool_packages"
 skills_dir = "skills"
 
 [sandbox]
+image = "pux-sandbox:latest"
+runtime_class = "gvisor"
+warm_pool = 1
 init_files = [
   "@shared/forge_client.py",
   "sandbox/godot_client.py",
@@ -20,6 +23,19 @@ init_files = [
   "@shared/surreal_client.py",
 ]
 pip_packages = ["requests", "pillow"]
+
+[sandbox.resources.requests]
+cpu = "500m"
+memory = "512Mi"
+
+[sandbox.resources.limits]
+cpu = "2"
+memory = "2Gi"
+
+[[sandbox.volumes]]
+type = "volume"
+name = "tech-noir-workspace"
+container = "/workspace"
 
 [sandbox.env]
 MCP_HUB_ENDPOINT = "http://100.86.69.57:30080"

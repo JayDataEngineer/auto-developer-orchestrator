@@ -71,3 +71,6 @@ form.html
 # Orphan venvs (root .venv/ is covered above; this catches siblings)
 .venv-*/
 
+# External research notes (system cards, design docs from outside the repo)
+INSIGHTS-*.md
+

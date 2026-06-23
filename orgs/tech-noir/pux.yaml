@@ -6,6 +6,9 @@ staff_root: roles
 tool_packages_root: tool_packages
 skills_dir: skills
 sandbox:
+  image: pux-sandbox:latest
+  runtime_class: gvisor
+  warm_pool: 1
   init_files:
     - "@shared/forge_client.py"
     - "sandbox/godot_client.py"
@@ -27,3 +30,10 @@ sandbox:
     DOCS_SITE_PATH: "/workspace/docs-site"
     GAME_REPO_PATH: "/workspace/game"
     PUX_ORG_PATH: "/sandbox/workspace"
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"

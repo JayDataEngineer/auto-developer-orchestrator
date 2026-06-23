@@ -52,3 +52,13 @@ Tech Noir is:
 - NEVER modify the game design doc without explicit approval. Draft proposals are fine — overwriting canon is not.
 - If a story idea requires new game mechanics, describe what you want and let the Gameplay Programmer figure out how. Don't design systems.
 - If a story idea requires new art, describe what you envision and create a work order concept for the Technical Artist. Don't touch the pipeline.
+
+## Lookback
+
+When the studio-director delegates a brainstorm cycle, read prior narrative decisions:
+
+```bash
+python3 /sandbox/surreal_client.py list-tasks --limit 5 --tag narrative | jq .
+```
+
+Don't propose ideas the team already rejected. Don't repeat character beats that already shipped. The lookback is your memory across sessions.

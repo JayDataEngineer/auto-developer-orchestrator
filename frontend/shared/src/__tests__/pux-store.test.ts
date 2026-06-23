@@ -177,6 +177,72 @@ describe("setConversation", () => {
 		usePuxStore.getState().setConversation("proj", "");
 		expect(usePuxStore.getState().conversationKey).toBe("proj:default");
 	});
+
+	// ── Regression: live agents survive conversation switches ──
+	// Bug we're guarding against: switching conversations mid-stream was
+	// dropping active sub-agents because the prune loop swept them up.
+	// The hist_ prefix check is what protects live agents — without it,
+	// a delegate_to that just spawned would vanish from the agents panel
+	// the moment the user clicked another conversation.
+	it("preserves live (running) agents when switching conversations", () => {
+		const liveAgent = makeAgent({
+			agentId: "jake_live_1",
+			agentName: "jake",
+			status: "running",
+			task: "clicking things",
+		});
+		usePuxStore.setState({
+			projects: [{ name: "p1", path: "/p1" }],
+			agents: new Map([[liveAgent.agentId, liveAgent]]),
+		});
+
+		usePuxStore.getState().setConversation("p1", "agent-x");
+
+		const agents = usePuxStore.getState().agents;
+		expect(agents.has("jake_live_1")).toBe(true);
+		expect(agents.get("jake_live_1")!.status).toBe("running");
+	});
+
+	it("drops restored (hist_*) agents when switching conversations", () => {
+		const histAgent = makeAgent({
+			agentId: "hist_tc_1",
+			agentName: "browser_ops",
+			status: "complete",
+		});
+		const liveAgent = makeAgent({
+			agentId: "code_live_2",
+			agentName: "code_ops",
+			status: "running",
+		});
+		usePuxStore.setState({
+			projects: [{ name: "p1", path: "/p1" }],
+			agents: new Map([
+				[histAgent.agentId, histAgent],
+				[liveAgent.agentId, liveAgent],
+			]),
+		});
+
+		usePuxStore.getState().setConversation("p1", "agent-y");
+
+		const agents = usePuxStore.getState().agents;
+		expect(agents.has("hist_tc_1")).toBe(false);
+		expect(agents.has("code_live_2")).toBe(true);
+	});
+
+	it("does not create a new Map when no agents need pruning (avoids spurious re-renders)", () => {
+		const originalAgents = new Map([
+			["code_live_2", makeAgent({ agentId: "code_live_2", status: "running" })],
+		]);
+		usePuxStore.setState({
+			projects: [{ name: "p1", path: "/p1" }],
+			agents: originalAgents,
+		});
+
+		usePuxStore.getState().setConversation("p1", "agent-z");
+
+		// Same reference — no new Map created, so no subscriber re-render storm
+		expect(usePuxStore.getState().agents).toBe(originalAgents);
+	});
 });
 
 describe("clearConversation", () => {

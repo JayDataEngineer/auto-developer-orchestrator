@@ -1,0 +1,5 @@
+# Expected failure keywords — one per line. The summary must mention each.
+# Comments (lines starting with #) are ignored.
+FAIL
+TestHealth
+404

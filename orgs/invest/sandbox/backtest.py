@@ -28,10 +28,13 @@ from datetime import datetime, timedelta
 
 import yfinance as yf
 
-BACKTEST_DIR = "/workspace/backtest"
-SNAPSHOT_FILE = os.path.join(BACKTEST_DIR, "snapshot_{date}.json")
-PREDICTIONS_FILE = os.path.join(BACKTEST_DIR, "predictions.json")
-SCORES_FILE = os.path.join(BACKTEST_DIR, "scores.json")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths
+
+BACKTEST_DIR = paths.BACKTEST_DIR
+SNAPSHOT_FILE = paths.BACKTEST_SNAPSHOT_FILE
+PREDICTIONS_FILE = paths.BACKTEST_PREDICTIONS_FILE
+SCORES_FILE = paths.BACKTEST_SCORES_FILE
 
 # Default watchlist
 DEFAULT_STOCKS = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "AMZN", "META"]
@@ -219,6 +222,10 @@ def save_prediction(predictions, pred):
 
     with open(PREDICTIONS_FILE, "w") as f:
         json.dump(all_preds, f, indent=2)
+
+    # Auto-track progress: increment signals_recorded for this date.
+    _progress_touch(pred["date"], status="ok",
+                    signals=sum(1 for p in all_preds if p.get("date") == pred["date"]))
     return len(all_preds)
 
 
@@ -321,6 +328,10 @@ def run_backtest(date_str, stocks=None, crypto_ids=None, generate_prompt=True):
     stocks = stocks or DEFAULT_STOCKS
     crypto_ids = crypto_ids or DEFAULT_CRYPTO
 
+    # Auto-track progress so walks can't silently skip visibility.
+    # If walkthrough_progress.json exists, this date is now "in progress".
+    _progress_touch(date_str, status="started")
+
     print(f"Building backtest snapshot for {date_str}...", file=sys.stderr)
 
     # Stock snapshots
@@ -345,6 +356,23 @@ def run_backtest(date_str, stocks=None, crypto_ids=None, generate_prompt=True):
     with open(path, "w") as f:
         json.dump(snapshot, f, indent=2)
 
+    # Auto-generate per-date research plan so the walk gets qualitative context
+    # even if the agent forgets to invoke historical_research.py explicitly.
+    # Best-effort: never let a research-plan failure abort the snapshot.
+    try:
+        import subprocess
+        plan_path = os.path.join(paths.DATA_DIR, f"research_plan_{date_str}.json")
+        subprocess.run(
+            [sys.executable, os.path.join(paths.SCRIPT_DIR, "historical_research.py"),
+             "--date", date_str, "--output", plan_path],
+            check=False, capture_output=True, timeout=30,
+        )
+        if os.path.exists(plan_path):
+            snapshot["research_plan_path"] = plan_path
+            print(f"Research plan saved: {plan_path}", file=sys.stderr)
+    except Exception as e:
+        print(f"research plan skipped: {e}", file=sys.stderr)
+
     print(f"\nSnapshot saved: {path}", file=sys.stderr)
     print(f"Stocks with data: {len(stock_snapshots)}/{len(stocks)}", file=sys.stderr)
 
@@ -355,6 +383,57 @@ def run_backtest(date_str, stocks=None, crypto_ids=None, generate_prompt=True):
               file=sys.stderr)
 
     return snapshot
+
+
+def _progress_touch(date_str, status="started", signals=None, news=None, filings=None):
+    """Best-effort update of walkthrough_progress.json.
+
+    Called automatically from run_backtest / save_prediction / evaluate_predictions
+    so the walk leaves a progress trail even if the agent forgets to invoke
+    walk_progress.py explicitly. Never raises — progress tracking is a
+    side-effect, not a gate.
+    """
+    try:
+        import time
+        from pathlib import Path
+        pf = Path(paths.WALKTHROUGH_PROGRESS_FILE)
+        if not pf.parent.exists():
+            pf.parent.mkdir(parents=True, exist_ok=True)
+        state = {}
+        if pf.exists():
+            try:
+                state = json.loads(pf.read_text())
+            except Exception:
+                state = {}
+        if not state:
+            return  # no walk initialized — don't auto-create
+        if status == "started":
+            state["current"] = {
+                "date": date_str,
+                "started_at": datetime.now().isoformat(),
+                "started_epoch": time.time(),
+            }
+        elif status in ("ok", "failed"):
+            cur = state.get("current") or {}
+            started_epoch = cur.get("started_epoch") or time.time()
+            duration_ms = int((time.time() - started_epoch) * 1000)
+            entry = {"date": date_str, "status": status, "duration_ms": duration_ms}
+            if signals is not None:
+                entry["signals_recorded"] = signals
+            if news is not None:
+                entry["news_articles"] = news
+            if filings is not None:
+                entry["filings_read"] = filings
+            state["completed"] = [c for c in state.get("completed", [])
+                                  if c.get("date") != date_str]
+            state["completed"].append(entry)
+            state["current"] = None
+        state["updated_at"] = datetime.now().isoformat()
+        tmp = pf.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state, indent=2))
+        tmp.replace(pf)
+    except Exception:
+        pass
 
 
 def run_backtest_range(start_str, end_str, step=7, stocks=None):

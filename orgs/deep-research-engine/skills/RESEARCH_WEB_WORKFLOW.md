@@ -2,23 +2,14 @@
 
 The web-researcher's checklist. Loaded automatically into the web-researcher's prompt via skills_dir.
 
-## Tool reference (web MCP)
+## Strategy
 
-| Tool | When | Cost |
-|---|---|---|
-| `mcp__web__research` | Default. Searches + scrapes top 3-5 results in one call. Use for most queries. | Moderate (3-5 page fetches per call) |
-| `mcp__web__search` | When you only need titles+snippets (e.g., "does this topic have a name?"). | Cheap |
-| `mcp__web__scrape` | When you have a specific URL and want clean markdown. | Cheap |
-| `mcp__web__map` | When you need to discover URLs from a domain's sitemap. | Cheap |
-| `mcp__web__crawl` | Deep crawl following links. Use sparingly — `max_depth=2, max_pages=20` defaults. | Expensive |
-| `mcp__web__extract` | Structured JSON extraction (products, news, jobs). Use when scraping a known schema. | Cheap |
-| `mcp__web__docs_list_sources` / `docs_fetch_docs` | When the topic is documented in a known llms.txt source. | Cheap |
-
-All web tools accept `data:` URIs for inputs and return markdown.
+The web-mcp server exposes a combined search+scrape tool, a lightweight search-only tool, a single-page fetch tool, a domain-mapper, a deep crawler, and a structured-data extractor. **Check your tool list for the actual names** — they all live under the `mcp__web__` prefix. Use the combined search+scrape tool as the default; it returns full page content, not just titles. Escalate to the deep crawler only when you need many pages from one site.
 
 ## Workflow
 
 ### Step 1 — Decompose the question
+
 Restate the user's research question in your own words. Then list 3-5 sub-questions. If you can't decompose, you don't understand the question — ask the CTO.
 
 **Example:**
@@ -30,17 +21,23 @@ Restate the user's research question in your own words. Then list 3-5 sub-questi
   4. What's Telegram's policy on extremist channels and have they enforced it here?
 
 ### Step 2 — Search per sub-question
-Call `mcp__web__research` with each sub-question as the `query` parameter. Default `max_results=3, depth=quick`. For load-bearing sub-questions, escalate to `depth=deep` and `max_results=5`.
 
-```python
-# Conceptual — the actual call is via the MCP tool interface
-mcp__web__research(query="Who runs the @WLM_USA_MONTANA Telegram channel", max_results=3, depth="quick")
-```
+Call the combined search+scrape tool with each sub-question as the `query`. Default `max_results=3, depth=quick`. For load-bearing sub-questions, escalate to `depth=deep` and `max_results=5`.
 
 ### Step 3 — Deepen on load-bearing sources
-For each source that you'll cite, follow up with `mcp__web__scrape` on the URL. This gets you the full page text, not just the snippet. The snippet is often misleading.
 
-### Step 4 — Cross-check
+For each source that you'll cite, follow up with the single-page fetch tool on the URL. This gets you the full page text, not just the snippet. The snippet is often misleading.
+
+### Step 4 — Read every image
+
+For each load-bearing source, look at the page's images. Run the appropriate media-mcp tool:
+- Document/screenshot images → OCR (extract verbatim text)
+- Photo/scene images → caption (note identifiable people, locations, dates)
+
+This is non-negotiable. The image often contains the most falsifiable claim.
+
+### Step 5 — Cross-check
+
 For each claim, find ≥2 independent sources. "Independent" means:
 - Not both quoting the same press release
 - Not both owned by the same parent company
@@ -48,7 +45,7 @@ For each claim, find ≥2 independent sources. "Independent" means:
 
 If you find only echo-chamber sources, note that in `_INDEX.md`.
 
-### Step 5 — Record findings (markdown + SurrealDB source record)
+### Step 6 — Record findings (markdown + SurrealDB source record)
 
 **Two writes per finding.** Skipping the DB write means future agents can't query past research — the world stays ephemeral.
 
@@ -99,7 +96,6 @@ This atomically:
 **When to link person_ids**: only when the source directly discusses or quotes a person. If the person doesn't exist in the DB yet, create them via `upsert-person`:
 
 ```bash
-# Creates person if missing; returns existing ID if found. Idempotent on canonical_name.
 python3 /sandbox/surreal_client.py upsert-person \
   --name "Elon Musk" \
   --source-id "source:abc123" \
@@ -109,7 +105,8 @@ python3 /sandbox/surreal_client.py upsert-person \
 
 Only create persons for individuals the source is **about** or **quotes directly** — not every proper noun. Use your judgment.
 
-### Step 6 — Build the index
+### Step 7 — Build the index
+
 Write `artifacts/research/_INDEX.md`:
 
 ```markdown
@@ -147,4 +144,5 @@ If you stop with gaps, **say so explicitly** in `_INDEX.md`. Don't paper over.
 - **Search-result farming** — many "Top 10 X" sites exist purely to game search results. Skip them.
 - **Snippets lie** — Google's featured snippet is sometimes wrong. Always scrape the actual page.
 - **Date drift** — a 2018 article republished in 2024 still says 2018 things. Always check publication date, not "X years ago".
-- **Archive.org fallback** — if a page is 404, try `https://web.archive.org/web/*/<url>` via `mcp__web__scrape`.
+- **Archive.org fallback** — if a page is 404, try `https://web.archive.org/web/*/<url>` via the single-page fetch tool.
+- **Skipping images** — the most falsifiable claims often live in screenshots and infographics; read them.

@@ -31,7 +31,15 @@ func (b *BashExecutor) Exec(ctx context.Context, command string) (string, error)
 	if b.Mgr == nil {
 		return "", fmt.Errorf("sandbox manager not available")
 	}
-	output, err := b.Mgr.ExecInSandbox(ctx, b.SandboxID, []string{"sh", "-c", command})
+	// Auto-source /sandbox/.env so manifest-declared env vars (SURREALDB_URL,
+	// PUX_ORG_PATH, etc.) are visible to every command. `set -a` exports every
+	// subsequently-set var so child processes (python3, etc.) inherit them —
+	// without it, sourcing only creates shell vars which subprocesses can't see.
+	// IMPORTANT: dash (Ubuntu's /bin/sh) exits the entire shell when `. file`
+	// fails — even without `set -e`. Guard with [ -f ] so commands still run
+	// when /sandbox/.env doesn't exist (e.g., invest org sandbox).
+	wrapped := "if [ -f /sandbox/.env ]; then set -a; . /sandbox/.env 2>/dev/null; set +a; fi; " + command
+	output, err := b.Mgr.ExecInSandbox(ctx, b.SandboxID, []string{"sh", "-c", wrapped})
 	return output, err
 }
 

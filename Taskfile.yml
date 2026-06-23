@@ -334,7 +334,75 @@ tasks:
       - cmd: cd backend && go fmt ./... && go vet ./...
       - npm run lint
 
-  # ── Sandbox images ───────────────────────────────────────────────────────
+  # ── Secret Scanning ──────────────────────────────────────────────────────
+  hooks:
+    desc: Install pre-commit gitleaks hook (idempotent + health-check)
+    cmds:
+      - cmd: |
+          if ! command -v pre-commit >/dev/null 2>&1; then
+            echo "ERROR: pre-commit not installed."
+            echo "  Install one of:"
+            echo "    pipx install pre-commit        (recommended)"
+            echo "    pip install --user pre-commit"
+            echo "    brew install pre-commit"
+            exit 1
+          fi
+          pre-commit --version
+      - pre-commit install
+      - pre-commit install-hooks
+      - cmd: |
+          if [ ! -f .gitleaks-baseline.json ]; then
+            echo "WARN: .gitleaks-baseline.json missing. Run 'task scan-secrets-baseline'."
+          fi
+      - cmd: echo "OK pre-commit hook installed at .git/hooks/pre-commit"
+      - cmd: 'echo "    CI also scans; bypass locally with: git commit --no-verify"'
+
+  scan-secrets:
+    desc: Scan staged + working tree for secrets (does not write baseline)
+    cmds:
+      - cmd: |
+          if ! command -v gitleaks >/dev/null 2>&1; then
+            echo "ERROR: gitleaks not installed. brew install gitleaks or see https://gitleaks.io"
+            exit 1
+          fi
+      - gitleaks detect --source . --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --no-banner
+
+  scan-secrets-baseline:
+    desc: Regenerate .gitleaks-baseline.json — REVIEW FINDINGS BEFORE COMMITTING
+    cmds:
+      - cmd: |
+          if ! command -v gitleaks >/dev/null 2>&1; then
+            echo "ERROR: gitleaks not installed."
+            exit 1
+          fi
+      - gitleaks detect --source . --config .gitleaks.toml --report-format json --report-path .gitleaks-baseline.json --no-banner
+      - cmd: 'echo "Baseline regenerated: $(jq ''length'' .gitleaks-baseline.json 2>/dev/null || echo ''?'') findings marked as known."'
+      - cmd: echo "REVIEW .gitleaks-baseline.json -- every entry should be intentional."
+
+  # ── Transcript auditing ──────────────────────────────────────────────────
+  audit:
+    desc: Audit the most recent session against the Fable/Mythos six-pattern taxonomy
+    cmds:
+      - cmd: |
+          LATEST=$(ls -t .pux/sessions/*.jsonl 2>/dev/null | head -1)
+          if [ -z "$LATEST" ]; then echo "No sessions found in .pux/sessions/"; exit 1; fi
+          echo "Auditing: $LATEST"
+          python3 scripts/audit_transcript.py classify "$LATEST" --fast-only
+
+  audit-summary:
+    desc: Print the aggregate audit summary for the most recent session
+    cmds:
+      - cmd: |
+          LATEST=$(ls -t .pux/sessions/*.jsonl 2>/dev/null | head -1)
+          if [ -z "$LATEST" ]; then echo "No sessions found"; exit 1; fi
+          python3 scripts/audit_transcript.py summary "$LATEST"
+
+  test-eval-diligence:
+    desc: Run the code-summary honesty eval (Fable/Mythos §5.2). Exits non-zero if dishonesty > 30%.
+    cmds:
+      - python3 tests/evals/diligence/test_code_summary_honesty.py --verbose
+
+  # ── Sandbox images ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   sandbox-build:
     desc: Build sandbox Docker image (standard = noVNC, lightweight)
     cmds:

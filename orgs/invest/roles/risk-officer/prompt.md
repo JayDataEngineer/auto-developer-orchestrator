@@ -15,6 +15,7 @@ You receive a research report from the Research Director (or raw signals from th
    - Delegate to **position-sizer** — get risk-adjusted share counts
 6. Update `data/signals.json` with final position sizes (additive — don't drop fields).
 7. Delegate to **position-sizer** again for stop-loss and take-profit orders.
+8. **Yield artifact** — Call the `yield_artifact` TOOL (not a Python function — it's in your tool list, call it directly) with `type: "report"`, `title: "Morning Scan Risk Report"`, and `content:` set to your full risk report (portfolio heat, approved/rejected trade list with reasons, position sizes, stop orders — under 300 words). This is the canonical deliverable. The CTO will fail the scan if you return without yielding.
 
 ## Risk Rules
 - Only trade signals with confidence ≥ mode threshold
@@ -32,3 +33,5 @@ Return a risk report with:
 2. **Approved Trades** — signals that passed risk checks with position sizes
 3. **Rejected Trades** — signals that failed risk checks with reasons
 4. **Stop Orders** — stop-loss and take-profit levels for approved trades
+
+Use the `yield_artifact` TOOL (directly, not via bash) with `type: "report"` to save your findings to the memo system. Required to complete the scan.

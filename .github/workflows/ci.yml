@@ -46,6 +46,41 @@ jobs:
           version: latest
           args: --timeout=5m
 
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history — baseline lookup needs commit SHAs
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          GL_VER=8.30.0
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GL_VER}/gitleaks_${GL_VER}_linux_x64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Scan PR diff for new secrets
+        if: github.event_name == 'pull_request'
+        run: |
+          gitleaks detect \
+            --source . \
+            --config .gitleaks.toml \
+            --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" \
+            --redact \
+            --no-banner
+
+      - name: Scan pushed commits (with baseline) for new secrets
+        if: github.event_name != 'pull_request'
+        run: |
+          gitleaks detect \
+            --source . \
+            --config .gitleaks.toml \
+            --baseline-path .gitleaks-baseline.json \
+            --redact \
+            --no-banner
+
   org-build:
     # Stage 3 org templating — every org.toml must render cleanly to the
     # checked-in YAML tree. Drift = renderer output != checked-in file.

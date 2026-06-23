@@ -14,13 +14,13 @@ import (
 // Embedded by DelegateToTool, DelegateAsyncTool, DelegateContinueTool.
 type delegationTimeout struct{}
 
-func (delegationTimeout) TimeoutHint() time.Duration { return 30 * time.Minute }
+func (delegationTimeout) TimeoutHint() time.Duration { return 60 * time.Minute }
 
 // DelegateRunner creates and runs sub-agents for delegate_to/delegate_async.
 type DelegateRunner interface {
-	RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string) (map[string]any, error)
-	RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string, roleHooks []string) (map[string]any, error)
-	RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, delegatesTo []string) (map[string]any, error)
+	RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, thinking bool) (map[string]any, error)
+	RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string, roleHooks []string, thinking bool) (map[string]any, error)
+	RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, delegatesTo []string, thinking bool) (map[string]any, error)
 	CollectAsyncResults(ctx context.Context) (map[string]any, error)
 	RunDivisionDelegate(ctx context.Context, task, divisionPath, modelID string) (map[string]any, error)
 	RunParallel(ctx context.Context, specs []ParallelTaskSpec) (map[string]any, error)
@@ -38,6 +38,7 @@ type ParallelTaskSpec struct {
 	SandboxTier  string
 	DelegatesTo  []string
 	RoleHooks    []string
+	Thinking     bool
 }
 
 // MCPResolver resolves an MCP server prefix to a list of tool names.
@@ -66,7 +67,8 @@ type NameProvider func() []string
 // The 6th return value is the division path (non-empty = division head).
 // The 7th return value is the sandbox tier ("" = isolated/default).
 // The 9th return value is the named hooks list (e.g., ["file_checkpoint", "raise_browser"]).
-func resolveRole(instructions string, toolNames []string, maxRounds int, temperature float32, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole) (string, []string, int, float32, string, string, string, []string, []string) {
+// The 10th return value is whether extended thinking is enabled for the role.
+func resolveRole(instructions string, toolNames []string, maxRounds int, temperature float32, mcpResolver MCPResolver, roleMap map[string]*common.AgentRole) (string, []string, int, float32, string, string, string, []string, []string, bool) {
 	// Try org-specific roles first, then kernel defaults
 	var role *common.AgentRole
 	if roleMap != nil {
@@ -96,9 +98,9 @@ func resolveRole(instructions string, toolNames []string, maxRounds int, tempera
 		if temp == 0.4 && role.Temperature != 0.4 {
 			temp = role.Temperature
 		}
-		return prompt, tools, rounds, temp, role.Model, role.Division, role.SandboxTier, role.DelegatesTo, role.Hooks
+		return prompt, tools, rounds, temp, role.Model, role.Division, role.SandboxTier, role.DelegatesTo, role.Hooks, role.Thinking
 	}
-	return instructions, toolNames, maxRounds, temperature, "", "", "", nil, nil
+	return instructions, toolNames, maxRounds, temperature, "", "", "", nil, nil, false
 }
 
 // DelegateToTool implements core.Tool for synchronous sub-agent delegation.
@@ -203,7 +205,7 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 
 	// Resolve role name → prompt + defaults
 	roleMap := t.roleProvider()
-	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, division, sandboxTier, delegatesTo, roleHooks := resolveRole(role, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
+	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, division, sandboxTier, delegatesTo, roleHooks, thinking := resolveRole(role, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
 
 	// Division head: delegate to a full sub-orchestrator
 	if division != "" {
@@ -217,7 +219,7 @@ func (t *DelegateToTool) Execute(ctx context.Context, args map[string]any) (any,
 	// Use tracked delegation — returns agent_ref + file changes
 	// Pass role name as agentName for correct SSE event labeling
 	agentName := role
-	return t.runner.RunDelegateTracked(ctx, task, resolvedInstructions, agentName, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, sandboxTier, delegatesTo, roleHooks)
+	return t.runner.RunDelegateTracked(ctx, task, resolvedInstructions, agentName, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, sandboxTier, delegatesTo, roleHooks, thinking)
 }
 
 // executeParallel handles parallel_tasks — fans out multiple agents concurrently.
@@ -265,7 +267,7 @@ func (t *DelegateToTool) executeParallel(ctx context.Context, rawTasks []any, pa
 			temperature = float32(v)
 		}
 
-		instructions, resolvedTools, resolvedRounds, resolvedTemp, modelID, division, sandboxTier, delegatesTo, roleHooks := resolveRole(role, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
+		instructions, resolvedTools, resolvedRounds, resolvedTemp, modelID, division, sandboxTier, delegatesTo, roleHooks, thinking := resolveRole(role, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
 
 		if division != "" {
 			return nil, core.NewToolError("delegate_to", fmt.Sprintf("parallel_tasks[%d]: role '%s' is a division head — use delegate_to separately for division delegation", i, role))
@@ -285,6 +287,7 @@ func (t *DelegateToTool) executeParallel(ctx context.Context, rawTasks []any, pa
 			SandboxTier:  sandboxTier,
 			DelegatesTo:  delegatesTo,
 			RoleHooks:    roleHooks,
+			Thinking:     thinking,
 		})
 	}
 
@@ -464,7 +467,7 @@ func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (a
 
 	// Resolve role name → prompt + defaults
 	roleMap := t.roleProvider()
-	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, _, _, _, _ := resolveRole(role, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
+	resolvedInstructions, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, _, _, _, _, thinking := resolveRole(role, toolNames, maxRounds, temperature, t.mcpResolver, roleMap)
 
 	if len(resolvedTools) == 0 {
 		return nil, core.NewToolError("delegate_async", "no tools specified and role '"+role+"' has no default tools")
@@ -475,7 +478,7 @@ func (t *DelegateAsyncTool) Execute(ctx context.Context, args map[string]any) (a
 	if t.nameProvider != nil {
 		delegatesTo = t.nameProvider()
 	}
-	return t.runner.RunDelegateAsync(ctx, taskID, task, resolvedInstructions, role, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, delegatesTo)
+	return t.runner.RunDelegateAsync(ctx, taskID, task, resolvedInstructions, role, resolvedTools, resolvedRounds, resolvedTemp, resolvedModel, delegatesTo, thinking)
 }
 
 // CollectResultsTool waits for all pending async delegates to complete.

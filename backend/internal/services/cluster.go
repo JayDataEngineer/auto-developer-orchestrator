@@ -18,11 +18,7 @@ import (
 // HubBase returns the MCP/Service hub base URL.
 // Configurable via MCP_HUB_ENDPOINT env var.
 func HubBase() string {
-	hub := os.Getenv("MCP_HUB_ENDPOINT")
-	if hub == "" {
-		hub = "http://100.86.69.57:30080"
-	}
-	return hub
+	return os.Getenv("MCP_HUB_ENDPOINT")
 }
 
 // ClusterClient provides access to all Ray cluster services.
@@ -311,9 +307,6 @@ type LLMHealth struct {
 // S3Config returns S3 connection parameters from env vars.
 func S3Config() (endpoint, accessKey, secretKey string) {
 	endpoint = os.Getenv("S3_ENDPOINT")
-	if endpoint == "" {
-		endpoint = "http://100.86.69.57:30390"
-	}
 	return endpoint, os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_SECRET_KEY")
 }
 

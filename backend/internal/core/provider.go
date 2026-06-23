@@ -173,6 +173,13 @@ type GenerateOptions struct {
 	TopP           float32
 	TopK           int
 	ResponseFormat *ResponseFormat // Request structured output (JSON, schema-validated, etc.)
+
+	// Thinking enables extended thinking (CoT) for models that support it.
+	// Local llama-server: sets chat_template_kwargs.enable_thinking=true.
+	// Cloud providers: currently no-op (provider-specific APIs not yet wired).
+	// Per Anthropic Fable/Mythos system card, thinking mode reduces prompt-
+	// injection attack success rate 2-4x.
+	Thinking bool
 }
 
 // LLMProvider abstracts an LLM backend (llama-server, Gemini, OpenRouter, etc.).

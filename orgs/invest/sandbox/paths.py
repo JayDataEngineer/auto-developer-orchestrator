@@ -63,6 +63,21 @@ ALPHA_RESULTS = os.environ.get("ALPHA_RESULTS", os.path.join(DATA_DIR, "alpha_re
 HISTORICAL_RESULTS = os.environ.get("HISTORICAL_RESULTS", os.path.join(DATA_DIR, "historical_results.json"))
 WATCHLIST_FILE = os.environ.get("WATCHLIST_FILE", os.path.join(CONFIG_DIR, "watchlist.json"))
 
+# Backtest outputs (snapshots, predictions, scores). Lives INSIDE the org
+# workspace so artifacts persist to host via the bind-mount. Override via env
+# only when running outside the org (e.g., local dev against /tmp/).
+BACKTEST_DIR = os.environ.get("INVEST_BACKTEST_DIR", os.path.join(DATA_DIR, "backtest"))
+BACKTEST_SNAPSHOT_FILE = os.path.join(BACKTEST_DIR, "snapshot_{date}.json")
+BACKTEST_PREDICTIONS_FILE = os.environ.get("BACKTEST_PREDICTIONS_FILE", os.path.join(BACKTEST_DIR, "predictions.json"))
+BACKTEST_SCORES_FILE = os.environ.get("BACKTEST_SCORES_FILE", os.path.join(BACKTEST_DIR, "scores.json"))
+# walkthrough_progress.json lives at DATA_DIR (not BACKTEST_DIR) so it matches
+# what walk_progress.py expects. Both backtest.py auto-tracking and the
+# walk_progress.py CLI write to the same file.
+WALKTHROUGH_PROGRESS_FILE = os.environ.get(
+    "WALKTHROUGH_PROGRESS_FILE",
+    os.path.join(DATA_DIR, "walkthrough_progress.json"),
+)
+
 # Default watchlist fallbacks (used by fetch_data.py if WATCHLIST_FILE missing).
 DEFAULT_WATCHLIST_STOCKS = ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "TSLA", "AMZN"]
 DEFAULT_WATCHLIST_CRYPTO = ["BTC", "ETH", "SOL"]
@@ -95,6 +110,7 @@ def print_paths() -> None:
     print(f"SIGNALS_FILE      = {SIGNALS_FILE}")
     print(f"JOURNAL_FILE      = {JOURNAL_FILE}")
     print(f"WATCHLIST_FILE    = {WATCHLIST_FILE}")
+    print(f"BACKTEST_DIR      = {BACKTEST_DIR}")
 
 
 if __name__ == "__main__":

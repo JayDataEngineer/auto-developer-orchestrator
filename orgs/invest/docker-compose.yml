@@ -1,29 +1,22 @@
-# Invest org sandbox — standalone container for users who don't want host Python.
-#
-# Usage:
-#   docker compose run --rm invest-sandbox python3 /workspace/sandbox/fetch_data.py --watchlist /workspace/config/watchlist.json
-#   docker compose run --rm invest-sandbox python3 /workspace/sandbox/crypto.py --onchain BTC
-#   docker compose run --rm -e ALPACA_API_KEY=$ALPACA_API_KEY -e ALPACA_SECRET_KEY=$ALPACA_SECRET_KEY invest-sandbox python3 /workspace/sandbox/trade.py --status
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build invest`.
 
 services:
   invest-sandbox:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: invest-sandbox:latest
+    working_dir: /workspace
+    command: ["python3", "/workspace/sandbox/fetch_data.py", "--help"]
+    environment:
+      ALPACA_API_KEY: "${ALPACA_API_KEY:-}"
+      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY:-}"
+      FRED_API_KEY: "${FRED_API_KEY:-}"
     volumes:
-      # Mount the org dir so scripts/config persist
       - ./sandbox:/workspace/sandbox
       - ./config:/workspace/config
-      # Persist data (journal, ledger, cache) outside container
       - invest-data:/workspace/data
       - invest-cache:/workspace/workspace/cache
-    working_dir: /workspace
-    environment:
-      # Pass through credentials (set in shell env or .env file)
-      - ALPACA_API_KEY=${ALPACA_API_KEY:-}
-      - ALPACA_SECRET_KEY=${ALPACA_SECRET_KEY:-}
-      - FRED_API_KEY=${FRED_API_KEY:-}
-    # Default command shows fetch_data help
-    command: ["python3", "/workspace/sandbox/fetch_data.py", "--help"]
 
 volumes:
   invest-data:

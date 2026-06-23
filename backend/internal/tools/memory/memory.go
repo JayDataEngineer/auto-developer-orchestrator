@@ -101,11 +101,20 @@ func (s *Store) Write(content string) error {
 
 // Tool implements core.Tool for updating project memory.
 type Tool struct {
-	store *Store
+	store    *Store
+	landmine *LandmineChecker // optional; nil = no landmine check
 }
 
+// NewTool constructs a memory tool without diligence landmine checking.
+// Use NewToolWithLandmine for the production wiring.
 func NewTool(store *Store) *Tool {
 	return &Tool{store: store}
+}
+
+// NewToolWithLandmine wires the diligence landmine checker. Pass nil for
+// checker to disable; this is the path used by tests that don't care.
+func NewToolWithLandmine(store *Store, checker *LandmineChecker) *Tool {
+	return &Tool{store: store, landmine: checker}
 }
 
 func (t *Tool) Name() string        { return "update_memory" }
@@ -131,6 +140,19 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 
 	if section == "" {
 		section = "Project Facts"
+	}
+
+	// Diligence landmine check — runs before the write. In interactive mode
+	// this surfaces an ask_user; in non-interactive mode (job/sub-agent) it
+	// hard-denies with a rephrasing suggestion.
+	if t.landmine != nil {
+		matches := t.landmine.Check(key)
+		if len(matches) > 0 {
+			proceed, reason := t.landmine.Approve(ctx, key, matches)
+			if !proceed {
+				return nil, core.NewToolError("update_memory", reason)
+			}
+		}
 	}
 
 	existing := t.store.Read()

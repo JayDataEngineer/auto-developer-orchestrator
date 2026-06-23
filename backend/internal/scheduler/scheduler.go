@@ -115,6 +115,7 @@ type Job struct {
 	// Sandbox-only mode: job can only run bash/file ops inside its sandbox.
 	// Blocks delegation, MCP, browser, desktop, memory, skills, etc.
 	SandboxOnly bool `json:"sandboxOnly,omitempty"`
+	TimeoutSeconds int
 
 	// Inbound webhook token — POST /api/scheduler/webhook/{token} triggers this job
 	WebhookToken string `json:"webhookToken,omitempty"`
@@ -430,6 +431,7 @@ func jobToDB(j *Job) *storage.ScheduledJob {
 		ContextFrom:            string(contextFrom),
 		SandboxOnly:            j.SandboxOnly,
 		WebhookToken:           j.WebhookToken,
+			TimeoutSeconds:         j.TimeoutSeconds,
 		CreatedAt:              createdAt,
 		UpdatedAt:              updatedAt,
 	}
@@ -467,6 +469,7 @@ func dbToJob(d *storage.ScheduledJob) *Job {
 		DurationMs:             d.DurationMs,
 		SandboxOnly:            d.SandboxOnly,
 		WebhookToken:           d.WebhookToken,
+			TimeoutSeconds:         d.TimeoutSeconds,
 	}
 	if d.LastRunAt != nil {
 		j.LastRunAt = *d.LastRunAt

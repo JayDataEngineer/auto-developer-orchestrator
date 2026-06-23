@@ -15,6 +15,41 @@ manifesto = "MANIFESTO.md"
 staff_root = "roles"
 skills_dir = "skills"
 
+[sandbox]
+image = "invest-sandbox:latest"
+working_dir = "/workspace"
+command = ["python3", "/workspace/sandbox/fetch_data.py", "--help"]
+network_mode_disabled = true
+
+[sandbox.build]
+context = "."
+dockerfile = "Dockerfile"
+
+[sandbox.env]
+ALPACA_API_KEY = "${ALPACA_API_KEY:-}"
+ALPACA_SECRET_KEY = "${ALPACA_SECRET_KEY:-}"
+FRED_API_KEY = "${FRED_API_KEY:-}"
+
+[[sandbox.volumes]]
+type = "bind"
+host = "./sandbox"
+container = "/workspace/sandbox"
+
+[[sandbox.volumes]]
+type = "bind"
+host = "./config"
+container = "/workspace/config"
+
+[[sandbox.volumes]]
+type = "volume"
+name = "invest-data"
+container = "/workspace/data"
+
+[[sandbox.volumes]]
+type = "volume"
+name = "invest-cache"
+container = "/workspace/workspace/cache"
+
 [[schedules]]
 name = "morning_scan"
 cron = "30 9 * * 1-5"

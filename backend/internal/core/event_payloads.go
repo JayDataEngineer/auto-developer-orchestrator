@@ -287,3 +287,55 @@ type ProviderRetryData struct {
 }
 
 func (ProviderRetryData) seal() {}
+
+// --- Safeguard fallback (PR5) ---
+
+// SafeguardFallbackData is emitted when a destructive-shell pattern matches
+// in a tool call. The frontend renders a banner; the audit trail records it.
+// When OriginalModel == FallbackModel the request was not re-routed (e.g.,
+// no fallback configured); the event still fires so the signal is visible.
+type SafeguardFallbackData struct {
+	PatternID      string `json:"patternId,omitempty"`       // e.g. "destructive-shell"
+	Description    string `json:"description,omitempty"`     // human-readable pattern desc
+	MatchedText    string `json:"matchedText,omitempty"`     // the snippet that matched (truncated)
+	OriginalModel  string `json:"originalModel,omitempty"`   // model the request started on
+	FallbackModel  string `json:"fallbackModel,omitempty"`   // model the request was re-routed to
+	AgentName      string `json:"agentName,omitempty"`       // which agent triggered it
+	ToolName       string `json:"toolName,omitempty"`        // which tool the args came from
+}
+
+func (SafeguardFallbackData) seal() {}
+
+// --- Resource conflict (PR6) ---
+
+// ResourceConflictData is emitted when two concurrent agents write to the
+// same file. Pure audit signal today; future use may serialize the writes.
+type ResourceConflictData struct {
+	Path   string `json:"path,omitempty"`
+	AgentA string `json:"agentA,omitempty"`
+	AgentB string `json:"agentB,omitempty"`
+}
+
+func (ResourceConflictData) seal() {}
+
+// --- Peer messaging (PR6) ---
+
+// AgentMessageData is emitted when one agent sends a message to another
+// via send_message. Visible in the agent-messages panel in the TUI.
+type AgentMessageData struct {
+	FromAgent string `json:"fromAgent,omitempty"`
+	ToAgent   string `json:"toAgent,omitempty"`
+	Content   string `json:"content,omitempty"`
+}
+
+func (AgentMessageData) seal() {}
+
+// AgentStatusData is emitted when an agent transitions between working/idle/
+// terminated. Wakeable async delegation relies on this for state visibility.
+type AgentStatusData struct {
+	AgentID string `json:"agentId,omitempty"`
+	State   string `json:"state,omitempty"` // working | idle | terminated
+	Reason  string `json:"reason,omitempty"`
+}
+
+func (AgentStatusData) seal() {}

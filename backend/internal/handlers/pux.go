@@ -391,20 +391,24 @@ func (h *PuxHandler) Prompt(w http.ResponseWriter, r *http.Request) {
 		h.llamaEngine = selEngine
 	}
 
-	// 2) Inline model override from request (e.g. CLI --model deepseek/deepseek-v4-flash)
+	// 2) Inline model override from request (e.g. CLI --model deepseek-chat)
+	// Inline override takes priority over the logic default — the user explicitly
+	// asked for this model. We do NOT fall through to step 3 when an inline model
+	// was requested and successfully resolved.
+	inlineResolved := false
 	if req.Model != "" && (h.llamaEngine == nil || h.llamaEngine.ModelName() != req.Model) {
 		if eng := h.resolveEngineForModel(req.Model); eng != nil {
 			h.selectedEngines[key] = eng
 			h.llamaEngine = eng
+			inlineResolved = true
 		} else {
 			h.log.Warn("Model not found in any provider, falling back to current engine",
 				zap.String("model", req.Model))
 		}
 	}
 
-	// 3) Use logic default — always preferred over selectedEngines/local/cluster.
-	// Not stored in selectedEngines so default changes take effect on next prompt.
-	if h.defaultLogic != "" {
+	// 3) Logic default — fallback only. Skip if an inline override was honored.
+	if !inlineResolved && h.defaultLogic != "" {
 		if eng := h.resolveEngineForModel(h.defaultLogic); eng != nil {
 			h.llamaEngine = eng
 		}

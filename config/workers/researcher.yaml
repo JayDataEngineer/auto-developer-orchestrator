@@ -4,3 +4,4 @@ capabilities:
   - research
 max_rounds: 15
 temperature: 0.3
+thinking: true

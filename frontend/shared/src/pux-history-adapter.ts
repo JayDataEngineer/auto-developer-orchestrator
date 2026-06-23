@@ -235,6 +235,28 @@ export function restoreAgentsFromHistory(data: StoredMessage[]) {
 	}
 }
 
+// ── Shared history post-processing ──
+
+/**
+ * Apply the three post-processing steps to a stored-messages response:
+ *   1. restoreAgentsFromHistory — rebuild sub-agent state in the Zustand store
+ *   2. estimateContextFromHistory — seed the context indicator
+ *   3. storedMessagesToThreadLikes — convert to ThreadMessageLike[]
+ *
+ * Used by both the ThreadHistoryAdapter (TUI) and the web's imperative
+ * runtime.thread.reset() path. Any future post-processing added here
+ * automatically applies to both frontends — without it, the two paths
+ * drift (web was missing sub-agent restoration + context estimation).
+ *
+ * Returns the converted messages, or null if `data` is empty/invalid.
+ */
+export function processHistoryResponse(data: unknown): ThreadLike[] | null {
+	if (!Array.isArray(data) || data.length === 0) return null;
+	restoreAgentsFromHistory(data);
+	estimateContextFromHistory(data);
+	return storedMessagesToThreadLikes(data);
+}
+
 // ── Adapter ──
 
 export function createPuxHistoryAdapter(): ThreadHistoryAdapter {
@@ -257,18 +279,8 @@ export function createPuxHistoryAdapter(): ThreadHistoryAdapter {
 				}
 
 				const data: StoredMessage[] = await resp.json();
-				if (!Array.isArray(data) || data.length === 0) {
-					return { messages: [] };
-				}
-
-				// Reconstruct sub-agent state from persisted traces
-				restoreAgentsFromHistory(data);
-
-				// Estimate context metrics from loaded history so the status bar
-				// shows context usage immediately (not just after next agent_end)
-				estimateContextFromHistory(data);
-
-				const messages = storedMessagesToThreadLikes(data);
+				const messages = processHistoryResponse(data);
+				if (!messages) return { messages: [] };
 
 				// Import dynamically to avoid circular deps
 				const { ExportedMessageRepository } = await import(

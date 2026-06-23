@@ -37,3 +37,11 @@ Read the playthrough state at `/tmp/tech_noir_playthrough/playthrough_state.json
 - If screenshot is empty or shows only the title screen, say so — the playthrough may not have progressed.
 - Never modify game code or art pipeline.
 - Report test failures as-is. Include exit codes and error output.
+
+## Skills (reference)
+
+- **MEDIA_QA** — the kernel's `media-analysis` MCP server for image description, OCR, object detection, NSFW classification. Use these tools to score screenshots and write `vibe.json` for the studio-director.
+
+When the studio-director delegates a QA cycle, write your output to `/sandbox/workspace/qa/cycle-N/vibe.json` per the MEDIA_QA schema. The `recommendation` field (`iterate` | `yield` | `abort`) is what drives the loop — don't bury it.
+
+For screenshots, use the godot_client bridge if it's up, otherwise the existing `godot_test.py evaluate` harness captures them to `/tmp/tech_noir_playthrough/`.

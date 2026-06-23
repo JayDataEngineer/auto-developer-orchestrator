@@ -66,7 +66,11 @@ func (s *Scheduler) executeJob(jobID string) {
 	var err error
 	if s.promptSender != nil {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
+			timeoutSec := job.TimeoutSeconds
+			if timeoutSec <= 0 {
+				timeoutSec = 600
+			}
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 		defer cancel()
 		output, err = s.promptSender(ctx, job.Project, job.AgentID, effectiveMessage, job.Model, job.Org, job.AutoBranch, job.AutoMerge, job.SandboxOnly)
 	} else {

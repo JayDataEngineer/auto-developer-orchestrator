@@ -155,6 +155,12 @@ func (s *Session) buildRequest(opts GenerateOptions) ChatCompletionRequest {
 		Stream:          true,
 		ResponseFormat:  opts.ResponseFormat,
 	}
+	// Extended thinking: only meaningful for local llama-server (sends
+	// chat_template_kwargs.enable_thinking=true). Cloud providers sanitize
+	// this field out — see sanitizeRequest in llm_client.go.
+	if opts.Thinking && !s.engine.IsCloud() {
+		req.ChatTemplateKwargs = map[string]any{"enable_thinking": true}
+	}
 	if s.engine.IsCloud() {
 		req.Model = s.engine.ModelName()
 		req.SessionID = ""

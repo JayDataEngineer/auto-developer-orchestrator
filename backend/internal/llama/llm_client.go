@@ -440,6 +440,12 @@ type ChatCompletionRequest struct {
 	CachePrompt bool   `json:"cache_prompt,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`
 
+	// ChatTemplateKwargs is llama-server-specific. Map is serialized as
+	// `chat_template_kwargs` in the request body. Used for enable_thinking,
+	// which switches models with a <think> token (Qwen, Gemma 4) into
+	// extended-thinking mode. Sanitized out for cloud providers.
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
+
 	// Stream mode
 	Stream bool `json:"stream,omitempty"`
 
@@ -612,6 +618,19 @@ func (e *LLMClient) prepareMessages(messages []Message) []Message {
 		}
 	}
 
+	// OpenAI spec requires tool_calls[].type == "function". Some providers
+	// (DeepSeek, strict OpenAI) reject requests with empty type fields.
+	// Default empty Type to "function" for all cloud providers.
+	for i := range messages {
+		if messages[i].Role == "assistant" && len(messages[i].ToolCalls) > 0 {
+			for j := range messages[i].ToolCalls {
+				if messages[i].ToolCalls[j].Type == "" {
+					messages[i].ToolCalls[j].Type = "function"
+				}
+			}
+		}
+	}
+
 	// DeepSeek (via OpenRouter) only accepts user and assistant roles.
 	// Convert any system messages to user messages, prefixing the content
 	// so the model still receives the instructions.
@@ -628,7 +647,74 @@ func (e *LLMClient) prepareMessages(messages []Message) []Message {
 		messages = mergeAdjacentSameRole(messages)
 	}
 
+	// Strict OpenAI providers (DeepSeek, OpenAI itself) reject conversations
+	// where an assistant message has tool_calls but not every tool_call_id
+	// has a matching tool result. This happens when tool execution errored
+	// before producing a result, or context compaction dropped results.
+	// Synthesize placeholder tool results for any missing tool_call_ids.
+	messages = ensureToolResults(messages)
+
 	return messages
+}
+
+// ensureToolResults walks the message list and ensures every assistant
+// tool_call has a matching tool result message following it. If a tool_call
+// has no result, a placeholder is inserted so strict OpenAI providers don't
+// reject the request.
+func ensureToolResults(msgs []Message) []Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	out := make([]Message, 0, len(msgs)+4)
+	seenToolCallIDs := map[string]bool{}
+	for i, m := range msgs {
+		out = append(out, m)
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			// Collect IDs this assistant message expects results for.
+			expected := make([]string, 0, len(m.ToolCalls))
+			for _, tc := range m.ToolCalls {
+				if tc.ID != "" {
+					expected = append(expected, tc.ID)
+				}
+			}
+			if len(expected) == 0 {
+				continue
+			}
+			// Find which of these IDs already have tool results in subsequent messages.
+			answered := map[string]bool{}
+			for j := i + 1; j < len(msgs); j++ {
+				if msgs[j].Role == "tool" {
+					if containsString(expected, msgs[j].ToolCallID) {
+						answered[msgs[j].ToolCallID] = true
+					}
+				} else if msgs[j].Role == "assistant" || msgs[j].Role == "user" {
+					// Reached next turn — stop looking.
+					break
+				}
+			}
+			// Synthesize placeholders for any unanswered IDs.
+			for _, id := range expected {
+				if !answered[id] && !seenToolCallIDs[id] {
+					out = append(out, Message{
+						Role:       "tool",
+						ToolCallID: id,
+						Content:    "[tool execution result missing — synthesized placeholder]",
+					})
+					seenToolCallIDs[id] = true
+				}
+			}
+		}
+	}
+	return out
+}
+
+func containsString(slice []string, s string) bool {
+	for _, x := range slice {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // isDeepSeek returns true if the model is a DeepSeek variant.

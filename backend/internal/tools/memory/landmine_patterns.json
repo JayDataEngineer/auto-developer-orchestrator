@@ -1,0 +1,50 @@
+[
+  {
+    "id": "bypass",
+    "pattern": "\\bbypass\\b",
+    "description": "Encoding a workaround for a check that exists for a reason",
+    "suggestion": "Describe what you're trying to accomplish and why the check is in the way — don't encode the bypass."
+  },
+  {
+    "id": "skip-check",
+    "pattern": "skip\\s+the\\s+(check|review|approval|hook|test|gate|lint|ci|gatekeeper)",
+    "description": "Skipping a verification step",
+    "suggestion": "Explain why the check is unnecessary in this case, not that it should be skipped. If it's truly unnecessary, the explanation is the memory."
+  },
+  {
+    "id": "avoid-check",
+    "pattern": "to\\s+avoid\\s+(the\\s+)?\\s*(check|review|approval|hook|test|gate|lint)",
+    "description": "Avoiding rather than addressing a check",
+    "suggestion": "Describe the tradeoff; explain what the check would catch and why it's not relevant here."
+  },
+  {
+    "id": "get-around",
+    "pattern": "get\\s+around",
+    "description": "Circumvention framing",
+    "suggestion": "Describe the goal directly. 'Get around' implies the obstacle is the problem; usually the obstacle is protecting something."
+  },
+  {
+    "id": "wont-notice",
+    "pattern": "(won't|won’t|will not)\\s+notice",
+    "description": "Assuming the user won't notice a behavior change",
+    "suggestion": "Users notice. Describe the actual behavior and let the user decide."
+  },
+  {
+    "id": "reduce-requirement",
+    "pattern": "reduce\\s+the\\s+requirement|lower\\s+the\\s+bar|weaken\\s+the\\s+(check|gate|requirement)",
+    "description": "Lowering a bar that was set deliberately",
+    "suggestion": "Requirements exist for reasons. If you think the requirement is wrong, explain the tension and surface it to the user."
+  },
+  {
+    "id": "force-push-merge",
+    "pattern": "force\\s+(the\\s+)?(push|merge)|force\\s*-?push",
+    "description": "Encoding force-push/force-merge as a default behavior",
+    "suggestion": "Explain why the history rewrite is the right call in this specific case, not as a default."
+  },
+  {
+    "id": "no-verify",
+    "pattern": "--no-verify|--no-gpg-sign|skip\\s+hooks",
+    "description": "Skipping git hooks or signing",
+    "suggestion": "Hooks exist to catch mistakes. If a hook is firing wrongly, fix the hook — don't encode skipping it."
+  }
+]

@@ -13,7 +13,7 @@ import {
 import { relativeTime } from "@pux/shared";
 import { cn } from "@/lib/utils";
 import { webChatAdapter } from "@/lib/pux-chat-adapter";
-import { createPuxHistoryAdapter, storedMessagesToThreadLikes } from "@/lib/pux-history-adapter";
+import { createPuxHistoryAdapter, processHistoryResponse } from "@/lib/pux-history-adapter";
 import { getFetch, apiUrl } from "@pux/shared";
 import { Thread } from "@/components/assistant-ui/thread";
 import { VNCViewer } from "@/components/workbench/vnc-viewer";
@@ -97,7 +97,8 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 	});
 
 	// When the active conversation changes, reset the thread and reload history.
-	// This avoids the AuiProvider crash caused by key-based remounting.
+	// Uses processHistoryResponse so sub-agent state restoration and context
+	// estimation run here too — matching the TUI's history adapter behavior.
 	const conversationKey = usePuxStore((s) => s.conversationKey);
 	const prevKeyRef = useRef(conversationKey);
 	useEffect(() => {
@@ -121,11 +122,11 @@ function PuxRuntimeProvider({ children }: { children: React.ReactNode }) {
 					return;
 				}
 				const data = await resp.json();
-				if (!Array.isArray(data) || data.length === 0) {
+				const messages = processHistoryResponse(data);
+				if (!messages) {
 					runtime.thread.reset();
 					return;
 				}
-				const messages = storedMessagesToThreadLikes(data);
 				runtime.thread.reset(messages);
 			} catch {
 				runtime.thread.reset();

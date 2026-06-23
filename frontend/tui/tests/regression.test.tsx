@@ -10,10 +10,15 @@ import React from "react";
 import { Text, Box } from "ink";
 import { render } from "ink-testing-library";
 
-vi.mock("@assistant-ui/tap/react-shim", () => ({
-	useDebugValue: () => {},
-	useSyncExternalStore: (_sub: any, getSnapshot: any) => getSnapshot(),
-}));
+vi.mock("@assistant-ui/tap/react-shim", async () => {
+	const React = await import("react");
+	return {
+		...React,
+		useSyncExternalStore: (_sub: any, getSnapshot: any) => getSnapshot(),
+		useEffectEvent: (cb: any) => cb,
+		useDebugValue: () => {},
+	};
+});
 
 import { usePuxStore } from "@pux/shared";
 

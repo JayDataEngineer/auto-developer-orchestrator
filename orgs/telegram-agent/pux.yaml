@@ -4,3 +4,7 @@ description: Personal Telegram automation — post to Saved Messages, read menti
 manifesto: MANIFESTO.md
 staff_root: roles
 skills_dir: skills
+sandbox:
+  image: pux-sandbox:latest
+  runtime_class: runc
+  warm_pool: 1

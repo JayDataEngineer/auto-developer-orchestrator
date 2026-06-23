@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 )
 
@@ -17,10 +18,11 @@ type Executor interface {
 
 // Tool implements core.Tool for bash execution.
 type Tool struct {
-	executor  Executor
-	taskMgr   *core.TaskManager
-	workDir   string
-	validator *Validator // nil = no command restriction
+	executor        Executor
+	taskMgr         *core.TaskManager
+	workDir         string
+	validator       *Validator // nil = no command restriction
+	secretResolver  func(string) string // optional: resolves <secret>domain.key</secret> before exec
 }
 
 // New creates a new bash tool with default command restrictions.
@@ -31,6 +33,15 @@ func New(exec Executor) *Tool {
 // NewWithTaskManager creates a bash tool with background task support and default restrictions.
 func NewWithTaskManager(exec Executor, taskMgr *core.TaskManager, workDir string) *Tool {
 	return &Tool{executor: exec, taskMgr: taskMgr, workDir: workDir, validator: NewDefaultValidator()}
+}
+
+// WithSecretResolver attaches a secret-resolver function. When set, the tool
+// resolves <secret>domain.key</secret> placeholders in commands BEFORE exec,
+// so the real value never reaches the model's context. The resolver receives
+// the raw command and returns the resolved command.
+func (t *Tool) WithSecretResolver(r func(string) string) *Tool {
+	t.secretResolver = r
+	return t
 }
 
 func (t *Tool) Name() string { return "bash" }
@@ -66,6 +77,14 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	}
 	if cmd == "" {
 		return nil, core.NewToolError("bash", "missing required parameter 'command'")
+	}
+
+	// Resolve <secret>domain.key</secret> placeholders BEFORE validation/exec.
+	// The real value is substituted in the command string, runs in the shell,
+	// and never enters model context (placeholders aren't scrubbed because they
+	// don't match secret patterns; real values in stdout still get scrubbed).
+	if t.secretResolver != nil {
+		cmd = t.secretResolver(cmd)
 	}
 
 	// Validate command against restriction rules (defense-in-depth)
@@ -156,11 +175,16 @@ func (t *Tool) formatTaskResult(task *core.BackgroundTask) (any, error) {
 		result += msg
 	}
 
+	// Scrub secrets from output BEFORE returning to model — defense-in-depth.
+	// Prevents leaks like `cat .env` (if hard-deny missed) → key in stdout →
+	// model pastes it into a delegate_to task arg → exfiltrated to LLM provider.
+	result = sensitive.ScrubText(result)
+
 	if task.Status == core.TaskFailed {
 		return map[string]any{
 			"output":   result,
 			"exitCode": task.ExitCode,
-			"error":    task.Error,
+			"error":    sensitive.ScrubText(task.Error),
 		}, nil
 	}
 
@@ -179,6 +203,9 @@ func (t *Tool) executeSync(ctx context.Context, cmd string) (any, error) {
 	if msg := truncate.FormatBashTruncation(tr); msg != "" {
 		result += msg
 	}
+
+	// Scrub secrets BEFORE returning — see formatTaskResult for rationale.
+	result = sensitive.ScrubText(result)
 
 	return map[string]any{"output": result}, nil
 }

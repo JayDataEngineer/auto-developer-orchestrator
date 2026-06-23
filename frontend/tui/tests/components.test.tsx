@@ -247,11 +247,16 @@ vi.mock("node:module", () => ({
 	createRequire: () => () => ({ version: "0.1.0-test" }),
 }));
 
-// ── Mock @assistant-ui/tap/react-shim (version mismatch: store expects tap/react-shim which doesn't exist) ──
-vi.mock("@assistant-ui/tap/react-shim", () => ({
-	useDebugValue: () => {},
-	useSyncExternalStore: (_sub: any, getSnapshot: any) => getSnapshot(),
-}));
+// ── Mock @assistant-ui/tap/react-shim (re-export React, matching the real shim's `export * from "react"`) ──
+vi.mock("@assistant-ui/tap/react-shim", async () => {
+	const React = await import("react");
+	return {
+		...React,
+		useSyncExternalStore: (_sub: any, getSnapshot: any) => getSnapshot(),
+		useEffectEvent: (cb: any) => cb,
+		useDebugValue: () => {},
+	};
+});
 
 // ═══════════════════════════════════════════════════════
 // IMPORTS

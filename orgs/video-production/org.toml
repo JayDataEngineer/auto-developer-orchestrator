@@ -10,6 +10,39 @@ manifesto = "MANIFESTO.md"
 staff_root = "roles"
 skills_dir = "skills"
 
+[sandbox]
+service_name = "video-producer"
+container_name = "research-video-producer"
+restart = "unless-stopped"
+network_mode_disabled = true
+
+[sandbox.build]
+context = "."
+dockerfile = "Dockerfile"
+
+[sandbox.env]
+VIDEO_PRODUCTION_ROOT = "/workspace/video-productions"
+KOKORO_VOICE = "af_heart"
+KOKORO_LANG_CODE = "a"
+
+[sandbox.healthcheck]
+test = ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+interval = "30s"
+timeout = "5s"
+retries = 3
+start_period = "120s"
+
+[[sandbox.volumes]]
+type = "volume"
+name = "video_prod_workspace"
+docker_name = "research_video_prod_workspace"
+container = "/workspace/video-productions"
+
+[[sandbox.networks]]
+name = "deep-research"
+docker_name = "deep-research-engine_default"
+external = true
+
 [[roles]]
 name = "video-producer"
 description = "Video Producer — Full-stack educational video production: research, storyboard, Manim/ffmpeg visuals, Kokoro TTS narration, QC, archival, and delivery. Produces explainers, paper walkthroughs, lecture recaps, daily summaries."

@@ -233,6 +233,24 @@ func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 			"action": p.Action,
 		}}
 
+	case llamaeng.EventTypeProviderRetry:
+		// Pass through payload map-as-data so the frontend retry banner has
+		// everything it needs (attempt, maxRetry, backoffMs, error).
+		return &sseEvent{Type: "provider_retry", Data: payload}
+
+	case llamaeng.EventTypeSafeguardFallback:
+		// Destructive-shell pattern matched. Frontend renders a warning banner.
+		return &sseEvent{Type: "safeguard_fallback", Data: payload}
+
+	case llamaeng.EventTypeResourceConflict:
+		return &sseEvent{Type: "resource_conflict", Data: payload}
+
+	case llamaeng.EventTypeAgentMessage:
+		return &sseEvent{Type: "agent_message", Data: payload}
+
+	case llamaeng.EventTypeAgentStatus:
+		return &sseEvent{Type: "agent_status", Data: payload}
+
 	default:
 		return nil
 	}

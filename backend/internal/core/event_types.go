@@ -33,5 +33,9 @@ const (
 	EventTypeTaskBackground  AgentEventType = "task_background"  // foreground → background conversion
 	EventTypeContextUpdate   AgentEventType = "context_update"   // per-round context metrics
 	EventTypeMouseAction     AgentEventType = "mouse_action"     // visual mouse overlay for sandbox
-	EventTypeProviderRetry   AgentEventType = "provider_retry"   // LLM provider retrying after transient error
+	EventTypeProviderRetry     AgentEventType = "provider_retry"     // LLM provider retrying after transient error
+	EventTypeSafeguardFallback AgentEventType = "safeguard_fallback"  // destructive pattern detected → routed/flagged
+	EventTypeResourceConflict  AgentEventType = "resource_conflict"   // two agents touched the same file (PR6)
+	EventTypeAgentMessage      AgentEventType = "agent_message"       // peer-to-peer message between agents (PR6)
+	EventTypeAgentStatus       AgentEventType = "agent_status"        // agent state changed: working/idle/terminated (PR6)
 )

@@ -20,8 +20,8 @@ var ScrubPatterns = []struct {
 	{regexp.MustCompile(`gh[posur]_[A-Za-z0-9_]{36,}`), "GITHUB_TOKEN"},
 	// Generic API keys — catches common patterns like "api_key: sk-..."
 	{regexp.MustCompile(`(?i)(?:api[_-]?key|apikey|access[_-]?key)\s*[=:]\s*["']?([A-Za-z0-9_\-]{20,})["']?`), "API_KEY"},
-	// OpenRouter / OpenAI keys (sk-...)
-	{regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`), "API_KEY"},
+	// OpenRouter / OpenAI keys (sk-...). Includes dashes & underscores so sk-or-v1-... matches.
+	{regexp.MustCompile(`sk-[a-zA-Z0-9\-_]{20,}`), "API_KEY"},
 	// Anthropic keys (sk-ant-...)
 	{regexp.MustCompile(`sk-ant-[a-zA-Z0-9\-]{20,}`), "ANTHROPIC_KEY"},
 	// Bearer tokens in Authorization headers

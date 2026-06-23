@@ -24,7 +24,7 @@ func NewInfisicalClient() *InfisicalClient {
 		// Check if the hub is reachable — if so, default to cluster Infisical
 		hub := os.Getenv("MCP_HUB_ENDPOINT")
 		if hub == "" {
-			hub = "http://100.86.69.57:30080"
+			return nil
 		}
 		url = hub + "/infisical"
 	}

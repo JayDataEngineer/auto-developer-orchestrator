@@ -35,11 +35,6 @@ type LangfuseClient struct {
 func NewLangfuseClient() *LangfuseClient {
 	host := os.Getenv("LANGFUSE_HOST")
 	if host == "" {
-		if os.Getenv("LANGFUSE_PUBLIC_KEY") != "" || os.Getenv("LANGFUSE_SECRET_KEY") != "" {
-			host = "http://100.86.69.57:30080/langfuse"
-		}
-	}
-	if host == "" {
 		return nil // disabled
 	}
 	c := &LangfuseClient{

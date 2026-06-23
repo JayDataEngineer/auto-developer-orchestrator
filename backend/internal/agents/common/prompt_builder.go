@@ -44,6 +44,7 @@ type PromptContext struct {
 	OrgRoles       map[string]*AgentRole
 	KernelRoles    map[string]*AgentRole
 	MCPInstructions map[string]string // server prefix → instruction text
+	Sandboxed      bool // true when CTO runs inside Docker sandbox — affects path rendering
 }
 
 // PromptBuilder assembles the CTO system prompt from cached sections.
@@ -124,7 +125,7 @@ func (b *PromptBuilder) Build(ctx *PromptContext) string {
 			boundaryInserted = true
 			// Org header is the first dynamic section
 			if ctx.Org != nil {
-				parts = append(parts, b.renderOrgManifesto(ctx.Org))
+				parts = append(parts, b.renderOrgManifesto(ctx))
 			}
 		}
 
@@ -134,20 +135,49 @@ func (b *PromptBuilder) Build(ctx *PromptContext) string {
 	// No non-stable content — insert boundary + org at the end
 	if !boundaryInserted && ctx.Org != nil {
 		parts = append(parts, DynamicBoundary)
-		parts = append(parts, b.renderOrgManifesto(ctx.Org))
+		parts = append(parts, b.renderOrgManifesto(ctx))
 	}
 
 	return strings.Join(parts, "\n\n")
 }
 
 // renderOrgManifesto produces the org header section.
-func (b *PromptBuilder) renderOrgManifesto(org *OrgManifest) string {
+func (b *PromptBuilder) renderOrgManifesto(ctx *PromptContext) string {
+	org := ctx.Org
 	var header strings.Builder
 	fmt.Fprintf(&header, "# Organization: %s\n%s", org.Name, org.Description)
 	if manifesto := org.ManifestoContent(); manifesto != "" {
 		fmt.Fprintf(&header, "\n\n## Manifesto\n%s", manifesto)
 	}
+	dataDir := org.DataDirPath()
+	if dataDir != "" {
+		// When the CTO runs inside the sandbox, render the container-relative path
+		// instead of the host path. The org workspace is mounted at /sandbox/workspace/
+		// so the host path `<orgDir>/data/` becomes `/sandbox/workspace/data/` inside.
+		renderedPath := dataDir
+		if ctx.Sandboxed && org.baseDir != "" {
+			renderedPath = "/sandbox/workspace/" + relPathFromBase(org.baseDir, dataDir)
+		}
+		fmt.Fprintf(&header, "\n\n## Org Data Directory\nInput data lives at: `%s`\n"+
+			"When the user references data, a corpus, an export, or a dump WITHOUT a path, "+
+			"look here FIRST before asking them where it is. List what's there and pick the "+
+			"most recent / most relevant entry.", renderedPath)
+	}
 	return header.String()
+}
+
+// relPathFromBase strips the base dir prefix from path, returning a relative path.
+// If path isn't under base, returns the original path.
+func relPathFromBase(base, path string) string {
+	if !strings.HasPrefix(path, base+"/") && path != base {
+		return path
+	}
+	rel := strings.TrimPrefix(path, base)
+	rel = strings.TrimPrefix(rel, "/")
+	if rel == "" {
+		return "."
+	}
+	return rel
 }
 
 // getStable loads a stable section from file, using cache if unchanged.
@@ -396,6 +426,14 @@ func ResetGlobalBuilder() {
 // if config/prompt_sections/ exists, otherwise falls back to the legacy template.
 // Uses a singleton PromptBuilder so the cache persists across calls.
 func BuildOrchestratorPromptV2(tools []core.Tool, sandboxID, projectContext, skills string, org *OrgManifest, orgRoles map[string]*AgentRole) string {
+	return BuildOrchestratorPromptV2WithCtx(tools, sandboxID, projectContext, skills, org, orgRoles, false)
+}
+
+// BuildOrchestratorPromptV2WithCtx is like BuildOrchestratorPromptV2 but accepts
+// a sandboxed flag. When true, paths in the org manifesto render container-relative
+// (e.g. /sandbox/workspace/data/ instead of /home/.../org/data/) because the CTO
+// runs inside the sandbox container.
+func BuildOrchestratorPromptV2WithCtx(tools []core.Tool, sandboxID, projectContext, skills string, org *OrgManifest, orgRoles map[string]*AgentRole, sandboxed bool) string {
 	configDir := FindKernelConfigDir()
 
 	// Check if section pipeline is available
@@ -422,6 +460,7 @@ func BuildOrchestratorPromptV2(tools []core.Tool, sandboxID, projectContext, ski
 		OrgRoles:        orgRoles,
 		KernelRoles:     LoadAgentRoles(),
 		MCPInstructions: MCPInstructionsMap(),
+		Sandboxed:       sandboxed,
 	}
 
 	return globalBuilder.Build(ctx)

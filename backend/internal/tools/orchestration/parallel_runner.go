@@ -103,6 +103,11 @@ type RunnerConfig struct {
 	PermDecisions *core.DecisionRegistry
 	ToolPerms     *perms.ToolPermissionConfig
 	BashRules     *perms.BashRuleStore
+	// NonInteractive, when true, marks sub-agents as running without a human
+	// approver. The permission hook will auto-approve "ask" patterns instead
+	// of waiting 5min for a decision that will never arrive.
+	// Forced true for sub-agents regardless — they're never directly interactive.
+	NonInteractive bool
 
 	// Sub-agent hook dependencies — used to resolve named hooks from worker YAML
 	HookDeps hooks.HookDeps
@@ -118,6 +123,16 @@ type RunnerConfig struct {
 	// surface on the orchestrator's stream. Without this, the overlay stays
 	// empty because sub-agent events are the only source of mouse_action.
 	MouseCoordinateResolver func(toolName string, args map[string]any) (normX, normY float64, action string)
+
+	// Subscriber is the SSE channel forwarded to per-agent message bus
+	// emissions. When nil, agent_message events are dropped silently.
+	Subscriber chan<- core.AgentEvent
+
+	// Bus is an externally-provided message bus shared with the CTO's
+	// messaging tools. When nil, the runner constructs its own (the CTO
+	// then has no peers to talk to). Pass the same bus used to construct
+	// the CTO's MessagingTools to keep them on the same channel.
+	Bus *MessageBus
 }
 
 // ParallelRunner implements DelegateRunner with goroutine-based parallelism.
@@ -131,6 +146,8 @@ type ParallelRunner struct {
 	liveAgents         map[string]*liveAgent // kept-alive sub-agents for continuation
 	completedSnapshots map[string]string     // agentRef → snapshotID for auto-accepted delegates (enables revert)
 	spill              *ctxpkg.SpillStore    // unified spill store for sub-agent result offloading
+	bus                *MessageBus           // peer-to-peer messaging between sub-agents + CTO
+	conflicts          *ConflictTracker      // turf-war detection for file_write overlap
 }
 
 // asyncTask is a single in-flight async sub-agent.
@@ -178,13 +195,47 @@ func NewParallelRunner(cfg RunnerConfig) *ParallelRunner {
 		spill = ctxpkg.NewSpillStoreWithSandbox(hostDir, sandboxDir)
 	}
 
+	// Use externally-provided bus when available so the CTO + sub-agents
+	// share one channel; otherwise construct an isolated bus (CTO won't be
+	// able to message sub-agents, but the runner still works for delegate_async).
+	bus := cfg.Bus
+	if bus == nil {
+		bus = NewMessageBus(16, cfg.Subscriber)
+	}
+
 	return &ParallelRunner{
 		cfg:                cfg,
 		tasks:              make(map[string]*asyncTask),
 		liveAgents:         make(map[string]*liveAgent),
 		completedSnapshots: make(map[string]string),
 		spill:              spill,
+		bus:                bus,
+		conflicts:          NewConflictTracker(cfg.Subscriber),
 	}
+}
+
+// MessageBus returns the runner's peer-to-peer messaging bus. The CTO and
+// any sub-agent that wants send_message/wait_for_message tools should be
+// wired against this same instance.
+func (r *ParallelRunner) MessageBus() *MessageBus { return r.bus }
+
+// RegisterAgent registers an agent on the message bus. Call on sub-agent
+// start. The CTO should also register itself (typically as "cto") so
+// sub-agents can send back clarifications.
+func (r *ParallelRunner) RegisterAgent(agentID string) {
+	if r.bus == nil {
+		return
+	}
+	r.bus.Register(agentID)
+}
+
+// UnregisterAgent removes an agent from the bus. Call on sub-agent exit.
+// Undelivered messages in the agent's queue are dropped.
+func (r *ParallelRunner) UnregisterAgent(agentID string) {
+	if r.bus == nil {
+		return
+	}
+	r.bus.Unregister(agentID)
 }
 
 // enrichTask prepends relevant context from the parent session to the task.
@@ -485,8 +536,8 @@ func (r *ParallelRunner) Close() {
 
 // RunDelegate runs a synchronous sub-agent.
 // Delegates to RunDelegateTracked with empty agentName and nil delegatesTo.
-func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID, sandboxTier string) (map[string]any, error) {
-	return r.RunDelegateTracked(ctx, task, instructions, "", toolNames, maxRounds, temperature, modelID, sandboxTier, nil, nil)
+func (r *ParallelRunner) RunDelegate(ctx context.Context, task, instructions string, toolNames []string, maxRounds int, temperature float32, modelID, sandboxTier string, thinking bool) (map[string]any, error) {
+	return r.RunDelegateTracked(ctx, task, instructions, "", toolNames, maxRounds, temperature, modelID, sandboxTier, nil, nil, thinking)
 }
 
 // RunDivisionDelegate creates a full sub-orchestrator for a division head.
@@ -708,6 +759,14 @@ func (r *ParallelRunner) prepareDelegation(
 		r.cfg.Logger("SCOPED_DELEGATION: sub-agent %q can delegate to %v", agentName, delegatesTo)
 	}
 
+	// Advertise peer-messaging tools (send_message / wait_for_message /
+	// list_peers) so the sub-agent's model can call them. The runtime
+	// implementations are dispatched by messagingExecutor (wired in
+	// buildSubAgent) against the runner-owned bus using agentName as selfID.
+	if r.bus != nil {
+		selectedTools = append(selectedTools, messagingToolSpecs()...)
+	}
+
 	return &delegateSetup{
 		SnapshotID:      snapshotID,
 		AgentName:       agentName,
@@ -804,6 +863,7 @@ func (r *ParallelRunner) buildSubAgent(
 	temperature float32,
 	sandboxTier string,
 	delegatesTo []string,
+	thinking bool,
 ) *builtAgent {
 	// Create raw message store and full context management stack
 	store := &subMsgStore{id: setup.TranscriptID}
@@ -855,6 +915,7 @@ func (r *ParallelRunner) buildSubAgent(
 			Temperature: temperature,
 			TopP:        0.95,
 			TopK:        20,
+			Thinking:    thinking,
 		},
 	}
 
@@ -873,6 +934,12 @@ func (r *ParallelRunner) buildSubAgent(
 			collect:  setup.scopedCollect,
 		}
 	}
+	// Wrap with messaging dispatch: routes send_message / wait_for_message /
+	// list_peers to per-agent tools on the runner-owned bus. No-op if bus nil.
+	executor = newMessagingExecutor(executor, r.bus, setup.AgentName)
+	// Wrap with conflict-tracker observation: records file_write/file_edit
+	// calls so the CTO sees resource_conflict events on parallel overlap.
+	executor = newWriteObservingExecutor(executor, r.conflicts, setup.AgentName)
 	{
 		vExec := vision.NewVisionAwareExecutor(executor, r.cfg.VisionChain, log.New(io.Discard, "", 0))
 		vExec.SetNativeVision(r.cfg.NativeVision)
@@ -912,11 +979,13 @@ func (r *ParallelRunner) buildSubAgent(
 		MaxTokens:              8192,
 		ContextSize:            r.cfg.ContextSize,
 		ProjectDir:             r.cfg.ProjectDir,
-		GenerateOptions:        core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20},
+		GenerateOptions:        core.GenerateOptions{MaxTokens: 8192, Temperature: temperature, TopP: 0.95, TopK: 20, Thinking: thinking},
 		ScratchStore:           r.cfg.ScratchStore,
 		PermDecisions:          r.cfg.PermDecisions,
 		ToolPerms:              r.cfg.ToolPerms,
 		BashRules:              r.cfg.BashRules,
+		// Sub-agents never have a human watching — always non-interactive.
+		NonInteractive:         true,
 		ExtraHooks:             resources.ExtraHooks,
 		ToolResultProcessor:    processor,
 		MouseCoordinateResolver: r.cfg.MouseCoordinateResolver,
@@ -1092,18 +1161,26 @@ func (r *ParallelRunner) finalizeDelegation(
 
 // RunDelegateTracked is the main entry point for synchronous sub-agent delegation.
 // Decomposed into 5 phases: prepare → create resources → build agent → execute → finalize.
-func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string, roleHooks []string) (map[string]any, error) {
+func (r *ParallelRunner) RunDelegateTracked(ctx context.Context, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, sandboxTier string, delegatesTo []string, roleHooks []string, thinking bool) (map[string]any, error) {
 	setup, err := r.prepareDelegation(ctx, task, agentName, instructions, toolNames, delegatesTo)
 	if err != nil {
 		return nil, err
 	}
+
+	// Register on the message bus so the CTO + peers can send to this agent.
+	// Unregister on exit so future agents with the same name don't see stale
+	// messages from a previous run. Clear conflict tracker so the same-named
+	// agent in a later run doesn't trip over stale file_write entries.
+	r.RegisterAgent(agentName)
+	defer r.UnregisterAgent(agentName)
+	defer r.conflicts.Clear(agentName)
 
 	resources, err := r.createSubAgentResources(ctx, task, setup, modelID, toolNames, roleHooks)
 	if err != nil {
 		return nil, err
 	}
 
-	agent := r.buildSubAgent(instructions, setup, resources, maxRounds, temperature, sandboxTier, delegatesTo)
+	agent := r.buildSubAgent(instructions, setup, resources, maxRounds, temperature, sandboxTier, delegatesTo, thinking)
 
 	runRes, bgResult, bg := r.executeAndDrain(ctx, agent, setup, resources, task)
 	if bg {
@@ -1157,13 +1234,21 @@ func (r *ParallelRunner) RunParallel(ctx context.Context, specs []ParallelTaskSp
 				return
 			}
 
+			// Register on bus; defer unregister so siblings can address this
+			// agent by name during the run and any undelivered messages are
+			// dropped when the goroutine exits. Clear conflict tracker so
+			// same-named future agents don't trip on stale entries.
+			r.RegisterAgent(spec.AgentName)
+			defer r.UnregisterAgent(spec.AgentName)
+			defer r.conflicts.Clear(spec.AgentName)
+
 			resources, err := r.createSubAgentResources(ctx, spec.Task, setup, spec.ModelID, spec.Tools, spec.RoleHooks)
 			if err != nil {
 				results[idx] = parallelResult{Index: idx, Err: err}
 				return
 			}
 
-			agent := r.buildSubAgent(spec.Instructions, setup, resources, spec.MaxRounds, spec.Temperature, spec.SandboxTier, spec.DelegatesTo)
+			agent := r.buildSubAgent(spec.Instructions, setup, resources, spec.MaxRounds, spec.Temperature, spec.SandboxTier, spec.DelegatesTo, spec.Thinking)
 
 			runRes, _, bg := r.executeAndDrain(ctx, agent, setup, resources, spec.Task)
 			if bg {
@@ -1446,7 +1531,7 @@ func (r *ParallelRunner) RevertAgent(ctx context.Context, agentRef string) (map[
 }
 
 // RunDelegateAsync launches a sub-agent in a goroutine. Returns immediately.
-func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, delegatesTo []string) (map[string]any, error) {
+func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, instructions, agentName string, toolNames []string, maxRounds int, temperature float32, modelID string, delegatesTo []string, thinking bool) (map[string]any, error) {
 	// Capture subscriber from parent ctx before spawning goroutine.
 	// The goroutine uses context.Background() to survive parent cancellation,
 	// so we re-inject the subscriber into the background context.
@@ -1484,7 +1569,7 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 		defer close(t.Done)
 
 		// Wrap in a long timeout for safety (30 minutes per async agent)
-		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		bgCtx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 		// Re-inject subscriber into background context so RunDelegateTracked can emit events
 		if parentSubscriber != nil {
 			bgCtx = context.WithValue(bgCtx, core.SubscriberKey{}, parentSubscriber)
@@ -1492,7 +1577,7 @@ func (r *ParallelRunner) RunDelegateAsync(ctx context.Context, taskID, task, ins
 		defer cancel()
 
 		// Use tracked delegation for file change tracking + agent_ref
-		result, err := r.RunDelegateTracked(bgCtx, task, instructions, agentName, toolNames, maxRounds, temperature, modelID, "", delegatesTo, nil)
+		result, err := r.RunDelegateTracked(bgCtx, task, instructions, agentName, toolNames, maxRounds, temperature, modelID, "", delegatesTo, nil, thinking)
 
 		// Async delegates don't need to stay alive for continuation.
 		// Clean up the live agent but keep the completedSnapshot for revert.

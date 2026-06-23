@@ -25,6 +25,9 @@ password_env = "SURREAL_PASSWORD"
 # SURREALDB_* vars use host.docker.internal so the container can reach the
 # host-bound SurrealDB behind Caddy on :8000.
 [sandbox]
+image = "pux-sandbox:latest"
+runtime_class = "gvisor"
+warm_pool = 1
 init_files = [
   "@shared/forge_client.py",
   "sandbox/twitter_helpers.py",
@@ -34,6 +37,19 @@ init_files = [
   "@shared/surreal_client.py",
 ]
 pip_packages = ["browser-cookie3", "requests", "telethon"]
+
+[sandbox.resources.requests]
+cpu = "250m"
+memory = "256Mi"
+
+[sandbox.resources.limits]
+cpu = "1"
+memory = "1Gi"
+
+[[sandbox.volumes]]
+type = "volume"
+name = "social-media-pipeline-workspace"
+container = "/workspace"
 
 [sandbox.env]
 MCP_HUB_ENDPOINT = "http://100.86.69.57:30080"

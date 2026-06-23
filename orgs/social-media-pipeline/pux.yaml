@@ -13,6 +13,9 @@ databases:
     username: root
     password_env: SURREAL_PASSWORD
 sandbox:
+  image: pux-sandbox:latest
+  runtime_class: gvisor
+  warm_pool: 1
   init_files:
     - "@shared/forge_client.py"
     - "sandbox/twitter_helpers.py"
@@ -32,3 +35,10 @@ sandbox:
     SURREALDB_USER: "root"
     SURREALDB_PASS: "root"
     PUX_ORG_PATH: "/sandbox/workspace"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"

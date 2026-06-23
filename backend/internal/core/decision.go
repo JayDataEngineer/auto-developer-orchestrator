@@ -46,6 +46,13 @@ var GlobalDecisions = &DecisionRegistry{
 	pending: make(map[string]chan DecisionResponse),
 }
 
+// NewDecisionRegistry constructs a fresh registry. Use this in tests instead
+// of mutating GlobalDecisions, and in production code that needs isolated
+// decision state (e.g., sub-agent workers that may run in parallel).
+func NewDecisionRegistry() *DecisionRegistry {
+	return &DecisionRegistry{pending: make(map[string]chan DecisionResponse)}
+}
+
 // Register creates a pending decision and returns a channel that receives the response.
 func (r *DecisionRegistry) Register(id string) chan DecisionResponse {
 	ch := make(chan DecisionResponse, 1)

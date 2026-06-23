@@ -29,3 +29,7 @@ schedules:
     role: researcher
     model: deepseek/deepseek-v4-flash
     enabled: false
+sandbox:
+  image: pux-sandbox:latest
+  runtime_class: runc
+  warm_pool: 1

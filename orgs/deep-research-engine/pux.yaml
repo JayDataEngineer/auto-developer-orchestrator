@@ -13,6 +13,9 @@ databases:
     username: root
     password_env: SURREAL_PASSWORD
 sandbox:
+  image: pux-sandbox:latest
+  runtime_class: gvisor
+  warm_pool: 1
   init_files:
     - "@shared/surreal_client.py"
     - "sandbox/context_engine.py"
@@ -30,3 +33,10 @@ sandbox:
     SURREALDB_USER: "root"
     SURREALDB_PASS: "root"
     PUX_ORG_PATH: "/sandbox/workspace"
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"

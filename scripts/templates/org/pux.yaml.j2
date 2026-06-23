@@ -41,15 +41,24 @@ databases:
 {% for k, v in cfg.items() if v is not none %}    {{ k }}: {{ v if v is string else v | tojson }}
 {% endfor %}{% endfor %}
 {% endif %}
-{% if sandbox.init_files or sandbox.pip_packages or sandbox.env %}
+{% if sandbox.init_files or sandbox.pip_packages or sandbox.env or sandbox.runtime_class %}
 sandbox:
-{% if sandbox.init_files %}  init_files:
+{% if sandbox.image %}  image: {{ sandbox.image }}
+{% endif %}{% if sandbox.runtime_class %}  runtime_class: {{ sandbox.runtime_class }}
+{% endif %}{% if sandbox.warm_pool %}  warm_pool: {{ sandbox.warm_pool }}
+{% endif %}{% if sandbox.init_files %}  init_files:
 {% for f in sandbox.init_files %}    - "{{ f }}"
 {% endfor %}{% endif %}{% if sandbox.pip_packages %}  pip_packages:
 {% for p in sandbox.pip_packages %}    - {{ p }}
 {% endfor %}{% endif %}{% if sandbox.env %}  env:
 {% for k, v in sandbox.env.items() %}    {{ k }}: "{{ v }}"
-{% endfor %}{% endif %}
+{% endfor %}{% endif %}{% if sandbox.resources.requests or sandbox.resources.limits %}
+  resources:
+{% if sandbox.resources.requests %}    requests:
+{% for k, v in sandbox.resources.requests.items() %}      {{ k }}: "{{ v }}"
+{% endfor %}{% endif %}{% if sandbox.resources.limits %}    limits:
+{% for k, v in sandbox.resources.limits.items() %}      {{ k }}: "{{ v }}"
+{% endfor %}{% endif %}{% endif %}
 {% endif %}
 {% if mcp_servers %}
 mcp_servers:

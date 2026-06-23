@@ -4,3 +4,4 @@ capabilities:
   - vision
 max_rounds: 10
 temperature: 0.4
+thinking: true

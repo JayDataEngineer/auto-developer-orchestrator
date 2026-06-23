@@ -16,7 +16,7 @@ import os
 import pytest
 import requests
 
-MCP_VISION_URL = os.environ.get("MCP_VISION_URL", "http://100.86.69.57:30080")
+MCP_VISION_URL = os.environ.get("MCP_VISION_URL", "")
 LOCAL_MODEL_URL = os.environ.get("LOCAL_MODEL_URL", "http://localhost:8001")
 WEBUI_VISUAL_URL = os.environ.get("WEBUI_VISUAL_URL", "http://localhost:9878")
 TUI_VISUAL_URL = os.environ.get("TUI_VISUAL_URL", "http://localhost:9877")

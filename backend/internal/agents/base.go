@@ -35,6 +35,12 @@ type BaseConfig struct {
 	ToolPerms     *perms.ToolPermissionConfig
 	BashRules     *perms.BashRuleStore
 
+	// NonInteractive marks this agent as running without a human in the loop
+	// (job, sub-agent, scheduler). When true, the permission hook auto-approves
+	// "ask" patterns instead of waiting 5min for a decision that won't arrive.
+	// Hard-deny patterns are still enforced.
+	NonInteractive bool
+
 	// Extension points.
 	ExtraHooks          []core.LoopHook
 	ToolResultProcessor func(ctx context.Context, toolName, toolCallID, result string, toolArgs map[string]any) string
@@ -81,7 +87,9 @@ func NewBaseAgent(cfg BaseConfig) *BaseAgent {
 	}
 
 	if cfg.ToolPerms != nil && cfg.PermDecisions != nil {
-		hks = append(hks, hooks.NewPermissionHook(cfg.ToolPerms, cfg.BashRules, cfg.PermDecisions, nil))
+		permHook := hooks.NewPermissionHook(cfg.ToolPerms, cfg.BashRules, cfg.PermDecisions, nil)
+		permHook.NonInteractive = cfg.NonInteractive
+		hks = append(hks, permHook)
 	}
 
 	hks = append(hks, cfg.ExtraHooks...)

@@ -298,6 +298,34 @@ type dangerousRule struct {
 // ── Hard-deny: always blocked, no override possible ──
 
 var hardDenyRules = []denyRule{
+	// ── Secret file reads ──
+	// Reading .env, .env.*, credentials*, secrets*, .netrc, .ssh/id_*, etc.
+	// Secrets live in the cred store (~/.pux/credentials/<org>.json), not on the
+	// host filesystem. Use list_secrets + inject_secret instead.
+	{
+		pattern: regexp.MustCompile(`(?i)` + cmdPos + `(?:cat|head|tail|less|more|vim|nano|vi|emacs|gedit|bat)[^|;&<>\n]*(?:\.env(?:\.[a-z0-9_-]+)?|credentials(?:\.[a-z0-9_-]+)?|secrets?\.(?:[a-z0-9_-]+)|\.netrc|id_(?:rsa|ed25519|ecdsa)|\.npmrc|\.pypirc)`),
+		message: "reading secret files is blocked — use the inject_secret tool to retrieve credentials",
+	},
+	// cat with explicit ssh/aws paths
+	{
+		pattern: regexp.MustCompile(`(?i)` + cmdPos + `(?:cat|head|tail|less|more|vim|nano|vi|emacs|gedit|bat)[^|;&<>\n]*(?:\.ssh/(?:id_|config|known_hosts)|\.aws/credentials)`),
+		message: "reading SSH/AWS secrets is blocked — use the inject_secret tool",
+	},
+	// cp/mv/scp/rsync of secret files (exfiltration prevention)
+	{
+		pattern: regexp.MustCompile(`(?i)` + cmdPos + `(?:cp|mv|scp|rsync)[^|;&<>\n]*(?:\.env|credentials|secrets?\.[a-z0-9_-]+|\.ssh/id_|\.aws/credentials)`),
+		message: "copying/moving secret files is blocked — use inject_secret tool",
+	},
+	// find or grep targeting .ssh, .aws, or .env files
+	{
+		pattern: regexp.MustCompile(`(?i)` + cmdPos + `(?:find|grep|rg|fd)[^|;&<>\n]*(?:\.ssh|\.aws|\.env)`),
+		message: "searching secret directories is blocked — use inject_secret tool",
+	},
+	// ls on .ssh or .aws to enumerate
+	{
+		pattern: regexp.MustCompile(`(?i)` + cmdPos + `ls[^|;&<>\n]*(?:\.ssh|\.aws)(?:\s|$)`),
+		message: "listing secret directories is blocked",
+	},
 	// rm -rf / (bare root)
 	{
 		pattern: regexp.MustCompile(`(?i)` + cmdPos + `rm\s+-[a-zA-Z]*f[a-zA-Z]*\s+/(?:\s|$)`),

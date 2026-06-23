@@ -22,20 +22,10 @@ type WorkerStore struct {
 	jit      bool // true = session-scoped, cleaned up on Close
 }
 
-// workerConfig matches common.workerConfig exactly — same YAML format.
-type workerConfig struct {
-	Hint         string   `yaml:"hint,omitempty"`
-	Persona      string   `yaml:"persona"`
-	Capabilities []string `yaml:"capabilities"`
-	Tools        []string `yaml:"tools,omitempty"`
-	MCPServers   []string `yaml:"mcp_servers,omitempty"`
-	MaxRounds    int      `yaml:"max_rounds"`
-	Temperature  float64  `yaml:"temperature"`
-	Model        string   `yaml:"model"`
-	Sandbox      string   `yaml:"sandbox"`
-	DelegatesTo  []string `yaml:"delegates_to,omitempty"`
-	Hooks        []string `yaml:"hooks,omitempty"`
-}
+// Worker YAML format is defined once in common.RoleConfig — autoconfig
+// reuses that struct so new fields (delegates_to, hooks, division, etc.)
+// are automatically available everywhere. No second struct to keep in sync.
+type workerConfig = common.RoleConfig
 
 // NewWorkerStore creates a persistent worker store.
 // Workers are written to baseDir as <name>.yaml files.
@@ -94,13 +84,16 @@ func (s *WorkerStore) Get(ctx context.Context, name string) (any, error) {
 		"name":         name,
 		"hint":         wc.Hint,
 		"persona":      wc.Persona,
+		"description":  wc.Description,
 		"capabilities": wc.Capabilities,
+		"imports":      wc.Imports,
 		"tools":        wc.Tools,
 		"mcp_servers":  wc.MCPServers,
 		"max_rounds":   wc.MaxRounds,
 		"temperature":  wc.Temperature,
 		"model":        wc.Model,
 		"sandbox":      wc.Sandbox,
+		"division":     wc.Division,
 		"delegates_to": wc.DelegatesTo,
 		"hooks":        wc.Hooks,
 		"jit":          s.jit,
@@ -245,15 +238,28 @@ func specToWorkerConfig(spec map[string]any) (*workerConfig, error) {
 	if v, ok := spec["persona"].(string); ok {
 		wc.Persona = v
 	}
-	if wc.Persona == "" {
-		// persona is required — it's the worker's identity
-		return nil, fmt.Errorf("persona is required")
+	// Description is accepted as a fallback identity — some workers are
+	// authored by agents that copy the legacy role format (description +
+	// prompt.md). If neither is provided we cannot identify the worker.
+	if v, ok := spec["description"].(string); ok {
+		wc.Description = v
+	}
+	if wc.Persona == "" && wc.Description == "" {
+		return nil, fmt.Errorf("persona or description is required")
 	}
 
 	if v, ok := spec["capabilities"].([]any); ok {
 		for _, item := range v {
 			if s, ok := item.(string); ok {
 				wc.Capabilities = append(wc.Capabilities, s)
+			}
+		}
+	}
+	// imports is an alias for capabilities (legacy role format). Merge in.
+	if v, ok := spec["imports"].([]any); ok {
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				wc.Imports = append(wc.Imports, s)
 			}
 		}
 	}
@@ -294,6 +300,10 @@ func specToWorkerConfig(spec map[string]any) (*workerConfig, error) {
 
 	if v, ok := spec["sandbox"].(string); ok {
 		wc.Sandbox = v
+	}
+
+	if v, ok := spec["division"].(string); ok {
+		wc.Division = v
 	}
 
 	if v, ok := spec["delegates_to"].([]any); ok {

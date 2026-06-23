@@ -6,17 +6,15 @@ const alias = {
   "@pux/shared": resolve(__dirname, "frontend/shared/src/index.ts"),
 };
 
-const commonExclude = [
-  "**/node_modules/**",
-  "tests/**",                  // Playwright E2E
-  "reference/**",              // External reference code
-  "**/*.spec.{ts,tsx,js}",     // Playwright specs
-];
-
 export default defineConfig({
   resolve: { alias },
   test: {
-    exclude: commonExclude,
+    exclude: [
+      "**/node_modules/**",
+      "tests/**",                  // Playwright E2E
+      "reference/**",              // External reference code
+      "**/*.spec.{ts,tsx,js}",     // Playwright specs
+    ],
     projects: [
       {
         resolve: { alias },

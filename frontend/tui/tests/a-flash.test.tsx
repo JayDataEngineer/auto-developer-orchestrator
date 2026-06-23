@@ -12,11 +12,20 @@ import React from "react";
 import { Text, Box } from "ink";
 import { render } from "ink-testing-library";
 
-// ── Fix dependency: @assistant-ui/tap/react-shim missing from installed version ──
-vi.mock("@assistant-ui/tap/react-shim", () => ({
-	useDebugValue: () => {},
-	useSyncExternalStore: (_sub: any, getSnapshot: any) => getSnapshot(),
-}));
+// ── Mock @assistant-ui/tap/react-shim (re-export React, matching the real shim's `export * from "react"`) ──
+// react-ink@0.0.29 / store@0.2.18 / core@0.2.18 all import hooks (useRef, useEffect,
+// useMemo, useState, useReducer, useCallback, useEffectEvent, use, useContext,
+// createContext, Fragment, memo, useId, useLayoutEffect, createElement) from this
+// path. The real shim re-exports React plus overrides a few — we just re-export React.
+vi.mock("@assistant-ui/tap/react-shim", async () => {
+	const React = await import("react");
+	return {
+		...React,
+		useSyncExternalStore: (_sub: any, getSnapshot: any) => getSnapshot(),
+		useEffectEvent: (cb: any) => cb,
+		useDebugValue: () => {},
+	};
+});
 
 import {
 	useLocalRuntime,

@@ -43,3 +43,9 @@ python3 departments/engineering/game/tools/godot_test.py evaluate     # AI playt
 - NEVER run asset generation pipelines from here. That's the Technical Artist's job.
 - NEVER modify tools or ComfyUI nodes. Those live in `tools/comfyui_nodes/`.
 - If an asset is missing or wrong, create a work order YAML for the Technical Artist.
+
+## Skills (reference)
+
+- **GODOT_VIA_MCP** — drive the Godot editor from the sandbox via HTTP. Use when you need scene edits, script-read/update, or viewport screenshots. Health-check first; on `GODOT_MCP_DOWN`, fall back to the `godot_test.py` harness.
+
+Use `/sandbox/godot_client.py` — it reads `GODOT_MCP_URL` from env. The local Godot editor must be running with the IvanMurzak plugin for the bridge to work.

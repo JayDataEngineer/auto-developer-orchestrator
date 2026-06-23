@@ -41,6 +41,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
+	"github.com/auto-developer-orchestrator/backend/internal/safeguard"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/auto-developer-orchestrator/backend/internal/vision"
 )
@@ -278,7 +279,34 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 
 	if cfg.MemoryStore != nil {
-		ctoTools = append(ctoTools, memory.NewTool(cfg.MemoryStore))
+		// Wire diligence landmine checker if we have a decision channel.
+		// Interactive (cfg.Subscriber != nil): ask_user on flagged writes.
+		// Non-interactive (cfg.NonInteractive): hard-deny with rephrasing.
+		// Both nil: legacy NewTool (no checking — for tests).
+		var memoryTool core.Tool
+		if cfg.NonInteractive {
+			checker, err := memory.NewLandmineChecker(nil, nil)
+			if err != nil {
+				logger.Printf("landmine checker disabled (non-interactive): %v", err)
+				memoryTool = memory.NewTool(cfg.MemoryStore)
+			} else {
+				checker.NonInteractive = true
+				memoryTool = memory.NewToolWithLandmine(cfg.MemoryStore, checker)
+			}
+		} else if cfg.Subscriber != nil {
+			// cfg.Subscriber is chan<- core.AgentEvent (send-only), which is
+			// exactly what the checker wants.
+			checker, err := memory.NewLandmineChecker(core.GlobalDecisions, cfg.Subscriber)
+			if err != nil {
+				logger.Printf("landmine checker disabled (interactive): %v", err)
+				memoryTool = memory.NewTool(cfg.MemoryStore)
+			} else {
+				memoryTool = memory.NewToolWithLandmine(cfg.MemoryStore, checker)
+			}
+		} else {
+			memoryTool = memory.NewTool(cfg.MemoryStore)
+		}
+		ctoTools = append(ctoTools, memoryTool)
 	}
 
 	// Folder-based memory tool (replaces single-file MEMORY.md)
@@ -440,6 +468,13 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	}
 
 	// All tools = CTO tools + employee tools (for sub-agent toolSpecs)
+	// Wire CTO messaging tools onto the runner-owned bus so the CTO can
+	// send to / receive from sub-agents. Bus is constructed here so both
+	// the tool registry and the runner share the same instance.
+	sharedBus := orchestration.NewMessageBus(16, cfg.Subscriber)
+	sharedBus.Register("cto")
+	ctoTools = append(ctoTools, orchestration.MessagingTools(sharedBus, "cto")...)
+
 	allTools := append(ctoTools, employeeTools...)
 	allToolSpecs := common.ToOpenAITools(allTools)
 
@@ -587,6 +622,8 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 				HomeDir:     home,
 				GitExecutor: cfg.GitExecutor,
 			},
+			Subscriber: cfg.Subscriber,
+			Bus:        sharedBus,
 		})
 		runner = pr
 	}
@@ -651,6 +688,18 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// CTO-specific hooks (common hooks — scratchpad, goal nudge, permission — are wired by BaseAgent)
 	var ctoHooks []core.LoopHook
 	ctoHooks = append(ctoHooks, hooks.NewJournalCheckpointHook(sess))
+
+	// Safeguard router — destructive-shell pattern detector. Emits a
+	// safeguard_fallback event when matches are found in tool args or user
+	// messages. Always-on audit signal; the permission hook handles blocking.
+	if sgRouter, err := safeguard.NewRouter(); err != nil {
+		logger.Printf("safeguard router disabled: %v", err)
+	} else {
+		sgHook := safeguard.NewSafeguardHook(sgRouter, cfg.Subscriber)
+		sgHook.AgentName = "cto"
+		ctoHooks = append(ctoHooks, sgHook)
+		logger.Printf("Safeguard router enabled (%d pattern(s))", len(safeguard.DefaultPatterns()))
+	}
 
 	if cfg.GitExecutor != nil {
 		ctoHooks = append(ctoHooks, hooks.NewGitCheckpointHook(cfg.GitExecutor))
