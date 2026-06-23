@@ -78,6 +78,7 @@ func NewPromptBuilder(configDir string) *PromptBuilder {
 		{Name: "delegation", Level: Stable, File: "delegation.md"},
 		{Name: "communication", Level: Stable, File: "communication.md"},
 		{Name: "actions", Level: Stable, File: "actions.md"},
+		{Name: "diligence", Level: Stable, File: "diligence.md"},
 		{Name: "planning", Level: Stable, File: "planning.md"},
 		{Name: "artifacts", Level: Stable, File: "artifacts.md"},
 		{Name: "scripts", Level: Stable, File: "scripts.md"},
