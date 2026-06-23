@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -24,9 +25,10 @@ type ManagedExtension struct {
 
 // Manager starts and stops extension subprocesses, capturing their MCP server ports.
 type Manager struct {
-	exts           []*ManagedExtension
-	startupResults []StartupResult
-	logger         *zap.Logger
+	mu              sync.Mutex
+	exts            []*ManagedExtension
+	startupResults  []StartupResult
+	logger          *zap.Logger
 }
 
 // NewManager creates a new extension process manager.
@@ -40,7 +42,14 @@ func NewManager(logger *zap.Logger) *Manager {
 // StartAll discovers extensions in the given directories and starts their MCP servers.
 // Each directory is scanned; extensions from later directories override earlier ones by name.
 // Returns the number of extensions successfully started.
+//
+// Boot-time only. Holds the write lock for the whole spawn sequence — pre-warm
+// and health-monitor goroutines block until boot finishes. This is correct:
+// those goroutines assume the boot-time set is in place.
 func (m *Manager) StartAll(ctx context.Context, dirs ...string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Collect extensions from all directories (last wins for same name)
 	seen := make(map[string]*Extension)
 	for _, dir := range dirs {
@@ -92,7 +101,13 @@ func (m *Manager) StartAll(ctx context.Context, dirs ...string) int {
 }
 
 // StopAll stops all running extension subprocesses.
+//
+// Holds the write lock for the whole stop sequence so pre-warm / restart
+// goroutines can't append to m.exts while we're tearing down.
 func (m *Manager) StopAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	for _, ext := range m.exts {
 		if ext.cmd != nil && ext.cmd.Process != nil {
 			m.logger.Info("stopping extension", zap.String("name", ext.Name))
@@ -117,7 +132,14 @@ func (m *Manager) StopAll() {
 // subprocess-backed MCP server fails N consecutive health probes. The new port is
 // returned so callers (HealthMonitor) can re-register the client with the new URL.
 // Restarts obey the extension's Restart policy: "no" → ErrRestartDisabled.
+//
+// Holds the write lock for the duration. Other extensions' restarts serialize,
+// which is acceptable — N-strike events are rare (one per ~10min when something
+// is actually wrong), not a hot path.
 func (m *Manager) Restart(ctx context.Context, prefix string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	for i, ext := range m.exts {
 		if ext.Name != prefix {
 			continue
@@ -159,6 +181,8 @@ func (m *Manager) Restart(ctx context.Context, prefix string) (int, error) {
 // Callers build the URL themselves (http://127.0.0.1:<port>/mcp). Used by
 // HealthMonitor after Restart so it can re-register the client with MultiClient.
 func (m *Manager) PortFor(prefix string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, ext := range m.exts {
 		if ext.Name == prefix {
 			return ext.port
@@ -176,6 +200,8 @@ var ErrUnknownExtension = fmt.Errorf("unknown extension")
 
 // Clients returns MCP clients for all running extensions, keyed by extension name (prefix).
 func (m *Manager) Clients() map[string]*mcp.Client {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	clients := make(map[string]*mcp.Client)
 	for _, ext := range m.exts {
 		endpoint := fmt.Sprintf("http://127.0.0.1:%d/mcp", ext.port)
@@ -191,6 +217,8 @@ func (m *Manager) StartupResults() []StartupResult {
 
 // Extensions returns info about all managed extensions.
 func (m *Manager) Extensions() []Extension {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	result := make([]Extension, len(m.exts))
 	for i, ext := range m.exts {
 		result[i] = ext.Extension
@@ -198,7 +226,11 @@ func (m *Manager) Extensions() []Extension {
 	return result
 }
 
-// startOne starts a single extension subprocess and waits for it to print its port.
+// startOne spawns a single extension subprocess and waits for it to print its port.
+// Lock-free: does not touch m.exts. Callers coordinate locking around mutations
+// to m.exts. StartAll and Restart hold m.mu for their whole sequence so they can
+// call this with consistent state; CloneAndStart spawns without the lock (spawn
+// can take 30s+ for slow MCP servers) and only takes m.mu around the append.
 func (m *Manager) startOne(ctx context.Context, ext *Extension) (int, *exec.Cmd, error) {
 	timeout := time.Duration(ext.Server.Timeout) * time.Second
 	if timeout == 0 {

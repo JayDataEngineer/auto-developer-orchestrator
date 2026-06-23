@@ -21,12 +21,16 @@ type fakeRestarter struct {
 	restartCalls  []string
 	portToReturn  int
 	portCalls     []string
+	onRestart     func() // optional; fires inside the lock when Restart is called
 }
 
 func (f *fakeRestarter) Restart(_ context.Context, prefix string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.restartCalls = append(f.restartCalls, prefix)
+	if f.onRestart != nil {
+		f.onRestart()
+	}
 	return f.portToReturn, nil
 }
 
@@ -247,3 +251,100 @@ func TestHealthMonitor_ProbeTimeout(t *testing.T) {
 
 // keep import used even if future test drops atomic helper
 var _ = atomic.AddInt32
+
+// TestHealthMonitor_TierDeathCallbackFires: after maxFailures consecutive
+// failures, the onTierDeath hook (Phase 3 hot-promotion) fires exactly once
+// with the dying prefix. Verifies the wiring without depending on a real
+// resolver — the test stubs the callback to record what it saw.
+func TestHealthMonitor_TierDeathCallbackFires(t *testing.T) {
+	server := mcpServerStub(t, "stub_tool")
+
+	multi := NewMultiClient(zap.NewNop())
+	multi.AddClient("stub", NewClient("stub", server.URL, nil))
+	if err := multi.InitializeAll(context.Background()); err != nil {
+		t.Fatalf("InitializeAll: %v", err)
+	}
+
+	var fired []string
+	var firedMu sync.Mutex
+	mon := NewHealthMonitor(multi, nil, zap.NewNop(),
+		WithHealthInterval(time.Hour),
+		WithMaxFailures(3),
+		WithProbeTimeout(500*time.Millisecond),
+		WithTierDeathCallback(func(prefix string) {
+			firedMu.Lock()
+			fired = append(fired, prefix)
+			firedMu.Unlock()
+		}),
+	)
+
+	server.Close()
+
+	for i := 1; i <= 3; i++ {
+		mon.probeAll(context.Background())
+	}
+
+	firedMu.Lock()
+	gotFired := append([]string(nil), fired...)
+	firedMu.Unlock()
+
+	if len(gotFired) != 1 {
+		t.Errorf("onTierDeath fired %d times, want 1 (one maxFailures crossing)", len(gotFired))
+	}
+	if len(gotFired) > 0 && gotFired[0] != "stub" {
+		t.Errorf("onTierDeath prefix = %q, want stub", gotFired[0])
+	}
+}
+
+// TestHealthMonitor_TierDeathFiresBeforeRestart: confirms the ordering —
+// onTierDeath fires BEFORE the restart path. If both are wired, hot-promotion
+// gets first crack. App wiring uses this to invalidate the resolver before
+// the extension manager spawns a new subprocess.
+func TestHealthMonitor_TierDeathFiresBeforeRestart(t *testing.T) {
+	server := mcpServerStub(t, "stub_tool")
+
+	multi := NewMultiClient(zap.NewNop())
+	multi.AddClient("stub", NewClient("stub", server.URL, nil))
+	if err := multi.InitializeAll(context.Background()); err != nil {
+		t.Fatalf("InitializeAll: %v", err)
+	}
+
+	var order []string
+	var orderMu sync.Mutex
+	restarter := &fakeRestarter{
+		portToReturn: 9999,
+		onRestart: func() {
+			orderMu.Lock()
+			order = append(order, "restart")
+			orderMu.Unlock()
+		},
+	}
+	mon := NewHealthMonitor(multi, restarter, zap.NewNop(),
+		WithHealthInterval(time.Hour),
+		WithMaxFailures(3),
+		WithProbeTimeout(500*time.Millisecond),
+		WithTierDeathCallback(func(prefix string) {
+			orderMu.Lock()
+			order = append(order, "tier-death:"+prefix)
+			orderMu.Unlock()
+		}),
+	)
+
+	server.Close()
+
+	for i := 1; i <= 3; i++ {
+		mon.probeAll(context.Background())
+	}
+
+	orderMu.Lock()
+	defer orderMu.Unlock()
+	if len(order) != 2 {
+		t.Fatalf("expected 2 callbacks (tier-death + restart), got %d: %v", len(order), order)
+	}
+	if order[0] != "tier-death:stub" {
+		t.Errorf("first callback = %q, want tier-death:stub", order[0])
+	}
+	if order[1] != "restart" {
+		t.Errorf("second callback = %q, want restart", order[1])
+	}
+}

@@ -63,6 +63,8 @@ type App struct {
 	imageServer        *vision.ImageServer
 	sshManager         *puxssh.SessionManager
 	toolsHandler       *handlers.ToolsHandler
+	healthMon          *mcp.HealthMonitor
+	preWarmer          *common.PreWarmer
 }
 
 // NewApp initializes all components and assembles the application.
@@ -132,6 +134,16 @@ func (a *App) shutdown() {
 	}
 	if a.sched != nil {
 		a.sched.Stop()
+	}
+	if a.healthMon != nil {
+		a.healthMon.Stop()
+	}
+	// Stop pre-warmer BEFORE extMgr.StopAll so a background clone can't
+	// append a new subprocess to m.exts while StopAll is tearing down. The
+	// pre-warmer's ctx cancel signals the goroutine; Wait blocks until it
+	// exits. extMgr.StopAll then sees a quiescent m.exts.
+	if a.preWarmer != nil {
+		a.preWarmer.Stop()
 	}
 	if a.extMgr != nil {
 		a.extMgr.StopAll()
@@ -341,26 +353,20 @@ func (a *App) initHandlers() {
 func (a *App) initMCP() {
 	mcpMulti := mcp.NewMultiClient(a.logger)
 
-	// Tailscale cloud node hosts all MCPs. Each URL is env-var overridable
-	// so future swaps don't need a recompile. Requires MagicDNS on the host:
-	//   sudo tailscale set --accept-dns=true
-	tsCloud := "https://cloud.tailb1e597.ts.net:10000"
+	// Cloud MCP servers come from config/mcp_servers.yaml. Each row is env-var
+	// overridable via MCP_<PREFIX>_URL so swaps don't need a re-render.
 	var webResearchClient *mcp.Client
-	for prefix, path := range map[string]string{
-		"web":      "/research/mcp",
-		"media":    "/media/mcp",
-		"meta":     "/meta/mcp",
-		"equibles": "/equibles/mcp",
-	} {
-		url := os.Getenv("MCP_" + strings.ToUpper(prefix) + "_URL")
+	configDir := common.FindKernelConfigDir()
+	for _, decl := range common.LoadMCPServers(configDir) {
+		url := common.MCPServerURLOverride(decl.Prefix)
 		if url == "" {
-			url = tsCloud + path
+			url = decl.URL
 		}
-		client := mcp.NewClient(prefix, url, a.logger)
-		if prefix == "web" {
+		client := mcp.NewClient(decl.Prefix, url, a.logger)
+		if decl.Prefix == "web" {
 			webResearchClient = client
 		}
-		mcpMulti.AddClient(prefix, client)
+		mcpMulti.AddClient(decl.Prefix, client)
 	}
 
 	// Start extension subprocesses
@@ -437,6 +443,44 @@ func (a *App) initMCP() {
 			zap.String("type", impl.Type),
 		)
 	}
+
+	// Health monitor: pings every MCP client on a 60s ticker. Extension-backed
+	// clients get auto-restarted after 3 consecutive failures (see health.go).
+	// Phase 3 hot-promotion: on tier death, the onTierDeath callback asks the
+	// resolver to re-resolve any capability whose active impl used the dying
+	// prefix — if a pre-warmed fallback is live, it becomes the active tier for
+	// the next session. Runs for the lifetime of the process; Stop() is called
+	// in shutdown().
+	if mcpMulti.IsAvailable() {
+		a.healthMon = mcp.NewHealthMonitor(mcpMulti, a.extMgr, a.logger,
+			mcp.WithTierDeathCallback(func(prefix string) {
+				caps := resolver.CapabilitiesForPrefix(prefix)
+				if len(caps) == 0 {
+					return
+				}
+				for _, capName := range caps {
+					fresh := resolver.Invalidate(capName)
+					if fresh == nil {
+						continue
+					}
+					a.logger.Info("Capability tier invalidated (hot-promotion)",
+						zap.String("capability", capName),
+						zap.String("prefix_died", prefix),
+						zap.String("new_tier", fresh.Name))
+				}
+			}),
+		)
+		a.healthMon.Start(context.Background())
+		a.logger.Info("MCP health monitor started",
+			zap.Int("clients", len(mcpMulti.Prefixes())))
+	}
+
+	// Pre-warmer: background goroutine that clones self-hostable tiers
+	// (implementations[] rows with `source: git+...`) so hot-promotion in
+	// Layer 3 is a port swap, not a 2-minute clone+install wait. Failures are
+	// logged + skipped — pre-warm is best-effort, never blocks boot.
+	a.preWarmer = common.NewPreWarmer(a.extMgr, mcpMulti, a.logger)
+	a.preWarmer.Start(context.Background())
 }
 
 func (a *App) initScheduler() {
@@ -796,6 +840,13 @@ func (a *App) buildRouter(
 		r.Route("/prompt-sections", func(r chi.Router) {
 			promptHandler.RegisterRoutes(r)
 		})
+
+		// Transcript auditing — Fable/Mythos six-pattern taxonomy.
+		// Mounted under /api/pux/audit/{sessionId} to share the /pux prefix.
+		scriptsDir := filepath.Join(common.FindKernelConfigDir(), "..", "scripts")
+		auditHandler := handlers.NewAuditHandler(scriptsDir, a.logger)
+		r.Get("/pux/audit/{sessionId}", auditHandler.AuditSession)
+		r.Post("/pux/audit/{sessionId}", auditHandler.AuditSession)
 
 		// Cluster services
 		r.Route("/cluster", func(r chi.Router) {

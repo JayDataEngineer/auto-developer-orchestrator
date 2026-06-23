@@ -161,3 +161,213 @@ func TestResolveReturnsNilBeforeResolveAll(t *testing.T) {
 		t.Errorf("expected nil before ResolveAll, got %v", got)
 	}
 }
+
+// TestPrefixesFor — verifies the reverse-index key derivation. MCP tiers use
+// their MCPServers list; extension tiers use the <cap>-<tier> PreWarmer
+// convention; bash tiers have no prefix (HealthMonitor never sees them).
+func TestPrefixesFor(t *testing.T) {
+	cases := []struct {
+		name    string
+		capName string
+		impl    *Implementation
+		want    []string
+	}{
+		{
+			name:    "mcp tier uses MCPServers",
+			capName: "research",
+			impl:    &Implementation{Name: "cloud", Type: "mcp", MCPServers: []string{"web", "media"}},
+			want:    []string{"web", "media"},
+		},
+		{
+			name:    "extension tier uses cap-tier convention",
+			capName: "research",
+			impl:    &Implementation{Name: "self-hosted", Type: "extension", Source: "git+https://example/x"},
+			want:    []string{"research-self-hosted"},
+		},
+		{
+			name:    "extension tier without source has no prefix",
+			capName: "research",
+			impl:    &Implementation{Name: "stub", Type: "extension"},
+			want:    nil,
+		},
+		{
+			name:    "bash tier has no prefix",
+			capName: "research",
+			impl:    &Implementation{Name: "bash-ddg", Type: "bash"},
+			want:    nil,
+		},
+		{
+			name:    "nil impl",
+			capName: "research",
+			impl:    nil,
+			want:    nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := prefixesFor(tc.capName, tc.impl)
+			if len(got) != len(tc.want) {
+				t.Fatalf("len mismatch: got %v want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("[%d] got %q want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// seedResolverForTest bypasses ResolveAll (which calls invalidateCachesForResolve
+// and fights the test's stubbed toolPackages cache) by directly populating
+// r.resolved + r.prefixToCaps. Returns a cleanup that nils them out.
+func seedResolverForTest(t *testing.T, r *CapabilityResolver, resolved map[string]*Implementation) {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.resolved = resolved
+	r.prefixToCaps = make(map[string][]string)
+	for capName, impl := range resolved {
+		for _, pfx := range prefixesFor(capName, impl) {
+			r.prefixToCaps[pfx] = append(r.prefixToCaps[pfx], capName)
+		}
+	}
+	t.Cleanup(func() {
+		r.mu.Lock()
+		r.resolved = nil
+		r.prefixToCaps = nil
+		r.mu.Unlock()
+	})
+}
+
+// TestInvalidateReResolves — when the active impl dies and a fallback becomes
+// live, Invalidate(capName) returns the new impl and updates the cache.
+//
+// Uses invalidateOneLocked directly (bypasses LoadToolPackages so we don't
+// fight the package cache). The "cloud tier died" simulation: change the
+// pkg's implementation[0] health to a failing probe, then re-run invalidate.
+func TestInvalidateReResolves(t *testing.T) {
+	r := NewResolver(nil)
+
+	pkg := &ToolPackage{
+		Name: "research",
+		Implementations: []Implementation{
+			{Name: "cloud", Priority: 1, Health: HealthCheck{Kind: "always-true"}},
+			{Name: "bash", Priority: 99, Health: HealthCheck{Kind: "always-true"}},
+		},
+	}
+	seedResolverForTest(t, r, map[string]*Implementation{
+		"research": &pkg.Implementations[0],
+	})
+
+	if got := r.Resolve("research"); got == nil || got.Name != "cloud" {
+		t.Fatalf("initial Resolve = %v, want cloud", got)
+	}
+
+	// Simulate "cloud died" — its always-true probe becomes a failing mcp probe.
+	pkg.Implementations[0].Health = HealthCheck{Kind: "mcp-available", Server: "nonexistent"}
+
+	r.mu.Lock()
+	fresh := r.invalidateOneLocked("research", pkg)
+	r.mu.Unlock()
+
+	if fresh == nil {
+		t.Fatal("invalidateOneLocked returned nil")
+	}
+	if fresh.Name != "bash" {
+		t.Errorf("expected invalidate to pick bash fallback, got %q", fresh.Name)
+	}
+	if got := r.Resolve("research"); got == nil || got.Name != "bash" {
+		t.Errorf("Resolve after invalidate = %v, want bash", got)
+	}
+}
+
+// TestInvalidateNoOpWhenUnchanged — if pickActive returns the same tier,
+// Invalidate returns the previous impl without bumping probed or firing
+// cache invalidation. Confirms the short-circuit path.
+func TestInvalidateNoOpWhenUnchanged(t *testing.T) {
+	r := NewResolver(nil)
+
+	pkg := &ToolPackage{
+		Name: "research",
+		Implementations: []Implementation{
+			{Name: "cloud", Priority: 1, Health: HealthCheck{Kind: "always-true"}},
+		},
+	}
+	seedResolverForTest(t, r, map[string]*Implementation{
+		"research": &pkg.Implementations[0],
+	})
+
+	before := r.ProbedCount()
+
+	r.mu.Lock()
+	fresh := r.invalidateOneLocked("research", pkg)
+	r.mu.Unlock()
+
+	if fresh == nil || fresh.Name != "cloud" {
+		t.Errorf("expected invalidate to return cloud, got %v", fresh)
+	}
+	if r.ProbedCount() != before {
+		t.Errorf("ProbedCount changed on no-op invalidate: %d → %d", before, r.ProbedCount())
+	}
+}
+
+// TestCapabilitiesForPrefix — after seeding the resolver, the reverse index
+// maps MCP prefixes back to capability names. Used by HealthMonitor's
+// hot-promotion path.
+func TestCapabilitiesForPrefix(t *testing.T) {
+	r := NewResolver(nil)
+
+	cloud := &Implementation{Name: "cloud", Priority: 1, Type: "mcp", MCPServers: []string{"web"}, Health: HealthCheck{Kind: "always-true"}}
+	seedResolverForTest(t, r, map[string]*Implementation{"research": cloud})
+
+	caps := r.CapabilitiesForPrefix("web")
+	if len(caps) != 1 || caps[0] != "research" {
+		t.Errorf("CapabilitiesForPrefix(web) = %v, want [research]", caps)
+	}
+	if got := r.CapabilitiesForPrefix("nonexistent"); len(got) != 0 {
+		t.Errorf("CapabilitiesForPrefix(nonexistent) = %v, want []", got)
+	}
+}
+
+// TestInvalidateUpdatesReverseIndex — when Invalidate swaps the active impl,
+// the reverse index must drop the old prefix and add the new one. Otherwise
+// HealthMonitor would invalidate the wrong capability on the next failure.
+func TestInvalidateUpdatesReverseIndex(t *testing.T) {
+	r := NewResolver(nil)
+
+	pkg := &ToolPackage{
+		Name: "research",
+		Implementations: []Implementation{
+			{Name: "cloud", Priority: 1, Type: "mcp", MCPServers: []string{"web"}, Health: HealthCheck{Kind: "always-true"}},
+			{Name: "self-hosted", Priority: 99, Type: "extension", Source: "git+https://example/x", Health: HealthCheck{Kind: "always-true"}},
+		},
+	}
+	seedResolverForTest(t, r, map[string]*Implementation{
+		"research": &pkg.Implementations[0],
+	})
+
+	// Sanity: initial reverse index points at web.
+	if caps := r.CapabilitiesForPrefix("web"); len(caps) != 1 || caps[0] != "research" {
+		t.Fatalf("initial CapabilitiesForPrefix(web) = %v, want [research]", caps)
+	}
+
+	// Kill the cloud tier.
+	pkg.Implementations[0].Health = HealthCheck{Kind: "mcp-available", Server: "nonexistent"}
+
+	r.mu.Lock()
+	fresh := r.invalidateOneLocked("research", pkg)
+	r.mu.Unlock()
+
+	if fresh == nil || fresh.Name != "self-hosted" {
+		t.Fatalf("invalidate = %v, want self-hosted", fresh)
+	}
+
+	// Reverse index: web → [] (removed), research-self-hosted → [research] (added).
+	if caps := r.CapabilitiesForPrefix("web"); len(caps) != 0 {
+		t.Errorf("after invalidate, CapabilitiesForPrefix(web) = %v, want []", caps)
+	}
+	if caps := r.CapabilitiesForPrefix("research-self-hosted"); len(caps) != 1 || caps[0] != "research" {
+		t.Errorf("after invalidate, CapabilitiesForPrefix(research-self-hosted) = %v, want [research]", caps)
+	}
+}

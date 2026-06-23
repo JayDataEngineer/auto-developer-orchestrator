@@ -21,23 +21,27 @@ type ExtensionRestarter interface {
 // HealthMonitor pings every registered MCP client on a fixed interval.
 // On N consecutive failures it:
 //   - marks the prefix unavailable (advisory — CallTool still tries)
+//   - fires the optional onTierDeath callback (Phase 3 hot-promotion path —
+//     typically calls resolver.Invalidate so the next session picks a fallback)
 //   - for extension-backed clients, asks the ExtensionRestarter to restart
 //   - on recovery, calls MultiClient.RefreshTools so the tool map is fresh
 //
-// The monitor does NOT own capability resolver re-probe — that's Stage 4.
-// It only owns the "is this server alive right now?" loop.
+// The monitor owns "is this server alive right now?" Hot-promotion wiring
+// is delegated to the onTierDeath callback so this package doesn't depend on
+// the resolver.
 type HealthMonitor struct {
-	multi    *MultiClient
-	restarter ExtensionRestarter
-	logger   *zap.Logger
+	multi       *MultiClient
+	restarter   ExtensionRestarter
+	onTierDeath func(prefix string) // Phase 3: hot-promotion hook. Nil = disabled.
+	logger      *zap.Logger
 
-	interval       time.Duration
-	probeTimeout   time.Duration
-	maxFailures    int
+	interval     time.Duration
+	probeTimeout time.Duration
+	maxFailures  int
 
-	mu          sync.Mutex
-	failCounts  map[string]int
-	cancel      context.CancelFunc
+	mu         sync.Mutex
+	failCounts map[string]int
+	cancel     context.CancelFunc
 }
 
 // HealthMonitorOption configures a HealthMonitor at construction time.
@@ -67,6 +71,18 @@ func WithMaxFailures(n int) HealthMonitorOption {
 		if n > 0 {
 			h.maxFailures = n
 		}
+	}
+}
+
+// WithTierDeathCallback installs a hot-promotion hook (Phase 3). When a prefix
+// crosses the maxFailures threshold, the callback fires with the prefix. The
+// callback typically calls resolver.CapabilitiesForPrefix + resolver.Invalidate
+// so the next agent session picks up the fallback tier. Errors inside the
+// callback are the caller's problem — HealthMonitor logs but otherwise ignores
+// them. Nil callback = hot-promotion disabled.
+func WithTierDeathCallback(fn func(prefix string)) HealthMonitorOption {
+	return func(h *HealthMonitor) {
+		h.onTierDeath = fn
 	}
 }
 
@@ -179,6 +195,22 @@ func (h *HealthMonitor) probeOne(ctx context.Context, prefix string) {
 
 	if h.failCounts[prefix] >= h.maxFailures {
 		h.multi.MarkUnavailable(prefix)
+		// Phase 3 hot-promotion: fire the onTierDeath callback first. The
+		// callback typically calls resolver.Invalidate which re-probes the
+		// capability — if a pre-warmed fallback exists, it becomes the active
+		// tier for the next session. The restart path below is the fallback
+		// when no resolver is wired OR the prefix isn't tied to a polymorphic
+		// capability.
+		if h.onTierDeath != nil {
+			h.logger.Info("MCP health: firing tier-death callback",
+				zap.String("prefix", prefix))
+			// Drop the lock for the callback — it may do slow work (resolver
+			// re-probes, HTTP health checks) and we don't want to block other
+			// prefixes' probes behind it.
+			h.mu.Unlock()
+			h.onTierDeath(prefix)
+			h.mu.Lock()
+		}
 		if h.restarter != nil {
 			h.tryRestart(ctx, prefix)
 		}

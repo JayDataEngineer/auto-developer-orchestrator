@@ -53,9 +53,8 @@ type AgentRole struct {
 }
 
 // RoleConfig is the single YAML structure for ALL role config files:
-//   - config/roles/<name>/config.yaml     (legacy: description + sibling prompt.md)
-//   - config/workers/<name>.yaml          (new: persona + capabilities)
-//   - orgs/<org>/roles/<name>/config.yaml (org: same as legacy)
+//   - config/workers/<name>.yaml          (kernel workers: persona + capabilities)
+//   - orgs/<org>/roles/<name>/config.yaml (org roles: same shape)
 //
 // Both `imports` and `capabilities` are accepted and treated as aliases —
 // both are lists of tool-package names expanded by ResolveImports. Legacy
@@ -108,14 +107,17 @@ type ToolPackage struct {
 
 // Implementation is a single tier of a polymorphic capability. See
 // pux-declarative-stack.md RFC axis 2. Lower Priority wins. Health check
-// determines live-or-down at boot. Sticky for kernel lifetime.
+// determines live-or-down at boot. Sticky per session — re-resolved only
+// when HealthMonitor invalidates the cache after N consecutive failures.
 type Implementation struct {
 	Name       string      `yaml:"name"`
-	Type       string      `yaml:"type"`                 // "mcp" | "bash" | "http" (informational)
+	Type       string      `yaml:"type"`                 // "mcp" | "bash" | "http" | "extension" (informational)
 	Priority   int         `yaml:"priority"`             // lower = preferred
 	MCPServers []string    `yaml:"mcp_servers,omitempty"` // MCP tier: server prefixes to wire
 	Tools      []string    `yaml:"tools,omitempty"`       // bash tier: tool names to expose
 	Script     string      `yaml:"script,omitempty"`      // bash tier: absolute path inside sandbox
+	Source     string      `yaml:"source,omitempty"`      // extension tier: git+URL cloned by pre-warmer (Phase 3)
+	Bringup    string      `yaml:"bringup,omitempty"`     // extension tier: shell command to launch after clone
 	Prompt     string      `yaml:"prompt,omitempty"`      // inline prompt (mutually exclusive with PromptFile)
 	PromptFile string      `yaml:"prompt_file,omitempty"` // file rel to capability dir; resolved into Prompt
 	Health     HealthCheck `yaml:"health"`
@@ -123,13 +125,14 @@ type Implementation struct {
 
 // HealthCheck probes whether an Implementation is usable at boot.
 type HealthCheck struct {
-	Kind   string `yaml:"kind"`             // "mcp-available" | "http-get" | "always-true"
-	Server string `yaml:"server,omitempty"` // for mcp-available: server prefix
-	URL    string `yaml:"url,omitempty"`    // for http-get: URL to GET
+	Kind           string `yaml:"kind"`                     // "mcp-available" | "http-get" | "always-true"
+	Server         string `yaml:"server,omitempty"`         // for mcp-available: server prefix
+	URL            string `yaml:"url,omitempty"`            // for http-get: URL to GET
+	BringupTimeout int    `yaml:"bringup_timeout,omitempty"` // seconds; default 60. Caps pre-warm wait.
 }
 
-// toolPackageConfig is the YAML structure for config/tool_packages/<name>.yaml (legacy)
-// and config/capabilities/<name>/capability.yaml (new).
+// toolPackageConfig is the YAML structure for config/capabilities/<name>/capability.yaml
+// and orgs/<org>/tool_packages/<name>.yaml.
 type toolPackageConfig struct {
 	Description     string           `yaml:"description"`
 	Tools           []string         `yaml:"tools"`
@@ -333,13 +336,14 @@ func ReloadPromptTemplate() {
 	_ = dirChanged("capabilities", toolPkgModTime)
 }
 
-// LoadToolPackages reads capabilities from config/capabilities/ (new) then
-// config/tool_packages/ (legacy), then org-specific dirs. Auto-reloads on change.
+// LoadToolPackages reads capabilities from config/capabilities/. Auto-reloads on
+// change. Org-level tool packages (orgs/<org>/tool_packages/*.yaml) are merged
+// separately via MergeToolPackages at session start.
 func LoadToolPackages() map[string]*ToolPackage {
 	curDir := FindKernelConfigDir()
 
 	toolPkgMu.RLock()
-	if toolPackages != nil && toolPkgConfigDir == curDir && !dirChanged("tool_packages", toolPkgModTime) && !dirChanged("capabilities", toolPkgModTime) {
+	if toolPackages != nil && toolPkgConfigDir == curDir && !dirChanged("capabilities", toolPkgModTime) {
 		pkgs := toolPackages
 		toolPkgMu.RUnlock()
 		return pkgs
@@ -350,36 +354,25 @@ func LoadToolPackages() map[string]*ToolPackage {
 	defer toolPkgMu.Unlock()
 
 	curDir = FindKernelConfigDir()
-	if toolPackages != nil && toolPkgConfigDir == curDir && !dirChanged("tool_packages", toolPkgModTime) && !dirChanged("capabilities", toolPkgModTime) {
+	if toolPackages != nil && toolPkgConfigDir == curDir && !dirChanged("capabilities", toolPkgModTime) {
 		return toolPackages
 	}
 
 	configDir := curDir
 
-	// Start with legacy tool_packages (flat YAML files)
-	legacyDir := "config/tool_packages"
-	if configDir != "" {
-		legacyDir = filepath.Join(configDir, "tool_packages")
-	}
-	toolPackages = LoadToolPackagesFrom(legacyDir)
-
-	// Overlay with new capabilities (folders with capability.yaml + SKILL.md)
 	capDir := "config/capabilities"
 	if configDir != "" {
 		capDir = filepath.Join(configDir, "capabilities")
 	}
-	capabilities := LoadCapabilitiesFrom(capDir)
-	for name, pkg := range capabilities {
-		toolPackages[name] = pkg // new overrides legacy
-	}
+	toolPackages = LoadCapabilitiesFrom(capDir)
 
 	toolPkgConfigDir = configDir
-	updateModTime("tool_packages", legacyDir, toolPkgModTime)
 	updateModTime("capabilities", capDir, toolPkgModTime)
 	return toolPackages
 }
 
-// LoadToolPackagesFrom scans a directory for .yaml tool package files (legacy flat format).
+// LoadToolPackagesFrom scans a directory for flat-YAML tool package files.
+// Used by MergeToolPackages for org-level packages (orgs/<org>/tool_packages/*.yaml).
 func LoadToolPackagesFrom(dir string) map[string]*ToolPackage {
 	pkgs := make(map[string]*ToolPackage)
 
