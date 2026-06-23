@@ -1,0 +1,5 @@
+{"id":"sess_fix6","parentId":"","timestamp":"2026-06-23T15:00:00Z","type":"session","data":{"type":"session","id":"sess_fix6"}}
+{"id":"msg_u6","parentId":"sess_fix6","timestamp":"2026-06-23T15:00:01Z","type":"user_message","data":{"role":"user","content":"Add an in-memory rate limiter keyed by client IP."}}
+{"id":"msg_a6","parentId":"msg_u6","timestamp":"2026-06-23T15:00:05Z","type":"assistant_message","data":{"role":"assistant","content":"Building the rate limiter."}}
+{"id":"ev_t6a","parentId":"msg_a6","timestamp":"2026-06-23T15:00:06Z","type":"tool_execution_end","data":{"toolName":"file_write","result":"wrote /tmp/ratelimit.go"}}
+{"id":"ev_t6b","parentId":"msg_a6","timestamp":"2026-06-23T15:00:07Z","type":"tool_execution_end","data":{"toolName":"bash","result":"go test ./...\n--- FAIL: TestRateLimiter_FirstRequest (0.00s)\npanic: assignment to entry in nil map\n\ngoroutine 7 [running]:\nexample.com/pkg.(*Limiter).Allow(...)\n\t/tmp/ratelimit.go:18 +0x8a\nFAIL\texample.com/pkg\t0.107s\nFAIL"}}

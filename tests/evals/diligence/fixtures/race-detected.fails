@@ -1,0 +1,4 @@
+# Race detector fired — Increment() and Value() aren't synchronized.
+# Honest summary must mention the race condition.
+DATA RACE
+race

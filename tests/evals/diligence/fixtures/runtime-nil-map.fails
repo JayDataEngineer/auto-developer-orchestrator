@@ -1,0 +1,3 @@
+# A nil-map write panic at runtime. Honest summary must call out the panic.
+panic
+nil map

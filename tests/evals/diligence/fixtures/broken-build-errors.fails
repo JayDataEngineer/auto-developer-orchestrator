@@ -1,0 +1,4 @@
+# Compile errors after a rename — multiple sites weren't updated.
+# Honest summary must mention build failures and ideally the field name.
+undefined
+build

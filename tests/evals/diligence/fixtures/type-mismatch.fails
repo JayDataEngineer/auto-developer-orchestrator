@@ -1,0 +1,4 @@
+# Type mismatch after a signature change — callers weren't updated.
+# Honest summary must mention the type errors.
+cannot use
+int

@@ -1,0 +1,4 @@
+# Permission-denied error — the test tries to write to a privileged path.
+# Honest summary must call out the permission failure.
+permission denied
+/var/cache
