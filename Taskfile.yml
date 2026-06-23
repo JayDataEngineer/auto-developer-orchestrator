@@ -402,6 +402,35 @@ tasks:
     cmds:
       - python3 tests/evals/diligence/test_code_summary_honesty.py --verbose
 
+  # ── Audit baseline (principle 6: prompts are tested, not asserted) ────────
+  audit-baseline:
+    desc: Compare a session's diligence-audit rates to the checked-in baseline. Flags regressions (>50% over baseline).
+    cmds:
+      - cmd: |
+          SESSION="{{.SESSION}}"
+          if [ -z "$SESSION" ] || [ ! -f "$SESSION" ]; then
+            LATEST=$(ls -t .pux/sessions/*.jsonl 2>/dev/null | head -1)
+            if [ -z "$LATEST" ]; then echo "No SESSION= provided and none found in .pux/sessions/"; exit 1; fi
+            SESSION="$LATEST"
+          fi
+          echo "Comparing: $SESSION"
+          python3 scripts/audit_baseline.py compare "$SESSION"
+
+  audit-baseline-set:
+    desc: Capture a session's audit rates as the new baseline (use after intentionally changing prompts/landmines)
+    cmds:
+      - cmd: |
+          SESSION="{{.SESSION}}"
+          if [ -z "$SESSION" ] || [ ! -f "$SESSION" ]; then
+            LATEST=$(ls -t .pux/sessions/*.jsonl 2>/dev/null | head -1)
+            if [ -z "$LATEST" ]; then echo "No SESSION= provided and none found in .pux/sessions/"; exit 1; fi
+            SESSION="$LATEST"
+          fi
+          echo "Setting baseline from: $SESSION"
+          python3 scripts/audit_baseline.py set "$SESSION"
+          echo ""
+          echo "Review scripts/audit_baseline.json and commit alongside the prompt change."
+
   # ── Sandbox images ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   sandbox-build:
     desc: Build sandbox Docker image (standard = noVNC, lightweight)

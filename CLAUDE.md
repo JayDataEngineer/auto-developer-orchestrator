@@ -625,6 +625,35 @@ Files:
 - `scripts/audit_lib.py` — shared classifier logic, importable
 - `backend/internal/handlers/audit.go` — HTTP endpoint, shells out to the script
 
+### Audit Baseline (principle 6: prompts are tested, not asserted)
+
+The audit script classifies one session at a time. The baseline workflow closes the loop: compare any session's rates to a checked-in baseline so prompt regressions are visible.
+
+```bash
+task audit-baseline                          # compare latest session to baseline; exit 2 on regressions
+task audit-baseline SESSION=path/to/sess.jsonl
+task audit-baseline-set SESSION=path/to/sess.jsonl   # capture session rates as new baseline
+```
+
+The baseline lives at `scripts/audit_baseline.json` — just tag rates + source session + turn count. Refresh it when prompts materially change (diligence substrate updated, new landmine pattern added, etc.). Commit the new baseline alongside the prompt change so reviewers see the delta.
+
+A session "regresses" if any tag rate exceeds the baseline by >50%. The threshold is deliberately generous — the audit is a signal, not a gate. Use `audit-baseline-set` to refresh when you intentionally tighten detection.
+
+Files:
+- `scripts/audit_baseline.py` — `set` and `compare` subcommands
+- `scripts/audit_baseline.json` — checked-in seed baseline (regenerable)
+
+### Diligence Substrate (principle 5: version it, regression-test it)
+
+The diligence section in the CTO prompt is the highest-leverage text in the system. It's protected two ways:
+
+1. **Version annotation.** `config/prompt_sections/diligence.md` carries a `<!-- diligence-substrate version: YYYY-MM-DD -->` comment. Bump it when you change the content.
+2. **Regression test.** `backend/internal/agents/common/diligence_section_test.go::TestDiligenceSectionPresent` fails if any of the canonical phrases (six failure-mode names, three rules, sentinels) are missing from the rendered prompt. Update `RequiredPhrases` when you intentionally change the substrate.
+
+Historical note: when this regression was written, the diligence section existed only in the legacy `config/prompt.md` and was silently dropped by the V2 section-pipeline builder. The test + `diligence.md` section file close that gap.
+
+
+
 
 
 **Manual scan:** `task scan-secrets`
