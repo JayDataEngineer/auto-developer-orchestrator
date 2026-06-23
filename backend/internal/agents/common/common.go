@@ -50,6 +50,7 @@ type AgentRole struct {
 	SandboxTier string   // "isolated" (default), "bridged", "native"
 	DelegatesTo []string // if non-empty, this worker gets scoped delegation tools
 	Hooks       []string // named hooks to attach to sub-agents (e.g., "file_checkpoint", "raise_browser")
+	Skills      []string // discoverable-skill scope (P2): explicit allowlist of skill names this role can read_skill
 }
 
 // RoleConfig is the single YAML structure for ALL role config files:
@@ -91,6 +92,13 @@ type RoleConfig struct {
 	Sandbox     string   `yaml:"sandbox,omitempty"`
 	DelegatesTo []string `yaml:"delegates_to,omitempty"`
 	Hooks       []string `yaml:"hooks,omitempty"`
+
+	// Discoverable-skill scope — names of skills this role can read_skill.
+	// Empty means: derive scope from capability-attached skills (frontmatter
+	// `capabilities: [name]`). Workers without explicit Skills or
+	// capability-attached skills do not get read_skill at all (preserves the
+	// pre-P2 default of CTO-only access).
+	Skills []string `yaml:"skills,omitempty"`
 }
 
 // ToolPackage is a shared tool group (legacy name, still used internally).
@@ -726,6 +734,7 @@ func loadRoleFromFolder(folder string) *AgentRole {
 		SandboxTier: rc.Sandbox,
 		DelegatesTo: rc.DelegatesTo,
 		Hooks:       rc.Hooks,
+		Skills:      rc.Skills,
 	}
 }
 
@@ -814,6 +823,7 @@ func LoadWorkersFrom(dir string) map[string]*AgentRole {
 			SandboxTier:  sandboxTier,
 			DelegatesTo:  wc.DelegatesTo,
 			Hooks:        wc.Hooks,
+			Skills:       wc.Skills,
 		}
 	}
 	return roles

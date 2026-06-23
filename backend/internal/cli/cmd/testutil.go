@@ -55,6 +55,7 @@ func runCommand(t *testing.T, serverURL string, args ...string) (stdout, stderr 
 	desktopDirection = ""
 	desktopSubmit = false
 	configSetArgs = nil
+	skillsOrgName = ""
 
 	fullArgs := append([]string{"--server", serverURL}, args...)
 

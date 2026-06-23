@@ -19,6 +19,7 @@ import (
 	ctxpkg "github.com/auto-developer-orchestrator/backend/internal/context"
 	"github.com/auto-developer-orchestrator/backend/internal/hooks"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
+	"github.com/auto-developer-orchestrator/backend/internal/skills"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	"github.com/auto-developer-orchestrator/backend/internal/util"
@@ -133,6 +134,13 @@ type RunnerConfig struct {
 	// then has no peers to talk to). Pass the same bus used to construct
 	// the CTO's MessagingTools to keep them on the same channel.
 	Bus *MessageBus
+
+	// SkillStore is the discoverable-skills store the runner uses to grant
+	// sub-agents scoped read_skill access. When nil, sub-agents do not get
+	// read_skill at all (pre-P2 behavior). When set, each sub-agent's role
+	// determines its scope via RoleConfig.Skills (explicit allowlist) plus
+	// any skill whose frontmatter `capabilities:` intersects the role's imports.
+	SkillStore *skills.Store
 }
 
 // ParallelRunner implements DelegateRunner with goroutine-based parallelism.
@@ -665,6 +673,10 @@ type delegateSetup struct {
 	SelectedTools []core.OpenAITool
 	// Scoped delegation tools (non-nil if sub-agent can delegate further)
 	scopedDelegate, scopedAsync, scopedCollect core.Tool
+	// ScopedSkillStore is the read_skill store filtered to this sub-agent's
+	// allowed skills. Non-nil iff the role has any discoverable skills in
+	// scope (via RoleConfig.Skills or capability-attached skills).
+	ScopedSkillStore *skills.Store
 }
 
 // subAgentResources holds the provider and hooks resolved for a sub-agent.
@@ -767,14 +779,30 @@ func (r *ParallelRunner) prepareDelegation(
 		selectedTools = append(selectedTools, messagingToolSpecs()...)
 	}
 
+	// P2: advertise read_skill when this role has skills in scope. Scope =
+	// explicit RoleConfig.Skills ∪ skills whose frontmatter capabilities:
+	// intersects the role's imports. The runtime dispatch goes through a
+	// skillsExecutor wrapper around the per-agent scoped store.
+	var scopedStore *skills.Store
+	if r.cfg.SkillStore != nil && r.cfg.RoleProvider != nil {
+		scope := computeSkillScope(r.cfg.RoleProvider, r.cfg.SkillStore, agentName)
+		if len(scope) > 0 {
+			scopedStore = r.cfg.SkillStore.Visible(scope)
+			readSkill := skills.NewReadSkillTool(scopedStore)
+			selectedTools = append(selectedTools, jsonToToolSpec(readSkill))
+			r.cfg.Logger("SKILL_SCOPE: agent=%s scope=%v", agentName, scope)
+		}
+	}
+
 	return &delegateSetup{
-		SnapshotID:      snapshotID,
-		AgentName:       agentName,
-		TranscriptID:    transcriptID,
-		SelectedTools:   selectedTools,
-		scopedDelegate:  scopedDelegate,
-		scopedAsync:     scopedAsync,
-		scopedCollect:   scopedCollect,
+		SnapshotID:       snapshotID,
+		AgentName:        agentName,
+		TranscriptID:     transcriptID,
+		SelectedTools:    selectedTools,
+		scopedDelegate:   scopedDelegate,
+		scopedAsync:      scopedAsync,
+		scopedCollect:    scopedCollect,
+		ScopedSkillStore: scopedStore,
 	}, nil
 }
 
@@ -940,6 +968,11 @@ func (r *ParallelRunner) buildSubAgent(
 	// Wrap with conflict-tracker observation: records file_write/file_edit
 	// calls so the CTO sees resource_conflict events on parallel overlap.
 	executor = newWriteObservingExecutor(executor, r.conflicts, setup.AgentName)
+	// P2: route read_skill calls to the per-agent scoped store. No-op when
+	// the role has no skills in scope (preserves pre-P2 read_skill absence).
+	if setup.ScopedSkillStore != nil {
+		executor = &skillsExecutor{parent: executor, store: setup.ScopedSkillStore}
+	}
 	{
 		vExec := vision.NewVisionAwareExecutor(executor, r.cfg.VisionChain, log.New(io.Discard, "", 0))
 		vExec.SetNativeVision(r.cfg.NativeVision)
@@ -2181,6 +2214,78 @@ func (e *scopedDelegationExecutor) ToolTimeoutHint(toolName string) time.Duratio
 			return meta.TimeoutHint()
 		}
 	case "collect_results":
+		return 0
+	}
+	if hinter, ok := e.parent.(interface{ ToolTimeoutHint(string) time.Duration }); ok {
+		return hinter.ToolTimeoutHint(toolName)
+	}
+	return 0
+}
+
+// computeSkillScope returns the discoverable-skill names this role may
+// read_skill. The union of:
+//   - RoleConfig.Skills (explicit YAML allowlist)
+//   - skills whose frontmatter `capabilities:` lists any of the role's imports
+//
+// Returns nil when nothing is in scope — caller treats nil as "no read_skill
+// for this sub-agent" (preserves pre-P2 behavior).
+func computeSkillScope(roleProvider RoleProvider, store *skills.Store, agentName string) []string {
+	if roleProvider == nil || store == nil {
+		return nil
+	}
+	roles := roleProvider()
+	role, ok := roles[agentName]
+	if !ok || role == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var scope []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		// Only include skills the store actually has — silently skip
+		// declared-but-missing names so a typo in RoleConfig.Skills doesn't
+		// grant read access to a phantom skill.
+		if store.Get(name) == nil {
+			return
+		}
+		seen[name] = true
+		scope = append(scope, name)
+	}
+	for _, s := range role.Skills {
+		add(s)
+	}
+	for _, cap := range role.Imports {
+		for _, s := range store.ForCapability(cap) {
+			add(s)
+		}
+	}
+	return scope
+}
+
+// skillsExecutor dispatches read_skill calls against a per-agent scoped
+// skills.Store. Other tool calls pass through to the parent executor
+// unchanged. Mirrors the loadSpilledExecutor / messagingExecutor pattern.
+type skillsExecutor struct {
+	parent core.ToolExecutor
+	store  *skills.Store
+}
+
+func (e *skillsExecutor) Execute(ctx context.Context, toolName string, args map[string]any) (any, error) {
+	if e == nil {
+		return nil, core.NewToolError(toolName, "skills executor not configured")
+	}
+	if toolName == "read_skill" {
+		tool := skills.NewReadSkillTool(e.store)
+		return tool.Execute(ctx, args)
+	}
+	return e.parent.Execute(ctx, toolName, args)
+}
+
+// ToolTimeoutHint delegates to the parent executor's hint if present.
+func (e *skillsExecutor) ToolTimeoutHint(toolName string) time.Duration {
+	if e == nil {
 		return 0
 	}
 	if hinter, ok := e.parent.(interface{ ToolTimeoutHint(string) time.Duration }); ok {

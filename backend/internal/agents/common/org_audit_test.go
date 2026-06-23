@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/auto-developer-orchestrator/backend/internal/skills"
 )
 
 // TestOrgsDirectoryAudit walks the consolidated orgs/ directory and asserts
@@ -122,6 +124,12 @@ func auditOrg(t *testing.T, orgPath, name string) {
 		skillsDir := org.SkillsDirPath()
 		if _, err := os.Stat(skillsDir); err != nil {
 			t.Errorf("%s: skills_dir=%q but dir %s does not exist", name, org.SkillsDir, skillsDir)
+		} else {
+			// P0 fix #4: load the skills dir through the real loader and
+			// assert that every .md candidate actually registers. Before this
+			// audit, 6 of 7 orgs had skills/ dirs full of UPPER_CASE.md files
+			// that silently dropped at parse time. Now any drop fails the test.
+			auditOrgSkills(t, name, skillsDir)
 		}
 	}
 
@@ -242,4 +250,32 @@ func sortedKeys(m map[string]*AgentRole) string {
 		}
 	}
 	return strings.Join(keys, ", ")
+}
+
+// auditOrgSkills loads the org's skills dir through the production skills
+// loader and fails the test if any candidate file is dropped. Catches the
+// silent-failure class of bugs: malformed frontmatter, missing description,
+// duplicate names, etc. Before this audit, 6/7 orgs loaded zero skills and
+// nothing complained.
+//
+// Reports with zero walked files are allowed — an empty skills/ dir is
+// legitimate (some orgs declare skills_dir for future use). The failure
+// signal is "we walked files but loaded fewer than we walked."
+func auditOrgSkills(t *testing.T, orgName, skillsDir string) {
+	t.Helper()
+	store := skills.NewStore()
+	store.LoadFromDirs([]string{skillsDir})
+	for _, r := range store.Reports() {
+		if r.Walked == 0 {
+			continue
+		}
+		if r.Loaded == r.Walked {
+			t.Logf("%s/skills: %d skill(s) loaded cleanly", orgName, r.Loaded)
+			continue
+		}
+		t.Errorf("%s/skills: %s\n", orgName, r.Summary())
+		for _, reason := range r.Skipped {
+			t.Errorf("  %s", reason)
+		}
+	}
 }

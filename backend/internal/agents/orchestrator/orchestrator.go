@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/agents"
 	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
@@ -97,11 +98,12 @@ type Config struct {
 // Agent is the full orchestrator agent with all tools.
 type Agent struct {
 	*agents.BaseAgent
-	Memory   *memory.Store
-	config   Config
-	logger   *log.Logger
-	jitStore *autoconfig.WorkerStore          // session-scoped workers, cleaned up on Close
-	runner   *orchestration.ParallelRunner    // nil if external DelegateRunner provided
+	Memory    *memory.Store
+	config    Config
+	logger    *log.Logger
+	jitStore  *autoconfig.WorkerStore         // session-scoped workers, cleaned up on Close
+	runner    *orchestration.ParallelRunner   // nil if external DelegateRunner provided
+	skillDone chan struct{}                    // closes to stop skill hot-reload watcher
 }
 
 // newBashTool creates a bash tool for the CTO.
@@ -356,6 +358,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if skillStore != nil && skillStore.Count() > 0 {
 		ctoTools = append(ctoTools, skills.NewReadSkillTool(skillStore))
 		logger.Printf("Skills loaded: %d skills discovered", skillStore.Count())
+		logSkillDrift(skillStore, logger)
 	}
 
 	// ── Context management add-on ──
@@ -624,6 +627,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			},
 			Subscriber: cfg.Subscriber,
 			Bus:        sharedBus,
+			SkillStore: skillStore,
 		})
 		runner = pr
 	}
@@ -790,14 +794,47 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		Logger:          logger,
 	})
 
-	return &Agent{
+	agent := &Agent{
 		BaseAgent: baseAgent,
 		Memory:    cfg.MemoryStore,
 		config:    cfg,
 		logger:    logger,
 		jitStore:  jitStore,
 		runner:    pr,
-	}, nil
+	}
+
+	// P3: hot-reload discoverable skills every 30s. Editing a skill on disk
+	// shows up in the next read_skill call without a server restart. The
+	// watcher stops when Agent.Close() closes skillDone.
+	if skillStore != nil && skillStore.Count() > 0 {
+		dirs := skillDirsToWatch(cfg, skillStore)
+		if len(dirs) > 0 {
+			agent.skillDone = make(chan struct{})
+			go skillStore.WatchAndReload(dirs, 30*time.Second, agent.skillDone, func(format string, args ...any) {
+				logger.Printf("SKILL_RELOAD: "+format, args...)
+			})
+		}
+	}
+
+	return agent, nil
+}
+
+// skillDirsToWatch returns the dirs the hot-reload watcher should scan. Combines
+// kernel skills dir, project skills dir, and org skills dir (if applicable).
+func skillDirsToWatch(cfg Config, store *skills.Store) []string {
+	var dirs []string
+	if cfg.ProjectDir != "" {
+		dirs = append(dirs, filepath.Join(cfg.ProjectDir, "skills"))
+	}
+	if cfg.Org != nil {
+		if orgDir := cfg.Org.SkillsDirPath(); orgDir != "" {
+			dirs = append(dirs, orgDir)
+		}
+	}
+	if kcfg := common.FindKernelConfigDir(); kcfg != "" {
+		dirs = append(dirs, filepath.Join(kcfg, "skills"))
+	}
+	return dirs
 }
 
 // Run executes the agent with a user message.
@@ -817,6 +854,11 @@ func (a *Agent) Continue(ctx context.Context, userMsg string, subscriber chan<- 
 
 // Close releases resources.
 func (a *Agent) Close() error {
+	// Stop skill hot-reload watcher
+	if a.skillDone != nil {
+		close(a.skillDone)
+		a.skillDone = nil
+	}
 	// Clean up live sub-agents (providers kept alive for delegate_continue)
 	if a.runner != nil {
 		a.runner.Close()
@@ -908,4 +950,25 @@ func (a *subOrchestratorAdapter) Run(ctx context.Context, userMsg string, subscr
 
 func (a *subOrchestratorAdapter) Close() error {
 	return a.agent.Close()
+}
+
+// logSkillDrift warns when a discoverable skill shares a name with a
+// capability folder. The capability's SKILL.md is baked into worker prompts
+// via BuildWorkerPrompt; a discoverable skill with the same name is read on
+// demand via read_skill. When they collide, the on-demand body can drift from
+// the baked-in body silently. The warning surfaces the collision so a human
+// can audit before the divergence becomes a problem.
+func logSkillDrift(store *skills.Store, logger *log.Logger) {
+	capNames := make(map[string]bool)
+	for name := range common.LoadToolPackages() {
+		capNames[name] = true
+	}
+	if len(capNames) == 0 {
+		return
+	}
+	for _, s := range store.All() {
+		if capNames[s.Name] {
+			logger.Printf("SKILL_DRIFT: skill %q shares name with a capability folder — baked-in SKILL.md may diverge from on-demand skill at %s", s.Name, s.Location)
+		}
+	}
 }

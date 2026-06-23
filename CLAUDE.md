@@ -639,3 +639,45 @@ task scan-secrets-baseline   # overwrites .gitleaks-baseline.json
 ```
 
 **CI:** `.github/workflows/ci.yml` `secret-scan` job. PRs scan only the diff (no baseline needed); pushes to main use the baseline. Uses raw gitleaks binary, not the paid `gitleaks-action`.
+
+## Skills System (two-tier)
+
+Pux has **two non-overlapping skill systems**. They look similar but serve different roles:
+
+| Aspect | Capability SKILL.md (backbone) | Discoverable skills (on-demand) |
+|--------|-------------------------------|--------------------------------|
+| Location | `config/capabilities/<name>/SKILL.md` | `config/skills/`, `orgs/<org>/skills/`, project `skills/` |
+| Format | Free markdown | YAML frontmatter + markdown body |
+| Who sees it | Every worker that imports the capability — baked into the prompt via `BuildWorkerPrompt` | CTO + sub-agents with explicit scope |
+| How to read | Always in context | `read_skill(name)` tool call |
+| Naming | Capability folder name (e.g., `browser`) | Kebab-case (e.g., `context-engine-query`) |
+| Hot-reload | No (boot-time only) | Yes (polled every 30s) |
+| Drift risk | Low (single source) | High if same name as a capability — logged at boot |
+
+**Discoverable skill layout conventions:**
+
+1. **Canonical:** `<skill-name>/SKILL.md` — name from parent dir.
+2. **Flat:** `<STEM_NAME>.md` — name from filename stem (`CONTEXT_ENGINE_QUERY` → `context-engine-query`). Description auto-derived from first paragraph after the H1. Useful for migrating legacy docs without rewriting frontmatter.
+
+**Per-role scope (P2):** A sub-agent can call `read_skill` when:
+- Its YAML declares `skills: [name1, name2]` (explicit allowlist), OR
+- A skill's frontmatter declares `capabilities: [research]` and the role imports `research` (auto-attached)
+
+Sub-agents without either get no `read_skill` tool — preserves the pre-P2 default of CTO-only access.
+
+**CLI visibility:**
+
+```bash
+orch skills list                       # kernel + project skills
+orch skills list --org invest          # also scan ~/.pux/orgs/invest/skills/
+orch skills show context-engine-query  # print full skill body
+orch skills json                       # machine-readable
+```
+
+**Loader diagnostics.** Every dropped file gets a reason logged at boot via `LoadReport.Skipped`. The org audit test (`TestOrgsDirectoryAudit`) fails the build if any org's `skills_dir` walks more files than it loads.
+
+**Files:**
+- `backend/internal/skills/skills.go` — Store, loader, hot-reload, ReadSkillTool
+- `backend/internal/skills/watcher.go` — polling-based hot-reload (no fsnotify dep)
+- `backend/internal/cli/cmd/skills.go` — `orch skills` CLI
+- `backend/internal/tools/orchestration/skills_scope_test.go` — per-role scope regression tests
