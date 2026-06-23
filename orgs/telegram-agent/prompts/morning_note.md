@@ -23,7 +23,7 @@ Note: ...
 
 ## Execution
 
-1. Check session: `python3 /sandbox/session.py --check`. If invalid, tell the user — don't try to re-auth silently.
+1. Check session: `python3 /sandbox/telegram_session.py --check`. If invalid, tell the user — don't try to re-auth silently.
 2. If a `post_note` script exists in list_scripts, reuse it. Otherwise make it once.
 3. Run the script with the formatted message as args.
 4. Report success with the message_id.

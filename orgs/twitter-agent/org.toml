@@ -12,6 +12,33 @@ staff_root = "roles"
 tool_packages_root = "tool_packages"
 skills_dir = "skills"
 
+[sandbox]
+image = "pux-sandbox:latest"
+runtime_class = "gvisor"
+warm_pool = 1
+init_files = [
+  "@shared/sandbox/twitter_session.py",
+  "@shared/sandbox/twitter_helpers.py",
+  "@shared/sandbox/twitter_post.py",
+]
+pip_packages = ["browser-cookie3", "requests", "tweepy"]
+
+[sandbox.resources.requests]
+cpu = "250m"
+memory = "256Mi"
+
+[sandbox.resources.limits]
+cpu = "1"
+memory = "1Gi"
+
+[[sandbox.volumes]]
+type = "volume"
+name = "twitter-agent-workspace"
+container = "/workspace"
+
+[sandbox.env]
+PUX_ORG_PATH = "/sandbox/workspace"
+
 [[schedules]]
 name = "morning_post"
 cron = "0 8 * * *"

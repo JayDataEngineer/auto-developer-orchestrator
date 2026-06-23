@@ -16,14 +16,14 @@ Before posting or reading, the session must be live. **Do not default to the VNC
 The host machine is already logged into Twitter via Firefox or Chrome. Pull live cookies from it:
 
 ```bash
-python3 /sandbox/session.py --cookies-from-browser firefox
+python3 /sandbox/twitter_session.py --cookies-from-browser firefox
 # or: --cookies-from-browser chrome
 # or: --cookies-from-browser firefox:Personal  (specific profile)
 ```
 
-This is the yt-dlp pattern — it reads cookies directly from the host browser's SQLite cookie DB. No captcha, no VNC, no manual step. Validate the result with `python3 /sandbox/session.py --check` — if `valid: true`, you're ready to post.
+This is the yt-dlp pattern — it reads cookies directly from the host browser's SQLite cookie DB. No captcha, no VNC, no manual step. Validate the result with `python3 /sandbox/twitter_session.py --check` — if `valid: true`, you're ready to post.
 
-Fall back to `python3 /sandbox/session.py --bootstrap` (VNC) ONLY if cookie import fails AND no human is around to refresh the host browser session.
+Fall back to `python3 /sandbox/twitter_session.py --bootstrap` (VNC) ONLY if cookie import fails AND no human is around to refresh the host browser session.
 
 ## Captcha Handling
 

@@ -1,0 +1,22 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build twitter-agent`.
+
+services:
+  twitter-agent-sandbox:
+    image: pux-sandbox:latest
+    runtime: runsc
+    environment:
+      PUX_ORG_PATH: "/sandbox/workspace"
+    deploy:
+      resources:
+        reservations:
+          cpus: '250m'
+          memory: 256Mi
+        limits:
+          cpus: '1'
+          memory: 1Gi
+    volumes:
+      - twitter-agent-workspace:/workspace
+    network_mode: host
+
+volumes:
+  twitter-agent-workspace:

@@ -17,8 +17,8 @@ Direct, knowledgeable, no fluff. See MANIFESTO.md for full voice guide.
 If you're asked to post directly (not just draft), sync session from the host browser first — yt-dlp pattern, no VNC dance:
 
 ```bash
-python3 /sandbox/session.py --cookies-from-browser firefox
-python3 /sandbox/session.py --check  # confirm valid: true before posting
+python3 /sandbox/twitter_session.py --cookies-from-browser firefox
+python3 /sandbox/twitter_session.py --check  # confirm valid: true before posting
 ```
 
 Switch `firefox` to `chrome`, `brave`, `edge` etc. to match the host's logged-in browser. See `skills/SOCIAL_CAPTCHA.md` if a captcha appears during posting.

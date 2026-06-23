@@ -133,20 +133,30 @@ func (si *sandboxInit) runInit(ctx context.Context, sandboxID string, sandboxCfg
 }
 
 // resolveInitFileLocalPath maps a pux.yaml init_files entry to its source path
-// on the host. Entries with the "@shared/" prefix resolve against
-// orgs/_shared/clients/ (canonical shared Python clients); everything else
-// resolves against the project directory.
+// on the host. Entries with the "@shared/" prefix resolve against the
+// orgs/_shared/ tree:
 //
-// Returns an error when an "@shared/" entry is given but the shared clients
-// directory cannot be located — this is a deployment misconfiguration, not a
-// runtime miss.
+//   - "@shared/clients/foo.py"  → orgs/_shared/clients/foo.py   (explicit)
+//   - "@shared/sandbox/foo.py"  → orgs/_shared/sandbox/foo.py   (explicit)
+//   - "@shared/foo.py"          → orgs/_shared/clients/foo.py   (backward compat)
+//
+// Everything else resolves against the project directory.
+//
+// Returns an error when an "@shared/" entry is given but the shared root
+// cannot be located — this is a deployment misconfiguration, not a runtime
+// miss.
 func resolveInitFileLocalPath(relPath, projectDir string) (string, error) {
 	if strings.HasPrefix(relPath, "@shared/") {
-		sharedDir := common.FindSharedClientsDir()
-		if sharedDir == "" {
-			return "", fmt.Errorf("upload %s: orgs/_shared/clients/ not found (set PROJECT_ROOT)", relPath)
+		sharedRoot, err := common.FindSharedRoot()
+		if err != nil {
+			return "", fmt.Errorf("upload %s: %v", relPath, err)
 		}
-		return filepath.Join(sharedDir, strings.TrimPrefix(relPath, "@shared/")), nil
+		rest := strings.TrimPrefix(relPath, "@shared/")
+		// Bare filename (no subdir) defaults to clients/ for backward compat.
+		if !strings.Contains(rest, "/") {
+			rest = filepath.Join("clients", rest)
+		}
+		return filepath.Join(sharedRoot, rest), nil
 	}
 	return filepath.Join(projectDir, relPath), nil
 }

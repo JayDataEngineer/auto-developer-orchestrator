@@ -56,6 +56,43 @@ func TestResolveInitFileLocalPath_SharedBranch(t *testing.T) {
 	}
 }
 
+// TestResolveInitFileLocalPath_SharedSandboxSubdir verifies the @shared/
+// resolver honors explicit subdirs. `@shared/sandbox/X.py` must resolve to
+// `orgs/_shared/sandbox/X.py`, NOT `orgs/_shared/clients/sandbox/X.py`.
+// Locks down the extension that unblocked twitter-agent/telegram-agent wiring.
+func TestResolveInitFileLocalPath_SharedSandboxSubdir(t *testing.T) {
+	projectDir := t.TempDir()
+	got, err := resolveInitFileLocalPath("@shared/sandbox/twitter_session.py", projectDir)
+	if err != nil {
+		t.Fatalf("@shared/sandbox/ branch returned error: %v", err)
+	}
+	// Resolved path must contain the sandbox subdir — not just clients/.
+	if !strings.Contains(got, "_shared/sandbox/twitter_session.py") {
+		t.Errorf("expected path under _shared/sandbox/, got: %s", got)
+	}
+	// Must NOT resolve via clients/sandbox/ (the old broken behavior).
+	if strings.Contains(got, "clients/sandbox") {
+		t.Errorf("resolved through clients/sandbox/ (subdir not honored): %s", got)
+	}
+	if _, err := os.Stat(got); err != nil {
+		t.Errorf("resolved path does not exist: %v", err)
+	}
+}
+
+// TestResolveInitFileLocalPath_SharedBareFilenameStillClients verifies the
+// backward-compat path: `@shared/foo.py` (no subdir) still resolves through
+// clients/. This protects existing orgs that use the bare form.
+func TestResolveInitFileLocalPath_SharedBareFilenameStillClients(t *testing.T) {
+	projectDir := t.TempDir()
+	got, err := resolveInitFileLocalPath("@shared/surreal_client.py", projectDir)
+	if err != nil {
+		t.Fatalf("bare @shared/ branch returned error: %v", err)
+	}
+	if !strings.Contains(got, "_shared/clients/surreal_client.py") {
+		t.Errorf("bare @shared/foo.py should resolve through clients/, got: %s", got)
+	}
+}
+
 // TestResolveInitFileLocalPath_UnknownSharedWhenUnset verifies the error
 // branch: when PROJECT_ROOT is unset and the test is running from somewhere
 // without orgs/_shared/ nearby, an @shared entry returns an error rather
@@ -85,7 +122,7 @@ func TestResolveInitFileLocalPath_UnknownSharedWhenUnset(t *testing.T) {
 		// error branch can't be exercised here.
 		t.Skip("shared clients dir was locatable from tmp — error branch not reachable")
 	}
-	if !strings.Contains(err.Error(), "orgs/_shared/clients/") {
-		t.Errorf("error should mention orgs/_shared/clients/, got: %v", err)
+	if !strings.Contains(err.Error(), "orgs/_shared/") {
+		t.Errorf("error should mention orgs/_shared/, got: %v", err)
 	}
 }

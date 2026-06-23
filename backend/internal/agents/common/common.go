@@ -261,7 +261,29 @@ func FindKernelConfigDir() string {
 // Used by the sandbox init loader to resolve `@shared/<name>` references in
 // pux.yaml init_files — lets orgs share canonical client scripts instead of
 // each carrying their own copy.
+//
+// Deprecated: prefer FindSharedRoot for new code — the @shared/ tree now
+// hosts more than just clients/ (sandbox/ for shared scripts, etc.).
+// FindSharedClientsDir is kept for backward compat with existing callers.
 func FindSharedClientsDir() string {
+	root, err := FindSharedRoot()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(root, "clients")
+}
+
+// FindSharedRoot resolves the repo's orgs/_shared/ directory. The shared tree
+// hosts cross-org resources in namespaced subdirs:
+//
+//	orgs/_shared/
+//	  clients/   — Python clients (surreal_client.py, forge_client.py, ...)
+//	  sandbox/   — shared sandbox scripts (twitter_session.py, ...)
+//
+// @shared/ init_files entries resolve against this root. Bare filenames
+// (e.g. "@shared/foo.py") default to clients/ for backward compat; explicit
+// subdir paths (e.g. "@shared/sandbox/foo.py") are honored as-is.
+func FindSharedRoot() (string, error) {
 	root := os.Getenv("PROJECT_ROOT")
 
 	candidates := []string{}
@@ -284,12 +306,12 @@ func FindSharedClientsDir() string {
 	}
 
 	for _, c := range candidates {
-		p := filepath.Join(c, "orgs", "_shared", "clients")
+		p := filepath.Join(c, "orgs", "_shared")
 		if info, err := os.Stat(p); err == nil && info.IsDir() {
-			return p
+			return p, nil
 		}
 	}
-	return ""
+	return "", fmt.Errorf("orgs/_shared/ not found (set PROJECT_ROOT to the repo root)")
 }
 
 // loadPromptTemplate loads and parses config/prompt.md as a Go text/template.

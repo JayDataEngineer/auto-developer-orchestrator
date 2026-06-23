@@ -144,3 +144,69 @@ sandbox:
 		}
 	}
 }
+
+// TestOrgManifestValidate_SharedSandboxSubdir proves the @shared/ resolver
+// honors explicit subdirs — @shared/sandbox/X.py resolves to
+// orgs/_shared/sandbox/X.py, NOT orgs/_shared/clients/sandbox/X.py. This
+// locks down the extension that unblocked twitter-agent/telegram-agent
+// wiring (their session scripts live under _shared/sandbox/, not clients/).
+func TestOrgManifestValidate_SharedSandboxSubdir(t *testing.T) {
+	if root, err := FindSharedRoot(); err != nil {
+		t.Skipf("shared root not locatable: %v", err)
+	} else if _, err := os.Stat(filepath.Join(root, "sandbox", "twitter_session.py")); err != nil {
+		t.Skipf("twitter_session.py not in _shared/sandbox/ — run org-build first: %v", err)
+	}
+
+	tmp := t.TempDir()
+	puxYaml := `name: test-org
+sandbox:
+  init_files:
+    - "@shared/sandbox/twitter_session.py"
+    - "@shared/sandbox/telegram_session.py"
+`
+	if err := os.WriteFile(filepath.Join(tmp, "pux.yaml"), []byte(puxYaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	org := LoadOrgManifest(tmp)
+	if org == nil {
+		t.Fatal("LoadOrgManifest returned nil")
+	}
+	for _, e := range org.Validate() {
+		if strings.Contains(e, "twitter_session.py") || strings.Contains(e, "telegram_session.py") {
+			t.Errorf("expected @shared/sandbox/ resolution to succeed, got error: %s", e)
+		}
+	}
+}
+
+// TestOrgManifestValidate_SharedSandboxSubdirMissing confirms the validator
+// still catches a typo'd @shared/sandbox/ path — extension didn't weaken
+// the existence check.
+func TestOrgManifestValidate_SharedSandboxSubdirMissing(t *testing.T) {
+	if _, err := FindSharedRoot(); err != nil {
+		t.Skip("shared root not locatable")
+	}
+	tmp := t.TempDir()
+	puxYaml := `name: test-org
+sandbox:
+  init_files:
+    - "@shared/sandbox/this_does_not_exist.py"
+`
+	if err := os.WriteFile(filepath.Join(tmp, "pux.yaml"), []byte(puxYaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	org := LoadOrgManifest(tmp)
+	if org == nil {
+		t.Fatal("LoadOrgManifest returned nil")
+	}
+	errs := org.Validate()
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "this_does_not_exist.py") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected missing @shared/sandbox/ file to be flagged, got: %v", errs)
+	}
+}

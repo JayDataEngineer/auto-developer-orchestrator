@@ -6,6 +6,21 @@ staff_root: roles
 skills_dir: skills
 sandbox:
   image: pux-sandbox:latest
-  runtime_class: runc
+  runtime_class: gvisor
   warm_pool: 1
   mode: contained
+  init_files:
+    - "@shared/sandbox/telegram_session.py"
+    - "@shared/sandbox/telegram_helpers.py"
+  pip_packages:
+    - telethon
+    - requests
+  env:
+    PUX_ORG_PATH: "/sandbox/workspace"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"

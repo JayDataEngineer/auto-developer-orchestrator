@@ -4,7 +4,7 @@ Pull the last N notes from Saved Messages so the user can see what they wrote re
 
 ## Steps
 
-1. Check session: `python3 /sandbox/session.py --check`. Escalate if invalid.
+1. Check session: `python3 /sandbox/telegram_session.py --check`. Escalate if invalid.
 2. Use `read_messages` from `telegram_helpers`:
 
 ```python

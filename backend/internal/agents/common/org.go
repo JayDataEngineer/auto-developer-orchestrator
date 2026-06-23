@@ -206,16 +206,21 @@ func (o *OrgManifest) Validate() []string {
 	}
 
 	// @shared/ init_files must resolve to files that exist on disk. The
-	// finder logic lives in FindSharedClientsDir; if it returns empty we
-	// can't validate, so we skip (the upload path will error at runtime).
-	if len(o.sharedDir()) > 0 {
+	// finder logic lives in FindSharedRoot; if it errors we can't validate,
+	// so we skip (the upload path will error at runtime).
+	if root, err := FindSharedRoot(); err == nil {
 		for _, rel := range o.SandboxInitFiles() {
 			if !strings.HasPrefix(rel, "@shared/") {
 				continue
 			}
-			path := filepath.Join(o.sharedDir(), strings.TrimPrefix(rel, "@shared/"))
+			rest := strings.TrimPrefix(rel, "@shared/")
+			// Bare filename defaults to clients/ for backward compat.
+			if !strings.Contains(rest, "/") {
+				rest = filepath.Join("clients", rest)
+			}
+			path := filepath.Join(root, rest)
 			if _, err := os.Stat(path); err != nil {
-				errs = append(errs, fmt.Sprintf("sandbox.init_files: %s does not exist in orgs/_shared/clients/", rel))
+				errs = append(errs, fmt.Sprintf("sandbox.init_files: %s does not exist under orgs/_shared/ (resolved to %s)", rel, path))
 			}
 		}
 	}
@@ -248,9 +253,6 @@ func (o *OrgManifest) Validate() []string {
 
 	return errs
 }
-
-// sharedDir returns the orgs/_shared/clients/ path (cached via FindSharedClientsDir).
-func (o *OrgManifest) sharedDir() string { return FindSharedClientsDir() }
 
 // Sandbox mode constants. The mode controls whether the CTO runs inside the
 // sandbox container (locked to /sandbox/workspace/) or on the host filesystem.

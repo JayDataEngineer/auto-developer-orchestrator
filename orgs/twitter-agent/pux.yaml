@@ -31,6 +31,23 @@ schedules:
     enabled: false
 sandbox:
   image: pux-sandbox:latest
-  runtime_class: runc
+  runtime_class: gvisor
   warm_pool: 1
   mode: contained
+  init_files:
+    - "@shared/sandbox/twitter_session.py"
+    - "@shared/sandbox/twitter_helpers.py"
+    - "@shared/sandbox/twitter_post.py"
+  pip_packages:
+    - browser-cookie3
+    - requests
+    - tweepy
+  env:
+    PUX_ORG_PATH: "/sandbox/workspace"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
