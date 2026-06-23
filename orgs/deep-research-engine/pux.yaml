@@ -16,6 +16,7 @@ sandbox:
   image: pux-sandbox:latest
   runtime_class: gvisor
   warm_pool: 1
+  mode: contained
   init_files:
     - "@shared/surreal_client.py"
     - "sandbox/context_engine.py"

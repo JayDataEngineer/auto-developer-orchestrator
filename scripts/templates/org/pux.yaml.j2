@@ -41,11 +41,12 @@ databases:
 {% for k, v in cfg.items() if v is not none %}    {{ k }}: {{ v if v is string else v | tojson }}
 {% endfor %}{% endfor %}
 {% endif %}
-{% if sandbox.init_files or sandbox.pip_packages or sandbox.env or sandbox.runtime_class %}
+{% if sandbox.init_files or sandbox.pip_packages or sandbox.env or sandbox.runtime_class or sandbox.mode %}
 sandbox:
 {% if sandbox.image %}  image: {{ sandbox.image }}
 {% endif %}{% if sandbox.runtime_class %}  runtime_class: {{ sandbox.runtime_class }}
 {% endif %}{% if sandbox.warm_pool %}  warm_pool: {{ sandbox.warm_pool }}
+{% endif %}{% if sandbox.mode %}  mode: {{ sandbox.mode }}
 {% endif %}{% if sandbox.init_files %}  init_files:
 {% for f in sandbox.init_files %}    - "{{ f }}"
 {% endfor %}{% endif %}{% if sandbox.pip_packages %}  pip_packages:

@@ -308,3 +308,104 @@ func TestOrgPromptMergesKernelRoles(t *testing.T) {
 		t.Error("manifesto content not found in prompt")
 	}
 }
+
+// writeTmpOrgManifest writes a pux.yaml with the given sandbox.mode line into
+// a tmp dir and returns the loaded OrgManifest. Pass empty string to omit
+// the mode line entirely (test the default-default path).
+func writeTmpOrgManifest(t *testing.T, mode string) *OrgManifest {
+	t.Helper()
+	dir := t.TempDir()
+	var content string
+	if mode == "" {
+		content = "name: test-org\ndescription: x\n"
+	} else {
+		content = "name: test-org\ndescription: x\nsandbox:\n  mode: " + mode + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pux.yaml"), []byte(content), 0644); err != nil {
+		t.Fatalf("write pux.yaml: %v", err)
+	}
+	org := LoadOrgManifest(dir)
+	if org == nil {
+		t.Fatal("LoadOrgManifest returned nil")
+	}
+	return org
+}
+
+// TestSandboxModeDefaults tests that an org without sandbox.mode (or without
+// a sandbox block at all) reads back as "contained" — the safe default.
+func TestSandboxModeDefaults(t *testing.T) {
+	org := writeTmpOrgManifest(t, "")
+	if got := org.SandboxMode(); got != SandboxModeContained {
+		t.Errorf("empty mode → %q, want %q", got, SandboxModeContained)
+	}
+	if org.HostAccessEnabled() {
+		t.Error("HostAccessEnabled should be false when mode is unset")
+	}
+}
+
+// TestSandboxModeHostAccess proves the host-access value round-trips through
+// pux.yaml → OrgManifest.SandboxMode(). This is the value coding-agent orgs
+// set to opt out of container isolation.
+func TestSandboxModeHostAccess(t *testing.T) {
+	org := writeTmpOrgManifest(t, SandboxModeHostAccess)
+	if got := org.SandboxMode(); got != SandboxModeHostAccess {
+		t.Errorf("host-access → %q, want %q", got, SandboxModeHostAccess)
+	}
+	if !org.HostAccessEnabled() {
+		t.Error("HostAccessEnabled should be true for host-access mode")
+	}
+}
+
+// TestSandboxModeContainedExplicit proves the contained value round-trips.
+func TestSandboxModeContainedExplicit(t *testing.T) {
+	org := writeTmpOrgManifest(t, SandboxModeContained)
+	if got := org.SandboxMode(); got != SandboxModeContained {
+		t.Errorf("contained → %q, want %q", got, SandboxModeContained)
+	}
+}
+
+// TestSandboxModeUnknownValueIsContained proves a typo at runtime falls back
+// to contained rather than leaking host access. The validator catches typos
+// at audit time; this test covers the runtime safety net for orgs that
+// bypassed validation (e.g. hand-edited pux.yaml).
+func TestSandboxModeUnknownValueIsContained(t *testing.T) {
+	org := writeTmpOrgManifest(t, "host_acess") // typo
+	if got := org.SandboxMode(); got != "host_acess" {
+		t.Errorf("SandboxMode should pass through unknown value %q as-is for Validate() to catch, got %q", "host_acess", got)
+	}
+	if org.HostAccessEnabled() {
+		t.Error("HostAccessEnabled must be false for unknown mode values — safe default")
+	}
+}
+
+// TestSandboxModeValidateRejectsUnknown proves the validator catches typos.
+// Pairs with TestSandboxModeUnknownValueIsContained — runtime falls back to
+// safe default, audit time complains loud.
+func TestSandboxModeValidateRejectsUnknown(t *testing.T) {
+	org := writeTmpOrgManifest(t, "host_acess") // typo
+	errs := org.Validate()
+	found := false
+	for _, e := range errs {
+		if contains(e, "sandbox.mode") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Validate should reject unknown mode, got errs=%v", errs)
+	}
+}
+
+// TestSandboxModeValidateAcceptsKnown proves both contained and host-access
+// pass Validate without complaint.
+func TestSandboxModeValidateAcceptsKnown(t *testing.T) {
+	for _, mode := range []string{SandboxModeContained, SandboxModeHostAccess} {
+		org := writeTmpOrgManifest(t, mode)
+		errs := org.Validate()
+		for _, e := range errs {
+			if contains(e, "sandbox.mode") {
+				t.Errorf("Validate should accept %q, got error: %s", mode, e)
+			}
+		}
+	}
+}

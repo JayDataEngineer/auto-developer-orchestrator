@@ -33,3 +33,4 @@ sandbox:
   image: pux-sandbox:latest
   runtime_class: runc
   warm_pool: 1
+  mode: contained

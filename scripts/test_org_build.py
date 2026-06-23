@@ -379,6 +379,72 @@ def test_validation_rejects_zero_warm_pool(tmp_path: Path) -> None:
     assert any("warm_pool" in e for e in errs)
 
 
+def test_validation_accepts_known_sandbox_modes(tmp_path: Path) -> None:
+    """Both 'contained' (default) and 'host-access' must pass validation.
+    A typo must fail loud so a misspelled 'host_acess' doesn't silently lock
+    down an org that meant to opt out."""
+    for ok in ("contained", "host-access"):
+        errs = org_build.validate_org_data(
+            {
+                "name": "acme",
+                "description": "x",
+                "sandbox": {"mode": ok},
+            },
+            "acme",
+            tmp_path,
+        )
+        assert not any("sandbox.mode" in e for e in errs), (
+            f"expected {ok!r} to be valid, got errs={errs}"
+        )
+
+
+def test_validation_rejects_unknown_sandbox_mode(tmp_path: Path) -> None:
+    errs = org_build.validate_org_data(
+        {
+            "name": "acme",
+            "description": "x",
+            "sandbox": {"mode": "host_acess"},  # typo: underscore, not hyphen
+        },
+        "acme",
+        tmp_path,
+    )
+    assert any("sandbox.mode" in e for e in errs), errs
+
+
+def test_pux_yaml_renders_host_access_mode(tmp_path: Path) -> None:
+    """When org.toml sets sandbox.mode = 'host-access', the generated pux.yaml
+    must carry that field so the kernel's OrgManifest.SandboxMode() picks it up."""
+    org_dir = tmp_path / "coder"
+    org_dir.mkdir()
+    (org_dir / "org.toml").write_text(
+        'name = "coder"\n'
+        'description = "coding agent — host reach"\n'
+        '[sandbox]\n'
+        'mode = "host-access"\n'
+    )
+    env = org_build._make_env()
+    org_build.render_org(org_dir, env)
+    pux = (org_dir / "pux.yaml").read_text()
+    assert "mode: host-access" in pux, pux
+
+
+def test_pux_yaml_renders_contained_default(tmp_path: Path) -> None:
+    """When org.toml is silent on sandbox.mode, the renderer defaults to
+    'contained' so the kernel always sees an explicit value."""
+    org_dir = tmp_path / "locked"
+    org_dir.mkdir()
+    (org_dir / "org.toml").write_text(
+        'name = "locked"\n'
+        'description = "investment org — pure sandbox"\n'
+        '[sandbox]\n'
+        'runtime_class = "runc"\n'
+    )
+    env = org_build._make_env()
+    org_build.render_org(org_dir, env)
+    pux = (org_dir / "pux.yaml").read_text()
+    assert "mode: contained" in pux, pux
+
+
 def test_sandbox_compose_yaml_parses(sandbox_org: Path) -> None:
     """Generated compose must be valid YAML."""
     yaml = pytest.importorskip("yaml")

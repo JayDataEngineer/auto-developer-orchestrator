@@ -107,6 +107,19 @@ def validate_org_data(data: dict[str, Any], org_name: str, org_dir: Path) -> lis
                 f"org.toml: sandbox.runtime_class={rc!r} must be one of "
                 f"{sorted(RUNTIME_CLASS_MAP)}"
             )
+        # sandbox.mode: per-org isolation toggle. Default "contained" (CTO
+        # locked in /sandbox/workspace/). "host-access" opts the org out —
+        # right for coding-agent orgs whose purpose is editing files in a
+        # real repo. Anything else is a typo; fail loud so a misspelled
+        # "host_acess" doesn't silently lock down an org that meant to opt
+        # out.
+        valid_modes = {"contained", "host-access"}
+        mode = sandbox.get("mode", "contained")
+        if mode not in valid_modes:
+            errs.append(
+                f"org.toml: sandbox.mode={mode!r} must be one of "
+                f"{sorted(valid_modes)}"
+            )
         wp = sandbox.get("warm_pool", 1)
         if not isinstance(wp, int) or wp < 1:
             errs.append(
@@ -225,6 +238,7 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     sandbox.setdefault("env", {})
     sandbox.setdefault("runtime_class", "runc")
     sandbox.setdefault("warm_pool", 1)
+    sandbox.setdefault("mode", "contained")
     sandbox.setdefault("resources", {})
     sandbox.setdefault("build", {})
     sandbox.setdefault("container_name", "")

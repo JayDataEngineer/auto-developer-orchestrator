@@ -143,10 +143,14 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	var hostFileOps file.SandboxFileOps = &file.SimpleSandboxOps{BasePath: projectPath}
 
 	// Detect org mode early — drives the isolation swap below.
+	// orgPathForMode is the path we'll LoadOrgManifest() on to read
+	// sandbox.mode. Empty when no org is active.
 	orgModeActive := req.Org != ""
+	orgPathForMode := req.Org
 	if !orgModeActive {
 		if org := common.LoadOrgManifest(projectPath); org != nil {
 			orgModeActive = true
+			orgPathForMode = projectPath
 		}
 	}
 
@@ -195,14 +199,26 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	//
 	// SSH projects skip this: the SSH executor already provides isolation by
 	// only seeing its WorkDir on the remote host.
+	//
+	// Per-org escape hatch: pux.yaml's sandbox.mode: host-access opts the org
+	// out of container isolation. The CTO + sub-agents then run on host bash
+	// + host file ops. Right for "coding agent" orgs whose whole purpose is
+	// editing files in a real repo. Default is "contained" — safe-by-default
+	// so invest / game-dev / twitter scrapers stay locked without any opt-in.
 	orgSandboxed := false
 	if orgModeActive && sshInfo == nil && bashExec != nil {
-		hostBash = bashExec
-		hostFileOps = fileOpsInstance
-		orgSandboxed = true
-		h.log.Info("Org isolation active — CTO routed through sandbox executor",
-			zap.String("project", projectPath),
-			zap.String("sandbox_id", sandboxID))
+		if org := common.LoadOrgManifest(orgPathForMode); org != nil && org.HostAccessEnabled() {
+			h.log.Info("Org host-access mode active — CTO runs on host executors",
+				zap.String("project", projectPath),
+				zap.String("org", org.Name))
+		} else {
+			hostBash = bashExec
+			hostFileOps = fileOpsInstance
+			orgSandboxed = true
+			h.log.Info("Org isolation active — CTO routed through sandbox executor",
+				zap.String("project", projectPath),
+				zap.String("sandbox_id", sandboxID))
+		}
 	}
 
 	// Project memory (MEMORY.md — legacy, still supported)

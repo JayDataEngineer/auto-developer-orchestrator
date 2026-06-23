@@ -16,6 +16,7 @@ sandbox:
   image: pux-sandbox:latest
   runtime_class: gvisor
   warm_pool: 1
+  mode: contained
   init_files:
     - "@shared/forge_client.py"
     - "sandbox/twitter_helpers.py"

@@ -220,6 +220,20 @@ func (o *OrgManifest) Validate() []string {
 		}
 	}
 
+	// sandbox.mode: must be one of the two known values. Unknown values
+	// fall back to "contained" at runtime (safe default), but we surface
+	// them here so a typo doesn't silently lock down an org that meant
+	// to opt into host access.
+	switch o.SandboxMode() {
+	case SandboxModeContained, SandboxModeHostAccess:
+		// ok
+	default:
+		errs = append(errs, fmt.Sprintf(
+			"sandbox.mode: %q must be one of [%q, %q]",
+			o.SandboxMode(), SandboxModeContained, SandboxModeHostAccess,
+		))
+	}
+
 	// mcp_servers: rows must have both name + endpoint. A row missing
 	// either field would register a broken client — fail loud at audit
 	// time, not silently at first tool call.
@@ -237,6 +251,24 @@ func (o *OrgManifest) Validate() []string {
 
 // sharedDir returns the orgs/_shared/clients/ path (cached via FindSharedClientsDir).
 func (o *OrgManifest) sharedDir() string { return FindSharedClientsDir() }
+
+// Sandbox mode constants. The mode controls whether the CTO runs inside the
+// sandbox container (locked to /sandbox/workspace/) or on the host filesystem.
+//
+// SandboxModeContained (default) — CTO + sub-agents route through the sandbox
+// executor. They see only the org workspace; ~/.aws, SSH keys, .env in the
+// parent repo, etc. are unreachable. Right for orgs that handle untrusted
+// input (invest data, game-dev assets, twitter scrapes) where the agent
+// touching host state would be a foot-gun.
+//
+// SandboxModeHostAccess — CTO + sub-agents run on host bash + host file ops.
+// The sandbox container may still be provisioned (for sandbox-tier workers
+// that need it), but the CTO itself is not locked in. Right for "coding
+// agent" orgs where the whole point is editing files in a real repo.
+const (
+	SandboxModeContained   = "contained"
+	SandboxModeHostAccess  = "host-access"
+)
 
 // SandboxInitFiles returns the init_files list from the manifest's sandbox block,
 // if any. Loaded lazily so Validate() doesn't require the sandbox block to be
@@ -267,6 +299,40 @@ func (o *OrgManifest) SandboxInitFiles() []string {
 		return nil
 	}
 	return w.Sandbox.InitFiles
+}
+
+// SandboxMode returns the sandbox.mode field from pux.yaml. Default is
+// SandboxModeContained when the field or block is absent. Invalid values
+// surface as Validate() errors at audit time; at runtime unknown values
+// fall back to contained (safe default — over-isolate rather than leak).
+func (o *OrgManifest) SandboxMode() string {
+	type sandboxBlock struct {
+		Mode string `yaml:"mode"`
+	}
+	type wrapper struct {
+		Sandbox *sandboxBlock `yaml:"sandbox"`
+	}
+	if o.baseDir == "" {
+		return SandboxModeContained
+	}
+	data, err := os.ReadFile(filepath.Join(o.baseDir, "pux.yaml"))
+	if err != nil {
+		return SandboxModeContained
+	}
+	var w wrapper
+	if err := yaml.Unmarshal(data, &w); err != nil {
+		return SandboxModeContained
+	}
+	if w.Sandbox == nil || w.Sandbox.Mode == "" {
+		return SandboxModeContained
+	}
+	return w.Sandbox.Mode
+}
+
+// HostAccessEnabled is a convenience predicate for callers that just need a
+// boolean (e.g. pux_prompt.go deciding whether to flip OrgSandboxed).
+func (o *OrgManifest) HostAccessEnabled() bool {
+	return o.SandboxMode() == SandboxModeHostAccess
 }
 
 func (o *OrgManifest) resolvePath(p string) string {

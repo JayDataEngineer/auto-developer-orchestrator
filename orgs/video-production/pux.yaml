@@ -7,6 +7,7 @@ skills_dir: skills
 sandbox:
   runtime_class: runc
   warm_pool: 1
+  mode: contained
   env:
     VIDEO_PRODUCTION_ROOT: "/workspace/video-productions"
     KOKORO_VOICE: "af_heart"
