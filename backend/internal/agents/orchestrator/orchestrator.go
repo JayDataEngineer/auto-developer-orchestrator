@@ -21,6 +21,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/skills"
 	appprofile "github.com/auto-developer-orchestrator/backend/internal/tools/appprofile"
 	browsertools "github.com/auto-developer-orchestrator/backend/internal/tools/browser"
+	"github.com/auto-developer-orchestrator/backend/internal/tools/decltools"
 	desktoptools "github.com/auto-developer-orchestrator/backend/internal/tools/desktop"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	asktool "github.com/auto-developer-orchestrator/backend/internal/tools/ask"
@@ -35,7 +36,9 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	_ "github.com/auto-developer-orchestrator/backend/internal/tools/plan" // plan tool: removed from CTO, kept for re-enable
 	schedulertool "github.com/auto-developer-orchestrator/backend/internal/tools/scheduler"
+	secrettools "github.com/auto-developer-orchestrator/backend/internal/tools/secrets"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/todo"
+	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/orchestration"
 	"github.com/auto-developer-orchestrator/backend/internal/perms"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
@@ -57,6 +60,8 @@ type Config struct {
 	FileOps         file.SandboxFileOps // sandbox file ops — used by sub-agents
 	HostBash        bash.Executor   // host executor — CTO reads/writes directly on host
 	HostFileOps     file.SandboxFileOps // host file ops — CTO file tools
+	CredStore       *sensitive.Store // optional: if set, bash resolves <secret>domain.key</secret> placeholders + secrets tools registered
+	OrgSandboxed    bool             // optional: true when CTO runs inside sandbox for org isolation — affects path rendering
 	DelegateRunner   orchestration.DelegateRunner
 	ProviderFactory  orchestration.ProviderFactory  // creates isolated providers per sub-agent (own session/slot)
 	Skills           *skills.Store
@@ -82,6 +87,7 @@ type Config struct {
 	Scheduler       any                         // optional: *scheduler.Scheduler — passed through to scheduler tool
 	ToolPerms       *perms.ToolPermissionConfig // optional: if set, enables per-tool permission checks
 	BashRules       *perms.BashRuleStore        // optional: if set, enables user-defined bash command rules
+	NonInteractive  bool                        // optional: if true, auto-approve "ask" patterns (jobs, schedulers)
 	SandboxOnly     bool                        // optional: if true, only bash + file tools available (no delegation, MCP, browser, etc.)
 	TaskMgr         *core.TaskManager           // optional: if set, bash tool supports run_in_background + task_output
 	MouseCoordinateResolver func(toolName string, args map[string]any) (normX, normY float64, action string) // optional: visual mouse overlay
@@ -97,17 +103,45 @@ type Agent struct {
 	runner   *orchestration.ParallelRunner    // nil if external DelegateRunner provided
 }
 
-// newBashTool creates a bash tool for the CTO using the host executor.
-// The CTO runs commands directly on the host machine — not inside the sandbox.
+// newBashTool creates a bash tool for the CTO.
+//
+// Default mode: the CTO runs commands directly on the host machine via HostBash.
+//
+// OrgSandboxed mode: the CTO runs INSIDE the sandbox container. We use the
+// sandbox BashExecutor (routes through Docker) and bypass TaskManager
+// (TaskManager spawns via os/exec on the server host, which would defeat
+// the isolation boundary — commands need to land in /sandbox/workspace/
+// inside the container, not on the host filesystem).
 func newBashTool(cfg Config) core.Tool {
+	exec := pickBashExecutor(cfg)
+	var tool *bash.Tool
+	if cfg.TaskMgr != nil && !cfg.OrgSandboxed {
+		tool = bash.NewWithTaskManager(exec, cfg.TaskMgr, cfg.ProjectDir)
+	} else {
+		tool = bash.New(exec)
+	}
+	if cfg.CredStore != nil {
+		tool = tool.WithSecretResolver(cfg.CredStore.Resolve)
+	}
+	return tool
+}
+
+// pickBashExecutor returns the bash.Executor the CTO + decltools should use.
+// Extracted from newBashTool so decltools wiring reuses the exact same logic
+// — see Risk #5 in the Phase 4 plan: silently passing HostBash for an
+// OrgSandboxed org would bypass isolation. Both callers MUST go through here.
+//
+// Default: HostBash → BashExecutor fallback.
+// OrgSandboxed: BashExecutor (forced — even if HostBash is also set).
+func pickBashExecutor(cfg Config) bash.Executor {
 	exec := cfg.HostBash
 	if exec == nil {
-		exec = cfg.BashExecutor // fallback to sandbox if no host executor
+		exec = cfg.BashExecutor
 	}
-	if cfg.TaskMgr != nil {
-		return bash.NewWithTaskManager(exec, cfg.TaskMgr, cfg.ProjectDir)
+	if cfg.OrgSandboxed && cfg.BashExecutor != nil {
+		exec = cfg.BashExecutor
 	}
-	return bash.New(exec)
+	return exec
 }
 
 // New creates a new orchestrator agent.
@@ -135,13 +169,29 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 
 	// CTO uses host file ops — reads/writes directly on the host filesystem.
 	// Falls back to sandbox ops if no host file ops are configured.
+	// Org isolation: force sandbox FileOps so reads/writes land inside the
+	// sandbox container's /sandbox/workspace/, not on the host filesystem.
 	hostFileOps := cfg.HostFileOps
 	if hostFileOps == nil {
+		hostFileOps = cfg.FileOps
+	}
+	if cfg.OrgSandboxed && cfg.FileOps != nil {
 		hostFileOps = cfg.FileOps
 	}
 
 	ctoTools := []core.Tool{
 		newBashTool(cfg),
+	}
+
+	// yield_artifact shared between CTO and host-tier sub-agents. Created once so
+	// both see the same ArtifactDB + project paths. Sub-agents that import
+	// yield_artifact via role config expect the executor to honor it; without
+	// this injection, the host executor returns "tool not found" on yield.
+	yieldArtifactTool := meta.NewYieldArtifactToolWithDB(cfg.ArtifactDB, cfg.ProjectDir, cfg.SandboxID)
+
+	// Secrets tools — only when an org cred store is wired
+	if cfg.CredStore != nil {
+		ctoTools = append(ctoTools, secrettools.AllTools(cfg.CredStore)...)
 	}
 
 	// Shared tracker for concurrent modification detection between read and edit
@@ -159,7 +209,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		file.NewGrepTool(hostFileOps),
 		file.NewGlobTool(hostFileOps),
 		meta.NewWaitTool(),
-		meta.NewYieldArtifactToolWithDB(cfg.ArtifactDB, cfg.ProjectDir, cfg.SandboxID),
+		yieldArtifactTool,
 	)
 
 	// ── Sandbox-only mode: strict isolation ──
@@ -185,7 +235,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		}
 
 		// Build a minimal system prompt — no employee roster, no skills
-		systemPrompt := common.BuildOrchestratorPromptV2(ctoToolReg.All(), cfg.SandboxID, "", "", nil, nil)
+		systemPrompt := common.BuildOrchestratorPromptV2(ctoToolReg.All(), cfg.SandboxID, "", "", nil, nil) // sandbox-only mode: no org, no sandboxed flag
 
 		baseAgent := agents.NewBaseAgent(agents.BaseConfig{
 			Provider:        provider,
@@ -204,6 +254,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			PermDecisions:   core.GlobalDecisions,
 			ToolPerms:       cfg.ToolPerms,
 			BashRules:       cfg.BashRules,
+			NonInteractive:  cfg.NonInteractive,
 			Logger:          logger,
 		})
 
@@ -326,6 +377,20 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// These are collected into allTools for sub-agent toolSpecs only.
 	employeeTools := []core.Tool{}
 
+	// Declarative tools — YAML-defined tools from capability implementations.
+	// Uses the SAME executor-pick logic as the CTO's bash tool so OrgSandboxed
+	// isolation is preserved (Phase 4 Risk #5).
+	if declExec := pickBashExecutor(cfg); declExec != nil {
+		before := len(employeeTools)
+		// LoadToolPackages is the cached loader — uses ActiveImpl set by the
+		// capability resolver at boot. We get only the active tier's DeclTools,
+		// not the full implementations list.
+		employeeTools = append(employeeTools, decltools.BuildAll(common.LoadToolPackages(), declExec)...)
+		if n := len(employeeTools) - before; n > 0 {
+			logger.Printf("Declarative tools loaded for employees: %d tools", n)
+		}
+	}
+
 	if cfg.MCPClient != nil {
 		employeeTools = mcptools.RegisterAll(employeeTools, cfg.MCPClient)
 		logger.Printf("MCP tools loaded for employees: %d tools", len(employeeTools))
@@ -359,11 +424,18 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		logger.Printf("App profile tools loaded for employees: app_interact, app_profile")
 	}
 
-	// Build MCP server resolver for role-based delegation
+	// Build MCP server resolver for role-based delegation.
+	// Returns prefixed tool names (mcp__{prefix}__{name}) so they match
+	// the names used in RegisterAll and skill prompts.
 	var mcpResolver orchestration.MCPResolver
 	if cfg.MCPClient != nil {
 		mcpResolver = func(prefix string) []string {
-			return cfg.MCPClient.ServerToolNames(prefix)
+			raw := cfg.MCPClient.ServerToolNames(prefix)
+			prefixed := make([]string, len(raw))
+			for i, name := range raw {
+				prefixed[i] = fmt.Sprintf("mcp__%s__%s", prefix, name)
+			}
+			return prefixed
 		}
 	}
 
@@ -453,6 +525,10 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 				))
 				// Scripting tools (make/run/list/edit ad-hoc helpers) — same as CTO
 				hostReg = core.NewToolRegistry(append(hostReg.All(), scripting.AllTools()...))
+				// Add yield_artifact (created above) so sub-agents on host tier can
+				// persist artifacts — without this, models that call yield_artifact
+				// see "tool not found" because the host executor lacks it.
+				hostReg = core.NewToolRegistry(append(hostReg.All(), yieldArtifactTool))
 				hostReg.RegisterCommonAliases()
 				return hostReg
 			}
@@ -501,6 +577,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 			PermDecisions:           core.GlobalDecisions,
 			ToolPerms:               cfg.ToolPerms,
 			BashRules:               cfg.BashRules,
+			NonInteractive:          cfg.NonInteractive,
 			MouseCoordinateResolver: cfg.MouseCoordinateResolver,
 			Summarizer: func(ctx context.Context, text string, targetChars int) (string, error) {
 				return ctxpkg.SummarizeText(ctx, summarizerProvider, text, targetChars)
@@ -598,7 +675,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	if skillStore.Count() > 0 {
 		skillsStr = skillStore.FormatAvailableSkills()
 	}
-	systemPrompt := common.BuildOrchestratorPromptV2(ctoToolReg.All(), cfg.SandboxID, "", skillsStr, cfg.Org, cfg.OrgRoles)
+	systemPrompt := common.BuildOrchestratorPromptV2WithCtx(ctoToolReg.All(), cfg.SandboxID, "", skillsStr, cfg.Org, cfg.OrgRoles, cfg.OrgSandboxed)
 
 	ctoToolSpecs := common.ToOpenAITools(ctoToolReg.All())
 
@@ -649,6 +726,7 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 		PermDecisions:   core.GlobalDecisions,
 		ToolPerms:       cfg.ToolPerms,
 		BashRules:       cfg.BashRules,
+		NonInteractive:  cfg.NonInteractive,
 		ExtraHooks:      ctoHooks,
 		ToolResultProcessor: toolResultProcessor,
 		ContextMetricsFunc: func() core.ContextMetricsSnapshot {

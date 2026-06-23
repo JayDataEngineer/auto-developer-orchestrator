@@ -1,14 +1,20 @@
 # Research Capability — Degraded Tier (DuckDuckGo HTML)
 
 The cloud web-research MCP server is **unavailable**. You are running on the
-bash-only fallback tier. Your only research tool is:
+bash-only fallback tier. Your primary research tool is **`ddg_search`**:
 
 ```
-python3 /sandbox/ddg.py '<query>' [--max N]
+ddg_search(query="<search terms>", max=8)
 ```
 
-Output is JSON to stdout: `[{title, url, snippet}, ...]`. On error: JSON
-`{"error": "..."}` to stderr and exit code 1.
+Returns JSON: `[{title, url, snippet}, ...]` as the `stdout` field. On error
+the result map has an `error` key instead. Use this tool — don't shell out to
+`python3 /sandbox/ddg.py` yourself; the structured parameters are how the
+caller can verify you actually ran a search (per the verify-or-die rule, the
+CTO will check `tool_execution_end` events).
+
+The `bash` tool is still available for ad-hoc shell work, but for **all
+DuckDuckGo searches** use `ddg_search`.
 
 ## What this tier can do
 

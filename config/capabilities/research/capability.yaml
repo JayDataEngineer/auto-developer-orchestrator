@@ -14,3 +14,11 @@ implementations:
     script: /sandbox/ddg.py
     prompt_file: prompts/bash-ddg.md
     health: {kind: always-true}
+    decl_tools:
+      - name: ddg_search
+        description: "Search DuckDuckGo HTML (degraded tier). Returns JSON [{title,url,snippet}]. Snippet-level only — no page fetching."
+        command: "python3 /sandbox/ddg.py {{query}} --max {{max}}"
+        timeout: 30
+        parameters:
+          - {name: query, type: string, description: "Search query", required: true}
+          - {name: max, type: integer, description: "Max results (default 8)", default: 8}

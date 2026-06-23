@@ -110,17 +110,40 @@ type ToolPackage struct {
 // determines live-or-down at boot. Sticky per session — re-resolved only
 // when HealthMonitor invalidates the cache after N consecutive failures.
 type Implementation struct {
-	Name       string      `yaml:"name"`
-	Type       string      `yaml:"type"`                 // "mcp" | "bash" | "http" | "extension" (informational)
-	Priority   int         `yaml:"priority"`             // lower = preferred
-	MCPServers []string    `yaml:"mcp_servers,omitempty"` // MCP tier: server prefixes to wire
-	Tools      []string    `yaml:"tools,omitempty"`       // bash tier: tool names to expose
-	Script     string      `yaml:"script,omitempty"`      // bash tier: absolute path inside sandbox
-	Source     string      `yaml:"source,omitempty"`      // extension tier: git+URL cloned by pre-warmer (Phase 3)
-	Bringup    string      `yaml:"bringup,omitempty"`     // extension tier: shell command to launch after clone
-	Prompt     string      `yaml:"prompt,omitempty"`      // inline prompt (mutually exclusive with PromptFile)
-	PromptFile string      `yaml:"prompt_file,omitempty"` // file rel to capability dir; resolved into Prompt
-	Health     HealthCheck `yaml:"health"`
+	Name       string            `yaml:"name"`
+	Type       string            `yaml:"type"`                 // "mcp" | "bash" | "http" | "extension" (informational)
+	Priority   int               `yaml:"priority"`             // lower = preferred
+	MCPServers []string          `yaml:"mcp_servers,omitempty"` // MCP tier: server prefixes to wire
+	Tools      []string          `yaml:"tools,omitempty"`       // bash tier: tool names to expose
+	DeclTools  []DeclarativeTool `yaml:"decl_tools,omitempty"`  // Phase 4: YAML-defined tools this tier exposes
+	Script     string            `yaml:"script,omitempty"`      // bash tier: absolute path inside sandbox
+	Source     string            `yaml:"source,omitempty"`      // extension tier: git+URL cloned by pre-warmer (Phase 3)
+	Bringup    string            `yaml:"bringup,omitempty"`     // extension tier: shell command to launch after clone
+	Prompt     string            `yaml:"prompt,omitempty"`      // inline prompt (mutually exclusive with PromptFile)
+	PromptFile string            `yaml:"prompt_file,omitempty"` // file rel to capability dir; resolved into Prompt
+	Health     HealthCheck       `yaml:"health"`
+}
+
+// DeclarativeTool is a YAML-defined tool. The factory in tools/decltools
+// turns each declaration into a core.Tool instance by substituting {{param}}
+// with shell-quoted values and running the command through bash.Executor.
+// See pux-declarative-stack.md RFC axis 2 / Phase 4.
+type DeclarativeTool struct {
+	Name        string      `yaml:"name"`
+	Description string      `yaml:"description"`
+	Command     string      `yaml:"command"`           // bash template, {{param}} substituted
+	Parameters  []ToolParam `yaml:"parameters"`
+	Timeout     int         `yaml:"timeout,omitempty"` // seconds; 0 = no per-tool timeout
+}
+
+// ToolParam is a single parameter for a DeclarativeTool. Type is one of the
+// JSON-schema primitives: "string", "integer", "number", "boolean".
+type ToolParam struct {
+	Name        string `yaml:"name"`
+	Type        string `yaml:"type"`
+	Description string `yaml:"description"`
+	Required    bool   `yaml:"required"`
+	Default     any    `yaml:"default,omitempty"`
 }
 
 // HealthCheck probes whether an Implementation is usable at boot.
