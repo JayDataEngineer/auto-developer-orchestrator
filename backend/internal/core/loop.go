@@ -868,6 +868,17 @@ func (l *AgentLoop) IsRunning() bool {
 	return l.running
 }
 
+// ToolNames returns the names of the tools currently registered on the loop.
+// Used by smoke tests that assert tool composition (CTO vs employee tools,
+// messaging tools present, etc.) without having to run the agent loop.
+func (l *AgentLoop) ToolNames() []string {
+	names := make([]string, 0, len(l.config.Tools))
+	for _, t := range l.config.Tools {
+		names = append(names, t.Function.Name)
+	}
+	return names
+}
+
 // Session returns the underlying session.
 func (l *AgentLoop) Session() Session {
 	return l.session
