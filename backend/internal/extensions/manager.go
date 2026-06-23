@@ -112,6 +112,68 @@ func (m *Manager) StopAll() {
 	m.exts = nil
 }
 
+// Restart stops and re-starts the extension with the given prefix (extension Name).
+// Returns an error if no extension matches. Used by the MCP HealthMonitor when a
+// subprocess-backed MCP server fails N consecutive health probes. The new port is
+// returned so callers (HealthMonitor) can re-register the client with the new URL.
+// Restarts obey the extension's Restart policy: "no" → ErrRestartDisabled.
+func (m *Manager) Restart(ctx context.Context, prefix string) (int, error) {
+	for i, ext := range m.exts {
+		if ext.Name != prefix {
+			continue
+		}
+		if ext.Server.Restart == "no" {
+			return 0, ErrRestartDisabled
+		}
+		// Stop the existing subprocess.
+		if ext.cmd != nil && ext.cmd.Process != nil {
+			m.logger.Info("restarting extension", zap.String("name", ext.Name))
+			ext.cmd.Process.Signal(os.Interrupt)
+			done := make(chan error, 1)
+			go func() {
+				done <- ext.cmd.Wait()
+			}()
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				ext.cmd.Process.Kill()
+			}
+		}
+		// Start a fresh subprocess on the same extension config.
+		port, cmd, err := m.startOne(ctx, &ext.Extension)
+		if err != nil {
+			m.logger.Error("extension restart failed",
+				zap.String("name", ext.Name), zap.Error(err))
+			return 0, fmt.Errorf("restart %s: %w", ext.Name, err)
+		}
+		m.exts[i].cmd = cmd
+		m.exts[i].port = port
+		m.logger.Info("extension restarted",
+			zap.String("name", ext.Name), zap.Int("port", port))
+		return port, nil
+	}
+	return 0, ErrUnknownExtension
+}
+
+// PortFor returns the current MCP port for an extension by prefix, or 0 if unknown.
+// Callers build the URL themselves (http://127.0.0.1:<port>/mcp). Used by
+// HealthMonitor after Restart so it can re-register the client with MultiClient.
+func (m *Manager) PortFor(prefix string) int {
+	for _, ext := range m.exts {
+		if ext.Name == prefix {
+			return ext.port
+		}
+	}
+	return 0
+}
+
+// ErrRestartDisabled signals the extension declared `restart: "no"` in its
+// extension.yaml and must not be auto-restarted by the HealthMonitor.
+var ErrRestartDisabled = fmt.Errorf("extension restart disabled by policy")
+
+// ErrUnknownExtension signals no extension is registered under the requested prefix.
+var ErrUnknownExtension = fmt.Errorf("unknown extension")
+
 // Clients returns MCP clients for all running extensions, keyed by extension name (prefix).
 func (m *Manager) Clients() map[string]*mcp.Client {
 	clients := make(map[string]*mcp.Client)

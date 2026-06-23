@@ -1,0 +1,20 @@
+# Cloud MCP servers wired by the kernel at boot.
+#
+# Each entry registers a remote MCP endpoint under `prefix`. Tool names from
+# that server are exposed to the agent as `<prefix>_<tool>`. The capability
+# resolver (Stage 2) reads these prefixes when picking implementations.
+#
+# Per-server env override: MCP_<UPPERCASE_PREFIX>_URL wins over the url below.
+# So a developer pointing web-research at a localhost mock just sets
+# MCP_WEB_URL=http://localhost:9000/mcp in their shell — no edit here.
+#
+# To add a new cloud MCP: append an entry, restart the kernel, done.
+servers:
+  - prefix: web
+    url: https://cloud.tailb1e597.ts.net:10000/research/mcp
+  - prefix: media
+    url: https://cloud.tailb1e597.ts.net:10000/media/mcp
+  - prefix: meta
+    url: https://cloud.tailb1e597.ts.net:10000/meta/mcp
+  - prefix: equibles
+    url: https://cloud.tailb1e597.ts.net:10000/equibles/mcp

@@ -22,6 +22,7 @@ type ServerConfig struct {
 	Command string   // Command to run (default: "bun")
 	Args    []string // Arguments (default: ["run", "server.ts"])
 	Timeout int      // Startup timeout in seconds (default: 15)
+	Restart string   // Restart policy: "on-failure" (default), "always", "no"
 }
 
 // ExtensionConfig is the YAML structure for extension.yaml manifests.
@@ -33,5 +34,6 @@ type ExtensionConfig struct {
 		Command string   `yaml:"command"`
 		Args    []string `yaml:"args"`
 		Timeout int      `yaml:"timeout"`
+		Restart string   `yaml:"restart"`
 	} `yaml:"server"`
 }

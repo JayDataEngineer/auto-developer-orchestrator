@@ -70,6 +70,7 @@ func discoverOne(dir string) (*Extension, error) {
 				Command: "bun",
 				Args:    []string{"run", "server.ts"},
 				Timeout: 15,
+				Restart: "on-failure",
 			},
 		}, nil
 	}
@@ -97,6 +98,10 @@ func discoverOne(dir string) (*Extension, error) {
 	if timeout == 0 {
 		timeout = 15
 	}
+	restart := cfg.Server.Restart
+	if restart == "" {
+		restart = "on-failure"
+	}
 
 	// Verify entry point exists
 	entryPoint := filepath.Join(dir, args[len(args)-1])
@@ -113,6 +118,7 @@ func discoverOne(dir string) (*Extension, error) {
 			Command: command,
 			Args:    args,
 			Timeout: timeout,
+			Restart: restart,
 		},
 	}, nil
 }

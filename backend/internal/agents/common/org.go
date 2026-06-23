@@ -37,8 +37,18 @@ type OrgManifest struct {
 	DataDir       string                    `yaml:"data_dir"`       // where input data lives (Telegram dumps, PDFs, etc.)
 	Schedules     []OrgSchedule             `yaml:"schedules"`
 	Databases     map[string]DatabaseConfig `yaml:"databases"`
+	MCPServers    []OrgMCPServer             `yaml:"mcp_servers"` // org-scoped remote MCP servers, wired at org activation
 
 	baseDir string // absolute path to the directory containing pux.yaml
+}
+
+// OrgMCPServer is one row of pux.yaml's mcp_servers: block. The Jinja2
+// renderer in scripts/templates/org/pux.yaml.j2 already emits rows in this
+// shape (name + endpoint) — this struct just makes the kernel actually read
+// them. Before Phase 2 the field was dead config: templated but never parsed.
+type OrgMCPServer struct {
+	Name     string `yaml:"name"`     // tool prefix (web, media, custom)
+	Endpoint string `yaml:"endpoint"` // HTTP/HTTPS URL of the MCP server
 }
 
 // OrgSchedule is a cron-based scheduled task within an organization.
@@ -207,6 +217,18 @@ func (o *OrgManifest) Validate() []string {
 			if _, err := os.Stat(path); err != nil {
 				errs = append(errs, fmt.Sprintf("sandbox.init_files: %s does not exist in orgs/_shared/clients/", rel))
 			}
+		}
+	}
+
+	// mcp_servers: rows must have both name + endpoint. A row missing
+	// either field would register a broken client — fail loud at audit
+	// time, not silently at first tool call.
+	for i, s := range o.MCPServers {
+		if s.Name == "" {
+			errs = append(errs, fmt.Sprintf("mcp_servers[%d]: name is required", i))
+		}
+		if s.Endpoint == "" {
+			errs = append(errs, fmt.Sprintf("mcp_servers[%d]: endpoint is required", i))
 		}
 	}
 

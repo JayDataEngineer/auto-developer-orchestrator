@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -384,9 +385,11 @@ func parseSSEData(body []byte) []byte {
 // Each server has a prefix (e.g. "mcp_" for web-research, "media_" for media-analysis).
 // Tool calls are routed by matching the tool name to the registered prefix.
 type MultiClient struct {
+	mu          sync.RWMutex
 	clients     map[string]*Client // prefix → client
 	toolMap     map[string]string  // toolName → prefix (built from ListTools)
 	cachedTools []MCPTool          // cached after InitializeAll
+	unavailable map[string]bool    // prefix → health-flag (set by HealthMonitor)
 	logger      *zap.Logger
 }
 
@@ -396,9 +399,10 @@ func NewMultiClient(logger *zap.Logger) *MultiClient {
 		logger = zap.NewNop()
 	}
 	return &MultiClient{
-		clients: make(map[string]*Client),
-		toolMap: make(map[string]string),
-		logger:  logger,
+		clients:     make(map[string]*Client),
+		toolMap:     make(map[string]string),
+		unavailable: make(map[string]bool),
+		logger:      logger,
 	}
 }
 
@@ -415,11 +419,15 @@ func registerInstructions(prefix, instructions string) {
 
 // AddClient registers an MCP server with a tool name prefix.
 func (m *MultiClient) AddClient(prefix string, client *Client) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.clients[prefix] = client
 }
 
 // HasClient checks if a server with the given prefix is registered.
 func (m *MultiClient) HasClient(prefix string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	_, ok := m.clients[prefix]
 	return ok
 }
@@ -428,6 +436,8 @@ func (m *MultiClient) HasClient(prefix string) bool {
 // if no server is registered under that prefix. Used by capability resolution
 // to health-check a specific tier (e.g. "is the web server up?").
 func (m *MultiClient) ClientForPrefix(prefix string) *Client {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	c, ok := m.clients[prefix]
 	if !ok {
 		return nil
@@ -435,9 +445,48 @@ func (m *MultiClient) ClientForPrefix(prefix string) *Client {
 	return c
 }
 
+// Prefixes returns the list of registered server prefixes. Used by HealthMonitor
+// to iterate clients withoutSnapshotting the underlying map.
+func (m *MultiClient) Prefixes() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]string, 0, len(m.clients))
+	for p := range m.clients {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// MarkUnavailable flags a server prefix as failing. The MultiClient keeps the
+// client registered (toolMap intact) so call paths still surface errors; the
+// flag is advisory state for the management UI + HealthMonitor bookkeeping.
+func (m *MultiClient) MarkUnavailable(prefix string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.unavailable[prefix] = true
+}
+
+// MarkAvailable clears the unavailable flag. Called by HealthMonitor on recovery.
+func (m *MultiClient) MarkAvailable(prefix string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.unavailable, prefix)
+}
+
+// IsUnavailable reports whether a prefix is currently flagged unavailable.
+func (m *MultiClient) IsUnavailable(prefix string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.unavailable[prefix]
+}
+
 // RemoveClient removes a server by prefix and cleans up its tool entries.
 func (m *MultiClient) RemoveClient(prefix string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.clients, prefix)
+	delete(m.unavailable, prefix)
 	// Remove tool routing entries for this prefix
 	for toolName, p := range m.toolMap {
 		if p == prefix {
@@ -499,19 +548,58 @@ func (m *MultiClient) AllTools() []MCPTool {
 // ResetTools clears the cached tool list. The next call to AllTools will be empty
 // until InitializeAll is called again.
 func (m *MultiClient) ResetTools() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.cachedTools = nil
+}
+
+// RefreshTools re-runs ListTools on every registered client and rebuilds the
+// routing map. Used after org activation registers new servers mid-session
+// (so their tools become visible without a process restart) and after the
+// HealthMonitor recovers a previously-down server. Safe to call concurrently
+// with CallTool — CallTool takes the read lock, RefreshTools takes write.
+func (m *MultiClient) RefreshTools(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	seen := make(map[string]bool)
+	var newCached []MCPTool
+	for prefix, client := range m.clients {
+		tools, err := client.ListTools(ctx)
+		if err != nil {
+			m.logger.Warn("MCP RefreshTools: ListTools failed",
+				zap.String("prefix", prefix), zap.Error(err))
+			continue
+		}
+		for _, t := range tools {
+			if seen[t.Name] {
+				continue
+			}
+			seen[t.Name] = true
+			m.toolMap[t.Name] = prefix
+			newCached = append(newCached, t)
+		}
+		// Clear unavailable flag — a successful ListTools means the server is back.
+		delete(m.unavailable, prefix)
+	}
+	m.cachedTools = newCached
+	return nil
 }
 
 // CallTool routes a tool call to the correct server based on the tool name.
 func (m *MultiClient) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
+	m.mu.RLock()
 	prefix, ok := m.toolMap[name]
 	if !ok {
+		m.mu.RUnlock()
 		return "", fmt.Errorf("MCP tool %q not found in any server", name)
 	}
 	client, ok := m.clients[prefix]
 	if !ok {
+		m.mu.RUnlock()
 		return "", fmt.Errorf("MCP server %q not available", prefix)
 	}
+	m.mu.RUnlock()
 	return client.CallTool(ctx, name, args)
 }
 
@@ -533,6 +621,8 @@ func (m *MultiClient) ClientCount() int {
 // ClientForTool returns the MCP client that handles the given tool name.
 // Returns nil if the tool is not registered.
 func (m *MultiClient) ClientForTool(toolName string) *Client {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	prefix, ok := m.toolMap[toolName]
 	if !ok {
 		return nil
@@ -542,12 +632,16 @@ func (m *MultiClient) ClientForTool(toolName string) *Client {
 
 // HasTool checks if a tool name is registered in any server.
 func (m *MultiClient) HasTool(toolName string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	_, ok := m.toolMap[toolName]
 	return ok
 }
 
 // ServerToolNames returns all tool names registered under the given MCP server prefix.
 func (m *MultiClient) ServerToolNames(prefix string) []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var names []string
 	for name, p := range m.toolMap {
 		if p == prefix {
