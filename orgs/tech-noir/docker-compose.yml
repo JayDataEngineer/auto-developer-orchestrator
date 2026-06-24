@@ -4,10 +4,22 @@ services:
   tech-noir-sandbox:
     image: pux-sandbox:latest
     runtime: runsc
+    # Labels that let Pux adopt this container instead of spinning up a
+    # sibling. Bootstrap.sh exports OPENSHELL_PROJECT_PATH so the label
+    # and the bind mount stay in sync — Pux's bash executor assumes
+    # /sandbox/workspace maps to the project root.
+    labels:
+      openshell.org-name: "tech-noir"
+      openshell.project-path: "${OPENSHELL_PROJECT_PATH:-}"
+      openshell.sandbox-id: "tech-noir-compose"
+      openshell.policy: "developer"
+    volumes:
+      # Canonical Pux mount — enables container reuse. When the env var
+      # is unset, mounts the compose CWD (harmless default; Pux discovery
+      # fails because the label is also empty, so no wrong adoption).
+      - ${OPENSHELL_PROJECT_PATH:-./}:/sandbox/workspace
+      - tech-noir-workspace:/workspace
     environment:
-      MCP_HUB_ENDPOINT: "http://100.86.69.57:30080"
-      FORGE_URL: "http://100.86.69.57:30080/forge"
-      COMFYUI_URL: "http://100.86.69.57:30080/image/comfyui"
       GODOT_MCP_URL: "http://host.docker.internal:8080"
       SURREALDB_URL: "http://host.docker.internal:8000/surreal"
       SURREALDB_NS: "studio"
@@ -25,8 +37,6 @@ services:
         limits:
           cpus: '2'
           memory: 2Gi
-    volumes:
-      - tech-noir-workspace:/workspace
     network_mode: host
 
 volumes:

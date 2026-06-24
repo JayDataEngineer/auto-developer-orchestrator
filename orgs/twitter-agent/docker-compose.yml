@@ -4,6 +4,21 @@ services:
   twitter-agent-sandbox:
     image: pux-sandbox:latest
     runtime: runsc
+    # Labels that let Pux adopt this container instead of spinning up a
+    # sibling. Bootstrap.sh exports OPENSHELL_PROJECT_PATH so the label
+    # and the bind mount stay in sync — Pux's bash executor assumes
+    # /sandbox/workspace maps to the project root.
+    labels:
+      openshell.org-name: "twitter-agent"
+      openshell.project-path: "${OPENSHELL_PROJECT_PATH:-}"
+      openshell.sandbox-id: "twitter-agent-compose"
+      openshell.policy: "developer"
+    volumes:
+      # Canonical Pux mount — enables container reuse. When the env var
+      # is unset, mounts the compose CWD (harmless default; Pux discovery
+      # fails because the label is also empty, so no wrong adoption).
+      - ${OPENSHELL_PROJECT_PATH:-./}:/sandbox/workspace
+      - twitter-agent-workspace:/workspace
     environment:
       PUX_ORG_PATH: "/sandbox/workspace"
     deploy:
@@ -14,8 +29,6 @@ services:
         limits:
           cpus: '1'
           memory: 1Gi
-    volumes:
-      - twitter-agent-workspace:/workspace
     network_mode: host
 
 volumes:

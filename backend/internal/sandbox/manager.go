@@ -149,6 +149,13 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 
 	containerName := m.getContainerName(opts.ID)
 	image := getEnvOrDefault("OPENSHELL_IMAGE", "pux-sandbox:latest")
+	// Org-mode image override: when the caller (pux_prompt.go) supplies an
+	// Image in SandboxOptions, it wins over the env default. This is how
+	// orgs like video-production get their specialized sandbox image used
+	// instead of the generic pux-sandbox:latest.
+	if opts.Image != "" {
+		image = opts.Image
+	}
 	policy := opts.Policy
 	if policy == "" {
 		policy = "developer"
@@ -223,6 +230,13 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		"DOCKER_HOST=unix:///var/run/docker.sock",
 		"HOST_GATEWAY=host.docker.internal",
 	}
+	// Org-mode env propagation: caller may pass extra env vars (e.g.
+	// VIDEO_PRODUCTION_ROOT) declared in the org's [sandbox.env] block.
+	// These override defaults if they collide (last-wins, matching Docker
+	// semantics).
+	if len(opts.Env) > 0 {
+		envVars = append(envVars, opts.Env...)
+	}
 
 	// Create a persistent Docker volume for this sandbox
 	volumeName := fmt.Sprintf("sandbox-%s-persist", opts.ID)
@@ -254,6 +268,22 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		policiesDir + ":/etc/openshell/policies:ro",
 		"/tmp:/sandbox/tmp",
 		volumeName + ":/sandbox/persist",
+	}
+	// Org-mode volume propagation: caller may pass org-declared volumes
+	// (e.g. video-production's named workspace volume mounted at
+	// /workspace/video-productions). Each entry renders to a Docker bind
+	// string via SandboxVolume.BindString(). Malformed entries are skipped
+	// so one bad row doesn't fail sandbox creation.
+	for _, vol := range opts.Volumes {
+		bind := vol.BindString()
+		if bind == "" {
+			m.logger.Warn("Skipping malformed org sandbox volume",
+				zap.String("type", vol.Type),
+				zap.String("name", vol.Name),
+				zap.String("container", vol.Container))
+			continue
+		}
+		binds = append(binds, bind)
 	}
 	hostConfig := &container.HostConfig{
 		Binds:     binds,
@@ -730,6 +760,19 @@ func (m *Manager) FindSandboxByProject(name string) *Sandbox {
 		}
 	}
 
+	// Phase 1.5: discover by openshell.project-path label.
+	// Catches containers started outside Pux (e.g. `docker compose up` via
+	// org bootstrap.sh) that carry the same label Pux uses internally on
+	// its own containers. Without this, Pux silently spins up a sibling
+	// container instead of adopting the running one — wasteful and a
+	// classic source of "agent writes to container A, user reads from
+	// container B" file-visibility bugs.
+	if m.dockerClient != nil {
+		if sb := m.discoverByProjectLabel(name); sb != nil {
+			return sb
+		}
+	}
+
 	// No in-memory match — try to find a stopped Docker container by project name.
 	// Try both the full path (legacy, when req.Project was an absolute path) and
 	// the basename (current, when ID is derived from filepath.Base).
@@ -796,6 +839,106 @@ func (m *Manager) FindSandboxByProject(name string) *Sandbox {
 	}
 
 	return nil
+}
+
+// discoverByProjectLabel queries Docker for running containers carrying
+// openshell.project-path=<projectPath> that aren't already tracked in
+// m.sandboxes. Returns the first match adopted into the in-memory map.
+//
+// Contract: org bootstrap.sh exports OPENSHELL_PROJECT_PATH so compose
+// can attach both the label AND the matching bind mount
+// (${OPENSHELL_PROJECT_PATH}:/sandbox/workspace). The label is the
+// discovery signal; the matching mount is what makes the adoption safe
+// — the bash executor assumes /sandbox/workspace maps to ProjectPath,
+// so a container with a different mount would silently break file ops.
+//
+// Containers created by Pux already carry this label, but Phase 1 of
+// FindSandboxByProject catches them via the in-memory map first. We
+// reach here only when no in-memory match exists, so the discovery
+// exclusively catches externally-created (compose, manual docker run)
+// containers.
+func (m *Manager) discoverByProjectLabel(projectPath string) *Sandbox {
+	if projectPath == "" || m.dockerClient == nil {
+		return nil
+	}
+	ctx := context.Background()
+	result, err := m.dockerClient.ContainerList(ctx, client.ContainerListOptions{
+		Filters: client.Filters{
+			"label": {"openshell.project-path=" + projectPath: true},
+		},
+	})
+	if err != nil {
+		m.logger.Warn("container discovery by label failed",
+			zap.String("project", projectPath),
+			zap.Error(err))
+		return nil
+	}
+	for _, c := range result.Items {
+		// Skip already-tracked sandboxes — Phase 1 should have caught these,
+		// but State transitions can race. Re-checking under the read lock is cheap.
+		existingID := c.Labels["openshell.sandbox-id"]
+		m.mu.RLock()
+		_, inMem := m.sandboxes[existingID]
+		m.mu.RUnlock()
+		if inMem {
+			continue
+		}
+		sb := adoptContainerAsSandbox(c, projectPath)
+		if sb == nil {
+			continue
+		}
+		m.mu.Lock()
+		m.sandboxes[sb.ID] = sb
+		m.mu.Unlock()
+		m.logger.Info("adopted external container by project-path label",
+			zap.String("sandbox_id", sb.ID),
+			zap.String("container_id", c.ID),
+			zap.String("project", projectPath),
+			zap.String("image", c.Image))
+		return sb
+	}
+	return nil
+}
+
+// adoptContainerAsSandbox constructs a *Sandbox from a Docker container
+// summary, deriving ID/policy from labels with sensible fallbacks.
+// Pure function — extracted so the adoption contract can be unit-tested
+// without spinning up Docker.
+//
+// Returns nil if the container lacks the minimum signal (project-path
+// label must match what we queried by).
+func adoptContainerAsSandbox(c container.Summary, projectPath string) *Sandbox {
+	if c.Labels == nil {
+		return nil
+	}
+	if c.Labels["openshell.project-path"] != projectPath {
+		return nil
+	}
+	sandboxID := c.Labels["openshell.sandbox-id"]
+	if sandboxID == "" {
+		// Compose containers may not carry this label; fall back to name
+		// (preferred — human-readable) or container ID short hash.
+		if len(c.Names) > 0 {
+			sandboxID = strings.TrimPrefix(c.Names[0], "/")
+		} else if len(c.ID) >= 12 {
+			sandboxID = c.ID[:12]
+		} else {
+			sandboxID = c.ID
+		}
+	}
+	policy := c.Labels["openshell.policy"]
+	if policy == "" {
+		policy = "developer"
+	}
+	return &Sandbox{
+		ID:          sandboxID,
+		ContainerID: c.ID,
+		ProjectPath: projectPath,
+		Policy:      policy,
+		Mode:        ModeCLI,
+		Status:      StatusRunning,
+		CreatedAt:   time.Now(),
+	}
 }
 
 func (m *Manager) GetSandbox(id string) (*Sandbox, error) {

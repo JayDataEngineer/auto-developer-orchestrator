@@ -47,6 +47,28 @@ services:
 {% if sandbox.command %}
     command: [{{ sandbox.command | map('tojson') | join(", ") }}]
 {% endif %}
+    # Labels that let Pux adopt this container instead of spinning up a
+    # sibling. Bootstrap.sh exports OPENSHELL_PROJECT_PATH so the label
+    # and the bind mount stay in sync — Pux's bash executor assumes
+    # /sandbox/workspace maps to the project root.
+    labels:
+      openshell.org-name: "{{ name }}"
+      openshell.project-path: "${OPENSHELL_PROJECT_PATH:-}"
+      openshell.sandbox-id: "{{ name }}-compose"
+      openshell.policy: "{{ sandbox.policy | default('developer') }}"
+{% if sandbox.volumes %}
+    volumes:
+      # Canonical Pux mount — enables container reuse. When the env var
+      # is unset, mounts the compose CWD (harmless default; Pux discovery
+      # fails because the label is also empty, so no wrong adoption).
+      - ${OPENSHELL_PROJECT_PATH:-./}:/sandbox/workspace
+{% for v in sandbox.volumes %}
+      - {{ (v.host if v.type == "bind" else v.name) ~ ":" ~ v.container }}
+{% endfor %}
+{% else %}
+    volumes:
+      - ${OPENSHELL_PROJECT_PATH:-./}:/sandbox/workspace
+{% endif %}
 {% if sandbox.env %}
     environment:
 {% for k, v in sandbox.env.items() %}
@@ -82,12 +104,6 @@ services:
 {% if sandbox.healthcheck.retries %}
       retries: {{ sandbox.healthcheck.retries }}
 {% endif %}
-{% endif %}
-{% if sandbox.volumes %}
-    volumes:
-{% for v in sandbox.volumes %}
-      - {{ (v.host if v.type == "bind" else v.name) ~ ":" ~ v.container }}
-{% endfor %}
 {% endif %}
 {% if sandbox.networks %}
     networks:

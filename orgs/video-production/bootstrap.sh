@@ -16,7 +16,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Export the absolute project path so docker-compose can attach it both
+# as the openshell.project-path label AND as the /sandbox/workspace bind
+# mount. Pux's bash executor assumes /sandbox/workspace maps to the
+# project root, and Pux's container discovery (FindSandboxByProject)
+# uses the label to adopt this container instead of spinning up a
+# sibling. Without this export, Pux creates its own container.
+export OPENSHELL_PROJECT_PATH="${OPENSHELL_PROJECT_PATH:-$SCRIPT_DIR}"
+
 echo "=== Video Production Org Bootstrap ==="
+echo "  OPENSHELL_PROJECT_PATH=$OPENSHELL_PROJECT_PATH"
 echo ""
 
 # --- Build & start ---

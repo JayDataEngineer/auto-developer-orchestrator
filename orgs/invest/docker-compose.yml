@@ -8,15 +8,28 @@ services:
     image: invest-sandbox:latest
     working_dir: /workspace
     command: ["python3", "/workspace/sandbox/fetch_data.py", "--help"]
-    environment:
-      ALPACA_API_KEY: "${ALPACA_API_KEY:-}"
-      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY:-}"
-      FRED_API_KEY: "${FRED_API_KEY:-}"
+    # Labels that let Pux adopt this container instead of spinning up a
+    # sibling. Bootstrap.sh exports OPENSHELL_PROJECT_PATH so the label
+    # and the bind mount stay in sync — Pux's bash executor assumes
+    # /sandbox/workspace maps to the project root.
+    labels:
+      openshell.org-name: "invest"
+      openshell.project-path: "${OPENSHELL_PROJECT_PATH:-}"
+      openshell.sandbox-id: "invest-compose"
+      openshell.policy: "developer"
     volumes:
+      # Canonical Pux mount — enables container reuse. When the env var
+      # is unset, mounts the compose CWD (harmless default; Pux discovery
+      # fails because the label is also empty, so no wrong adoption).
+      - ${OPENSHELL_PROJECT_PATH:-./}:/sandbox/workspace
       - ./sandbox:/workspace/sandbox
       - ./config:/workspace/config
       - invest-data:/workspace/data
       - invest-cache:/workspace/workspace/cache
+    environment:
+      ALPACA_API_KEY: "${ALPACA_API_KEY:-}"
+      ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY:-}"
+      FRED_API_KEY: "${FRED_API_KEY:-}"
 
 volumes:
   invest-data:

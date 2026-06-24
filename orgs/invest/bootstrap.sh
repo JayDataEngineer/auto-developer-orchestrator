@@ -141,5 +141,10 @@ echo "  Required env:"
 echo "    ALPACA_API_KEY, ALPACA_SECRET_KEY  (paper trading)"
 echo "    FRED_API_KEY                        (macro data — free at fred.stlouisfed.org)"
 echo
+echo "  Docker compose (optional alternative to venv):"
+echo "    export OPENSHELL_PROJECT_PATH=\$TARGET_DIR"
+echo "    cd $SCRIPT_DIR && docker compose up -d"
+echo "    # Pux will then adopt this container instead of creating a sibling."
+echo
 echo "  Smoke test passed: ✓"
 echo "═══════════════════════════════════════════════════════════════"
