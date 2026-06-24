@@ -5,6 +5,8 @@ manifesto: MANIFESTO.md
 staff_root: roles
 skills_dir: skills
 sandbox:
+  tier: custom-build
+  image: video-production-video-producer:latest
   runtime_class: runc
   warm_pool: 1
   mode: contained
@@ -12,3 +14,8 @@ sandbox:
     VIDEO_PRODUCTION_ROOT: "/workspace/video-productions"
     KOKORO_VOICE: "af_heart"
     KOKORO_LANG_CODE: "a"
+  volumes:
+    - type: volume
+      name: video_prod_workspace
+      docker_name: research_video_prod_workspace
+      container: /workspace/video-productions

@@ -41,7 +41,7 @@ databases:
 {% for k, v in cfg.items() if v is not none %}    {{ k }}: {{ v if v is string else v | tojson }}
 {% endfor %}{% endfor %}
 {% endif %}
-{% if sandbox.init_files or sandbox.pip_packages or sandbox.env or sandbox.runtime_class or sandbox.mode or sandbox.image or sandbox.volumes or sandbox.tier %}
+{% if sandbox.tier and sandbox.tier != "skeleton" %}
 sandbox:
 {% if sandbox.tier %}  tier: {{ sandbox.tier }}
 {% endif %}{% if sandbox.image %}  image: {{ sandbox.image }}

@@ -48,10 +48,20 @@ schedules:
     model: deepseek-chat
     enabled: true
 sandbox:
-  image: invest-sandbox:latest
-  runtime_class: runc
+  tier: standard
+  image: pux-sandbox:latest
+  runtime_class: gvisor
   warm_pool: 1
   mode: contained
+  pip_packages:
+    - yfinance
+    - pycoingecko
+    - alpaca-py
+    - fredapi
+    - pandas
+    - numpy
+    - scikit-learn
+    - requests
   env:
     ALPACA_API_KEY: "${ALPACA_API_KEY:-}"
     ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY:-}"
@@ -69,3 +79,10 @@ sandbox:
     - type: volume
       name: invest-cache
       container: /workspace/workspace/cache
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"

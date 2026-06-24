@@ -499,11 +499,11 @@ func TestOrgSandboxTierContract(t *testing.T) {
 		t.Skip("no orgs found to audit")
 	}
 
-	// PR1: report as warnings. PR2 will flip this to t.Errorf once orgs are
-	// migrated. Tracking the count keeps the migration progress visible.
+	// PR2: hard-fail. PR1 shipped this as a warning; migration is now complete
+	// across all 9 orgs (tier declared in every org.toml that has [sandbox]).
 	if len(violations) > 0 {
 		var b strings.Builder
-		fmt.Fprintf(&b, "%d/%d orgs violate sandbox.tier contract (PR2 migration pending):\n",
+		fmt.Fprintf(&b, "%d/%d orgs violate sandbox.tier contract:\n",
 			len(violations), orgCount)
 		for _, v := range violations {
 			if v.tier != "" {
@@ -512,7 +512,7 @@ func TestOrgSandboxTierContract(t *testing.T) {
 				fmt.Fprintf(&b, "  - %s: %s\n", v.orgName, v.reason)
 			}
 		}
-		t.Logf("DRIFT (warning, not failure yet):\n%s", b.String())
+		t.Errorf("DRIFT:\n%s", b.String())
 	}
 }
 
@@ -553,8 +553,8 @@ func TestOrgBootstrapAtRoot(t *testing.T) {
 	}
 
 	if len(drifted) > 0 {
-		t.Logf(
-			"DRIFT (warning, not failure yet) — bootstrap.sh location:\n  - %s\nPR2 will move these to org root.",
+		t.Errorf(
+			"DRIFT — bootstrap.sh must live at org root, not scripts/:\n  - %s",
 			strings.Join(drifted, "\n  - "),
 		)
 	}
@@ -705,16 +705,16 @@ func TestOrgSharedPathStyle(t *testing.T) {
 		})
 	}
 
-	// PR1: report as warnings. PR2 will flip to t.Errorf once tech-noir +
-	// deep-research-engine @shared/surreal_client.py paths are migrated.
+	// PR2: hard-fail. PR1 shipped this as a warning; @shared/ paths are
+	// migrated to the canonical @shared/{clients,sandbox}/ form across all
+	// 9 orgs.
 	if len(violations) > 0 {
-		// Group by org for readability.
 		byOrg := map[string][]string{}
 		for _, v := range violations {
 			byOrg[v.orgName] = append(byOrg[v.orgName], v.path)
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "%d org(s) use legacy bare @shared/foo.py paths (PR2 migration pending):\n",
+		fmt.Fprintf(&b, "%d org(s) use legacy bare @shared/foo.py paths:\n",
 			len(byOrg))
 		for orgName, paths := range byOrg {
 			fmt.Fprintf(&b, "  %s:\n", orgName)
@@ -723,7 +723,7 @@ func TestOrgSharedPathStyle(t *testing.T) {
 			}
 		}
 		fmt.Fprintf(&b, "  Allowed subdirs: %v\n", allowedSharedSubdirs)
-		t.Logf("DRIFT (warning, not failure yet):\n%s", b.String())
+		t.Errorf("DRIFT:\n%s", b.String())
 	}
 }
 

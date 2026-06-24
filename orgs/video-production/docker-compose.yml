@@ -33,13 +33,7 @@ services:
       timeout: 5s
       start_period: 120s
       retries: 3
-    networks:
-      - deep-research
 
 volumes:
   video_prod_workspace:
     name: research_video_prod_workspace
-networks:
-  deep-research:
-    name: deep-research-engine_default
-    external: true

@@ -6,22 +6,20 @@ staff_root: roles
 tool_packages_root: tool_packages
 skills_dir: skills
 sandbox:
+  tier: standard
   image: pux-sandbox:latest
   runtime_class: gvisor
   warm_pool: 1
   mode: contained
   init_files:
-    - "@shared/forge_client.py"
+    - "@shared/clients/forge_client.py"
     - "sandbox/godot_client.py"
-    - "sandbox/comfyui_client.py"
-    - "@shared/surreal_client.py"
+    - "@shared/clients/comfyui_client.py"
+    - "@shared/clients/surreal_client.py"
   pip_packages:
     - requests
     - pillow
   env:
-    MCP_HUB_ENDPOINT: "http://100.86.69.57:30080"
-    FORGE_URL: "http://100.86.69.57:30080/forge"
-    COMFYUI_URL: "http://100.86.69.57:30080/image/comfyui"
     GODOT_MCP_URL: "http://host.docker.internal:8080"
     SURREALDB_URL: "http://host.docker.internal:8000/surreal"
     SURREALDB_NS: "studio"
@@ -31,6 +29,10 @@ sandbox:
     DOCS_SITE_PATH: "/workspace/docs-site"
     GAME_REPO_PATH: "/workspace/game"
     PUX_ORG_PATH: "/sandbox/workspace"
+  volumes:
+    - type: volume
+      name: tech-noir-workspace
+      container: /workspace
   resources:
     requests:
       cpu: "500m"

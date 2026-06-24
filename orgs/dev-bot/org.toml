@@ -9,6 +9,11 @@ description = "Software development organization — explore, architect, impleme
 manifesto = "MANIFESTO.md"
 staff_root = "roles"
 
+# Skeleton tier — config-only org. No sandbox container; roles run on host
+# bash + host file ops (dev-bot's purpose is editing real code in a repo).
+[sandbox]
+tier = "skeleton"
+
 [[roles]]
 name = "architect"
 description = "Architect — system design, task breakdown, code review. Writes spec artifacts."

@@ -4,6 +4,7 @@ services:
   twitter-agent-sandbox:
     image: pux-sandbox:latest
     runtime: runsc
+    restart: unless-stopped
     # Labels that let Pux adopt this container instead of spinning up a
     # sibling. Bootstrap.sh exports OPENSHELL_PROJECT_PATH so the label
     # and the bind mount stay in sync — Pux's bash executor assumes
@@ -24,11 +25,11 @@ services:
     deploy:
       resources:
         reservations:
-          cpus: '250m'
-          memory: 256Mi
+          cpus: '0.25'
+          memory: 256M
         limits:
           cpus: '1'
-          memory: 1Gi
+          memory: 1G
     network_mode: host
 
 volumes:

@@ -5,3 +5,8 @@
 
 name = "general"
 description = "General-purpose testing project — no roles, no skills, just kernel defaults"
+
+# Skeleton tier — config-only org. No sandbox, no overlay; exercises the
+# kernel's fallback path (kernel workers only).
+[sandbox]
+tier = "skeleton"

@@ -93,7 +93,7 @@ def _docker_mem(k8s_mem: str | int) -> str:
 # sandbox.tier — three explicit contracts. See declarative-cooking-wolf.md §A1.
 #
 # standard     — stock pux-sandbox:latest image, full kernel isolation
-#                (gVisor, warm_pool, resources, PUX_ORG_PATH env).
+#                (gVisor, warm_pool, resources).
 #
 # custom-build — org ships its own Dockerfile. Requires a `justification`
 #                string forcing the author to articulate why. Used by orgs
@@ -130,13 +130,6 @@ def _validate_sandbox_tier_fields(
             errs.append(
                 "org.toml: sandbox.warm_pool must be a positive integer "
                 "for tier='standard'"
-            )
-        env = sandbox.get("env") or {}
-        if not isinstance(env, dict) or "PUX_ORG_PATH" not in env:
-            errs.append(
-                "org.toml: sandbox.env.PUX_ORG_PATH is required for "
-                "tier='standard' (kernel uses this to label-discover the "
-                "container at sandbox creation time)"
             )
         # resources block is required — both requests + limits.
         res = sandbox.get("resources") or {}
@@ -188,15 +181,6 @@ def _validate_sandbox_tier_fields(
                     "tier='custom-build' — explain why pux-sandbox:latest "
                     "is insufficient (system deps, vendored binaries, etc)."
                 )
-        # Custom-build still needs env.PUX_ORG_PATH — label discovery is
-        # the adoption mechanism regardless of image source.
-        env = sandbox.get("env") or {}
-        if not isinstance(env, dict) or "PUX_ORG_PATH" not in env:
-            errs.append(
-                "org.toml: sandbox.env.PUX_ORG_PATH is required for "
-                "tier='custom-build' (same label-discovery contract as "
-                "tier='standard')"
-            )
 
     elif tier == "skeleton":
         # Skeleton tier = no sandbox. The [sandbox] block is allowed to
@@ -427,8 +411,32 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     missing from org.toml, we inject an empty/none value so the {% if %}
     guards in the templates evaluate cleanly. Nested tables (``sandbox``)
     get their commonly-accessed keys pre-filled too.
+
+    Skeleton tier is exempt: tier='skeleton' means 'no sandbox body', so
+    injecting sandbox defaults would contradict the tier declaration. The
+    validator (validate_org_data) already hard-rejects skeleton tier with
+    non-empty sandbox body; this guard prevents the normalizer from silently
+    undoing that contract. Top-level defaults (schedules, databases, etc.)
+    still apply — the skeleton tier only constrains the sandbox block.
     """
     sandbox = dict(data.get("sandbox") or {})
+    if sandbox.get("tier") == "skeleton":
+        # Preserve only the tier declaration. Any other field present here
+        # is a validator error (already caught upstream); don't paper over
+        # it by injecting more defaults. Fall through to the top-level
+        # defaults below so schedules/databases/etc. still get populated.
+        sandbox = {"tier": "skeleton"}
+    else:
+        sandbox = _normalize_sandbox(sandbox, data)
+    return _normalize_toplevel(data, sandbox)
+
+
+def _normalize_sandbox(sandbox: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    """Apply sandbox-block defaults for non-skeleton tiers.
+
+    Mutates `sandbox` in place (the caller already made a copy). Returns it
+    for readability. See `_normalize` for the skeleton-tier bypass.
+    """
     sandbox.setdefault("init_files", [])
     sandbox.setdefault("pip_packages", [])
     sandbox.setdefault("env", {})
@@ -519,7 +527,17 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     # in validate_org_data flags them.
     raw_runtime = sandbox.get("runtime_class") or "runc"
     sandbox["runtime_class_docker"] = RUNTIME_CLASS_MAP.get(raw_runtime)
+    return sandbox
 
+
+def _normalize_toplevel(data: dict[str, Any], sandbox: dict[str, Any]) -> dict[str, Any]:
+    """Build the top-level template context.
+
+    Always called — even for skeleton-tier orgs, which still need the
+    `schedules`, `databases`, `roles`, etc. keys populated for StrictUndefined
+    templates. `sandbox` is the already-normalized sandbox dict (or the
+    minimal `{"tier": "skeleton"}` for skeleton orgs).
+    """
     return {
         "name": data.get("name", ""),
         "description": data.get("description", ""),
@@ -576,16 +594,22 @@ def render_org(org_dir: Path, env: Environment, target_dir: Path | None = None) 
     _atomic_write(pux_path, pux_out, allow_overwrite_header=True)
     written.append(pux_path)
 
-    # docker-compose.yml — only for orgs that declare a [sandbox] block.
-    # The compose file is the ops view of the sandbox profile; the kernel
-    # still uses its own Docker SDK for sandbox lifecycle (compose is for
-    # `docker compose up` by humans/CI and for documenting intent).
+    # docker-compose.yml — only for orgs that declare a non-skeleton [sandbox].
+    # Skeleton tier means "no container" by declaration, so we don't render
+    # a compose file for it. The kernel still uses its own Docker SDK for
+    # sandbox lifecycle on standard/custom-build orgs; compose is for
+    # `docker compose up` by humans/CI and for documenting intent.
     # Standard filename so `docker compose <cmd>` works with no -f flag.
-    if raw.get("sandbox"):
+    sandbox_raw = raw.get("sandbox") or {}
+    if sandbox_raw and sandbox_raw.get("tier") != "skeleton":
         compose_out = _render_template(env, "sandbox.compose.yml.j2", data)
         compose_path = write_root / "docker-compose.yml"
         _atomic_write(compose_path, compose_out, allow_overwrite_header=True)
         written.append(compose_path)
+    elif (write_root / "docker-compose.yml").exists():
+        # Stale compose file from before the skeleton migration — remove it
+        # so the rendered tree matches the declared tier.
+        (write_root / "docker-compose.yml").unlink()
 
     # roles/<name>/config.yaml
     role_defaults = {

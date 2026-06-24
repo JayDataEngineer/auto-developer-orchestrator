@@ -25,7 +25,9 @@ password_env = "SURREAL_PASSWORD"
 # SURREALDB_* vars use host.docker.internal so the container can reach the
 # host-bound SurrealDB behind Caddy on :8000.
 [sandbox]
+tier = "standard"
 image = "pux-sandbox:latest"
+restart = "unless-stopped"
 runtime_class = "gvisor"
 warm_pool = 1
 init_files = [
@@ -53,7 +55,8 @@ name = "social-media-pipeline-workspace"
 container = "/workspace"
 
 [sandbox.env]
-MCP_HUB_ENDPOINT = "http://100.86.69.57:30080"
+# MCP_HUB_ENDPOINT omitted — default in orgs/_shared/clients/forge_client.py
+# points at localhost. Set this env var only when pointing at a remote cluster.
 SURREALDB_URL = "http://host.docker.internal:8000/surreal"
 SURREALDB_NS = "research"
 SURREALDB_DB = "main"

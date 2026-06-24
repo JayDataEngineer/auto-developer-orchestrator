@@ -3,8 +3,3 @@ name: dev-bot
 description: Software development organization — explore, architect, implement, review, test, operate
 manifesto: MANIFESTO.md
 staff_root: roles
-sandbox:
-  image: pux-sandbox:latest
-  runtime_class: runc
-  warm_pool: 1
-  mode: contained

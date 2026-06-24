@@ -13,6 +13,7 @@ databases:
     username: root
     password_env: SURREAL_PASSWORD
 sandbox:
+  tier: standard
   image: pux-sandbox:latest
   runtime_class: gvisor
   warm_pool: 1
@@ -30,13 +31,16 @@ sandbox:
     - requests
     - telethon
   env:
-    MCP_HUB_ENDPOINT: "http://100.86.69.57:30080"
     SURREALDB_URL: "http://host.docker.internal:8000/surreal"
     SURREALDB_NS: "research"
     SURREALDB_DB: "main"
     SURREALDB_USER: "root"
     SURREALDB_PASS: "root"
     PUX_ORG_PATH: "/sandbox/workspace"
+  volumes:
+    - type: volume
+      name: social-media-pipeline-workspace
+      container: /workspace
   resources:
     requests:
       cpu: "250m"

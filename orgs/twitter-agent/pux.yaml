@@ -30,6 +30,7 @@ schedules:
     model: deepseek/deepseek-v4-flash
     enabled: false
 sandbox:
+  tier: standard
   image: pux-sandbox:latest
   runtime_class: gvisor
   warm_pool: 1
@@ -44,6 +45,10 @@ sandbox:
     - tweepy
   env:
     PUX_ORG_PATH: "/sandbox/workspace"
+  volumes:
+    - type: volume
+      name: twitter-agent-workspace
+      container: /workspace
   resources:
     requests:
       cpu: "250m"

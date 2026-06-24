@@ -29,11 +29,13 @@ password_env = "SURREAL_PASSWORD"
 # PUX_ORG_PATH points at the bind-mounted /sandbox/workspace so surreal_client.py
 # can locate prompts/surreal_schema.sql via its _load_schema_sql() lookup.
 [sandbox]
+tier = "standard"
 image = "pux-sandbox:latest"
+restart = "unless-stopped"
 runtime_class = "gvisor"
 warm_pool = 1
 init_files = [
-  "@shared/surreal_client.py",
+  "@shared/clients/surreal_client.py",
   "sandbox/context_engine.py",
   "sandbox/vector_search.py",
   "sandbox/entity_extract.py",
@@ -41,6 +43,7 @@ init_files = [
   "sandbox/telegram_parser.py",
   "sandbox/face_client.py",
   "sandbox/audio_client.py",
+  "sandbox/video_frames.py",
   "sandbox/neo4j_client.py",
 ]
 
@@ -64,6 +67,9 @@ SURREALDB_DB = "main"
 SURREALDB_USER = "root"
 SURREALDB_PASS = "root"
 PUX_ORG_PATH = "/sandbox/workspace"
+# MCP capability URLs (MEDIA_MCP_URL, WEB_MCP_URL) are NOT declared here —
+# they're deployment-specific. The shared sandbox clients default to
+# localhost; set the env vars here only when pointing at a non-local MCP.
 
 [[roles]]
 name = "artifact-director"
@@ -81,7 +87,7 @@ imports = ["shell"]
 
 [[roles]]
 name = "ingestion-director"
-description = "Ingestion Director — Manages multimodal data ingestion (Telegram, PDFs, audio, images). Delegates to specialized processors, reviews quality, builds knowledge structures."
+description = "Ingestion Director — Manages multimodal data ingestion (structured exports, PDFs, audio, images). Delegates to specialized processors, reviews quality, builds knowledge structures."
 max_rounds = 40
 model = "deepseek/deepseek-v4-flash"
 imports = ["shell"]

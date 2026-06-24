@@ -11,6 +11,7 @@ staff_root = "roles"
 skills_dir = "skills"
 
 [sandbox]
+tier = "custom-build"
 service_name = "video-producer"
 container_name = "research-video-producer"
 restart = "unless-stopped"
@@ -19,6 +20,9 @@ network_mode_disabled = true
 [sandbox.build]
 context = "."
 dockerfile = "Dockerfile"
+# Custom build required: Manim (LaTeX + Cairo), Kokoro TTS, ffmpeg system deps
+# are too heavy for the pux-sandbox:latest base image. Build time ~6 min.
+justification = "Manim + LaTeX + Kokoro TTS + ffmpeg system dependencies are too heavy for the stock pux-sandbox image; rendering requires system packages that pip alone cannot install."
 
 [sandbox.env]
 VIDEO_PRODUCTION_ROOT = "/workspace/video-productions"
@@ -37,11 +41,6 @@ type = "volume"
 name = "video_prod_workspace"
 docker_name = "research_video_prod_workspace"
 container = "/workspace/video-productions"
-
-[[sandbox.networks]]
-name = "deep-research"
-docker_name = "deep-research-engine_default"
-external = true
 
 [[roles]]
 name = "video-producer"

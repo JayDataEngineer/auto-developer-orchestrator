@@ -13,12 +13,13 @@ databases:
     username: root
     password_env: SURREAL_PASSWORD
 sandbox:
+  tier: standard
   image: pux-sandbox:latest
   runtime_class: gvisor
   warm_pool: 1
   mode: contained
   init_files:
-    - "@shared/surreal_client.py"
+    - "@shared/clients/surreal_client.py"
     - "sandbox/context_engine.py"
     - "sandbox/vector_search.py"
     - "sandbox/entity_extract.py"
@@ -26,6 +27,7 @@ sandbox:
     - "sandbox/telegram_parser.py"
     - "sandbox/face_client.py"
     - "sandbox/audio_client.py"
+    - "sandbox/video_frames.py"
     - "sandbox/neo4j_client.py"
   env:
     SURREALDB_URL: "http://host.docker.internal:8000/surreal"
@@ -34,6 +36,10 @@ sandbox:
     SURREALDB_USER: "root"
     SURREALDB_PASS: "root"
     PUX_ORG_PATH: "/sandbox/workspace"
+  volumes:
+    - type: volume
+      name: deep-research-engine-workspace
+      container: /workspace
   resources:
     requests:
       cpu: "500m"

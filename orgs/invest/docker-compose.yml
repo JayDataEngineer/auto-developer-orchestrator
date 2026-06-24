@@ -2,12 +2,9 @@
 
 services:
   invest-sandbox:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: invest-sandbox:latest
-    working_dir: /workspace
-    command: ["python3", "/workspace/sandbox/fetch_data.py", "--help"]
+    image: pux-sandbox:latest
+    runtime: runsc
+    restart: unless-stopped
     # Labels that let Pux adopt this container instead of spinning up a
     # sibling. Bootstrap.sh exports OPENSHELL_PROJECT_PATH so the label
     # and the bind mount stay in sync — Pux's bash executor assumes
@@ -30,6 +27,15 @@ services:
       ALPACA_API_KEY: "${ALPACA_API_KEY:-}"
       ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY:-}"
       FRED_API_KEY: "${FRED_API_KEY:-}"
+    deploy:
+      resources:
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+        limits:
+          cpus: '2'
+          memory: 2G
+    network_mode: host
 
 volumes:
   invest-data:

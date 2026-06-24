@@ -16,14 +16,24 @@ staff_root = "roles"
 skills_dir = "skills"
 
 [sandbox]
-image = "invest-sandbox:latest"
-working_dir = "/workspace"
-command = ["python3", "/workspace/sandbox/fetch_data.py", "--help"]
-network_mode_disabled = true
-
-[sandbox.build]
-context = "."
-dockerfile = "Dockerfile"
+tier = "standard"
+image = "pux-sandbox:latest"
+restart = "unless-stopped"
+runtime_class = "gvisor"
+warm_pool = 1
+# Pure-Python deps only — no system packages needed, so pux-sandbox:latest
+# is sufficient. Custom Dockerfile removed in PR2 of the 0-drift enforcement
+# (declarative-cooking-wolf.md).
+pip_packages = [
+  "yfinance",
+  "pycoingecko",
+  "alpaca-py",
+  "fredapi",
+  "pandas",
+  "numpy",
+  "scikit-learn",
+  "requests",
+]
 
 [sandbox.env]
 ALPACA_API_KEY = "${ALPACA_API_KEY:-}"
@@ -49,6 +59,14 @@ container = "/workspace/data"
 type = "volume"
 name = "invest-cache"
 container = "/workspace/workspace/cache"
+
+[sandbox.resources.requests]
+cpu = "500m"
+memory = "512Mi"
+
+[sandbox.resources.limits]
+cpu = "2"
+memory = "2Gi"
 
 [[schedules]]
 name = "morning_scan"

@@ -570,12 +570,16 @@ def test_validation_rejects_standard_with_runc(tmp_path: Path) -> None:
     assert any("runtime_class must be 'gvisor' or 'kata'" in e for e in errs), errs
 
 
-def test_validation_rejects_standard_without_pux_org_path(tmp_path: Path) -> None:
-    """standard tier requires env.PUX_ORG_PATH (label-discovery contract)."""
-    bad = dict(_VALID_STANDARD_SANDBOX)
-    bad["env"] = {}
-    errs = org_build.validate_org_data(_org_with_sandbox(bad), "acme", tmp_path)
-    assert any("PUX_ORG_PATH" in e for e in errs), errs
+def test_validation_accepts_standard_without_pux_org_path(tmp_path: Path) -> None:
+    """PUX_ORG_PATH env is OPTIONAL — kernel uses openshell.project-path LABEL
+    from bootstrap.sh for container adoption, not the env var. The env var is
+    just an in-container hint that scripts can opt into via /sandbox/.env.
+    Three production orgs (deep-research-engine, social-media-pipeline,
+    tech-noir) don't declare it and work correctly."""
+    good = dict(_VALID_STANDARD_SANDBOX)
+    good["env"] = {}  # no PUX_ORG_PATH — still valid
+    errs = org_build.validate_org_data(_org_with_sandbox(good), "acme", tmp_path)
+    assert not errs, errs
 
 
 def test_validation_rejects_standard_with_build_block(tmp_path: Path) -> None:
@@ -819,16 +823,6 @@ def test_sandbox_docker_name_without_external_does_not_emit_external_flag(
 @pytest.mark.skipif(
     not (REPO_ROOT / "orgs").exists(),
     reason="orgs/ directory not present",
-)
-@pytest.mark.xfail(
-    reason=(
-        "Phase A §A1 forcing function: every [sandbox] block must declare "
-        "a tier. PR1 added the validator; PR2 migrates the orgs. Once "
-        "every org declares tier, remove this xfail mark — the test will "
-        "then enforce the contract on every CI run. See "
-        "declarative-cooking-wolf.md §A1."
-    ),
-    strict=False,
 )
 def test_all_real_orgs_render_cleanly() -> None:
     """Every checked-in org.toml renders without exception."""

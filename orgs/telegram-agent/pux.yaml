@@ -5,6 +5,7 @@ manifesto: MANIFESTO.md
 staff_root: roles
 skills_dir: skills
 sandbox:
+  tier: standard
   image: pux-sandbox:latest
   runtime_class: gvisor
   warm_pool: 1
@@ -17,6 +18,10 @@ sandbox:
     - requests
   env:
     PUX_ORG_PATH: "/sandbox/workspace"
+  volumes:
+    - type: volume
+      name: telegram-agent-workspace
+      container: /workspace
   resources:
     requests:
       cpu: "250m"

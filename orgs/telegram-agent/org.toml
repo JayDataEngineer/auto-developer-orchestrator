@@ -11,7 +11,9 @@ staff_root = "roles"
 skills_dir = "skills"
 
 [sandbox]
+tier = "standard"
 image = "pux-sandbox:latest"
+restart = "unless-stopped"
 runtime_class = "gvisor"
 warm_pool = 1
 init_files = [
