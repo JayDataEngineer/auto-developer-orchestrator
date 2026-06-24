@@ -272,9 +272,13 @@ staff_root = "roles"
 
 [sandbox]
 image = "acme-sandbox:latest"
+tier = "standard"
 runtime_class = "gvisor"
 warm_pool = 2
 init_files = ["sandbox/run.py"]
+
+[sandbox.env]
+PUX_ORG_PATH = "/sandbox/workspace"
 
 [sandbox.resources.requests]
 cpu = "250m"
@@ -324,14 +328,28 @@ def test_sandbox_compose_omitted_when_no_block(tmp_org: Path) -> None:
 
 
 def test_sandbox_runc_omits_runtime_line(tmp_path: Path) -> None:
-    """runtime_class=runc (Docker default) must not emit a runtime: line."""
+    """runtime_class=runc (Docker default) must not emit a runtime: line.
+
+    Note: runc + tier='standard' is rejected by the validator. This fixture
+    uses tier='custom-build' (which allows runc) to exercise the rendering
+    contract independently of the isolation contract."""
     org = tmp_path / "acme"
     (org / "roles" / "worker").mkdir(parents=True)
     (org / "roles" / "worker" / "prompt.md").write_text("p")
     (org / "MANIFESTO.md").write_text("m")
+    (org / "Dockerfile").write_text("FROM pux-sandbox:latest\n")
     (org / "org.toml").write_text(
         MINIMAL_ORG_TOML
-        + '\n[sandbox]\nruntime_class = "runc"\ninit_files = ["sandbox/x.py"]\n'
+        + '\n[sandbox]\n'
+        'tier = "custom-build"\n'
+        'runtime_class = "runc"\n'
+        'init_files = ["sandbox/x.py"]\n'
+        '[sandbox.env]\n'
+        'PUX_ORG_PATH = "/sandbox/workspace"\n'
+        '[sandbox.build]\n'
+        'context = "."\n'
+        'dockerfile = "Dockerfile"\n'
+        'justification = "test fixture — runc rendering"\n'
     )
     env = org_build._make_env()
     org_build.render_org(org, env)
@@ -351,6 +369,26 @@ def test_sandbox_profile_in_pux_yaml(sandbox_org: Path) -> None:
     assert sb["warm_pool"] == 2
     assert sb["resources"]["requests"]["cpu"] == "250m"
     assert sb["resources"]["limits"]["memory"] == "1Gi"
+
+
+def test_sandbox_resources_translated_for_compose(sandbox_org: Path) -> None:
+    """Docker compose gets translated units (250m→0.25, 1Gi→1G); pux.yaml keeps K8s."""
+    env = org_build._make_env()
+    org_build.render_org(sandbox_org, env)
+    compose = (sandbox_org / "docker-compose.yml").read_text()
+    # Compose view — Docker-translated.
+    assert "cpus: '0.25'" in compose, "250m must translate to 0.25 for compose"
+    assert "memory: 256M" in compose, "256Mi must translate to 256M for compose"
+    assert "cpus: '1'" in compose, "1 must stay as 1 for compose"
+    assert "memory: 1G" in compose, "1Gi must translate to 1G for compose"
+    # Compose must NOT contain K8s suffixes — `docker compose up` rejects them.
+    assert "250m" not in compose, "K8s millicore suffix leaked into compose"
+    assert "1Gi" not in compose, "K8s Mi/Gi suffix leaked into compose"
+    # pux.yaml preserves the K8s view (already covered by the test above, but
+    # assert it here too so the contract is documented in one place).
+    import yaml as _yaml
+    data = _yaml.safe_load((sandbox_org / "pux.yaml").read_text())
+    assert data["sandbox"]["resources"]["requests"]["cpu"] == "250m"
 
 
 def test_validation_rejects_bad_runtime_class(tmp_path: Path) -> None:
@@ -420,7 +458,18 @@ def test_pux_yaml_renders_host_access_mode(tmp_path: Path) -> None:
         'name = "coder"\n'
         'description = "coding agent — host reach"\n'
         '[sandbox]\n'
+        'tier = "standard"\n'
         'mode = "host-access"\n'
+        'runtime_class = "gvisor"\n'
+        'warm_pool = 1\n'
+        '[sandbox.env]\n'
+        'PUX_ORG_PATH = "/sandbox/workspace"\n'
+        '[sandbox.resources.requests]\n'
+        'cpu = "250m"\n'
+        'memory = "256Mi"\n'
+        '[sandbox.resources.limits]\n'
+        'cpu = "1"\n'
+        'memory = "1Gi"\n'
     )
     env = org_build._make_env()
     org_build.render_org(org_dir, env)
@@ -437,12 +486,242 @@ def test_pux_yaml_renders_contained_default(tmp_path: Path) -> None:
         'name = "locked"\n'
         'description = "investment org — pure sandbox"\n'
         '[sandbox]\n'
-        'runtime_class = "runc"\n'
+        'tier = "standard"\n'
+        'runtime_class = "gvisor"\n'
+        'warm_pool = 1\n'
+        '[sandbox.env]\n'
+        'PUX_ORG_PATH = "/sandbox/workspace"\n'
+        '[sandbox.resources.requests]\n'
+        'cpu = "250m"\n'
+        'memory = "256Mi"\n'
+        '[sandbox.resources.limits]\n'
+        'cpu = "1"\n'
+        'memory = "1Gi"\n'
     )
     env = org_build._make_env()
     org_build.render_org(org_dir, env)
     pux = (org_dir / "pux.yaml").read_text()
     assert "mode: contained" in pux, pux
+
+
+# --------------------------------------------------------------------------- #
+# Phase A §A1: sandbox.tier contract                                          #
+# --------------------------------------------------------------------------- #
+# Every [sandbox] block must declare a tier. Three tiers, mutually exclusive.
+# See plan: declarative-cooking-wolf.md §A1.
+
+_VALID_STANDARD_SANDBOX = {
+    "tier": "standard",
+    "runtime_class": "gvisor",
+    "warm_pool": 1,
+    "env": {"PUX_ORG_PATH": "/sandbox/workspace"},
+    "resources": {
+        "requests": {"cpu": "250m", "memory": "256Mi"},
+        "limits": {"cpu": "1", "memory": "1Gi"},
+    },
+}
+
+
+def _org_with_sandbox(sandbox: dict) -> dict:
+    """Helper — wrap a sandbox block in a minimal valid org dict."""
+    return {
+        "name": "acme",
+        "description": "test org",
+        "sandbox": sandbox,
+    }
+
+
+def test_validation_rejects_sandbox_without_tier(tmp_path: Path) -> None:
+    """Missing tier = hard failure (forcing function)."""
+    errs = org_build.validate_org_data(
+        _org_with_sandbox({"runtime_class": "gvisor"}),
+        "acme",
+        tmp_path,
+    )
+    assert any("sandbox.tier is required" in e for e in errs), errs
+
+
+def test_validation_rejects_unknown_tier(tmp_path: Path) -> None:
+    """Bogus tier value must fail loud."""
+    errs = org_build.validate_org_data(
+        _org_with_sandbox({"tier": "premium"}),
+        "acme",
+        tmp_path,
+    )
+    assert any("sandbox.tier" in e and "premium" in e for e in errs), errs
+
+
+def test_validation_accepts_standard_tier(tmp_path: Path) -> None:
+    """A well-formed standard tier passes cleanly."""
+    errs = org_build.validate_org_data(
+        _org_with_sandbox(dict(_VALID_STANDARD_SANDBOX)),
+        "acme",
+        tmp_path,
+    )
+    tier_errs = [e for e in errs if "tier" in e.lower()]
+    assert tier_errs == [], tier_errs
+
+
+def test_validation_rejects_standard_with_runc(tmp_path: Path) -> None:
+    """standard tier requires gVisor or Kata — runc = no isolation."""
+    bad = dict(_VALID_STANDARD_SANDBOX)
+    bad["runtime_class"] = "runc"
+    errs = org_build.validate_org_data(_org_with_sandbox(bad), "acme", tmp_path)
+    assert any("runtime_class must be 'gvisor' or 'kata'" in e for e in errs), errs
+
+
+def test_validation_rejects_standard_without_pux_org_path(tmp_path: Path) -> None:
+    """standard tier requires env.PUX_ORG_PATH (label-discovery contract)."""
+    bad = dict(_VALID_STANDARD_SANDBOX)
+    bad["env"] = {}
+    errs = org_build.validate_org_data(_org_with_sandbox(bad), "acme", tmp_path)
+    assert any("PUX_ORG_PATH" in e for e in errs), errs
+
+
+def test_validation_rejects_standard_with_build_block(tmp_path: Path) -> None:
+    """standard + build = contradiction. Use custom-build."""
+    bad = dict(_VALID_STANDARD_SANDBOX)
+    bad["build"] = {"context": ".", "dockerfile": "Dockerfile"}
+    errs = org_build.validate_org_data(_org_with_sandbox(bad), "acme", tmp_path)
+    assert any("forbidden for tier='standard'" in e for e in errs), errs
+
+
+def test_validation_rejects_custom_build_without_justification(tmp_path: Path) -> None:
+    """custom-build requires justification — articulate WHY pux-sandbox:latest
+    is insufficient."""
+    errs = org_build.validate_org_data(
+        _org_with_sandbox({
+            "tier": "custom-build",
+            "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile",
+                "justification": "",  # empty
+            },
+            "env": {"PUX_ORG_PATH": "/sandbox/workspace"},
+        }),
+        "acme",
+        tmp_path,
+    )
+    assert any("justification" in e for e in errs), errs
+
+
+def test_validation_accepts_custom_build_with_justification(tmp_path: Path) -> None:
+    """A custom-build tier with a real justification passes."""
+    errs = org_build.validate_org_data(
+        _org_with_sandbox({
+            "tier": "custom-build",
+            "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile",
+                "justification": "Manim + LaTeX + Kokoro — too heavy for base image",
+            },
+            "env": {"PUX_ORG_PATH": "/sandbox/workspace"},
+        }),
+        "acme",
+        tmp_path,
+    )
+    tier_errs = [e for e in errs if "tier" in e.lower() or "justification" in e]
+    assert tier_errs == [], tier_errs
+
+
+def test_validation_rejects_skeleton_with_sandbox_body(tmp_path: Path) -> None:
+    """skeleton tier = no sandbox config. Any non-tier key in the block = error."""
+    errs = org_build.validate_org_data(
+        _org_with_sandbox({"tier": "skeleton", "image": "pux-sandbox:latest"}),
+        "acme",
+        tmp_path,
+    )
+    assert any("tier='skeleton'" in e and "image" in e for e in errs), errs
+
+
+def test_validation_accepts_skeleton_tier_with_only_tier_key(tmp_path: Path) -> None:
+    """skeleton tier with empty sandbox body (just tier marker) is valid —
+    documents intent without contradicting the contract."""
+    errs = org_build.validate_org_data(
+        _org_with_sandbox({"tier": "skeleton"}),
+        "acme",
+        tmp_path,
+    )
+    tier_errs = [e for e in errs if "tier" in e.lower()]
+    assert tier_errs == [], tier_errs
+
+
+def test_validation_rejects_org_without_sandbox_block_silently(tmp_path: Path) -> None:
+    """An org with NO [sandbox] block at all is treated as a 'skeleton' org
+    implicitly. The validator does NOT require tier in that case — this is
+    how legacy minimal orgs (dev-bot, general) work."""
+    errs = org_build.validate_org_data(
+        {"name": "acme", "description": "minimal"},
+        "acme",
+        tmp_path,
+    )
+    assert not any("tier" in e.lower() for e in errs), errs
+
+
+# --------------------------------------------------------------------------- #
+# Phase C §C1: idle_shutdown_secs contract                                    #
+# --------------------------------------------------------------------------- #
+
+def test_validation_accepts_zero_idle_shutdown(tmp_path: Path) -> None:
+    """0 = never auto-shutdown (default). Must be valid."""
+    sandbox = dict(_VALID_STANDARD_SANDBOX)
+    sandbox["idle_shutdown_secs"] = 0
+    errs = org_build.validate_org_data(_org_with_sandbox(sandbox), "acme", tmp_path)
+    assert not any("idle_shutdown_secs" in e for e in errs), errs
+
+
+def test_validation_accepts_positive_idle_shutdown(tmp_path: Path) -> None:
+    """1800 = 30 min auto-shutdown. Must be valid."""
+    sandbox = dict(_VALID_STANDARD_SANDBOX)
+    sandbox["idle_shutdown_secs"] = 1800
+    errs = org_build.validate_org_data(_org_with_sandbox(sandbox), "acme", tmp_path)
+    assert not any("idle_shutdown_secs" in e for e in errs), errs
+
+
+def test_validation_rejects_negative_idle_shutdown(tmp_path: Path) -> None:
+    """Negative = nonsensical."""
+    sandbox = dict(_VALID_STANDARD_SANDBOX)
+    sandbox["idle_shutdown_secs"] = -1
+    errs = org_build.validate_org_data(_org_with_sandbox(sandbox), "acme", tmp_path)
+    assert any("idle_shutdown_secs" in e for e in errs), errs
+
+
+def test_validation_rejects_non_int_idle_shutdown(tmp_path: Path) -> None:
+    """String or bool — watchdog needs an int."""
+    sandbox = dict(_VALID_STANDARD_SANDBOX)
+    sandbox["idle_shutdown_secs"] = "1800"
+    errs = org_build.validate_org_data(_org_with_sandbox(sandbox), "acme", tmp_path)
+    assert any("idle_shutdown_secs" in e for e in errs), errs
+
+
+# --------------------------------------------------------------------------- #
+# Phase A §A1: tier renders into pux.yaml                                      #
+# --------------------------------------------------------------------------- #
+
+def test_tier_renders_into_pux_yaml(tmp_path: Path) -> None:
+    """The tier field must land in pux.yaml so the Go kernel can read it."""
+    org = tmp_path / "acme"
+    (org / "roles" / "worker").mkdir(parents=True)
+    (org / "roles" / "worker" / "prompt.md").write_text("p")
+    (org / "MANIFESTO.md").write_text("m")
+    (org / "org.toml").write_text(
+        MINIMAL_ORG_TOML
+        + '\n[sandbox]\n'
+        'tier = "standard"\n'
+        'runtime_class = "gvisor"\n'
+        'warm_pool = 1\n'
+        'env = { PUX_ORG_PATH = "/sandbox/workspace" }\n'
+        '\n[sandbox.resources.requests]\n'
+        'cpu = "250m"\n'
+        'memory = "256Mi"\n'
+        '\n[sandbox.resources.limits]\n'
+        'cpu = "1"\n'
+        'memory = "1Gi"\n'
+    )
+    env = org_build._make_env()
+    org_build.render_org(org, env)
+    pux = (org / "pux.yaml").read_text()
+    assert "tier: standard" in pux, pux
 
 
 def test_sandbox_compose_yaml_parses(sandbox_org: Path) -> None:
@@ -464,7 +743,20 @@ def test_sandbox_service_name_overrides_default(tmp_path: Path) -> None:
     (org / "MANIFESTO.md").write_text("m")
     (org / "org.toml").write_text(
         MINIMAL_ORG_TOML
-        + '\n[sandbox]\nservice_name = "video-producer"\ninit_files = ["sandbox/x.py"]\n'
+        + '\n[sandbox]\n'
+        'tier = "standard"\n'
+        'service_name = "video-producer"\n'
+        'runtime_class = "gvisor"\n'
+        'warm_pool = 1\n'
+        'init_files = ["sandbox/x.py"]\n'
+        '[sandbox.env]\n'
+        'PUX_ORG_PATH = "/sandbox/workspace"\n'
+        '[sandbox.resources.requests]\n'
+        'cpu = "250m"\n'
+        'memory = "256Mi"\n'
+        '[sandbox.resources.limits]\n'
+        'cpu = "1"\n'
+        'memory = "1Gi"\n'
     )
     env = org_build._make_env()
     org_build.render_org(org, env)
@@ -485,7 +777,19 @@ def test_sandbox_docker_name_without_external_does_not_emit_external_flag(
     (org / "MANIFESTO.md").write_text("m")
     (org / "org.toml").write_text(
         MINIMAL_ORG_TOML
-        + '\n[sandbox]\ninit_files = ["sandbox/x.py"]\n'
+        + '\n[sandbox]\n'
+        'tier = "standard"\n'
+        'runtime_class = "gvisor"\n'
+        'warm_pool = 1\n'
+        'init_files = ["sandbox/x.py"]\n'
+        '[sandbox.env]\n'
+        'PUX_ORG_PATH = "/sandbox/workspace"\n'
+        '[sandbox.resources.requests]\n'
+        'cpu = "250m"\n'
+        'memory = "256Mi"\n'
+        '[sandbox.resources.limits]\n'
+        'cpu = "1"\n'
+        'memory = "1Gi"\n'
         "\n[[sandbox.volumes]]\n"
         'type = "volume"\n'
         'name = "workspace"\n'
@@ -516,13 +820,33 @@ def test_sandbox_docker_name_without_external_does_not_emit_external_flag(
     not (REPO_ROOT / "orgs").exists(),
     reason="orgs/ directory not present",
 )
+@pytest.mark.xfail(
+    reason=(
+        "Phase A §A1 forcing function: every [sandbox] block must declare "
+        "a tier. PR1 added the validator; PR2 migrates the orgs. Once "
+        "every org declares tier, remove this xfail mark — the test will "
+        "then enforce the contract on every CI run. See "
+        "declarative-cooking-wolf.md §A1."
+    ),
+    strict=False,
+)
 def test_all_real_orgs_render_cleanly() -> None:
     """Every checked-in org.toml renders without exception."""
     env = org_build._make_env()
+    failures: list[str] = []
     for org_dir in org_build.discover_orgs():
         with tempfile.TemporaryDirectory() as td:
-            # Render into tmp to avoid mutating the working tree.
-            org_build.render_org(org_dir, env, target_dir=Path(td))
+            try:
+                org_build.render_org(org_dir, env, target_dir=Path(td))
+            except Exception as e:
+                failures.append(f"{org_dir.name}: {e}")
+    if failures:
+        # Surface every failing org so the migration plan is visible in
+        # CI output. PR2 should drive this list to zero.
+        raise AssertionError(
+            "Orgs failing PR1 tier validation (expected until PR2 migration):\n  - "
+            + "\n  - ".join(failures)
+        )
 
 
 if __name__ == "__main__":

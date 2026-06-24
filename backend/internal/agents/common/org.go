@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -272,6 +273,102 @@ const (
 	SandboxModeHostAccess  = "host-access"
 )
 
+// Sandbox tier constants. Every [sandbox] block must declare one of these.
+// Enforced by scripts/org_build.py validate_org_data (Python-side, pre-render)
+// and by TestOrgSandboxTierContract (Go-side, post-render against real orgs/).
+//
+// Tier rules (see plan: declarative-cooking-wolf.md §A1):
+//
+//   - SandboxTierStandard — stock pux-sandbox image + gVisor. Required fields:
+//     runtime_class=gvisor, warm_pool≥1, resources.{requests,limits},
+//     env.PUX_ORG_PATH. FORBIDS build block.
+//   - SandboxTierCustomBuild — custom Dockerfile. Required: build.justification,
+//     env.PUX_ORG_PATH. Used for orgs with system deps the stock image lacks.
+//   - SandboxTierSkeleton — no sandbox body at all. Config-only org (dev-bot,
+//     general). Implicit when [sandbox] is absent.
+const (
+	SandboxTierStandard    = "standard"
+	SandboxTierCustomBuild = "custom-build"
+	SandboxTierSkeleton    = "skeleton"
+)
+
+// validSandboxTiers is the canonical allowlist. Kept as a slice (not a map) so
+// error messages can list values in declaration order.
+var validSandboxTiers = []string{
+	SandboxTierStandard,
+	SandboxTierCustomBuild,
+	SandboxTierSkeleton,
+}
+
+// IsValidSandboxTier reports whether v is one of the declared tier constants.
+// Used by audit tests + callers that need to branch on tier.
+func IsValidSandboxTier(v string) bool {
+	return slices.Contains(validSandboxTiers, v)
+}
+
+// ValidSandboxTiers returns the canonical allowlist for error messages + tests.
+func ValidSandboxTiers() []string {
+	out := make([]string, len(validSandboxTiers))
+	copy(out, validSandboxTiers)
+	return out
+}
+
+// SandboxTier returns the sandbox.tier field from pux.yaml. Empty string when
+// the block is absent (interpreted as SandboxTierSkeleton by callers). The
+// Python validator hard-fails on missing tier; this reader is permissive so
+// legacy pux.yaml files still load for migration.
+func (o *OrgManifest) SandboxTier() string {
+	type sandboxBlock struct {
+		Tier string `yaml:"tier"`
+	}
+	type wrapper struct {
+		Sandbox *sandboxBlock `yaml:"sandbox"`
+	}
+	if o.baseDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(o.baseDir, "pux.yaml"))
+	if err != nil {
+		return ""
+	}
+	var w wrapper
+	if err := yaml.Unmarshal(data, &w); err != nil {
+		return ""
+	}
+	if w.Sandbox == nil {
+		return ""
+	}
+	return w.Sandbox.Tier
+}
+
+// SandboxIdleShutdownSecs returns the sandbox.idle_shutdown_secs field from
+// pux.yaml. 0 = no auto-shutdown (preserves current daemon-model behavior).
+// Positive value = watchdog tears the container down after N seconds of idle.
+// See plan: declarative-cooking-wolf.md §C1.
+func (o *OrgManifest) SandboxIdleShutdownSecs() int {
+	type sandboxBlock struct {
+		IdleShutdownSecs int `yaml:"idle_shutdown_secs"`
+	}
+	type wrapper struct {
+		Sandbox *sandboxBlock `yaml:"sandbox"`
+	}
+	if o.baseDir == "" {
+		return 0
+	}
+	data, err := os.ReadFile(filepath.Join(o.baseDir, "pux.yaml"))
+	if err != nil {
+		return 0
+	}
+	var w wrapper
+	if err := yaml.Unmarshal(data, &w); err != nil {
+		return 0
+	}
+	if w.Sandbox == nil {
+		return 0
+	}
+	return w.Sandbox.IdleShutdownSecs
+}
+
 // SandboxInitFiles returns the init_files list from the manifest's sandbox block,
 // if any. Loaded lazily so Validate() doesn't require the sandbox block to be
 // present.
@@ -335,6 +432,111 @@ func (o *OrgManifest) SandboxMode() string {
 // boolean (e.g. pux_prompt.go deciding whether to flip OrgSandboxed).
 func (o *OrgManifest) HostAccessEnabled() bool {
 	return o.SandboxMode() == SandboxModeHostAccess
+}
+
+// SandboxImage returns the sandbox.image field from pux.yaml, if any. When
+// non-empty, the sandbox manager uses this image instead of the default
+// (OPENSHELL_IMAGE env or pux-sandbox:latest). This is how orgs like
+// video-production get their specialized sandbox image (with manim, kokoro,
+// etc.) actually used by the agent — without this, the org's [sandbox] block
+// is decorative.
+//
+// Empty return = no override; use the default image.
+func (o *OrgManifest) SandboxImage() string {
+	type sandboxBlock struct {
+		Image string `yaml:"image"`
+	}
+	type wrapper struct {
+		Sandbox *sandboxBlock `yaml:"sandbox"`
+	}
+	if o.baseDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(o.baseDir, "pux.yaml"))
+	if err != nil {
+		return ""
+	}
+	var w wrapper
+	if err := yaml.Unmarshal(data, &w); err != nil {
+		return ""
+	}
+	if w.Sandbox == nil {
+		return ""
+	}
+	return w.Sandbox.Image
+}
+
+// SandboxEnv returns the sandbox.env map from pux.yaml, if any. These are
+// propagated to the sandbox container at creation time so org-declared env
+// vars (e.g. VIDEO_PRODUCTION_ROOT) actually reach the agent. Returns nil
+// when the block is absent.
+func (o *OrgManifest) SandboxEnv() map[string]string {
+	type sandboxBlock struct {
+		Env map[string]string `yaml:"env"`
+	}
+	type wrapper struct {
+		Sandbox *sandboxBlock `yaml:"sandbox"`
+	}
+	if o.baseDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(o.baseDir, "pux.yaml"))
+	if err != nil {
+		return nil
+	}
+	var w wrapper
+	if err := yaml.Unmarshal(data, &w); err != nil {
+		return nil
+	}
+	if w.Sandbox == nil {
+		return nil
+	}
+	return w.Sandbox.Env
+}
+
+// SandboxVolume mirrors one row of pux.yaml's sandbox.volumes: block. Kept
+// here (not in sandbox/types.go) because this is the parsed-manifest shape —
+// the runtime sandbox.SandboxVolume is a sibling that knows how to render
+// to Docker bind syntax. The two intentionally decouple so a malformed
+// manifest entry doesn't pull the runtime package into common.
+type SandboxVolume struct {
+	Type       string `yaml:"type"`
+	Name       string `yaml:"name"`
+	DockerName string `yaml:"docker_name"`
+	Host       string `yaml:"host"`
+	Container  string `yaml:"container"`
+}
+
+// SandboxVolumes returns the sandbox.volumes list from pux.yaml, if any.
+// Each row is propagated to the sandbox manager at creation time so
+// org-declared volumes (e.g. video-production's named workspace volume)
+// actually mount inside the agent container. Returns nil when absent.
+//
+// The caller (pux_prompt.go) converts each entry to a sandbox.SandboxVolume
+// before passing it into SandboxOptions. That conversion is the only place
+// the manifest-shape and runtime-shape couple.
+func (o *OrgManifest) SandboxVolumes() []SandboxVolume {
+	type sandboxBlock struct {
+		Volumes []SandboxVolume `yaml:"volumes"`
+	}
+	type wrapper struct {
+		Sandbox *sandboxBlock `yaml:"sandbox"`
+	}
+	if o.baseDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(o.baseDir, "pux.yaml"))
+	if err != nil {
+		return nil
+	}
+	var w wrapper
+	if err := yaml.Unmarshal(data, &w); err != nil {
+		return nil
+	}
+	if w.Sandbox == nil {
+		return nil
+	}
+	return w.Sandbox.Volumes
 }
 
 func (o *OrgManifest) resolvePath(p string) string {

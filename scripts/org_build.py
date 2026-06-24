@@ -49,9 +49,173 @@ RUNTIME_CLASS_MAP: dict[str, str | None] = {
 }
 
 
+def _docker_cpu(k8s_cpu: str | int | float) -> str:
+    """Translate K8s CPU request/limit → Docker compose ``cpus`` value.
+
+    K8s accepts ``500m`` (millicores), ``2`` (cores), ``0.5`` (decimal).
+    Docker compose wants a decimal number as a string: ``'0.5'``, ``'2'``.
+    """
+    s = str(k8s_cpu).strip()
+    if not s:
+        return ""
+    if s.endswith("m") and s[:-1].isdigit():
+        # millicores → decimal cores
+        return f"{int(s[:-1]) / 1000:g}"
+    # Already a number (cores). Pass through, normalized.
+    try:
+        return f"{float(s):g}"
+    except ValueError:
+        # Unknown shape — emit as-is and let Docker complain.
+        return s
+
+
+def _docker_mem(k8s_mem: str | int) -> str:
+    """Translate K8s memory request/limit → Docker compose ``memory`` value.
+
+    K8s accepts ``512Mi``, ``2Gi``, ``1G`` (binary + decimal SI suffixes).
+    Docker compose accepts ``512M``, ``2G`` (decimal SI only — no ``Mi``/``Gi``).
+    Bare numbers are interpreted as bytes by both.
+    """
+    s = str(k8s_mem).strip()
+    if not s:
+        return ""
+    suffix_map = {"Ki": "K", "Mi": "M", "Gi": "G", "Ti": "T"}
+    for k8s_suf, docker_suf in suffix_map.items():
+        if s.endswith(k8s_suf):
+            return s[: -len(k8s_suf)] + docker_suf
+    return s
+
+
 # --------------------------------------------------------------------------- #
 # Schema validation                                                           #
 # --------------------------------------------------------------------------- #
+
+# sandbox.tier — three explicit contracts. See declarative-cooking-wolf.md §A1.
+#
+# standard     — stock pux-sandbox:latest image, full kernel isolation
+#                (gVisor, warm_pool, resources, PUX_ORG_PATH env).
+#
+# custom-build — org ships its own Dockerfile. Requires a `justification`
+#                string forcing the author to articulate why. Used by orgs
+#                with heavy system deps (Manim, LaTeX, etc).
+#
+# skeleton     — config-only org, no sandbox container. The [sandbox] block
+#                must be EMPTY when tier = skeleton; if it isn't, the org
+#                has contradicted itself and we fail loud.
+SANDBOX_TIERS: tuple[str, ...] = ("standard", "custom-build", "skeleton")
+
+
+def _validate_sandbox_tier_fields(
+    tier: str, sandbox: dict[str, Any]
+) -> list[str]:
+    """Per-tier required-field checks. Called only when tier value is valid.
+
+    The point isn't to constrain what orgs can declare — it's to make the
+    implicit contract explicit so that drift becomes visible at validate
+    time instead of at runtime.
+    """
+    errs: list[str] = []
+
+    if tier == "standard":
+        # Standard tier requires the kernel isolation primitives. Missing
+        # any of these means the org silently falls back to Docker defaults,
+        # which is the drift we're trying to surface.
+        if sandbox.get("runtime_class") not in ("gvisor", "kata"):
+            errs.append(
+                "org.toml: sandbox.runtime_class must be 'gvisor' or 'kata' "
+                "for tier='standard' (runc = Docker default, no isolation)"
+            )
+        wp = sandbox.get("warm_pool")
+        if not isinstance(wp, int) or isinstance(wp, bool) or wp < 1:
+            errs.append(
+                "org.toml: sandbox.warm_pool must be a positive integer "
+                "for tier='standard'"
+            )
+        env = sandbox.get("env") or {}
+        if not isinstance(env, dict) or "PUX_ORG_PATH" not in env:
+            errs.append(
+                "org.toml: sandbox.env.PUX_ORG_PATH is required for "
+                "tier='standard' (kernel uses this to label-discover the "
+                "container at sandbox creation time)"
+            )
+        # resources block is required — both requests + limits.
+        res = sandbox.get("resources") or {}
+        if not isinstance(res, dict):
+            errs.append(
+                "org.toml: sandbox.resources is required for tier='standard'"
+            )
+        else:
+            for sub in ("requests", "limits"):
+                block = res.get(sub) or {}
+                if not isinstance(block, dict) or not block:
+                    errs.append(
+                        f"org.toml: sandbox.resources.{sub} is required for "
+                        f"tier='standard' (cpu + memory)"
+                    )
+        # Standard tier must NOT declare a build block — that's the
+        # custom-build tier's job. If both are present, the org has
+        # contradicted itself.
+        if sandbox.get("build"):
+            errs.append(
+                "org.toml: sandbox.build is forbidden for tier='standard' "
+                "(use tier='custom-build' if a Dockerfile is needed)"
+            )
+
+    elif tier == "custom-build":
+        build = sandbox.get("build")
+        if not isinstance(build, dict):
+            errs.append(
+                "org.toml: sandbox.build is required for tier='custom-build' "
+                "(must be a table with context + dockerfile + justification)"
+            )
+        else:
+            if not build.get("context"):
+                errs.append(
+                    "org.toml: sandbox.build.context is required for "
+                    "tier='custom-build'"
+                )
+            if not build.get("dockerfile"):
+                errs.append(
+                    "org.toml: sandbox.build.dockerfile is required for "
+                    "tier='custom-build'"
+                )
+            # justification is the forcing function: articulate WHY this
+            # org needs a custom build. Empty string = reject.
+            justification = build.get("justification", "").strip()
+            if not justification:
+                errs.append(
+                    "org.toml: sandbox.build.justification is required for "
+                    "tier='custom-build' — explain why pux-sandbox:latest "
+                    "is insufficient (system deps, vendored binaries, etc)."
+                )
+        # Custom-build still needs env.PUX_ORG_PATH — label discovery is
+        # the adoption mechanism regardless of image source.
+        env = sandbox.get("env") or {}
+        if not isinstance(env, dict) or "PUX_ORG_PATH" not in env:
+            errs.append(
+                "org.toml: sandbox.env.PUX_ORG_PATH is required for "
+                "tier='custom-build' (same label-discovery contract as "
+                "tier='standard')"
+            )
+
+    elif tier == "skeleton":
+        # Skeleton tier = no sandbox. The [sandbox] block is allowed to
+        # declare tier='skeleton' (so the org can document intent) but
+        # MUST NOT declare any sandbox configuration fields. Any non-tier
+        # key in the block means the org has contradicted itself.
+        forbidden_keys = sorted(
+            k for k in sandbox.keys() if k not in ("tier",)
+        )
+        if forbidden_keys:
+            errs.append(
+                f"org.toml: sandbox block must be empty for "
+                f"tier='skeleton' (found: {forbidden_keys}). Skeleton "
+                f"orgs don't have a sandbox — declare tier='standard' or "
+                f"tier='custom-build' if you need one."
+            )
+
+    return errs
+
 
 def validate_org_data(data: dict[str, Any], org_name: str, org_dir: Path) -> list[str]:
     """Return a list of human-readable error strings. Empty list = valid."""
@@ -101,6 +265,38 @@ def validate_org_data(data: dict[str, Any], org_name: str, org_dir: Path) -> lis
     # boots the sandbox.
     sandbox = data.get("sandbox")
     if isinstance(sandbox, dict):
+        # sandbox.tier — explicit declaration of which sandbox contract the
+        # org runs under. Three values, mutually exclusive. Missing tier is
+        # a hard failure (forcing function: every org declares its tier).
+        # See plan: declarative-cooking-wolf.md §A1.
+        valid_tiers = {"standard", "custom-build", "skeleton"}
+        tier = sandbox.get("tier")
+        if not tier:
+            errs.append(
+                "org.toml: sandbox.tier is required (one of "
+                f"{sorted(valid_tiers)}). See declarative-cooking-wolf.md §A1."
+            )
+        elif tier not in valid_tiers:
+            errs.append(
+                f"org.toml: sandbox.tier={tier!r} must be one of "
+                f"{sorted(valid_tiers)}"
+            )
+        else:
+            # Tier-specific required-field checks. Run only when tier is
+            # known — otherwise we'd cascade confusing errors.
+            tier_errs = _validate_sandbox_tier_fields(tier, sandbox)
+            errs.extend(tier_errs)
+
+        # sandbox.idle_shutdown_secs — Phase C container lifecycle. 0 = off.
+        # Negative values are nonsensical; non-ints break the watchdog.
+        idle = sandbox.get("idle_shutdown_secs", 0)
+        if not isinstance(idle, int) or isinstance(idle, bool) or idle < 0:
+            errs.append(
+                f"org.toml: sandbox.idle_shutdown_secs={idle!r} must be a "
+                f"non-negative integer (0 = never auto-shutdown). See "
+                f"declarative-cooking-wolf.md §C1."
+            )
+
         rc = sandbox.get("runtime_class", "runc")
         if rc not in RUNTIME_CLASS_MAP:
             errs.append(
@@ -251,11 +447,24 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     sandbox.setdefault("network_mode_disabled", False)
     sandbox.setdefault("service_name", "")
     sandbox.setdefault("image", "")
+    # Phase C container lifecycle — 0 means no idle auto-shutdown. Preserved
+    # in pux.yaml so the kernel's watchdog can read it.
+    sandbox.setdefault("idle_shutdown_secs", 0)
+    # Phase A: tier field is required by validate_org_data() when [sandbox]
+    # is present. Default to empty here so StrictUndefined doesn't trip on
+    # templates that probe `sandbox.tier` — validator catches missing tier.
+    sandbox.setdefault("tier", "")
     # For orgs without a build context and without an explicit image, default
-    # to the stock kernel sandbox image. Orgs with a Dockerfile don't need
-    # a stock image pushed at them — `docker compose build` tags the result.
+    # to the stock kernel sandbox image. Orgs with a Dockerfile get their
+    # composed image tag derived from project+service (matches what
+    # `docker compose build` produces) so Pux's sandbox manager can launch
+    # the org's specialized container directly.
     if not sandbox.get("build") and not sandbox.get("image"):
         sandbox["image"] = "pux-sandbox:latest"
+    elif sandbox.get("build") and not sandbox.get("image"):
+        org_name = data.get("name") or "org"
+        service = sandbox.get("service_name") or "sandbox"
+        sandbox["image"] = f"{org_name}-{service}:latest"
     # Pre-fill optional sub-keys on volumes/networks so StrictUndefined
     # doesn't trip when the template probes docker_name / external.
     sandbox["volumes"] = [
@@ -286,12 +495,25 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
         sandbox["healthcheck"] = {}
     # Pre-fill requests/limits so StrictUndefined doesn't trip in pux.yaml.j2.
     # Both default to {} so the `{% if requests or limits %}` guard is falsy.
+    # `sandbox["resources"]` preserves the K8s-style source values (`250m`,
+    # `1Gi`) — pux.yaml is the CRD view. The Docker-translated view lives in
+    # `sandbox["resources_docker"]` (`0.25`, `1G`) and is what compose reads.
     resources = sandbox["resources"]
-    if isinstance(resources, dict):
-        resources.setdefault("requests", {})
-        resources.setdefault("limits", {})
-    else:
+    if not isinstance(resources, dict):
         sandbox["resources"] = {"requests": {}, "limits": {}}
+    sandbox["resources"].setdefault("requests", {})
+    sandbox["resources"].setdefault("limits", {})
+    resources_docker = {"requests": {}, "limits": {}}
+    for tier in ("requests", "limits"):
+        tier_cfg = sandbox["resources"].get(tier) or {}
+        for key, raw_val in tier_cfg.items():
+            if key == "cpu":
+                resources_docker[tier][key] = _docker_cpu(raw_val)
+            elif key == "memory":
+                resources_docker[tier][key] = _docker_mem(raw_val)
+            else:
+                resources_docker[tier][key] = raw_val
+    sandbox["resources_docker"] = resources_docker
     # Translate K8s runtime_class name to Docker --runtime value. Invalid
     # values fall through to None (no `runtime:` line) and the schema check
     # in validate_org_data flags them.

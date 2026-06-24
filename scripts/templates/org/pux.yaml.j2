@@ -41,18 +41,26 @@ databases:
 {% for k, v in cfg.items() if v is not none %}    {{ k }}: {{ v if v is string else v | tojson }}
 {% endfor %}{% endfor %}
 {% endif %}
-{% if sandbox.init_files or sandbox.pip_packages or sandbox.env or sandbox.runtime_class or sandbox.mode %}
+{% if sandbox.init_files or sandbox.pip_packages or sandbox.env or sandbox.runtime_class or sandbox.mode or sandbox.image or sandbox.volumes or sandbox.tier %}
 sandbox:
-{% if sandbox.image %}  image: {{ sandbox.image }}
+{% if sandbox.tier %}  tier: {{ sandbox.tier }}
+{% endif %}{% if sandbox.image %}  image: {{ sandbox.image }}
 {% endif %}{% if sandbox.runtime_class %}  runtime_class: {{ sandbox.runtime_class }}
 {% endif %}{% if sandbox.warm_pool %}  warm_pool: {{ sandbox.warm_pool }}
 {% endif %}{% if sandbox.mode %}  mode: {{ sandbox.mode }}
+{% endif %}{% if sandbox.idle_shutdown_secs is defined and sandbox.idle_shutdown_secs %}  idle_shutdown_secs: {{ sandbox.idle_shutdown_secs }}
 {% endif %}{% if sandbox.init_files %}  init_files:
 {% for f in sandbox.init_files %}    - "{{ f }}"
 {% endfor %}{% endif %}{% if sandbox.pip_packages %}  pip_packages:
 {% for p in sandbox.pip_packages %}    - {{ p }}
 {% endfor %}{% endif %}{% if sandbox.env %}  env:
 {% for k, v in sandbox.env.items() %}    {{ k }}: "{{ v }}"
+{% endfor %}{% endif %}{% if sandbox.volumes %}  volumes:
+{% for v in sandbox.volumes %}    - type: {{ v.type }}
+{% if v.type == "bind" %}      host: {{ v.host }}
+{% else %}      name: {{ v.name }}
+{% if v.docker_name %}      docker_name: {{ v.docker_name }}
+{% endif %}{% endif %}      container: {{ v.container }}
 {% endfor %}{% endif %}{% if sandbox.resources.requests or sandbox.resources.limits %}
   resources:
 {% if sandbox.resources.requests %}    requests:
