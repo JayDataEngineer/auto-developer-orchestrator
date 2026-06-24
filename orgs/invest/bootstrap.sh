@@ -5,6 +5,7 @@
 #   bash orgs/invest/bootstrap.sh                              # default target
 #   bash orgs/invest/bootstrap.sh /path/to/project             # custom target
 #   bash orgs/invest/bootstrap.sh /path/to/project --no-venv   # skip venv setup
+#   bash orgs/invest/bootstrap.sh --down                       # tear down compose container
 #
 # What it does:
 #   1. Creates target dir structure if missing
@@ -19,6 +20,17 @@
 set -euo pipefail
 
 # ── Args ──────────────────────────────────────────────────────────────────
+# --down short-circuits everything: tears down compose container (if any)
+# and exits. Named volumes preserved.
+if [[ "${1:-}" == "--down" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  cd "$SCRIPT_DIR"
+  echo "[bootstrap] tearing down (docker compose down)"
+  docker compose down
+  echo "[bootstrap] ✓ containers stopped"
+  exit 0
+fi
+
 TARGET_DIR="${1:-${INVEST_TARGET_DIR:-$HOME/Documents/programs/dev/invest}}"
 SKIP_VENV="${2:-}"
 

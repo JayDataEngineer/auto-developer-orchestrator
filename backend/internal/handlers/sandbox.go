@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/agents/common"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 	"github.com/go-chi/chi/v5"
@@ -44,6 +45,11 @@ type CreateSandboxRequest struct {
 	ProjectPath string `json:"project_path"`
 	Policy      string `json:"policy"`
 	InitialMode string `json:"initial_mode"` // "cli", "browser", "desktop" — default: "browser"
+	// Org, when set, triggers org-mode propagation: the handler loads the
+	// org manifest and threads sandbox.image / sandbox.env / sandbox.volumes
+	// into SandboxOptions. Mirrors what pux_prompt.go does for prompt-driven
+	// sandbox creation. Empty = no propagation (legacy behavior).
+	Org string `json:"org"`
 }
 
 // CreateSandbox creates a new sandbox
@@ -60,12 +66,51 @@ func (h *SandboxHandler) CreateSandbox(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sb, err := h.manager.CreateSandbox(r.Context(), sandbox.SandboxOptions{
+	opts := sandbox.SandboxOptions{
 		ID:          req.ID,
 		ProjectPath: req.ProjectPath,
 		Policy:      req.Policy,
 		InitialMode: sandbox.SandboxMode(req.InitialMode),
-	})
+	}
+
+	// Org-mode propagation: when the caller passes an org name (CLI global
+	// --org flag, or any other client), load the manifest and thread image,
+	// env, and volumes through. This mirrors the prompt-driven path in
+	// pux_prompt.go so both sandbox-creation entry points honor org config.
+	// Without this, `orch sandbox create --org X` would launch a generic
+	// pux-sandbox container even when X declares a specialized image.
+	orgPath := req.Org
+	if orgPath == "" {
+		orgPath = req.ProjectPath
+	}
+	if orgPath != "" {
+		if org := common.LoadOrgManifest(orgPath); org != nil {
+			if img := org.SandboxImage(); img != "" {
+				opts.Image = img
+			}
+			if envMap := org.SandboxEnv(); len(envMap) > 0 {
+				for k, v := range envMap {
+					opts.Env = append(opts.Env, k+"="+v)
+				}
+			}
+			if vols := org.SandboxVolumes(); len(vols) > 0 {
+				for _, v := range vols {
+					opts.Volumes = append(opts.Volumes, sandbox.SandboxVolume{
+						Type:       v.Type,
+						Name:       v.Name,
+						DockerName: v.DockerName,
+						Host:       v.Host,
+						Container:  v.Container,
+					})
+				}
+			}
+			if idle := org.SandboxIdleShutdownSecs(); idle > 0 {
+				opts.IdleShutdownSecs = idle
+			}
+		}
+	}
+
+	sb, err := h.manager.CreateSandbox(r.Context(), opts)
 	if err != nil {
 		// Validation errors (bad input) → 400 so callers can distinguish
 		// from genuine internal failures (500).

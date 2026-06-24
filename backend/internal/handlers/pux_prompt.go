@@ -89,12 +89,57 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			if sshInfo != nil {
 				sbProjectPath = ""
 			}
-			// No sandbox for this project — auto-create one
-			sb, err := h.sandboxMgr.CreateSandbox(r.Context(), sandbox.SandboxOptions{
+			// Org-mode sandbox image + env override. When the active org
+			// declares sandbox.image (e.g. video-production's manim image),
+			// pass it through so the agent runs inside the specialized
+			// container instead of generic pux-sandbox:latest. Same for
+			// sandbox.env (e.g. VIDEO_PRODUCTION_ROOT).
+			sbOpts := sandbox.SandboxOptions{
 				ID:          sandboxID,
 				ProjectPath: sbProjectPath,
 				InitialMode: sandbox.ModeBrowser,
-			})
+			}
+			orgPathForSandbox := req.Org
+			if orgPathForSandbox == "" {
+				orgPathForSandbox = projectPath
+			}
+			if org := common.LoadOrgManifest(orgPathForSandbox); org != nil {
+				if img := org.SandboxImage(); img != "" {
+					sbOpts.Image = img
+					h.log.Info("Org sandbox image override",
+						zap.String("org", orgPathForSandbox),
+						zap.String("image", img))
+				}
+				if envMap := org.SandboxEnv(); len(envMap) > 0 {
+					for k, v := range envMap {
+						sbOpts.Env = append(sbOpts.Env, k+"="+v)
+					}
+					h.log.Info("Org sandbox env propagation",
+						zap.String("org", orgPathForSandbox),
+						zap.Int("vars", len(envMap)))
+				}
+				if vols := org.SandboxVolumes(); len(vols) > 0 {
+					for _, v := range vols {
+						sbOpts.Volumes = append(sbOpts.Volumes, sandbox.SandboxVolume{
+							Type:       v.Type,
+							Name:       v.Name,
+							DockerName: v.DockerName,
+							Host:       v.Host,
+							Container:  v.Container,
+						})
+					}
+					h.log.Info("Org sandbox volumes propagation",
+						zap.String("org", orgPathForSandbox),
+						zap.Int("volumes", len(vols)))
+				}
+				if idle := org.SandboxIdleShutdownSecs(); idle > 0 {
+					sbOpts.IdleShutdownSecs = idle
+					h.log.Info("Org sandbox idle-shutdown enabled",
+						zap.String("org", orgPathForSandbox),
+						zap.Int("idle_shutdown_secs", idle))
+				}
+			}
+			sb, err := h.sandboxMgr.CreateSandbox(r.Context(), sbOpts)
 			if err != nil {
 				// Docker unavailable — continue in host-only mode.
 				// CTO tools use HostBash/HostFileOps (host filesystem).
@@ -305,6 +350,14 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	// Wire mouse coordinate resolver for visual cursor overlay
 	if h.cuBridge != nil && sandboxID != "" {
 		cfg.MouseCoordinateResolver = newMouseResolver(h.cuBridge.CU, sandboxID)
+	}
+
+	// Wire shutdown_container CTO tool. Only when sandbox manager is present
+	// — host-only mode (no Docker) has nothing to shut down. The tool is
+	// terminal: after the agent calls it, the container is gone and the
+	// next prompt re-creates from scratch. See plan §C3.
+	if h.sandboxMgr != nil {
+		cfg.SandboxShutdown = h.sandboxMgr
 	}
 
 	// Detect org mode — explicit org path takes priority, then check project dir

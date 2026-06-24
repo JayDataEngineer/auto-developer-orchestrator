@@ -45,6 +45,79 @@ type SandboxOptions struct {
 	InitialMode SandboxMode
 	// Tier controls sandbox isolation: "isolated" (default), "bridged", "native"
 	Tier SandboxTier
+	// Image overrides the default sandbox image (OPENSHELL_IMAGE env or
+	// pux-sandbox:latest). When non-empty, the manager pulls if missing and
+	// uses this image for the container. Used by org mode to honor the
+	// org's declared specialized sandbox image (e.g. video-production's
+	// manim+kokoro image). Empty = use default.
+	Image string
+	// Env appends additional environment variables to the sandbox container
+	// (format: "KEY=VALUE"). Used by org mode to propagate the org's declared
+	// sandbox env (e.g. VIDEO_PRODUCTION_ROOT). Empty = no extras.
+	Env []string
+	// Volumes appends additional Docker bind mounts to the sandbox container.
+	// Used by org mode to honor org-declared volumes (e.g. video-production's
+	// named workspace volume). Empty = only the default project/policies/tmp/persist
+	// binds apply.
+	Volumes []SandboxVolume
+	// IdleShutdownSecs controls the watchdog's idle-teardown threshold for
+	// this sandbox. 0 = never auto-shutdown (preserves pre-PR4 behavior).
+	// Non-zero = if no tool execution touches the sandbox for this many
+	// seconds, the watchdog calls ShutdownByProjectLabel.
+	//
+	// Plumbed in from org.toml [sandbox].idle_shutdown_secs at sandbox
+	// creation. Default 0 (off).
+	IdleShutdownSecs int
+}
+
+// SandboxVolume mirrors one row of pux.yaml's sandbox.volumes: block. The
+// org.toml schema validator (scripts/org_build.py) already enforces that
+// type=volume has name and type=bind has host; both require container.
+type SandboxVolume struct {
+	// Type is "volume" (Docker named volume) or "bind" (host path mount).
+	Type string `yaml:"type" json:"type"`
+	// Name is the local logical name for a named volume. Used as the bind
+	// source when DockerName is empty.
+	Name string `yaml:"name" json:"name,omitempty"`
+	// DockerName is the actual Docker volume name (may differ from Name when
+	// the org wants a stable external name like research_video_prod_workspace).
+	// Empty = use Name as the Docker volume name.
+	DockerName string `yaml:"docker_name" json:"docker_name,omitempty"`
+	// Host is the host-side path for type=bind. Ignored for type=volume.
+	Host string `yaml:"host" json:"host,omitempty"`
+	// Container is the in-container mount point. Always required.
+	Container string `yaml:"container" json:"container"`
+}
+
+// BindString renders the volume in Docker --mount/-v bind syntax:
+//
+//	type=volume → "<dockerName-or-name>:<container>"
+//	type=bind   → "<host>:<container>"
+//
+// Returns empty string when the entry is incomplete (missing container or
+// the type-specific source) so callers can skip without building broken binds.
+func (v SandboxVolume) BindString() string {
+	if v.Container == "" {
+		return ""
+	}
+	switch v.Type {
+	case "bind":
+		if v.Host == "" {
+			return ""
+		}
+		return v.Host + ":" + v.Container
+	case "", "volume":
+		src := v.DockerName
+		if src == "" {
+			src = v.Name
+		}
+		if src == "" {
+			return ""
+		}
+		return src + ":" + v.Container
+	default:
+		return ""
+	}
 }
 
 // Sandbox represents an OpenShell sandbox instance
@@ -59,6 +132,14 @@ type Sandbox struct {
 	DesktopSession *DesktopSession `json:"desktop_session,omitempty"`
 	Tier           SandboxTier     `json:"tier,omitempty"`
 	VNCBackend     VNCBackend      `json:"vnc_backend,omitempty"`
+	// LastActivityAt is updated on every tool execution that touches this
+	// sandbox (ExecInSandbox, CopyToSandbox, PipInstall, WriteEnvFile).
+	// The watchdog goroutine reads it to decide idle-teardown.
+	// Zero value = treat as CreatedAt (sandbox just booted, not idle yet).
+	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
+	// IdleShutdownSecs mirrors SandboxOptions.IdleShutdownSecs. 0 = off.
+	// Set once at CreateSandbox and unchanged for the sandbox's lifetime.
+	IdleShutdownSecs int `json:"idle_shutdown_secs,omitempty"`
 }
 
 // SandboxStatus is the current state of a sandbox

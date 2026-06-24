@@ -366,14 +366,16 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	m.restorePersistedState(restoreCtx, containerName)
 
 	sandbox := &Sandbox{
-		ID:          opts.ID,
-		ContainerID: createResp.ID,
-		ProjectPath: projectPath,
-		Policy:      policy,
-		Mode:        ModeCLI,
-		Status:      StatusRunning,
-		CreatedAt:   time.Now(),
-		Tier:        opts.Tier,
+		ID:               opts.ID,
+		ContainerID:      createResp.ID,
+		ProjectPath:      projectPath,
+		Policy:           policy,
+		Mode:             ModeCLI,
+		Status:           StatusRunning,
+		CreatedAt:        time.Now(),
+		Tier:             opts.Tier,
+		LastActivityAt:   time.Now(),
+		IdleShutdownSecs: opts.IdleShutdownSecs,
 	}
 
 	m.sandboxes[opts.ID] = sandbox
@@ -568,7 +570,23 @@ func (m *Manager) ExecInSandbox(ctx context.Context, id string, cmd []string) (s
 		return "", fmt.Errorf("exec failed in sandbox %s: %w", id, err)
 	}
 
+	m.touchLastActivity(id)
 	return output, nil
+}
+
+// touchLastActivity bumps the sandbox's LastActivityAt timestamp to now.
+// Called after every successful tool execution so the idle-shutdown
+// watchdog sees fresh activity. No-op if the sandbox isn't tracked.
+//
+// The write happens under the write lock; the read in ExecInSandbox was
+// under RLock, so we re-acquire briefly here. Cost is negligible — this
+// runs once per tool call, not per request.
+func (m *Manager) touchLastActivity(id string) {
+	m.mu.Lock()
+	if sb, ok := m.sandboxes[id]; ok {
+		sb.LastActivityAt = time.Now()
+	}
+	m.mu.Unlock()
 }
 
 // ExecInSandboxRaw executes a command inside a sandbox and returns output + exit code.
@@ -618,6 +636,7 @@ func (m *Manager) ExecInSandboxRaw(ctx context.Context, id string, cmd []string)
 		return buf.String(), -1, nil
 	}
 
+	m.touchLastActivity(id)
 	return buf.String(), inspect.ExitCode, nil
 }
 
@@ -898,6 +917,91 @@ func (m *Manager) discoverByProjectLabel(projectPath string) *Sandbox {
 		return sb
 	}
 	return nil
+}
+
+// ShutdownByProjectLabel tears down every container carrying
+// openshell.project-path=<projectPath>. Returns the list of removed
+// container IDs (short hashes — useful for SSE payloads + audit logs).
+//
+// Two call sites:
+//   - shutdown_container CTO tool (agent explicitly ends a task)
+//   - watchdog goroutine (idle_shutdown_secs elapsed with no tool calls)
+//
+// The label query is the same one discoverByProjectLabel uses, so this
+// catches BOTH Pux-created containers AND externally-created compose
+// containers — as long as bootstrap.sh exported OPENSHELL_PROJECT_PATH
+// (the bootstrap template enforces this; the org audit test rejects
+// orgs whose bootstrap forgets it).
+//
+// Containers without the label (e.g. sibling containers from other
+// projects on the same host) are NEVER touched. The label is the
+// authorization boundary.
+//
+// Force=true on ContainerRemove so a hung container doesn't block the
+// teardown — we're committed to bringing it down. Stop timeout is 10s,
+// matching DestroySandbox's grace period.
+func (m *Manager) ShutdownByProjectLabel(ctx context.Context, projectPath string) ([]string, error) {
+	if projectPath == "" {
+		return nil, fmt.Errorf("projectPath is required")
+	}
+	if m.dockerClient == nil {
+		return nil, fmt.Errorf("docker client not initialized")
+	}
+
+	result, err := m.dockerClient.ContainerList(ctx, client.ContainerListOptions{
+		Filters: client.Filters{
+			"label": {"openshell.project-path=" + projectPath: true},
+		},
+		All: true, // include stopped containers so we clean up half-dead state too
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list containers: %w", err)
+	}
+
+	removed := []string{}
+	timeout := 10
+	for _, c := range result.Items {
+		containerID := c.ID
+		short := containerID
+		if len(short) > 12 {
+			short = short[:12]
+		}
+
+		if _, err := m.dockerClient.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
+			m.logger.Warn("shutdown: container stop failed",
+				zap.String("container", short),
+				zap.String("project", projectPath),
+				zap.Error(err))
+			// Keep going — ContainerRemove with Force=true will catch it.
+		}
+		if _, err := m.dockerClient.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
+			m.logger.Warn("shutdown: container remove failed",
+				zap.String("container", short),
+				zap.String("project", projectPath),
+				zap.Error(err))
+			continue
+		}
+		removed = append(removed, short)
+
+		// Drop any in-memory sandbox state for this container so the next
+		// CreateSandbox starts clean instead of re-adopting a ghost.
+		if sandboxID := c.Labels["openshell.sandbox-id"]; sandboxID != "" {
+			m.mu.Lock()
+			if _, ok := m.sandboxes[sandboxID]; ok {
+				delete(m.sandboxes, sandboxID)
+				m.logger.Info("shutdown: dropped in-memory sandbox state",
+					zap.String("sandbox_id", sandboxID),
+					zap.String("container", short))
+			}
+			m.mu.Unlock()
+		}
+	}
+
+	m.logger.Info("shutdown: containers removed by project-path label",
+		zap.String("project", projectPath),
+		zap.Int("count", len(removed)),
+		zap.Strings("containers", removed))
+	return removed, nil
 }
 
 // adoptContainerAsSandbox constructs a *Sandbox from a Docker container

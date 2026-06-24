@@ -65,6 +65,9 @@ type App struct {
 	toolsHandler       *handlers.ToolsHandler
 	healthMon          *mcp.HealthMonitor
 	preWarmer          *common.PreWarmer
+
+	// Lifecycle
+	idleWatchdog *sandbox.Watchdog
 }
 
 // NewApp initializes all components and assembles the application.
@@ -131,6 +134,13 @@ func (a *App) shutdown() {
 	}
 	if a.puxHandler != nil {
 		a.puxHandler.CloseSSH()
+	}
+	if a.idleWatchdog != nil {
+		// Stop the idle-shutdown watchdog before the sandbox manager goes
+		// away — otherwise the watchdog's next tick could fire against a
+		// torn-down Docker client. Stop blocks until the in-flight tick
+		// finishes (or the tickInterval elapses).
+		a.idleWatchdog.Stop()
 	}
 	if a.sched != nil {
 		a.sched.Stop()
@@ -278,6 +288,11 @@ func (a *App) initHandlers() {
 	}
 	if sandboxMgr != nil {
 		sandboxMgr.RecoverAllSandboxes(context.Background())
+		// Idle-shutdown watchdog. Polls every 60s; tears down containers
+		// whose IdleShutdownSecs > 0 once they've been idle that long.
+		// No-op for orgs that don't opt in (field defaults to 0 = off).
+		// See plan: declarative-cooking-wolf.md §C2.
+		a.idleWatchdog = sandbox.NewWatchdog(sandbox.WatchdogDefaults(sandboxMgr, logger)).Start()
 	}
 	a.sandboxHandler = handlers.NewSandboxHandler(sandboxMgr, logger, a.db)
 

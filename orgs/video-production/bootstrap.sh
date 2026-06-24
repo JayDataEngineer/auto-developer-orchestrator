@@ -10,6 +10,10 @@
 #   3. Waits for health
 #   4. Verifies all tools are present
 #   5. Prints ready message
+#
+# Usage:
+#   ./bootstrap.sh                # full bootstrap
+#   ./bootstrap.sh --down         # tear down what bootstrap brought up
 
 set -euo pipefail
 
@@ -23,6 +27,15 @@ cd "$SCRIPT_DIR"
 # uses the label to adopt this container instead of spinning up a
 # sibling. Without this export, Pux creates its own container.
 export OPENSHELL_PROJECT_PATH="${OPENSHELL_PROJECT_PATH:-$SCRIPT_DIR}"
+
+# --down: inverse of up. Named volumes preserved (no -v).
+# To wipe volumes too, run `docker compose down -v` manually.
+if [[ "${1:-}" == "--down" ]]; then
+  echo "=== Video Production Org — Tear Down ==="
+  docker compose down
+  echo "  Containers stopped."
+  exit 0
+fi
 
 echo "=== Video Production Org Bootstrap ==="
 echo "  OPENSHELL_PROJECT_PATH=$OPENSHELL_PROJECT_PATH"

@@ -37,6 +37,7 @@ import (
 	"github.com/auto-developer-orchestrator/backend/internal/tools/meta"
 	_ "github.com/auto-developer-orchestrator/backend/internal/tools/plan" // plan tool: removed from CTO, kept for re-enable
 	schedulertool "github.com/auto-developer-orchestrator/backend/internal/tools/scheduler"
+	sandboxtools "github.com/auto-developer-orchestrator/backend/internal/tools/sandbox"
 	secrettools "github.com/auto-developer-orchestrator/backend/internal/tools/secrets"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/todo"
 	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
@@ -93,6 +94,12 @@ type Config struct {
 	SandboxOnly     bool                        // optional: if true, only bash + file tools available (no delegation, MCP, browser, etc.)
 	TaskMgr         *core.TaskManager           // optional: if set, bash tool supports run_in_background + task_output
 	MouseCoordinateResolver func(toolName string, args map[string]any) (normX, normY float64, action string) // optional: visual mouse overlay
+	// SandboxShutdown is the optional interface to the sandbox manager's
+	// ShutdownByProjectLabel method. When set, the CTO gets a
+	// shutdown_container tool that lets it explicitly end the sandbox
+	// lifecycle after yielding its final response. Sub-agents do NOT
+	// see this tool — only the CTO.
+	SandboxShutdown sandboxtools.ContainerShutdown
 }
 
 // Agent is the full orchestrator agent with all tools.
@@ -195,6 +202,15 @@ func New(provider core.LLMProvider, cfg Config) (*Agent, error) {
 	// Secrets tools — only when an org cred store is wired
 	if cfg.CredStore != nil {
 		ctoTools = append(ctoTools, secrettools.AllTools(cfg.CredStore)...)
+	}
+
+	// shutdown_container — CTO-only lifecycle tool. Wired only when the
+	// orchestrator has a sandbox manager reference (org mode + sandbox-
+	// bearing orgs). The tool lets the CTO explicitly tear down the
+	// container after yielding its final response. Sub-agents never see
+	// this tool — see PR4 plan §C3.
+	if cfg.SandboxShutdown != nil {
+		ctoTools = append(ctoTools, sandboxtools.AllTools(cfg.SandboxShutdown, cfg.ProjectDir)...)
 	}
 
 	// Shared tracker for concurrent modification detection between read and edit
