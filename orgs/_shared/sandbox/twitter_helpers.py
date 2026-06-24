@@ -26,7 +26,25 @@ import os
 from contextlib import contextmanager
 from typing import Generator
 
-COOKIES_PATH = "/sandbox/.twitter-session.json"
+try:
+    from paths import twitter_cookies as _cookies_path
+    from paths import twitter_cookies_legacy as _cookies_legacy_path
+except ImportError:
+    _cookies_path = None
+    _cookies_legacy_path = None
+
+
+def _resolve_cookies_path():
+    """Canonical (data_dir) → legacy (in-container root) fallback chain."""
+    candidates = []
+    if _cookies_path is not None:
+        candidates.append(_cookies_path())
+    if _cookies_legacy_path is not None:
+        candidates.append(_cookies_legacy_path())
+    for p in candidates:
+        if p.exists() and p.stat().st_size > 0:
+            return p
+    return candidates[0] if candidates else None
 
 
 def load_cookies() -> list[dict]:
@@ -35,9 +53,10 @@ def load_cookies() -> list[dict]:
     Run `python3 /sandbox/session.py --cookies-from-browser brave` first
     if this returns empty — that pulls fresh cookies from the host browser.
     """
-    if not os.path.exists(COOKIES_PATH):
+    p = _resolve_cookies_path()
+    if p is None or not p.exists():
         return []
-    with open(COOKIES_PATH) as f:
+    with open(p) as f:
         data = json.load(f)
     if isinstance(data, list):
         return data
@@ -80,8 +99,9 @@ def twitter_session(headless: bool = True, wait_seconds: int = 3) -> Generator:
 
     cookies = load_cookies()
     if not cookies:
+        cookies_file = _resolve_cookies_path()
         raise RuntimeError(
-            f"No Twitter session at {COOKIES_PATH}. "
+            f"No Twitter session at {cookies_file}. "
             f"Run: python3 /sandbox/session.py --cookies-from-browser brave"
         )
 

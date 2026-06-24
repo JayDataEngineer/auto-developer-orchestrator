@@ -17,9 +17,45 @@ import sys
 import time
 from datetime import datetime
 
-CALENDAR_PATH = "/sandbox/calendar.json"
-DRAFTS_PATH = "/sandbox/drafts.json"
-COOKIES_PATH = "/sandbox/.twitter-session.json"
+try:
+    from paths import (
+        twitter_calendar as _calendar_path,
+        twitter_calendar_legacy as _calendar_legacy_path,
+        twitter_drafts as _drafts_path,
+        twitter_drafts_legacy as _drafts_legacy_path,
+        twitter_cookies as _cookies_path,
+        twitter_cookies_legacy as _cookies_legacy_path,
+    )
+except ImportError:
+    _calendar_path = None
+    _calendar_legacy_path = None
+    _drafts_path = None
+    _drafts_legacy_path = None
+    _cookies_path = None
+    _cookies_legacy_path = None
+
+
+def _first_existing(*candidates):
+    """Return the first existing non-empty Path, else the first candidate."""
+    for p in candidates:
+        if p is not None and p.exists() and p.stat().st_size > 0:
+            return p
+    return candidates[0] if candidates else None
+
+
+def _resolve_cookies_path():
+    return _first_existing(_cookies_path() if _cookies_path else None,
+                            _cookies_legacy_path() if _cookies_legacy_path else None)
+
+
+def _resolve_calendar_path():
+    return _first_existing(_calendar_path() if _calendar_path else None,
+                            _calendar_legacy_path() if _calendar_legacy_path else None)
+
+
+def _resolve_drafts_path():
+    return _first_existing(_drafts_path() if _drafts_path else None,
+                            _drafts_legacy_path() if _drafts_legacy_path else None)
 
 
 def load_json(path):
@@ -35,7 +71,7 @@ def save_json(path, data):
 
 
 def save_draft(tweet_text, pillar="unknown"):
-    drafts = load_json(DRAFTS_PATH)
+    drafts = load_json(str(_resolve_drafts_path()))
     draft = {
         "text": tweet_text,
         "pillar": pillar,
@@ -43,25 +79,26 @@ def save_draft(tweet_text, pillar="unknown"):
         "char_count": len(tweet_text),
     }
     drafts.append(draft)
-    save_json(DRAFTS_PATH, drafts)
+    save_json(str(_resolve_drafts_path()), drafts)
     return draft
 
 
 def mark_calendar_posted(tweet_text):
-    calendar = load_json(CALENDAR_PATH)
+    calendar = load_json(str(_resolve_calendar_path()))
     for entry in calendar:
         if entry.get("tweet") == tweet_text and not entry.get("posted"):
             entry["posted"] = True
             entry["posted_at"] = datetime.now().isoformat()
-    save_json(CALENDAR_PATH, calendar)
+    save_json(str(_resolve_calendar_path()), calendar)
 
 
 def has_session():
     """Check if session cookies exist and look valid."""
-    if not os.path.exists(COOKIES_PATH):
+    p = _resolve_cookies_path()
+    if p is None or not os.path.exists(p):
         return False
     try:
-        with open(COOKIES_PATH) as f:
+        with open(p) as f:
             data = json.load(f)
         cookies = data if isinstance(data, list) else data.get("cookies", [])
         return any(c.get("name") == "auth_token" for c in cookies)
@@ -88,7 +125,7 @@ def post_tweet(tweet_text):
         from seleniumbase import SB
 
         # Load cookies
-        with open(COOKIES_PATH) as f:
+        with open(_resolve_cookies_path()) as f:
             session_data = json.load(f)
         cookies = session_data.get("cookies", session_data) if isinstance(session_data, dict) else session_data
 
@@ -187,8 +224,8 @@ def post_tweet(tweet_text):
 
 
 def show_status():
-    calendar = load_json(CALENDAR_PATH)
-    drafts = load_json(DRAFTS_PATH)
+    calendar = load_json(str(_resolve_calendar_path()))
+    drafts = load_json(str(_resolve_drafts_path()))
     posted = sum(1 for e in calendar if e.get("posted"))
     unposted = sum(1 for e in calendar if not e.get("posted"))
     return {
@@ -228,7 +265,7 @@ def main():
         return
 
     if args.post:
-        calendar = load_json(CALENDAR_PATH)
+        calendar = load_json(str(_resolve_calendar_path()))
         for entry in calendar:
             if not entry.get("posted"):
                 result = post_tweet(entry["tweet"])

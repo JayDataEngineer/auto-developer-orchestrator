@@ -41,8 +41,40 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Generator, Optional
 
-CREDENTIALS_PATH = "/sandbox/.telegram-credentials.json"
-SESSION_PATH = "/sandbox/.telegram-session.session"
+try:
+    from paths import telegram_credentials as _credentials_path
+    from paths import telegram_credentials_legacy as _credentials_legacy_path
+    from paths import telegram_session as _session_path
+    from paths import telegram_session_legacy as _session_legacy_path
+except ImportError:
+    _credentials_path = None
+    _credentials_legacy_path = None
+    _session_path = None
+    _session_legacy_path = None
+
+
+def _resolve_credentials_path():
+    candidates = []
+    if _credentials_path is not None:
+        candidates.append(_credentials_path())
+    if _credentials_legacy_path is not None:
+        candidates.append(_credentials_legacy_path())
+    for p in candidates:
+        if p.exists() and p.stat().st_size > 0:
+            return p
+    return candidates[0] if candidates else None
+
+
+def _resolve_session_path():
+    candidates = []
+    if _session_path is not None:
+        candidates.append(_session_path())
+    if _session_legacy_path is not None:
+        candidates.append(_session_legacy_path())
+    for p in candidates:
+        if p.exists() and p.stat().st_size > 0:
+            return p
+    return candidates[0] if candidates else None
 
 
 def load_credentials() -> dict:
@@ -51,12 +83,13 @@ def load_credentials() -> dict:
     Raises RuntimeError if file is missing. Call session.py --setup-credentials
     first to populate it.
     """
-    if not os.path.exists(CREDENTIALS_PATH):
+    p = _resolve_credentials_path()
+    if p is None or not p.exists():
         raise RuntimeError(
-            f"No Telegram credentials at {CREDENTIALS_PATH}. "
+            f"No Telegram credentials at {p}. "
             f"Run: python3 /sandbox/session.py --setup-credentials API_ID API_HASH PHONE"
         )
-    with open(CREDENTIALS_PATH) as f:
+    with open(p) as f:
         data = json.load(f)
     if isinstance(data.get("api_id"), str):
         data["api_id"] = int(data["api_id"])
@@ -68,10 +101,14 @@ def has_valid_session() -> bool:
 
     For a real liveness check, use session.py --check (calls get_me).
     """
+    sp = _resolve_session_path()
+    cp = _resolve_credentials_path()
     return (
-        os.path.exists(SESSION_PATH)
-        and os.path.getsize(SESSION_PATH) > 0
-        and os.path.exists(CREDENTIALS_PATH)
+        sp is not None
+        and sp.exists()
+        and sp.stat().st_size > 0
+        and cp is not None
+        and cp.exists()
     )
 
 
@@ -99,15 +136,17 @@ def telegram_session():
         ) from e
 
     if not has_valid_session():
+        sp = _resolve_session_path()
+        cp = _resolve_credentials_path()
         raise RuntimeError(
             f"Session not ready. Files missing:\n"
-            f"  credentials: {CREDENTIALS_PATH} ({'ok' if os.path.exists(CREDENTIALS_PATH) else 'MISSING'})\n"
-            f"  session:     {SESSION_PATH} ({'ok' if os.path.exists(SESSION_PATH) else 'MISSING'})\n"
+            f"  credentials: {cp} ({'ok' if cp and cp.exists() else 'MISSING'})\n"
+            f"  session:     {sp} ({'ok' if sp and sp.exists() else 'MISSING'})\n"
             f"Run: python3 /sandbox/session.py --bootstrap"
         )
 
     creds = load_credentials()
-    client = TelegramClient(SESSION_PATH, creds["api_id"], creds["api_hash"])
+    client = TelegramClient(str(_resolve_session_path()), creds["api_id"], creds["api_hash"])
     client.connect()
     try:
         if not client.is_user_authorized():

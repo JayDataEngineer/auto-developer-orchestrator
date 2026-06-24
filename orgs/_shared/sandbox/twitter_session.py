@@ -28,22 +28,50 @@ import sys
 import time
 from datetime import datetime
 
-COOKIES_PATH = "/sandbox/.twitter-session.json"
+try:
+    from paths import twitter_cookies as _cookies_path
+    from paths import twitter_cookies_legacy as _cookies_legacy_path
+except ImportError:
+    _cookies_path = None
+    _cookies_legacy_path = None
+
+
+def _resolve_cookies_path():
+    """Walk the candidate chain: canonical (data_dir) → legacy (in-container root).
+
+    Returns the first existing non-empty file. Falls back to the canonical
+    path for error messages when neither exists (so users see the right
+    "expected at <canonical>" hint).
+    """
+    candidates = []
+    if _cookies_path is not None:
+        candidates.append(_cookies_path())
+    if _cookies_legacy_path is not None:
+        candidates.append(_cookies_legacy_path())
+    for p in candidates:
+        if p.exists() and p.stat().st_size > 0:
+            return p
+    return candidates[0] if candidates else None
 
 
 def cookies_exist():
-    return os.path.exists(COOKIES_PATH) and os.path.getsize(COOKIES_PATH) > 0
+    p = _resolve_cookies_path()
+    return p is not None and p.exists() and p.stat().st_size > 0
 
 
 def load_cookies():
     if not cookies_exist():
         return None
-    with open(COOKIES_PATH) as f:
+    with open(_resolve_cookies_path()) as f:
         return json.load(f)
 
 
 def save_cookies(cookies):
-    with open(COOKIES_PATH, "w") as f:
+    # Always write to the canonical path so in-sandbox bootstraps (VNC login,
+    # CDP export, --cookies-from-browser) keep working.
+    if _cookies_path is None:
+        raise RuntimeError("paths module not available; cannot resolve canonical cookies path")
+    with open(_cookies_path(), "w") as f:
         json.dump(cookies, f, indent=2)
 
 
@@ -116,7 +144,7 @@ def bootstrap_interactive():
         }
         save_cookies(session_data)
 
-        print(f"\nSaved {len(twitter_cookies)} Twitter cookies to {COOKIES_PATH}")
+        print(f"\nSaved {len(twitter_cookies)} Twitter cookies to {_cookies_path() if _cookies_path else '<unknown>'}")
         result = check_session()
         print(json.dumps(result, indent=2))
 
@@ -319,7 +347,7 @@ def main():
     elif args.info:
         data = load_cookies()
         if data:
-            print(f"Session file: {COOKIES_PATH}")
+            print(f"Session file: {_resolve_cookies_path()}")
             print(f"Saved at: {data.get('saved_at', 'unknown')}")
             print(f"Source: {data.get('source', 'interactive')}")
             cookies = data.get("cookies", [])

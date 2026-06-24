@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/tools"
 )
 
 // Store persists project memory (MEMORY.md file).
@@ -105,6 +106,20 @@ type Tool struct {
 	landmine *LandmineChecker // optional; nil = no landmine check
 }
 
+// AllTools returns every memory-package tool wired with the standard landmine
+// checker. Single source of truth for orchestrator wiring — guarantees every
+// memory tool gets QuarantineResult wrapping + diligence-landmine enforcement
+// without re-implementing the wiring at each callsite.
+//
+// Pass nil for checker to disable landmine enforcement (test fixture path).
+// Production wiring should pass a real *LandmineChecker.
+func AllTools(store *Store, folder *FolderStore, checker *LandmineChecker) []core.Tool {
+	return []core.Tool{
+		NewToolWithLandmine(store, checker),
+		NewFolderTool(folder),
+	}
+}
+
 // NewTool constructs a memory tool without diligence landmine checking.
 // Use NewToolWithLandmine for the production wiring.
 func NewTool(store *Store) *Tool {
@@ -180,5 +195,11 @@ func (t *Tool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	if err := t.store.Write(newContent); err != nil {
 		return nil, err
 	}
-	return map[string]any{"success": true, "section": section, "key": key}, nil
+	// The result echoes agent-authored `key` + `section` back to the model.
+	// If either contains an injection pattern (e.g. the agent stored a
+	// transcript beginning with "ignore previous instructions"), the model
+	// would see it as a tool result and might comply. QuarantineResult wraps
+	// suspicious lines in <suspicious_input> tags so the model can recognize
+	// them as data, not directives. Clean inputs round-trip unchanged.
+	return tools.QuarantineResult(map[string]any{"success": true, "section": section, "key": key}), nil
 }

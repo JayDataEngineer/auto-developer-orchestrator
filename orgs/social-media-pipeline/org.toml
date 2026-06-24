@@ -31,6 +31,7 @@ restart = "unless-stopped"
 runtime_class = "gvisor"
 warm_pool = 1
 init_files = [
+  "@shared/sandbox/paths.py",
   "@shared/clients/forge_client.py",
   "@shared/sandbox/twitter_helpers.py",
   "@shared/sandbox/twitter_session.py",

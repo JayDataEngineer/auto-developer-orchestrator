@@ -910,7 +910,7 @@ func postCreate(t *testing.T, r http.Handler, body string) (*httptest.ResponseRe
 
 func TestCreateSandboxRejectsSSHURL(t *testing.T) {
 	r, _ := setupSandboxRouter(t)
-	w, errBody := postCreate(t, r, `{"project_path":"ssh://user@100.86.69.57/home/user/project"}`)
+	w, errBody := postCreate(t, r, `{"project_path":"ssh://user@192.0.2.1/home/user/project"}`)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 Bad Request for ssh:// URL, got %d (body: %s)", w.Code, w.Body.String())

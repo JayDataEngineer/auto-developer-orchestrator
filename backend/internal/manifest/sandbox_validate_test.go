@@ -75,7 +75,7 @@ func TestSandboxConfigValidate_NilSandbox(t *testing.T) {
 // don't trip the SurrealDB check.
 func TestSandboxConfigValidate_UnrelatedEnvIsQuiet(t *testing.T) {
 	s := &SandboxConfig{Env: map[string]string{
-		"MCP_HUB_ENDPOINT": "http://100.86.69.57:30080",
+		"MCP_HUB_ENDPOINT": "http://192.0.2.1:30080",
 		"PUX_ORG_PATH":     "/sandbox/workspace",
 	}}
 	if errs := s.Validate(); len(errs) != 0 {

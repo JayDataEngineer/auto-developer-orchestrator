@@ -116,7 +116,7 @@ func TestParseSSHURL(t *testing.T) {
 		sshPath  string
 		ok       bool
 	}{
-		{"ssh://ubuntu@100.86.69.57/home/user/project", "ubuntu", "100.86.69.57", "22", "/home/user/project", true},
+		{"ssh://ubuntu@192.0.2.1/home/user/project", "ubuntu", "192.0.2.1", "22", "/home/user/project", true},
 		{"ssh://admin@my-server:2222/var/www", "admin", "my-server", "2222", "/var/www", true},
 		{"ssh://root@192.168.1.1/", "root", "192.168.1.1", "22", "/", true},
 		{"ssh://deploy@10.0.0.1", "deploy", "10.0.0.1", "22", "/", true},
@@ -206,7 +206,7 @@ func TestResolveProjectFSSSHFromDB(t *testing.T) {
 	defer db.Close()
 
 	ctx := context.Background()
-	db.AddCustomProject(ctx, "remote-proj", "ssh://ubuntu@100.86.69.57/home/user/project")
+	db.AddCustomProject(ctx, "remote-proj", "ssh://ubuntu@192.0.2.1/home/user/project")
 
 	// Without SSH manager — should get error
 	_, err = resolveProjectFS("remote-proj", db, nil)

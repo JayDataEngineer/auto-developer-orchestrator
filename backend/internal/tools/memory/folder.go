@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/tools"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 )
 
@@ -361,14 +362,19 @@ func (t *FolderTool) Execute(ctx context.Context, args map[string]any) (any, err
 		if err := t.store.save(ctx, path, content); err != nil {
 			return nil, err
 		}
-		return map[string]any{"saved": true, "path": path}, nil
+		return tools.QuarantineResult(map[string]any{"saved": true, "path": path}), nil
 
 	case "recall":
 		result, err := t.store.recall(path)
 		if err != nil {
 			return nil, err
 		}
-		return result, nil
+		// Recall returns agent-stored memory docs verbatim. Memory content
+		// is the highest-risk untrusted input in the system — agents store
+		// transcripts, web research, MCP results that may contain injection
+		// patterns. QuarantineResult wraps suspicious lines in
+		// <suspicious_input> tags so the model sees them as data.
+		return tools.QuarantineResult(result), nil
 
 	case "delete":
 		if path == "" {
@@ -377,7 +383,7 @@ func (t *FolderTool) Execute(ctx context.Context, args map[string]any) (any, err
 		if err := t.store.deleteDoc(path); err != nil {
 			return nil, err
 		}
-		return map[string]any{"deleted": true, "path": path}, nil
+		return tools.QuarantineResult(map[string]any{"deleted": true, "path": path}), nil
 
 	default:
 		return nil, core.NewToolError("memory", fmt.Sprintf("unknown action: %s (use save, recall, or delete)", action))

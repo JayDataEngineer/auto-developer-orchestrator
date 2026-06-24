@@ -19,6 +19,7 @@ restart = "unless-stopped"
 runtime_class = "gvisor"
 warm_pool = 1
 init_files = [
+  "@shared/sandbox/paths.py",
   "@shared/sandbox/twitter_session.py",
   "@shared/sandbox/twitter_helpers.py",
   "@shared/sandbox/twitter_post.py",

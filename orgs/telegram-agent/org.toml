@@ -17,6 +17,7 @@ restart = "unless-stopped"
 runtime_class = "gvisor"
 warm_pool = 1
 init_files = [
+  "@shared/sandbox/paths.py",
   "@shared/sandbox/telegram_session.py",
   "@shared/sandbox/telegram_helpers.py",
 ]

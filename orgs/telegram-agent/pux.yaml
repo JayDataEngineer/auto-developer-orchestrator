@@ -11,6 +11,7 @@ sandbox:
   warm_pool: 1
   mode: contained
   init_files:
+    - "@shared/sandbox/paths.py"
     - "@shared/sandbox/telegram_session.py"
     - "@shared/sandbox/telegram_helpers.py"
   pip_packages:

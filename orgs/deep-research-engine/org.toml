@@ -35,6 +35,7 @@ restart = "unless-stopped"
 runtime_class = "gvisor"
 warm_pool = 1
 init_files = [
+  "@shared/sandbox/paths.py",
   "@shared/clients/surreal_client.py",
   "sandbox/context_engine.py",
   "sandbox/vector_search.py",

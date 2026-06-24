@@ -19,6 +19,7 @@ sandbox:
   warm_pool: 1
   mode: contained
   init_files:
+    - "@shared/sandbox/paths.py"
     - "@shared/clients/surreal_client.py"
     - "sandbox/context_engine.py"
     - "sandbox/vector_search.py"

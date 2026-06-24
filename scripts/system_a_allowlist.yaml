@@ -1,0 +1,21 @@
+# System A contract allowlist.
+#
+# Each entry exempts a script from one or more of:
+#   - --help must exit 0
+#   - --bogus-flag must exit non-zero
+#   - no hardcoded /sandbox/ absolute paths
+#
+# The allowlist is intentionally tiny. Adding an entry is a reviewer red flag,
+# not a default — every exemption must have a one-line `reason:` that explains
+# why the script can't conform (e.g. single-purpose no-arg tool, third-party
+# vendored code that doesn't use argparse).
+#
+# Format:
+#   allowlist:
+#     - script: <basename>      # e.g. "desktop_observe.py"
+#       reason: "free-text"
+#
+# Stale entries (for scripts that were renamed/deleted) are caught by
+# test_allowlist_entries_reference_real_scripts.
+
+allowlist: []
