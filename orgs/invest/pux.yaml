@@ -56,3 +56,16 @@ sandbox:
     ALPACA_API_KEY: "${ALPACA_API_KEY:-}"
     ALPACA_SECRET_KEY: "${ALPACA_SECRET_KEY:-}"
     FRED_API_KEY: "${FRED_API_KEY:-}"
+  volumes:
+    - type: bind
+      host: ./sandbox
+      container: /workspace/sandbox
+    - type: bind
+      host: ./config
+      container: /workspace/config
+    - type: volume
+      name: invest-data
+      container: /workspace/data
+    - type: volume
+      name: invest-cache
+      container: /workspace/workspace/cache

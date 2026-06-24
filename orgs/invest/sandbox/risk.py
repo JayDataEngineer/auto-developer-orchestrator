@@ -83,6 +83,35 @@ def calc_atr(highs, lows, closes, period=14):
     return sum(trs[-period:]) / period
 
 
+def kelly_fraction(win_rate, win_loss_ratio):
+    """Compute full and half Kelly fractions.
+
+    Kelly formula: f = (W*B - (1-W)) / B
+      where W = win_rate, B = win_loss_ratio (avg win / avg loss).
+    Half-Kelly is returned because full Kelly is too volatile for live use.
+
+    Returns (0.0, 0.0) for invalid inputs (win_rate <= 0 or ratio <= 0).
+    Callers must check for zero and apply a confidence-based fallback.
+    """
+    if win_rate <= 0 or win_loss_ratio <= 0:
+        return 0.0, 0.0
+    q = 1 - win_rate
+    full = (win_loss_ratio * win_rate - q) / win_loss_ratio
+    half = max(0.0, full * 0.5)
+    return full, half
+
+
+def risk_reward_ratio(target_mult, stop_mult):
+    """Ratio of take-profit distance to stop-loss distance from ATR multiples.
+
+    Returns 0.0 when stop_mult is zero (degenerate config). Same formula
+    cmd_stops uses to decide whether a setup meets min_risk_reward.
+    """
+    if stop_mult <= 0:
+        return 0.0
+    return round(target_mult / stop_mult, 2)
+
+
 def fetch_atr(symbol, period=14):
     """Fetch price history via yfinance and calculate ATR."""
     try:
@@ -240,7 +269,7 @@ def cmd_stops(config, symbols=None):
         take_profit = round(entry + target_mult * atr, 2)
         stop_distance = entry - stop_loss
         target_distance = take_profit - entry
-        rr_ratio = round(target_distance / stop_distance, 2) if stop_distance > 0 else 0
+        rr_ratio = risk_reward_ratio(target_distance, stop_distance) if stop_distance > 0 else 0
 
         trailing_activation = round(entry + trail_act * atr, 2)
         trailing_stop = None
@@ -279,9 +308,7 @@ def cmd_size(ticker, confidence, price, config):
 
     # 1. Kelly fraction (half-Kelly for safety)
     if win_rate > 0 and win_loss_ratio > 0:
-        q = 1 - win_rate
-        kelly_full = (win_loss_ratio * win_rate - q) / win_loss_ratio
-        kelly_half = max(0, kelly_full * 0.5)
+        _, kelly_half = kelly_fraction(win_rate, win_loss_ratio)
     else:
         kelly_half = confidence * 0.5
 
