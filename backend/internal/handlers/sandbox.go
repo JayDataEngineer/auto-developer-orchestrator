@@ -28,6 +28,10 @@ type SandboxHandler struct {
 	manager *sandbox.Manager
 	logger  *zap.Logger
 	db      *storage.Database
+	// sandboxIn runs init_files after CreateSandbox. Same adoption gap as
+	// the prompt path: a compose-started container adopted via label
+	// discovery has no /sandbox/<name>.py until this runs.
+	sandboxIn SandboxInitializer
 }
 
 // NewSandboxHandler creates a new sandbox handler
@@ -37,6 +41,13 @@ func NewSandboxHandler(manager *sandbox.Manager, logger *zap.Logger, db *storage
 		logger:  logger,
 		db:      db,
 	}
+}
+
+// SetSandboxInitializer wires the sandbox initializer so the standalone
+// /api/sandbox POST path can run init_files after CreateSandbox. Mirrors
+// the prompt-path wiring — keeps both paths consistent.
+func (h *SandboxHandler) SetSandboxInitializer(si SandboxInitializer) {
+	h.sandboxIn = si
 }
 
 // CreateSandboxRequest is the request body for creating a sandbox
@@ -124,6 +135,19 @@ func (h *SandboxHandler) CreateSandbox(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Run init_files. Covers the adoption gap: a compose-started container
+	// picked up via discoverByProjectLabel has no /sandbox/<name>.py until
+	// this runs. Same contract as the prompt path — see ensureOrgSandboxInit.
+	initOrgPath := req.Org
+	if initOrgPath == "" {
+		initOrgPath = req.ProjectPath
+	}
+	initProjectPath := req.ProjectPath
+	if initProjectPath == "" {
+		initProjectPath = orgPath
+	}
+	ensureOrgSandboxInit(r.Context(), h.sandboxIn, h.logger, sb.ID, initOrgPath, initProjectPath)
 
 	writeJSON(w, http.StatusCreated, sb)
 }

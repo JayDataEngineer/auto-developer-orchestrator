@@ -155,7 +155,20 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 				h.log.Info("Auto-created sandbox for prompt",
 					zap.String("project", req.Project),
 					zap.String("sandbox_id", sb.ID))
+				// Run init_files. Covers both the new-container case AND the
+				// adoption case (discoverByProjectLabel picked up a compose-
+				// started container, which never had init_files copied).
+				// Without this, /sandbox/surreal_client.py and the rest of
+				// the System A backbone are missing — see ensureOrgSandboxInit.
+				ensureOrgSandboxInit(r.Context(), h.sandboxIn, h.log, sandboxID, orgPathForSandbox, sbProjectPath)
 			}
+		} else {
+			// Existing sandbox — re-run init_files. Covers the server-restart
+			// edge case where the in-memory map was rebuilt by
+			// RecoverAllSandboxes but the underlying container may not have
+			// had init_files copied (e.g. it was adopted on a prior prompt
+			// before this fix shipped). Cost is bounded; idempotent.
+			ensureOrgSandboxInit(r.Context(), h.sandboxIn, h.log, sandboxID, projectPath, projectPath)
 		}
 	}
 

@@ -63,6 +63,48 @@ func NewSandboxInitializer(manager *sandbox.Manager, logger *zap.Logger) Sandbox
 	return &sandboxInit{manager: manager, logger: logger}
 }
 
+// ensureOrgSandboxInit loads the manifest at orgPath and runs init_files
+// against the named sandbox. Safe to call on every prompt-time sandbox
+// adoption — CopyToSandbox overwrites, the cost is bounded by N init_files.
+//
+// Why this exists: Manager.CreateSandbox has two outcomes — create a fresh
+// container, or adopt one discovered via the openshell.project-path label
+// (compose-started containers). The adoption path skips init_files, so a
+// container started by org bootstrap.sh has zero files at /sandbox/*.py
+// until this helper runs. Without it, surreal_client.py and the rest of
+// the System A backbone are unreachable, and the agent either fails or
+// works around it via raw HTTP (silent degradation, not the contract).
+//
+// Returns the init result (nil if si is nil or no manifest found).
+func ensureOrgSandboxInit(ctx context.Context, si SandboxInitializer, logger *zap.Logger, sandboxID, orgPath, projectPath string) *SandboxInitResult {
+	if si == nil || orgPath == "" {
+		return nil
+	}
+	mf, _ := manifest.LoadManifest(orgPath)
+	if mf == nil || mf.Sandbox == nil {
+		return nil
+	}
+	res := si.InitFromManifest(ctx, sandboxID, mf.Sandbox, projectPath)
+	if logger == nil {
+		return res
+	}
+	if len(res.Errors) > 0 {
+		logger.Warn("sandbox init had errors",
+			zap.String("sandbox_id", sandboxID),
+			zap.String("org", orgPath),
+			zap.Int("files_uploaded", res.FilesUploaded),
+			zap.Strings("errors", res.Errors))
+	} else {
+		logger.Info("sandbox init complete",
+			zap.String("sandbox_id", sandboxID),
+			zap.String("org", orgPath),
+			zap.Int("files_uploaded", res.FilesUploaded),
+			zap.Int("pip_installed", res.PipPackagesInstalled),
+			zap.Int("env_vars_written", res.EnvVarsWritten))
+	}
+	return res
+}
+
 // InitFromManifest runs full sandbox initialization (files, pip, env) for a project.
 // If no sandbox exists, returns a result with SandboxNotFound=true.
 func (si *sandboxInit) InitFromManifest(ctx context.Context, projectName string, sandboxCfg *manifest.SandboxConfig, projectDir string) *SandboxInitResult {
@@ -89,7 +131,24 @@ func (si *sandboxInit) InitIfSandboxExists(ctx context.Context, projectName stri
 func (si *sandboxInit) runInit(ctx context.Context, sandboxID string, sandboxCfg *manifest.SandboxConfig, projectDir string) *SandboxInitResult {
 	result := &SandboxInitResult{}
 
-	// Upload init_files
+	// Upload init_files.
+	//
+	// Two-tier Python separation (enforced 2026-06-24):
+	//   - HUMAN-backbone scripts (init_files) ship at /sandbox/<name>.py
+	//   - AGENT-authored scripts live writable at /sandbox/workspace/scripts/
+	//
+	// PRIMARY enforcement is at the tool surface: scripts.py (backing impl
+	// for make_script / edit_script) refuses to operate anywhere except
+	// SCRIPTS_DIR = /sandbox/workspace/scripts/. An agent literally cannot
+	// point its scripting tools at /sandbox/*.py — the substrate is separated
+	// by API contract.
+	//
+	// The chmod 0444 below is DEFENSE-IN-DEPTH. It is currently partial because
+	// the sandbox runs as root (Docker default) and root bypasses file perms.
+	// It still catches accidental `sed -i` / `echo >` that don't pre-escalate,
+	// because the model rarely thinks to chmod-before-write. The protection
+	// becomes kernel-enforced the day the sandbox drops to non-root (planned
+	// follow-up — see [[feedback_two_tier_python_separation]]).
 	for _, relPath := range sandboxCfg.InitFiles {
 		localPath, err := resolveInitFileLocalPath(relPath, projectDir)
 		if err != nil {
@@ -99,6 +158,12 @@ func (si *sandboxInit) runInit(ctx context.Context, sandboxID string, sandboxCfg
 		sandboxPath := filepath.Join("/sandbox", filepath.Base(relPath))
 		if err := si.manager.CopyToSandbox(ctx, sandboxID, localPath, sandboxPath); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("upload %s: %v", relPath, err))
+			continue
+		}
+		// Best-effort read-only flag. See tier comment above for what this
+		// actually enforces today vs. once the sandbox drops to non-root.
+		if _, err := si.manager.ExecInSandbox(ctx, sandboxID, []string{"chmod", "0444", sandboxPath}); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("chmod %s: %v", relPath, err))
 			continue
 		}
 		result.FilesUploaded++

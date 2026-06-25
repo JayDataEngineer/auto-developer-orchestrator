@@ -340,6 +340,13 @@ func (a *App) initHandlers() {
 	projectHandler.SetScheduler(a.sched)
 	projectHandler.SetSandboxManager(sandboxMgr)
 	projectHandler.SetSandboxInitializer(sandboxIniter)
+	// Pux handler also needs the initializer so prompt-time sandbox adoptions
+	// run init_files. Without this, a container started by org bootstrap.sh
+	// gets adopted (via openshell.project-path label) but never receives the
+	// backbone scripts declared in pux.yaml init_files — surreal_client.py
+	// and friends are missing at /sandbox/.
+	a.puxHandler.SetSandboxInitializer(sandboxIniter)
+	a.sandboxHandler.SetSandboxInitializer(sandboxIniter)
 
 	// Re-init sandboxes from manifests
 	if projects, err := a.db.GetCustomProjects(context.Background()); err == nil {

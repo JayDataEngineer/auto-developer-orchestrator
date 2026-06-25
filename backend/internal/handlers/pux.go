@@ -68,6 +68,13 @@ type PuxHandler struct {
 	activeAgents   sync.Map                         // key="project:agentId" → *orchestrator.Agent for cancel
 	taskMgr        *core.TaskManager                // background task manager
 
+	// sandboxIn copies init_files / pip / env into a sandbox on first use.
+	// Critical for the adoption path: when discoverByProjectLabel picks up
+	// a container that compose started, init_files never ran for it. Without
+	// this, the agent sees a /sandbox/ with zero backbone scripts and the
+	// org's surreal_client.py / context_engine.py / etc. are unreachable.
+	sandboxIn SandboxInitializer
+
 	defaultLogic  string // model ID for CTO/orchestrator (logic)
 	defaultWorker string // model ID for sub-agents/employees (worker)
 
@@ -125,6 +132,13 @@ func (h *PuxHandler) SetClusterEngine(engine *llamaeng.LLMClient) {
 // SetSchedulerTool wires the scheduler tool backend for LLM access.
 func (h *PuxHandler) SetSchedulerTool(backend any) {
 	h.schedulerTool = backend
+}
+
+// SetSandboxInitializer wires the sandbox initializer used to run init_files
+// after a sandbox is created or adopted. See the comment on the sandboxIn
+// field for why this is required on the prompt path, not just project create.
+func (h *PuxHandler) SetSandboxInitializer(si SandboxInitializer) {
+	h.sandboxIn = si
 }
 
 // SetGeminiEngine configures the optional Gemini cloud engine.
