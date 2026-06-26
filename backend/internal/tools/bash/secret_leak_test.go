@@ -51,12 +51,18 @@ func TestSecretReadBlocked(t *testing.T) {
 
 // TestSecretScrubbedFromOutput proves a secret that leaks into stdout (some
 // other way) gets scrubbed before reaching the model.
+//
+// The fixture uses a clearly-fake prefix ("sk-test-FAKE-FIXTURE-...") that
+// still matches the scrubber regex (`sk-[a-zA-Z0-9\-_]{20,}`) but doesn't
+// trip provider-side secret scanners (GitHub secret scanning, OpenRouter's
+// own detector, etc.). Past versions of this test used `sk-or-v1-<64 hex>`
+// and got the push blocked at the remote. Don't restore that pattern.
 func TestSecretScrubbedFromOutput(t *testing.T) {
 	exec := &fakeExec{}
 	tool := New(exec)
 
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"command": "echo 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",
+		"command": "echo sk-test-FAKE-FIXTURE-not-a-real-key-do-not-use-1234567890",
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -66,7 +72,7 @@ func TestSecretScrubbedFromOutput(t *testing.T) {
 		t.Fatalf("result not map: %T", result)
 	}
 	output, _ := m["output"].(string)
-	if strings.Contains(output, "sk-or-v1-dbbce62fc") {
+	if strings.Contains(output, "sk-test-FAKE-FIXTURE") {
 		t.Errorf("LEAK: actual key prefix in output: %q", output)
 	}
 	if !strings.Contains(output, "[REDACTED_") {
