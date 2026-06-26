@@ -94,6 +94,46 @@ func TestMCPServerURLOverrideReadsEnvVar(t *testing.T) {
 	}
 }
 
+// TestMCPServerFallbackURLOverrideReadsEnvVar verifies the fallback URL env-var
+// override mirrors the primary URL override. Names an explicit env-var convention
+// (MCP_<PREFIX>_FALLBACK_URL) so future contributors don't reinvent it.
+func TestMCPServerFallbackURLOverrideReadsEnvVar(t *testing.T) {
+	t.Setenv("MCP_MEDIA_FALLBACK_URL", "http://fallback.example.com/mcp")
+	if got := MCPServerFallbackURLOverride("media"); got != "http://fallback.example.com/mcp" {
+		t.Errorf("fallback env override mismatch: got %q", got)
+	}
+	if got := MCPServerFallbackURLOverride("web"); got != "" {
+		t.Errorf("unset fallback env var should return empty, got %q", got)
+	}
+}
+
+// TestLoadMCPServersParsesFallbackURL verifies the YAML schema accepts the
+// new fallback_url field without disturbing rows that don't set it.
+func TestLoadMCPServersParsesFallbackURL(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "mcp_servers.yaml"), []byte(`
+servers:
+  - prefix: web
+    url: http://primary.example.com/mcp
+    fallback_url: http://fallback.example.com/mcp
+  - prefix: media
+    url: http://media.example.com/mcp
+`), 0o644)
+	if err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	servers := LoadMCPServers(dir)
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 servers, got %d", len(servers))
+	}
+	if servers[0].FallbackURL != "http://fallback.example.com/mcp" {
+		t.Errorf("row 0 fallback_url mismatch: got %q", servers[0].FallbackURL)
+	}
+	if servers[1].FallbackURL != "" {
+		t.Errorf("row 1 fallback_url should default to empty, got %q", servers[1].FallbackURL)
+	}
+}
+
 func TestLoadMCPServersRealConfigParses(t *testing.T) {
 	// The checked-in config/mcp_servers.yaml must always parse and yield at
 	// least the four legacy cloud MCPs. Catches a broken file before CI does.

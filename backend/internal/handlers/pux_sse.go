@@ -251,6 +251,9 @@ func mapEventToSSE(event llamaeng.AgentEvent) *sseEvent {
 	case llamaeng.EventTypeAgentStatus:
 		return &sseEvent{Type: "agent_status", Data: payload}
 
+	case llamaeng.EventTypeMCPEndpointChanged:
+		return &sseEvent{Type: "mcp_endpoint_changed", Data: payload}
+
 	default:
 		return nil
 	}

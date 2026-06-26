@@ -194,6 +194,17 @@ func TestMapEventToSSEAllKnownEvents(t *testing.T) {
 			},
 			wantType: "agent_status",
 		},
+		{
+			name:      "mcp_endpoint_changed",
+			eventType: core.EventTypeMCPEndpointChanged,
+			payload: core.MCPEndpointChangedData{
+				Prefix: "media",
+				From:   "http://localhost:8101",
+				To:     "http://fallback.example.com/mcp",
+				Reason: "primary down",
+			},
+			wantType: "mcp_endpoint_changed",
+		},
 	}
 
 	for _, c := range cases {

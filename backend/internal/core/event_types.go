@@ -38,4 +38,5 @@ const (
 	EventTypeResourceConflict  AgentEventType = "resource_conflict"   // two agents touched the same file (PR6)
 	EventTypeAgentMessage      AgentEventType = "agent_message"       // peer-to-peer message between agents (PR6)
 	EventTypeAgentStatus       AgentEventType = "agent_status"        // agent state changed: working/idle/terminated (PR6)
+	EventTypeMCPEndpointChanged AgentEventType = "mcp_endpoint_changed" // MCP client switched primary ↔ fallback URL
 )

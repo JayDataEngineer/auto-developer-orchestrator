@@ -339,3 +339,18 @@ type AgentStatusData struct {
 }
 
 func (AgentStatusData) seal() {}
+
+// MCPEndpointChangedData is emitted when an MCP client switches between its
+// primary and fallback endpoint. Reason is "primary down" (switched to
+// fallback), "primary recovered" (switched back to primary), or
+// "primary unreachable at boot" (initial fallback adoption at startup).
+// The event is advisory — the switch has already happened; recipients use it
+// for observability (TUI badge, audit log) not for control flow.
+type MCPEndpointChangedData struct {
+	Prefix string `json:"prefix"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Reason string `json:"reason"`
+}
+
+func (MCPEndpointChangedData) seal() {}

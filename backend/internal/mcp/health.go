@@ -166,6 +166,22 @@ func (h *HealthMonitor) probeOne(ctx context.Context, prefix string) {
 	if client == nil {
 		return // registered then removed — skip
 	}
+	// Clients with a fallback endpoint take a separate probe path that also
+	// checks the inactive endpoint for switch opportunities. This is the
+	// load-bearing extension: a single-URL client can't self-heal; a
+	// fallback-configured client can.
+	if client.HasFallback() {
+		h.probeOneWithFallback(ctx, prefix, client)
+		return
+	}
+	h.probeOneSimple(ctx, prefix, client)
+}
+
+// probeOneSimple is the legacy probe path for clients without a fallback
+// endpoint. Behavior is identical to the pre-fallback probeOne: count
+// consecutive failures, fire onTierDeath at threshold, restart extension if
+// a restarter is wired.
+func (h *HealthMonitor) probeOneSimple(ctx context.Context, prefix string, client *Client) {
 	probeCtx, cancel := context.WithTimeout(ctx, h.probeTimeout)
 	_, err := client.ListTools(probeCtx)
 	cancel()
@@ -215,6 +231,117 @@ func (h *HealthMonitor) probeOne(ctx context.Context, prefix string) {
 			h.tryRestart(ctx, prefix)
 		}
 	}
+}
+
+// probeOneWithFallback is the dual-endpoint probe path. Every tick:
+//  1. Probe the active endpoint.
+//  2. If active is up, no action — same as the simple path.
+//  3. If active is down, probe the inactive endpoint (recovery opportunity).
+//  4. If inactive is up, switch to it (primary→fallback on primary death;
+//     fallback→primary on primary recovery).
+//  5. If both are down, increment fail count and fire onTierDeath at threshold.
+//
+// The fail-count threshold (maxFailures, default 3) applies only to the
+// both-down case. A single failed active probe doesn't escalate to
+// onTierDeath when fallback absorbs the load — MarkUnavailable is reserved
+// for the genuine "neither endpoint works" state.
+func (h *HealthMonitor) probeOneWithFallback(ctx context.Context, prefix string, client *Client) {
+	active := client.ActiveEndpoint()
+
+	probeCtx, cancel := context.WithTimeout(ctx, h.probeTimeout)
+	activeUp := h.probeEndpointURL(probeCtx, client, active)
+	cancel()
+
+	if activeUp {
+		h.mu.Lock()
+		wasFailing := h.failCounts[prefix] > 0 || h.multi.IsUnavailable(prefix)
+		h.failCounts[prefix] = 0
+		if wasFailing {
+			h.logger.Info("MCP health recovered", zap.String("prefix", prefix))
+			h.multi.MarkAvailable(prefix)
+			_ = h.multi.RefreshTools(ctx)
+		}
+		h.mu.Unlock()
+		return
+	}
+
+	// Active is down. Probe the inactive endpoint for a switch opportunity.
+	inactive := client.PrimaryEndpoint()
+	if active == client.PrimaryEndpoint() {
+		inactive = client.FallbackEndpoint()
+	}
+
+	probeCtx2, cancel2 := context.WithTimeout(ctx, h.probeTimeout)
+	inactiveUp := h.probeEndpointURL(probeCtx2, client, inactive)
+	cancel2()
+
+	if inactiveUp {
+		reason := "primary down"
+		if active == client.FallbackEndpoint() {
+			reason = "primary recovered"
+		}
+		if swErr := client.SwitchEndpoint(inactive, reason); swErr != nil {
+			h.logger.Error("MCP health switch failed",
+				zap.String("prefix", prefix),
+				zap.String("from", active),
+				zap.String("to", inactive),
+				zap.Error(swErr))
+			h.escalateBothDown(ctx, prefix, nil)
+			return
+		}
+		h.mu.Lock()
+		h.failCounts[prefix] = 0
+		h.multi.MarkAvailable(prefix)
+		_ = h.multi.RefreshTools(ctx)
+		h.mu.Unlock()
+		h.logger.Info("MCP health switched endpoint",
+			zap.String("prefix", prefix),
+			zap.String("from", active),
+			zap.String("to", inactive),
+			zap.String("reason", reason))
+		return
+	}
+
+	// Both down — escalate through the failure-counter path.
+	h.escalateBothDown(ctx, prefix, nil)
+}
+
+// escalateBothDown advances the failure counter and, at threshold, fires
+// onTierDeath + tryRestart. Shared between the simple and fallback paths
+// when neither endpoint is reachable. The extra err param is for log context
+// — the active probe's error is meaningful even when both are down.
+func (h *HealthMonitor) escalateBothDown(ctx context.Context, prefix string, _ error) {
+	h.mu.Lock()
+	h.failCounts[prefix]++
+	h.logger.Warn("MCP health probe failed",
+		zap.String("prefix", prefix),
+		zap.Int("consecutive_failures", h.failCounts[prefix]))
+
+	if h.failCounts[prefix] < h.maxFailures {
+		h.mu.Unlock()
+		return
+	}
+
+	h.multi.MarkUnavailable(prefix)
+	if h.onTierDeath != nil {
+		h.logger.Info("MCP health: firing tier-death callback",
+			zap.String("prefix", prefix))
+		h.mu.Unlock()
+		h.onTierDeath(prefix)
+		h.mu.Lock()
+	}
+	h.mu.Unlock()
+	if h.restarter != nil {
+		h.tryRestart(ctx, prefix)
+	}
+}
+
+// probeEndpointURL probes a specific URL via a one-shot client. Returns true
+// if the URL responded to initialize + tools/list without error. Used by the
+// fallback-aware probe path to check both endpoints.
+func (h *HealthMonitor) probeEndpointURL(ctx context.Context, client *Client, url string) bool {
+	_, err := client.ProbeEndpoint(ctx, url)
+	return err == nil
 }
 
 func (h *HealthMonitor) tryRestart(ctx context.Context, prefix string) {

@@ -3,11 +3,26 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"testing"
 	"time"
 
 	"go.uber.org/zap"
 )
+
+// freeTCPPort returns a port that the OS has just released. Used by tests that
+// need a port where nothing is listening — "expected to fail" cases. Hard-coded
+// ports (e.g. 9222) couple the test to whatever Chrome is running on the dev
+// machine that day. Free-port lookup decouples it.
+func freeTCPPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("can't allocate free port: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
 
 // ── parseElements ─────────────────────────────────────────────
 
@@ -141,7 +156,7 @@ func TestSandboxBrowserClientUpdateState(t *testing.T) {
 }
 
 func TestSandboxBrowserClientScreenshotNotConnected(t *testing.T) {
-	client, _ := NewSandboxBrowserClient(9222, "localhost", zap.NewNop())
+	client, _ := NewSandboxBrowserClient(freeTCPPort(t), "localhost", zap.NewNop())
 	ctx := context.Background()
 	_, err := client.Screenshot(ctx)
 	if err == nil {
@@ -150,7 +165,10 @@ func TestSandboxBrowserClientScreenshotNotConnected(t *testing.T) {
 }
 
 func TestSandboxBrowserClientNavigateNotConnected(t *testing.T) {
-	client, _ := NewSandboxBrowserClient(9222, "localhost", zap.NewNop())
+	// Use a port where nothing is listening. Earlier this test hard-coded 9222,
+	// which silently passed on dev machines without Chrome but FAILED on dev
+	// machines that had Chrome on 9222 (the test would actually navigate).
+	client, _ := NewSandboxBrowserClient(freeTCPPort(t), "localhost", zap.NewNop())
 	ctx := context.Background()
 	_, err := client.Navigate(ctx, "http://example.com")
 	if err == nil {
@@ -159,7 +177,7 @@ func TestSandboxBrowserClientNavigateNotConnected(t *testing.T) {
 }
 
 func TestSandboxBrowserClientClickNoElement(t *testing.T) {
-	client, _ := NewSandboxBrowserClient(9222, "localhost", zap.NewNop())
+	client, _ := NewSandboxBrowserClient(freeTCPPort(t), "localhost", zap.NewNop())
 	ctx := context.Background()
 	_, err := client.Click(ctx, 99)
 	if err == nil {
@@ -168,7 +186,7 @@ func TestSandboxBrowserClientClickNoElement(t *testing.T) {
 }
 
 func TestSandboxBrowserClientTypeNoElement(t *testing.T) {
-	client, _ := NewSandboxBrowserClient(9222, "localhost", zap.NewNop())
+	client, _ := NewSandboxBrowserClient(freeTCPPort(t), "localhost", zap.NewNop())
 	ctx := context.Background()
 	_, err := client.Type(ctx, 99, "hello", false)
 	if err == nil {

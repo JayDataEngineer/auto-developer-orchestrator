@@ -4,17 +4,51 @@
 # that server are exposed to the agent as `<prefix>_<tool>`. The capability
 # resolver (Stage 2) reads these prefixes when picking implementations.
 #
-# Per-server env override: MCP_<UPPERCASE_PREFIX>_URL wins over the url below.
+# Per-server env override:
+#   MCP_<UPPERCASE_PREFIX>_URL           — overrides `url` (primary endpoint)
+#   MCP_<UPPERCASE_PREFIX>_FALLBACK_URL  — overrides `fallback_url` (optional)
 # So a developer pointing web-research at a localhost mock just sets
 # MCP_WEB_URL=http://localhost:9000/mcp in their shell — no edit here.
+#
+# FALLBACK URLS (runtime failover)
+#   When `fallback_url` is set on a server, the MCP client transparently
+#   switches to it on transport-level failures (connection refused, context
+#   deadline, HTTP 5xx). The HealthMonitor probes both endpoints every 60s:
+#     - Active up                       → no action
+#     - Active down, inactive up        → switch to inactive (with reason)
+#     - Both down for 3 consecutive     → MarkUnavailable + tier-death callback
+#   Tool discovery takes the INTERSECTION of primary and fallback tool lists
+#   at boot — the agent only sees tools served by BOTH endpoints, so a switch
+#   never strands a tool call. When only one endpoint is up at boot, that
+#   endpoint's tool list is advertised as-is (degraded but functional).
+#
+#   Transport errors trigger fallback; tool errors do NOT. A valid JSON-RPC
+#   error envelope (e.g. "rate limited by upstream", "image not found") is
+#   treated as a healthy server returning a tool-level result — switching
+#   would mask real bugs and could cascade to a fallback without the tool.
+#
+#   Empty `fallback_url` (default) preserves today's behavior — no fallback,
+#   no failover. Existing deployments need no config change.
+#
+# OPERATOR-ONLY
+#   Both `url` and `fallback_url` are operator config. Do NOT expose them via
+#   ~/.pi/agent/settings.json — the file is trusted operator config, not user
+#   input, and an attacker-controlled URL is an SSRF vector.
+#
+# The defaults below assume MCP servers run on localhost. Override via the
+# env vars above when pointing at a remote cluster, tailnet node, or shared
+# deployment. Keep your actual endpoints in your shell env (~/.bashrc,
+# ~/.zshrc) or your systemd unit — never in this file.
 #
 # To add a new cloud MCP: append an entry, restart the kernel, done.
 servers:
   - prefix: web
-    url: https://cloud.tailb1e597.ts.net:10000/research/mcp
+    url: http://localhost:8327/mcp
+    # fallback_url: ""  # set MCP_WEB_FALLBACK_URL or uncomment to enable
   - prefix: media
-    url: https://cloud.tailb1e597.ts.net:10000/media/mcp
+    url: http://localhost:8101
+    # fallback_url: ""  # set MCP_MEDIA_FALLBACK_URL or uncomment to enable
   - prefix: meta
-    url: https://cloud.tailb1e597.ts.net:10000/meta/mcp
+    url: http://localhost:8200/mcp
   - prefix: equibles
-    url: https://cloud.tailb1e597.ts.net:10000/equibles/mcp
+    url: http://localhost:8300/mcp

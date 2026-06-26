@@ -376,7 +376,8 @@ func (a *App) initMCP() {
 	mcpMulti := mcp.NewMultiClient(a.logger)
 
 	// Cloud MCP servers come from config/mcp_servers.yaml. Each row is env-var
-	// overridable via MCP_<PREFIX>_URL so swaps don't need a re-render.
+	// overridable via MCP_<PREFIX>_URL so swaps don't need a re-render. Fallback
+	// URLs are also env-var overridable via MCP_<PREFIX>_FALLBACK_URL.
 	var webResearchClient *mcp.Client
 	configDir := common.FindKernelConfigDir()
 	for _, decl := range common.LoadMCPServers(configDir) {
@@ -384,7 +385,24 @@ func (a *App) initMCP() {
 		if url == "" {
 			url = decl.URL
 		}
-		client := mcp.NewClient(decl.Prefix, url, a.logger)
+		fallback := common.MCPServerFallbackURLOverride(decl.Prefix)
+		if fallback == "" {
+			fallback = decl.FallbackURL
+		}
+		client := mcp.NewClientWithFallback(decl.Prefix, url, fallback, a.logger)
+		if fallback != "" {
+			// Switch callback: log + (future) broadcast as mcp_endpoint_changed
+			// SSE event. Real-time broadcast to all active subscribers requires
+			// a global event bus — not yet wired. The /api/mcp/servers endpoint
+			// exposes ActiveEndpoint so polling clients can observe switches.
+			client.SetSwitchCallback(func(from, to, reason string) {
+				a.logger.Info("MCP endpoint switched",
+					zap.String("prefix", decl.Prefix),
+					zap.String("from", from),
+					zap.String("to", to),
+					zap.String("reason", reason))
+			})
+		}
 		if decl.Prefix == "web" {
 			webResearchClient = client
 		}

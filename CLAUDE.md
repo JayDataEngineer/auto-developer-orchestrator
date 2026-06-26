@@ -264,6 +264,48 @@ This is the substrate for the DeepSeek V4 Flash "command-and-control" architectu
 | `sandbox/scripts/scripts.py` | Pure-Python CLI backing impl (make/run/list/edit/show/rm). JSON output. |
 | `backend/internal/tools/scripting/scripting.go` | Go tool wrappers (5 structs + `AllTools()`). Subprocess to scripts.py. |
 
+#### Two-Tier Python System (separation is the contract)
+
+There are TWO Python script systems in flight. They MUST stay cleanly separated — the separation is the contract, not the language.
+
+**System A — human-shipped backbone (git-tracked, read-only in container)**
+- Source: `orgs/<org>/sandbox/*.py`, `orgs/_shared/sandbox/*.py`, `sandbox/scripts/*.py`
+- Declared via `[sandbox].init_files` in `org.toml`, rendered into `pux.yaml` by `task org-build`
+- Reach the container at `/sandbox/<name>.py` and **chmod 0444** (read-only)
+- Examples: `telegram_parser.py`, `audio_client.py`, `face_client.py`, `surreal_client.py`, `paths.py`, `scripts.py` itself
+- Agent can invoke (`python3 /sandbox/<name>.py ...`) but cannot mutate (`sed -i`, `tee`, `edit_script` all fail on 0444)
+
+**System B — agent-authored scratch (NOT git-tracked, fully mutable)**
+- Source: agent writes via `make_script` / `edit_script`
+- Lives at `/sandbox/workspace/scripts/<name>.py` (project-scoped, survives sandbox restarts, NOT in git)
+- Backed by `sandbox/scripts/scripts.py` (which is itself System A)
+- `scripts.py` refuses to operate anywhere except `SCRIPTS_DIR = Path(os.environ.get("PUX_SCRIPTS_DIR", "/sandbox/workspace/scripts"))` — don't widen the scope
+
+**The chmod 0444 step** runs in `backend/internal/handlers/projects.go::runInit` after every init_files copy. Don't remove it. It prevents accidental edits (the agent running `sed -i` over a backbone script and breaking the org's pipeline). It does NOT prevent determined evasion (cp + edit + run); if a stronger guarantee is needed, run the agent as a non-root user with /sandbox/* owned by root.
+
+**When to use which tier:**
+- New canonical pipeline, format parser, API client → System A (add to `init_files`, ship via PR)
+- One-off helper, format-specific glue the agent dreams up → System B (`make_script`)
+- Capability that needs to evolve per-session without redeploy → System B + a SKILL.md teaching the agent how to call it
+
+### Three Tool Tiers — full contract
+
+The two Python tiers above (System A + System B) plus the Go tier form
+three tool tiers with distinct contracts. The canonical doc lives at
+[`backend/internal/tools/README.md`](backend/internal/tools/README.md) —
+read it before adding a tool to any tier. Quick reference:
+
+| Tier | Where | Contract enforced by |
+|------|-------|----------------------|
+| 1. Go tools | `backend/internal/tools/<pkg>/` | `tool_audit_test.go` — AllTools(), QuarantineResult wrap, schema validity |
+| 2. System A Python | `orgs/<org>/sandbox/`, `orgs/_shared/`, `sandbox/scripts/` | `scripts/test_system_a_contract.py` — argparse, JSON, paths.py/env-var |
+| 3. System B Python | `/sandbox/workspace/scripts/` (agent-authored) | `scope_lock_test.go` — three-layer scope lock (regex + symlink refusal + realpath containment) |
+
+**Adding a new tool?** Default to "ship a Python helper in System A +
+SKILL.md" — reserve Go tools for things that genuinely need to integrate
+with the agent loop (tool registry, hooks, SSE events). Full decision
+matrix + worked examples in `backend/internal/tools/README.md`.
+
 ### Browser Backend (SeleniumBase default)
 
 The agent drives Chrome via **SeleniumBase** by default (sb_server.py inside
@@ -383,40 +425,55 @@ Double-Escape when the agent is idle opens the rewind overlay. Shows a list of p
 - **Files**: `backend/internal/handlers/pux_rewind.go`, `frontend/tui/src/components/rewind-overlay.tsx`
 - **Not yet**: file checkpointing ("Restore code"), "Summarize from here"
 
-## Remote LLM Access (Tech Noir Ray Cluster — Tailscale)
+## Remote LLM Access (bring-your-own cluster)
 
-The cluster runs an LLM gateway behind Traefik on Tailscale node `100.86.69.57`.
-Auto-loads the default model on first `/v1/chat/completions` request.
+The kernel talks to any OpenAI-compatible endpoint. A common pattern is to run
+an LLM gateway (e.g. llama-server behind Traefik) on a separate machine and
+point Pux at it via a provider in `~/.pi/agent/settings.json`. Configure the
+base URL, API key (if any), and model IDs there — the model picker in the TUI
+or web UI handles it without code edits.
 
-| Detail | Value |
-|--------|-------|
-| Cluster node | `100.86.69.57` (Tailscale) |
-| Traefik NodePort | `30080` (web :80 → NodePort 30080) |
-| Default model | `qwen3.6-27b-q5_k_s-32k` (BeeLlama.cpp with speculative decoding) |
+The cluster's gateway auto-loads the default model on first
+`/v1/chat/completions` request when using the `/llm/*` raw passthrough, but
+direct OpenAI-compatible calls (`/v1/chat/completions`) work without that
+warm-up if the gateway already has a model loaded.
 
-**Endpoints** (from any machine on the Tailscale network):
+If your gateway requires an API key, set it in the provider config — the
+kernel passes it through as `Authorization: Bearer <key>` on every request.
 
-| Method | Endpoint | What it does |
-|--------|----------|-------------|
-| POST | `/v1/llm/configure` | Select model & engine |
-| POST | `/v1/chat/completions` | OpenAI-compatible chat (auto-loads default) |
-| GET | `/v1/models` | List available models |
-| * | `/llm/*` | Raw passthrough to llama-server HTTP API |
+## MCP Servers (from scratch)
 
-**Quick start:**
-```bash
-# 1. Configure a model (first time)
-curl -X POST http://100.86.69.57:30080/v1/llm/configure \
-  -H "Content-Type: application/json" \
-  -d '{"model": "qwen3.6-27b-q5_k_s-32k"}'
+The kernel expects two MCP servers wired in `config/mcp_servers.yaml`:
+`web` (research/scrape) and `media` (vision/audio). The canonical setup runs
+them on a host or tailnet node; the URLs go in your shell env so the config
+file stays generic.
 
-# 2. Chat
-curl http://100.86.69.57:30080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "qwen3.6-27b-q5_k_s-32k", "messages": [{"role": "user", "content": "Hello!"}]}'
-```
+If you're setting up from scratch — no cluster access, no hosted versions —
+clone and run these:
 
-If `config/local.yaml` has `secrets.api_key` set, include it: `-H "x-api-key: your-key"` or `?api_key=your-key`.
+- **research-mcp** — https://github.com/JayDataEngineer/research-mcp
+- **media-mcp** — https://github.com/JayDataEngineer/media-mcp
+
+Both ship as `docker-compose up` IaC. Set `MCP_WEB_URL` / `MCP_MEDIA_URL` to
+point at your instance. Optionally set `MCP_WEB_FALLBACK_URL` /
+`MCP_MEDIA_FALLBACK_URL` if you want runtime failover between two deployments
+(e.g. primary on tailnet + fallback on localhost for offline dev).
+
+**How fallback works:** the HealthMonitor probes both endpoints every 60s.
+When the active endpoint fails 3 consecutive probes, the monitor switches to
+the inactive one (emits `mcp_endpoint_changed` SSE event + logs). When the
+original recovers, it switches back. Tool discovery takes the INTERSECTION of
+primary + fallback tool lists at boot — agents never see a tool the active
+endpoint can't serve.
+
+**Transport errors trigger fallback; tool errors do NOT.** A valid JSON-RPC
+error envelope (rate-limited, image not found, etc.) is a healthy server
+returning a tool-level result. Switching would mask real bugs and could
+cascade to a fallback without the tool.
+
+**Observability:** `GET /api/mcp/servers` returns `activeEndpoint` /
+`primaryEndpoint` / `fallbackEndpoint` per prefix so the UI can show which
+URL is live. The `mcp_endpoint_changed` SSE event fires on every switch.
 
 ## TUI Visual Testing
 

@@ -9,9 +9,22 @@ import (
 )
 
 // MCPServerDecl is one row in config/mcp_servers.yaml.
+//
+// URL is the primary endpoint. FallbackURL is optional — when set, the MCP
+// client transparently switches to it on transport-level failures (connection
+// refused, context deadline, HTTP 5xx) and switches back when primary recovers.
+// Tool discovery takes the INTERSECTION of primary and fallback tool lists so
+// the agent never calls a tool the active endpoint can't serve. Empty
+// FallbackURL preserves today's behavior (no fallback).
+//
+// Both URLs are operator-only config — do not expose via user settings.json
+// (SSRF defense). Operators override either via MCP_<PREFIX>_URL or
+// MCP_<PREFIX>_FALLBACK_URL env vars; see MCPServerURLOverride and
+// MCPServerFallbackURLOverride.
 type MCPServerDecl struct {
-	Prefix string `yaml:"prefix"`
-	URL    string `yaml:"url"`
+	Prefix      string `yaml:"prefix"`
+	URL         string `yaml:"url"`
+	FallbackURL string `yaml:"fallback_url"`
 }
 
 type mcpServersFile struct {
@@ -52,4 +65,13 @@ func LoadMCPServers(configDir string) []MCPServerDecl {
 // MCP_<PREFIX>_URL pattern that lived in app.go before this loader existed.
 func MCPServerURLOverride(prefix string) string {
 	return strings.TrimSpace(os.Getenv("MCP_" + strings.ToUpper(prefix) + "_URL"))
+}
+
+// MCPServerFallbackURLOverride returns the env-var override for the fallback
+// endpoint of a prefix, if set. Empty means "no override — use the declared
+// FallbackURL (which may itself be empty, meaning no fallback configured)."
+// Mirrors MCPServerURLOverride so operators can A/B test fallbacks without
+// re-rendering the YAML.
+func MCPServerFallbackURLOverride(prefix string) string {
+	return strings.TrimSpace(os.Getenv("MCP_" + strings.ToUpper(prefix) + "_FALLBACK_URL"))
 }

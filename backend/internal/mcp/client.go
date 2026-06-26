@@ -18,35 +18,143 @@ import (
 )
 
 // Client is an HTTP client for the MCP research server.
+//
+// A client has a primary endpoint and an optional fallback endpoint. When
+// fallback is configured (non-empty), the HealthMonitor or explicit
+// SwitchEndpoint call can swap which URL is active in response to transport-
+// level failures. The active endpoint is read on every request via the mu
+// RWMutex — a switch is atomic from the caller's perspective.
+//
+// Tool discovery at boot snapshots both primaryTools and fallbackTools; the
+// MultiClient advertises the INTERSECTION so the agent never calls a tool the
+// active endpoint can't serve. The intersection is stable for the process
+// lifetime — RefreshTools recomputes it only when explicitly asked.
 type Client struct {
-	endpoint     string
-	prefix       string // server prefix for tool routing and instructions
-	httpClient   *http.Client
-	logger       *zap.Logger
-	sessionID    string        // Mcp-Session-Id from initialize response
-	instructions string        // instructions text from initialize response
-	sem          chan struct{} // concurrency limiter — 2 concurrent requests max
+	prefix     string
+	httpClient *http.Client
+	logger     *zap.Logger
+	sem        chan struct{}
+
+	// Immutable after construction.
+	primaryEndpoint  string
+	fallbackEndpoint string
+
+	// mu guards the active routing state. SwitchEndpoint takes write to flip
+	// endpoint + clear sessionID together; doRequest takes read to snapshot
+	// both at request-build time. Critical sections are tiny — the HTTP
+	// round-trip happens outside the lock.
+	mu           sync.RWMutex
+	endpoint     string // current active endpoint (primary or fallback)
+	sessionID    string // Mcp-Session-Id for the active endpoint
+	instructions string // instructions text from initialize response
+
+	// primaryTools / fallbackTools are populated at boot by InitializeAll.
+	// Both stay nil when the endpoint wasn't probed. MultiClient intersects
+	// them to decide which tools to advertise.
+	primaryTools  []MCPTool
+	fallbackTools []MCPTool
+
+	// onSwitch fires on every endpoint change (primary→fallback or
+	// fallback→primary). Wired by app.go to emit the mcp_endpoint_changed
+	// SSE event. Nil when no SSE bus is wired (e.g. in unit tests).
+	onSwitch func(from, to, reason string)
 }
 
-// NewClient creates a new MCP client. The endpoint should be the MCP server URL.
-// The prefix identifies this server for tool routing and instruction registration.
-// If endpoint is empty, it falls back to the MCP_RESEARCH_ENDPOINT env var.
+// NewClient creates a new MCP client without a fallback endpoint. Preserves
+// the original signature for callers that don't need fallback. Equivalent to
+// NewClientWithFallback(prefix, endpoint, "", logger).
 func NewClient(prefix, endpoint string, logger *zap.Logger) *Client {
-	if endpoint == "" {
-		endpoint = os.Getenv("MCP_RESEARCH_ENDPOINT")
+	return NewClientWithFallback(prefix, endpoint, "", logger)
+}
+
+// NewClientWithFallback creates a client with a primary endpoint and an
+// optional fallback endpoint. Empty fallback means no fallback configured
+// (behavior identical to NewClient). The prefix identifies this server for
+// tool routing and instruction registration. If primary is empty, it falls
+// back to the MCP_RESEARCH_ENDPOINT env var.
+func NewClientWithFallback(prefix, primary, fallback string, logger *zap.Logger) *Client {
+	if primary == "" {
+		primary = os.Getenv("MCP_RESEARCH_ENDPOINT")
 	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &Client{
-		prefix:   prefix,
-		endpoint: endpoint,
+		prefix:           prefix,
+		primaryEndpoint:  primary,
+		fallbackEndpoint: fallback,
+		endpoint:         primary,
 		httpClient: &http.Client{
 			Timeout: 300 * time.Second, // MCP tools can be slow (AI vision models, search, scrape)
 		},
 		logger: logger,
 		sem:    make(chan struct{}, 2), // max 2 concurrent MCP requests
 	}
+}
+
+// SetSwitchCallback registers a callback fired on every endpoint change.
+// app.go wires this to emit the mcp_endpoint_changed SSE event. The callback
+// receives (fromURL, toURL, reason). Calling this with nil disables the
+// callback (used in tests). Must be called before Initialize — the callback
+// fires during the boot switch decision if both endpoints need probing.
+func (c *Client) SetSwitchCallback(fn func(from, to, reason string)) {
+	c.mu.Lock()
+	c.onSwitch = fn
+	c.mu.Unlock()
+}
+
+// SwitchEndpoint atomically swaps which endpoint is active. Clears sessionID
+// because the new endpoint has its own session — the next CallTool auto-
+// initializes via Initialize. Fires the onSwitch callback (if wired) AFTER
+// the swap so recipients observe the new state. Returns an error if target
+// matches neither primary nor fallback (defensive — caller bug otherwise).
+func (c *Client) SwitchEndpoint(target, reason string) error {
+	if target != c.primaryEndpoint && target != c.fallbackEndpoint {
+		return fmt.Errorf("SwitchEndpoint: %q is neither primary (%q) nor fallback (%q)",
+			target, c.primaryEndpoint, c.fallbackEndpoint)
+	}
+	c.mu.Lock()
+	old := c.endpoint
+	if old == target {
+		c.mu.Unlock()
+		return nil // already there — no-op, no callback
+	}
+	c.endpoint = target
+	c.sessionID = ""
+	cb := c.onSwitch
+	c.mu.Unlock()
+	if cb != nil {
+		cb(old, target, reason)
+	}
+	c.logger.Info("MCP endpoint switched",
+		zap.String("prefix", c.prefix),
+		zap.String("from", old),
+		zap.String("to", target),
+		zap.String("reason", reason))
+	return nil
+}
+
+// PrimaryEndpoint returns the declared primary URL. Immutable after construction.
+func (c *Client) PrimaryEndpoint() string {
+	return c.primaryEndpoint
+}
+
+// FallbackEndpoint returns the declared fallback URL, or empty when no
+// fallback is configured.
+func (c *Client) FallbackEndpoint() string {
+	return c.fallbackEndpoint
+}
+
+// HasFallback reports whether a fallback endpoint is configured.
+func (c *Client) HasFallback() bool {
+	return c.fallbackEndpoint != ""
+}
+
+// ActiveEndpoint returns the URL currently in use (primary or fallback).
+func (c *Client) ActiveEndpoint() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.endpoint
 }
 
 // jsonRPCRequest is a JSON-RPC 2.0 request.
@@ -91,9 +199,14 @@ func (c *Client) Initialize(ctx context.Context) error {
 		return fmt.Errorf("MCP initialize failed: %w", err)
 	}
 
-	// Capture session ID from response headers for subsequent requests
+	// Capture session ID from response headers for subsequent requests.
+	// Held under the write lock because doRequest reads it under read lock
+	// and SwitchEndpoint clears it — without coordination, a switch mid-init
+	// could let a stale primary session slip onto a fallback request.
 	if sid := headers.Get("Mcp-Session-Id"); sid != "" {
+		c.mu.Lock()
 		c.sessionID = sid
+		c.mu.Unlock()
 	}
 
 	// Parse instructions from the initialize response
@@ -112,7 +225,9 @@ func (c *Client) Initialize(ctx context.Context) error {
 		}
 	}
 	if initResult.Instructions != "" {
+		c.mu.Lock()
 		c.instructions = initResult.Instructions
+		c.mu.Unlock()
 		c.logger.Debug("MCP server instructions captured",
 			zap.String("prefix", c.prefix),
 			zap.Int("length", len(initResult.Instructions)),
@@ -127,10 +242,18 @@ func (c *Client) Initialize(ctx context.Context) error {
 	_, _, _ = c.doRequest(ctx, notif)
 
 	c.logger.Debug("MCP initialize response",
-		zap.String("sessionId", c.sessionID),
+		zap.String("sessionId", sidLocked(c)),
 		zap.String("body", string(respBody)),
 	)
 	return nil
+}
+
+// sidLocked is a tiny helper that reads sessionID under the RLock for log
+// formatting. Kept separate so the deferred Unlock can't be forgotten.
+func sidLocked(c *Client) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sessionID
 }
 
 // CallTool calls an MCP tool by name with the given arguments.
@@ -231,11 +354,17 @@ func (c *Client) ProcessHTML(ctx context.Context, html string) (string, error) {
 }
 
 // IsAvailable returns true if the MCP server is reachable.
-// Fast-path: if a session is already established, return true without
-// re-initializing. This avoids competing for the semaphore with active
-// worker tool calls and prevents overwriting a valid session ID.
+// Fast-path: if a session is already established against the active endpoint,
+// return true without re-initializing. This avoids competing for the semaphore
+// with active worker tool calls and prevents overwriting a valid session ID.
+//
+// After SwitchEndpoint clears sessionID, this starts probing again — that's
+// correct, not a bug: the new endpoint hasn't been initialized yet.
 func (c *Client) IsAvailable() bool {
-	if c.sessionID != "" {
+	c.mu.RLock()
+	sid := c.sessionID
+	c.mu.RUnlock()
+	if sid != "" {
 		return true
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -284,6 +413,97 @@ func (c *Client) ListTools(ctx context.Context) ([]MCPTool, error) {
 	return result.Tools, nil
 }
 
+// PrimaryTools returns the tool list snapshot taken from the primary endpoint
+// at boot. Nil if DiscoverBothEndpoints hasn't been called or primary wasn't
+// reachable. Used by MultiClient to compute the intersection advertised to
+// the agent.
+func (c *Client) PrimaryTools() []MCPTool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.primaryTools
+}
+
+// FallbackTools returns the tool list snapshot taken from the fallback
+// endpoint at boot. Nil if no fallback is configured or DiscoverBothEndpoints
+// wasn't called. Empty (non-nil) slice means the fallback was reached and
+// returned zero tools.
+func (c *Client) FallbackTools() []MCPTool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.fallbackTools
+}
+
+// SetPrimaryTools records the tool list for the primary endpoint. Called by
+// MultiClient.InitializeAll after a successful ListTools against primary.
+// Exposed so tests can seed state without spinning up a real server.
+func (c *Client) SetPrimaryTools(tools []MCPTool) {
+	c.mu.Lock()
+	c.primaryTools = tools
+	c.mu.Unlock()
+}
+
+// SetFallbackTools records the tool list for the fallback endpoint. Called by
+// MultiClient.InitializeAll after probing fallback at boot.
+func (c *Client) SetFallbackTools(tools []MCPTool) {
+	c.mu.Lock()
+	c.fallbackTools = tools
+	c.mu.Unlock()
+}
+
+// IntersectionTools returns tools present on BOTH primary and fallback.
+// If fallback is not configured, returns primaryTools (preserves today's
+// behavior — no fallback means no intersection constraint). If primary is
+// nil, returns nil. Used by MultiClient to decide what to advertise.
+func (c *Client) IntersectionTools() []MCPTool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return intersectionLocked(c.primaryTools, c.fallbackTools)
+}
+
+// ProbeEndpoint lists tools at the given URL without touching the receiver's
+// active state. Used by MultiClient at boot to discover the fallback tool
+// list so the intersection can be computed. Returns the discovered tool list
+// and an error if the URL was unreachable or the handshake failed.
+func (c *Client) ProbeEndpoint(ctx context.Context, url string) ([]MCPTool, error) {
+	if url == "" {
+		return nil, fmt.Errorf("ProbeEndpoint: empty url")
+	}
+	probe := NewClient(c.prefix, url, c.logger)
+	if err := probe.Initialize(ctx); err != nil {
+		return nil, err
+	}
+	return probe.ListTools(ctx)
+}
+
+// intersectionLocked computes the intersection of two tool lists by name.
+// Pure function so it can be reused by tests without a Client. Caller is
+// responsible for any lock acquisition.
+func intersectionLocked(primary, fallback []MCPTool) []MCPTool {
+	if len(primary) == 0 {
+		return nil
+	}
+	if len(fallback) == 0 {
+		// Empty fallback slice with fallback configured → strict intersection
+		// is empty. We can't tell that case from "no fallback configured" here
+		// — the caller (IntersectionTools on Client) handles that distinction
+		// by only routing here when needed. As a library function we return
+		// primary to preserve the "no constraint" semantic when fallback is
+		// empty/nil.
+		return primary
+	}
+	seen := make(map[string]bool, len(fallback))
+	for _, t := range fallback {
+		seen[t.Name] = true
+	}
+	out := make([]MCPTool, 0, len(primary))
+	for _, t := range primary {
+		if seen[t.Name] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // truncateString truncates a string to maxLen for debug logging.
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
@@ -292,13 +512,17 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "...(truncated)"
 }
 
-// Endpoint returns the MCP server endpoint URL.
+// Endpoint returns the active MCP server endpoint URL. Alias for
+// ActiveEndpoint(); preserved for backward compatibility with callers that
+// predate fallback support.
 func (c *Client) Endpoint() string {
-	return c.endpoint
+	return c.ActiveEndpoint()
 }
 
 // Instructions returns the instructions text from the MCP server's initialize response.
 func (c *Client) Instructions() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.instructions
 }
 
@@ -310,6 +534,12 @@ func (c *Client) Prefix() string {
 // doRequest sends a JSON-RPC request and returns the response body and headers.
 // Handles both plain JSON and SSE (text/event-stream) responses from the MCP server.
 // Uses a semaphore to limit concurrent requests (max 2) to avoid overwhelming the server.
+//
+// The active endpoint + session ID are snapshotted under the read lock at the
+// top; the HTTP round-trip happens outside the lock so a SwitchEndpoint can
+// fire mid-request without deadlock. The snapshot means an in-flight request
+// always finishes against the endpoint it started with — the next call sees
+// the new endpoint.
 func (c *Client) doRequest(ctx context.Context, req jsonRPCRequest) ([]byte, http.Header, error) {
 	// Acquire semaphore slot (or respect context cancellation)
 	select {
@@ -324,7 +554,12 @@ func (c *Client) doRequest(ctx context.Context, req jsonRPCRequest) ([]byte, htt
 		return nil, nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.endpoint, bytes.NewReader(body))
+	c.mu.RLock()
+	endpoint := c.endpoint
+	sid := c.sessionID
+	c.mu.RUnlock()
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -332,8 +567,8 @@ func (c *Client) doRequest(ctx context.Context, req jsonRPCRequest) ([]byte, htt
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 
 	// Attach session ID if we have one
-	if c.sessionID != "" {
-		httpReq.Header.Set("Mcp-Session-Id", c.sessionID)
+	if sid != "" {
+		httpReq.Header.Set("Mcp-Session-Id", sid)
 	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -347,7 +582,10 @@ func (c *Client) doRequest(ctx context.Context, req jsonRPCRequest) ([]byte, htt
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, resp.Header, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody[:min(len(respBody), 200)]))
+		// Wrap with the endpoint so callers can see which URL returned the
+		// error — load-bearing for SwitchEndpoint decisions post-failure.
+		return nil, resp.Header, fmt.Errorf("HTTP %d from %s: %s",
+			resp.StatusCode, endpoint, string(respBody[:min(len(respBody), 200)]))
 	}
 
 	// If the response is SSE (text/event-stream), extract the data payload
@@ -506,26 +744,26 @@ func (m *MultiClient) RemoveClient(prefix string) {
 // InitializeAll initializes all registered MCP servers and discovers their tools.
 // Populates both toolMap (tool → prefix routing) and cachedTools (full tool list).
 // Also captures server instructions and registers them with the prompt builder.
+//
+// When a client has a fallback endpoint configured:
+//  1. Primary is probed first. If primary succeeds, fallback is probed in a
+//     one-shot ProbeEndpoint (no state pollution — uses a throwaway client).
+//  2. If primary is unreachable but fallback is reachable, the client is
+//     switched to fallback (activeEndpoint = fallback) so subsequent calls
+//     route correctly.
+//  3. Tools advertised are the INTERSECTION of primary and fallback tools
+//     when both are reachable. When only one is reachable, that one's tools
+//     are advertised as-is (degraded but functional).
+//  4. When both are unreachable, the prefix is skipped (existing behavior).
 func (m *MultiClient) InitializeAll(ctx context.Context) error {
 	m.cachedTools = nil
 	seen := make(map[string]bool)
 	for prefix, client := range m.clients {
-		if err := client.Initialize(ctx); err != nil {
-			m.logger.Warn("MCP server initialize failed", zap.String("prefix", prefix), zap.Error(err))
-			continue
-		}
-
-		// Register instructions with the prompt builder
-		if client.Instructions() != "" {
-			registerInstructions(prefix, client.Instructions())
-		}
-
-		tools, err := client.ListTools(ctx)
+		advertised, err := m.bootOneClient(ctx, prefix, client)
 		if err != nil {
-			m.logger.Warn("MCP tools/list failed", zap.String("prefix", prefix), zap.Error(err))
 			continue
 		}
-		for _, t := range tools {
+		for _, t := range advertised {
 			if seen[t.Name] {
 				continue
 			}
@@ -533,9 +771,113 @@ func (m *MultiClient) InitializeAll(ctx context.Context) error {
 			m.toolMap[t.Name] = prefix
 			m.cachedTools = append(m.cachedTools, t)
 		}
-		m.logger.Info("MCP server initialized", zap.String("prefix", prefix), zap.Int("tools", len(tools)))
 	}
 	return nil
+}
+
+// bootOneClient initializes a single client at boot, handling fallback
+// discovery and intersection. Returns the tool list to advertise. Returns an
+// error only when neither primary nor fallback is reachable.
+func (m *MultiClient) bootOneClient(ctx context.Context, prefix string, client *Client) ([]MCPTool, error) {
+	primaryErr := client.Initialize(ctx)
+	if primaryErr != nil {
+		m.logger.Warn("MCP server initialize failed",
+			zap.String("prefix", prefix), zap.Error(primaryErr))
+	}
+
+	// Capture primary tools if initialize succeeded.
+	var primaryTools []MCPTool
+	if primaryErr == nil {
+		// Register instructions with the prompt builder.
+		if client.Instructions() != "" {
+			registerInstructions(prefix, client.Instructions())
+		}
+		tools, err := client.ListTools(ctx)
+		if err != nil {
+			m.logger.Warn("MCP tools/list failed",
+				zap.String("prefix", prefix), zap.Error(err))
+			primaryErr = err // treat as primary-unreachable for fallback decision
+		} else {
+			primaryTools = tools
+			client.SetPrimaryTools(tools)
+		}
+	}
+
+	// Discover fallback tools (if configured) via one-shot probe. Doesn't
+	// touch the active endpoint state.
+	var fallbackTools []MCPTool
+	if client.HasFallback() {
+		ft, ferr := client.ProbeEndpoint(ctx, client.FallbackEndpoint())
+		if ferr != nil {
+			m.logger.Warn("MCP fallback probe failed",
+				zap.String("prefix", prefix),
+				zap.String("fallback", client.FallbackEndpoint()),
+				zap.Error(ferr))
+		} else {
+			fallbackTools = ft
+			client.SetFallbackTools(ft)
+		}
+	}
+
+	// Decide what to advertise + whether to switch to fallback.
+	switch {
+	case primaryErr == nil && len(fallbackTools) > 0:
+		// Both reachable — advertise intersection, primary stays active.
+		intersected := intersectionLocked(primaryTools, fallbackTools)
+		m.logger.Info("MCP server initialized with fallback",
+			zap.String("prefix", prefix),
+			zap.Int("primary_tools", len(primaryTools)),
+			zap.Int("fallback_tools", len(fallbackTools)),
+			zap.Int("advertised", len(intersected)))
+		return intersected, nil
+
+	case primaryErr == nil && !client.HasFallback():
+		// No fallback configured — advertise primary tools. This is the
+		// today's-behavior path; preserving it explicitly so the switch
+		// statement is exhaustive.
+		m.logger.Info("MCP server initialized (no fallback)",
+			zap.String("prefix", prefix),
+			zap.Int("tools", len(primaryTools)))
+		return primaryTools, nil
+
+	case primaryErr == nil && client.HasFallback() && len(fallbackTools) == 0:
+		// Primary up, fallback configured but unreachable. Advertise primary
+		// tools; runtime fallback path is dead but the primary still serves.
+		m.logger.Warn("MCP server: primary up, fallback unreachable — advertising primary tools",
+			zap.String("prefix", prefix))
+		return primaryTools, nil
+
+	case primaryErr != nil && len(fallbackTools) > 0:
+		// Primary down, fallback up. Switch to fallback, advertise its tools.
+		if swErr := client.SwitchEndpoint(client.FallbackEndpoint(), "primary unreachable at boot"); swErr != nil {
+			m.logger.Error("MCP boot switch to fallback failed",
+				zap.String("prefix", prefix), zap.Error(swErr))
+			return nil, swErr
+		}
+		if initErr := client.Initialize(ctx); initErr != nil {
+			m.logger.Error("MCP boot re-init on fallback failed",
+				zap.String("prefix", prefix), zap.Error(initErr))
+			return nil, initErr
+		}
+		if client.Instructions() != "" {
+			registerInstructions(prefix, client.Instructions())
+		}
+		m.logger.Info("MCP server initialized on fallback (primary unreachable)",
+			zap.String("prefix", prefix),
+			zap.Int("fallback_tools", len(fallbackTools)))
+		return fallbackTools, nil
+
+	default:
+		// Both unreachable OR primary down with no fallback configured.
+		// Caller skips this prefix.
+		if client.HasFallback() {
+			m.logger.Error("MCP server unreachable on both primary and fallback at boot",
+				zap.String("prefix", prefix),
+				zap.String("primary", client.PrimaryEndpoint()),
+				zap.String("fallback", client.FallbackEndpoint()))
+		}
+		return nil, fmt.Errorf("both endpoints unreachable")
+	}
 }
 
 // AllTools returns all tools from all registered servers, with their original names.
@@ -661,11 +1003,14 @@ func (m *MultiClient) PrimaryClient() *Client {
 
 // MCPServerInfo describes a registered MCP server for the management UI.
 type MCPServerInfo struct {
-	Prefix    string   `json:"prefix"`
-	Endpoint  string   `json:"endpoint"`
-	Available bool     `json:"available"`
-	ToolCount int      `json:"toolCount"`
-	Tools     []string `json:"tools"`
+	Prefix           string   `json:"prefix"`
+	Endpoint         string   `json:"endpoint"`          // active endpoint (legacy field)
+	ActiveEndpoint   string   `json:"activeEndpoint"`    // currently in use
+	PrimaryEndpoint  string   `json:"primaryEndpoint"`   // declared primary
+	FallbackEndpoint string   `json:"fallbackEndpoint"`  // declared fallback (empty = none)
+	Available        bool     `json:"available"`
+	ToolCount        int      `json:"toolCount"`
+	Tools            []string `json:"tools"`
 }
 
 // ServersInfo returns metadata about all registered MCP servers.
@@ -673,10 +1018,13 @@ func (m *MultiClient) ServersInfo() []MCPServerInfo {
 	var servers []MCPServerInfo
 	for prefix, client := range m.clients {
 		info := MCPServerInfo{
-			Prefix:    prefix,
-			Endpoint:  client.Endpoint(),
-			Available: client.IsAvailable(),
-			Tools:     m.ServerToolNames(prefix),
+			Prefix:           prefix,
+			Endpoint:         client.ActiveEndpoint(),
+			ActiveEndpoint:   client.ActiveEndpoint(),
+			PrimaryEndpoint:  client.PrimaryEndpoint(),
+			FallbackEndpoint: client.FallbackEndpoint(),
+			Available:        client.IsAvailable(),
+			Tools:            m.ServerToolNames(prefix),
 		}
 		info.ToolCount = len(info.Tools)
 		servers = append(servers, info)

@@ -113,4 +113,5 @@ const (
 	EventTypeResourceConflict  = core.EventTypeResourceConflict
 	EventTypeAgentMessage      = core.EventTypeAgentMessage
 	EventTypeAgentStatus       = core.EventTypeAgentStatus
+	EventTypeMCPEndpointChanged = core.EventTypeMCPEndpointChanged
 )
