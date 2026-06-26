@@ -53,6 +53,7 @@ via the `Mcp-Session-Id` header (generated on `initialize`).
 | `bash` | `tools/bash/bash.go` | adapters.BashExecutor → Docker exec |
 | `file_read` / `file_write` / `file_edit` / `file_grep` / `file_glob` | `tools/file/file.go` | adapters.FileOps → Docker exec |
 | `python` | `mcpserver/sandbox_python.go` | adapters.BashExecutor → `python3 -c` |
+| `list_skills` / `load_skill` | `mcpserver/skills_tool.go` | skills package → host FS at `<project>/skills/` |
 
 All file paths are **inside the sandbox container**. Your project is mounted
 at `/sandbox/workspace/`. The model sees that path; there is no host path

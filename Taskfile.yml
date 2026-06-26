@@ -31,16 +31,29 @@ tasks:
     desc: Build + boot server + run smoke test against a temp workspace
     cmds:
       - task: build
-      - mkdir -p /tmp/mcp-smoke
+      - mkdir -p /tmp/mcp-smoke/skills/smoke-test
       - "echo 'hello world' > /tmp/mcp-smoke/test.txt"
+      - "printf '%s\\n' '---' 'name: smoke-test' 'description: One-line summary used by list_skills' '---' '' '# Smoke Test Skill' '' 'Specialized guidance for the smoke test. Loaded via load_skill to prove the skill roundtrip works end-to-end against a real project mount.' > /tmp/mcp-smoke/skills/smoke-test/SKILL.md"
       - |
         ./{{.BIN}} --addr 127.0.0.1:19876 --project /tmp/mcp-smoke &
         SERVER_PID=$!
-        sleep 10
+        # Wait up to 60s for the port to accept connections (Docker boot varies).
+        for i in $(seq 1 120); do
+          if python3 -c "import socket,sys; socket.create_connection(('127.0.0.1',19876),1).close()" 2>/dev/null; then
+            echo "[port up after ${i}x0.5s]"
+            break
+          fi
+          sleep 0.5
+        done
         python3 scripts/smoke_mcp.py
         EXIT=$?
         /bin/kill -TERM $SERVER_PID 2>/dev/null || true
-        wait $SERVER_PID 2>/dev/null || true
+        # Give the server a moment to tear down its sandbox cleanly.
+        for i in $(seq 1 20); do
+          if ! kill -0 $SERVER_PID 2>/dev/null; then break; fi
+          sleep 0.5
+        done
+        /bin/kill -9 $SERVER_PID 2>/dev/null || true
         exit $EXIT
 
   hooks:

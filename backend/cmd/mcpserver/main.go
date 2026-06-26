@@ -126,6 +126,8 @@ func main() {
 	srv.RegisterTool(file.NewGrepTool(fileOps))
 	srv.RegisterTool(file.NewGlobTool(fileOps))
 	srv.RegisterTool(mcpserver.NewSandboxPythonTool(bashExec))
+	srv.RegisterTool(mcpserver.NewListSkillsTool(*projectPath))
+	srv.RegisterTool(mcpserver.NewLoadSkillTool(*projectPath))
 
 	// 5. HTTP server.
 	httpSrv := &http.Server{

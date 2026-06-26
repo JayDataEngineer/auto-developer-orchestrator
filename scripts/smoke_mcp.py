@@ -84,7 +84,8 @@ def main():
     listed = call("tools/list", {})
     names = [t["name"] for t in listed["result"]["tools"]]
     print(f"\n  advertised tools: {names}")
-    expected = {"bash", "file_read", "file_write", "file_edit", "file_grep", "file_glob", "python"}
+    expected = {"bash", "file_read", "file_write", "file_edit", "file_grep", "file_glob",
+                "python", "list_skills", "load_skill"}
     missing = expected - set(names)
     expect(not missing, f"all expected tools advertised (missing: {missing})")
 
@@ -123,7 +124,17 @@ def main():
     expect("unknown tool" in text.lower() or "method not found" in text.lower(),
            f"unknown tool error message correct (got: {text!r})")
 
-    # 9. ping
+    # 9. list_skills / load_skill roundtrip
+    # Smoke workspace has skills/smoke-test/SKILL.md written before server boot.
+    text, err = call_tool("list_skills", {})
+    expect(not err, f"list_skills succeeds (err={err})")
+    expect("smoke-test" in text, f"list_skills surfaces smoke-test skill (got: {text!r})")
+    text, err = call_tool("load_skill", {"name": "smoke-test"})
+    expect(not err, f"load_skill succeeds (err={err})")
+    expect("Specialized guidance for the smoke test" in text,
+           f"load_skill returns skill body (got: {text!r})")
+
+    # 10. ping
     ping = call("ping", {})
     expect(ping.get("result") is not None and ping.get("error") is None,
            "ping returned empty result")

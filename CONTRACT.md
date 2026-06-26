@@ -99,6 +99,8 @@ what's registered in `cmd/mcpserver/main.go::main` at boot.
 | `file_grep` | `tools/file/file.go` | `adapters.FileOps` → Docker exec | ripgrep primary, grep fallback. |
 | `file_glob` | `tools/file/file.go` | `adapters.FileOps` → Docker exec | Standard glob syntax. |
 | `python` | `mcpserver/sandbox_python.go` | `adapters.BashExecutor` → `python3 -c` | Sandbox-installed deps available. |
+| `list_skills` | `mcpserver/skills_tool.go` | `skills.Discover` → host FS at `<project>/skills/` | Returns metadata only (no body). |
+| `load_skill` | `mcpserver/skills_tool.go` | `skills.Load` → host FS at `<project>/skills/<name>/SKILL.md` | Returns full markdown body. |
 
 All file paths are **inside the sandbox container**. The project is
 bind-mounted at `/sandbox/workspace/`. The model sees that path verbatim;
@@ -107,6 +109,20 @@ there is no host path translation in the contract.
 `/sandbox/` also contains read-only backbone scripts (`scripts.py`, etc.)
 that ship with the sandbox image — the model can invoke them but cannot
 edit them (`chmod 0444`).
+
+### Skills (host-side backbone context)
+
+Skills are operator-authored markdown files at `<project>/skills/<name>/SKILL.md`.
+Each carries YAML frontmatter (`name`, `description`) and a markdown body.
+The model discovers them via `list_skills` (cheap — metadata only) and
+reads a specific body via `load_skill(name)`. This is the progressive-
+disclosure pattern: list first, load on demand.
+
+Skills are NOT model-mutable through this surface — they're host-side
+backbone context, distinct from in-sandbox artifacts. The model can still
+edit them via `file_write` (they're bind-mounted at
+`/sandbox/workspace/skills/`), but that's an operator concern, not the
+skill tools' job.
 
 ### 3.1 Adding a tool
 
