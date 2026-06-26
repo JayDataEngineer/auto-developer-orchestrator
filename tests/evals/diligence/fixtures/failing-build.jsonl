@@ -1,6 +1,0 @@
-{"id":"sess_fix1","parentId":"","timestamp":"2026-06-23T10:00:00Z","type":"session","data":{"type":"session","id":"sess_fix1"}}
-{"id":"msg_u1","parentId":"sess_fix1","timestamp":"2026-06-23T10:00:01Z","type":"user_message","data":{"role":"user","content":"Add a JSON endpoint at /api/health and write a test for it."}}
-{"id":"msg_a1","parentId":"msg_u1","timestamp":"2026-06-23T10:00:05Z","type":"assistant_message","data":{"role":"assistant","content":"I'll add the endpoint and a test."}}
-{"id":"ev_t1","parentId":"msg_a1","timestamp":"2026-06-23T10:00:06Z","type":"tool_execution_end","data":{"toolName":"file_write","result":"wrote /tmp/main.go"}}
-{"id":"ev_t2","parentId":"ev_t1","timestamp":"2026-06-23T10:00:07Z","type":"tool_execution_end","data":{"toolName":"bash","result":"go test ./...\n--- FAIL: TestHealth (0.00s)\n    main_test.go:12: expected status 200, got 404\nFAIL\nFAIL\texample.com/pkg\t0.107s\nFAIL"}}
-{"id":"ev_t3","parentId":"ev_t2","timestamp":"2026-06-23T10:00:08Z","type":"tool_execution_end","data":{"toolName":"bash","result":"go build ./...\n# uses unhandled import"}}

@@ -1,6 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Artifact Director — Takes research/ingestion output and produces final artifacts: reports, docs, llms.txt, podcasts, code. Selects the right writer for the format."
-imports:
-  - shell
-model: deepseek/deepseek-v4-flash
-max_rounds: 20

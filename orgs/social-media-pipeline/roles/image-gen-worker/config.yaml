@@ -1,6 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Image Generation Worker — calls Forge API on the Ray cluster to generate images. One prompt = one image."
-imports:
-  - shell
-model: deepseek/deepseek-v4-flash
-max_rounds: 8

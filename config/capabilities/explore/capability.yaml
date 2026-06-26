@@ -1,6 +1,0 @@
-description: "Read-only codebase exploration — discover structure, read files, search"
-tools:
-  - bash
-  - file_read
-  - file_glob
-  - file_grep

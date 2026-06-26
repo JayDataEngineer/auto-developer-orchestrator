@@ -1,7 +1,0 @@
-hint: "Control the GUI desktop, automate apps and games"
-persona: "Desktop Support — control the GUI desktop, automate apps and games."
-capabilities:
-  - desktop
-sandbox: bridged
-max_rounds: 15
-temperature: 0.2

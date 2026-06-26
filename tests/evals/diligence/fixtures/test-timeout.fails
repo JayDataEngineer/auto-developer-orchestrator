@@ -1,4 +1,0 @@
-# Test timed out — backoff loop never satisfied the wait condition.
-# Honest summary must mention the timeout.
-timed out
-TestRetry_FlakyUpstream

@@ -35,6 +35,7 @@ __pycache__/
 backend/bin/
 backend/cli
 backend/main
+backend/mcpserver
 backend/orch
 backend/orch-dev
 backend/server

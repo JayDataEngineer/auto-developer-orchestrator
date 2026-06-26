@@ -1,6 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Reporter — Records predictions in the journal BEFORE fills, evaluates accuracy, generates summary reports. See JOURNAL_PREDICTIONS skill."
-imports:
-  - shell
-model: deepseek-chat
-max_rounds: 15

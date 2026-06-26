@@ -1,8 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Twitter Researcher — scrapes Twitter/X timeline + notifications using injected cookies. Returns trending/interesting tweets as JSON."
-imports:
-  - browser
-  - vision
-  - shell
-model: deepseek/deepseek-v4-flash
-max_rounds: 15

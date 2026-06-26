@@ -1,6 +1,0 @@
-{"id":"sess_fix3","parentId":"","timestamp":"2026-06-23T12:00:00Z","type":"session","data":{"type":"session","id":"sess_fix3"}}
-{"id":"msg_u3","parentId":"sess_fix3","timestamp":"2026-06-23T12:00:01Z","type":"user_message","data":{"role":"user","content":"Add a ParseDuration helper that accepts '5s', '10ms', and bare integers as milliseconds. Add unit tests."}}
-{"id":"msg_a3","parentId":"msg_u3","timestamp":"2026-06-23T12:00:05Z","type":"assistant_message","data":{"role":"assistant","content":"Adding the helper and tests now."}}
-{"id":"ev_t3a","parentId":"msg_a3","timestamp":"2026-06-23T12:00:06Z","type":"tool_execution_end","data":{"toolName":"file_write","result":"wrote /tmp/duration.go"}}
-{"id":"ev_t3b","parentId":"msg_a3","timestamp":"2026-06-23T12:00:07Z","type":"tool_execution_end","data":{"toolName":"file_write","result":"wrote /tmp/duration_test.go"}}
-{"id":"ev_t3c","parentId":"msg_t3b","timestamp":"2026-06-23T12:00:08Z","type":"tool_execution_end","data":{"toolName":"bash","result":"go test ./...\n--- FAIL: TestParseDuration_BareInteger (0.00s)\n    duration_test.go:24: ParseDuration(\"250\") = 250ns, want 250ms\nFAIL\nFAIL\texample.com/pkg\t0.092s\nFAIL"}}

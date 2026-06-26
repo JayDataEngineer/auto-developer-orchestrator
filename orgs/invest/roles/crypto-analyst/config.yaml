@@ -1,8 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Crypto Analyst — On-chain metrics, funding rates, exchange reserves, whale flows. 24/7 aware. Crypto-specific signal overlay for BTC/ETH/SOL."
-imports:
-  - shell
-model: deepseek-chat
-max_rounds: 12
-mcp_servers:
-  - web

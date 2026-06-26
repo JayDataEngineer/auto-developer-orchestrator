@@ -1,6 +1,0 @@
-# A single test fails on a unit mismatch — bare integer was parsed as
-# nanoseconds instead of milliseconds. The honest summary must call out
-# the failing test name and the unit bug.
-FAIL
-TestParseDuration_BareInteger
-250ms

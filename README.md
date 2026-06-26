@@ -1,87 +1,100 @@
-# PUX - Agent Orcastrator System
+# Pux MCP Server
 
-Pux is a system crafted for streamlined control over an AI Orcastrator with a focus on customization.
+A Model Context Protocol (MCP) server that exposes a sandboxed development
+environment to any MCP-capable LLM client (Claude Desktop, Hermes, OpenClaw,
+continue.dev, etc.). The server boots a Docker sandbox on startup, mounts
+your project, and exposes `bash`, `file_read`, `file_write`, `file_edit`,
+`file_grep`, `file_glob`, and `python` tools to the model over standard MCP.
 
-## Interfaces
+**Scope:** single-tenant, localhost-only, no auth. Run one server per project.
 
-There are three interfaces that can be used.
+## Quick start
 
-a) Web interface - The main focus for the interface. Features a view for the Sandbox as well as a text editor.
-b) TUI interface - WIP, a standard interface for AI Agents.
-c) CLI interface / MCP interface. This allows for integratation with tools such as the Hermes series of programs.
-
-## Make Pux your own with Text Files
-
-Through the WebUI, agents and orchestrators can be made on the fly. Get your agent just the way you like it.
-Features tooling for coding tasks, and an easy to extend the skill based interface to extend the toolkit for tasks such as deep research.
-
-## Tooling to get the Job Done
-
-Native to Pux is a sandboxed desktop, browser, text editor, and vision toolkit. This gives an edge to Pux when dealing with web development, or integrating it with tools such as telegram or game development.
-Coming soon, scheduled jobs. This allows jobs to be run entirely in a safe, sandboxed environments.
-
-## Stay Soverign at any Step
-
-In the fast paced corporate world of today, it is easy to get 'locked in' to a certain provider. Issues with providers like cosumer-unfriendly billing practices by companies such as Google AI can be far behind, at your own discretion. You can use Opus for planning, and a local Qwen model for execution.
-
----
-
-## 🛠 Architecture
-
-- **Web Frontend**: A minimalist webui desinged to both manage and use the PUX system.
-- **Go Backend**: As opposed to a pure Typescript or Python backedn, Pux is built on a contract system. This gives the TUI, WebUI, and backend a simple language to speak while keeping Go speed for heavy, rapid tool use.
-- **Extensions**: An extension system desinged to allow more advanced functionality being added
-
----
-
-## Quick Start
-
-### 1. Prerequisites
-- **Go 1.26+**
-- **Bun** (for TUI)
-- **Docker** (optional, for sandboxes and local model server)
-- **Task** ([taskfile.dev](https://taskfile.dev)) — `sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin`
-
-### 2. Setup
 ```bash
-git clone https://github.com/JayDataEngineer/auto-developer-orchestrator.git
-cd auto-developer-orchestrator
-task install
+# Build + boot against the current directory
+task run
+
+# Or explicitly:
+task build
+./backend/mcpserver --addr 127.0.0.1:9876 --project ~/code/myproject
 ```
 
-### 3. Run
-```bash
-task dev     # Start Go backend + Vite frontend
-task chat    # Start TUI
+The server expects `pux-sandbox:latest` (or `$OPENSHELL_IMAGE`) to be
+available locally. See `sandbox/Dockerfile` to build it from scratch.
+
+## Connect from a client
+
+Add to your MCP client config (Claude Desktop, etc.):
+
+```json
+{
+  "mcpServers": {
+    "pux": {
+      "url": "http://127.0.0.1:9876"
+    }
+  }
+}
 ```
 
-Access the web UI at **http://localhost:5174**. Then add a provider (OpenRouter, local llama-server, etc.) through the model picker — no config files needed.
+## Tools exposed
 
----
+| Tool | What it does |
+|------|-------------|
+| `bash` | Execute a shell command in the sandbox |
+| `file_read` | Read a file (with line numbers) |
+| `file_write` | Write or overwrite a file |
+| `file_edit` | sed-style find/replace |
+| `file_grep` | ripgrep (with grep fallback) |
+| `file_glob` | File pattern matching |
+| `python` | Execute Python inside the sandbox (sandbox deps available) |
 
-## Build System (Taskfile)
+Files are relative to `/sandbox/workspace/` inside the container — that's
+where your project is bind-mounted.
 
-The project uses **[Task](https://taskfile.dev)** for all operations. Run `task --list` to see everything available.
+## Smoke test
 
-| Command | Description |
-|---------|-------------|
-| `task install` | Install all dependencies (JS, Go) |
-| `task dev` | Start Go backend (3847) + Vite frontend (5174) |
-| `task chat` | Start the TUI (terminal interface) |
-| `task build` | Build server and CLI binaries |
-| `task down` | Stop everything — backend, frontend, sandboxes |
-| `task model` | Start local llama-server (requires NVIDIA GPU) |
-| `task test-go` | Run Go unit tests |
-| `task test-e2e` | Run Playwright E2E tests |
-| `task infra-check` | Check health of shared infrastructure |
+```bash
+task smoke
+```
 
----
+Builds, boots, drives the full MCP contract (initialize → tools/list →
+tools/call → bash echo + file roundtrip + python sum), and tears down.
 
-## Project Structure
+## Architecture
 
-- `/backend` — Go API server, agent loop, orchestrator, tool registry
-- `/frontend/tui` — Terminal UI (React 19 + Ink 6 + @assistant-ui/react-ink)
-- `/frontend/web` — Web frontend (Vite + React)
-- `/frontend/shared` — Shared package (`@pux/shared`): PuxChatAdapter, Zustand store, SSE types
-- `/config` — Kernel config: CTO prompt, employee roles, tool packages, worker definitions
+```
+┌─────────────────────────────────────┐
+│ MCP Client (Claude / Hermes / ...)  │
+└──────────────┬──────────────────────┘
+               │ JSON-RPC 2.0 over HTTP
+               │ (Mcp-Session-Id header)
+┌──────────────▼──────────────────────┐
+│ pux-mcpserver (Go, localhost:9876)   │
+│  - tool registry                     │
+│  - JSON-RPC dispatch                 │
+└──────────────┬──────────────────────┘
+               │ Docker exec
+┌──────────────▼──────────────────────┐
+│ pux-sandbox container                │
+│  - /workspace bind-mount             │
+│  - /sandbox/scripts.py (read-only)   │
+└─────────────────────────────────────┘
+```
 
+## Branch layout
+
+- **`master`** — this MVP. Slim, focused, ~3000 LOC of Go.
+- **`dev`** — fullstack branch with TUI, web UI, CLI, multi-agent orchestration,
+  skills system, org overlays. Frozen, not deleted.
+- **`v0.1.0-fullstack-legacy`** — tagged snapshot of fullstack HEAD before
+  the MVP pivot. Safety net in case `dev` regresses.
+
+## Status
+
+Phase 1 surface (bash + file + python). Browser/desktop automation, multi-agent
+orchestration, and the skills system are all on `dev` — they'll migrate back
+incrementally once each is proven to fit the MCP contract cleanly.
+
+## License
+
+See [LICENSE](LICENSE).

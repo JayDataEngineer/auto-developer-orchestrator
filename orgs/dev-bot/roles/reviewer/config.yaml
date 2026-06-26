@@ -1,9 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Reviewer — code quality, structure, DRY, spaghetti detection. Read-only, never edits."
-max_rounds: 15
-temperature: 0.2
-tools:
-  - bash
-  - file_read
-  - file_glob
-  - file_grep

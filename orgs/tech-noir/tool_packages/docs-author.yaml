@@ -1,9 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "MDX documentation authoring for the tech-noir docs-site (Next.js 15 + MDX + Tailwind 4). Reads source via file_*, follows DOCS_AUTHORING skill for design tokens, updates Search.tsx index for new pages."
-tools:
-  - bash
-  - file_read
-  - file_write
-  - file_edit
-  - file_glob
-  - file_grep

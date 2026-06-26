@@ -1,6 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Auditor — Peer worker that checks ingestion quality. Catches empty transcripts, sender-name pollution, all-Unknown senders, missing topic discovery, broken join tables. Returns gap report."
-imports:
-  - shell
-model: deepseek/deepseek-v4-flash
-max_rounds: 20

@@ -1,8 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "News Analyst — News + social sentiment via web MCP. Uses research (search + scrape in one call) and extract (news schema for structured headlines/dates). Covers Reddit, X, financial news."
-imports:
-  - shell
-model: deepseek-chat
-max_rounds: 12
-mcp_servers:
-  - web

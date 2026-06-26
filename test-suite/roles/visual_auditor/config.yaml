@@ -1,6 +1,0 @@
-description: "Visual Auditor — screenshot analysis, rendering bug detection, layout comparison across any UI surface"
-imports:
-  - vision
-  - testing
-max_rounds: 25
-temperature: 0.1

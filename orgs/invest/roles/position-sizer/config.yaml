@@ -1,6 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Position Sizer — ATR-based sizing with regime adjustment. Stop-loss + take-profit generation. Conservative mode halves sizes."
-imports:
-  - shell
-model: deepseek-chat
-max_rounds: 15

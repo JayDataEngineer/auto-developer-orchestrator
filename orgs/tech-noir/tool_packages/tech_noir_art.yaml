@@ -1,6 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Tech Noir art pipeline — Forge (image/3D/music) + ComfyUI (VFX) + media-analysis (QA). Drives the full asset build: generate, process, vibe-check, deliver to game/assets/."
-tools:
-  - bash
-mcp_servers:
-  - media

@@ -1,8 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Narrative Designer — Creative writing, dialogue, lore, characters, scenes"
-imports:
-  - research
-  - studio_vision
-max_rounds: 15
-temperature: 0.7
-sandbox: isolated

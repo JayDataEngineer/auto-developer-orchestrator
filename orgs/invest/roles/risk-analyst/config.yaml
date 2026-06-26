@@ -1,6 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Risk Analyst — Portfolio heat, sector concentration, position limits, drawdown warnings. Multi-asset aware (crypto + stocks heat tracked separately and combined)."
-imports:
-  - shell
-model: deepseek-chat
-max_rounds: 15

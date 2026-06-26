@@ -1,9 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Research Director — owns Phase B. Delegates to twitter + telegram researchers, collects findings, summarizes for content team."
-imports:
-  - shell
-model: deepseek/deepseek-v4-flash
-max_rounds: 20
-delegates_to:
-  - twitter-researcher
-  - telegram-researcher

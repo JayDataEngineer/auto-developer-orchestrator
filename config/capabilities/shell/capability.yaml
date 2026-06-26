@@ -1,8 +1,0 @@
-description: "Sandbox shell and file operations"
-tools:
-  - bash
-  - file_read
-  - file_write
-  - file_edit
-  - file_glob
-  - file_grep

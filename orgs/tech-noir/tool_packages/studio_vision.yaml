@@ -1,4 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Studio vision — scene analysis, asset QA, vibe reports, batch playtest review. Uses the kernel media-analysis MCP server (image description, OCR, object detection, NSFW classification, face detection)."
-mcp_servers:
-  - media

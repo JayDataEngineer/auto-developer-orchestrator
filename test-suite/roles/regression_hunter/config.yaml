@@ -1,7 +1,0 @@
-description: "Regression Hunter — known bug pattern verification, before/after comparison, stability testing"
-imports:
-  - vision
-  - testing
-  - browser
-max_rounds: 30
-temperature: 0.2

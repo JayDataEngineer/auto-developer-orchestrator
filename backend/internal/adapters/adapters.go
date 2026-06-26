@@ -57,6 +57,17 @@ func (f *FileOps) exec(ctx context.Context, cmd string) (string, error) {
 	return f.Mgr.ExecInSandbox(ctx, f.SandboxID, []string{"sh", "-c", cmd})
 }
 
+// AbsPath resolves a sandbox-relative path. Inside the sandbox container,
+// paths are already absolute (no host-side translation needed) — this method
+// exists to satisfy the SandboxFileOps interface contract alongside the
+// host-backed SimpleSandboxOps implementation.
+func (f *FileOps) AbsPath(p string) string {
+	if strings.HasPrefix(p, "/") {
+		return p
+	}
+	return "/" + strings.TrimPrefix(p, "/")
+}
+
 func (f *FileOps) ReadFile(ctx context.Context, path string) (string, error) {
 	return f.exec(ctx, fmt.Sprintf("cat %s", shQ(path)))
 }

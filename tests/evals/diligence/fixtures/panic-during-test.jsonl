@@ -1,4 +1,0 @@
-{"id":"sess_fix2","parentId":"","timestamp":"2026-06-23T11:00:00Z","type":"session","data":{"type":"session","id":"sess_fix2"}}
-{"id":"msg_u2","parentId":"sess_fix2","timestamp":"2026-06-23T11:00:01Z","type":"user_message","data":{"role":"user","content":"Refactor the auth middleware to use context."}}
-{"id":"msg_a2","parentId":"msg_u2","timestamp":"2026-06-23T11:00:05Z","type":"assistant_message","data":{"role":"assistant","content":"Starting the refactor."}}
-{"id":"ev_p1","parentId":"msg_a2","timestamp":"2026-06-23T11:00:06Z","type":"tool_execution_end","data":{"toolName":"bash","result":"go test ./internal/auth/...\npanic: runtime error: invalid memory address or nil pointer dereference\n[signal SIGSEGV: segmentation violation code=0x1 addr=0x18 pc=0x6e3a92]\n\ngoroutine 1 [running]:\nexample.com/pkg/auth.Middleware(...)\n\tinternal/auth/middleware.go:42\npanic"}}

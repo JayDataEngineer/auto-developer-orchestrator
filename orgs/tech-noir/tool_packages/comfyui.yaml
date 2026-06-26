@@ -1,4 +1,0 @@
-# AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "ComfyUI workflow execution via Ray cluster proxy. Posts workflow JSON to /image/comfyui/prompt and polls for outputs. Used for VFX generation, sprite distillation, and batch texture processing when Forge's image mode isn't flexible enough."
-tools:
-  - bash

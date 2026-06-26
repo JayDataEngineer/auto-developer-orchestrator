@@ -1,4 +1,0 @@
-[test]
-# Exclude node_modules from test discovery — shared package tests
-# pollute the Zustand store and break timing-sensitive flash tests
-exclude = ["node_modules"]
