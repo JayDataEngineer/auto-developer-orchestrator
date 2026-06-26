@@ -13,16 +13,11 @@ const SessionIDHeader = "Mcp-Session-Id"
 
 // ServeHTTP implements http.Handler for the MCP server.
 //
-// The single endpoint accepts POST requests with JSON-RPC envelopes. The
-// response can be either:
-//   - JSON-RPC response (single object) for request/response pattern
-//   - SSE stream (text/event-stream) for streaming/batch responses
-//
-// For MVP, we always return a single JSON-RPC response. SSE is reserved for
-// future progress-streaming tools (long-running bash, file uploads).
-//
-// GET requests to the same endpoint open an SSE channel for server-initiated
-// notifications (resource updates, etc.) — not used by MVP tools but reserved.
+// The single endpoint accepts POST requests with JSON-RPC envelopes and
+// returns a single JSON-RPC response per request. SSE streaming, batched
+// requests, and server-initiated notifications are all OUT of scope — the
+// slim MVP is strictly request/response. GET and DELETE are reserved
+// (return 405 and 204 respectively); OPTIONS handles CORS preflight.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// CORS for localhost dev (Claude Desktop, Hermes connect from local
 	// renderers that may set Origin). No auth on localhost.

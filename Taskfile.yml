@@ -39,7 +39,7 @@ tasks:
         sleep 10
         python3 scripts/smoke_mcp.py
         EXIT=$?
-        kill -TERM $SERVER_PID
+        /bin/kill -TERM $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
         exit $EXIT
 

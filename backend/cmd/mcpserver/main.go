@@ -1,8 +1,9 @@
 // Command mcpserver runs the Pux MCP server.
 //
 // Single-tenant, localhost-only. Boots a Docker sandbox, registers the
-// sandbox-aware tools (bash, file, browser, desktop, python) as MCP tools,
-// and serves JSON-RPC over HTTP on 127.0.0.1.
+// sandbox-aware tools (bash, file_read, file_write, file_edit, file_grep,
+// file_glob, python) as MCP tools, and serves JSON-RPC over HTTP on
+// 127.0.0.1.
 //
 // Usage:
 //

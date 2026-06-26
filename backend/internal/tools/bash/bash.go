@@ -177,7 +177,8 @@ func (t *Tool) formatTaskResult(task *core.BackgroundTask) (any, error) {
 
 	// Scrub secrets from output BEFORE returning to model — defense-in-depth.
 	// Prevents leaks like `cat .env` (if hard-deny missed) → key in stdout →
-	// model pastes it into a delegate_to task arg → exfiltrated to LLM provider.
+	// model echoes it into a tool-call arg or follow-up message → exfiltrated
+	// to the LLM provider.
 	result = sensitive.ScrubText(result)
 
 	if task.Status == core.TaskFailed {

@@ -12,17 +12,17 @@ import (
 
 // SandboxExecutor runs a shell command inside a sandbox. Satisfied by
 // adapters.BashExecutor. Kept here (not in core) because python-in-sandbox
-// is an MCP-server-specific composition — the broader codebase has its own
-// python tool with a different lifecycle.
+// is a composition specific to the MCP server — we want the model to see a
+// dedicated `python` tool with clean ergonomics, not a shell wrapper.
 type SandboxExecutor interface {
 	Exec(ctx context.Context, command string) (string, error)
 }
 
 // SandboxPythonTool executes Python code inside the sandbox by wrapping it
-// in `python3 -c`. This is the simple composition the MVP needs — the model
-// gets a dedicated `python` tool with clean ergonomics (just code), and the
-// code runs inside the sandbox container so org-installed deps (manim,
-// surrealdb, etc.) are visible.
+// in `python3 -c`. The model gets a dedicated `python` tool with clean
+// ergonomics (just the code), and the code runs inside the sandbox
+// container so whatever the sandbox image ships with (Python stdlib + any
+// apt/uv-installed deps from sandbox/Dockerfile) is available.
 //
 // This is intentionally minimal — no data-preamble, no subprocess management.
 // For richer ergonomics (data JSON, exit codes), the model can still call
@@ -43,7 +43,7 @@ func (t *SandboxPythonTool) Name() string { return "python" }
 
 func (t *SandboxPythonTool) Description() string {
 	return "Execute Python code inside the sandbox. Print output is captured. " +
-		"Sandbox-installed packages (surrealdb, manim, etc.) are available. " +
+		"Whatever the sandbox image ships with is available. " +
 		"Runs with a 60s timeout."
 }
 

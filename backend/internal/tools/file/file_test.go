@@ -728,8 +728,9 @@ func TestAbsPath_WrongBasePath_NoOp(t *testing.T) {
 }
 
 func TestReadTool_SandboxPathRemap(t *testing.T) {
-	// Simulates sub-agent reading a file via /sandbox/workspace/ path.
-	// The BasePath is set to a real temp dir (simulating projectPath on the host).
+	// The MCP client sends paths prefixed with /sandbox/workspace/ — the
+	// file tool must remap them to the actual bind-mount path on disk.
+	// BasePath here stands in for the projectPath the server boots with.
 	dir := t.TempDir()
 	subDir := filepath.Join(dir, "go-backend", "internal")
 	os.MkdirAll(subDir, 0755)
@@ -739,7 +740,7 @@ func TestReadTool_SandboxPathRemap(t *testing.T) {
 	ops := &SimpleSandboxOps{BasePath: dir}
 	tool := NewReadTool(ops, nil)
 
-	// Sub-agent uses /sandbox/workspace/ path — should remap to dir
+	// /sandbox/workspace/ path is what arrives over the wire from the client
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"file_path": "/sandbox/workspace/go-backend/internal/perms.go",
 	})
@@ -772,7 +773,7 @@ func TestReadTool_Multimedia_SandboxPathRemap(t *testing.T) {
 	ops := &SimpleSandboxOps{BasePath: dir}
 	tool := NewReadTool(ops, media)
 
-	// Sub-agent uses /sandbox/workspace/ path for an image
+	// Client sent a /sandbox/workspace/ path for an image — must remap before media
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"file_path": "/sandbox/workspace/screenshots/screen.png",
 	})

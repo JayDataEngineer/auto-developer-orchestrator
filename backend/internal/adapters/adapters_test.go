@@ -152,23 +152,25 @@ func TestHostExecutor_NoWorkDir(t *testing.T) {
 	}
 }
 
-// TestSubAgentWriteThenRead simulates the exact sub-agent pipeline:
-// file_write with /sandbox/workspace/ path → HostExecutor bash ls → file_read back.
-// This catches the class of bugs where file tools and bash tools resolve paths differently.
+// TestSubAgentWriteThenRead verifies file_write + bash + file_read all agree
+// on path resolution. Any MCP tool call that arrives with `/sandbox/workspace/...`
+// must remap consistently across the file ops and the bash executor — otherwise
+// a file written via file_write is invisible to a follow-up `ls` and the model
+// gets flaky bugs.
+//
+// (Test name retained from the fullstack era where this was a sub-agent pipeline.
+// The path-remap behavior is still load-bearing for MCP tool calls today.)
 func TestSubAgentWriteThenRead(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
 
-	// Same setup as execFactory("native") in orchestrator.go
 	hostExec := &HostExecutor{WorkDir: dir}
-
-	// Use the file package directly — import it
 	fileOps := &fileOpsShim{dir: dir}
 
 	sandboxPath := "/sandbox/workspace/go-backend/internal/mypkg/mypkg.go"
 	content := "package mypkg\n\nfunc Hello() string { return \"hello\" }\n"
 
-	// Step 1: file_write via SimpleSandboxOps (sub-agent uses /sandbox/workspace/ path)
+	// Step 1: file_write with the /sandbox/workspace/ prefix the model emits
 	_, err := fileOps.WriteFile(ctx, sandboxPath, content, false)
 	if err != nil {
 		t.Fatalf("file_write failed: %v", err)
@@ -219,7 +221,8 @@ func TestDoubleNestingFix(t *testing.T) {
 	hostExec := &HostExecutor{WorkDir: dir}
 	fileOps := &fileOpsShim{dir: dir}
 
-	// The sub-agent's task references /sandbox/workspace/go-backend/... (double-nesting)
+	// The model emits `/sandbox/workspace/<projectBasename>/...` — the remap
+	// must collapse the basename, not double-nest it.
 	doubleNestedPath := "/sandbox/workspace/go-backend/internal/mypkg/mypkg.go"
 	content := "package mypkg\n\nfunc Hello() string { return \"hello\" }\n"
 

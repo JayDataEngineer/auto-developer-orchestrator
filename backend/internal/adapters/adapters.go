@@ -1,9 +1,9 @@
-// Package adapters provides shared wiring adapters that bridge low-level
-// infrastructure (sandbox manager, git, approval) to new-architecture
-// interfaces (tools.Tool, hooks.GitExecutor, hooks.ApprovalHandler).
+// Package adapters bridges the sandbox manager to the tool implementations.
 //
-// Both the HTTP handlers and the scheduler use these adapters, avoiding
-// duplicate implementations across wiring layers.
+// BashExecutor and FileOps are the two adapters the MCP server uses —
+// tools/bash and tools/file talk to these interfaces, the adapters dispatch
+// into sandbox.Manager. Keeping the boundary here means the tools don't
+// import the sandbox package directly.
 package adapters
 
 import (
@@ -31,13 +31,13 @@ func (b *BashExecutor) Exec(ctx context.Context, command string) (string, error)
 	if b.Mgr == nil {
 		return "", fmt.Errorf("sandbox manager not available")
 	}
-	// Auto-source /sandbox/.env so manifest-declared env vars (SURREALDB_URL,
-	// PUX_ORG_PATH, etc.) are visible to every command. `set -a` exports every
-	// subsequently-set var so child processes (python3, etc.) inherit them —
-	// without it, sourcing only creates shell vars which subprocesses can't see.
+	// Auto-source /sandbox/.env if the sandbox image ships one. `set -a`
+	// exports every subsequently-set var so child processes (python3, etc.)
+	// inherit them — without it, sourcing only creates shell vars which
+	// subprocesses can't see.
 	// IMPORTANT: dash (Ubuntu's /bin/sh) exits the entire shell when `. file`
 	// fails — even without `set -e`. Guard with [ -f ] so commands still run
-	// when /sandbox/.env doesn't exist (e.g., invest org sandbox).
+	// when /sandbox/.env doesn't exist.
 	wrapped := "if [ -f /sandbox/.env ]; then set -a; . /sandbox/.env 2>/dev/null; set +a; fi; " + command
 	output, err := b.Mgr.ExecInSandbox(ctx, b.SandboxID, []string{"sh", "-c", wrapped})
 	return output, err

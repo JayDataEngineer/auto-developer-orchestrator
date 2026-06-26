@@ -5,9 +5,9 @@
 // header. The wire format mirrors what our own client in internal/mcp/
 // consumes — see backend/internal/mcp/client.go for the protocol surface.
 //
-// The server is single-tenant: it owns one sandbox, registered at startup.
-// Multi-tenant routing (orgs, per-client sandboxes) is a later concern; the
-// hook is `SandboxResolver` below.
+// The server is single-tenant: it owns one sandbox, registered at startup,
+// torn down on SIGTERM. Multi-tenant routing is out of scope — run multiple
+// servers on different ports if you need per-project isolation.
 //
 // Transport is localhost-only. Operators wanting tailnet exposure run a
 // reverse proxy (Caddy/Tailscale Funnel) in front.
