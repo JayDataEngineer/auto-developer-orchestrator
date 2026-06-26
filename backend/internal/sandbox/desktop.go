@@ -36,7 +36,7 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 	sandbox, exists := m.sandboxes[sandboxID]
 	if !exists {
 		// Sandbox not in memory — check if container exists and recover it
-		containerName := m.getContainerName(sandboxID)
+		containerName := m.getContainerNameLocked(sandboxID)
 		inspectResult, inspectErr := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
 		if inspectErr != nil {
 			return nil, fmt.Errorf("sandbox %s not found", sandboxID)
@@ -84,7 +84,7 @@ func (m *Manager) EnableBrowserMode(ctx context.Context, sandboxID string) (*Des
 	vncPort := 5900
 	cdpPort := 19222 // External port (socat-forwarded)
 
-	containerName := m.getContainerName(sandboxID)
+	containerName := m.getContainerNameLocked(sandboxID)
 
 	// Detect VNC backend — KasmVNC uses port 8444, standard uses 6080
 	backend := m.detectVNCBackend(ctx, containerName)
@@ -174,7 +174,7 @@ func (m *Manager) EnableDesktopMode(ctx context.Context, sandboxID string) (*Des
 	displayNum, vncPort, cdpPort, novncPort := m.portAllocator.AllocatePorts()
 	m.portMutex.Unlock()
 
-	containerName := m.getContainerName(sandboxID)
+	containerName := m.getContainerNameLocked(sandboxID)
 	display := fmt.Sprintf(":%d", displayNum)
 
 	// Detect VNC backend — affects how we start the VNC server
@@ -361,7 +361,7 @@ func (m *Manager) disableModeLocked(ctx context.Context, sandboxID string) error
 	}
 
 	session := sandbox.DesktopSession
-	containerName := m.getContainerName(sandboxID)
+	containerName := m.getContainerNameLocked(sandboxID)
 
 	m.logger.Info("disabling mode",
 		zap.String("sandbox_id", sandboxID),

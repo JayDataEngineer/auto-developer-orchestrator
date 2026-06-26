@@ -22,8 +22,10 @@ password_env = "SURREAL_PASSWORD"
 
 # Sandbox setup — uploaded into the container at /sandbox/ on every init.
 # MCP_HUB_ENDPOINT points at the Ray cluster's Forge API for image generation.
-# SURREALDB_* vars use host.docker.internal so the container can reach the
-# host-bound SurrealDB behind Caddy on :8000.
+# The sandbox uses network_mode: host (see rendered compose), so localhost
+# inside the container IS the host — SurrealDB behind Caddy on localhost:8000
+# is reachable directly. host.docker.internal does NOT resolve on Linux
+# host network mode.
 [sandbox]
 tier = "standard"
 image = "pux-sandbox:latest"
@@ -58,12 +60,24 @@ container = "/workspace"
 [sandbox.env]
 # MCP_HUB_ENDPOINT omitted — default in orgs/_shared/clients/forge_client.py
 # points at localhost. Set this env var only when pointing at a remote cluster.
-SURREALDB_URL = "http://host.docker.internal:8000/surreal"
+SURREALDB_URL = "http://localhost:8000/surreal"
 SURREALDB_NS = "research"
 SURREALDB_DB = "main"
 SURREALDB_USER = "root"
 SURREALDB_PASS = "root"
 PUX_ORG_PATH = "/sandbox/workspace"
+
+# Bootstrap metadata — drives the rendered bootstrap.sh. Container uses
+# network_mode: host in the rendered compose, so SurrealDB on localhost:8000
+# is reachable from inside the container without host.docker.internal.
+[sandbox.bootstrap]
+smoke_test_command = "python3 -c \"import os,urllib.request; urllib.request.urlopen(os.environ['SURREALDB_URL']+'/health').read(); print('ok')\""
+smoke_test_description = "container → SurrealDB reachable"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "SurrealDB"
+check = 'curl -sf -o /dev/null "${SURREALDB_HEALTH:-http://localhost:8000/surreal/health}"'
+error_msg = "SurrealDB not reachable at $SURREALDB_HEALTH — start it on the host first (e.g. via shared-docker-infra compose)"
 
 [[roles]]
 name = "content-director"

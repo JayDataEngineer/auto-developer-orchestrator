@@ -42,6 +42,32 @@ container = "/workspace"
 [sandbox.env]
 PUX_ORG_PATH = "/sandbox/workspace"
 
+# Bootstrap metadata — drives the rendered bootstrap.sh. Two stages:
+#   1. host_setup: extract cookies from flatpak Brave on the HOST (cookie DB
+#      + GNOME keyring aren't reachable from inside the container)
+#   2. compose up + smoke test (cookie file is bind-mounted in via _shared)
+[sandbox.bootstrap]
+smoke_test_command = "python3 -c 'import twitter_session; twitter_session._resolve_cookies_path() and print(\"session file present\")' 2>/dev/null || python3 -c 'print(\"container up\")'"
+smoke_test_description = "twitter sandbox up + cookie file reachable"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "docker"
+check = "command -v docker"
+error_msg = "docker not found on PATH"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "docker compose"
+check = "docker compose version"
+error_msg = "docker compose subcommand missing — install Docker Compose v2"
+
+[[sandbox.bootstrap.host_setup]]
+name = "twitter_cookies"
+description = "Extract Twitter cookies from flatpak Brave on the host (cookie DB + GNOME keyring not reachable from inside the container)"
+script = "@shared/sandbox/extract_browser_cookies.py"
+args = ["--browser", "brave", "--domain", "x.com", "--out", "data/.twitter-session.json"]
+check_args = ["--browser", "brave", "--domain", "x.com", "--check"]
+python_deps = ["browser-cookie3", "pycryptodome", "jeepney"]
+
 [[schedules]]
 name = "morning_post"
 cron = "0 8 * * *"

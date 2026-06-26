@@ -14,15 +14,66 @@ You have access to these capabilities:
 
 - **research/web-mcp**: Search the web, scrape pages, fetch sources, verify facts
 - **media/media-mcp**: Analyze images, transcribe audio, extract text/OCR  
-- **bash**: Run commands in the video-production container (Python 3.11, ffmpeg, Manim, Kokoro TTS, poppler-utils, Pillow)
+- **bash**: Run commands in the Pux sandbox. ffmpeg, ffprobe, Python 3.10 always available. Manim + Kokoro installed via `scripts/bootstrap.sh` into `.venv/` (source before use). Pillow pre-installed.
 - **filesystem**: Read/write files in the job workspace
+
+## Runtime Environment
+
+You run inside the Pux orchestrator sandbox (`pux-sandbox:latest`).
+ffmpeg, ffprobe, and Python 3.10 are pre-installed. **Manim, Kokoro, and
+friends are NOT on PATH until you bootstrap them.** A project-scoped venv
+holds them; bootstrap is idempotent and persists across sandbox restarts.
+
+### First-time setup (run once per sandbox)
+
+```bash
+cd /sandbox/workspace
+./scripts/bootstrap.sh
+source .venv/bin/activate
+```
+
+Subsequent shells only need the activation:
+
+```bash
+source /sandbox/workspace/.venv/bin/activate
+```
+
+After activation, `manim`, `python`, `python3`, `pip`, and `kokoro` are all
+on PATH inside the venv. ffmpeg / ffprobe come from the system.
+
+### Stable paths
+
+| What | Path |
+|------|------|
+| Org root (bind-mounted) | `/sandbox/workspace/` |
+| Skill scripts | `/sandbox/workspace/skills/scripts/*.py` |
+| Venv | `/sandbox/workspace/.venv/` |
+| Bootstrap | `/sandbox/workspace/scripts/bootstrap.sh` |
+| Job workspace root | `$VIDEO_PRODUCTION_ROOT` if set, else `~/video-productions/` |
+
+**Workspace contract**: prefer `/sandbox/workspace/video-productions/` for
+job artifacts. `init_video_job.py` auto-detects `/workspace/video-productions`
+if present (the dedicated video-production container path) but in the
+pux-sandbox the canonical location is `/sandbox/workspace/video-productions/`.
+Override with `VIDEO_PRODUCTION_ROOT=/sandbox/workspace/video-productions`.
+
+### Pitfalls
+
+- **Do NOT call `manim` before activating the venv.** It will fail with
+  "command not found."
+- **Do NOT `pip install` outside the venv.** Use `bootstrap.sh` or
+  `.venv/bin/pip` directly.
+- **LaTeX (MathTex) is NOT installed.** Use `Tex`/`Text`/`MathTex` from Manim
+  sparingly; complex equations may render as empty boxes. For pure-text
+  proofs, prefer animated shapes over MathTex.
 
 ## Workspace Contract
 
-Every video job lives under `/workspace/video-productions/`:
+Every video job lives under `/sandbox/workspace/video-productions/` (or wherever
+`$VIDEO_PRODUCTION_ROOT` points):
 
 ```
-/workspace/video-productions/
+/sandbox/workspace/video-productions/
 ├── jobs/<YYYY-MM-DD-HHMM-slug>/
 │   ├── assets/      # source figures, crops, tables, screenshots
 │   ├── audio/       # narration segments + final voiceover
@@ -36,10 +87,10 @@ Every video job lives under `/workspace/video-productions/`:
 └── serve/<slug>/           # hosting dirs
 ```
 
-Initialize every non-trivial video job:
+Initialize every non-trivial video job (after `source /sandbox/workspace/.venv/bin/activate`):
 
 ```bash
-python /app/skills/scripts/init_video_job.py "Topic or title" --prompt "original user prompt" [--source URL_OR_PATH]
+python /sandbox/workspace/skills/scripts/init_video_job.py "Topic or title" --prompt "original user prompt" [--source URL_OR_PATH]
 ```
 
 ## Standard Workflow
@@ -78,13 +129,13 @@ Use Kokoro TTS (bundled in container) or fall back to any available TTS:
 
 ```bash
 # Check TTS availability
-python /app/skills/scripts/synth_kokoro.py --check
+python /sandbox/workspace/skills/scripts/synth_kokoro.py --check
 
 # Synthesize from segments
-python /app/skills/scripts/synth_kokoro.py src/segments.json --out audio
+python /sandbox/workspace/skills/scripts/synth_kokoro.py src/segments.json --out audio
 
 # Fallback: plain text file
-python /app/skills/scripts/synth_kokoro.py narration.txt --out audio
+python /sandbox/workspace/skills/scripts/synth_kokoro.py narration.txt --out audio
 ```
 
 Normalize with ffmpeg loudnorm. Output: per-segment WAVs, `audio/voice_raw.wav`, `audio/voice.wav`, `audio/timings.json`.
@@ -131,12 +182,12 @@ Extract representative frames. Inspect for cropped text, unreadable charts, brok
 
 ### 11. Archive and deliver
 ```bash
-python /app/skills/scripts/archive_video.py exports/final.mp4 --job "$VIDEO_PRODUCTION_ROOT/current"
+python /sandbox/workspace/skills/scripts/archive_video.py exports/final.mp4 --job "$VIDEO_PRODUCTION_ROOT/current"
 ```
 
 Report: duration, thumbnail, file path. If direct media upload fails, host over Tailscale:
 ```bash
-python /app/skills/scripts/host_video.py exports/final.mp4 --port 8791 --slug my-video
+python /sandbox/workspace/skills/scripts/host_video.py exports/final.mp4 --port 8791 --slug my-video
 ```
 
 ## Video Format Guidance

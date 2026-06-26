@@ -114,6 +114,13 @@ func resolveOrgPath(name string) (string, error) {
 	for _, dir := range candidates {
 		puxYaml := filepath.Join(dir, "pux.yaml")
 		if _, err := os.Stat(puxYaml); err == nil {
+			// Canonicalize so label-discovery agrees with bootstrap.sh's
+			// OPENSHELL_PROJECT_PATH (pwd -P). Without this, ~/.pux/orgs/X
+			// (symlink) and the canonical path string-differ and Pux
+			// spawns a sibling container instead of adopting the compose one.
+			if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+				return resolved, nil
+			}
 			return dir, nil
 		}
 	}

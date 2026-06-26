@@ -191,6 +191,17 @@ func MessagingTools(bus *MessageBus, selfID string) []core.Tool {
 	}
 }
 
+// AllTools returns the subset of orchestration tools that don't need the
+// DelegateRunner / MCPResolver / RoleMap plumbing — i.e. messaging + the
+// stateless Synthesize tool. Delegate* and CollectResults tools require
+// per-orchestrator wiring; compose them individually at the call site.
+func AllTools(bus *MessageBus, selfID string) []core.Tool {
+	return append(
+		MessagingTools(bus, selfID),
+		NewSynthesizeTool(),
+	)
+}
+
 // formatPeersHelper is a convenience used by tool-result formatters that
 // want to inline the peer list into another tool's output. Kept for future
 // use; suppresses unused-import churn in tests.

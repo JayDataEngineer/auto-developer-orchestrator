@@ -38,27 +38,9 @@ var agentPromptCmd = &cobra.Command{
 		client := api.NewClient(serverURL)
 		message := args[0]
 
-		effectiveProject := projectName
-		// Resolve relative paths (e.g., ".") to absolute paths before sending.
-		// The backend resolves project names via PROJECT_ROOT/projects/<name>,
-		// so sending "." would incorrectly resolve to PROJECT_ROOT/projects/.
-		if effectiveProject != "" && !filepath.IsAbs(effectiveProject) && !strings.Contains(effectiveProject, "://") {
-			if abs, err := filepath.Abs(effectiveProject); err == nil {
-				effectiveProject = abs
-			}
-		}
-		effectiveOrg := ""
-		// If --org is set, resolve it and pass as separate field
-		if orgName != "" {
-			orgPath, err := resolveOrgPath(orgName)
-			if err != nil {
-				return err
-			}
-			effectiveOrg = orgPath
-			// If no project specified, use org path as project (backward compat)
-			if effectiveProject == "" {
-				effectiveProject = orgPath
-			}
+		effectiveProject, effectiveOrg, err := resolveEffectiveProjectAndOrg(projectName, orgName)
+		if err != nil {
+			return err
 		}
 
 		effectiveAgentID := agentID
@@ -259,6 +241,47 @@ func printJSON(v interface{}) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// resolveEffectiveProjectAndOrg turns the --project (-p) and --org flags
+// into the actual Project + Org values sent to the backend.
+//
+// When --org is set, the org path MUST be used as the project for sandbox
+// routing. bootstrap.sh labels the compose container with
+// openshell.project-path=<orgPath>, and label discovery
+// (Manager.discoverByProjectLabel) queries by exactly that path. If we
+// let -p (e.g. repo root) override it, discovery misses the compose
+// container and Pux spins up a generic sandbox without the org's system
+// deps (manim, kokoro, comfyui, etc). Verified broken for video-production
+// 2026-06-25.
+//
+// If both flags point at different paths, a warning is printed to stderr
+// so the user knows -p was ignored. The org path always wins.
+func resolveEffectiveProjectAndOrg(projectFlag, orgNameFlag string) (effectiveProject, effectiveOrg string, err error) {
+	effectiveProject = projectFlag
+	// Resolve relative paths (e.g., ".") to absolute paths before sending.
+	// The backend resolves project names via PROJECT_ROOT/projects/<name>,
+	// so sending "." would incorrectly resolve to PROJECT_ROOT/projects/.
+	if effectiveProject != "" && !filepath.IsAbs(effectiveProject) && !strings.Contains(effectiveProject, "://") {
+		if abs, err := filepath.Abs(effectiveProject); err == nil {
+			effectiveProject = abs
+		}
+	}
+	if orgNameFlag == "" {
+		return effectiveProject, "", nil
+	}
+	orgPath, err := resolveOrgPath(orgNameFlag)
+	if err != nil {
+		return "", "", err
+	}
+	effectiveOrg = orgPath
+	if effectiveProject != "" && effectiveProject != orgPath {
+		fmt.Fprintf(os.Stderr,
+			"warning: --project %q ignored because --org %s resolves to %q (sandbox routing uses the org path)\n",
+			effectiveProject, orgNameFlag, orgPath)
+	}
+	effectiveProject = orgPath
+	return effectiveProject, effectiveOrg, nil
 }
 
 func init() {

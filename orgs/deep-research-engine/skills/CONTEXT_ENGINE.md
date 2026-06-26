@@ -1,35 +1,37 @@
 # Context Engine — Autonomous Ingestion → Intelligence Report
 
-Standalone orchestrator that takes raw communications data and produces a
+Standalone orchestrator that takes a raw multimodal corpus and produces a
 structured intelligence report with zero human-in-the-loop decisions.
 
 ## When to use
 
-- Telegram chat export → intelligence analysis
-- Bulk audio (interviews, voice messages) → searchable knowledge graph
-- Mixed media corpus → entity-rich narrative report
+- Structured chat/document export → intelligence analysis
+- Bulk audio (interviews, voice memos, podcasts) → searchable knowledge graph
+- Mixed media corpus (text + audio + images + video) → entity-rich narrative report
+- Any task where "read everything, find the actors + themes, write it up" applies
 
 ## The CTO loop: ingest → audit → refine → re-ingest
 
-The previous pipeline ran ingestion once and assumed success. The new pipeline
-runs ingestion, then delegates to the **auditor** role, which checks 6 measurable
-success criteria. If any fail, the CTO re-delegates ingestion with refined scope
-(max 5 rounds). See `skills/AUDIT_QUALITY_GATES.md` for the full checklist.
+The pipeline runs ingestion, then delegates to the **auditor** role, which
+checks measurable success criteria. If any fail, the CTO re-delegates
+ingestion with refined scope (max 5 rounds). See `skills/AUDIT_QUALITY_GATES.md`
+for the full checklist.
 
-The 6 criteria, all must pass:
+The criteria, all must pass (goals are parametric — see audit skill for SQL):
 
-1. Every `item` of type `voice` has a `transcript` with non-empty `text` (34/34 on Telegram dataset)
-2. Zero `sender` values match `\d{2}\.\d{2}\.\d{4}` (timestamp pollution)
-3. Sender="Unknown" rate < 5% (<36/720 on Telegram dataset)
-4. `topic` table has ≥5 rows
-5. ≥3 distinct `person` clusters from faces+voices
-6. ≥1 `person` node has both `face_centroid` AND `voice_centroid` (proves cross-modal linking)
+1. Every `item` of type `voice`/`video` has a `transcript` child with non-empty `text`
+2. Zero `sender` values match a timestamp-pollution regex
+3. `sender='Unknown'` rate below threshold (parametric; disambiguates forwarded vs. parser-missed)
+4. `topic` table meets minimum row count
+5. Person clusters from faces+voices meet minimum distinct-count
+6. Cross-modal linking: ≥1 `person` node has both `face_centroid` AND `voice_centroid`
 
 ## Pipeline
 
 ```
-[1] Survey             →  count files by type (audio/image/text/other)
-[2] Parse              →  telegram_parser.py → items.json (text + media refs)
+[1] Survey             →  count files by type (audio/image/text/video/other)
+[2] Parse              →  format-specific parser in sandbox/ → items.json
+                          (run `python3 sandbox/<parser>.py --help` to see supported formats)
 [3] Audio              →  audio_client.py + voice_activity + embed_voice per file
                           (Parakeet ASR + Silero VAD + WeSpeaker embeddings + Pyannote diarization)
 [4] Face clustering    →  INGEST_FACE_CLUSTERING_V2
@@ -40,7 +42,7 @@ The 6 criteria, all must pass:
                           (LLM extracts people/organizations/topics/locations/dates per chunk)
 [7] Knowledge Graph    →  surreal_client.py → SurrealDB
                           (item + transcript + speaker_turn + face_appearance + person + topic)
-[8] Audit              →  AUDIT_QUALITY_GATES (6 criteria)
+[8] Audit              →  AUDIT_QUALITY_GATES
                           (if any fail, re-delegate the responsible ingestion step)
 [9] Synthesis          →  LLM reads whole corpus → intelligence_report.md
                           (structured markdown: actors, themes, timeline, warnings)
@@ -49,34 +51,31 @@ The 6 criteria, all must pass:
 ## Usage
 
 ```bash
-cd ~/Documents/programs/deep-research-engine
-
-# Configure LLM endpoint (OpenRouter auto-detected from .env)
-export $(grep -E "^(OPENROUTER_API_KEY|OPENROUTER_BASE_URL)=" .env | xargs)
-
-# Full autonomous run on a Telegram export
+# Full autonomous run on a corpus directory
 python3 sandbox/context_engine.py run \
-  --input data/ChatExport_2026-03-13/ \
+  --input data/<corpus_dir>/ \
   --work-dir /tmp/context-engine
 
 # Skip audio (use cached transcripts from work_dir/transcripts/) — fast iteration
 python3 sandbox/context_engine.py run \
-  --input data/ChatExport_2026-03-13/ \
+  --input data/<corpus_dir>/ \
   --work-dir /tmp/context-engine \
   --skip-audio
 
 # Override synthesis model
 python3 sandbox/context_engine.py run \
-  --input data/ChatExport_2026-03-13/ \
+  --input data/<corpus_dir>/ \
   --work-dir /tmp/context-engine \
   --model anthropic/claude-3.5-sonnet
 ```
+
+Run `python3 sandbox/context_engine.py --help` to see all flags.
 
 ## Output artifacts (in work_dir/)
 
 | File | Contents |
 |------|----------|
-| `items.json` | Parsed Telegram items (text + media refs) |
+| `items.json` | Parsed items (text + media refs) — schema depends on parser |
 | `transcripts/*.json` | One per audio file — text + speaker turns + raw ASR/diarize responses |
 | `text_chunks.json` | Text items + transcripts chunked for entity extraction |
 | `entities.json` | Per-chunk extracted entities (people/orgs/topics/locations/dates) |
@@ -94,23 +93,23 @@ Audio > 60s is automatically chunked:
 
 Verified on 7.75-minute voice file → 3 speakers, 51 turns, 7249-char transcript.
 
-## Cost + latency (observed 2026-06-18)
+## Cost + latency (observed baseline)
 
-For the Telegram demo (4 voice files + 13 text messages):
+For a small mixed corpus (a handful of voice files + text):
 - Audio processing: ~12 min for the long file (8min audio), ~30s each for short
 - Entity extraction: ~30s × N chunks (1 LLM call per chunk)
 - Synthesis: ~30s single LLM call
-- **Total wall clock**: ~15 min for 4-file demo
-- **SurrealDB graph**: 4 transcripts + 99 entities + 34 mention edges
-- **Report length**: 5223 chars
+- **Total wall clock**: ~15 min for a small demo
+- **SurrealDB graph**: transcripts + entities + mention edges proportional to corpus size
+- **Report length**: typically 3–6K chars
 
-For the full 34-file Telegram export, projected ~2-3 hours (bottleneck: pyannote CPU on long audio).
+Larger corpora scale roughly linearly with audio duration; pyannote on CPU is the bottleneck for long-form voice.
 
 ## Quality notes
 
-- Speaker labels are abstract (SPEAKER_00, SPEAKER_01) — no identity resolution across files yet
-- Identity resolution would require voice fingerprints or face matching against known senders
-- Entity extraction has some noise (e.g., "Telegram" classified as organization) — could be filtered with allow/deny lists
+- Speaker labels are abstract (SPEAKER_00, SPEAKER_01) until cross-modal linking resolves them to person nodes
+- Identity resolution depends on coverage of both face embeddings (from images/video keyframes) and voice embeddings (from audio tracks)
+- Entity extraction has some noise — could be filtered with allow/deny lists per corpus
 - Synthesis is one-shot — could be improved with iterative refinement (draft → critique → revise)
 
 ## Failure modes (silent)
@@ -120,6 +119,7 @@ The auditor role should watch for:
 - Transcripts with `speakers: []` (diarization failed)
 - Entities with `people: []` across ALL chunks (LLM endpoint broken)
 - Report with `## Information Gaps` listing majority of content (context not loaded)
+- Embedding coverage gaps (item/transcript/face rows missing their vector columns — see audit Check 7)
 
 ## Files
 
@@ -127,4 +127,4 @@ The auditor role should watch for:
 - `sandbox/audio_client.py` — per-file audio processing
 - `sandbox/entity_extract.py` — LLM-based entity extraction
 - `sandbox/surreal_client.py` — knowledge graph store
-- `sandbox/telegram_parser.py` — Telegram export parser
+- `sandbox/<format>_parser.py` — one parser per supported ingest format; `--help` lists flags + edge cases

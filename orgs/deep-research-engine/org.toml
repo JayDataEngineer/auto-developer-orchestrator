@@ -24,8 +24,10 @@ username = "root"
 password_env = "SURREAL_PASSWORD"
 
 # Sandbox setup — uploaded into the container at /sandbox/ on every init.
-# host.docker.internal resolves to the docker bridge gateway (10.10.0.1) and
-# lets the container reach host-bound services (SurrealDB behind Caddy on :8000).
+# The sandbox container uses network_mode: host (see rendered compose), so
+# localhost inside the container IS the host — SurrealDB behind Caddy on
+# localhost:8000 is reachable directly. host.docker.internal is a Docker
+# Desktop feature and does NOT resolve on Linux host network mode.
 # PUX_ORG_PATH points at the bind-mounted /sandbox/workspace so surreal_client.py
 # can locate prompts/surreal_schema.sql via its _load_schema_sql() lookup.
 [sandbox]
@@ -62,7 +64,7 @@ name = "deep-research-engine-workspace"
 container = "/workspace"
 
 [sandbox.env]
-SURREALDB_URL = "http://host.docker.internal:8000/surreal"
+SURREALDB_URL = "http://localhost:8000/surreal"
 SURREALDB_NS = "research"
 SURREALDB_DB = "main"
 SURREALDB_USER = "root"
@@ -71,6 +73,29 @@ PUX_ORG_PATH = "/sandbox/workspace"
 # MCP capability URLs (MEDIA_MCP_URL, WEB_MCP_URL) are NOT declared here —
 # they're deployment-specific. The shared sandbox clients default to
 # localhost; set the env vars here only when pointing at a non-local MCP.
+# Note: this org's sandbox uses host network mode, so localhost = host.
+
+# Bootstrap metadata — drives the rendered bootstrap.sh. The container uses
+# network_mode: host in the rendered compose, so SurrealDB on localhost:8000
+# is reachable from inside the container without host.docker.internal.
+[sandbox.bootstrap]
+smoke_test_command = "python3 -c \"import os,urllib.request; urllib.request.urlopen(os.environ['SURREALDB_URL']+'/health').read(); print('ok')\""
+smoke_test_description = "container → SurrealDB reachable"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "SurrealDB"
+check = 'curl -sf -o /dev/null "${SURREALDB_HEALTH:-http://localhost:8000/surreal/health}"'
+error_msg = "SurrealDB not reachable at $SURREALDB_HEALTH — start it on the host first (e.g. via shared-docker-infra compose)"
+
+[[sandbox.bootstrap.soft_deps]]
+name = "media-mcp"
+check = 'curl -sf -o /dev/null --max-time 3 -X POST "${MEDIA_MCP_URL:-http://localhost:8101}/mcp" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}"'
+warn_msg = "multimodal ingest paths may degrade (set MEDIA_MCP_URL)"
+
+[[sandbox.bootstrap.soft_deps]]
+name = "web-mcp"
+check = 'curl -sf -o /dev/null --max-time 3 -X POST "${WEB_MCP_URL:-http://localhost:8327}/mcp" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}"'
+warn_msg = "web research tools may degrade (set WEB_MCP_URL)"
 
 [[roles]]
 name = "artifact-director"

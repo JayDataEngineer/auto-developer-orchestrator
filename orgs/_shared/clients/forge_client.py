@@ -7,7 +7,9 @@ Usage:
   python3 forge_client.py generate "prompt" --mode image --params '{"seed":42,"width":1024,"height":1024}'
 
 Env:
-  MCP_HUB_ENDPOINT — Forge API base (default: http://100.86.69.57:30080)
+  MCP_HUB_ENDPOINT — Forge API base (default: http://localhost:30080).
+                     Set this env var when the MCP hub is hosted on a remote
+                     cluster or tailnet node.
 """
 import argparse
 import base64
@@ -17,7 +19,7 @@ import sys
 import urllib.parse
 import urllib.request
 
-ENDPOINT = os.environ.get("MCP_HUB_ENDPOINT", "http://100.86.69.57:30080")
+ENDPOINT = os.environ.get("MCP_HUB_ENDPOINT", "http://localhost:30080")
 TIMEOUT = 180  # generation can take a while on cold GPU
 
 

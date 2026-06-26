@@ -51,6 +51,43 @@ imports = ["shell"]
 """
 
 
+# A canonical [sandbox.bootstrap] block (TOML slice) included by every test
+# fixture that declares tier='standard' or tier='custom-build'. The validator
+# requires this block so the rendered bootstrap.sh is fully derived from data
+# (see scripts/templates/org/bootstrap.sh.j2). Keep this in sync with the
+# real orgs' bootstrap metadata.
+STANDARD_BOOTSTRAP_TOML = """
+[sandbox.bootstrap]
+smoke_test_command = "python3 -c 'print(\\"ok\\")'"
+smoke_test_description = "container up"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "docker"
+check = "command -v docker"
+error_msg = "docker not found on PATH"
+"""
+
+STANDARD_BOOTSTRAP_TOML_CUSTOM_BUILD = """
+[sandbox.bootstrap]
+smoke_test_command = "python3 -c 'print(\\"ok\\")'"
+smoke_test_description = "container up"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "docker"
+check = "command -v docker"
+error_msg = "docker not found on PATH"
+"""
+
+# Dict form for the validator-level tests (avoids re-parsing TOML).
+STANDARD_BOOTSTRAP_DICT = {
+    "smoke_test_command": "python3 -c 'print(\"ok\")'",
+    "smoke_test_description": "container up",
+    "hard_deps": [
+        {"name": "docker", "check": "command -v docker", "error_msg": "docker not found"},
+    ],
+}
+
+
 @pytest.fixture
 def tmp_org(tmp_path: Path) -> Path:
     """A minimal org tree at tmp_path/orgs/acme with org.toml + one role."""
@@ -287,6 +324,7 @@ memory = "256Mi"
 [sandbox.resources.limits]
 cpu = "1"
 memory = "1Gi"
+""" + STANDARD_BOOTSTRAP_TOML + """\
 
 [[roles]]
 name = "worker"
@@ -350,6 +388,7 @@ def test_sandbox_runc_omits_runtime_line(tmp_path: Path) -> None:
         'context = "."\n'
         'dockerfile = "Dockerfile"\n'
         'justification = "test fixture — runc rendering"\n'
+        + STANDARD_BOOTSTRAP_TOML_CUSTOM_BUILD
     )
     env = org_build._make_env()
     org_build.render_org(org, env)
@@ -470,6 +509,7 @@ def test_pux_yaml_renders_host_access_mode(tmp_path: Path) -> None:
         '[sandbox.resources.limits]\n'
         'cpu = "1"\n'
         'memory = "1Gi"\n'
+        + STANDARD_BOOTSTRAP_TOML
     )
     env = org_build._make_env()
     org_build.render_org(org_dir, env)
@@ -497,6 +537,7 @@ def test_pux_yaml_renders_contained_default(tmp_path: Path) -> None:
         '[sandbox.resources.limits]\n'
         'cpu = "1"\n'
         'memory = "1Gi"\n'
+        + STANDARD_BOOTSTRAP_TOML
     )
     env = org_build._make_env()
     org_build.render_org(org_dir, env)
@@ -519,6 +560,7 @@ _VALID_STANDARD_SANDBOX = {
         "requests": {"cpu": "250m", "memory": "256Mi"},
         "limits": {"cpu": "1", "memory": "1Gi"},
     },
+    "bootstrap": dict(STANDARD_BOOTSTRAP_DICT),
 }
 
 
@@ -620,6 +662,7 @@ def test_validation_accepts_custom_build_with_justification(tmp_path: Path) -> N
                 "justification": "Manim + LaTeX + Kokoro — too heavy for base image",
             },
             "env": {"PUX_ORG_PATH": "/sandbox/workspace"},
+            "bootstrap": dict(STANDARD_BOOTSTRAP_DICT),
         }),
         "acme",
         tmp_path,
@@ -699,6 +742,61 @@ def test_validation_rejects_non_int_idle_shutdown(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# host.docker.internal trap — Linux host network mode does not resolve it.     #
+# Any env var or smoke-test string carrying it is a latent bug on Linux.       #
+# See feedback_host_docker_internal_linux_trap.md.                             #
+# --------------------------------------------------------------------------- #
+
+def test_validation_rejects_host_docker_internal_in_env(tmp_path: Path) -> None:
+    """env var carrying host.docker.internal must fail validation."""
+    sandbox = dict(_VALID_STANDARD_SANDBOX)
+    sandbox["env"] = {"SURREALDB_URL": "http://host.docker.internal:8000/surreal"}
+    errs = org_build.validate_org_data(_org_with_sandbox(sandbox), "acme", tmp_path)
+    hits = [e for e in errs if "host.docker.internal" in e and "env.SURREALDB_URL" in e]
+    assert hits, f"expected host.docker.internal error, got: {errs}"
+    assert "localhost" in hits[0], "error must point at the localhost fix"
+
+
+def test_validation_rejects_host_docker_internal_in_smoke_test(tmp_path: Path) -> None:
+    """Smoke-test shim .replace('host.docker.internal','localhost') is the
+    symptom-level patch we're trying to prevent. Reject at source."""
+    sandbox = dict(_VALID_STANDARD_SANDBOX)
+    sandbox["bootstrap"] = dict(STANDARD_BOOTSTRAP_DICT)
+    sandbox["bootstrap"]["smoke_test_command"] = (
+        "python3 -c \"import os; url=os.environ['X'].replace("
+        "'host.docker.internal','localhost'); ...\""
+    )
+    errs = org_build.validate_org_data(_org_with_sandbox(sandbox), "acme", tmp_path)
+    hits = [e for e in errs if "host.docker.internal" in e and "smoke_test_command" in e]
+    assert hits, f"expected smoke_test error, got: {errs}"
+    assert ".replace()" in hits[0], "error must call out the shim anti-pattern"
+
+
+def test_validation_rejects_host_docker_internal_in_dep_check(tmp_path: Path) -> None:
+    """hard_deps[].check + soft_deps[].check also can't carry it."""
+    sandbox = dict(_VALID_STANDARD_SANDBOX)
+    sandbox["bootstrap"] = dict(STANDARD_BOOTSTRAP_DICT)
+    sandbox["bootstrap"]["hard_deps"] = [
+        {"name": "X", "check": "curl http://host.docker.internal:8000", "error_msg": "x"}
+    ]
+    errs = org_build.validate_org_data(_org_with_sandbox(sandbox), "acme", tmp_path)
+    hits = [e for e in errs if "host.docker.internal" in e and "hard_deps[0].check" in e]
+    assert hits, f"expected hard_deps error, got: {errs}"
+
+
+def test_validation_accepts_localhost_env(tmp_path: Path) -> None:
+    """Positive control — localhost is the correct value."""
+    sandbox = dict(_VALID_STANDARD_SANDBOX)
+    sandbox["env"] = {
+        "SURREALDB_URL": "http://localhost:8000/surreal",
+        "PUX_ORG_PATH": "/sandbox/workspace",
+    }
+    errs = org_build.validate_org_data(_org_with_sandbox(sandbox), "acme", tmp_path)
+    hdi_errs = [e for e in errs if "host.docker.internal" in e]
+    assert not hdi_errs, f"expected zero host.docker.internal errors, got: {hdi_errs}"
+
+
+# --------------------------------------------------------------------------- #
 # Phase A §A1: tier renders into pux.yaml                                      #
 # --------------------------------------------------------------------------- #
 
@@ -721,6 +819,7 @@ def test_tier_renders_into_pux_yaml(tmp_path: Path) -> None:
         '\n[sandbox.resources.limits]\n'
         'cpu = "1"\n'
         'memory = "1Gi"\n'
+        + STANDARD_BOOTSTRAP_TOML
     )
     env = org_build._make_env()
     org_build.render_org(org, env)
@@ -761,6 +860,7 @@ def test_sandbox_service_name_overrides_default(tmp_path: Path) -> None:
         '[sandbox.resources.limits]\n'
         'cpu = "1"\n'
         'memory = "1Gi"\n'
+        + STANDARD_BOOTSTRAP_TOML
     )
     env = org_build._make_env()
     org_build.render_org(org, env)
@@ -794,7 +894,8 @@ def test_sandbox_docker_name_without_external_does_not_emit_external_flag(
         '[sandbox.resources.limits]\n'
         'cpu = "1"\n'
         'memory = "1Gi"\n'
-        "\n[[sandbox.volumes]]\n"
+        + STANDARD_BOOTSTRAP_TOML
+        + "\n[[sandbox.volumes]]\n"
         'type = "volume"\n'
         'name = "workspace"\n'
         'docker_name = "acme_workspace"\n'

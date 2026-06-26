@@ -69,4 +69,4 @@ Bad prompts:
 
 ## Endpoint
 
-`MCP_HUB_ENDPOINT` env var is set to `http://100.86.69.57:30080` in the sandbox. Forge lives at `/forge/generate` under that.
+`MCP_HUB_ENDPOINT` env var points the forge_client at the Forge API (default `http://localhost:30080`; set this in your sandbox env when Forge is hosted on a remote cluster). Forge lives at `/forge/generate` under that.

@@ -119,6 +119,11 @@ func (c *Client) do(method, path string, body io.Reader) (*http.Response, error)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// CLI is non-interactive by definition — no human is watching the stream
+	// to answer permission asks. Auto-approve "ask" patterns instead of
+	// hanging 5min for a decision that won't arrive. See isNonInteractiveRequest
+	// in handlers/pux_prompt.go and [[permission-non-interactive-fix]].
+	req.Header.Set("X-Pux-Non-Interactive", "1")
 	return c.HTTPClient.Do(req)
 }
 
@@ -162,5 +167,7 @@ func (c *Client) newRequest(method, path string, payload interface{}) (*http.Req
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// CLI is non-interactive by definition — see do() for rationale.
+	req.Header.Set("X-Pux-Non-Interactive", "1")
 	return req, nil
 }

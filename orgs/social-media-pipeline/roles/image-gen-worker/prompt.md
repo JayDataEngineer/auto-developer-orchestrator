@@ -38,7 +38,7 @@ After all calls, verify each output file exists and is non-empty. Return JSON:
 {
   "generated": ["/sandbox/workspace/images/img_1.png", "/sandbox/workspace/images/img_2.png"],
   "failed": [],
-  "forge_endpoint": "http://100.86.69.57:30080"
+  "forge_endpoint": "http://localhost:30080"
 }
 ```
 

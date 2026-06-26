@@ -63,8 +63,36 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 	}, nil
 }
 
-// getContainerName returns the Docker container name for a sandbox.
+// getContainerName returns the Docker container identifier for a sandbox.
+//
+// Registry-aware: prefers the recorded ContainerID (the Docker-assigned full
+// ID) when present, falls back to the synthesized Pux name otherwise.
+//
+// Why: when bootstrap.sh starts a container via `docker compose up`, that
+// container is named `<project>-<service>-<N>`, NOT `orchestrator-sandbox-<id>`.
+// Pux adopts it via discoverByProjectLabel and records sb.ContainerID. If
+// callers use the synthesized name for exec/stop/inspect, they get "No such
+// container: orchestrator-sandbox-<id>" errors even though the container is
+// up. Routing all lookups through this helper makes the adoption transparent
+// to every caller — bash exec, file copy, stop, inspect, desktop.
+//
+// For freshly-created Pux sandboxes (CreateSandbox path), ContainerID is ""
+// at the moment of creation, so this returns the synthesized name — which is
+// what CreateSandbox itself names the container. The two paths agree.
+//
+// Callers already holding m.mu MUST use getContainerNameLocked instead —
+// this variant takes the lock and will deadlock otherwise.
 func (m *Manager) getContainerName(sandboxID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getContainerNameLocked(sandboxID)
+}
+
+// getContainerNameLocked is the lock-free inner form. Caller MUST hold m.mu.
+func (m *Manager) getContainerNameLocked(sandboxID string) string {
+	if sb, ok := m.sandboxes[sandboxID]; ok && sb != nil && sb.ContainerID != "" {
+		return sb.ContainerID
+	}
 	return fmt.Sprintf("orchestrator-sandbox-%s", sandboxID)
 }
 
@@ -147,7 +175,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		zap.String("policy", opts.Policy),
 	)
 
-	containerName := m.getContainerName(opts.ID)
+	containerName := m.getContainerNameLocked(opts.ID)
 	image := getEnvOrDefault("OPENSHELL_IMAGE", "pux-sandbox:latest")
 	// Org-mode image override: when the caller (pux_prompt.go) supplies an
 	// Image in SandboxOptions, it wins over the env default. This is how
@@ -170,6 +198,21 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	}
 	if projectPath == "" {
 		projectPath = "/app/projects"
+	}
+
+	// Canonicalize before the path hits a Docker label or bind mount.
+	// Without this, the same project invoked via the ~/.pux/orgs/<name>
+	// symlink vs the repo-relative path produces two different labels —
+	// discoverByProjectLabel (which queries by the canonical path) misses
+	// the existing container and Pux spawns a sibling. See
+	// [[feedback_container_reuse_label_discovery]].
+	if resolved, rerr := filepath.EvalSymlinks(projectPath); rerr == nil {
+		projectPath = resolved
+	} else {
+		// EvalSymlinks fails if the path doesn't exist (test fixtures, planned
+		// paths). Fall back to Clean so trailing slashes / `..` segments don't
+		// produce equivalent-but-different label strings.
+		projectPath = filepath.Clean(projectPath)
 	}
 
 	// Reject URL-style project paths (ssh://, file://, http://, ...).
@@ -476,7 +519,7 @@ func (m *Manager) DestroySandbox(ctx context.Context, id string) error {
 	}
 
 	// Save persisted state before destroying
-	containerName := m.getContainerName(id)
+	containerName := m.getContainerNameLocked(id)
 	m.savePersistedState(ctx, containerName)
 
 	// Stop and remove the Docker container
@@ -710,20 +753,65 @@ var envVarRegex = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
 
 // verifyContainerExists checks that the Docker container for a sandbox is actually
 // running. Removes stale entries from the sandbox map if the container is gone.
+//
+// Two lookup paths, in order:
+//  1. By sb.ContainerID (the Docker-assigned full ID). This is what
+//     adoptContainerAsSandbox + RecoverFromDocker populate — the canonical
+//     identifier for an externally-created container (compose, manual run).
+//  2. By synthesized name `orchestrator-sandbox-<id>`. This is what
+//     CreateSandbox names its containers. Used when ContainerID is empty
+//     (legacy entry, or in-memory test sandbox).
+//
+// Without path 1, every adopted compose container fails the lookup
+// (compose names containers `<project>-<service>-<N>`, not
+// `orchestrator-sandbox-<id>`) and gets evicted on the next
+// FindSandboxByProject pass — manifesting as "sandbox <id> not found"
+// errors from the bash executor even though the container is up.
 func (m *Manager) verifyContainerExists(sb *Sandbox) bool {
 	if m.dockerClient == nil {
 		return true // no docker — assume it exists
 	}
 	ctx := context.Background()
-	containerName := "orchestrator-sandbox-" + sb.ID
-	if _, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{}); err != nil {
-		// Container gone — remove stale entry
-		m.mu.Lock()
-		delete(m.sandboxes, sb.ID)
-		m.mu.Unlock()
-		return false
+	target := resolveContainerLookupTarget(sb)
+	if _, err := m.dockerClient.ContainerInspect(ctx, target, client.ContainerInspectOptions{}); err == nil {
+		return true
 	}
-	return true
+	// If the primary target was ContainerID, fall back to the synthesized
+	// Pux name — the container may have been recreated without the label.
+	if sb.ContainerID != "" {
+		fallback := "orchestrator-sandbox-" + sb.ID
+		if fallback != target {
+			if _, err := m.dockerClient.ContainerInspect(ctx, fallback, client.ContainerInspectOptions{}); err == nil {
+				return true
+			}
+		}
+	}
+	// Container gone — remove stale entry
+	m.mu.Lock()
+	delete(m.sandboxes, sb.ID)
+	m.mu.Unlock()
+	return false
+}
+
+// resolveContainerLookupTarget returns the identifier to pass to
+// ContainerInspect when verifying a sandbox's container still exists.
+//
+// Pure function — extracted so the adoption contract can be unit-tested
+// without a Docker client. See verifyContainerExists for the call site.
+//
+// Rule: prefer sb.ContainerID (the Docker-assigned full ID), fall back to
+// the Pux-synthesized `orchestrator-sandbox-<id>` name. The ContainerID
+// path is what makes adopted compose containers verifiable — compose
+// names containers `<project>-<service>-<N>`, so the synthesized Pux
+// name never matches.
+func resolveContainerLookupTarget(sb *Sandbox) string {
+	if sb == nil {
+		return ""
+	}
+	if sb.ContainerID != "" {
+		return sb.ContainerID
+	}
+	return "orchestrator-sandbox-" + sb.ID
 }
 
 // FindSandboxByProject finds a sandbox by project path basename or project path.
@@ -880,10 +968,24 @@ func (m *Manager) discoverByProjectLabel(projectPath string) *Sandbox {
 	if projectPath == "" || m.dockerClient == nil {
 		return nil
 	}
+	// Canonicalize so a discovery query by the repo-relative path still
+	// matches a container whose label was set from the ~/.pux/orgs/<name>
+	// symlink (or vice versa). CreateSandbox canonicalizes on the write
+	// side; this canonicalizes on the read side so historical labels
+	// produced before that fix still adopt cleanly.
+	canonical := projectPath
+	if resolved, err := filepath.EvalSymlinks(projectPath); err == nil {
+		canonical = resolved
+	}
 	ctx := context.Background()
+	// Query both the canonical + original forms — protects against
+	// containers labeled by older Pux versions that didn't canonicalize.
 	result, err := m.dockerClient.ContainerList(ctx, client.ContainerListOptions{
 		Filters: client.Filters{
-			"label": {"openshell.project-path=" + projectPath: true},
+			"label": {
+				"openshell.project-path=" + canonical:        true,
+				"openshell.project-path=" + projectPath:      true,
+			},
 		},
 	})
 	if err != nil {

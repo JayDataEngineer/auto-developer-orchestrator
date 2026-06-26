@@ -15,18 +15,39 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths
 
-from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
+# Third-party + env-var checks deferred until inside main() so --help works
+# in a bare venv (System A contract: stdlib-only top-level imports).
+TradingClient = None  # type: ignore[assignment]
+MarketOrderRequest = None  # type: ignore[assignment]
+LimitOrderRequest = None  # type: ignore[assignment]
+OrderSide = None  # type: ignore[assignment]
+TimeInForce = None  # type: ignore[assignment]
+QueryOrderStatus = None  # type: ignore[assignment]
+API_KEY = os.environ.get("ALPACA_API_KEY") or ""
+SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY") or ""
 
 
-# Alpaca paper trading credentials — required from env, never hardcoded
-API_KEY = os.environ.get("ALPACA_API_KEY")
-SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY")
+def _ensure_alpaca():
+    """Lazily import alpaca-trade + verify env creds. Emits JSON error on failure."""
+    global TradingClient, MarketOrderRequest, LimitOrderRequest
+    global OrderSide, TimeInForce, QueryOrderStatus
+    if TradingClient is not None:
+        return
+    if not API_KEY or not SECRET_KEY:
+        print(json.dumps({"error": "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in env."}))
+        sys.exit(2)
+    try:
+        from alpaca.trading.client import TradingClient as _TC
+        from alpaca.trading.requests import MarketOrderRequest as _MOR, LimitOrderRequest as _LOR
+        from alpaca.trading.enums import (
+            OrderSide as _OS, TimeInForce as _TIF, QueryOrderStatus as _QOS,
+        )
+        TradingClient, MarketOrderRequest, LimitOrderRequest = _TC, _MOR, _LOR
+        OrderSide, TimeInForce, QueryOrderStatus = _OS, _TIF, _QOS
+    except ImportError:
+        print(json.dumps({"error": "alpaca-py not installed. Add to [sandbox].pip_packages."}))
+        sys.exit(1)
 
-if not API_KEY or not SECRET_KEY:
-    print("ERROR: ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in env.", file=sys.stderr)
-    sys.exit(2)
 
 SIGNALS_FILE = paths.SIGNALS_FILE
 MAX_POSITION_PCT = 0.15  # Max 15% of equity in single position
@@ -34,6 +55,7 @@ MIN_CONFIDENCE = 0.6
 
 
 def get_client():
+    _ensure_alpaca()
     return TradingClient(API_KEY, SECRET_KEY, paper=True)
 
 

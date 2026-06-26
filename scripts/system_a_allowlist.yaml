@@ -18,4 +18,13 @@
 # Stale entries (for scripts that were renamed/deleted) are caught by
 # test_allowlist_entries_reference_real_scripts.
 
-allowlist: []
+allowlist:
+  # HTTP server lifecycle — binds port 9876 + imports seleniumbase BEFORE
+  # reaching any argparse call. The script is invoked by Go's
+  # seleniumbase_bridge.go as a long-lived server, not by the agent with
+  # --help. argparse is used internally (port, host flags) but only AFTER
+  # the import-time side effects, so --help fails with ImportError or
+  # OSError: address in use. Refactoring to defer imports is invasive and
+  # risks destabilizing the browser backend.
+  - script: sb_server.py
+    reason: "HTTP server — binds port + imports deps at module top before argparse; --help fails with ImportError/OSError. Server lifecycle, not agent CLI."

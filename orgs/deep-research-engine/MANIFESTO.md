@@ -4,8 +4,10 @@
 Config-driven multi-agent research engine. **Query in, expert content out.**
 Two surfaces share one knowledge engine:
 
-1. **Multimodal ingest** — Telegram exports, audio, video, photos → knowledge graph in SurrealDB (faces, voices, persons, topics, transcripts)
+1. **Multimodal ingest** — structured exports (chat dumps, field notes, scraped corpora), audio, video, photos → knowledge graph in SurrealDB (faces, voices, persons, topics, transcripts)
 2. **Expert research + content** — web search + optional PDFs → synthesized brief → social posts / Substack articles / podcast scripts
+
+The engine is **format-agnostic**. Any ingest path that produces `item` rows in SurrealDB participates in the same downstream entity-extraction, clustering, and audit pipeline. Skills describe the *shape* of an ingest task; format-specific knowledge (which parser to call, which edge cases to handle) lives in the parser scripts themselves, surfaced via `--help`.
 
 ## CTO Loop (this org's overlay on the kernel CTO)
 
@@ -88,7 +90,7 @@ Walk this in order. First match wins.
 
 | User request shape | Route to |
 |---|---|
-| "Ingest this Telegram export / folder of media" | First: list the Org Data Directory (declared above) and pick the most relevant export. Then: `ingestion-director` (existing path, runs full audit→yield loop) |
+| "Ingest this structured export / folder of media / corpus of documents" | First: list the Org Data Directory (declared above) and pick the most relevant corpus. Then: `ingestion-director` (existing path, runs full audit→yield loop). Format-specific parse steps live in the relevant `INGEST_*` skill + parser script. |
 | "Read these PDFs and tell me about X" | `pdf-ingestor` → `synthesizer` |
 | "Research X on the web" / "What's new with X" / "Latest on X" | `web-researcher` → `synthesizer` |
 | **Query about data already in SurrealDB** ("who is Person_3?", "what topics exist?", "what do we know about X?") | **No delegation** — use `CONTEXT_ENGINE_QUERY` skill yourself, answer directly. Yields text, not a file. |
@@ -96,7 +98,7 @@ Walk this in order. First match wins.
 | "Write a social post / Twitter thread about X" | requires prior brief → `social-post-writer` |
 | "Write a Substack article about X" | requires prior brief → `substack-writer` |
 | **Fact-check this article** (URL provided, has images) | `web-researcher` with FACT_CHECK_ARTICLES skill — scrapes, OCRs images via media-mcp, verifies each claim |
-| **Act as detective / intelligence report on "our data" / "the dump" / "the corpus"** (no path given) | Look in the Org Data Directory FIRST. Run `ingestion-director` on the relevant export, then have `synthesizer` produce the investigator's brief. |
+| **Act as detective / intelligence report on "our data" / "the dump" / "the corpus"** (no path given) | Look in the Org Data Directory FIRST. Run `ingestion-director` on the relevant corpus, then have `synthesizer` produce the investigator's brief. |
 | "Become an expert on X" (no specific artifact) | `web-researcher` → `synthesizer`, then yield the brief as the expertise |
 | Simple conversational reply / capability question | Answer directly. Skip START-TASK (not a real task). |
 
@@ -109,7 +111,7 @@ If user references existing SurrealDB state ("use what we already know about Per
 ## Workers at your disposal
 
 **Multimodal ingest path:**
-- `ingestion-director` — runs Telegram/media ingest end-to-end
+- `ingestion-director` — runs multimodal ingest (any format the parsers support) end-to-end
 - `auditor` — checks 6 success criteria, returns gap report
 - `multimodal-worker` — cross-modal person linking (face ↔ voice)
 
@@ -142,6 +144,28 @@ For writer output:
 4. **Iterate until good enough** — you are the quality gate. No separate critic node.
 5. **Config = prompts** — new workflows come from new prompts + new skills, not new code.
 6. **The world isn't ephemeral** — every pipeline run writes a `<entity>_run` record to SurrealDB. Before delegating, query prior runs via `CONTEXT_ENGINE_QUERY`. Skip work that's already done.
+7. **Comprehensive persistence** — when you build a vector index, a graph edge set, or an embedding space (face / voice / text / topic), the data you write must be **comprehensive enough to serve as a reference for later queries**. Partial coverage silently breaks semantic search: a 4%-populated HNSW index is a trap, not a feature. Concretely:
+   - **Every text-bearing record gets a text embedding.** Chat messages, transcript lines, source_item bodies, task_run prompts — all of them, not just the ones you found interesting. If the table has a `<field>_embedding` column, fill it for every row before declaring the task done.
+   - **Every face-bearing image gets face embeddings**, including every keyframe extracted from every video. Don't process the photos and skip the videos.
+   - **Every voice-bearing audio gets a voice embedding**, including audio tracks extracted from videos. The autonomous speaker→person linkage depends on coverage.
+   - **Every transcript gets its `embedding` field populated** and `transcript_status` set (`transcribed` / `pending` / `failed`) so future queries can filter cleanly.
+   - **Every topic gets a `centroid_embedding`** computed from its member items. Topics without centroids can't be semantic-search targets.
+   - **Populate graph edges for every entity you discovered.** `appears_in`, `mentions`, `speaks_in`, `extracted_from` — if you extracted the entity, write the edge. Orphan nodes (no in/out edges) are queryable in principle but invisible in practice.
+   - **Run the auditor before declaring victory.** The `auditor` role exists to surface exactly these coverage gaps. If the audit reports <100% coverage on a populated embedding space, re-delegate the worker to close the gap before YIELD.
+
+   Coverage check (quick SQL the CTO can run directly):
+   ```sql
+   -- Should all return 0
+   SELECT count() FROM item WHERE array::len(text_embedding) != 1024 GROUP ALL;
+   SELECT count() FROM transcript WHERE embedding = NONE GROUP ALL;
+   SELECT count() FROM face_appearance WHERE embedding = NONE GROUP ALL;
+   SELECT count() FROM topic WHERE centroid_embedding = NONE GROUP ALL;
+   SELECT count() FROM media WHERE type = NONE GROUP ALL;
+   -- Should be > 0 if you discovered any entities
+   SELECT count() FROM appears_in GROUP ALL;
+   SELECT count() FROM mentions GROUP ALL;
+   ```
+   Any non-zero count above is a coverage gap. Re-delegate before yielding.
 
 ## Director Pattern (for the director roles)
 Each director:

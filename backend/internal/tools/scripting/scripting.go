@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/tools"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 )
 
@@ -49,10 +50,16 @@ func scriptsPyPath() string {
 }
 
 // runScriptsPy invokes scripts.py with the given args and optional stdin.
-// Returns the parsed JSON output. On subprocess failure, returns a map with
-// "error" and "stderr" keys. Never returns a Go-level error — callers should
-// check the "error" key in the returned map.
-func runScriptsPy(args []string, stdin string, timeout time.Duration) map[string]any {
+// Returns the parsed JSON result (map[string]any) wrapped via tools.QuarantineResult
+// — agent-authored Python can echo injection patterns in stdout/stderr.
+// Return type is `any` (not map[string]any) because QuarantineResult may
+// return a generic map[string]any after JSON round-trip when patterns match.
+// Callers that need the map shape can type-assert; the Execute methods return
+// `any` directly per the core.Tool contract.
+func runScriptsPy(args []string, stdin string, timeout time.Duration) any {
+	// Returns the parsed JSON output. On subprocess failure, returns a map with
+	// "error" and "stderr" keys. Never returns a Go-level error — callers should
+	// check the "error" key in the returned map.
 	scriptPath := scriptsPyPath()
 	if scriptPath == "" {
 		return map[string]any{
@@ -107,7 +114,8 @@ func runScriptsPy(args []string, stdin string, timeout time.Duration) map[string
 	// scripts.py always emits JSON; parse it
 	var result map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		// Not JSON — return raw
+		// Not JSON — return raw. Wrap via QuarantineResult because agent-authored
+		// Python can echo injection patterns ("ignore previous instructions", etc).
 		out := map[string]any{
 			"exit_code": exitCode,
 			"stdout":    truncate.Tail(stdout.String(), truncate.FileMaxLines, truncate.BashMaxChars).Content,
@@ -115,7 +123,7 @@ func runScriptsPy(args []string, stdin string, timeout time.Duration) map[string
 		if stderr.Len() > 0 {
 			out["stderr"] = truncate.Tail(stderr.String(), truncate.FileMaxLines, truncate.BashMaxChars).Content
 		}
-		return out
+		return tools.QuarantineResult(out)
 	}
 
 	// Truncate large stdout fields if present
@@ -125,7 +133,10 @@ func runScriptsPy(args []string, stdin string, timeout time.Duration) map[string
 	if rawStderr, ok := result["stderr"].(string); ok {
 		result["stderr"] = truncate.Tail(rawStderr, truncate.FileMaxLines, truncate.BashMaxChars).Content
 	}
-	return result
+	// Wrap via QuarantineResult — stdout/stderr is arbitrary agent-authored
+	// Python output and may contain injection-pattern text. Same contract as
+	// browser + MCP + memory tools.
+	return tools.QuarantineResult(result)
 }
 
 // AvailableScriptsBlock builds the <available_scripts> XML block injected into
@@ -145,7 +156,8 @@ func AvailableScriptsBlock() string {
 	const maxLineChars = 120
 
 	res := runScriptsPy([]string{"--list"}, "", 5*time.Second)
-	scripts, _ := res["scripts"].([]any)
+	resMap, _ := res.(map[string]any)
+	scripts, _ := resMap["scripts"].([]any)
 	if len(scripts) == 0 {
 		return ""
 	}

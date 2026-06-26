@@ -61,10 +61,17 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	// req.Project string. req.Project could be a short name ("go-backend") or
 	// an absolute path ("/home/ubuntu/.../go-backend") depending on the client.
 	// Using filepath.Base(projectPath) ensures the ID is always consistent.
+	//
+	// skeletonTier is hoisted to the outer scope so the bashExec wiring below
+	// can gate on it. Without the gate, skeleton-tier orgs (dev-bot, general)
+	// skip CreateSandbox but still get bashExec pointed at the string-derived
+	// sandboxID — which doesn't exist in the sandbox registry. The bash tool
+	// then returns "sandbox <id> not found" on every call.
 	sandboxID := filepath.Base(projectPath)
 	sandboxID = strings.ReplaceAll(sandboxID, "/", "-")
 	sandboxID = strings.ReplaceAll(sandboxID, "_", "-")
 	sandboxID = strings.Trim(sandboxID, "-")
+	skeletonTier := false
 	if h.sandboxMgr != nil {
 		var existingSandbox *sandbox.Sandbox
 		if sb := h.sandboxMgr.FindSandboxByProject(projectPath); sb != nil {
@@ -83,12 +90,43 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 			}
 		}
 		if existingSandbox == nil {
-			// For SSH projects, don't bind-mount a local path (it doesn't exist locally).
-			// The agent uses SSHExecutor for host commands instead.
-			sbProjectPath := projectPath
-			if sshInfo != nil {
-				sbProjectPath = ""
+			// Skeleton-tier orgs (dev-bot, general) declare no sandbox body
+			// and must NOT have a container spawned for them. Skip the
+			// CreateSandbox call entirely; the host bash + host file ops
+			// executors wired above remain in effect.
+			//
+			// Without this guard, every prompt against a skeleton org
+			// attempts to spin up an `orchestrator-sandbox-<id>` container,
+			// hangs waiting for it to become ready (which never happens
+			// because the org has no init_files / image config), and burns
+			// the prompt timeout. Tier=skeleton is the explicit declaration
+			// that the org runs without a container — respect it.
+			orgPathForTierCheck := req.Org
+			skipSandbox := false
+			if orgPathForTierCheck == "" {
+				orgPathForTierCheck = projectPath
 			}
+			if org := common.LoadOrgManifest(orgPathForTierCheck); org != nil {
+				tier := org.SandboxTier()
+				// Per OrgManifest.SandboxTier() contract: empty string is
+				// interpreted as skeleton (no sandbox block in pux.yaml,
+				// renderer drops it for tier="skeleton" orgs). Both paths
+				// mean "do not spawn a container for this org."
+				if tier == "" || tier == common.SandboxTierSkeleton {
+					h.log.Info("Skeleton-tier org — skipping sandbox creation",
+						zap.String("org", orgPathForTierCheck),
+						zap.String("tier", tier))
+					skipSandbox = true
+					skeletonTier = true
+				}
+			}
+			if !skipSandbox {
+				// For SSH projects, don't bind-mount a local path (it doesn't exist locally).
+				// The agent uses SSHExecutor for host commands instead.
+				sbProjectPath := projectPath
+				if sshInfo != nil {
+					sbProjectPath = ""
+				}
 			// Org-mode sandbox image + env override. When the active org
 			// declares sandbox.image (e.g. video-production's manim image),
 			// pass it through so the agent runs inside the specialized
@@ -162,6 +200,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 				// the System A backbone are missing — see ensureOrgSandboxInit.
 				ensureOrgSandboxInit(r.Context(), h.sandboxIn, h.log, sandboxID, orgPathForSandbox, sbProjectPath)
 			}
+			} // end !skipSandbox branch
 		} else {
 			// Existing sandbox — re-run init_files. Covers the server-restart
 			// edge case where the in-memory map was rebuilt by
@@ -183,10 +222,14 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	provider := llm.NewAdapter(engine, 0)
 	defer provider.Close()
 
-	// Build infrastructure adapters (shared with scheduler)
+	// Build infrastructure adapters (shared with scheduler).
+	// skeletonTier orgs never wire bashExec — they have no container, so the
+	// BashExecutor would point at a non-existent sandbox and every bash call
+	// would fail with "sandbox <id> not found". CTO + sub-agents fall through
+	// to hostBash (HostExecutor) at the org-isolation swap below.
 	var bashExec bashtools.Executor
 	var fileOpsInstance file.SandboxFileOps
-	if h.sandboxMgr != nil && sandboxID != "" {
+	if h.sandboxMgr != nil && sandboxID != "" && !skeletonTier {
 		bashExec = &adapters.BashExecutor{Mgr: h.sandboxMgr, SandboxID: sandboxID}
 		// Use the project path as BasePath so /sandbox/workspace/ remapping works.
 		// SimpleSandboxOps.ReadFile calls absPath() which strips /sandbox/workspace/
@@ -264,7 +307,7 @@ func (h *PuxHandler) promptWithOrchestrator(w http.ResponseWriter, r *http.Reque
 	// editing files in a real repo. Default is "contained" — safe-by-default
 	// so invest / game-dev / twitter scrapers stay locked without any opt-in.
 	orgSandboxed := false
-	if orgModeActive && sshInfo == nil && bashExec != nil {
+	if orgModeActive && sshInfo == nil && bashExec != nil && !skeletonTier {
 		if org := common.LoadOrgManifest(orgPathForMode); org != nil && org.HostAccessEnabled() {
 			h.log.Info("Org host-access mode active — CTO runs on host executors",
 				zap.String("project", projectPath),

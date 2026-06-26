@@ -20,7 +20,7 @@ func NewSelectOptionTool(p BrowserProvider, sandboxID func() string) *SelectOpti
 
 func (t *SelectOptionTool) Name() string { return "select_option" }
 func (t *SelectOptionTool) Description() string {
-	return "Select an option in a dropdown (<select>) element. Find the select by CSS selector, role, or label, then choose an option by value or visible text. Use this for country/state/language pickers on forms."
+	return "Select an option in a dropdown (<select>) element. Find the select by CSS selector, role, or label, then choose an option by value or visible text. Use this for any picker that exposes a fixed list of choices (region, language, category, preference, etc.)."
 }
 func (t *SelectOptionTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
@@ -58,14 +58,14 @@ func NewUploadFileTool(p BrowserProvider, sandboxID func() string) *UploadFileTo
 
 func (t *UploadFileTool) Name() string { return "upload_file" }
 func (t *UploadFileTool) Description() string {
-	return "Upload a file to a file input element (<input type='file'>). The file must exist in the sandbox workspace (e.g., /sandbox/workspace/resume.pdf). Use this for resume/CV uploads on job application forms."
+	return "Upload a file to a file input element (<input type='file'>). The file must already exist in the sandbox workspace (e.g., /sandbox/workspace/document.pdf). Use this whenever a page asks for a file you already have on hand."
 }
 func (t *UploadFileTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
 			"selector": {"type": "string", "description": "CSS selector for the file input (default: 'input[type=file]')"},
-			"file_path": {"type": "string", "description": "Path to the file in the sandbox (e.g., '/sandbox/workspace/resume.pdf')"}
+			"file_path": {"type": "string", "description": "Path to the file in the sandbox (e.g., '/sandbox/workspace/document.pdf')"}
 		},
 		"required": ["file_path"]
 	}`)
@@ -171,13 +171,13 @@ func NewInjectFileTool(p BrowserProvider, sandboxID func() string) *InjectFileTo
 
 func (t *InjectFileTool) Name() string { return "inject_file" }
 func (t *InjectFileTool) Description() string {
-	return "Write a file (base64-encoded) into the sandbox filesystem. Use this to upload resume PDFs, profile pictures, cover letters, or any other file needed for form filling that isn't already in the sandbox. The file will be decoded and saved at the specified path."
+	return "Write a file (base64-encoded) into the sandbox filesystem. Use this to materialize any file the page needs (e.g., an image, PDF, CSV, or archive) that isn't already in the sandbox. The file will be decoded and saved at the specified path."
 }
 func (t *InjectFileTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"dest_path": {"type": "string", "description": "Destination path in the sandbox (e.g., '/sandbox/workspace/resume.pdf')"},
+			"dest_path": {"type": "string", "description": "Destination path in the sandbox (e.g., '/sandbox/workspace/document.pdf')"},
 			"content_base64": {"type": "string", "description": "Base64-encoded file content"}
 		},
 		"required": ["dest_path", "content_base64"]
@@ -211,13 +211,13 @@ func NewCredentialGetTool(p BrowserProvider, sandboxID func() string) *Credentia
 
 func (t *CredentialGetTool) Name() string { return "credential_get" }
 func (t *CredentialGetTool) Description() string {
-	return "Get saved login credentials for a service. Looks up service-specific environment variables (e.g., LINKEDIN_USERNAME, LINKEDIN_PASSWORD). Use this to log into job portals, email, or any other service without hardcoding credentials in prompts."
+	return "Get saved login credentials for a service. Looks up service-specific environment variables (e.g., <SERVICE>_USERNAME, <SERVICE>_PASSWORD). Use this to log into any service without hardcoding credentials in prompts."
 }
 func (t *CredentialGetTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"service": {"type": "string", "description": "Service name (e.g., 'linkedin', 'indeed', 'glassdoor'). Case-insensitive."}
+			"service": {"type": "string", "description": "Service name. The tool looks up <SERVICE>_USERNAME and <SERVICE>_PASSWORD (uppercase). Case-insensitive."}
 		},
 		"required": ["service"]
 	}`)
@@ -246,7 +246,7 @@ func NewUserProfileTool(p BrowserProvider, sandboxID func() string) *UserProfile
 
 func (t *UserProfileTool) Name() string { return "user_profile" }
 func (t *UserProfileTool) Description() string {
-	return "Read your profile information (name, email, phone, resume path, skills, work history) from a saved JSON config file. The config is loaded from PROFILE_PATH env var, ~/.pux/user_profile.json, or the project root. Use this to quickly fill profile fields on applications without repeating yourself."
+	return "Read the user's profile information (name, email, phone, and any other fields they've chosen to save) from a JSON config file. The config is loaded from PROFILE_PATH env var, ~/.pux/user_profile.json, or the project root. Use this whenever a page asks for information about the user that they've already chosen to persist."
 }
 func (t *UserProfileTool) Schema() json.RawMessage {
 	return json.RawMessage(`{

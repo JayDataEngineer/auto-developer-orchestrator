@@ -13,12 +13,12 @@ The web-mcp server exposes a combined search+scrape tool, a lightweight search-o
 Restate the user's research question in your own words. Then list 3-5 sub-questions. If you can't decompose, you don't understand the question — ask the CTO.
 
 **Example:**
-- User: "What's the deal with the White Lives Matter Montana Telegram channel?"
+- User: "What's the background of organization X and why are they in the news?"
 - Sub-questions:
-  1. Who runs @WLM_USA_MONTANA and what's their stated platform?
-  2. What do watchdog groups (ADL, SPLC) say about this channel?
-  3. Has the channel been linked to real-world incidents?
-  4. What's Telegram's policy on extremist channels and have they enforced it here?
+  1. Who runs organization X and what's their stated mission?
+  2. What do watchdog groups or journalists say about them?
+  3. Have they been linked to specific real-world incidents?
+  4. What's the platform/provider response to their activity, if any?
 
 ### Step 2 — Search per sub-question
 

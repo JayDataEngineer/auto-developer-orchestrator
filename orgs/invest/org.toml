@@ -40,6 +40,33 @@ ALPACA_API_KEY = "${ALPACA_API_KEY:-}"
 ALPACA_SECRET_KEY = "${ALPACA_SECRET_KEY:-}"
 FRED_API_KEY = "${FRED_API_KEY:-}"
 
+# Bootstrap metadata — drives the rendered bootstrap.sh. Hard deps are the
+# docker tools the operator needs; soft deps are optional API keys that
+# unlock specific data sources (paper trading, FRED macro data).
+[sandbox.bootstrap]
+smoke_test_command = "python3 -c 'import pandas, numpy, yfinance; print(\"deps ok\")'"
+smoke_test_description = "pure-Python deps importable"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "docker"
+check = "command -v docker"
+error_msg = "docker not found on PATH"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "docker compose"
+check = "docker compose version"
+error_msg = "docker compose subcommand missing — install Docker Compose v2"
+
+[[sandbox.bootstrap.soft_deps]]
+name = "ALPACA_API_KEY"
+check = '[ -n "${ALPACA_API_KEY:-}" ]'
+warn_msg = "paper trading will be unavailable until you export it"
+
+[[sandbox.bootstrap.soft_deps]]
+name = "FRED_API_KEY"
+check = '[ -n "${FRED_API_KEY:-}" ]'
+warn_msg = "macro data (yield curve, rates) will be unavailable"
+
 [[sandbox.volumes]]
 type = "bind"
 host = "./sandbox"

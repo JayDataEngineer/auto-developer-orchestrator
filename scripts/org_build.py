@@ -309,18 +309,18 @@ def validate_org_data(data: dict[str, Any], org_name: str, org_dir: Path) -> lis
         if res is not None and not isinstance(res, dict):
             errs.append("org.toml: sandbox.resources must be a table")
         else:
-            for tier in ("requests", "limits"):
-                block = (res or {}).get(tier)
+            for res_sub in ("requests", "limits"):
+                block = (res or {}).get(res_sub)
                 if block is None:
                     continue
                 if not isinstance(block, dict):
-                    errs.append(f"org.toml: sandbox.resources.{tier} must be a table")
+                    errs.append(f"org.toml: sandbox.resources.{res_sub} must be a table")
                     continue
                 for k in ("cpu", "memory"):
                     v = block.get(k)
                     if v is not None and not isinstance(v, str):
                         errs.append(
-                            f"org.toml: sandbox.resources.{tier}.{k} must be a "
+                            f"org.toml: sandbox.resources.{res_sub}.{k} must be a "
                             f"string like '200m' or '256Mi'"
                         )
 
@@ -382,7 +382,243 @@ def validate_org_data(data: dict[str, Any], org_name: str, org_dir: Path) -> lis
             elif not hc.get("test"):
                 errs.append("org.toml: sandbox.healthcheck.test is required")
 
+        # Bootstrap block — drives the rendered bootstrap.sh. Required for
+        # non-skeleton tiers (every sandbox org must declare its hard deps +
+        # smoke test so the bootstrap is fully derived from data, not prose).
+        # Skeleton tier forbids it (no container = no bootstrap).
+        bootstrap = sandbox.get("bootstrap")
+        if tier == "skeleton":
+            if bootstrap is not None:
+                errs.append(
+                    "org.toml: sandbox.bootstrap is forbidden for tier='skeleton' "
+                    "(skeleton orgs have no bootstrap — they're config-only)"
+                )
+        else:
+            if bootstrap is None:
+                errs.append(
+                    f"org.toml: sandbox.bootstrap is required for tier={tier!r} "
+                    f"(declares hard_deps, soft_deps, smoke_test). See "
+                    f"scripts/templates/org/bootstrap.sh.j2."
+                )
+            elif not isinstance(bootstrap, dict):
+                errs.append("org.toml: sandbox.bootstrap must be a table")
+            else:
+                errs.extend(_validate_bootstrap_block(bootstrap, org_name, org_dir, tier))
+
+        # host.docker.internal is Docker-Desktop-only (Mac/Windows). On Linux
+        # with network_mode: host it does NOT resolve — the container shares
+        # the host network namespace, so localhost IS the host. Any env var,
+        # smoke test, or dep-check that hardcodes host.docker.internal is a
+        # latent bug on Linux deployments. Reject at build time so it can't
+        # drift in via copy-paste from Docker-Desktop examples.
+        # See feedback_host_docker_internal_linux_trap.md.
+        errs.extend(_scan_host_docker_internal(sandbox))
+
     return errs
+
+
+def _scan_host_docker_internal(sandbox: dict[str, Any]) -> list[str]:
+    """Reject any string value under [sandbox] containing host.docker.internal.
+
+    Scans env values + bootstrap command strings. Comments aren't reachable
+    here (TOML parser strips them) so any occurrence in a config value is a
+    real bug, not documentation.
+    """
+    errs: list[str] = []
+    needle = "host.docker.internal"
+
+    env = sandbox.get("env")
+    if isinstance(env, dict):
+        for k, v in env.items():
+            if isinstance(v, str) and needle in v:
+                errs.append(
+                    f"org.toml: sandbox.env.{k}={v!r} contains {needle!r} "
+                    f"which does not resolve on Linux host network mode. "
+                    f"Use 'localhost' instead (sandbox uses network_mode: host)."
+                )
+
+    bootstrap = sandbox.get("bootstrap")
+    if isinstance(bootstrap, dict):
+        smk = bootstrap.get("smoke_test_command")
+        if isinstance(smk, str) and needle in smk:
+            errs.append(
+                f"org.toml: sandbox.bootstrap.smoke_test_command contains "
+                f"{needle!r}. Fix the source env var instead of patching it "
+                f"with a .replace() shim in the smoke test."
+            )
+        for dep_kind in ("hard_deps", "soft_deps"):
+            for i, dep in enumerate(bootstrap.get(dep_kind) or []):
+                if not isinstance(dep, dict):
+                    continue
+                check = dep.get("check")
+                if isinstance(check, str) and needle in check:
+                    errs.append(
+                        f"org.toml: sandbox.bootstrap.{dep_kind}[{i}].check "
+                        f"contains {needle!r}. Use 'localhost' (sandbox uses "
+                        f"network_mode: host on Linux)."
+                    )
+
+    return errs
+
+
+def _validate_bootstrap_block(
+    bootstrap: dict[str, Any],
+    org_name: str,
+    org_dir: Path,
+    tier: str,
+) -> list[str]:
+    """Validate [sandbox.bootstrap] contents.
+
+    The block drives the rendered bootstrap.sh. Every entry must be structured
+    so the template can render it without org-specific conditionals.
+    """
+    errs: list[str] = []
+
+    # hard_deps[] — fail-fast checks. Each entry: {name, check, error_msg}.
+    for i, dep in enumerate(bootstrap.get("hard_deps") or []):
+        if not isinstance(dep, dict):
+            errs.append(f"org.toml: sandbox.bootstrap.hard_deps[{i}] must be a table")
+            continue
+        for field in ("name", "check", "error_msg"):
+            v = dep.get(field)
+            if not isinstance(v, str) or not v.strip():
+                errs.append(
+                    f"org.toml: sandbox.bootstrap.hard_deps[{i}].{field} is required "
+                    f"(non-empty string)"
+                )
+
+    # soft_deps[] — warn-only checks. Same shape but error_msg → warn_msg.
+    for i, dep in enumerate(bootstrap.get("soft_deps") or []):
+        if not isinstance(dep, dict):
+            errs.append(f"org.toml: sandbox.bootstrap.soft_deps[{i}] must be a table")
+            continue
+        for field in ("name", "check", "warn_msg"):
+            v = dep.get(field)
+            if not isinstance(v, str) or not v.strip():
+                errs.append(
+                    f"org.toml: sandbox.bootstrap.soft_deps[{i}].{field} is required "
+                    f"(non-empty string)"
+                )
+
+    # smoke_test_command is optional but if declared must be a non-empty
+    # string. Description is optional (template derives a default).
+    smk = bootstrap.get("smoke_test_command")
+    if smk is not None and (not isinstance(smk, str) or not smk.strip()):
+        errs.append(
+            "org.toml: sandbox.bootstrap.smoke_test_command must be a non-empty "
+            "string if declared"
+        )
+    smk_desc = bootstrap.get("smoke_test_description")
+    if smk_desc is not None and (not isinstance(smk_desc, str) or not smk_desc.strip()):
+        errs.append(
+            "org.toml: sandbox.bootstrap.smoke_test_description must be a non-empty "
+            "string if declared"
+        )
+
+    # host_setup[] — pre-compose host-side helpers. Each entry needs at least
+    # name + description + script + args. python_deps is optional (venv setup
+    # runs only when declared). check_args is optional (skips helper in --check
+    # mode when absent).
+    for i, helper in enumerate(bootstrap.get("host_setup") or []):
+        if not isinstance(helper, dict):
+            errs.append(f"org.toml: sandbox.bootstrap.host_setup[{i}] must be a table")
+            continue
+        for field in ("name", "description"):
+            v = helper.get(field)
+            if not isinstance(v, str) or not v.strip():
+                errs.append(
+                    f"org.toml: sandbox.bootstrap.host_setup[{i}].{field} is required"
+                )
+        script = helper.get("script")
+        if not isinstance(script, str) or not script.strip():
+            errs.append(
+                f"org.toml: sandbox.bootstrap.host_setup[{i}].script is required "
+                f"(path to host-side helper script)"
+            )
+        else:
+            # Resolve @shared/... and org-relative paths to verify the script
+            # actually exists in the source tree. Catches typos at validate
+            # time instead of at bootstrap runtime.
+            resolved = _resolve_org_path(script, org_dir)
+            if not resolved.exists():
+                errs.append(
+                    f"org.toml: sandbox.bootstrap.host_setup[{i}].script={script!r} "
+                    f"resolves to {resolved} but file does not exist"
+                )
+        args = helper.get("args")
+        if args is not None and not isinstance(args, list):
+            errs.append(
+                f"org.toml: sandbox.bootstrap.host_setup[{i}].args must be a list "
+                f"of strings"
+            )
+        check_args = helper.get("check_args")
+        if check_args is not None and not isinstance(check_args, list):
+            errs.append(
+                f"org.toml: sandbox.bootstrap.host_setup[{i}].check_args must be a "
+                f"list of strings"
+            )
+        pydeps = helper.get("python_deps")
+        if pydeps is not None:
+            if not isinstance(pydeps, list) or not all(
+                isinstance(p, str) and p.strip() for p in pydeps
+            ):
+                errs.append(
+                    f"org.toml: sandbox.bootstrap.host_setup[{i}].python_deps must "
+                    f"be a list of non-empty strings"
+                )
+
+    # extra_subcommands[] — org-specific flag handlers (telegram-agent has
+    # --setup-credentials, --interactive-login). Each entry: {flag, usage_args,
+    # description, body}. Body is a literal bash string (heredoc'd into the
+    # rendered script). It's an escape hatch — prefer host_setup[] for new code.
+    for i, cmd in enumerate(bootstrap.get("extra_subcommands") or []):
+        if not isinstance(cmd, dict):
+            errs.append(
+                f"org.toml: sandbox.bootstrap.extra_subcommands[{i}] must be a table"
+            )
+            continue
+        for field in ("flag", "description"):
+            v = cmd.get(field)
+            if not isinstance(v, str) or not v.strip():
+                errs.append(
+                    f"org.toml: sandbox.bootstrap.extra_subcommands[{i}].{field} "
+                    f"is required"
+                )
+        if not cmd.get("flag", "").startswith("--"):
+            errs.append(
+                f"org.toml: sandbox.bootstrap.extra_subcommands[{i}].flag must "
+                f"start with '--' (got {cmd.get('flag')!r})"
+            )
+        usage_args = cmd.get("usage_args")
+        if usage_args is not None and not isinstance(usage_args, str):
+            errs.append(
+                f"org.toml: sandbox.bootstrap.extra_subcommands[{i}].usage_args "
+                f"must be a string"
+            )
+        body = cmd.get("body")
+        if body is not None and not isinstance(body, str):
+            errs.append(
+                f"org.toml: sandbox.bootstrap.extra_subcommands[{i}].body must "
+                f"be a string"
+            )
+
+    return errs
+
+
+def _resolve_org_path(path_str: str, org_dir: Path) -> Path:
+    """Resolve a path declared in org.toml against the org directory.
+
+    Handles three forms:
+      - ``@shared/...``    → ``orgs/_shared/...`` (shared sandbox scripts)
+      - ``sandbox/...``    → ``<org_dir>/sandbox/...`` (org-local scripts)
+      - anything else      → ``<org_dir>/<path>`` (org-relative)
+    """
+    s = path_str.strip()
+    if s.startswith("@shared/"):
+        return org_dir.parent / "_shared" / s[len("@shared/"):]
+    if s.startswith("/"):
+        return Path(s)
+    return org_dir / s
 
 
 # --------------------------------------------------------------------------- #
@@ -512,22 +748,76 @@ def _normalize_sandbox(sandbox: dict[str, Any], data: dict[str, Any]) -> dict[st
     sandbox["resources"].setdefault("requests", {})
     sandbox["resources"].setdefault("limits", {})
     resources_docker = {"requests": {}, "limits": {}}
-    for tier in ("requests", "limits"):
-        tier_cfg = sandbox["resources"].get(tier) or {}
+    for res_sub in ("requests", "limits"):
+        tier_cfg = sandbox["resources"].get(res_sub) or {}
         for key, raw_val in tier_cfg.items():
             if key == "cpu":
-                resources_docker[tier][key] = _docker_cpu(raw_val)
+                resources_docker[res_sub][key] = _docker_cpu(raw_val)
             elif key == "memory":
-                resources_docker[tier][key] = _docker_mem(raw_val)
+                resources_docker[res_sub][key] = _docker_mem(raw_val)
             else:
-                resources_docker[tier][key] = raw_val
+                resources_docker[res_sub][key] = raw_val
     sandbox["resources_docker"] = resources_docker
     # Translate K8s runtime_class name to Docker --runtime value. Invalid
     # values fall through to None (no `runtime:` line) and the schema check
     # in validate_org_data flags them.
     raw_runtime = sandbox.get("runtime_class") or "runc"
     sandbox["runtime_class_docker"] = RUNTIME_CLASS_MAP.get(raw_runtime)
+    # Normalize the bootstrap block. Skeleton tier never has one (validator
+    # rejects). Non-skeleton tiers may also lack it pre-migration; the
+    # validator flags missing bootstrap, but normalizer must still produce
+    # a dict so StrictUndefined templates don't trip.
+    bootstrap = sandbox.get("bootstrap")
+    if not isinstance(bootstrap, dict):
+        sandbox["bootstrap"] = {
+            "hard_deps": [],
+            "soft_deps": [],
+            "host_setup": [],
+            "extra_subcommands": [],
+            "smoke_test_command": "",
+            "smoke_test_description": "",
+        }
+    else:
+        bootstrap.setdefault("hard_deps", [])
+        bootstrap.setdefault("soft_deps", [])
+        bootstrap.setdefault("host_setup", [])
+        bootstrap.setdefault("extra_subcommands", [])
+        bootstrap.setdefault("smoke_test_command", "")
+        bootstrap.setdefault("smoke_test_description", "")
+        # Compute helper flags the template needs:
+        #   host_setup_requires_uv — True if any helper declares python_deps,
+        #     so the template emits the `command -v uv` check.
+        #   script_invocation — the literal bash command that runs the helper.
+        #     Host-side scripts live at $SCRIPT_DIR/<path> after path resolution;
+        #     @shared/... paths resolve to $SCRIPT_DIR/../_shared/... because
+        #     bootstrap.sh CWDs to the org root.
+        bootstrap["host_setup_requires_uv"] = any(
+            bool(h.get("python_deps")) for h in bootstrap["host_setup"]
+        )
+        for helper in bootstrap["host_setup"]:
+            script = helper.get("script", "")
+            helper["script_invocation"] = _bash_invocation(script, helper)
     return sandbox
+
+
+def _bash_invocation(script: str, helper: dict[str, Any]) -> str:
+    """Render the bash command that runs a host_setup helper.
+
+    Helpers with python_deps run via the org-local venv (``$SCRIPT_DIR/.venv/bin/python``).
+    Helpers without python_deps run the script directly (must be executable
+    or have a shebang).
+    """
+    # Rewrite @shared/... and bare paths to $SCRIPT_DIR-relative bash paths.
+    if script.startswith("@shared/"):
+        bash_path = f'"$SCRIPT_DIR/../_shared/{script[len("@shared/"):]}"'
+    elif script.startswith("/"):
+        bash_path = f'"{script}"'
+    else:
+        bash_path = f'"$SCRIPT_DIR/{script}"'
+
+    if helper.get("python_deps"):
+        return f'"$SCRIPT_DIR/.venv/bin/python" {bash_path}'
+    return bash_path
 
 
 def _normalize_toplevel(data: dict[str, Any], sandbox: dict[str, Any]) -> dict[str, Any]:
@@ -606,10 +896,31 @@ def render_org(org_dir: Path, env: Environment, target_dir: Path | None = None) 
         compose_path = write_root / "docker-compose.yml"
         _atomic_write(compose_path, compose_out, allow_overwrite_header=True)
         written.append(compose_path)
+
+        # bootstrap.sh — rendered from the same org.toml data. Exposes the
+        # compose service name (mirrors sandbox.compose.yml.j2's derivation)
+        # so the template can reference it without re-deriving. Also lifts
+        # sandbox.bootstrap to top-level `bootstrap` for the template — the
+        # template references `bootstrap.hard_deps` etc directly.
+        sb = data["sandbox"]
+        data["compose_service_name"] = sb.get("service_name") or f"{data['name']}-sandbox"
+        data["org_name"] = data["name"]
+        data["bootstrap"] = sb.get("bootstrap") or {}
+        bs_out = _render_template(env, "bootstrap.sh.j2", data)
+        bs_path = write_root / "bootstrap.sh"
+        _atomic_write(bs_path, bs_out, allow_overwrite_header=True)
+        # Exec bit — bootstrap.sh must be runnable. _atomic_write writes via
+        # Path.write_text which uses 0o666 & ~umask; force +x so the file is
+        # directly invocable as ./bootstrap.sh.
+        bs_path.chmod(0o755)
+        written.append(bs_path)
     elif (write_root / "docker-compose.yml").exists():
         # Stale compose file from before the skeleton migration — remove it
         # so the rendered tree matches the declared tier.
         (write_root / "docker-compose.yml").unlink()
+        # Same for bootstrap.sh — skeleton orgs have no bootstrap.
+        if (write_root / "bootstrap.sh").exists():
+            (write_root / "bootstrap.sh").unlink()
 
     # roles/<name>/config.yaml
     role_defaults = {
@@ -663,20 +974,40 @@ def _atomic_write(
 ) -> None:
     """Write content to path, creating parent dirs.
 
-    Safety: if the target file exists and does NOT start with the
+    Safety: if the target file exists and does NOT carry the
     ``# AUTO-GENERATED`` marker, refuse to overwrite. This catches accidental
-    clobbering of hand-edited files.
+    clobbering of hand-edited files. The marker may appear on line 1 (YAML,
+    TOML) or on line 2 after a ``#!`` shebang (executable scripts like
+    bootstrap.sh) — both are accepted.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and allow_overwrite_header:
         existing = path.read_text(encoding="utf-8")
-        if not existing.lstrip().startswith(GENERATED_HEADER):
+        if not _carries_generated_marker(existing):
             raise RuntimeError(
                 f"Refusing to overwrite {path}: existing file lacks "
                 f"{GENERATED_HEADER!r} header. Hand-written files must not be "
                 f"replaced by the renderer."
             )
     path.write_text(content, encoding="utf-8")
+
+
+def _carries_generated_marker(text: str) -> bool:
+    """Return True if any of the first two non-empty lines starts with the
+    AUTO-GENERATED marker. Line 1 carries it for YAML/TOML; line 2 carries
+    it for executable scripts where line 1 is the ``#!`` shebang.
+    """
+    lines_examined = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(GENERATED_HEADER):
+            return True
+        lines_examined += 1
+        if lines_examined >= 2:
+            break
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -731,13 +1062,15 @@ def _diff_trees(checked_in: Path, rendered: Path) -> list[str]:
 
 
 def _looks_generated(path: Path) -> bool:
-    """Heuristic: file is generated iff its first non-empty line starts with
-    the AUTO-GENERATED marker."""
+    """Heuristic: file is generated iff any of its first two non-empty lines
+    starts with the AUTO-GENERATED marker. Supports both YAML-style files
+    (marker on line 1) and executable scripts (marker on line 2 after the
+    ``#!`` shebang)."""
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return False
-    return text.lstrip().startswith(GENERATED_HEADER)
+    return _carries_generated_marker(text)
 
 
 # --------------------------------------------------------------------------- #

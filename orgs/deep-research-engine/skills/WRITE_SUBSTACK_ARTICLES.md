@@ -27,7 +27,7 @@ Write one sentence: "This article argues that ___." If you can't fill in the bla
 - "X is important." (No argument.)
 
 **Good theses:**
-- "The Telegram dump shows doxing operations rely on a single unverified source, and that source has a documented history of deception."
+- "The ingested corpus shows doxing operations rely on a single unverified source, and that source has a documented history of deception."
 - "Three of the four named subjects in the chat cannot be independently verified, and that should change how the dump is reported."
 
 ### Step 3 — Outline

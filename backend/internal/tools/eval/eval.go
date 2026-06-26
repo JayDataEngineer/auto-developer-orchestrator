@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/dop251/goja"
 )
 
@@ -30,6 +31,11 @@ func NewEvalTool() *EvalTool {
 		timeout: defaultTimeout,
 		logger:  log.Default(),
 	}
+}
+
+// AllTools returns every stateless tool in the eval package.
+func AllTools() []core.Tool {
+	return []core.Tool{NewEvalTool()}
 }
 
 func (t *EvalTool) Name() string { return "eval" }

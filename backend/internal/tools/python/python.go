@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/tools"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 )
 
@@ -16,6 +18,11 @@ const (
 	defaultTimeout = 30 * time.Second
 	maxTimeout     = 120 * time.Second
 )
+
+// AllTools returns every python tool. opts is optional; pass nil for defaults.
+func AllTools(opts ...Option) []core.Tool {
+	return []core.Tool{NewPythonTool(opts...)}
+}
 
 // PythonTool executes Python code in a subprocess with timeout.
 // No embedded interpreter — uses system python3. Captures stdout and stderr.
@@ -150,7 +157,10 @@ func (t *PythonTool) Execute(ctx context.Context, args map[string]any) (any, err
 		if result.exitCode != 0 {
 			output["exit_code"] = result.exitCode
 		}
-		return output, nil
+		// Wrap via QuarantineResult — agent-authored Python stdout/stderr can
+		// echo injection patterns ("ignore previous instructions", etc).
+		// Same contract as scripting.go (System B sibling tool).
+		return tools.QuarantineResult(output), nil
 	case <-time.After(timeout):
 		return map[string]any{
 			"error":   fmt.Sprintf("execution timed out after %v", timeout),

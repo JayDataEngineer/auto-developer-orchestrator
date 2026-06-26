@@ -41,7 +41,7 @@ char_count: 264
 citations: [1, 3]
 ---
 
-In a 903 MB Telegram dump, one chat sent 30 voice messages
+In a recent 903 MB corpus ingest, one chat sent 30 voice messages
 about four named individuals in Flathead Valley.
 Addresses, gun ownership, license plates — all in the open.[1][3]
 ```

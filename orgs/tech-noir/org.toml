@@ -43,8 +43,8 @@ container = "/workspace"
 # MCP_HUB_ENDPOINT / FORGE_URL / COMFYUI_URL deliberately omitted — defaults
 # in orgs/_shared/clients/{forge,comfyui}_client.py point at localhost. Set
 # these env vars here only when pointing at a remote/tailnet cluster.
-GODOT_MCP_URL = "http://host.docker.internal:8080"
-SURREALDB_URL = "http://host.docker.internal:8000/surreal"
+GODOT_MCP_URL = "http://localhost:8080"
+SURREALDB_URL = "http://localhost:8000/surreal"
 SURREALDB_NS = "studio"
 SURREALDB_DB = "tech-noir"
 SURREALDB_USER = "root"
@@ -52,6 +52,28 @@ SURREALDB_PASS = "root"
 DOCS_SITE_PATH = "/workspace/docs-site"
 GAME_REPO_PATH = "/workspace/game"
 PUX_ORG_PATH = "/sandbox/workspace"
+
+# Bootstrap metadata — drives the rendered bootstrap.sh. Container uses
+# network_mode: host in the rendered compose, so SurrealDB + creative-stack
+# on localhost are reachable from inside the container.
+[sandbox.bootstrap]
+smoke_test_command = "python3 -c \"import os,urllib.request; urllib.request.urlopen(os.environ['SURREALDB_URL']+'/health').read(); print('ok')\""
+smoke_test_description = "container → SurrealDB reachable"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "SurrealDB"
+check = 'curl -sf -o /dev/null "${SURREALDB_HEALTH:-http://localhost:8000/surreal/health}"'
+error_msg = "SurrealDB not reachable at $SURREALDB_HEALTH — start it on the host first (e.g. via shared-docker-infra compose)"
+
+[[sandbox.bootstrap.soft_deps]]
+name = "Godot MCP"
+check = 'curl -sf -o /dev/null --max-time 2 "${GODOT_MCP_URL:-http://localhost:8080}"'
+warn_msg = "game-dev paths may degrade (set GODOT_MCP_URL)"
+
+[[sandbox.bootstrap.soft_deps]]
+name = "ComfyUI"
+check = 'curl -sf -o /dev/null --max-time 2 "${COMFYUI_URL:-http://localhost:8188}"'
+warn_msg = "image-gen VFX paths may degrade (set COMFYUI_URL)"
 
 # Org-local tool packages (kernel-level packages like shell/code are imported
 # by roles without redeclaration).

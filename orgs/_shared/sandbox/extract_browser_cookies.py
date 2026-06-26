@@ -1,21 +1,36 @@
 #!/usr/bin/env python3
-"""Extract cookies from any installed browser for a given domain.
+"""Host-side cookie extractor for the browser capability.
 
-Why host-side:
-  Browser cookie DBs live on the host filesystem, and Chromium-based
-  browsers (Chrome, Brave, Edge, Vivaldi, Opera) encrypt cookie values
-  with a key stored in the user's GNOME keyring (D-Bus) or macOS keychain.
-  Neither the cookie file nor the keyring is reachable from inside the
-  sandbox container, so extraction MUST happen on the host (e.g. via
-  bootstrap.sh). Once written, the JSON file is bind-mounted into the
-  sandbox where the browser's restore_session tool picks it up.
+Why this exists
+---------------
+The browser capability runs Chrome inside the sandbox container. Cookie
+databases for the user's real browser (Chrome, Brave, Edge, Firefox, etc.)
+live on the HOST filesystem, and Chromium-based browsers encrypt cookie
+values with a key stored in the user's GNOME keyring (D-Bus) or macOS
+keychain. Neither the cookie file nor the keyring is reachable from inside
+the sandbox container, so extraction MUST happen on the host.
 
-Supported browsers:
-  Chromium-based: chrome, brave, edge, chromium, opera, opera_gx, vivaldi
-  Firefox-based:  firefox
-  (Also auto-detects flatpak installs of any of the above.)
+This script is the host-side half of the cookie bridge. The kernel's
+``restore_session`` browser tool is the in-sandbox half. Together they
+let any browser-using org authenticate as the user without exposing
+credentials inside the container.
 
-Output shape (browser-session-compatible):
+Availability
+------------
+Lives at ``orgs/_shared/sandbox/extract_browser_cookies.py`` so every
+browser-using org can wire it up via ``[[sandbox.bootstrap.host_setup]]``
+in their ``org.toml``. Not specific to any one org — first shipped for
+twitter-agent but the contract is generic. See the "Host-browser cookie
+extraction" recipe in ``config/capabilities/browser/SKILL.md``.
+
+Supported browsers
+------------------
+Chromium-based: chrome, brave, edge, chromium, opera, opera_gx, vivaldi
+Firefox-based:  firefox
+(Auto-detects flatpak installs of any of the above on Linux.)
+
+Output shape (browser-session-compatible)
+-----------------------------------------
   {
     "cookies": [{name, value, domain, path, secure, expires, httponly}, ...],
     "localStorage": {},
@@ -25,10 +40,13 @@ Output shape (browser-session-compatible):
     "domain": "<requested domain>"
   }
 
-  The cookies list is in the exact shape restore_session expects, so the
-  output file can be passed directly to that tool.
+The cookies list is in the exact shape ``restore_session`` expects, so
+the output file can be passed directly to that tool. Canonical home is
+``data/.browser-session-<domain>.json`` (see ``paths.browser_session()``)
+but the ``--out`` flag lets callers write anywhere.
 
-Usage:
+Usage
+-----
   python3 extract_browser_cookies.py --browser brave --domain example.com
   python3 extract_browser_cookies.py --browser chrome  --domain example.com --out /path/session.json
   python3 extract_browser_cookies.py --browser brave --domain example.com --check

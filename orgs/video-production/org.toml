@@ -36,6 +36,23 @@ timeout = "5s"
 retries = 3
 start_period = "120s"
 
+# Bootstrap metadata — drives the rendered bootstrap.sh. Custom-build tier
+# triggers `docker compose build` before `up`. Smoke test verifies the
+# heavy system deps that the custom Dockerfile installs (Manim, LaTeX, ffmpeg).
+[sandbox.bootstrap]
+smoke_test_command = "python3 -c 'import manim; print(\"manim\", manim.__version__)' && ffmpeg -version >/dev/null 2>&1 && python3 -c 'from PIL import Image; print(\"pillow ok\")'"
+smoke_test_description = "Manim + ffmpeg + Pillow available in container"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "docker"
+check = "command -v docker"
+error_msg = "docker not found on PATH"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "docker compose"
+check = "docker compose version"
+error_msg = "docker compose subcommand missing — install Docker Compose v2"
+
 [[sandbox.volumes]]
 type = "volume"
 name = "video_prod_workspace"

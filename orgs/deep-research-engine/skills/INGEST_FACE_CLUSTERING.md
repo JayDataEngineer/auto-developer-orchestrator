@@ -3,7 +3,7 @@
 Recognize and cluster faces across an image corpus, then write each identity
 cluster as a `person` node + `appears_in` edges to the media where they appear.
 This is the identity-resolution half of image ingestion — run after
-INGEST_TELEGRAM_EXPORT (or any skill that produces a list of image paths).
+INGEST_STRUCTURED_EXPORT (or any skill that produces a list of image paths).
 
 ## When to use
 
@@ -41,7 +41,7 @@ set -a && . ./.env.local && set +a
 # Build image list (JSON array of paths)
 python3 -c "
 import json, pathlib
-photos = sorted(pathlib.Path('data/ChatExport_2026-03-13/photos').glob('*.jpg'))
+photos = sorted(pathlib.Path('data/<export_dir>/photos').glob('*.jpg'))
 photos = [str(p) for p in photos if 'thumb' not in p.name]
 print(json.dumps(photos))
 " > /tmp/image_list.json
@@ -174,12 +174,3 @@ python3 sandbox/face_client.py delete-subject --name "TestSubject"
 - **0 clusters found** — likely legitimate (all faces genuinely unique). To
   verify clustering itself works, run the synthetic test in the smoke test
   section above (4 copies of an embedding + 4 noise → 1 cluster).
-
-## Verification log (2026-06-17)
-
-Proven end-to-end against the deep-research-engine stack:
-- 5 dataset photos → 13 faces detected (1 photo had 9 people)
-- 1 subject added and recognized with confidence=1.0
-- Synthetic clustering test: 3 groups of 4 + 3 noise → correctly identified
-  3 clusters of 4 + 3 unclustered
-- `delete-subject` correctly reports face count via pre-flight GET

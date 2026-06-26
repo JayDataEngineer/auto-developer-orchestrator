@@ -270,3 +270,107 @@ func TestSystemBScopeLockScriptsDirEnvOverride(t *testing.T) {
 			createdAbs, scriptsDirAbs)
 	}
 }
+
+// TestSystemBScopeLockRejectsSymlinkEscape proves the symlink-escape guard
+// in scripts.py::_script_path actually fires.
+//
+// The bypass: agent uses bash to `ln -s /sandbox/twitter_session.py
+// /sandbox/workspace/scripts/hi.py` then calls `edit_script(name="hi")`.
+// The regex name check passes (hi.py is a valid name), so without the
+// symlink guard, write_text would follow the symlink and overwrite a
+// System A backbone file. The chmod 0444 layer is bypassed because the
+// container runs as root today.
+//
+// Fix: scripts.py refuses to operate on any path where is_symlink() is True
+// OR whose realpath escapes SCRIPTS_DIR. This test creates the malicious
+// symlink the way the agent would (os.Symlink) and asserts every operation
+// (make/edit/run/show/rm) fails cleanly.
+func TestSystemBScopeLockRejectsSymlinkEscape(t *testing.T) {
+	scriptsDir := withTempScriptsDir(t)
+
+	// Place a "System A backbone" outside SCRIPTS_DIR to stand in for
+	// /sandbox/twitter_session.py. The symlink in SCRIPTS_DIR will point here.
+	target := filepath.Join(filepath.Dir(scriptsDir), "fake_backbone.py")
+	// Stub a fake backbone file with content the agent should NOT be able to
+	// overwrite. Read at end of test to prove it stayed intact.
+	originalContent := "# fake backbone — must remain unchanged\nprint('original')\n"
+	if err := os.WriteFile(target, []byte(originalContent), 0644); err != nil {
+		t.Fatalf("seed fake backbone: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(target) })
+
+	// The malicious symlink: appears as a System B script, actually points
+	// at the fake backbone.
+	linkPath := filepath.Join(scriptsDir, "escape.py")
+	if err := os.Symlink(target, linkPath); err != nil {
+		t.Fatalf("create malicious symlink: %v", err)
+	}
+
+	// Every operation must fail. We're testing that scripts.py refuses to
+	// touch the symlink, not that the operation itself fails for any other
+	// reason.
+	for _, op := range []struct {
+		tool string
+		exec func() map[string]any
+	}{
+		{"make", func() map[string]any {
+			r, _ := MakeScriptTool{}.Execute(context.Background(), map[string]any{
+				"name": "escape", "code": "print('pwned')",
+				"description": "should fail",
+			})
+			m, _ := r.(map[string]any)
+			return m
+		}},
+		{"edit", func() map[string]any {
+			r, _ := EditScriptTool{}.Execute(context.Background(), map[string]any{
+				"name": "escape", "code": "print('pwned')",
+			})
+			m, _ := r.(map[string]any)
+			return m
+		}},
+		{"run", func() map[string]any {
+			r, _ := RunScriptTool{}.Execute(context.Background(), map[string]any{
+				"name": "escape", "timeout_seconds": 5,
+			})
+			m, _ := r.(map[string]any)
+			return m
+		}},
+		{"show", func() map[string]any {
+			r, _ := ShowScriptTool{}.Execute(context.Background(), map[string]any{"name": "escape"})
+			m, _ := r.(map[string]any)
+			return m
+		}},
+		{"rm", func() map[string]any {
+			r, _ := RemoveScriptTool{}.Execute(context.Background(), map[string]any{"name": "escape"})
+			m, _ := r.(map[string]any)
+			return m
+		}},
+	} {
+		t.Run(op.tool, func(t *testing.T) {
+			m := op.exec()
+			if m == nil {
+				t.Fatalf("%s returned nil map", op.tool)
+			}
+			if !responseFailed(m) {
+				t.Errorf("%s on symlink target returned success-shaped response: %v\n"+
+					"The symlink-escape guard in scripts.py::_script_path must refuse "+
+					"to operate on symlinks so an agent can't mutate System A backbone "+
+					"files via a bash-created symlink.",
+					op.tool, m)
+			}
+		})
+	}
+
+	// And the fake backbone file MUST be unchanged — proving none of the
+	// operations slipped through and wrote to the symlink target.
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read fake backbone after ops: %v", err)
+	}
+	if string(got) != originalContent {
+		t.Errorf("fake backbone was MUTATED via symlink escape:\n  before: %q\n  after:  %q\n"+
+			"One of the scripting operations wrote through the symlink — "+
+			"the scope-lock symlink guard is broken.",
+			originalContent, string(got))
+	}
+}

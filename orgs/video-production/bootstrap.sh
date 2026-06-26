@@ -1,107 +1,139 @@
 #!/usr/bin/env bash
-# Video Production Org — bootstrap
+# AUTO-GENERATED — bootstrap.sh for video-production.
+# Source of truth: orgs/video-production/org.toml → [sandbox.bootstrap] + tier.
+# Template: scripts/templates/org/bootstrap.sh.j2
 #
-# One-command setup:
-#   cd orgs/video-production && ./bootstrap.sh
-#
-# This script:
-#   1. Builds the video-producer container (Python + Manim + Kokoro + ffmpeg)
-#   2. Starts it
-#   3. Waits for health
-#   4. Verifies all tools are present
-#   5. Prints ready message
+# Rendered via `task org-build`. Hand-edits will be overwritten on next render;
+# add org-specific stages by editing org.toml, not this file.
 #
 # Usage:
 #   ./bootstrap.sh                # full bootstrap
+#   ./bootstrap.sh --check        # verify only, don't start anything
 #   ./bootstrap.sh --down         # tear down what bootstrap brought up
+#
+# ── Semantics of `--check` ─────────────────────────────────────────────────
+# `--check` is a dry-run contract: "verify dependencies + configuration, then
+# exit 0 WITHOUT starting the container or making network changes." It runs:
+#   1. hard_dep checks  (docker, docker compose, etc.)   → fail-fast
+#   2. soft_dep checks  (API keys in env)                → warn-only
+#   3. host_setup[].check_args for each declared helper → can fail-fast
+#   4. compose config validation (if tier != skeleton)   → fail-fast
+#
+# Orgs with host_setup helpers (e.g. the browser capability's
+# extract_browser_cookies.py — see config/capabilities/browser/SKILL.md)
+# extend `--check` to dry-run the helper too — the helper's check_args is the
+# canonical "does this work without side effects?" probe. Skeleton-tier orgs
+# (no container, no host_setup) still run dep checks + exit 0.
+#
+# This is DIFFERENT from `compose config --check` (yaml syntax only) and
+# DIFFERENT from a single helper's own `--check` flag. The bootstrap `--check`
+# subcommand is the union of all dry-run probes for the org's full lifecycle.
+# See [feedback_pr4_container_lifecycle] for the contract motivation.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$SCRIPT_DIR"
 
-# Export the absolute project path so docker-compose can attach it both
-# as the openshell.project-path label AND as the /sandbox/workspace bind
-# mount. Pux's bash executor assumes /sandbox/workspace maps to the
-# project root, and Pux's container discovery (FindSandboxByProject)
-# uses the label to adopt this container instead of spinning up a
-# sibling. Without this export, Pux creates its own container.
+# Canonical Pux mount + label — lets Pux adopt this container instead of
+# spinning up a sibling. pwd -P resolves symlinks so the label matches
+# what Pux queries by (resolveOrgPath EvalSymlinks). See
+# [[feedback_container_reuse_label_discovery]].
 export OPENSHELL_PROJECT_PATH="${OPENSHELL_PROJECT_PATH:-$SCRIPT_DIR}"
 
-# --down: inverse of up. Named volumes preserved (no -v).
-# To wipe volumes too, run `docker compose down -v` manually.
-if [[ "${1:-}" == "--down" ]]; then
-  echo "=== Video Production Org — Tear Down ==="
+log()  { printf '[bootstrap] %s\n' "$*"; }
+ok()   { printf '[bootstrap] ✓ %s\n' "$*"; }
+err()  { printf '[bootstrap] ERROR: %s\n' "$*" >&2; }
+
+CONTAINER="video-producer"
+
+# ── Extra subcommands (org-specific extensions, declared in org.toml) ──────
+# Dispatched BEFORE the standard --check/--down args so they take precedence.
+
+# ── Args ──────────────────────────────────────────────────────────────────
+CHECK_ONLY=0
+DO_DOWN=0
+case "${1:-}" in
+  --check) CHECK_ONLY=1 ;;
+  --down)  DO_DOWN=1 ;;
+  "")      ;;
+  *)       err "unknown arg: $1"; exit 1 ;;
+esac
+
+# ── --down: inverse of up ─────────────────────────────────────────────────
+# Tears down the container + its network. Named volumes are PRESERVED
+# (no `-v` flag) so data isn't lost across re-bootstraps. To wipe volumes
+# too, run `docker compose down -v` manually.
+if [ "$DO_DOWN" = "1" ]; then
+  log "tearing down (docker compose down)"
   docker compose down
-  echo "  Containers stopped."
+  ok "containers stopped"
   exit 0
 fi
 
-echo "=== Video Production Org Bootstrap ==="
-echo "  OPENSHELL_PROJECT_PATH=$OPENSHELL_PROJECT_PATH"
-echo ""
+# ── 1. Hard deps (fail-fast) ──────────────────────────────────────────────
+if ! command -v docker >/dev/null 2>&1; then
+  err "docker not found on PATH"
+  exit 1
+fi
+ok "docker"
+if ! docker compose version >/dev/null 2>&1; then
+  err "docker compose subcommand missing — install Docker Compose v2"
+  exit 1
+fi
+ok "docker compose"
 
-# --- Build & start ---
-echo "[1/4] Building container (this may take a few minutes for LaTeX + Manim)..."
-docker compose build --progress=plain 2>&1 | tail -5
+# ── 2. Soft deps (warn only) ──────────────────────────────────────────────
 
-echo ""
-echo "[2/4] Starting container..."
+# ── 3. Host-side setup (pre-compose, optional) ────────────────────────────
+# Runs declared helpers on the host BEFORE compose up. Used when the helper
+# needs host-only resources (flatpak cookie DB, GNOME keyring, USB devices,
+# audio hardware). Each helper may install Python deps into $SCRIPT_DIR/.venv
+# and run a script with its declared args.
+
+# ── 4. --check early-exit (after host_setup so check_args run if declared) ─
+if [ "$CHECK_ONLY" = "1" ]; then
+  log "--check requested; not starting container"
+  exit 0
+fi
+
+# ── 5. gVisor detection ───────────────────────────────────────────────────
+# The auto-generated compose requests `runtime: runsc` when org.toml
+# declares runtime_class = "gvisor". Hosts without runsc installed choke
+# on that line. Write a local override (gitignored) that strips it.
+
+# ── 6. Build (custom-build tier only) ─────────────────────────────────────
+log "building sandbox image (custom-build tier; may take minutes)"
+docker compose build --progress=plain
+
+# ── 7. Bring up the container ─────────────────────────────────────────────
+log "starting sandbox (docker compose up -d)"
 docker compose up -d
 
-# --- Wait for health ---
-echo ""
-echo "[3/4] Waiting for container to be healthy..."
-for i in $(seq 1 60); do
-    if docker compose ps | grep -q "healthy"; then
-        echo "  Container healthy after ${i}s"
-        break
-    fi
-    sleep 2
+log "waiting for container to be running"
+for i in $(seq 1 30); do
+  if docker compose ps --status running --quiet | grep -q .; then
+    ok "container running after ${i}s"
+    break
+  fi
+  sleep 1
 done
 
-# --- Verify tools ---
-echo ""
-echo "[4/4] Verifying tools..."
+# ── 8. Smoke test ─────────────────────────────────────────────────────────
+log "smoke test: Manim + ffmpeg + Pillow available in container"
+if docker compose exec -T "$CONTAINER" python3 -c 'import manim; print("manim", manim.__version__)' && ffmpeg -version >/dev/null 2>&1 && python3 -c 'from PIL import Image; print("pillow ok")' >/dev/null 2>&1; then
+  ok "smoke test passed"
+else
+  err "smoke test failed — check container logs: docker compose logs"
+  exit 1
+fi
 
-verify() {
-    local label="$1"
-    shift
-    if docker compose exec -T video-producer "$@" >/dev/null 2>&1; then
-        echo "  ✓ $label"
-    else
-        echo "  ✗ $label (missing or broken)"
-    fi
-}
-
-verify "Python 3.11"         python3 --version
-verify "pip"                 pip --version
-verify "ffmpeg"              ffmpeg -version
-verify "ffprobe"             ffprobe -version
-verify "pdftotext"           pdftotext -v
-verify "espeak-ng"           espeak-ng --version
-verify "Pillow"              python3 -c "from PIL import Image; print('ok')"
-verify "manim"               python3 -c "import manim; print('manim', manim.__version__)"
-verify "Kokoro TTS"          python3 /app/skills/scripts/synth_kokoro.py --check 2>/dev/null || echo "  ⚠ Kokoro may need additional setup (KOKORO_PYTHON or KOKORO_TTS_DIR)"
-
-echo ""
-echo "=== Bootstrap complete ==="
-echo ""
-echo "Video Producer is ready at: research-video-producer"
-echo "Workspace: /workspace/video-productions/"
-echo ""
-echo "Usage examples:"
-echo "  # Interactive shell"
-echo "  docker compose exec video-producer bash"
-echo ""
-echo "  # Run a video job initialization"
-echo "  docker compose exec video-producer python /app/skills/scripts/init_video_job.py \"My Topic\""
-echo ""
-echo "  # Check TTS setup"
-echo "  docker compose exec video-producer python /app/skills/scripts/synth_kokoro.py --check"
-echo ""
-echo "  # Copy video out"
-echo "  docker compose cp research-video-producer:/workspace/video-productions/jobs/<job>/exports/final.mp4 ."
-echo ""
-echo "Volumes (persist across restarts):"
-echo "  research_video_prod_workspace → /workspace/video-productions"
+echo
+echo "═══════════════════════════════════════════════════════════════"
+echo "  video-production bootstrap — COMPLETE"
+echo "═══════════════════════════════════════════════════════════════"
+echo "  Container:  $CONTAINER (restart: unless-stopped)"
+echo "  Workspace:  $SCRIPT_DIR  (bind-mounted at /sandbox/workspace)"
+echo
+echo "  Tear down:  ./bootstrap.sh --down"
+echo "═══════════════════════════════════════════════════════════════"

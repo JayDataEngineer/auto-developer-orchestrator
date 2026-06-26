@@ -33,9 +33,13 @@ func TestUntrustedHandlingPackagesWrapViaQuarantineResult(t *testing.T) {
 	// Maintained by hand; the test fails if a package's .go files stop
 	// referencing QuarantineResult.
 	untrustedPkgs := []string{
-		"browser",  // CDP page content, downloads, cookies
-		"mcp",      // MCP server responses
-		"memory",   // agent-authored memory docs (recall returns stored content)
+		"bash",       // subprocess stdout/stderr — agent-authored shell can echo injection patterns
+		"browser",    // CDP page content, downloads, cookies
+		"file",       // file_read content + grep matches — attacker-dropped files (downloads, scrapes)
+		"mcp",        // MCP server responses
+		"memory",     // agent-authored memory docs (recall returns stored content)
+		"python",     // agent-authored Python stdout/stderr — same risk class as scripting/bash
+		"scripting",  // scripts.py stdout/stderr (agent-authored Python)
 	}
 
 	toolsRoot := findToolsRoot(t)
@@ -235,4 +239,155 @@ func countGoFiles(dir string, tests bool) int {
 		return nil
 	})
 	return count
+}
+
+// TestEveryToolPackageExposesBulkRegistration enforces the contract: every
+// package under backend/internal/tools/ that exports a type implementing
+// core.Tool MUST also export a bulk-registration function.
+//
+// Accepted shapes (any one satisfies the contract):
+//   - func AllTools() []core.Tool              — stateless (scripting, ask, eval, meta)
+//   - func AllTools(deps...) []core.Tool       — deps-aware (memory, secrets, sandbox)
+//   - func RegisterAll(tools, deps...) []core.Tool — appender (appprofile, graph, mcp)
+//   - func BuildAll(deps...) []core.Tool       — declarative (decltools)
+//
+// Why: without a discoverable bulk-registration function, packages accrete
+// tools ad-hoc. Some get wired at the orchestrator site, some don't, drift
+// compounds silently.
+func TestEveryToolPackageExposesBulkRegistration(t *testing.T) {
+	toolsRoot := findToolsRoot(t)
+	entries, err := os.ReadDir(toolsRoot)
+	if err != nil {
+		t.Fatalf("cannot read tools dir: %v", err)
+	}
+	// Utility packages whose types happen to satisfy the core.Tool method set
+	// but aren't tool families — they're generic helpers used by other packages.
+	// New entries here need a one-line reason.
+	utilityPkgs := map[string]string{
+		"base":      "generic Tool wrapper used by graph/etc — not a tool family",
+		"decltools": "generic declarative-tool wrapper — entry point is BuildAll but base.Tool here is the helper type",
+	}
+	var failed []string
+	var discovered int
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), "_") {
+			continue
+		}
+		if reason, ok := utilityPkgs[entry.Name()]; ok {
+			t.Logf("tools/%s: exempt (%s)", entry.Name(), reason)
+			continue
+		}
+		pkgDir := filepath.Join(toolsRoot, entry.Name())
+		toolTypes := findToolTypesInDir(t, pkgDir)
+		if len(toolTypes) == 0 {
+			continue
+		}
+		discovered++
+		if !hasBulkRegistration(pkgDir) {
+			failed = append(failed, entry.Name()+" (types: "+strings.Join(toolTypes, ", ")+")")
+		}
+	}
+	if discovered == 0 {
+		t.Fatal("no tool packages discovered — the AST walker is broken")
+	}
+	if len(failed) > 0 {
+		t.Errorf(
+			"packages exposing core.Tool types but missing AllTools/RegisterAll/BuildAll:\n  - %s\n"+
+				"Add `func AllTools(...) []core.Tool { return []core.Tool{...} }` (or RegisterAll/BuildAll for deps-aware variants).",
+			strings.Join(failed, "\n  - "),
+		)
+	}
+}
+
+// findToolTypesInDir scans a package dir for types whose method set covers
+// Name()+Description()+Schema()+Execute() — the shape of core.Tool. We don't
+// type-check; we just look for the four method names on the same receiver.
+// False positives would require a type to expose those exact names without
+// being a tool, which is implausible in this package layout.
+func findToolTypesInDir(t *testing.T, pkgDir string) []string {
+	t.Helper()
+	methodsByType := make(map[string]map[string]bool)
+	fset := token.NewFileSet()
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		t.Fatalf("os.ReadDir(%s): %v", pkgDir, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, filepath.Join(pkgDir, entry.Name()), nil, parser.SkipObjectResolution)
+		if err != nil {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || len(fn.Recv.List) == 0 || fn.Name == nil {
+				continue
+			}
+			recv := fn.Recv.List[0].Type
+			if star, ok := recv.(*ast.StarExpr); ok {
+				recv = star.X
+			}
+			id, ok := recv.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			if methodsByType[id.Name] == nil {
+				methodsByType[id.Name] = make(map[string]bool)
+			}
+			methodsByType[id.Name][fn.Name.Name] = true
+		}
+	}
+	required := []string{"Name", "Description", "Schema", "Execute"}
+	var toolTypes []string
+	for typeName, methods := range methodsByType {
+		allPresent := true
+		for _, m := range required {
+			if !methods[m] {
+				allPresent = false
+				break
+			}
+		}
+		if allPresent {
+			toolTypes = append(toolTypes, typeName)
+		}
+	}
+	return toolTypes
+}
+
+// hasBulkRegistration returns true if any non-test .go file in pkgDir declares
+// AllTools, RegisterAll, or BuildAll at the package level.
+func hasBulkRegistration(pkgDir string) bool {
+	fset := token.NewFileSet()
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, filepath.Join(pkgDir, entry.Name()), nil, parser.SkipObjectResolution)
+		if err != nil {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name == nil {
+				continue
+			}
+			switch fn.Name.Name {
+			case "AllTools", "RegisterAll", "BuildAll":
+				return true
+			}
+		}
+	}
+	return false
 }

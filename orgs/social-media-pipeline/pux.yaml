@@ -32,7 +32,7 @@ sandbox:
     - requests
     - telethon
   env:
-    SURREALDB_URL: "http://host.docker.internal:8000/surreal"
+    SURREALDB_URL: "http://localhost:8000/surreal"
     SURREALDB_NS: "research"
     SURREALDB_DB: "main"
     SURREALDB_USER: "root"

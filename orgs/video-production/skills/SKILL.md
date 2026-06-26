@@ -96,16 +96,23 @@ Use `python {baseDir}/scripts/synth_kokoro.py --check` to validate Kokoro + ffmp
 
 ### Manim environment
 
-Use a per-job or temp venv if Manim is not globally installed:
+Manim is NOT pre-installed in the Pux sandbox base image. Bootstrap once per
+sandbox via `scripts/bootstrap.sh`, then source the venv before invoking manim:
 
 ```bash
-uv venv .venv
+cd /sandbox/workspace
+./scripts/bootstrap.sh                # idempotent; installs manim + kokoro + deps
 source .venv/bin/activate
-uv pip install 'manim>=0.19,<0.20'
 manim -qm --fps 30 src/video.py SceneName
 ```
 
 Use `-ql` for draft checks, `-qm` for fast delivery, and higher quality only when needed.
+
+The bootstrap creates `/sandbox/workspace/.venv/` which persists across sandbox
+restarts. Subsequent shells in the same sandbox only need the `source` line.
+
+If you're running on the host (outside the sandbox), the same flow works —
+just adjust the `cd` to your org directory.
 
 ### Paper asset extraction
 

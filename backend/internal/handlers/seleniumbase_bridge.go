@@ -170,7 +170,14 @@ func (b *SeleniumBaseBridge) FindElement(ctx context.Context, sandboxID string, 
 	case "":
 		// find-only
 	case "click":
-		clickResp, err := b.call(ctx, sandboxID, "POST", "/click", map[string]interface{}{"selector": selector})
+		clickReq := map[string]interface{}{"selector": selector}
+		// Forward optional behavioral-realism flag. Default off — costs ~250ms
+		// per click (Bezier-curve mouseMoved pre-roll through real CDP
+		// Input.dispatch_mouse_event). See sb_server.py::_humanlike_move_to.
+		if v, ok := req["humanlike"].(bool); ok && v {
+			clickReq["humanlike"] = true
+		}
+		clickResp, err := b.call(ctx, sandboxID, "POST", "/click", clickReq)
 		if err != nil {
 			return out, err
 		}

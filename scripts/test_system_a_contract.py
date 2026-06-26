@@ -82,24 +82,87 @@ def _resolve_init_file(org_dir: Path, declared: str) -> Path:
 
 
 def discover_system_a_scripts() -> list[tuple[str, str, Path]]:
-    """Walk every org's [sandbox].init_files and yield (org, declared, path)."""
+    """Walk every org + kernel + shared dir; yield (org, declared, path).
+
+    Four discovery sources, all human-shipped System A:
+
+      1. init_files copy  — declared in [sandbox].init_files, copied to
+         /sandbox/ at container init (chmod 0444 — System A backbone,
+         read-only).
+      2. Bind-mount       — declared via [[sandbox.volumes]] with host="./sandbox"
+         mounted to /workspace/sandbox/. The org's own scripts live alongside
+         the org.toml; they're git-tracked + human-shipped (System A intent)
+         but delivered via bind-mount instead of init_files copy.
+      3. Kernel scripts   — ``sandbox/scripts/*.py`` at repo root.
+         The kernel-default backbone (scripts.py itself, sb_server.py,
+         sb_agent.py, desktop_observe.py). These land in EVERY container
+         regardless of org, so they're the highest-leverage place for
+         contract conformance. Without this coverage, sb_agent.py's raw
+         sys.argv parsing escaped the audit entirely.
+      4. Shared modules   — ``orgs/_shared/{sandbox,clients}/*.py``. Modules
+         referenced via ``@shared/...`` resolution. Even if no org currently
+         imports a given shared module, the file exists as drift debt the
+         next org will reach for — surface it now.
+
+    All four are human-shipped (git-tracked, System A intent) — so all four
+    must follow the canonical CLI / output / path-resolution pattern.
+    """
     if not ORGS_DIR.exists():
         return []
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     import org_build  # noqa: E402  -- path-dependent import
 
     out: list[tuple[str, str, Path]] = []
+    seen_paths: set[Path] = set()
+
+    def _add(org: str, declared: str, path: Path) -> None:
+        if path in seen_paths:
+            return
+        if "__pycache__" in path.parts:
+            return
+        # Skip test files — they're not agent-invoked backbone, they're
+        # pytest-discovered. The contract is about scripts the AGENT calls.
+        if path.name.startswith("test_") and "_test" not in path.name:
+            return
+        if not path.exists():
+            return
+        out.append((org, declared, path))
+        seen_paths.add(path)
+
     for org_dir in org_build.discover_orgs():
         with open(org_dir / "org.toml", "rb") as f:
             import tomllib
             raw = tomllib.load(f)
+        # (1) init_files copy model
         for declared in raw.get("sandbox", {}).get("init_files", []):
             try:
                 path = _resolve_init_file(org_dir, declared)
             except ValueError:
                 continue
-            if path.exists():
-                out.append((org_dir.name, declared, path))
+            _add(org_dir.name, declared, path)
+        # (2) Bind-mount model: walk org's own sandbox/ dir if it has any *.py
+        org_sandbox = org_dir / "sandbox"
+        if org_sandbox.is_dir():
+            for path in sorted(org_sandbox.rglob("*.py")):
+                declared = f"sandbox/{path.relative_to(org_sandbox)}"
+                _add(org_dir.name, declared, path)
+
+    # (3) Kernel-default backbone scripts. These land in every container.
+    kernel_scripts = REPO_ROOT / "sandbox" / "scripts"
+    if kernel_scripts.is_dir():
+        for path in sorted(kernel_scripts.glob("*.py")):
+            _add("_kernel", f"sandbox/scripts/{path.name}", path)
+
+    # (4) Shared modules referenced via @shared/ resolution.
+    shared_root = ORGS_DIR / "_shared"
+    for sub in ("sandbox", "clients"):
+        shared_dir = shared_root / sub
+        if not shared_dir.is_dir():
+            continue
+        for path in sorted(shared_dir.glob("*.py")):
+            declared = f"@shared/{sub}/{path.name}"
+            _add("_shared", declared, path)
+
     return out
 
 
@@ -123,8 +186,12 @@ def has_hardcoded_sandbox_path(source: str) -> list[str]:
 
     Heuristic: skip lines inside triple-quoted blocks and stripped comment
     lines. Skip lines that are obviously documentation prose (contain
-    "mounted at", "copies to", "Reach the", etc.). What remains must use
-    paths.py / __file__ / env lookup.
+    "mounted at", "copies to", "Reach the", etc.). Skip lines that use
+    env-var lookup with a default (``os.environ.get(..., "/sandbox/...")``)
+    — that IS the canonical path-via-env pattern, not a hardcode.
+
+    What remains must use paths.py / __file__ / env-var lookup without
+    a hardcoded default.
     """
     violations = []
     in_docstring = False
@@ -161,6 +228,12 @@ def _looks_like_path_doc(line: str) -> bool:
         "Run:", "run:",  # "Run: python3 /sandbox/X" — agent-facing instruction
         "next_step",       # JSON key whose value is a command string
         "hint",
+        # Env-var lookup with /sandbox/ as the DEFAULT is canonical —
+        # the env override is the actual path resolution mechanism.
+        # Pattern: os.environ.get("VAR", "/sandbox/...") or
+        # os.getenv("VAR", "/sandbox/...") or os.environ.get("VAR") or "/sandbox/..."
+        "os.environ.get",
+        "os.getenv",
     )
     return any(m in line for m in doc_markers)
 

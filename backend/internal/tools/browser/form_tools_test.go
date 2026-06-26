@@ -91,7 +91,7 @@ func (m *mockBrowserProvider) SelectOption(ctx context.Context, sandboxID string
 }
 func (m *mockBrowserProvider) UploadFile(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error) {
 	if m.uploadFileFn != nil { return m.uploadFileFn(ctx, sandboxID, req) }
-	return map[string]interface{}{"uploaded": "resume.pdf", "size": float64(1234)}, nil
+	return map[string]interface{}{"uploaded": "document.pdf", "size": float64(1234)}, nil
 }
 func (m *mockBrowserProvider) SaveSession(ctx context.Context, sandboxID, path string) (map[string]interface{}, error) {
 	if m.saveSessionFn != nil { return m.saveSessionFn(ctx, sandboxID, path) }
@@ -224,12 +224,12 @@ func TestUploadFileTool(t *testing.T) {
 	}
 
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"file_path": "/sandbox/workspace/resume.pdf",
+		"file_path": "/sandbox/workspace/document.pdf",
 	})
 	testutil.AssertNoError(t, err)
 	r := result.(map[string]interface{})
-	if r["uploaded"] != "resume.pdf" {
-		t.Errorf("expected uploaded='resume.pdf', got %v", r["uploaded"])
+	if r["uploaded"] != "document.pdf" {
+		t.Errorf("expected uploaded='document.pdf', got %v", r["uploaded"])
 	}
 }
 
@@ -240,27 +240,27 @@ func TestUploadFileTool_DelegatesToProvider(t *testing.T) {
 	p.uploadFileFn = func(ctx context.Context, sandboxID string, req map[string]interface{}) (map[string]interface{}, error) {
 		capturedID = sandboxID
 		capturedReq = req
-		return map[string]interface{}{"uploaded": "cv.pdf", "size": float64(5678)}, nil
+		return map[string]interface{}{"uploaded": "archive.zip", "size": float64(5678)}, nil
 	}
 	tool := NewUploadFileTool(p, sandboxIDFn("sb-99"))
 
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"file_path": "/sandbox/workspace/cv.pdf",
-		"selector":  "input[type=file]#resume",
+		"file_path": "/sandbox/workspace/archive.zip",
+		"selector":  "input[type=file]#upload",
 	})
 	testutil.AssertNoError(t, err)
 	if capturedID != "sb-99" {
 		t.Errorf("expected sandboxID 'sb-99', got %q", capturedID)
 	}
-	if capturedReq["file_path"] != "/sandbox/workspace/cv.pdf" {
-		t.Errorf("expected file_path '/sandbox/workspace/cv.pdf', got %v", capturedReq["file_path"])
+	if capturedReq["file_path"] != "/sandbox/workspace/archive.zip" {
+		t.Errorf("expected file_path '/sandbox/workspace/archive.zip', got %v", capturedReq["file_path"])
 	}
-	if capturedReq["selector"] != "input[type=file]#resume" {
-		t.Errorf("expected selector 'input[type=file]#resume', got %v", capturedReq["selector"])
+	if capturedReq["selector"] != "input[type=file]#upload" {
+		t.Errorf("expected selector 'input[type=file]#upload', got %v", capturedReq["selector"])
 	}
 	r := result.(map[string]interface{})
-	if r["uploaded"] != "cv.pdf" {
-		t.Errorf("expected uploaded='cv.pdf', got %v", r["uploaded"])
+	if r["uploaded"] != "archive.zip" {
+		t.Errorf("expected uploaded='archive.zip', got %v", r["uploaded"])
 	}
 }
 

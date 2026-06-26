@@ -375,16 +375,28 @@ func (h *SandboxHandler) GetDesktopViewer(w http.ResponseWriter, r *http.Request
 	// path below calls EnableBrowserMode → dockerClient.ContainerInspect on a
 	// nonexistent container, which dereferences a nil docker client in tests
 	// (and produces a confusing 500 in production).
-	if _, err := h.manager.GetSandbox(id); err != nil {
+	sb, err := h.manager.GetSandbox(id)
+	if err != nil {
 		JSONError(w, "sandbox not found: "+id, http.StatusNotFound)
+		return
+	}
+
+	// Sandboxes in ModeCLI have never had a desktop/browser session — the
+	// auto-enable path below exists for server-restart recovery (Browser or
+	// Desktop mode that lost its in-memory pointer). Auto-enabling a CLI
+	// sandbox would block for ~150s on retry.Long polling Chrome CDP inside
+	// a container that has no VNC stack running. Fail fast instead.
+	if sb.Mode == sandbox.ModeCLI {
+		JSONError(w, "sandbox has no desktop session: "+id, http.StatusNotFound)
 		return
 	}
 
 	session, err := h.manager.GetDesktopSession(id)
 	if err != nil {
-		// No session yet — auto-enable browser mode so the viewer works
-		// without the frontend having to call /enable first.
-		// This handles server restarts where DesktopSession is lost from memory.
+		// No session pointer in memory — auto-enable so the viewer works
+		// without the frontend having to call /enable first. This handles
+		// server restarts where DesktopSession was lost from memory but the
+		// sandbox was already in Browser/Desktop mode before the restart.
 		h.logger.Info("auto-enabling browser mode for viewer", zap.String("sandbox_id", id))
 		if autoSession, autoErr := h.manager.EnableBrowserMode(r.Context(), id); autoErr != nil {
 			// Try desktop mode as fallback

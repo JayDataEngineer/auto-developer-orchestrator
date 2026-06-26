@@ -27,7 +27,7 @@ Usage:
 
 Environment:
     MEDIA_MCP_URL     Base URL of the media-analysis MCP.
-                      Default: http://localhost:8102 (set via sandbox env
+                      Default: http://localhost:8101 (set via sandbox env
                       when MCP is hosted elsewhere)
     SURREALDB_URL     SurrealDB HTTP endpoint (surreal_client.py reads this)
 
@@ -62,7 +62,7 @@ from pathlib import Path
 def get_mcp_url():
     return os.environ.get(
         "MEDIA_MCP_URL",
-        "http://localhost:8102",
+        "http://localhost:8101",
     ).rstrip("/")
 
 

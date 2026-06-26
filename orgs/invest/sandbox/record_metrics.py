@@ -20,6 +20,7 @@ Usage:
   python3 record_metrics.py --data-dir /path       # custom data dir
 """
 
+import argparse
 import json
 import math
 import os
@@ -239,19 +240,15 @@ def extract_simulation_metrics(report):
 
 
 def main():
-    data_dir = os.environ.get("DATA_DIR", str(Path(SCRIPT_DIR).parent / "data"))
-    mode = "live"
+    parser = argparse.ArgumentParser(description="Emit langfuse-style metrics JSON for invest-bot runs.")
+    parser.add_argument("--data-dir", default=None,
+                        help="Override DATA_DIR (defaults to env var or <repo>/data)")
+    parser.add_argument("--mode", choices=["live", "simulation"], default="live",
+                        help="live = read current ledger; simulation = read historical_results.json")
+    args = parser.parse_args()
 
-    # Parse args
-    args = sys.argv[1:]
-    if "--data-dir" in args:
-        idx = args.index("--data-dir")
-        if idx + 1 < len(args):
-            data_dir = args[idx + 1]
-    if "--mode" in args:
-        idx = args.index("--mode")
-        if idx + 1 < len(args):
-            mode = args[idx + 1]
+    data_dir = args.data_dir or os.environ.get("DATA_DIR", str(Path(SCRIPT_DIR).parent / "data"))
+    mode = args.mode
 
     # Simulation mode: read from historical_results.json
     if mode == "simulation":

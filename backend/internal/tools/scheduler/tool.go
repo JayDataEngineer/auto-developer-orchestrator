@@ -73,6 +73,15 @@ func NewSchedulerTool(b Backend, projectDir string) *SchedulerTool {
 	return &SchedulerTool{backend: b, projectDir: projectDir, projectName: name}
 }
 
+// AllTools returns every scheduler tool, wired with the given backend + projectDir.
+// Pass a nil b to get nil back (caller skips scheduler wiring when no backend).
+func AllTools(b Backend, projectDir string) []core.Tool {
+	if b == nil {
+		return nil
+	}
+	return []core.Tool{NewSchedulerTool(b, projectDir)}
+}
+
 // NewSchedulerToolFromAny accepts a Backend via any to break import cycles.
 func NewSchedulerToolFromAny(b any, projectDir string) *SchedulerTool {
 	if b == nil {

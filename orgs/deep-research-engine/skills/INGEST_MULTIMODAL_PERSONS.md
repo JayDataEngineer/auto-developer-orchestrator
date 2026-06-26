@@ -29,7 +29,7 @@ For each `speaker_turn` (segment of voice with `start_sec` + `end_sec` in a vide
 
 ### Why "1 face = link" is acceptable for v1
 
-In single-speaker videos (the 80% case for Telegram-style clips), there's exactly one person on camera while they talk. The heuristic assumes no cutaways. For multi-speaker videos, we defer rather than guess wrong.
+In single-speaker videos (the 80% case for typical voice-memo / direct-to-camera clips), there's exactly one person on camera while they talk. The heuristic assumes no cutaways. For multi-speaker videos, we defer rather than guess wrong.
 
 ## Pipeline
 
@@ -180,7 +180,7 @@ Expected: at least 1 person with non-empty `photos` + `videos` arrays.
 
 ## Pitfalls
 
-1. **Frame_sec vs message timestamp.** `face_appearance.frame_sec` is seconds from start of video. `speaker_turn.start_sec` is also seconds from start of video. Don't confuse either with the Telegram message timestamp (which is wall-clock).
+1. **Frame_sec vs message timestamp.** `face_appearance.frame_sec` is seconds from start of video. `speaker_turn.start_sec` is also seconds from start of video. Don't confuse either with the source-format message timestamp (which is wall-clock).
 2. **Cluster ID collision.** Face cluster IDs (`person_0`, `person_1`) and voice cluster IDs (`voice_cluster_0`, `voice_cluster_1`) come from independent HDBSCAN runs. The ID space collides if you reuse integers. Disambiguate via prefix (`person_fc_0` vs `person_vc_0`) or via separate tables until linking is complete.
 3. **Don't pad voice embeddings to face dim.** 256-d voice + 512-d face — leave them in separate fields. The `person` node has `face_centroid[512]` and `voice_centroid[256]` as separate optional fields.
 4. **`pending_link` is not a failure.** v1 defers multi-face cases by design. The auditor counts these as `ambiguous_deferred` and they're expected for any video with cutaways.
@@ -213,4 +213,4 @@ VOICE_ONLY=$(curl -sX POST http://localhost:8000/surreal/sql \
 echo "linked: $LINKED, deferred: $DEFERRED, voice_only: $VOICE_ONLY"
 ```
 
-For the Telegram dataset, expect roughly: linked ≥ 1 (criteria #6), deferred depends on video count, voice_only depends on off-camera speech.
+For a typical multimodal corpus, expect roughly: linked ≥ 1 (criteria #6), deferred depends on video count, voice_only depends on off-camera speech.

@@ -23,7 +23,21 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths  # noqa: E402
 
-import yfinance as yf
+# Third-party deps imported lazily so --help works in a bare venv (System A contract).
+yf = None  # type: ignore[assignment]
+
+
+def _ensure_yfinance():
+    global yf
+    if yf is not None:
+        return yf
+    try:
+        import yfinance as _yf
+        yf = _yf
+        return yf
+    except ImportError:
+        print(json.dumps({"error": "yfinance not installed. Add to [sandbox].pip_packages."}))
+        sys.exit(1)
 
 
 def fetch_yahoo_chart(symbol: str, range: str = "3mo", interval: str = "1d"):
@@ -73,6 +87,7 @@ def fetch_fundamentals(symbol: str):
     Returns: valuation, profitability, growth, balance sheet, cash flow,
     analyst consensus, and quarterly income statement.
     """
+    _ensure_yfinance()
     try:
         ticker = yf.Ticker(symbol)
         info = ticker.info

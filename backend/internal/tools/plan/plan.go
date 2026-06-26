@@ -29,6 +29,13 @@ func NewPlanTool(projectDir string, store *autoconfig.PlanStore) *PlanTool {
 	return &PlanTool{projectDir: projectDir, store: store}
 }
 
+// AllTools returns every plan tool, wired with projectDir + store.
+// store may be nil for stub/test paths — the tool returns an error at Execute
+// time if the store isn't available.
+func AllTools(projectDir string, store *autoconfig.PlanStore) []core.Tool {
+	return []core.Tool{NewPlanTool(projectDir, store)}
+}
+
 func (t *PlanTool) Name() string { return "create_plan" }
 
 func (t *PlanTool) Description() string {

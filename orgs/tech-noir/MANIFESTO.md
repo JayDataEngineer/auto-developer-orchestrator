@@ -88,9 +88,12 @@ See **AUTONOMOUS_LOOP** skill for full contract.
 
 ## Ray Cluster
 
-- **Cluster Ingress**: `http://100.86.69.57:30080` (Tailscale; k3s/Traefik single ingress)
-- **Ray Dashboard**: `http://100.86.69.57:18265`
-- **Ray Client** (from Python): `ray.init(address="ray://192.168.1.184:10001")` — LAN IP, not Tailscale
+Bring-your-own cluster. The sandbox clients all read cluster endpoints from
+environment variables (no hardcoded URLs), and the org.toml `sandbox.env`
+table lets you inject per-deployment values without editing any client code.
+
+- **Cluster Ingress**: `${MCP_HUB_ENDPOINT}` — single Traefik ingress on your cluster host
+- **Ray Dashboard**: `${RAY_DASHBOARD_URL:-http://localhost:18265}`
 
 ### Cluster Routes
 
@@ -110,9 +113,9 @@ Every bash call inside the sandbox sources `/sandbox/.env` first. Key vars:
 
 | Variable | Default | Used by |
 |----------|---------|---------|
-| `MCP_HUB_ENDPOINT` | `http://100.86.69.57:30080` | forge_client.py |
-| `FORGE_URL` | `…/forge` | forge_client.py |
-| `COMFYUI_URL` | `…/image/comfyui` | comfyui_client.py |
+| `MCP_HUB_ENDPOINT` | `http://localhost:30080` (override via env) | forge_client.py |
+| `FORGE_URL` | `${MCP_HUB_ENDPOINT}/forge` | forge_client.py |
+| `COMFYUI_URL` | `${MCP_HUB_ENDPOINT}/image/comfyui` | comfyui_client.py |
 | `GODOT_MCP_URL` | `http://host.docker.internal:8080` | godot_client.py |
 | `SURREALDB_URL` | `http://host.docker.internal:8000/surreal` | surreal_client.py |
 | `SURREALDB_NS` / `_DB` / `_USER` / `_PASS` | studio / tech-noir / root / root | surreal_client.py |

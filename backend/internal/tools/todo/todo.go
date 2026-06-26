@@ -43,6 +43,12 @@ func NewTool(store *Store) *Tool {
 	return &Tool{store: store}
 }
 
+// AllTools returns the canonical todo tool set. Pass a fresh Store from
+// todo.NewStore() — the store is per-agent-session.
+func AllTools(store *Store) []core.Tool {
+	return []core.Tool{NewTool(store)}
+}
+
 func (t *Tool) Name() string { return "todo" }
 func (t *Tool) Description() string {
 	return `Use this tool to create and manage a structured task list for your current work session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.

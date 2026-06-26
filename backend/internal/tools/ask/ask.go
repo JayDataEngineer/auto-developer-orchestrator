@@ -22,6 +22,15 @@ func NewAskUserTool() *AskUserTool {
 	return &AskUserTool{}
 }
 
+// AllTools returns every stateless tool in the ask package.
+// Tools that need runtime deps are not included here — wire them via the
+// orchestrator's tool composer instead.
+func AllTools() []core.Tool {
+	return []core.Tool{
+		NewAskUserTool(),
+	}
+}
+
 func (t *AskUserTool) Name() string { return "ask_user" }
 
 // TimeoutHint returns 0 — ask_user waits indefinitely for user response.

@@ -29,7 +29,7 @@ Sample output:
   "id": "ingestion_run:abc123",
   "started_at": "2026-06-19T02:09:14Z",
   "completed_at": "2026-06-19T02:51:33Z",
-  "source_path": "data/ChatExport_2026-03-13/",
+  "source_path": "data/<export_dir>/",
   "pipeline_version": "v2-onnx-2026-06-19",
   "status": "completed",
   "stats": {
@@ -117,7 +117,7 @@ curl -sX POST $URL "${HDR[@]}" $AUTH \
 
 | Question | If answer is… | Action |
 |----------|---------------|--------|
-| Has anyone ingested `data/ChatExport_2026-03-13/`? | Yes, `status=completed` | Skip ingest. Read the existing rows. |
+| Has anyone ingested `data/<export_dir>/`? | Yes, `status=completed` | Skip ingest. Read the existing rows. |
 | Has anyone ingested it? | Yes, but `status=running` | Wait for completion. Don't start a parallel run. |
 | Has anyone ingested it? | Yes, `status=failed` | Read `stats` to see how far it got, resume from there. |
 | Has anyone ingested it? | No | Start a fresh ingestion. |

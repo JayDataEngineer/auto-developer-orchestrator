@@ -43,17 +43,25 @@ cd /sandbox/workspace && python3 -m http.server 9876 &
 
 ```bash
 # Photos
-photos=$(find data/ChatExport_2026-03-13/photos -type f -name "*.jpg" \
+photos=$(find data/<export_dir>/photos -type f -name "*.jpg" \
     | grep -v thumb | sort)
 
-# Video keyframes (1fps extraction)
-mkdir -p /sandbox/workspace/keyframes
-for video in data/ChatExport_2026-03-13/video_files/*.mp4; do
-    name=$(basename "$video" .mp4)
-    ffmpeg -i "$video" -vf fps=1 \
-        /sandbox/workspace/keyframes/${name}_%04d.jpg
+# Video keyframes — use sandbox/video_frames.py, NOT raw ffmpeg.
+# video_frames.py runs scene-detection + temporal fallback (captures every
+# cut AND forces a frame every ~5s on single-take videos). Naive fps=1
+# misses fast cuts and wastes compute on static scenes.
+mkdir -p /sandbox/workspace/video_work
+for video in data/<export_dir>/<video_subdir>/*.mp4 \
+             data/<export_dir>/<video_subdir>/*.MP4; do
+    [ -e "$video" ] || continue
+    name=$(basename "$video" | tr 'A-Z' 'a-z' | sed 's/\.mp4$//')
+    python3 /sandbox/video_frames.py extract-scenes \
+        --video "$video" \
+        --output /sandbox/workspace/video_work/"$name"
 done
-keyframes=$(find /sandbox/workspace/keyframes -type f -name "*.jpg" | sort)
+# Keyframes are now at /sandbox/workspace/video_work/<name>/frame_*.png
+# with frames.json carrying pts_time + scene_score per frame.
+keyframes=$(find /sandbox/workspace/video_work -name 'frame_*.png' | sort)
 ```
 
 ### Step 2 — Embed every face in every image
@@ -187,7 +195,7 @@ curl -sX POST http://localhost:8102/mcp \
 
 ## Pitfalls
 
-1. **Low det_score_threshold default.** `MEDIA_FACES_DET_SCORE_THRESHOLD=0.3` keeps marginal detections. Telegram photos are low-quality — 0.5 misses real faces. If you see many noise points (`-1` cluster label), raise threshold to 0.5 and re-run.
+1. **Low det_score_threshold default.** `MEDIA_FACES_DET_SCORE_THRESHOLD=0.3` keeps marginal detections. Low-quality source images are — 0.5 misses real faces. If you see many noise points (`-1` cluster label), raise threshold to 0.5 and re-run.
 2. **Keyframe extraction rate.** `fps=1` is the default (1 frame per second). For action-heavy video, use `fps=2`. For static talking-head video, `fps=1/2` (one frame every 2 seconds) is enough.
 3. **Don't deduplicate embeddings before clustering.** HDBSCAN handles near-duplicates naturally. Pre-deduplication can drop signal.
 4. **Centroids are mean of cluster members.** They're NOT the same as a fresh embedding of an "average face." Treat them as identifiers, not as input to a downstream face recognition model.

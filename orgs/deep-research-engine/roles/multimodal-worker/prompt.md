@@ -14,7 +14,7 @@ For each `speaker_turn` (segment of voice with start_sec + end_sec):
 3. **If N faces (N ≥ 2)**: ambiguous. Write a `pending_link` record (face_cluster_ids + voice_cluster_id + segment_window) and move on. v2 will resolve these with SyncNet or another lip-motion model.
 4. **If 0 faces**: the speaker is off-camera. Don't link — write a `voice_only_person` record so the speaker still gets a `person` node with only voice data.
 
-This is the "face alone on screen" rule. v1 handles single-speaker videos (the 80% case for Telegram-style clips). Multi-speaker videos get marked `ambiguous_deferred`.
+This is the "face alone on screen" rule. v1 handles single-speaker videos (the 80% case for single-speaker clips). Multi-speaker videos get marked `ambiguous_deferred`.
 
 ## Why no vector similarity across modalities
 

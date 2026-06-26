@@ -39,6 +39,49 @@ container = "/workspace"
 [sandbox.env]
 PUX_ORG_PATH = "/sandbox/workspace"
 
+# Bootstrap metadata — drives the rendered bootstrap.sh. Telegram needs
+# one-time interactive setup (SMS code), exposed as extra_subcommands so
+# the operator can run them via ./bootstrap.sh <--setup-credentials|--interactive-login>.
+# Smoke test reuses telegram_session.py --check inside the container.
+[sandbox.bootstrap]
+smoke_test_command = "python3 /sandbox/telegram_session.py --check"
+smoke_test_description = "telegram session alive"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "docker"
+check = "command -v docker"
+error_msg = "docker not found on PATH"
+
+[[sandbox.bootstrap.hard_deps]]
+name = "docker compose"
+check = "docker compose version"
+error_msg = "docker compose subcommand missing — install Docker Compose v2"
+
+[[sandbox.bootstrap.extra_subcommands]]
+flag = "--setup-credentials"
+usage_args = "API_ID API_HASH PHONE"
+description = "write /sandbox/.telegram-credentials.json (container-side)"
+body = '''
+    if [ "$#" -ne 4 ]; then
+      err "usage: $0 --setup-credentials API_ID API_HASH PHONE"
+      exit 1
+    fi
+    log "writing credentials inside container"
+    docker compose exec -T "$CONTAINER" python3 /sandbox/telegram_session.py \
+      --setup-credentials "$2" "$3" "$4"
+    ok "credentials written to /sandbox/.telegram-credentials.json"
+'''
+
+[[sandbox.bootstrap.extra_subcommands]]
+flag = "--interactive-login"
+usage_args = ""
+description = "run telegram_session.py --bootstrap (SMS code prompt)"
+body = '''
+    log "interactive login — you'll receive an SMS code"
+    docker compose exec -it "$CONTAINER" python3 /sandbox/telegram_session.py --bootstrap
+    ok "session created"
+'''
+
 [[roles]]
 name = "personal-assistant"
 description = "Personal assistant — Telegram notes, mentions, and messaging via agent-written scripts"

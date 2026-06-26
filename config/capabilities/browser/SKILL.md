@@ -72,10 +72,57 @@ find_element_visual({query: "the canvas drawing area center"})
 
 **FALLBACK PROTOCOL:** Try `find_element` → `snapshot_a11y` → `evaluate_js` first. If all return nothing useful, use `find_element_visual`. Do NOT guess coordinates.
 
-
+### snapshot_a11y
 Get the accessibility tree of the current page — lists all interactive elements with
 their ARIA role, name, and CSS selector. Use this to discover what's on the page before
 interacting.
+
+No parameters required.
+
+### scroll_page
+Scroll the current page up or down by one viewport.
+
+Parameter: `direction` (optional) — `"up"` or `"down"` (default: `"down"`).
+
+Use cases: reveal lazy-loaded content, bring elements into the viewport before clicking, paginate through infinite-scroll feeds.
+
+### read_page
+Extract structured content from the current page: title, URL, visible text, images (with `src` + `alt`), links (with text + URL).
+
+Use this when you need page **data** (not a screenshot) — e.g., to find all links matching a pattern, extract article text, or inventory the images on the page.
+
+### evaluate_js
+Execute arbitrary JavaScript in the page and return the result. Use this to:
+- Extract data not exposed by other tools (computed styles, hidden form values, JSON embedded in `<script>` tags)
+- Dispatch synthetic events (mouseover, mouseenter, dragstart) — see "Interaction patterns" below
+- Pierce shadow DOM or iframes when DOM tools can't reach inside them
+- Read `window.*` globals set by the page's own scripts
+
+Parameter: `script` (required) — a JavaScript expression that returns a value.
+
+Example:
+```
+evaluate_js({script: "document.querySelectorAll('a[href*=\"/blog/\"]').length"})
+```
+
+### download_file
+Download a file to the sandbox workspace. Returns the file path + size.
+
+Use this instead of `bash + curl/wget` so the file lands in a known location the rest of the tools can reference.
+
+Parameters: `url` (required), `path` (optional — default: workspace root with the URL's basename).
+
+### observe
+Combined capture: screenshot + element list + AI vision description in one call. Useful as a single-shot "what's going on" probe when you're disoriented.
+
+### search_web
+Search the web (via the browser's default search engine) and return result titles + URLs. Useful when you don't have a target URL yet.
+
+### get_cookies / set_cookie / clear_cookies
+Read, write, or clear the browser's cookie jar for the current page.
+
+### get_storage / set_storage / clear_storage
+Read, write, or clear `localStorage` for the current page. Useful for sites that store auth tokens or UI state in localStorage rather than cookies.
 
 ### browser_screenshot
 Take a screenshot of the current browser page. The image is automatically described
@@ -107,37 +154,35 @@ Parameters:
 
 Example:
 ```
-upload_file({file_path: "/tmp/resume.pdf", selector: "#resume"})
+upload_file({file_path: "/sandbox/workspace/document.pdf", selector: "#upload"})
 ```
 
 ### inject_file
-Write a file (base64-encoded) into the sandbox filesystem. Use this when you need to upload a file that doesn't exist in the sandbox yet (e.g., a resume PDF from the user's profile).
+Write a file (base64-encoded) into the sandbox filesystem. Use this when you need to upload a file that doesn't exist in the sandbox yet (e.g., an image, PDF, CSV, or archive the page is asking for).
 
 Parameters:
-- `dest_path` (required) — destination path in the sandbox (e.g., '/sandbox/workspace/resume.pdf')
+- `dest_path` (required) — destination path in the sandbox (e.g., '/sandbox/workspace/document.pdf')
 - `content_base64` (required) — base64-encoded content of the file
 
 Example:
 ```
-inject_file({dest_path: "/sandbox/workspace/resume.pdf", content_base64: "JVBERi0xLjcN..."})
+inject_file({dest_path: "/sandbox/workspace/document.pdf", content_base64: "JVBERi0xLjcN..."})
 ```
 
 ### credential_get
-Get saved login credentials for a service from environment variables. Use this to log into job portals without hardcoding credentials.
+Get saved login credentials for a service from environment variables. Use this to log into any service without hardcoding credentials.
 
 Parameters:
-- `service` (required) — service name (e.g., 'linkedin', 'indeed', 'glassdoor'). Case-insensitive.
-
-Looks up `{SERVICE}_USERNAME` and `{SERVICE}_PASSWORD` (or `_EMAIL` and `_PASS`) env vars.
+- `service` (required) — service name. The tool looks up `{SERVICE}_USERNAME` and `{SERVICE}_PASSWORD` (uppercase). Case-insensitive.
 
 Example:
 ```
-credential_get({service: "linkedin"})
+credential_get({service: "acme"})
 → {username: "john@example.com", password: "***", found: true}
 ```
 
 ### user_profile
-Read your profile information (name, email, phone, resume path, skills, work history) from a saved JSON config file. The config is loaded from `PROFILE_PATH` env var, `~/.pux/user_profile.json`, or the project root.
+Read the user's profile information (name, email, phone, and any other fields they've chosen to persist) from a JSON config file. The config is loaded from `PROFILE_PATH` env var, `~/.pux/user_profile.json`, or the project root.
 
 No parameters required.
 
@@ -147,9 +192,7 @@ Example profile format (`~/.pux/user_profile.json`):
   "name": "John Smith",
   "email": "john.smith@example.com",
   "phone": "+1-555-123-4567",
-  "resume_path": "/sandbox/workspace/resume.pdf",
-  "skills": ["Go", "Python", "React"],
-  "work_history": [{"company": "Tech Corp", "title": "Software Engineer"}]
+  "custom_fields": { "...": "any key/value pairs the user wants to expose" }
 }
 ```
 
@@ -165,8 +208,205 @@ Restore a previously saved browser session from a file.
 Parameters:
 - `path` (optional) — file path in sandbox to read session data from (default: /tmp/browser-session.json)
 
+## Interaction patterns
+
+These are **general patterns** that apply to any page. They are not site-specific
+recipes — read them as primitives and compose them to fit the page in front of you.
+
+### Hover / flyout menus
+Many menus only appear after a real `mouseover` event. `find_element({action:"click"})`
+does not synthesize one, so flyouts stay hidden. Dispatch it explicitly:
+
+```
+evaluate_js({script: `
+  const el = document.querySelector('#menu-item');
+  el.dispatchEvent(new MouseEvent('mouseover', {bubbles:true}));
+  el.dispatchEvent(new MouseEvent('mouseenter', {bubbles:false}));
+`})
+```
+
+Then call `snapshot_a11y` or `browser_screenshot` to see the now-visible submenu.
+
+### Selectors for elements with numeric or special-character IDs
+
+HTML5 allows IDs like `5`, `1.2.3`, or `foo:bar`, but CSS selectors require
+escaping (`#5` is invalid; `[id="5"]` or `#\35` work). `find_element({selector:"#5"})`
+silently fails because `document.querySelector("#5")` throws a SyntaxError
+inside the JS fallback path, and the upstream CDP `page.select("#5")` rejects
+it too. Use attribute-selector form for any ID that starts with a digit or
+contains punctuation:
+
+```
+find_element({selector:'[id="5"]'})
+find_element({selector:'[id="1.2.3"]'})
+```
+
+This is the only reliable way to click digit-ID calculator buttons, grid
+cells in some data tables, and sections in legacy anchors.
+
+### Drag and drop
+HTML5 drag events need a `DataTransfer` object — `find_element` can't synthesize
+that. Do it in JS:
+
+```
+evaluate_js({script: `
+  const src = document.querySelector('#drag-source');
+  const dst = document.querySelector('#drop-target');
+  const dt = new DataTransfer();
+  src.dispatchEvent(new DragEvent('dragstart', {bubbles:true, dataTransfer:dt}));
+  dst.dispatchEvent(new DragEvent('drop', {bubbles:true, dataTransfer:dt}));
+  src.dispatchEvent(new DragEvent('dragend', {bubbles:true, dataTransfer:dt}));
+`})
+```
+
+For sliders and canvas-based dragging, use `find_element_visual` to get pixel
+coordinates and dispatch `pointerdown` / `pointermove` / `pointerup` via JS.
+
+### Shadow DOM
+Web components (custom elements, modern design systems) hide their internals
+inside a shadow root. `find_element` and `snapshot_a11y` cannot pierce shadow
+boundaries — query them via JS:
+
+```
+evaluate_js({script: `
+  const host = document.querySelector('my-widget');
+  return host.shadowRoot.querySelector('button').textContent;
+`})
+```
+
+If the shadow mode is `closed`, you usually cannot reach inside at all — fall
+back to `find_element_visual` (pixel coordinates) + synthetic click at those
+coordinates.
+
+### Iframes
+Content inside an `<iframe>` is a separate document. DOM tools cannot cross
+the frame boundary, but `evaluate_js` can — it walks `document.querySelectorAll('iframe')`
+and inspects `.contentWindow.document`. Cross-origin iframes throw a SecurityError;
+for those, the only path is to navigate the top-level page to the iframe's `src`
+directly.
+
+```
+evaluate_js({script: `
+  const f = document.querySelector('iframe');
+  return f.contentDocument.querySelector('button#submit').textContent;
+`})
+```
+
+### Dialog boxes (alert / prompt / confirm)
+The browser auto-dismisses `window.alert`/`confirm`/`prompt` dialogs (accept =
+true / OK). If you're not sure, probe first:
+
+```
+evaluate_js({script: `typeof window.__lastDialogMessage !== 'undefined' ? window.__lastDialogMessage : 'none'`})
+```
+
+Modal **HTML** dialogs (e.g., `<dialog>` element, or a `<div role="dialog">`)
+are not JS dialogs — handle them with the normal `find_element({action:"click"})`
+on their close/confirm button.
+
+### Infinite scroll / lazy-loaded lists
+The page appends new items only as you approach the bottom. Loop:
+
+1. `scroll_page({direction:"down"})`
+2. `snapshot_a11y` (or `read_page`) — record the new items
+3. Stop when two consecutive scrolls return no new items
+
+Set a hard cap (e.g., 50 iterations) so a broken "load more" endpoint doesn't
+loop forever.
+
+### Multi-step forms (wizards)
+Each "Next" button typically validates the current step before revealing the
+next. Pattern:
+
+1. Fill the visible step with `find_element({action:"type"})` + `select_option`
+2. Click "Next" with `find_element({action:"click"})`
+3. **Verify** with `browser_screenshot` — did a new step appear, or did a
+   validation error stay on the current one?
+4. If validation error: read it, fix the offending field, click "Next" again.
+5. Repeat until the final "Submit" succeeds and the URL changes.
+
+Never assume a click worked — always re-snapshot and check.
+
+### Bot detection / Cloudflare Turnstile
+
+Two interchangeable Chrome backends sit behind a waterfall. `/navigate`
+auto-routes — you don't pick the mode.
+
+The response carries `mode` and `waterfall` fields:
+
+- `mode: "attach"`, `waterfall: "attach"` — Mode A (long-lived Chrome) landed clean. Default path.
+- `mode: "stealth"`, `waterfall: "attach_then_stealth"` — Mode A hit a CF challenge; the driver spawned Mode Stealth (rotated fingerprint) and re-drove the URL.
+- `mode: "stealth"`, `waterfall: "stealth_cached"` — domain remembered as CF; skipped Mode A.
+- `mode: "stealth"`, `waterfall: "stealth_blocked"`, `cf_still_present: true` — **both backends lost**. Don't keep retrying the URL. Move to **pre-extracted cookies** (see "Pulling host-browser cookies" below).
+
+`/solve_captcha` (`POST /api/sandbox/{id}/sb/solve_captcha`) dispatches SeleniumBase's solver for CF Turnstile / reCAPTCHA / hCaptcha / DataDome / FriendlyCaptcha. It works on test sitekeys but **does not clear real CF Turnstile today** — don't waste a call hoping it will.
+
+For fingerprinted flows (DataDome, PerimeterX, checkout bots):
+
+- `humanlike: true` on `find_element({action:"click"})` moves the cursor along a Bezier curve before the press. Default off (~250ms cost). Turn on for these flows.
+- `evaluate_js({script: "await new Promise(r => setTimeout(r, 1500))"})` between actions.
+- If Turnstile appears and the page hasn't loaded real content after 3 scroll/wait cycles, report it back. Don't fight server-side-gated widgets.
+
+### Cross-tab / popup windows
+Links with `target="_blank"` open a new tab. The browser driver attaches to the
+first tab by default. To switch context, use `evaluate_js` to read
+`window.open()`'s returned handle, or navigate the current tab to the popup's
+URL directly (simpler — popups close when their opener is reused).
+
+### Pulling host-browser cookies into the sandbox
+The sandbox container cannot read the host browser's cookie DB or keyring, so
+the extraction happens host-side. The flow:
+
+1. **Host-side** (once per session, via `bootstrap.sh`): run
+   `extract_browser_cookies.py --browser brave --domain example.com --out data/.browser-session-example.com.json`
+2. The JSON is bind-mounted into the sandbox at `/sandbox/workspace/data/.browser-session-example.com.json`.
+3. In the agent: `restore_session({path: "/sandbox/workspace/data/.browser-session-example.com.json"})`
+   applies the cookies + localStorage to the browser.
+
+The same script supports chrome, brave, edge, chromium, opera, opera_gx,
+vivaldi, and firefox — flatpak installs auto-detected via `FLATPAK_PATHS`.
+
+#### Wiring it into any org (the standard recipe)
+
+Browser-using orgs declare a `[[sandbox.bootstrap.host_setup]]` block in
+their `org.toml`. The bootstrap template handles venv creation, dep install,
+check-mode dispatch, and bind-mounting the output file. Copy-paste recipe:
+
+```toml
+[sandbox]
+tier = "standard"
+# ...image, runtime_class, resources, env...
+
+pip_packages = ["browser-cookie3", "pycryptodome", "jeepney"]
+
+[[sandbox.bootstrap.host_setup]]
+name = "linkedin_cookies"
+description = "Extract LinkedIn cookies from the host browser (cookie DB + GNOME keyring not reachable from inside the container)"
+script = "@shared/sandbox/extract_browser_cookies.py"
+args = ["--browser", "brave", "--domain", "linkedin.com", "--out", "data/.browser-session-linkedin.com.json"]
+check_args = ["--browser", "brave", "--domain", "linkedin.com", "--check"]
+python_deps = ["browser-cookie3", "pycryptodome", "jeepney"]
+```
+
+For multiple domains, declare one `[[sandbox.bootstrap.host_setup]]` block
+per domain. Each will be checked + extracted independently during
+`./bootstrap.sh --check` and `./bootstrap.sh` respectively.
+
+In-sandbox code can resolve the canonical session path via the shared
+`paths` module:
+
+```python
+from paths import browser_session
+session_file = browser_session("linkedin.com")
+# → /sandbox/workspace/data/.browser-session-linkedin.com.json
+```
+
+Or call `restore_session` directly with the absolute path. Either way the
+session JSON has the shape `restore_session` expects (cookies + localStorage
++ url + saved_at + source + domain).
+
 ## Workflow
-1. Prepare: call `inject_file` to place any needed files (resume PDF, etc.) into the sandbox
+1. Prepare: call `inject_file` to place any files the page will need into the sandbox
 2. Prepare: call `user_profile` to get profile info, `credential_get` for login credentials
 3. Navigate: call `browse_to` with the target URL
 4. Discover: call `snapshot_a11y` to find interactive elements

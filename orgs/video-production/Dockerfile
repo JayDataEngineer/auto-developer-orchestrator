@@ -38,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential pkg-config \
     libcairo2-dev libpango1.0-dev \
     libgirepository1.0-dev libglib2.0-dev \
-    python3-gi python3-cairo \
+    python3-gi python3-cairo python-is-python3 \
     curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -48,10 +48,25 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Skill scripts
 COPY skills/ /app/skills/
+RUN chmod +x /app/skills/scripts/*.py \
+    && for f in /app/skills/scripts/*.py; do \
+        ln -sf "$f" /usr/local/bin/"$(basename "$f" .py)"; \
+    done
 
 # Workspace volume
 RUN mkdir -p /workspace/video-productions/{jobs,backups,serve} \
     && ln -sf /workspace/video-productions /app/workspace
+
+# Stable skill path agents can rely on regardless of who mounts what.
+# /sandbox/workspace is what the Pux sandbox manager binds the project dir to.
+# DO NOT symlink /sandbox/workspace to anything — Docker resolves the symlink
+# chain at bind-mount time and would redirect the project bind to whatever the
+# symlink points at (here, /workspace/video-productions). That collides with
+# the org-declared named volume on the same path and shadows it. The previous
+# `ln -sf /app/workspace /sandbox/workspace` caused exactly that collision;
+# removing it lets the Pux bind-mount and the named volume coexist.
+RUN mkdir -p /sandbox \
+    && ln -sf /app/skills /sandbox/skills
 
 VOLUME ["/workspace/video-productions"]
 

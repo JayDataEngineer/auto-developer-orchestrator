@@ -1,8 +1,16 @@
 # AUDIT_QUALITY_GATES
 
-The 6 measurable success criteria for deep-research-engine ingestion. Run all 6 in order. Each returns pass/fail with concrete numbers + sample bad rows. The auditor role uses this skill as its checklist.
+The 7 measurable success criteria for deep-research-engine ingestion. Run all 7 in order. Each returns pass/fail with concrete numbers + sample bad rows. The auditor role uses this skill as its checklist.
 
-The CTO loop: `delegate_to ingestion-director → delegate_to auditor → if gaps, delegate_to ingestion-director with refined scope → repeat` until all 6 pass.
+The CTO loop: `delegate_to ingestion-director → delegate_to auditor → if gaps, delegate_to ingestion-director with refined scope → repeat` until all 7 pass.
+
+## Scope
+
+**Checks 1-6 apply specifically to the multimodal-ingest path** — any task that populates the `item`/`transcript`/`media`/`person` tables via the format-specific parsers + `audio_client.py` + `video_frames.py` + the face-clustering skills.
+
+**Check 7 (embedding_coverage_complete) is general — it applies to ANY path that populates a vector column.** When auditing a web-research-only or PDF-only task, skip checks 1-6 and run only check 7 against whatever tables the task actually populated. The check is table-driven: a query that references an empty table returns 0 missing, which is a trivial pass — not a false positive.
+
+If your task created tables not covered by check 7's hardcoded list (e.g. `pdf_chunk` from a future PDF pipeline), add a count query for that table's embedding column before yielding. Don't ship a new vector column without a coverage check.
 
 ## Setup
 
@@ -15,7 +23,7 @@ All queries go through Caddy on `http://localhost:8000/surreal/sql` with headers
 
 ## Check 1 — transcripts_complete
 
-**Goal:** every `item` of type `voice` or `video` has a `transcript` child with non-empty `text`. Target: 34/34 on the Telegram dataset.
+**Goal:** every `item` of type `voice` or `video` has a `transcript` child with non-empty `text`. Target: 100% coverage of populated voice/video items.
 
 ```bash
 # Count voice/video items missing a transcript OR with empty-text transcript.
@@ -48,6 +56,8 @@ curl -sX POST http://localhost:8000/surreal/sql \
 
 **Common failure cause:** ASR provider 429'd mid-batch. Re-delegate INGEST_AUDIO_DIARIZATION with the explicit list of missing IDs.
 
+**Parametric thresholds:** "34/34" appears in the goal above as an example baseline from one stress-test corpus. The real threshold is **100% coverage of populated rows**. Compute total voice/video items at audit time and require `MISSING = 0`.
+
 **Silent videos — legitimate edge case:** some videos are recorded with no microphone input (audio measures -91 dB = digital silence). ASR correctly returns empty text. The pipeline writes a transcript with `text="[no speech detected ...]"` and `is_silent: true` so the audit reflects reality rather than masking silence as a failure. The query above counts these as success because `text` is non-empty. If you want to see how many transcripts are silent markers vs real speech:
 
 ```bash
@@ -73,11 +83,11 @@ POLLUTED=$(curl -sX POST http://localhost:8000/surreal/sql \
 ```
 
 **Pass:** POLLUTED = 0.
-**Common failure cause:** parser regex broken, or someone re-ingested via raw HTML scraping instead of `telegram_parser.py`.
+**Common failure cause:** parser regex broken, or someone re-ingested via raw scraping instead of the canonical parser for the source format.
 
 ## Check 3 — sender_extraction_worked
 
-**Goal:** <5% of items have `sender='Unknown'`. Target: <36/720 on Telegram dataset.
+**Goal:** <5% of items have `sender='Unknown'`. Target: rate < 5% of total items.
 
 ```bash
 UNKNOWN=$(curl -sX POST http://localhost:8000/surreal/sql \
@@ -96,7 +106,7 @@ echo "unknown rate: $(echo "scale=2; $UNKNOWN * 100 / $TOTAL" | bc)%"
 ```
 
 **Pass:** rate < 5%.
-**Disambiguation:** Genuine `Unknown` (forwarded messages, deleted accounts) is fine. Sample 10 Unknown senders and check the raw HTML — if they're all forwarded messages, the parser is working correctly. If they're normal messages with visible `from_name` in HTML, the parser missed them.
+**Disambiguation:** Genuine `Unknown` (forwarded messages, deleted accounts, orphan media) is fine. Sample 10 Unknown senders and check the raw export — if they're all forwarded messages or orphan media files, the parser is working correctly. If they're normal messages with a visible sender in the source, the parser missed them.
 
 ## Check 4 — topic_discovery_ran
 
@@ -143,42 +153,76 @@ LINKED=$(curl -sX POST http://localhost:8000/surreal/sql \
 **Pass:** LINKED ≥ 1.
 **Note:** This check only passes if checks #5 ran first. If #5 fails, #6 trivially fails too — note this in the report and move on.
 
-## Mutation test
+## Check 7 — embedding_coverage_complete
 
-Verify the auditor catches regression. Plant one of the original failure modes manually:
+**Goal:** every vector column is populated on every row that should have one. A 4%-populated HNSW index is a trap — semantic search silently misses 96% of the corpus. Target: 0 missing on each count below.
 
 ```bash
-# Plant a polluted sender name
-curl -sX POST http://localhost:8000/surreal/sql \
+# Items without text embeddings
+ITEMS_NO_VEC=$(curl -sX POST http://localhost:8000/surreal/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
-    -d "UPDATE item:voice_5 SET sender = 'Will  03.03.2026 16:45:33' WHERE id = item:voice_5"
+    -d "RETURN count(SELECT id FROM item WHERE text_embedding = NONE OR array::len(text_embedding) != 1024)" \
+    | jq -r '.[0].result')
 
-# Re-run check #2 — must report POLLUTED = 1
+# Transcripts without embeddings
+TR_NO_VEC=$(curl -sX POST http://localhost:8000/surreal/sql \
+    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
+    -u "root:$SURREAL_PASSWORD" \
+    -d "RETURN count(SELECT id FROM transcript WHERE embedding = NONE)" \
+    | jq -r '.[0].result')
+
+# Face appearances without embeddings (orphan detection vectors)
+FACE_NO_VEC=$(curl -sX POST http://localhost:8000/surreal/sql \
+    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
+    -u "root:$SURREAL_PASSWORD" \
+    -d "RETURN count(SELECT id FROM face_appearance WHERE embedding = NONE)" \
+    | jq -r '.[0].result')
+
+# Topics without centroid embeddings (can't be semantic-search targets)
+TOPIC_NO_VEC=$(curl -sX POST http://localhost:8000/surreal/sql \
+    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
+    -u "root:$SURREAL_PASSWORD" \
+    -d "RETURN count(SELECT id FROM topic WHERE centroid_embedding = NONE)" \
+    | jq -r '.[0].result')
+
+# Orphan media (videos registered but never processed through video_frames.py)
+MEDIA_NO_TYPE=$(curl -sX POST http://localhost:8000/surreal/sql \
+    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
+    -u "root:$SURREAL_PASSWORD" \
+    -d "RETURN count(SELECT id FROM media WHERE type = NONE)" \
+    | jq -r '.[0].result')
+
+# Orphan persons (no face or voice evidence linked)
+PERSON_NO_EDGE=$(curl -sX POST http://localhost:8000/surreal/sql \
+    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
+    -u "root:$SURREAL_PASSWORD" \
+    -d "RETURN count(SELECT id FROM person WHERE count(<-appears_in<-face_appearance) = 0 AND count(<-speaks_in<-speaker_turn) = 0)" \
+    | jq -r '.[0].result')
+
+echo "embedding coverage gaps:"
+echo "  item.text_embedding:        $ITEMS_NO_VEC"
+echo "  transcript.embedding:       $TR_NO_VEC"
+echo "  face_appearance.embedding:  $FACE_NO_VEC"
+echo "  topic.centroid_embedding:   $TOPIC_NO_VEC"
+echo "  media.type (orphans):       $MEDIA_NO_TYPE"
+echo "  person with no edges:       $PERSON_NO_EDGE"
 ```
 
-If check #2 still returns 0 after planting bad data, the regex check is broken.
+**Pass:** ALL counts = 0.
+
+**Common failure causes + fixes:**
+- `item.text_embedding > 0`: ingestion-director ran embedding on a subset (the 13 it found interesting, not the other 351). Re-delegate INGEST_ENTITY_EXTRACTION with explicit instruction: "vectorize every item, not just entities — backfill the rest."
+- `transcript.embedding > 0`: ASR happened but the embedding step was skipped for placeholder transcripts. Either embed the placeholder text too or mark `transcript_status='failed'` so future queries can filter.
+- `face_appearance.embedding > 0`: shouldn't happen — embed_faces always returns vectors or fails entirely. If non-zero, media-mcp was returning malformed responses. Re-delegate.
+- `topic.centroid_embedding > 0`: cluster created but centroid never computed. Re-delegate INGEST_ENTITY_EXTRACTION with the specific topic IDs.
+- `media.type = NONE > 0`: items registered as media rows without going through the proper pipeline. For orphans with `path=<video_subdir>/*`, run `video_frames.py process` on each. For others, identify the source and re-ingest.
+- `person with no edges > 0`: person node created speculatively but no face/voice evidence was linked. Either link the evidence or delete the orphan person.
+
+**Principle:** see MANIFESTO principle #7 (Comprehensive persistence). The agent's job isn't done when *some* data is in the DB — it's done when the DB is usable as a reference for future queries.
 
 ## When all 6 pass
 
 Report `overall: pass`. The CTO can now safely delegate to the artifact-generation phase (research-director + artifact-director) knowing the underlying knowledge graph is trustworthy.
 
 If any check still fails after 5 iteration rounds, escalate to the user with the concrete failure mode + proposed fix. Don't keep retrying the same thing hoping it works.
-
-## Manual verification (human-in-the-loop)
-
-After all 6 pass, run the file sorter so a human can spot-check the embeddings against the source files. This catches data-quality bugs that the 6 quantitative checks can't — e.g., a voice message attributed to the wrong sender, a face cluster that groups two different people, a centroid that's literally identical between two person records.
-
-```bash
-cd ~/Documents/programs/deep-research-engine
-python3 sandbox/export_for_verification.py
-# → writes output/verify/ with browsable HTML
-# Open: file://$(pwd)/output/verify/index.html
-```
-
-Output tree:
-- `faces/<sender>/` — every photo with detected faces, rendered with red bbox overlays. Click any photo to see the boxes positioned over the image.
-- `voices/<sender>/` — audio + transcript `.txt` side-by-side. Listen and read at the same time.
-- `embeddings/` — JSON dump of every face/voice embedding + cosine-similarity matrices for centroids. Surfaces "two centroids are literally identical" or "intra-cluster similarity is 0.05 (clusters are noise)" type bugs.
-
-Use `--copy` instead of symlinks if you need to move the folder off the host.

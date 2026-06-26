@@ -8,6 +8,7 @@ import (
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/sensitive"
+	"github.com/auto-developer-orchestrator/backend/internal/tools"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 )
 
@@ -181,14 +182,14 @@ func (t *Tool) formatTaskResult(task *core.BackgroundTask) (any, error) {
 	result = sensitive.ScrubText(result)
 
 	if task.Status == core.TaskFailed {
-		return map[string]any{
+		return tools.QuarantineResult(map[string]any{
 			"output":   result,
 			"exitCode": task.ExitCode,
 			"error":    sensitive.ScrubText(task.Error),
-		}, nil
+		}), nil
 	}
 
-	return map[string]any{"output": result}, nil
+	return tools.QuarantineResult(map[string]any{"output": result}), nil
 }
 
 // executeSync is the fallback for when no TaskManager is available.
@@ -207,7 +208,7 @@ func (t *Tool) executeSync(ctx context.Context, cmd string) (any, error) {
 	// Scrub secrets BEFORE returning — see formatTaskResult for rationale.
 	result = sensitive.ScrubText(result)
 
-	return map[string]any{"output": result}, nil
+	return tools.QuarantineResult(map[string]any{"output": result}), nil
 }
 
 // isRemoteExecutor returns true if the executor runs commands on a remote

@@ -75,20 +75,25 @@ services:
       {{ k }}: "{{ v }}"
 {% endfor %}
 {% endif %}
-{% if sandbox.resources.requests or sandbox.resources.limits %}
+{% if sandbox.resources_docker.requests or sandbox.resources_docker.limits %}
     deploy:
       resources:
-{% if sandbox.resources.requests %}
+{% if sandbox.resources_docker.requests %}
         reservations:
-          cpus: '{{ sandbox.resources.requests.cpu }}'
-          memory: {{ sandbox.resources.requests.memory }}
+          cpus: '{{ sandbox.resources_docker.requests.cpu }}'
+          memory: {{ sandbox.resources_docker.requests.memory }}
 {% endif %}
-{% if sandbox.resources.limits %}
+{% if sandbox.resources_docker.limits %}
         limits:
-          cpus: '{{ sandbox.resources.limits.cpu }}'
-          memory: {{ sandbox.resources.limits.memory }}
+          cpus: '{{ sandbox.resources_docker.limits.cpu }}'
+          memory: {{ sandbox.resources_docker.limits.memory }}
 {% endif %}
 {% endif %}
+{# `resources_docker` carries Docker-translated values (`0.25`, `512M`);
+   the K8s-style originals (`250m`, `512Mi`) live in `sandbox.resources`
+   and surface in pux.yaml as the CRD view. The single quotes around
+   `cpus:` are required because Docker compose parses unquoted numeric
+   values here as floats, not strings. #}
 {% if sandbox.healthcheck %}
     healthcheck:
       test: [{{ sandbox.healthcheck.test | map('tojson') | join(", ") }}]

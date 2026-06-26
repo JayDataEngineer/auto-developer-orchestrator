@@ -20,8 +20,8 @@ sandbox:
     - requests
     - pillow
   env:
-    GODOT_MCP_URL: "http://host.docker.internal:8080"
-    SURREALDB_URL: "http://host.docker.internal:8000/surreal"
+    GODOT_MCP_URL: "http://localhost:8080"
+    SURREALDB_URL: "http://localhost:8000/surreal"
     SURREALDB_NS: "studio"
     SURREALDB_DB: "tech-noir"
     SURREALDB_USER: "root"

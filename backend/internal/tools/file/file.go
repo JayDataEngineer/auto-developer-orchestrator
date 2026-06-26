@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
+	"github.com/auto-developer-orchestrator/backend/internal/tools"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/truncate"
 )
 
@@ -293,6 +294,19 @@ func (s *SimpleSandboxOps) AbsPath(p string) string {
 	return s.BasePath + "/" + p
 }
 
+// AllTools returns every file tool, wired with the given ops + media + tracker.
+// tracker may be nil — the returned ReadTool/EditTool will simply not track reads.
+// media may be nil — ReadTool will skip multimodal description.
+func AllTools(ops SandboxFileOps, media MediaDescriber, tracker *FileReadTracker) []core.Tool {
+	return []core.Tool{
+		NewReadToolWithTracker(ops, media, tracker),
+		NewWriteTool(ops),
+		NewEditToolWithTracker(ops, tracker),
+		NewGrepTool(ops),
+		NewGlobTool(ops),
+	}
+}
+
 // ReadTool implements core.Tool for reading files.
 type ReadTool struct {
 	ops     SandboxFileOps
@@ -400,13 +414,13 @@ func (t *ReadTool) Execute(ctx context.Context, args map[string]any) (any, error
 		output += contMsg
 	}
 
-	return map[string]any{
+	return tools.QuarantineResult(map[string]any{
 		"content":     output,
 		"path":        path,
 		"total_lines": totalLines,
 		"start_line":  offset,
 		"shown_lines": tr.OutputLines,
-	}, nil
+	}), nil
 }
 
 // readMultimodal handles non-text files (images, audio, documents) via the MediaDescriber.
@@ -606,7 +620,10 @@ func (t *GrepTool) Execute(ctx context.Context, args map[string]any) (any, error
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"matches": result, "pattern": pattern}, nil
+	// Wrap via QuarantineResult — matched lines echo file content which can
+	// contain attacker-controlled text (e.g. a downloaded README with
+	// prompt-injection patterns).
+	return tools.QuarantineResult(map[string]any{"matches": result, "pattern": pattern}), nil
 }
 
 // GlobTool implements core.Tool for file pattern matching.
@@ -645,7 +662,9 @@ func (t *GlobTool) Execute(ctx context.Context, args map[string]any) (any, error
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"files": result, "pattern": pattern}, nil
+	// Wrap via QuarantineResult — filenames can carry injection-pattern text
+	// (e.g. a downloaded file named "ignore_previous_instructions.txt").
+	return tools.QuarantineResult(map[string]any{"files": result, "pattern": pattern}), nil
 }
 
 // normalizeQuotes converts smart/curly quotes to ASCII equivalents.

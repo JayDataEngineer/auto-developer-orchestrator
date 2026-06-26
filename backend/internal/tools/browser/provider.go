@@ -44,7 +44,7 @@ type BrowserProvider interface {
 	// RestoreSession restores cookies + localStorage from a saved file.
 	RestoreSession(ctx context.Context, sandboxID, path string) (map[string]interface{}, error)
 	// InjectFile writes a file (base64-encoded content) into the sandbox filesystem.
-	// Use this to upload a resume PDF, profile picture, or any other file for form filling.
+	// Use this to materialize any file the page needs that isn't already in the sandbox.
 	InjectFile(ctx context.Context, sandboxID, destPath, contentBase64 string) (map[string]interface{}, error)
 	// CredentialGet reads credentials for a service from environment variables.
 	// Looks up {SERVICE}_USERNAME and {SERVICE}_PASSWORD (or _EMAIL and _PASS).

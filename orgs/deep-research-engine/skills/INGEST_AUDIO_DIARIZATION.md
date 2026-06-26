@@ -7,7 +7,7 @@ node + N `speaker_turn` nodes in SurrealDB.
 ## When to use
 
 You have audio files (`.ogg`, `.mp3`, `.wav`, `.m4a`, `.opus`, `.webm`)
-from a Telegram export, scraped media, or interview recordings. You want
+from a structured export, scraped media, or interview recordings. You want
 to answer "what was said, by whom, when?"
 
 Do NOT run this skill until you have:
@@ -28,7 +28,7 @@ The full pipeline is now:
 3. `cluster_embeddings` over all voice embeddings → cross-clip speaker identities
 4. (Optional) `diarize_audio` for within-clip turn-taking if you need finer granularity than VAD segments
 
-`diarize_audio` is still useful for **multi-speaker clips** (interviews, meetings) where VAD alone won't separate speakers. For single-speaker voice messages (the Telegram case), `embed_voice` per clip is enough.
+`diarize_audio` is still useful for **multi-speaker clips** (interviews, meetings) where VAD alone won't separate speakers. For single-speaker voice messages (the common case), `embed_voice` per clip is enough.
 
 ## Tool
 
@@ -55,7 +55,7 @@ the docker bridge IP `172.17.0.1`. To override (e.g., use Tailscale), set
 export MEDIA_MCP_URL=http://localhost:8102
 
 python3 sandbox/audio_client.py process \
-    --audio data/ChatExport_2026-03-13/voice_messages/audio_1@13-03-2026_08-59-37.ogg \
+    --audio data/<export_dir>/<audio_subdir>/audio_1@13-03-2026_08-59-37.ogg \
     --output /tmp/turns.json \
     --wait-for-mcp       # blocks up to 120s for MCP to be ready on first call
 ```
@@ -64,7 +64,7 @@ python3 sandbox/audio_client.py process \
 
 ```json
 {
-  "audio": "/abs/path/to/audio_1.ogg",
+  "audio": "/abs/path/to/<audio_file>.ogg",
   "duration_sec": 12.34,
   "transcript": "Hey it's me, just calling to ...",
   "speakers": ["speaker_0", "speaker_1"],
@@ -85,7 +85,7 @@ whose Pyannote window contains the chunk's midpoint. If no window overlaps
 
 ```bash
 python3 sandbox/audio_client.py batch \
-    --input data/ChatExport_2026-03-13/voice_messages/ \
+    --input data/<export_dir>/<audio_subdir>/ \
     --output /tmp/voice_turns/ \
     --wait-for-mcp
 ```
@@ -96,7 +96,7 @@ Failed files appear in `_summary.json` with an `error` field.
 ### Step 3 — Write to SurrealDB
 
 Each audio file → 1 `media` node (if not already present from a prior
-INGEST_TELEGRAM_EXPORT run) + 1 `transcript` node + N `speaker_turn` nodes:
+INGEST_STRUCTURED_EXPORT run) + 1 `transcript` node + N `speaker_turn` nodes:
 
 ```python
 import json
@@ -167,7 +167,7 @@ curl -sf http://localhost:8102/health || echo "MCP not up"
 
 # 2. Process one file (use any .ogg/.mp3 with speech)
 python3 sandbox/audio_client.py process \
-    --audio data/ChatExport_2026-03-13/voice_messages/<some_file>.ogg \
+    --audio data/<export_dir>/<audio_subdir>/<some_file>.ogg \
     --output /tmp/smoke.json \
     --wait-for-mcp
 
@@ -210,13 +210,3 @@ Expected output: `OK: 1 speakers, 1 turns, 47 chars` (numbers vary by file).
   the docker bridge IP `172.17.0.1`. If that IP isn't reachable from the
   MCP container (different network), set `AUDIO_HTTP_PUBLIC=<tailscale-ip>`
   before running.
-
-## Verification log (2026-06-18)
-
-Proven end-to-end against the deep-research-engine stack:
-- Voice file from `data/ChatExport_2026-03-13/voice_messages/` processed via
-  the local `research-media-mcp` container (Parakeet + Pyannote).
-- Transcript non-empty with expected content.
-- Diarization returned ≥1 speaker segment.
-- Alignment produced one `turn` per transcript chunk with correct speaker
-  assignment by midpoint overlap.

@@ -52,6 +52,20 @@ var sandboxCreateCmd = &cobra.Command{
 		if sandboxProjPath != "" {
 			req["project_path"] = sandboxProjPath
 		}
+		// Thread the global --org flag through so `orch sandbox create --org X`
+		// honors org-declared sandbox image/env/volumes. Without this, the
+		// standalone create launches a generic pux-sandbox container even
+		// when the org declares a specialized image (the same gap the prompt
+		// path closed in pux_prompt.go). Resolve the name to an absolute path
+		// so the server-side LoadOrgManifest finds pux.yaml regardless of
+		// the server's working directory.
+		if orgName != "" {
+			orgPath, err := resolveOrgPath(orgName)
+			if err != nil {
+				return err
+			}
+			req["org"] = orgPath
+		}
 		client := api.NewClient(serverURL)
 		var result api.SandboxInfo
 		if err := client.Post("/api/sandbox/", req, &result); err != nil {

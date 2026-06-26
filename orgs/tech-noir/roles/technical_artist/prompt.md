@@ -97,7 +97,7 @@ packages:
 ## ComfyUI Connection
 
 - Local: `http://127.0.0.1:8465`
-- Remote (Ray): `http://100.86.69.57:30080/image/comfyui`
+- Remote (Ray): `${COMFYUI_URL}` (default `http://localhost:30080/image/comfyui`)
 - All ComfyUI interaction goes through `comfyui_client/comfyui_client.py`
 
 ## VNCCS Pattern (Critical)

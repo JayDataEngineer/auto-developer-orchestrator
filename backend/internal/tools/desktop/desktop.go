@@ -206,6 +206,16 @@ func RegisterDesktopTools(tools []core.Tool, p DesktopProvider, sandboxID func()
 	)
 }
 
+// AllTools returns every desktop tool, wired with the given provider + sandboxID.
+// Nil provider returns nil — caller is expected to skip desktop wiring when no
+// provider is available.
+func AllTools(p DesktopProvider, sandboxID func() string) []core.Tool {
+	if p == nil {
+		return nil
+	}
+	return RegisterDesktopTools(nil, p, sandboxID)
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 // parseIntField extracts an integer from a map[string]interface{} value.

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/storage"
 )
 
@@ -15,6 +16,13 @@ import (
 type WaitTool struct{}
 
 func NewWaitTool() *WaitTool { return &WaitTool{} }
+
+// AllTools returns every stateless tool in the meta package.
+// YieldArtifactTool is excluded — it has runtime deps (db, sandboxDir, agentID);
+// wire it via NewYieldArtifactToolWithDB at the orchestrator site.
+func AllTools() []core.Tool {
+	return []core.Tool{NewWaitTool()}
+}
 
 func (t *WaitTool) Name() string        { return "wait" }
 func (t *WaitTool) Description() string { return "Wait/pause for a specified number of seconds" }

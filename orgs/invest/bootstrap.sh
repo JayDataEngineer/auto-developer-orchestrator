@@ -1,162 +1,157 @@
 #!/usr/bin/env bash
-# bootstrap.sh — idempotent deploy of invest org sandbox → target project.
+# AUTO-GENERATED — bootstrap.sh for invest.
+# Source of truth: orgs/invest/org.toml → [sandbox.bootstrap] + tier.
+# Template: scripts/templates/org/bootstrap.sh.j2
+#
+# Rendered via `task org-build`. Hand-edits will be overwritten on next render;
+# add org-specific stages by editing org.toml, not this file.
 #
 # Usage:
-#   bash orgs/invest/bootstrap.sh                              # default target
-#   bash orgs/invest/bootstrap.sh /path/to/project             # custom target
-#   bash orgs/invest/bootstrap.sh /path/to/project --no-venv   # skip venv setup
-#   bash orgs/invest/bootstrap.sh --down                       # tear down compose container
+#   ./bootstrap.sh                # full bootstrap
+#   ./bootstrap.sh --check        # verify only, don't start anything
+#   ./bootstrap.sh --down         # tear down what bootstrap brought up
 #
-# What it does:
-#   1. Creates target dir structure if missing
-#   2. Copies sandbox/* + config/* (only if changed — sha256 compare)
-#   3. Sets up Python venv via uv (idempotent)
-#   4. Installs requirements
-#   5. Health check: every .py file compiles, --help works
-#   6. Prints summary
+# ── Semantics of `--check` ─────────────────────────────────────────────────
+# `--check` is a dry-run contract: "verify dependencies + configuration, then
+# exit 0 WITHOUT starting the container or making network changes." It runs:
+#   1. hard_dep checks  (docker, docker compose, etc.)   → fail-fast
+#   2. soft_dep checks  (API keys in env)                → warn-only
+#   3. host_setup[].check_args for each declared helper → can fail-fast
+#   4. compose config validation (if tier != skeleton)   → fail-fast
 #
-# Exits 0 on success, non-zero on failure. Safe to re-run.
+# Orgs with host_setup helpers (e.g. the browser capability's
+# extract_browser_cookies.py — see config/capabilities/browser/SKILL.md)
+# extend `--check` to dry-run the helper too — the helper's check_args is the
+# canonical "does this work without side effects?" probe. Skeleton-tier orgs
+# (no container, no host_setup) still run dep checks + exit 0.
+#
+# This is DIFFERENT from `compose config --check` (yaml syntax only) and
+# DIFFERENT from a single helper's own `--check` flag. The bootstrap `--check`
+# subcommand is the union of all dry-run probes for the org's full lifecycle.
+# See [feedback_pr4_container_lifecycle] for the contract motivation.
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+cd "$SCRIPT_DIR"
+
+# Canonical Pux mount + label — lets Pux adopt this container instead of
+# spinning up a sibling. pwd -P resolves symlinks so the label matches
+# what Pux queries by (resolveOrgPath EvalSymlinks). See
+# [[feedback_container_reuse_label_discovery]].
+export OPENSHELL_PROJECT_PATH="${OPENSHELL_PROJECT_PATH:-$SCRIPT_DIR}"
+
+log()  { printf '[bootstrap] %s\n' "$*"; }
+ok()   { printf '[bootstrap] ✓ %s\n' "$*"; }
+err()  { printf '[bootstrap] ERROR: %s\n' "$*" >&2; }
+
+CONTAINER="invest-sandbox"
+
+# ── Extra subcommands (org-specific extensions, declared in org.toml) ──────
+# Dispatched BEFORE the standard --check/--down args so they take precedence.
+
 # ── Args ──────────────────────────────────────────────────────────────────
-# --down short-circuits everything: tears down compose container (if any)
-# and exits. Named volumes preserved.
-if [[ "${1:-}" == "--down" ]]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  cd "$SCRIPT_DIR"
-  echo "[bootstrap] tearing down (docker compose down)"
+CHECK_ONLY=0
+DO_DOWN=0
+case "${1:-}" in
+  --check) CHECK_ONLY=1 ;;
+  --down)  DO_DOWN=1 ;;
+  "")      ;;
+  *)       err "unknown arg: $1"; exit 1 ;;
+esac
+
+# ── --down: inverse of up ─────────────────────────────────────────────────
+# Tears down the container + its network. Named volumes are PRESERVED
+# (no `-v` flag) so data isn't lost across re-bootstraps. To wipe volumes
+# too, run `docker compose down -v` manually.
+if [ "$DO_DOWN" = "1" ]; then
+  log "tearing down (docker compose down)"
   docker compose down
-  echo "[bootstrap] ✓ containers stopped"
+  ok "containers stopped"
   exit 0
 fi
 
-TARGET_DIR="${1:-${INVEST_TARGET_DIR:-$HOME/Documents/programs/dev/invest}}"
-SKIP_VENV="${2:-}"
-
-# Resolve the org source dir (relative to this script)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_SANDBOX="$SCRIPT_DIR/sandbox"
-SRC_CONFIG="$SCRIPT_DIR/config"
-REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
-
-# ── Helpers ───────────────────────────────────────────────────────────────
-log()  { printf '[bootstrap] %s\n' "$*"; }
-err()  { printf '[bootstrap] ERROR: %s\n' "$*" >&2; }
-ok()   { printf '[bootstrap] ✓ %s\n' "$*"; }
-
-# ── Pre-flight ────────────────────────────────────────────────────────────
-if [[ ! -d "$SRC_SANDBOX" ]]; then
-  err "Source sandbox not found: $SRC_SANDBOX"
+# ── 1. Hard deps (fail-fast) ──────────────────────────────────────────────
+if ! command -v docker >/dev/null 2>&1; then
+  err "docker not found on PATH"
   exit 1
 fi
-if [[ ! -f "$REQUIREMENTS" ]]; then
-  err "requirements.txt not found: $REQUIREMENTS"
+ok "docker"
+if ! docker compose version >/dev/null 2>&1; then
+  err "docker compose subcommand missing — install Docker Compose v2"
   exit 1
 fi
+ok "docker compose"
 
-mkdir -p "$TARGET_DIR/sandbox" "$TARGET_DIR/config"
-ok "Target dir ready: $TARGET_DIR"
-
-# ── Sync sandbox/ + config/ (skip unchanged via sha256) ───────────────────
-synced=0
-skipped=0
-for src in "$SRC_SANDBOX"/*; do
-  [[ -f "$src" ]] || continue
-  fname="$(basename "$src")"
-  dst="$TARGET_DIR/sandbox/$fname"
-  if [[ -f "$dst" ]] && [[ "$(sha256sum < "$src")" == "$(sha256sum < "$dst")" ]]; then
-    skipped=$((skipped+1))
-  else
-    cp "$src" "$dst"
-    synced=$((synced+1))
-  fi
-done
-
-for src in "$SRC_CONFIG"/*; do
-  [[ -f "$src" ]] || continue
-  fname="$(basename "$src")"
-  dst="$TARGET_DIR/config/$fname"
-  if [[ -f "$dst" ]] && [[ "$(sha256sum < "$src")" == "$(sha256sum < "$dst")" ]]; then
-    skipped=$((skipped+1))
-  else
-    cp "$src" "$dst"
-    synced=$((synced+1))
-  fi
-done
-
-ok "Sandbox synced: $synced files updated, $skipped unchanged"
-
-# ── Python venv (uv) ──────────────────────────────────────────────────────
-VENV_DIR=""
-if [[ "$SKIP_VENV" == "--no-venv" ]]; then
-  log "Skipping venv setup (--no-venv)"
-elif ! command -v uv >/dev/null 2>&1; then
-  err "uv not found. Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
-  err "Or rerun with: bash $0 $TARGET_DIR --no-venv"
-  exit 1
+# ── 2. Soft deps (warn only) ──────────────────────────────────────────────
+if ! [ -n "${ALPACA_API_KEY:-}" ] >/dev/null 2>&1; then
+  log "warning: ALPACA_API_KEY — paper trading will be unavailable until you export it"
 else
-  VENV_DIR="$TARGET_DIR/.venv"
-  if [[ ! -d "$VENV_DIR" ]]; then
-    log "Creating venv at $VENV_DIR"
-    uv venv "$VENV_DIR" >/dev/null
-    ok "venv created"
-  fi
-  log "Installing requirements (idempotent)"
-  uv pip install --python "$VENV_DIR/bin/python" -r "$REQUIREMENTS" >/dev/null 2>&1 || {
-    err "pip install failed. Run manually: uv pip install --python $VENV_DIR/bin/python -r $REQUIREMENTS"
-    exit 1
-  }
-  ok "Dependencies installed"
+  ok "ALPACA_API_KEY"
+fi
+if ! [ -n "${FRED_API_KEY:-}" ] >/dev/null 2>&1; then
+  log "warning: FRED_API_KEY — macro data (yield curve, rates) will be unavailable"
+else
+  ok "FRED_API_KEY"
 fi
 
-# ── Health check: every .py compiles ──────────────────────────────────────
-PY="${VENV_DIR:+$VENV_DIR/bin/python}"
-[[ -z "$PY" ]] && PY="python3"
+# ── 3. Host-side setup (pre-compose, optional) ────────────────────────────
+# Runs declared helpers on the host BEFORE compose up. Used when the helper
+# needs host-only resources (flatpak cookie DB, GNOME keyring, USB devices,
+# audio hardware). Each helper may install Python deps into $SCRIPT_DIR/.venv
+# and run a script with its declared args.
 
-compile_failures=0
-for f in "$TARGET_DIR/sandbox"/*.py; do
-  if ! "$PY" -m py_compile "$f" 2>/dev/null; then
-    err "Compile failed: $(basename "$f")"
-    compile_failures=$((compile_failures+1))
+# ── 4. --check early-exit (after host_setup so check_args run if declared) ─
+if [ "$CHECK_ONLY" = "1" ]; then
+  log "--check requested; not starting container"
+  exit 0
+fi
+
+# ── 5. gVisor detection ───────────────────────────────────────────────────
+# The auto-generated compose requests `runtime: runsc` when org.toml
+# declares runtime_class = "gvisor". Hosts without runsc installed choke
+# on that line. Write a local override (gitignored) that strips it.
+if ! docker info 2>/dev/null | grep -qi 'runtimes:.*runsc'; then
+  log "runsc not installed locally — writing docker-compose.override.yml"
+  cat > docker-compose.override.yml <<'EOF'
+# Local override — strips `runtime: runsc` for hosts without gVisor.
+# Auto-generated by bootstrap.sh; safe to delete.
+services:
+  invest-sandbox:
+    runtime: ""
+EOF
+fi
+
+# ── 6. Build (custom-build tier only) ─────────────────────────────────────
+
+# ── 7. Bring up the container ─────────────────────────────────────────────
+log "starting sandbox (docker compose up -d)"
+docker compose up -d
+
+log "waiting for container to be running"
+for i in $(seq 1 30); do
+  if docker compose ps --status running --quiet | grep -q .; then
+    ok "container running after ${i}s"
+    break
   fi
+  sleep 1
 done
 
-if [[ $compile_failures -gt 0 ]]; then
-  err "$compile_failures file(s) failed to compile"
+# ── 8. Smoke test ─────────────────────────────────────────────────────────
+log "smoke test: pure-Python deps importable"
+if docker compose exec -T "$CONTAINER" python3 -c 'import pandas, numpy, yfinance; print("deps ok")' >/dev/null 2>&1; then
+  ok "smoke test passed"
+else
+  err "smoke test failed — check container logs: docker compose logs"
   exit 1
 fi
-ok "All Python files compile"
 
-# ── Health check: fetch_data --help ───────────────────────────────────────
-if ! "$PY" "$TARGET_DIR/sandbox/fetch_data.py" --help >/dev/null 2>&1; then
-  err "fetch_data.py --help failed"
-  exit 1
-fi
-ok "fetch_data.py CLI functional"
-
-# ── Summary ───────────────────────────────────────────────────────────────
 echo
 echo "═══════════════════════════════════════════════════════════════"
-echo "  invest org bootstrap — COMPLETE"
+echo "  invest bootstrap — COMPLETE"
 echo "═══════════════════════════════════════════════════════════════"
-echo "  Target:       $TARGET_DIR"
-echo "  Sandbox:      $TARGET_DIR/sandbox/ ($(ls "$TARGET_DIR/sandbox"/*.py 2>/dev/null | wc -l) .py files)"
-echo "  Config:       $TARGET_DIR/config/"
-if [[ -d "$VENV_DIR" ]]; then
-  echo "  Venv:         $VENV_DIR"
-  echo "  Activate:     source $VENV_DIR/bin/activate"
-fi
-echo "  Watchlist:    $TARGET_DIR/config/watchlist.json (multi-asset)"
+echo "  Container:  $CONTAINER (restart: unless-stopped)"
+echo "  Workspace:  $SCRIPT_DIR  (bind-mounted at /sandbox/workspace)"
 echo
-echo "  Required env:"
-echo "    ALPACA_API_KEY, ALPACA_SECRET_KEY  (paper trading)"
-echo "    FRED_API_KEY                        (macro data — free at fred.stlouisfed.org)"
-echo
-echo "  Docker compose (optional alternative to venv):"
-echo "    export OPENSHELL_PROJECT_PATH=\$TARGET_DIR"
-echo "    cd $SCRIPT_DIR && docker compose up -d"
-echo "    # Pux will then adopt this container instead of creating a sibling."
-echo
-echo "  Smoke test passed: ✓"
+echo "  Tear down:  ./bootstrap.sh --down"
 echo "═══════════════════════════════════════════════════════════════"

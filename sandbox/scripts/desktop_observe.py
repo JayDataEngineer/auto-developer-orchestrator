@@ -11,6 +11,7 @@ Runs inside the sandbox via ExecInSandbox. Outputs JSON to stdout with:
 Graceful degradation: if tesseract is missing, returns empty elements
 and ocr_available=false. Screenshot + windows always work.
 """
+import argparse
 import subprocess
 import json
 import sys
@@ -25,11 +26,19 @@ WORD_GROUP_GAP = 50  # pixels — merge adjacent words within this gap
 
 
 def run(cmd, **kwargs):
-    """Run a command, return CompletedProcess."""
-    env = {**os.environ}
-    if "DISPLAY" not in env:
-        env["DISPLAY"] = ":99"
-    return subprocess.run(cmd, capture_output=True, text=True, env=env, **kwargs)
+    """Run a command, return CompletedProcess.
+
+    If the caller doesn't pass ``env=``, inject a copy of os.environ with
+    DISPLAY defaulting to ``:99``. If the caller does pass env, respect it
+    verbatim — merging would cause ``TypeError: got multiple values for
+    keyword argument 'env'`` (bug fixed 2026-06-25).
+    """
+    if "env" not in kwargs:
+        env = {**os.environ}
+        if "DISPLAY" not in env:
+            env["DISPLAY"] = ":99"
+        kwargs["env"] = env
+    return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
 
 
 def take_screenshot(display):
@@ -220,6 +229,14 @@ def get_resolution(display):
 
 
 def main():
+    # Argparse gives us --help + rejects unknown flags for free. The script
+    # is invoked by the desktop.go tool with no args, so we declare no
+    # positional or optional arguments — the parser's only job is CLI hygiene.
+    argparse.ArgumentParser(
+        prog="desktop_observe",
+        description="Screenshot + OCR + window list in one JSON blob.",
+    ).parse_args()
+
     display = os.environ.get("DISPLAY", ":99")
 
     if not take_screenshot(display):

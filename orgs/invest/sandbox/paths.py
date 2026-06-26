@@ -114,4 +114,7 @@ def print_paths() -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Path discovery for invest org. Print resolved paths by default.")
+    parser.parse_args()  # rejects unknown flags; --help works
     print_paths()

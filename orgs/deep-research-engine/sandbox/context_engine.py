@@ -25,7 +25,7 @@ Usage:
 Env:
   LLM_API_URL   OpenAI-compatible /v1/chat/completions endpoint
   LLM_MODEL     Model name for synthesis (default: qwen35-35b-a3b-vision)
-  MEDIA_MCP_URL Media MCP container (default: http://localhost:8102)
+  MEDIA_MCP_URL Media MCP container (default: http://localhost:8101)
 
 Designed to run autonomously: no agent in the loop, no human prompts.
 Failures are logged + skipped; pipeline continues.

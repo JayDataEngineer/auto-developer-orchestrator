@@ -1,0 +1,13 @@
+{
+  "job_id": "2026-06-24-0416-pythagorean-theorem-proof",
+  "title": "Pythagorean Theorem Proof",
+  "slug": "pythagorean-theorem-proof",
+  "created_at": "2026-06-24T04:16:32.273381+00:00",
+  "prompt": "30-second animated proof of a^2 + b^2 = c^2 using square rearrangement on a right triangle",
+  "sources": [],
+  "status": "initialized",
+  "final_video": null,
+  "backup_video": null,
+  "host_url": null,
+  "notes": []
+}

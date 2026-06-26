@@ -1,5 +1,5 @@
 # AUTO-GENERATED from org.toml — do not edit. Run `task org-build`.
-description: "Ingestion Director — Manages multimodal data ingestion (Telegram, PDFs, audio, images). Delegates to specialized processors, reviews quality, builds knowledge structures."
+description: "Ingestion Director — Manages multimodal data ingestion (structured exports, PDFs, audio, images). Delegates to specialized processors, reviews quality, builds knowledge structures."
 imports:
   - shell
 model: deepseek/deepseek-v4-flash

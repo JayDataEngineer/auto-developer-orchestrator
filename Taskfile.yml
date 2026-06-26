@@ -491,10 +491,11 @@ tasks:
       - uv run --with jinja2 python3 scripts/org_build.py {{.CLI_ARGS}}
 
   org-build-check:
-    desc: "Verify rendered org trees match checked-in (CI mode)"
+    desc: "Verify rendered org trees match checked-in (CI mode) + System A contract"
     cmds:
       - uv run --with jinja2,pytest,pyyaml python3 scripts/org_build.py --check
       - uv run --with jinja2,pytest,pyyaml pytest scripts/test_org_build.py
+      - uv run --with jinja2,pytest,pyyaml pytest scripts/test_system_a_contract.py
 
   # ── llama.cpp Model Server ────────────────────────────────────────────
   model:

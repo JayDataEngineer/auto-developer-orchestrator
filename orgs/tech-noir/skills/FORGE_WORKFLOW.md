@@ -68,4 +68,4 @@ Avoid:
 
 ## Endpoint
 
-`MCP_HUB_ENDPOINT` env var is set to `http://100.86.69.57:30080` in the sandbox. Forge lives at `/forge/generate` under that. Don't hardcode the URL — read it from env in case the cluster moves.
+`MCP_HUB_ENDPOINT` env var points at the Forge API (default `http://localhost:30080`; override via sandbox env when pointing at a remote cluster). Forge lives at `/forge/generate` under that. Don't hardcode the URL — read it from env in case the cluster moves.

@@ -12,7 +12,9 @@ Usage:
   python3 comfyui_client.py post-prompt --workflow '{"3":{"class_type":"KSampler",...}}'
 
 Env:
-  COMFYUI_URL — base URL (default: http://100.86.69.57:30080/image/comfyui)
+  COMFYUI_URL — base URL (default: http://localhost:30080/image/comfyui).
+                 Set this env var when ComfyUI is hosted on a remote cluster
+                 or tailnet node.
 """
 import argparse
 import json
@@ -22,7 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-BASE = os.environ.get("COMFYUI_URL", "http://100.86.69.57:30080/image/comfyui").rstrip("/")
+BASE = os.environ.get("COMFYUI_URL", "http://localhost:30080/image/comfyui").rstrip("/")
 TIMEOUT = 180  # ComfyUI workflow can run minutes on a cold GPU
 
 

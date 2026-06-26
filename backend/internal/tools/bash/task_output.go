@@ -20,6 +20,16 @@ func NewTaskOutputTool(taskMgr *core.TaskManager) *TaskOutputTool {
 	return &TaskOutputTool{taskMgr: taskMgr}
 }
 
+// AllTools returns every tool in the bash package, wired with the given deps.
+// taskMgr may be nil — TaskOutputTool handles nil-gracefully (returns an error
+// at Execute time). exec is required.
+func AllTools(exec Executor, taskMgr *core.TaskManager, workDir string) []core.Tool {
+	return []core.Tool{
+		NewWithTaskManager(exec, taskMgr, workDir),
+		NewTaskOutputTool(taskMgr),
+	}
+}
+
 func (t *TaskOutputTool) Name() string { return "task_output" }
 
 func (t *TaskOutputTool) Description() string {

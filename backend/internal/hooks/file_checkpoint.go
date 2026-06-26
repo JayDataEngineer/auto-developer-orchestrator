@@ -56,11 +56,11 @@ func (h *FileCheckpointHook) OnAfterModel(_ context.Context, _ *core.LoopState, 
 	return nil
 }
 
-func (h *FileCheckpointHook) OnAfterToolCall(_ context.Context, state *core.LoopState, toolName string, _ map[string]any, _ string, _ error) error {
+func (h *FileCheckpointHook) OnAfterToolCall(ctx context.Context, state *core.LoopState, toolName string, _ map[string]any, _ string, _ error) error {
 	// Create a snapshot after file-modifying tool calls so each change is restorable
 	switch toolName {
 	case "file_write", "write_file", "file_edit", "edit_file", "bash":
-		snap, err := h.manager.CreateSnapshot(nil, "after-"+toolName, state.Round)
+		snap, err := h.manager.CreateSnapshot(ctx, "after-"+toolName, state.Round)
 		if err != nil {
 			h.logger.Printf("checkpoint: post-tool snapshot failed: %v", err)
 		} else if snap.FileCount > 0 {
@@ -70,9 +70,9 @@ func (h *FileCheckpointHook) OnAfterToolCall(_ context.Context, state *core.Loop
 	return nil
 }
 
-func (h *FileCheckpointHook) OnAgentEnd(_ context.Context, state *core.LoopState) error {
+func (h *FileCheckpointHook) OnAgentEnd(ctx context.Context, state *core.LoopState) error {
 	// Final snapshot with all tracked files
-	if snap, err := h.manager.CreateSnapshot(nil, "agent-end", state.Round); err != nil {
+	if snap, err := h.manager.CreateSnapshot(ctx, "agent-end", state.Round); err != nil {
 		h.logger.Printf("checkpoint: final snapshot failed: %v", err)
 	} else {
 		h.logger.Printf("checkpoint: final snapshot %s (%d files)", snap.ID, snap.FileCount)

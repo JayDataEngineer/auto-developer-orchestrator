@@ -26,7 +26,10 @@ import os
 import sys
 from datetime import datetime, timedelta
 
-import yfinance as yf
+# Third-party deps imported lazily inside functions so --help works even when
+# the deps aren't installed (the System A contract test runs --help from a
+# bare uv venv). Canonical pattern: stdlib-only top-level imports.
+yf = None  # type: ignore[assignment]
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths
@@ -42,12 +45,27 @@ DEFAULT_CRYPTO = ["bitcoin", "ethereum", "solana"]
 EVAL_DAYS = [1, 3, 7, 14, 30]  # Evaluate predictions at these horizons
 
 
+def _ensure_yfinance():
+    """Lazily import yfinance; emit JSON error on missing dep per System A contract."""
+    global yf
+    if yf is not None:
+        return yf
+    try:
+        import yfinance as _yf
+        yf = _yf
+        return yf
+    except ImportError:
+        print(json.dumps({"error": "yfinance not installed. Add to [sandbox].pip_packages."}))
+        sys.exit(1)
+
+
 def ensure_dir():
     os.makedirs(BACKTEST_DIR, exist_ok=True)
 
 
 def fetch_historical(symbol, end_date, days=120):
     """Fetch price history up to (but NOT after) end_date."""
+    _ensure_yfinance()
     start = end_date - timedelta(days=days)
     try:
         ticker = yf.Ticker(symbol)
@@ -62,6 +80,7 @@ def fetch_historical(symbol, end_date, days=120):
 
 def fetch_fundamentals_asof(symbol, date_str):
     """Fetch fundamentals (these don't change much day-to-day, so current is fine)."""
+    _ensure_yfinance()
     try:
         ticker = yf.Ticker(symbol)
         info = ticker.info

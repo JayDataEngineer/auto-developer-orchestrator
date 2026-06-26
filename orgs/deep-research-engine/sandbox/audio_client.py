@@ -23,8 +23,8 @@ Usage:
 
 Environment:
     MEDIA_MCP_URL    Base URL of the media MCP container.
-                     Default: http://localhost:8102 (research-media-mcp via host port)
-                     Inside the same docker network: http://media-mcp:8001
+                     Default: http://localhost:8101 (local media-mcp server)
+                     Set via sandbox env when the MCP is hosted elsewhere.
     AUDIO_HTTP_BASE  Base URL the MCP can fetch audio from. Set this if your
                      audio is on a host path; the script starts a throwaway
                      HTTP server bound to 0.0.0.0 and uses the docker bridge IP
@@ -57,6 +57,7 @@ import json
 import os
 import socket
 import socketserver
+import subprocess
 import sys
 import threading
 import time
@@ -69,7 +70,14 @@ from pathlib import Path
 # Config
 
 def get_mcp_url():
-    return os.environ.get("MEDIA_MCP_URL", "http://localhost:8102").rstrip("/")
+    # Local media-mcp container is the default. For deployments that host the
+    # MCP elsewhere (cloud, tailnet, separate host), set MEDIA_MCP_URL in the
+    # sandbox env via pux.yaml or the org's sandbox.env block. Do NOT hardcode
+    # deployment-specific URLs here — this file is public.
+    return os.environ.get(
+        "MEDIA_MCP_URL",
+        "http://localhost:8101",
+    ).rstrip("/")
 
 
 def get_audio_base():
@@ -98,20 +106,7 @@ def _serve_path(path: Path):
     thread.start()
     try:
         # Prefer Tailscale IP if available — MCP container can reach it
-        public_ip = os.environ.get("AUDIO_HTTP_PUBLIC", "")
-        if not public_ip:
-            # Try to detect Tailscale IP
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("100.86.69.57", 53))  # any tailscale addr — won't actually send
-                # actually this won't work for our container; use the docker bridge
-                s.close()
-            except Exception:
-                pass
-            # Default: docker bridge gateway IP — container reaches host via 172.17.0.1
-            # Override by setting AUDIO_HTTP_PUBLIC=<tailscale-ip> if running on a host
-            # whose MCP container is on a custom network.
-            public_ip = os.environ.get("AUDIO_HTTP_PUBLIC", "172.17.0.1")
+        public_ip = _detect_public_ip()
         suffix = path.name if path.is_file() else ""
         url = f"http://{public_ip}:{port}/{urllib.parse.quote(suffix)}"
         yield url
@@ -122,17 +117,82 @@ def _serve_path(path: Path):
         os.chdir(cwd)
 
 
+def _detect_public_ip():
+    """Pick the IP a remote MCP container can fetch audio from.
+
+    Priority:
+      1. AUDIO_HTTP_PUBLIC env var (explicit override)
+      2. `tailscale ip -4` if the binary is on PATH and reports a 100.x address
+      3. Scan `hostname -I` for a 100.64.0.0/10 CGNAT address (tailnet range)
+      4. Docker bridge gateway 172.17.0.1 (works only when MCP is on the
+         same host's docker network — the legacy default)
+
+    The old auto-detect used a UDP socket trick that doesn't work for the
+    sandbox container because gvisor blocks raw socket ops. Replaced with
+    real subprocess + hostname lookups.
+    """
+    explicit = os.environ.get("AUDIO_HTTP_PUBLIC", "").strip()
+    if explicit:
+        return explicit
+
+    # tailscale CLI — most authoritative if available
+    try:
+        result = subprocess.run(
+            ["tailscale", "ip", "-4"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().splitlines():
+                line = line.strip()
+                if line.startswith("100."):
+                    return line
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # hostname -I — works without tailscale binary; scan for CGNAT range
+    try:
+        result = subprocess.run(
+            ["hostname", "-I"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            for ip in result.stdout.strip().split():
+                if ip.startswith("100."):
+                    return ip
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Last-resort fallback — assumes MCP shares the host's docker bridge.
+    return "172.17.0.1"
+
+
 # ---------------------------------------------------------------------------
 # MCP HTTP calls
 
 def _wait_for_mcp(max_seconds=120):
-    """Block until MCP health endpoint responds. Prints progress."""
-    url = f"{get_mcp_url()}/health"
+    """Block until MCP server answers a tools/list probe.
+
+    FastMCP mounts tools at /mcp via JSON-RPC, not as REST endpoints, so a
+    bare /health probe returns 404 even on a healthy server. The canonical
+    health check is the MCP `initialize` handshake (or a `tools/list` call).
+    """
+    url = f"{get_mcp_url()}/mcp"
+    payload = json.dumps({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/list",
+    }).encode("utf-8")
     deadline = time.time() + max_seconds
     last_err = ""
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=5) as resp:
+            req = urllib.request.Request(
+                url, data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
                 if resp.status == 200:
                     return True
         except Exception as e:

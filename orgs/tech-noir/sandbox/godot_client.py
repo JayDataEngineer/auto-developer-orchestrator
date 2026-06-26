@@ -16,7 +16,7 @@ Usage:
   python3 godot_client.py call <tool_name> --args '{"key":"value"}'
 
 Env:
-  GODOT_MCP_URL — base URL of the gamedev-mcp-server (default: http://host.docker.internal:8080)
+  GODOT_MCP_URL — base URL of the gamedev-mcp-server (default: http://localhost:8080)
 """
 import argparse
 import json
@@ -25,7 +25,7 @@ import sys
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get("GODOT_MCP_URL", "http://host.docker.internal:8080")
+BASE = os.environ.get("GODOT_MCP_URL", "http://localhost:8080")
 TIMEOUT = 90  # Godot editor ops are usually fast; screenshots can lag
 
 

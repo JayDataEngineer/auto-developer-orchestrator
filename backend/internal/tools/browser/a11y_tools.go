@@ -87,7 +87,8 @@ func (t *FindElementTool) Schema() json.RawMessage {
 			"selector": {"type": "string", "description": "CSS selector (direct lookup, bypasses a11y tree)"},
 			"action": {"type": "string", "description": "Optional action: 'click' or 'type'. Omit for find-only."},
 			"type_text": {"type": "string", "description": "Text to type (required when action=type)"},
-			"submit": {"type": "boolean", "description": "Press Enter after typing"}
+			"submit": {"type": "boolean", "description": "Press Enter after typing"},
+			"humanlike": {"type": "boolean", "description": "Pre-roll cursor along a Bezier curve (~250ms, 15-25 CDP mouseMoved events) before clicking. Use for sites that fingerprint input patterns (DataDome, PerimeterX, Cloudflare widget warmup). Default off — costs latency."}
 		}
 	}`)
 }
@@ -106,6 +107,9 @@ func (t *FindElementTool) Execute(ctx context.Context, args map[string]any) (any
 	}
 	if v, ok := args["submit"].(bool); ok {
 		req["submit"] = v
+	}
+	if v, ok := args["humanlike"].(bool); ok && v {
+		req["humanlike"] = true
 	}
 
 	return t.provider.FindElement(ctx, sbID, req)
@@ -455,6 +459,20 @@ func RegisterBrowserTools(tools []core.Tool, p BrowserProvider, sandboxID func()
 		NewCredentialGetTool(p, sandboxID),
 		NewUserProfileTool(p, sandboxID),
 	)
+}
+
+// AllTools returns the canonical browser tool set (21 provider-backed tools).
+// This is the same slice produced by RegisterBrowserTools(nil, p, sandboxID).
+// Tools that take a Driver instead of a BrowserProvider (NavigateTool, ClickTool,
+// TypeTool, ReadPageTool, ScrollTool, ObserveTool, SearchWebTool) are legacy
+// constructor-specific wrappers — they're wired individually at sites that
+// drive Chrome directly. Prefer this AllTools when working through the
+// BrowserProvider abstraction.
+func AllTools(p BrowserProvider, sandboxID func() string) []core.Tool {
+	if p == nil {
+		return nil
+	}
+	return RegisterBrowserTools(nil, p, sandboxID)
 }
 
 // ── Evaluate JS Tool ──

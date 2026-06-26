@@ -73,4 +73,4 @@ python3 /sandbox/comfyui_client.py queue
 
 ## Endpoint
 
-`COMFYUI_URL` env var is set to `http://100.86.69.57:30080/image/comfyui` in the sandbox. Routes under that: `/prompt`, `/queue`, `/history`, `/view`, `/system_stats`.
+`COMFYUI_URL` env var (default `http://localhost:30080/image/comfyui`; override via sandbox env when pointing at a remote cluster). Routes under that: `/prompt`, `/queue`, `/history`, `/view`, `/system_stats`.

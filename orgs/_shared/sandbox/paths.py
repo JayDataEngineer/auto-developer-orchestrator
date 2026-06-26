@@ -16,12 +16,16 @@ layouts.
 
 USAGE
 -----
-    from paths import twitter_cookies, telegram_credentials
+    from paths import browser_session, telegram_credentials
 
-    cookies_path = twitter_cookies()
-    if not cookies_path.exists():
-        print(json.dumps({"error": f"no twitter session at {cookies_path}"}))
+    session = browser_session("linkedin.com")
+    if not session.exists():
+        print(json.dumps({"error": f"no browser session at {session}"}))
         sys.exit(1)
+
+    # Twitter-specific legacy helpers also exist (twitter_cookies(), etc.)
+    # for back-compat with older bootstraps. Prefer browser_session(domain)
+    # for new code — it's domain-keyed, not site-branded.
 
 LAYOUT
 ------
@@ -31,8 +35,9 @@ LAYOUT
 - ``/sandbox/workspace/scripts/`` — agent-authored scratch (System B)
 
 The data/ dir is the canonical home for session files because it survives
-container restarts and is reachable from both host extractors (e.g.
-twitter-agent/scripts/extract_brave_cookies.py) and in-container code.
+container restarts and is reachable from both the host-side cookie
+extractor (``orgs/_shared/sandbox/extract_browser_cookies.py``) and
+in-container code.
 """
 from __future__ import annotations
 
@@ -74,7 +79,49 @@ def scripts_dir() -> Path:
 
 
 # --------------------------------------------------------------------- #
-# Twitter session + artifacts
+# Generic browser sessions (any domain, any host browser)
+# --------------------------------------------------------------------- #
+# This is the canonical path family for host-extracted browser cookies.
+# ``extract_browser_cookies.py`` writes JSON files here; the kernel's
+# ``restore_session`` browser tool reads them back. Domain-keyed so the
+# same org can hold sessions for multiple sites (linkedin.com, x.com, ...)
+# without collisions. Twitter-specific helpers below are kept for back-compat
+# with older bootstraps but new code should prefer browser_session(domain).
+
+def browser_session(domain: str) -> Path:
+    """Return the canonical session JSON path for the given domain.
+
+    Output of ``extract_browser_cookies.py --domain <domain>`` is expected
+    here. File shape matches what ``restore_session`` consumes (cookies +
+    localStorage + url + saved_at + source + domain).
+
+    The filename is derived by stripping the leading subdomain so
+    ``linkedin.com`` and ``www.linkedin.com`` resolve to the same file.
+    """
+    safe = domain.lstrip(".").split(":")[0]  # strip port if present
+    if safe.startswith("www."):
+        safe = safe[4:]
+    return _env_path(
+        f"PUX_BROWSER_SESSION_{safe.replace('.', '_').upper()}",
+        data_dir() / f".browser-session-{safe}.json",
+    )
+
+
+def browser_session_search(domain: str) -> list[Path]:
+    """Return candidate session paths in fallback order for the given domain.
+
+    Used by code that wants to gracefully accept either the new
+    domain-keyed location or an org-specific legacy file (e.g.
+    twitter_session.py reads .twitter-session.json before browser_session).
+    """
+    return [
+        browser_session(domain),
+        data_dir() / f".{domain.split('.')[0]}-session.json",  # legacy per-site
+    ]
+
+
+# --------------------------------------------------------------------- #
+# Twitter session + artifacts (legacy — prefer browser_session("x.com"))
 # --------------------------------------------------------------------- #
 
 def twitter_cookies() -> Path:
@@ -197,6 +244,8 @@ def _main() -> int:
         "workspace_root": str(workspace_root()),
         "data_dir": str(data_dir()),
         "scripts_dir": str(scripts_dir()),
+        "browser_session_x_com": str(browser_session("x.com")),
+        "browser_session_linkedin_com": str(browser_session("linkedin.com")),
         "twitter_cookies": str(twitter_cookies()),
         "twitter_calendar": str(twitter_calendar()),
         "twitter_drafts": str(twitter_drafts()),

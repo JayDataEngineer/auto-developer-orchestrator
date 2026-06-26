@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -199,7 +200,7 @@ func restoreCheckpointDisk(sessionID, snapID string) error {
 	}
 	mgr := checkpoint.NewManager(sessionID, man.Project, filepath.Join(checkpointBaseDir(), sessionID))
 	mgr.Load()
-	restored, err := mgr.RestoreSnapshot(nil, snapID)
+	restored, err := mgr.RestoreSnapshot(context.TODO(), snapID)
 	if err != nil {
 		return err
 	}
