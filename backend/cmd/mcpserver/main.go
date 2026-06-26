@@ -40,6 +40,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/auto-developer-orchestrator/backend/internal/adapters"
+	"github.com/auto-developer-orchestrator/backend/internal/audit"
 	"github.com/auto-developer-orchestrator/backend/internal/mcpserver"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
@@ -107,7 +108,17 @@ func main() {
 	fileOps := &adapters.FileOps{Mgr: mgr, SandboxID: sb.ID}
 
 	// 4. Build the tool registry.
-	srv := mcpserver.New("pux-mcp", version)
+	auditLogger, err := audit.Open(os.Getenv("PUX_AUDIT_LOG"))
+	if err != nil {
+		logger.Fatal("audit log open failed", zap.Error(err))
+	}
+	defer auditLogger.Close()
+	if auditLogger != nil {
+		logger.Info("audit log enabled",
+			zap.String("path", os.Getenv("PUX_AUDIT_LOG")))
+	}
+
+	srv := mcpserver.New("pux-mcp", version, auditLogger)
 	srv.RegisterTool(bash.New(bashExec))
 	srv.RegisterTool(file.NewReadTool(fileOps, nil))
 	srv.RegisterTool(file.NewWriteTool(fileOps))

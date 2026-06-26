@@ -19,7 +19,9 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/auto-developer-orchestrator/backend/internal/audit"
 	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
 
@@ -38,15 +40,19 @@ type Server struct {
 	tools  map[string]core.Tool
 	sessionID string
 	initialized atomic.Bool
+
+	audit *audit.Logger
 }
 
 // New constructs a Server with no tools registered. Call RegisterTool for each
-// capability before serving.
-func New(name, version string) *Server {
+// capability before serving. Pass nil for al if audit logging is disabled
+// (the common case — audit is opt-in via PUX_AUDIT_LOG).
+func New(name, version string, al *audit.Logger) *Server {
 	return &Server{
 		name:    name,
 		version: version,
 		tools:   make(map[string]core.Tool),
+		audit:   al,
 	}
 }
 
@@ -158,7 +164,7 @@ func (s *Server) Dispatch(ctx context.Context, raw []byte, sessionID string) *rp
 	case "tools/list":
 		resp = s.handleToolsList(req)
 	case "tools/call":
-		resp = s.handleToolsCall(ctx, req)
+		resp = s.handleToolsCall(ctx, req, sessionID)
 	case "ping":
 		resp = &rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}}
 	default:
@@ -258,7 +264,7 @@ type mcpToolResult struct {
 	IsError bool         `json:"isError,omitempty"`
 }
 
-func (s *Server) handleToolsCall(ctx context.Context, req rpcRequest) *rpcResponse {
+func (s *Server) handleToolsCall(ctx context.Context, req rpcRequest, sessionID string) *rpcResponse {
 	var p toolsCallParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return &rpcResponse{
@@ -280,7 +286,27 @@ func (s *Server) handleToolsCall(ctx context.Context, req rpcRequest) *rpcRespon
 	// Execute the tool. We translate core.Tool's (any, error) return into
 	// MCP's content-array shape. Map returns are JSON-marshaled to text;
 	// strings pass through; errors become isError=true content entries.
+	start := time.Now()
 	result, err := t.Execute(ctx, p.Arguments)
+
+	// Audit log captures every successful tool dispatch (parse + lookup
+	// passed). Protocol errors (bad params, unknown tool) are NOT audited
+	// — they aren't model actions, they're wire-level failures.
+	if s.audit != nil {
+		entry := audit.Entry{
+			Timestamp:  start,
+			SessionID:  sessionID,
+			Tool:       p.Name,
+			Args:       p.Arguments,
+			Result:     result,
+			DurationMs: time.Since(start).Milliseconds(),
+		}
+		if err != nil {
+			entry.Error = err.Error()
+		}
+		s.audit.Log(entry)
+	}
+
 	if err != nil {
 		// Tool errors are returned as MCP tool results with isError=true
 		// (per MCP spec). Transport/panic errors become JSON-RPC errors.

@@ -28,6 +28,9 @@ task hooks              # Install pre-commit (gitleaks)
 The server takes `--addr` (default `127.0.0.1:9876`) and `--project` (defaults
 to `$PWD`). Env vars `PUX_MCP_ADDR` / `PUX_PROJECT_PATH` mirror them.
 
+Set `PUX_AUDIT_LOG=/path/to/audit.jsonl` to append every tool call (args +
+result + duration, secret-scrubbed) to a forensic log. Opt-in; default off.
+
 ## Connecting MCP clients
 
 Add to Claude Desktop (or any MCP client that supports HTTP transport):

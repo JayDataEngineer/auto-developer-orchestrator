@@ -59,7 +59,7 @@ func extractText(t *testing.T, resp *rpcResponse) string {
 // ── Protocol envelope ──────────────────────────────────────────────
 
 func TestInitializeReturnsProtocolVersion(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	resp := srv.Dispatch(context.Background(), jsonRPC(1, "initialize", map[string]any{
 		"protocolVersion": "2025-03-26",
 		"clientInfo":      map[string]string{"name": "claude-desktop", "version": "0.1"},
@@ -88,7 +88,7 @@ func TestInitializeReturnsProtocolVersion(t *testing.T) {
 }
 
 func TestInitializeSetsSessionID(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	_ = srv.Dispatch(context.Background(), jsonRPC(1, "initialize", map[string]any{}), "")
 	if srv.sessionID == "" {
 		t.Error("sessionID not set after initialize")
@@ -99,7 +99,7 @@ func TestInitializeSetsSessionID(t *testing.T) {
 }
 
 func TestInitializedNotificationReturnsNil(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	resp := srv.Dispatch(context.Background(), []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`), "")
 	if resp != nil {
 		t.Errorf("notification should return nil, got %+v", resp)
@@ -110,7 +110,7 @@ func TestInitializedNotificationReturnsNil(t *testing.T) {
 }
 
 func TestPingReturnsEmptyResult(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	resp := srv.Dispatch(context.Background(), jsonRPC(7, "ping", map[string]any{}), "")
 	if resp == nil || resp.Error != nil {
 		t.Fatalf("ping failed: %+v", resp)
@@ -122,7 +122,7 @@ func TestPingReturnsEmptyResult(t *testing.T) {
 }
 
 func TestUnknownMethodReturnsMethodNotFound(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	resp := srv.Dispatch(context.Background(), jsonRPC(1, "resources/read", map[string]any{}), "")
 	if resp == nil {
 		t.Fatal("nil response")
@@ -133,7 +133,7 @@ func TestUnknownMethodReturnsMethodNotFound(t *testing.T) {
 }
 
 func TestParseError(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	resp := srv.Dispatch(context.Background(), []byte(`{not json`), "")
 	if resp == nil || resp.Error == nil {
 		t.Fatal("expected error")
@@ -146,7 +146,7 @@ func TestParseError(t *testing.T) {
 // ── Tool dispatch ──────────────────────────────────────────────────
 
 func TestToolsListEmpty(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	resp := srv.Dispatch(context.Background(), jsonRPC(1, "tools/list", map[string]any{}), "")
 	if resp == nil || resp.Error != nil {
 		t.Fatalf("tools/list failed: %+v", resp)
@@ -167,7 +167,7 @@ func TestToolsListEmpty(t *testing.T) {
 func TestToolsListIncludesRegisteredTool(t *testing.T) {
 	// Use a fake tool — we don't need to test the bash impl here, just
 	// that the registry shape is correct.
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	srv.RegisterTool(&fakeTool{name: "echo", desc: "Echoes input"})
 
 	resp := srv.Dispatch(context.Background(), jsonRPC(1, "tools/list", map[string]any{}), "")
@@ -185,7 +185,7 @@ func TestToolsListIncludesRegisteredTool(t *testing.T) {
 }
 
 func TestToolsCallUnknownToolReturnsMethodNotFound(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	resp := srv.Dispatch(context.Background(), jsonRPC(1, "tools/call", toolsCallParams{
 		Name:      "nope",
 		Arguments: map[string]any{},
@@ -199,7 +199,7 @@ func TestToolsCallUnknownToolReturnsMethodNotFound(t *testing.T) {
 }
 
 func TestToolsCallToolErrorReturnsIsErrorTrue(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	srv.RegisterTool(&fakeTool{name: "fail", err: errSentinel})
 
 	resp := srv.Dispatch(context.Background(), jsonRPC(1, "tools/call", toolsCallParams{
@@ -226,7 +226,7 @@ func TestToolsCallToolErrorReturnsIsErrorTrue(t *testing.T) {
 }
 
 func TestToolsCallStringReturnPassesThrough(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	srv.RegisterTool(&fakeTool{name: "echo", out: "hello world"})
 
 	resp := srv.Dispatch(context.Background(), jsonRPC(1, "tools/call", toolsCallParams{
@@ -243,7 +243,7 @@ func TestToolsCallStringReturnPassesThrough(t *testing.T) {
 }
 
 func TestToolsCallMapReturnJSONEncoded(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	srv.RegisterTool(&fakeTool{name: "stats", out: map[string]any{"ok": true, "count": 3}})
 
 	resp := srv.Dispatch(context.Background(), jsonRPC(1, "tools/call", toolsCallParams{
@@ -258,7 +258,7 @@ func TestToolsCallMapReturnJSONEncoded(t *testing.T) {
 // ── Duplicate registration panics ───────────────────────────────────
 
 func TestDuplicateRegistrationPanics(t *testing.T) {
-	srv := New("test", "1.0.0")
+	srv := New("test", "1.0.0", nil)
 	srv.RegisterTool(&fakeTool{name: "dup", desc: "first"})
 	defer func() {
 		if r := recover(); r == nil {

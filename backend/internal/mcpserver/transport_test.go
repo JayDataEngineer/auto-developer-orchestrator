@@ -16,7 +16,7 @@ import (
 // executes it. This is the "prove the wire works" test — if the JSON-RPC
 // envelope shape breaks, this fails before any deployment test does.
 func TestTransportEndToEnd(t *testing.T) {
-	srv := New("pux-mcp-test", "0.1.0-test")
+	srv := New("pux-mcp-test", "0.1.0-test", nil)
 	srv.RegisterTool(&fakeTool{name: "echo", out: "hello-from-sandbox"})
 
 	httpSrv := httptest.NewServer(srv)
@@ -90,7 +90,7 @@ func TestTransportEndToEnd(t *testing.T) {
 // request per HTTP envelope only. Batches get a clear error, not silent wrong
 // behavior.
 func TestTransportRejectsBatch(t *testing.T) {
-	srv := New("test", "0.0.1")
+	srv := New("test", "0.0.1", nil)
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()
 
@@ -115,7 +115,7 @@ func TestTransportRejectsBatch(t *testing.T) {
 // TestTransportOptionsPreflight verifies the CORS preflight short-circuit so
 // browser-based MCP clients (Claude Desktop web, etc.) work in dev.
 func TestTransportOptionsPreflight(t *testing.T) {
-	srv := New("test", "0.0.1")
+	srv := New("test", "0.0.1", nil)
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()
 
@@ -140,7 +140,7 @@ func TestTransportOptionsPreflight(t *testing.T) {
 // a client sends a different session ID than the one established. Without
 // this, multi-tenant future versions would silently cross sessions.
 func TestTransportSessionMismatch(t *testing.T) {
-	srv := New("test", "0.0.1")
+	srv := New("test", "0.0.1", nil)
 	// Force-set a session ID by calling initialize first.
 	_ = srv.Dispatch(context.Background(), jsonRPC(1, "initialize", map[string]any{}), "")
 	if srv.sessionID == "" {

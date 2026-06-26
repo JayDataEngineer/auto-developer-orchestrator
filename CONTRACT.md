@@ -187,6 +187,24 @@ project. Run multiple servers on different ports if you need more.
 
 ---
 
+## Contract 7: Audit log (opt-in)
+
+| Behavior | Detail |
+|----------|--------|
+| Opt-in | `PUX_AUDIT_LOG=/path/to/audit.jsonl`. Empty (default) = no audit. |
+| Format | JSONL, one entry per line. |
+| Entry shape | `{ts, session_id, tool, args, result, error, duration_ms}`. |
+| Scope | Successful tool dispatches only. Parse errors + unknown-tool lookups are wire-level failures, not model actions — they're NOT audited. |
+| Secret scrubbing | `args` / `result` / `error` pass through `sensitive.ScrubText` before write. A leaked key in bash output becomes `[REDACTED_API_KEY]`. |
+| Size cap | Each field capped at 4096 bytes (`...[truncated]` marker). 1 MiB of bash output → ~10 KiB audit line. |
+| Concurrency | Mutex-serialized writes. Safe under N goroutines. |
+
+This is the forensic record of "what did the model do to my code?" —
+distinct from the client-owned conversation log and the server-owned zap
+log (which is debug-level transport telemetry).
+
+---
+
 ## Compliance rules
 
 1. **The server only speaks MCP.** No proprietary JSON-RPC methods, no
