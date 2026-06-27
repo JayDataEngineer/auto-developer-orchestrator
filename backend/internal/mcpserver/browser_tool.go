@@ -7,12 +7,11 @@
 // navigate, click, type, screenshot, evaluate, etc. State persists across
 // calls because the Python process holds the SeleniumBase session.
 //
-// We wrap the 5 most useful endpoints as distinct MCP tools. The model
-// gets typed schemas; internally each tool is a curl call to sb_server.
-//
-// Why not one generic "browser" tool with a `method` param? Two reasons:
-// (1) per-tool schemas are clearer for the model than a union type,
-// (2) the MCP spec favors many narrow tools over one wide tool.
+// All 5 endpoints share the same shape (curl POST → JSON response). Only
+// the endpoint path + the body-construction logic vary. We encode that
+// variation declaratively as a slice of browserSpec structs and dispatch
+// through one BrowserTool type. Adding a 6th browser tool = append one
+// spec entry, no new type.
 package mcpserver
 
 import (
@@ -40,8 +39,7 @@ type BrowserToolConfig struct {
 	Timeout time.Duration
 }
 
-// browserBase is the shared scaffolding for all browser tools. Each
-// concrete tool sets endpoint + arg-marshaler + result-parser.
+// browserBase is the shared scaffolding for all browser tools.
 type browserBase struct {
 	exec    SandboxExecutor
 	timeout time.Duration
@@ -59,9 +57,6 @@ func newBrowserBase(exec SandboxExecutor, cfg BrowserToolConfig) browserBase {
 // the response body. Errors are wrapped with the endpoint name so the
 // tool result makes the failing call obvious.
 func (b *browserBase) postJSON(ctx context.Context, endpoint, body string, extraHeaders map[string]string) (string, error) {
-	// Build curl command. -s (silent), -S (show errors), --max-time (cap,
-	// rounded UP so sub-second timeouts aren't truncated to 0),
-	// -X POST, -H Content-Type, -d body.
 	maxTimeSec := max(1, int(math.Ceil(b.timeout.Seconds())))
 	parts := []string{
 		"curl -s -S",
@@ -78,9 +73,6 @@ func (b *browserBase) postJSON(ctx context.Context, endpoint, body string, extra
 	}
 	cmd := strings.Join(parts, " ")
 
-	// Context timeout matches the curl flag. We round up at the curl level
-	// (sub-second becomes 1s) so this Go timeout is always ≥ curl's. The +1s
-	// budget covers curl's own teardown after hitting --max-time.
 	execCtx, cancel := context.WithTimeout(ctx, b.timeout+time.Second)
 	defer cancel()
 
@@ -95,7 +87,6 @@ func (b *browserBase) postJSON(ctx context.Context, endpoint, body string, extra
 }
 
 // parseSBResponse extracts the result/data field from sb_server's response.
-// sb_server returns JSON like {ok: true, ...fields} or {ok: false, error:...}.
 // We surface the whole payload to the model — different endpoints return
 // different shapes (some have screenshot, some have links, some have text)
 // and a generic extractor would lose information.
@@ -107,213 +98,164 @@ func parseSBResponse(raw string) (map[string]any, error) {
 	return parsed, nil
 }
 
-// ── Tool 1: browser_navigate ─────────────────────────────────────────────
-
-// BrowserNavigateTool opens a URL in the sandbox browser. Returns page
-// metadata + initial screenshot (base64 PNG). The browser session persists
-// across tool calls — subsequent click/type/screenshot calls operate on
-// the page this tool navigated to.
-type BrowserNavigateTool struct{ base browserBase }
-
-func NewBrowserNavigateTool(exec SandboxExecutor, cfg BrowserToolConfig) *BrowserNavigateTool {
-	return &BrowserNavigateTool{base: newBrowserBase(exec, cfg)}
-}
-func (t *BrowserNavigateTool) Name() string { return "browser_navigate" }
-func (t *BrowserNavigateTool) Description() string {
-	return "Open a URL in the sandbox's persistent Chrome. " +
-		"Returns page title, URL, text snippet, and a base64 screenshot with " +
-		"Set-of-Marks labels on interactive elements. " +
-		"The session persists — subsequent browser_click / browser_type / " +
-		"browser_screenshot calls operate on this page until you navigate again."
-}
-func (t *BrowserNavigateTool) Schema() json.RawMessage {
-	return json.RawMessage(`{
-		"type": "object",
-		"required": ["url"],
-		"properties": {
-			"url": {"type": "string", "description": "Absolute URL including scheme (https://example.com)"}
-		}
-	}`)
-}
-func (t *BrowserNavigateTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	url, _ := args["url"].(string)
-	if url == "" {
-		return nil, core.NewToolError("browser_navigate", "url is required")
-	}
-	body := fmt.Sprintf(`{"url":%s}`, mustJSONString(url))
-	out, err := t.base.postJSON(ctx, "/navigate", body, nil)
-	if err != nil {
-		return nil, err
-	}
-	return parseSBResponse(out)
-}
-
-// ── Tool 2: browser_click ────────────────────────────────────────────────
-
-// BrowserClickTool clicks an element by SoM label (the numbered boxes
-// from /navigate) or by CSS selector.
-type BrowserClickTool struct{ base browserBase }
-
-func NewBrowserClickTool(exec SandboxExecutor, cfg BrowserToolConfig) *BrowserClickTool {
-	return &BrowserClickTool{base: newBrowserBase(exec, cfg)}
-}
-func (t *BrowserClickTool) Name() string { return "browser_click" }
-func (t *BrowserClickTool) Description() string {
-	return "Click an element on the current page. Pass either a SoM label " +
-		"(integer from the labeled screenshot) or a CSS selector string. " +
-		"Returns the post-click page state (URL, title, screenshot)."
-}
-func (t *BrowserClickTool) Schema() json.RawMessage {
-	return json.RawMessage(`{
-		"type": "object",
-		"properties": {
-			"index": {"type": "integer", "description": "SoM label (the numbered box on interactive elements from the last screenshot). Sent as 'index' to sb_server."},
-			"selector": {"type": "string", "description": "CSS selector (e.g. 'button#submit'). Used when index is omitted."}
-		},
-		"oneOf": [{"required": ["index"]}, {"required": ["selector"]}]
-	}`)
-}
-func (t *BrowserClickTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	body, err := json.Marshal(args)
-	if err != nil {
-		return nil, fmt.Errorf("browser_click: marshal args: %w", err)
-	}
-	out, err := t.base.postJSON(ctx, "/click", string(body), nil)
-	if err != nil {
-		return nil, err
-	}
-	return parseSBResponse(out)
-}
-
-// ── Tool 3: browser_type ─────────────────────────────────────────────────
-
-// BrowserTypeTool types text into an input. Clears the field first by
-// default (sb_server behavior).
-type BrowserTypeTool struct{ base browserBase }
-
-func NewBrowserTypeTool(exec SandboxExecutor, cfg BrowserToolConfig) *BrowserTypeTool {
-	return &BrowserTypeTool{base: newBrowserBase(exec, cfg)}
-}
-func (t *BrowserTypeTool) Name() string { return "browser_type" }
-func (t *BrowserTypeTool) Description() string {
-	return "Type text into a form field on the current page. " +
-		"Uses CDP character-by-character input (React-safe — fires real DOM events). " +
-		"Pass either a SoM label or CSS selector to identify the target input."
-}
-func (t *BrowserTypeTool) Schema() json.RawMessage {
-	return json.RawMessage(`{
-		"type": "object",
-		"required": ["text"],
-		"properties": {
-			"text": {"type": "string", "description": "Text to type into the field"},
-			"index": {"type": "integer", "description": "SoM label of the target input. Sent as 'index' to sb_server."},
-			"selector": {"type": "string", "description": "CSS selector of the target input"}
-		},
-		"oneOf": [{"required": ["text", "index"]}, {"required": ["text", "selector"]}]
-	}`)
-}
-func (t *BrowserTypeTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	if _, ok := args["text"].(string); !ok {
-		return nil, core.NewToolError("browser_type", "text is required")
-	}
-	if _, hasLabel := args["index"]; !hasLabel {
-		if _, hasSel := args["selector"].(string); !hasSel {
-			return nil, core.NewToolError("browser_type", "either index or selector is required")
-		}
-	}
-	body, err := json.Marshal(args)
-	if err != nil {
-		return nil, fmt.Errorf("browser_type: marshal args: %w", err)
-	}
-	out, err := t.base.postJSON(ctx, "/type", string(body), nil)
-	if err != nil {
-		return nil, err
-	}
-	return parseSBResponse(out)
-}
-
-// ── Tool 4: browser_screenshot ───────────────────────────────────────────
-
-// BrowserScreenshotTool captures the current page state as a base64 PNG
-// with SoM labels on interactive elements. Free — doesn't navigate.
-type BrowserScreenshotTool struct{ base browserBase }
-
-func NewBrowserScreenshotTool(exec SandboxExecutor, cfg BrowserToolConfig) *BrowserScreenshotTool {
-	return &BrowserScreenshotTool{base: newBrowserBase(exec, cfg)}
-}
-func (t *BrowserScreenshotTool) Name() string { return "browser_screenshot" }
-func (t *BrowserScreenshotTool) Description() string {
-	return "Capture the current browser state as a labeled screenshot. " +
-		"Returns base64 PNG + SoM-numbered boxes on interactive elements. " +
-		"Use this to re-orient after page updates, or to get a fresh set of " +
-		"label numbers for clicking."
-}
-func (t *BrowserScreenshotTool) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{}}`)
-}
-func (t *BrowserScreenshotTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	out, err := t.base.postJSON(ctx, "/read", "{}", nil)
-	if err != nil {
-		return nil, err
-	}
-	return parseSBResponse(out)
-}
-
-// ── Tool 5: browser_evaluate ─────────────────────────────────────────────
-
-// BrowserEvaluateTool runs arbitrary JavaScript on the page and returns
-// the result. Power tool — escape hatch when the typed tools don't fit.
-type BrowserEvaluateTool struct{ base browserBase }
-
-func NewBrowserEvaluateTool(exec SandboxExecutor, cfg BrowserToolConfig) *BrowserEvaluateTool {
-	return &BrowserEvaluateTool{base: newBrowserBase(exec, cfg)}
-}
-func (t *BrowserEvaluateTool) Name() string { return "browser_evaluate" }
-func (t *BrowserEvaluateTool) Description() string {
-	return "Evaluate JavaScript on the current page, return the result. " +
-		"Power-tool escape hatch when navigate/click/type/screenshot don't fit " +
-		"(e.g. read window.__NEXT_DATA__, scroll to specific element, fetch XHR). " +
-		"The script runs in the page context — same-origin policy applies."
-}
-func (t *BrowserEvaluateTool) Schema() json.RawMessage {
-	return json.RawMessage(`{
-		"type": "object",
-		"required": ["code"],
-		"properties": {
-			"code": {"type": "string", "description": "JavaScript expression to evaluate. Use 'return' for explicit value (e.g. 'return document.title')"}
-		}
-	}`)
-}
-func (t *BrowserEvaluateTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	code, _ := args["code"].(string)
-	if code == "" {
-		return nil, core.NewToolError("browser_evaluate", "code is required")
-	}
-	body := fmt.Sprintf(`{"code":%s}`, mustJSONString(code))
-	out, err := t.base.postJSON(ctx, "/evaluate", body, nil)
-	if err != nil {
-		return nil, err
-	}
-	return parseSBResponse(out)
-}
-
 // mustJSONString JSON-encodes a string. Used for embedding strings into
 // hand-built JSON payloads (we don't full-marshal because sb_server
 // accepts extra fields the model didn't set).
 func mustJSONString(s string) string {
 	b, err := json.Marshal(s)
 	if err != nil {
-		// Should never happen for a plain string — fall back to a safe repr.
 		return fmt.Sprintf("%q", s)
 	}
 	return string(b)
 }
 
-// interface assertions
-var (
-	_ core.Tool = (*BrowserNavigateTool)(nil)
-	_ core.Tool = (*BrowserClickTool)(nil)
-	_ core.Tool = (*BrowserTypeTool)(nil)
-	_ core.Tool = (*BrowserScreenshotTool)(nil)
-	_ core.Tool = (*BrowserEvaluateTool)(nil)
-)
+// ── Spec-driven dispatch ──────────────────────────────────────────────
+
+// browserSpec declaratively describes one browser_* tool. The spec slice
+// below is the source of truth — to add a new browser tool, append here.
+type browserSpec struct {
+	name        string
+	description string
+	schema      json.RawMessage
+	endpoint    string
+	// buildBody turns MCP args into the sb_server JSON body. Returns ""
+	// for empty-body endpoints (browser_screenshot sends "{}"). Returns
+	// core.ToolError for arg-validation failures.
+	buildBody func(args map[string]any) (string, error)
+}
+
+// BrowserTool is the single dispatcher type for the whole browser family.
+// One instance per spec entry; registered via RegisterBrowserTools.
+type BrowserTool struct {
+	spec browserSpec
+	base browserBase
+}
+
+func (t *BrowserTool) Name() string            { return t.spec.name }
+func (t *BrowserTool) Description() string     { return t.spec.description }
+func (t *BrowserTool) Schema() json.RawMessage { return t.spec.schema }
+
+func (t *BrowserTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	body, err := t.spec.buildBody(args)
+	if err != nil {
+		return nil, err
+	}
+	out, err := t.base.postJSON(ctx, t.spec.endpoint, body, nil)
+	if err != nil {
+		return nil, err
+	}
+	return parseSBResponse(out)
+}
+
+// browserSpecs is the declarative registry of browser tools.
+var browserSpecs = []browserSpec{
+	{
+		name:        "browser_navigate",
+		description: "Open a URL in the sandbox's persistent Chrome. Returns page title, URL, text snippet, and a base64 screenshot with Set-of-Marks labels on interactive elements. The session persists — subsequent browser_click / browser_type / browser_screenshot calls operate on this page until you navigate again.",
+		schema: json.RawMessage(`{
+			"type": "object",
+			"required": ["url"],
+			"properties": {
+				"url": {"type": "string", "description": "Absolute URL including scheme (https://example.com)"}
+			}
+		}`),
+		endpoint: "/navigate",
+		buildBody: func(args map[string]any) (string, error) {
+			url, _ := args["url"].(string)
+			if url == "" {
+				return "", core.NewToolError("browser_navigate", "url is required")
+			}
+			return fmt.Sprintf(`{"url":%s}`, mustJSONString(url)), nil
+		},
+	},
+	{
+		name:        "browser_click",
+		description: "Click an element on the current page. Pass either a SoM label (integer from the labeled screenshot) or a CSS selector string. Returns the post-click page state (URL, title, screenshot).",
+		schema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"index": {"type": "integer", "description": "SoM label (the numbered box on interactive elements from the last screenshot). Sent as 'index' to sb_server."},
+				"selector": {"type": "string", "description": "CSS selector (e.g. 'button#submit'). Used when index is omitted."}
+			},
+			"oneOf": [{"required": ["index"]}, {"required": ["selector"]}]
+		}`),
+		endpoint: "/click",
+		buildBody: marshalArgs("browser_click"),
+	},
+	{
+		name:        "browser_type",
+		description: "Type text into a form field on the current page. Uses CDP character-by-character input (React-safe — fires real DOM events). Pass either a SoM label or CSS selector to identify the target input.",
+		schema: json.RawMessage(`{
+			"type": "object",
+			"required": ["text"],
+			"properties": {
+				"text": {"type": "string", "description": "Text to type into the field"},
+				"index": {"type": "integer", "description": "SoM label of the target input. Sent as 'index' to sb_server."},
+				"selector": {"type": "string", "description": "CSS selector of the target input"}
+			},
+			"oneOf": [{"required": ["text", "index"]}, {"required": ["text", "selector"]}]
+		}`),
+		endpoint: "/type",
+		buildBody: func(args map[string]any) (string, error) {
+			if _, ok := args["text"].(string); !ok {
+				return "", core.NewToolError("browser_type", "text is required")
+			}
+			if _, hasIndex := args["index"]; !hasIndex {
+				if _, hasSel := args["selector"].(string); !hasSel {
+					return "", core.NewToolError("browser_type", "either index or selector is required")
+				}
+			}
+			return marshalArgs("browser_type")(args)
+		},
+	},
+	{
+		name:        "browser_screenshot",
+		description: "Capture the current browser state as a labeled screenshot. Returns base64 PNG + SoM-numbered boxes on interactive elements. Use this to re-orient after page updates, or to get a fresh set of label numbers for clicking.",
+		schema:     json.RawMessage(`{"type":"object","properties":{}}`),
+		endpoint:   "/read",
+		buildBody:  func(_ map[string]any) (string, error) { return "{}", nil },
+	},
+	{
+		name:        "browser_evaluate",
+		description: "Evaluate JavaScript on the current page, return the result. Power-tool escape hatch when navigate/click/type/screenshot don't fit (e.g. read window.__NEXT_DATA__, scroll to specific element, fetch XHR). The script runs in the page context — same-origin policy applies.",
+		schema: json.RawMessage(`{
+			"type": "object",
+			"required": ["code"],
+			"properties": {
+				"code": {"type": "string", "description": "JavaScript expression to evaluate. Use 'return' for explicit value (e.g. 'return document.title')"}
+			}
+		}`),
+		endpoint: "/evaluate",
+		buildBody: func(args map[string]any) (string, error) {
+			code, _ := args["code"].(string)
+			if code == "" {
+				return "", core.NewToolError("browser_evaluate", "code is required")
+			}
+			return fmt.Sprintf(`{"code":%s}`, mustJSONString(code)), nil
+		},
+	},
+}
+
+// marshalArgs returns a buildBody func that JSON-encodes args as-is. Used
+// by endpoints (click, type) where the sb_server contract accepts the
+// model's argument map directly with no transformation.
+func marshalArgs(toolName string) func(map[string]any) (string, error) {
+	return func(args map[string]any) (string, error) {
+		b, err := json.Marshal(args)
+		if err != nil {
+			return "", fmt.Errorf("%s: marshal args: %w", toolName, err)
+		}
+		return string(b), nil
+	}
+}
+
+// RegisterBrowserTools installs all browser_* tools from the spec slice.
+// Called from main.go.
+func RegisterBrowserTools(srv *Server, exec SandboxExecutor, cfg BrowserToolConfig) {
+	base := newBrowserBase(exec, cfg)
+	for _, spec := range browserSpecs {
+		srv.RegisterTool(&BrowserTool{spec: spec, base: base})
+	}
+}
+
+var _ core.Tool = (*BrowserTool)(nil)

@@ -8,16 +8,33 @@ import (
 	"time"
 )
 
-// sbFakeExec captures the curl command and returns a canned sb_server
-// response. Same shape as fakeSandboxExec but the canned output is the
-// sb_server JSON envelope.
-func newSBFake(out string) *fakeSandboxExec {
-	return &fakeSandboxExec{out: out}
+// (fakeSandboxExec + newFakeExec live in sandbox_python_test.go — shared
+// across all MCP tool tests.)
+
+// browserSpecForName returns the spec entry with the given tool name, or
+// panics. Used by newBrowserTool + the timeout test (which needs a custom
+// cfg, not the default the helper applies).
+func browserSpecForName(name string) browserSpec {
+	for _, s := range browserSpecs {
+		if s.name == name {
+			return s
+		}
+	}
+	panic("unknown browser spec: " + name)
+}
+
+// newBrowserTool looks up a spec by tool name and constructs a BrowserTool
+// backed by exec. Replaces the 5 per-tool constructors we used to ship.
+func newBrowserTool(specName string, exec SandboxExecutor) *BrowserTool {
+	return &BrowserTool{
+		spec: browserSpecForName(specName),
+		base: newBrowserBase(exec, BrowserToolConfig{}),
+	}
 }
 
 func TestBrowserNavigateBuildsCorrectCurl(t *testing.T) {
-	fake := newSBFake(`{"ok":true,"title":"Example","url":"https://example.com"}`)
-	tool := NewBrowserNavigateTool(fake, BrowserToolConfig{})
+	fake := newFakeExec(`{"ok":true,"title":"Example","url":"https://example.com"}`)
+	tool := newBrowserTool("browser_navigate", fake)
 
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"url": "https://example.com",
@@ -46,8 +63,8 @@ func TestBrowserNavigateBuildsCorrectCurl(t *testing.T) {
 }
 
 func TestBrowserNavigateRequiresURL(t *testing.T) {
-	fake := newSBFake("")
-	tool := NewBrowserNavigateTool(fake, BrowserToolConfig{})
+	fake := newFakeExec("")
+	tool := newBrowserTool("browser_navigate", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{})
 	if err == nil {
@@ -56,8 +73,8 @@ func TestBrowserNavigateRequiresURL(t *testing.T) {
 }
 
 func TestBrowserClickByLabel(t *testing.T) {
-	fake := newSBFake(`{"ok":true,"clicked":true}`)
-	tool := NewBrowserClickTool(fake, BrowserToolConfig{})
+	fake := newFakeExec(`{"ok":true,"clicked":true}`)
+	tool := newBrowserTool("browser_click", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"index": 7,
@@ -80,8 +97,8 @@ func TestBrowserClickByLabel(t *testing.T) {
 }
 
 func TestBrowserClickBySelector(t *testing.T) {
-	fake := newSBFake(`{"ok":true}`)
-	tool := NewBrowserClickTool(fake, BrowserToolConfig{})
+	fake := newFakeExec(`{"ok":true}`)
+	tool := newBrowserTool("browser_click", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"selector": "button#submit",
@@ -96,8 +113,8 @@ func TestBrowserClickBySelector(t *testing.T) {
 }
 
 func TestBrowserTypeRequiresTarget(t *testing.T) {
-	fake := newSBFake("")
-	tool := NewBrowserTypeTool(fake, BrowserToolConfig{})
+	fake := newFakeExec("")
+	tool := newBrowserTool("browser_type", fake)
 
 	// text without target → error
 	_, err := tool.Execute(context.Background(), map[string]any{"text": "hello"})
@@ -107,8 +124,8 @@ func TestBrowserTypeRequiresTarget(t *testing.T) {
 }
 
 func TestBrowserTypeWithSelector(t *testing.T) {
-	fake := newSBFake(`{"ok":true}`)
-	tool := NewBrowserTypeTool(fake, BrowserToolConfig{})
+	fake := newFakeExec(`{"ok":true}`)
+	tool := newBrowserTool("browser_type", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"text":    "hello@example.com",
@@ -130,8 +147,8 @@ func TestBrowserScreenshotCallsRead(t *testing.T) {
 	// Screenshot re-uses /read endpoint — it returns the current page state
 	// including a fresh labeled screenshot. (Use valid JSON for the canned
 	// response so parseSBResponse doesn't error before we can check the URL.)
-	fake := newSBFake(`{"ok":true,"screenshot":"iVBORw...","labels":[{"n":1}]}`)
-	tool := NewBrowserScreenshotTool(fake, BrowserToolConfig{})
+	fake := newFakeExec(`{"ok":true,"screenshot":"iVBORw...","labels":[{"n":1}]}`)
+	tool := newBrowserTool("browser_screenshot", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{})
 	if err != nil {
@@ -143,8 +160,8 @@ func TestBrowserScreenshotCallsRead(t *testing.T) {
 }
 
 func TestBrowserEvaluateScript(t *testing.T) {
-	fake := newSBFake(`{"ok":true,"result":"Page Title"}`)
-	tool := NewBrowserEvaluateTool(fake, BrowserToolConfig{})
+	fake := newFakeExec(`{"ok":true,"result":"Page Title"}`)
+	tool := newBrowserTool("browser_evaluate", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"code": "return document.title",
@@ -162,8 +179,8 @@ func TestBrowserEvaluateScript(t *testing.T) {
 }
 
 func TestBrowserEvaluateRequiresScript(t *testing.T) {
-	fake := newSBFake("")
-	tool := NewBrowserEvaluateTool(fake, BrowserToolConfig{})
+	fake := newFakeExec("")
+	tool := newBrowserTool("browser_evaluate", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{})
 	if err == nil {
@@ -180,7 +197,12 @@ func TestBrowserTimeout(t *testing.T) {
 		out:   "",
 		delay: 5 * time.Second,
 	}
-	tool := NewBrowserNavigateTool(fake, BrowserToolConfig{Timeout: 1 * time.Second})
+	// Construct directly with 1s timeout (curl --max-time rounds sub-second
+	// to 1s) — the spec-lookup helper uses the default 60s.
+	tool := &BrowserTool{
+		spec: browserSpecForName("browser_navigate"),
+		base: newBrowserBase(fake, BrowserToolConfig{Timeout: 1 * time.Second}),
+	}
 
 	_, err := tool.Execute(context.Background(), map[string]any{"url": "https://example.com"})
 	if err == nil {
@@ -194,8 +216,8 @@ func TestBrowserTimeout(t *testing.T) {
 // TestBrowserMalformedResponse verifies the JSON-parse guard fires when
 // sb_server returns garbage (e.g. HTML 500 page from supervisord).
 func TestBrowserMalformedResponse(t *testing.T) {
-	fake := newSBFake("<html>500 Internal Server Error</html>")
-	tool := NewBrowserNavigateTool(fake, BrowserToolConfig{})
+	fake := newFakeExec("<html>500 Internal Server Error</html>")
+	tool := newBrowserTool("browser_navigate", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{"url": "https://example.com"})
 	if err == nil {
@@ -213,7 +235,7 @@ func TestBrowserExecFailure(t *testing.T) {
 		out: "curl: (7) Failed to connect to 127.0.0.1 port 9876",
 		err: errFake("exec exited with code 7"),
 	}
-	tool := NewBrowserNavigateTool(fake, BrowserToolConfig{})
+	tool := newBrowserTool("browser_navigate", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{"url": "https://example.com"})
 	if err == nil {
