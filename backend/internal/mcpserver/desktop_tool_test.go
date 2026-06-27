@@ -7,10 +7,29 @@ import (
 	"time"
 )
 
-// desktopFakeExec returns a canned desktop_observe.py JSON envelope. For
-// the click/type/key tests we just need to verify the command shape —
-// empty out is fine since success only checks err.
-func newDesktopFake(out string) *fakeSandboxExec { return &fakeSandboxExec{out: out} }
+// (fakeSandboxExec + newFakeExec live in sandbox_python_test.go — shared
+// across all MCP tool tests.)
+
+// desktopSpecForName returns the spec entry with the given tool name, or
+// panics. Used by newDesktopTool + the timeout test (which needs a custom
+// cfg, not the default the helper applies).
+func desktopSpecForName(name string) desktopSpec {
+	for _, s := range desktopSpecs {
+		if s.name == name {
+			return s
+		}
+	}
+	panic("unknown desktop spec: " + name)
+}
+
+// newDesktopTool looks up a spec by tool name and constructs a DesktopTool
+// backed by exec. Replaces the 4 per-tool constructors we used to ship.
+func newDesktopTool(specName string, exec SandboxExecutor) *DesktopTool {
+	return &DesktopTool{
+		spec: desktopSpecForName(specName),
+		base: newDesktopBase(exec, DesktopToolConfig{}),
+	}
+}
 
 const sampleObserveJSON = `{
   "image_b64": "iVBORw0KGgoAAAANSUhEUg==",
@@ -24,8 +43,8 @@ const sampleObserveJSON = `{
 }`
 
 func TestDesktopScreenshotParsesObserve(t *testing.T) {
-	fake := newDesktopFake(sampleObserveJSON)
-	tool := NewDesktopScreenshotTool(fake, DesktopToolConfig{})
+	fake := newFakeExec(sampleObserveJSON)
+	tool := newDesktopTool("desktop_screenshot", fake)
 
 	result, err := tool.Execute(context.Background(), map[string]any{})
 	if err != nil {
@@ -51,8 +70,8 @@ func TestDesktopScreenshotParsesObserve(t *testing.T) {
 }
 
 func TestDesktopScreenshotMalformedJSON(t *testing.T) {
-	fake := newDesktopFake("not json at all")
-	tool := NewDesktopScreenshotTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("not json at all")
+	tool := newDesktopTool("desktop_screenshot", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{})
 	if err == nil {
@@ -65,7 +84,7 @@ func TestDesktopScreenshotMalformedJSON(t *testing.T) {
 
 func TestDesktopScreenshotExecFailure(t *testing.T) {
 	fake := &fakeSandboxExec{err: errFake("exec exited with code 1")}
-	tool := NewDesktopScreenshotTool(fake, DesktopToolConfig{})
+	tool := newDesktopTool("desktop_screenshot", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{})
 	if err == nil {
@@ -78,7 +97,12 @@ func TestDesktopScreenshotExecFailure(t *testing.T) {
 
 func TestDesktopScreenshotTimeout(t *testing.T) {
 	fake := &fakeSandboxExec{out: "", delay: 5 * time.Second}
-	tool := NewDesktopScreenshotTool(fake, DesktopToolConfig{Timeout: 1 * time.Second})
+	// Construct directly with 1s timeout — the spec-lookup helper uses
+	// the default 15s, which the 5s fake delay wouldn't trip.
+	tool := &DesktopTool{
+		spec: desktopSpecForName("desktop_screenshot"),
+		base: newDesktopBase(fake, DesktopToolConfig{Timeout: 1 * time.Second}),
+	}
 
 	_, err := tool.Execute(context.Background(), map[string]any{})
 	if err == nil {
@@ -90,8 +114,8 @@ func TestDesktopScreenshotTimeout(t *testing.T) {
 }
 
 func TestDesktopClickByCoords(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopClickTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_click", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"x": 100,
@@ -109,8 +133,8 @@ func TestDesktopClickByCoords(t *testing.T) {
 }
 
 func TestDesktopClickDefaultButton(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopClickTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_click", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"x": 50,
@@ -125,8 +149,8 @@ func TestDesktopClickDefaultButton(t *testing.T) {
 }
 
 func TestDesktopClickRightButton(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopClickTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_click", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"x":      10,
@@ -142,8 +166,8 @@ func TestDesktopClickRightButton(t *testing.T) {
 }
 
 func TestDesktopClickInvalidButton(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopClickTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_click", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"x":      10,
@@ -156,8 +180,8 @@ func TestDesktopClickInvalidButton(t *testing.T) {
 }
 
 func TestDesktopClickMissingX(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopClickTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_click", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{"y": 20})
 	if err == nil {
@@ -167,8 +191,8 @@ func TestDesktopClickMissingX(t *testing.T) {
 
 func TestDesktopClickFloatCoords(t *testing.T) {
 	// JSON unmarshal produces float64 for integer fields. Verify the parser.
-	fake := newDesktopFake("")
-	tool := NewDesktopClickTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_click", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"x": float64(42),
@@ -183,8 +207,8 @@ func TestDesktopClickFloatCoords(t *testing.T) {
 }
 
 func TestDesktopTypeWithClear(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopTypeTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_type", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"text": "hello world",
@@ -201,8 +225,8 @@ func TestDesktopTypeWithClear(t *testing.T) {
 }
 
 func TestDesktopTypeWithoutClear(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopTypeTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_type", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"text":  "append me",
@@ -219,8 +243,8 @@ func TestDesktopTypeWithoutClear(t *testing.T) {
 func TestDesktopTypeShellEscaping(t *testing.T) {
 	// Verify shQ handles single quotes — the POSIX idiom '\'' must be applied
 	// so a model-supplied string with a single quote doesn't break out.
-	fake := newDesktopFake("")
-	tool := NewDesktopTypeTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_type", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"text":  "it's a test",
@@ -235,8 +259,8 @@ func TestDesktopTypeShellEscaping(t *testing.T) {
 }
 
 func TestDesktopTypeEmpty(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopTypeTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_type", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{"text": ""})
 	if err == nil {
@@ -245,8 +269,8 @@ func TestDesktopTypeEmpty(t *testing.T) {
 }
 
 func TestDesktopKeyBasic(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopKeyTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_key", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"keys": "Return",
@@ -260,8 +284,8 @@ func TestDesktopKeyBasic(t *testing.T) {
 }
 
 func TestDesktopKeyChord(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopKeyTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_key", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"keys": "ctrl+c",
@@ -275,8 +299,8 @@ func TestDesktopKeyChord(t *testing.T) {
 }
 
 func TestDesktopKeyEmpty(t *testing.T) {
-	fake := newDesktopFake("")
-	tool := NewDesktopKeyTool(fake, DesktopToolConfig{})
+	fake := newFakeExec("")
+	tool := newDesktopTool("desktop_key", fake)
 
 	_, err := tool.Execute(context.Background(), map[string]any{"keys": ""})
 	if err == nil {
