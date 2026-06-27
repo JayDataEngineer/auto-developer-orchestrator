@@ -150,6 +150,8 @@ pull in heavyweight state. Pruning them further is a Phase 2 cleanup.
 
 ## Adding a new tool
 
+**Standalone tool** (one-off like `describe_image`, `python`, `list_skills`):
+
 1. Write a Go type implementing `core.Tool` (`Name()`, `Description()`, `Schema()`, `Execute()`).
    See `mcpserver/sandbox_python.go` for a 100-LOC example.
 2. In `cmd/mcpserver/main.go`, register it: `srv.RegisterTool(myTool)`.
@@ -157,7 +159,21 @@ pull in heavyweight state. Pruning them further is a Phase 2 cleanup.
    in the constructor — same pattern as `bash.New(exec)`.
 4. Rebuild (`task build`) — the tool shows up in `tools/list` automatically.
 
-There's no codegen, no manifest. The tool registry is the source of truth.
+**Family of related tools** (browser_*, desktop_*, future mobile_*, device_*):
+
+1. Append a spec entry to the family's slice in its file
+   (`browserSpecs` in `browser_tool.go`, `desktopSpecs` in `desktop_tool.go`).
+   The spec carries name + description + schema + the per-tool logic
+   (buildBody for browser, build+result for desktop). No new type, no new
+   constructor — the dispatcher (`BrowserTool` / `DesktopTool`) handles
+   registration via the spec slice.
+2. The family's `RegisterXXXTools(srv, exec, cfg)` helper in the same file
+   picks up the new spec automatically. No main.go change.
+3. Add a test in the family's `_test.go` file using the spec-lookup helper
+   (`newBrowserTool("browser_xxx", fake)` or `newDesktopTool(...)`).
+
+There's no codegen, no manifest. The spec slice (for families) + the
+registry (for standalone tools) are the source of truth.
 
 ## Vision (local ONNX, opt-in)
 
