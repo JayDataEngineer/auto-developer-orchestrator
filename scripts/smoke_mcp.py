@@ -87,7 +87,8 @@ def main():
     expected = {"bash", "file_read", "file_write", "file_edit", "file_grep", "file_glob",
                 "python", "list_skills", "load_skill", "describe_image",
                 "browser_navigate", "browser_click", "browser_type",
-                "browser_screenshot", "browser_evaluate"}
+                "browser_screenshot", "browser_evaluate",
+                "desktop_screenshot", "desktop_click", "desktop_type", "desktop_key"}
     missing = expected - set(names)
     expect(not missing, f"all expected tools advertised (missing: {missing})")
 
@@ -224,6 +225,38 @@ def main():
     ping = call("ping", {})
     expect(ping.get("result") is not None and ping.get("error") is None,
            "ping returned empty result")
+
+    # 13. desktop_screenshot + desktop_click + desktop_type + desktop_key.
+    # The sandbox runs Xvfb on DISPLAY=:99 (auto-enabled alongside browser
+    # mode). desktop_observe.py ships at /usr/local/bin/. We just verify
+    # each tool returns ok=true — the desktop is empty (just fluxbox wm)
+    # so we don't assert any specific UI state.
+    text, err = call_tool("desktop_screenshot", {})
+    expect(not err, f"desktop_screenshot succeeds (err={err})")
+    ss = json.loads(text)
+    expect(ss.get("ok") is True, f"desktop_screenshot ok=true (got: {str(ss)[:200]!r})")
+    expect("image_b64" in ss, f"desktop_screenshot returns image (got keys: {list(ss.keys())})")
+    expect("resolution" in ss, f"desktop_screenshot returns resolution (got keys: {list(ss.keys())})")
+    # Pick a safe coord for click (center of a 1280x720 desktop — definitely empty).
+    width = ss.get("resolution", {}).get("width", 1280)
+    height = ss.get("resolution", {}).get("height", 720)
+    click_x, click_y = width // 2, height // 2
+
+    text, err = call_tool("desktop_click", {"x": click_x, "y": click_y})
+    expect(not err, f"desktop_click succeeds (err={err})")
+    click = json.loads(text)
+    expect(click.get("ok") is True, f"desktop_click ok=true (got: {click})")
+    expect(click.get("x") == click_x, f"desktop_click echoes x (got: {click})")
+
+    text, err = call_tool("desktop_type", {"text": "smoke-typed", "clear": False})
+    expect(not err, f"desktop_type succeeds (err={err})")
+    typed = json.loads(text)
+    expect(typed.get("ok") is True, f"desktop_type ok=true (got: {typed})")
+
+    text, err = call_tool("desktop_key", {"keys": "Escape"})
+    expect(not err, f"desktop_key succeeds (err={err})")
+    keyed = json.loads(text)
+    expect(keyed.get("ok") is True, f"desktop_key ok=true (got: {keyed})")
 
     print("\n=== ALL CHECKS PASSED ===\n")
 

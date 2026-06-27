@@ -118,15 +118,15 @@ func (t *DescribeImageTool) Execute(ctx context.Context, args map[string]any) (a
 	// Use shQ to safely quote values — image paths and URLs may contain quotes/spaces.
 	parts := []string{"python3 /usr/local/bin/describe_image.py"}
 	if imagePath != "" {
-		parts = append(parts, "--image", shQVision(imagePath))
+		parts = append(parts, "--image", shQ(imagePath))
 	} else {
-		parts = append(parts, "--image-url", shQVision(imageURL))
+		parts = append(parts, "--image-url", shQ(imageURL))
 	}
 	if prompt != "" {
-		parts = append(parts, "--prompt", shQVision(prompt))
+		parts = append(parts, "--prompt", shQ(prompt))
 	}
 	if t.cfg.ModelDir != "" {
-		parts = append(parts, "--model-dir", shQVision(t.cfg.ModelDir))
+		parts = append(parts, "--model-dir", shQ(t.cfg.ModelDir))
 	}
 	cmd := strings.Join(parts, " ")
 
@@ -237,13 +237,6 @@ func tailOutput(s string, n int) string {
 		return s
 	}
 	return "..." + s[len(s)-n:]
-}
-
-// shQVision wraps a string in single quotes for shell-safe passage. Same
-// POSIX idiom as adapters.shQ / sandbox_python.shQPy. Kept local to avoid
-// churn if the adapters implementation changes.
-func shQVision(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // interface assertion

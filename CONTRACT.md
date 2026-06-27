@@ -107,6 +107,10 @@ what's registered in `cmd/mcpserver/main.go::main` at boot.
 | `browser_type` | `mcpserver/browser_tool.go` | `adapters.BashExecutor` → `curl POST /type` to `sb_server.py` | CDP character-by-character typing (React-safe). Requires `text` + (`index` or `selector`). |
 | `browser_screenshot` | `mcpserver/browser_tool.go` | `adapters.BashExecutor` → `curl POST /read` to `sb_server.py` | Fresh page state + SoM labels + screenshot path. Free — doesn't navigate. |
 | `browser_evaluate` | `mcpserver/browser_tool.go` | `adapters.BashExecutor` → `curl POST /evaluate` to `sb_server.py` | Power-tool escape hatch — runs `code` (JavaScript) in the page context. Returns `{result, type}`. |
+| `desktop_screenshot` | `mcpserver/desktop_tool.go` | `adapters.BashExecutor` → `/usr/local/bin/desktop_observe.py` (X11 + tesseract) | Captures DISPLAY=:99 as base64 PNG + OCR text elements (with cx/cy center coords) + window list + resolution. |
+| `desktop_click` | `mcpserver/desktop_tool.go` | `adapters.BashExecutor` → `xdotool mousemove + click` | Clicks at pixel `(x, y)` (pick from desktop_screenshot's element.cx/cy). Optional `button`: 1=left (default), 2=middle, 3=right. |
+| `desktop_type` | `mcpserver/desktop_tool.go` | `adapters.BashExecutor` → `xdotool type` | Types text into focused window. Real X11 key events (works in any app). Optional `clear=true` (default) Ctrl+A + Delete first. |
+| `desktop_key` | `mcpserver/desktop_tool.go` | `adapters.BashExecutor` → `xdotool key` | Presses a key combo (`Return`, `ctrl+c`, `alt+Tab`, `Escape`, `super`). For text use desktop_type. |
 
 All file paths are **inside the sandbox container**. The project is
 bind-mounted at `/sandbox/workspace/`. The model sees that path verbatim;
@@ -187,6 +191,30 @@ NO graceful-degradation path — they need `sb_server` up. Failures
 (timeout, malformed response, exec failure) return `isError: true` with
 the endpoint name in the message so the failing call is obvious in
 transcripts.
+
+### Desktop (Xvfb DISPLAY=:99, xdotool + OCR)
+
+Four MCP tools wrap the sandbox's X11 desktop. The sandbox already
+boots Xvfb at DISPLAY=:99 + fluxbox wm + xdotool + scrot + tesseract
+via supervisord when `EnableBrowserMode` runs (browser mode and desktop
+mode share the same Xvfb). These tools drive arbitrary desktop apps via
+pixel coordinates.
+
+| Tool | Field contract |
+|------|---------------|
+| `desktop_screenshot` | `{}` (no args) — returns `{image_b64, elements[], windows[], resolution, ocr_available}` |
+| `desktop_click` | `{x, y, button?}` — button default 1 (left); 2=middle, 3=right |
+| `desktop_type` | `{text, clear?}` — clear default true (Ctrl+A + Delete first) |
+| `desktop_key` | `{keys}` — xdotool key combo like `Return`, `ctrl+c`, `alt+Tab` |
+
+**Pixel coordinates are the contract, not text labels.** OCR text
+positions are non-deterministic across runs — clicking "by text" via a
+cached index would drift. The model picks `element.cx, element.cy` from
+the latest desktop_screenshot and passes those to `desktop_click`.
+
+**Errors propagate as Go errors** (same as browser tools — no graceful
+degradation; the desktop tools need Xvfb up). Failures surface with the
+operation name (`desktop click`, `desktop type`, etc.) in the message.
 
 ### 3.1 Adding a tool
 

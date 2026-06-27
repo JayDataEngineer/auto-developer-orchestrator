@@ -56,6 +56,7 @@ via the `Mcp-Session-Id` header (generated on `initialize`).
 | `list_skills` / `load_skill` | `mcpserver/skills_tool.go` | skills package → host FS at `<project>/skills/` |
 | `describe_image` | `mcpserver/vision_tool.go` | adapters.BashExecutor → `/usr/local/bin/describe_image.py` (local ONNX vision) |
 | `browser_navigate` / `browser_click` / `browser_type` / `browser_screenshot` / `browser_evaluate` | `mcpserver/browser_tool.go` | adapters.BashExecutor → `curl` to in-sandbox `sb_server.py` (persistent SeleniumBase Chrome) |
+| `desktop_screenshot` / `desktop_click` / `desktop_type` / `desktop_key` | `mcpserver/desktop_tool.go` | adapters.BashExecutor → `xdotool` + `/usr/local/bin/desktop_observe.py` (Xvfb DISPLAY=:99) |
 
 All file paths are **inside the sandbox container**. Your project is mounted
 at `/sandbox/workspace/`. The model sees that path; there is no host path
@@ -110,7 +111,9 @@ auto-developer-orchestrator/
 │       │   ├── sandbox_python.go  # python tool (sandbox-aware)
 │       │   ├── skills_tool.go     # list_skills / load_skill
 │       │   ├── vision_tool.go     # describe_image (local ONNX vision)
-│       │   └── browser_tool.go    # browser_* tools wrapping in-sandbox sb_server.py
+│       │   ├── browser_tool.go    # browser_* tools wrapping in-sandbox sb_server.py
+│       │   ├── desktop_tool.go    # desktop_* tools wrapping xdotool + desktop_observe.py
+│       │   └── shell.go           # shared shQ shell-escape helper
 │       ├── perms/                 # Permission checks (transitive)
 │       ├── retry/                 # Provider retry (transitive)
 │       ├── sandbox/               # Docker sandbox lifecycle
@@ -214,6 +217,29 @@ tools need `sb_server` up). Timeouts, malformed responses, exec
 failures all return `isError:true` with the endpoint name in the
 message.
 
+## Desktop (Xvfb DISPLAY=:99, xdotool + OCR)
+
+Four MCP tools wrap the sandbox's X11 desktop. The sandbox already
+boots Xvfb + fluxbox + xdotool + scrot + tesseract (supervisord-managed,
+auto-enabled alongside browser mode). The tools drive arbitrary desktop
+apps via pixel coordinates.
+
+| Tool | Field contract |
+|------|---------------|
+| `desktop_screenshot` | `{}` — returns `{image_b64, elements[], windows[], resolution, ocr_available}` |
+| `desktop_click` | `{x, y, button?}` — button default 1 (left); 2=middle, 3=right |
+| `desktop_type` | `{text, clear?}` — clear default true (Ctrl+A + Delete first) |
+| `desktop_key` | `{keys}` — xdotool key combo like `Return`, `ctrl+c`, `alt+Tab` |
+
+**Pixel coordinates are the contract.** OCR text positions drift across
+runs, so we click by `(x, y)` from the latest `desktop_screenshot`'s
+`element.cx, element.cy`. The model picks the coord from the elements
+list or the visible image.
+
+**Errors propagate as Go errors** (same as browser tools — no graceful
+degradation; the desktop tools need Xvfb up). Failures surface with the
+operation name (`desktop click`, `desktop type`, etc.) in the message.
+
 ## MCP transport contract
 
 | Method | Behavior |
@@ -232,7 +258,7 @@ returns 204. `GET` and `DELETE` are reserved (405 / 204 respectively).
 
 ## Verification
 
-The contract is enforced by 33 Go tests in `mcpserver/`:
+The contract is enforced by 70+ Go tests in `mcpserver/`:
 
 - **Protocol envelope** (6 tests): initialize, session ID generation,
   notifications/initialized, ping, unknown method, parse errors
@@ -244,6 +270,10 @@ The contract is enforced by 33 Go tests in `mcpserver/`:
 - **Browser tools** (12 tests): navigate/click/type/screenshot/evaluate
   arg-marshal + endpoint routing, timeout, malformed response, exec
   failure, label-vs-selector dispatch
+- **Desktop tools** (17 tests): screenshot parses desktop_observe.py
+  JSON + handles malformed/timeout/exec-failure, click coord parsing
+  (float/int/string) + button validation, type shell-escaping + clear
+  flag, key combo building
 
 Plus a real end-to-end smoke test (`task smoke`) that boots against a live
 Docker container and exercises every tool. **Run `task smoke` before
@@ -272,7 +302,6 @@ real-Docker bugs.
 ## What's NOT here (deferred to dev branch)
 
 - Multi-agent orchestration (CTO + employee delegation loop)
-- Desktop automation (xdotool, VNC)
 - Org system (per-domain config overlays — invest, twitter-agent, etc.)
 - TUI (Ink), web UI (Vite), CLI (Cobra)
 - Self-evolving script toolkit (`make_script` / `edit_script`)

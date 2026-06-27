@@ -71,10 +71,10 @@ func (b *browserBase) postJSON(ctx context.Context, endpoint, body string, extra
 		"-H 'Content-Type: application/json'",
 	}
 	for k, v := range extraHeaders {
-		parts = append(parts, fmt.Sprintf("-H %s", shQVision(k+": "+v)))
+		parts = append(parts, fmt.Sprintf("-H %s", shQ(k+": "+v)))
 	}
 	if body != "" {
-		parts = append(parts, "-d", shQVision(body))
+		parts = append(parts, "-d", shQ(body))
 	}
 	cmd := strings.Join(parts, " ")
 

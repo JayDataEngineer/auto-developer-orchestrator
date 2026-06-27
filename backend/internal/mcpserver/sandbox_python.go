@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/auto-developer-orchestrator/backend/internal/core"
@@ -69,11 +68,10 @@ func (t *SandboxPythonTool) Execute(ctx context.Context, args map[string]any) (a
 	execCtx, cancel := context.WithTimeout(ctx, t.timeout)
 	defer cancel()
 
-	// Wrap the code in a single-quoted heredoc-style invocation. python3 -c
-	// takes the code as argv[1]; we use a heredoc to avoid quoting hell with
-	// multi-line code containing its own quotes.
-	// Use shQ to safely wrap the python code as a single shell argument.
-	wrapped := fmt.Sprintf("python3 -c %s", shQPy(code))
+	// Wrap the code in a single-quoted shell argument. shQ handles any
+	// embedded quotes — the model can pass multi-line python with its own
+	// quotes/spaces safely.
+	wrapped := fmt.Sprintf("python3 -c %s", shQ(code))
 	out, err := t.exec.Exec(execCtx, wrapped)
 	if execCtx.Err() == context.DeadlineExceeded {
 		return map[string]any{
@@ -92,13 +90,6 @@ func (t *SandboxPythonTool) Execute(ctx context.Context, args map[string]any) (a
 		}, nil
 	}
 	return map[string]any{"success": true, "output": out}, nil
-}
-
-// shQPy wraps a string in single quotes for shell-safe passage. Mirrors
-// adapters.shQ but kept local — the sandbox-python tool doesn't depend on
-// adapters at the package boundary.
-func shQPy(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // interface assertion

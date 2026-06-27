@@ -25,10 +25,18 @@ WORD_GROUP_GAP = 50  # pixels — merge adjacent words within this gap
 
 
 def run(cmd, **kwargs):
-    """Run a command, return CompletedProcess."""
+    """Run a command, return CompletedProcess.
+
+    If the caller passes env= explicitly, merge it ON TOP of the default
+    env (DISPLAY defaults to :99 if unset anywhere). Avoids the
+    subprocess.run "multiple values for env" trap when a caller wants
+    to override DISPLAY explicitly.
+    """
     env = {**os.environ}
     if "DISPLAY" not in env:
         env["DISPLAY"] = ":99"
+    if "env" in kwargs:
+        env = {**env, **kwargs.pop("env")}
     return subprocess.run(cmd, capture_output=True, text=True, env=env, **kwargs)
 
 

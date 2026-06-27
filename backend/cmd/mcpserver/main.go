@@ -138,6 +138,12 @@ func main() {
 	srv.RegisterTool(mcpserver.NewBrowserTypeTool(bashExec, mcpserver.BrowserToolConfig{}))
 	srv.RegisterTool(mcpserver.NewBrowserScreenshotTool(bashExec, mcpserver.BrowserToolConfig{}))
 	srv.RegisterTool(mcpserver.NewBrowserEvaluateTool(bashExec, mcpserver.BrowserToolConfig{}))
+	// Desktop tools wrap xdotool + the sandbox's desktop_observe.py (screenshot +
+	// OCR + window list). Always safe to register — they only fail when called.
+	srv.RegisterTool(mcpserver.NewDesktopScreenshotTool(bashExec, mcpserver.DesktopToolConfig{}))
+	srv.RegisterTool(mcpserver.NewDesktopClickTool(bashExec, mcpserver.DesktopToolConfig{}))
+	srv.RegisterTool(mcpserver.NewDesktopTypeTool(bashExec, mcpserver.DesktopToolConfig{}))
+	srv.RegisterTool(mcpserver.NewDesktopKeyTool(bashExec, mcpserver.DesktopToolConfig{}))
 
 	// 5. HTTP server.
 	httpSrv := &http.Server{
