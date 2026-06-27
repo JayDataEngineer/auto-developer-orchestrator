@@ -131,6 +131,13 @@ func main() {
 	// Vision is opt-in: the tool returns a friendly "run bootstrap-vision.sh"
 	// message when the model isn't downloaded, so it's always safe to register.
 	srv.RegisterTool(mcpserver.NewDescribeImageTool(bashExec, mcpserver.VisionToolConfig{}))
+	// Browser tools wrap the sandbox's sb_server.py (SeleniumBase HTTP API).
+	// Always safe to register — they only fail when called.
+	srv.RegisterTool(mcpserver.NewBrowserNavigateTool(bashExec, mcpserver.BrowserToolConfig{}))
+	srv.RegisterTool(mcpserver.NewBrowserClickTool(bashExec, mcpserver.BrowserToolConfig{}))
+	srv.RegisterTool(mcpserver.NewBrowserTypeTool(bashExec, mcpserver.BrowserToolConfig{}))
+	srv.RegisterTool(mcpserver.NewBrowserScreenshotTool(bashExec, mcpserver.BrowserToolConfig{}))
+	srv.RegisterTool(mcpserver.NewBrowserEvaluateTool(bashExec, mcpserver.BrowserToolConfig{}))
 
 	// 5. HTTP server.
 	httpSrv := &http.Server{

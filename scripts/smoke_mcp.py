@@ -85,7 +85,9 @@ def main():
     names = [t["name"] for t in listed["result"]["tools"]]
     print(f"\n  advertised tools: {names}")
     expected = {"bash", "file_read", "file_write", "file_edit", "file_grep", "file_glob",
-                "python", "list_skills", "load_skill", "describe_image"}
+                "python", "list_skills", "load_skill", "describe_image",
+                "browser_navigate", "browser_click", "browser_type",
+                "browser_screenshot", "browser_evaluate"}
     missing = expected - set(names)
     expect(not missing, f"all expected tools advertised (missing: {missing})")
 
@@ -163,7 +165,62 @@ def main():
                f"describe_image should return a known reason (got: {reason!r})")
         print(f"  PASS  describe_image degraded gracefully (reason={reason})")
 
-    # 11. ping
+    # 11. browser_navigate + browser_evaluate + browser_screenshot.
+    # The sandbox runs sb_server.py (persistent SeleniumBase HTTP API) on
+    # port 9876 inside the container. The Go tools shell out to curl it.
+    # Use a data: URL so the test is hermetic — no network dependency.
+    data_url = ("data:text/html,<html><head><title>Smoke</title></head>"
+                "<body><h1 id=h>Hello</h1>"
+                "<input id=inp type=text>"
+                "<button id=btn>Click</button></body></html>")
+    text, err = call_tool("browser_navigate", {"url": data_url})
+    expect(not err, f"browser_navigate succeeds (err={err}, text={text[:200]!r})")
+    nav = json.loads(text)
+    expect(nav.get("ok") is True, f"browser_navigate ok=true (got: {nav})")
+    title = nav.get("page_data", {}).get("title", "")
+    expect(title == "Smoke", f"browser_navigate returns correct title (got: {title!r})")
+    # element_map should include the button with SoM label
+    elements = nav.get("element_map", [])
+    expect(any(e.get("tag") == "button" for e in elements),
+           f"element_map contains button (got: {elements})")
+
+    # browser_evaluate: extract the h1 text via JS
+    text, err = call_tool("browser_evaluate", {"code": "return document.getElementById('h').textContent"})
+    expect(not err, f"browser_evaluate succeeds (err={err})")
+    ev = json.loads(text)
+    expect(ev.get("ok") is True, f"browser_evaluate ok=true (got: {ev})")
+    # Some sb_server versions wrap result; tolerate either "result" or "value".
+    ev_result = ev.get("result", ev.get("value", ""))
+    expect("Hello" in str(ev_result),
+           f"browser_evaluate returns h1 text (got: {ev_result!r})")
+
+    # browser_type: type into the input
+    text, err = call_tool("browser_type", {
+        "selector": "#inp",
+        "text": "smoke-typed-text",
+    })
+    expect(not err, f"browser_type succeeds (err={err})")
+    typed = json.loads(text)
+    expect(typed.get("ok") is True, f"browser_type ok=true (got: {typed})")
+
+    # browser_click: click the button by SoM index (the button is index 2 in
+    # the navigate response). We don't assert any side-effect — the data: URL
+    # has no JS handler — we just verify the click endpoint returns ok=true
+    # with the post-click page state.
+    text, err = call_tool("browser_click", {"index": 2})
+    expect(not err, f"browser_click succeeds (err={err})")
+    clicked = json.loads(text)
+    expect(clicked.get("ok") is True, f"browser_click ok=true (got: {clicked})")
+
+    # browser_screenshot: just verify it returns ok + a screenshot path
+    text, err = call_tool("browser_screenshot", {})
+    expect(not err, f"browser_screenshot succeeds (err={err})")
+    ss = json.loads(text)
+    expect(ss.get("ok") is True, f"browser_screenshot ok=true (got: {ss})")
+    expect("screenshot_path" in str(ss) or "page_data" in str(ss),
+           f"browser_screenshot returns page state (got: {str(ss)[:200]!r})")
+
+    # 12. ping
     ping = call("ping", {})
     expect(ping.get("result") is not None and ping.get("error") is None,
            "ping returned empty result")

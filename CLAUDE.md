@@ -55,6 +55,7 @@ via the `Mcp-Session-Id` header (generated on `initialize`).
 | `python` | `mcpserver/sandbox_python.go` | adapters.BashExecutor → `python3 -c` |
 | `list_skills` / `load_skill` | `mcpserver/skills_tool.go` | skills package → host FS at `<project>/skills/` |
 | `describe_image` | `mcpserver/vision_tool.go` | adapters.BashExecutor → `/usr/local/bin/describe_image.py` (local ONNX vision) |
+| `browser_navigate` / `browser_click` / `browser_type` / `browser_screenshot` / `browser_evaluate` | `mcpserver/browser_tool.go` | adapters.BashExecutor → `curl` to in-sandbox `sb_server.py` (persistent SeleniumBase Chrome) |
 
 All file paths are **inside the sandbox container**. Your project is mounted
 at `/sandbox/workspace/`. The model sees that path; there is no host path
@@ -108,7 +109,8 @@ auto-developer-orchestrator/
 │       │   ├── session.go         # Session ID generator
 │       │   ├── sandbox_python.go  # python tool (sandbox-aware)
 │       │   ├── skills_tool.go     # list_skills / load_skill
-│       │   └── vision_tool.go     # describe_image (local ONNX vision)
+│       │   ├── vision_tool.go     # describe_image (local ONNX vision)
+│       │   └── browser_tool.go    # browser_* tools wrapping in-sandbox sb_server.py
 │       ├── perms/                 # Permission checks (transitive)
 │       ├── retry/                 # Provider retry (transitive)
 │       ├── sandbox/               # Docker sandbox lifecycle
@@ -186,6 +188,32 @@ the "run bootstrap-vision.sh" hint inside the result body.
 Model location (bind-mounted into sandbox):
 `<project>/.pux/models/Qwen3.5-2B-ONNX-OPT/` → `/sandbox/workspace/.pux/models/Qwen3.5-2B-ONNX-OPT/`
 
+## Browser (in-sandbox sb_server.py)
+
+Five MCP tools wrap the sandbox's existing `sb_server.py` (persistent
+SeleniumBase HTTP API on `127.0.0.1:9876` inside the container). The
+MCP tools shell out to `curl` against that API; the Chrome session
+persists across calls.
+
+| Tool | Endpoint | Field contract |
+|------|----------|---------------|
+| `browser_navigate` | `/navigate` | `{url}` |
+| `browser_click` | `/click` | `{index}` or `{selector}` (mutually exclusive) |
+| `browser_type` | `/type` | `{text}` + (`{index}` or `{selector}`) |
+| `browser_screenshot` | `/read` | `{}` (no args) — returns page + SoM labels + screenshot path |
+| `browser_evaluate` | `/evaluate` | `{code}` — JavaScript expression, use `return` for explicit values |
+
+**Set-of-Marks labels:** `/navigate` and `/read` return an `element_map`
+of interactive elements with bounding boxes + an integer `index`. Pass
+that integer to `browser_click(index=N)` or `browser_type(index=N,
+text=...)` — the sb_server resolves the index to the current selector
+at call time, robust against reflows.
+
+**Errors propagate as Go errors** (no graceful-degradation path — the
+tools need `sb_server` up). Timeouts, malformed responses, exec
+failures all return `isError:true` with the endpoint name in the
+message.
+
 ## MCP transport contract
 
 | Method | Behavior |
@@ -204,7 +232,7 @@ returns 204. `GET` and `DELETE` are reserved (405 / 204 respectively).
 
 ## Verification
 
-The contract is enforced by 21 Go tests in `mcpserver/`:
+The contract is enforced by 33 Go tests in `mcpserver/`:
 
 - **Protocol envelope** (6 tests): initialize, session ID generation,
   notifications/initialized, ping, unknown method, parse errors
@@ -213,6 +241,9 @@ The contract is enforced by 21 Go tests in `mcpserver/`:
   registration panics
 - **Transport** (4 tests): end-to-end HTTP (initialize → list → call),
   batch rejection, CORS preflight, session mismatch
+- **Browser tools** (12 tests): navigate/click/type/screenshot/evaluate
+  arg-marshal + endpoint routing, timeout, malformed response, exec
+  failure, label-vs-selector dispatch
 
 Plus a real end-to-end smoke test (`task smoke`) that boots against a live
 Docker container and exercises every tool. **Run `task smoke` before
@@ -241,7 +272,6 @@ real-Docker bugs.
 ## What's NOT here (deferred to dev branch)
 
 - Multi-agent orchestration (CTO + employee delegation loop)
-- Browser automation (CDP, SeleniumBase, vision-in-the-loop)
 - Desktop automation (xdotool, VNC)
 - Org system (per-domain config overlays — invest, twitter-agent, etc.)
 - TUI (Ink), web UI (Vite), CLI (Cobra)

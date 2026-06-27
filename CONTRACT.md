@@ -102,6 +102,11 @@ what's registered in `cmd/mcpserver/main.go::main` at boot.
 | `list_skills` | `mcpserver/skills_tool.go` | `skills.Discover` → host FS at `<project>/skills/` | Returns metadata only (no body). |
 | `load_skill` | `mcpserver/skills_tool.go` | `skills.Load` → host FS at `<project>/skills/<name>/SKILL.md` | Returns full markdown body. |
 | `describe_image` | `mcpserver/vision_tool.go` | `adapters.BashExecutor` → `/usr/local/bin/describe_image.py` | Local ONNX vision (Qwen3.5-2B-ONNX-OPT fp16). Graceful degradation — missing model returns `success:false, reason:"unavailable"`, not an error. |
+| `browser_navigate` | `mcpserver/browser_tool.go` | `adapters.BashExecutor` → `curl POST /navigate` to in-sandbox `sb_server.py` | Opens URL in persistent Chrome. Returns title/url/text + SoM-labeled element map + screenshot path. |
+| `browser_click` | `mcpserver/browser_tool.go` | `adapters.BashExecutor` → `curl POST /click` to `sb_server.py` | Click by SoM `index` (integer) or CSS `selector`. Returns post-click page state. |
+| `browser_type` | `mcpserver/browser_tool.go` | `adapters.BashExecutor` → `curl POST /type` to `sb_server.py` | CDP character-by-character typing (React-safe). Requires `text` + (`index` or `selector`). |
+| `browser_screenshot` | `mcpserver/browser_tool.go` | `adapters.BashExecutor` → `curl POST /read` to `sb_server.py` | Fresh page state + SoM labels + screenshot path. Free — doesn't navigate. |
+| `browser_evaluate` | `mcpserver/browser_tool.go` | `adapters.BashExecutor` → `curl POST /evaluate` to `sb_server.py` | Power-tool escape hatch — runs `code` (JavaScript) in the page context. Returns `{result, type}`. |
 
 All file paths are **inside the sandbox container**. The project is
 bind-mounted at `/sandbox/workspace/`. The model sees that path verbatim;
@@ -150,6 +155,38 @@ gracefully rather than crashing.
 Genuine failures (corrupt image, ONNX runtime crash, OOM) DO surface as
 `success:false, reason:"inference_failed"`. These are observable but
 non-fatal — the calling client can retry or skip.
+
+### Browser (in-sandbox sb_server, persistent Chrome)
+
+The five `browser_*` tools wrap the sandbox's existing `sb_server.py` —
+a persistent HTTP API in front of SeleniumBase/Chrome. The server runs
+INSIDE the sandbox container on `127.0.0.1:9876` (supervisord-managed);
+the MCP tools shell out to `curl` against it. The browser session
+persists across calls — `browser_navigate` opens the page, then any
+subsequent `browser_click` / `browser_type` / `browser_screenshot` /
+`browser_evaluate` operates on that page until you navigate again.
+
+**Set-of-Marks labels.** `/navigate` and `/read` return an `element_map`
+of clickable/typable elements with bounding boxes + an integer `index`.
+Pass that integer to `browser_click(index=N)` or
+`browser_type(index=N, text=...)` — the sb_server resolves the index to
+the current selector at call time (more robust than CSS selectors
+across reflows).
+
+**Field-name contract** (matches the sb_server's HTTP API exactly):
+- `browser_navigate`: `{url}`
+- `browser_click`: `{index}` or `{selector}` (mutually exclusive)
+- `browser_type`: `{text}` + (`{index}` or `{selector}`)
+- `browser_screenshot`: `{}` (no args)
+- `browser_evaluate`: `{code}` — JavaScript expression; use `return` for
+  explicit values. Result shape: `{ok, result, type}`.
+
+**Errors propagate as Go errors.** Unlike `describe_image` (which
+degrades gracefully when the model is missing), the browser tools have
+NO graceful-degradation path — they need `sb_server` up. Failures
+(timeout, malformed response, exec failure) return `isError: true` with
+the endpoint name in the message so the failing call is obvious in
+transcripts.
 
 ### 3.1 Adding a tool
 
@@ -267,7 +304,6 @@ log (which is debug-level transport telemetry).
 ## What this contract does NOT cover (deferred to dev branch)
 
 - Sub-agent orchestration (CTO + employee delegation loop)
-- Browser automation (CDP, SeleniumBase, vision-in-the-loop)
 - Desktop automation (xdotool, VNC)
 - Skills system (backbone SKILL.md + discoverable skills)
 - Org system (per-domain config overlays)
