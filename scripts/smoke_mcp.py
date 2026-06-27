@@ -85,7 +85,7 @@ def main():
     names = [t["name"] for t in listed["result"]["tools"]]
     print(f"\n  advertised tools: {names}")
     expected = {"bash", "file_read", "file_write", "file_edit", "file_grep", "file_glob",
-                "python", "list_skills", "load_skill"}
+                "python", "list_skills", "load_skill", "describe_image"}
     missing = expected - set(names)
     expect(not missing, f"all expected tools advertised (missing: {missing})")
 
@@ -134,7 +134,36 @@ def main():
     expect("Specialized guidance for the smoke test" in text,
            f"load_skill returns skill body (got: {text!r})")
 
-    # 10. ping
+    # 10. describe_image: graceful degradation check.
+    # The smoke workspace does NOT have the model downloaded, so we expect
+    # the tool to return a structured success:false with reason="unavailable"
+    # — NOT a Go error. This is the load-bearing contract: vision is opt-in,
+    # a missing model MUST NOT break the agent loop.
+    # If the model IS present (operator pre-downloaded), we accept either
+    # success:true or a graceful failure; we only fail the smoke if the tool
+    # errors out entirely.
+    text, err = call_tool("describe_image", {
+        "image_path": "/sandbox/workspace/test.txt",  # not an image, but model-missing path triggers first
+    })
+    expect(not err, f"describe_image should not hard-error even without model (err={err}, text={text!r})")
+    # Response is JSON-shaped; check the structured fields.
+    try:
+        vision_result = json.loads(text)
+    except json.JSONDecodeError:
+        expect(False, f"describe_image result not JSON: {text!r}")
+        return
+    if vision_result.get("success") is True:
+        # Model is downloaded in this env — accept any non-error result.
+        print(f"  PASS  describe_image returned success (model present)")
+    else:
+        expect(vision_result.get("success") is False,
+               f"describe_image should return success=false when model absent (got: {vision_result!r})")
+        reason = vision_result.get("reason", "")
+        expect(reason in ("unavailable", "deps_missing", "inference_failed", "timeout"),
+               f"describe_image should return a known reason (got: {reason!r})")
+        print(f"  PASS  describe_image degraded gracefully (reason={reason})")
+
+    # 11. ping
     ping = call("ping", {})
     expect(ping.get("result") is not None and ping.get("error") is None,
            "ping returned empty result")

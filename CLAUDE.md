@@ -54,6 +54,7 @@ via the `Mcp-Session-Id` header (generated on `initialize`).
 | `file_read` / `file_write` / `file_edit` / `file_grep` / `file_glob` | `tools/file/file.go` | adapters.FileOps → Docker exec |
 | `python` | `mcpserver/sandbox_python.go` | adapters.BashExecutor → `python3 -c` |
 | `list_skills` / `load_skill` | `mcpserver/skills_tool.go` | skills package → host FS at `<project>/skills/` |
+| `describe_image` | `mcpserver/vision_tool.go` | adapters.BashExecutor → `/usr/local/bin/describe_image.py` (local ONNX vision) |
 
 All file paths are **inside the sandbox container**. Your project is mounted
 at `/sandbox/workspace/`. The model sees that path; there is no host path
@@ -105,7 +106,9 @@ auto-developer-orchestrator/
 │       │   ├── server.go          # JSON-RPC dispatch + tool registry
 │       │   ├── transport.go       # HTTP handler
 │       │   ├── session.go         # Session ID generator
-│       │   └── sandbox_python.go  # python tool (sandbox-aware)
+│       │   ├── sandbox_python.go  # python tool (sandbox-aware)
+│       │   ├── skills_tool.go     # list_skills / load_skill
+│       │   └── vision_tool.go     # describe_image (local ONNX vision)
 │       ├── perms/                 # Permission checks (transitive)
 │       ├── retry/                 # Provider retry (transitive)
 │       ├── sandbox/               # Docker sandbox lifecycle
@@ -150,6 +153,38 @@ pull in heavyweight state. Pruning them further is a Phase 2 cleanup.
 4. Rebuild (`task build`) — the tool shows up in `tools/list` automatically.
 
 There's no codegen, no manifest. The tool registry is the source of truth.
+
+## Vision (local ONNX, opt-in)
+
+`describe_image` runs local vision inference inside the sandbox via
+Qwen3.5-2B-ONNX-OPT fp16. **No external MCP dependency** — the model
+weights are operator-supplied, downloaded once via host-side script.
+
+**Bootstrap:**
+```bash
+scripts/bootstrap-vision.sh                 # downloads to $PWD/.pux/models/
+scripts/bootstrap-vision.sh --project DIR   # explicit project root
+scripts/bootstrap-vision.sh --check         # exit 0 if ready, 1 if not
+```
+
+The script downloads ~5GB of fp16 weights, applies the known `patch_size: 16`
+bug fix to `genai_config.json`, and verifies file integrity. Idempotent —
+safe to re-run; uses HF resume support.
+
+**Contract:** when the model is absent, `describe_image` returns
+`{success:false, reason:"unavailable"}` — NOT a Go error, NOT an
+`isError:true` envelope. The driving agent falls back to text-only
+reasoning without breaking its loop. Operators reading transcripts see
+the "run bootstrap-vision.sh" hint inside the result body.
+
+**Three pieces:**
+- `scripts/bootstrap-vision.sh` — host-side downloader (idempotent)
+- `sandbox/scripts/describe_image.py` — backbone script (shipped in
+  container at `/usr/local/bin/describe_image.py`)
+- `backend/internal/mcpserver/vision_tool.go` — MCP tool wrapper
+
+Model location (bind-mounted into sandbox):
+`<project>/.pux/models/Qwen3.5-2B-ONNX-OPT/` → `/sandbox/workspace/.pux/models/Qwen3.5-2B-ONNX-OPT/`
 
 ## MCP transport contract
 
@@ -208,11 +243,11 @@ real-Docker bugs.
 - Multi-agent orchestration (CTO + employee delegation loop)
 - Browser automation (CDP, SeleniumBase, vision-in-the-loop)
 - Desktop automation (xdotool, VNC)
-- Skills system (backbone SKILL.md + discoverable skills)
 - Org system (per-domain config overlays — invest, twitter-agent, etc.)
 - TUI (Ink), web UI (Vite), CLI (Cobra)
 - Self-evolving script toolkit (`make_script` / `edit_script`)
 - Transcript auditing, diligence evals, safeguard router
+- Runtime MCP-server fallback URLs (planned — see plan file)
 
 Each will migrate back to master one feature at a time, after it's proven
 to fit the MCP contract cleanly.

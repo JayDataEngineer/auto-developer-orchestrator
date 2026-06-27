@@ -128,6 +128,9 @@ func main() {
 	srv.RegisterTool(mcpserver.NewSandboxPythonTool(bashExec))
 	srv.RegisterTool(mcpserver.NewListSkillsTool(*projectPath))
 	srv.RegisterTool(mcpserver.NewLoadSkillTool(*projectPath))
+	// Vision is opt-in: the tool returns a friendly "run bootstrap-vision.sh"
+	// message when the model isn't downloaded, so it's always safe to register.
+	srv.RegisterTool(mcpserver.NewDescribeImageTool(bashExec, mcpserver.VisionToolConfig{}))
 
 	// 5. HTTP server.
 	httpSrv := &http.Server{

@@ -101,6 +101,7 @@ what's registered in `cmd/mcpserver/main.go::main` at boot.
 | `python` | `mcpserver/sandbox_python.go` | `adapters.BashExecutor` → `python3 -c` | Sandbox-installed deps available. |
 | `list_skills` | `mcpserver/skills_tool.go` | `skills.Discover` → host FS at `<project>/skills/` | Returns metadata only (no body). |
 | `load_skill` | `mcpserver/skills_tool.go` | `skills.Load` → host FS at `<project>/skills/<name>/SKILL.md` | Returns full markdown body. |
+| `describe_image` | `mcpserver/vision_tool.go` | `adapters.BashExecutor` → `/usr/local/bin/describe_image.py` | Local ONNX vision (Qwen3.5-2B-ONNX-OPT fp16). Graceful degradation — missing model returns `success:false, reason:"unavailable"`, not an error. |
 
 All file paths are **inside the sandbox container**. The project is
 bind-mounted at `/sandbox/workspace/`. The model sees that path verbatim;
@@ -123,6 +124,32 @@ backbone context, distinct from in-sandbox artifacts. The model can still
 edit them via `file_write` (they're bind-mounted at
 `/sandbox/workspace/skills/`), but that's an operator concern, not the
 skill tools' job.
+
+### Vision (opt-in, graceful degradation)
+
+`describe_image` runs local vision inference via Qwen3.5-2B-ONNX-OPT fp16
+loaded inside the sandbox. No external MCP dependency — the model weights
+are an OPTIONAL operator-supplied artifact.
+
+The model directory lives at `<project>/.pux/models/Qwen3.5-2B-ONNX-OPT/`
+and is bind-mounted into the sandbox at
+`/sandbox/workspace/.pux/models/...`. Operators download it via
+`scripts/bootstrap-vision.sh` from the host.
+
+**Contract:** when the model is absent, `describe_image` returns a
+structured result with `success:false` and `reason:"unavailable"` — NOT a
+Go-level error and NOT an `isError:true` envelope. The driving agent must
+be able to fall back to text-only reasoning without its loop breaking. The
+friendly "run bootstrap-vision.sh" message lives inside the result body so
+the operator (reading transcripts) can see it.
+
+The same applies to the `deps_missing` reason: if the sandbox image is
+somehow missing `onnxruntime-genai`, the tool reports the state
+gracefully rather than crashing.
+
+Genuine failures (corrupt image, ONNX runtime crash, OOM) DO surface as
+`success:false, reason:"inference_failed"`. These are observable but
+non-fatal — the calling client can retry or skip.
 
 ### 3.1 Adding a tool
 

@@ -103,8 +103,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-# Python packages for web scraping, image processing, and stealth browsing
+# Python packages for web scraping, image processing, and stealth browsing.
+# onnxruntime-genai: required by /usr/local/bin/describe_image.py for vision
+# inference against Qwen3.5-2B-ONNX-OPT. The model itself is opt-in — operators
+# run scripts/bootstrap-vision.sh from the host to download weights to
+# <project>/.pux/models/. Without the weights, describe_image exits 2 with a
+# friendly "run bootstrap-vision.sh" message and the rest of the server is
+# unaffected. numpy comes in via Pillow's transitive deps; explicit here so
+# the describe_image script can rely on it without import-time surprise.
 RUN python3 -m pip install seleniumbase requests beautifulsoup4 Pillow httpx \
+        onnxruntime-genai numpy \
     && rm -rf /root/.cache/pip
 
 # Chrome
@@ -124,10 +132,11 @@ ENV BUN_INSTALL="/root/.bun"
 COPY scripts/sb_agent.py /usr/local/bin/sb_agent.py
 COPY scripts/sb_server.py /usr/local/bin/sb_server.py
 COPY scripts/desktop_observe.py /usr/local/bin/desktop_observe.py
+COPY scripts/describe_image.py /usr/local/bin/describe_image.py
 COPY scripts/start-kasmvnc.sh /usr/local/bin/start-kasmvnc.sh
 COPY scripts/setup-display.sh /usr/local/bin/setup-display.sh
 COPY scripts/fluxbox-apps-menu.sh /usr/local/bin/fluxbox-apps-menu.sh
-RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py /usr/local/bin/start-kasmvnc.sh /usr/local/bin/setup-display.sh /usr/local/bin/fluxbox-apps-menu.sh
+RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py /usr/local/bin/describe_image.py /usr/local/bin/start-kasmvnc.sh /usr/local/bin/setup-display.sh /usr/local/bin/fluxbox-apps-menu.sh
 
 # Fluxbox config — dark theme, dynamic app menu
 COPY fluxbox/ /root/.fluxbox/
