@@ -7,23 +7,6 @@ import (
 	"testing"
 )
 
-// fakeExecutor is a stub tools/bash.Executor for transport-level tests.
-// We don't want a Docker sandbox in unit tests — just enough to verify
-// the MCP envelope is wired correctly.
-type fakeExecutor struct {
-	lastCmd string
-	out     string
-	err     error
-}
-
-func (f *fakeExecutor) Exec(ctx context.Context, command string) (string, error) {
-	f.lastCmd = command
-	if f.err != nil {
-		return "", f.err
-	}
-	return f.out, nil
-}
-
 // jsonRPC builds a JSON-RPC request envelope as raw bytes.
 func jsonRPC(id any, method string, params any) []byte {
 	b, _ := json.Marshal(map[string]any{

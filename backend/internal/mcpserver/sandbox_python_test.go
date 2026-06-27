@@ -31,6 +31,10 @@ func (f *fakeSandboxExec) Exec(ctx context.Context, cmd string) (string, error) 
 	return f.out, nil
 }
 
+// newFakeExec is the canonical "out-only" constructor for fakeSandboxExec.
+// Tests needing err/delay use the struct literal directly.
+func newFakeExec(out string) *fakeSandboxExec { return &fakeSandboxExec{out: out} }
+
 func TestSandboxPythonExecutesCode(t *testing.T) {
 	fake := &fakeSandboxExec{out: "42\n"}
 	tool := NewSandboxPythonTool(fake)
