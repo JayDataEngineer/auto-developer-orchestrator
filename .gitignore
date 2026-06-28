@@ -45,6 +45,10 @@ backend/tmp/
 data/
 **/.pux/
 
+# Org runtime data (5G+ of model weights, venvs, parsed dumps, memos).
+# Org *templates* ship separately when the org-dispatch MCP surface lands.
+orgs/
+
 # Org-scoped runtime artifacts (article bodies, backtest outputs, parsed
 # chat dumps, memos, etc.) — written by the agent during runs, not source.
 artifacts/
