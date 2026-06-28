@@ -31,6 +31,14 @@ to `$PWD`). Env vars `PUX_MCP_ADDR` / `PUX_PROJECT_PATH` mirror them.
 Set `PUX_AUDIT_LOG=/path/to/audit.jsonl` to append every tool call (args +
 result + duration, secret-scrubbed) to a forensic log. Opt-in; default off.
 
+Set `PUX_LLM_API_KEY` to enable the **dispatch surface** (the
+`dispatch_task` / `get_task_status` / `list_orgs` MCP tools). When set, the
+server-side agent loop runs against Anthropic's Messages API — an external
+caller (Hermes / OpenClaw / Claude Code) can hand a task to a configured
+"org" and the org's CTO does the work. Optional knobs: `PUX_LLM_BASE_URL`,
+`PUX_LLM_MODEL` (default `claude-sonnet-4-6`), `PUX_LLM_MAX_TOKENS`. Absent
+key = surface disabled, the other 19 tools still work.
+
 ## Connecting MCP clients
 
 Add to Claude Desktop (or any MCP client that supports HTTP transport):
@@ -57,6 +65,7 @@ via the `Mcp-Session-Id` header (generated on `initialize`).
 | `describe_image` | `mcpserver/vision_tool.go` | adapters.BashExecutor → `/usr/local/bin/describe_image.py` (local ONNX vision) |
 | `browser_navigate` / `browser_click` / `browser_type` / `browser_screenshot` / `browser_evaluate` | `mcpserver/browser_tool.go` | adapters.BashExecutor → `curl` to in-sandbox `sb_server.py` (persistent SeleniumBase Chrome) |
 | `desktop_screenshot` / `desktop_click` / `desktop_type` / `desktop_key` | `mcpserver/desktop_tool.go` | adapters.BashExecutor → `xdotool` + `/usr/local/bin/desktop_observe.py` (Xvfb DISPLAY=:99) |
+| `dispatch_task` / `get_task_status` / `list_orgs` | `mcpserver/dispatch_tool.go` | agent.Loop → Anthropic Messages API + same sandbox tools as above (opt-in via `PUX_LLM_API_KEY`) |
 
 All file paths are **inside the sandbox container**. Your project is mounted
 at `/sandbox/workspace/`. The model sees that path; there is no host path
@@ -113,7 +122,11 @@ auto-developer-orchestrator/
 │       │   ├── vision_tool.go     # describe_image (local ONNX vision)
 │       │   ├── browser_tool.go    # browser_* tools wrapping in-sandbox sb_server.py
 │       │   ├── desktop_tool.go    # desktop_* tools wrapping xdotool + desktop_observe.py
+│       │   ├── dispatch_tool.go   # dispatch_task / get_task_status / list_orgs
+│       │   ├── task_store.go      # in-memory task registry for dispatch
 │       │   └── shell.go           # shared shQ shell-escape helper
+│       ├── agent/                 # AnthropicProvider + Loop + DelegateTool
+│       ├── org/                   # Org + TOML loader for orgs/<name>/org.toml
 │       ├── perms/                 # Permission checks (transitive)
 │       ├── retry/                 # Provider retry (transitive)
 │       ├── sandbox/               # Docker sandbox lifecycle
@@ -124,6 +137,8 @@ auto-developer-orchestrator/
 │           ├── bash/              # Bash tool
 │           ├── file/              # File tools (read/write/edit/grep/glob)
 │           └── truncate/          # Output truncation
+├── orgs/                          # org templates (shipped: _demo/)
+│   └── _demo/                     #   example org: cto + researcher
 ├── sandbox/                       # Dockerfile + scripts for pux-sandbox:latest
 ├── scripts/
 │   ├── setup-hooks.sh             # Pre-commit install
@@ -174,6 +189,63 @@ pull in heavyweight state. Pruning them further is a Phase 2 cleanup.
 
 There's no codegen, no manifest. The spec slice (for families) + the
 registry (for standalone tools) are the source of truth.
+
+## Dispatch surface (org → agent loop, opt-in)
+
+When `PUX_LLM_API_KEY` is set at server boot, three additional MCP tools
+are registered:
+
+| Tool | Shape |
+|------|-------|
+| `list_orgs` | `{}` → `{orgs: [{name, description, roles}], count}` |
+| `dispatch_task` | `{org_name, task_description}` → `{task_id, status:"pending"}` |
+| `get_task_status` | `{task_id}` → `{status, result, error, round, transcript_tail, started_at, finished_at}` |
+
+`dispatch_task` is async — it returns a `task_id` immediately and the
+server runs the org's CTO loop in a background goroutine. Poll
+`get_task_status` for completion (status moves `pending → running →
+complete | failed`).
+
+### Org layout
+
+An org is a directory under `<project>/orgs/<name>/` containing an
+`org.toml` + markdown prompt bodies:
+
+```
+orgs/<name>/
+├── org.toml           # config (name, description, [cto], [[roles]])
+├── cto.md             # CTO system prompt body
+└── roles/<role>.md    # one per [[roles]] entry
+```
+
+See `orgs/_demo/` for the shipped example. Each `[cto]` / `[[roles]]`
+block declares its own `prompt` (relative path), `max_rounds`, and
+`tools` (whitelist of MCP tool names). Roles automatically inherit
+recursion protection — `delegate_to` is forbidden in role whitelists
+(the validator rejects it loudly at dispatch time).
+
+### How the loop works
+
+The CTO loop runs in the host process (not the sandbox). It calls the
+Anthropic Messages API directly, dispatches `tool_use` blocks back
+through the SAME registered MCP tools (so an agent loop calling `bash`
+hits the exact same code path as an external MCP client calling `bash`),
+and on `delegate_to` spawns a child loop with the role's prompt + filtered
+tool whitelist. CTO receives the child's final response as the tool
+result; the child's tool chatter is invisible to the CTO.
+
+Per-org serialization: one task per org at a time (filesystem races).
+Cross-org dispatches run concurrently. The dispatch goroutine holds a
+per-org mutex for its duration; `dispatch_task` itself returns immediately.
+
+### Wiring
+
+`cmd/mcpserver/dispatch.go` contains the runtime: the `Dispatcher`
+impl, per-org mutex map, role lookup, tool catalog → ToolExecutor
+adapter, and the `OrgLister` impl. `main.go` constructs it when
+`PUX_LLM_API_KEY` is set and registers the three MCP tools. SIGTERM
+calls `TaskStore.Shutdown()` which cancels in-flight tasks (their
+status moves to `failed: "server shutdown"`).
 
 ## Vision (local ONNX, opt-in)
 

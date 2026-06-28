@@ -9,9 +9,10 @@
 
 Pux on `master` is one thing: an MCP server. It speaks standard Model
 Context Protocol to any MCP-capable client (Claude Desktop, Hermes, OpenClaw,
-continue.dev). It does not render a UI, run agents, schedule prompts, or
-orchestrate sub-agents — those concerns belong to the client on the other
-end of the wire.
+continue.dev). It does not render a UI, schedule prompts, or own
+persistence beyond the sandbox. It can optionally run a server-side agent
+loop (the **dispatch surface**, see Contract 8) when `PUX_LLM_API_KEY` is
+set — but the wire format stays standard MCP.
 
 The contract is the wire format. The kernel (this server) produces and
 consumes MCP JSON-RPC. The sandbox executes commands. The boundary is the
@@ -111,6 +112,9 @@ what's registered in `cmd/mcpserver/main.go::main` at boot.
 | `desktop_click` | `mcpserver/desktop_tool.go` | `adapters.BashExecutor` → `xdotool mousemove + click` | Clicks at pixel `(x, y)` (pick from desktop_screenshot's element.cx/cy). Optional `button`: 1=left (default), 2=middle, 3=right. |
 | `desktop_type` | `mcpserver/desktop_tool.go` | `adapters.BashExecutor` → `xdotool type` | Types text into focused window. Real X11 key events (works in any app). Optional `clear=true` (default) Ctrl+A + Delete first. |
 | `desktop_key` | `mcpserver/desktop_tool.go` | `adapters.BashExecutor` → `xdotool key` | Presses a key combo (`Return`, `ctrl+c`, `alt+Tab`, `Escape`, `super`). For text use desktop_type. |
+| `dispatch_task` | `mcpserver/dispatch_tool.go` | `agent.Loop` → Anthropic Messages API + same sandbox tools | **Opt-in via `PUX_LLM_API_KEY`.** Async — returns `{task_id, status:"pending"}` immediately, the org's CTO loop runs in a goroutine. |
+| `get_task_status` | `mcpserver/dispatch_tool.go` | `mcpserver.TaskStore` lookup | **Opt-in.** Polls `{task_id}` → `{status, result, error, round, transcript_tail, started_at, finished_at}`. |
+| `list_orgs` | `mcpserver/dispatch_tool.go` | `org.Loader.LoadAll` | **Opt-in.** Returns `{orgs: [{name, description, roles}], count}`. |
 
 All file paths are **inside the sandbox container**. The project is
 bind-mounted at `/sandbox/workspace/`. The model sees that path verbatim;
@@ -313,6 +317,86 @@ log (which is debug-level transport telemetry).
 
 ---
 
+## Contract 8: Dispatch surface (opt-in via `PUX_LLM_API_KEY`)
+
+When the env var is set at server boot, three additional tools land:
+`dispatch_task`, `get_task_status`, `list_orgs`. They expose the
+**server-side agent loop**: an external MCP client describes a task, the
+server runs its own LLM provider (Anthropic Messages API), and the
+configured "org" does the work.
+
+### Async lifecycle
+
+`dispatch_task` is **async** — it returns `{task_id, status: "pending"}`
+immediately. The server spawns a goroutine that:
+
+1. Loads the org (`<project>/orgs/<name>/org.toml`).
+2. Validates the CTO/role tool whitelists against the registered catalog.
+3. Builds a Plan/Act/Observe agent loop with the CTO's system prompt + the
+   CTO's whitelisted tools (plus `delegate_to` if the org declares roles).
+4. Runs the loop against Anthropic. Tool calls dispatch back through the
+   SAME registered MCP tools (an agent calling `bash` hits the same code
+   path as an external client calling `bash`).
+5. Updates the task store: `pending → running → complete | failed`.
+
+### Org layout
+
+```
+<project>/orgs/<name>/
+├── org.toml           # name + description + [cto] + [[roles]]
+├── cto.md             # CTO system prompt body
+└── roles/<role>.md    # one per [[roles]] entry
+```
+
+The shipped `orgs/_demo/` is the canonical example: a CTO + a `researcher`
+role. Per-org config knobs:
+
+| Field | Default | Notes |
+|-------|---------|-------|
+| `sandbox_image` | `""` (= `pux-sandbox:latest`) | Reserved for future per-org image override. |
+| `idle_shutdown_secs` | `300` | Reserved for future idle-shutdown wiring. |
+| `[cto].max_rounds` | `30` | Hard cap on Plan/Act/Observe rounds. |
+| `[cto].tools` | (required) | Whitelist of registered MCP tool names. Must include `delegate_to` when roles are declared. |
+| `[[roles]].tools` | (required) | Whitelist; MUST NOT include `delegate_to` (recursion guard, enforced). |
+
+### Per-org serialization
+
+One task per org at a time (filesystem races in the shared sandbox). The
+dispatch goroutine holds a per-org mutex for its duration; `dispatch_task`
+itself returns immediately. Cross-org dispatches run concurrently.
+
+### Cancellation
+
+`context.WithCancel` per task. SIGTERM calls `TaskStore.Shutdown()` which
+cancels every in-flight task — their status moves to `failed:
+"server shutdown"`. The provider honors the context; tools inherit it
+via `errgroup.WithContext`.
+
+### Multi-agent (`delegate_to`)
+
+The CTO's tool list can include `delegate_to(role, task)`. From the
+CTO's view it's synchronous — call it, get back the role's final
+response text. Internally the tool builds a child Loop with:
+
+- The role's system prompt (markdown body)
+- The role's tool whitelist FILTERED against the same catalog
+- No `delegate_to` (recursion guard, enforced at dispatch time)
+
+The child's tool chatter is invisible to the CTO; only the final text
+response is returned. The child can run any number of rounds within its
+own `max_rounds` budget.
+
+### Out of scope for v1 dispatch
+
+- Multi-provider (only Anthropic for v1; OpenAI/Ollama can come later
+  via `core.LLMProvider`).
+- DB persistence (in-memory `TaskStore`; tasks lost on restart).
+- SSE streaming to client (MCP transport is request/response; use
+  `transcript_tail` for progress).
+- Per-org sandbox isolation (orgs share the project sandbox).
+
+---
+
 ## Compliance rules
 
 1. **The server only speaks MCP.** No proprietary JSON-RPC methods, no
@@ -331,14 +415,16 @@ log (which is debug-level transport telemetry).
 
 ## What this contract does NOT cover (deferred to dev branch)
 
-- Sub-agent orchestration (CTO + employee delegation loop)
-- Desktop automation (xdotool, VNC)
-- Skills system (backbone SKILL.md + discoverable skills)
-- Org system (per-domain config overlays)
+- Multi-provider agent loop (only Anthropic on master; OpenAI/Ollama via `core.LLMProvider` later)
+- DB persistence for dispatched tasks (in-memory only)
+- SSE streaming to MCP client (use `transcript_tail` polling)
+- Per-org sandbox isolation (orgs share the project sandbox)
+- Desktop automation beyond xdotool pixel-coords (no VNC, no native window APIs)
+- Skills system beyond list/load (no progressive-disclosure triggers)
+- Org-level config overlays (no per-domain env / image overrides yet)
 - TUI (Ink), web UI (Vite), CLI (Cobra)
 - Self-evolving script toolkit (`make_script` / `edit_script`)
 - Transcript auditing, diligence evals, safeguard router
-- SSE event stream (the slim MVP is request/response, not streaming)
 
 Each of these will migrate back to `master` one feature at a time, after
 it's proven to fit the MCP contract cleanly. When that happens, this
