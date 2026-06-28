@@ -12,9 +12,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/auto-developer-orchestrator/backend/internal/core"
-	"github.com/auto-developer-orchestrator/backend/internal/git"
-	"github.com/auto-developer-orchestrator/backend/internal/hooks"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 )
 
@@ -152,55 +149,10 @@ func (f *FileOps) Glob(ctx context.Context, path string, pattern string) (string
 	return f.exec(ctx, fmt.Sprintf("find %s -name %s -type f -maxdepth 6 2>/dev/null | head -500", shQ(path), shQ(pattern)))
 }
 
-// ── Git adapter ──────────────────────────────────────────────────────
-
-// GitExecutor wraps *git.GitOps to implement hooks.GitExecutor.
-// A nil Git field makes Commit a no-op (for scheduler and other contexts
-// where git checkpoints are not needed).
-type GitExecutor struct {
-	Git     *git.GitOps
-	RepoDir string
-}
-
-func (g *GitExecutor) Commit(ctx context.Context, message string) error {
-	if g.Git == nil {
-		return nil // no-op
-	}
-	return g.Git.Commit(ctx, git.CommitOptions{
-		Dir:     g.RepoDir,
-		Message: message,
-	})
-}
-
-// ── Approval adapter ─────────────────────────────────────────────────
-
-// ApprovalHandler wraps *core.DecisionRegistry to implement hooks.ApprovalHandler.
-// This bridges the unified DecisionRegistry (HTTP Decision endpoint) to the
-// agent's approval hook.
-type ApprovalHandler struct {
-	Registry *core.DecisionRegistry
-}
-
-func (a *ApprovalHandler) RequestApproval(ctx context.Context, requestID string, data map[string]any) (hooks.ApprovalResponse, error) {
-	ch := a.Registry.Register(requestID)
-	defer a.Registry.Cleanup(requestID)
-
-	select {
-	case <-ctx.Done():
-		return hooks.ApprovalResponse{Approved: false, Feedback: "timeout"}, ctx.Err()
-	case resp := <-ch:
-		return hooks.ApprovalResponse{
-			Approved: resp.Action == "approve",
-			Feedback: resp.Value,
-		}, nil
-	}
-}
-
 // ── Compile-time interface checks ────────────────────────────────────
 //
 // These assertions ensure the adapters satisfy their target interfaces.
-// The actual interface types are imported where needed (tools/bash, tools/file,
-// hooks).
+// The actual interface types are imported where needed (tools/bash, tools/file).
 // To verify, build the consuming packages — the compiler checks the
 // assignment compatibility at their use sites.
 

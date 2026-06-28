@@ -296,24 +296,22 @@ func (s *SimpleSandboxOps) AbsPath(p string) string {
 // ReadTool implements core.Tool for reading files.
 type ReadTool struct {
 	ops     SandboxFileOps
-	media   MediaDescriber
 	tracker *FileReadTracker // optional: records content hash for edit validation
 }
 
-func NewReadTool(ops SandboxFileOps, media MediaDescriber) *ReadTool {
-	return &ReadTool{ops: ops, media: media}
+func NewReadTool(ops SandboxFileOps) *ReadTool {
+	return &ReadTool{ops: ops}
 }
 
-func NewReadToolWithTracker(ops SandboxFileOps, media MediaDescriber, tracker *FileReadTracker) *ReadTool {
-	return &ReadTool{ops: ops, media: media, tracker: tracker}
+func NewReadToolWithTracker(ops SandboxFileOps, tracker *FileReadTracker) *ReadTool {
+	return &ReadTool{ops: ops, tracker: tracker}
 }
 
 func (t *ReadTool) Name() string        { return "file_read" }
 func (t *ReadTool) Description() string {
 	return fmt.Sprintf(
-		"Read file contents. Supports text files (truncated to %d lines or %s), "+
-			"images (png/jpg/gif/webp), documents (pdf/ppt/pptx), and audio (wav/mp3/flac). "+
-			"Use offset/limit for large text files. "+
+		"Read file contents. Truncated to %d lines or %s. "+
+			"Use offset/limit for large files. "+
 			"ALWAYS prefer this over bash cat/head/tail — file_read is faster, handles truncation, and returns structured output.",
 		truncate.FileMaxLines, truncate.FormatSize(truncate.FileMaxBytes),
 	)
@@ -335,12 +333,6 @@ func (t *ReadTool) Execute(ctx context.Context, args map[string]any) (any, error
 	path, _ := args["file_path"].(string)
 	if path == "" {
 		return nil, core.NewToolError("file_read", "missing required parameter 'file_path'")
-	}
-
-	// Check if this is a multimodal file type (image, audio, document)
-	ext := filepath.Ext(path)
-	if toolName, ok := isMultimodalExt(ext); ok {
-		return t.readMultimodal(ctx, path, toolName)
 	}
 
 	// Parse optional offset (1-indexed) and limit
@@ -406,32 +398,6 @@ func (t *ReadTool) Execute(ctx context.Context, args map[string]any) (any, error
 		"total_lines": totalLines,
 		"start_line":  offset,
 		"shown_lines": tr.OutputLines,
-	}, nil
-}
-
-// readMultimodal handles non-text files (images, audio, documents) via the MediaDescriber.
-func (t *ReadTool) readMultimodal(ctx context.Context, path string, toolName string) (any, error) {
-	if t.media == nil {
-		ext := filepath.Ext(path)
-		return nil, core.NewToolError("file_read",
-			fmt.Sprintf("cannot read %s file: media analysis not available", ext))
-	}
-
-	// Resolve to absolute path for the media describer.
-	// Must remap /sandbox/workspace/ paths to the host project directory,
-	// otherwise the media describer tries to read from a Docker-only path.
-	absPath := t.ops.AbsPath(path)
-
-	desc, err := t.media.Describe(ctx, absPath, toolName)
-	if err != nil {
-		return nil, core.NewToolError("file_read",
-			fmt.Sprintf("failed to analyze %s file: %v", filepath.Ext(path), err))
-	}
-
-	return map[string]any{
-		"content": desc,
-		"path":    path,
-		"media":   true,
 	}, nil
 }
 

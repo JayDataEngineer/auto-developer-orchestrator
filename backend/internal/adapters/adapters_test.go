@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/auto-developer-orchestrator/backend/internal/core"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
 )
 
@@ -42,14 +41,6 @@ func TestShQ(t *testing.T) {
 				t.Errorf("shQ(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
-	}
-}
-
-func TestGitExecutor_Commit_Nil(t *testing.T) {
-	g := &GitExecutor{Git: nil}
-	err := g.Commit(context.Background(), "message")
-	if err != nil {
-		t.Fatalf("expected nil error for nil Git, got %v", err)
 	}
 }
 
@@ -98,18 +89,6 @@ func TestFileOps_Glob_NilManager(t *testing.T) {
 	_, err := f.Glob(context.Background(), ".", "*.go")
 	if err == nil {
 		t.Fatal("expected error for nil manager")
-	}
-}
-
-func TestApprovalHandler_RequestApproval_CtxCancelled(t *testing.T) {
-	h := &ApprovalHandler{Registry: core.GlobalDecisions}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := h.RequestApproval(ctx, "req-1", nil)
-	if err == nil {
-		t.Fatal("expected error for cancelled context")
 	}
 }
 

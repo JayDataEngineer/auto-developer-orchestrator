@@ -122,7 +122,7 @@ func main() {
 
 	srv := mcpserver.New("pux-mcp", version, auditLogger)
 	srv.RegisterTool(bash.New(bashExec))
-	srv.RegisterTool(file.NewReadTool(fileOps, nil))
+	srv.RegisterTool(file.NewReadTool(fileOps))
 	srv.RegisterTool(file.NewWriteTool(fileOps))
 	srv.RegisterTool(file.NewEditTool(fileOps))
 	srv.RegisterTool(file.NewGrepTool(fileOps))
