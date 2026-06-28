@@ -40,8 +40,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/auto-developer-orchestrator/backend/internal/adapters"
+	"github.com/auto-developer-orchestrator/backend/internal/agent"
 	"github.com/auto-developer-orchestrator/backend/internal/audit"
 	"github.com/auto-developer-orchestrator/backend/internal/mcpserver"
+	"github.com/auto-developer-orchestrator/backend/internal/org"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
@@ -138,6 +140,36 @@ func main() {
 	mcpserver.RegisterBrowserTools(srv, bashExec, mcpserver.BrowserToolConfig{})
 	mcpserver.RegisterDesktopTools(srv, bashExec, mcpserver.DesktopToolConfig{})
 
+	// Dispatch surface (org → agent loop) is opt-in via PUX_LLM_API_KEY.
+	// When enabled, three new MCP tools land: dispatch_task, get_task_status,
+	// list_orgs. The runtime re-uses the sandbox tools registered above as
+	// the agent's in-loop catalog.
+	var taskStore *mcpserver.TaskStore
+	if apiKey := os.Getenv("PUX_LLM_API_KEY"); apiKey != "" {
+		provider, err := agent.NewProvider(agent.ProviderConfig{
+			APIKey:    apiKey,
+			BaseURL:   os.Getenv("PUX_LLM_BASE_URL"),
+			Model:     os.Getenv("PUX_LLM_MODEL"),
+			MaxTokens: envOrZero("PUX_LLM_MAX_TOKENS"),
+		})
+		if err != nil {
+			logger.Fatal("dispatch provider init failed", zap.Error(err))
+		}
+		taskStore = mcpserver.NewTaskStore()
+		loader := org.NewLoader(*projectPath)
+		rt := newDispatchRuntime(provider, loader, taskStore, srv.Tools(), logger)
+
+		srv.RegisterTool(mcpserver.NewDispatchTool(taskStore, rt))
+		srv.RegisterTool(mcpserver.NewTaskStatusTool(taskStore))
+		srv.RegisterTool(mcpserver.NewListOrgsTool(&orgLister{loader: loader}))
+
+		logger.Info("dispatch surface enabled",
+			zap.String("model", provider.ModelName()),
+			zap.String("orgs_root", *projectPath+"/orgs"))
+	} else {
+		logger.Info("dispatch surface disabled (set PUX_LLM_API_KEY to enable)")
+	}
+
 	// 5. HTTP server.
 	httpSrv := &http.Server{
 		Addr:              *addr,
@@ -148,7 +180,7 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// 6. Graceful shutdown. Sequence: signal → destroy sandbox → stop HTTP → exit.
+	// 6. Graceful shutdown. Sequence: signal → cancel tasks → destroy sandbox → stop HTTP → exit.
 	// Sandbox destroy happens BEFORE HTTP shutdown so main() doesn't race-exit
 	// and orphan the goroutine mid-destroy. The done channel blocks main until
 	// the teardown completes.
@@ -160,9 +192,15 @@ func main() {
 		sig := <-shutdown
 		logger.Info("shutdown signal received", zap.String("signal", sig.String()))
 
-		// 1. Destroy the sandbox first (slow operation). HTTP server still
-		//    serves so in-flight requests get answers — but the sandbox is
-		//    gone, so they'll fail. That's fine; SIGTERM is a hard stop.
+		// 1. Cancel in-flight dispatch tasks. Cheap; gives goroutines a chance
+		//    to surface "server shutdown" status before the sandbox dies.
+		if taskStore != nil {
+			taskStore.Shutdown()
+		}
+
+		// 2. Destroy the sandbox (slow operation). HTTP server still serves so
+		//    in-flight requests get answers — but the sandbox is gone, so
+		//    they'll fail. That's fine; SIGTERM is a hard stop.
 		if !*keepAlive {
 			sbCtx, sbCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := mgr.DestroySandbox(sbCtx, sb.ID); err != nil {
@@ -173,7 +211,7 @@ func main() {
 			sbCancel()
 		}
 
-		// 2. Stop the HTTP server.
+		// 3. Stop the HTTP server.
 		httpCtx, httpCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := httpSrv.Shutdown(httpCtx); err != nil {
 			logger.Warn("http shutdown errored (non-fatal)", zap.Error(err))
@@ -196,4 +234,30 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envOrZero returns the integer value of the named env var, or 0 if unset /
+// unparseable. Used for optional knobs like PUX_LLM_MAX_TOKENS where zero
+// means "use the provider default".
+func envOrZero(key string) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return 0
+	}
+	n, err := atoiPositive(v)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+func atoiPositive(s string) (int, error) {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("not a positive integer: %q", s)
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, nil
 }
