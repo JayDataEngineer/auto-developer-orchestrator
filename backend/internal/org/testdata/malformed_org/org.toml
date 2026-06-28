@@ -1,0 +1,5 @@
+name = "malformed"
+description = "fixture: TOML won't parse"
+
+[cto
+prompt = "cto.md"

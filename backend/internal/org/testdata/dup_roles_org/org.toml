@@ -1,0 +1,17 @@
+name = "dup_roles"
+description = "fixture: same role name appears twice"
+
+[cto]
+prompt = "cto.md"
+max_rounds = 5
+tools = ["bash"]
+
+[[roles]]
+name = "worker"
+prompt = "roles/worker.md"
+tools = ["bash"]
+
+[[roles]]
+name = "worker"
+prompt = "roles/worker.md"
+tools = ["bash"]

@@ -48,6 +48,10 @@ data/
 # Org runtime data (5G+ of model weights, venvs, parsed dumps, memos).
 # Org *templates* ship separately when the org-dispatch MCP surface lands.
 orgs/
+# Shipped org templates live under orgs/_demo/, orgs/<template>/ — these
+# ARE source. The negation un-ignores them while keeping runtime org
+# directories (which contain .pux/models/, venvs, etc) out of git.
+!orgs/_demo/
 
 # Org-scoped runtime artifacts (article bodies, backtest outputs, parsed
 # chat dumps, memos, etc.) — written by the agent during runs, not source.

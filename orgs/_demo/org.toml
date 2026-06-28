@@ -1,0 +1,43 @@
+# _demo org — minimal shipped example for the dispatch MCP surface.
+#
+# This org exists so list_orgs has something to show on a fresh install
+# and so smoke_mcp.py can exercise dispatch_task → get_task_status without
+# a real operator-supplied org. Copy this directory to orgs/<your-name>/
+# to start a new org.
+
+name = "_demo"
+description = "Minimal example org. CTO delegates file research to a 'researcher' role."
+
+# Use the default sandbox image (pux-sandbox:latest). Override per org when
+# you need extra deps (e.g. sandbox_image = "pux-sandbox:manim").
+sandbox_image = ""
+idle_shutdown_secs = 300
+
+[cto]
+prompt = "cto.md"
+max_rounds = 30
+tools = [
+    "bash",
+    "file_read",
+    "file_write",
+    "file_edit",
+    "file_glob",
+    "file_grep",
+    "python",
+    "delegate_to",
+]
+model = ""  # empty = server default (PUX_LLM_MODEL or claude-sonnet-4-6)
+
+# Roles the CTO can delegate to via delegate_to. Each role gets its own
+# agent loop with its own system prompt + tool whitelist.
+[[roles]]
+name = "researcher"
+prompt = "roles/researcher.md"
+max_rounds = 20
+tools = [
+    "bash",
+    "file_read",
+    "file_grep",
+    "file_glob",
+    "python",
+]
