@@ -2,7 +2,6 @@ name = "valid"
 description = "fixture: well-formed org for happy-path tests"
 
 sandbox_image = "pux-sandbox:latest"
-idle_shutdown_secs = 60
 
 [cto]
 prompt = "cto.md"

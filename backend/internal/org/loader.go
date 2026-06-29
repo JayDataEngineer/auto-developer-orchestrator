@@ -88,13 +88,12 @@ func LoadOne(orgDir string) (*Org, error) {
 	}
 
 	org := &Org{
-		Name:             cfg.Name,
-		Description:      cfg.Description,
-		Dir:              orgDir,
-		SandboxImage:     cfg.SandboxImage,
-		SandboxEnv:       cfg.SandboxEnv,
-		IdleShutdownSecs: cfg.IdleShutdownSecs,
-		Roles:            make(map[string]Role),
+		Name:         cfg.Name,
+		Description:  cfg.Description,
+		Dir:          orgDir,
+		SandboxImage: cfg.SandboxImage,
+		SandboxEnv:   cfg.SandboxEnv,
+		Roles:        make(map[string]Role),
 	}
 
 	// CTO is required.
@@ -154,13 +153,12 @@ func readPromptFile(orgDir, rel string) (string, error) {
 // tomlConfig mirrors org.toml. Field names use snake_case via the toml tag
 // to match the human-written format. Unknown fields are ignored.
 type tomlConfig struct {
-	Name             string         `toml:"name"`
-	Description      string         `toml:"description"`
-	SandboxImage     string         `toml:"sandbox_image"`
-	SandboxEnv       []string       `toml:"sandbox_env"`
-	IdleShutdownSecs int            `toml:"idle_shutdown_secs"`
-	CTO              tomlRoleBlock  `toml:"cto"`
-	Roles            []tomlRoleBlock `toml:"roles"`
+	Name         string          `toml:"name"`
+	Description  string          `toml:"description"`
+	SandboxImage string          `toml:"sandbox_image"`
+	SandboxEnv   []string        `toml:"sandbox_env"`
+	CTO          tomlRoleBlock   `toml:"cto"`
+	Roles        []tomlRoleBlock `toml:"roles"`
 }
 
 // tomlRoleBlock is the shape of both [cto] and [[roles]] entries.

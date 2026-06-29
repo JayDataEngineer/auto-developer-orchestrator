@@ -36,9 +36,6 @@ func TestLoadOne_ValidOrg(t *testing.T) {
 	if org.SandboxImage != "pux-sandbox:latest" {
 		t.Errorf("SandboxImage = %q", org.SandboxImage)
 	}
-	if org.IdleShutdownSecs != 60 {
-		t.Errorf("IdleShutdownSecs = %d, want 60", org.IdleShutdownSecs)
-	}
 
 	// CTO loads from cto.md with the configured tools + round budget.
 	if org.CTO.Name != "cto" {

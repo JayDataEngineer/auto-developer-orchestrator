@@ -60,14 +60,6 @@ type SandboxOptions struct {
 	// named workspace volume). Empty = only the default project/policies/tmp/persist
 	// binds apply.
 	Volumes []SandboxVolume
-	// IdleShutdownSecs controls the watchdog's idle-teardown threshold for
-	// this sandbox. 0 = never auto-shutdown (preserves pre-PR4 behavior).
-	// Non-zero = if no tool execution touches the sandbox for this many
-	// seconds, the watchdog calls ShutdownByProjectLabel.
-	//
-	// Plumbed in from org.toml [sandbox].idle_shutdown_secs at sandbox
-	// creation. Default 0 (off).
-	IdleShutdownSecs int
 }
 
 // SandboxVolume mirrors one row of pux.yaml's sandbox.volumes: block. The
@@ -134,12 +126,8 @@ type Sandbox struct {
 	VNCBackend     VNCBackend      `json:"vnc_backend,omitempty"`
 	// LastActivityAt is updated on every tool execution that touches this
 	// sandbox (ExecInSandbox, CopyToSandbox, PipInstall, WriteEnvFile).
-	// The watchdog goroutine reads it to decide idle-teardown.
 	// Zero value = treat as CreatedAt (sandbox just booted, not idle yet).
 	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
-	// IdleShutdownSecs mirrors SandboxOptions.IdleShutdownSecs. 0 = off.
-	// Set once at CreateSandbox and unchanged for the sandbox's lifetime.
-	IdleShutdownSecs int `json:"idle_shutdown_secs,omitempty"`
 }
 
 // SandboxStatus is the current state of a sandbox
@@ -155,12 +143,12 @@ const (
 // DesktopSession represents an active desktop/browser mode session
 type DesktopSession struct {
 	SandboxID  string      `json:"sandbox_id"`
-	Mode       SandboxMode `json:"mode"`           // "browser" or "desktop"
-	DisplayNum int         `json:"display_num"`    // :1, :2, etc. (desktop only)
-	VNCPort    int         `json:"vnc_port"`       // 5901, 5902, etc. (desktop only)
-	CDPPort    int         `json:"cdp_port"`       // 9222, 9223, etc.
-	NoVNCPort  int         `json:"novnc_port"`     // 6081/8444, web viewer port
-	ViewerURL  string      `json:"viewer_url"`     // URL for the desktop viewer popup
+	Mode       SandboxMode `json:"mode"`        // "browser" or "desktop"
+	DisplayNum int         `json:"display_num"` // :1, :2, etc. (desktop only)
+	VNCPort    int         `json:"vnc_port"`    // 5901, 5902, etc. (desktop only)
+	CDPPort    int         `json:"cdp_port"`    // 9222, 9223, etc.
+	NoVNCPort  int         `json:"novnc_port"`  // 6081/8444, web viewer port
+	ViewerURL  string      `json:"viewer_url"`  // URL for the desktop viewer popup
 	IsActive   bool        `json:"is_active"`
 	StartedAt  time.Time   `json:"started_at"`
 	Backend    VNCBackend  `json:"backend,omitempty"` // "standard" or "kasm"

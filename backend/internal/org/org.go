@@ -31,11 +31,10 @@ type Org struct {
 	Description string
 	Dir         string // absolute path to the org directory
 
-	SandboxImage     string   // empty = default pux-sandbox:latest
-	SandboxEnv       []string // KEY=VALUE entries
-	IdleShutdownSecs int      // 0 = no idle shutdown
+	SandboxImage string   // empty = default pux-sandbox:latest
+	SandboxEnv   []string // KEY=VALUE entries
 
-	CTO  Role
+	CTO   Role
 	Roles map[string]Role // keyed by role.Name
 
 	LoadedAt time.Time // for cache invalidation by directory mtime
@@ -44,11 +43,11 @@ type Org struct {
 // Role is a prompt + tool whitelist + round budget. The CTO is a Role too
 // (Org.CTO is populated from [cto] in the TOML).
 type Role struct {
-	Name       string
-	Prompt     string // markdown body
-	MaxRounds  int    // 0 = inherit server default
-	Tools      []string
-	Model      string // empty = inherit server default
+	Name      string
+	Prompt    string // markdown body
+	MaxRounds int    // 0 = inherit server default
+	Tools     []string
+	Model     string // empty = inherit server default
 }
 
 // Validate checks invariants after loading. Returns a descriptive error

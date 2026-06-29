@@ -53,7 +53,10 @@ func TestLoadDemoOrgSmoke(t *testing.T) {
 	}
 	var sawDemo bool
 	for _, o := range all {
-		if o.Name == "_demo" { sawDemo = true; break }
+		if o.Name == "_demo" {
+			sawDemo = true
+			break
+		}
 	}
 	if !sawDemo {
 		t.Errorf("LoadAll did not return _demo: %v", all)
@@ -61,6 +64,10 @@ func TestLoadDemoOrgSmoke(t *testing.T) {
 }
 
 func contains(s []string, want string) bool {
-	for _, x := range s { if x == want { return true } }
+	for _, x := range s {
+		if x == want {
+			return true
+		}
+	}
 	return false
 }

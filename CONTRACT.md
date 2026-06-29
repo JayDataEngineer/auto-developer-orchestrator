@@ -353,8 +353,7 @@ role. Per-org config knobs:
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `sandbox_image` | `""` (= `pux-sandbox:latest`) | Reserved for future per-org image override. |
-| `idle_shutdown_secs` | `300` | Reserved for future idle-shutdown wiring. |
+| `sandbox_image` | `""` (= `pux-sandbox:latest`) | Per-org specialized sandbox image override. |
 | `[cto].max_rounds` | `30` | Hard cap on Plan/Act/Observe rounds. |
 | `[cto].tools` | (required) | Whitelist of registered MCP tool names. Must include `delegate_to` when roles are declared. |
 | `[[roles]].tools` | (required) | Whitelist; MUST NOT include `delegate_to` (recursion guard, enforced). |

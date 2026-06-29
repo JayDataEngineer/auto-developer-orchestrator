@@ -177,13 +177,10 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	// colons that corrupt Docker's `-v host:container[:mode]` parsing — for
 	// ssh://user@host/path the container path `/sandbox/workspace` ends up in
 	// the mode slot and Docker returns "invalid mode: /sandbox/workspace".
-	// SSH projects are designed to run via SSHExecutor on the host, not inside
-	// a local Docker sandbox, so this combination is unsupported.
 	if parsed, perr := url.Parse(projectPath); perr == nil && parsed.Scheme != "" {
 		m.mu.Unlock()
 		return nil, newValidationError(
-			"sandboxes require a local filesystem path; received %s URL %q. "+
-				"Open a local project in the sidebar, or for remote projects use the host agent loop (SSHExecutor) instead of a sandbox.",
+			"sandboxes require a local filesystem path; received %s URL %q",
 			parsed.Scheme, projectPath,
 		)
 	}
@@ -286,8 +283,8 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		binds = append(binds, bind)
 	}
 	hostConfig := &container.HostConfig{
-		Binds:     binds,
-		Resources: resources,
+		Binds:      binds,
+		Resources:  resources,
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 	netConfig := &network.NetworkingConfig{
@@ -310,8 +307,8 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	// Create the container
 	createResp, err := m.dockerClient.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
-			Image:  image,
-			Env:    envVars,
+			Image: image,
+			Env:   envVars,
 			Labels: map[string]string{
 				"openshell.policy":       policy,
 				"openshell.sandbox-id":   opts.ID,
@@ -320,7 +317,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		},
 		HostConfig:       hostConfig,
 		NetworkingConfig: netConfig,
-		Name:            containerName,
+		Name:             containerName,
 	})
 	if err != nil {
 		// Container name conflict — remove stale stopped container and retry
@@ -329,8 +326,8 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 			m.dockerClient.ContainerRemove(ctx, containerName, client.ContainerRemoveOptions{Force: true})
 			createResp, err = m.dockerClient.ContainerCreate(ctx, client.ContainerCreateOptions{
 				Config: &container.Config{
-					Image:  image,
-					Env:    envVars,
+					Image: image,
+					Env:   envVars,
 					Labels: map[string]string{
 						"openshell.policy":       policy,
 						"openshell.sandbox-id":   opts.ID,
@@ -339,7 +336,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 				},
 				HostConfig:       hostConfig,
 				NetworkingConfig: netConfig,
-				Name:            containerName,
+				Name:             containerName,
 			})
 			if err != nil {
 				m.mu.Unlock()
@@ -366,16 +363,15 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	m.restorePersistedState(restoreCtx, containerName)
 
 	sandbox := &Sandbox{
-		ID:               opts.ID,
-		ContainerID:      createResp.ID,
-		ProjectPath:      projectPath,
-		Policy:           policy,
-		Mode:             ModeCLI,
-		Status:           StatusRunning,
-		CreatedAt:        time.Now(),
-		Tier:             opts.Tier,
-		LastActivityAt:   time.Now(),
-		IdleShutdownSecs: opts.IdleShutdownSecs,
+		ID:             opts.ID,
+		ContainerID:    createResp.ID,
+		ProjectPath:    projectPath,
+		Policy:         policy,
+		Mode:           ModeCLI,
+		Status:         StatusRunning,
+		CreatedAt:      time.Now(),
+		Tier:           opts.Tier,
+		LastActivityAt: time.Now(),
 	}
 
 	m.sandboxes[opts.ID] = sandbox
@@ -575,8 +571,8 @@ func (m *Manager) ExecInSandbox(ctx context.Context, id string, cmd []string) (s
 }
 
 // touchLastActivity bumps the sandbox's LastActivityAt timestamp to now.
-// Called after every successful tool execution so the idle-shutdown
-// watchdog sees fresh activity. No-op if the sandbox isn't tracked.
+// Called after every successful tool execution so external observers
+// reading the Sandbox see fresh activity. No-op if the sandbox isn't tracked.
 //
 // The write happens under the write lock; the read in ExecInSandbox was
 // under RLock, so we re-acquire briefly here. Cost is negligible — this
@@ -708,343 +704,6 @@ func (m *Manager) WriteEnvFile(ctx context.Context, sandboxID string, envVars ma
 // envVarRegex matches ${VAR_NAME} patterns in env var values.
 var envVarRegex = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
 
-// verifyContainerExists checks that the Docker container for a sandbox is actually
-// running. Removes stale entries from the sandbox map if the container is gone.
-func (m *Manager) verifyContainerExists(sb *Sandbox) bool {
-	if m.dockerClient == nil {
-		return true // no docker — assume it exists
-	}
-	ctx := context.Background()
-	containerName := "orchestrator-sandbox-" + sb.ID
-	if _, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{}); err != nil {
-		// Container gone — remove stale entry
-		m.mu.Lock()
-		delete(m.sandboxes, sb.ID)
-		m.mu.Unlock()
-		return false
-	}
-	return true
-}
-
-// FindSandboxByProject finds a sandbox by project path basename or project path.
-// Returns the first running sandbox whose ProjectPath ends with name, or whose ID matches name.
-// Verifies the Docker container is actually running before returning.
-// Prioritizes exact path matches over fuzzy basename matches to avoid routing collisions.
-// If a stopped container is found, it is started and recovered automatically.
-func (m *Manager) FindSandboxByProject(name string) *Sandbox {
-	m.mu.RLock()
-
-	// Phase 1: Exact match — by ID or full project path
-	if sb, ok := m.sandboxes[name]; ok {
-		m.mu.RUnlock()
-		if m.verifyContainerExists(sb) {
-			return sb
-		}
-		m.mu.RLock()
-	}
-	for _, sb := range m.sandboxes {
-		if sb.Status != StatusRunning {
-			continue
-		}
-		if sb.ProjectPath == name {
-			m.mu.RUnlock()
-			if m.verifyContainerExists(sb) {
-				return sb
-			}
-			m.mu.RLock()
-		}
-	}
-
-	// Phase 2: Fuzzy match — by basename or suffix (less reliable)
-	var candidates []*Sandbox
-	for _, sb := range m.sandboxes {
-		if sb.Status != StatusRunning {
-			continue
-		}
-		if filepath.Base(sb.ProjectPath) == name || strings.HasSuffix(sb.ProjectPath, "/"+name) {
-			// Skip sandboxes whose project path doesn't actually match —
-			// avoids routing to a sandbox with different bind mounts.
-			if sb.ProjectPath != name {
-				continue
-			}
-			candidates = append(candidates, sb)
-		}
-	}
-	m.mu.RUnlock()
-
-	// Verify the Docker container actually exists for each candidate
-	for _, sb := range candidates {
-		if m.verifyContainerExists(sb) {
-			return sb
-		}
-	}
-
-	// Phase 1.5: discover by openshell.project-path label.
-	// Catches containers started outside Pux (e.g. `docker compose up` via
-	// org bootstrap.sh) that carry the same label Pux uses internally on
-	// its own containers. Without this, Pux silently spins up a sibling
-	// container instead of adopting the running one — wasteful and a
-	// classic source of "agent writes to container A, user reads from
-	// container B" file-visibility bugs.
-	if m.dockerClient != nil {
-		if sb := m.discoverByProjectLabel(name); sb != nil {
-			return sb
-		}
-	}
-
-	// No in-memory match — try to find a stopped Docker container by project name.
-	// Try both the full path (legacy, when req.Project was an absolute path) and
-	// the basename (current, when ID is derived from filepath.Base).
-	if m.dockerClient != nil {
-		ctx := context.Background()
-		candidates := []string{name}
-		if base := filepath.Base(name); base != name {
-			candidates = append(candidates, base)
-		}
-		for _, candidate := range candidates {
-			containerName := "orchestrator-sandbox-" + candidate
-			result, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
-			if err != nil {
-				continue
-			}
-			if result.Container.State == nil || result.Container.State.Running {
-				continue
-			}
-			m.logger.Info("found stopped sandbox container, restarting", zap.String("name", containerName))
-			if _, err := m.dockerClient.ContainerStart(ctx, result.Container.ID, client.ContainerStartOptions{}); err != nil {
-				m.logger.Warn("failed to start stopped container", zap.Error(err))
-				return nil
-			}
-			// Recover into in-memory map using the container's actual sandbox-id label
-			sandboxID := candidate
-			projectPath := ""
-			policy := "developer"
-			if result.Container.Config != nil && result.Container.Config.Labels != nil {
-				if id := result.Container.Config.Labels["openshell.sandbox-id"]; id != "" {
-					sandboxID = id
-				}
-				projectPath = result.Container.Config.Labels["openshell.project-path"]
-				if p := result.Container.Config.Labels["openshell.policy"]; p != "" {
-					policy = p
-				}
-			}
-			// Validate: the restarted sandbox's mount must match the requested project.
-			// A mismatch means an old container with different bind mounts — using it
-			// would cause file visibility bugs (CTO and sub-agents write to different dirs).
-			if projectPath != name {
-				m.logger.Warn("stopped sandbox has different project path, discarding",
-					zap.String("container", containerName),
-					zap.String("sandbox_project", projectPath),
-					zap.String("requested", name))
-				// Stop the container we just started — CreateSandbox will make a fresh one
-				timeout := 5
-				_, _ = m.dockerClient.ContainerStop(ctx, result.Container.ID, client.ContainerStopOptions{Timeout: &timeout})
-				return nil
-			}
-			sb := &Sandbox{
-				ID:          sandboxID,
-				ContainerID: result.Container.ID,
-				ProjectPath: projectPath,
-				Policy:      policy,
-				Mode:        ModeCLI,
-				Status:      StatusRunning,
-				CreatedAt:   time.Now(),
-			}
-			m.mu.Lock()
-			m.sandboxes[sandboxID] = sb
-			m.mu.Unlock()
-			return sb
-		}
-	}
-
-	return nil
-}
-
-// discoverByProjectLabel queries Docker for running containers carrying
-// openshell.project-path=<projectPath> that aren't already tracked in
-// m.sandboxes. Returns the first match adopted into the in-memory map.
-//
-// Contract: org bootstrap.sh exports OPENSHELL_PROJECT_PATH so compose
-// can attach both the label AND the matching bind mount
-// (${OPENSHELL_PROJECT_PATH}:/sandbox/workspace). The label is the
-// discovery signal; the matching mount is what makes the adoption safe
-// — the bash executor assumes /sandbox/workspace maps to ProjectPath,
-// so a container with a different mount would silently break file ops.
-//
-// Containers created by Pux already carry this label, but Phase 1 of
-// FindSandboxByProject catches them via the in-memory map first. We
-// reach here only when no in-memory match exists, so the discovery
-// exclusively catches externally-created (compose, manual docker run)
-// containers.
-func (m *Manager) discoverByProjectLabel(projectPath string) *Sandbox {
-	if projectPath == "" || m.dockerClient == nil {
-		return nil
-	}
-	ctx := context.Background()
-	result, err := m.dockerClient.ContainerList(ctx, client.ContainerListOptions{
-		Filters: client.Filters{
-			"label": {"openshell.project-path=" + projectPath: true},
-		},
-	})
-	if err != nil {
-		m.logger.Warn("container discovery by label failed",
-			zap.String("project", projectPath),
-			zap.Error(err))
-		return nil
-	}
-	for _, c := range result.Items {
-		// Skip already-tracked sandboxes — Phase 1 should have caught these,
-		// but State transitions can race. Re-checking under the read lock is cheap.
-		existingID := c.Labels["openshell.sandbox-id"]
-		m.mu.RLock()
-		_, inMem := m.sandboxes[existingID]
-		m.mu.RUnlock()
-		if inMem {
-			continue
-		}
-		sb := adoptContainerAsSandbox(c, projectPath)
-		if sb == nil {
-			continue
-		}
-		m.mu.Lock()
-		m.sandboxes[sb.ID] = sb
-		m.mu.Unlock()
-		m.logger.Info("adopted external container by project-path label",
-			zap.String("sandbox_id", sb.ID),
-			zap.String("container_id", c.ID),
-			zap.String("project", projectPath),
-			zap.String("image", c.Image))
-		return sb
-	}
-	return nil
-}
-
-// ShutdownByProjectLabel tears down every container carrying
-// openshell.project-path=<projectPath>. Returns the list of removed
-// container IDs (short hashes — useful for SSE payloads + audit logs).
-//
-// Two call sites:
-//   - shutdown_container CTO tool (agent explicitly ends a task)
-//   - watchdog goroutine (idle_shutdown_secs elapsed with no tool calls)
-//
-// The label query is the same one discoverByProjectLabel uses, so this
-// catches BOTH Pux-created containers AND externally-created compose
-// containers — as long as bootstrap.sh exported OPENSHELL_PROJECT_PATH
-// (the bootstrap template enforces this; the org audit test rejects
-// orgs whose bootstrap forgets it).
-//
-// Containers without the label (e.g. sibling containers from other
-// projects on the same host) are NEVER touched. The label is the
-// authorization boundary.
-//
-// Force=true on ContainerRemove so a hung container doesn't block the
-// teardown — we're committed to bringing it down. Stop timeout is 10s,
-// matching DestroySandbox's grace period.
-func (m *Manager) ShutdownByProjectLabel(ctx context.Context, projectPath string) ([]string, error) {
-	if projectPath == "" {
-		return nil, fmt.Errorf("projectPath is required")
-	}
-	if m.dockerClient == nil {
-		return nil, fmt.Errorf("docker client not initialized")
-	}
-
-	result, err := m.dockerClient.ContainerList(ctx, client.ContainerListOptions{
-		Filters: client.Filters{
-			"label": {"openshell.project-path=" + projectPath: true},
-		},
-		All: true, // include stopped containers so we clean up half-dead state too
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list containers: %w", err)
-	}
-
-	removed := []string{}
-	timeout := 10
-	for _, c := range result.Items {
-		containerID := c.ID
-		short := containerID
-		if len(short) > 12 {
-			short = short[:12]
-		}
-
-		if _, err := m.dockerClient.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
-			m.logger.Warn("shutdown: container stop failed",
-				zap.String("container", short),
-				zap.String("project", projectPath),
-				zap.Error(err))
-			// Keep going — ContainerRemove with Force=true will catch it.
-		}
-		if _, err := m.dockerClient.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true}); err != nil {
-			m.logger.Warn("shutdown: container remove failed",
-				zap.String("container", short),
-				zap.String("project", projectPath),
-				zap.Error(err))
-			continue
-		}
-		removed = append(removed, short)
-
-		// Drop any in-memory sandbox state for this container so the next
-		// CreateSandbox starts clean instead of re-adopting a ghost.
-		if sandboxID := c.Labels["openshell.sandbox-id"]; sandboxID != "" {
-			m.mu.Lock()
-			if _, ok := m.sandboxes[sandboxID]; ok {
-				delete(m.sandboxes, sandboxID)
-				m.logger.Info("shutdown: dropped in-memory sandbox state",
-					zap.String("sandbox_id", sandboxID),
-					zap.String("container", short))
-			}
-			m.mu.Unlock()
-		}
-	}
-
-	m.logger.Info("shutdown: containers removed by project-path label",
-		zap.String("project", projectPath),
-		zap.Int("count", len(removed)),
-		zap.Strings("containers", removed))
-	return removed, nil
-}
-
-// adoptContainerAsSandbox constructs a *Sandbox from a Docker container
-// summary, deriving ID/policy from labels with sensible fallbacks.
-// Pure function — extracted so the adoption contract can be unit-tested
-// without spinning up Docker.
-//
-// Returns nil if the container lacks the minimum signal (project-path
-// label must match what we queried by).
-func adoptContainerAsSandbox(c container.Summary, projectPath string) *Sandbox {
-	if c.Labels == nil {
-		return nil
-	}
-	if c.Labels["openshell.project-path"] != projectPath {
-		return nil
-	}
-	sandboxID := c.Labels["openshell.sandbox-id"]
-	if sandboxID == "" {
-		// Compose containers may not carry this label; fall back to name
-		// (preferred — human-readable) or container ID short hash.
-		if len(c.Names) > 0 {
-			sandboxID = strings.TrimPrefix(c.Names[0], "/")
-		} else if len(c.ID) >= 12 {
-			sandboxID = c.ID[:12]
-		} else {
-			sandboxID = c.ID
-		}
-	}
-	policy := c.Labels["openshell.policy"]
-	if policy == "" {
-		policy = "developer"
-	}
-	return &Sandbox{
-		ID:          sandboxID,
-		ContainerID: c.ID,
-		ProjectPath: projectPath,
-		Policy:      policy,
-		Mode:        ModeCLI,
-		Status:      StatusRunning,
-		CreatedAt:   time.Now(),
-	}
-}
-
 func (m *Manager) GetSandbox(id string) (*Sandbox, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -1055,49 +714,6 @@ func (m *Manager) GetSandbox(id string) (*Sandbox, error) {
 	}
 
 	return sandbox, nil
-}
-
-// RecoverSandbox recovers an existing Docker container into the in-memory map
-// without creating a new one. Used when the backend restarts but containers are still running.
-func (m *Manager) RecoverSandbox(ctx context.Context, sandboxID string) error {
-	if m.dockerClient == nil {
-		return fmt.Errorf("docker client not available")
-	}
-	containerName := m.getContainerName(sandboxID)
-	result, err := m.dockerClient.ContainerInspect(ctx, containerName, client.ContainerInspectOptions{})
-	if err != nil {
-		return fmt.Errorf("container %s not found: %w", containerName, err)
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Recover metadata from container labels
-	projectPath := ""
-	policy := "developer"
-	if result.Container.Config != nil && result.Container.Config.Labels != nil {
-		projectPath = result.Container.Config.Labels["openshell.project-path"]
-		if p := result.Container.Config.Labels["openshell.policy"]; p != "" {
-			policy = p
-		}
-	}
-
-	sandbox := &Sandbox{
-		ID:          sandboxID,
-		ContainerID: result.Container.ID,
-		ProjectPath: projectPath,
-		Policy:      policy,
-		Mode:        ModeCLI,
-		Status:      StatusRunning,
-		CreatedAt:   time.Now(),
-	}
-	m.sandboxes[sandboxID] = sandbox
-
-	m.logger.Info("recovered existing sandbox container",
-		zap.String("sandbox_id", sandboxID),
-		zap.String("container_id", result.Container.ID),
-	)
-	return nil
 }
 
 // ListSandboxes returns all active sandboxes
@@ -1165,53 +781,4 @@ func (m *Manager) GetContainerIP(ctx context.Context, sandboxID string) (string,
 		}
 	}
 	return "", fmt.Errorf("no IP address found for container %s (networks: %d)", containerName, len(result.Container.NetworkSettings.Networks))
-}
-
-// RecoverAllSandboxes discovers running OpenShell containers and recovers them
-// into the in-memory map. Called on startup to restore state after a backend restart.
-func (m *Manager) RecoverAllSandboxes(ctx context.Context) error {
-	if m.dockerClient == nil {
-		return nil
-	}
-
-	result, err := m.dockerClient.ContainerList(ctx, client.ContainerListOptions{
-		Filters: client.Filters{
-			"label": {"openshell.sandbox-id": true},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list containers: %w", err)
-	}
-
-	for _, c := range result.Items {
-		sandboxID := c.Labels["openshell.sandbox-id"]
-		if sandboxID == "" {
-			continue
-		}
-		projectPath := c.Labels["openshell.project-path"]
-		policy := c.Labels["openshell.policy"]
-		if policy == "" {
-			policy = "developer"
-		}
-
-		m.mu.Lock()
-		if _, exists := m.sandboxes[sandboxID]; !exists {
-			m.sandboxes[sandboxID] = &Sandbox{
-				ID:          sandboxID,
-				ContainerID: c.ID,
-				ProjectPath: projectPath,
-				Policy:      policy,
-				Mode:        ModeCLI,
-				Status:      StatusRunning,
-				CreatedAt:   time.Now(),
-			}
-			m.logger.Info("recovered sandbox from Docker",
-				zap.String("id", sandboxID),
-				zap.String("project_path", projectPath),
-			)
-		}
-		m.mu.Unlock()
-	}
-
-	return nil
 }
