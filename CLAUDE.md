@@ -107,13 +107,10 @@ auto-developer-orchestrator/
 │   ├── cmd/mcpserver/main.go      # Entry point
 │   └── internal/
 │       ├── adapters/              # BashExecutor, FileOps (sandbox bridge)
-│       ├── checkpoint/            # Git checkpointing (transitive)
-│       ├── context/               # Context offloading (transitive)
-│       ├── core/                  # core.Tool interface, hooks, events
-│       ├── git/                   # Git ops (transitive)
-│       ├── hooks/                 # Approval hooks (transitive)
-│       ├── mcp/                   # MCP client (transitive — used by sandbox)
-│       ├── mcpserver/             # ← THE NEW PACKAGE
+│       ├── agent/                 # AnthropicProvider + Loop + DelegateTool
+│       ├── audit/                 # JSONL audit log (opt-in via PUX_AUDIT_LOG)
+│       ├── core/                  # core.Tool, LLMProvider, ChatEvent, ToolError
+│       ├── mcpserver/             # MCP server + tool registry
 │       │   ├── server.go          # JSON-RPC dispatch + tool registry
 │       │   ├── transport.go       # HTTP handler
 │       │   ├── session.go         # Session ID generator
@@ -125,16 +122,13 @@ auto-developer-orchestrator/
 │       │   ├── dispatch_tool.go   # dispatch_task / get_task_status / list_orgs
 │       │   ├── task_store.go      # in-memory task registry for dispatch
 │       │   └── shell.go           # shared shQ shell-escape helper
-│       ├── agent/                 # AnthropicProvider + Loop + DelegateTool
 │       ├── org/                   # Org + TOML loader for orgs/<name>/org.toml
-│       ├── perms/                 # Permission checks (transitive)
-│       ├── retry/                 # Provider retry (transitive)
+│       ├── retry/                 # Provider retry
 │       ├── sandbox/               # Docker sandbox lifecycle
-│       ├── sensitive/             # Secret scrubbing (transitive)
-│       ├── session/               # Session storage (transitive)
-│       ├── storage/               # Object storage (transitive)
+│       ├── sensitive/             # Secret scrubbing
+│       ├── skills/                # list_skills / load_skill package
 │       └── tools/
-│           ├── bash/              # Bash tool
+│           ├── bash/              # Bash tool (Validator-based deny list)
 │           ├── file/              # File tools (read/write/edit/grep/glob)
 │           └── truncate/          # Output truncation
 ├── orgs/                          # org templates (shipped: _demo/)
@@ -148,9 +142,11 @@ auto-developer-orchestrator/
 └── VERSION                        # 0.1.0-mvp
 ```
 
-Packages marked "(transitive)" are needed because something in the deps
-closure imports them — they're kept because they compile cleanly and don't
-pull in heavyweight state. Pruning them further is a Phase 2 cleanup.
+Packages without a "(transitive)" marker are load-bearing — every directory
+above is reachable from `cmd/mcpserver/main.go`. The fullstack predecessor
+(hooks, checkpoint, context, session, storage, perms, mcp client, the old
+core.Loop / TaskManager / SSE event pipeline) lives on the `dev` branch and
+the `v0.1.0-fullstack-legacy` tag if any of it is needed again.
 
 ## Key code paths
 
