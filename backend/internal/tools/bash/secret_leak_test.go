@@ -24,9 +24,10 @@ func (f *fakeExec) Exec(ctx context.Context, command string) (string, error) {
 	return out.String(), nil
 }
 
-// TestSecretReadBlocked proves `cat .env` is hard-denied at the permission layer.
+// TestSecretReadBlocked proves `cat .env` is hard-denied by the bash Validator.
 // This is the exact command the CTO used to leak the OpenRouter key on 2026-06-20.
 func TestSecretReadBlocked(t *testing.T) {
+	v := NewDefaultValidator()
 	cmds := []string{
 		"cat .env",
 		"cat /home/ubuntu/Documents/programs/deep-research-engine/.env",
@@ -42,9 +43,8 @@ func TestSecretReadBlocked(t *testing.T) {
 		"grep -r OPENROUTER .env",
 	}
 	for _, cmd := range cmds {
-		perm := CheckBashPermission(cmd)
-		if perm.Behavior != "deny" {
-			t.Errorf("cmd %q got %s, want deny (%s)", cmd, perm.Behavior, perm.Message)
+		if err := v.Validate(cmd); err == nil {
+			t.Errorf("cmd %q should be blocked, got nil", cmd)
 		}
 	}
 }

@@ -66,10 +66,43 @@ func (v *Validator) Validate(cmd string) error {
 	return nil
 }
 
+// cmdPos anchors a regex to command-position: start-of-string or after a
+// shell separator (;, &&, ||, |). Used by deny rules so they only match
+// actual commands, not arguments that happen to look like one.
+const cmdPos = `(?:^|;\s*|&&\s*|\|\|\s*|\|\s*)`
+
 // defaultDenyRules returns the built-in command deny list.
-// These use the shared patterns from permissions.go to stay consistent.
 func defaultDenyRules() []Rule {
 	return []Rule{
+		// ── Secret file reads ──
+		// Secrets live in the cred store, not on the host filesystem.
+		// Use list_secrets + inject_secret instead of cat/grep/vim.
+		{
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `(?:cat|head|tail|less|more|vim|nano|vi|emacs|gedit|bat)[^|;&<>\n]*(?:\.env(?:\.[a-z0-9_-]+)?|credentials(?:\.[a-z0-9_-]+)?|secrets?\.(?:[a-z0-9_-]+)|\.netrc|id_(?:rsa|ed25519|ecdsa)|\.npmrc|\.pypirc)`),
+			Category: "secret_exfil",
+			Message:  "reading secret files is blocked — use the inject_secret tool to retrieve credentials",
+		},
+		{
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `(?:cat|head|tail|less|more|vim|nano|vi|emacs|gedit|bat)[^|;&<>\n]*(?:\.ssh/(?:id_|config|known_hosts)|\.aws/credentials)`),
+			Category: "secret_exfil",
+			Message:  "reading SSH/AWS secrets is blocked — use the inject_secret tool",
+		},
+		{
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `(?:cp|mv|scp|rsync)[^|;&<>\n]*(?:\.env|credentials|secrets?\.[a-z0-9_-]+|\.ssh/id_|\.aws/credentials)`),
+			Category: "secret_exfil",
+			Message:  "copying/moving secret files is blocked — use inject_secret tool",
+		},
+		{
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `(?:find|grep|rg|fd)[^|;&<>\n]*(?:\.ssh|\.aws|\.env)`),
+			Category: "secret_exfil",
+			Message:  "searching secret directories is blocked — use inject_secret tool",
+		},
+		{
+			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `ls[^|;&<>\n]*(?:\.ssh|\.aws)(?:\s|$)`),
+			Category: "secret_exfil",
+			Message:  "listing secret directories is blocked",
+		},
+
 		// ── Destruction ──
 		{
 			Pattern:  regexp.MustCompile(`(?i)` + cmdPos + `rm\s+-[a-zA-Z]*f[a-zA-Z]*\s+/(?:\s|$)`),

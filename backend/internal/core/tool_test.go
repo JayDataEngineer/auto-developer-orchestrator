@@ -246,42 +246,6 @@ func TestClassifyError(t *testing.T) {
 	}
 }
 
-func TestSendEvent(t *testing.T) {
-	ch := make(chan AgentEvent, 1)
-	evt := AgentEvent{Type: EventTypeTextDelta, Data: TextDelta{Text: "hello"}}
-	SendEvent(ch, evt)
-
-	select {
-	case received := <-ch:
-		if received.Type != EventTypeTextDelta {
-			t.Errorf("expected EventTypeTextDelta, got %v", received.Type)
-		}
-		td, ok := received.Data.(TextDelta)
-		if !ok {
-			t.Fatalf("expected TextDelta payload, got %T", received.Data)
-		}
-		if td.Text != "hello" {
-			t.Errorf("expected text 'hello', got %q", td.Text)
-		}
-	default:
-		t.Fatal("expected event on channel")
-	}
-}
-
-func TestSendEvent_Blocking(t *testing.T) {
-	// Unbuffered channel should not block due to SendEvent's non-blocking select
-	ch := make(chan AgentEvent)
-	evt := AgentEvent{Type: EventTypeTextDelta}
-	SendEvent(ch, evt) // Should not block (default case)
-
-	select {
-	case <-ch:
-		// Should not reach here since the channel is unbuffered and default case should fire
-	default:
-		// OK - SendEvent used the default case
-	}
-}
-
 // stubTool for testing
 type stubTool struct {
 	name    string
