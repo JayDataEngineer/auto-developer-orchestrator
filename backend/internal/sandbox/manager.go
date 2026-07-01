@@ -287,6 +287,15 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		Resources:  resources,
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
+	// gVisor opt-in: PUX_SANDBOX_RUNTIME=runsc swaps the container runtime
+	// to gVisor's runsc, which intercepts syscalls at the kernel level
+	// (stronger isolation than the default runc). Empty = Docker default
+	// (runc). Bridged-mode sandboxes (X11 + host net) skip the override —
+	// runsc + NET_HOST + Xvfb is an untested combination we don't want to
+	// surprise operators with.
+	if r := os.Getenv("PUX_SANDBOX_RUNTIME"); r != "" && opts.Tier != TierBridged {
+		hostConfig.Runtime = r
+	}
 	netConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
 			networkName: {},
