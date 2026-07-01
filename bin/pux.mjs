@@ -6,14 +6,20 @@
 // pattern: pi is a plain npm dep, extensions live under .pi/extensions/, and
 // pi-mcp-adapter bridges our Go MCP server's tools into pi's tool registry.
 //
-// Usage:
+// Subcommands:
 //   pux                       # interactive TUI against the cwd
-//   pux --org _demo           # interactive TUI with a CTO overlay (Phase 3)
-//   pux dispatch --org X "…"  # one-shot headless dispatch (Phase 4)
+//   pux --org _demo           # interactive TUI with a CTO overlay
+//   pux dispatch --org X "…"  # one-shot headless dispatch (alias for -p)
+//   pux history list          # list pi session files
+//   pux history resume        # pi --resume (TUI session picker)
+//   pux history continue      # pi --continue (most recent session)
+//   pux setup                 # verify Docker image + build + start MCP server
+//   pux teardown              # stop the MCP server
 //   pux --help                # pi's own help
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,7 +42,23 @@ if (tooOld) {
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(here, "..");
 
-// ---- 3. Resolve the bundled pi CLI entry point ----
+// ---- 3. Subcommand intercept ----
+// `dispatch` is a pure alias: rewrite argv to add `-p` then fall through to
+// the normal pi spawn. The others are terminal — handle and exit.
+const subcommand = process.argv[2];
+
+if (subcommand === "dispatch") {
+  // pux dispatch [...args] → pux -p [...args]
+  process.argv = [process.argv[0], process.argv[1], "--print", ...process.argv.slice(3)];
+} else if (subcommand === "history") {
+  process.exit(runHistory(process.argv.slice(3)));
+} else if (subcommand === "setup") {
+  process.exit(runSetup(process.argv.slice(3)));
+} else if (subcommand === "teardown") {
+  process.exit(runTeardown(process.argv.slice(3)));
+}
+
+// ---- 4. Resolve the bundled pi CLI entry point ----
 // Invoke pi's JS entry directly under the current Node binary (skips .bin/pi
 // shim — works identically on Linux/macOS/Windows, no cmd.exe quoting traps).
 // Try npm nested layout first, then bun/flat sibling layout.
@@ -71,7 +93,7 @@ if (!piEntry) {
   process.exit(1);
 }
 
-// ---- 4. Auto-discover bundled extensions under .pi/extensions/ ----
+// ---- 5. Auto-discover bundled extensions under .pi/extensions/ ----
 // Each subdir with an index.ts becomes a `--extension <path>` arg. Mirrors
 // little-coder's pattern — keeps the bundled set explicit, ignores pi's own
 // auto-discovery from cwd (--no-extensions below).
@@ -119,7 +141,7 @@ if (existsSync(subagentsEntry)) {
   process.exit(1);
 }
 
-// ---- 5. Compose pi argv ----
+// ---- 6. Compose pi argv ----
 // --no-context-files : ignore user's AGENTS.md so OURS wins
 // --no-extensions    : skip pi's auto-discovery from cwd; explicit -e flags still load
 // --system-prompt    : load <pkgRoot>/AGENTS.md regardless of cwd
@@ -134,14 +156,14 @@ const piArgs = [
   ...userArgs,
 ];
 
-// ---- 6. Suppress pi's version banner by default ----
+// ---- 7. Suppress pi's version banner by default ----
 // Pi is an internal dep here; users install `pux` and shouldn't see in-session
 // nags about updating the underlying pi-coding-agent package.
 if (process.env.PI_SKIP_VERSION_CHECK === undefined) {
   process.env.PI_SKIP_VERSION_CHECK = "1";
 }
 
-// ---- 7. Spawn pi in the user's cwd ----
+// ---- 8. Spawn pi in the user's cwd ----
 // process.execPath = same Node binary that passed our preflight. piEntry as
 // argv element (not a shell string) avoids space-in-path / shell-injection
 // classes on every platform.
@@ -174,3 +196,159 @@ child.on("exit", (code, signal) => {
     process.exit(code ?? 0);
   }
 });
+
+// ---- Subcommand implementations ----
+
+function runHistory(args) {
+  // pi-mono stores sessions as JSONL at
+  // ~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl
+  // The encoding makes the path ugly to grep, so we just list everything and
+  // let the operator pipe to fzf / grep / etc.
+  const sessionsDir = join(homedir(), ".pi", "agent", "sessions");
+  const sub = args[0] ?? "list";
+
+  if (sub === "list") {
+    if (!existsSync(sessionsDir)) {
+      console.log(`No sessions directory at ${sessionsDir}`);
+      console.log(`(Run 'pux' to start your first session.)`);
+      return 0;
+    }
+    // Walk one level deep — each subdir is an encoded project path.
+    let projectDirs;
+    try {
+      projectDirs = readdirSync(sessionsDir).filter((n) => {
+        try {
+          return statSync(join(sessionsDir, n)).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+    } catch (err) {
+      console.error(`pux history: cannot read ${sessionsDir}: ${err.message}`);
+      return 1;
+    }
+    const rows = [];
+    for (const proj of projectDirs) {
+      const projDir = join(sessionsDir, proj);
+      let files;
+      try {
+        files = readdirSync(projDir).filter((n) => n.endsWith(".jsonl"));
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        const full = join(projDir, f);
+        try {
+          const st = statSync(full);
+          // Strip the `.jsonl` and split timestamp+uuid for readability.
+          rows.push({
+            project: proj.replace(/^--|--$/g, "").replace(/--/g, "/"),
+            session: f.replace(/\.jsonl$/, ""),
+            mtime: st.mtime.toISOString(),
+            size: st.size,
+          });
+        } catch {
+          // skip unreadable
+        }
+      }
+    }
+    if (rows.length === 0) {
+      console.log("No sessions found.");
+      return 0;
+    }
+    rows.sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
+    console.log("Most recent sessions (newest first):");
+    for (const r of rows) {
+      console.log(`  ${r.mtime}  ${r.session}  ${r.project}`);
+    }
+    console.log(`\nResume:  pux --resume ${rows[0].session}`);
+    console.log(`Continue: pux --continue`);
+    return 0;
+  }
+
+  if (sub === "resume" || sub === "-r") {
+    console.error(
+      `pux history resume: use 'pux --resume' directly — pi opens an interactive session picker.`,
+    );
+    return 1;
+  }
+
+  if (sub === "continue" || sub === "-c") {
+    console.error(`pux history continue: use 'pux --continue' directly.`);
+    return 1;
+  }
+
+  console.error(
+    `pux history: unknown subcommand '${sub}'.\n` +
+      `Available: list (default), resume, continue.\n` +
+      `For full session control, use pi flags directly: pux --resume, pux --continue, pux --session <id>, pux --fork <id>.`,
+  );
+  return 1;
+}
+
+function runSetup(_args) {
+  // 1. Verify task binary is on PATH (canonical entry to Go server lifecycle).
+  const taskOnPath = spawnSync("task", ["--version"], { stdio: "pipe" }).status === 0;
+  if (!taskOnPath) {
+    console.error(
+      `pux setup: 'task' (Taskfile) not found on PATH.\n` +
+        `Install: https://taskfile.dev/installation/ — e.g. 'sh -c "$(curl --location https://taskfile.dev/install.sh)"'`,
+    );
+    return 1;
+  }
+
+  // 2. Verify Docker is up.
+  const dockerOk = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], {
+    stdio: "pipe",
+  }).status === 0;
+  if (!dockerOk) {
+    console.error(
+      `pux setup: docker daemon not reachable. Start Docker Desktop or the dockerd service.`,
+    );
+    return 1;
+  }
+
+  // 3. Verify the pux-sandbox image exists.
+  const imgCheck = spawnSync(
+    "docker",
+    ["image", "inspect", "pux-sandbox:latest", "--format", "{{.Id}}"],
+    { stdio: "pipe" },
+  );
+  if (imgCheck.status !== 0) {
+    console.error(
+      `pux setup: 'pux-sandbox:latest' image not found.\n` +
+        `Build it first: cd sandbox && docker build -t pux-sandbox:latest .`,
+    );
+    return 1;
+  }
+
+  // 4. Build + start the MCP server in background.
+  console.log("Building MCP server binary...");
+  const build = spawnSync("task", ["build"], { stdio: "inherit", cwd: pkgRoot });
+  if (build.status !== 0) {
+    console.error(`pux setup: task build failed (exit ${build.status}).`);
+    return build.status ?? 1;
+  }
+
+  console.log("Starting MCP server in background...");
+  const start = spawnSync("task", ["start"], { stdio: "inherit", cwd: pkgRoot });
+  if (start.status !== 0) {
+    console.error(`pux setup: task start failed (exit ${start.status}).`);
+    return start.status ?? 1;
+  }
+
+  // 5. Print connection info.
+  console.log("\nMCP server is up at http://127.0.0.1:9987");
+  console.log("Connect from any MCP client using:");
+  console.log('  {"mcpServers":{"pux-sandbox":{"url":"http://127.0.0.1:9987"}}}');
+  console.log("\nOr drive it via the pux CLI:");
+  console.log("  pux                       # interactive TUI");
+  console.log("  pux --org _demo           # interactive TUI with CTO overlay");
+  console.log("  pux dispatch --org _demo \"task\"  # one-shot headless");
+  return 0;
+}
+
+function runTeardown(_args) {
+  const res = spawnSync("task", ["stop"], { stdio: "inherit", cwd: pkgRoot });
+  return res.status ?? 0;
+}

@@ -1,55 +1,117 @@
-# Pux MCP Server
+# Pux
 
-A Model Context Protocol (MCP) server that exposes a sandboxed development
-environment to any MCP-capable LLM client (Claude Desktop, Hermes, OpenClaw,
-continue.dev, etc.). The server boots a Docker sandbox on startup, mounts
-your project, and exposes `bash`, `file_read`, `file_write`, `file_edit`,
-`file_grep`, `file_glob`, and `python` tools to the model over standard MCP.
+**Pi-Mono driving a Docker sandbox MCP backend.** Pux is a TS harness around
+[pi-mono](https://github.com/badlogic/pi-mono) that adds:
 
-**Scope:** single-tenant, localhost-only, no auth. Run one server per project.
+- A Docker sandbox with Chrome, Xvfb, xdotool, tesseract, supervisord.
+- 16 MCP tools (bash, file_read/write/edit/grep/glob, python, browser_*,
+  desktop_*, describe_image, list_skills, load_skill) backed by the sandbox.
+- An org system: thin `--org <name>` overlay that appends `orgs/<name>/AGENTS.md`
+  to the system prompt. Subagent delegation via pi-subagents.
+
+Single-tenant, localhost-only, no auth. One pux process = one project = one
+sandbox.
 
 ## Quick start
 
 ```bash
-# Build + boot against the current directory
-task run
+# 1. Clone + install TS deps
+git clone <this-repo> pux && cd pux
+npm install
 
-# Or explicitly:
-task build
-./backend/mcpserver --addr 127.0.0.1:9987 --project ~/code/myproject
+# 2. Build the sandbox image (one-time, ~5 min)
+cd sandbox && docker build -t pux-sandbox:latest . && cd ..
+
+# 3. Boot the stack (verifies Docker, builds Go binary, starts MCP server)
+pux setup
+
+# 4. Drive it
+pux                             # interactive TUI
+pux --org _demo                 # interactive TUI with the demo CTO overlay
+pux dispatch --org _demo "describe this project"  # one-shot headless
+
+# 5. Teardown
+pux teardown
 ```
 
-The server expects `pux-sandbox:latest` (or `$OPENSHELL_IMAGE`) to be
-available locally. See `sandbox/Dockerfile` to build it from scratch.
+The MCP server listens at `http://127.0.0.1:9987`. pux connects to it
+automatically via `pi-mcp-adapter` (configured in `.mcp.json`).
 
-## Connect from a client
+## Subcommands
 
-Add to your MCP client config (Claude Desktop, etc.):
+| Subcommand | What it does |
+|------------|-------------|
+| `pux` | Interactive TUI (pi-mono). |
+| `pux --org <name>` | Interactive TUI with `orgs/<name>/AGENTS.md` appended to the system prompt. |
+| `pux dispatch [...args]` | Alias for `pux -p [...args]` — headless one-shot. |
+| `pux history list` | List recent pi-mono sessions from `~/.pi/agent/sessions/`. |
+| `pux setup` | Verify Docker + sandbox image, build + start MCP server. |
+| `pux teardown` | Stop the MCP server (`task stop`). |
+| `pux --resume` | pi-mono session picker (TUI). |
+| `pux --continue` | Resume most recent session in this cwd. |
 
-```json
-{
-  "mcpServers": {
-    "pux": {
-      "url": "http://127.0.0.1:9987"
-    }
-  }
-}
-```
+Any other flag is passed through to pi-mono. Run `pux --help` to see
+pi-mono's full option set plus the pux extension flags (`--org`,
+`--mcp-config`).
 
 ## Tools exposed
+
+All tools execute inside the Docker sandbox. The project is bind-mounted at
+`/sandbox/workspace/`.
 
 | Tool | What it does |
 |------|-------------|
 | `bash` | Execute a shell command in the sandbox |
-| `file_read` | Read a file (with line numbers) |
-| `file_write` | Write or overwrite a file |
-| `file_edit` | sed-style find/replace |
-| `file_grep` | ripgrep (with grep fallback) |
-| `file_glob` | File pattern matching |
-| `python` | Execute Python inside the sandbox (sandbox deps available) |
+| `file_read` / `file_write` / `file_edit` / `file_grep` / `file_glob` | File operations |
+| `python` | Execute Python inside the sandbox |
+| `browser_navigate` / `browser_click` / `browser_type` / `browser_screenshot` / `browser_evaluate` | Persistent SeleniumBase Chrome session |
+| `desktop_screenshot` / `desktop_click` / `desktop_type` / `desktop_key` | Xvfb desktop automation (xdotool + OCR) |
+| `describe_image` | Local ONNX vision (Qwen3.5-2B, opt-in via `scripts/bootstrap-vision.sh`) |
+| `list_skills` / `load_skill` | Discover and load project-local skill markdown |
 
-Files are relative to `/sandbox/workspace/` inside the container — that's
-where your project is bind-mounted.
+In the TS harness, tools are exposed via `pi-mcp-adapter` with
+`directTools: true` — each tool becomes a first-class pi tool with a
+`pux_sandbox_*` prefix. Agents reference them as `mcp:pux-sandbox/<tool>` in
+their `tools:` frontmatter.
+
+## Org system
+
+Orgs are markdown-driven. Drop a directory under `orgs/<name>/` with an
+`AGENTS.md`:
+
+```
+orgs/<name>/
+└── AGENTS.md    # CTO system prompt body
+```
+
+`pux --org <name>` appends the body to the base system prompt. The main pi
+session becomes the CTO.
+
+Specialist subagents live under `.pi/agents/*.md` with rich frontmatter
+(`tools`, `model`, `thinking`, `output`, `systemPromptMode`, etc.). The
+shipped example is `.pi/agents/researcher.md` — a read-only codebase
+investigator. Spawn one from the main session via the `subagent` tool:
+
+```
+subagent({ agent: "researcher", task: "list all .ts files under src/" })
+```
+
+See [pi-subagents](https://github.com/nicobailon/pi-subagents) for the full
+agent/skill format and delegation patterns (parallel, chain, async, fork).
+
+## Sessions & history
+
+pi-mono writes sessions as JSON Lines at
+`~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`. The format is
+crash-safe and supports tree-structured branching (`/fork`, `/branch`,
+`/tree`).
+
+```bash
+pux history list               # show recent sessions
+pux --resume                   # interactive session picker
+pux --continue                 # resume most recent
+pux --session <partial-uuid>   # resume a specific session
+```
 
 ## Smoke test
 
@@ -57,43 +119,45 @@ where your project is bind-mounted.
 task smoke
 ```
 
-Builds, boots, drives the full MCP contract (initialize → tools/list →
-tools/call → bash echo + file roundtrip + python sum), and tears down.
+Builds, boots the Go server via the supervisor, drives the full MCP contract
+(initialize → tools/list → tools/call → bash echo + file roundtrip + python
+sum), and tears down. Real Docker — catches container-side regressions that
+unit tests miss.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│ MCP Client (Claude / Hermes / ...)  │
-└──────────────┬──────────────────────┘
-               │ JSON-RPC 2.0 over HTTP
-               │ (Mcp-Session-Id header)
-┌──────────────▼──────────────────────┐
-│ pux-mcpserver (Go, localhost:9987)   │
-│  - tool registry                     │
-│  - JSON-RPC dispatch                 │
-└──────────────┬──────────────────────┘
-               │ Docker exec
-┌──────────────▼──────────────────────┐
-│ pux-sandbox container                │
-│  - /workspace bind-mount             │
-│  - /sandbox/scripts.py (read-only)   │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│ pux (TS harness)                        │
+│  bin/pux.mjs + .pi/extensions/          │
+│  + AGENTS.md + .pi/agents/ + .pi/skills/│
+└──────────────┬──────────────────────────┘
+               │ MCP JSON-RPC (pi-mcp-adapter)
+┌──────────────▼──────────────────────────┐
+│ pux-mcpserver (Go, localhost:9987)      │
+│  tool registry + lifecycle supervisor   │
+└──────────────┬──────────────────────────┘
+               │ docker exec
+┌──────────────▼──────────────────────────┐
+│ pux-sandbox container                   │
+│  Chrome + Xvfb + xdotool + tesseract +  │
+│  supervisord + /workspace bind-mount    │
+└─────────────────────────────────────────┘
 ```
 
 ## Branch layout
 
-- **`master`** — this MVP. Slim, focused, ~3000 LOC of Go.
-- **`dev`** — fullstack branch with TUI, web UI, CLI, multi-agent orchestration,
-  skills system, org overlays. Frozen, not deleted.
-- **`v0.1.0-fullstack-legacy`** — tagged snapshot of fullstack HEAD before
-  the MVP pivot. Safety net in case `dev` regresses.
+- **`pi-pivot`** — current. Pi-Mono on top, slim Go MCP server below.
+- **`master`** — pre-pivot MVP. Slim Go MCP server with in-process agent
+  loop + history + TUI + dispatch surface.
+- **`v0.2.0-pre-pi-mono`** — tag of master HEAD before this pivot. Safety net.
+- **`dev`** + **`v0.1.0-fullstack-legacy`** — older fullstack predecessor.
 
 ## Status
 
-Phase 1 surface (bash + file + python). Browser/desktop automation, multi-agent
-orchestration, and the skills system are all on `dev` — they'll migrate back
-incrementally once each is proven to fit the MCP contract cleanly.
+The pi-mono pivot is the current line of work. The Go side (sandbox + MCP)
+is stable. The TS side (org system, sample agents, sample skills) is
+minimal-but-complete — drop more orgs / agents / skills as markdown files.
 
 ## License
 
