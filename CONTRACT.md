@@ -27,7 +27,7 @@ only thing that matters.
                    │ JSON-RPC 2.0 over HTTP
                    │ (Mcp-Session-Id header)
 ┌──────────────────▼──────────────────────┐
-│ pux-mcpserver (Go, localhost:9876)       │
+│ pux-mcpserver (Go, localhost:9987)       │
 │  - mcpserver.Server (tool registry)      │
 │  - http.Handler (JSON-RPC dispatch)      │
 └──────────────────┬──────────────────────┘
@@ -55,7 +55,7 @@ proxy (Caddy, Tailscale Funnel) in front and add auth there.
 |----------|-------|
 | Wire format | JSON-RPC 2.0 |
 | Transport | HTTP POST (Streamable HTTP, MCP variant) |
-| Endpoint | Single URL (default `http://127.0.0.1:9876`) |
+| Endpoint | Single URL (default `http://127.0.0.1:9987`) |
 | Session header | `Mcp-Session-Id` (generated on `initialize`) |
 | Protocol version | `2025-03-26` |
 | Max request body | 32 MiB |

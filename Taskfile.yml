@@ -16,10 +16,30 @@ tasks:
       - go build -o ../{{.BIN}} ./cmd/mcpserver/
 
   run:
-    desc: Build + run against $PWD (cd into your project first or set PUX_PROJECT_PATH)
+    desc: Build + run in FOREGROUND. Override addr via PUX_MCP_ADDR (default 127.0.0.1:9987). Signals propagate (exec).
     cmds:
       - task: build
-      - "{{.BIN}} --addr 127.0.0.1:9876 --project ${PUX_PROJECT_PATH:-$PWD}"
+      # `exec` makes the binary replace this shell — SIGTERM from a parent
+      # shell lands directly on the server, no orphan bash wrapper.
+      - "exec {{.BIN}} run --project ${PUX_PROJECT_PATH:-$PWD}"
+
+  start:
+    desc: Build + start in BACKGROUND (daemonize, returns immediately). Same flags as `run` plus --log PATH and --force.
+    cmds:
+      - task: build
+      # `${PUX_MCP_LOG:+--log $PUX_MCP_LOG}` expands to nothing when unset,
+      # avoiding the "--log needs a value" parse error from bare --log.
+      - "{{.BIN}} start --project ${PUX_PROJECT_PATH:-$PWD} ${PUX_MCP_LOG:+--log $PUX_MCP_LOG}"
+
+  stop:
+    desc: Stop the backgrounded server (SIGTERM, then SIGKILL after --wait). Looks up PID file under <project>/.pux/.
+    cmds:
+      - "{{.BIN}} stop --project ${PUX_PROJECT_PATH:-$PWD}"
+
+  status:
+    desc: Show server state (PID, addr, sandbox, uptime). Use --live to also POST a ping.
+    cmds:
+      - "{{.BIN}} status --project ${PUX_PROJECT_PATH:-$PWD}"
 
   test:
     desc: Run Go unit tests
@@ -28,16 +48,18 @@ tasks:
       - go test -race ./...
 
   smoke:
-    desc: Build + boot server + run smoke test against a temp workspace
+    desc: Build + boot server via supervisor + run smoke test + stop. Proves start/stop round-trip against real Docker.
     cmds:
       - task: build
       - mkdir -p /tmp/mcp-smoke/skills/smoke-test
       - "echo 'hello world' > /tmp/mcp-smoke/test.txt"
       - "printf '%s\\n' '---' 'name: smoke-test' 'description: One-line summary used by list_skills' '---' '' '# Smoke Test Skill' '' 'Specialized guidance for the smoke test. Loaded via load_skill to prove the skill roundtrip works end-to-end against a real project mount.' > /tmp/mcp-smoke/skills/smoke-test/SKILL.md"
+      # Clean any stale PID file from a prior crashed smoke.
+      - "rm -f /tmp/mcp-smoke/.pux/mcpserver.pid"
+      # Boot via the supervisor — proves start subcommand end-to-end.
+      - "./{{.BIN}} start --addr 127.0.0.1:19876 --project /tmp/mcp-smoke --log /tmp/mcp-smoke/smoke.log"
+      # Wait up to 60s for the port to accept connections (Docker boot varies).
       - |
-        ./{{.BIN}} --addr 127.0.0.1:19876 --project /tmp/mcp-smoke &
-        SERVER_PID=$!
-        # Wait up to 60s for the port to accept connections (Docker boot varies).
         for i in $(seq 1 120); do
           if python3 -c "import socket,sys; socket.create_connection(('127.0.0.1',19876),1).close()" 2>/dev/null; then
             echo "[port up after ${i}x0.5s]"
@@ -45,16 +67,9 @@ tasks:
           fi
           sleep 0.5
         done
-        python3 scripts/smoke_mcp.py
-        EXIT=$?
-        /bin/kill -TERM $SERVER_PID 2>/dev/null || true
-        # Give the server a moment to tear down its sandbox cleanly.
-        for i in $(seq 1 20); do
-          if ! kill -0 $SERVER_PID 2>/dev/null; then break; fi
-          sleep 0.5
-        done
-        /bin/kill -9 $SERVER_PID 2>/dev/null || true
-        exit $EXIT
+      - "python3 scripts/smoke_mcp.py"
+      # Stop via the supervisor — proves stop subcommand end-to-end.
+      - "./{{.BIN}} stop --project /tmp/mcp-smoke"
 
   hooks:
     desc: Install pre-commit hooks (gitleaks secret scan)

@@ -19,14 +19,47 @@ is a safety net.
 
 ```bash
 task build              # Build the binary at backend/mcpserver
-task run                # Build + boot against $PWD
-task smoke              # Build + boot + smoke test + teardown
+task run                # Foreground dev mode (signals propagate via exec)
+task start              # Build + start in BACKGROUND (daemonize, returns immediately)
+task stop               # SIGTERM the backgrounded server
+task status             # Show running state (PID, addr, sandbox, uptime)
+task smoke              # Build + start + smoke test + stop (exercises supervisor)
 task test               # Go unit tests
 task hooks              # Install pre-commit (gitleaks)
 ```
 
-The server takes `--addr` (default `127.0.0.1:9876`) and `--project` (defaults
-to `$PWD`). Env vars `PUX_MCP_ADDR` / `PUX_PROJECT_PATH` mirror them.
+The server takes `--addr` (default `127.0.0.1:9987`) and `--project` (defaults
+to `$PWD`). Env vars `PUX_MCP_ADDR` / `PUX_PROJECT_PATH` mirror them. The
+`run` task honors `PUX_MCP_ADDR` — e.g. `PUX_MCP_ADDR=127.0.0.1:9999 task run`.
+
+**Why 9987 (not 9876):** the sandbox's `sb_server.py` (browser-mode HTTP API)
+listens on 9876 *inside* the container. Any org sandbox that boots with
+`--network=host` (invest, deep-research-engine, etc.) leaks that listener to
+the host's 9876. Defaulting pux-mcpserver to 9987 avoids the collision
+out-of-the-box. Forcing `--addr 127.0.0.1:9876` while a host-networked org
+sandbox is running will still fail with "address already in use" — pick
+another port or stop the conflicting container.
+
+## Lifecycle (`run` / `start` / `stop` / `status`)
+
+The binary ships with four subcommands. `mcpserver` with no subcommand (or
+with `--flags` only) defaults to `run` — that's the back-compat path, so
+existing scripts and the `task smoke` of older revisions keep working.
+
+| Subcommand | When to use |
+|-----------|--------------|
+| `run` | **Dev/foreground.** Boots in the terminal, sandbox + HTTP listener live until SIGINT/SIGINT. The `run` task uses `exec` so signals from a parent shell propagate directly (no orphan bash wrapper). |
+| `start` | **Background/CI.** Daemonizes via `setsid` + `cmd.Process.Release()`, writes a PID file at `<project>/.pux/mcpserver.pid`, returns immediately. Refuses if a server is already running for that project unless `--force` stops it first. Logs default to discarded — pass `--log <path>` or set `PUX_MCP_LOG` to capture. |
+| `stop` | Reads the PID file, SIGTERMs the server, polls up to `--wait` (default 10s), SIGKILLs if still alive. Removes the PID file. |
+| `status` | Reports PID + addr + project + sandbox + container_id + uptime. `--live` adds an HTTP ping to verify the server actually responds (vs just "process exists"). |
+
+**Stale-PID recovery:** if `start` finds a PID file but the process is dead
+(crash, SIGKILL, OOM), it cleans up and proceeds. The PID file lingering
+after a crash is the explicit signal — the next `start` will treat it as
+stale rather than refuse boot.
+
+**Single-tenant per project:** the PID file lives at `<project>/.pux/mcpserver.pid`
+(one server per project). Override via `PUX_PID_FILE` for unusual layouts.
 
 Set `PUX_AUDIT_LOG=/path/to/audit.jsonl` to append every tool call (args +
 result + duration, secret-scrubbed) to a forensic log. Opt-in; default off.
@@ -39,6 +72,14 @@ caller (Hermes / OpenClaw / Claude Code) can hand a task to a configured
 `PUX_LLM_MODEL` (default `claude-sonnet-4-6`), `PUX_LLM_MAX_TOKENS`. Absent
 key = surface disabled, the other 19 tools still work.
 
+Set `PUX_HISTORY_DIR=/path/to/dir` to enable the **history sidecar** —
+durable sqlite recording of dispatch-surface activity (task lifecycle,
+agent-loop assistant messages, in-loop tool calls). When set, the server
+opens `<dir>/history.sqlite` at boot and writes one row per observer event.
+Read path is host-side only via the `pux-history` binary
+(`pux-history list / show / search`). No MCP tool exposes the read path.
+Fully deletable: drop the env var and the recorder is never constructed.
+
 ## Connecting MCP clients
 
 Add to Claude Desktop (or any MCP client that supports HTTP transport):
@@ -46,7 +87,7 @@ Add to Claude Desktop (or any MCP client that supports HTTP transport):
 ```json
 {
   "mcpServers": {
-    "pux": { "url": "http://127.0.0.1:9876" }
+    "pux": { "url": "http://127.0.0.1:9987" }
   }
 }
 ```
@@ -83,7 +124,7 @@ them (`chmod 0444`).
 └──────────────┬──────────────────────┘
                │ JSON-RPC 2.0 over HTTP
 ┌──────────────▼──────────────────────┐
-│ pux-mcpserver (Go, localhost:9876)   │
+│ pux-mcpserver (Go, localhost:9987)   │
 │  - mcpserver.Server (tool registry)  │
 │  - http.Handler (JSON-RPC dispatch)  │
 └──────────────┬──────────────────────┘
@@ -105,11 +146,18 @@ them (`chmod 0444`).
 auto-developer-orchestrator/
 ├── backend/
 │   ├── cmd/mcpserver/main.go      # Entry point
+│   ├── cmd/pux-history/main.go    # History CLI (list/show/search the sqlite db)
+│   ├── cmd/pux-tui/main.go        # Bubble Tea conversational TUI (chat with an org)
 │   └── internal/
 │       ├── adapters/              # BashExecutor, FileOps (sandbox bridge)
 │       ├── agent/                 # AnthropicProvider + Loop + DelegateTool
 │       ├── audit/                 # JSONL audit log (opt-in via PUX_AUDIT_LOG)
-│       ├── core/                  # core.Tool, LLMProvider, ChatEvent, ToolError
+│       ├── core/                  # core.Tool, LLMProvider, ChatEvent, ToolError, observers
+│       ├── history/               # sqlite history sidecar (opt-in via PUX_HISTORY_DIR)
+│       │   ├── recorder.go        # implements TaskObserver + ChatObserver + ToolObserver
+│       │   ├── store.go           # sqlite open + write ops
+│       │   ├── query.go           # read API for cmd/pux-history + internal/tui
+│       │   └── schema.sql         # tasks / messages / tool_calls + indexes
 │       ├── mcpserver/             # MCP server + tool registry
 │       │   ├── server.go          # JSON-RPC dispatch + tool registry
 │       │   ├── transport.go       # HTTP handler
@@ -127,6 +175,12 @@ auto-developer-orchestrator/
 │       ├── sandbox/               # Docker sandbox lifecycle
 │       ├── sensitive/             # Secret scrubbing
 │       ├── skills/                # list_skills / load_skill package
+│       ├── tui/                   # Bubble Tea conversational interface sidecar
+│       │   ├── model.go           # top-level tea.Model + Update/View
+│       │   ├── client.go          # MCP HTTP client (initialize + dispatch + status)
+│       │   ├── conversation.go    # client-side turn accumulation + renderConversation
+│       │   ├── history.go         # optional history pane (nil-safe via os.Stat probe)
+│       │   └── styles.go          # lipgloss styles
 │       └── tools/
 │           ├── bash/              # Bash tool (Validator-based deny list)
 │           ├── file/              # File tools (read/write/edit/grep/glob)
@@ -243,6 +297,87 @@ adapter, and the `OrgLister` impl. `main.go` constructs it when
 calls `TaskStore.Shutdown()` which cancels in-flight tasks (their
 status moves to `failed: "server shutdown"`).
 
+## History (sqlite sidecar, opt-in)
+
+When `PUX_HISTORY_DIR` is set at server boot, the dispatch surface fires
+observer events into a sqlite database at `<dir>/history.sqlite`. Three
+observer interfaces (`internal/core/observer.go`) form the seam:
+
+| Observer | Fired by | Records |
+|----------|----------|---------|
+| `TaskObserver` | `mcpserver/task_store.go` | task lifecycle: pending → running → complete / failed |
+| `ChatObserver` | `agent/loop.go::Run` | one row per non-empty assistant turn |
+| `ToolObserver` | `agent/loop.go::dispatchTools` | one row per in-loop tool dispatch |
+
+All three are nil-safe — call sites check `!= nil` before firing. The
+`history.Recorder` (in `internal/history/recorder.go`) implements all
+three. CTO + delegated child loops inherit the same observers via
+`DelegateTool`, so a delegation chain lands under one task ID.
+
+**Read path** is host-side only — no MCP tool exposes it. The
+`pux-history` binary (built via `go build ./cmd/pux-history`) reads the
+same sqlite file:
+
+```
+pux-history list [--org NAME] [--limit N]    # most-recent tasks
+pux-history show <task-id>                     # full transcript + tool calls
+pux-history search <regex> [--org NAME]        # across messages + tool calls + task bodies
+```
+
+Default `--limit 50`. `PUX_HISTORY_DIR` selects the file (same path the
+server writes to). Output is plain text, not JSON — operator tool, not API.
+
+**Deletion-proof by contract.** `rm -rf internal/history/ cmd/pux-history/`
++ drop the 8 wiring lines in `cmd/mcpserver/main.go` + the 2 fields in
+`dispatch.go` + the TaskStore observer plumbing. Server still builds, still
+ships 19 MCP tools, zero history overhead. The seam is the contract.
+
+**Scope:** task lifecycle + assistant messages + in-loop tool calls.
+Scrubbed via `internal/sensitive.ScrubText` (same patterns as the audit
+log). NOT recorded: system prompts, reasoning/thinking content, MCP-direct
+tool calls (those go to the audit log if enabled), token usage. Each is a
+small follow-up at the same seam.
+
+## TUI (Bubble Tea conversational interface, opt-in)
+
+`pux-tui` is the operator's chat window into an org. It's a Bubble Tea
+program that points at a running pux-mcpserver over HTTP (same wire
+contract as Claude Desktop) and lets the operator type messages to an
+org's CTO. Use case: with a `game-maker-org`, the operator types "I want
+a 2D platformer" → CTO responds → "use pixel art" → CTO responds again,
+with full multi-turn context.
+
+```bash
+go run ./cmd/pux-tui --mcp-addr http://127.0.0.1:9987 --org _demo
+```
+
+**Conversation state lives client-side.** The dispatch surface is
+intentionally stateless per-task — each Enter dispatches the full
+accumulated conversation as a single `task_description` (markdown: one
+`**User:**` / `**Assistant:**` block per turn). This is the only way to
+get multi-turn chat against the slim MVP server. The CTO sees the whole
+conversation verbatim on every turn.
+
+**History pane** (`Ctrl+H`): toggleable list of recent tasks. If
+`PUX_HISTORY_DIR` is set on the server AND `<dir>/history.sqlite` exists,
+the pane lists tasks (via `history.Query.ListTasks`); arrow keys move,
+`Enter` expands one to show its transcript. If history is unavailable,
+the hint is hidden and `Ctrl+H` is a no-op. The pane is probed via
+`os.Stat` (not `OpenQuery`, which would create the file as a side effect).
+
+**Deletion-proof by contract.** `rm -rf internal/tui/ cmd/pux-tui/` →
+MCP server still builds, still ships 19 MCP tools, dispatch surface
+intact. **No wiring in `cmd/mcpserver/main.go`** — the TUI is a separate
+binary that drives the server over HTTP, exactly like Claude Desktop.
+
+**Import prohibition** (enforced by the package's own doc comment): the
+TUI package imports only stdlib + `charmbracelet/{bubbletea,lipgloss,glamour}`
++ `internal/history` (for the optional pane). It MUST NOT import `agent/`,
+`mcpserver/`, `sandbox/`, `org/`, `audit/`, `sensitive/`, `adapters/`,
+`tools/`, or `core/`. Reach for any of those → the contract is broken.
+
+## Vision (local ONNX, opt-in)
+
 ## Vision (local ONNX, opt-in)
 
 `describe_image` runs local vision inference inside the sandbox via
@@ -358,6 +493,10 @@ The contract is enforced by 70+ Go tests in `mcpserver/`:
   JSON + handles malformed/timeout/exec-failure, click coord parsing
   (float/int/string) + button validation, type shell-escaping + clear
   flag, key combo building
+- **History sidecar** (8 tests): full task lifecycle (pending → running →
+  complete/failed), assistant-message round ordering, tool-call fields +
+  error path, regex search across task/message/tool sources, org filter,
+  secret scrubbing, idempotent Close
 
 Plus a real end-to-end smoke test (`task smoke`) that boots against a live
 Docker container and exercises every tool. **Run `task smoke` before
@@ -387,9 +526,10 @@ real-Docker bugs.
 
 - Multi-agent orchestration (CTO + employee delegation loop)
 - Org system (per-domain config overlays — invest, twitter-agent, etc.)
-- TUI (Ink), web UI (Vite), CLI (Cobra)
+- ~~TUI (Ink), web UI (Vite)~~ — TUI shipped (Bubble Tea); see `pux-tui` above
+- CLI (Cobra) — `pux-history` + `pux-tui` cover the operator surface
 - Self-evolving script toolkit (`make_script` / `edit_script`)
-- Transcript auditing, diligence evals, safeguard router
+- Diligence evals, safeguard router
 - Runtime MCP-server fallback URLs (planned — see plan file)
 
 Each will migrate back to master one feature at a time, after it's proven

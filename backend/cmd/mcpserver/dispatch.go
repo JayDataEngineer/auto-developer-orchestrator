@@ -42,6 +42,13 @@ type dispatchRuntime struct {
 	store    *mcpserver.TaskStore
 	logger   *zap.Logger
 
+	// chat + tool observers are wired into every CTO + delegated child loop
+	// so the history sidecar (when opted-in via PUX_HISTORY_DIR) can record
+	// the conversation transcript + in-loop tool dispatches. Nil = no
+	// recording (the common case when history is off).
+	chat core.ChatObserver
+	tool core.ToolObserver
+
 	// catalog is the full set of tools available to CTO/role loops. Filtered
 	// per task by the org's whitelist. delegate_to is added per-task (it
 	// needs an org-scoped role lookup).
@@ -54,12 +61,15 @@ type dispatchRuntime struct {
 
 // newDispatchRuntime wires the runtime. catalog is the full set of tools
 // already registered with the MCP server — the runtime reuses these
-// instances for in-loop dispatch.
+// instances for in-loop dispatch. chat + tool observers are optional; nil
+// values mean no transcript recording for that observer type.
 func newDispatchRuntime(
 	provider *agent.AnthropicProvider,
 	loader *org.Loader,
 	store *mcpserver.TaskStore,
 	catalog []core.Tool,
+	chat core.ChatObserver,
+	tool core.ToolObserver,
 	logger *zap.Logger,
 ) *dispatchRuntime {
 	return &dispatchRuntime{
@@ -67,6 +77,8 @@ func newDispatchRuntime(
 		loader:   loader,
 		store:    store,
 		catalog:  catalog,
+		chat:     chat,
+		tool:     tool,
 		logger:   logger,
 		orgMu:    make(map[string]*sync.Mutex),
 	}
@@ -178,10 +190,14 @@ func (r *dispatchRuntime) runOrg(ctx context.Context, o *org.Org, task, taskID s
 	defer close(runnerDone)
 
 	// Build the CTO catalog: shared sandbox tools + delegate_to (with this
-	// org's role lookup).
+	// org's role lookup). The delegate tool inherits the observers + taskID
+	// so delegated sub-tasks also get recorded under the same task ID.
 	lookup := &orgRoleLookup{org: o, catalog: r.catalog}
 	ctoCatalog := append([]core.Tool(nil), r.catalog...)
-	ctoCatalog = append(ctoCatalog, agent.NewDelegateTool(lookup, r.provider, &catalogExecutor{tools: ctoCatalog}))
+	ctoCatalog = append(ctoCatalog, agent.NewDelegateTool(
+		lookup, r.provider, &catalogExecutor{tools: ctoCatalog},
+		taskID, r.chat, r.tool,
+	))
 
 	ctoTools := agent.FilterTools(toolsToOpenAI(ctoCatalog), o.CTO.Tools)
 
@@ -192,6 +208,10 @@ func (r *dispatchRuntime) runOrg(ctx context.Context, o *org.Org, task, taskID s
 		Tools:        ctoTools,
 		MaxRounds:    o.CTO.MaxRounds,
 		Status:       status,
+		TaskID:       taskID,
+		Role:         "cto",
+		ChatObserver: r.chat,
+		ToolObserver: r.tool,
 	})
 	if err != nil {
 		return "", fmt.Errorf("build cto loop: %w", err)

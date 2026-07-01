@@ -16,7 +16,7 @@ task run
 
 # Or explicitly:
 task build
-./backend/mcpserver --addr 127.0.0.1:9876 --project ~/code/myproject
+./backend/mcpserver --addr 127.0.0.1:9987 --project ~/code/myproject
 ```
 
 The server expects `pux-sandbox:latest` (or `$OPENSHELL_IMAGE`) to be
@@ -30,7 +30,7 @@ Add to your MCP client config (Claude Desktop, etc.):
 {
   "mcpServers": {
     "pux": {
-      "url": "http://127.0.0.1:9876"
+      "url": "http://127.0.0.1:9987"
     }
   }
 }
@@ -69,7 +69,7 @@ tools/call → bash echo + file roundtrip + python sum), and tears down.
                │ JSON-RPC 2.0 over HTTP
                │ (Mcp-Session-Id header)
 ┌──────────────▼──────────────────────┐
-│ pux-mcpserver (Go, localhost:9876)   │
+│ pux-mcpserver (Go, localhost:9987)   │
 │  - tool registry                     │
 │  - JSON-RPC dispatch                 │
 └──────────────┬──────────────────────┘

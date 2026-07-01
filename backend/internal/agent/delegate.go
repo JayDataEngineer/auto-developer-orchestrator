@@ -40,17 +40,41 @@ type RoleConfig struct {
 // `delegate_to` (enforced by the wiring layer). Hard depth cap is also
 // enforced here via context-local recursion counter — but the primary
 // mechanism is the whitelist.
+//
+// Observer propagation: taskID, role, chat, and tool flow from the parent
+// CTO loop into every child loop the delegate tool spawns. The child's
+// recorded events are stamped with the role name (not "cto") so the
+// history sidecar can correlate which agent did what in a delegation chain.
 type DelegateTool struct {
-	lookup    RoleLookup
-	provider  core.LLMProvider
-	executor  core.ToolExecutor
+	lookup   RoleLookup
+	provider core.LLMProvider
+	executor core.ToolExecutor
+	taskID   string
+	chat     core.ChatObserver
+	tool     core.ToolObserver
 }
 
-// NewDelegateTool wires the tool with its dependencies. All three are
-// required — the tool cannot delegate without a role lookup, a provider
-// to drive the child loop, and an executor to run child tool calls.
-func NewDelegateTool(lookup RoleLookup, prov core.LLMProvider, exec core.ToolExecutor) *DelegateTool {
-	return &DelegateTool{lookup: lookup, provider: prov, executor: exec}
+// NewDelegateTool wires the tool with its dependencies. lookup, prov, and
+// exec are required — the tool cannot delegate without them. taskID, chat,
+// and tool propagate into every child loop so observer events from
+// delegated sub-tasks correlate to the parent dispatch task. Nil observers
+// + empty taskID are valid (children simply don't fire events).
+func NewDelegateTool(
+	lookup RoleLookup,
+	prov core.LLMProvider,
+	exec core.ToolExecutor,
+	taskID string,
+	chat core.ChatObserver,
+	tool core.ToolObserver,
+) *DelegateTool {
+	return &DelegateTool{
+		lookup:   lookup,
+		provider: prov,
+		executor: exec,
+		taskID:   taskID,
+		chat:     chat,
+		tool:     tool,
+	}
 }
 
 func (t *DelegateTool) Name() string { return "delegate_to" }
@@ -107,6 +131,10 @@ func (t *DelegateTool) Execute(ctx context.Context, args map[string]any) (any, e
 		MaxRounds:    role.MaxRounds,
 		MaxTokens:    role.MaxTokens,
 		Thinking:     role.Thinking,
+		TaskID:       t.taskID,
+		Role:         roleName,
+		ChatObserver: t.chat,
+		ToolObserver: t.tool,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("delegate_to: build child loop: %w", err)

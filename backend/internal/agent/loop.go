@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -32,6 +33,25 @@ type LoopConfig struct {
 	// Status is an optional sink the dispatch layer wires up so pollers
 	// can observe round counter + transcript tail. Nil = no status updates.
 	Status *Status
+
+	// TaskID correlates this loop's observer events to a dispatch task. Empty
+	// for loops not driven by the dispatch surface (e.g. tests). Passed
+	// through to ChatObserver + ToolObserver fire sites.
+	TaskID string
+
+	// Role identifies which agent is running this loop. The dispatch surface
+	// stamps "cto" for the CTO loop; DelegateTool stamps the role name for
+	// delegated children. Empty is normalized to "cto" in NewLoop. Forwarded
+	// to observer fire sites so history can correlate events to a delegation
+	// chain (which role did what).
+	Role string
+
+	// ChatObserver receives one event per non-empty assistant turn. Optional.
+	ChatObserver core.ChatObserver
+
+	// ToolObserver receives one event per in-loop tool dispatch. Optional.
+	// Distinct from the MCP-server audit hook, which catches external calls.
+	ToolObserver core.ToolObserver
 }
 
 // Status is the per-task progress signal read by get_task_status. Writes
@@ -100,6 +120,9 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	if max <= 0 {
 		max = defaultMaxRounds
 	}
+	if cfg.Role == "" {
+		cfg.Role = "cto"
+	}
 	return &Loop{cfg: cfg, maxRounds: max}, nil
 }
 
@@ -151,6 +174,7 @@ func (l *Loop) Run(ctx context.Context, task string) (string, error) {
 
 		if content != "" {
 			l.appendTranscriptTail(content)
+			l.fireAssistantMessage(ctx, round, content)
 		}
 
 		// ── Stop conditions ────────────────────────────────────────────
@@ -159,7 +183,7 @@ func (l *Loop) Run(ctx context.Context, task string) (string, error) {
 		}
 
 		// ── Act + Observe: dispatch tools in parallel, append results ─
-		if err := l.dispatchTools(ctx, toolCalls); err != nil {
+		if err := l.dispatchTools(ctx, round, toolCalls); err != nil {
 			l.setStatusError(err.Error())
 			return "", fmt.Errorf("agent round %d: dispatch: %w", round, err)
 		}
@@ -224,13 +248,18 @@ func (l *Loop) setStatusError(msg string) {
 // returns an error, the error itself becomes the tool's result content
 // (the model can see what went wrong and recover) — the loop only fails
 // fast if ctx is cancelled.
-func (l *Loop) dispatchTools(ctx context.Context, calls []core.ToolCallResponse) error {
+//
+// `round` is the 1-based Plan/Act/Observe cycle that produced these calls.
+// Forwarded to ToolObserver so recorded events correlate to their round.
+func (l *Loop) dispatchTools(ctx context.Context, round int, calls []core.ToolCallResponse) error {
 	results := make([]core.Message, len(calls))
 	g, gctx := errgroup.WithContext(ctx)
 	for i, c := range calls {
 		g.Go(func() error {
 			args := decodeArgs(c.Function.Arguments)
+			start := time.Now()
 			res, err := l.cfg.Executor.Execute(gctx, c.Function.Name, args)
+			duration := time.Since(start)
 			var body string
 			if err != nil {
 				// Surface tool error to the model — don't kill the loop.
@@ -239,6 +268,7 @@ func (l *Loop) dispatchTools(ctx context.Context, calls []core.ToolCallResponse)
 			} else {
 				body = renderResult(res)
 			}
+			l.fireToolCall(ctx, round, c.Function.Name, c.Function.Arguments, body, duration, err)
 			results[i] = core.Message{
 				Role:       string(core.RoleTool),
 				Content:    body,
@@ -255,6 +285,25 @@ func (l *Loop) dispatchTools(ctx context.Context, calls []core.ToolCallResponse)
 	l.messages = append(l.messages, results...)
 	l.mu.Unlock()
 	return nil
+}
+
+// fireAssistantMessage forwards the turn's content to the chat observer
+// (if wired). No-op when ChatObserver is nil — the common case for tests
+// and any loop that isn't driven by the dispatch surface.
+func (l *Loop) fireAssistantMessage(ctx context.Context, round int, content string) {
+	if l.cfg.ChatObserver == nil {
+		return
+	}
+	l.cfg.ChatObserver.OnAssistantMessage(ctx, l.cfg.TaskID, l.cfg.Role, round, content)
+}
+
+// fireToolCall forwards the call's metadata to the tool observer (if wired).
+// No-op when ToolObserver is nil.
+func (l *Loop) fireToolCall(ctx context.Context, round int, name, argsRaw, result string, duration time.Duration, err error) {
+	if l.cfg.ToolObserver == nil {
+		return
+	}
+	l.cfg.ToolObserver.OnToolCall(ctx, l.cfg.TaskID, l.cfg.Role, round, name, argsRaw, result, duration, err)
 }
 
 // drainStream consumes the provider's event channel end-to-end and returns

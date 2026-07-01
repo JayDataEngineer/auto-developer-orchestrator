@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/auto-developer-orchestrator/backend/internal/core"
 )
 
 // TaskStatus is the per-task lifecycle state.
@@ -45,14 +47,21 @@ type Task struct {
 // TaskStore is the in-memory registry of dispatched tasks. Safe for
 // concurrent use. Single-tenant — no persistence. Tasks live until the
 // server restarts.
+//
+// observer is an optional core.TaskObserver wired in at construction. When
+// non-nil, the store fires lifecycle events (pending/running/complete/failed)
+// inside the same mutex critical section that mutates the Task. Nil = no
+// events fire (the common case when history is not opted-in).
 type TaskStore struct {
-	mu    sync.RWMutex
-	tasks map[string]*Task
+	mu        sync.RWMutex
+	tasks     map[string]*Task
+	observer  core.TaskObserver
 }
 
-// NewTaskStore constructs an empty store.
-func NewTaskStore() *TaskStore {
-	return &TaskStore{tasks: make(map[string]*Task)}
+// NewTaskStore constructs an empty store. observer may be nil — lifecycle
+// events are silently dropped when no observer is wired.
+func NewTaskStore(observer core.TaskObserver) *TaskStore {
+	return &TaskStore{tasks: make(map[string]*Task), observer: observer}
 }
 
 // Insert registers a task under a fresh, randomly-generated ID. Returns
@@ -68,6 +77,9 @@ func (s *TaskStore) Insert(org, task string) *Task {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tasks[t.ID] = t
+	if s.observer != nil {
+		s.observer.OnTaskPending(context.Background(), t.ID, org, task, t.StartedAt)
+	}
 	return t
 }
 
@@ -94,6 +106,9 @@ func (s *TaskStore) SetRunning(id string) {
 	defer s.mu.Unlock()
 	if t, ok := s.tasks[id]; ok {
 		t.Status = StatusRunning
+		if s.observer != nil {
+			s.observer.OnTaskRunning(context.Background(), id)
+		}
 	}
 }
 
@@ -109,6 +124,9 @@ func (s *TaskStore) SetComplete(id, result string) {
 			t.cancel()
 			t.cancel = nil
 		}
+		if s.observer != nil {
+			s.observer.OnTaskComplete(context.Background(), id, result, t.FinishedAt)
+		}
 	}
 }
 
@@ -123,6 +141,9 @@ func (s *TaskStore) SetFailed(id, msg string) {
 		if t.cancel != nil {
 			t.cancel()
 			t.cancel = nil
+		}
+		if s.observer != nil {
+			s.observer.OnTaskFailed(context.Background(), id, msg, t.FinishedAt)
 		}
 	}
 }

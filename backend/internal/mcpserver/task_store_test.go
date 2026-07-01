@@ -8,7 +8,7 @@ import (
 )
 
 func TestTaskStore_Lifecycle(t *testing.T) {
-	s := NewTaskStore()
+	s := NewTaskStore(nil)
 	task := s.Insert("demo", "say hi")
 	if task.ID == "" {
 		t.Fatal("Insert: empty ID")
@@ -59,7 +59,7 @@ func TestTaskStore_Lifecycle(t *testing.T) {
 }
 
 func TestTaskStore_Failed(t *testing.T) {
-	s := NewTaskStore()
+	s := NewTaskStore(nil)
 	task := s.Insert("demo", "fail")
 	s.SetFailed(task.ID, "upstream error")
 
@@ -76,7 +76,7 @@ func TestTaskStore_Failed(t *testing.T) {
 }
 
 func TestTaskStore_GetMissingReturnsFalse(t *testing.T) {
-	s := NewTaskStore()
+	s := NewTaskStore(nil)
 	if _, ok := s.Get("tsk_nope"); ok {
 		t.Error("Get on missing ID returned true")
 	}
@@ -85,7 +85,7 @@ func TestTaskStore_GetMissingReturnsFalse(t *testing.T) {
 func TestTaskStore_GetReturnsCopy(t *testing.T) {
 	// Mutating the returned Task must NOT affect the store. Populate Tail
 	// first so the test exercises the slice-copy path too.
-	s := NewTaskStore()
+	s := NewTaskStore(nil)
 	task := s.Insert("demo", "test")
 	s.UpdateProgress(task.ID, 1, []string{"first", "second"})
 	s.SetComplete(task.ID, "result")
@@ -105,7 +105,7 @@ func TestTaskStore_GetReturnsCopy(t *testing.T) {
 }
 
 func TestTaskStore_ShutdownCancelsInFlight(t *testing.T) {
-	s := NewTaskStore()
+	s := NewTaskStore(nil)
 	t1 := s.Insert("a", "x")
 	t2 := s.Insert("b", "y")
 	s.SetRunning(t1.ID)
@@ -157,7 +157,7 @@ func TestTaskStore_ShutdownCancelsInFlight(t *testing.T) {
 
 func TestTaskStore_ConcurrentAccess(t *testing.T) {
 	// Run under -race; the test passes if the race detector is silent.
-	s := NewTaskStore()
+	s := NewTaskStore(nil)
 	const N = 50
 	var wg sync.WaitGroup
 	wg.Add(N * 3)
@@ -232,7 +232,7 @@ func (d *fakeDispatcher) Dispatch(org, task string) (string, error) {
 }
 
 func TestDispatchTool_HappyPath(t *testing.T) {
-	store := NewTaskStore()
+	store := NewTaskStore(nil)
 	disp := &fakeDispatcher{}
 	tool := NewDispatchTool(store, disp)
 
@@ -259,7 +259,7 @@ func TestDispatchTool_HappyPath(t *testing.T) {
 }
 
 func TestDispatchTool_Validation(t *testing.T) {
-	tool := NewDispatchTool(NewTaskStore(), &fakeDispatcher{})
+	tool := NewDispatchTool(NewTaskStore(nil), &fakeDispatcher{})
 	if _, err := tool.Execute(context.Background(), map[string]any{}); err == nil {
 		t.Error("missing org_name: expected error")
 	}
@@ -269,7 +269,7 @@ func TestDispatchTool_Validation(t *testing.T) {
 }
 
 func TestTaskStatusTool_Paths(t *testing.T) {
-	store := NewTaskStore()
+	store := NewTaskStore(nil)
 	task := store.Insert("demo", "test")
 	store.SetRunning(task.ID)
 	store.UpdateProgress(task.ID, 2, []string{"hello", "world"})

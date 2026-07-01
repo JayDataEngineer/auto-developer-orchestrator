@@ -54,7 +54,7 @@ func TestDelegate_HappyPath(t *testing.T) {
 	lookup := &fakeRoleLookup{roles: map[string]RoleConfig{
 		"researcher": {Name: "researcher", Prompt: "you are a researcher"},
 	}}
-	delegate := NewDelegateTool(lookup, prov, &recordingExecutor{})
+	delegate := NewDelegateTool(lookup, prov, &recordingExecutor{}, "", nil, nil)
 
 	// Drive the parent loop manually so we can inspect the delegate result
 	// both at the tool-call level and via the parent's final response.
@@ -102,7 +102,7 @@ func TestDelegate_HappyPath(t *testing.T) {
 func TestDelegate_UnknownRole(t *testing.T) {
 	lookup := &fakeRoleLookup{roles: map[string]RoleConfig{}}
 	prov := newFakeProvider()
-	delegate := NewDelegateTool(lookup, prov, &recordingExecutor{})
+	delegate := NewDelegateTool(lookup, prov, &recordingExecutor{}, "", nil, nil)
 
 	_, err := delegate.Execute(context.Background(), map[string]any{
 		"role": "ghost",
@@ -118,7 +118,7 @@ func TestDelegate_UnknownRole(t *testing.T) {
 
 // TestDelegate_MissingParams verifies required field validation.
 func TestDelegate_MissingParams(t *testing.T) {
-	delegate := NewDelegateTool(&fakeRoleLookup{}, newFakeProvider(), &recordingExecutor{})
+	delegate := NewDelegateTool(&fakeRoleLookup{}, newFakeProvider(), &recordingExecutor{}, "", nil, nil)
 
 	if _, err := delegate.Execute(context.Background(), map[string]any{}); err == nil {
 		t.Error("missing role: expected error")
@@ -145,7 +145,7 @@ func TestDelegate_ChildLoopFailureSurfacesAsText(t *testing.T) {
 	lookup := &fakeRoleLookup{roles: map[string]RoleConfig{
 		"worker": {Name: "worker", Prompt: "worker prompt", MaxRounds: 3},
 	}}
-	delegate := NewDelegateTool(lookup, prov, &recordingExecutor{})
+	delegate := NewDelegateTool(lookup, prov, &recordingExecutor{}, "", nil, nil)
 
 	res, err := delegate.Execute(context.Background(), map[string]any{
 		"role": "worker",
