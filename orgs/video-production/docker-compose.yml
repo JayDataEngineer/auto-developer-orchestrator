@@ -1,0 +1,39 @@
+# AUTO-GENERATED from org.toml — do not edit. Run `task org-build video-production`.
+
+services:
+  video-producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: video-production-video-producer:latest
+    container_name: research-video-producer
+    restart: unless-stopped
+    # Labels that let Pux adopt this container instead of spinning up a
+    # sibling. Bootstrap.sh exports OPENSHELL_PROJECT_PATH so the label
+    # and the bind mount stay in sync — Pux's bash executor assumes
+    # /sandbox/workspace maps to the project root.
+    labels:
+      openshell.org-name: "video-production"
+      openshell.project-path: "${OPENSHELL_PROJECT_PATH:-}"
+      openshell.sandbox-id: "video-production-compose"
+      openshell.policy: "developer"
+    volumes:
+      # Canonical Pux mount — enables container reuse. When the env var
+      # is unset, mounts the compose CWD (harmless default; Pux discovery
+      # fails because the label is also empty, so no wrong adoption).
+      - ${OPENSHELL_PROJECT_PATH:-./}:/sandbox/workspace
+      - video_prod_workspace:/workspace/video-productions
+    environment:
+      VIDEO_PRODUCTION_ROOT: "/workspace/video-productions"
+      KOKORO_VOICE: "af_heart"
+      KOKORO_LANG_CODE: "a"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+
+volumes:
+  video_prod_workspace:
+    name: research_video_prod_workspace
