@@ -98,3 +98,15 @@ form.html
 # External research notes (system cards, design docs from outside the repo)
 INSIGHTS-*.md
 
+# Subagent default-output pollution — pi-subagents writes to project root
+# when an agent's `output:` frontmatter is a bare filename. Operators should
+# give explicit paths in task strings; this catches the leaks.
+/brief.md
+/draft.md
+/manifest.md
+/options.md
+/research.md
+/script.md
+/test-report.md
+/video-productions/
+
