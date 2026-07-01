@@ -105,6 +105,20 @@ if (existsSync(mcpAdapterEntry)) {
   process.exit(1);
 }
 
+// pi-subagents brings the `subagent` tool + agent-file discovery. Agents live
+// under .pi/agents/*.md (project) and are delegated to via frontmatter-driven
+// spawning. Path is stable per pi-subagents package.json `pi.extensions`.
+const subagentsEntry = join(pkgRoot, "node_modules", "pi-subagents", "src", "extension", "index.ts");
+if (existsSync(subagentsEntry)) {
+  extArgs.push("--extension", subagentsEntry);
+} else {
+  console.error(
+    `pux: pi-subagents not found at ${subagentsEntry}\n` +
+      `Run 'npm install' to bring down the dep.`,
+  );
+  process.exit(1);
+}
+
 // ---- 5. Compose pi argv ----
 // --no-context-files : ignore user's AGENTS.md so OURS wins
 // --no-extensions    : skip pi's auto-discovery from cwd; explicit -e flags still load

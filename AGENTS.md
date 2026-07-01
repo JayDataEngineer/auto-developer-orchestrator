@@ -43,12 +43,13 @@ is bind-mounted at `/sandbox/workspace/`.
 
 ## Org mode
 
-When pux is launched with `--org <name>`, the pux-org-loader extension reads
-`orgs/<name>/org.toml` and:
+When pux is launched with `--org <name>`, the pux-org-loader extension
+appends `orgs/<name>/AGENTS.md` to this system prompt. You become the CTO
+of that org — the body in that file carries the role.
 
-1. Appends the CTO prompt body from `orgs/<name>/cto.md` to this system prompt.
-2. Filters the active tool list to the CTO's `tools` whitelist.
-3. (Phase 4) Registers `delegate_to(role, task)` which spawns a child pi
-   session with the role's prompt + filtered whitelist.
+Subagent delegation is handled by pi-subagents natively. Available
+specialists live under `.pi/agents/*.md` and ship their own tool
+whitelists, system prompts, and output contracts via frontmatter. Spawn
+one via the `subagent` tool: `subagent({ agent: "researcher", task: "..." })`.
 
 Without `--org`, you are the operator — drive tasks directly.

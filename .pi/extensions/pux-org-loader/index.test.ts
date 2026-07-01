@@ -1,21 +1,18 @@
 // Unit tests for pux-org-loader. Drives the extension factory with a stub
 // ExtensionAPI and exercises the registered hooks against the shipped
-// orgs/_demo/ substrate. No LLM, no Docker, no network.
+// orgs/_demo/AGENTS.md substrate. No LLM, no Docker, no network.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Type } from "typebox";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { rm, mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 type Hook = (event: any, ctx: any) => Promise<any | undefined>;
 
 interface StubAPI {
   flags: Record<string, unknown>;
   hooks: Map<string, Hook[]>;
-  activeTools: string[] | null;
   flagRegistrations: { name: string; opts: any }[];
 }
 
@@ -23,7 +20,6 @@ function makeStubAPI(): ExtensionAPI {
   const stub: StubAPI = {
     flags: {},
     hooks: new Map(),
-    activeTools: null,
     flagRegistrations: [],
   };
 
@@ -40,19 +36,9 @@ function makeStubAPI(): ExtensionAPI {
       list.push(handler);
       stub.hooks.set(event, list);
     },
-    getActiveTools() {
-      return stub.activeTools ?? ["bash", "file_read", "file_write", "python", "describe_image", "browser_navigate"];
-    },
-    setActiveTools(names: string[]) {
-      stub.activeTools = names;
-    },
-    registerTool() {
-      // Phase 4
-    },
   };
 
-  const api = Object.assign(apiMethods, { __stub: stub }) as unknown as ExtensionAPI;
-  return api;
+  return Object.assign(apiMethods, { __stub: stub }) as unknown as ExtensionAPI;
 }
 
 async function fire(stub: any, event: string, ev: any, ctx: any) {
@@ -74,40 +60,21 @@ async function withTempProject<T>(fn: (root: string) => Promise<T>): Promise<T> 
   }
 }
 
-async function writeOrg(
-  root: string,
-  name: string,
-  opts: { ctoTools?: string[]; ctoBody?: string; omitCtoBlock?: boolean } = {},
-) {
-  const orgDir = join(root, "orgs", name);
+async function writeAgentsMd(root: string, orgName: string, body: string) {
+  const orgDir = join(root, "orgs", orgName);
   await mkdir(orgDir, { recursive: true });
-  await mkdir(join(orgDir, "roles"), { recursive: true });
-  const tools = (opts.ctoTools ?? ["bash", "file_read"]).map((t) => '"' + t + '"').join(", ");
-  const lines = [
-    'name = "' + name + '"',
-    'description = "test org"',
-    "",
-  ];
-  if (!opts.omitCtoBlock) {
-    lines.push("[cto]");
-    lines.push('prompt = "cto.md"');
-    lines.push("max_rounds = 30");
-    lines.push("tools = [" + tools + "]");
-  }
-  await writeFile(join(orgDir, "org.toml"), lines.join("\n") + "\n");
-  await writeFile(join(orgDir, "cto.md"), opts.ctoBody ?? "# CTO for " + name + "\n\nTest body.");
+  await writeFile(join(orgDir, "AGENTS.md"), body);
 }
 
-const importFresh = async () => import("./index.ts").then((m) => m.default);
+const importFresh = () => import("./index.ts").then((m) => m.default);
 
 beforeEach(() => {
-  // Tests resolve orgs/<name>/ relative to cwd; project root is 4 levels up
-  // from .pi/extensions/pux-org-loader/index.test.ts.
+  // Project root is 4 levels up from .pi/extensions/pux-org-loader/index.test.ts.
   process.chdir(join(__dirname, "..", "..", ".."));
 });
 
 afterEach(() => {
-  delete process.env.PUX_ORG_TEST_ROOT;
+  vi.restoreAllMocks();
 });
 
 describe("pux-org-loader", () => {
@@ -122,17 +89,23 @@ describe("pux-org-loader", () => {
     expect(reg.opts.description).toMatch(/org mode/i);
   });
 
-  it("before_agent_start: appends CTO body from orgs/_demo/cto.md when --org=_demo", async () => {
+  it("before_agent_start: appends orgs/_demo/AGENTS.md body when --org=_demo", async () => {
     const api = makeStubAPI();
     const factory = await importFresh();
     factory(api);
     (api as any).__stub.flags.org = "_demo";
 
     const ev = { systemPrompt: "BASE", prompt: "say hi" };
-    const result = await fire((api as any).__stub, "before_agent_start", ev, { ui: { notify() {} } });
+    const result = await fire(
+      (api as any).__stub,
+      "before_agent_start",
+      ev,
+      { ui: { notify() {} } },
+    );
     expect(result.systemPrompt).toContain("BASE");
-    expect(result.systemPrompt).toContain("Demo CTO");
     expect(result.systemPrompt).toContain("Org: _demo");
+    expect(result.systemPrompt).toContain("Demo Org");
+    expect(result.systemPrompt).toContain("CTO Overlay");
   });
 
   it("before_agent_start: no-op when --org is empty", async () => {
@@ -142,11 +115,16 @@ describe("pux-org-loader", () => {
     (api as any).__stub.flags.org = "";
 
     const ev = { systemPrompt: "BASE", prompt: "hi" };
-    const result = await fire((api as any).__stub, "before_agent_start", ev, { ui: { notify() {} } });
+    const result = await fire(
+      (api as any).__stub,
+      "before_agent_start",
+      ev,
+      { ui: { notify() {} } },
+    );
     expect(result.systemPrompt).toBe("BASE");
   });
 
-  it("before_agent_start: no-op + logs error when org TOML is missing", async () => {
+  it("before_agent_start: no-op + logs error when orgs/<name>/AGENTS.md is missing", async () => {
     await withTempProject(async (root) => {
       process.chdir(root);
       const api = makeStubAPI();
@@ -156,109 +134,37 @@ describe("pux-org-loader", () => {
 
       const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const ev = { systemPrompt: "BASE", prompt: "hi" };
-      const result = await fire((api as any).__stub, "before_agent_start", ev, { ui: { notify() {} } });
+      const result = await fire(
+        (api as any).__stub,
+        "before_agent_start",
+        ev,
+        { ui: { notify() {} } },
+      );
       expect(result.systemPrompt).toBe("BASE");
       expect(errSpy).toHaveBeenCalled();
-      errSpy.mockRestore();
-    });
-  });
-
-  it("session_start: applies the CTO whitelist via setActiveTools", async () => {
-    await withTempProject(async (root) => {
-      await writeOrg(root, "wl-test", { ctoTools: ["bash", "file_read", "python"] });
-      process.chdir(root);
-
-      const api = makeStubAPI();
-      const factory = await importFresh();
-      factory(api);
-      (api as any).__stub.flags.org = "wl-test";
-
-      await fire((api as any).__stub, "session_start", { reason: "startup" }, { ui: { notify() {} } });
-      expect((api as any).__stub.activeTools).toEqual(["bash", "file_read", "python"]);
-    });
-  });
-
-  it("session_start: filters 'delegate_to' from the whitelist (Phase 4 tool not yet registered)", async () => {
-    await withTempProject(async (root) => {
-      await writeOrg(root, "del-test", { ctoTools: ["bash", "delegate_to"] });
-      process.chdir(root);
-
-      const api = makeStubAPI();
-      const factory = await importFresh();
-      factory(api);
-      (api as any).__stub.flags.org = "del-test";
-
-      await fire((api as any).__stub, "session_start", { reason: "startup" }, { ui: { notify() {} } });
-      expect((api as any).__stub.activeTools).toEqual(["bash"]);
-    });
-  });
-
-  it("tool_call: blocks a tool outside the whitelist", async () => {
-    await withTempProject(async (root) => {
-      await writeOrg(root, "block-test", { ctoTools: ["bash"] });
-      process.chdir(root);
-
-      const api = makeStubAPI();
-      const factory = await importFresh();
-      factory(api);
-      (api as any).__stub.flags.org = "block-test";
-
-      const result = await fire((api as any).__stub, "tool_call", {
-        toolName: "file_write",
-        toolCallId: "1",
-        input: {},
-      }, { ui: { notify() {} } });
-      expect(result.block).toBe(true);
-      expect(result.reason).toMatch(/not in the block-test CTO whitelist/);
-    });
-  });
-
-  it("tool_call: allows a whitelisted tool", async () => {
-    await withTempProject(async (root) => {
-      await writeOrg(root, "allow-test", { ctoTools: ["bash", "file_read"] });
-      process.chdir(root);
-
-      const api = makeStubAPI();
-      const factory = await importFresh();
-      factory(api);
-      (api as any).__stub.flags.org = "allow-test";
-
-      const result = await fire((api as any).__stub, "tool_call", {
-        toolName: "bash",
-        toolCallId: "1",
-        input: { command: "ls" },
-      }, { ui: { notify() {} } });
-      expect(result.block).toBeUndefined();
-    });
-  });
-
-  it("before_agent_start: errors loudly when [cto] block is missing", async () => {
-    await withTempProject(async (root) => {
-      await writeOrg(root, "no-cto", { omitCtoBlock: true });
-      process.chdir(root);
-
-      const api = makeStubAPI();
-      const factory = await importFresh();
-      factory(api);
-      (api as any).__stub.flags.org = "no-cto";
-
-      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-      const result = await fire((api as any).__stub, "before_agent_start", { systemPrompt: "BASE", prompt: "hi" }, { ui: { notify() {} } });
-      expect(result.systemPrompt).toBe("BASE");
       const msgs = errSpy.mock.calls.map((c) => String(c[0]));
-      expect(msgs.some((m) => m.includes("missing [cto] block"))).toBe(true);
-      errSpy.mockRestore();
+      expect(msgs.some((m) => m.includes("AGENTS.md not found"))).toBe(true);
+    });
+  });
+
+  it("before_agent_start: appends body from a custom org's AGENTS.md", async () => {
+    await withTempProject(async (root) => {
+      await writeAgentsMd(root, "custom", "# Custom Org\n\nSpecialist body.");
+      process.chdir(root);
+
+      const api = makeStubAPI();
+      const factory = await importFresh();
+      factory(api);
+      (api as any).__stub.flags.org = "custom";
+
+      const result = await fire(
+        (api as any).__stub,
+        "before_agent_start",
+        { systemPrompt: "BASE", prompt: "hi" },
+        { ui: { notify() {} } },
+      );
+      expect(result.systemPrompt).toContain("Org: custom");
+      expect(result.systemPrompt).toContain("Specialist body.");
     });
   });
 });
-
-// Type-box runtime check sanity (ensures typebox dep is wired)
-describe("typebox dep", () => {
-  it("Type.Object constructs schemas", () => {
-    const s = Type.Object({ name: Type.String() });
-    expect(s.type).toBe("object");
-  });
-});
-
-// Import vitest globals used inside withTempProject blocks
-import { vi } from "vitest";
