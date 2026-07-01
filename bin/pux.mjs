@@ -42,6 +42,20 @@ if (tooOld) {
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(here, "..");
 
+// ---- 2a. Prepend node_modules/.bin to PATH ----
+// pi-subagents spawns child sessions via the bare command "pi" (resolved
+// through PATH). Without this prepend, a globally-installed pi (e.g.
+// @mariozechner/pi-coding-agent via Homebrew) wins and subagents inherit a
+// different model registry than the parent — current models like
+// deepseek-v4-flash go "not found" inside child sessions even though the
+// parent sees them fine. node_modules/.bin/pi is the symlink npm writes to
+// our bundled @earendil-works/pi-coding-agent, so putting it first keeps
+// parent + child on the same version.
+const localBin = join(pkgRoot, "node_modules", ".bin");
+if (existsSync(localBin)) {
+  process.env.PATH = `${localBin}:${process.env.PATH ?? ""}`;
+}
+
 // ---- 3. Subcommand intercept ----
 // `dispatch` is a pure alias: rewrite argv to add `-p` then fall through to
 // the normal pi spawn. The others are terminal — handle and exit.

@@ -1,0 +1,7 @@
+{
+  "defaultProvider": "deepseek",
+  "defaultModel": "deepseek/deepseek-v4-flash",
+  "subagents": {
+    "disableThinking": true
+  }
+}
