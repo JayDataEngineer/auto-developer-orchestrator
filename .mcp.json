@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pux-sandbox": {
+      "url": "http://127.0.0.1:9987",
+      "lifecycle": "eager"
+    }
+  }
+}

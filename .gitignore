@@ -20,8 +20,13 @@ coverage/
 # Environment / secrets
 .env*
 !.env.example
-.pi/
-**/settings.json
+# Pi runtime data (sessions, package installs, cache). Project-shipped
+# extensions + settings ARE source — un-ignore them explicitly.
+.pi/sessions/
+.pi/npm/
+.pi/git/
+.pi/cache.json
+.pi/mcp-cache.json
 **/auth.json
 
 # Logs

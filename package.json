@@ -1,0 +1,26 @@
+{
+  "name": "pux",
+  "version": "0.2.0-pi-pivot",
+  "description": "Pux — Pi-Mono harness driving a Docker sandbox MCP backend. Composable org system for long-term one-shot tasks.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "pux": "bin/pux.mjs"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "pux": "node bin/pux.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.4",
+    "pi-mcp-adapter": "^2.10.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
