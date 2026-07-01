@@ -50,12 +50,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/auto-developer-orchestrator/backend/internal/adapters"
-	"github.com/auto-developer-orchestrator/backend/internal/agent"
 	"github.com/auto-developer-orchestrator/backend/internal/audit"
-	"github.com/auto-developer-orchestrator/backend/internal/core"
-	"github.com/auto-developer-orchestrator/backend/internal/history"
 	"github.com/auto-developer-orchestrator/backend/internal/mcpserver"
-	"github.com/auto-developer-orchestrator/backend/internal/org"
 	"github.com/auto-developer-orchestrator/backend/internal/sandbox"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/bash"
 	"github.com/auto-developer-orchestrator/backend/internal/tools/file"
@@ -117,8 +113,6 @@ Environment:
   PUX_PROJECT_PATH     Override --project
   PUX_SANDBOX_ID       Override --sandbox-id
   PUX_AUDIT_LOG        Opt-in audit log path (JSONL)
-  PUX_LLM_API_KEY      Opt-in dispatch surface (org → agent loop)
-  PUX_HISTORY_DIR      Opt-in history recorder (sqlite)
 
 Examples:
   mcpserver                                   # foreground, default port
@@ -231,54 +225,6 @@ func runRun(args []string) {
 	mcpserver.RegisterBrowserTools(srv, bashExec, mcpserver.BrowserToolConfig{})
 	mcpserver.RegisterDesktopTools(srv, bashExec, mcpserver.DesktopToolConfig{})
 
-	// History sidecar — opt-in via PUX_HISTORY_DIR. When set, opens a sqlite
-	// database at <dir>/history.sqlite and records dispatch task lifecycle +
-	// agent-loop transcripts + in-loop tool calls. Fully deletable: rm the
-	// history package + these 8 lines + the matching cmd/pux-history binary
-	// and the server still builds + runs identically.
-	var taskObs core.TaskObserver
-	var chatObs core.ChatObserver
-	var toolObs core.ToolObserver
-	if dir := os.Getenv("PUX_HISTORY_DIR"); dir != "" {
-		rec, err := history.New(dir)
-		if err != nil {
-			logger.Fatal("history recorder init failed", zap.String("dir", dir), zap.Error(err))
-		}
-		defer rec.Close()
-		taskObs, chatObs, toolObs = rec, rec, rec
-		logger.Info("history recorder enabled", zap.String("dir", dir))
-	}
-
-	// Dispatch surface (org → agent loop) is opt-in via PUX_LLM_API_KEY.
-	// When enabled, three new MCP tools land: dispatch_task, get_task_status,
-	// list_orgs. The runtime re-uses the sandbox tools registered above as
-	// the agent's in-loop catalog.
-	var taskStore *mcpserver.TaskStore
-	if apiKey := os.Getenv("PUX_LLM_API_KEY"); apiKey != "" {
-		provider, err := agent.NewProvider(agent.ProviderConfig{
-			APIKey:    apiKey,
-			BaseURL:   os.Getenv("PUX_LLM_BASE_URL"),
-			Model:     os.Getenv("PUX_LLM_MODEL"),
-			MaxTokens: envOrZero("PUX_LLM_MAX_TOKENS"),
-		})
-		if err != nil {
-			logger.Fatal("dispatch provider init failed", zap.Error(err))
-		}
-		taskStore = mcpserver.NewTaskStore(taskObs)
-		loader := org.NewLoader(*projectPath)
-		rt := newDispatchRuntime(provider, loader, taskStore, srv.Tools(), chatObs, toolObs, logger)
-
-		srv.RegisterTool(mcpserver.NewDispatchTool(taskStore, rt))
-		srv.RegisterTool(mcpserver.NewTaskStatusTool(taskStore))
-		srv.RegisterTool(mcpserver.NewListOrgsTool(&orgLister{loader: loader}))
-
-		logger.Info("dispatch surface enabled",
-			zap.String("model", provider.ModelName()),
-			zap.String("orgs_root", *projectPath+"/orgs"))
-	} else {
-		logger.Info("dispatch surface disabled (set PUX_LLM_API_KEY to enable)")
-	}
-
 	// 6. HTTP server.
 	httpSrv := &http.Server{
 		Addr:              *addr,
@@ -289,10 +235,10 @@ func runRun(args []string) {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// 7. Graceful shutdown. Sequence: signal → cancel tasks → destroy sandbox
-	// → stop HTTP → remove PID file → exit. Sandbox destroy happens BEFORE
-	// HTTP shutdown so main() doesn't race-exit and orphan the goroutine
-	// mid-destroy. The done channel blocks main until the teardown completes.
+	// 7. Graceful shutdown. Sequence: signal → destroy sandbox → stop HTTP
+	// → remove PID file → exit. Sandbox destroy happens BEFORE HTTP shutdown
+	// so main() doesn't race-exit and orphan the goroutine mid-destroy. The
+	// done channel blocks main until the teardown completes.
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan struct{})
@@ -301,12 +247,7 @@ func runRun(args []string) {
 		sig := <-shutdown
 		logger.Info("shutdown signal received", zap.String("signal", sig.String()))
 
-		// 1. Cancel in-flight dispatch tasks.
-		if taskStore != nil {
-			taskStore.Shutdown()
-		}
-
-		// 2. Destroy the sandbox (slow operation).
+		// 1. Destroy the sandbox (slow operation).
 		if !*keepAlive {
 			sbCtx, sbCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := mgr.DestroySandbox(sbCtx, sb.ID); err != nil {
@@ -317,14 +258,14 @@ func runRun(args []string) {
 			sbCancel()
 		}
 
-		// 3. Stop the HTTP server.
+		// 2. Stop the HTTP server.
 		httpCtx, httpCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := httpSrv.Shutdown(httpCtx); err != nil {
 			logger.Warn("http shutdown errored (non-fatal)", zap.Error(err))
 		}
 		httpCancel()
 
-		// 4. Remove the PID file (supervisor bookkeeping).
+		// 3. Remove the PID file (supervisor bookkeeping).
 		if err := removePIDFile(pidPath); err != nil && !os.IsNotExist(err) {
 			logger.Warn("pid file remove failed (non-fatal)", zap.Error(err))
 		}
@@ -545,30 +486,4 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
-}
-
-// envOrZero returns the integer value of the named env var, or 0 if unset /
-// unparseable. Used for optional knobs like PUX_LLM_MAX_TOKENS where zero
-// means "use the provider default".
-func envOrZero(key string) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return 0
-	}
-	n, err := atoiPositive(v)
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
-func atoiPositive(s string) (int, error) {
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, fmt.Errorf("not a positive integer: %q", s)
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n, nil
 }

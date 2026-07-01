@@ -1,5 +1,0 @@
-description = "fixture: missing top-level name field"
-
-[cto]
-prompt = "cto.md"
-tools = ["bash"]

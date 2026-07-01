@@ -1,7 +1,0 @@
-name = "missing_prompt"
-description = "fixture: references a prompt file that doesn't exist"
-
-[cto]
-prompt = "does_not_exist.md"
-max_rounds = 5
-tools = ["bash"]

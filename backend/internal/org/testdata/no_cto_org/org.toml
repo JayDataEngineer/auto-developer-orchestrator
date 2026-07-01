@@ -1,7 +1,0 @@
-name = "no_cto"
-description = "fixture: missing [cto] section entirely"
-
-[[roles]]
-name = "researcher"
-prompt = "roles/researcher.md"
-tools = ["bash"]
