@@ -5,7 +5,9 @@ You are driving Pux — a Pi-Mono harness backed by a Docker sandbox.
 ## What pux gives you
 
 A sandbox MCP backend at `http://127.0.0.1:9987` (server name `pux-sandbox`)
-exposes these tool families via the `mcp` proxy tool:
+exposes these tool families. They're registered as first-class pi tools
+(`directTools: true` in `.mcp.json`), so call them by name directly — no
+`mcp({tool:...})` proxy.
 
 - **bash / file_read / file_write / file_edit / file_grep / file_glob** — basic
   filesystem + shell, all executing inside the Docker container.
@@ -27,19 +29,6 @@ exposes these tool families via the `mcp` proxy tool:
 All paths the tools report are **inside the sandbox container**. The project
 is bind-mounted at `/sandbox/workspace/`.
 
-## How to call MCP tools
-
-The proxy tool costs ~200 tokens regardless of how many MCP tools exist
-behind it. Use it in two steps:
-
-```
-mcp({ search: "bash file_read" })       // discover matching tools
-mcp({ tool: "bash", args: '{"command":"ls /sandbox/workspace"}' })
-```
-
-`args` is a JSON string, not an object. Search terms are fuzzy-matched on
-hyphens and underscores; space-separated words are OR'd.
-
 ## Operating principles
 
 - **Verify or die.** Run a tool, watch its output, then reason about the
@@ -52,8 +41,14 @@ hyphens and underscores; space-separated words are OR'd.
 - **No fallbacks.** If something breaks, surface the error — don't paper over
   it with a fallback path.
 
-## Org system (Phase 3 — pending)
+## Org mode
 
-The full org system (`orgs/<name>/org.toml` + CTO + delegated roles) lands in
-Phase 3 of the pivot. For now, this AGENTS.md is the system prompt; the
-operator drives tasks directly through pi.
+When pux is launched with `--org <name>`, the pux-org-loader extension reads
+`orgs/<name>/org.toml` and:
+
+1. Appends the CTO prompt body from `orgs/<name>/cto.md` to this system prompt.
+2. Filters the active tool list to the CTO's `tools` whitelist.
+3. (Phase 4) Registers `delegate_to(role, task)` which spawns a child pi
+   session with the role's prompt + filtered whitelist.
+
+Without `--org`, you are the operator — drive tasks directly.

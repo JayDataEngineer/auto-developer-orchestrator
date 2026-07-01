@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.79.4",
+    "@iarna/toml": "^2.2.5",
     "pi-mcp-adapter": "^2.10.0"
   },
   "devDependencies": {
