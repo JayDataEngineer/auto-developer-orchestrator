@@ -29,6 +29,7 @@ import type { PiSendMessageInput } from "@assistant-ui/react-pi";
 import { piClient } from "./pi.ts";
 import { handleFilesRoute } from "./files.ts";
 import { handleSandboxRoute } from "./sandbox.ts";
+import { handleVncHttpRoute, attachVncUpgrade } from "./vnc-proxy.ts";
 import { attachTerminalUpgrade } from "./terminal.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -345,6 +346,19 @@ const server = createServer(async (req, res) => {
 
   // Sandbox lifecycle BFF.
   if (urlPath === "/api/sandbox" || urlPath.startsWith("/api/sandbox/")) {
+    // VNC reverse-proxy lives at /api/sandbox/vnc/** — try it first.
+    if (urlPath.startsWith("/api/sandbox/vnc")) {
+      try {
+        const handled = await handleVncHttpRoute(req, res, urlPath);
+        if (handled) return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[api] ${method} ${urlPath} →`, err);
+        if (!res.headersSent) sendError(res, 502, msg);
+        else try { res.end(); } catch {}
+        return;
+      }
+    }
     try {
       const handled = await handleSandboxRoute(req, res, urlPath);
       if (handled) return;
@@ -390,8 +404,9 @@ server.listen(PORT, HOST, () => {
   console.log(`[pux-site] API on http://${HOST}:${PORT}  (proxy from vite :5176)`);
 });
 
-// WebSocket upgrade routes — terminal PTY (and later, VNC reverse proxy).
+// WebSocket upgrade routes — terminal PTY + VNC reverse proxy.
 attachTerminalUpgrade(server);
+attachVncUpgrade(server);
 
 // Keep the supervisor alive on signals
 process.on("SIGINT", () => process.exit(0));

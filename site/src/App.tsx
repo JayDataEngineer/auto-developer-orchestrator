@@ -19,6 +19,7 @@ import { EditorPanel } from "./components/workbench/editor-panel.tsx";
 import { TerminalPanel } from "./components/workbench/terminal-panel.tsx";
 import { SandboxPanel } from "./components/workbench/sandbox-panel.tsx";
 import { SettingsPanel } from "./components/workbench/settings-panel.tsx";
+import { VncViewer } from "./components/workbench/vnc-viewer.tsx";
 import { cn } from "./lib/utils";
 
 type WorkbenchTab = "files" | "terminal" | "sandbox" | "vnc" | "settings";
@@ -122,10 +123,10 @@ export function App() {
             <button
               onClick={() => openTab("vnc")}
               className={cn(
-                "flex size-7 items-center justify-center rounded-md opacity-40 hover:bg-accent",
+                "flex size-7 items-center justify-center rounded-md hover:bg-accent",
                 workbenchOpen && workbenchTab === "vnc" && "bg-accent",
               )}
-              title="VNC (Phase 5)"
+              title="VNC"
             >
               <MonitorIcon className="size-4" />
             </button>
@@ -201,11 +202,7 @@ export function App() {
                       {workbenchTab === "files" && <EditorPanel />}
                       {workbenchTab === "terminal" && <TerminalPanel />}
                       {workbenchTab === "sandbox" && <SandboxPanel />}
-                      {workbenchTab === "vnc" && (
-                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                          VNC ships in Phase 5
-                        </div>
-                      )}
+                      {workbenchTab === "vnc" && <VncViewer />}
                       {workbenchTab === "settings" && <SettingsPanel />}
                     </div>
                   </section>

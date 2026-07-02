@@ -97,7 +97,10 @@ async function findSandbox(): Promise<DockerPsRow | null> {
 
 function toInfo(row: DockerPsRow): SandboxInfo {
   const ports = parsePorts(row.Ports);
-  const vncPort = ports.find(p => p.container === 6080);
+  // Relative URL — same-origin through the BFF reverse proxy so remote
+  // operators (SSH tunnel, tailscale) don't need direct access to the
+  // container's published port. We always expose this when the sandbox
+  // is running; the proxy 503s if the container is gone.
   return {
     id: SANDBOX_ID,
     containerId: row.ID,
@@ -106,7 +109,9 @@ function toInfo(row: DockerPsRow): SandboxInfo {
     running: row.State === "running",
     createdAt: row.CreatedAt,
     ports,
-    vncUrl: vncPort ? `http://127.0.0.1:${vncPort.host}/vnc.html?autoconnect=true&resize=remote&path=api/sandbox/vnc/websockify` : null,
+    vncUrl: row.State === "running"
+      ? `/api/sandbox/vnc/vnc.html?autoconnect=true&resize=remote&path=api/sandbox/vnc/websockify&reconnect=true`
+      : null,
   };
 }
 
