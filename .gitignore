@@ -67,6 +67,7 @@ orgs/*
 !orgs/video-production/
 orgs/*/*
 !orgs/*/AGENTS.md
+!orgs/*/policy.yaml
 
 # Org-scoped runtime artifacts (article bodies, backtest outputs, parsed
 # chat dumps, memos, etc.) — written by the agent during runs, not source.

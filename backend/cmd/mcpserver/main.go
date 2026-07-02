@@ -157,6 +157,7 @@ func runRun(args []string) {
 	sb, err := mgr.CreateSandbox(context.Background(), sandbox.SandboxOptions{
 		ID:          *sandboxID,
 		ProjectPath: *projectPath,
+		OrgName:     os.Getenv("PUX_ORG"),
 	})
 	if err != nil {
 		var ve *sandbox.ValidationError

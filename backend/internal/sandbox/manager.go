@@ -296,6 +296,23 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	if r := os.Getenv("PUX_SANDBOX_RUNTIME"); r != "" && opts.Tier != TierBridged {
 		hostConfig.Runtime = r
 	}
+
+	// Declarative policy enforcement — opt-in per org via policy.yaml.
+	// Loads + validates + applies before container create. Skipped for
+	// TierBridged (host networking makes iptables-in-container meaningless;
+	// operator explicitly chose host net for that sandbox). Errors from
+	// the policy layer are loud: missing required creds or unresolved
+	// ${VAR} placeholders fail the create rather than silently degrade.
+	containerUser := ""
+	if opts.OrgName != "" && opts.Tier != TierBridged {
+		user, err := applyOrgPolicy(opts, &binds, &envVars, hostConfig, m.logger)
+		if err != nil {
+			m.mu.Unlock()
+			return nil, err
+		}
+		containerUser = user
+	}
+
 	netConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
 			networkName: {},
@@ -317,6 +334,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	createResp, err := m.dockerClient.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
 			Image: image,
+			User:  containerUser,
 			Env:   envVars,
 			Labels: map[string]string{
 				"openshell.policy":       policy,
@@ -336,6 +354,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 			createResp, err = m.dockerClient.ContainerCreate(ctx, client.ContainerCreateOptions{
 				Config: &container.Config{
 					Image: image,
+					User:  containerUser,
 					Env:   envVars,
 					Labels: map[string]string{
 						"openshell.policy":       policy,

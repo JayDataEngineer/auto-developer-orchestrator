@@ -348,6 +348,60 @@ Four MCP tools wrap the sandbox's X11 desktop.
 **Pixel coordinates are the contract.** OCR text positions drift across
 runs, so click by `(x, y)` from the latest `desktop_screenshot`.
 
+## Sandbox policy (declarative, opt-in per org)
+
+`orgs/<name>/policy.yaml` is the per-org enforcement contract. Presence
+opts that org into three independent layers; absence = today's behavior
+(full egress, root-owning writes, no required creds). All three sections
+optional — declare only what you need.
+
+```yaml
+# orgs/<name>/policy.yaml
+workspace:
+  mounts:
+    - host: ${GAME_ROOT}            # ${VAR} resolved from operator env
+      container: /workspace/game
+      mode: rw                      # rw (default) | ro
+  run_as_host_user: true            # match container UID:GID to operator
+
+egress:
+  allow:                            # deny-by-default when non-empty
+    - host: github.com              # DNS resolved at boot, all IPs allowed
+      port: 443
+    - host: 100.86.69.57            # literal IP also works
+      ports: [18800, 18080, 18265]
+
+credentials:
+  required: [ALPACA_API_KEY]        # refuse create if absent in env
+  optional: [FRED_API_KEY]          # inject if present, silent skip
+```
+
+**Pipeline** (all in `backend/internal/policy/` + `sandbox/policy_hook.go`):
+
+1. `pux --org X` → TS extension sets `PUX_ORG=X` in env
+2. Go server reads `PUX_ORG`, calls `policy.Load(X, projectRoot)`
+3. `ValidateEnv` checks required creds present → fail loud if missing
+4. `ResolveMounts` expands `${VAR}` placeholders → fail loud if unset
+5. Required + optional creds injected as `--env KEY=VALUE`
+6. `RunAsHostUser` → `container.Config.User = "UID:GID"`
+7. `egress.allow` non-empty → stages `<project>/.pux/egress.conf` +
+   grants `NET_ADMIN` capability
+8. Supervisor runs `apply-egress-policy.sh` at boot priority 15:
+   `iptables -P OUTPUT DROP` + allowlist + always allow loopback/DNS/established
+
+**Skipped for TierBridged** — host networking makes iptables-in-container
+meaningless; operator explicitly chose host net for that sandbox.
+
+**Verify gates** (baked into `task test`):
+
+- `go test -race ./internal/policy/...` — 22 tests (placeholder expansion,
+  missing-env errors, optional vs required, hostname resolution, port
+  range, IPv4 + IPv6 literals, DNS failure)
+- `task smoke` — boots real Docker, confirms no-policy path unchanged
+- E2E: add `orgs/<name>/policy.yaml`, run `pux dispatch --org <name>`,
+  confirm refused create when creds missing, allowed host succeeds,
+  blocked host fails at network layer
+
 ## MCP transport contract
 
 | Method | Behavior |

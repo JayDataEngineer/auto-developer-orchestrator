@@ -1,7 +1,13 @@
 // pux-org-loader — turns a pi session into the CTO of a configured org.
 //
-// Activation: `--org <name>` CLI flag. When set, the contents of
-// `orgs/<name>/AGENTS.md` are appended to the base system prompt. That's it.
+// Activation: `--org <name>` CLI flag. When set:
+//   1. The contents of `orgs/<name>/AGENTS.md` are appended to the base
+//      system prompt (CTO overlay).
+//   2. PUX_ORG=<name> is exported to the process environment so the Go
+//      MCP server (which inherits this env via `task start`) can load
+//      `orgs/<name>/policy.yaml` and apply declarative policy enforcement
+//      (egress ACLs, env-only credentials, workspace mounts) at sandbox
+//      create time. See backend/internal/policy/ for the schema.
 //
 // Everything else (subagent delegation, per-role tool whitelists, output
 // files, thinking levels) is handled by pi-subagents natively — see
@@ -34,6 +40,12 @@ export default function (pi: ExtensionAPI) {
       );
       return event;
     }
+
+    // Export PUX_ORG so the Go MCP server (a child process via task start)
+    // reads it at sandbox create time and loads policy.yaml for this org.
+    // Empty policy.yaml = no enforcement; missing file = no enforcement.
+    // Opt-in is purely per-org via file presence.
+    process.env.PUX_ORG = orgName;
 
     const body = await readFile(orgAgentsMd, "utf-8");
     return {

@@ -6,6 +6,7 @@ require (
 	github.com/moby/moby/api v1.54.2
 	github.com/moby/moby/client v0.4.1
 	go.uber.org/zap v1.28.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

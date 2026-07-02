@@ -60,6 +60,14 @@ type SandboxOptions struct {
 	// named workspace volume). Empty = only the default project/policies/tmp/persist
 	// binds apply.
 	Volumes []SandboxVolume
+	// OrgName opts this sandbox into declarative policy enforcement. When
+	// non-empty, the manager loads orgs/<OrgName>/policy.yaml from
+	// ProjectPath and applies its workspace/egress/credentials sections.
+	// Skipped for TierBridged sandboxes (host networking makes iptables-
+	// in-container meaningless — operator explicitly chose host net).
+	// Source: PUX_ORG env var set by the pux-org-loader TS extension when
+	// the operator passes --org <name>.
+	OrgName string
 }
 
 // SandboxVolume mirrors one row of pux.yaml's sandbox.volumes: block. The

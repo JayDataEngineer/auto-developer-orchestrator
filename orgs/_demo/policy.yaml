@@ -1,0 +1,38 @@
+# Declarative sandbox policy for org _demo.
+#
+# Presence of policy.yaml opts this org into declarative enforcement:
+# deny-by-default egress, env-only credentials, extra workspace mounts.
+# All three sections are independent — uncomment the ones you want.
+#
+# Schema reference: backend/internal/policy/policy.go
+# Behavior: backend/internal/sandbox/policy_hook.go + sandbox/scripts/apply-egress-policy.sh
+#
+# Enforcement skips TierBridged sandboxes (host networking makes
+# iptables-in-container meaningless). For orgs that need X11 + host net,
+# put host allowlists elsewhere (e.g. the host firewall).
+
+# workspace:
+#   mounts:
+#     - host: ${PROJECT_ROOT}
+#       container: /workspace/project
+#       mode: rw                  # rw (default) or ro
+#   run_as_host_user: true        # match container UID:GID to operator so
+#                                 # writes to bind-mounts aren't root-owned
+
+# egress:
+#   allow:
+#     - host: github.com          # DNS resolved at boot, all IPs allowed
+#       port: 443
+#     - host: api.alpaca.markets
+#       port: 443
+#     - host: 100.86.69.57        # literal IP also works (e.g. Tailscale)
+#       ports: [18800, 18080, 18265]
+#   # deny_default: true implied when allow non-empty.
+#   # DNS (port 53) + established connections + loopback always allowed.
+
+# credentials:
+#   required:                     # refuse sandbox create if absent in env
+#     - ALPACA_API_KEY
+#     - ALPACA_SECRET_KEY
+#   optional:                     # inject if present, silent skip otherwise
+#     - FRED_API_KEY
