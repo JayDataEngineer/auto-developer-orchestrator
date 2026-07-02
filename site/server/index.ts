@@ -28,6 +28,8 @@ import { fileURLToPath } from "node:url";
 import type { PiSendMessageInput } from "@assistant-ui/react-pi";
 import { piClient } from "./pi.ts";
 import { handleFilesRoute } from "./files.ts";
+import { handleSandboxRoute } from "./sandbox.ts";
+import { attachTerminalUpgrade } from "./terminal.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const siteRoot = resolve(here, "..");
@@ -341,6 +343,20 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  // Sandbox lifecycle BFF.
+  if (urlPath === "/api/sandbox" || urlPath.startsWith("/api/sandbox/")) {
+    try {
+      const handled = await handleSandboxRoute(req, res, urlPath);
+      if (handled) return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[api] ${method} ${urlPath} →`, err);
+      if (!res.headersSent) sendError(res, 500, msg);
+      else try { res.end(); } catch {}
+      return;
+    }
+  }
+
   for (const route of routes) {
     if (route.method !== method) continue;
     const match = route.pattern.exec(urlPath);
@@ -373,6 +389,9 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`[pux-site] API on http://${HOST}:${PORT}  (proxy from vite :5176)`);
 });
+
+// WebSocket upgrade routes — terminal PTY (and later, VNC reverse proxy).
+attachTerminalUpgrade(server);
 
 // Keep the supervisor alive on signals
 process.on("SIGINT", () => process.exit(0));

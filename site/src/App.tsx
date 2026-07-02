@@ -7,6 +7,7 @@ import {
   Code2Icon,
   TerminalIcon,
   MonitorIcon,
+  ContainerIcon,
   SettingsIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,9 +16,12 @@ import { Thread } from "./components/thread.tsx";
 import { ThreadList } from "./components/sidebar/thread-list.tsx";
 import { HostUiDialog } from "./components/host-ui-dialog.tsx";
 import { EditorPanel } from "./components/workbench/editor-panel.tsx";
+import { TerminalPanel } from "./components/workbench/terminal-panel.tsx";
+import { SandboxPanel } from "./components/workbench/sandbox-panel.tsx";
+import { SettingsPanel } from "./components/workbench/settings-panel.tsx";
 import { cn } from "./lib/utils";
 
-type WorkbenchTab = "files" | "terminal" | "vnc" | "settings";
+type WorkbenchTab = "files" | "terminal" | "sandbox" | "vnc" | "settings";
 
 function readThreadFromUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -98,12 +102,22 @@ export function App() {
             <button
               onClick={() => openTab("terminal")}
               className={cn(
-                "flex size-7 items-center justify-center rounded-md opacity-40 hover:bg-accent",
+                "flex size-7 items-center justify-center rounded-md hover:bg-accent",
                 workbenchOpen && workbenchTab === "terminal" && "bg-accent",
               )}
-              title="Terminal (Phase 3)"
+              title="Terminal"
             >
               <TerminalIcon className="size-4" />
+            </button>
+            <button
+              onClick={() => openTab("sandbox")}
+              className={cn(
+                "flex size-7 items-center justify-center rounded-md hover:bg-accent",
+                workbenchOpen && workbenchTab === "sandbox" && "bg-accent",
+              )}
+              title="Sandbox"
+            >
+              <ContainerIcon className="size-4" />
             </button>
             <button
               onClick={() => openTab("vnc")}
@@ -118,10 +132,10 @@ export function App() {
             <button
               onClick={() => openTab("settings")}
               className={cn(
-                "flex size-7 items-center justify-center rounded-md opacity-40 hover:bg-accent",
+                "flex size-7 items-center justify-center rounded-md hover:bg-accent",
                 workbenchOpen && workbenchTab === "settings" && "bg-accent",
               )}
-              title="Settings (Phase 6)"
+              title="Settings"
             >
               <SettingsIcon className="size-4" />
             </button>
@@ -185,21 +199,14 @@ export function App() {
                     </div>
                     <div className="min-h-0 flex-1">
                       {workbenchTab === "files" && <EditorPanel />}
-                      {workbenchTab === "terminal" && (
-                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                          terminal ships in Phase 3
-                        </div>
-                      )}
+                      {workbenchTab === "terminal" && <TerminalPanel />}
+                      {workbenchTab === "sandbox" && <SandboxPanel />}
                       {workbenchTab === "vnc" && (
                         <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
                           VNC ships in Phase 5
                         </div>
                       )}
-                      {workbenchTab === "settings" && (
-                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                          settings ship in Phase 6
-                        </div>
-                      )}
+                      {workbenchTab === "settings" && <SettingsPanel />}
                     </div>
                   </section>
                 </Panel>
