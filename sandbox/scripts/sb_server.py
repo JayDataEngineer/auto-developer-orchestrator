@@ -1000,19 +1000,106 @@ class Handler(BaseHTTPRequestHandler):
         # ── Cookies ────────────────────────────────────────────────────────
         elif path == "/cookies":
             # GET (no action): list cookies for current domain
-            # POST (action=set): add a cookie
+            # POST (action=set): add a cookie (single via body.cookie or bulk
+            #   via body.cookies — bulk is what seed-cookies.sh uses at boot
+            #   to inject a Twitter/Telegram session before the agent runs)
             # POST (action=clear): delete all cookies
             if sb is None: return self._err("browser not available")
             action = body.get("action", "get")
+
+            def _cookie_to_dict(c):
+                # sb_cdp's get_all_cookies() returns CDP Cookie dataclass
+                # instances, which aren't JSON-serializable. Project back to
+                # the dict shape callers expect.
+                if isinstance(c, dict):
+                    return c
+                return {
+                    "name": getattr(c, "name", ""),
+                    "value": getattr(c, "value", ""),
+                    "domain": getattr(c, "domain", ""),
+                    "path": getattr(c, "path", ""),
+                    "secure": bool(getattr(c, "secure", False)),
+                    "expires": getattr(c, "expires", None),
+                    "httponly": bool(getattr(c, "http_only", False)),
+                }
+
+            def _dicts_to_cookie_params(dicts):
+                # sb_cdp's set_all_cookies() ultimately calls
+                # cdp.network.set_cookies([i.to_json() for i in cookies]).
+                # That requires CDP CookieParam instances — plain dicts lack
+                # .to_json() and the call deadlocks inside the asyncio loop.
+                # Convert each dict to a CookieParam with the fields we have.
+                #
+                # IMPORTANT: `expires` is intentionally NOT forwarded. CDP's
+                # bulk Network.setCookies silently rejects the ENTIRE batch
+                # when any cookie carries an expires field — verified by
+                # bisecting the twitter cookie payload (1 cookie with
+                # expires → whole batch dropped, even cookies that would
+                # otherwise succeed on their own). Session-scoped cookies
+                # are correct for our use case: seed-cookies.sh runs at
+                # sandbox boot, the agent uses them in-session, sandbox
+                # tears down at exit. No persistence needed past that.
+                from mycdp import network as _net
+                params = []
+                for d in dicts:
+                    if not isinstance(d, dict):
+                        params.append(d)
+                        continue
+                    kwargs = {"name": d.get("name", ""), "value": d.get("value", "")}
+                    if d.get("domain") is not None:
+                        kwargs["domain"] = d["domain"]
+                    if d.get("path") is not None:
+                        kwargs["path"] = d["path"]
+                    if d.get("secure") is not None:
+                        kwargs["secure"] = bool(d["secure"])
+                    if d.get("httponly") is not None:
+                        kwargs["http_only"] = bool(d["httponly"])
+                    params.append(_net.CookieParam(**kwargs))
+                return params
+
+            def _navigate_to_cookie_domain(cookies_list):
+                # CDP Network.setCookies silently drops cookies when the
+                # browser is on about:blank — the cookie store has no scope
+                # to bind them to, even with explicit domain/url on each
+                # cookie. Navigating to the cookie's domain first gives the
+                # browser the context it needs. Picked from the first cookie.
+                if not cookies_list:
+                    return
+                first = cookies_list[0]
+                if isinstance(first, dict):
+                    domain = (first.get("domain") or "").lstrip(".")
+                else:
+                    domain = (getattr(first, "domain", "") or "").lstrip(".")
+                if not domain:
+                    return
+                try:
+                    cur = sb.get_current_url() or ""
+                except Exception:
+                    cur = ""
+                if domain in cur:
+                    return
+                try:
+                    sb.open(f"https://{domain}")
+                except Exception:
+                    pass
+
             try:
                 if action == "get":
                     cookies = sb.get_all_cookies() or []
-                    self._ok({"cookies": cookies})
+                    self._ok({"cookies": [_cookie_to_dict(c) for c in cookies]})
                 elif action == "set":
-                    cookie = body.get("cookie", {})
-                    # SeleniumBase set_all_cookies takes a list of cookie dicts
-                    sb.set_all_cookies([cookie])
-                    self._ok({"set": True, "name": cookie.get("name", "")})
+                    cookies = body.get("cookies")
+                    if cookies is not None:
+                        if not isinstance(cookies, list):
+                            return self._err("cookies must be a list", 400)
+                        _navigate_to_cookie_domain(cookies)
+                        sb.set_all_cookies(_dicts_to_cookie_params(cookies))
+                        self._ok({"set": True, "count": len(cookies)})
+                    else:
+                        cookie = body.get("cookie", {})
+                        _navigate_to_cookie_domain([cookie])
+                        sb.set_all_cookies(_dicts_to_cookie_params([cookie]))
+                        self._ok({"set": True, "name": cookie.get("name", "")})
                 elif action == "clear":
                     sb.clear_cookies()
                     self._ok({"cleared": True})

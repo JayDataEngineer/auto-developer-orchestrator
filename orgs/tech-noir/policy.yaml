@@ -1,0 +1,17 @@
+# Declarative sandbox policy for org tech-noir.
+# Migrated off host networking (TierBridged) to bridge + egress allowlist.
+# Ray cluster on Tailscale IP 100.86.69.57 is reachable from bridge
+# (verified via ping from --network bridge container 2026-07-02).
+#
+# Three Ray ports:
+#   18800 — Ray Serve proxy (ComfyUI at /comfyui/*, all other services)
+#   18080 — API Ingress (LLM, TTS, ASR, 3D, music, creative, MCP, jobs)
+#   18265 — Ray Dashboard
+
+sandbox:
+  tier: isolated
+
+egress:
+  allow:
+    - host: 100.86.69.57
+      ports: [18800, 18080, 18265]

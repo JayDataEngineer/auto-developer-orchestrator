@@ -1,0 +1,20 @@
+# Declarative sandbox policy for org invest.
+# Tightens prod egress to just Alpaca + FRED; injects API keys via env only.
+
+egress:
+  allow:
+    - host: api.alpaca.markets
+      port: 443
+    - host: data.alpaca.markets
+      port: 443
+    # FRED is hosted on fred.stlouisfed.org but the API lives on a separate host
+    # depending on which series you query. Allow the canonical API host.
+    - host: fred.stlouisfed.org
+      port: 443
+
+credentials:
+  required:
+    - ALPACA_API_KEY
+    - ALPACA_SECRET_KEY
+  optional:
+    - FRED_API_KEY

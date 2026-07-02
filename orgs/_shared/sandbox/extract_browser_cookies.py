@@ -56,6 +56,7 @@ Usage
 Exits 0 on success, 1 on usage errors, 2 on cookie-file/browser missing.
 """
 import argparse
+import base64
 import json
 import os
 import sys
@@ -181,6 +182,10 @@ def main():
                              "Use --list-domains to see what's stored.")
     parser.add_argument("--out", default=str(DEFAULT_OUT),
                         help=f"Output JSON path (default: {DEFAULT_OUT})")
+    parser.add_argument("--b64", action="store_true",
+                        help="Write base64-encoded cookie JSON to stdout (no file written). "
+                             "Used by bootstrap.sh to populate TWITTER_COOKIES_B64 for env-only "
+                             "injection into the sandbox.")
     parser.add_argument("--check", action="store_true",
                         help="Only print a summary, don't write the file")
     parser.add_argument("--list-domains", action="store_true",
@@ -223,6 +228,15 @@ def main():
             **summary,
         }, indent=2), file=sys.stderr)
         sys.exit(2)
+
+    if args.b64:
+        # Emit just the cookies list as base64 — seed-cookies.sh decodes
+        # and POSTs to sb_server.py. The full session wrapper (browser,
+        # domain, saved_at) is dropped because the browser doesn't need it.
+        payload = json.dumps(cookies).encode("utf-8")
+        sys.stdout.write(base64.b64encode(payload).decode("ascii"))
+        sys.stdout.write("\n")
+        return
 
     out_path = write_session(cookies, args.browser, args.domain, args.out)
     summary["out_path"] = str(out_path)

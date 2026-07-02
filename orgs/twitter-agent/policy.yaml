@@ -1,0 +1,27 @@
+# Declarative sandbox policy for org twitter-agent.
+# Drops host networking in favor of bridge + egress allowlist for x.com.
+# Cookies injected via base64 env at boot (seed-cookies supervisor).
+
+sandbox:
+  tier: isolated
+
+egress:
+  allow:
+    # Twitter main + image CDN + API endpoints all resolve under x.com / twitter.com
+    - host: x.com
+      port: 443
+    - host: twitter.com
+      port: 443
+    - host: api.x.com
+      port: 443
+    - host: abs.twimg.com
+      port: 443
+    - host: pbs.twimg.com
+      port: 443
+
+credentials:
+  required:
+    - TWITTER_COOKIES_B64
+
+browser:
+  cookies_env: TWITTER_COOKIES_B64

@@ -1,8 +1,13 @@
 # Declarative sandbox policy for org _demo.
 #
-# Presence of policy.yaml opts this org into declarative enforcement:
-# deny-by-default egress, env-only credentials, extra workspace mounts.
-# All three sections are independent — uncomment the ones you want.
+# Presence of policy.yaml opts this org into declarative enforcement.
+# Five sections, all independent — uncomment the ones you want:
+#
+#   workspace        extra bind-mounts + run_as_host_user
+#   egress           deny-by-default iptables ACL (resolved at boot)
+#   credentials      env-only cred injection (validated, never on disk)
+#   sandbox          image + tier overrides
+#   browser          cookie pre-seed via base64 env (with seed-cookies.sh)
 #
 # Schema reference: backend/internal/policy/policy.go
 # Behavior: backend/internal/sandbox/policy_hook.go + sandbox/scripts/apply-egress-policy.sh
@@ -36,3 +41,28 @@
 #     - ALPACA_SECRET_KEY
 #   optional:                     # inject if present, silent skip otherwise
 #     - FRED_API_KEY
+
+# sandbox:
+#   image: my-org-sandbox:latest  # override pux-sandbox:latest with a custom
+#                                 # image (specialist deps — manim, kokoro,
+#                                 # etc). Tag must exist locally or in the
+#                                 # configured registry.
+#   tier: isolated                # override the caller's networking tier.
+#                                 # `isolated` (default Docker bridge) forces
+#                                 # egress ACLs + container networking.
+#                                 # `bridged` skips them (host net).
+
+# browser:
+#   cookies_env: TWITTER_COOKIES_B64
+#                                 # Name of the env var carrying base64-encoded
+#                                 # cookie JSON for the in-sandbox browser.
+#                                 # Operator exports the var (typically via
+#                                 # `<org>/bootstrap.sh --emit-env > env && source env`);
+#                                 # Go validates present (required), injects
+#                                 # into container env. Supervisord runs
+#                                 # seed-cookies.sh at priority 80, which
+#                                 # decodes the b64 + POSTs to sb_server.py's
+#                                 # /cookies endpoint. Cookies NEVER touch disk
+#                                 # inside the container. See
+#                                 # orgs/twitter-agent/policy.yaml for a
+#                                 # shipped example.

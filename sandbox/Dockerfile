@@ -138,7 +138,8 @@ COPY scripts/start-kasmvnc.sh /usr/local/bin/start-kasmvnc.sh
 COPY scripts/setup-display.sh /usr/local/bin/setup-display.sh
 COPY scripts/fluxbox-apps-menu.sh /usr/local/bin/fluxbox-apps-menu.sh
 COPY scripts/apply-egress-policy.sh /usr/local/bin/apply-egress-policy.sh
-RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py /usr/local/bin/describe_image.py /usr/local/bin/start-kasmvnc.sh /usr/local/bin/setup-display.sh /usr/local/bin/fluxbox-apps-menu.sh /usr/local/bin/apply-egress-policy.sh
+COPY scripts/seed-cookies.sh /usr/local/bin/seed-cookies.sh
+RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py /usr/local/bin/describe_image.py /usr/local/bin/start-kasmvnc.sh /usr/local/bin/setup-display.sh /usr/local/bin/fluxbox-apps-menu.sh /usr/local/bin/apply-egress-policy.sh /usr/local/bin/seed-cookies.sh
 
 # Fluxbox config — dark theme, dynamic app menu
 COPY fluxbox/ /root/.fluxbox/

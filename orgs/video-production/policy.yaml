@@ -1,0 +1,11 @@
+# Declarative sandbox policy for org video-production.
+# Uses the specialized image with manim + kokoro + ffmpeg. No external
+# egress — TTS runs locally via Kokoro.
+
+sandbox:
+  image: video-production-video-producer:latest
+
+credentials:
+  optional:
+    - KOKORO_VOICE
+    - KOKORO_LANG_CODE

@@ -292,25 +292,40 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	// (stronger isolation than the default runc). Empty = Docker default
 	// (runc). Bridged-mode sandboxes (X11 + host net) skip the override —
 	// runsc + NET_HOST + Xvfb is an untested combination we don't want to
-	// surprise operators with.
-	if r := os.Getenv("PUX_SANDBOX_RUNTIME"); r != "" && opts.Tier != TierBridged {
+	// surprise operators with. The tier check uses the *resolved* tier
+	// (after policy override) so policy can flip a sandbox off bridged.
+	resolvedTier := opts.Tier
+	if r := os.Getenv("PUX_SANDBOX_RUNTIME"); r != "" && resolvedTier != TierBridged {
 		hostConfig.Runtime = r
 	}
 
 	// Declarative policy enforcement — opt-in per org via policy.yaml.
-	// Loads + validates + applies before container create. Skipped for
-	// TierBridged (host networking makes iptables-in-container meaningless;
-	// operator explicitly chose host net for that sandbox). Errors from
-	// the policy layer are loud: missing required creds or unresolved
-	// ${VAR} placeholders fail the create rather than silently degrade.
+	// Loads + validates + applies before container create. When policy
+	// overrides tier or image, those override the caller-supplied values.
+	// Egress staging is skipped for effective TierBridged (host networking
+	// makes iptables-in-container meaningless). Errors are loud: missing
+	// required creds or unresolved ${VAR} placeholders fail the create
+	// rather than silently degrade.
 	containerUser := ""
-	if opts.OrgName != "" && opts.Tier != TierBridged {
-		user, err := applyOrgPolicy(opts, &binds, &envVars, hostConfig, m.logger)
+	if opts.OrgName != "" {
+		decisions, err := applyOrgPolicy(opts, opts.Tier, &binds, &envVars, hostConfig, m.logger)
 		if err != nil {
 			m.mu.Unlock()
 			return nil, err
 		}
-		containerUser = user
+		containerUser = decisions.ContainerUser
+		if decisions.Image != "" {
+			image = decisions.Image
+		}
+		if decisions.TierSet {
+			resolvedTier = decisions.Tier
+			// Re-evaluate gVisor override now that tier may have flipped.
+			if r := os.Getenv("PUX_SANDBOX_RUNTIME"); r != "" && resolvedTier != TierBridged {
+				hostConfig.Runtime = r
+			} else if resolvedTier == TierBridged {
+				hostConfig.Runtime = ""
+			}
+		}
 	}
 
 	netConfig := &network.NetworkingConfig{
@@ -319,8 +334,9 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		},
 	}
 
-	// Bridged mode: mount host X11 socket + use host network
-	if opts.Tier == TierBridged {
+	// Bridged mode: mount host X11 socket + use host network. Uses the
+	// resolved tier so policy.yaml's sandbox.tier override is honored.
+	if resolvedTier == TierBridged {
 		hostDisplay := os.Getenv("DISPLAY")
 		if hostDisplay != "" {
 			binds = append(binds, "/tmp/.X11-unix:/tmp/.X11-unix")
@@ -398,7 +414,7 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		Mode:           ModeCLI,
 		Status:         StatusRunning,
 		CreatedAt:      time.Now(),
-		Tier:           opts.Tier,
+		Tier:           resolvedTier,
 		LastActivityAt: time.Now(),
 	}
 

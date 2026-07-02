@@ -1,0 +1,24 @@
+# Declarative sandbox policy for org telegram-agent.
+# Telegram MTProto uses DC2 (149.154.167.91:443) for most accounts.
+# Session is a Telethon/Pyrogram session string injected via env.
+
+sandbox:
+  tier: isolated
+
+egress:
+  allow:
+    # Telegram DC2 — primary for most user accounts
+    - host: 149.154.167.91
+      port: 443
+    # DC4 fallback (some accounts land here)
+    - host: 149.154.167.91
+      port: 443
+    # Telethon needs to query the Telegram API to resolve DCs on first connect
+    - host: api.telegram.org
+      port: 443
+
+credentials:
+  required:
+    - TG_API_ID
+    - TG_API_HASH
+    - TELEGRAM_SESSION_B64

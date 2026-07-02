@@ -351,9 +351,9 @@ runs, so click by `(x, y)` from the latest `desktop_screenshot`.
 ## Sandbox policy (declarative, opt-in per org)
 
 `orgs/<name>/policy.yaml` is the per-org enforcement contract. Presence
-opts that org into three independent layers; absence = today's behavior
-(full egress, root-owning writes, no required creds). All three sections
-optional — declare only what you need.
+opts that org into five independent layers; absence = today's behavior
+(full egress, root-owning writes, no required creds, default image +
+tier). All five sections optional — declare only what you need.
 
 ```yaml
 # orgs/<name>/policy.yaml
@@ -374,6 +374,21 @@ egress:
 credentials:
   required: [ALPACA_API_KEY]        # refuse create if absent in env
   optional: [FRED_API_KEY]          # inject if present, silent skip
+
+sandbox:
+  image: my-org-sandbox:latest      # override pux-sandbox:latest (specialist
+                                    # deps: manim, kokoro, etc). Tag must
+                                    # exist locally. See video-production for
+                                    # a shipped example.
+  tier: isolated                    # override caller-supplied tier.
+                                    # isolated = bridge network + egress ACLs
+                                    # bridged  = host net (skips ACLs)
+
+browser:
+  cookies_env: TWITTER_COOKIES_B64  # base64-encoded cookie JSON, injected
+                                    # as env var. seed-cookies.sh (priority 80)
+                                    # decodes + POSTs to sb_server.py /cookies.
+                                    # Cookies NEVER touch disk in container.
 ```
 
 **Pipeline** (all in `backend/internal/policy/` + `sandbox/policy_hook.go`):
@@ -382,25 +397,43 @@ credentials:
 2. Go server reads `PUX_ORG`, calls `policy.Load(X, projectRoot)`
 3. `ValidateEnv` checks required creds present → fail loud if missing
 4. `ResolveMounts` expands `${VAR}` placeholders → fail loud if unset
-5. Required + optional creds injected as `--env KEY=VALUE`
+5. Required + optional creds + `cookies_env` value + `SEED_COOKIES_ENV` pointer
+   injected as `--env KEY=VALUE`
 6. `RunAsHostUser` → `container.Config.User = "UID:GID"`
 7. `egress.allow` non-empty → stages `<project>/.pux/egress.conf` +
    grants `NET_ADMIN` capability
-8. Supervisor runs `apply-egress-policy.sh` at boot priority 15:
-   `iptables -P OUTPUT DROP` + allowlist + always allow loopback/DNS/established
+8. `sandbox.image` overrides the image used at container create
+9. `sandbox.tier` overrides the caller-supplied tier (re-evaluates gVisor)
+10. Supervisor runs `apply-egress-policy.sh` at boot priority 15:
+    `iptables -P OUTPUT DROP` + allowlist + always allow loopback/DNS/established
+11. Supervisor runs `seed-cookies.sh` at boot priority 80 (after sb_server.py
+    at priority 70): decodes base64 env, POSTs to `http://127.0.0.1:9876/cookies`,
+    validates `count` matches.
 
 **Skipped for TierBridged** — host networking makes iptables-in-container
-meaningless; operator explicitly chose host net for that sandbox.
+meaningless; operator explicitly chose host net for that sandbox. The
+egress firewall staging step is skipped when the *resolved* tier (after
+policy override) is TierBridged.
+
+**Browser cookie contract** — CDP's bulk `Network.setCookies` silently
+rejects the ENTIRE batch when any cookie carries an `expires` field
+(bisected + proven against the real twitter payload 2026-07-02).
+`sb_server.py::_dicts_to_cookie_params` strips `expires` — cookies
+become session-scoped, which is correct for the seed-at-boot use case.
 
 **Verify gates** (baked into `task test`):
 
-- `go test -race ./internal/policy/...` — 22 tests (placeholder expansion,
+- `go test -race ./internal/policy/...` — 28 tests (placeholder expansion,
   missing-env errors, optional vs required, hostname resolution, port
-  range, IPv4 + IPv6 literals, DNS failure)
+  range, IPv4 + IPv6 literals, DNS failure, sandbox.image+tier override,
+  ResolveTier semantics, cookies_env injection pointer, shipped policies
+  parse cleanly)
 - `task smoke` — boots real Docker, confirms no-policy path unchanged
-- E2E: add `orgs/<name>/policy.yaml`, run `pux dispatch --org <name>`,
-  confirm refused create when creds missing, allowed host succeeds,
-  blocked host fails at network layer
+- E2E (proven 2026-07-02): twitter-agent with browser cookies — seed-cookies.sh
+  runs at boot, 14 cookies persist, navigate to x.com → logged-in home feed;
+  egress firewall drops example.com (3.9s timeout), allows api.x.com (404 from
+  server, not firewall). tech-noir bridge networking — 3 allow rules applied
+  correctly, host-and-container return identical results per service state.
 
 ## MCP transport contract
 

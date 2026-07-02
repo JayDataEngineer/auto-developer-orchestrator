@@ -1,0 +1,34 @@
+# Declarative sandbox policy for org social-media-pipeline.
+# Cross-posts to Twitter + Telegram. Both sessions injected via env.
+
+sandbox:
+  tier: isolated
+
+egress:
+  allow:
+    # Twitter
+    - host: x.com
+      port: 443
+    - host: twitter.com
+      port: 443
+    - host: api.x.com
+      port: 443
+    - host: abs.twimg.com
+      port: 443
+    - host: pbs.twimg.com
+      port: 443
+    # Telegram
+    - host: 149.154.167.91
+      port: 443
+    - host: api.telegram.org
+      port: 443
+
+credentials:
+  required:
+    - TWITTER_COOKIES_B64
+    - TG_API_ID
+    - TG_API_HASH
+    - TELEGRAM_SESSION_B64
+
+browser:
+  cookies_env: TWITTER_COOKIES_B64

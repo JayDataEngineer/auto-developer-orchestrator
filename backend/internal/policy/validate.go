@@ -49,6 +49,10 @@ func ValidateEnv(p *Policy) error {
 // EnvVars returns the KEY=VALUE strings to inject into the container env.
 // Required creds come straight from os.Getenv (ValidateEnv already proved
 // they're set). Optional creds are included only when present in env.
+// When browser.cookies_env is declared and that env var is set, two entries
+// are emitted: the cookies value under the operator-named var (so the
+// seed-cookies supervisor script can find it) plus SEED_COOKIES_ENV=<name>
+// (so the script knows which var to read).
 // Caller passes the result to Docker's Env field.
 func EnvVars(p *Policy) []string {
 	if p == nil {
@@ -61,6 +65,12 @@ func EnvVars(p *Policy) []string {
 	for _, name := range p.Credentials.Optional {
 		if v := os.Getenv(name); v != "" {
 			out = append(out, name+"="+v)
+		}
+	}
+	if p.Browser.CookiesEnv != "" {
+		if v := os.Getenv(p.Browser.CookiesEnv); v != "" {
+			out = append(out, p.Browser.CookiesEnv+"="+v)
+			out = append(out, "SEED_COOKIES_ENV="+p.Browser.CookiesEnv)
 		}
 	}
 	return out

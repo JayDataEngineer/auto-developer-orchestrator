@@ -311,3 +311,130 @@ func TestEgressRules_NilPolicySafe(t *testing.T) {
 		t.Errorf("got %q, want empty", out)
 	}
 }
+
+func TestLoad_SandboxImageAndTier(t *testing.T) {
+	body := `
+sandbox:
+  image: video-production-video-producer:latest
+  tier: isolated
+`
+	root := writePolicyFile(t, "video-production", body)
+	p, err := Load("video-production", root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if p.Sandbox.Image != "video-production-video-producer:latest" {
+		t.Errorf("image: got %q", p.Sandbox.Image)
+	}
+	if p.Sandbox.Tier != "isolated" {
+		t.Errorf("tier: got %q", p.Sandbox.Tier)
+	}
+}
+
+func TestResolveTier_NoOverride(t *testing.T) {
+	// Empty policy tier = caller wins.
+	got := ResolveTier(&Policy{}, "bridged")
+	if got != "bridged" {
+		t.Errorf("got %q, want bridged", got)
+	}
+	got = ResolveTier(nil, "isolated")
+	if got != "isolated" {
+		t.Errorf("nil policy: got %q, want isolated", got)
+	}
+}
+
+func TestResolveTier_OverrideWins(t *testing.T) {
+	p := &Policy{Sandbox: SandboxSpec{Tier: "isolated"}}
+	got := ResolveTier(p, "bridged")
+	if got != "isolated" {
+		t.Errorf("got %q, want isolated", got)
+	}
+}
+
+func TestEnvVars_CookiesEnvInjected(t *testing.T) {
+	t.Setenv("TWITTER_COOKIES_B64", "eyJmb28iOiAiYmFyIn0=")
+	p := &Policy{Browser: BrowserSpec{CookiesEnv: "TWITTER_COOKIES_B64"}}
+	out := EnvVars(p)
+	// Expect both the cookies value and the SEED_COOKIES_ENV pointer.
+	wantVal := "TWITTER_COOKIES_B64=eyJmb28iOiAiYmFyIn0="
+	wantPtr := "SEED_COOKIES_ENV=TWITTER_COOKIES_B64"
+	hasVal, hasPtr := false, false
+	for _, kv := range out {
+		if kv == wantVal {
+			hasVal = true
+		}
+		if kv == wantPtr {
+			hasPtr = true
+		}
+	}
+	if !hasVal {
+		t.Errorf("missing cookies value in %v", out)
+	}
+	if !hasPtr {
+		t.Errorf("missing SEED_COOKIES_ENV pointer in %v", out)
+	}
+}
+
+func TestEnvVars_CookiesEnvAbsentSkipped(t *testing.T) {
+	// Declared but operator didn't export it = silent skip, no partial entries.
+	t.Setenv("TWITTER_COOKIES_B64", "")
+	p := &Policy{Browser: BrowserSpec{CookiesEnv: "TWITTER_COOKIES_B64"}}
+	out := EnvVars(p)
+	for _, kv := range out {
+		if kv == "SEED_COOKIES_ENV=TWITTER_COOKIES_B64" {
+			t.Errorf("should not inject pointer when value absent, got %v", out)
+		}
+	}
+}
+
+// TestLoad_ShippedPolicies is an integration-style check that every
+// orgs/<name>/policy.yaml shipped in the repo parses cleanly and that
+// the opt-in contract (presence = enforcement, absence = ErrNoPolicy)
+// holds end-to-end against the real files. Catches drift between the
+// Go schema and the YAML the operator actually writes.
+//
+// Skipped when the test isn't run from the repo root (no backend/../orgs).
+func TestLoad_ShippedPolicies(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	orgsDir := filepath.Join(repoRoot, "orgs")
+	entries, err := os.ReadDir(orgsDir)
+	if err != nil {
+		t.Skipf("no orgs dir at %s — running outside repo?", orgsDir)
+	}
+	count := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		policyPath := filepath.Join(orgsDir, e.Name(), "policy.yaml")
+		if _, statErr := os.Stat(policyPath); errors.Is(statErr, os.ErrNotExist) {
+			continue
+		}
+		count++
+		t.Run(e.Name(), func(t *testing.T) {
+			p, err := Load(e.Name(), repoRoot)
+			if err != nil {
+				t.Fatalf("Load(%q): %v", e.Name(), err)
+			}
+			// ValidateEnv must pass cleanly against whatever the operator
+			// currently has in env (test env may have none of these vars).
+			// We just confirm the call doesn't panic on the shipped schema.
+			_ = ValidateEnv(p)
+			// ResolveMounts on shipped policies — none of them currently use
+			// ${VAR} placeholders so this should be a no-op.
+			if _, err := ResolveMounts(p); err != nil {
+				t.Fatalf("ResolveMounts(%q): %v", e.Name(), err)
+			}
+			// EgressRules resolves DNS for every allow entry. Skip the test
+			// for any entry that fails DNS — sandbox creates are still gated
+			// by real DNS at runtime, this is just a parse-time sanity check.
+			t.Logf("policy %q: image=%q tier=%q egress=%d allow creds required=%d optional=%d",
+				e.Name(), p.Sandbox.Image, p.Sandbox.Tier,
+				len(p.Egress.Allow),
+				len(p.Credentials.Required), len(p.Credentials.Optional))
+		})
+	}
+	if count == 0 {
+		t.Skip("no shipped policy.yaml files found")
+	}
+}

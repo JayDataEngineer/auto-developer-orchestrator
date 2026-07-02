@@ -53,11 +53,13 @@ CONTAINER="twitter-agent-sandbox"
 # ── Args ──────────────────────────────────────────────────────────────────
 CHECK_ONLY=0
 DO_DOWN=0
+EMIT_ENV=0
 case "${1:-}" in
-  --check) CHECK_ONLY=1 ;;
-  --down)  DO_DOWN=1 ;;
-  "")      ;;
-  *)       err "unknown arg: $1"; exit 1 ;;
+  --check)   CHECK_ONLY=1 ;;
+  --down)    DO_DOWN=1 ;;
+  --emit-env) EMIT_ENV=1 ;;
+  "")        ;;
+  *)         err "unknown arg: $1"; exit 1 ;;
 esac
 
 # ── --down: inverse of up ─────────────────────────────────────────────────
@@ -116,6 +118,22 @@ else
   fi
 fi
 ok "twitter_cookies"
+
+# --emit-env: print export statements for the operator to eval into their
+# shell before launching pux. Cookies are base64-encoded so the value is a
+# single line with no special chars — safe to wrap in shell quotes.
+# Source of truth for the env contract: orgs/twitter-agent/policy.yaml.
+if [ "$EMIT_ENV" = "1" ]; then
+  B64="$("$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/../_shared/sandbox/extract_browser_cookies.py" --browser brave --domain x.com --b64)"
+  if [ -z "$B64" ]; then
+    err "emit-env: cookie extraction returned empty"
+    exit 1
+  fi
+  # Quote the value to be safe with special chars (there shouldn't be any
+  # in base64, but defense in depth). Single quotes prevent shell expansion.
+  printf "export TWITTER_COOKIES_B64='%s'\n" "$B64"
+  exit 0
+fi
 
 # ── 4. --check early-exit (after host_setup so check_args run if declared) ─
 if [ "$CHECK_ONLY" = "1" ]; then
