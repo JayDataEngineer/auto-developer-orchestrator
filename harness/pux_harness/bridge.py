@@ -176,7 +176,10 @@ def _make_tool(client: PuxMCPClient, spec: dict) -> StructuredTool:
 # (ls/read_file/write_file/edit_file/glob/grep/execute) via PuxSandboxBackend.
 # This bridge exposes ONLY specialists — the Go server's bash + file_* tools
 # still exist for the backend's internal use but are not bound to the model.
-_SPECIALIST_TOOLS = frozenset({
+#
+# Phase 8b–8f ports specialists to native_tools.py; graph.py requests the
+# un-ported remainder from here (SPECIALIST_TOOLS - PORTED_SPECIALISTS).
+SPECIALIST_TOOLS: frozenset[str] = frozenset({
     "browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_evaluate",
     "desktop_screenshot", "desktop_click", "desktop_type", "desktop_key",
     "describe_image", "list_skills", "load_skill", "python",
@@ -193,7 +196,7 @@ def get_pux_client(url: str = PUX_MCP_URL) -> PuxMCPClient:
 
 def get_pux_tools(
     url: str = PUX_MCP_URL,
-    only: set[str] | frozenset[str] | None = _SPECIALIST_TOOLS,
+    only: set[str] | frozenset[str] | None = SPECIALIST_TOOLS,
     client: PuxMCPClient | None = None,
 ) -> list[StructuredTool]:
     """Return LangChain StructuredTools backed by the Go sandbox.

@@ -15,10 +15,11 @@ from typing import Any
 from deepagents import create_deep_agent
 from langgraph.graph.state import CompiledStateGraph
 
-from pux_harness.bridge import PuxMCPClient, get_pux_client, get_pux_tools
+from pux_harness.bridge import PuxMCPClient, SPECIALIST_TOOLS, get_pux_client, get_pux_tools
 from pux_harness.context_offload import ContextOffloadMiddleware, build_ctx_tools
 from pux_harness.docker_exec import DockerExecClient, get_exec_client
 from pux_harness.model import get_model
+from pux_harness.native_tools import PORTED_SPECIALISTS, build_native_specialists
 from pux_harness.orgs import build_system_prompt, load_subagents
 from pux_harness.sandbox import PuxSandboxBackend
 
@@ -60,9 +61,20 @@ def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
     (auto-injected into the main agent + every subagent by ``create_deep_agent``).
     The checkpointer is caller-supplied so the runner can use an ephemeral
     ``MemorySaver`` while the server uses a persistent ``AsyncSqliteSaver``.
+
+    Phase 8b–8f: specialists are split — those in ``PORTED_SPECIALISTS`` come
+    from ``native_tools`` (direct docker exec / host FS), the REST still come
+    from the Go bridge. When ``PORTED_SPECIALISTS == SPECIALIST_TOOLS`` the
+    bridge carries nothing and ``shared_client()`` is no longer called.
     """
     model = get_model()
-    tools = get_pux_tools(client=shared_client())
+    # Native specialists first (docker exec / host FS); bridge fills the rest.
+    native = build_native_specialists(shared_exec())
+    remaining = SPECIALIST_TOOLS - PORTED_SPECIALISTS
+    bridge_tools = (
+        get_pux_tools(client=shared_client(), only=remaining) if remaining else []
+    )
+    tools = [*native, *bridge_tools]
     # Phase 7: ctx_recall/ctx_search ride on the MAIN agent only (they're not in
     # any subagent ``tools:`` whitelist, so excluding them from the subagent-
     # resolution ``tools`` keeps specialist whitelists clean). The offload
