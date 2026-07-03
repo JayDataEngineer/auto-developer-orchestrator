@@ -1,6 +1,6 @@
 {
-  "defaultProvider": "deepseek",
-  "defaultModel": "deepseek/deepseek-v4-flash",
+  "defaultProvider": "mimo",
+  "defaultModel": "mimo-v2.5",
   "subagents": {
     "disableThinking": true
   },

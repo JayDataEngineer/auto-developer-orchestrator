@@ -213,12 +213,25 @@ if (existsSync(askUserEntry)) {
 // --no-context-files : ignore user's AGENTS.md so OURS wins
 // --no-extensions    : skip pi's auto-discovery from cwd; explicit -e flags still load
 // --system-prompt    : load <pkgRoot>/AGENTS.md regardless of cwd
+// --approve          : trust project-local files for this run. Pi gates
+//                      project-local extensions (our .pi/extensions/*) behind a
+//                      trust check — interactive mode prompts once and remembers,
+//                      but --print/dispatch mode silently skips untrusted
+//                      extensions. That breaks default-provider resolution:
+//                      settings.json defaultProvider=defaultModel couldn't find
+//                      the mimo provider (registered by .pi/extensions/mimo-
+//                      provider) and fell back to OpenAI. We ship these
+//                      extensions ourselves, so trusting them is correct by
+//                      construction and makes boot deterministic regardless of
+//                      the user's trust-store state. Operator passing --no-approve
+//                      later in userArgs overrides this (last-write wins for pi).
 const userArgs = process.argv.slice(2);
 const agentsMd = join(pkgRoot, "AGENTS.md");
 
 const piArgs = [
   "--no-context-files",
   "--no-extensions",
+  "--approve",
   ...(existsSync(agentsMd) ? ["--system-prompt", agentsMd] : []),
   ...extArgs,
   ...userArgs,
