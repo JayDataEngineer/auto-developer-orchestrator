@@ -24,6 +24,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from pux_harness.bridge import get_pux_client, get_pux_tools
 from pux_harness.contract import check_all, check_harness, has_errors
+from pux_harness.docker_exec import get_exec_client
 from pux_harness.graph import build_graph, shared_backend
 from pux_harness.orgs import (
     discover_orgs,
@@ -329,13 +330,13 @@ def main() -> None:
         raise SystemExit(_check_policy(args.org))
 
     if args.check:
-        client = get_pux_client()
-        backend = PuxSandboxBackend(client)
+        backend = PuxSandboxBackend(get_exec_client())
+        client = get_pux_client()  # still needed to list specialist tools (8b–8f ports them)
         tools = get_pux_tools(client=client)
-        print(f"bridge+backend OK: {len(tools)} specialist pux_sandbox_* tools + "
+        print(f"backend(docker exec)+bridge OK: {len(tools)} specialist pux_sandbox_* tools + "
               f"native fs (ls/read_file/write_file/edit_file/glob/grep/execute)")
         ex = backend.execute("echo pux-ok")
-        print(f"  backend.execute: exit={ex.exit_code} output={ex.output!r}")
+        print(f"  backend.execute [docker exec]: exit={ex.exit_code} output={ex.output!r}")
         ls = backend.ls("/sandbox/workspace")
         print(f"  backend.ls: {len(ls.entries or [])} entries, error={ls.error}")
         return

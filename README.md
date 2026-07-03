@@ -74,7 +74,7 @@ the container); specialists are **`pux_sandbox_*`** MCP tools:
 
 | Tool | Backed by |
 |------|----------|
-| `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native — `PuxSandboxBackend.execute()` → MCP `bash` |
+| `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native — `PuxSandboxBackend.execute()` → docker exec (Phase 8a) |
 | `python` | MCP `python` (sandbox `python3 -c`) |
 | `browser_navigate` / `_click` / `_type` / `_screenshot` / `_evaluate` | in-sandbox `sb_server.py` (SeleniumBase) |
 | `desktop_screenshot` / `_click` / `_type` / `_key` | Xvfb + xdotool + OCR |

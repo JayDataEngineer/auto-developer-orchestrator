@@ -17,11 +17,13 @@ from langgraph.graph.state import CompiledStateGraph
 
 from pux_harness.bridge import PuxMCPClient, get_pux_client, get_pux_tools
 from pux_harness.context_offload import ContextOffloadMiddleware, build_ctx_tools
+from pux_harness.docker_exec import DockerExecClient, get_exec_client
 from pux_harness.model import get_model
 from pux_harness.orgs import build_system_prompt, load_subagents
 from pux_harness.sandbox import PuxSandboxBackend
 
-_client: PuxMCPClient | None = None
+_client: PuxMCPClient | None = None  # MCP bridge — specialists only (8b–8f retargets these)
+_exec: DockerExecClient | None = None  # direct docker exec — native fs (8a) + soon specialists
 _backend: PuxSandboxBackend | None = None
 
 
@@ -34,11 +36,19 @@ def shared_client() -> PuxMCPClient:
     return _client
 
 
+def shared_exec() -> DockerExecClient:
+    """One docker-exec client for the process (lazy — discovery hits Docker)."""
+    global _exec
+    if _exec is None:
+        _exec = get_exec_client()
+    return _exec
+
+
 def shared_backend() -> PuxSandboxBackend:
-    """One sandbox backend over the shared client."""
+    """One sandbox backend over the shared docker-exec client (Phase 8a)."""
     global _backend
     if _backend is None:
-        _backend = PuxSandboxBackend(shared_client())
+        _backend = PuxSandboxBackend(shared_exec())
     return _backend
 
 

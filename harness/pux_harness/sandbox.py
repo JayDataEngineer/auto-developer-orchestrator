@@ -1,30 +1,40 @@
-"""PuxSandboxBackend — a deepagents ``BaseSandbox`` over the Go MCP sandbox.
+"""PuxSandboxBackend — a deepagents ``BaseSandbox`` over a Docker exec client.
 
-Shape A (decided by probe, see ``PROVEN`` below): subclass
+Shape A (decided by probe in Phase 3): subclass
 ``deepagents.backends.sandbox.BaseSandbox`` and implement only its four
 abstract primitives — ``execute``, ``id``, ``upload_files``, ``download_files``.
 The inherited ``ls/read/write/edit/grep/glob`` (and all ``a*`` async variants)
 run small ``python3``/``grep`` scripts *through our* ``execute()``, so they work
-the moment ``execute()`` does. This is Phase-8-aligned: later, only
-``execute()`` retargets to a direct ``docker exec``; the file ops keep working
-as shell with no rewrite.
+the moment ``execute()`` does.
 
-Why one ``execute()`` path for everything (incl. upload/download): the Go MCP
-``bash`` tool already runs commands inside the pux-sandbox container (python3
-3.10 + grep present, verified). Moving bytes as base64 through that same path
-handles text **and** binary uniformly — no split between the text-only
-``file_write`` and a notional binary path. ``upload_files``/``download_files``
-are invoked by the skills/summarization/memory middleware (not just abstract
-baggage), so they must be real.
+Phase 8a retargeted ``execute()`` from the Go MCP ``bash`` tool to a **direct
+``docker exec``** (``DockerExecClient``) — the same moby ``Exec`` the Go binary
+used, just called from Python. No JSON-RPC hop, no Go middleman, no
+``{"output": "..."}`` envelope to unwrap (the MCP-specific ``_content_text`` /
+``_unwrap`` helpers are gone). The inherited ``_build_*_cmd`` scripts run
+unchanged — they only ever cared about ``execute()``'s shell output, which is
+byte-identical to what the Go path produced (verified 2026-07-03).
 
-PROVEN 2026-07-03 (task #17): ``backend.ls('/sandbox/workspace')`` and
-``backend.read('AGENTS.md')`` return correct structured results against the live
-container — the inherited ``_build_*_cmd`` scripts run cleanly in the image.
+Why one ``execute()`` path for everything (incl. upload/download): the sandbox
+container ships ``python3`` + ``base64`` (it backs the ``python`` tool +
+``describe_image.py``). Moving bytes as base64 through that same path handles
+text **and** binary uniformly. ``upload_files``/``download_files`` are invoked
+by the skills/summarization/memory middleware (not just abstract baggage), so
+they must be real.
+
+The Go MCP bridge is still wired in ``graph.py`` for the 13 *specialist* tools
+(``python``/``browser_*``/``desktop_*``/``describe_image``/skills) — those move
+to direct docker exec in Phase 8b–8f. Until then the backend (native fs) and the
+bridge (specialists) are two paths into the same container.
+
+PROVEN 2026-07-03 (8a): against the live ``orchestrator-sandbox-mcp-default``
+container, ``DockerExecClient.exec('echo pux-ok')`` → ``('pux-ok\\n', 0)``;
+``backend.execute`` + inherited ``backend.ls('/sandbox/workspace')`` + ``backend.read``
+return correct structured results via direct docker exec (no MCP hop).
 """
 from __future__ import annotations
 
 import base64
-import json
 import shlex
 from collections import deque
 
@@ -35,37 +45,7 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 
-from pux_harness.bridge import PuxMCPClient
-
-
-def _content_text(result: dict) -> str:
-    """Join an MCP ``tools/call`` result's text content blocks into one string."""
-    parts: list[str] = []
-    for item in (result or {}).get("content", []) or []:
-        if isinstance(item, dict) and item.get("type") == "text":
-            parts.append(item.get("text", ""))
-    return "\n".join(p for p in parts if p)
-
-
-def _unwrap(text: str) -> str:
-    """Peel the Go ``bash`` tool's success envelope.
-
-    Success: the tool returns JSON ``{"output": "<stdout>"}`` (stdout newlines
-    re-escaped). Failure (non-zero exit): ``isError: true`` with a combined
-    message — handled by ``execute()`` before this is called. Anything that
-    isn't an ``{"output": str}`` object (raw text, other JSON) is returned
-    verbatim so we never corrupt legitimate output that happens to be JSON.
-    """
-    s = text.strip()
-    if not (s.startswith("{") and s.endswith("}")):
-        return text
-    try:
-        parsed = json.loads(s)
-    except json.JSONDecodeError:
-        return text
-    if isinstance(parsed, dict) and isinstance(parsed.get("output"), str):
-        return parsed["output"]
-    return text
+from pux_harness.docker_exec import DockerExecClient
 
 
 # python3 snippets used for byte-accurate upload/download via execute(). Base64
@@ -85,17 +65,16 @@ _DOWNLOAD_PY = (
 
 
 class PuxSandboxBackend(BaseSandbox):
-    """deepagents sandbox backed by the pux Go MCP server's ``bash`` tool."""
+    """deepagents sandbox backed by a direct ``docker exec`` (Phase 8a)."""
 
-    def __init__(self, client: PuxMCPClient):
-        self._client = client
+    def __init__(self, exec_client: DockerExecClient):
+        self._exec = exec_client
         self._id: str | None = None
         # Every command run through native execute() — including the inherited
         # ls/read/glob/grep/write/edit (they all build a cmd + call execute()).
         # Observation-only: turns "did the subagent use native fs tools?" from
-        # inference into direct evidence. pux_sandbox_bash is never bound, so
-        # any entry here is, by construction, a NATIVE fs/shell call. Bounded
-        # so a long-lived server process can't leak memory here.
+        # inference into direct evidence. Bounded so a long-lived server
+        # process can't leak memory here.
         self.execute_log: deque[str] = deque(maxlen=2048)
 
     # --- the four abstract primitives --------------------------------------
@@ -106,20 +85,17 @@ class PuxSandboxBackend(BaseSandbox):
         # middleware/graph), but abstract-required. Lazily reflect the real
         # container hostname so it's meaningful if ever logged.
         if self._id is None:
-            res = self._client.call_tool("bash", {"command": "cat /etc/hostname"})
-            self._id = _unwrap(_content_text(res)).strip() or "pux-sandbox"
+            out, _ = self._exec.exec("cat /etc/hostname")
+            self._id = out.strip() or self._exec.container
         return self._id
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         self.execute_log.append(command)
-        res = self._client.call_tool("bash", {"command": command})
-        text = _content_text(res)
+        output, exit_code = self._exec.exec(command, timeout=timeout)
         # Non-zero exit in the container: the inherited _build_*_cmd scripts
         # append `2>/dev/null` + `|| true`, so a non-zero exit here is a real
-        # failure — surface it (exit_code=1) rather than masquerading as success.
-        if res.get("isError"):
-            return ExecuteResponse(output=text, exit_code=1, truncated=False)
-        return ExecuteResponse(output=_unwrap(text), exit_code=0, truncated=False)
+        # failure (or a raw command the model ran) — surface it verbatim.
+        return ExecuteResponse(output=output, exit_code=exit_code, truncated=False)
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         out: list[FileUploadResponse] = []

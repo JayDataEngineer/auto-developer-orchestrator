@@ -5,6 +5,7 @@ description = "deepagents-based Pux harness (Phase 0 pivot spike)"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "deepagents",
+    "docker>=7.1.0",
     "fastapi>=0.139.0",
     "httpx>=0.28.1",
     "langchain-openai",
