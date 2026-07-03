@@ -257,6 +257,29 @@ always available regardless of a subagent's `tools:` whitelist.
 that ship with the sandbox image — the agent can invoke them but can't edit
 them (`chmod 0444`).
 
+## Context offload (Phase 7)
+
+Proactive tool-output offload keeps large results out of the working context
+*before* they accumulate. `harness/pux_harness/context_offload.py`:
+
+- **`ContextOffloadMiddleware(AgentMiddleware)`** — `wrap_tool_call`/
+  `awrap_tool_call` measure every result; a text `ToolMessage` over `threshold`
+  (default 8000 chars ≈ 2K tokens) is stashed to `ctx_store.py` (host-side
+  `<project>/.pux/ctx/`) and replaced with a short stub + a `ctx:<id>` handle.
+  This is the *proactive* complement to deepagents' reactive
+  `SummarizationMiddleware` (which only evicts after overflow).
+- **`ctx_recall` / `ctx_search`** — agent tools to pull a stashed result back
+  by handle or grep across all of them. **Exempt** from offload: their job is
+  to inject content, so re-stashing would trap the agent (proven + fixed in the
+  Phase 7 E2E).
+
+Runs on the **main agent only** — deepagents' `SubAgentMiddleware` doesn't
+forward a raw SubAgent spec's `middleware` key into the compiled specialist
+(verified), so attaching it there is a silent no-op; subagent offload is a
+`CompiledSubAgent`-pre-compilation follow-up, not a shim. The store is a
+harness-owned cache of results that already came back to it — no new
+host-write capability, no Docker, `.pux/` is gitignored.
+
 ## Agent Protocol server (`pux serve`)
 
 `harness/pux_harness/server.py` serves the deepagents org graphs over a subset
@@ -544,7 +567,7 @@ and all 10 orgs ported to RUN on deepagents (Phase 5).
 |-------|------|--------|
 | 5 | Port remaining 7 orgs to RUN on deepagents (delegation-forcing tasks) | **SHIPPED 2026-07-03** — all 10 orgs run E2E. Each `pux direct --org <name>` forcing task in `main.py:DEFAULT_TASKS` makes the CTO delegate via `task(subagent_type=<specialist>)` and drive a native fs/shell tool (`execute`/`read_file`/`glob`) against the org's own bundled content; every run returned the correct ground-truth answer (invest=17 .py via invest-researcher, game-studio=6 skills via docs-writer, dre=7 .py via dre-auditor, smp=3 angles via smp-writer, twitter=1 skill via twitter-drafter, telegram=4 msgs via telegram-drafter, video=3 entries via video-scriptwriter). New structural test `test_every_org_has_a_forcing_task`; pytest 47/47. |
 | 6 | Policy engine Go→Python (egress/creds/image+tier/browser) | **SHIPPED 2026-07-03** — `harness/pux_harness/policy.py` is a faithful 1:1 port of `backend/internal/policy` (pure logic: load/validate_env/env_vars/resolve_mounts/egress_rules/resolve_tier). `tests/test_policy.py` mirrors the 22 Go tests (35 cases incl. IPv6, container-resolved `host.docker.internal` passthrough, DNS-refresh comments, ports fanout). Contract rule 5 now runs the real engine as a deep-schema check (`load` + `resolve_mounts` — offline; `egress_rules` deliberately NOT called, it resolves DNS). Consumer: `pux direct --org <name> --check-policy` — a no-model dry-run that resolves mounts, checks creds (names only — never values), resolves egress DNS, reports tier/image; exits 1 on missing required creds (the same gate container-create enforces). pytest 84/84. Enforcement wiring (binds/env/caps/egress.conf staging at `ContainerCreate`) is Phase 8 — it needs container ownership, which the harness doesn't have while the Go binary owns the shared container. |
-| 7 | context-mode integration (ctx MCP + wrap_tool_call offload) | roadmap |
+| 7 | context-mode integration (ctx MCP + wrap_tool_call offload) | **SHIPPED 2026-07-03** — **native harness offload, NOT an external ctx-MCP bridge** (context-mode is a stdio Claude-Code bun plugin, unreachable over HTTP from the harness; meta-mcp `list_servers` confirmed). `harness/pux_harness/context_offload.py` `ContextOffloadMiddleware(AgentMiddleware)` measures each `wrap_tool_call`/`awrap_tool_call` result; a ToolMessage > `threshold` (default 8000 chars ≈ 2K tokens) gets stashed to `ctx_store.py` (host-side `<project>/.pux/ctx/<id>.txt+.json`; hex-only ids reject path-escape) and replaced with a preview + `ctx:<id>` handle. `ctx_recall` / `ctx_search` StructuredTools pull stashed bytes back on demand — only the slice the agent asks for re-enters context. This is the *proactive* complement to deepagents' own reactive `SummarizationMiddleware`. **Two findings the E2E surfaced + fixed:** (1) `ctx_recall`/`ctx_search` are exempt from offload (`_RETRIEVAL_TOOLS`) — their job is to inject content, so re-stashing trapped the agent in a recall→offload loop (proven: pre-fix ctx_recall(12K)→re-offloaded; post-fix returns full text); (2) **main-agent-only** — deepagents' `SubAgentMiddleware` does not forward a raw SubAgent spec's `middleware` key into the compiled specialist (verified: a researcher's `read_file` of an 11.9K-char file returned the full text yet nothing stashed), so attaching it to specialists is a silent no-op. Forcing it would be a shim; left documented as a `CompiledSubAgent`-pre-compilation follow-up. **Proven E2E** (`pux direct --org general` glm-5.2): `execute seq 1 3000`→12087B offloaded→`ctx_recall` retrieves full text→correct answer; pytest 102/102; `--check-contract` exit 0. |
 | 8 | Re-host sandbox in Python (`execute()`→docker exec; 13 specialist tools); wire policy enforcement here; delete Go MCP | roadmap |
 | 9 | TUI/clients as Agent Protocol consumers (+ SSE streaming) | roadmap |
 

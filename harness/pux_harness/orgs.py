@@ -128,6 +128,12 @@ def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
     `tools` comes from the frontmatter whitelist (mapped to bridge tools);
     omitted means inherit the main agent's tools. `model` is omitted so
     specialists inherit the main agent's model (mimo), matching pi-mono.
+
+    No ``middleware`` key: deepagents' ``SubAgentMiddleware`` does not forward a
+    raw spec's ``middleware`` key into the compiled specialist (verified in the
+    Phase 7 E2E), so setting it would be a silent no-op. Context-offload runs on
+    the main agent only; see ``context_offload.py`` for the rationale + how to
+    add subagent offload properly later (CompiledSubAgent pre-compilation).
     """
     if org not in discover_orgs():
         raise KeyError(f"unknown org {org!r}; discovered orgs: {discover_orgs()}")

@@ -126,7 +126,7 @@ pux run <thread_id> "follow up"    # continue on the same thread
 ## Tests
 
 ```bash
-cd harness && uv run pytest -q          # 46 tests: org contract + server routing
+cd harness && uv run pytest -q          # 102 tests: org contract + server routing + policy + context offload
 ```
 
 The server tests use FastAPI's `TestClient` with a stub graph (no tokens, no
@@ -160,11 +160,13 @@ is proven end-to-end in the Phase 4 verify log (`dispatch --org general` →
 
 ## Branch layout
 
-- **`pi-pivot`** — current. Deepagents pivot in progress: Phases 0–6 shipped
+- **`pi-pivot`** — current. Deepagents pivot in progress: Phases 0–7 shipped
   (harness + bridge, native sandbox, declarative contract, TS harness deleted,
-  Agent Protocol server + client, all 10 orgs ported to RUN on deepagents, and
-  the policy resolution engine ported Go→Python). Phases 7–9 roadmap
-  (context-mode, delete Go MCP, TUI).
+  Agent Protocol server + client, all 10 orgs ported to RUN on deepagents, the
+  policy resolution engine ported Go→Python, and proactive context-offload —
+  `ContextOffloadMiddleware` stashes >8K-char tool results behind a `ctx:<id>`
+  handle + `ctx_recall`/`ctx_search` retrieval tools). Phases 8–9 roadmap
+  (delete Go MCP, TUI).
 - **`master`** — pre-pivot MVP. Slim Go MCP server with in-process agent loop.
 - **`v0.2.0-pre-pi-mono`** — tag of master HEAD before the pivot. Safety net.
 

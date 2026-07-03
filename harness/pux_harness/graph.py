@@ -16,6 +16,7 @@ from deepagents import create_deep_agent
 from langgraph.graph.state import CompiledStateGraph
 
 from pux_harness.bridge import PuxMCPClient, get_pux_client, get_pux_tools
+from pux_harness.context_offload import ContextOffloadMiddleware, build_ctx_tools
 from pux_harness.model import get_model
 from pux_harness.orgs import build_system_prompt, load_subagents
 from pux_harness.sandbox import PuxSandboxBackend
@@ -52,11 +53,20 @@ def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
     """
     model = get_model()
     tools = get_pux_tools(client=shared_client())
+    # Phase 7: ctx_recall/ctx_search ride on the MAIN agent only (they're not in
+    # any subagent ``tools:`` whitelist, so excluding them from the subagent-
+    # resolution ``tools`` keeps specialist whitelists clean). The offload
+    # middleware shares the process-wide store with these tools via shared_store().
+    # Main-agent-only: deepagents' SubAgentMiddleware doesn't forward a raw
+    # spec's `middleware` key (verified in the Phase 7 E2E), so attaching it to
+    # specialists is a silent no-op — see context_offload.py module docstring.
+    ctx_tools = build_ctx_tools()
     return create_deep_agent(
         model=model,
         system_prompt=build_system_prompt(org),
-        tools=tools,
+        tools=[*tools, *ctx_tools],
         subagents=load_subagents(org, tools),
+        middleware=[ContextOffloadMiddleware()],
         backend=shared_backend(),
         checkpointer=checkpointer,
     )
