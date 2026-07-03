@@ -2,20 +2,20 @@
 """Content clustering client for Pux sandbox workers.
 
 Standalone CLI — groups text items into thematic clusters using LLM.
-No DRE engine dependencies.
+Optional --existing-topics reuses topic names already in SurrealDB.
 
 Usage:
     python3 content_cluster.py cluster --input texts.json
     python3 content_cluster.py cluster --input texts.json --existing-topics
-    python3 content_cluster.py cluster --input texts.json --namespace myproject
 
 Environment:
     LLM_API_URL       (default: http://localhost:18080/v1/chat/completions)
     LLM_MODEL         (default: qwen35-35b-a3b-vision)
-    NEO4J_URI         (default: bolt://localhost:37687)
-    NEO4J_USER        (default: neo4j)
-    NEO4J_PASSWORD    (required for --existing-topics)
-    NEO4J_DATABASE    (default: neo4j)
+    SURREALDB_URL     (default: http://localhost:8000/surreal)
+    SURREALDB_NS      (default: research)
+    SURREALDB_DB      (default: main)
+    SURREALDB_USER    (default: root)
+    SURREALDB_PASS    (default: root)
 """
 
 import argparse
@@ -90,47 +90,68 @@ def call_llm(prompt, model=None, temperature=0.3, max_tokens=16000):
         sys.exit(1)
 
 
-def fetch_existing_topics(namespace="default"):
-    """Fetch existing Topic nodes from Neo4j for reuse."""
+def fetch_existing_topics():
+    """Fetch existing topic records from SurrealDB for reuse.
+
+    Queries the `topic` table for name + summary. Topics are linked into the
+    graph via RELATE (extracted_from / mentions edges), but for clustering we
+    only need the surface labels. Uses the SurrealDB /sql HTTP endpoint —
+    same pattern as surreal_client.py.
+    """
+    url = os.environ.get("SURREALDB_URL", "http://localhost:8000/surreal") + "/sql"
+    ns = os.environ.get("SURREALDB_NS", "research")
+    db = os.environ.get("SURREALDB_DB", "main")
+    user = os.environ.get("SURREALDB_USER", "root")
+    password = os.environ.get("SURREALDB_PASS", "root")
+
+    sql = "SELECT name, summary FROM topic LIMIT 50;"
+    req = urllib.request.Request(
+        url,
+        data=sql.encode(),
+        headers={
+            "Content-Type": "text/plain",
+            "Accept": "application/json",
+            "surreal-ns": ns,
+            "surreal-db": db,
+        },
+    )
+
     try:
-        from neo4j import GraphDatabase
-    except ImportError:
-        print("WARNING: neo4j package not installed. Skipping topic reuse.", file=sys.stderr)
-        return ""
-
-    uri = os.environ.get("NEO4J_URI", "bolt://localhost:37687")
-    user = os.environ.get("NEO4J_USER", "neo4j")
-    password = os.environ.get("NEO4J_PASSWORD", "")
-
-    if not password:
-        return ""
+        import base64
+        auth = base64.b64encode(f"{user}:{password}".encode()).decode()
+        req.add_header("Authorization", f"Basic {auth}")
+    except Exception:
+        pass
 
     try:
-        driver = GraphDatabase.driver(uri, auth=(user, password))
-        database = os.environ.get("NEO4J_DATABASE", "neo4j")
-        with driver.session(database=database) as session:
-            result = session.run(
-                "MATCH (t:Topic) WHERE t.namespace = $ns OR $ns = '__all__' "
-                "RETURN t.name as name, t.summary as summary LIMIT 50",
-                {"ns": namespace if namespace != "__all__" else "__all__"},
-            )
-            rows = [record.data() for record in result]
-        driver.close()
-
-        if not rows:
-            return ""
-
-        lines = [
-            f"- {r['name']}" + (f": {r['summary']}" if r.get("summary") else "")
-            for r in rows
-        ]
-        return (
-            "EXISTING TOPICS (reuse these when the content fits):\n"
-            + "\n".join(lines)
-        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            payload = json.loads(resp.read())
     except Exception as e:
-        print(f"WARNING: Failed to query Neo4j topics: {e}", file=sys.stderr)
+        print(f"WARNING: Failed to query SurrealDB topics: {e}", file=sys.stderr)
         return ""
+
+    # SurrealDB /sql returns a list of result objects (one per statement).
+    # Extract rows from the first (only) result.
+    rows = []
+    if isinstance(payload, list) and payload:
+        first = payload[0]
+        if isinstance(first, dict) and "result" in first:
+            rows = first["result"] or []
+
+    if not rows:
+        return ""
+
+    lines = [
+        f"- {r.get('name', '?')}" + (f": {r['summary']}" if r.get("summary") else "")
+        for r in rows
+        if isinstance(r, dict)
+    ]
+    if not lines:
+        return ""
+    return (
+        "EXISTING TOPICS (reuse these when the content fits):\n"
+        + "\n".join(lines)
+    )
 
 
 def parse_clusters(raw):
@@ -189,10 +210,10 @@ def cmd_cluster(args):
 
     combined = "\n\n---\n\n".join(text_chunks)[:80000]
 
-    # Fetch existing topics from Neo4j if requested
+    # Fetch existing topics from SurrealDB if requested
     topics_section = ""
     if args.existing_topics:
-        topics_section = fetch_existing_topics(namespace=args.namespace or "default")
+        topics_section = fetch_existing_topics()
         if topics_section:
             print(f"Found existing topics for reuse", file=sys.stderr)
 
@@ -223,8 +244,7 @@ def main():
     p = sub.add_parser("cluster", help="Cluster text items into thematic groups")
     p.add_argument("--input", required=True, help="JSON file with text items")
     p.add_argument("--output", help="Output JSON file (default: stdout)")
-    p.add_argument("--existing-topics", action="store_true", help="Query Neo4j for existing topics to reuse")
-    p.add_argument("--namespace", default=None, help="Neo4j namespace for topic lookup")
+    p.add_argument("--existing-topics", action="store_true", help="Query SurrealDB for existing topic names to reuse")
     p.add_argument("--model", help="LLM model to use")
 
     args = parser.parse_args()

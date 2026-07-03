@@ -122,10 +122,9 @@ All sandbox tools are available under the `pux_sandbox_*` prefix
 The workspace lives at `/sandbox/workspace/` inside the sandbox container.
 
 Sandbox scripts (shipped, read-only) live at `sandbox/`:
-`context_engine.py`, `vector_search.py`, `entity_extract.py`,
-`content_cluster.py`, `telegram_parser.py`, `face_client.py`,
-`audio_client.py`, `video_frames.py`, `neo4j_client.py`,
-`surreal_client.py`. Run `python3 sandbox/<script> --help` for usage.
+`context_engine.py`, `entity_extract.py`, `content_cluster.py`,
+`telegram_parser.py`, `face_client.py`, `audio_client.py`,
+`video_frames.py`, `surreal_client.py`. Run `python3 sandbox/<script> --help` for usage.
 
 ## Delegation
 
