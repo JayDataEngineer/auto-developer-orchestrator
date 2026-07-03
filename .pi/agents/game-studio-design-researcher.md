@@ -1,5 +1,5 @@
 ---
-name: tech-noir-design-researcher
+name: game-studio-design-researcher
 description: Tech Noir Design Researcher — researches game design topics (survival horror mechanics, 2.5D Godot techniques, procedural gen, AI asset pipelines, narrative design, audio) and produces under-400-word actionable reports. Read-only.
 tools: mcp:pux-sandbox/bash, mcp:pux-sandbox/file_read, mcp:pux-sandbox/file_write, mcp:pux-sandbox/file_glob, mcp:pux-sandbox/file_grep, mcp:pux-sandbox/python, mcp:pux-sandbox/browser_navigate, mcp:pux-sandbox/browser_screenshot, mcp:pux-sandbox/describe_image
 systemPromptMode: replace

@@ -1,5 +1,5 @@
 ---
-name: tech-noir-docs-writer
+name: game-studio-docs-writer
 description: Tech Noir Documentation Writer — MDX author for the docs-site (Next.js 15 + MDX + Tailwind 4). Reads source via file_*, follows DOCS_AUTHORING skill for design tokens (zero border radius, Space Grotesk/Inter/Fira Code), updates Search.tsx docsIndex for new pages.
 tools: mcp:pux-sandbox/bash, mcp:pux-sandbox/file_read, mcp:pux-sandbox/file_write, mcp:pux-sandbox/file_edit, mcp:pux-sandbox/file_glob, mcp:pux-sandbox/file_grep
 systemPromptMode: replace

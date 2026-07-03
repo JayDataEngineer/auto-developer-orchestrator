@@ -432,7 +432,7 @@ become session-scoped, which is correct for the seed-at-boot use case.
 - E2E (proven 2026-07-02): twitter-agent with browser cookies — seed-cookies.sh
   runs at boot, 14 cookies persist, navigate to x.com → logged-in home feed;
   egress firewall drops example.com (3.9s timeout), allows api.x.com (404 from
-  server, not firewall). tech-noir bridge networking — 3 allow rules applied
+  server, not firewall). game-studio bridge networking — 3 allow rules applied
   correctly, host-and-container return identical results per service state.
 
 ## MCP transport contract

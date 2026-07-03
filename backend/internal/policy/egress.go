@@ -7,6 +7,28 @@ import (
 	"strings"
 )
 
+// containerResolvedHosts lists hostnames that cannot be resolved on the host
+// (where Load + EgressRules run — the operator's machine) but ARE resolvable
+// inside the sandbox container via /etc/hosts. Docker writes these entries at
+// container create from hostConfig.ExtraHosts; the manager always adds
+// "host.docker.internal:host-gateway".
+//
+// These names are passed through to egress.conf VERBATIM — not pre-resolved
+// to IPs — because net.LookupHost on the host would fail (the name is a
+// Docker-internal /etc/hosts entry, not a DNS record). apply-egress-policy.sh
+// resolves them at boot via `getent hosts`, which is a local /etc/hosts
+// lookup (no network, no port 53) so it still works under deny-by-default.
+//
+// This is how bridge-networked orgs reach host-side services (e.g. a shared
+// SurrealDB on the operator's machine) through the firewall.
+var containerResolvedHosts = map[string]bool{
+	"host.docker.internal": true,
+}
+
+func isContainerResolved(host string) bool {
+	return containerResolvedHosts[strings.ToLower(host)]
+}
+
 // EgressRules returns the iptables-allow lines for each entry in
 // p.Egress.Allow. Each output line is "<ip> <port>" — one host:port pair
 // per line, hostname pre-resolved to IP(s). One hostname may expand to
@@ -34,9 +56,18 @@ func EgressRules(p *Policy) (string, error) {
 	}
 	var lines []string
 	for _, rule := range p.Egress.Allow {
-		ips, err := resolveHost(rule.Host)
-		if err != nil {
-			return "", fmt.Errorf("egress: resolve %s: %w", rule.Host, err)
+		var ips []string
+		if isContainerResolved(rule.Host) {
+			// Docker-internal name (host.docker.internal) — resolvable only
+			// inside the container via /etc/hosts. Pass through verbatim; the
+			// firewall script resolves it at boot via getent (no DNS).
+			ips = []string{rule.Host}
+		} else {
+			var err error
+			ips, err = resolveHost(rule.Host)
+			if err != nil {
+				return "", fmt.Errorf("egress: resolve %s: %w", rule.Host, err)
+			}
 		}
 		ports := rule.Ports
 		if rule.Port != 0 {
@@ -45,10 +76,12 @@ func EgressRules(p *Policy) (string, error) {
 		if len(ports) == 0 {
 			return "", fmt.Errorf("egress: rule for %s has no port(s)", rule.Host)
 		}
-		// Emit hostname comment for DNS-resolved hosts (literal IPs skip —
-		// nothing to re-resolve). The refresh script reads this to know
-		// which hostname to re-lookup periodically.
-		if net.ParseIP(rule.Host) == nil {
+		// Emit hostname comment for DNS-resolved hosts only (literal IPs skip
+		// — nothing to re-resolve; container-resolved names resolve fresh every
+		// boot inside the container, so the periodic refresh script must not
+		// try to re-resolve them host-side). The refresh script reads this to
+		// know which hostname to re-lookup periodically.
+		if net.ParseIP(rule.Host) == nil && !isContainerResolved(rule.Host) {
 			lines = append(lines, "# host: "+rule.Host)
 		}
 		for _, ip := range ips {

@@ -28,10 +28,18 @@ URLs.
 | ASR | Parakeet | `${ASR_URL}` |
 | Vision (local) | describe_image tool | (sandbox-local ONNX) |
 
-## Ray Cluster Endpoints
+## Service endpoints (bridge networking)
 
-Cluster runs on a remote host reachable over Tailscale. From the sandbox
-container these resolve via the host network.
+This org boots at `tier: isolated` (bridge network, **not** host networking).
+Service URLs the scripts default to (`http://localhost:…`) refer to the
+*container* under bridge and won't resolve — set the endpoints explicitly:
+
+- **Ray cluster** (LLM / TTS / ASR / 3D / music / ComfyUI — on Tailscale
+  `100.86.69.57`) → use the Tailscale IP directly (allowlisted in `policy.yaml`).
+- **Host-side SurrealDB** (the `studio` / `tech-noir` task_run store — started
+  on the operator's machine via shared-docker-infra) → reach it via
+  `host.docker.internal` (Docker maps it to the host-gateway IP; allowlisted
+  in `policy.yaml`).
 
 | Role | Endpoint |
 |------|----------|
@@ -40,13 +48,16 @@ container these resolve via the host network.
 | Ray Dashboard (cluster UI) | `http://100.86.69.57:18265` |
 | API Ingress (LLM, TTS, ASR, 3D, music) | `http://100.86.69.57:18080` |
 
-Source these before any generation call:
+Source these before any generation call (run once per bash session):
 
 ```bash
+# Ray cluster — generation endpoints
 export MCP_HUB_ENDPOINT=http://100.86.69.57:18080
 export FORGE_URL=http://100.86.69.57:18080/forge
 export COMFYUI_URL=http://100.86.69.57:18800/comfyui
 export RAY_DASHBOARD_URL=http://100.86.69.57:18265
+# Host-side SurrealDB — task_run store (namespace: studio, database: tech-noir)
+export SURREALDB_URL=http://host.docker.internal:8000/surreal
 ```
 
 Health-check before each cycle: `curl -sf ${FORGE_URL}/health` and
@@ -62,9 +73,9 @@ brief → creative (manifest) → renderer (generation) → review → yield
 1. **Brief** — read the operator's request verbatim. Restate as one
    sentence. Identify the deliverable (sprite sheet? music track? 3D prop?
    full character build?).
-2. **Creative** — delegate to `tech-noir-creative`: translates the brief
+2. **Creative** — delegate to `game-studio-creative`: translates the brief
    into a YAML asset manifest + shot list. Output: `art/manifest.yaml`.
-3. **Render** — delegate to `tech-noir-renderer`: submits the manifest as
+3. **Render** — delegate to `game-studio-renderer`: submits the manifest as
    ComfyUI / Forge jobs against the Ray cluster, saves outputs to
    `art/output/`. Returns a list of generated file paths.
 4. **Review** — you do this yourself. Read the manifest back, list
@@ -98,11 +109,11 @@ All sandbox tools available under the `pux_sandbox_*` prefix
 (`pux_sandbox_bash`, `pux_sandbox_file_read`, `pux_sandbox_python`, etc.).
 The workspace lives at `/sandbox/workspace/`.
 
-Use `subagent(agent, task)` to delegate. Tech-noir specialists:
+Use `subagent(agent, task)` to delegate. Game-studio specialists:
 
-- `tech-noir-creative` — translates brief → YAML asset manifest + shot list.
+- `game-studio-creative` — translates brief → YAML asset manifest + shot list.
   Read-only on workspace.
-- `tech-noir-renderer` — runs ComfyUI / Forge jobs against the Ray cluster,
+- `game-studio-renderer` — runs ComfyUI / Forge jobs against the Ray cluster,
   saves outputs to disk.
 
 Plus the project-level agents under `.pi/agents/` (e.g. `researcher` for

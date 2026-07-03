@@ -5,9 +5,14 @@
 # policy.yaml that declares an `egress.allow` block, it stages a flat-file
 # allowlist at <project>/.pux/egress.conf. The project dir is bind-mounted
 # at /sandbox/workspace, so the file shows up here. Each non-empty line in
-# the conf is "<ip> <port>" — one host:port pair, hostname pre-resolved by
-# the Go side (DNS may not work inside the container after the firewall
-# drops OUTPUT). Empty or absent conf = no enforcement.
+# the conf is "<ip> <port>" — one host:port pair. "<ip>" is normally a
+# literal IP (the Go side pre-resolves DNS hostnames at sandbox-create time
+# since DNS may not work inside the container after the firewall drops OUTPUT),
+# but may be a container-resolved name like "host.docker.internal" — a
+# Docker-internal name that can't be resolved on the host but IS in the
+# container's /etc/hosts via the host-gateway ExtraHosts entry. We resolve
+# those HERE at boot (see resolve_in_container below). Empty or absent
+# conf = no enforcement.
 #
 # This script runs once at boot via supervisord. autorestart=false so the
 # iptables rules persist after exit. Errors are loud: a partial firewall
@@ -45,7 +50,33 @@ iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
 iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 
 # Apply each rule from the staged conf. Format: one "<ip> <port>" per line.
-# Comments (#) and blank lines are skipped.
+# Comments (#) and blank lines are skipped. "<ip>" is normally a literal IP;
+# a container-resolved name (host.docker.internal) is resolved to an IP HERE
+# via /etc/hosts (local getent lookup — no DNS, so it works under
+# deny-by-default) so bridge containers can reach host-side services.
+
+# is_literal_ip returns 0 (true) if $1 looks like a literal IPv4 or IPv6
+# address. IPv4: ≥3 dots (4 octets). IPv6: contains a colon.
+is_literal_ip() {
+    case "$1" in
+        *:*)      return 0 ;; # IPv6
+        *.*.*.*)  return 0 ;; # IPv4
+        *)        return 1 ;;
+    esac
+}
+
+# resolve_in_container maps a Docker-internal name to its /etc/hosts IP.
+# getent is the canonical lookup; the awk fallback covers minimal images
+# without libc-bin. Prints the first IP, empty on failure.
+resolve_in_container() {
+    local name="$1" ip
+    ip="$(getent hosts "$name" 2>/dev/null | awk '{print $1}' | head -n1)"
+    if [ -z "$ip" ]; then
+        ip="$(awk -v h="$name" '$2==h||$3==h {print $1; exit}' /etc/hosts 2>/dev/null)"
+    fi
+    printf '%s' "$ip"
+}
+
 RULE_COUNT=0
 while IFS=' ' read -r ip port || [ -n "$ip" ]; do
     # Skip blank lines and comments.
@@ -55,6 +86,18 @@ while IFS=' ' read -r ip port || [ -n "$ip" ]; do
     if [ -z "$port" ]; then
         echo "$LOG_PREFIX WARN: rule '$ip' has no port, skipping" >&2
         continue
+    fi
+
+    # Container-resolved names arrive verbatim — resolve to an IP now via
+    # /etc/hosts. Literal IPs skip this (already concrete).
+    if ! is_literal_ip "$ip"; then
+        resolved="$(resolve_in_container "$ip")"
+        if [ -z "$resolved" ]; then
+            echo "$LOG_PREFIX WARN: cannot resolve '$ip' via /etc/hosts, skipping" >&2
+            continue
+        fi
+        echo "$LOG_PREFIX resolved $ip -> $resolved"
+        ip="$resolved"
     fi
 
     iptables -A OUTPUT -d "$ip" -p tcp --dport "$port" -j ACCEPT

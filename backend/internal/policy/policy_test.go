@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -225,6 +226,54 @@ func TestEgressRules_IPv6Literal(t *testing.T) {
 	}
 	if out != "::1 443\n" {
 		t.Errorf("got %q, want '::1 443\\n'", out)
+	}
+}
+
+func TestEgressRules_ContainerResolvedHost(t *testing.T) {
+	// host.docker.internal is a Docker-internal /etc/hosts entry — it does
+	// NOT resolve on the host (where EgressRules runs) and must be passed
+	// through verbatim so apply-egress-policy.sh can resolve it inside the
+	// container at boot. This must NOT hit DNS (would fail offline) and must
+	// NOT emit a "# host:" refresh comment (the refresh script would try to
+	// re-resolve it host-side and fail).
+	p := &Policy{Egress: Egress{Allow: []Rule{
+		{Host: "host.docker.internal", Port: 8000},
+	}}}
+	out, err := EgressRules(p)
+	if err != nil {
+		t.Fatalf("EgressRules: %v", err)
+	}
+	if out != "host.docker.internal 8000\n" {
+		t.Errorf("got %q, want 'host.docker.internal 8000\\n' (verbatim, no DNS)", out)
+	}
+}
+
+func TestEgressRules_ContainerResolvedMixed(t *testing.T) {
+	// A host.docker.internal rule must not poison an adjacent DNS rule with
+	// a stray refresh comment, and literal IPs stay comment-free too.
+	// Skip the real-DNS leg offline so this runs in CI without a network.
+	if testing.Short() {
+		t.Skip("skipping mixed real-DNS test in -short mode")
+	}
+	p := &Policy{Egress: Egress{Allow: []Rule{
+		{Host: "host.docker.internal", Port: 8000},
+		{Host: "1.2.3.4", Port: 443},
+	}}}
+	out, err := EgressRules(p)
+	if err != nil {
+		t.Fatalf("EgressRules: %v", err)
+	}
+	// No line starts with "# host: host.docker.internal" — that's the point.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "host.docker.internal") && strings.HasPrefix(line, "#") {
+			t.Errorf("container-resolved host got a refresh comment: %q", line)
+		}
+	}
+	if !strings.Contains(out, "host.docker.internal 8000\n") {
+		t.Errorf("missing verbatim sentinel line in %q", out)
+	}
+	if !strings.Contains(out, "1.2.3.4 443\n") {
+		t.Errorf("missing literal-IP line in %q", out)
 	}
 }
 

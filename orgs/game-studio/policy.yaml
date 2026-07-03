@@ -1,4 +1,4 @@
-# Declarative sandbox policy for org tech-noir.
+# Declarative sandbox policy for org game-studio.
 # Migrated off host networking (TierBridged) to bridge + egress allowlist.
 # Ray cluster on Tailscale IP 100.86.69.57 is reachable from bridge
 # (verified via ping from --network bridge container 2026-07-02).
@@ -7,11 +7,19 @@
 #   18800 — Ray Serve proxy (ComfyUI at /comfyui/*, all other services)
 #   18080 — API Ingress (LLM, TTS, ASR, 3D, music, creative, MCP, jobs)
 #   18265 — Ray Dashboard
+#
+# Host-side SurrealDB (the studio/tech-noir task_run store) is reached via
+# host.docker.internal — resolved inside the container at boot (see
+# backend/internal/policy/egress.go containerResolvedHosts + apply-egress-policy.sh).
 
 sandbox:
   tier: isolated
 
 egress:
   allow:
+    # Ray cluster on Tailscale.
     - host: 100.86.69.57
       ports: [18800, 18080, 18265]
+    # Host-side SurrealDB — resolved inside the container via host-gateway.
+    - host: host.docker.internal
+      port: 8000

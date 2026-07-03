@@ -22,6 +22,9 @@ egress:
       port: 443
     - host: api.telegram.org
       port: 443
+    # Host-side SurrealDB — task_run persistence (resolved inside the container via host-gateway).
+    - host: host.docker.internal
+      port: 8000
 
 credentials:
   required:

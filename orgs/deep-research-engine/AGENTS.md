@@ -126,6 +126,39 @@ Sandbox scripts (shipped, read-only) live at `sandbox/`:
 `telegram_parser.py`, `face_client.py`, `audio_client.py`,
 `video_frames.py`, `surreal_client.py`. Run `python3 sandbox/<script> --help` for usage.
 
+### Service endpoints (bridge networking)
+
+This org boots at `tier: isolated` (bridge network, **not** host networking).
+The sandbox scripts default every service URL to `http://localhost:…`, which
+under bridge networking refers to the *container* and will not resolve. Set
+the endpoints explicitly before calling the scripts:
+
+- **Host-side services** (SurrealDB, Caddy/CompreFace ingress — started on the
+  operator's machine via shared-docker-infra) → reach them via
+  `host.docker.internal` (Docker maps it to the host-gateway IP; allowlisted
+  in `policy.yaml`).
+- **Ray cluster services** (LLM ingress, media-mcp, web-mcp — on Tailscale
+  `100.86.69.57`) → use the Tailscale IP directly (allowlisted in `policy.yaml`).
+
+Copy-paste export block (run once per bash session before pipeline work):
+
+```bash
+# Host-side SurrealDB (knowledge graph)
+export SURREALDB_URL=http://host.docker.internal:8000/surreal
+# Ray cluster — LLM API ingress (entity_extract / context_engine / content_cluster)
+export LLM_API_URL=http://100.86.69.57:18080/v1/chat/completions
+# Ray cluster — media-mcp (face / audio / video ingest)
+export MEDIA_MCP_URL=http://100.86.69.57:8101
+# Ray cluster — web-mcp (web research tools)
+export WEB_MCP_URL=http://100.86.69.57:8327
+# Host-side Caddy ingress → CompreFace (only if COMPREFACE_API_KEY is set)
+export COMPREFACE_BASE_URL=http://host.docker.internal:8000
+```
+
+Fallback path: if `OPENROUTER_API_KEY` is exported (and `LLM_API_URL` is not),
+the scripts route the LLM through `https://openrouter.ai/api/v1` instead of
+the Ray ingress — also allowlisted.
+
 ## Delegation
 
 Use `subagent(agent, task)` for specialist work. Available dre-specific
