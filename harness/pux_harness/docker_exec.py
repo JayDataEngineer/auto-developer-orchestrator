@@ -21,17 +21,35 @@ live container (8a probe): ``exec_run(['bash','-c',...], tty=False)`` returns
 ``ExecResult(exit_code=int, output=bytes)``.
 
 Timeout: ``docker.from_env(timeout=300)`` sets the SDK's HTTP read timeout —
-the same 300s ceiling the bridge's ``_TIMEOUT`` enforced. Per-command timeouts
-are not yet wired (the Go ``bash`` tool had none either); the ``execute``
-signature keeps ``timeout`` for API compatibility.
+the same 300s ceiling the bridge's ``_TIMEOUT`` enforced. Per-command
+deadlines are enforced via a thread-based ``.result(timeout=…)`` wrapper
+(Phase 8d) — ``exec(cmd, timeout=N)`` raises ``ExecTimeout`` after ``N``
+seconds so callers (e.g. ``describe_image``'s 120s) can map it to a clean
+result envelope instead of hanging to the 300s socket ceiling. The Docker
+SDK is blocking and can't be interrupted, so a timed-out call keeps running
+in the background until it finishes or the socket ceiling hits — acceptable
+for a single-tenant dev harness, and the caller already got its signal.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import os
 from pathlib import Path
 
 import docker
 from docker.errors import APIError, NotFound
+
+
+class ExecTimeout(Exception):
+    """Raised when an ``exec(timeout=N)`` deadline elapses. Callers map this to
+    a tool-result envelope (e.g. describe_image's ``reason:"timeout"``) rather
+    than letting the call hang."""
+
+
+# Small shared pool for the timed-exec wrapper. ``max_workers`` is intentionally
+# modest — exec is sequential in practice (one agent, one tool call at a time);
+# the pool only exists because the deadline needs a separate thread to block on.
+_EXEC_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_LABEL = "openshell.project-path"
@@ -95,18 +113,11 @@ class DockerExecClient:
             self._container = _discover(self._client, _resolve_project())
         return self._container
 
-    def exec(self, command: str, *, timeout: int | None = None) -> tuple[str, int]:
-        """Run ``bash -c <command>`` in the sandbox; return (output, exit_code).
-
-        Output is the combined stdout+stderr, utf-8 decoded (errors replaced)
-        so binary-ish payloads (base64 from upload/download helpers) survive.
-        ``exit_code`` is 0 on success, non-zero on container-side failure — the
-        caller decides whether non-zero is an error (the inherited fs scripts
-        append ``|| true`` so they report 0; a raw command failing surfaces its
-        real exit code).
-        """
+    def _do_exec(self, command: str):
+        """The blocking docker call, isolated so ``exec(timeout=…)`` can run it
+        on a worker thread and enforce a deadline via ``.result(timeout=…)``."""
         try:
-            result = self._client.containers.get(self.container).exec_run(
+            return self._client.containers.get(self.container).exec_run(
                 ["bash", "-c", command],
                 tty=False,
                 demux=False,  # combined stream; SDK parses Docker framing
@@ -116,6 +127,31 @@ class DockerExecClient:
             raise RuntimeError(
                 f"sandbox container {self.container!r} vanished mid-run: {exc}"
             ) from exc
+
+    def exec(self, command: str, *, timeout: int | None = None) -> tuple[str, int]:
+        """Run ``bash -c <command>`` in the sandbox; return (output, exit_code).
+
+        Output is the combined stdout+stderr, utf-8 decoded (errors replaced)
+        so binary-ish payloads (base64 from upload/download helpers) survive.
+        ``exit_code`` is 0 on success, non-zero on container-side failure — the
+        caller decides whether non-zero is an error (the inherited fs scripts
+        append ``|| true`` so they report 0; a raw command failing surfaces its
+        real exit code).
+
+        ``timeout`` (seconds) caps wall-clock: raises ``ExecTimeout`` past it.
+        ``None`` (default) blocks to the client's 300s socket ceiling — the
+        original behavior, unchanged for the fs/shell tools that never pass one.
+        """
+        if timeout is None:
+            result = self._do_exec(command)
+        else:
+            future = _EXEC_POOL.submit(self._do_exec, command)
+            try:
+                result = future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError as exc:
+                raise ExecTimeout(
+                    f"exec timed out after {timeout}s: {command[:120]!r}"
+                ) from exc
         out = result.output
         if isinstance(out, (bytes, bytearray)):
             out = out.decode("utf-8", "replace")

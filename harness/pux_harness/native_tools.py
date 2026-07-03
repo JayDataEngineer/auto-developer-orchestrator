@@ -18,15 +18,21 @@ Batch 1 (8b/8c):
   - ``list_skills``   — host FS walk of ``<project>/.pi/skills/``.
   - ``load_skill``    — host FS read of one ``SKILL.md`` body.
 
+Batch 2 (8d):
+  - ``describe_image`` — ``/usr/local/bin/describe_image.py`` via docker exec
+                         (was Go's DescribeImageTool; exit-code dispatch +
+                         120s timeout + the model-missing ``success:false``
+                         contract — NOT an error).
+
 **Bug fixed by the port:** the Go skills package read ``<root>/skills/`` which
 does not exist in this repo (skills live at ``.pi/skills/`` per the pi-mono
 layout); the live ``list_skills`` returned ``count: 0``. Probed before porting
 (2026-07-03); the Python port reads the correct path.
 
-Timeout note: the Go ``python``/``describe_image`` tools enforced per-call
-deadlines (60s/120s). The shared ``DockerExecClient`` enforces only the
-process-level 300s HTTP ceiling today; per-call timeouts are a follow-up (the
-common case — fast calls — is unaffected).
+Timeout note: the Go ``describe_image`` tool enforced a 120s deadline. The
+shared ``DockerExecClient.exec(timeout=120)`` now enforces it (Phase 8d) and
+raises ``ExecTimeout``, which this tool maps to ``reason:"timeout"``. The Go
+``python`` tool's 60s deadline is not yet wired (fast calls dominate).
 """
 from __future__ import annotations
 
@@ -37,7 +43,7 @@ from pathlib import Path
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from pux_harness.docker_exec import DockerExecClient
+from pux_harness.docker_exec import DockerExecClient, ExecTimeout
 
 PUX_PREFIX = "pux_sandbox_"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -47,7 +53,16 @@ SKILL_FILE = "SKILL.md"
 # Unprefixed specialist names implemented natively HERE. ``graph.py`` subtracts
 # this from the full specialist set to decide what still comes from the bridge.
 # Grows each batch; when it equals SPECIALIST_TOOLS, the bridge is retired.
-PORTED_SPECIALISTS: frozenset[str] = frozenset({"python", "list_skills", "load_skill"})
+PORTED_SPECIALISTS: frozenset[str] = frozenset({
+    "python", "list_skills", "load_skill", "describe_image",
+})
+
+
+def _tail(text: str, n: int = 800) -> str:
+    """Last ``n`` chars of ``text`` — keeps stderr tails (tracebacks, model
+    messages) out of result envelopes without leaking megabytes. Mirrors the Go
+    ``tailOutput`` helper."""
+    return text if len(text) <= n else "..." + text[len(text) - n:]
 
 
 def _result(obj: dict) -> str:
@@ -179,6 +194,109 @@ def _load_skill_tool() -> StructuredTool:
     )
 
 
+# --- describe_image (8d) — local ONNX vision via describe_image.py ----------
+
+_DESCRIBE_IMAGE_SCRIPT = "/usr/local/bin/describe_image.py"
+_DESCRIBE_IMAGE_TIMEOUT = 120  # seconds; matches the Go tool's default
+
+_VISION_UNAVAILABLE = (
+    "Vision model is not downloaded. Run scripts/bootstrap-vision.sh from the "
+    "host to enable. Until then, image-aware reasoning falls back to whatever "
+    "the driving LLM provides natively."
+)
+_VISION_DEPS_MISSING = (
+    "Sandbox image is missing onnxruntime-genai. Rebuild with `task build` "
+    "after pulling latest sandbox/Dockerfile."
+)
+
+
+class _DescribeImageArgs(BaseModel):
+    image_path: str | None = Field(
+        None, description="Absolute path to image file inside the sandbox "
+        "(e.g. /sandbox/workspace/foo.png)"
+    )
+    image_url: str | None = Field(
+        None, description="URL of image to download and describe. Mutually "
+        "exclusive with image_path."
+    )
+    prompt: str | None = Field(
+        None, description="Optional instruction for the model (default: generic "
+        "description). e.g. 'what text is on the sign?'"
+    )
+
+
+_DESCRIBE_IMAGE_DESC = (
+    "Describe an image using local vision inference (Qwen3.5-2B-ONNX-OPT). "
+    "Use when the driving LLM can't see the image directly, or when you want a "
+    "fast local description without an external round-trip. Pass either an "
+    "in-sandbox image path OR a URL (the script fetches it). Vision is OPTIONAL "
+    "— if the model isn't downloaded, returns a friendly 'run "
+    "scripts/bootstrap-vision.sh' message instead of an error."
+)
+
+
+def _describe_image_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(
+        image_path: str | None = None,
+        image_url: str | None = None,
+        prompt: str | None = None,
+    ) -> str:
+        if not image_path and not image_url:
+            return _result({"success": False, "error": "one of image_path or image_url is required"})
+        if image_path and image_url:
+            return _result({"success": False, "error": "image_path and image_url are mutually exclusive"})
+        # describe_image.py takes --image XOR --image-url; shlex.quote is safe
+        # for paths/URLs carrying spaces or quotes (Go used its shQ helper).
+        parts = [f"python3 {_DESCRIBE_IMAGE_SCRIPT}"]
+        parts += ["--image", shlex.quote(image_path)] if image_path else ["--image-url", shlex.quote(image_url)]
+        if prompt:
+            parts += ["--prompt", shlex.quote(prompt)]
+        cmd = " ".join(parts)
+        try:
+            out, exit_code = exec_client.exec(cmd, timeout=_DESCRIBE_IMAGE_TIMEOUT)
+        except ExecTimeout:
+            return _result({
+                "success": False, "reason": "timeout",
+                "error": f"describe_image timed out after {_DESCRIBE_IMAGE_TIMEOUT}s",
+            })
+        except Exception as exc:  # container vanished / docker API error
+            return _result({"success": False, "reason": "exec_failed", "error": str(exc)})
+
+        # Exit-code dispatch — describe_image.py contract (faithful 1:1 with the
+        # Go DescribeImageTool): 0=success, 1=inference error, 2=model missing,
+        # 3=onnxruntime-genai absent. Model-missing is NOT an error (the model
+        # is optional); the others are real failures the agent can react to.
+        if exit_code == 0:
+            try:
+                parsed = json.loads(out)
+            except json.JSONDecodeError:
+                return _result({
+                    "success": False, "reason": "malformed_output",
+                    "error": f"describe_image returned non-JSON: {_tail(out, 400)}",
+                })
+            return _result({
+                "success": True,
+                "description": parsed.get("description", ""),
+                "model": parsed.get("model", ""),
+            })
+        if exit_code == 2:
+            return _result({
+                "success": False, "reason": "unavailable",
+                "explanation": _VISION_UNAVAILABLE, "detail": _tail(out),
+            })
+        if exit_code == 3:
+            return _result({
+                "success": False, "reason": "deps_missing",
+                "explanation": _VISION_DEPS_MISSING, "detail": _tail(out),
+            })
+        return _result({"success": False, "reason": "inference_failed", "error": _tail(out)})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "describe_image", description=_DESCRIBE_IMAGE_DESC,
+        args_schema=_DescribeImageArgs, func=_run,
+    )
+
+
 # --- registry ---------------------------------------------------------------
 
 def build_native_specialists(exec_client: DockerExecClient) -> list[StructuredTool]:
@@ -189,4 +307,5 @@ def build_native_specialists(exec_client: DockerExecClient) -> list[StructuredTo
         _python_tool(exec_client),
         _list_skills_tool(),
         _load_skill_tool(),
+        _describe_image_tool(exec_client),
     ]

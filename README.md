@@ -69,17 +69,18 @@ server at `http://127.0.0.1:9988`. The `pux` client defaults to the latter
 
 ## Tool surface
 
-fs/shell is **deepagents-native** (via `PuxSandboxBackend` → MCP `bash` inside
-the container); specialists are **`pux_sandbox_*`** MCP tools:
+fs/shell is **deepagents-native** (via `PuxSandboxBackend.execute()` → docker
+exec inside the container); specialists are **`pux_sandbox_*`** — some native
+Python (Phase 8b–8d), the rest still MCP from the Go bridge (8e/8f):
 
 | Tool | Backed by |
 |------|----------|
-| `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native — `PuxSandboxBackend.execute()` → docker exec (Phase 8a) |
-| `python` | MCP `python` (sandbox `python3 -c`) |
+| `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native — `PuxSandboxBackend.execute()` → docker exec (8a) |
+| `python` | native — docker exec `python3 -c` (8b) |
+| `list_skills` / `load_skill` | native — host FS `.pi/skills/` (8c) |
+| `describe_image` | native — `/usr/local/bin/describe_image.py` via docker exec (8d) |
 | `browser_navigate` / `_click` / `_type` / `_screenshot` / `_evaluate` | in-sandbox `sb_server.py` (SeleniumBase) |
 | `desktop_screenshot` / `_click` / `_type` / `_key` | Xvfb + xdotool + OCR |
-| `describe_image` | local ONNX vision (Qwen3.5-2B, opt-in) |
-| `list_skills` / `load_skill` | project-local skill markdown |
 
 All paths the tools report are **inside the sandbox container**; the project is
 bind-mounted at `/sandbox/workspace/`. `create_deep_agent` injects
