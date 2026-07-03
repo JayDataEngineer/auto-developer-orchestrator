@@ -70,8 +70,8 @@ server at `http://127.0.0.1:9988`. The `pux` client defaults to the latter
 ## Tool surface
 
 fs/shell is **deepagents-native** (via `PuxSandboxBackend.execute()` → docker
-exec inside the container); specialists are **`pux_sandbox_*`** — some native
-Python (Phase 8b–8d), the rest still MCP from the Go bridge (8e/8f):
+exec inside the container); all 13 specialists are **`pux_sandbox_*`** native
+Python tools too (Phase 8b–8f). The Go bridge now owns only container lifecycle:
 
 | Tool | Backed by |
 |------|----------|
@@ -80,7 +80,7 @@ Python (Phase 8b–8d), the rest still MCP from the Go bridge (8e/8f):
 | `list_skills` / `load_skill` | native — host FS `.pi/skills/` (8c) |
 | `describe_image` | native — `/usr/local/bin/describe_image.py` via docker exec (8d) |
 | `browser_navigate` / `_click` / `_type` / `_screenshot` / `_evaluate` | native — `curl` to in-sandbox `sb_server.py` via docker exec (8e) |
-| `desktop_screenshot` / `_click` / `_type` / `_key` | Xvfb + xdotool + OCR |
+| `desktop_screenshot` / `_click` / `_type` / `_key` | native — `xdotool` + `desktop_observe.py` via docker exec (8f) |
 
 All paths the tools report are **inside the sandbox container**; the project is
 bind-mounted at `/sandbox/workspace/`. `create_deep_agent` injects
