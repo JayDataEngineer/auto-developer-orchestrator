@@ -56,6 +56,31 @@ if (existsSync(localBin)) {
   process.env.PATH = `${localBin}:${process.env.PATH ?? ""}`;
 }
 
+// ---- 2b. Auto-load project .env (gitignored) ----
+// Minimal parser: KEY=VALUE per line, surrounding quotes stripped, # comments
+// and blank lines skipped. Does NOT override vars already set in the parent
+// shell (operator env wins). Mirrors dotenv's default behavior.
+const envPath = join(pkgRoot, ".env");
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, "utf-8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
 // ---- 3. Subcommand intercept ----
 // `dispatch` is a pure alias: rewrite argv to add `-p` then fall through to
 // the normal pi spawn. The others are terminal — handle and exit.
