@@ -79,7 +79,7 @@ Python (Phase 8b–8d), the rest still MCP from the Go bridge (8e/8f):
 | `python` | native — docker exec `python3 -c` (8b) |
 | `list_skills` / `load_skill` | native — host FS `.pi/skills/` (8c) |
 | `describe_image` | native — `/usr/local/bin/describe_image.py` via docker exec (8d) |
-| `browser_navigate` / `_click` / `_type` / `_screenshot` / `_evaluate` | in-sandbox `sb_server.py` (SeleniumBase) |
+| `browser_navigate` / `_click` / `_type` / `_screenshot` / `_evaluate` | native — `curl` to in-sandbox `sb_server.py` via docker exec (8e) |
 | `desktop_screenshot` / `_click` / `_type` / `_key` | Xvfb + xdotool + OCR |
 
 All paths the tools report are **inside the sandbox container**; the project is
