@@ -155,6 +155,35 @@ if (existsSync(subagentsEntry)) {
   process.exit(1);
 }
 
+// pi-dynamic-workflows brings the `workflow` tool (parallel/pipeline fan-out
+// with per-agent model routing + structured outputs). Installed via
+// `pi install npm:@quintinshaw/pi-dynamic-workflows` which writes the package
+// to .pi/settings.json:packages — but we run with --no-extensions (above) so
+// pi's auto-discovery of `packages:` is disabled. Load the entry explicitly.
+// Soft-fail: if not installed, pux still works without the workflow tool.
+const workflowEntry = join(
+  pkgRoot,
+  ".pi",
+  "npm",
+  "node_modules",
+  "@quintinshaw",
+  "pi-dynamic-workflows",
+  "extensions",
+  "workflow.ts",
+);
+if (existsSync(workflowEntry)) {
+  extArgs.push("--extension", workflowEntry);
+}
+
+// pi-mono-ask-user-question brings the `ask_user` tool — structured prompts
+// (select / multi-select / confirm / input) that surface in the TUI. Loaded
+// explicitly because --no-extensions above disables settings.json:packages
+// auto-discovery. Soft-fail: if not installed, pux still works without it.
+const askUserEntry = join(pkgRoot, "node_modules", "pi-mono-ask-user-question", "index.ts");
+if (existsSync(askUserEntry)) {
+  extArgs.push("--extension", askUserEntry);
+}
+
 // ---- 6. Compose pi argv ----
 // --no-context-files : ignore user's AGENTS.md so OURS wins
 // --no-extensions    : skip pi's auto-discovery from cwd; explicit -e flags still load

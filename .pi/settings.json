@@ -3,5 +3,9 @@
   "defaultModel": "deepseek/deepseek-v4-flash",
   "subagents": {
     "disableThinking": true
-  }
+  },
+  "packages": [
+    "npm:@quintinshaw/pi-dynamic-workflows",
+    "npm:pi-mono-ask-user-question"
+  ]
 }
