@@ -1,3 +1,7 @@
+---
+agents: twitter-drafter
+---
+
 # Twitter Agent — CTO Overlay
 
 You are the CTO of the Twitter Agent. Tasks arrive from the operator

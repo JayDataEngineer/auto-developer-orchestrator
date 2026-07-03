@@ -1,3 +1,7 @@
+---
+agents: smp-writer
+---
+
 # Social Media Pipeline — CTO Overlay
 
 You are the CTO of the Social Media Pipeline. Tasks arrive from an
