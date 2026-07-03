@@ -5,25 +5,29 @@
 Pux is **Deepagents (Python/LangGraph) driving a Docker sandbox.** The agent
 layer (orchestration, subagent delegation, sessions/threads, skills, the Agent
 Protocol server + client) is [deepagents](https://docs.langchain.com/oss/python/deepagents),
-living in `harness/`. The Go binary (`backend/mcpserver`) is the **sandbox
-bridge** — it owns the Docker sandbox lifecycle, the MCP wire protocol, and the
-specialist tool implementations (browser/desktop/vision/python/skills). Phase 8
-of the pivot re-hosts that bridge in Python and deletes the Go binary; until
-then it stays.
+living in `harness/`. The harness ALSO owns the Docker sandbox lifecycle +
+the specialist tool implementations (browser/desktop/vision/python/skills) —
+all native Python as of Phase 8a–8g. The Go binary (`backend/mcpserver`) is
+now **fully vestigial** — it carries no model-visible tools and owns no
+container (the harness boots its own via `pux sandbox start` or lazily on
+first tool use). Phase 8i deletes it; until then it stays compiled but unused.
 
 Three layers:
 
 - **`harness/`** (Python, uv) — the agent layer. `pux_harness/graph.py` builds
   per-org deepagents graphs (CTO + specialist subagents) with a
-  `PuxSandboxBackend` (native fs/shell tools) + specialist `pux_sandbox_*`
-  tools from the Go MCP bridge. Served over the LangChain Agent Protocol REST
-  API (`server.py`, FastAPI on `:9988`). Driven by `cli.py` (the `pux` client)
-  or the in-process runner (`main.py`).
-- **`backend/mcpserver`** (Go binary) — boots the Docker sandbox, exposes
-  bash/file/python/browser/desktop/vision tools over MCP at
-  `http://127.0.0.1:9987`. Single-tenant, localhost-only, no auth.
+  `PuxSandboxBackend` (native fs/shell tools) + native specialist
+  `pux_sandbox_*` tools. `pux_harness/container.py` owns the Docker sandbox
+  create/start/stop/remove + declarative policy enforcement. Served over the
+  LangChain Agent Protocol REST API (`server.py`, FastAPI on `:9988`). Driven
+  by `cli.py` (the `pux` client) or the in-process runner (`main.py`).
+- **`backend/mcpserver`** (Go binary) — **vestigial (Phase 8i deletes it).**
+  Historically booted the Docker sandbox + exposed bash/file/python/browser/
+  desktop/vision tools over MCP at `http://127.0.0.1:9987`. As of 8a–8g every
+  one of those responsibilities lives in the harness; the binary is kept only
+  as a reference impl + until 8i removes it.
 - **`bin/pux`** (bash launcher) — sources `.env`, routes `serve` / `direct` /
-  client subcommands into the harness.
+  `sandbox` / client subcommands into the harness.
 
 The pi-mono TS harness (`bin/pux.mjs`, `.pi/extensions/*`, `pi-*` npm deps,
 `package.json`) is **deleted** (Phase 4). Its org-overlay + delegation jobs are
@@ -40,8 +44,9 @@ cd sandbox && docker build -t pux-sandbox:latest . && cd ..
 # Sync the Python harness
 cd harness && uv sync && cd ..
 
-# Start the sandbox bridge (Go MCP server)
-task start                       # background daemon; or `task run` for foreground
+# Boot the sandbox container (harness-owned; replaces the old `task start`)
+pux sandbox start                # or: `pux sandbox status` to reuse a running one
+                                 # (omitted → the harness boots lazily on first use)
 
 # Start the Agent Protocol server (blocks; the canonical executor)
 pux serve                        # FastAPI on http://127.0.0.1:9988
@@ -53,6 +58,11 @@ pux resume                                    # list recent threads
 pux show <thread_id>                          # last message + status
 pux run <thread_id> "follow up"               # background run on a thread
 pux wait <run_id>                             # block for a background run
+
+# Sandbox lifecycle (harness-owned, Phase 8g):
+pux sandbox start                             # boot (with $PUX_ORG policy if set)
+pux sandbox status                            # is it up? (reuses if running)
+pux sandbox stop                              # save-persisted + stop + remove
 
 # No server? In-process runner for dev/verify:
 pux direct --org general                       # runs the graph directly, no HTTP
@@ -98,21 +108,34 @@ Agent Protocol port 8000 is taken on this host.
 │  harness/pux_harness/server.py                  │  (per-org graph cache,
 │  deepagents org graphs + AsyncSqliteSaver       │   SQLite threads/history)
 └──────────────┬──────────────────────────────────┘
-               │ MCP JSON-RPC (harness/bridge.py)
+               │ deepagents graph + PuxSandboxBackend
 ┌──────────────▼──────────────────────────────────┐
-│ pux-mcpserver (Go, localhost:9987)              │  sandbox bridge
-│   - MCP wire protocol                           │  (deleted in Phase 8)
-│   - Tool registry (specialist tools)            │
-│   - Lifecycle supervisor (run/start/stop)       │
+│ harness  (Python, deepagents)                   │  the whole agent + sandbox
+│  - graph.py / orgs.py / native_tools.py         │   layer: 13 specialist
+│  - container.py  SandboxContainer.ensure()      │   tools NATIVE (no MCP hop
+│  - docker_exec.py  DockerExecClient.exec()      │   for fs/shell OR
+│  - context_offload.py + policy.py               │   specialists)
 └──────────────┬──────────────────────────────────┘
-               │ docker exec
+               │ Docker SDK (create / exec / stop)
 ┌──────────────▼──────────────────────────────────┐
 │ pux-sandbox container                           │
 │   Chrome + Xvfb + xdotool + tesseract +         │
 │   supervisord + /workspace bind-mount +         │
 │   backbone scripts (chmod 0444)                 │
 └─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│ backend/mcpserver  (Go, :9987)  — VESTIGIAL     │  carries NO model-visible
+│  No tools (all 13 specialists ported native).   │  tools since 8a–8f; the
+│  Deleted in Phase 8i (after 8g proven).         │  container lifecycle moved
+└─────────────────────────────────────────────────┘  to container.py (8g).
 ```
+
+**The Go binary is vestigial.** Phase 8a–8f ported all 13 specialist tools
+into `native_tools.py` (the graph no longer calls `shared_client()`); Phase 8g
+moved the container lifecycle into `container.py`. Nothing model-visible flows
+through Go. It stays in the tree **only** until 8i deletes it — kept last so
+the repo is never half-deleted mid-pivot. To run Pux you do **not** start it.
 
 ## Harness layout (Python, deepagents)
 
@@ -216,11 +239,15 @@ Override via `PUX_PID_FILE` for unusual layouts.
 Set `PUX_AUDIT_LOG=/path/to/audit.jsonl` to append every tool call (args +
 result + duration, secret-scrubbed) to a forensic log. Opt-in; default off.
 
-## Connecting to the sandbox bridge
+## Connecting to the (vestigial) Go bridge
 
-The harness connects to the Go server via `harness/pux_harness/bridge.py`
-(direct JSON-RPC client, not the MCP SDK — leaner). To use the sandbox from
-another MCP client (Claude Desktop, etc.):
+The harness no longer depends on the Go server for any model-visible work.
+`bridge.py` (the direct JSON-RPC client) still exists but is reached **only**
+by `--check-contract` rule 4 (live-bridge tool probe) and `--check`; the
+agent graph itself stopped calling it in Phase 8a–8f. The container is now
+created + exec'd by `container.py` / `docker_exec.py` directly over the Docker
+SDK — no JSON-RPC hop. Until 8i deletes it, the Go binary still *can* be
+attached from another MCP client (Claude Desktop, etc.):
 
 ```json
 {
@@ -237,9 +264,10 @@ via the `Mcp-Session-Id` header (generated on `initialize`).
 
 fs/shell is **deepagents-native** (via `PuxSandboxBackend.execute()` → **direct
 `docker exec`** into the container — Phase 8a cut the MCP→Go middleman); all
-13 specialists are **native Python StructuredTools** too (Phase 8b–8f). The Go
-bridge now carries NO model-visible tools — it stays only as the container
-lifecycle owner until 8g/8h port that:
+13 specialists are **native Python StructuredTools** too (Phase 8b–8f). Phase
+8g moved the container **lifecycle** (create/start/stop) into `container.py`,
+so the Go bridge now owns nothing the harness uses — it carries NO
+model-visible tools AND no longer owns the container:
 
 | Tool | Source | Backed by |
 |------|--------|----------|
@@ -332,14 +360,24 @@ are the client surface over `/threads/*` + `/runs/*`.
 
 ## Adding a new tool
 
+**The canonical path is now Python** (`native_tools.py`) — Phase 8a–8f ported
+all 13 specialists there and the graph stopped calling the Go bridge. Add a
+new specialist as a `StructuredTool` built in `native_tools.py` (it gets a
+`shared_exec()` client for docker-exec); append its name to `SPECIALIST_TOOLS`
++ `PORTED_SPECIALISTS` so the contract + parity check pick it up. Reference it
+from an agent's `tools:` frontmatter. No rebuild, no Go.
+
+**The Go path below is the legacy that 8i will delete** — kept only so the
+vestigial binary's `tools/list` still mirrors the live surface for `--check`:
+
 **Specialist tool on the Go bridge** (browser_*, desktop_*, vision, future
 mobile_*, device_*): append a spec entry to the family's slice in its file
 (`browserSpecs` in `browser_tool.go`, `desktopSpecs` in `desktop_tool.go`);
 the family's `RegisterXXXTools(srv, exec, cfg)` helper picks it up. Or a
 standalone Go type implementing `core.Tool` registered in
 `cmd/mcpserver/main.go`. Rebuild (`task build`) → shows in `tools/list`. Then
-reference it in agent `tools:` frontmatter and overlays. (Phase 8 moves all of
-this into Python — the bridge is temporary.)
+reference it in agent `tools:` frontmatter and overlays. **Mirror it in
+`native_tools.py` too** — that is the surface the agent actually sees.
 
 **Standalone tool** (one-off like `describe_image`, `python`, `list_skills`):
 
@@ -450,27 +488,25 @@ browser:
                                     # Cookies NEVER touch disk in container.
 ```
 
-**Pipeline** (the resolver lives in `harness/pux_harness/policy.py` — a 1:1
-port of the Go package; the *enforcer* stays in `backend/internal/policy/` +
-`sandbox/policy_hook.go` until Phase 8). The Go server reads `PUX_ORG` and
-applies policy at container create + supervisor boot. **Phase 6 ported the
-pure resolution engine to Python** (`load/validate_env/env_vars/resolve_mounts
-/egress_rules/resolve_tier` — 35 parity tests mirror the 22 Go tests; the
-harness now resolves policy via `pux direct --org <X> --check-policy` without
-a model call). Enforcement (binds/env/caps/egress.conf staging) moves to the
-harness in Phase 8, when the harness owns container creation — today the Go
-binary owns the single shared container, so per-org enforcement can't run
-harness-side yet.
+**Pipeline** — Phase 6 ported the *resolver* (`harness/pux_harness/policy.py`,
+a 1:1 port of the Go package: `load/validate_env/env_vars/resolve_mounts/
+egress_rules/resolve_tier` — 35 parity tests mirror the 22 Go tests); Phase 8g
+ported the *enforcer* too, into `container.py::create()`. The harness now
+reads `PUX_ORG` and applies policy at container create; the Go enforcer
+(`backend/internal/policy/` + `sandbox/policy_hook.go`) is dead code until 8i
+deletes it. The no-model dry-run `pux direct --org <X> --check-policy` resolves
+mounts/creds/egress/tier without touching Docker.
 
 1. `--org X` → harness sets `PUX_ORG=X` in env
-2. Go server reads `PUX_ORG`, calls `policy.Load(X, projectRoot)`
-3. `ValidateEnv` checks required creds present → fail loud if missing
-4. `ResolveMounts` expands `${VAR}` placeholders → fail loud if unset
+2. `container.SandboxContainer._resolve_policy()` reads `PUX_ORG`, calls
+   `policy.load(X, projectRoot)`
+3. `policy.validate_env` checks required creds present → fail loud BEFORE Docker
+4. `policy.resolve_mounts` expands `${VAR}` placeholders → fail loud if unset
 5. Required + optional creds + `cookies_env` value + `SEED_COOKIES_ENV` pointer
-   injected as `--env KEY=VALUE`
-6. `RunAsHostUser` → `container.Config.User = "UID:GID"`
-7. `egress.allow` non-empty → stages `<project>/.pux/egress.conf` +
-   grants `NET_ADMIN` capability
+   injected as `environment=[KEY=VALUE]` on the create call
+6. `run_as_host_user` → `create(user="UID:GID")`
+7. `egress.allow` non-empty → stages `<project>/.pux/egress.conf` (0600) +
+   `cap_add=["NET_ADMIN"]`
 8. `sandbox.image` overrides the image used at container create
 9. `sandbox.tier` overrides the caller-supplied tier (re-evaluates gVisor)
 10. Supervisor runs `apply-egress-policy.sh` at boot priority 15:
@@ -568,9 +604,9 @@ and all 10 orgs ported to RUN on deepagents (Phase 5).
 | Phase | What | Status |
 |-------|------|--------|
 | 5 | Port remaining 7 orgs to RUN on deepagents (delegation-forcing tasks) | **SHIPPED 2026-07-03** — all 10 orgs run E2E. Each `pux direct --org <name>` forcing task in `main.py:DEFAULT_TASKS` makes the CTO delegate via `task(subagent_type=<specialist>)` and drive a native fs/shell tool (`execute`/`read_file`/`glob`) against the org's own bundled content; every run returned the correct ground-truth answer (invest=17 .py via invest-researcher, game-studio=6 skills via docs-writer, dre=7 .py via dre-auditor, smp=3 angles via smp-writer, twitter=1 skill via twitter-drafter, telegram=4 msgs via telegram-drafter, video=3 entries via video-scriptwriter). New structural test `test_every_org_has_a_forcing_task`; pytest 47/47. |
-| 6 | Policy engine Go→Python (egress/creds/image+tier/browser) | **SHIPPED 2026-07-03** — `harness/pux_harness/policy.py` is a faithful 1:1 port of `backend/internal/policy` (pure logic: load/validate_env/env_vars/resolve_mounts/egress_rules/resolve_tier). `tests/test_policy.py` mirrors the 22 Go tests (35 cases incl. IPv6, container-resolved `host.docker.internal` passthrough, DNS-refresh comments, ports fanout). Contract rule 5 now runs the real engine as a deep-schema check (`load` + `resolve_mounts` — offline; `egress_rules` deliberately NOT called, it resolves DNS). Consumer: `pux direct --org <name> --check-policy` — a no-model dry-run that resolves mounts, checks creds (names only — never values), resolves egress DNS, reports tier/image; exits 1 on missing required creds (the same gate container-create enforces). pytest 84/84. Enforcement wiring (binds/env/caps/egress.conf staging at `ContainerCreate`) is Phase 8 — it needs container ownership, which the harness doesn't have while the Go binary owns the shared container. |
+| 6 | Policy engine Go→Python (egress/creds/image+tier/browser) | **SHIPPED 2026-07-03** — `harness/pux_harness/policy.py` is a faithful 1:1 port of `backend/internal/policy` (pure logic: load/validate_env/env_vars/resolve_mounts/egress_rules/resolve_tier). `tests/test_policy.py` mirrors the 22 Go tests (35 cases incl. IPv6, container-resolved `host.docker.internal` passthrough, DNS-refresh comments, ports fanout). Contract rule 5 now runs the real engine as a deep-schema check (`load` + `resolve_mounts` — offline; `egress_rules` deliberately NOT called, it resolves DNS). Consumer: `pux direct --org <name> --check-policy` — a no-model dry-run that resolves mounts, checks creds (names only — never values), resolves egress DNS, reports tier/image; exits 1 on missing required creds (the same gate container-create enforces). pytest 84/84. Enforcement wiring (binds/env/caps/egress.conf staging at `ContainerCreate`) landed in **Phase 8g** (`container.py::create()`) once the harness owned container creation — see the Phase 8 row. |
 | 7 | context-mode integration (ctx MCP + wrap_tool_call offload) | **SHIPPED 2026-07-03** — **native harness offload, NOT an external ctx-MCP bridge** (context-mode is a stdio Claude-Code bun plugin, unreachable over HTTP from the harness; meta-mcp `list_servers` confirmed). `harness/pux_harness/context_offload.py` `ContextOffloadMiddleware(AgentMiddleware)` measures each `wrap_tool_call`/`awrap_tool_call` result; a ToolMessage > `threshold` (default 8000 chars ≈ 2K tokens) gets stashed to `ctx_store.py` (host-side `<project>/.pux/ctx/<id>.txt+.json`; hex-only ids reject path-escape) and replaced with a preview + `ctx:<id>` handle. `ctx_recall` / `ctx_search` StructuredTools pull stashed bytes back on demand — only the slice the agent asks for re-enters context. This is the *proactive* complement to deepagents' own reactive `SummarizationMiddleware`. **Two findings the E2E surfaced + fixed:** (1) `ctx_recall`/`ctx_search` are exempt from offload (`_RETRIEVAL_TOOLS`) — their job is to inject content, so re-stashing trapped the agent in a recall→offload loop (proven: pre-fix ctx_recall(12K)→re-offloaded; post-fix returns full text); (2) **main-agent-only** — deepagents' `SubAgentMiddleware` does not forward a raw SubAgent spec's `middleware` key into the compiled specialist (verified: a researcher's `read_file` of an 11.9K-char file returned the full text yet nothing stashed), so attaching it to specialists is a silent no-op. Forcing it would be a shim; left documented as a `CompiledSubAgent`-pre-compilation follow-up. **Proven E2E** (`pux direct --org general` glm-5.2): `execute seq 1 3000`→12087B offloaded→`ctx_recall` retrieves full text→correct answer; pytest 102/102; `--check-contract` exit 0. |
-| 8 | Re-host sandbox in Python (`execute()`→docker exec; 13 specialist tools); wire policy enforcement here; delete Go MCP | **8a–8f SHIPPED 2026-07-03** — **8a** `docker_exec.py` `DockerExecClient` (container discovered by `openshell.project-path` label; `exec()` via Docker SDK `exec_run(tty=False)`; `PuxSandboxBackend.execute()`/`id` retargeted from MCP `bash` to direct docker exec). **8b/8c** `native_tools.py` ports `python` (docker exec `python3 -c`), `list_skills`/`load_skill` (host FS `.pi/skills/`) — fixes a latent Go bug (skills package read `<root>/skills/` → `count:0`; Python reads the real path → `count:1`). **8d** ports `describe_image` (exit-code dispatch: 0/1/2=unavailable/3=deps + timeout); `docker_exec.exec(timeout=N)` enforces per-call deadlines via thread `.result(timeout=)` → `ExecTimeout`. **8e** ports the 5 `browser_*` tools (`_sb_post` builds the exact `curl … sb_server` cmd Go's `postJSON` did). **8f** ports the 4 `desktop_*` tools (`_exec_desktop` runs `DISPLAY=:99 xdotool …` / `desktop_observe.py` via docker exec; pixel-coord contract). `_result` uses `sort_keys=True` → byte-equivalent to the Go bridge's `json.MarshalIndent(v,"","  ")` (Go sorts map keys — verified live list_skills emits `count` before `skills`). `PORTED_SPECIALISTS == SPECIALIST_TOOLS` (all 13 native) → `build_graph` no longer calls `shared_client()`; the Go bridge carries NO model-visible tools, stays only as container-lifecycle owner. **Proven E2E** (real sb_server + Xvfb + live glm-5.2 trees): browser_navigate example.com→"Example Domain"+SoM map; desktop_screenshot→15 OCR elements w/ cx/cy (offload middleware stashed the big payload behind ctx_recall); describe_image→unavailable; real xdotool click+key → ok:true. pytest 102/102, contract exit 0. Sub-steps 8g–8i remain (lifecycle + policy enforcement in Python, then delete Go). |
+| 8 | Re-host sandbox in Python (`execute()`→docker exec; 13 specialist tools); wire policy enforcement here; delete Go MCP | **8a–8g SHIPPED 2026-07-03** — **8a** `docker_exec.py` `DockerExecClient` (container discovered by `openshell.project-path` label; `exec()` via Docker SDK `exec_run(tty=False)`; `PuxSandboxBackend.execute()`/`id` retargeted from MCP `bash` to direct docker exec). **8b/8c** `native_tools.py` ports `python` (docker exec `python3 -c`), `list_skills`/`load_skill` (host FS `.pi/skills/`) — fixes a latent Go bug (skills package read `<root>/skills/` → `count:0`; Python reads the real path → `count:1`). **8d** ports `describe_image` (exit-code dispatch: 0/1/2=unavailable/3=deps + timeout); `docker_exec.exec(timeout=N)` enforces per-call deadlines via thread `.result(timeout=)` → `ExecTimeout`. **8e** ports the 5 `browser_*` tools (`_sb_post` builds the exact `curl … sb_server` cmd Go's `postJSON` did). **8f** ports the 4 `desktop_*` tools (`_exec_desktop` runs `DISPLAY=:99 xdotool …` / `desktop_observe.py` via docker exec; pixel-coord contract). `_result` uses `sort_keys=True` → byte-equivalent to the Go bridge's `json.MarshalIndent(v,"","  ")` (Go sorts map keys — verified live list_skills emits `count` before `skills`). `PORTED_SPECIALISTS == SPECIALIST_TOOLS` (all 13 native) → `build_graph` no longer calls `shared_client()`. **8g** `container.py` `SandboxContainer` owns the container lifecycle (create/start/stop/remove) — a faithful port of `manager.go::CreateSandbox`+`DestroySandbox` (CLI-mode slice; desktop/VNC/port-allocator paths dropped — native tools curl sb_server/xdotool directly). `ensure()` is the single-tenant gate (discover-by-label → reuse, else create); the exec client now **self-boots** so `task start` is no longer required. Policy **enforcement** (the part deferred from Phase 6 — binds/env/caps/egress.conf staging at create) runs harness-side now, porting `policy_hook.go::applyOrgPolicy` step-for-step. **Proven E2E** (2026-07-03): stopped the Go binary + removed its container → `pux sandbox start` booted a fresh one → inspect byte-matches the Go-managed config (image/labels/5 binds/extra_hosts/2GB·2cpu·512pids/shared-infra/runc); `pux direct --org general` → CTO→researcher→native `execute find … -name '*.go'` → 9 correct files. Policy enforcement proven at the Docker level: `PUX_ORG=game-studio pux sandbox start` → container created with `CapAdd:[NET_ADMIN]` + `.pux/egress.conf` staged (0600) with the 4 resolved rules incl. container-resolved `host.docker.internal`. New `tests/test_container.py` (28 cases — runtime decision table, cache-name determinism + live-match, env defaults, URL rejection). `pux sandbox {start,stop,status}` CLI surface replaces `task start/stop/status`. pytest 130/130, contract exit 0. **8i remains**: delete the Go MCP tree (LAST — after 8a–8g proven, which they are). |
 | 9 | TUI/clients as Agent Protocol consumers (+ SSE streaming) | roadmap |
 
 ## Branch strategy

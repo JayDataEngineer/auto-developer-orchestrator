@@ -2,6 +2,7 @@
 # pux — routes to the deepagents harness (Python/uv).
 #   pux serve              start the Agent Protocol server (uvicorn)
 #   pux direct ...         in-process runner (python -m pux_harness.main); no server
+#   pux sandbox <cmd>      Docker sandbox lifecycle (start/stop/status/ensure)
 #   pux <subcommand> ...   Agent Protocol client (python -m pux_harness.cli)
 #
 # Replaces the deleted TS launcher (bin/pux.mjs). The Agent Protocol server is
@@ -22,8 +23,11 @@ case "$cmd" in
   direct)
     shift
     cd "$HARNESS" && exec uv run python -m pux_harness.main "$@" ;;
+  sandbox)
+    shift
+    cd "$HARNESS" && exec uv run python -m pux_harness.main --sandbox "$@" ;;
   "")
-    echo "usage: pux <serve|direct|agents|dispatch|resume|show|history|run|wait> ..." >&2
+    echo "usage: pux <serve|direct|sandbox|agents|dispatch|resume|show|history|run|wait> ..." >&2
     exit 2 ;;
 esac
 

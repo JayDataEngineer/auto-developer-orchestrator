@@ -6,10 +6,12 @@ container the same way the Go binary did (moby ``ExecCreate``/``ExecAttach``),
 just from Python — no JSON-RPC hop, no Go middleman.
 
 The container is discovered by its ``openshell.project-path`` label, decoupled
-from the Go binary's ``orchestrator-sandbox-<id>`` naming convention. The Go
-MCP bridge still owns the container *lifecycle* (create/start/stop) until
-Phase 8g ports it here; this module only *execs into* an already-running
-container, so today the Go ``task start`` boots it and the harness execs it.
+from the Go binary's ``orchestrator-sandbox-<id>`` naming convention. Phase 8g
+moved the container *lifecycle* (create/start/stop) into the harness too
+(``container.py``); the exec path now **self-boots**: when no running container
+is found for the project, ``container.SandboxContainer.ensure()`` creates one
+(with this process's ``PUX_ORG`` policy applied) instead of failing. The Go
+``task start`` is no longer required to drive the harness.
 
 Why ``tty=False``: the Go binary reads the Docker attach stream raw
 (``io.Copy``) so it needs ``TTY=true`` to dodge Docker's multiplexed 8-byte
@@ -67,13 +69,13 @@ def _resolve_project() -> str:
     return os.path.abspath(os.environ.get("PUX_PROJECT_PATH") or str(PROJECT_ROOT))
 
 
-def _discover(client: docker.DockerClient, project_path: str) -> str:
-    """Find the running sandbox container for ``project_path`` by label.
+def _discover(client: docker.DockerClient, project_path: str) -> str | None:
+    """Find the running sandbox container for ``project_path`` by label, or None.
 
-    The Go binary labels every sandbox ``openshell.project-path=<abs>``. There
-    must be exactly one running match (single-tenant per project); if several
-    exist we take the newest and raise loudly so the operator notices the
-    anomaly rather than silently exec-ing the wrong container.
+    Every sandbox is labeled ``openshell.project-path=<abs>``. >1 running match
+    is the single-tenant anomaly — we raise loudly so the operator notices
+    rather than silently exec-ing the wrong container. No match → None (the
+    caller decides whether to boot one).
     """
     try:
         containers = client.containers.list(
@@ -82,10 +84,7 @@ def _discover(client: docker.DockerClient, project_path: str) -> str:
     except APIError as exc:  # docker daemon unreachable / permission
         raise RuntimeError(f"docker list failed: {exc}") from exc
     if not containers:
-        raise RuntimeError(
-            f"no running pux-sandbox container found for project {project_path!r} "
-            f"(label {PROJECT_LABEL}={project_path}). Boot one with `task start`."
-        )
+        return None
     if len(containers) > 1:
         names = sorted(c.name for c in containers)
         raise RuntimeError(
@@ -98,19 +97,39 @@ def _discover(client: docker.DockerClient, project_path: str) -> str:
 class DockerExecClient:
     """Exec-only client over the Docker SDK.
 
-    Caches the discovered container name so the label-filter lookup runs once
-    per process — the hot path is ``exec()``, not discovery. Stateless apart
-    from that cache + the (long-lived) SDK client.
+    Caches the container name so the label-filter lookup runs once per process —
+    the hot path is ``exec()``, not discovery. When ``boot=True`` (default) and
+    no running container is found, ``container.SandboxContainer.ensure()`` boots
+    one (with the process's ``PUX_ORG`` policy) so the harness is self-starting.
     """
 
-    def __init__(self, container: str | None = None, *, timeout: int = _DEFAULT_TIMEOUT):
+    def __init__(
+        self,
+        container: str | None = None,
+        *,
+        timeout: int = _DEFAULT_TIMEOUT,
+        boot: bool = True,
+    ):
         self._client = docker.from_env(timeout=timeout)
         self._container = container
+        self._boot = boot
 
     @property
     def container(self) -> str:
         if self._container is None:
-            self._container = _discover(self._client, _resolve_project())
+            found = _discover(self._client, _resolve_project())
+            if found is not None:
+                self._container = found
+            elif self._boot:
+                # Lazy import — avoids a docker_exec↔container cycle at import time.
+                from pux_harness.container import SandboxContainer
+
+                self._container = SandboxContainer(client=self._client).ensure()
+            else:
+                raise RuntimeError(
+                    "no running pux-sandbox container found (boot disabled). "
+                    "Start one with `task start` or enable boot."
+                )
         return self._container
 
     def _do_exec(self, command: str):

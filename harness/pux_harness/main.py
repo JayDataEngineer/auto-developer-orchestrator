@@ -257,6 +257,57 @@ def _check_policy(org: str) -> int:
     return 1 if missing else 0
 
 
+def _sandbox(cmd: str) -> int:
+    """Docker sandbox lifecycle, harness-owned (Phase 8g). Replaces the Go
+    ``task start/stop/status`` for container boot. ``ensure`` reuses a running
+    container or boots one (the path the exec client takes lazily)."""
+    from pux_harness.container import SandboxContainer, resolve_project_path
+
+    sb = SandboxContainer()
+    project = resolve_project_path()
+    org = sb.org or "(none)"
+
+    if cmd == "start":
+        name = sb.ensure()
+        _print_status(name, project, org)
+        return 0
+    if cmd == "ensure":
+        name = sb.ensure()
+        _print_status(name, project, org)
+        return 0
+    if cmd == "stop":
+        sb.destroy()
+        print(f"stopped + removed container for {project}")
+        return 0
+    if cmd == "status":
+        from pux_harness.docker_exec import _discover  # noqa: PLC0415
+        import docker  # noqa: PLC0415
+
+        name = _discover(docker.from_env(timeout=10), project)
+        if name is None:
+            print(f"not running (no container for {project})")
+            return 1
+        _print_status(name, project, org)
+        return 0
+    raise SystemExit(
+        f"unknown sandbox subcommand {cmd!r}; use: start | stop | status | ensure"
+    )
+
+
+def _print_status(name: str, project: str, org: str) -> None:
+    import docker  # noqa: PLC0415
+
+    c = docker.from_env(timeout=10).containers.get(name)
+    print(f"running")
+    print(f"  Container   {name}")
+    print(f"  Image       {c.image.tags[0] if c.image.tags else c.image.id[:19]}")
+    print(f"  Status      {c.status}")
+    print(f"  Project     {project}")
+    print(f"  Org policy  {org}")
+    print(f"  Network     {','.join(c.attrs['NetworkSettings']['Networks'].keys())}")
+    print(f"  Runtime     {c.attrs['HostConfig']['Runtime'] or 'default'}")
+
+
 def _check_contract() -> int:
     """Run the declarative org contract. Structural tier always runs (no
     server, no tokens); the tool-resolution tier (rule 4) runs only when the
@@ -311,7 +362,13 @@ def main() -> None:
     ap.add_argument("--check-policy", action="store_true",
                     help="resolve + report this org's policy (mounts/creds/egress/tier); "
                          "exit 1 if required creds are missing. No model call.")
+    ap.add_argument("--sandbox", metavar="CMD",
+                    help="Docker sandbox lifecycle: start | stop | status | ensure "
+                         "(harness-owned, Phase 8g; replaces `task start/stop/status`)")
     args = ap.parse_args()
+
+    if args.sandbox is not None:
+        raise SystemExit(_sandbox(args.sandbox))
 
     if args.check_contract:
         raise SystemExit(_check_contract())
