@@ -283,6 +283,17 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		"/tmp:/sandbox/tmp",
 		volumeName + ":/sandbox/persist",
 	}
+	// Per-project cache volume at /root/.cache — survives container death
+	// so pip wheels, huggingface weights, and other tool caches don't
+	// re-download every session. Deterministic by absolute project path:
+	// same project → same volume → warm cache. PUX_CACHE_VOLUME=off opts
+	// out for debugging. See cache.go for naming + lifecycle.
+	if cacheVol, err := ensureCacheVolume(ctx, m.dockerClient, projectPath, m.logger); err != nil {
+		m.logger.Warn("Failed to create per-project cache volume (proceeding without)",
+			zap.Error(err))
+	} else if cacheVol != "" {
+		binds = append(binds, cacheVol+":"+CacheMountTarget)
+	}
 	// Org-mode volume propagation: caller may pass org-declared volumes
 	// (e.g. video-production's named workspace volume mounted at
 	// /workspace/video-productions). Each entry renders to a Docker bind
