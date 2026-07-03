@@ -13,6 +13,13 @@ import (
 // multiple lines (multi-IP DNS records). The consumer (apply-egress-policy.sh)
 // reads this format and emits one iptables -A per line.
 //
+// For DNS-resolved hosts, a "# host: <name>" comment is emitted before the
+// IP lines for that host. This lets refresh-egress-dns.sh re-resolve the
+// hostname periodically and update the firewall when CDNs rotate IPs.
+// Literal IP entries get no comment (nothing to re-resolve). Lines starting
+// with '#' are skipped by apply-egress-policy.sh, so the comments are
+// backwards-compatible with the existing boot script.
+//
 // DNS resolution happens NOW (sandbox-create time), not in-container at
 // boot — by the time the firewall runs, DNS may be blocked (deny-by-default).
 // Resolving up front means: (1) the policy is concrete + auditable, (2)
@@ -38,6 +45,12 @@ func EgressRules(p *Policy) (string, error) {
 		if len(ports) == 0 {
 			return "", fmt.Errorf("egress: rule for %s has no port(s)", rule.Host)
 		}
+		// Emit hostname comment for DNS-resolved hosts (literal IPs skip —
+		// nothing to re-resolve). The refresh script reads this to know
+		// which hostname to re-lookup periodically.
+		if net.ParseIP(rule.Host) == nil {
+			lines = append(lines, "# host: "+rule.Host)
+		}
 		for _, ip := range ips {
 			for _, port := range ports {
 				if port < 1 || port > 65535 {
@@ -49,6 +62,7 @@ func EgressRules(p *Policy) (string, error) {
 	}
 	return strings.Join(lines, "\n") + "\n", nil
 }
+
 
 // resolveHost returns one or more IPs for a hostname OR validates a
 // literal IP. Literal IPv4/IPv6 short-circuits — no DNS lookup needed.

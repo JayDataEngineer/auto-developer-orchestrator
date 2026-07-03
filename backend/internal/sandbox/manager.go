@@ -141,6 +141,18 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		opts.ID = fmt.Sprintf("sandbox-%d", time.Now().UnixMilli())
 	}
 
+	// Normalize tier: callers passing empty get TierIsolated so every
+	// downstream branch (gVisor default, egress staging skip, bridged
+	// mount logic) treats "no tier set" identically to "tier: isolated".
+	// Without this, an empty tier would skip the egress-staging guard
+	// (`resolvedTier != TierBridged`) AND skip the gVisor default (which
+	// keys off TierIsolated), producing inconsistent behavior between
+	// callers that pass `Tier: TierIsolated` explicitly vs. those that
+	// leave it unset.
+	if opts.Tier == "" {
+		opts.Tier = TierIsolated
+	}
+
 	m.logger.Info("creating sandbox",
 		zap.String("id", opts.ID),
 		zap.String("project", opts.ProjectPath),
@@ -250,13 +262,18 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 		}
 	}
 
-	// Build resource limits
-	resources := container.Resources{}
-	if opts.MemoryLimit > 0 {
-		resources.Memory = int64(opts.MemoryLimit) * 1024 * 1024 // MB to bytes
-	}
-	if opts.CPULimit > 0 {
-		resources.NanoCPUs = int64(opts.CPULimit * 1e9) // cores to nanocpus
+	// Build resource limits. Caller-supplied values win; zero values fall
+	// back to env-overridable defaults (PUX_SANDBOX_MEMORY_MB / CPU_CORES /
+	// PIDS) so an agent going wild (fork bomb, OOM bait, infinite loop) is
+	// contained to a known slice of the host rather than chewing the whole
+	// machine. PidsLimit is always set — there's no caller override for it,
+	// only the env knob.
+	memMB, cpuCores, pids := resolveResourceDefaults(opts)
+	pidsLimit := int64(pids)
+	resources := container.Resources{
+		Memory:    int64(memMB) * 1024 * 1024, // MB to bytes
+		NanoCPUs:  int64(cpuCores * 1e9),      // cores to nanocpus
+		PidsLimit: &pidsLimit,
 	}
 
 	// Build bind mounts
@@ -289,13 +306,15 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 	}
 	// gVisor opt-in: PUX_SANDBOX_RUNTIME=runsc swaps the container runtime
 	// to gVisor's runsc, which intercepts syscalls at the kernel level
-	// (stronger isolation than the default runc). Empty = Docker default
-	// (runc). Bridged-mode sandboxes (X11 + host net) skip the override —
-	// runsc + NET_HOST + Xvfb is an untested combination we don't want to
-	// surprise operators with. The tier check uses the *resolved* tier
-	// (after policy override) so policy can flip a sandbox off bridged.
+	// (stronger isolation than the default runc). Default-on for TierIsolated
+	// when runsc is installed in the Docker daemon — see pickRuntime.
+	// Empty = Docker default (runc). Bridged-mode sandboxes (X11 + host net)
+	// skip the override — runsc + NET_HOST + Xvfb is an untested combination
+	// we don't want to surprise operators with. The tier check uses the
+	// *resolved* tier (after policy override) so policy can flip a sandbox
+	// off bridged.
 	resolvedTier := opts.Tier
-	if r := os.Getenv("PUX_SANDBOX_RUNTIME"); r != "" && resolvedTier != TierBridged {
+	if r := m.pickRuntime(ctx, resolvedTier); r != "" {
 		hostConfig.Runtime = r
 	}
 
@@ -318,12 +337,17 @@ func (m *Manager) CreateSandbox(ctx context.Context, opts SandboxOptions) (*Sand
 			image = decisions.Image
 		}
 		if decisions.TierSet {
+			previousTier := resolvedTier
 			resolvedTier = decisions.Tier
 			// Re-evaluate gVisor override now that tier may have flipped.
-			if r := os.Getenv("PUX_SANDBOX_RUNTIME"); r != "" && resolvedTier != TierBridged {
-				hostConfig.Runtime = r
-			} else if resolvedTier == TierBridged {
-				hostConfig.Runtime = ""
+			// If the resolved tier changed, the runtime decision may need
+			// to flip with it (e.g. policy moved sandbox off Bridged).
+			if resolvedTier != previousTier {
+				if r := m.pickRuntime(ctx, resolvedTier); r != "" {
+					hostConfig.Runtime = r
+				} else {
+					hostConfig.Runtime = ""
+				}
 			}
 		}
 	}
