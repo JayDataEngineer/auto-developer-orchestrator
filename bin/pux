@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# pux — routes to the deepagents harness (Python/uv).
+#   pux serve              start the Agent Protocol server (uvicorn)
+#   pux direct ...         in-process runner (python -m pux_harness.main); no server
+#   pux <subcommand> ...   Agent Protocol client (python -m pux_harness.cli)
+#
+# Replaces the deleted TS launcher (bin/pux.mjs). The Agent Protocol server is
+# the canonical executor; client subcommands require it running.
+set -euo pipefail
+# resolve symlinks (e.g. ~/.local/bin/pux -> repo/bin/pux) before computing paths
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+REPO="$(cd "$HERE/.." && pwd)"
+HARNESS="$REPO/harness"
+
+if [[ -f "$REPO/.env" ]]; then set -a; . "$REPO/.env"; set +a; fi
+
+cmd="${1:-}"
+case "$cmd" in
+  serve)
+    shift
+    cd "$HARNESS" && exec uv run python -m pux_harness.server "$@" ;;
+  direct)
+    shift
+    cd "$HARNESS" && exec uv run python -m pux_harness.main "$@" ;;
+  "")
+    echo "usage: pux <serve|direct|agents|dispatch|resume|show|history|run|wait> ..." >&2
+    exit 2 ;;
+esac
+
+cd "$HARNESS" && exec uv run python -m pux_harness.cli "$@"

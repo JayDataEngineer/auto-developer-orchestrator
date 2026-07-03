@@ -21,15 +21,11 @@ import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
 
-from deepagents import create_deep_agent
-
 from pux_harness.bridge import get_pux_client, get_pux_tools
 from pux_harness.contract import check_all, check_harness, has_errors
-from pux_harness.model import get_model
+from pux_harness.graph import build_graph, shared_backend
 from pux_harness.orgs import (
-    build_system_prompt,
     discover_orgs,
-    load_subagents,
     org_agent_slugs,
 )
 from pux_harness.sandbox import PuxSandboxBackend
@@ -63,22 +59,10 @@ DEFAULT_TASKS: dict[str, str] = {
 
 
 def _build_agent(org: str):
-    model = get_model()
-    client = get_pux_client()
-    backend = PuxSandboxBackend(client)
-    # Specialist tools (browser/desktop/vision/skills/python) come from tools=;
-    # native fs/shell tools come from FilesystemMiddleware via the backend
-    # (auto-injected into the main agent + every subagent by create_deep_agent).
-    all_tools = get_pux_tools(client=client)
-    agent = create_deep_agent(
-        model=model,
-        system_prompt=build_system_prompt(org),
-        tools=all_tools,
-        subagents=load_subagents(org, all_tools),
-        backend=backend,
-        checkpointer=MemorySaver(),
-    )
-    return agent, backend
+    # Ephemeral in-memory checkpointer — the runner is one-shot per process.
+    # The server (server.py) uses a persistent AsyncSqliteSaver instead.
+    agent = build_graph(org, checkpointer=MemorySaver())
+    return agent, shared_backend()
 
 
 def _usage(messages: list) -> dict:

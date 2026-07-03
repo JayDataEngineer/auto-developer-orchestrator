@@ -2,25 +2,34 @@
 
 ## What this is
 
-Pux is **Pi-Mono driving a Docker sandbox MCP backend.** The agent layer
-(orchestration, sessions, history, TUI, subagent delegation, skills) is
-[pi-mono](https://github.com/badlogic/pi-mono) — pulled in as an npm dep.
-The irreducible Go value (sandbox lifecycle, MCP wire protocol, tool
-implementations) stays in `backend/`.
+Pux is **Deepagents (Python/LangGraph) driving a Docker sandbox.** The agent
+layer (orchestration, subagent delegation, sessions/threads, skills, the Agent
+Protocol server + client) is [deepagents](https://docs.langchain.com/oss/python/deepagents),
+living in `harness/`. The Go binary (`backend/mcpserver`) is the **sandbox
+bridge** — it owns the Docker sandbox lifecycle, the MCP wire protocol, and the
+specialist tool implementations (browser/desktop/vision/python/skills). Phase 8
+of the pivot re-hosts that bridge in Python and deletes the Go binary; until
+then it stays.
 
-Two layers, one binary each:
+Three layers:
 
-- **`bin/pux.mjs`** (TS harness) — wraps pi-mono with our AGENTS.md system
-  prompt, loads `pi-mcp-adapter` + `pi-subagents` + `.pi/extensions/*`, and
-  exposes pux-specific subcommands (`dispatch`, `history`, `setup`,
-  `teardown`).
-- **`backend/mcpserver`** (Go binary) — boots a Docker sandbox, exposes
+- **`harness/`** (Python, uv) — the agent layer. `pux_harness/graph.py` builds
+  per-org deepagents graphs (CTO + specialist subagents) with a
+  `PuxSandboxBackend` (native fs/shell tools) + specialist `pux_sandbox_*`
+  tools from the Go MCP bridge. Served over the LangChain Agent Protocol REST
+  API (`server.py`, FastAPI on `:9988`). Driven by `cli.py` (the `pux` client)
+  or the in-process runner (`main.py`).
+- **`backend/mcpserver`** (Go binary) — boots the Docker sandbox, exposes
   bash/file/python/browser/desktop/vision tools over MCP at
   `http://127.0.0.1:9987`. Single-tenant, localhost-only, no auth.
+- **`bin/pux`** (bash launcher) — sources `.env`, routes `serve` / `direct` /
+  client subcommands into the harness.
 
-The fullstack predecessor (in-process agent loop, Go TUI, Go history
-recorder, dispatch surface) is gone — pi-mono does all of that better. The
-pre-pivot HEAD is tagged `v0.2.0-pre-pi-mono` for safety. Branch: `pi-pivot`.
+The pi-mono TS harness (`bin/pux.mjs`, `.pi/extensions/*`, `pi-*` npm deps,
+`package.json`) is **deleted** (Phase 4). Its org-overlay + delegation jobs are
+now `harness/pux_harness/orgs.py` + deepagents' native `task(subagent_type=…)`
+delegation. The pre-pi-mono HEAD is tagged `v0.2.0-pre-pi-mono`; the
+pre-deepagents HEAD is the commit before Phase 4. Branch: `pi-pivot`.
 
 ## Quick start
 
@@ -28,24 +37,29 @@ pre-pivot HEAD is tagged `v0.2.0-pre-pi-mono` for safety. Branch: `pi-pivot`.
 # One-time: build sandbox image
 cd sandbox && docker build -t pux-sandbox:latest . && cd ..
 
-# Boot the stack
-pux setup                       # verifies Docker + image, builds + starts MCP server
+# Sync the Python harness
+cd harness && uv sync && cd ..
 
-# Drive it
-pux                             # interactive TUI (pi-mono) against the cwd
-pux --org _demo                 # interactive TUI with a CTO overlay (orgs/_demo/AGENTS.md)
-pux dispatch --org _demo "task" # one-shot headless (= pux -p --org _demo "task")
-pux --resume                    # pi-mono session picker (tree of past sessions)
-pux --continue                  # resume most recent session
+# Start the sandbox bridge (Go MCP server)
+task start                       # background daemon; or `task run` for foreground
 
-# History (pi-mono writes .jsonl sessions to ~/.pi/agent/sessions/)
-pux history list                # shows recent sessions, suggests resume/continue commands
+# Start the Agent Protocol server (blocks; the canonical executor)
+pux serve                        # FastAPI on http://127.0.0.1:9988
 
-# Teardown
-pux teardown                    # task stop
+# Drive it (client — requires `pux serve` running)
+pux agents                                    # list the 10 orgs
+pux dispatch --org general "describe this"   # one-shot run -> answer + thread_id
+pux resume                                    # list recent threads
+pux show <thread_id>                          # last message + status
+pux run <thread_id> "follow up"               # background run on a thread
+pux wait <run_id>                             # block for a background run
+
+# No server? In-process runner for dev/verify:
+pux direct --org general                       # runs the graph directly, no HTTP
+pux direct --org general --check-contract      # validate all 10 orgs (no tokens)
 ```
 
-For direct Go-side work (bypassing the TS harness):
+For direct Go-side work (the sandbox bridge):
 
 ```bash
 task build                      # Build the binary at backend/mcpserver
@@ -60,37 +74,35 @@ task hooks                      # Install pre-commit (gitleaks)
 
 The Go server takes `--addr` (default `127.0.0.1:9987`) and `--project`
 (defaults to `$PWD`). Env vars `PUX_MCP_ADDR` / `PUX_PROJECT_PATH` mirror
-them.
+them. The Agent Protocol server reads `PUX_API_HOST` / `PUX_API_PORT`
+(default `127.0.0.1:9988`), `PUX_API_DB` (default
+`<project>/.pux/agent-protocol.sqlite`), `PUX_MODEL` (provider/model, e.g.
+`mimo-v2.5`, `glm-5.2`).
 
 **Why 9987 (not 9876):** the sandbox's `sb_server.py` (browser-mode HTTP API)
 listens on 9876 *inside* the container. Any org sandbox that boots with
 `--network=host` leaks that listener to the host's 9876. Defaulting
-pux-mcpserver to 9987 avoids the collision out-of-the-box.
+pux-mcpserver to 9987 avoids the collision out-of-the-box. **Why 9988 (the
+Agent Protocol server):** adjacent to the MCP bridge, and the conventional
+Agent Protocol port 8000 is taken on this host.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
-│ Operator                                        │
-│   - pux                          (TUI)          │
-│   - pux dispatch --org X "task"  (headless -p)  │
+│ pux (bash launcher → harness/cli.py)            │  Agent Protocol client
 └──────────────┬──────────────────────────────────┘
-               │
+               │ Agent Protocol REST (httpx)
 ┌──────────────▼──────────────────────────────────┐
-│ bin/pux.mjs (Node ≥ 22.19)                      │
-│   - Loads pi-mono + extensions                  │
-│   - .pi/extensions/pux-org-loader/ (--org flag) │
-│   - node_modules/pi-mcp-adapter/ (MCP bridge)   │
-│   - node_modules/pi-subagents/ (delegation)     │
-│   - .pi/agents/*.md (specialist subagents)      │
-│   - .pi/skills/* (skill markdown)               │
-│   - AGENTS.md (system prompt)                   │
+│ pux serve  (FastAPI, :9988)                     │  Agent Protocol server
+│  harness/pux_harness/server.py                  │  (per-org graph cache,
+│  deepagents org graphs + AsyncSqliteSaver       │   SQLite threads/history)
 └──────────────┬──────────────────────────────────┘
-               │ MCP JSON-RPC over HTTP (pi-mcp-adapter)
+               │ MCP JSON-RPC (harness/bridge.py)
 ┌──────────────▼──────────────────────────────────┐
-│ pux-mcpserver (Go, localhost:9987)              │
-│   - MCP wire protocol                           │
-│   - Tool registry (16 tools)                    │
+│ pux-mcpserver (Go, localhost:9987)              │  sandbox bridge
+│   - MCP wire protocol                           │  (deleted in Phase 8)
+│   - Tool registry (specialist tools)            │
 │   - Lifecycle supervisor (run/start/stop)       │
 └──────────────┬──────────────────────────────────┘
                │ docker exec
@@ -102,46 +114,52 @@ pux-mcpserver to 9987 avoids the collision out-of-the-box.
 └─────────────────────────────────────────────────┘
 ```
 
-## TS harness layout
+## Harness layout (Python, deepagents)
 
 ```
-auto-developer-orchestrator/
-├── bin/pux.mjs                 # Launcher + subcommand intercepts
-├── AGENTS.md                   # Root system prompt (pi-mono reads on boot)
-├── .mcp.json                   # MCP client config (pux-sandbox server, directTools:true)
-├── .pi/
-│   ├── extensions/
-│   │   └── pux-org-loader/     # --org flag: appends orgs/<name>/AGENTS.md
-│   │       ├── index.ts        # 44 LOC extension
-│   │       └── index.test.ts   # 5 vitest tests
-│   ├── agents/                 # Specialist subagent files (rich frontmatter)
-│   │   └── researcher.md       # example: read-only codebase investigator
-│   └── skills/                 # Skill markdown (pi-mono native discovery)
-│       └── source-citation/
-│           └── SKILL.md        # example: cite file:line for every claim
-├── orgs/                       # Per-org CTO overlays
-│   └── _demo/
-│       └── AGENTS.md           # Demo CTO body
-├── package.json                # pi-coding-agent + pi-mcp-adapter + pi-subagents deps
-├── tsconfig.json
-└── vitest.config.ts
+harness/
+├── pyproject.toml              # deepagents + langgraph + fastapi + uvicorn + httpx
+├── pux_harness/
+│   ├── graph.py                # build_graph(org) -> compiled deepagents graph
+│   │                           # one shared MCP client + PuxSandboxBackend per process
+│   ├── server.py               # Agent Protocol server (FastAPI, :9988)
+│   ├── cli.py                  # `pux` client (httpx → server)
+│   ├── main.py                 # in-process runner (`pux direct`)
+│   ├── bridge.py               # PuxMCPClient: direct JSON-RPC to Go MCP :9987
+│   ├── sandbox.py              # PuxSandboxBackend(BaseSandbox) -> native fs tools
+│   ├── model.py                # provider/model factory (PUX_MODEL)
+│   ├── orgs.py                 # system-prompt builder + subagent loader + contract glue
+│   └── contract.py             # declarative org-contract enforcer (7 rules)
+└── tests/
+    ├── test_org_contract.py    # 24 tests — the all-orgs-green gate
+    └── test_server.py          # 22 tests — Agent Protocol routing (stub graph)
 ```
 
-**Adding an org:** drop a directory under `orgs/<name>/` with an `AGENTS.md`
-file. Its body gets appended to the system prompt on `--org <name>`. That's
-the entire org loader — no TOML, no schema, no per-org config. If you need
-per-org agents, ship them under `.pi/agents/<name>.md` with frontmatter
-gating (e.g. `description: "Only load when --org=foo is set"` — pi-mono's
-discovery picks up everything, so prompt-level gating is the contract).
+**The deepagents seam (source-verified):** `create_deep_agent(model,
+system_prompt, tools, subagents, backend, checkpointer)` (deepagents
+`graph.py:270`). The `backend` flows into the main `FilesystemMiddleware`
+**and** every subagent's — one backend serves the whole tree, so native
+fs/shell tools (`ls/read_file/write_file/edit_file/glob/grep/execute`) are
+available to every subagent regardless of its `tools:` whitelist.
+`PuxSandboxBackend` subclasses `BaseSandbox` (Shape A — 4 abstract methods:
+`execute`/`id`/`upload_files`/`download_files`); it inherits `ls/read/write/
+edit/grep/glob` free, all routed through our `execute()` → MCP `bash`.
 
-**Adding a subagent:** write `.pi/agents/<name>.md` with frontmatter
-(`name`, `description`, `tools`, `thinking`, `output`, `systemPromptMode`,
-etc.) + body. pi-subagents discovers it automatically. Call via
-`subagent({ agent: "<name>", task: "..." })` from the main session.
+**Adding an org:** drop `orgs/<name>/AGENTS.md` (CTO body) with an
+`agents: [slug…]` frontmatter listing its specialists. Optionally add
+`orgs/<name>/policy.yaml`. Run `--check-contract` to validate (the contract
+also runs as a pytest gate). No harness-level per-org code — org-bundled
+`*.py`/`Dockerfile`/`docker-compose.yml`/`bootstrap.sh` is the org's sandbox
+payload, reached via the sandbox, never imported by the harness.
+
+**Adding a subagent:** write `.pi/agents/<slug>.md` with frontmatter
+(`name`, `description`, `tools`, `model`, `thinking`, `output`, …) + body.
+Reference it from an org's `agents:` frontmatter. Delegation is deepagents'
+native `task(subagent_type="<slug>", task="…")`.
 
 **Adding a skill:** write `.pi/skills/<name>/SKILL.md` with `name` +
-`description` frontmatter + body. pi-subagents discovers it. Skills are
-referenced from agent files via the `skills:` frontmatter field.
+`description` frontmatter. Reached by the agent via the `list_skills` /
+`load_skill` MCP tools.
 
 ## Go backend layout
 
@@ -174,11 +192,12 @@ backend/
 ```
 
 The pre-pivot agent/history/tui/org packages are gone. They live on the
-`v0.2.0-pre-pi-mono` tag if needed: `git show v0.2.0-pre-pi-mono:backend/internal/agent/loop.go`.
+`v0.2.0-pre-pi-mono` tag if needed:
+`git show v0.2.0-pre-pi-mono:backend/internal/agent/loop.go`.
 
 ## Lifecycle (`run` / `start` / `stop` / `status`)
 
-The binary ships with four subcommands. `mcpserver` with no subcommand (or
+The Go binary ships with four subcommands. `mcpserver` with no subcommand (or
 with `--flags` only) defaults to `run`.
 
 | Subcommand | When to use |
@@ -197,10 +216,11 @@ Override via `PUX_PID_FILE` for unusual layouts.
 Set `PUX_AUDIT_LOG=/path/to/audit.jsonl` to append every tool call (args +
 result + duration, secret-scrubbed) to a forensic log. Opt-in; default off.
 
-## Connecting MCP clients
+## Connecting to the sandbox bridge
 
-The pux TS harness connects to the Go server via `.mcp.json`. To use the
-sandbox from another MCP client (Claude Desktop, etc.):
+The harness connects to the Go server via `harness/pux_harness/bridge.py`
+(direct JSON-RPC client, not the MCP SDK — leaner). To use the sandbox from
+another MCP client (Claude Desktop, etc.):
 
 ```json
 {
@@ -213,74 +233,88 @@ sandbox from another MCP client (Claude Desktop, etc.):
 The server speaks MCP protocol version `2025-03-26`. Sessions are tracked
 via the `Mcp-Session-Id` header (generated on `initialize`).
 
-## Tool surface (16 tools, all on the Go side)
+## Tool surface
 
-| Tool | Schema source | Backed by |
-|------|--------------|----------|
-| `bash` | `tools/bash/bash.go` | adapters.BashExecutor → Docker exec |
-| `file_read` / `file_write` / `file_edit` / `file_grep` / `file_glob` | `tools/file/file.go` | adapters.FileOps → Docker exec |
-| `python` | `mcpserver/sandbox_python.go` | adapters.BashExecutor → `python3 -c` |
-| `list_skills` / `load_skill` | `mcpserver/skills_tool.go` | skills package → host FS at `<project>/skills/` |
-| `describe_image` | `mcpserver/vision_tool.go` | adapters.BashExecutor → `/usr/local/bin/describe_image.py` (local ONNX vision) |
-| `browser_navigate` / `browser_click` / `browser_type` / `browser_screenshot` / `browser_evaluate` | `mcpserver/browser_tool.go` | adapters.BashExecutor → `curl` to in-sandbox `sb_server.py` |
-| `desktop_screenshot` / `desktop_click` / `desktop_type` / `desktop_key` | `mcpserver/desktop_tool.go` | adapters.BashExecutor → `xdotool` + `/usr/local/bin/desktop_observe.py` |
+fs/shell is **deepagents-native** (via `PuxSandboxBackend.execute()` → MCP
+`bash` inside the container); specialists are **`pux_sandbox_*`** MCP tools
+from the Go bridge:
+
+| Tool | Source | Backed by |
+|------|--------|----------|
+| `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native (`BaseSandbox`) | `PuxSandboxBackend.execute()` → MCP `bash` |
+| `python` | MCP (`pux_sandbox_python`) | `python3 -c` in sandbox |
+| `list_skills` / `load_skill` | MCP | skills package → host FS at `<project>/skills/` |
+| `describe_image` | MCP (`pux_sandbox_describe_image`) | `/usr/local/bin/describe_image.py` (local ONNX) |
+| `browser_navigate` / `_click` / `_type` / `_screenshot` / `_evaluate` | MCP | `curl` to in-sandbox `sb_server.py` |
+| `desktop_screenshot` / `_click` / `_type` / `_key` | MCP | `xdotool` + `/usr/local/bin/desktop_observe.py` |
 
 All paths the tools report are **inside the sandbox container**. Your project
-is bind-mounted at `/sandbox/workspace/`. pi-mono sees tools via
-`pi-mcp-adapter` with `directTools: true` (each tool becomes a first-class
-pi tool with a `pux_sandbox_*` prefix).
+is bind-mounted at `/sandbox/workspace/`. `create_deep_agent` injects
+`FilesystemMiddleware(backend)` into every subagent, so native fs tools are
+always available regardless of a subagent's `tools:` whitelist.
 
 `/sandbox/` also contains read-only backbone scripts (`scripts.py`, etc.)
 that ship with the sandbox image — the agent can invoke them but can't edit
 them (`chmod 0444`).
 
-## Agent layer (pi-mono)
+## Agent Protocol server (`pux serve`)
 
-The agent loop, sessions, history, TUI, and subagent delegation all live in
-pi-mono + pi-subagents. Pux's contribution is the org loader extension
-(44 LOC) + the AGENTS.md system prompt + the `.pi/agents/*.md` and
-`.pi/skills/*/SKILL.md` files.
+`harness/pux_harness/server.py` serves the deepagents org graphs over a subset
+of the published Agent Protocol spec. **Org → agent_id.** One
+`AsyncSqliteSaver` (persistent threads/history) is shared across all org
+graphs; per-org compiled graphs are cached lazily. Runs are ephemeral
+executions tracked in-memory; the durable thread state (messages + checkpoints)
+lives in SQLite. A small `pux_threads` index table maps thread_id → org so a
+thread remembers which org's graph owns it across restarts.
+
+| Endpoint | Behavior |
+|----------|----------|
+| `GET /ok` | health + org list |
+| `POST /agents/search` | list orgs as agents (+ specialists) |
+| `GET /agents/{agent_id}` | org descriptor |
+| `POST /threads` | create a thread for an agent |
+| `POST /threads/search` | list/search threads (optional `agent_id` filter) |
+| `GET /threads/{thread_id}` | thread state (last message + status) |
+| `DELETE /threads/{thread_id}` | delete (checkpointer + index) |
+| `GET /threads/{thread_id}/history` | revision history (langgraph checkpoints) |
+| `POST /threads/{thread_id}/runs` | background run → `run_id` |
+| `GET /threads/{thread_id}/runs` | list a thread's runs |
+| `POST /runs/wait` | ephemeral blocking run (create+run+return; thread is kept) |
+| `GET /runs/{run_id}/wait` | block for a background run's final output |
+| `POST /runs/{run_id}/cancel` | cancel a background run |
+
+**Implementation choice:** thin FastAPI implementing the published spec, NOT
+`langgraph-api` (the Platform runtime). Rationale: minimalist (we own ~330 LOC
+vs adopting an opinionated runtime), and the REST contract is identical either
+way — swapping the server impl behind these endpoints is invisible to clients,
+so the choice is reversible. SSE streaming (run lifecycle + tool + nested-
+subagent events) is deferred to Phase 9.
 
 ### Org mode (`--org <name>`)
 
-When pux is launched with `--org <name>`, the pux-org-loader extension
-appends `orgs/<name>/AGENTS.md` to the system prompt. You become the CTO of
-that org — the body in that file carries the role.
+In-process: `pux direct --org <name>` builds the graph with
+`orgs/<name>/AGENTS.md` appended to the base system prompt. Over the server:
+`dispatch --org <name>` (ephemeral) or `POST /threads {agent_id}` then
+`POST /threads/{id}/runs`. The main agent becomes that org's CTO and
+delegates to its declared specialists via the `task` tool.
 
-Subagent delegation is pi-subagents' native `subagent` tool. Specialists
-live under `.pi/agents/*.md` with rich frontmatter (`tools`, `model`,
-`thinking`, `output`, `systemPromptMode`, `inheritSkills`, etc.). Spawn one
-via `subagent({ agent: "researcher", task: "..." })` from the main session.
+### Threads & history
 
-### Sessions & history
-
-pi-mono writes sessions as JSON Lines at
-`~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`. Each line is
-one entry; the format is crash-safe (partial writes don't corrupt prior
-turns). The tree is `id`/`parentId`-linked so `/fork` and `/branch` work.
-
-Use pi's flags directly for navigation:
-
-- `pux --resume` — interactive session picker (TUI)
-- `pux --continue` — resume the most recent session in this cwd
-- `pux --session <id>` — resume a specific session by partial UUID
-- `pux --fork <id>` — fork a session into a new branch
-- `/tree` inside the TUI — visualize the branching history
-
-`pux history list` (in `bin/pux.mjs`) is a thin convenience wrapper that
-just `ls`s the session directory and prints the most recent entries with
-suggested resume commands.
-
-### Compaction
-
-When a session nears the model's context limit, pi-mono runs an LLM-generated
-summary of older turns, preserving a recent verbatim window
-(`keepRecentTokens`, default 20K tokens). Compaction never splits a turn
-(user message + tool calls + tool results stay together). The raw
-pre-compaction history stays in the .jsonl file — forking from an older
-segment reconstructs the uncompacted state.
+The server persists threads + checkpoint history in SQLite
+(`<project>/.pux/agent-protocol.sqlite`). Every run writes a resumable
+thread; revisions are langgraph checkpoints. `pux resume/show/history/run/wait`
+are the client surface over `/threads/*` + `/runs/*`.
 
 ## Adding a new tool
+
+**Specialist tool on the Go bridge** (browser_*, desktop_*, vision, future
+mobile_*, device_*): append a spec entry to the family's slice in its file
+(`browserSpecs` in `browser_tool.go`, `desktopSpecs` in `desktop_tool.go`);
+the family's `RegisterXXXTools(srv, exec, cfg)` helper picks it up. Or a
+standalone Go type implementing `core.Tool` registered in
+`cmd/mcpserver/main.go`. Rebuild (`task build`) → shows in `tools/list`. Then
+reference it in agent `tools:` frontmatter and overlays. (Phase 8 moves all of
+this into Python — the bridge is temporary.)
 
 **Standalone tool** (one-off like `describe_image`, `python`, `list_skills`):
 
@@ -392,8 +426,11 @@ browser:
 ```
 
 **Pipeline** (all in `backend/internal/policy/` + `sandbox/policy_hook.go`):
+today the Go server reads `PUX_ORG` and applies policy at container create +
+supervisor boot. **Phase 6 ports this engine to Python** (egress/creds/image+
+tier/browser) so the harness owns policy once the Go binary is deleted.
 
-1. `pux --org X` → TS extension sets `PUX_ORG=X` in env
+1. `--org X` → harness sets `PUX_ORG=X` in env
 2. Go server reads `PUX_ORG`, calls `policy.Load(X, projectRoot)`
 3. `ValidateEnv` checks required creds present → fail loud if missing
 4. `ResolveMounts` expands `${VAR}` placeholders → fail loud if unset
@@ -435,7 +472,7 @@ become session-scoped, which is correct for the seed-at-boot use case.
   server, not firewall). game-studio bridge networking — 3 allow rules applied
   correctly, host-and-container return identical results per service state.
 
-## MCP transport contract
+## MCP transport contract (Go bridge)
 
 | Method | Behavior |
 |--------|----------|
@@ -453,7 +490,7 @@ returns 204. `GET` and `DELETE` are reserved (405 / 204 respectively).
 
 ## Verification
 
-The Go contract is enforced by 60+ tests in `mcpserver/`:
+**Go contract** (60+ tests in `mcpserver/`):
 
 - **Protocol envelope** (6 tests): initialize, session ID generation,
   notifications/initialized, ping, unknown method, parse errors
@@ -472,55 +509,77 @@ The Go contract is enforced by 60+ tests in `mcpserver/`:
 Plus a real end-to-end smoke test (`task smoke`) that boots against a live
 Docker container and exercises every tool.
 
-The TS harness has 5 vitest tests covering pux-org-loader
-(`.pi/extensions/pux-org-loader/index.test.ts`). Run with `npm test`.
+**Harness contract** (`harness/tests/`, run with `uv run pytest -q`):
+
+- **Org contract** (24 tests): all 10 orgs green; tool-resolution against
+  the live bridge surface; each violation class fires.
+- **Agent Protocol server** (22 tests): pure helpers + HTTP routing with
+  a stub graph (no tokens, no Docker) — locks the REST envelope + thread/run
+  CRUD. The real LLM-driven run is proven end-to-end in the Phase 4 verify
+  log (`dispatch --org general` → 9 Go files via the researcher subagent).
 
 **Verify gates before committing:**
 
-- Go side: `task test` + `task smoke` (real Docker)
-- TS side: `npm run typecheck` + `npm test`
-- Boot check: `node bin/pux.mjs --help` (extension flags register) +
-  `node bin/pux.mjs --list-models` (runtime boots with both extensions)
+- Harness: `cd harness && uv run pytest -q` + `uv run python -m
+  pux_harness.main --check-contract` (exit 0)
+- Go side: `task test` + `task smoke` (real Docker) — only when touching the
+  bridge
+- Boot check: `pux serve` + `pux agents` (server boots, lists 10 orgs) +
+  `pux dispatch --org general "<forcing task>"` (real run returns ground truth)
+
+## Pivot roadmap (pi-pivot branch)
+
+Phases 0–4 shipped (2026-07-03): harness + bridge, native sandbox,
+declarative contract, TS harness deleted, Agent Protocol server + client.
+
+| Phase | What | Status |
+|-------|------|--------|
+| 5 | Port remaining 7 orgs to RUN on deepagents (delegation-forcing tasks) | roadmap |
+| 6 | Policy engine Go→Python (egress/creds/image+tier/browser) | roadmap |
+| 7 | context-mode integration (ctx MCP + wrap_tool_call offload) | roadmap |
+| 8 | Re-host sandbox in Python (`execute()`→docker exec; 13 specialist tools); delete Go MCP | roadmap |
+| 9 | TUI/clients as Agent Protocol consumers (+ SSE streaming) | roadmap |
 
 ## Branch strategy
 
-- **`pi-pivot`** = current branch. The pi-mono pivot. PRs here should keep
-  both surfaces clean: minimal Go (sandbox + MCP), minimal TS (launcher +
-  thin extensions on top of pi-mono).
-- **`master`** = pre-pivot MVP. Slim Go MCP server with the in-process
-  agent loop + history recorder + Bubble Tea TUI + dispatch surface. Frozen
-  from the pi-pivot perspective.
-- **`v0.2.0-pre-pi-mono`** = tag of master HEAD before the pivot. Safety
+- **`pi-pivot`** = current branch. The deepagents pivot. PRs here keep both
+  surfaces clean: the Python harness is the agent layer; the Go binary is the
+  (temporary) sandbox bridge.
+- **`master`** = pre-pivot MVP. Slim Go MCP server with the in-process agent
+  loop + history recorder + Bubble Tea TUI + dispatch surface. Frozen from
+  the pi-pivot perspective.
+- **`v0.2.0-pre-pi-mono`** = tag of master HEAD before the pi-mono pivot. Safety
   net. `git show v0.2.0-pre-pi-mono:backend/internal/agent/loop.go` works.
 - **`dev`** + **`v0.1.0-fullstack-legacy`** = the older fullstack predecessor
-  (TUI, web UI, CLI, multi-agent). Frozen. Features migrated into master
-  one at a time, then into pi-pivot as pi-mono dependencies.
+  (TUI, web UI, CLI, multi-agent). Frozen.
 
 ## Testing harness rules
 
-- "Should work" is banned. Verify with `task smoke` (real Docker) or a Go
-  test that exercises the actual code path.
-- Adding a tool → add a test in `mcpserver/server_test.go` covering its
+- "Should work" is banned. Verify with `task smoke` (real Docker), a real
+  `pux dispatch` run (ground-truth answer), or a test that exercises the
+  actual code path.
+- Adding a Go tool → add a test in `mcpserver/server_test.go` covering its
   return shape (string vs map vs error).
+- Adding an Agent Protocol endpoint → add a routing test in
+  `harness/tests/test_server.py` (stub graph, no tokens).
+- Adding an org / subagent → it must pass `--check-contract` + the
+  `test_org_contract.py` gate.
 - Changing the JSON-RPC envelope → update both `server.go` and the
   `server_test.go` table.
-- Adding a TS extension → add a vitest test in
-  `.pi/extensions/<name>/index.test.ts`.
 
 ## What's NOT here (deferred or dropped)
 
-Dropped (pi-mono does it natively, or wasn't pulling weight):
+Dropped (deepagents does it natively, or wasn't pulling weight):
 
-- ~~In-process Go agent loop~~ — replaced by pi-mono's loop
-- ~~Go dispatch surface (`dispatch_task` / `get_task_status` / `list_orgs`)~~ —
-  replaced by `pux dispatch` + pi-mono's RPC mode
-- ~~Go history recorder (sqlite sidecar + `pux-history` binary)~~ — replaced
-  by pi-mono's .jsonl sessions + `pux history list` convenience wrapper
-- ~~Bubble Tea TUI (`pux-tui`)~~ — replaced by pi-mono's TUI
+- ~~pi-mono TS harness (`bin/pux.mjs`, `.pi/extensions/*`, `pi-*` npm deps)~~ —
+  replaced by the Python harness + Agent Protocol server (Phase 4)
+- ~~In-process Go agent loop / Go dispatch surface / Go history recorder /
+  Bubble Tea TUI~~ — replaced by deepagents + the Agent Protocol server
 - ~~TOML org config~~ — replaced by per-org `AGENTS.md` markdown
 
 Deferred (might land later if a concrete need emerges):
 
+- SSE streaming for Agent Protocol runs (Phase 9)
 - Multi-org orchestration (invest, twitter-agent, etc.) — current
   `.pi/agents/*.md` + `orgs/<name>/AGENTS.md` covers most cases
 - Self-evolving script toolkit (`make_script` / `edit_script`)
@@ -530,7 +589,7 @@ Deferred (might land later if a concrete need emerges):
 ## Conventions
 
 - No co-authored-by Claude in git commits.
-- Use astral uv for any Python environments (sandbox scripts, smoke test runner).
+- Use astral uv for any Python environments (sandbox scripts, smoke test runner, the harness).
 - Prefer 'prove' (integration-style) over 'assert' (unit-only) when feasible.
 - "Verify or die" — no claiming a thing works without running it.
 - IaC + self-bootstrap — every new service ships as docker-compose +

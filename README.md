@@ -1,13 +1,25 @@
 # Pux
 
-**Pi-Mono driving a Docker sandbox MCP backend.** Pux is a TS harness around
-[pi-mono](https://github.com/badlogic/pi-mono) that adds:
+**Deepagents (Python/LangGraph) driving a Docker sandbox.** Pux is an agent
+orchestrator: a [deepagents](https://docs.langchain.com/oss/python/deepagents)
+agent layer served over the [LangChain Agent
+Protocol](https://langchain-ai.github.io/agent-protocol/), backed by a Docker
+sandbox that exposes bash / file / browser / desktop / vision tools.
 
-- A Docker sandbox with Chrome, Xvfb, xdotool, tesseract, supervisord.
-- 16 MCP tools (bash, file_read/write/edit/grep/glob, python, browser_*,
-  desktop_*, describe_image, list_skills, load_skill) backed by the sandbox.
-- An org system: thin `--org <name>` overlay that appends `orgs/<name>/AGENTS.md`
-  to the system prompt. Subagent delegation via pi-subagents.
+Three pieces, one each:
+
+- **`harness/`** (Python, uv) — the agent layer. Builds per-org deepagents
+  graphs (a CTO + specialist subagents), serves them over the Agent Protocol
+  REST API, and ships a thin `pux` client. Native fs/shell tools (`ls` /
+  `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute`) run
+  through a `PuxSandboxBackend`; specialist tools (`browser_*`, `desktop_*`,
+  `describe_image`, `python`, skills) come from the Go MCP bridge.
+- **`backend/mcpserver`** (Go binary) — boots the Docker sandbox, exposes the
+  tools over MCP at `http://127.0.0.1:9987`. Today this is the sandbox bridge
+  the harness calls into (Phase 8 of the pivot re-hosts it in Python and
+  deletes this binary).
+- **`bin/pux`** (bash launcher) — routes `pux serve` / `pux direct` /
+  `pux <client-cmd>` into the harness.
 
 Single-tenant, localhost-only, no auth. One pux process = one project = one
 sandbox.
@@ -15,149 +27,145 @@ sandbox.
 ## Quick start
 
 ```bash
-# 1. Clone + install TS deps
+# 1. Clone + sync the Python harness
 git clone <this-repo> pux && cd pux
-npm install
+cd harness && uv sync && cd ..
 
-# 2. Build the sandbox image (one-time, ~5 min)
+# 2. Build the sandbox image (one-time)
 cd sandbox && docker build -t pux-sandbox:latest . && cd ..
 
-# 3. Boot the stack (verifies Docker, builds Go binary, starts MCP server)
-pux setup
+# 3. Start the Go MCP sandbox server (verifies Docker + image)
+task start                         # or: task run  (foreground dev)
 
-# 4. Drive it
-pux                             # interactive TUI
-pux --org _demo                 # interactive TUI with the demo CTO overlay
-pux dispatch --org _demo "describe this project"  # one-shot headless
+# 4. Start the Agent Protocol server
+pux serve                          # FastAPI on http://127.0.0.1:9988
 
-# 5. Teardown
-pux teardown
+# 5. Drive it (client — requires the server running)
+pux agents                         # list the 10 orgs
+pux dispatch --org general "describe this project"   # one-shot run
+pux resume                         # list recent threads
+
+# No server? In-process runner for dev:
+pux direct --org general           # runs the graph directly, no HTTP
 ```
 
-The MCP server listens at `http://127.0.0.1:9987`. pux connects to it
-automatically via `pi-mcp-adapter` (configured in `.mcp.json`).
+The MCP sandbox server listens at `http://127.0.0.1:9987`; the Agent Protocol
+server at `http://127.0.0.1:9988`. The `pux` client defaults to the latter
+(override with `PUX_API_URL`).
 
 ## Subcommands
 
 | Subcommand | What it does |
 |------------|-------------|
-| `pux` | Interactive TUI (pi-mono). |
-| `pux --org <name>` | Interactive TUI with `orgs/<name>/AGENTS.md` appended to the system prompt. |
-| `pux dispatch [...args]` | Alias for `pux -p [...args]` — headless one-shot. |
-| `pux history list` | List recent pi-mono sessions from `~/.pi/agent/sessions/`. |
-| `pux setup` | Verify Docker + sandbox image, build + start MCP server. |
-| `pux teardown` | Stop the MCP server (`task stop`). |
-| `pux --resume` | pi-mono session picker (TUI). |
-| `pux --continue` | Resume most recent session in this cwd. |
+| `pux serve` | Start the Agent Protocol server (uvicorn on :9988). |
+| `pux direct --org <name> [--task "..."]` | In-process runner — no server. The verify/dev path. |
+| `pux agents` | List orgs as Agent Protocol agents (+ their specialists). |
+| `pux dispatch --org <name> "task"` | Ephemeral blocking run; prints the answer + a resumable `thread_id`. |
+| `pux resume [--org <name>]` | List recent threads. |
+| `pux show <thread_id>` | Print a thread's last message + status. |
+| `pux history <thread_id>` | Print a thread's revision history (langgraph checkpoints). |
+| `pux run <thread_id> "task"` | Background run on an existing thread → `run_id`. |
+| `pux wait <run_id>` | Block for a background run's output. |
 
-Any other flag is passed through to pi-mono. Run `pux --help` to see
-pi-mono's full option set plus the pux extension flags (`--org`,
-`--mcp-config`).
+## Tool surface
 
-## Tools exposed
+fs/shell is **deepagents-native** (via `PuxSandboxBackend` → MCP `bash` inside
+the container); specialists are **`pux_sandbox_*`** MCP tools:
 
-All tools execute inside the Docker sandbox. The project is bind-mounted at
-`/sandbox/workspace/`.
+| Tool | Backed by |
+|------|----------|
+| `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native — `PuxSandboxBackend.execute()` → MCP `bash` |
+| `python` | MCP `python` (sandbox `python3 -c`) |
+| `browser_navigate` / `_click` / `_type` / `_screenshot` / `_evaluate` | in-sandbox `sb_server.py` (SeleniumBase) |
+| `desktop_screenshot` / `_click` / `_type` / `_key` | Xvfb + xdotool + OCR |
+| `describe_image` | local ONNX vision (Qwen3.5-2B, opt-in) |
+| `list_skills` / `load_skill` | project-local skill markdown |
 
-| Tool | What it does |
-|------|-------------|
-| `bash` | Execute a shell command in the sandbox |
-| `file_read` / `file_write` / `file_edit` / `file_grep` / `file_glob` | File operations |
-| `python` | Execute Python inside the sandbox |
-| `browser_navigate` / `browser_click` / `browser_type` / `browser_screenshot` / `browser_evaluate` | Persistent SeleniumBase Chrome session |
-| `desktop_screenshot` / `desktop_click` / `desktop_type` / `desktop_key` | Xvfb desktop automation (xdotool + OCR) |
-| `describe_image` | Local ONNX vision (Qwen3.5-2B, opt-in via `scripts/bootstrap-vision.sh`) |
-| `list_skills` / `load_skill` | Discover and load project-local skill markdown |
-
-In the TS harness, tools are exposed via `pi-mcp-adapter` with
-`directTools: true` — each tool becomes a first-class pi tool with a
-`pux_sandbox_*` prefix. Agents reference them as `mcp:pux-sandbox/<tool>` in
-their `tools:` frontmatter.
+All paths the tools report are **inside the sandbox container**; the project is
+bind-mounted at `/sandbox/workspace/`. `create_deep_agent` injects
+`FilesystemMiddleware(backend)` into every subagent, so native fs tools are
+always available regardless of a subagent's `tools:` whitelist.
 
 ## Org system
 
-Orgs are markdown-driven. Drop a directory under `orgs/<name>/` with an
-`AGENTS.md`:
+Orgs are markdown-driven and **declaratively contracted**. Drop a directory
+under `orgs/<name>/`:
 
 ```
 orgs/<name>/
-└── AGENTS.md    # CTO system prompt body
+├── AGENTS.md       # CTO system prompt body + `agents: [slug…]` frontmatter
+└── policy.yaml     # optional: egress ACLs, creds, sandbox image/tier, cookies
 ```
 
-`pux --org <name>` appends the body to the base system prompt. The main pi
-session becomes the CTO.
+`pux --org <name>` (in-process) / `dispatch --org <name>` (server) appends the
+body to the base system prompt — the main agent becomes that org's CTO and
+delegates to its declared specialists via the `task` tool.
 
 Specialist subagents live under `.pi/agents/*.md` with rich frontmatter
-(`tools`, `model`, `thinking`, `output`, `systemPromptMode`, etc.). The
-shipped example is `.pi/agents/researcher.md` — a read-only codebase
-investigator. Spawn one from the main session via the `subagent` tool:
-
-```
-subagent({ agent: "researcher", task: "list all .ts files under src/" })
-```
-
-See [pi-subagents](https://github.com/nicobailon/pi-subagents) for the full
-agent/skill format and delegation patterns (parallel, chain, async, fork).
-
-## Sessions & history
-
-pi-mono writes sessions as JSON Lines at
-`~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`. The format is
-crash-safe and supports tree-structured branching (`/fork`, `/branch`,
-`/tree`).
+(`tools`, `model`, `thinking`, `output`, …). The org contract enforces that
+every `agents:` slug resolves, every `tools:` entry is a real tool (native or
+live bridge), and any `policy.yaml` is schema-valid:
 
 ```bash
-pux history list               # show recent sessions
-pux --resume                   # interactive session picker
-pux --continue                 # resume most recent
-pux --session <partial-uuid>   # resume a specific session
+cd harness && uv run python -m pux_harness.main --check-contract   # exit 0 = green
 ```
 
-## Smoke test
+## Threads & history
+
+The Agent Protocol server persists threads + checkpoint history in SQLite
+(`<project>/.pux/agent-protocol.sqlite`). Every run (ephemeral or background)
+writes a resumable thread; revisions are langgraph checkpoints:
 
 ```bash
-task smoke
+pux dispatch --org general "..."   # → thread_id
+pux show <thread_id>               # last message + status
+pux history <thread_id>            # revisions
+pux run <thread_id> "follow up"    # continue on the same thread
 ```
 
-Builds, boots the Go server via the supervisor, drives the full MCP contract
-(initialize → tools/list → tools/call → bash echo + file roundtrip + python
-sum), and tears down. Real Docker — catches container-side regressions that
-unit tests miss.
+## Tests
+
+```bash
+cd harness && uv run pytest -q          # 46 tests: org contract + server routing
+```
+
+The server tests use FastAPI's `TestClient` with a stub graph (no tokens, no
+Docker) to lock the REST envelope + thread/run CRUD; the real LLM-driven run
+is proven end-to-end in the Phase 4 verify log (`dispatch --org general` →
+9 Go files).
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│ pux (TS harness)                        │
-│  bin/pux.mjs + .pi/extensions/          │
-│  + AGENTS.md + .pi/agents/ + .pi/skills/│
-└──────────────┬──────────────────────────┘
-               │ MCP JSON-RPC (pi-mcp-adapter)
-┌──────────────▼──────────────────────────┐
-│ pux-mcpserver (Go, localhost:9987)      │
-│  tool registry + lifecycle supervisor   │
-└──────────────┬──────────────────────────┘
+┌──────────────────────────────────────────┐
+│ pux (bash launcher → harness/cli.py)     │  client
+└──────────────┬───────────────────────────┘
+               │ Agent Protocol REST (httpx)
+┌──────────────▼───────────────────────────┐
+│ pux serve  (FastAPI, :9988)              │  Agent Protocol server
+│  deepagents org graphs + AsyncSqliteSaver│  (per-org graph cache, threads)
+└──────────────┬───────────────────────────┘
+               │ MCP JSON-RPC (harness/bridge.py)
+┌──────────────▼───────────────────────────┐
+│ pux-mcpserver (Go, :9987)                │  sandbox bridge (deleted in Phase 8)
+│  tool registry + lifecycle supervisor    │
+└──────────────┬───────────────────────────┘
                │ docker exec
-┌──────────────▼──────────────────────────┐
-│ pux-sandbox container                   │
-│  Chrome + Xvfb + xdotool + tesseract +  │
-│  supervisord + /workspace bind-mount    │
-└─────────────────────────────────────────┘
+┌──────────────▼───────────────────────────┐
+│ pux-sandbox container                    │
+│  Chrome + Xvfb + xdotool + tesseract +   │
+│  supervisord + /workspace bind-mount     │
+└──────────────────────────────────────────┘
 ```
 
 ## Branch layout
 
-- **`pi-pivot`** — current. Pi-Mono on top, slim Go MCP server below.
-- **`master`** — pre-pivot MVP. Slim Go MCP server with in-process agent
-  loop + history + TUI + dispatch surface.
-- **`v0.2.0-pre-pi-mono`** — tag of master HEAD before this pivot. Safety net.
-- **`dev`** + **`v0.1.0-fullstack-legacy`** — older fullstack predecessor.
-
-## Status
-
-The pi-mono pivot is the current line of work. The Go side (sandbox + MCP)
-is stable. The TS side (org system, sample agents, sample skills) is
-minimal-but-complete — drop more orgs / agents / skills as markdown files.
+- **`pi-pivot`** — current. Deepagents pivot in progress: Phases 0–4 shipped
+  (harness + bridge, native sandbox, declarative contract, TS harness deleted,
+  Agent Protocol server + client). Phases 5–9 roadmap (port remaining orgs,
+  policy Go→Python, context-mode, delete Go MCP, TUI).
+- **`master`** — pre-pivot MVP. Slim Go MCP server with in-process agent loop.
+- **`v0.2.0-pre-pi-mono`** — tag of master HEAD before the pivot. Safety net.
 
 ## License
 

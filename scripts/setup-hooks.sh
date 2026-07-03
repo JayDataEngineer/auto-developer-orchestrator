@@ -16,8 +16,8 @@ fi
 
 echo "Running tests before push..."
 
-# Run tests
-npm run test
+# Run the harness tests (deepagents pivot; the TS vitest suite is gone).
+( cd harness && uv run pytest -q )
 TEST_RESULT=$?
 
 if [ $TEST_RESULT -ne 0 ]; then

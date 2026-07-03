@@ -26,6 +26,7 @@ from __future__ import annotations
 import base64
 import json
 import shlex
+from collections import deque
 
 from deepagents.backends.protocol import (
     ExecuteResponse,
@@ -93,8 +94,9 @@ class PuxSandboxBackend(BaseSandbox):
         # ls/read/glob/grep/write/edit (they all build a cmd + call execute()).
         # Observation-only: turns "did the subagent use native fs tools?" from
         # inference into direct evidence. pux_sandbox_bash is never bound, so
-        # any entry here is, by construction, a NATIVE fs/shell call.
-        self.execute_log: list[str] = []
+        # any entry here is, by construction, a NATIVE fs/shell call. Bounded
+        # so a long-lived server process can't leak memory here.
+        self.execute_log: deque[str] = deque(maxlen=2048)
 
     # --- the four abstract primitives --------------------------------------
 
