@@ -35,6 +35,7 @@ from pathlib import Path
 
 import yaml
 
+from pux_harness import policy as policy_mod
 from pux_harness.orgs import (
     PROJECT_ROOT,
     _split_frontmatter,
@@ -163,11 +164,11 @@ def check_org(name: str, *, bridge_tools: set[str] | None = None) -> list[Violat
                                        f"{name}/{slug}: tool {raw!r} -> "
                                        f"{key!r} not in live bridge surface"))
 
-    # Rule 5: policy.yaml parses + known sections.
-    policy = org_dir / "policy.yaml"
-    if policy.is_file():
+    # Rule 5: policy.yaml parses + valid schema + known sections.
+    policy_path = org_dir / "policy.yaml"
+    if policy_path.is_file():
         try:
-            parsed = yaml.safe_load(policy.read_text())
+            parsed = yaml.safe_load(policy_path.read_text())
         except yaml.YAMLError as e:
             v.append(Violation("error", "policy-parse",
                                f"{name}: policy.yaml is not valid YAML: {e}"))
@@ -179,6 +180,22 @@ def check_org(name: str, *, bridge_tools: set[str] | None = None) -> list[Violat
                                    f"{name}: policy.yaml unknown sections "
                                    f"{bad}; allowed: "
                                    f"{sorted(KNOWN_POLICY_SECTIONS)}"))
+            # Deep schema: the real policy engine (Phase 6 port of the Go
+            # package) catches malformed mounts/creds the shallow section check
+            # misses. Go's parser is lenient on unknown keys, so the strict
+            # unknown-section check above runs first; this catches everything
+            # else — non-mapping sections (load) + bad mount paths/modes +
+            # unset ${VAR} placeholders (resolve_mounts). egress_rules is
+            # intentionally NOT called here: it resolves real DNS (network),
+            # which the contract must not depend on.
+            try:
+                pol = policy_mod.load(name, _orgs_dir().parent)
+                policy_mod.resolve_mounts(pol)
+            except policy_mod.PolicyError as e:
+                v.append(Violation("error", "policy-schema",
+                                   f"{name}: policy.yaml schema error: {e}"))
+            except policy_mod.NoPolicy:
+                pass
         elif parsed is not None:
             v.append(Violation("error", "policy-shape",
                                f"{name}: policy.yaml top-level must be a "

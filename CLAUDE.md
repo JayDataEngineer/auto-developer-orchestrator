@@ -425,10 +425,17 @@ browser:
                                     # Cookies NEVER touch disk in container.
 ```
 
-**Pipeline** (all in `backend/internal/policy/` + `sandbox/policy_hook.go`):
-today the Go server reads `PUX_ORG` and applies policy at container create +
-supervisor boot. **Phase 6 ports this engine to Python** (egress/creds/image+
-tier/browser) so the harness owns policy once the Go binary is deleted.
+**Pipeline** (the resolver lives in `harness/pux_harness/policy.py` — a 1:1
+port of the Go package; the *enforcer* stays in `backend/internal/policy/` +
+`sandbox/policy_hook.go` until Phase 8). The Go server reads `PUX_ORG` and
+applies policy at container create + supervisor boot. **Phase 6 ported the
+pure resolution engine to Python** (`load/validate_env/env_vars/resolve_mounts
+/egress_rules/resolve_tier` — 35 parity tests mirror the 22 Go tests; the
+harness now resolves policy via `pux direct --org <X> --check-policy` without
+a model call). Enforcement (binds/env/caps/egress.conf staging) moves to the
+harness in Phase 8, when the harness owns container creation — today the Go
+binary owns the single shared container, so per-org enforcement can't run
+harness-side yet.
 
 1. `--org X` → harness sets `PUX_ORG=X` in env
 2. Go server reads `PUX_ORG`, calls `policy.Load(X, projectRoot)`
@@ -536,9 +543,9 @@ and all 10 orgs ported to RUN on deepagents (Phase 5).
 | Phase | What | Status |
 |-------|------|--------|
 | 5 | Port remaining 7 orgs to RUN on deepagents (delegation-forcing tasks) | **SHIPPED 2026-07-03** — all 10 orgs run E2E. Each `pux direct --org <name>` forcing task in `main.py:DEFAULT_TASKS` makes the CTO delegate via `task(subagent_type=<specialist>)` and drive a native fs/shell tool (`execute`/`read_file`/`glob`) against the org's own bundled content; every run returned the correct ground-truth answer (invest=17 .py via invest-researcher, game-studio=6 skills via docs-writer, dre=7 .py via dre-auditor, smp=3 angles via smp-writer, twitter=1 skill via twitter-drafter, telegram=4 msgs via telegram-drafter, video=3 entries via video-scriptwriter). New structural test `test_every_org_has_a_forcing_task`; pytest 47/47. |
-| 6 | Policy engine Go→Python (egress/creds/image+tier/browser) | roadmap |
+| 6 | Policy engine Go→Python (egress/creds/image+tier/browser) | **SHIPPED 2026-07-03** — `harness/pux_harness/policy.py` is a faithful 1:1 port of `backend/internal/policy` (pure logic: load/validate_env/env_vars/resolve_mounts/egress_rules/resolve_tier). `tests/test_policy.py` mirrors the 22 Go tests (35 cases incl. IPv6, container-resolved `host.docker.internal` passthrough, DNS-refresh comments, ports fanout). Contract rule 5 now runs the real engine as a deep-schema check (`load` + `resolve_mounts` — offline; `egress_rules` deliberately NOT called, it resolves DNS). Consumer: `pux direct --org <name> --check-policy` — a no-model dry-run that resolves mounts, checks creds (names only — never values), resolves egress DNS, reports tier/image; exits 1 on missing required creds (the same gate container-create enforces). pytest 84/84. Enforcement wiring (binds/env/caps/egress.conf staging at `ContainerCreate`) is Phase 8 — it needs container ownership, which the harness doesn't have while the Go binary owns the shared container. |
 | 7 | context-mode integration (ctx MCP + wrap_tool_call offload) | roadmap |
-| 8 | Re-host sandbox in Python (`execute()`→docker exec; 13 specialist tools); delete Go MCP | roadmap |
+| 8 | Re-host sandbox in Python (`execute()`→docker exec; 13 specialist tools); wire policy enforcement here; delete Go MCP | roadmap |
 | 9 | TUI/clients as Agent Protocol consumers (+ SSE streaming) | roadmap |
 
 ## Branch strategy

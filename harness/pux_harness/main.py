@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -198,6 +199,63 @@ async def _run(org: str, task: str, recursion_limit: int) -> None:
         print("  (none — no native fs/shell call was made this run)")
 
 
+def _check_policy(org: str) -> int:
+    """Resolve + report an org's policy WITHOUT running the model — a dry-run of
+    what container-side enforcement (Phase 8) will do. Prints expanded mounts,
+    credential presence (names only — never values; ``.env`` holds live keys),
+    the rendered egress allowlist (DNS resolved now), and tier/image overrides.
+
+    Exits 1 if any required credential is missing — the same gate a real
+    container create would enforce, so this is a usable pre-flight."""
+    from pux_harness import policy
+    from pux_harness.orgs import PROJECT_ROOT
+
+    try:
+        p = policy.load(org, PROJECT_ROOT)
+    except policy.NoPolicy:
+        print(f"{org}: no policy.yaml — today's behavior "
+              "(full egress, default image/tier, no required creds).")
+        return 0
+
+    print(f"## {org} policy")
+    mounts = policy.resolve_mounts(p)
+    if mounts:
+        print("workspace.mounts:")
+        for m in mounts:
+            print(f"  {m.host} -> {m.container} ({m.mode})")
+    else:
+        print("workspace.mounts: (none)")
+
+    present = [n for n in p.credentials.required if os.environ.get(n, "")]
+    missing = [n for n in p.credentials.required if not os.environ.get(n, "")]
+    opt_present = [n for n in p.credentials.optional if os.environ.get(n, "")]
+    print(f"credentials.required: {p.credentials.required or '(none)'}")
+    print(f"  present:  {present or '(none)'}")
+    print(f"  MISSING:  {missing or '(none)'}")
+    print(f"credentials.optional present: {opt_present or '(none)'}")
+
+    if p.egress.allow:
+        try:
+            rules = policy.egress_rules(p)
+            print("egress.allow (DNS-resolved now):")
+            for line in rules.rstrip("\n").split("\n"):
+                print(f"  {line}")
+        except policy.PolicyError as e:
+            print(f"egress.allow: RESOLUTION ERROR — {e}")
+            missing = missing or ["<egress-unresolvable>"]  # fail the gate
+    else:
+        print("egress.allow: (none — full egress)")
+
+    print(f"sandbox.image: {p.sandbox.image or '(default pux-sandbox:latest)'}")
+    print(f"sandbox.tier:  {policy.resolve_tier(p, 'isolated')!r} (effective)")
+
+    if p.browser.cookies_env:
+        state = "set" if os.environ.get(p.browser.cookies_env, "") else "UNSET"
+        print(f"browser.cookies_env: {p.browser.cookies_env} ({state})")
+
+    return 1 if missing else 0
+
+
 def _check_contract() -> int:
     """Run the declarative org contract. Structural tier always runs (no
     server, no tokens); the tool-resolution tier (rule 4) runs only when the
@@ -249,6 +307,9 @@ def main() -> None:
     ap.add_argument("--list", action="store_true", help="list discovered orgs + their agents")
     ap.add_argument("--check-contract", action="store_true",
                     help="validate the declarative org contract; exit 1 on error")
+    ap.add_argument("--check-policy", action="store_true",
+                    help="resolve + report this org's policy (mounts/creds/egress/tier); "
+                         "exit 1 if required creds are missing. No model call.")
     args = ap.parse_args()
 
     if args.check_contract:
@@ -263,6 +324,9 @@ def main() -> None:
 
     if args.org not in discover_orgs():
         raise SystemExit(f"unknown org {args.org!r}; discovered: {discover_orgs()}")
+
+    if args.check_policy:
+        raise SystemExit(_check_policy(args.org))
 
     if args.check:
         client = get_pux_client()

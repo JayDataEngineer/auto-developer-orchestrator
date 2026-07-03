@@ -217,3 +217,31 @@ def test_rule5_policy_valid_sections_ok(fake_tree):
     add_org("o", agents="r",
             policy="egress:\n  allow: []\ncredentials:\n  required: []\n")
     assert check_org("o") == []
+
+
+def test_rule5_policy_non_mapping_section_caught(fake_tree):
+    """Deep schema (Phase 6): a known section that is NOT a mapping passes the
+    shallow section check (the key is known) but fails the real policy engine —
+    ``policy.load`` raises 'section must be a mapping'. Proves the load layer."""
+    add_org, add_agent = fake_tree
+    add_agent("r")
+    add_org("o", agents="r", policy="egress: not-a-mapping\n")
+    vs = check_org("o")
+    assert any(v.rule == "policy-schema" for v in vs), vs
+    # and the shallow section check must NOT fire — the key IS known
+    assert not any(v.rule == "policy-sections" for v in vs)
+
+
+def test_rule5_policy_bad_mount_caught(fake_tree):
+    """Deep schema (Phase 6): a workspace mount with a relative container path
+    parses as valid YAML + known sections, so both the shallow checks pass —
+    only ``resolve_mounts`` (called by the contract's deep check) catches it.
+    Proves the resolve_mounts layer (no network — safe offline)."""
+    add_org, add_agent = fake_tree
+    add_agent("r")
+    add_org("o", agents="r",
+            policy="workspace:\n  mounts:\n    - host: /abs/path\n"
+                   "      container: relative/path\n")
+    vs = check_org("o")
+    assert any(v.rule == "policy-schema" for v in vs), vs
+    assert not any(v.rule == "policy-sections" for v in vs)
