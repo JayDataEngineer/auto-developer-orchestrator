@@ -160,10 +160,10 @@ is proven end-to-end in the Phase 4 verify log (`dispatch --org general` →
 
 ## Branch layout
 
-- **`pi-pivot`** — current. Deepagents pivot in progress: Phases 0–4 shipped
+- **`pi-pivot`** — current. Deepagents pivot in progress: Phases 0–5 shipped
   (harness + bridge, native sandbox, declarative contract, TS harness deleted,
-  Agent Protocol server + client). Phases 5–9 roadmap (port remaining orgs,
-  policy Go→Python, context-mode, delete Go MCP, TUI).
+  Agent Protocol server + client, and all 10 orgs ported to RUN on deepagents).
+  Phases 6–9 roadmap (policy Go→Python, context-mode, delete Go MCP, TUI).
 - **`master`** — pre-pivot MVP. Slim Go MCP server with in-process agent loop.
 - **`v0.2.0-pre-pi-mono`** — tag of master HEAD before the pivot. Safety net.
 

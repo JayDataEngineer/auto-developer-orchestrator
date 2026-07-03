@@ -55,6 +55,55 @@ DEFAULT_TASKS: dict[str, str] = {
         "exported identifier (names starting with an uppercase letter) and report "
         "each with a file:line citation. Report its findings verbatim."
     ),
+    # --- Phase 5: the remaining 7 orgs. Each forces delegation to a named
+    # specialist and drives a NATIVE tool against the org's OWN bundled content
+    # (no external keys/images needed). Answers are verifiable against the FS.
+    "invest": (
+        "How many Python modules are under /sandbox/workspace/orgs/invest/sandbox/? "
+        "Delegate to the `invest-researcher` subagent — do NOT inspect the code "
+        "yourself. Have it run, via the native `execute` tool: "
+        "`find /sandbox/workspace/orgs/invest/sandbox -name '*.py'`. "
+        "Report the count and the module filenames verbatim."
+    ),
+    "game-studio": (
+        "What playbook markdown docs ship under /sandbox/workspace/orgs/game-studio/skills/? "
+        "Delegate to the `game-studio-docs-writer` subagent — do NOT look yourself. "
+        "Have it use the native `glob` tool for "
+        "`/sandbox/workspace/orgs/game-studio/skills/*.md` and list each filename. "
+        "Report verbatim."
+    ),
+    "deep-research-engine": (
+        "How many Python modules are under /sandbox/workspace/orgs/deep-research-engine/sandbox/? "
+        "Delegate to the `dre-auditor` subagent — do NOT inspect yourself. Have it "
+        "run, via the native `execute` tool: "
+        "`find /sandbox/workspace/orgs/deep-research-engine/sandbox -name '*.py'`. "
+        "Report the count and module filenames verbatim."
+    ),
+    "social-media-pipeline": (
+        "Read the campaign-angles file at "
+        "/sandbox/workspace/orgs/social-media-pipeline/data/options.json. Delegate to "
+        "the `smp-writer` subagent — do NOT read it yourself. Have it use the native "
+        "`read_file` tool, then report how many angles there are and the id + angle "
+        "of each. Report verbatim."
+    ),
+    "twitter-agent": (
+        "What helper docs ship under /sandbox/workspace/orgs/twitter-agent/skills/? "
+        "Delegate to the `twitter-drafter` subagent — do NOT look yourself. Have it "
+        "use the native `glob` tool for `/sandbox/workspace/orgs/twitter-agent/skills/**`. "
+        "Report the filenames found."
+    ),
+    "telegram-agent": (
+        "Read the campaign file at /sandbox/workspace/orgs/telegram-agent/data/campaign.json. "
+        "Delegate to the `telegram-drafter` subagent — do NOT read it yourself. Have it "
+        "use the native `read_file` tool, then report how many messages the campaign "
+        "contains. Report the count verbatim."
+    ),
+    "video-production": (
+        "What ships under /sandbox/workspace/orgs/video-production/skills/? Delegate to "
+        "the `video-scriptwriter` subagent — do NOT look yourself. Have it use the "
+        "native `execute` tool: `ls -1 /sandbox/workspace/orgs/video-production/skills`. "
+        "Report the entries verbatim."
+    ),
 }
 
 

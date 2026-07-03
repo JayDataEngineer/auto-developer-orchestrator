@@ -529,12 +529,13 @@ Docker container and exercises every tool.
 
 ## Pivot roadmap (pi-pivot branch)
 
-Phases 0–4 shipped (2026-07-03): harness + bridge, native sandbox,
-declarative contract, TS harness deleted, Agent Protocol server + client.
+Phases 0–5 shipped (2026-07-03): harness + bridge, native sandbox,
+declarative contract, TS harness deleted, Agent Protocol server + client,
+and all 10 orgs ported to RUN on deepagents (Phase 5).
 
 | Phase | What | Status |
 |-------|------|--------|
-| 5 | Port remaining 7 orgs to RUN on deepagents (delegation-forcing tasks) | roadmap |
+| 5 | Port remaining 7 orgs to RUN on deepagents (delegation-forcing tasks) | **SHIPPED 2026-07-03** — all 10 orgs run E2E. Each `pux direct --org <name>` forcing task in `main.py:DEFAULT_TASKS` makes the CTO delegate via `task(subagent_type=<specialist>)` and drive a native fs/shell tool (`execute`/`read_file`/`glob`) against the org's own bundled content; every run returned the correct ground-truth answer (invest=17 .py via invest-researcher, game-studio=6 skills via docs-writer, dre=7 .py via dre-auditor, smp=3 angles via smp-writer, twitter=1 skill via twitter-drafter, telegram=4 msgs via telegram-drafter, video=3 entries via video-scriptwriter). New structural test `test_every_org_has_a_forcing_task`; pytest 47/47. |
 | 6 | Policy engine Go→Python (egress/creds/image+tier/browser) | roadmap |
 | 7 | context-mode integration (ctx MCP + wrap_tool_call offload) | roadmap |
 | 8 | Re-host sandbox in Python (`execute()`→docker exec; 13 specialist tools); delete Go MCP | roadmap |

@@ -59,6 +59,17 @@ def test_no_orphan_agents():
     assert orphan_agents() == [], f"orphan agents: {orphan_agents()}"
 
 
+def test_every_org_has_a_forcing_task():
+    """The in-process runner (``pux direct --org <name>``) drives a delegation-
+    forcing task per org. Every discovered org must have a DEFAULT_TASKS entry —
+    a missing entry would make ``--org <name>`` fail with a KeyError instead of
+    running. (Phase 5: all 10 orgs ported to RUN on deepagents.)"""
+    from pux_harness.main import DEFAULT_TASKS
+
+    missing = set(discover_orgs()) - set(DEFAULT_TASKS)
+    assert not missing, f"orgs without a DEFAULT_TASKS forcing task: {missing}"
+
+
 def test_harness_has_no_hardcoded_manifest():
     """Rule 6: the org->agent map lives in frontmatter, not harness code."""
     assert check_harness() == []
