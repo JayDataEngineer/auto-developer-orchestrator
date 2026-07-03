@@ -1,7 +1,6 @@
 ---
 name: smp-writer
 description: Social Media Pipeline content writer — adapts a brief for a target platform (twitter | telegram | discord), reads data/research.json if present, writes data/options.json with 3-8 distinct, platform-native options.
-tools: mcp:pux-sandbox/bash, mcp:pux-sandbox/file_read, mcp:pux-sandbox/file_write, mcp:pux-sandbox/file_glob, mcp:pux-sandbox/file_grep
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

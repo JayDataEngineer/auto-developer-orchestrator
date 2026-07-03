@@ -1,7 +1,6 @@
 ---
 name: twitter-drafter
 description: Twitter Agent drafting specialist — reads recent timeline context (via twitter_helpers.py), drafts a tweet or thread for a requested content slot. Authentic voice, no engagement bait. Does NOT post — the CTO posts.
-tools: mcp:pux-sandbox/bash, mcp:pux-sandbox/file_read, mcp:pux-sandbox/file_write, mcp:pux-sandbox/file_glob, mcp:pux-sandbox/file_grep
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

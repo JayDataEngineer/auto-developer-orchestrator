@@ -66,7 +66,7 @@ in the task string so it picks the right length, format, and tone.
 ## Toolkit
 
 All sandbox tools are available under the `pux_sandbox_*` prefix
-(`pux_sandbox_bash`, `pux_sandbox_file_read`, etc.). The workspace lives
+(`execute`, `read_file`, etc.). The workspace lives
 at `/sandbox/workspace/` inside the sandbox container.
 
 Use `subagent(agent, task)` to delegate to specialists. Available

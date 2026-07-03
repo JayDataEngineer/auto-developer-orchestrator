@@ -1,7 +1,7 @@
 ---
 name: video-renderer
 description: Video Production renderer — drives Manim + ffmpeg + Kokoro end-to-end. Produces exports/final.mp4 with synced narration, archives to backups/.
-tools: mcp:pux-sandbox/bash, mcp:pux-sandbox/file_read, mcp:pux-sandbox/file_write, mcp:pux-sandbox/file_edit, mcp:pux-sandbox/file_glob, mcp:pux-sandbox/file_grep, mcp:pux-sandbox/python
+tools: mcp:pux-sandbox/python
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

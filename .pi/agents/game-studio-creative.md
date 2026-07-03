@@ -1,7 +1,7 @@
 ---
 name: game-studio-creative
 description: Tech Noir creative director — translates an operator brief into a YAML asset manifest + shot list. Read-only on workspace. Produces art/manifest.yaml.
-tools: mcp:pux-sandbox/bash, mcp:pux-sandbox/file_read, mcp:pux-sandbox/file_glob, mcp:pux-sandbox/file_grep, mcp:pux-sandbox/python
+tools: mcp:pux-sandbox/python
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

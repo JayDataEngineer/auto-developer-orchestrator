@@ -100,7 +100,7 @@ prefer animated shapes over MathTex.
 ## Toolkit
 
 All sandbox tools available under the `pux_sandbox_*` prefix
-(`pux_sandbox_bash`, `pux_sandbox_file_read`, `pux_sandbox_python`, etc.).
+(`execute`, `read_file`, `pux_sandbox_python`, etc.).
 The workspace lives at `/sandbox/workspace/`.
 
 Use `subagent(agent, task)` to delegate. Video-production specialists:

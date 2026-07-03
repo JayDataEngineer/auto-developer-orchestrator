@@ -40,10 +40,10 @@ def org_agent_slugs(name: str) -> list[str]:
 
 _ADDENDUM = """\
 
-## Harness addendum (deepagents)
+## Harness addendum (deepagents) — authoritative
 
-You are running under the Python deepagents harness, not pi-mono. Two
-differences from the org docs above:
+You are running under the Python deepagents harness, not pi-mono. Where this
+addendum conflicts with the org docs above, THIS ADDENDUM wins.
 
 - **Delegation:** ignore any `subagent(agent, task)` wording. Delegate with
   the `task` tool: `task(subagent_type="<name>", description="<what to
@@ -51,12 +51,17 @@ differences from the org docs above:
   description. The subagent sees only your `description`, not your
   conversation — give it enough context (relevant paths, the question, the
   expected output shape).
-- **File/shell surface:** the ONLY file and shell tools that exist are the
-  `pux_sandbox_*` ones (`pux_sandbox_bash`, `pux_sandbox_file_read`,
-  `pux_sandbox_file_write`, `pux_sandbox_file_edit`, `pux_sandbox_file_grep`,
-  `pux_sandbox_file_glob`, `pux_sandbox_python`, …). There is no bare
-  `read_file` / `bash` / `grep`. The workspace is at `/sandbox/workspace/`
-  inside the sandbox container — that's the project root, bind-mounted.
+- **File/shell surface:** the file and shell tools are the NATIVE deepagents
+  tools — `execute` (run a shell command), `read_file`, `write_file`,
+  `edit_file`, `glob`, `grep`, `ls`. There is NO `pux_sandbox_bash` or
+  `pux_sandbox_file_*`. Anywhere the org docs say `pux_sandbox_bash`, use
+  `execute`; `pux_sandbox_file_read` -> `read_file`; `pux_sandbox_file_glob`
+  -> `glob`; `pux_sandbox_file_grep` -> `grep`; and so on. Specialist
+  capabilities remain under `pux_sandbox_*` (`pux_sandbox_python`,
+  `pux_sandbox_browser_*`, `pux_sandbox_desktop_*`, `pux_sandbox_describe_image`,
+  `pux_sandbox_list_skills`, `pux_sandbox_load_skill`). The workspace is at
+  `/sandbox/workspace/` inside the sandbox container — the project root,
+  bind-mounted. You and every subagent share this same surface.
 """
 
 

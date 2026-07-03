@@ -68,10 +68,10 @@ Plus project-level agents under `.pi/agents/`.
 ## Toolkit
 
 All sandbox tools are available under the `pux_sandbox_*` prefix
-(`pux_sandbox_bash`, `pux_sandbox_file_read`, etc.). The workspace lives
+(`execute`, `read_file`, etc.). The workspace lives
 at `/sandbox/workspace/` inside the sandbox container.
 
-Common helper calls (run via `pux_sandbox_bash`):
+Common helper calls (run via `execute`):
 
 ```bash
 python3 /sandbox/telegram_helpers.py list-chats --limit 20

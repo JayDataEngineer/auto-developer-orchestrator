@@ -120,8 +120,8 @@ stale memory.
 ## Toolkit
 
 All sandbox tools are available under the `pux_sandbox_*` prefix
-(`pux_sandbox_bash`, `pux_sandbox_file_read`, `pux_sandbox_file_write`,
-`pux_sandbox_file_grep`, `pux_sandbox_file_glob`, `pux_sandbox_python`,
+(`execute`, `read_file`, `write_file`,
+`grep`, `glob`, `pux_sandbox_python`,
 `pux_sandbox_describe_image`, `pux_sandbox_browser_*`, `pux_sandbox_desktop_*`).
 The workspace lives at `/sandbox/workspace/` inside the sandbox container.
 

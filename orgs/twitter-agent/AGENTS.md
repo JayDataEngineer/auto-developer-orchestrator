@@ -91,7 +91,7 @@ operator — don't claim success.
 ## Toolkit
 
 All sandbox tools are available under the `pux_sandbox_*` prefix
-(`pux_sandbox_bash`, `pux_sandbox_file_read`, `pux_sandbox_browser_*`,
+(`execute`, `read_file`, `pux_sandbox_browser_*`,
 etc.). The workspace lives at `/sandbox/workspace/` inside the sandbox
 container.
 

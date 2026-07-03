@@ -1,7 +1,6 @@
 ---
 name: telegram-drafter
 description: Telegram Agent drafting specialist — reads recent chat context (via telegram_helpers.py), drafts a reply or proactive post for a target chat. Tone-sensitive. Does NOT send — the CTO sends.
-tools: mcp:pux-sandbox/bash, mcp:pux-sandbox/file_read, mcp:pux-sandbox/file_write, mcp:pux-sandbox/file_glob, mcp:pux-sandbox/file_grep
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

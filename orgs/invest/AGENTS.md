@@ -79,7 +79,7 @@ Pass mode to specialists via the delegation task string.
 ## Toolkit
 
 All sandbox tools are available under the `pux_sandbox_*` prefix
-(`pux_sandbox_bash`, `pux_sandbox_file_read`, etc.). The workspace lives at
+(`execute`, `read_file`, etc.). The workspace lives at
 `/sandbox/workspace/` inside the sandbox container.
 
 Use `subagent(agent, task)` to delegate to specialists. Available

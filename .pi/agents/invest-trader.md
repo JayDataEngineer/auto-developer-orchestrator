@@ -1,7 +1,7 @@
 ---
 name: invest-trader
 description: Investment Division execution specialist — Alpaca paper trading + prediction journaling. Reads data/signals.json, executes approved trades, journals predictions BEFORE fills.
-tools: mcp:pux-sandbox/bash, mcp:pux-sandbox/file_read, mcp:pux-sandbox/file_write, mcp:pux-sandbox/python
+tools: mcp:pux-sandbox/python
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

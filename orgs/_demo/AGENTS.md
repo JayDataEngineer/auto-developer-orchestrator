@@ -11,8 +11,8 @@ the rest to specialists via the `subagent` tool.
 
 ## Toolkit
 
-All sandbox tools are available to you directly under the `pux_sandbox_*`
-prefix (e.g. `pux_sandbox_bash`, `pux_sandbox_file_read`). The workspace
+The file/shell surface is the native deepagents tools (`execute`, `read_file`,
+`glob`, `grep`, ...); specialist tools stay under `pux_sandbox_*`. The workspace
 lives at `/sandbox/workspace/` inside the sandbox container.
 
 Use `subagent(agent, task)` to delegate. Available agents live under

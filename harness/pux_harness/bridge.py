@@ -6,8 +6,12 @@ transport.go:14-20). That is NOT the standard MCP "streamable HTTP"
 transport, so langchain-mcp-adapters' streamable_http client can reject it.
 This module talks the proven wire protocol directly — initialize → capture
 Mcp-Session-Id → tools/list → tools/call — and exposes each tool as a
-LangChain StructuredTool, name-prefixed `pux_sandbox_` so the org AGENTS.md
-overlays port verbatim (they already say "use pux_sandbox_bash", etc.).
+LangChain StructuredTool, name-prefixed `pux_sandbox_`. Phase 3 narrowed the
+model-visible surface to the SPECIALIST tools (browser/desktop/vision/skills/
+python); the fs/shell surface is deepagents' native tools (ls/read_file/
+write_file/edit_file/glob/grep/execute) backed by ``PuxSandboxBackend``, which
+reaches this server's ``bash`` internally — the Go ``bash``/``file_*`` tools are
+no longer bound to the model.
 
 The curl probe (2026-07-03) confirmed this exact request/response shape and
 that the server returns Mcp-Session-Id on initialize.
@@ -168,26 +172,48 @@ def _make_tool(client: PuxMCPClient, spec: dict) -> StructuredTool:
     )
 
 
-def get_pux_tools(url: str = PUX_MCP_URL, only: set[str] | None = None) -> list[StructuredTool]:
-    """Connect + initialize, return LangChain tools backed by the Go sandbox.
+# Phase 3: the model-visible fs/shell surface moved to deepagents native tools
+# (ls/read_file/write_file/edit_file/glob/grep/execute) via PuxSandboxBackend.
+# This bridge exposes ONLY specialists — the Go server's bash + file_* tools
+# still exist for the backend's internal use but are not bound to the model.
+_SPECIALIST_TOOLS = frozenset({
+    "browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_evaluate",
+    "desktop_screenshot", "desktop_click", "desktop_type", "desktop_key",
+    "describe_image", "list_skills", "load_skill", "python",
+})
 
-    `only` filters by the UN-prefixed MCP tool name, e.g. {"bash", "file_read"}.
-    """
+
+def get_pux_client(url: str = PUX_MCP_URL) -> PuxMCPClient:
+    """Connect + initialize once. Shared by the backend and the tool surface so
+    a subagent tree rides one MCP session."""
     client = PuxMCPClient(url)
     client.initialize()
+    return client
+
+
+def get_pux_tools(
+    url: str = PUX_MCP_URL,
+    only: set[str] | frozenset[str] | None = _SPECIALIST_TOOLS,
+    client: PuxMCPClient | None = None,
+) -> list[StructuredTool]:
+    """Return LangChain StructuredTools backed by the Go sandbox.
+
+    ``only`` filters by the UN-prefixed MCP tool name; it defaults to the
+    specialist set (fs/shell is native via ``PuxSandboxBackend``). Pass
+    ``only=None`` for all tools, or a custom set. ``client`` lets the backend +
+    tool surface share one initialized session.
+    """
+    client = client or get_pux_client(url)
     specs = client.list_tools()
     return [
         _make_tool(client, s)
         for s in specs
-        if not only or s["name"] in only
+        if only is None or s["name"] in only
     ]
 
 
 if __name__ == "__main__":
     print(f"connecting to {PUX_MCP_URL} ...")
     tools = get_pux_tools()
-    print(f"{len(tools)} tools: {[t.name for t in tools]}")
-    bash = next((t for t in tools if t.name == PUX_PREFIX + "bash"), None)
-    if bash:
-        print("--- smoke: bash `ls /sandbox/workspace | head` ---")
-        print(bash.invoke({"command": "ls /sandbox/workspace 2>/dev/null | head -20"}))
+    print(f"{len(tools)} specialist tools: "
+          f"{sorted(t.name[len(PUX_PREFIX):] for t in tools)}")

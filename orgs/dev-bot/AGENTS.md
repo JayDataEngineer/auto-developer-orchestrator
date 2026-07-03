@@ -64,11 +64,11 @@ A change is not done until:
 
 ## Toolkit
 
-All sandbox tools are available under the `pux_sandbox_*` prefix
-(`pux_sandbox_bash`, `pux_sandbox_file_read`, `pux_sandbox_file_write`,
-`pux_sandbox_file_edit`, `pux_sandbox_file_grep`, `pux_sandbox_file_glob`,
-`pux_sandbox_python`). The workspace lives at `/sandbox/workspace/` inside the
-sandbox container — that's the project root, bind-mounted.
+The file/shell surface is the native deepagents tools (`execute`, `read_file`,
+`write_file`, `edit_file`, `grep`, `glob`); specialist tools stay under
+`pux_sandbox_*` (`pux_sandbox_python`, `pux_sandbox_browser_*`, ...). The
+workspace lives at `/sandbox/workspace/` inside the sandbox container - that's
+the project root, bind-mounted.
 
 Use `subagent(agent, task)` to delegate. The subagent sees only the task
 string you pass, not your conversation history — give it enough context to

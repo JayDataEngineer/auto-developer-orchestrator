@@ -1,7 +1,7 @@
 ---
 name: video-scriptwriter
 description: Video Production scriptwriter — writes the narration script + segment manifest from a brief. Produces src/segments.json + src/production_brief.md.
-tools: mcp:pux-sandbox/bash, mcp:pux-sandbox/file_read, mcp:pux-sandbox/file_write, mcp:pux-sandbox/file_glob, mcp:pux-sandbox/file_grep, mcp:pux-sandbox/python
+tools: mcp:pux-sandbox/python
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false
