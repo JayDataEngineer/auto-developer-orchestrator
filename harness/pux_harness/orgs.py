@@ -98,8 +98,8 @@ def build_system_prompt(org: str) -> str:
     return f"{load_root_prompt()}\n\n{load_org_prompt(org)}{_ADDENDUM}"
 
 
-def _resolve_tools(spec: str, bridge: dict[str, BaseTool]) -> list[BaseTool]:
-    """Map a pi-mono `tools` frontmatter line to bridge StructuredTools.
+def _resolve_tools(spec: str, tool_map: dict[str, BaseTool]) -> list[BaseTool]:
+    """Map a pi-mono `tools` frontmatter line to specialist StructuredTools.
 
     Each entry is `mcp:<server>/<tool>`; we take the part after the last `/`
     and look up `pux_sandbox_<tool>`. Unknown tools fail loud (no silent
@@ -112,12 +112,12 @@ def _resolve_tools(spec: str, bridge: dict[str, BaseTool]) -> list[BaseTool]:
             continue
         tool_name = raw.rsplit("/", 1)[-1]
         key = "pux_sandbox_" + tool_name
-        if key not in bridge:
+        if key not in tool_map:
             raise KeyError(
                 f"agent frontmatter references unknown tool {raw!r} "
-                f"(resolved {key!r}, not in bridge tools)"
+                f"(resolved {key!r}, not in the specialist tool map)"
             )
-        resolved.append(bridge[key])
+        resolved.append(tool_map[key])
     return resolved
 
 
@@ -125,8 +125,8 @@ def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
     """Build deepagents SubAgent dicts for `org`'s specialists.
 
     Each `.pi/agents/<name>.md` -> {name, description, system_prompt, tools?}.
-    `tools` comes from the frontmatter whitelist (mapped to bridge tools);
-    omitted means inherit the main agent's tools. `model` is omitted so
+    `tools` comes from the frontmatter whitelist (mapped to the specialist tool
+    map); omitted means inherit the main agent's tools. `model` is omitted so
     specialists inherit the main agent's model (mimo), matching pi-mono.
 
     No ``middleware`` key: deepagents' ``SubAgentMiddleware`` does not forward a
@@ -137,7 +137,7 @@ def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
     """
     if org not in discover_orgs():
         raise KeyError(f"unknown org {org!r}; discovered orgs: {discover_orgs()}")
-    bridge: dict[str, BaseTool] = {t.name: t for t in all_tools}
+    tool_map: dict[str, BaseTool] = {t.name: t for t in all_tools}
     subs: list[dict[str, Any]] = []
     for slug in org_agent_slugs(org):
         fm, body = _split_frontmatter(_read(f".pi/agents/{slug}.md"))
@@ -147,6 +147,6 @@ def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
             "system_prompt": body,
         }
         if fm.get("tools"):
-            sub["tools"] = _resolve_tools(fm["tools"], bridge)
+            sub["tools"] = _resolve_tools(fm["tools"], tool_map)
         subs.append(sub)
     return subs

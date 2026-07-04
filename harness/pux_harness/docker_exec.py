@@ -23,7 +23,7 @@ live container (8a probe): ``exec_run(['bash','-c',...], tty=False)`` returns
 ``ExecResult(exit_code=int, output=bytes)``.
 
 Timeout: ``docker.from_env(timeout=300)`` sets the SDK's HTTP read timeout —
-the same 300s ceiling the bridge's ``_TIMEOUT`` enforced. Per-command
+a 300s ceiling carried over from the Go bridge that preceded this path. Per-command
 deadlines are enforced via a thread-based ``.result(timeout=…)`` wrapper
 (Phase 8d) — ``exec(cmd, timeout=N)`` raises ``ExecTimeout`` after ``N``
 seconds so callers (e.g. ``describe_image``'s 120s) can map it to a clean
@@ -55,7 +55,7 @@ _EXEC_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_LABEL = "openshell.project-path"
-_DEFAULT_TIMEOUT = 300  # matches bridge.py _TIMEOUT
+_DEFAULT_TIMEOUT = 300  # 5min socket ceiling (carried over from the Go bridge)
 
 
 def _resolve_project() -> str:

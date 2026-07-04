@@ -2,9 +2,9 @@
 # bootstrap-vision.sh — download Qwen3.5-2B-ONNX-OPT (fp16 vision) for pux.
 #
 # Downloads to <project>/.pux/models/Qwen3.5-2B-ONNX-OPT/ so the model is
-# bind-mounted into the sandbox at /sandbox/workspace/.pux/models/... when
-# pux-mcpserver boots against that project. The describe_image tool looks
-# for the model there.
+# bind-mounted into the sandbox at /sandbox/workspace/.pux/models/... when the
+# pux sandbox boots for that project. The describe_image tool looks for the
+# model there.
 #
 # Applies the known patch_size bug fix: deletes the `"patch_size": 16` line
 # from genai_config.json. Older onnxruntime-genai versions (≤1.4.3) trip a
@@ -163,4 +163,4 @@ if [ "$SIZE_BIN" -lt 104857600 ]; then
 fi
 
 log "ready: $MODEL_DIR"
-log "next: rebuild sandbox (task build) and boot pux — describe_image tool will pick up the model automatically."
+log "next: boot pux (pux sandbox start) — describe_image picks up the bind-mounted model automatically (no image rebuild needed)."

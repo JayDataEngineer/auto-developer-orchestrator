@@ -1,37 +1,61 @@
-# pux-harness — deepagents-based Pux (Phase 0 pivot spike)
+# pux-harness — deepagents Pux agent + sandbox layer
 
-Replaces the pi-mono TS harness with a Python **deepagents** harness. Phase 0
-proves: deepagents drives the existing pux sandbox (Go MCP server at
-`127.0.0.1:9987`) via a direct JSON-RPC bridge, and does CTO→researcher
-subagent delegation — on the `general` org, with real cost/output numbers.
-
-See `memory/project_deepagents_pivot.md` for the full migration plan.
+The Python harness is the whole agent + sandbox layer: per-org
+[deepagents](https://docs.langchain.com/oss/python/deepagents) graphs served
+over the LangChain Agent Protocol, driving a Docker sandbox directly over the
+SDK (no Go server, no JSON-RPC hop). The Go MCP tree + its bridge client were
+deleted in Phase 8i.
 
 ## Layout
 
 ```
 pux_harness/
-  bridge.py   # Go MCP server → LangChain StructuredTools (prefixed pux_sandbox_)
-  model.py    # mimo-v2.5 via OpenCode Zen Go (OpenAI-compatible)
-  orgs.py     # org AGENTS.md + .pi/agents/*.md loaders (port verbatim)
-  main.py     # create_deep_agent wiring + run
+  graph.py            # build_graph(org) -> compiled deepagents graph
+  server.py           # Agent Protocol server (FastAPI, :9988)
+  cli.py              # `pux` client (httpx -> server)
+  main.py             # in-process runner (`pux direct`) + sandbox lifecycle
+  sandbox.py          # PuxSandboxBackend(BaseSandbox) -> native fs tools
+  docker_exec.py      # DockerExecClient: direct `docker exec`
+  container.py        # SandboxContainer: create/start/stop/remove + policy enforce
+  native_tools.py     # 13 specialist StructuredTools (python/skills/vision/browser/desktop)
+  context_offload.py  # ContextOffloadMiddleware + ctx_recall/ctx_search
+  ctx_store.py        # host-side stash for offloaded tool output
+  model.py            # provider/model factory (PUX_MODEL)
+  orgs.py             # system-prompt builder + subagent loader
+  policy.py           # declarative policy resolver
+  contract.py         # declarative org-contract enforcer (7 rules)
+tests/
+  test_org_contract.py    test_server.py    test_policy.py
+  test_container.py       test_context_offload.py
 ```
 
 ## Run
 
 ```bash
-# 0. Go MCP server must be live at 127.0.0.1:9987 (task start / task run)
 # 1. install
 cd harness && uv sync
-# 2. bridge smoke (no model tokens)
+# 2. native-surface smoke (no model tokens, no Go server needed)
 uv run python -m pux_harness.main --check
-# 3. full run (general's arch-summary task via researcher subagent)
+# 3. validate all 10 orgs against the declarative contract (offline)
+uv run python -m pux_harness.main --check-contract
+# 4. full in-process run (general's forcing task via researcher subagent)
 set -a && . ../.env && set +a && uv run python -m pux_harness.main
+#    (mimo exhausts on rate limits; use PUX_MODEL=glm-5.2 if so)
 ```
+
+The Agent Protocol server (the canonical executor) runs from the repo root via
+`pux serve` (FastAPI on `http://127.0.0.1:9988`); the `pux` client drives it.
 
 ## Env
 
-- `OPENCODE_API_KEY` — required (OpenCode Zen Go).
-- `PUX_MODEL` — default `mimo-v2.5`. mimo is a reasoning model; if it breaks the
-  agent loop, set `PUX_MODEL=glm-5.2` (clean, non-reasoning, same endpoint).
-- `PUX_MCP_URL` — default `http://127.0.0.1:9987/`.
+- `OPENCODE_API_KEY` — required (OpenCode Zen Go, OpenAI-compatible).
+- `PUX_MODEL` — default `mimo-v2.5`. mimo is a reasoning model that exhausts
+  on rate limits; `PUX_MODEL=glm-5.2` is the clean non-reasoning alternative.
+- `PUX_API_HOST` / `PUX_API_PORT` / `PUX_API_DB` / `PUX_API_LOG` — server bind
+  + SQLite path + log level (defaults `127.0.0.1:9988`,
+  `<project>/.pux/agent-protocol.sqlite`, `info`).
+- `PUX_ORG` — when set, the sandbox container is created with that org's
+  policy applied (egress ACLs, creds, image/tier, cookies).
+
+See the repo `CLAUDE.md` for the full architecture, tool-surface table, and
+pivot roadmap.

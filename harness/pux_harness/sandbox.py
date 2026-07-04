@@ -22,10 +22,11 @@ text **and** binary uniformly. ``upload_files``/``download_files`` are invoked
 by the skills/summarization/memory middleware (not just abstract baggage), so
 they must be real.
 
-The Go MCP bridge is still wired in ``graph.py`` for the 13 *specialist* tools
-(``python``/``browser_*``/``desktop_*``/``describe_image``/skills) — those move
-to direct docker exec in Phase 8b–8f. Until then the backend (native fs) and the
-bridge (specialists) are two paths into the same container.
+The 13 specialist tools (``python``/``browser_*``/``desktop_*``/
+``describe_image``/skills) are also native Python now (``native_tools.py``,
+Phases 8b–8f) and run through this same ``DockerExecClient``. There is no Go
+bridge — the backend (fs/shell) and the specialists are two Python surfaces
+over one ``docker exec`` path into the container.
 
 PROVEN 2026-07-03 (8a): against the live ``orchestrator-sandbox-mcp-default``
 container, ``DockerExecClient.exec('echo pux-ok')`` → ``('pux-ok\\n', 0)``;

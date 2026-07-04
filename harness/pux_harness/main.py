@@ -1,17 +1,17 @@
-"""Phase 3 harness: run any ported org on deepagents over the Go-MCP bridge,
-with a NATIVE fs/shell surface backed by ``PuxSandboxBackend``.
+"""In-process deepagents runner — drive any org against the harness directly.
 
-  uv run python -m pux_harness.main --list                       # ported orgs + agents
-  uv run python -m pux_harness.main --check                      # bridge + backend smoke (no tokens)
+  uv run python -m pux_harness.main --list                       # discovered orgs + agents
+  uv run python -m pux_harness.main --check                      # docker-exec + native specialist smoke (no tokens)
   uv run python -m pux_harness.main --org general                # default forcing task
   uv run python -m pux_harness.main --org dev-bot --task "..."   # custom task
 
 Proves per-org: deepagents drives the pux sandbox through ``PuxSandboxBackend``
-(native ``ls/read_file/write_file/edit_file/glob/grep/execute``), the CTO
-delegates to its specialist via ``task(subagent_type=...)``, and specialists
-fall back to those same native tools. Specialist capabilities (browser/desktop/
-vision/skills/python) remain ``pux_sandbox_*`` MCP tools. Prints a message
-trace + token usage so cost/output is comparable.
+(native ``ls/read_file/write_file/edit_file/glob/grep/execute`` via docker
+exec), the CTO delegates to its specialist via ``task(subagent_type=...)``, and
+specialists fall back to those same native tools. The 13 specialist capabilities
+(browser/desktop/vision/skills/python) are native ``pux_sandbox_*`` Python tools
+too — there is no Go bridge. Prints a message trace + token usage so
+cost/output is comparable.
 """
 from __future__ import annotations
 
@@ -22,10 +22,10 @@ import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
 
-from pux_harness.bridge import get_pux_client, get_pux_tools
 from pux_harness.contract import check_all, check_harness, has_errors
 from pux_harness.docker_exec import get_exec_client
 from pux_harness.graph import build_graph, shared_backend
+from pux_harness.native_tools import build_native_specialists
 from pux_harness.orgs import (
     discover_orgs,
     org_agent_slugs,
@@ -37,11 +37,11 @@ from pux_harness.sandbox import PuxSandboxBackend
 # Tasks name the NATIVE `execute` tool (Phase 3); `pux_sandbox_bash` is gone.
 DEFAULT_TASKS: dict[str, str] = {
     "general": (
-        "How many non-test Go source files are under backend/internal/mcpserver/, "
+        "How many Python modules ship under /sandbox/workspace/harness/pux_harness/, "
         "and what are their names? Delegate to the `researcher` subagent — do NOT "
         "inspect the codebase yourself. Have it run, via the native `execute` tool: "
-        "`find /sandbox/workspace/backend/internal/mcpserver -name '*.go' -not -name "
-        "'*_test.go'`. Report the researcher's findings verbatim."
+        "`find /sandbox/workspace/harness/pux_harness -name '*.py'`. "
+        "Report the researcher's findings verbatim."
     ),
     "_demo": (
         "List the top-level entries of the project root inside the sandbox. Delegate "
@@ -309,20 +309,11 @@ def _print_status(name: str, project: str, org: str) -> None:
 
 
 def _check_contract() -> int:
-    """Run the declarative org contract. Structural tier always runs (no
-    server, no tokens); the tool-resolution tier (rule 4) runs only when the
-    Go MCP bridge is reachable — announced explicitly, not a silent skip."""
-    bridge_tools: set[str] | None = None
-    try:
-        tools = get_pux_tools()
-        bridge_tools = {t.name for t in tools}
-        print(f"bridge: live ({len(bridge_tools)} pux_sandbox_* specialists) "
-              f"-> tool-resolution ON")
-    except Exception as e:  # noqa: BLE001 - announce + degrade one tier, loudly
-        print(f"bridge: not reachable ({type(e).__name__}: {e}); "
-              f"tool-resolution skipped (structural only)")
-
-    per_org = check_all(bridge_tools=bridge_tools)
+    """Run the declarative org contract — fully offline (no server, no tokens).
+    Rule 4 (tool-resolution) resolves against the static native surface (fs
+    tools ∪ the specialist registry), so it runs identically in pytest and
+    here with nothing live."""
+    per_org = check_all()
     for org in sorted(per_org):
         vs = per_org[org]
         print(f"\n## {org}")
@@ -351,11 +342,11 @@ def _check_contract() -> int:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="deepagents Pux harness (Phase 3)")
+    ap = argparse.ArgumentParser(description="deepagents Pux harness")
     ap.add_argument("--org", default="general", help="org to run (default: general)")
     ap.add_argument("--task", help="task string (default: per-org forcing task)")
     ap.add_argument("--recursion-limit", type=int, default=60)
-    ap.add_argument("--check", action="store_true", help="bridge + backend smoke, no model call")
+    ap.add_argument("--check", action="store_true", help="docker-exec backend + native specialist smoke, no model call")
     ap.add_argument("--list", action="store_true", help="list discovered orgs + their agents")
     ap.add_argument("--check-contract", action="store_true",
                     help="validate the declarative org contract; exit 1 on error")
@@ -387,10 +378,10 @@ def main() -> None:
         raise SystemExit(_check_policy(args.org))
 
     if args.check:
-        backend = PuxSandboxBackend(get_exec_client())
-        client = get_pux_client()  # still needed to list specialist tools (8b–8f ports them)
-        tools = get_pux_tools(client=client)
-        print(f"backend(docker exec)+bridge OK: {len(tools)} specialist pux_sandbox_* tools + "
+        exec_client = get_exec_client()
+        backend = PuxSandboxBackend(exec_client)
+        specialists = build_native_specialists(exec_client)
+        print(f"backend(docker exec) OK: {len(specialists)} native pux_sandbox_* specialists + "
               f"native fs (ls/read_file/write_file/edit_file/glob/grep/execute)")
         ex = backend.execute("echo pux-ok")
         print(f"  backend.execute [docker exec]: exit={ex.exit_code} output={ex.output!r}")

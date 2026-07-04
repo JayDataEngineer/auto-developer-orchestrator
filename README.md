@@ -6,7 +6,7 @@ agent layer served over the [LangChain Agent
 Protocol](https://langchain-ai.github.io/agent-protocol/), backed by a Docker
 sandbox that exposes bash / file / browser / desktop / vision tools.
 
-Three pieces, one each:
+Two pieces, one each:
 
 - **`harness/`** (Python, uv) — the agent layer. Builds per-org deepagents
   graphs (a CTO + specialist subagents), serves them over the Agent Protocol
@@ -15,12 +15,8 @@ Three pieces, one each:
   through a `PuxSandboxBackend`; the 13 specialist tools (`browser_*`,
   `desktop_*`, `describe_image`, `python`, skills) are native Python too
   (Phase 8a–8f). `container.py` owns the Docker sandbox lifecycle +
-  declarative policy enforcement (Phase 8g) — the harness boots its own
-  container; the Go binary is no longer required.
-- **`backend/mcpserver`** (Go binary) — **vestigial.** Historically booted the
-  Docker sandbox + exposed the tools over MCP at `http://127.0.0.1:9987`; as
-  of Phase 8a–8g every one of those responsibilities lives in the harness.
-  Kept only as a reference impl until Phase 8i deletes it.
+  declarative policy enforcement (Phase 8g). The harness boots its own
+  container directly over the Docker SDK — there is no Go server.
 - **`bin/pux`** (bash launcher) — routes `pux serve` / `pux direct` /
   `pux sandbox` / `pux <client-cmd>` into the harness.
 
@@ -53,8 +49,8 @@ pux direct --org general           # runs the graph directly, no HTTP
 ```
 
 The Agent Protocol server listens at `http://127.0.0.1:9988`; the `pux` client
-defaults to it (override with `PUX_API_URL`). The vestigial Go MCP server at
-`:9987` is no longer needed to run Pux — the harness talks to Docker directly.
+defaults to it (override with `PUX_API_URL`). There is no Go server — the
+harness drives the Docker sandbox directly over the SDK.
 
 ## Subcommands
 
@@ -76,7 +72,8 @@ defaults to it (override with `PUX_API_URL`). The vestigial Go MCP server at
 fs/shell is **deepagents-native** (via `PuxSandboxBackend.execute()` → docker
 exec inside the container); all 13 specialists are **`pux_sandbox_*`** native
 Python tools too (Phase 8b–8f). Phase 8g moved the container lifecycle into
-`container.py`, so the Go bridge owns nothing the harness uses:
+`container.py`; Phase 8i deleted the Go bridge — every model-visible path is
+Python:
 
 | Tool | Backed by |
 |------|----------|
@@ -109,8 +106,8 @@ delegates to its declared specialists via the `task` tool.
 
 Specialist subagents live under `.pi/agents/*.md` with rich frontmatter
 (`tools`, `model`, `thinking`, `output`, …). The org contract enforces that
-every `agents:` slug resolves, every `tools:` entry is a real tool (native or
-live bridge), and any `policy.yaml` is schema-valid:
+every `agents:` slug resolves, every `tools:` entry is a real tool (native fs
+or a `pux_sandbox_*` specialist), and any `policy.yaml` is schema-valid:
 
 ```bash
 cd harness && uv run python -m pux_harness.main --check-contract   # exit 0 = green
@@ -137,8 +134,8 @@ cd harness && uv run pytest -q          # 130 tests: org contract + server routi
 
 The server tests use FastAPI's `TestClient` with a stub graph (no tokens, no
 Docker) to lock the REST envelope + thread/run CRUD; the real LLM-driven run
-is proven end-to-end in the Phase 4 verify log (`dispatch --org general` →
-9 Go files).
+is proven end-to-end in the Phase 8i verify log (`pux direct --org general`
+with no Go binary → 15 harness modules via the researcher subagent).
 
 ## Architecture
 
@@ -165,19 +162,21 @@ is proven end-to-end in the Phase 4 verify log (`dispatch --org general` →
 └──────────────────────────────────────────┘
 ```
 
-`backend/mcpserver` (Go, `:9987`) is **vestigial** — no model-visible tools,
-no container ownership since 8g. Deleted in Phase 8i.
+There is no Go server on this branch. The Go MCP tree + JSON-RPC bridge were
+deleted in Phase 8i — every model-visible path (fs, shell, the 13 specialists,
+and the container lifecycle) lives in the Python harness and drives the sandbox
+directly over the Docker SDK.
 
 ## Branch layout
 
-- **`pi-pivot`** — current. Deepagents pivot: Phases 0–8g shipped (harness +
-  bridge, native sandbox, declarative contract, TS harness deleted, Agent
-  Protocol server + client, all 10 orgs ported to RUN on deepagents, the policy
-  engine ported Go→Python + its enforcement wired into `container.py`,
-  proactive context-offload, and the entire Go sandbox re-hosted in Python —
-  fs/shell + all 13 specialists via direct `docker exec`, container lifecycle +
-  policy enforcement harness-owned). The Go MCP binary is vestigial.
-  **8i** (delete the Go tree) + **Phase 9** (TUI) remain.
+- **`pi-pivot`** — current. Deepagents pivot: Phases 0–8i shipped (harness +
+  native sandbox, declarative contract, TS harness deleted, Agent Protocol
+  server + client, all 10 orgs ported to RUN on deepagents, the policy engine
+  ported Go→Python + its enforcement wired into `container.py`, proactive
+  context-offload, the entire Go sandbox re-hosted in Python — fs/shell + all
+  13 specialists via direct `docker exec`, container lifecycle + policy
+  enforcement harness-owned — and the Go MCP server + JSON-RPC bridge deleted).
+  **Phase 9** (TUI as Agent Protocol consumer + SSE) remains.
 - **`master`** — pre-pivot MVP. Slim Go MCP server with in-process agent loop.
 - **`v0.2.0-pre-pi-mono`** — tag of master HEAD before the pivot. Safety net.
 

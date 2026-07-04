@@ -5,13 +5,15 @@ Two tiers, mirroring ``contract.py``:
 * **Structural** (no server, no tokens): one parametrized case per discovered
   org asserts ``check_org(org) == []``. This is the gate — if an org's bundle
   drifts (bad frontmatter, unresolvable slug, malformed policy), this fails.
-* **Tool-resolution** (rule 4): exercised against a deliberately-empty bridge
-  surface so stale/unknown tool refs fail loud — proving the rule fires.
+* **Tool-resolution** (rule 4): the org contract resolves every agent
+  ``tools:`` entry against ``NATIVE_FS_TOOLS`` ∪ ``SPECIALIST_TOOL_NAMES``
+  (both Python constants). These tests feed a bogus tool so the rule fires
+  loud, and a real native-fs name so it's correctly allowed.
 * **Violation classes** (rules 1,2,3,5): built in a tmp tree, each asserts the
   right rule fires. Proves the enforcer catches what it claims to.
 
-The live ``--check-contract`` (server up) is the full tool-resolution proof;
-these tests are the structural + logic proof, runnable without Docker.
+Both ``--check-contract`` and these tests resolve against the same static
+surface — no Go server, no Docker, no tokens.
 """
 from __future__ import annotations
 
@@ -75,24 +77,28 @@ def test_harness_has_no_hardcoded_manifest():
     assert check_harness() == []
 
 
-# --- rule 4 fires (tool resolution against a live-shaped surface) --------
+# --- rule 4 fires (tool resolution against the static native surface) -----
 
-def test_rule4_unknown_tool_fails_loud():
-    """An empty bridge surface makes every pux_sandbox_* ref fail — proves the
-    resolver actually checks the live surface rather than trusting the names."""
-    vs = check_org("general", bridge_tools=set())
+def test_rule4_unknown_tool_fails_loud(fake_tree):
+    """An agent ``tools:`` entry that's neither a native fs tool nor a known
+    ``pux_sandbox_*`` specialist fails loud — proves the resolver checks the
+    static surface rather than trusting the names."""
+    add_org, add_agent = fake_tree
+    add_agent("ghost", tools="mcp:pux-sandbox/no_such_tool")
+    add_org("o", agents="ghost")
+    vs = check_org("o")
     rules = {v.rule for v in vs}
     assert "tool-resolves" in rules, f"expected tool-resolves error, got: {vs}"
 
 
 def test_rule4_native_fs_tool_always_allowed(fake_tree):
     """A native fs tool in a whitelist never fails — it comes from the backend,
-    not the MCP surface. Build an agent listing both a native name and a bridge
-    tool; under an empty bridge, ONLY the bridge tool fails."""
+    not the specialist registry. Build an agent listing both a native name and
+    an unknown specialist tool; ONLY the unknown specialist tool fails."""
     add_org, add_agent = fake_tree
     add_agent("mix", tools="read_file, mcp:pux-sandbox/bash")
     add_org("o", agents="mix")
-    vs = check_org("o", bridge_tools=set())
+    vs = check_org("o")
     resolves = [v for v in vs if v.rule == "tool-resolves"]
     assert len(resolves) == 1, vs
     assert "bash" in resolves[0].message and "pux_sandbox_bash" in resolves[0].message

@@ -1,16 +1,16 @@
-"""Native specialist tools — the Python replacements for the Go MCP bridge's
-``pux_sandbox_*`` specialists (Phase 8b–8f).
+"""Native specialist tools — the ``pux_sandbox_*`` specialist surface.
 
-Each tool is a LangChain StructuredTool named ``pux_sandbox_<name>`` — the SAME
-names the bridge used, so agent frontmatter and the contract resolver are
-untouched. ``graph.py`` requests the ported specialists from here and asks the
-Go bridge for the REST (``SPECIALIST_TOOLS - PORTED_SPECIALISTS``). When every
-specialist is ported, the bridge carries nothing and is retired (Phase 8i).
+Each tool is a LangChain StructuredTool named ``pux_sandbox_<name>``. This
+module is the SINGLE source of specialists: ``graph.py`` calls
+``build_native_specialists`` for every specialist, and the org contract
+resolves agent ``tools:`` whitelists against ``SPECIALIST_TOOL_NAMES`` below.
+These tools were first ported from the Go MCP bridge (Phases 8b–8f) and the
+bridge was deleted in 8i — there is no longer a Go surface these mirror.
 
 Result contract fidelity: each tool returns the SAME JSON the Go MCP server
-marshaled into its tool-call text blocks (verified against the live bridge —
-e.g. ``list_skills`` returns ``{"skills": [...], "count": N}`` indented 2),
-so the agent-visible output is byte-equivalent pre/post port.
+marshaled into its tool-call text blocks (verified against the live bridge
+during the port — e.g. ``list_skills`` returns ``{"skills": [...], "count": N}``
+indented 2), so the agent-visible output is byte-equivalent pre/post port.
 
 Batch 1 (8b/8c):
   - ``python``        — ``python3 -c <code>`` via docker exec (was Go's
@@ -33,10 +33,6 @@ Batch 4 (8f):
   - ``desktop_screenshot`` / ``_click`` / ``_type`` / ``_key`` — X11
     (``DISPLAY=:99``) via ``xdotool`` + ``desktop_observe.py`` through docker
     exec (was Go's DesktopTool spec family; pixel-coord contract — OCR drifts).
-
-With 8f, ``PORTED_SPECIALISTS == SPECIALIST_TOOLS`` (all 13 native): the Go
-bridge carries nothing specialist, and ``shared_client()`` is no longer called
-by ``build_graph``. The bridge stays only for container lifecycle until 8g/8h.
 
 **Bug fixed by the port:** the Go skills package read ``<root>/skills/`` which
 does not exist in this repo (skills live at ``.pi/skills/`` per the pi-mono
@@ -64,14 +60,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = PROJECT_ROOT / ".pi" / "skills"
 SKILL_FILE = "SKILL.md"
 
-# Unprefixed specialist names implemented natively HERE. ``graph.py`` subtracts
-# this from the full specialist set to decide what still comes from the bridge.
-# Grows each batch; when it equals SPECIALIST_TOOLS, the bridge is retired.
-PORTED_SPECIALISTS: frozenset[str] = frozenset({
+# The complete set of unprefixed specialist names the harness implements
+# natively (Phase 8i renamed this from the transitional ``PORTED_SPECIALISTS`` —
+# there is no longer a Go bridge to have been "ported" from). ``build_native_
+# specialists`` below returns exactly one ``pux_sandbox_<name>`` tool per entry;
+# ``SPECIALIST_TOOL_NAMES`` is the prefixed form the org contract resolves
+# ``tools:`` whitelists against.
+SPECIALISTS: frozenset[str] = frozenset({
     "python", "list_skills", "load_skill", "describe_image",
     "browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_evaluate",
     "desktop_screenshot", "desktop_click", "desktop_type", "desktop_key",
 })
+
+SPECIALIST_TOOL_NAMES: frozenset[str] = frozenset(
+    {PUX_PREFIX + s for s in SPECIALISTS}
+)
 
 
 def _tail(text: str, n: int = 800) -> str:

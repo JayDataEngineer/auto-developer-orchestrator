@@ -1,5 +1,12 @@
 # Pux MCP Server — Contract Specification
 
+> **FROZEN `master`-branch reference.** This document specifies the slim Go MCP
+> server that lives on `master` (the pre-pivot MVP). It does **not** describe
+> the `pi-pivot` branch, where that Go server is deleted (Phase 8i) and the
+> agent + sandbox layer is the Python deepagents harness — see `CLAUDE.md` and
+> `harness/README.md` for the current surface. Kept here as the frozen contract
+> for `master`.
+
 > Source of truth for the slim MVP on `master`. Everything in this codebase
 > conforms to this document or it's a bug. The fullstack contract (TUI, web
 > UI, CLI, sub-agents, organizations, skills) lives on the `dev` branch with
