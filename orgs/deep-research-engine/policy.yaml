@@ -41,3 +41,20 @@ credentials:
   optional:
     - OPENROUTER_API_KEY     # fallback LLM when Ray ingress is unused
     - COMPREFACE_API_KEY     # face recognition (face_client.py)
+
+jobs:
+  - name: diarize_audio
+    script: orgs/deep-research-engine/sandbox/audio_client.py
+    args: [--batch, /sandbox/workspace/data]
+    timeout: 7200
+    description: "Diarize + transcribe all audio files via media MCP"
+  - name: process_video
+    script: orgs/deep-research-engine/sandbox/video_frames.py
+    args: [process, --input, /sandbox/workspace/data]
+    timeout: 3600
+    description: "Extract frames + narrate video files"
+  - name: extract_entities
+    script: orgs/deep-research-engine/sandbox/entity_extract.py
+    args: [--input, /sandbox/workspace/data]
+    timeout: 1800
+    description: "Extract named entities from all text content"
