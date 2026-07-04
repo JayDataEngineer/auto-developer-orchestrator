@@ -2,6 +2,7 @@
 name: researcher
 description: Read-only codebase investigator — answers specific questions with cited evidence from files
 tools: mcp:pux-sandbox/python
+skills: .pi/skills
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

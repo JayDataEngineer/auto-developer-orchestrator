@@ -116,6 +116,7 @@ def fake_tree(tmp_path: Path, monkeypatch):
     contract's path helpers patched onto it."""
     (tmp_path / "orgs").mkdir()
     (tmp_path / ".pi" / "agents").mkdir(parents=True)
+    (tmp_path / ".pi" / "skills").mkdir(parents=True)
     monkeypatch.setattr(contract, "_orgs_dir", lambda: tmp_path / "orgs")
     monkeypatch.setattr(contract, "_agents_dir", lambda: tmp_path / ".pi" / "agents")
 
@@ -187,6 +188,7 @@ def test_rule3_unknown_agent_frontmatter_key(fake_tree):
     assert KNOWN_AGENT_KEYS == {
         "name", "description", "tools", "systemPromptMode", "output",
         "inheritSkills", "inheritProjectContext", "defaultProgress",
+        "model", "skills", "response_format", "permissions", "interrupt_on",
     }
 
 
@@ -251,3 +253,120 @@ def test_rule5_policy_bad_mount_caught(fake_tree):
     vs = check_org("o")
     assert any(v.rule == "policy-schema" for v in vs), vs
     assert not any(v.rule == "policy-sections" for v in vs)
+
+
+# --- rule 4b fires (Phase-10 rich SubAgent fields, offline validation) ----
+
+def _write_agent(slug: str, extra_fm: str) -> None:
+    """Write an agent file with arbitrary extra frontmatter (the Phase-10 rich
+    fields). Uses contract's patched ``_agents_dir`` so it lands in fake_tree."""
+    (contract._agents_dir() / f"{slug}.md").write_text(
+        f"---\nname: {slug}\ndescription: x\n{extra_fm}---\n\nbody\n")
+
+
+def test_rule4b_model_must_be_string(fake_tree):
+    add_org, _ = fake_tree
+    _write_agent("a", "model: 5\n")
+    add_org("o", agents="a")
+    vs = check_org("o")
+    assert any(v.rule == "model-shape" for v in vs), vs
+
+
+def test_rule4b_skill_source_must_resolve(fake_tree):
+    """A skills source that isn't a directory under the project root fails loud
+    (deepagents loads skills via the backend, so a missing source loads nothing)."""
+    add_org, _ = fake_tree
+    _write_agent("a", "skills: nope\n")
+    add_org("o", agents="a")
+    vs = check_org("o")
+    assert any(v.rule == "skill-source-resolves" for v in vs), vs
+
+
+def test_rule4b_skill_source_must_be_relative(fake_tree):
+    """A skills source must be project-relative (deepagents resolves it against
+    the backend); an absolute path or parent-escape is rejected."""
+    add_org, _ = fake_tree
+    _write_agent("a", "skills: /etc\n")
+    add_org("o", agents="a")
+    vs = check_org("o")
+    assert any(v.rule == "skill-source-shape" for v in vs), vs
+
+
+def test_rule4b_skill_source_root_resolves(fake_tree):
+    """A skills ROOT path (project-relative dir whose children are <skill>/) is
+    valid — deepagents scans it for every child skill."""
+    add_org, _ = fake_tree
+    _write_agent("a", "skills: .pi/skills\n")
+    add_org("o", agents="a")
+    assert check_org("o") == []
+
+
+def test_rule4b_response_format_must_be_mapping(fake_tree):
+    add_org, _ = fake_tree
+    _write_agent("a", "response_format: not-a-map\n")
+    add_org("o", agents="a")
+    vs = check_org("o")
+    assert any(v.rule == "response-format-shape" for v in vs), vs
+
+
+def test_rule4b_permissions_must_be_list(fake_tree):
+    add_org, _ = fake_tree
+    _write_agent("a", "permissions: {operations: [read]}\n")
+    add_org("o", agents="a")
+    vs = check_org("o")
+    assert any(v.rule == "permissions-shape" for v in vs), vs
+
+
+def test_rule4b_permissions_unknown_key(fake_tree):
+    add_org, _ = fake_tree
+    _write_agent("a", "permissions:\n  - operations: [read]\n"
+                       "    paths: [/x]\n    bogus: y\n")
+    add_org("o", agents="a")
+    vs = check_org("o")
+    assert any(v.rule == "permissions-shape" for v in vs), vs
+
+
+def test_rule4b_permissions_bad_mode(fake_tree):
+    add_org, _ = fake_tree
+    _write_agent("a", "permissions:\n  - operations: [read]\n"
+                       "    paths: [/x]\n    mode: teleport\n")
+    add_org("o", agents="a")
+    vs = check_org("o")
+    assert any(v.rule == "permissions-shape" for v in vs), vs
+
+
+def test_rule4b_permissions_bad_path_rejected(fake_tree):
+    """A relative path slips past the key/mode checks but deepagents'
+    ``FilesystemPermission.__post_init__`` rejects it — the contract reuses
+    that validation so a bad path fails here, not mid-run."""
+    add_org, _ = fake_tree
+    _write_agent("a", "permissions:\n  - operations: [read]\n"
+                       "    paths: [relative]\n")
+    add_org("o", agents="a")
+    vs = check_org("o")
+    assert any(v.rule == "permissions-shape" for v in vs), vs
+
+
+def test_rule4b_interrupt_on_must_be_bool_map(fake_tree):
+    add_org, _ = fake_tree
+    _write_agent("a", 'interrupt_on:\n  some_tool: "yes"\n')
+    add_org("o", agents="a")
+    vs = check_org("o")
+    assert any(v.rule == "interrupt-on-shape" for v in vs), vs
+
+
+def test_rule4b_all_rich_fields_green(fake_tree):
+    """All five Phase-10 fields valid -> the org is green (the loader will
+    resolve them; the contract validates them offline without get_model)."""
+    add_org, _ = fake_tree
+    _write_agent(
+        "a",
+        "model: glm-5.2\n"
+        "skills: .pi/skills\n"
+        "response_format:\n  type: object\n"
+        "permissions:\n  - operations: [read, write]\n"
+        "    paths: [/sandbox/workspace]\n"
+        "interrupt_on:\n  task: true\n",
+    )
+    add_org("o", agents="a")
+    assert check_org("o") == [], check_org("o")

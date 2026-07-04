@@ -1,6 +1,6 @@
 ---
 name: game-studio-narrative-designer
-description: Tech Noir Narrative Designer — the creative voice. Writes dialogue, builds lore, shapes characters, brainstorms story. Two modes: brainstorm (loose ideas) and write (drafts to departments/narrative/). Read-only on code + pipeline.
+description: "Tech Noir Narrative Designer — the creative voice. Writes dialogue, builds lore, shapes characters, brainstorms story. Two modes: brainstorm (loose ideas) and write (drafts to departments/narrative/). Read-only on code + pipeline."
 tools: mcp:pux-sandbox/python, mcp:pux-sandbox/browser_navigate, mcp:pux-sandbox/browser_screenshot, mcp:pux-sandbox/describe_image
 systemPromptMode: replace
 inheritProjectContext: false

@@ -33,17 +33,25 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
+from deepagents import FilesystemPermission
 
 from pux_harness import policy as policy_mod
 from pux_harness.native_tools import SPECIALIST_TOOL_NAMES
 from pux_harness.orgs import (
     PROJECT_ROOT,
+    _agents_dir,
+    _orgs_dir,
+    _parse_list,
     _split_frontmatter,
     discover_orgs,
     org_agent_slugs,
 )
+# ``_orgs_dir`` / ``_agents_dir`` are re-exported here (bound into THIS
+# module's namespace by the import) so the contract tests can monkeypatch
+# ``contract._orgs_dir`` / ``_agents_dir`` at the existing call sites.
 
 # --- the contract vocabulary ----------------------------------------------
 
@@ -52,10 +60,17 @@ from pux_harness.orgs import (
 # hardcoded ``ORG_AGENTS`` manifest.
 KNOWN_ORG_KEYS: frozenset[str] = frozenset({"agents"})
 
-# ``.pi/agents/<slug>.md`` frontmatter may use only these keys (pi-mono shape).
+# ``.pi/agents/<slug>.md`` frontmatter may use only these keys. The first 8 are
+# the carry-over pi-mono shape (harness ignores the last 4 of those — bools
+# like ``inheritSkills``); the last 5 are the Phase-10 deepagents ``SubAgent``
+# vocabulary the loader resolves in ``orgs.load_subagents`` (resolution table in
+# ``orgs.py``). ``middleware`` is deliberately absent: ``SubAgentMiddleware``
+# does not forward a raw spec's ``middleware`` key (Phase 7), so permitting it
+# here would greenlight a silent no-op.
 KNOWN_AGENT_KEYS: frozenset[str] = frozenset({
     "name", "description", "tools", "systemPromptMode", "output",
     "inheritSkills", "inheritProjectContext", "defaultProgress",
+    "model", "skills", "response_format", "permissions", "interrupt_on",
 })
 
 # Optional ``orgs/<name>/policy.yaml`` top-level sections (matches Go policy.go).
@@ -85,23 +100,113 @@ class Violation:
 
 
 # --- discovery (orgs + agent-slugs live in the low-level orgs module) ----
-
-
-def _orgs_dir() -> Path:
-    return PROJECT_ROOT / "orgs"
-
-
-def _agents_dir() -> Path:
-    return PROJECT_ROOT / ".pi" / "agents"
-
-
-def _parse_list(raw: str) -> list[str]:
-    """Comma-separated scalar -> stripped non-empty items (the ``agents:`` and
-    ``tools:`` frontmatter shape, consistent with pi-mono's ``tools:`` line)."""
-    return [s.strip() for s in raw.split(",") if s.strip()]
+# ``_orgs_dir`` / ``_agents_dir`` / ``_skills_dir`` / ``_parse_list`` /
+# ``_split_frontmatter`` are all imported from ``orgs`` (re-exported above) —
+# single source of truth. The contract tests monkeypatch them at
+# ``contract._orgs_dir`` etc., which still works because the import binds the
+# names into THIS module's namespace.
 
 
 # --- per-org checks (rules 1-5) ------------------------------------------
+
+
+def _validate_rich_fields(afm: dict[str, Any], slug: str) -> list[Violation]:
+    """Offline structural validation of the Phase-10 SubAgent fields.
+
+    Mirrors what ``orgs.load_subagents`` enforces by raising at runtime, so a
+    malformed field fails at ``--check-contract`` time (pytest) instead of
+    mid-run. No model init, no Docker. ``model`` is checked as a string here —
+    the loader resolves it through ``get_model`` (token-free in the dry-run, but
+    the contract itself never constructs the model, so it stays offline).
+    """
+    out: list[Violation] = []
+
+    if "model" in afm and not isinstance(afm["model"], str):
+        out.append(Violation(
+            "error", "model-shape",
+            f"{slug}: model must be a string shorthand (e.g. 'glm-5.2'), "
+            f"got {type(afm['model']).__name__}"))
+
+    if "skills" in afm:
+        project = _orgs_dir().parent
+        for p in _parse_list(afm["skills"]):
+            if (not isinstance(p, str) or not p
+                    or p.startswith("/") or ".." in Path(p).parts):
+                out.append(Violation(
+                    "error", "skill-source-shape",
+                    f"{slug}: skills source must be a project-relative path "
+                    f"(got {p!r})"))
+                continue
+            if not (project / p).is_dir():
+                out.append(Violation(
+                    "error", "skill-source-resolves",
+                    f"{slug}: skills source {p!r} -> not a directory under the "
+                    f"project root"))
+
+    if "response_format" in afm and not isinstance(afm["response_format"], dict):
+        out.append(Violation(
+            "error", "response-format-shape",
+            f"{slug}: response_format must be a JSON-schema mapping, "
+            f"got {type(afm['response_format']).__name__}"))
+
+    if "permissions" in afm:
+        raw = afm["permissions"]
+        allowed_keys = {"operations", "paths", "mode"}
+        allowed_ops = {"read", "write"}
+        allowed_modes = {"allow", "deny", "interrupt"}
+        if not isinstance(raw, list):
+            out.append(Violation(
+                "error", "permissions-shape",
+                f"{slug}: permissions must be a list of mappings, "
+                f"got {type(raw).__name__}"))
+        else:
+            for i, entry in enumerate(raw):
+                if not isinstance(entry, dict):
+                    out.append(Violation(
+                        "error", "permissions-shape",
+                        f"{slug}: permissions[{i}] must be a mapping, "
+                        f"got {type(entry).__name__}"))
+                    continue
+                bad = sorted(k for k in entry if k not in allowed_keys)
+                if bad:
+                    out.append(Violation(
+                        "error", "permissions-shape",
+                        f"{slug}: permissions[{i}] unknown keys {bad}; "
+                        f"allowed: {sorted(allowed_keys)}"))
+                    continue
+                ops = entry.get("operations", [])
+                bad_ops = [o for o in ops if o not in allowed_ops]
+                if not isinstance(ops, list) or bad_ops:
+                    out.append(Violation(
+                        "error", "permissions-shape",
+                        f"{slug}: permissions[{i}].operations must be a list of "
+                        f"'read'/'write'; invalid: {bad_ops!r}"))
+                    continue
+                mode = entry.get("mode", "allow")
+                if mode not in allowed_modes:
+                    out.append(Violation(
+                        "error", "permissions-shape",
+                        f"{slug}: permissions[{i}].mode must be one of "
+                        f"{sorted(allowed_modes)}, got {mode!r}"))
+                    continue
+                # Reuse deepagents' own path validation (leading '/', no '..'/'~').
+                try:
+                    FilesystemPermission(**entry)
+                except (ValueError, TypeError) as e:
+                    out.append(Violation(
+                        "error", "permissions-shape",
+                        f"{slug}: permissions[{i}] invalid: {e}"))
+
+    if "interrupt_on" in afm:
+        raw = afm["interrupt_on"]
+        if (not isinstance(raw, dict)
+                or not all(isinstance(v, bool) for v in raw.values())):
+            out.append(Violation(
+                "error", "interrupt-on-shape",
+                f"{slug}: interrupt_on must be a mapping of tool-name -> bool, "
+                f"got {raw!r}"))
+
+    return out
 
 
 def check_org(name: str) -> list[Violation]:
@@ -167,6 +272,14 @@ def check_org(name: str) -> list[Violation]:
                                    f"{name}/{slug}: tool {raw!r} -> "
                                    f"{key!r} not a native fs tool or a "
                                    f"pux_sandbox_* specialist"))
+
+    # Rule 4b: Phase-10 rich SubAgent fields (model/skills/response_format/
+    # permissions/interrupt_on) are structurally valid — offline, mirrors the
+    # runtime resolvers in ``orgs.load_subagents``. A malformed value fails here
+    # rather than aborting a real run.
+    for slug, afm in agent_frontmatter.items():
+        for violation in _validate_rich_fields(afm, f"{name}/{slug}"):
+            v.append(violation)
 
     # Rule 5: policy.yaml parses + valid schema + known sections.
     policy_path = org_dir / "policy.yaml"
