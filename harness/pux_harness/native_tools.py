@@ -19,10 +19,14 @@ Batch 1 (8b/8c):
   - ``load_skill``    — host FS read of one ``SKILL.md`` body.
 
 Batch 2 (8d):
-  - ``describe_image`` — ``/usr/local/bin/describe_image.py`` via docker exec
-                         (was Go's DescribeImageTool; exit-code dispatch +
-                         120s timeout + the model-missing ``success:false``
-                         contract — NOT an error).
+  - ``describe_image`` — **driving-model-primary** (mimo-v2.5 native multimodal
+                         via the OpenAI-compatible router) with the in-sandbox
+                         ONNX (``/usr/local/bin/describe_image.py``,
+                         Qwen3.5-2B-ONNX-OPT) as **fallback** on any primary
+                         failure. The ONNX path is the original Go
+                         DescribeImageTool contract (exit-code dispatch + 120s
+                         timeout + the model-missing ``success:false`` — NOT an
+                         error).
 
 Batch 3 (8e):
   - ``browser_navigate`` / ``_click`` / ``_type`` / ``_screenshot`` /
@@ -50,6 +54,7 @@ import json
 import shlex
 from pathlib import Path
 
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
@@ -220,20 +225,92 @@ def _load_skill_tool() -> StructuredTool:
     )
 
 
-# --- describe_image (8d) — local ONNX vision via describe_image.py ----------
+# --- describe_image (8d) — driving-model PRIMARY, in-sandbox ONNX FALLBACK ----
 
 _DESCRIBE_IMAGE_SCRIPT = "/usr/local/bin/describe_image.py"
 _DESCRIBE_IMAGE_TIMEOUT = 120  # seconds; matches the Go tool's default
+_IMAGE_FETCH_TIMEOUT = 60  # base64/curl round-trip to acquire bytes for the model
+
+# Mirrors describe_image.py's DEFAULT_PROMPT so primary and fallback behavior
+# are comparable for the same prompt.
+_DEFAULT_VISION_PROMPT = (
+    "Describe this image concisely. Focus on text, UI elements, and key visual features."
+)
+
+# Map common image extensions → MIME for the data: URL sent to the model.
+_MIME_BY_EXT = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+}
 
 _VISION_UNAVAILABLE = (
     "Vision model is not downloaded. Run scripts/bootstrap-vision.sh from the "
-    "host to enable. Until then, image-aware reasoning falls back to whatever "
-    "the driving LLM provides natively."
+    "host to enable. (This message means BOTH paths failed: the driving model "
+    "could not describe the image, and the local ONNX fallback is not "
+    "bootstrapped.)"
 )
 _VISION_DEPS_MISSING = (
     "Sandbox image is missing onnxruntime-genai. Rebuild with `task build` "
     "after pulling latest sandbox/Dockerfile."
 )
+
+
+def _image_mime(name: str) -> str:
+    """MIME for an image path/URL by extension (default ``image/png``)."""
+    return _MIME_BY_EXT.get(Path(name).suffix.lower(), "image/png")
+
+
+def _model_name(model: object) -> str:
+    """The model id of a ChatOpenAI instance (``.model_name`` / ``.model``)."""
+    return getattr(model, "model_name", None) or getattr(model, "model", None) or "model"
+
+
+def _acquire_image_b64(
+    exec_client: DockerExecClient, image_path: str | None, image_url: str | None,
+) -> tuple[str, str]:
+    """Fetch image bytes from the sandbox (path or URL) → ``(base64, mime)``.
+
+    Routed through ``docker exec`` so the sandbox fs + egress policy apply
+    uniformly to both the model-primary path (here) and the ONNX fallback
+    (``describe_image.py`` re-reads the same source). Raises on any failure —
+    the caller (primary path) catches and falls back to ONNX."""
+    if image_path:
+        cmd = f"base64 -w0 {shlex.quote(image_path)}"
+        mime = _image_mime(image_path)
+    else:
+        # -L follows redirects; egress ACLs in the sandbox apply.
+        cmd = f"curl -s -L --max-time 30 {shlex.quote(image_url or '')} | base64 -w0"
+        mime = _image_mime(image_url or "")
+    out, exit_code = exec_client.exec(cmd, timeout=_IMAGE_FETCH_TIMEOUT)
+    b64 = (out or "").strip()
+    if exit_code != 0 or not b64:
+        raise RuntimeError(f"image fetch exit {exit_code}: {_tail(out, 200)}")
+    return b64, mime
+
+
+def _invoke_primary_vision(model: object, b64: str, mime: str, prompt: str | None) -> str:
+    """Send the image to the driving model as a native multimodal message and
+    return its description text. Raises on any failure (empty/null content,
+    API error, non-multimodal model) — the caller falls back to ONNX."""
+    msg = HumanMessage(content=[
+        {"type": "text", "text": prompt or _DEFAULT_VISION_PROMPT},
+        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+    ])
+    resp = model.invoke([msg])
+    content = getattr(resp, "content", None)
+    # Some providers return a list of content blocks rather than a bare string.
+    if isinstance(content, list):
+        content = "".join(
+            block.get("text", "") for block in content if isinstance(block, dict)
+        )
+    text = (content or "").strip() if isinstance(content, str) else ""
+    if not text:
+        raise RuntimeError("primary model returned empty content")
+    return text
 
 
 class _DescribeImageArgs(BaseModel):
@@ -252,16 +329,17 @@ class _DescribeImageArgs(BaseModel):
 
 
 _DESCRIBE_IMAGE_DESC = (
-    "Describe an image using local vision inference (Qwen3.5-2B-ONNX-OPT). "
-    "Use when the driving LLM can't see the image directly, or when you want a "
-    "fast local description without an external round-trip. Pass either an "
-    "in-sandbox image path OR a URL (the script fetches it). Vision is OPTIONAL "
-    "— if the model isn't downloaded, returns a friendly 'run "
-    "scripts/bootstrap-vision.sh' message instead of an error."
+    "Describe an image. PRIMARY path: the driving model (mimo-v2.5) reads the "
+    "image natively via multimodal input — fast, no local model load. FALLBACK "
+    "path: if the driving model can't see the image (non-multimodal model, API "
+    "error, empty output), an in-sandbox ONNX vision model "
+    "(Qwen3.5-2B-ONNX-OPT) describes it locally. Pass either an in-sandbox "
+    "image path OR a URL. The result's `source` field reports which path "
+    "produced the description (`primary` | `fallback` | `onnx`)."
 )
 
 
-def _describe_image_tool(exec_client: DockerExecClient) -> StructuredTool:
+def _describe_image_tool(exec_client: DockerExecClient, model: object | None = None) -> StructuredTool:
     def _run(
         image_path: str | None = None,
         image_url: str | None = None,
@@ -271,6 +349,28 @@ def _describe_image_tool(exec_client: DockerExecClient) -> StructuredTool:
             return _result({"success": False, "error": "one of image_path or image_url is required"})
         if image_path and image_url:
             return _result({"success": False, "error": "image_path and image_url are mutually exclusive"})
+
+        # PRIMARY: the driving model's native multimodal vision (mimo-v2.5 by
+        # default). Any failure here (model not multimodal, rate limit, empty
+        # output, fetch error) is caught and we fall through to the ONNX
+        # fallback — `primary_error` is preserved on the fallback result so the
+        # fallback is observable, never silent.
+        primary_error: str | None = None
+        if model is not None:
+            try:
+                b64, mime = _acquire_image_b64(exec_client, image_path, image_url)
+                desc = _invoke_primary_vision(model, b64, mime, prompt)
+                return _result({
+                    "success": True,
+                    "description": desc,
+                    "model": _model_name(model),
+                    "source": "primary",
+                })
+            except Exception as exc:
+                primary_error = str(exc)
+        pe = {"primary_error": _tail(primary_error, 300)} if primary_error else {}
+
+        # FALLBACK: in-sandbox ONNX (Qwen3.5-2B-ONNX-OPT) via describe_image.py.
         # describe_image.py takes --image XOR --image-url; shlex.quote is safe
         # for paths/URLs carrying spaces or quotes (Go used its shQ helper).
         parts = [f"python3 {_DESCRIBE_IMAGE_SCRIPT}"]
@@ -284,9 +384,10 @@ def _describe_image_tool(exec_client: DockerExecClient) -> StructuredTool:
             return _result({
                 "success": False, "reason": "timeout",
                 "error": f"describe_image timed out after {_DESCRIBE_IMAGE_TIMEOUT}s",
+                **pe,
             })
         except Exception as exc:  # container vanished / docker API error
-            return _result({"success": False, "reason": "exec_failed", "error": str(exc)})
+            return _result({"success": False, "reason": "exec_failed", "error": str(exc), **pe})
 
         # Exit-code dispatch — describe_image.py contract (faithful 1:1 with the
         # Go DescribeImageTool): 0=success, 1=inference error, 2=model missing,
@@ -299,23 +400,31 @@ def _describe_image_tool(exec_client: DockerExecClient) -> StructuredTool:
                 return _result({
                     "success": False, "reason": "malformed_output",
                     "error": f"describe_image returned non-JSON: {_tail(out, 400)}",
+                    **pe,
                 })
+            # source distinguishes "model couldn't do it, ONNX saved it"
+            # (fallback) from "no model threaded, ONNX only" (onnx — the
+            # --check / offline path).
             return _result({
                 "success": True,
                 "description": parsed.get("description", ""),
                 "model": parsed.get("model", ""),
+                "source": "fallback" if primary_error else "onnx",
+                **pe,
             })
         if exit_code == 2:
             return _result({
                 "success": False, "reason": "unavailable",
                 "explanation": _VISION_UNAVAILABLE, "detail": _tail(out),
+                **pe,
             })
         if exit_code == 3:
             return _result({
                 "success": False, "reason": "deps_missing",
                 "explanation": _VISION_DEPS_MISSING, "detail": _tail(out),
+                **pe,
             })
-        return _result({"success": False, "reason": "inference_failed", "error": _tail(out)})
+        return _result({"success": False, "reason": "inference_failed", "error": _tail(out), **pe})
 
     return StructuredTool(
         name=PUX_PREFIX + "describe_image", description=_DESCRIBE_IMAGE_DESC,
@@ -663,15 +772,22 @@ def _desktop_key_tool(exec_client: DockerExecClient) -> StructuredTool:
 
 # --- registry ---------------------------------------------------------------
 
-def build_native_specialists(exec_client: DockerExecClient) -> list[StructuredTool]:
+def build_native_specialists(
+    exec_client: DockerExecClient, model: object | None = None,
+) -> list[StructuredTool]:
     """Every native ``pux_sandbox_*`` specialist. ``exec_client`` is shared with
     the backend (one Docker client per process). Host-FS-only tools (skills)
-    ignore it but take it for a uniform signature."""
+    ignore it but take it for a uniform signature.
+
+    ``model`` threads the driving LLM into ``describe_image`` so it can use the
+    model's native multimodal vision as the PRIMARY path (ONNX fallback). The
+    offline ``--check`` smoke passes ``model=None`` → ``describe_image`` is
+    ONNX-only and spends no tokens."""
     return [
         _python_tool(exec_client),
         _list_skills_tool(),
         _load_skill_tool(),
-        _describe_image_tool(exec_client),
+        _describe_image_tool(exec_client, model),
         _browser_navigate_tool(exec_client),
         _browser_click_tool(exec_client),
         _browser_type_tool(exec_client),

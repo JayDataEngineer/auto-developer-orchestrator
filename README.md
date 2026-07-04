@@ -80,7 +80,7 @@ Python:
 | `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native — `PuxSandboxBackend.execute()` → docker exec (8a) |
 | `python` | native — docker exec `python3 -c` (8b) |
 | `list_skills` / `load_skill` | native — host FS `.pi/skills/` (8c) |
-| `describe_image` | native — `/usr/local/bin/describe_image.py` via docker exec (8d) |
+| `describe_image` | native — **driving-model PRIMARY** (mimo-v2.5 multimodal) → in-sandbox ONNX fallback (8d) |
 | `browser_navigate` / `_click` / `_type` / `_screenshot` / `_evaluate` | native — `curl` to in-sandbox `sb_server.py` via docker exec (8e) |
 | `desktop_screenshot` / `_click` / `_type` / `_key` | native — `xdotool` + `desktop_observe.py` via docker exec (8f) |
 

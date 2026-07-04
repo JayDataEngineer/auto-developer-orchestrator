@@ -270,7 +270,7 @@ Phase 8i deleted the Go bridge entirely. **Every model-visible path is Python:**
 | `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native (`BaseSandbox`) | `PuxSandboxBackend.execute()` → `DockerExecClient` (docker exec) |
 | `python` | **native** (`pux_sandbox_python`, 8b) | `python3 -c` via docker exec |
 | `list_skills` / `load_skill` | **native** (8c) | host FS walk/read at `<project>/.pi/skills/` |
-| `describe_image` | **native** (`pux_sandbox_describe_image`, 8d) | `/usr/local/bin/describe_image.py` via docker exec (local ONNX) |
+| `describe_image` | **native** (`pux_sandbox_describe_image`, 8d) | **driving-model PRIMARY** (mimo-v2.5 multimodal) → in-sandbox ONNX (`describe_image.py`) FALLBACK |
 | `browser_navigate` / `_click` / `_type` / `_screenshot` / `_evaluate` | **native** (8e) | `curl` to in-sandbox `sb_server.py` via docker exec |
 | `desktop_screenshot` / `_click` / `_type` / `_key` | **native** (8f) | `xdotool` + `/usr/local/bin/desktop_observe.py` via docker exec |
 
@@ -404,23 +404,39 @@ resolver). Reference it from an agent's `tools:` frontmatter. No rebuild, no Go.
 4. Add a routing test in `harness/tests/` exercising the real code path where
    feasible.
 
-## Vision (local ONNX, opt-in)
+## Vision (driving-model PRIMARY, local ONNX FALLBACK)
 
-`describe_image` runs local vision inference inside the sandbox via
-Qwen3.5-2B-ONNX-OPT fp16. No external MCP dependency — model weights are
-operator-supplied, downloaded once via host-side script.
+`describe_image` is **two paths**:
 
-**Bootstrap:**
+1. **PRIMARY** — the driving model (mimo-v2.5) reads the image natively via
+   multimodal input (OpenAI-compatible `image_url` data-URL over the OpenCode
+   Zen Go router). Fast, no local model load. Acquires bytes from the sandbox
+   (`base64 -w0 <path>` for a file, `curl … | base64` for a URL — egress ACLs
+   apply) and sends a `HumanMessage` with an `image_url` content block.
+2. **FALLBACK** — on ANY primary failure (non-multimodal model, API error,
+   rate limit, empty output), the in-sandbox ONNX model
+   (`/usr/local/bin/describe_image.py`, Qwen3.5-2B-ONNX-OPT fp16) describes it
+   locally. `primary_error` is preserved on the fallback result so the
+   fallback is observable, never silent.
+
+The result's `source` field reports which path produced it: `primary` |
+`fallback` | `onnx` (the `onnx` tag = no model threaded, i.e. the offline
+`--check` smoke). When BOTH paths fail, `describe_image` returns
+`{success:false, reason:"unavailable"}` — NOT a Python error, NOT an
+`isError:true` envelope. The driving agent falls back to text-only reasoning
+without breaking its loop.
+
+`build_native_specialists(exec_client, model=None)` threads the driving model
+in; `graph.py` passes `get_model()`, the `--check` smoke passes `None`
+(ONNX-only, no tokens).
+
+**ONNX bootstrap (optional — only needed if you want the fallback to produce
+descriptions when the driving model isn't multimodal):**
 ```bash
 scripts/bootstrap-vision.sh                 # downloads to $PWD/.pux/models/
 scripts/bootstrap-vision.sh --project DIR   # explicit project root
 scripts/bootstrap-vision.sh --check         # exit 0 if ready, 1 if not
 ```
-
-**Contract:** when the model is absent, `describe_image` returns
-`{success:false, reason:"unavailable"}` — NOT a Python error, NOT an
-`isError:true` envelope. The driving agent falls back to text-only
-reasoning without breaking its loop.
 
 ## Browser (in-sandbox sb_server.py)
 
