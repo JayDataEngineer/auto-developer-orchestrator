@@ -227,7 +227,9 @@ def _resolve_skills(raw: Any, slug: str) -> list[str]:
 
 def _load_agent_module(slug: str) -> Any:
     """Load ``.pi/agents/<slug>.py`` by path and return its module object, or
-    ``None`` if no ``.py`` exists (caller falls back to the legacy ``.md``).
+    ``None`` if no ``.py`` exists (the caller, ``load_subagents``, raises —
+    there is NO legacy ``.md`` fallback; the ``no-legacy-agent-frontmatter``
+    contract tripwire guarantees every roster slug has a ``.py``).
 
     Path-loaded (``importlib.util.spec_from_file_location``) — ``.pi/`` is NOT
     on ``sys.path`` and this never adds it; the module's ``__file__`` is set so

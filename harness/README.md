@@ -22,11 +22,10 @@ pux_harness/
   context_offload.py  # ContextOffloadMiddleware + ctx_recall/ctx_search
   ctx_store.py        # host-side stash for offloaded tool output
   model.py            # provider/model factory (PUX_MODEL)
-  orgs.py             # system-prompt builder + subagent loader (real-YAML
-                      # frontmatter -> deepagents SubAgent dicts; Phase 10 rich
-                      # fields: model/skills/response_format/permissions/interrupt_on)
+  orgs.py             # system-prompt builder + subagent loader (.pi/agents/<slug>.py
+                      # SUBAGENT dicts + org.yaml rosters; resolves tools/skills/model)
   policy.py           # declarative policy resolver
-  contract.py         # declarative org-contract enforcer (7 rules)
+  contract.py         # declarative org-contract enforcer (rules 1-8 + legacy tripwires)
 tests/
   test_org_contract.py    test_server.py    test_acp.py    test_policy.py
   test_container.py       test_context_offload.py    test_load_subagents.py

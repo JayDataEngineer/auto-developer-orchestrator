@@ -96,7 +96,8 @@ under `orgs/<name>/`:
 
 ```
 orgs/<name>/
-├── AGENTS.md       # CTO system prompt body + `agents: [slug…]` frontmatter
+├── AGENTS.md       # CTO system prompt body (prose only — no frontmatter)
+├── org.yaml        # specialist roster: `agents: [slug, …]`
 └── policy.yaml     # optional: egress ACLs, creds, sandbox image/tier, cookies
 ```
 
@@ -104,10 +105,12 @@ orgs/<name>/
 body to the base system prompt — the main agent becomes that org's CTO and
 delegates to its declared specialists via the `task` tool.
 
-Specialist subagents live under `.pi/agents/*.md` with rich frontmatter
-(`tools`, `model`, `thinking`, `output`, …). The org contract enforces that
-every `agents:` slug resolves, every `tools:` entry is a real tool (native fs
-or a `pux_sandbox_*` specialist), and any `policy.yaml` is schema-valid:
+Specialist subagents live under `.pi/agents/<slug>.py` (a `SUBAGENT` dict:
+`name`, `description`, `system_prompt`, optional `tools`/`skills`/`model`)
+with a sibling prose-only `<slug>.md` holding the prompt. The org contract
+enforces that every `org.yaml` slug resolves to a `.py` that imports cleanly,
+every `tools:` entry is a real tool (native fs or a `pux_sandbox_*`
+specialist), and any `policy.yaml` is schema-valid:
 
 ```bash
 cd harness && uv run python -m pux_harness.main --check-contract   # exit 0 = green

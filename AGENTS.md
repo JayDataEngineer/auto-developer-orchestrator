@@ -30,9 +30,9 @@ Two tool surfaces, all running **inside the Docker container**:
     skills under `.pi/skills/` (the only tree these imperative tools scan).
     Per-org skills under `orgs/<name>/skills/` are NOT browsable here — they
     are scoped, progressive-disclosure skills attached to a specialist via the
-    `skills:` frontmatter (deepagents `SkillsMiddleware` loads their index at
-    startup and their bodies on demand). You see those only if your subagent
-    declared the root.
+    `skills:` field in its `.pi/agents/<slug>.py` `SUBAGENT` dict (deepagents
+    `SkillsMiddleware` loads their index at startup and their bodies on
+    demand). You see those only if your subagent declared the root.
 
 All paths the tools report are **inside the sandbox container**. The project
 is bind-mounted at `/sandbox/workspace/`.
@@ -56,8 +56,10 @@ to this system prompt. You become the CTO of that org — the body in that file
 carries the role.
 
 Subagent delegation is deepagents-native. Available specialists live under
-`.pi/agents/*.md` and ship their own tool whitelists, system prompts, and
-output contracts via frontmatter. Spawn one via the `task` tool:
+`.pi/agents/<slug>.py` (a `SUBAGENT` config dict: name, description, optional
+`tools`/`skills`) with a sibling `<slug>.md` holding the system-prompt prose.
+An org's roster — which specialists it delegates to — lives in
+`orgs/<name>/org.yaml`. Spawn one via the `task` tool:
 `task(subagent_type="researcher", description="...")`. The subagent sees only
 your `description`, not your conversation — give it enough context (relevant
 paths, the question, the expected output shape).

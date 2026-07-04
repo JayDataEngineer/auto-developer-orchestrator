@@ -153,37 +153,59 @@ available to every subagent regardless of its `tools:` whitelist.
 edit/grep/glob` free, all routed through our `execute()` → **direct
 `docker exec`** into the sandbox container.
 
-**Adding an org:** drop `orgs/<name>/AGENTS.md` (CTO body) with an
-`agents: [slug…]` frontmatter listing its specialists. Optionally add
-`orgs/<name>/policy.yaml`. Run `--check-contract` to validate (the contract
-also runs as a pytest gate). No harness-level per-org code — org-bundled
-`*.py`/`Dockerfile`/`docker-compose.yml`/`bootstrap.sh` is the org's sandbox
-payload, reached via the sandbox, never imported by the harness.
+**Adding an org:** drop `orgs/<name>/AGENTS.md` (CTO prompt **prose only** —
+no frontmatter; its conventional role as agent *context*) plus an
+`orgs/<name>/org.yaml` whose `agents: [slug…]` lists its specialists.
+Optionally add `orgs/<name>/policy.yaml`. Run `--check-contract` to validate
+(the contract also runs as a pytest gate). No harness-level per-org code —
+org-bundled `*.py`/`Dockerfile`/`docker-compose.yml`/`bootstrap.sh` is the
+org's sandbox payload, reached via the sandbox, never imported by the harness.
 
-**Adding a subagent:** write `.pi/agents/<slug>.md` with YAML frontmatter +
-body, then reference the slug from an org's `agents:` frontmatter. Delegation
-is deepagents' native `task(subagent_type="<slug>", description="…")`. The
-frontmatter parser is real YAML (`orgs._split_frontmatter` → `yaml.safe_load`),
-so the full deepagents `SubAgent` vocabulary is expressible. **Phase 10** adds
-five rich optional fields (beyond the carry-over pi-mono keys `name`/
-`description`/`tools`/`output`/`systemPromptMode`/`inheritSkills`/
-`inheritProjectContext`/`defaultProgress`, which the harness ignores):
+**Adding a subagent:** write **two files** under `.pi/agents/` (project data,
+NOT the harness package — keeps the harness generic, mirrors how skills work):
 
-| Field | YAML shape | Resolution (in `orgs.load_subagents`) |
-|-------|-----------|---------------------------------------|
-| `model` | `model: glm-5.2` | `get_model(value)` → a **`ChatOpenAI` instance**. Omit to **inherit** the parent model (`create_deep_agent` injects it — `spec.get("model", model)`). A bare shorthand MUST route through `get_model`, NOT deepagents' `init_chat_model` (it fails on `glm-5.2` and can't carry our OpenCode Zen Go base_url/api_key). |
-| `skills` | `skills: .pi/skills` (or `[.pi/skills, orgs/x/skills]`) | a **project-relative skills-ROOT directory** → mapped to a container-absolute path (`/sandbox/workspace/<path>`). deepagents' `SkillsMiddleware` resolves it against the **backend** (sandbox container) and scans every `<skill>/SKILL.md` beneath it. A source is a root, **not** an individual skill — passing `.pi/skills/source-citation` would load nothing (its only child is the `SKILL.md` file). Validated on host (the project is bind-mounted 1:1, so host existence == container existence). |
-| `response_format` | JSON-schema mapping | raw `dict` passthrough. |
-| `permissions` | `[{operations: [read,write], paths: [/x], mode: deny}]` | `list[FilesystemPermission]`; `__post_init__` validates paths (leading `/`, no `..`/`~`). Omit → inherit parent's. |
-| `interrupt_on` | `{tool_name: true}` | `dict[str, bool]` passthrough (bool-toggle form only). |
+- `<slug>.py` exporting a `SUBAGENT` dict — the deepagents-idiomatic config
+  form. Required keys: `name`, `description`, `system_prompt`. Optional:
+  `tools` (bare slugs like `["python", "browser_navigate"]`) and `skills`
+  (source-root paths). `system_prompt` is read from the sibling `.md`:
+  ```python
+  from pathlib import Path
+  SUBAGENT = {
+      "name": "<slug>",
+      "description": "action-oriented, what this subagent does",
+      "tools": ["python"],
+      "skills": [".pi/skills"],
+      "system_prompt": Path(__file__).with_suffix(".md").read_text(),
+  }
+  ```
+  The module MUST import only the stdlib (no `pux_harness.*` / Docker) so it
+  stays loadable under `--check-contract` (offline, no tokens). Tool + skills
+  resolution stays **central** (`orgs._resolve_tools` / `_resolve_skills`), so
+  the `.py` never couples to the harness — that's what keeps it CI-safe.
+- `<slug>.md` — system-prompt **prose only** (no frontmatter).
 
-`middleware` is deliberately **not** a field: `SubAgentMiddleware` does not
-forward a raw spec's `middleware` key into the compiled specialist (Phase 7), so
-permitting it would greenlight a silent no-op. The contract
-(`contract._validate_rich_fields`) validates all five offline — a malformed
-value fails `--check-contract` (and the pytest gate) rather than mid-run.
-Example: `.pi/agents/researcher.md` ships `skills: .pi/skills` (loads
-`source-citation`).
+Then reference the slug from an org's `org.yaml`. Delegation is deepagents'
+native `task(subagent_type="<slug>", description="…")`.
+
+| Field | Python shape | Resolution (in `orgs.load_subagents`) |
+|-------|-------------|---------------------------------------|
+| `tools` | `["python", "browser_navigate"]` (bare slugs) | each entry → `pux_sandbox_<slug>` lookup against the specialist tool map; unknown fails loud. Native fs tools (`execute`/`read_file`/…) are NOT listed here — they come from the backend's `FilesystemMiddleware` for every subagent. |
+| `skills` | `[".pi/skills"]` or `["orgs/invest/skills"]` | each entry is a **project-relative skills-ROOT directory** → mapped to a container-absolute path (`/sandbox/workspace/<path>`). deepagents' `SkillsMiddleware` resolves it against the **backend** (sandbox container) and scans every `<skill>/SKILL.md` beneath it. A source is a root, **not** an individual skill — passing `.pi/skills/source-citation` would load nothing (its only child is the `SKILL.md` file). Validated on host (the project is bind-mounted 1:1). |
+| `model` | `"glm-5.2"` (bare shorthand) | `get_model(value)` → a `ChatOpenAI` instance. Omit to **inherit** the parent model (`create_deep_agent` injects it — `spec.get("model", model)`). A bare shorthand MUST route through `get_model`, NOT deepagents' `init_chat_model` (it fails on `glm-5.2` and can't carry our OpenCode Zen Go base_url/api_key). |
+
+`middleware` is deliberately **not** a key: deepagents' `SubAgentMiddleware`
+does not forward a raw spec's `middleware` key into the compiled specialist
+(Phase 7), so setting it would be a silent no-op. Context-offload runs on the
+main agent only.
+
+**No legacy left behind (permanent).** The Phase-11 migration made the OLD
+`.md`-with-frontmatter agent form and the `agents:`-on-AGENTS.md org form
+HARD, PERMANENT contract failures — not a one-time cleanup. Two tripwires
+block any future commit that reintroduces them: `no-legacy-agent-frontmatter`
+(no `.pi/agents/*.md` may carry YAML frontmatter) and `no-legacy-org-roster`
+(no `orgs/*/AGENTS.md` may carry frontmatter — the roster lives in
+`org.yaml`). The `.py` form is the only valid agent-config path; the loader
+has no fallback branch. See `feedback_no_legacy_left_behind`.
 
 **Adding a skill:** skills follow the Agent-Skills spec — a `<kebab-name>/`
 dir containing `SKILL.md` (frontmatter `name` == dir name, `description`
@@ -192,15 +214,15 @@ skill **roots**, both `SkillsMiddleware`-compatible:
 
 - **Global** `.pi/skills/` — cross-cutting skills any agent can declare.
   Discoverable TWO ways: imperatively (`list_skills` / `load_skill` native
-  tools, which scan ONLY this root) AND via `skills: .pi/skills` frontmatter
-  (progressive disclosure). `source-citation` lives here.
+  tools, which scan ONLY this root) AND via a subagent's `skills: [".pi/skills"]`
+  field (progressive disclosure). `source-citation` lives here.
 - **Per-org** `orgs/<name>/skills/` — org-specific skills, declared ONLY via
-  that org's specialists' `skills: orgs/<name>/skills` frontmatter
+  that org's specialists' `skills: ["orgs/<name>/skills"]` field
   (SkillsMiddleware, progressive disclosure). NOT browsable via `list_skills`
   — scoped discovery is the point (one org never browses another's skills).
 
-A specialist consumes a skill declaratively: add `skills: <root-path>` to its
-`.pi/agents/<slug>.md` frontmatter (Phase 10). `SkillsMiddleware` resolves the
+A specialist consumes a skill declaratively: add the root path to its
+`.pi/agents/<slug>.py` `SUBAGENT["skills"]`. `SkillsMiddleware` resolves the
 root against the bind-mounted project, scans one level deep for every
 `<skill>/SKILL.md`, and serves level-1 metadata at startup → the `SKILL.md`
 body on invocation → `references/`/`scripts/` on demand. A source is a ROOT,
@@ -554,14 +576,15 @@ passing**):
 
 ## Pivot roadmap (pi-pivot branch)
 
-Phases 0–10 shipped (2026-07-04): harness + native sandbox, declarative
+Phases 0–11 shipped (2026-07-04): harness + native sandbox, declarative
 contract, TS harness deleted, Agent Protocol server + client, all 10 orgs
 ported to RUN on deepagents (Phase 5), policy engine Go→Python (Phase 6),
 proactive context-offload (Phase 7), the entire Go sandbox re-hosted in
-Python then deleted (Phase 8), ACP-first TUI (Phase 9), and the declarative
-subagent vocabulary — real-YAML frontmatter passing the rich `SubAgent` fields
-(`model`/`skills`/`response_format`/`permissions`/`interrupt_on`) through to
-deepagents (Phase 10).
+Python then deleted (Phase 8), ACP-first TUI (Phase 9), the declarative
+subagent vocabulary (Phase 10), and subagents going Python-native —
+`.pi/agents/<slug>.py` `SUBAGENT` dicts + `org.yaml` rosters replacing
+`.md`-with-frontmatter, with the legacy form made a permanent contract
+failure (Phase 11).
 
 | Phase | What | Status |
 |-------|------|--------|
@@ -571,7 +594,8 @@ deepagents (Phase 10).
 | 8 | Re-host sandbox in Python (`execute()`→docker exec; 13 specialist tools); wire policy enforcement here; delete Go MCP | **8a–8g SHIPPED 2026-07-03** — `docker_exec.py` `DockerExecClient` (container discovered by `openshell.project-path` label; `exec()` via Docker SDK `exec_run(tty=False)`); `native_tools.py` ports all 13 specialists (`_result` uses `sort_keys=True` → byte-stable JSON); `container.py` `SandboxContainer` owns the container lifecycle (faithful port of the deleted `manager.go::CreateSandbox`+`DestroySandbox`, CLI-mode slice) + policy **enforcement** (the part deferred from Phase 6 — binds/env/caps/egress.conf staging at create, porting `policy_hook.go::applyOrgPolicy` step-for-step). `ensure()` is the single-tenant gate; the exec client self-boots. `pux sandbox {start,stop,status}` CLI surface replaces `task start/stop/status`. |
 | 8i | Delete the Go MCP tree + rewire the seam (LAST, after 8a–8g proven) | **SHIPPED 2026-07-03** — `git rm -r backend/` (79 Go files) + `harness/pux_harness/bridge.py` (the JSON-RPC client) + `scripts/smoke_mcp.py` (81 deletions total). The seam rewired: contract rule-4 tool-resolution now resolves against the static `NATIVE_FS_TOOLS` ∪ `SPECIALIST_TOOL_NAMES` (always-on, no live-bridge probe); `graph.py` builds specialists from `build_native_specialists()` and no longer references a bridge client; `main.py --check`/`--check-contract` run with no Go server; `main.py:DEFAULT_TASKS["general"]` repointed from counting deleted Go files to counting harness Python modules (ground truth 15). `Taskfile.yml` rewritten harness-focused (all Go build/run/smoke tasks gone). **Proven E2E**: stopped the Go binary + removed its container → `pux direct --org general` with **no Go binary present** → CTO delegates via `task(researcher)` → researcher runs a single native `execute find … -name '*.py'` → returns **15 harness modules** (exact ground truth), `legacy pux_sandbox fs/shell leaked: NONE`. pytest 130/130, `--check-contract` exit 0. |
 | 9 | TUI/clients as Agent Protocol consumers (+ SSE streaming) | **ACP TRACK SHIPPED 2026-07-03** — `pux acp [--org X]` exposes `build_graph(org)` as a stdio ACP server (`harness/pux_harness/acp.py`, `deepagents-acp` `AgentServerACP(agent=factory)`); the editor (Zed / VS Code via vscode-acp / Neovim) IS the TUI — zero UI code. Org fixed at startup (`--org`→`$PUX_ORG`→`general`); factory caches the first build, sessions keyed by `thread_id=session_id` in `MemorySaver`; sandbox self-boots lazily. `test_acp.py` proves initialize+new_session over stdio (no tokens, no Docker). **Proven E2E** (`pux acp --org general` over stdio with glm-5.2): `prompt`→`stop_reason=end_turn`, 101 `session/update` frames streamed, CTO delegates via `task(researcher)`→native `execute find … -name '*.py'` (lazy sandbox boot)→verbatim **16 harness modules** (incl. the new `acp.py`); zero agent-side errors. Deferred: pux-serve SSE streaming + a terminal client of `pux serve` (Track 2/3) — ACP-first per the Phase-9 decision; the langgraph-api/Studio path remains reversible behind the same REST contract. |
-| 10 | Declarative subagent vocabulary (rich `SubAgent` frontmatter) | **SHIPPED 2026-07-04** — frontmatter parser upgraded from the hand-rolled scalar splitter to real YAML (`orgs._split_frontmatter` → `yaml.safe_load`), so the full deepagents `SubAgent` vocabulary is expressible in `.pi/agents/<slug>.md`. `orgs.load_subagents` resolves five rich optional fields: `model` (via our `get_model` → `ChatOpenAI` instance, NOT `init_chat_model` which can't carry our base_url/api_key; omit → inherit parent), `skills` (project-relative skills-ROOT path → container-absolute `/sandbox/workspace/<path>`, activates `SkillsMiddleware` which scans the root for `<skill>/SKILL.md`; a source is a ROOT not an individual skill dir), `response_format` (JSON-schema dict passthrough), `permissions` (`list[FilesystemPermission]`, path-validated), `interrupt_on` (`dict[str,bool]`). `middleware` deliberately NOT passed (Phase 7: `SubAgentMiddleware` doesn't round-trip it). Contract gains offline validators for all five (`contract._validate_rich_fields`: `model-shape`/`skill-source-shape`+`skill-source-resolves`/`response-format-shape`/`permissions-shape`/`interrupt-on-shape`) + `KNOWN_AGENT_KEYS` extended. Shipped example: `.pi/agents/researcher.md` gains `skills: .pi/skills`. pytest 148/148 (was 133; +10 contract + 5 `test_load_subagents.py`); `--check-contract` + `--check` exit 0. Surfaced + fixed two latent bugs: (1) `game-studio-narrative-designer.md` had an unquoted `Two modes: brainstorm` colon in its `description:` — invalid under real YAML; quoted it (the only broken file across all 33 agent/org `.md`); (2) the E2E smoke surfaced that deepagents' `SkillsMiddleware` resolves skills against the BACKEND and treats each source as a skills-ROOT (scanning its children), so the original slug→individual-dir form silently loaded nothing — reshaped to ROOT-path semantics (`.pi/skills` → scans `source-citation/`). |
+| 10 | Declarative subagent vocabulary (rich `SubAgent` frontmatter) | **SHIPPED 2026-07-04** — frontmatter parser upgraded from the hand-rolled scalar splitter to real YAML (`orgs._split_frontmatter` → `yaml.safe_load`), so the full deepagents `SubAgent` vocabulary is expressible in `.pi/agents/<slug>.md`. `orgs.load_subagents` resolves five rich optional fields: `model` (via our `get_model` → `ChatOpenAI` instance, NOT `init_chat_model` which can't carry our base_url/api_key; omit → inherit parent), `skills` (project-relative skills-ROOT path → container-absolute `/sandbox/workspace/<path>`, activates `SkillsMiddleware` which scans the root for `<skill>/SKILL.md`; a source is a ROOT not an individual skill dir), `response_format` (JSON-schema dict passthrough), `permissions` (`list[FilesystemPermission]`, path-validated), `interrupt_on` (`dict[str,bool]`). `middleware` deliberately NOT passed (Phase 7: `SubAgentMiddleware` doesn't round-trip it). Contract gains offline validators for all five (`contract._validate_rich_fields`: `model-shape`/`skill-source-shape`+`skill-source-resolves`/`response-format-shape`/`permissions-shape`/`interrupt-on-shape`) + `KNOWN_AGENT_KEYS` extended. Shipped example: `.pi/agents/researcher.md` gains `skills: .pi/skills`. pytest 148/148 (was 133; +10 contract + 5 `test_load_subagents.py`); `--check-contract` + `--check` exit 0. Surfaced + fixed two latent bugs: (1) `game-studio-narrative-designer.md` had an unquoted `Two modes: brainstorm` colon in its `description:` — invalid under real YAML; quoted it (the only broken file across all 33 agent/org `.md`); (2) the E2E smoke surfaced that deepagents' `SkillsMiddleware` resolves skills against the BACKEND and treats each source as a skills-ROOT (scanning its children), so the original slug→individual-dir form silently loaded nothing — reshaped to ROOT-path semantics (`.pi/skills` → scans `source-citation/`). **Superseded by Phase 11** — the `.md`-frontmatter agent form and the `_validate_rich_fields` machinery were deleted; only `model`/`tools`/`skills` survived, now expressed as a Python `SUBAGENT` dict. |
+| 11 | Subagents Python-native; org roster → `org.yaml`; legacy made permanent-failure | **SHIPPED 2026-07-04** — subagent config migrated from `.pi/agents/<slug>.md` (YAML frontmatter) to deepagents-idiomatic `.pi/agents/<slug>.py` exporting a `SUBAGENT` dict (`name`/`description`/`system_prompt` + optional `tools`/`skills`/`model`), with a sibling prose-only `<slug>.md` holding the prompt. The org roster moved OFF `orgs/<name>/AGENTS.md` frontmatter into `orgs/<name>/org.yaml` (`agents: [slug, …]`); `AGENTS.md` is pure CTO-prompt prose again. `orgs.load_subagents` loads each `.py` via `importlib.util.spec_from_file_location` (path-loaded — `.pi/` stays off `sys.path`); tool/skills/model resolution stays **central** so the modules import only stdlib and stay CI/offline-safe under `--check-contract`. Audit finding drove the scope: ZERO of 22 agents used any rich field (`response_format`/`permissions`/`interrupt_on`) — the entire Phase-10 rich-field resolver machinery resolved nothing, so it was deleted (only `model`/`tools`/`skills` survived). **No legacy left behind (the user's standing rule):** two PERMANENT contract tripwires block reintroduction — `no-legacy-agent-frontmatter` (no `.pi/agents/*.md` may carry YAML frontmatter) + `no-legacy-org-roster` (no `orgs/*/AGENTS.md` may carry frontmatter) — and the loader's dual-read fallback branch was deleted (provably unreachable behind the tripwires). `.gitignore` re-negated `!orgs/*/org.yaml` (the source-trap). pytest 156/156; `--check-contract` exit 0; `git archive HEAD` ships all 21 `.py` + 10 `org.yaml`. Plan: `~/.claude/plans/declarative-cooking-wolf.md`. |
 
 ## Branch strategy
 
