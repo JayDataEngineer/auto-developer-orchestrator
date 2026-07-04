@@ -245,6 +245,7 @@ def check_org(name: str) -> list[Violation]:
             if pol is not None:
                 v.extend(_validate_host_setup(name, pol))
                 v.extend(_validate_build_spec(name, pol))
+                v.extend(_validate_jobs(name, pol))
         elif parsed is not None:
             v.append(Violation("error", "policy-shape",
                                f"{name}: policy.yaml top-level must be a "
@@ -324,6 +325,44 @@ def _validate_build_spec(name: str, pol: policy_mod.Policy) -> list[Violation]:
             v.append(Violation("error", "sandbox-build-shape",
                                f"{name}: sandbox.build context "
                                f"{spec.context!r} not found at {context}"))
+    return v
+
+
+def _validate_jobs(name: str, pol: policy_mod.Policy) -> list[Violation]:
+    """Offline validation of jobs: each has a name + script; script resolves
+    under the project root and exists; timeout is a non-negative integer;
+    names are unique. Mirrors the runner's checks so a broken job spec fails
+    --check-contract before Docker."""
+    v: list[Violation] = []
+    specs = policy_mod.job_specs(pol)
+    if not specs:
+        return v
+    project_root = _orgs_dir().parent
+    seen_names: set[str] = set()
+    for spec in specs:
+        jname = spec.name or "<unnamed>"
+        if not spec.name:
+            v.append(Violation("error", "jobs-shape",
+                               f"{name}: job entry missing 'name'"))
+        if spec.name in seen_names:
+            v.append(Violation("error", "jobs-shape",
+                               f"{name}: duplicate job name {spec.name!r}"))
+        seen_names.add(spec.name)
+        if not spec.script:
+            v.append(Violation("error", "jobs-shape",
+                               f"{name}/{jname}: job entry missing 'script'"))
+            continue
+        script = Path(spec.script)
+        if not script.is_absolute():
+            script = project_root / spec.script
+        if not script.is_file():
+            v.append(Violation("error", "jobs-script-missing",
+                               f"{name}/{jname}: script "
+                               f"{spec.script!r} not found at {script}"))
+        if spec.timeout < 0:
+            v.append(Violation("error", "jobs-shape",
+                               f"{name}/{jname}: timeout must be >= 0, "
+                               f"got {spec.timeout}"))
     return v
 
 

@@ -458,3 +458,79 @@ def test_build_validator_missing_dockerfile(fake_tree):
         "    context: orgs/cookbook\n"))
     vs = check_org("cookbook")
     assert any(v.rule == "sandbox-build-shape" for v in vs), vs
+
+
+def test_jobs_validator_missing_script(fake_tree, tmp_path):
+    """A job whose script doesn't exist fails --check-contract."""
+    add_org, _ = fake_tree
+    add_org("cookbook", policy=(
+        "jobs:\n"
+        "  - name: diarize\n"
+        "    script: orgs/cookbook/sandbox/diarize.py\n"
+        "    timeout: 3600\n"))
+    vs = check_org("cookbook")
+    assert any(v.rule == "jobs-script-missing" for v in vs), vs
+
+
+def test_jobs_validator_missing_name(fake_tree, tmp_path):
+    """A job without a name fails --check-contract."""
+    add_org, _ = fake_tree
+    # Create the script so it doesn't fail for missing script
+    script_dir = tmp_path / "orgs" / "cookbook" / "sandbox"
+    script_dir.mkdir(parents=True)
+    (script_dir / "diarize.py").write_text("# fake")
+    add_org("cookbook", policy=(
+        "jobs:\n"
+        "  - script: orgs/cookbook/sandbox/diarize.py\n"
+        "    timeout: 3600\n"))
+    vs = check_org("cookbook")
+    assert any(v.rule == "jobs-shape" and "missing 'name'" in v.message for v in vs), vs
+
+
+def test_jobs_validator_duplicate_names(fake_tree, tmp_path):
+    """Duplicate job names fail --check-contract."""
+    add_org, _ = fake_tree
+    script_dir = tmp_path / "orgs" / "cookbook" / "sandbox"
+    script_dir.mkdir(parents=True)
+    (script_dir / "a.py").write_text("# fake")
+    (script_dir / "b.py").write_text("# fake")
+    add_org("cookbook", policy=(
+        "jobs:\n"
+        "  - name: diarize\n"
+        "    script: orgs/cookbook/sandbox/a.py\n"
+        "  - name: diarize\n"
+        "    script: orgs/cookbook/sandbox/b.py\n"))
+    vs = check_org("cookbook")
+    assert any(v.rule == "jobs-shape" and "duplicate" in v.message for v in vs), vs
+
+
+def test_jobs_validator_negative_timeout(fake_tree, tmp_path):
+    """Negative timeout fails --check-contract."""
+    add_org, _ = fake_tree
+    script_dir = tmp_path / "orgs" / "cookbook" / "sandbox"
+    script_dir.mkdir(parents=True)
+    (script_dir / "a.py").write_text("# fake")
+    add_org("cookbook", policy=(
+        "jobs:\n"
+        "  - name: run\n"
+        "    script: orgs/cookbook/sandbox/a.py\n"
+        "    timeout: -5\n"))
+    vs = check_org("cookbook")
+    assert any(v.rule == "jobs-shape" and "timeout" in v.message for v in vs), vs
+
+
+def test_jobs_validator_valid_spec_passes(fake_tree, tmp_path):
+    """A valid job spec passes --check-contract."""
+    add_org, _ = fake_tree
+    script_dir = tmp_path / "orgs" / "cookbook" / "sandbox"
+    script_dir.mkdir(parents=True)
+    (script_dir / "diarize.py").write_text("# fake")
+    add_org("cookbook", policy=(
+        "jobs:\n"
+        "  - name: diarize\n"
+        "    script: orgs/cookbook/sandbox/diarize.py\n"
+        "    timeout: 3600\n"
+        "    description: \"Diarize audio files\"\n"))
+    vs = check_org("cookbook")
+    job_vs = [v for v in vs if v.rule.startswith("jobs")]
+    assert not job_vs, f"unexpected job violations: {job_vs}"

@@ -606,3 +606,49 @@ fi
 # Save list of installed packages (for reinstallation on next start)
 dpkg-query -W -f='${Package}\n' 2>/dev/null | sort > /sandbox/persist/installed-packages.txt
 echo "Saved $(wc -l < /sandbox/persist/installed-packages.txt) packages list"""
+
+
+# --- prepare (post-create, pre-agent jobs) ----------------------------------
+
+
+def prepare(
+    org: str,
+    project_path: str | None = None,
+    exec_client: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Run post-create, pre-agent prep jobs inside the sandbox container.
+
+    Called by entry points (main.py, server.py) after ``ensure()``, before
+    ``graph.ainvoke()``. Returns a list of result dicts for logging/display.
+
+    Idempotency is delegated to the scripts themselves (file caches +
+    SurrealDB UPSERTs make repeat runs cheap).
+
+    Uses lazy imports to avoid circular dependency with docker_exec.
+    """
+    from pux_harness.sandbox.docker_exec import DockerExecClient  # noqa: PLC0415
+    from pux_harness.sandbox.jobs import run_jobs  # noqa: PLC0415
+
+    if not project_path:
+        project_path = resolve_project_path()
+
+    try:
+        pol = policy.load(org, project_path)
+    except policy.NoPolicy:
+        return []
+
+    specs = policy.job_specs(pol)
+    if not specs:
+        return []
+
+    if exec_client is None:
+        sb = SandboxContainer(project_path=project_path, org=org)
+        container_name = sb.ensure()
+        exec_client = DockerExecClient(container=container_name)
+
+    results = run_jobs(pol, exec_client)
+    return [
+        {"name": r.name, "status": r.status, "error": r.error,
+         "duration": round(r.duration, 1)}
+        for r in results
+    ]

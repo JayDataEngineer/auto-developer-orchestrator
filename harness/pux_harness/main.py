@@ -154,6 +154,17 @@ def _trace(messages: list) -> None:
 
 async def _run(org: str, task: str, recursion_limit: int) -> None:
     agent, backend = _build_agent(org)
+    # Run prep jobs after container is up, before the agent loop.
+    from pux_harness.sandbox.container import prepare  # noqa: PLC0415
+    job_results = prepare(org, exec_client=backend.exec_client)
+    if job_results:
+        failed = [r for r in job_results if r["status"] != "ok"]
+        for r in job_results:
+            tag = "ok" if r["status"] == "ok" else "FAIL"
+            print(f"  [job] {r['name']:<24} {tag} {r['duration']}s"
+                  + (f"  {r['error'][:80]}" if r.get("error") else ""))
+        if failed:
+            print(f"\n  {len(failed)} prep job(s) failed (continuing to agent)")
     print(f"[org] {org}   [task] {task}\n")
     result = await agent.ainvoke(
         {"messages": [{"role": "user", "content": task}]},

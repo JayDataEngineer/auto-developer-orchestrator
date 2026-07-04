@@ -326,6 +326,20 @@ async def run_ephemeral(body: EphemeralRun) -> dict[str, Any]:
 
 async def _run_task(run_id: str, org: str, thread_id: str, raw_input: Any, rl: int) -> None:
     app.state.run_meta[run_id]["status"] = "running"
+    # Run prep jobs after container is up, before the agent loop.
+    try:
+        from pux_harness.sandbox.container import prepare  # noqa: PLC0415
+        job_results = prepare(org)
+        if job_results:
+            failed = [r for r in job_results if r["status"] != "ok"]
+            if failed:
+                app.state.run_meta[run_id].setdefault("warnings", [])
+                app.state.run_meta[run_id]["warnings"] = [
+                    f"job {r['name']}: {r['status']}" for r in failed
+                ]
+    except Exception as exc:  # noqa: BLE001
+        # Jobs failing shouldn't block the agent run — warn only.
+        pass
     try:
         answer = await _execute(org, thread_id, raw_input, rl)
         app.state.run_meta[run_id].update(status="success", output=answer, error=None)
