@@ -1,4 +1,5 @@
-"""The harness owns the Docker sandbox lifecycle (Phase 8g).
+"""The harness owns the Docker sandbox lifecycle (Phase 8g create/stop;
+Phase 13 host_setup + image build).
 
 A faithful 1:1 port of the Go binary's CLI-mode container lifecycle —
 ``backend/cmd/mcpserver/main.go::runRun`` → ``sandbox.Manager.CreateSandbox``
@@ -12,12 +13,23 @@ The Go paths that are NOT ported carry nothing the harness needs:
   - ``CopyToSandbox``/``PipInstall``/``WriteEnvFile`` — the harness has native
     ``write_file`` / ``execute`` equivalents.
 
+Phase 13 extended ``create()`` with two pre-Docker steps run BEFORE the live
+container is created: ``host_setup`` hooks run on the host first
+(``sandbox/host_setup.py`` — cached uv venv at ``<project>/.pux/venvs/<name>/``,
+captured stdout → env exports, injected into ``os.environ`` BEFORE
+``validate_env`` so a hook can satisfy a required cred), then ``_ensure_image``
+builds the image via ``client.images.build`` when ``policy.sandbox.build`` is set
++ the image is absent (else the existing pull-if-absent). No operator
+``bootstrap.sh`` / ``docker-compose.yml`` — the harness is the ONE container
+path, so policy is enforced by construction.
+
 ``create()`` reproduces the live container byte-for-byte (verified against the
 inspect of ``orchestrator-sandbox-mcp-default`` 2026-07-03: runc, shared-infra,
 2GB/2cpu/512pids, the 5 binds, the 3 ``openshell.*`` labels):
 
   image        ``OPENSHELL_IMAGE`` env | ``pux-sandbox:latest`` (policy
-               ``sandbox.image`` override wins); pulled if absent.
+               ``sandbox.image`` override wins); built via ``policy.sandbox.build``
+               if set + absent (Phase 13), else pulled if absent.
   labels       ``openshell.policy`` / ``openshell.sandbox-id`` /
                ``openshell.project-path`` — the label the exec path filters on.
   binds        ``<project>:/sandbox/workspace``,
@@ -58,9 +70,9 @@ from pathlib import Path
 from typing import Any
 
 import docker
-from docker.errors import APIError, ImageNotFound, NotFound
+from docker.errors import APIError, BuildError, ImageNotFound, NotFound
 
-from pux_harness.sandbox import policy
+from pux_harness.sandbox import host_setup, policy
 
 log = logging.getLogger("pux.container")
 
@@ -322,17 +334,29 @@ class SandboxContainer:
         running container for this project (call ``ensure`` for the gated path)."""
         pol, effective_tier = self._resolve_policy()
 
-        # Validate required creds BEFORE touching Docker (cheapest, fails fast,
-        # no container leak). Resolve mounts too (unset ${VAR} fails loud).
         if pol is not None:
+            # host_setup runs FIRST (before validate_env): its exports populate
+            # the process env so the existing credentials.required /
+            # browser.cookies_env / env_vars / seed-cookies.sh chain consumes
+            # them UNCHANGED — one mechanism, not two. No-op with no hooks.
+            exports = host_setup.run_host_setup(pol, self.project_path)
+            if exports:
+                os.environ.update(exports)
+                log.info("host_setup exported %d env var(s): %s",
+                         len(exports), sorted(exports))
+
+            # Validate required creds BEFORE touching Docker (cheapest, fails
+            # fast, no container leak). Resolve mounts too (unset ${VAR} fails
+            # loud). Runs AFTER host_setup so creds the hooks produced are seen.
             policy.validate_env(pol)
             policy.resolve_mounts(pol)  # raises UnresolvedMount on first unset
 
-        # Image: policy sandbox.image override wins; else env/default. Pull if absent.
+        # Image: policy sandbox.image override wins; else env/default. Build when
+        # sandbox.build is set + image absent; else pull if absent.
         image = _env_str("OPENSHELL_IMAGE", DEFAULT_IMAGE)
         if pol is not None and pol.sandbox.image:
             image = pol.sandbox.image
-        self._ensure_image(image)
+        self._ensure_image(image, policy.build_spec(pol))
 
         env = self._build_env(pol)
         binds = self._build_binds(pol)
@@ -433,15 +457,39 @@ class SandboxContainer:
         self._name = self.name
         return self.name
 
-    def _ensure_image(self, image: str) -> None:
+    def _ensure_image(
+        self, image: str, build: policy.BuildSpec | None = None
+    ) -> None:
+        """Guarantee ``image`` exists locally. If already present, return. If
+        absent AND a ``build`` spec is set, build it from the org's Dockerfile
+        (host-side Docker SDK, no compose); else pull. ``build.dockerfile`` is
+        project-relative (or absolute); ``build.context`` defaults to the
+        Dockerfile's directory when blank. The ``dockerfile`` arg passed to the
+        SDK is the basename — it's resolved relative to the build context."""
         try:
             self.client.images.get(image)
+            return
         except ImageNotFound:
-            log.info("pulling image %s", image)
+            pass
+        if build is not None:
+            dockerfile_path = Path(build.dockerfile)
+            context = build.context or str(dockerfile_path.parent)
+            if not Path(context).is_absolute():
+                context = str(Path(self.project_path) / context)
+            log.info("building image %s (dockerfile=%s context=%s)",
+                     image, build.dockerfile, context)
             try:
-                self.client.images.pull(image)
-            except APIError as exc:
-                raise ContainerError(f"pull image {image}: {exc}") from exc
+                self.client.images.build(
+                    path=context, dockerfile=dockerfile_path.name, tag=image
+                )
+            except (APIError, BuildError) as exc:
+                raise ContainerError(f"build image {image}: {exc}") from exc
+            return
+        log.info("pulling image %s", image)
+        try:
+            self.client.images.pull(image)
+        except APIError as exc:
+            raise ContainerError(f"pull image {image}: {exc}") from exc
 
     def _exec(self, container: docker.models.containers.Container, cmd: str) -> None:
         """Best-effort exec after start; non-zero exit is logged not fatal."""

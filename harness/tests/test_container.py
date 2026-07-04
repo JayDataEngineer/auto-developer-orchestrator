@@ -161,3 +161,148 @@ def test_build_env_no_policy_has_no_creds():
     env = sb._build_env(None)
     # No policy → only the 6 base vars, no injected creds/cookies.
     assert len(env) == 6
+
+
+# --- host_setup ordering in create() (Phase 13) -------------------------------
+# create() must run host_setup BEFORE validate_env, so creds the hooks produce
+# (e.g. TWITTER_COOKIES_B64) are visible to the existing cred/cookie chain.
+# Proven via a recorder: host_setup records + returns {}, validate_env records
+# + raises a sentinel — so create() aborts before touching Docker, and the
+# recorder shows the order.
+
+
+class _AbortBeforeDocker(Exception):
+    pass
+
+
+def test_create_runs_host_setup_before_validate_env(monkeypatch):
+    order: list[str] = []
+
+    def fake_host_setup(pol, root):
+        order.append("host_setup")
+        return {}  # no exports → os.environ.update skipped, validate_env still runs
+
+    def fake_validate(pol, env=None):
+        order.append("validate_env")
+        raise _AbortBeforeDocker  # stop create() before any Docker call
+
+    monkeypatch.setattr(C.host_setup, "run_host_setup", fake_host_setup)
+    monkeypatch.setattr(C.policy, "validate_env", fake_validate)
+
+    sb = C.SandboxContainer(org="x", project_path="/proj")
+    monkeypatch.setattr(
+        sb,
+        "_resolve_policy",
+        lambda: (
+            C.policy.Policy(
+                host_setup=[
+                    C.policy.HostSetupHook(
+                        name="h", helper_script="x.py", exports={"X": "stdout"}
+                    )
+                ]
+            ),
+            "isolated",
+        ),
+    )
+    with pytest.raises(_AbortBeforeDocker):
+        sb.create()
+    assert order == ["host_setup", "validate_env"]
+
+
+def test_create_exports_flow_into_environ(monkeypatch):
+    # host_setup's exports are os.environ.update'd so the cred/cookie chain sees
+    # them. Proven by capturing os.environ inside fake_validate.
+    seen: dict[str, str] = {}
+
+    def fake_host_setup(pol, root):
+        return {"TWITTER_COOKIES_B64": "FROM-HOOK"}
+
+    def fake_validate(pol, env=None):
+        seen["TWITTER_COOKIES_B64"] = os.environ.get("TWITTER_COOKIES_B64", "")
+        raise _AbortBeforeDocker
+
+    monkeypatch.setattr(C.host_setup, "run_host_setup", fake_host_setup)
+    monkeypatch.setattr(C.policy, "validate_env", fake_validate)
+    sb = C.SandboxContainer(org="x", project_path="/proj")
+    monkeypatch.setattr(
+        sb,
+        "_resolve_policy",
+        lambda: (C.policy.Policy(host_setup=[C.policy.HostSetupHook(name="h")]), "isolated"),
+    )
+    with pytest.raises(_AbortBeforeDocker):
+        sb.create()
+    assert seen["TWITTER_COOKIES_B64"] == "FROM-HOOK"
+
+
+# --- _ensure_image build path (Phase 13) --------------------------------------
+
+
+class _FakeImages:
+    def __init__(self, *, present=False):
+        self.present = present
+        self.built: dict = {}
+        self.pulled: list[str] = []
+
+    def get(self, image):
+        if self.present:
+            return object()
+        raise C.ImageNotFound(image)
+
+    def build(self, *, path, dockerfile, tag):
+        self.built = dict(path=path, dockerfile=dockerfile, tag=tag)
+
+    def pull(self, image):
+        self.pulled.append(image)
+
+
+class _FakeClient:
+    def __init__(self, images):
+        self.images = images
+
+
+def test_ensure_image_builds_when_spec_set_and_absent():
+    images = _FakeImages(present=False)
+    sb = C.SandboxContainer(
+        org="x", project_path="/proj", client=_FakeClient(images)
+    )
+    build = C.policy.BuildSpec(
+        dockerfile="orgs/video-production/Dockerfile",
+        context="orgs/video-production",
+    )
+    sb._ensure_image("vp:latest", build)
+    assert images.built["tag"] == "vp:latest"
+    assert images.built["dockerfile"] == "Dockerfile"  # basename, relative to ctx
+    assert images.built["path"] == os.path.join("/proj", "orgs/video-production")
+    assert images.pulled == []  # build, not pull
+
+
+def test_ensure_image_context_defaults_to_dockerfile_dir():
+    images = _FakeImages(present=False)
+    sb = C.SandboxContainer(
+        org="x", project_path="/proj", client=_FakeClient(images)
+    )
+    # No context → defaults to the Dockerfile's parent, resolved project-relative.
+    build = C.policy.BuildSpec(dockerfile="orgs/video-production/Dockerfile")
+    sb._ensure_image("vp:latest", build)
+    assert images.built["path"] == os.path.join("/proj", "orgs/video-production")
+    assert images.built["dockerfile"] == "Dockerfile"
+
+
+def test_ensure_image_present_skips_build_and_pull():
+    images = _FakeImages(present=True)
+    sb = C.SandboxContainer(
+        org="x", project_path="/proj", client=_FakeClient(images)
+    )
+    sb._ensure_image("vp:latest", C.policy.BuildSpec(dockerfile="x/Dockerfile"))
+    assert images.built == {}
+    assert images.pulled == []
+
+
+def test_ensure_image_pulls_when_no_build_spec():
+    images = _FakeImages(present=False)
+    sb = C.SandboxContainer(
+        org="x", project_path="/proj", client=_FakeClient(images)
+    )
+    sb._ensure_image("pux-sandbox:latest", None)
+    assert images.pulled == ["pux-sandbox:latest"]
+    assert images.built == {}

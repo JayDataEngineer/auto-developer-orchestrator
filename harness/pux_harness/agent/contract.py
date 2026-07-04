@@ -70,9 +70,11 @@ _REQUIRED_AGENT_KEYS: frozenset[str] = frozenset({
     "name", "description", "system_prompt",
 })
 
-# Optional ``orgs/<name>/policy.yaml`` top-level sections (matches Go policy.go).
+# Optional ``orgs/<name>/policy.yaml`` top-level sections. ``host_setup`` is
+# harness-added (no Go equivalent) — the host-side prep-hook list (Phase 13).
+# ``build`` is a sub-key under ``sandbox``, NOT a top-level section.
 KNOWN_POLICY_SECTIONS: frozenset[str] = frozenset({
-    "workspace", "egress", "credentials", "sandbox", "browser",
+    "workspace", "egress", "credentials", "sandbox", "browser", "host_setup",
 })
 
 # Native fs/shell tools deepagents exposes via the backend (Phase 3). Accepted
@@ -230,6 +232,7 @@ def check_org(name: str) -> list[Violation]:
                                    f"{name}: policy.yaml unknown sections "
                                    f"{bad}; allowed: "
                                    f"{sorted(KNOWN_POLICY_SECTIONS)}"))
+            pol = None
             try:
                 pol = policy_mod.load(name, _orgs_dir().parent)
                 policy_mod.resolve_mounts(pol)
@@ -238,11 +241,88 @@ def check_org(name: str) -> list[Violation]:
                                    f"{name}: policy.yaml schema error: {e}"))
             except policy_mod.NoPolicy:
                 pass
+            if pol is not None:
+                v.extend(_validate_host_setup(name, pol))
+                v.extend(_validate_build_spec(name, pol))
         elif parsed is not None:
             v.append(Violation("error", "policy-shape",
                                f"{name}: policy.yaml top-level must be a "
                                f"mapping, got {type(parsed).__name__}"))
 
+    return v
+
+
+# --- host_setup + sandbox.build validators (Phase 13, offline) ---------------
+
+# Allowed values in a host_setup hook's ``exports`` mapping. Mirrors the runtime
+# check in ``sandbox/host_setup.py`` — kept here (not imported) so the contract
+# stays decoupled from the runner module.
+_EXPORT_SOURCES = frozenset({"stdout"})
+
+
+def _validate_host_setup(name: str, pol: policy_mod.Policy) -> list[Violation]:
+    """Offline validation of every host_setup hook: each has a name +
+    helper_script; helper_script resolves under the project root and exists;
+    export sources ⊆ {stdout}; python_deps is a list of strings. Mirrors the
+    runner's own checks so a broken hook fails --check-contract before Docker."""
+    v: list[Violation] = []
+    hooks = policy_mod.host_setup_hooks(pol)
+    if not hooks:
+        return v
+    project_root = _orgs_dir().parent
+    for hook in hooks:
+        hname = hook.name or "<unnamed>"
+        if not hook.name:
+            v.append(Violation("error", "host-setup-shape",
+                               f"{name}: host_setup hook missing 'name'"))
+        if not hook.helper_script:
+            v.append(Violation("error", "host-setup-shape",
+                               f"{name}/{hname}: host_setup hook missing 'helper_script'"))
+            continue
+        script = Path(hook.helper_script)
+        if not script.is_absolute():
+            script = project_root / hook.helper_script
+        if not script.is_file():
+            v.append(Violation("error", "host-setup-helper-missing",
+                               f"{name}/{hname}: helper_script "
+                               f"{hook.helper_script!r} not found at {script}"))
+        bad = sorted({s for s in hook.exports.values() if s not in _EXPORT_SOURCES})
+        if bad:
+            v.append(Violation("error", "host-setup-shape",
+                               f"{name}/{hname}: unsupported export source(s) {bad}; "
+                               f"allowed: {sorted(_EXPORT_SOURCES)}"))
+        if not isinstance(hook.python_deps, list) or not all(
+            isinstance(d, str) for d in hook.python_deps
+        ):
+            v.append(Violation("error", "host-setup-shape",
+                               f"{name}/{hname}: python_deps must be a list of strings"))
+    return v
+
+
+def _validate_build_spec(name: str, pol: policy_mod.Policy) -> list[Violation]:
+    """Offline validation of sandbox.build: dockerfile resolves under the
+    project root and exists; context (if set) is a dir. Mirrors the runner's
+    build path so a broken build spec fails --check-contract before Docker."""
+    v: list[Violation] = []
+    spec = policy_mod.build_spec(pol)
+    if spec is None:
+        return v
+    project_root = _orgs_dir().parent
+    dockerfile = Path(spec.dockerfile)
+    if not dockerfile.is_absolute():
+        dockerfile = project_root / spec.dockerfile
+    if not dockerfile.is_file():
+        v.append(Violation("error", "sandbox-build-shape",
+                           f"{name}: sandbox.build dockerfile "
+                           f"{spec.dockerfile!r} not found at {dockerfile}"))
+    if spec.context:
+        context = Path(spec.context)
+        if not context.is_absolute():
+            context = project_root / spec.context
+        if not context.is_dir():
+            v.append(Violation("error", "sandbox-build-shape",
+                               f"{name}: sandbox.build context "
+                               f"{spec.context!r} not found at {context}"))
     return v
 
 
@@ -279,6 +359,30 @@ def _no_legacy_agent_frontmatter() -> list[Violation]:
     return v
 
 
+def _no_legacy_sandbox_artifacts() -> list[Violation]:
+    """No ``orgs/<name>/{bootstrap.sh,docker-compose.yml,docker-compose.override.yml}``
+    may ship — the harness owns the full sandbox lifecycle now (Phase 13; the
+    frozen bash/compose shadow lifecycle was deleted). Permanent tripwire
+    (no-legacy-left-behind): a future re-introduction is a HARD failure, not a
+    silent regression — mirroring ``no-legacy-agent-frontmatter`` /
+    ``no-legacy-org-roster``."""
+    v: list[Violation] = []
+    orgs = _orgs_dir()
+    if not orgs.is_dir():
+        return v
+    for org_dir in sorted(orgs.iterdir()):
+        if not org_dir.is_dir():
+            continue
+        for art in ("bootstrap.sh", "docker-compose.yml", "docker-compose.override.yml"):
+            if (org_dir / art).is_file():
+                v.append(Violation(
+                    "error", "no-legacy-sandbox-artifacts",
+                    f"orgs/{org_dir.name}/{art}: the harness owns the sandbox "
+                    f"lifecycle now (policy.yaml host_setup + sandbox.build); "
+                    f"this bash/compose artifact must be deleted"))
+    return v
+
+
 def check_harness() -> list[Violation]:
     """Rule 6 (no hardcoded org->agent manifest) + rule 7 (no orphan agents)
     + permanent legacy tripwires. Global — not per-org."""
@@ -294,6 +398,7 @@ def check_harness() -> list[Violation]:
                            f"agent {orphan!r} is owned by no org (not in any "
                            f"`agents:` frontmatter)"))
     v.extend(_no_legacy_agent_frontmatter())
+    v.extend(_no_legacy_sandbox_artifacts())
     return v
 
 

@@ -259,9 +259,14 @@ validate; it's a pytest gate too.
 
 ## Lifecycle (`pux sandbox start` / `stop` / `status`)
 
-The Docker sandbox lifecycle is **harness-owned** (Phase 8g). The Go
-`task start/stop/status` surface is gone; `pux sandbox <cmd>` drives
-`SandboxContainer` directly.
+The Docker sandbox lifecycle is **fully harness-owned** (Phase 8g create/stop;
+Phase 13 host_setup + image build). There is **no operator `bootstrap.sh` or
+`docker-compose.yml`** — the per-org bash/compose shadow lifecycle was deleted
+(Phase 13) and made a permanent contract failure
+(`no-legacy-sandbox-artifacts`). The Go `task start/stop/status` surface is
+gone; `pux sandbox <cmd>` drives `SandboxContainer` directly — the ONE container
+path, so policy is enforced by construction (no externally-booted container can
+sneak past `create()`).
 
 | Subcommand | Behavior |
 |-----------|----------|
@@ -491,9 +496,10 @@ runs, so click by `(x, y)` from the latest `desktop_screenshot`.
 ## Sandbox policy (declarative, opt-in per org)
 
 `orgs/<name>/policy.yaml` is the per-org enforcement contract. Presence
-opts that org into five independent layers; absence = today's behavior
+opts that org into seven independent layers; absence = today's behavior
 (full egress, root-owning writes, no required creds, default image +
-tier). All five sections optional — declare only what you need.
+tier, no host hooks, no image build). All seven sections optional —
+declare only what you need.
 
 ```yaml
 # orgs/<name>/policy.yaml
@@ -517,9 +523,12 @@ credentials:
 
 sandbox:
   image: my-org-sandbox:latest      # override pux-sandbox:latest (specialist
-                                    # deps: manim, kokoro, etc). Tag must
-                                    # exist locally. See video-production for
-                                    # a shipped example.
+                                    # deps: manim, kokoro, etc). Built by
+                                    # `build` if set, else must exist locally.
+                                    # See video-production for a shipped example.
+  build:                            # build the image on first start if absent
+    dockerfile: orgs/<name>/Dockerfile   # project-relative
+    context: orgs/<name>                 # project-relative build context
   tier: isolated                    # override caller-supplied tier.
                                     # isolated = bridge network + egress ACLs
                                     # bridged  = host net (skips ACLs)
@@ -529,6 +538,20 @@ browser:
                                     # as env var. seed-cookies.sh (priority 80)
                                     # decodes + POSTs to sb_server.py /cookies.
                                     # Cookies NEVER touch disk in container.
+
+host_setup:                         # host-side hooks run BEFORE create(), each
+                                    # in a cached uv venv (<project>/.pux/venvs/
+                                    # <name>/). Captured stdout → env exports,
+                                    # injected into the harness env BEFORE
+                                    # validate_env (so a hook can satisfy a
+                                    # required cred). See twitter-agent (extracts
+                                    # flatpak-Brave cookies → TWITTER_COOKIES_B64).
+  - name: extract_twitter_cookies
+    helper_script: orgs/_shared/sandbox/extract_browser_cookies.py
+    python_deps: [browser-cookie3, pycryptodome, jeepney]
+    args: [--browser, brave, --domain, x.com, --b64]
+    exports:
+      TWITTER_COOKIES_B64: stdout   # captured stdout → env var
 ```
 
 **Pipeline** — `harness/pux_harness/sandbox/policy.py` is the *resolver* (ported 1:1
@@ -542,18 +565,23 @@ without touching Docker.
 1. `--org X` → harness sets `PUX_ORG=X` in env
 2. `container.SandboxContainer._resolve_policy()` reads `PUX_ORG`, calls
    `policy.load(X, projectRoot)`
-3. `policy.validate_env` checks required creds present → fail loud BEFORE Docker
-4. `policy.resolve_mounts` expands `${VAR}` placeholders → fail loud if unset
-5. Required + optional creds + `cookies_env` value + `SEED_COOKIES_ENV` pointer
+3. `host_setup.run_host_setup` runs each host hook in a cached uv venv, captures
+   stdout → env exports, `os.environ.update(exports)` → fail loud on hook error
+   (BEFORE `validate_env`, so a hook can satisfy a required cred)
+4. `policy.validate_env` checks required creds present → fail loud BEFORE Docker
+5. `policy.resolve_mounts` expands `${VAR}` placeholders → fail loud if unset
+6. `_ensure_image`: if image absent + `sandbox.build` set → `client.images.build`
+   (project-relative context/dockerfile); else pull-if-absent
+7. Required + optional creds + `cookies_env` value + `SEED_COOKIES_ENV` pointer
    injected as `environment=[KEY=VALUE]` on the create call
-6. `run_as_host_user` → `create(user="UID:GID")`
-7. `egress.allow` non-empty → stages `<project>/.pux/egress.conf` (0600) +
+8. `run_as_host_user` → `create(user="UID:GID")`
+9. `egress.allow` non-empty → stages `<project>/.pux/egress.conf` (0600) +
    `cap_add=["NET_ADMIN"]`
-8. `sandbox.image` overrides the image used at container create
-9. `sandbox.tier` overrides the caller-supplied tier (re-evaluates gVisor)
-10. Supervisor runs `apply-egress-policy.sh` at boot priority 15:
+10. `sandbox.image` overrides the image used at container create
+11. `sandbox.tier` overrides the caller-supplied tier (re-evaluates gVisor)
+12. Supervisor runs `apply-egress-policy.sh` at boot priority 15:
     `iptables -P OUTPUT DROP` + allowlist + always allow loopback/DNS/established
-11. Supervisor runs `seed-cookies.sh` at boot priority 80 (after sb_server.py
+13. Supervisor runs `seed-cookies.sh` at boot priority 80 (after sb_server.py
     at priority 70): decodes base64 env, POSTs to `http://127.0.0.1:9876/cookies`,
     validates `count` matches.
 
@@ -585,7 +613,7 @@ become session-scoped, which is correct for the seed-at-boot use case.
 
 ## Verification
 
-**Harness contract** (`harness/tests/`, run with `uv run pytest -q` → **132
+**Harness contract** (`harness/tests/`, run with `uv run pytest -q` → **198
 passing**):
 
 - **Org contract** (`test_org_contract.py`): all 10 orgs green; rule-4
@@ -598,7 +626,12 @@ passing**):
   the researcher subagent).
 - **Policy resolver** (`test_policy.py`): mirrors the deleted Go tests.
 - **Container** (`test_container.py`): runtime decision table, cache-name
-  determinism + live-match, env defaults, URL rejection.
+  determinism + live-match, env defaults, URL rejection; `create()` runs
+  host_setup before `validate_env`; the `_ensure_image` build branch.
+- **Host setup** (`test_host_setup.py`): venv cache + install, helper stdout →
+  exports, missing-script + bad-export-source + helper/venv/install rc failures;
+  `test_org_contract.py` covers the `no-legacy-sandbox-artifacts` tripwire +
+  `_validate_host_setup`/`_validate_build_spec` offline validators.
 - **Context offload** (`test_context_offload.py`): offload threshold + the
   ctx_recall/ctx_search exempt-from-re-offload fix.
 
@@ -611,7 +644,7 @@ passing**):
 
 ## Pivot roadmap (pi-pivot branch)
 
-Phases 0–12 shipped (2026-07-04): harness + native sandbox, declarative
+Phases 0–13 shipped (2026-07-04): harness + native sandbox, declarative
 contract, TS harness deleted, Agent Protocol server + client, all 10 orgs
 ported to RUN on deepagents (Phase 5), policy engine Go→Python (Phase 6),
 proactive context-offload (Phase 7), the entire Go sandbox re-hosted in
@@ -633,6 +666,7 @@ layered subpackages (Phase 12).
 | 10 | Declarative subagent vocabulary (rich `SubAgent` frontmatter) | **SHIPPED 2026-07-04** — frontmatter parser upgraded from the hand-rolled scalar splitter to real YAML (`orgs._split_frontmatter` → `yaml.safe_load`), so the full deepagents `SubAgent` vocabulary is expressible in `.pi/agents/<slug>.md`. `orgs.load_subagents` resolves five rich optional fields: `model` (via our `get_model` → `ChatOpenAI` instance, NOT `init_chat_model` which can't carry our base_url/api_key; omit → inherit parent), `skills` (project-relative skills-ROOT path → container-absolute `/sandbox/workspace/<path>`, activates `SkillsMiddleware` which scans the root for `<skill>/SKILL.md`; a source is a ROOT not an individual skill dir), `response_format` (JSON-schema dict passthrough), `permissions` (`list[FilesystemPermission]`, path-validated), `interrupt_on` (`dict[str,bool]`). `middleware` deliberately NOT passed (Phase 7: `SubAgentMiddleware` doesn't round-trip it). Contract gains offline validators for all five (`contract._validate_rich_fields`: `model-shape`/`skill-source-shape`+`skill-source-resolves`/`response-format-shape`/`permissions-shape`/`interrupt-on-shape`) + `KNOWN_AGENT_KEYS` extended. Shipped example: `.pi/agents/researcher.md` gains `skills: .pi/skills`. pytest 148/148 (was 133; +10 contract + 5 `test_load_subagents.py`); `--check-contract` + `--check` exit 0. Surfaced + fixed two latent bugs: (1) `game-studio-narrative-designer.md` had an unquoted `Two modes: brainstorm` colon in its `description:` — invalid under real YAML; quoted it (the only broken file across all 33 agent/org `.md`); (2) the E2E smoke surfaced that deepagents' `SkillsMiddleware` resolves skills against the BACKEND and treats each source as a skills-ROOT (scanning its children), so the original slug→individual-dir form silently loaded nothing — reshaped to ROOT-path semantics (`.pi/skills` → scans `source-citation/`). **Superseded by Phase 11** — the `.md`-frontmatter agent form and the `_validate_rich_fields` machinery were deleted; only `model`/`tools`/`skills` survived, now expressed as a Python `SUBAGENT` dict. |
 | 11 | Subagents Python-native; org roster → `org.yaml`; legacy made permanent-failure | **SHIPPED 2026-07-04** — subagent config migrated from `.pi/agents/<slug>.md` (YAML frontmatter) to deepagents-idiomatic `.pi/agents/<slug>.py` exporting a `SUBAGENT` dict (`name`/`description`/`system_prompt` + optional `tools`/`skills`/`model`), with a sibling prose-only `<slug>.md` holding the prompt. The org roster moved OFF `orgs/<name>/AGENTS.md` frontmatter into `orgs/<name>/org.yaml` (`agents: [slug, …]`); `AGENTS.md` is pure CTO-prompt prose again. `orgs.load_subagents` loads each `.py` via `importlib.util.spec_from_file_location` (path-loaded — `.pi/` stays off `sys.path`); tool/skills/model resolution stays **central** so the modules import only stdlib and stay CI/offline-safe under `--check-contract`. Audit finding drove the scope: ZERO of 22 agents used any rich field (`response_format`/`permissions`/`interrupt_on`) — the entire Phase-10 rich-field resolver machinery resolved nothing, so it was deleted (only `model`/`tools`/`skills` survived). **No legacy left behind (the user's standing rule):** two PERMANENT contract tripwires block reintroduction — `no-legacy-agent-frontmatter` (no `.pi/agents/*.md` may carry YAML frontmatter) + `no-legacy-org-roster` (no `orgs/*/AGENTS.md` may carry frontmatter) — and the loader's dual-read fallback branch was deleted (provably unreachable behind the tripwires). `.gitignore` re-negated `!orgs/*/org.yaml` (the source-trap). pytest 156/156; `--check-contract` exit 0; `git archive HEAD` ships all 21 `.py` + 10 `org.yaml`. Plan: `~/.claude/plans/declarative-cooking-wolf.md`. |
 | 12 | `pux_harness/` flat → layered subpackages (`agent/` + `sandbox/` + `context/`) | **SHIPPED 2026-07-04** — the flat 15-module `pux_harness/` package was too flat to navigate; split into three layer-correct subpackages. `agent/` = the assembly layer (`graph`, `orgs`, `model`, `contract` — what builds the deepagents graph); `sandbox/` = the Docker sandbox layer (`backend`, `docker_exec`, `container`, `tools`, `policy` — self-contained, imports nothing from `agent`/`context`); `context/` = the proactive offload layer (`offload`, `store`). The four entry points (`server`/`cli`/`acp`/`main`) stay TOP-LEVEL because they're invoked as `python -m pux_harness.<name>` — moving them would break the `-m` target + every doc/Taskfile reference. Renames: `sandbox.py`→`sandbox/backend.py`, `native_tools.py`→`sandbox/tools.py`, `context_offload.py`→`context/offload.py`, `ctx_store.py`→`context/store.py`. Two migration hazards surfaced + fixed: (1) `PROJECT_ROOT = Path(__file__).resolve().parents[2]` in the 4 moved modules resolved one dir too shallow → bumped to `parents[3]` (the top-level entries keep `parents[2]`); (2) the import-rewriter's blanket `from pux_harness.sandbox import` → `from pux_harness.sandbox.backend import` pair clobbered submodule imports (`policy`/`container` are siblings of `backend`, not names IN it) → re-pointed to `from pux_harness.sandbox import <submodule>`. **Proven E2E** (`pux direct --org general`, mimo-v2.5): CTO `task(researcher)` → native `execute find … -name '*.py'` → **19 modules** (was 16; +3 `__init__.py`), correct subpackage breakdown, `legacy pux_sandbox fs/shell leaked: NONE`. pytest 165/165; `--check-contract` + `--check` exit 0. No behavior change — pure file move. |
+| 13 | Per-org sandbox layer remade in the harness (delete bash/compose shadow lifecycle) | **SHIPPED 2026-07-04** — the per-org `bootstrap.sh` + `docker-compose.yml` shadow lifecycle (6+6 frozen artifacts, NEVER migrated — their generator was deleted in Phase 8i, leaving them un-regenerable) is deleted outright. Two new declarative capabilities in `policy.yaml`: `host_setup` (host-side hooks run BEFORE `create()` in a cached uv venv at `<project>/.pux/venvs/<name>/`, captured stdout → env exports, injected into the harness env before `validate_env` — so a hook can satisfy a required cred; `sandbox/host_setup.py`) and `sandbox.build` (build the image via `client.images.build` when absent, project-relative context/dockerfile; extends `_ensure_image`). `container.py::create()` runs `host_setup` before `validate_env`, then `_ensure_image(policy.build_spec(...))`. twitter-agent + social-media-pipeline migrated to `host_setup: extract_twitter_cookies` (same shared helper `orgs/_shared/sandbox/extract_browser_cookies.py` — social-media cross-posts to Twitter so it needs the same hook); video-production migrated to `sandbox.build`. **No-legacy-left-behind:** PERMANENT contract tripwire `no-legacy-sandbox-artifacts` (no `orgs/*/{bootstrap.sh,docker-compose.yml,docker-compose.override.yml}`) + offline `_validate_host_setup`/`_validate_build_spec` validators; the loader has no fallback. AGENTS.md prose updated (twitter + social-media). **Proven E2E:** `host_setup` extracts a real **4017-byte** twitter cookie bundle on this host (venv → install → helper → stdout → export); `general` regression → **20 modules** (was 19; +1 `host_setup.py`), legacy leak NONE; the video-production image already exists + runs healthy, so the build branch is unit-tested (`test_container.py::_ensure_image`). pytest **198/198**; `--check-contract` exit 0. Plan: `~/.claude/plans/declarative-cooking-wolf.md`. |
 
 ## Branch strategy
 
@@ -668,6 +702,10 @@ Dropped (deepagents does it natively, or wasn't pulling weight):
   Bubble Tea TUI~~ — replaced by deepagents + the Agent Protocol server
 - ~~Go MCP server (`backend/`) + `bridge.py` JSON-RPC client + `smoke_mcp.py`~~ —
   the entire Go sandbox re-hosted in Python then deleted (Phase 8a–8i)
+- ~~Per-org `bootstrap.sh` + `docker-compose.yml` shadow lifecycle~~ — the
+  harness owns the full lifecycle now; `policy.yaml` `host_setup` + `sandbox.build`
+  cover host hooks + image builds (Phase 13; permanent
+  `no-legacy-sandbox-artifacts` tripwire)
 - ~~TOML org config~~ — replaced by per-org `AGENTS.md` markdown
 
 Deferred (might land later if a concrete need emerges):

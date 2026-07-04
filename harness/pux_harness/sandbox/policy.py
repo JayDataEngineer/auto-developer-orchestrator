@@ -120,14 +120,44 @@ class Credentials:
 
 
 @dataclass
+class BuildSpec:
+    """``sandbox.build`` — build the org's custom sandbox image before create
+    if absent. Paths are project-relative; resolved + existence-checked by the
+    runner (and the contract's offline validator). Host-side Docker SDK build,
+    no compose. Both fields blank == no build requested (``build_spec`` → None).
+    """
+
+    dockerfile: str = ""
+    context: str = ""
+
+
+@dataclass
 class SandboxSpec:
     image: str = ""
     tier: str = ""  # "isolated" or "bridged"
+    build: BuildSpec = field(default_factory=BuildSpec)
 
 
 @dataclass
 class BrowserSpec:
     cookies_env: str = ""
+
+
+@dataclass
+class HostSetupHook:
+    """One host-side prep hook. Run BEFORE ``create()`` (so before
+    ``validate_env``): each captures ``helper_script``'s stdout into the env
+    vars named in ``exports`` (value ``stdout`` → captured stdout), which then
+    flow through the existing ``credentials.required`` / ``browser.cookies_env``
+    / ``env_vars`` / ``seed-cookies.sh`` chain UNCHANGED — one mechanism, not
+    two. ``python_deps`` install into a cached per-hook uv venv at
+    ``<project>/.pux/venvs/<name>/`` (runner-owned)."""
+
+    name: str = ""
+    helper_script: str = ""
+    python_deps: list[str] = field(default_factory=list)
+    args: list[str] = field(default_factory=list)
+    exports: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -137,6 +167,7 @@ class Policy:
     credentials: Credentials = field(default_factory=Credentials)
     sandbox: SandboxSpec = field(default_factory=SandboxSpec)
     browser: BrowserSpec = field(default_factory=BrowserSpec)
+    host_setup: list[HostSetupHook] = field(default_factory=list)
 
 
 @dataclass
@@ -193,12 +224,45 @@ def _policy_from_dict(d: Mapping) -> Policy:
         optional=[str(x) for x in (cr.get("optional") or [])],
     )
     sb = _section("sandbox")
+    build_map = sb.get("build")
+    if build_map is not None:
+        if not isinstance(build_map, Mapping):
+            raise PolicyError("policy: section 'sandbox.build' must be a mapping")
+        build = BuildSpec(
+            dockerfile=str(build_map.get("dockerfile", "") or ""),
+            context=str(build_map.get("context", "") or ""),
+        )
+    else:
+        build = BuildSpec()
     pol.sandbox = SandboxSpec(
         image=str(sb.get("image", "") or ""),
         tier=str(sb.get("tier", "") or ""),
+        build=build,
     )
     br = _section("browser")
     pol.browser = BrowserSpec(cookies_env=str(br.get("cookies_env", "") or ""))
+    # host_setup: a list of host-side prep hooks (run before create(), produce
+    # env exports that flow through credentials/cookies unchanged). Absent or
+    # empty -> no hooks (today's behavior).
+    hooks_raw = d.get("host_setup") or []
+    if not isinstance(hooks_raw, list):
+        raise PolicyError("policy: section 'host_setup' must be a list")
+    hooks: list[HostSetupHook] = []
+    for h in hooks_raw:
+        if not isinstance(h, Mapping):
+            raise PolicyError("policy: each host_setup entry must be a mapping")
+        exports_raw = h.get("exports") or {}
+        if not isinstance(exports_raw, Mapping):
+            raise PolicyError(
+                f"policy: host_setup entry {h.get('name')!r} exports must be a mapping")
+        hooks.append(HostSetupHook(
+            name=str(h.get("name", "") or ""),
+            helper_script=str(h.get("helper_script", "") or ""),
+            python_deps=[str(x) for x in (h.get("python_deps") or [])],
+            args=[str(x) for x in (h.get("args") or [])],
+            exports={str(k): str(v) for k, v in exports_raw.items()},
+        ))
+    pol.host_setup = hooks
     return pol
 
 
@@ -414,3 +478,29 @@ def resolve_tier(p: Policy | None, fallback: str) -> str:
     if p is None or not p.sandbox.tier:
         return fallback
     return p.sandbox.tier
+
+
+# --- host setup + image build -------------------------------------------------
+
+
+def host_setup_hooks(p: Policy | None) -> list[HostSetupHook]:
+    """The policy's host-side prep hooks (run before ``create()``, produce env
+    exports). Empty/None policy -> no hooks. Single accessor so callers never
+    read ``p.host_setup`` directly and the empty-vs-unset distinction lives in
+    one place."""
+    if p is None:
+        return []
+    return list(p.host_setup)
+
+
+def build_spec(p: Policy | None) -> BuildSpec | None:
+    """The policy's image-build spec, or ``None`` when no build is requested.
+    ``None`` => ``_ensure_image`` takes the existing pull path. A build is
+    "requested" only when ``dockerfile`` is non-empty; ``context`` defaults to
+    the Dockerfile's directory at run time when left blank."""
+    if p is None:
+        return None
+    b = p.sandbox.build
+    if not b.dockerfile:
+        return None
+    return b

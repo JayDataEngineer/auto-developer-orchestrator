@@ -334,6 +334,107 @@ def test_resolve_tier_override_wins() -> None:
     assert policy.resolve_tier(p, "bridged") == "isolated"
 
 
+# --- host_setup + sandbox.build (Phase 13) ------------------------------------
+
+
+def test_load_host_setup_parses(tmp_path: Path) -> None:
+    body = """
+host_setup:
+  - name: extract_cookies
+    helper_script: orgs/_shared/sandbox/extract_browser_cookies.py
+    python_deps: [browser-cookie3, pycryptodome]
+    args: [--browser, brave, --domain, x.com, --b64]
+    exports:
+      TWITTER_COOKIES_B64: stdout
+"""
+    p = policy.load("tw", _write_policy(tmp_path, "tw", body))
+    assert len(p.host_setup) == 1
+    hook = p.host_setup[0]
+    assert hook.name == "extract_cookies"
+    assert hook.helper_script == "orgs/_shared/sandbox/extract_browser_cookies.py"
+    assert hook.python_deps == ["browser-cookie3", "pycryptodome"]
+    assert hook.args == ["--browser", "brave", "--domain", "x.com", "--b64"]
+    assert hook.exports == {"TWITTER_COOKIES_B64": "stdout"}
+
+
+def test_load_host_setup_absent_is_empty(tmp_path: Path) -> None:
+    p = policy.load("none", _write_policy(tmp_path, "none", "sandbox:\n  tier: isolated\n"))
+    assert p.host_setup == []
+    assert policy.host_setup_hooks(p) == []
+
+
+def test_host_setup_hooks_none_is_empty() -> None:
+    assert policy.host_setup_hooks(None) == []
+
+
+def test_load_host_setup_not_a_list_fails(tmp_path: Path) -> None:
+    # A mapping instead of a list — must fail loud, not silently coerce.
+    body = "host_setup:\n  name: oops\n"
+    with pytest.raises(policy.PolicyError):
+        policy.load("bad", _write_policy(tmp_path, "bad", body))
+
+
+def test_load_host_setup_entry_not_a_mapping_fails(tmp_path: Path) -> None:
+    body = "host_setup:\n  - just-a-string\n"
+    with pytest.raises(policy.PolicyError):
+        policy.load("bad", _write_policy(tmp_path, "bad", body))
+
+
+def test_load_sandbox_build_parses(tmp_path: Path) -> None:
+    body = """
+sandbox:
+  image: video-production-video-producer:latest
+  build:
+    dockerfile: orgs/video-production/Dockerfile
+    context: orgs/video-production
+"""
+    p = policy.load("vp", _write_policy(tmp_path, "vp", body))
+    assert p.sandbox.image == "video-production-video-producer:latest"
+    assert p.sandbox.build.dockerfile == "orgs/video-production/Dockerfile"
+    assert p.sandbox.build.context == "orgs/video-production"
+
+
+def test_load_sandbox_build_not_a_mapping_fails(tmp_path: Path) -> None:
+    body = "sandbox:\n  build: oops\n"
+    with pytest.raises(policy.PolicyError):
+        policy.load("bad", _write_policy(tmp_path, "bad", body))
+
+
+def test_build_spec_absent_is_none(tmp_path: Path) -> None:
+    p = policy.load("nobuild", _write_policy(tmp_path, "nobuild", "sandbox:\n  image: foo:latest\n"))
+    assert policy.build_spec(p) is None
+
+
+def test_build_spec_no_dockerfile_is_none(tmp_path: Path) -> None:
+    # A build mapping with no dockerfile == no build requested.
+    p = policy.load("empty", _write_policy(tmp_path, "empty", "sandbox:\n  build:\n    context: orgs/x\n"))
+    assert policy.build_spec(p) is None
+
+
+def test_build_spec_none_is_none() -> None:
+    assert policy.build_spec(None) is None
+
+
+def test_build_spec_returns_spec(tmp_path: Path) -> None:
+    body = """
+sandbox:
+  build:
+    dockerfile: orgs/video-production/Dockerfile
+"""
+    p = policy.load("vp", _write_policy(tmp_path, "vp", body))
+    bs = policy.build_spec(p)
+    assert bs is not None
+    assert bs.dockerfile == "orgs/video-production/Dockerfile"
+
+
+def test_known_policy_sections_includes_host_setup() -> None:
+    # contract.py consults this; host_setup must be a known section or a
+    # twitter/video-production policy.yaml carrying it would trip the
+    # unknown-section rule.
+    from pux_harness.agent import contract
+    assert "host_setup" in contract.KNOWN_POLICY_SECTIONS
+
+
 # --- shipped policies (integration) ------------------------------------------
 
 

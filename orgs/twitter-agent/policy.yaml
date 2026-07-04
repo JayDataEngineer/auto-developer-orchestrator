@@ -1,9 +1,24 @@
 # Declarative sandbox policy for org twitter-agent.
 # Drops host networking in favor of bridge + egress allowlist for x.com.
-# Cookies injected via base64 env at boot (seed-cookies supervisor).
+# Cookies are extracted host-side by the host_setup hook (flatpak Brave),
+# base64'd into TWITTER_COOKIES_B64, and seeded into the in-sandbox browser at
+# boot by the seed-cookies supervisor. One mechanism — no operator
+# `bootstrap.sh --emit-env`.
 
 sandbox:
   tier: isolated
+
+host_setup:
+  # Extract Twitter cookies from the host's flatpak Brave on the host BEFORE
+  # create() (the cookie DB + GNOME keyring are unreachable from inside the
+  # container). stdout → TWITTER_COOKIES_B64, consumed by credentials/browser
+  # below unchanged. Cached venv at <project>/.pux/venvs/extract_twitter_cookies/.
+  - name: extract_twitter_cookies
+    helper_script: orgs/_shared/sandbox/extract_browser_cookies.py
+    python_deps: [browser-cookie3, pycryptodome, jeepney]
+    args: [--browser, brave, --domain, x.com, --b64]
+    exports:
+      TWITTER_COOKIES_B64: stdout
 
 egress:
   allow:

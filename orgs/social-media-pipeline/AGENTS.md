@@ -47,12 +47,14 @@ in the task string so it picks the right length, format, and tone.
 
 ## Auth & Sessions
 
-- **Twitter cookies** live at `/sandbox/workspace/data/.twitter-session.json`
-  (host-side extraction from flatpak Brave; see `bootstrap.sh`). Verify
-  with `python3 /sandbox/twitter_session.py --check`. Post via
-  `python3 /sandbox/twitter_post.py`. If the file is missing, return an
-  error — do not attempt to re-extract from inside the sandbox
-  (cookie DB + keyring aren't reachable from gVisor).
+- **Twitter cookies** are extracted from the host's flatpak Brave by the
+  `extract_twitter_cookies` host_setup hook in `policy.yaml` (run by the
+  harness before the container starts), base64'd into `TWITTER_COOKIES_B64`,
+  and seeded into the in-sandbox browser at boot. Verify with
+  `python3 /sandbox/twitter_session.py --check`. Post via
+  `python3 /sandbox/twitter_post.py`. If the session is invalid, recreate
+  the sandbox (`host_setup` re-runs) — do not re-extract from inside the
+  sandbox (cookie DB + keyring aren't reachable from gVisor).
 - **Telegram session** lives at `/sandbox/.telegram-session.session`
   (one-time interactive bootstrap, SMS code). Verify with
   `python3 /sandbox/telegram_session.py --check`. Send via

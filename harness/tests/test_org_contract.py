@@ -235,7 +235,7 @@ def test_rule5_policy_unknown_section(fake_tree):
     vs = check_org("o")
     assert any(v.rule == "policy-sections" for v in vs)
     assert KNOWN_POLICY_SECTIONS == {
-        "workspace", "egress", "credentials", "sandbox", "browser",
+        "workspace", "egress", "credentials", "sandbox", "browser", "host_setup",
     }
 
 
@@ -406,3 +406,54 @@ def test_no_legacy_org_roster_on_real_repo():
         vs = check_org(org)
         roster_vs = [v for v in vs if v.rule == "no-legacy-org-roster"]
         assert roster_vs == [], f"{org}: {roster_vs}"
+
+
+def test_no_legacy_sandbox_artifacts_rejected(fake_tree):
+    """A bootstrap.sh / docker-compose.yml under any org is a HARD contract
+    failure — the harness owns the full sandbox lifecycle now (no bash/compose
+    shadow). Mirrors no-legacy-org-roster / no-legacy-agent-frontmatter."""
+    add_org, _ = fake_tree
+    add_org("badorg")
+    (contract._orgs_dir() / "badorg" / "bootstrap.sh").write_text("#!/bin/sh\n")
+    (contract._orgs_dir() / "badorg" / "docker-compose.yml").write_text("services: {}\n")
+    vs = check_harness()
+    art_vs = [v for v in vs if v.rule == "no-legacy-sandbox-artifacts"]
+    assert len(art_vs) == 2, vs
+    msgs = "\n".join(v.message for v in art_vs)
+    assert "bootstrap.sh" in msgs and "docker-compose.yml" in msgs
+
+
+def test_no_legacy_sandbox_artifacts_on_real_repo():
+    """No orgs/*/{bootstrap.sh,docker-compose.yml,docker-compose.override.yml}
+    ships — the shadow lifecycle is gone (Phase 13)."""
+    vs = [v for v in check_harness()
+          if v.rule == "no-legacy-sandbox-artifacts"]
+    assert vs == [], vs
+
+
+def test_host_setup_validator_missing_helper(fake_tree):
+    """A host_setup hook whose helper_script doesn't resolve under the project
+    root fails --check-contract (offline) before Docker is ever touched."""
+    add_org, _ = fake_tree
+    add_org("cookbook", policy=(
+        "host_setup:\n"
+        "  - name: bad\n"
+        "    helper_script: orgs/_shared/sandbox/does_not_exist.py\n"
+        "    python_deps: [foo]\n"
+        "    exports:\n"
+        "      OUT: stdout\n"))
+    vs = check_org("cookbook")
+    assert any(v.rule == "host-setup-helper-missing" for v in vs), vs
+
+
+def test_build_validator_missing_dockerfile(fake_tree):
+    """A sandbox.build whose dockerfile doesn't exist fails --check-contract."""
+    add_org, _ = fake_tree
+    add_org("cookbook", policy=(
+        "sandbox:\n"
+        "  image: foo:latest\n"
+        "  build:\n"
+        "    dockerfile: orgs/cookbook/Dockerfile\n"
+        "    context: orgs/cookbook\n"))
+    vs = check_org("cookbook")
+    assert any(v.rule == "sandbox-build-shape" for v in vs), vs

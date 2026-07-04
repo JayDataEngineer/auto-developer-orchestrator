@@ -4,7 +4,11 @@ The Python harness is the whole agent + sandbox layer: per-org
 [deepagents](https://docs.langchain.com/oss/python/deepagents) graphs served
 over the LangChain Agent Protocol, driving a Docker sandbox directly over the
 SDK (no Go server, no JSON-RPC hop). The Go MCP tree + its bridge client were
-deleted in Phase 8i.
+deleted in Phase 8i. The harness owns the **full** sandbox lifecycle —
+`pux sandbox start` runs any `policy.yaml host_setup` hooks + builds the
+`sandbox.build` image before container create (Phase 13); there is no operator
+`bootstrap.sh` / `docker-compose.yml` (the per-org shadow lifecycle was deleted
++ made a permanent contract failure).
 
 ## Layout
 
@@ -26,13 +30,14 @@ pux_harness/
     container.py      # SandboxContainer: create/start/stop/remove + policy enforce
     tools.py          # 13 specialist StructuredTools (python/skills/vision/browser/desktop)
     policy.py         # declarative policy resolver
+    host_setup.py     # host-side hooks (cached uv venv, stdout → env exports)
   context/            # proactive offload layer
     offload.py        # ContextOffloadMiddleware + ctx_recall/ctx_search
     store.py          # host-side stash for offloaded tool output
 tests/
   test_org_contract.py    test_server.py    test_acp.py    test_policy.py
   test_container.py       test_context_offload.py    test_load_subagents.py
-  test_describe_image.py
+  test_describe_image.py  test_host_setup.py
 ```
 
 **Layering:** the four `[entry]` modules are invoked as `python -m
