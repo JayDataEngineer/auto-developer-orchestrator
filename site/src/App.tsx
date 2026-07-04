@@ -20,6 +20,7 @@ import { TerminalPanel } from "./components/workbench/terminal-panel.tsx";
 import { SandboxPanel } from "./components/workbench/sandbox-panel.tsx";
 import { SettingsPanel } from "./components/workbench/settings-panel.tsx";
 import { VncViewer } from "./components/workbench/vnc-viewer.tsx";
+import { MetricsFooter } from "./components/footer/metrics-footer.tsx";
 import { cn } from "./lib/utils";
 
 type WorkbenchTab = "files" | "terminal" | "sandbox" | "vnc" | "settings";
@@ -172,8 +173,11 @@ export function App() {
               </>
             )}
             <Panel id="chat">
-              <main className="h-full">
-                <Thread />
+              <main className="flex h-full flex-col">
+                <div className="min-h-0 flex-1">
+                  <Thread />
+                </div>
+                <MetricsFooter threadId={activeThreadId} />
               </main>
             </Panel>
             {workbenchOpen && (
@@ -203,7 +207,9 @@ export function App() {
                       {workbenchTab === "terminal" && <TerminalPanel />}
                       {workbenchTab === "sandbox" && <SandboxPanel />}
                       {workbenchTab === "vnc" && <VncViewer />}
-                      {workbenchTab === "settings" && <SettingsPanel />}
+                      {workbenchTab === "settings" && (
+                        <SettingsPanel threadId={activeThreadId} />
+                      )}
                     </div>
                   </section>
                 </Panel>
