@@ -236,6 +236,7 @@ def test_rule5_policy_unknown_section(fake_tree):
     assert any(v.rule == "policy-sections" for v in vs)
     assert KNOWN_POLICY_SECTIONS == {
         "workspace", "egress", "credentials", "sandbox", "browser", "host_setup",
+        "jobs",
     }
 
 

@@ -161,6 +161,21 @@ class HostSetupHook:
 
 
 @dataclass
+class JobSpec:
+    """One in-sandbox prep step declared in ``policy.yaml`` ``jobs:``. Runs
+    AFTER ``create()`` (inside the container), producing artifacts (not env
+    exports). Scripts reach external services over the existing egress
+    allowlist — no new network surface. Idempotency delegated to the scripts
+    (file caches + SurrealDB UPSERTs make repeat runs cheap)."""
+
+    name: str = ""
+    script: str = ""
+    args: list[str] = field(default_factory=list)
+    timeout: int = 0  # seconds; 0 = no limit
+    description: str = ""
+
+
+@dataclass
 class Policy:
     workspace: Workspace = field(default_factory=Workspace)
     egress: Egress = field(default_factory=Egress)
@@ -168,6 +183,7 @@ class Policy:
     sandbox: SandboxSpec = field(default_factory=SandboxSpec)
     browser: BrowserSpec = field(default_factory=BrowserSpec)
     host_setup: list[HostSetupHook] = field(default_factory=list)
+    jobs: list[JobSpec] = field(default_factory=list)
 
 
 @dataclass
@@ -263,6 +279,23 @@ def _policy_from_dict(d: Mapping) -> Policy:
             exports={str(k): str(v) for k, v in exports_raw.items()},
         ))
     pol.host_setup = hooks
+    # jobs: a list of in-sandbox prep steps (run after create(), produce
+    # artifacts, not env exports). Absent or empty -> no jobs.
+    jobs_raw = d.get("jobs") or []
+    if not isinstance(jobs_raw, list):
+        raise PolicyError("policy: section 'jobs' must be a list")
+    jobs: list[JobSpec] = []
+    for j in jobs_raw:
+        if not isinstance(j, Mapping):
+            raise PolicyError("policy: each jobs entry must be a mapping")
+        jobs.append(JobSpec(
+            name=str(j.get("name", "") or ""),
+            script=str(j.get("script", "") or ""),
+            args=[str(x) for x in (j.get("args") or [])],
+            timeout=int(j.get("timeout", 0) or 0),
+            description=str(j.get("description", "") or ""),
+        ))
+    pol.jobs = jobs
     return pol
 
 
@@ -504,3 +537,16 @@ def build_spec(p: Policy | None) -> BuildSpec | None:
     if not b.dockerfile:
         return None
     return b
+
+
+# --- jobs (post-create prep steps) ------------------------------------------
+
+
+def job_specs(p: Policy | None) -> list[JobSpec]:
+    """The policy's in-sandbox prep jobs (run after ``create()``, before the
+    agent loop). Empty/None policy -> no jobs. Single accessor so callers never
+    read ``p.jobs`` directly and the empty-vs-unset distinction lives in one
+    place."""
+    if p is None:
+        return []
+    return list(p.jobs)

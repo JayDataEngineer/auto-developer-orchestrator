@@ -75,6 +75,7 @@ _REQUIRED_AGENT_KEYS: frozenset[str] = frozenset({
 # ``build`` is a sub-key under ``sandbox``, NOT a top-level section.
 KNOWN_POLICY_SECTIONS: frozenset[str] = frozenset({
     "workspace", "egress", "credentials", "sandbox", "browser", "host_setup",
+    "jobs",
 })
 
 # Native fs/shell tools deepagents exposes via the backend (Phase 3). Accepted
