@@ -205,6 +205,73 @@ async def _run(org: str, task: str, recursion_limit: int) -> None:
         print("  (none — no native fs/shell call was made this run)")
 
 
+def _jobs_run(org: str, job: str | None) -> int:
+    """Run prep jobs inside the org's sandbox container (Phase 14)."""
+    from pux_harness.sandbox.container import SandboxContainer  # noqa: PLC0415
+    from pux_harness.sandbox.docker_exec import DockerExecClient  # noqa: PLC0415
+    from pux_harness.sandbox.jobs import run_jobs  # noqa: PLC0415
+    from pux_harness.sandbox import policy as policy_mod  # noqa: PLC0415
+    from pux_harness.agent.orgs import PROJECT_ROOT  # noqa: PLC0415
+
+    try:
+        pol = policy_mod.load(org, PROJECT_ROOT)
+    except policy_mod.NoPolicy:
+        print(f"{org}: no policy.yaml — no jobs declared")
+        return 0
+
+    specs = policy_mod.job_specs(pol)
+    if not specs:
+        print(f"{org}: no jobs declared")
+        return 0
+
+    if job:
+        specs = [s for s in specs if s.name == job]
+        if not specs:
+            print(f"{org}: no job named {job!r}")
+            return 1
+
+    print(f"[jobs] {org}: running {len(specs)} job(s)")
+    sb = SandboxContainer(org=org)
+    container_name = sb.ensure()
+    ec = DockerExecClient(container=container_name)
+    results = run_jobs(pol, ec)
+
+    if job:
+        results = [r for r in results if r.name == job]
+
+    for r in results:
+        icon = "ok" if r.status == "ok" else "FAIL"
+        err = f"  error={r.error[:120]}" if r.error else ""
+        print(f"  {r.name:<24} {icon:<6} {r.duration:.1f}s{err}")
+
+    failed = [r for r in results if r.status != "ok"]
+    print(f"\n{len(results)} jobs run, {len(failed)} failed")
+    return 1 if failed else 0
+
+
+def _jobs_status(org: str) -> int:
+    """Show declared prep jobs for this org (Phase 14)."""
+    from pux_harness.sandbox import policy as policy_mod  # noqa: PLC0415
+    from pux_harness.agent.orgs import PROJECT_ROOT  # noqa: PLC0415
+
+    try:
+        pol = policy_mod.load(org, PROJECT_ROOT)
+    except policy_mod.NoPolicy:
+        print(f"{org}: no policy.yaml — no jobs declared")
+        return 0
+
+    specs = policy_mod.job_specs(pol)
+    if not specs:
+        print(f"{org}: no jobs declared")
+        return 0
+
+    print(f"{'NAME':<24} {'SCRIPT':<40} {'TIMEOUT':<8} DESCRIPTION")
+    for s in specs:
+        timeout = f"{s.timeout}s" if s.timeout else "none"
+        print(f"  {s.name:<22} {s.script:<40} {timeout:<8} {s.description}")
+    return 0
+
+
 def _check_policy(org: str) -> int:
     """Resolve + report an org's policy WITHOUT running the model — a dry-run of
     what container-side enforcement (Phase 8) will do. Prints expanded mounts,
@@ -371,10 +438,22 @@ def main() -> None:
     ap.add_argument("--sandbox", metavar="CMD",
                     help="Docker sandbox lifecycle: start | stop | status | ensure "
                          "(harness-owned, Phase 8g; replaces `task start/stop/status`)")
+    ap.add_argument("--jobs-run", action="store_true",
+                    help="run prep jobs for this org inside the sandbox (Phase 14)")
+    ap.add_argument("--jobs-status", action="store_true",
+                    help="show declared prep jobs for this org (Phase 14)")
+    ap.add_argument("--job", default=None,
+                    help="with --jobs-run: run only this named job")
     args = ap.parse_args()
 
     if args.sandbox is not None:
         raise SystemExit(_sandbox(args.sandbox))
+
+    if args.jobs_run:
+        raise SystemExit(_jobs_run(args.org, args.job))
+
+    if args.jobs_status:
+        raise SystemExit(_jobs_status(args.org))
 
     if args.check_contract:
         raise SystemExit(_check_contract())

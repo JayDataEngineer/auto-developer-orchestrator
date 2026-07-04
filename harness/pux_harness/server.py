@@ -387,6 +387,88 @@ async def run_cancel(run_id: str) -> dict[str, Any]:
     return meta
 
 
+# --- jobs (post-create prep steps) -------------------------------------------
+
+class JobsRunRequest(BaseModel):
+    job: str | None = None  # run a specific job by name, or all if None
+
+
+@app.post("/jobs/{org}/run")
+async def jobs_run(org: str, body: JobsRunRequest = JobsRunRequest()) -> dict[str, Any]:
+    """Run prep jobs inside the org's sandbox container. Returns per-job results."""
+    if org not in discover_orgs():
+        raise HTTPException(status_code=404, detail=f"unknown org {org!r}")
+
+    from pux_harness.sandbox.container import SandboxContainer  # noqa: PLC0415
+    from pux_harness.sandbox.docker_exec import DockerExecClient  # noqa: PLC0415
+    from pux_harness.sandbox.jobs import run_jobs  # noqa: PLC0415
+    from pux_harness.sandbox import policy as policy_mod  # noqa: PLC0415
+    from pux_harness.agent.orgs import PROJECT_ROOT  # noqa: PLC0415
+
+    try:
+        pol = policy_mod.load(org, PROJECT_ROOT)
+    except policy_mod.NoPolicy:
+        return {"org": org, "jobs": [], "message": "no policy.yaml — no jobs declared"}
+
+    specs = policy_mod.job_specs(pol)
+    if not specs:
+        return {"org": org, "jobs": [], "message": "no jobs declared"}
+
+    # Filter to specific job if requested
+    if body.job:
+        specs = [s for s in specs if s.name == body.job]
+        if not specs:
+            raise HTTPException(status_code=404, detail=f"no job named {body.job!r}")
+
+    # Ensure sandbox is running
+    try:
+        sb = SandboxContainer(org=org)
+        container_name = sb.ensure()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"sandbox error: {exc}") from exc
+
+    ec = DockerExecClient(container=container_name)
+    results = run_jobs(pol, ec)
+    # Filter results if specific job requested
+    if body.job:
+        results = [r for r in results if r.name == body.job]
+
+    return {
+        "org": org,
+        "jobs": [
+            {"name": r.name, "status": r.status, "error": r.error,
+             "duration": round(r.duration, 1)}
+            for r in results
+        ],
+    }
+
+
+@app.get("/jobs/{org}/status")
+async def jobs_status(org: str) -> dict[str, Any]:
+    """Show declared jobs for an org and their specs. Status is derived from
+    the latest run if available."""
+    if org not in discover_orgs():
+        raise HTTPException(status_code=404, detail=f"unknown org {org!r}")
+
+    from pux_harness.sandbox import policy as policy_mod  # noqa: PLC0415
+    from pux_harness.agent.orgs import PROJECT_ROOT  # noqa: PLC0415
+
+    try:
+        pol = policy_mod.load(org, PROJECT_ROOT)
+    except policy_mod.NoPolicy:
+        return {"org": org, "jobs": [], "message": "no policy.yaml"}
+
+    specs = policy_mod.job_specs(pol)
+    return {
+        "org": org,
+        "jobs": [
+            {"name": s.name, "script": s.script, "args": s.args,
+             "timeout": s.timeout, "description": s.description}
+            for s in specs
+        ],
+    }
+
+
 # --- helpers ------------------------------------------------------------------
 
 def _status_from_snapshot(snap: Any) -> str:

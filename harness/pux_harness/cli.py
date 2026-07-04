@@ -130,6 +130,37 @@ def cmd_wait(run_id: str) -> None:
     _print_block(f"run {run_id} (status={res.get('status')})", res.get("output", "(empty)"))
 
 
+def cmd_jobs_run(org: str, job: str | None) -> None:
+    body: dict[str, Any] = {}
+    if job:
+        body["job"] = job
+    res = _post(f"/jobs/{org}/run", **body)
+    jobs = res.get("jobs", [])
+    if not jobs:
+        print(res.get("message", "no jobs"))
+        return
+    failed = [j for j in jobs if j["status"] != "ok"]
+    for j in jobs:
+        status_icon = "ok" if j["status"] == "ok" else "FAIL"
+        err = f"  error={j['error'][:120]}" if j.get("error") else ""
+        print(f"  {j['name']:<24} {status_icon:<6} {j['duration']}s{err}")
+    print(f"\n{len(jobs)} jobs run, {len(failed)} failed")
+    if failed:
+        raise SystemExit(1)
+
+
+def cmd_jobs_status(org: str) -> None:
+    res = _get(f"/jobs/{org}/status")
+    jobs = res.get("jobs", [])
+    if not jobs:
+        print(res.get("message", "no jobs declared"))
+        return
+    print(f"{'NAME':<24} {'SCRIPT':<40} {'TIMEOUT':<8} DESCRIPTION")
+    for j in jobs:
+        timeout = f"{j['timeout']}s" if j["timeout"] else "none"
+        print(f"  {j['name']:<22} {j['script']:<40} {timeout:<8} {j.get('description', '')}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         prog="pux", description="Pux Agent Protocol client (drives `pux serve`)."
@@ -165,6 +196,18 @@ def main() -> None:
     p_wait = sub.add_parser("wait", help="block for a background run's output")
     p_wait.add_argument("run_id")
     p_wait.set_defaults(func=lambda a: cmd_wait(a.run_id))
+
+    p_jobs = sub.add_parser("jobs", help="run prep jobs or show status")
+    jobs_sub = p_jobs.add_subparsers(dest="jobs_cmd", required=True)
+
+    p_jr = jobs_sub.add_parser("run", help="run prep jobs in the sandbox")
+    p_jr.add_argument("--org", required=True, help="org to run jobs for")
+    p_jr.add_argument("--job", default=None, help="run only this named job")
+    p_jr.set_defaults(func=lambda a: cmd_jobs_run(a.org, a.job))
+
+    p_js = jobs_sub.add_parser("status", help="show declared prep jobs")
+    p_js.add_argument("--org", required=True, help="org to show jobs for")
+    p_js.set_defaults(func=lambda a: cmd_jobs_status(a.org))
 
     args = ap.parse_args()
     args.func(args)
