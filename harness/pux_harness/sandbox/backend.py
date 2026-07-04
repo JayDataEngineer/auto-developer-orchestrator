@@ -46,7 +46,7 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 
-from pux_harness.docker_exec import DockerExecClient
+from pux_harness.sandbox.docker_exec import DockerExecClient
 
 
 # python3 snippets used for byte-accurate upload/download via execute(). Base64

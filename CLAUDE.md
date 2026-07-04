@@ -14,21 +14,22 @@ first tool use) and drives it directly over the Docker SDK.
 
 Two layers:
 
-- **`harness/`** (Python, uv) — the agent layer. `pux_harness/graph.py` builds
-  per-org deepagents graphs (CTO + specialist subagents) with a
+- **`harness/`** (Python, uv) — the agent layer. `pux_harness/agent/graph.py`
+  builds per-org deepagents graphs (CTO + specialist subagents) with a
   `PuxSandboxBackend` (native fs/shell tools) + native specialist
-  `pux_sandbox_*` tools. `pux_harness/container.py` owns the Docker sandbox
-  create/start/stop/remove + declarative policy enforcement. Served over the
-  LangChain Agent Protocol REST API (`server.py`, FastAPI on `:9988`). Driven
-  by `cli.py` (the `pux` client) or the in-process runner (`main.py`).
+  `pux_sandbox_*` tools. `pux_harness/sandbox/container.py` owns the Docker
+  sandbox create/start/stop/remove + declarative policy enforcement. Served
+  over the LangChain Agent Protocol REST API (`server.py`, FastAPI on `:9988`).
+  Driven by `cli.py` (the `pux` client) or the in-process runner (`main.py`).
 - **`bin/pux`** (bash launcher) — sources `.env`, routes `serve` / `direct` /
   `acp` / `sandbox` / client subcommands into the harness.
 
 The pi-mono TS harness (`bin/pux.mjs`, `.pi/extensions/*`, `pi-*` npm deps,
 `package.json`) is **deleted** (Phase 4). Its org-overlay + delegation jobs are
-now `harness/pux_harness/orgs.py` + deepagents' native `task(subagent_type=…)`
-delegation. The pre-pi-mono HEAD is tagged `v0.2.0-pre-pi-mono`; the
-pre-deepagents HEAD is the commit before Phase 4. Branch: `pi-pivot`.
+now `harness/pux_harness/agent/orgs.py` + deepagents' native
+`task(subagent_type=…)` delegation. The pre-pi-mono HEAD is tagged
+`v0.2.0-pre-pi-mono`; the pre-deepagents HEAD is the commit before Phase 4.
+Branch: `pi-pivot`.
 
 ## Quick start
 
@@ -91,10 +92,11 @@ Protocol port 8000, which is taken on this host.
                │ deepagents graph + PuxSandboxBackend
 ┌──────────────▼──────────────────────────────────┐
 │ harness  (Python, deepagents)                   │  the whole agent + sandbox
-│  - graph.py / orgs.py / native_tools.py         │   layer: fs/shell + 13
-│  - container.py  SandboxContainer.ensure()      │   specialist tools ALL native
-│  - docker_exec.py  DockerExecClient.exec()      │   (no MCP hop — direct
-│  - context_offload.py + policy.py               │   docker exec)
+│  - agent/graph.py / agent/orgs.py               │   layer: fs/shell + 13
+│  - sandbox/container.py  SandboxContainer.ensure│   specialist tools ALL native
+│  - sandbox/docker_exec.py  DockerExecClient.exec│   (no MCP hop — direct
+│  - sandbox/tools.py + sandbox/policy.py         │   docker exec)
+│  - context/offload.py                           │
 └──────────────┬──────────────────────────────────┘
                │ Docker SDK (create / exec / stop)
 ┌──────────────▼──────────────────────────────────┐
@@ -106,10 +108,11 @@ Protocol port 8000, which is taken on this host.
 ```
 
 **There is no Go server.** Phase 8a–8f ported all 13 specialist tools into
-`native_tools.py`; Phase 8g moved the container lifecycle into `container.py`;
-Phase 8i deleted the Go MCP tree + `bridge.py`. Every model-visible path — fs,
-shell, the 13 specialists, and the container lifecycle — lives in Python,
-driving the sandbox directly over the Docker SDK.
+`native_tools.py` (now `sandbox/tools.py`); Phase 8g moved the container
+lifecycle into `container.py` (now `sandbox/container.py`); Phase 8i deleted
+the Go MCP tree + `bridge.py`. Every model-visible path — fs, shell, the 13
+specialists, and the container lifecycle — lives in Python, driving the
+sandbox directly over the Docker SDK.
 
 ## Harness layout (Python, deepagents)
 
@@ -117,30 +120,46 @@ driving the sandbox directly over the Docker SDK.
 harness/
 ├── pyproject.toml              # deepagents + langgraph + fastapi + uvicorn + httpx
 ├── pux_harness/
-│   ├── graph.py                # build_graph(org) -> compiled deepagents graph
-│   │                           # one shared DockerExecClient + PuxSandboxBackend per process
-│   ├── server.py               # Agent Protocol server (FastAPI, :9988)
-│   ├── cli.py                  # `pux` client (httpx → server)
-│   ├── acp.py                  # ACP stdio server (`pux acp`) — editor = TUI (Phase 9)
-│   ├── main.py                 # in-process runner (`pux direct`) + sandbox lifecycle
-│   ├── sandbox.py              # PuxSandboxBackend(BaseSandbox) -> native fs tools
-│   ├── docker_exec.py          # DockerExecClient: direct `docker exec` into the container
-│   ├── container.py            # SandboxContainer: create/start/stop/remove + policy enforce
-│   ├── native_tools.py         # 13 specialist StructuredTools (python/skills/vision/browser/desktop)
-│   ├── context_offload.py      # ContextOffloadMiddleware + ctx_recall/ctx_search (Phase 7)
-│   ├── ctx_store.py            # host-side stash for offloaded tool output
-│   ├── model.py                # provider/model factory (PUX_MODEL)
-│   ├── orgs.py                 # system-prompt builder + subagent loader + contract glue
-│   ├── policy.py               # declarative policy resolver (Phase 6)
-│   └── contract.py             # declarative org-contract enforcer (7 rules)
+│   ├── __init__.py
+│   ├── server.py               # [entry] Agent Protocol server (FastAPI, :9988)
+│   ├── cli.py                  # [entry] `pux` client (httpx → server)
+│   ├── acp.py                  # [entry] ACP stdio server (`pux acp`) — editor = TUI (Phase 9)
+│   ├── main.py                 # [entry] in-process runner (`pux direct`) + sandbox lifecycle
+│   ├── agent/                  # assembly layer — builds the deepagents graph
+│   │   ├── graph.py            # build_graph(org) -> compiled graph; one shared DockerExecClient
+│   │   │                       # + PuxSandboxBackend per process
+│   │   ├── orgs.py             # system-prompt builder + subagent loader
+│   │   ├── model.py            # provider/model factory (PUX_MODEL)
+│   │   └── contract.py         # declarative org-contract enforcer (rules 1–8)
+│   ├── sandbox/                # Docker sandbox layer — self-contained (no agent/context import)
+│   │   ├── backend.py          # PuxSandboxBackend(BaseSandbox) -> native fs tools
+│   │   ├── docker_exec.py      # DockerExecClient: direct `docker exec` into the container
+│   │   ├── container.py        # SandboxContainer: create/start/stop/remove + policy enforce
+│   │   ├── tools.py            # 13 specialist StructuredTools (python/skills/vision/browser/desktop)
+│   │   └── policy.py           # declarative policy resolver (Phase 6)
+│   └── context/                # proactive offload layer
+│       ├── offload.py          # ContextOffloadMiddleware + ctx_recall/ctx_search (Phase 7)
+│       └── store.py            # host-side stash for offloaded tool output
 └── tests/
-    ├── test_org_contract.py    # the all-orgs-green gate (rule 1–7)
+    ├── test_org_contract.py    # the all-orgs-green gate (rules 1–8)
+    ├── test_load_subagents.py  # .pi/agents/*.py SUBAGENT loader + tool/skills resolution
     ├── test_server.py          # Agent Protocol routing (stub graph, no tokens)
     ├── test_acp.py             # ACP stdio handshake (subprocess, no tokens/Docker)
     ├── test_policy.py          # policy resolver parity (mirrors the deleted Go tests)
     ├── test_container.py       # SandboxContainer runtime decision table
+    ├── test_describe_image.py  # describe_image dispatch (model PRIMARY / ONNX FALLBACK)
     └── test_context_offload.py # offload + ctx_recall/ctx_search
 ```
+
+**Layering (dependency direction):** the four `[entry]` modules
+(`server`/`cli`/`acp`/`main`) are invoked as `python -m pux_harness.<name>` —
+they stay top-level so the `-m` target never moves. `agent/` depends on
+`sandbox/` (specialist tools + the model wired into `describe_image`) and
+`context/` (the offload middleware rides the graph). `sandbox/` is
+self-contained — it imports nothing from `agent/` or `context/`. `context/`
+is self-contained too. PROJECT_ROOT in each module is `Path(__file__).resolve().parents[N]`
+— N is 3 for the moved modules (one level deeper now), 2 for the top-level
+entries.
 
 **The deepagents seam (source-verified):** `create_deep_agent(model,
 system_prompt, tools, subagents, backend, checkpointer)` (deepagents
@@ -286,11 +305,11 @@ them (`chmod 0444`).
 ## Context offload (Phase 7)
 
 Proactive tool-output offload keeps large results out of the working context
-*before* they accumulate. `harness/pux_harness/context_offload.py`:
+*before* they accumulate. `harness/pux_harness/context/offload.py`:
 
 - **`ContextOffloadMiddleware(AgentMiddleware)`** — `wrap_tool_call`/
   `awrap_tool_call` measure every result; a text `ToolMessage` over `threshold`
-  (default 8000 chars ≈ 2K tokens) is stashed to `ctx_store.py` (host-side
+  (default 8000 chars ≈ 2K tokens) is stashed to `context/store.py` (host-side
   `<project>/.pux/ctx/`) and replaced with a short stub + a `ctx:<id>` handle.
   This is the *proactive* complement to deepagents' reactive
   `SummarizationMiddleware` (which only evicts after overflow).
@@ -385,22 +404,22 @@ are the client surface over `/threads/*` + `/runs/*`.
 
 ## Adding a new tool
 
-**The only path is Python** (`native_tools.py`). Add a new specialist as a
-`StructuredTool` built in `native_tools.py` (it gets the shared
+**The only path is Python** (`sandbox/tools.py`). Add a new specialist as a
+`StructuredTool` built in `sandbox/tools.py` (it gets the shared
 `DockerExecClient` for docker-exec); append its name to the `SPECIALISTS`
 frozenset (which derives `SPECIALIST_TOOL_NAMES` for the contract's rule-4
-resolver). Reference it from an agent's `tools:` frontmatter. No rebuild, no Go.
+resolver). Reference it from an agent's `tools:` field. No rebuild, no Go.
 
-1. Write the StructuredTool in `native_tools.py` (see `pux_sandbox_python` or
+1. Write the StructuredTool in `sandbox/tools.py` (see `pux_sandbox_python` or
    `_sb_post` for the curl-to-sb_server pattern, `_exec_desktop` for the
    xdotool pattern). Use `_result()` for JSON output — it sorts keys
    (`json.dumps(sort_keys=True, indent=2)`) for stable diffs.
 2. Append the tool's short name to the `SPECIALISTS` frozenset — that drives
    both `build_native_specialists()` (the bound surface) and
    `SPECIALIST_TOOL_NAMES` (the contract resolver + `--check-contract` gate).
-3. Reference it in the relevant agent's `tools:` frontmatter as
-   `mcp:pux-sandbox/<name>` (the resolver strips the prefix and looks up
-   `pux_sandbox_<name>`).
+3. Reference it in the relevant agent's `tools:` list (in
+   `.pi/agents/<slug>.py` `SUBAGENT["tools"]`) as the bare slug `<name>` —
+   the resolver looks up `pux_sandbox_<name>` against the specialist map.
 4. Add a routing test in `harness/tests/` exercising the real code path where
    feasible.
 
@@ -512,7 +531,7 @@ browser:
                                     # Cookies NEVER touch disk in container.
 ```
 
-**Pipeline** — `harness/pux_harness/policy.py` is the *resolver* (ported 1:1
+**Pipeline** — `harness/pux_harness/sandbox/policy.py` is the *resolver* (ported 1:1
 from the now-deleted Go package: `load/validate_env/env_vars/resolve_mounts/
 egress_rules/resolve_tier`); `container.py::create()` is the *enforcer*
 (Phase 8g ported `policy_hook.go::applyOrgPolicy` step-for-step). The harness
@@ -592,15 +611,16 @@ passing**):
 
 ## Pivot roadmap (pi-pivot branch)
 
-Phases 0–11 shipped (2026-07-04): harness + native sandbox, declarative
+Phases 0–12 shipped (2026-07-04): harness + native sandbox, declarative
 contract, TS harness deleted, Agent Protocol server + client, all 10 orgs
 ported to RUN on deepagents (Phase 5), policy engine Go→Python (Phase 6),
 proactive context-offload (Phase 7), the entire Go sandbox re-hosted in
 Python then deleted (Phase 8), ACP-first TUI (Phase 9), the declarative
-subagent vocabulary (Phase 10), and subagents going Python-native —
+subagent vocabulary (Phase 10), subagents going Python-native —
 `.pi/agents/<slug>.py` `SUBAGENT` dicts + `org.yaml` rosters replacing
 `.md`-with-frontmatter, with the legacy form made a permanent contract
-failure (Phase 11).
+failure (Phase 11), and the flat 15-module `pux_harness/` package split into
+layered subpackages (Phase 12).
 
 | Phase | What | Status |
 |-------|------|--------|
@@ -612,6 +632,7 @@ failure (Phase 11).
 | 9 | TUI/clients as Agent Protocol consumers (+ SSE streaming) | **ACP TRACK SHIPPED 2026-07-03** — `pux acp [--org X]` exposes `build_graph(org)` as a stdio ACP server (`harness/pux_harness/acp.py`, `deepagents-acp` `AgentServerACP(agent=factory)`); the editor (Zed / VS Code via vscode-acp / Neovim) IS the TUI — zero UI code. Org fixed at startup (`--org`→`$PUX_ORG`→`general`); factory caches the first build, sessions keyed by `thread_id=session_id` in `MemorySaver`; sandbox self-boots lazily. `test_acp.py` proves initialize+new_session over stdio (no tokens, no Docker). **Proven E2E** (`pux acp --org general` over stdio with glm-5.2): `prompt`→`stop_reason=end_turn`, 101 `session/update` frames streamed, CTO delegates via `task(researcher)`→native `execute find … -name '*.py'` (lazy sandbox boot)→verbatim **16 harness modules** (incl. the new `acp.py`); zero agent-side errors. Deferred: pux-serve SSE streaming + a terminal client of `pux serve` (Track 2/3) — ACP-first per the Phase-9 decision; the langgraph-api/Studio path remains reversible behind the same REST contract. |
 | 10 | Declarative subagent vocabulary (rich `SubAgent` frontmatter) | **SHIPPED 2026-07-04** — frontmatter parser upgraded from the hand-rolled scalar splitter to real YAML (`orgs._split_frontmatter` → `yaml.safe_load`), so the full deepagents `SubAgent` vocabulary is expressible in `.pi/agents/<slug>.md`. `orgs.load_subagents` resolves five rich optional fields: `model` (via our `get_model` → `ChatOpenAI` instance, NOT `init_chat_model` which can't carry our base_url/api_key; omit → inherit parent), `skills` (project-relative skills-ROOT path → container-absolute `/sandbox/workspace/<path>`, activates `SkillsMiddleware` which scans the root for `<skill>/SKILL.md`; a source is a ROOT not an individual skill dir), `response_format` (JSON-schema dict passthrough), `permissions` (`list[FilesystemPermission]`, path-validated), `interrupt_on` (`dict[str,bool]`). `middleware` deliberately NOT passed (Phase 7: `SubAgentMiddleware` doesn't round-trip it). Contract gains offline validators for all five (`contract._validate_rich_fields`: `model-shape`/`skill-source-shape`+`skill-source-resolves`/`response-format-shape`/`permissions-shape`/`interrupt-on-shape`) + `KNOWN_AGENT_KEYS` extended. Shipped example: `.pi/agents/researcher.md` gains `skills: .pi/skills`. pytest 148/148 (was 133; +10 contract + 5 `test_load_subagents.py`); `--check-contract` + `--check` exit 0. Surfaced + fixed two latent bugs: (1) `game-studio-narrative-designer.md` had an unquoted `Two modes: brainstorm` colon in its `description:` — invalid under real YAML; quoted it (the only broken file across all 33 agent/org `.md`); (2) the E2E smoke surfaced that deepagents' `SkillsMiddleware` resolves skills against the BACKEND and treats each source as a skills-ROOT (scanning its children), so the original slug→individual-dir form silently loaded nothing — reshaped to ROOT-path semantics (`.pi/skills` → scans `source-citation/`). **Superseded by Phase 11** — the `.md`-frontmatter agent form and the `_validate_rich_fields` machinery were deleted; only `model`/`tools`/`skills` survived, now expressed as a Python `SUBAGENT` dict. |
 | 11 | Subagents Python-native; org roster → `org.yaml`; legacy made permanent-failure | **SHIPPED 2026-07-04** — subagent config migrated from `.pi/agents/<slug>.md` (YAML frontmatter) to deepagents-idiomatic `.pi/agents/<slug>.py` exporting a `SUBAGENT` dict (`name`/`description`/`system_prompt` + optional `tools`/`skills`/`model`), with a sibling prose-only `<slug>.md` holding the prompt. The org roster moved OFF `orgs/<name>/AGENTS.md` frontmatter into `orgs/<name>/org.yaml` (`agents: [slug, …]`); `AGENTS.md` is pure CTO-prompt prose again. `orgs.load_subagents` loads each `.py` via `importlib.util.spec_from_file_location` (path-loaded — `.pi/` stays off `sys.path`); tool/skills/model resolution stays **central** so the modules import only stdlib and stay CI/offline-safe under `--check-contract`. Audit finding drove the scope: ZERO of 22 agents used any rich field (`response_format`/`permissions`/`interrupt_on`) — the entire Phase-10 rich-field resolver machinery resolved nothing, so it was deleted (only `model`/`tools`/`skills` survived). **No legacy left behind (the user's standing rule):** two PERMANENT contract tripwires block reintroduction — `no-legacy-agent-frontmatter` (no `.pi/agents/*.md` may carry YAML frontmatter) + `no-legacy-org-roster` (no `orgs/*/AGENTS.md` may carry frontmatter) — and the loader's dual-read fallback branch was deleted (provably unreachable behind the tripwires). `.gitignore` re-negated `!orgs/*/org.yaml` (the source-trap). pytest 156/156; `--check-contract` exit 0; `git archive HEAD` ships all 21 `.py` + 10 `org.yaml`. Plan: `~/.claude/plans/declarative-cooking-wolf.md`. |
+| 12 | `pux_harness/` flat → layered subpackages (`agent/` + `sandbox/` + `context/`) | **SHIPPED 2026-07-04** — the flat 15-module `pux_harness/` package was too flat to navigate; split into three layer-correct subpackages. `agent/` = the assembly layer (`graph`, `orgs`, `model`, `contract` — what builds the deepagents graph); `sandbox/` = the Docker sandbox layer (`backend`, `docker_exec`, `container`, `tools`, `policy` — self-contained, imports nothing from `agent`/`context`); `context/` = the proactive offload layer (`offload`, `store`). The four entry points (`server`/`cli`/`acp`/`main`) stay TOP-LEVEL because they're invoked as `python -m pux_harness.<name>` — moving them would break the `-m` target + every doc/Taskfile reference. Renames: `sandbox.py`→`sandbox/backend.py`, `native_tools.py`→`sandbox/tools.py`, `context_offload.py`→`context/offload.py`, `ctx_store.py`→`context/store.py`. Two migration hazards surfaced + fixed: (1) `PROJECT_ROOT = Path(__file__).resolve().parents[2]` in the 4 moved modules resolved one dir too shallow → bumped to `parents[3]` (the top-level entries keep `parents[2]`); (2) the import-rewriter's blanket `from pux_harness.sandbox import` → `from pux_harness.sandbox.backend import` pair clobbered submodule imports (`policy`/`container` are siblings of `backend`, not names IN it) → re-pointed to `from pux_harness.sandbox import <submodule>`. **Proven E2E** (`pux direct --org general`, mimo-v2.5): CTO `task(researcher)` → native `execute find … -name '*.py'` → **19 modules** (was 16; +3 `__init__.py`), correct subpackage breakdown, `legacy pux_sandbox fs/shell leaked: NONE`. pytest 165/165; `--check-contract` + `--check` exit 0. No behavior change — pure file move. |
 
 ## Branch strategy
 

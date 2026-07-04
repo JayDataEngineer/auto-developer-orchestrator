@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 from langchain_openai import ChatOpenAI
 
-from pux_harness import orgs
+from pux_harness.agent import orgs
 
 
 class _FakeTool:

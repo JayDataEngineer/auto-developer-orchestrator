@@ -16,12 +16,12 @@ from typing import Any
 from deepagents import create_deep_agent
 from langgraph.graph.state import CompiledStateGraph
 
-from pux_harness.context_offload import ContextOffloadMiddleware, build_ctx_tools
-from pux_harness.docker_exec import DockerExecClient, get_exec_client
-from pux_harness.model import get_model
-from pux_harness.native_tools import build_native_specialists
-from pux_harness.orgs import build_system_prompt, load_subagents
-from pux_harness.sandbox import PuxSandboxBackend
+from pux_harness.context.offload import ContextOffloadMiddleware, build_ctx_tools
+from pux_harness.sandbox.docker_exec import DockerExecClient, get_exec_client
+from pux_harness.agent.model import get_model
+from pux_harness.sandbox.tools import build_native_specialists
+from pux_harness.agent.orgs import build_system_prompt, load_subagents
+from pux_harness.sandbox.backend import PuxSandboxBackend
 
 _exec: DockerExecClient | None = None  # direct docker exec — fs/shell + specialists
 _backend: PuxSandboxBackend | None = None

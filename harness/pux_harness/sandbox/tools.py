@@ -58,10 +58,10 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from pux_harness.docker_exec import DockerExecClient, ExecTimeout
+from pux_harness.sandbox.docker_exec import DockerExecClient, ExecTimeout
 
 PUX_PREFIX = "pux_sandbox_"
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SKILLS_DIR = PROJECT_ROOT / ".pi" / "skills"
 SKILL_FILE = "SKILL.md"
 

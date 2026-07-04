@@ -28,7 +28,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pux_harness.orgs import PROJECT_ROOT
+from pux_harness.agent.orgs import PROJECT_ROOT
 
 CTX_ROOT = PROJECT_ROOT / ".pux" / "ctx"
 _HANDLE_RE = re.compile(r"^ctx:(?P<id>[0-9a-f]+)$")

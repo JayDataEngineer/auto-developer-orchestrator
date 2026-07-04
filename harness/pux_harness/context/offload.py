@@ -37,7 +37,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from pux_harness.ctx_store import CtxStore, SearchHit, StashResult, shared_store
+from pux_harness.context.store import CtxStore, SearchHit, StashResult, shared_store
 
 # Defaults: ~2k tokens (chars/4). Tuned to catch directory dumps, big greps,
 # log tails, and JSON blobs without trimming ordinary tool replies.

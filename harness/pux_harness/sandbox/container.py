@@ -60,13 +60,13 @@ from typing import Any
 import docker
 from docker.errors import APIError, ImageNotFound, NotFound
 
-from pux_harness import policy
+from pux_harness.sandbox import policy
 
 log = logging.getLogger("pux.container")
 
 # --- defaults (mirror backend/internal/sandbox/{manager,defaults,cache}.go) ----
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROJECT_LABEL = "openshell.project-path"
 SANDBOX_LABEL = "openshell.sandbox-id"
 POLICY_LABEL = "openshell.policy"

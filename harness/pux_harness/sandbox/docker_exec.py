@@ -53,7 +53,7 @@ class ExecTimeout(Exception):
 # the pool only exists because the deadline needs a separate thread to block on.
 _EXEC_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROJECT_LABEL = "openshell.project-path"
 _DEFAULT_TIMEOUT = 300  # 5min socket ceiling (carried over from the Go bridge)
 
@@ -122,7 +122,7 @@ class DockerExecClient:
                 self._container = found
             elif self._boot:
                 # Lazy import — avoids a docker_exec↔container cycle at import time.
-                from pux_harness.container import SandboxContainer
+                from pux_harness.sandbox.container import SandboxContainer
 
                 self._container = SandboxContainer(client=self._client).ensure()
             else:

@@ -28,9 +28,9 @@ from typing import Any
 import yaml
 from langchain_core.tools import BaseTool
 
-from pux_harness.model import get_model
+from pux_harness.agent.model import get_model
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 # Container bind-mount target (container.py: ``<project>:/sandbox/workspace``).
 # Skills sources are mapped to container-absolute paths under this root for

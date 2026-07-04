@@ -49,8 +49,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
-from pux_harness.graph import build_graph
-from pux_harness.orgs import discover_orgs, org_agent_slugs
+from pux_harness.agent.graph import build_graph
+from pux_harness.agent.orgs import discover_orgs, org_agent_slugs
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PUX_API_DB = Path(os.environ.get("PUX_API_DB", str(PROJECT_ROOT / ".pux" / "agent-protocol.sqlite")))

@@ -15,12 +15,12 @@ from typing import Any
 import pytest
 from langchain_core.messages import ToolMessage
 
-from pux_harness.context_offload import (
+from pux_harness.context.offload import (
     ContextOffloadMiddleware,
     build_ctx_tools,
     _offload,
 )
-from pux_harness.ctx_store import CtxStore
+from pux_harness.context.store import CtxStore
 
 BIG = "x" * 20_000  # well over the 8000-char default threshold
 SMALL = "only a few hundred chars " * 5

@@ -31,8 +31,8 @@ from deepagents_acp.server import AgentServerACP, AgentSessionContext
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.state import CompiledStateGraph
 
-from pux_harness.graph import build_graph
-from pux_harness.orgs import discover_orgs
+from pux_harness.agent.graph import build_graph
+from pux_harness.agent.orgs import discover_orgs
 
 DEFAULT_ORG = "general"
 

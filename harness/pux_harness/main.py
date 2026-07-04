@@ -22,20 +22,20 @@ import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
 
-from pux_harness.contract import (
+from pux_harness.agent.contract import (
     check_all,
     check_harness,
     check_skill_roots,
     has_errors,
 )
-from pux_harness.docker_exec import get_exec_client
-from pux_harness.graph import build_graph, shared_backend
-from pux_harness.native_tools import build_native_specialists
-from pux_harness.orgs import (
+from pux_harness.sandbox.docker_exec import get_exec_client
+from pux_harness.agent.graph import build_graph, shared_backend
+from pux_harness.sandbox.tools import build_native_specialists
+from pux_harness.agent.orgs import (
     discover_orgs,
     org_agent_slugs,
 )
-from pux_harness.sandbox import PuxSandboxBackend
+from pux_harness.sandbox.backend import PuxSandboxBackend
 
 # Per-org default forcing tasks. Each is UN-answerable from the system prompt
 # alone, so the agent must delegate to its specialist — the seam we're proving.
@@ -213,8 +213,8 @@ def _check_policy(org: str) -> int:
 
     Exits 1 if any required credential is missing — the same gate a real
     container create would enforce, so this is a usable pre-flight."""
-    from pux_harness import policy
-    from pux_harness.orgs import PROJECT_ROOT
+    from pux_harness.sandbox import policy
+    from pux_harness.agent.orgs import PROJECT_ROOT
 
     try:
         p = policy.load(org, PROJECT_ROOT)
@@ -266,7 +266,7 @@ def _sandbox(cmd: str) -> int:
     """Docker sandbox lifecycle, harness-owned (Phase 8g). Replaces the Go
     ``task start/stop/status`` for container boot. ``ensure`` reuses a running
     container or boots one (the path the exec client takes lazily)."""
-    from pux_harness.container import SandboxContainer, resolve_project_path
+    from pux_harness.sandbox.container import SandboxContainer, resolve_project_path
 
     sb = SandboxContainer()
     project = resolve_project_path()
@@ -285,7 +285,7 @@ def _sandbox(cmd: str) -> int:
         print(f"stopped + removed container for {project}")
         return 0
     if cmd == "status":
-        from pux_harness.docker_exec import _discover  # noqa: PLC0415
+        from pux_harness.sandbox.docker_exec import _discover  # noqa: PLC0415
         import docker  # noqa: PLC0415
 
         name = _discover(docker.from_env(timeout=10), project)

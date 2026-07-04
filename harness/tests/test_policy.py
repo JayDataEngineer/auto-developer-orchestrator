@@ -3,7 +3,7 @@
 
 Every test here is a 1:1 port of a Go test (``policy_test.go`` /
 ``egress_test.go``): same inputs, same assertions. The point is to PROVE the
-Python port (``pux_harness.policy``) behaves identically to the Go package it
+Python port (``pux_harness.sandbox.policy``) behaves identically to the Go package it
 replaces — so swapping the engine behind the harness's policy resolution is
 invisible. The real, network-touching runs (DNS) skip offline rather than fail,
 matching Go's ``-short`` mode.
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from pux_harness import policy
+from pux_harness.sandbox import policy
 
 
 # --- helpers ------------------------------------------------------------------

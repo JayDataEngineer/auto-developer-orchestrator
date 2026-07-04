@@ -48,9 +48,9 @@ from typing import Any
 
 import yaml
 
-from pux_harness import policy as policy_mod
-from pux_harness.native_tools import SPECIALIST_TOOL_NAMES
-from pux_harness.orgs import (
+from pux_harness.sandbox import policy as policy_mod
+from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
+from pux_harness.agent.orgs import (
     PROJECT_ROOT,
     _agents_dir,
     _orgs_dir,

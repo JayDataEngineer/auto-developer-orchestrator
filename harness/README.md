@@ -10,26 +10,34 @@ deleted in Phase 8i.
 
 ```
 pux_harness/
-  graph.py            # build_graph(org) -> compiled deepagents graph
-  server.py           # Agent Protocol server (FastAPI, :9988)
-  cli.py              # `pux` client (httpx -> server)
-  acp.py              # ACP stdio server (`pux acp`) — editor = TUI (Phase 9)
-  main.py             # in-process runner (`pux direct`) + sandbox lifecycle
-  sandbox.py          # PuxSandboxBackend(BaseSandbox) -> native fs tools
-  docker_exec.py      # DockerExecClient: direct `docker exec`
-  container.py        # SandboxContainer: create/start/stop/remove + policy enforce
-  native_tools.py     # 13 specialist StructuredTools (python/skills/vision/browser/desktop)
-  context_offload.py  # ContextOffloadMiddleware + ctx_recall/ctx_search
-  ctx_store.py        # host-side stash for offloaded tool output
-  model.py            # provider/model factory (PUX_MODEL)
-  orgs.py             # system-prompt builder + subagent loader (.pi/agents/<slug>.py
+  server.py           # [entry] Agent Protocol server (FastAPI, :9988)
+  cli.py              # [entry] `pux` client (httpx -> server)
+  acp.py              # [entry] ACP stdio server (`pux acp`) — editor = TUI (Phase 9)
+  main.py             # [entry] in-process runner (`pux direct`) + sandbox lifecycle
+  agent/              # assembly layer — builds the deepagents graph
+    graph.py          # build_graph(org) -> compiled graph (1 DockerExecClient + backend/process)
+    orgs.py           # system-prompt builder + subagent loader (.pi/agents/<slug>.py
                       # SUBAGENT dicts + org.yaml rosters; resolves tools/skills/model)
-  policy.py           # declarative policy resolver
-  contract.py         # declarative org-contract enforcer (rules 1-8 + legacy tripwires)
+    model.py          # provider/model factory (PUX_MODEL)
+    contract.py       # declarative org-contract enforcer (rules 1-8 + legacy tripwires)
+  sandbox/            # Docker sandbox layer — self-contained (no agent/context import)
+    backend.py        # PuxSandboxBackend(BaseSandbox) -> native fs tools
+    docker_exec.py    # DockerExecClient: direct `docker exec`
+    container.py      # SandboxContainer: create/start/stop/remove + policy enforce
+    tools.py          # 13 specialist StructuredTools (python/skills/vision/browser/desktop)
+    policy.py         # declarative policy resolver
+  context/            # proactive offload layer
+    offload.py        # ContextOffloadMiddleware + ctx_recall/ctx_search
+    store.py          # host-side stash for offloaded tool output
 tests/
   test_org_contract.py    test_server.py    test_acp.py    test_policy.py
   test_container.py       test_context_offload.py    test_load_subagents.py
+  test_describe_image.py
 ```
+
+**Layering:** the four `[entry]` modules are invoked as `python -m
+pux_harness.<name>`, so they stay top-level. `agent/` depends on `sandbox/`
++ `context/`; `sandbox/` and `context/` are each self-contained.
 
 ## Run
 

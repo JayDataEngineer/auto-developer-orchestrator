@@ -23,8 +23,8 @@ from pathlib import Path
 
 import pytest
 
-from pux_harness import contract
-from pux_harness.contract import (
+from pux_harness.agent import contract
+from pux_harness.agent.contract import (
     KNOWN_POLICY_SECTIONS,
     NATIVE_FS_TOOLS,
     _REQUIRED_AGENT_KEYS,
@@ -314,7 +314,7 @@ def _write_skill(root: Path, slug: str, *, name: str | None = None,
 
 def test_skill_well_formed_missing_skill_md(tmp_path):
     """A skill dir without SKILL.md is not a skill."""
-    from pux_harness.contract import _check_skill_dir
+    from pux_harness.agent.contract import _check_skill_dir
     (tmp_path / "ghost").mkdir()
     vs = _check_skill_dir(tmp_path / "ghost")
     assert [v.rule for v in vs] == ["skill-well-formed"]
@@ -322,21 +322,21 @@ def test_skill_well_formed_missing_skill_md(tmp_path):
 
 
 def test_skill_well_formed_name_must_match_dir(tmp_path):
-    from pux_harness.contract import _check_skill_dir
+    from pux_harness.agent.contract import _check_skill_dir
     _write_skill(tmp_path, "real-name", name="wrong-name")
     vs = _check_skill_dir(tmp_path / "real-name")
     assert any("must equal the dir name" in v.message for v in vs), vs
 
 
 def test_skill_well_formed_name_must_be_kebab(tmp_path):
-    from pux_harness.contract import _check_skill_dir
+    from pux_harness.agent.contract import _check_skill_dir
     _write_skill(tmp_path, "Bad_Name", name="Bad_Name")  # caps + underscore
     vs = _check_skill_dir(tmp_path / "Bad_Name")
     assert any("kebab-case" in v.message for v in vs), vs
 
 
 def test_skill_well_formed_description_required(tmp_path):
-    from pux_harness.contract import _check_skill_dir
+    from pux_harness.agent.contract import _check_skill_dir
     d = tmp_path / "no-desc"
     d.mkdir()
     (d / "SKILL.md").write_text(
@@ -348,7 +348,7 @@ def test_skill_well_formed_description_required(tmp_path):
 def test_skill_well_formed_unparseable_frontmatter(tmp_path):
     """A colon-space in an unquoted scalar fails YAML parsing — caught here
     as a skill-well-formed error, not mid-run (the game-studio regression)."""
-    from pux_harness.contract import _check_skill_dir
+    from pux_harness.agent.contract import _check_skill_dir
     d = tmp_path / "broken"
     d.mkdir()
     (d / "SKILL.md").write_text(
@@ -359,7 +359,7 @@ def test_skill_well_formed_unparseable_frontmatter(tmp_path):
 
 
 def test_skill_well_formed_clean(tmp_path):
-    from pux_harness.contract import _check_skill_dir
+    from pux_harness.agent.contract import _check_skill_dir
     _write_skill(tmp_path, "clean-skill", desc="does the thing")
     assert _check_skill_dir(tmp_path / "clean-skill") == []
 

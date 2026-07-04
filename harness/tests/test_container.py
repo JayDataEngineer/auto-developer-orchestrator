@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from pux_harness import container as C
+from pux_harness.sandbox import container as C
 
 
 # --- resolve_runtime (port of runtime.go::resolveRuntime) ---------------------
