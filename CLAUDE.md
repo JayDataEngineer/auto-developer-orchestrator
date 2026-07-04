@@ -22,7 +22,7 @@ Two layers:
   LangChain Agent Protocol REST API (`server.py`, FastAPI on `:9988`). Driven
   by `cli.py` (the `pux` client) or the in-process runner (`main.py`).
 - **`bin/pux`** (bash launcher) — sources `.env`, routes `serve` / `direct` /
-  `sandbox` / client subcommands into the harness.
+  `acp` / `sandbox` / client subcommands into the harness.
 
 The pi-mono TS harness (`bin/pux.mjs`, `.pi/extensions/*`, `pi-*` npm deps,
 `package.json`) is **deleted** (Phase 4). Its org-overlay + delegation jobs are
@@ -45,6 +45,10 @@ pux sandbox start                # or: `pux sandbox status` to reuse a running o
 
 # Start the Agent Protocol server (blocks; the canonical executor)
 pux serve                        # FastAPI on http://127.0.0.1:9988
+
+# OR: expose an org as an ACP stdio server — the editor IS the TUI
+pux acp --org general            # drive from Zed / VS Code (vscode-acp) / Neovim
+                                 # (sandbox self-boots lazily, like `pux direct`)
 
 # Drive it (client — requires `pux serve` running)
 pux agents                                    # list the 10 orgs
@@ -117,6 +121,7 @@ harness/
 │   │                           # one shared DockerExecClient + PuxSandboxBackend per process
 │   ├── server.py               # Agent Protocol server (FastAPI, :9988)
 │   ├── cli.py                  # `pux` client (httpx → server)
+│   ├── acp.py                  # ACP stdio server (`pux acp`) — editor = TUI (Phase 9)
 │   ├── main.py                 # in-process runner (`pux direct`) + sandbox lifecycle
 │   ├── sandbox.py              # PuxSandboxBackend(BaseSandbox) -> native fs tools
 │   ├── docker_exec.py          # DockerExecClient: direct `docker exec` into the container
@@ -131,6 +136,7 @@ harness/
 └── tests/
     ├── test_org_contract.py    # the all-orgs-green gate (rule 1–7)
     ├── test_server.py          # Agent Protocol routing (stub graph, no tokens)
+    ├── test_acp.py             # ACP stdio handshake (subprocess, no tokens/Docker)
     ├── test_policy.py          # policy resolver parity (mirrors the deleted Go tests)
     ├── test_container.py       # SandboxContainer runtime decision table
     └── test_context_offload.py # offload + ctx_recall/ctx_search
@@ -263,6 +269,35 @@ vs adopting an opinionated runtime), and the REST contract is identical either
 way — swapping the server impl behind these endpoints is invisible to clients,
 so the choice is reversible. SSE streaming (run lifecycle + tool + nested-
 subagent events) is deferred to Phase 9.
+
+## ACP (`pux acp`) — the editor is the TUI
+
+`harness/pux_harness/acp.py` exposes `build_graph(org)` as an **Agent Client
+Protocol** stdio server (`agentclientprotocol.com`) via
+`deepagents-acp`'s `AgentServerACP`. An editor that speaks ACP — **Zed**, **VS
+Code** (via `vscode-acp`), **Neovim** — connects to it; **the editor is the
+TUI**, so Phase 9 ships zero UI code. Additive: touches nothing in `server.py`,
+reverses no prior decision.
+
+```bash
+pux acp                # serve $PUX_ORG (or `general`) over stdio
+pux acp --org invest   # serve a specific org
+```
+
+**Factory contract (source-verified):** `AgentServerACP(agent=factory)` where
+`factory(context) -> CompiledStateGraph`. The server caches the first build —
+one graph instance serves all sessions, keyed by `thread_id=session_id` in the
+checkpointer — so the org is fixed at startup (first wins: `--org` → `$PUX_ORG`
+→ `general`); `context.cwd` (the editor's project dir) is ignored because the
+Pux sandbox workspace is the bind-mounted project, fixed by the container.
+`MemorySaver` keys sessions; a persistent `AsyncSqliteSaver` (like `server.py`)
+is a deliberate future option. The sandbox self-boots lazily on first tool use
+(same path as `pux direct`), so `pux acp` needs no prior `pux sandbox start`.
+
+**Editor env:** the editor process must have `OPENCODE_API_KEY` + `PUX_MODEL`
+in its environment (a shell that sourced `.env`, or `bin/pux` which sources it).
+The stdio server spends no tokens until the first `prompt`; `initialize` +
+`new_session` are pure plumbing.
 
 ### Org mode (`--org <name>`)
 
@@ -446,7 +481,7 @@ become session-scoped, which is correct for the seed-at-boot use case.
 
 ## Verification
 
-**Harness contract** (`harness/tests/`, run with `uv run pytest -q` → **130
+**Harness contract** (`harness/tests/`, run with `uv run pytest -q` → **132
 passing**):
 
 - **Org contract** (`test_org_contract.py`): all 10 orgs green; rule-4
@@ -485,7 +520,7 @@ Python then deleted (Phase 8).
 | 7 | context-mode integration (ctx MCP + wrap_tool_call offload) | **SHIPPED 2026-07-03** — **native harness offload, NOT an external ctx-MCP bridge** (context-mode is a stdio Claude-Code bun plugin, unreachable over HTTP from the harness; meta-mcp `list_servers` confirmed). `harness/pux_harness/context_offload.py` `ContextOffloadMiddleware(AgentMiddleware)` measures each `wrap_tool_call`/`awrap_tool_call` result; a ToolMessage > `threshold` (default 8000 chars ≈ 2K tokens) gets stashed to `ctx_store.py` (host-side `<project>/.pux/ctx/<id>.txt+.json`; hex-only ids reject path-escape) and replaced with a preview + `ctx:<id>` handle. `ctx_recall` / `ctx_search` StructuredTools pull stashed bytes back on demand. This is the *proactive* complement to deepagents' own reactive `SummarizationMiddleware`. **Two findings the E2E surfaced + fixed:** (1) `ctx_recall`/`ctx_search` are exempt from offload — re-stashing trapped the agent in a recall→offload loop; (2) **main-agent-only** — deepagents' `SubAgentMiddleware` does not forward a raw SubAgent spec's `middleware` key into the compiled specialist (verified), so attaching it there is a silent no-op; subagent offload is a `CompiledSubAgent`-pre-compilation follow-up, not a shim. |
 | 8 | Re-host sandbox in Python (`execute()`→docker exec; 13 specialist tools); wire policy enforcement here; delete Go MCP | **8a–8g SHIPPED 2026-07-03** — `docker_exec.py` `DockerExecClient` (container discovered by `openshell.project-path` label; `exec()` via Docker SDK `exec_run(tty=False)`); `native_tools.py` ports all 13 specialists (`_result` uses `sort_keys=True` → byte-stable JSON); `container.py` `SandboxContainer` owns the container lifecycle (faithful port of the deleted `manager.go::CreateSandbox`+`DestroySandbox`, CLI-mode slice) + policy **enforcement** (the part deferred from Phase 6 — binds/env/caps/egress.conf staging at create, porting `policy_hook.go::applyOrgPolicy` step-for-step). `ensure()` is the single-tenant gate; the exec client self-boots. `pux sandbox {start,stop,status}` CLI surface replaces `task start/stop/status`. |
 | 8i | Delete the Go MCP tree + rewire the seam (LAST, after 8a–8g proven) | **SHIPPED 2026-07-03** — `git rm -r backend/` (79 Go files) + `harness/pux_harness/bridge.py` (the JSON-RPC client) + `scripts/smoke_mcp.py` (81 deletions total). The seam rewired: contract rule-4 tool-resolution now resolves against the static `NATIVE_FS_TOOLS` ∪ `SPECIALIST_TOOL_NAMES` (always-on, no live-bridge probe); `graph.py` builds specialists from `build_native_specialists()` and no longer references a bridge client; `main.py --check`/`--check-contract` run with no Go server; `main.py:DEFAULT_TASKS["general"]` repointed from counting deleted Go files to counting harness Python modules (ground truth 15). `Taskfile.yml` rewritten harness-focused (all Go build/run/smoke tasks gone). **Proven E2E**: stopped the Go binary + removed its container → `pux direct --org general` with **no Go binary present** → CTO delegates via `task(researcher)` → researcher runs a single native `execute find … -name '*.py'` → returns **15 harness modules** (exact ground truth), `legacy pux_sandbox fs/shell leaked: NONE`. pytest 130/130, `--check-contract` exit 0. |
-| 9 | TUI/clients as Agent Protocol consumers (+ SSE streaming) | roadmap |
+| 9 | TUI/clients as Agent Protocol consumers (+ SSE streaming) | **ACP TRACK SHIPPED 2026-07-03** — `pux acp [--org X]` exposes `build_graph(org)` as a stdio ACP server (`harness/pux_harness/acp.py`, `deepagents-acp` `AgentServerACP(agent=factory)`); the editor (Zed / VS Code via vscode-acp / Neovim) IS the TUI — zero UI code. Org fixed at startup (`--org`→`$PUX_ORG`→`general`); factory caches the first build, sessions keyed by `thread_id=session_id` in `MemorySaver`; sandbox self-boots lazily. `test_acp.py` proves initialize+new_session over stdio (no tokens, no Docker). **Proven E2E** (`pux acp --org general` over stdio with glm-5.2): `prompt`→`stop_reason=end_turn`, 101 `session/update` frames streamed, CTO delegates via `task(researcher)`→native `execute find … -name '*.py'` (lazy sandbox boot)→verbatim **16 harness modules** (incl. the new `acp.py`); zero agent-side errors. Deferred: pux-serve SSE streaming + a terminal client of `pux serve` (Track 2/3) — ACP-first per the Phase-9 decision; the langgraph-api/Studio path remains reversible behind the same REST contract. |
 
 ## Branch strategy
 
