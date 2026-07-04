@@ -1,6 +1,7 @@
 """Declarative org contract — the portable org <-> harness interface.
 
-An org is a directory ``orgs/<name>/`` containing ``AGENTS.md``. This module
+An org is a directory ``orgs/<name>/`` containing ``AGENTS.md`` (CTO prompt
+prose) and optionally ``org.yaml`` (the specialist roster). This module
 enforces that every org is a self-contained, portable bundle with **no
 harness-level per-org code coupling** — pillar (a) of the deepagents pivot:
 orgs declare what they need, the harness treats them generically.
@@ -9,14 +10,16 @@ Two validation tiers:
 
 * **Structural** (always checked, no server, no model tokens):
   1. ``AGENTS.md`` present.
-  2. Org frontmatter uses only known keys (the standardized ``agents:``).
-  3. Every ``agents:`` slug resolves to a valid ``.pi/agents/<slug>.md`` with
-     known frontmatter + a description.
+  2. ``AGENTS.md`` carries no frontmatter (prose-only); roster lives in
+     ``org.yaml``.
+  3. Every ``org.yaml`` slug resolves to a valid ``.pi/agents/<slug>.py``
+     exporting a ``SUBAGENT`` dict with ``name``, ``description``, and
+     ``system_prompt``.
   5. Optional ``policy.yaml`` parses and uses known sections.
 
 * **Tool-resolution** (rule 4 — always on, no server): every entry in an
-  agent's ``tools:`` whitelist resolves to a native fs tool OR a name in the
-  static specialist surface (``SPECIALIST_TOOL_NAMES`` from ``native_tools``).
+  agent's ``SUBAGENT["tools"]`` list resolves to a native fs tool OR a name in
+  the static specialist surface (``SPECIALIST_TOOL_NAMES`` from ``native_tools``).
   Both surfaces are Python constants, so this runs offline in pytest and in
   ``--check-contract`` with no container or Go server.
 
@@ -26,19 +29,24 @@ Two validation tiers:
   8. Skill hygiene: every ``SKILL.md`` is Agent-Spec well-formed, and no ``.md``
      sits loose directly under a skills root (``check_skill_roots``).
 
+* **Permanent legacy tripwires** (no-legacy-agent-frontmatter,
+  no-legacy-org-roster): the legacy ``.md``-with-frontmatter agent form and
+  the ``agents:``-key-on-AGENTS.md org form are structurally forbidden —
+  ``--check-contract`` blocks any commit that reintroduces them.
+
 Rule 4 resolves against the *static* native surface: the specialist names are
 a Python frozenset (the single source of truth shared with ``graph.py``), so a
 stale ``tools:`` reference fails loud here without any process to probe.
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
-from deepagents import FilesystemPermission
 
 from pux_harness import policy as policy_mod
 from pux_harness.native_tools import SPECIALIST_TOOL_NAMES
@@ -57,22 +65,9 @@ from pux_harness.orgs import (
 
 # --- the contract vocabulary ----------------------------------------------
 
-# Org-level AGENTS.md frontmatter may use only this key. It declares the
-# specialist slugs the org delegates to (comma-separated), replacing the old
-# hardcoded ``ORG_AGENTS`` manifest.
-KNOWN_ORG_KEYS: frozenset[str] = frozenset({"agents"})
-
-# ``.pi/agents/<slug>.md`` frontmatter may use only these keys. The first 8 are
-# the carry-over pi-mono shape (harness ignores the last 4 of those — bools
-# like ``inheritSkills``); the last 5 are the Phase-10 deepagents ``SubAgent``
-# vocabulary the loader resolves in ``orgs.load_subagents`` (resolution table in
-# ``orgs.py``). ``middleware`` is deliberately absent: ``SubAgentMiddleware``
-# does not forward a raw spec's ``middleware`` key (Phase 7), so permitting it
-# here would greenlight a silent no-op.
-KNOWN_AGENT_KEYS: frozenset[str] = frozenset({
-    "name", "description", "tools", "systemPromptMode", "output",
-    "inheritSkills", "inheritProjectContext", "defaultProgress",
-    "model", "skills", "response_format", "permissions", "interrupt_on",
+# ``.pi/agents/<slug>.py`` SUBAGENT dict must contain these keys.
+_REQUIRED_AGENT_KEYS: frozenset[str] = frozenset({
+    "name", "description", "system_prompt",
 })
 
 # Optional ``orgs/<name>/policy.yaml`` top-level sections (matches Go policy.go).
@@ -116,122 +111,28 @@ class Violation:
 # --- per-org checks (rules 1-5) ------------------------------------------
 
 
-def _validate_rich_fields(afm: dict[str, Any], slug: str) -> list[Violation]:
-    """Offline structural validation of the Phase-10 SubAgent fields.
+def _load_agent_subagent(slug: str) -> dict[str, Any] | None:
+    """Import ``.pi/agents/<slug>.py`` and return its ``SUBAGENT`` dict.
 
-    Mirrors what ``orgs.load_subagents`` enforces by raising at runtime, so a
-    malformed field fails at ``--check-contract`` time (pytest) instead of
-    mid-run. No model init, no Docker. ``model`` is checked as a string here —
-    the loader resolves it through ``get_model`` (token-free in the dry-run, but
-    the contract itself never constructs the model, so it stays offline).
+    Path-loaded (``importlib.util.spec_from_file_location``) — ``.pi/`` is NOT
+    on ``sys.path`` and this never adds it. Returns ``None`` if no ``.py``
+    exists; raises on import error or missing ``SUBAGENT`` (fail loud — a
+    broken agent is a contract violation, not a silent skip).
     """
-    out: list[Violation] = []
-
-    if "model" in afm and not isinstance(afm["model"], str):
-        out.append(Violation(
-            "error", "model-shape",
-            f"{slug}: model must be a string shorthand (e.g. 'glm-5.2'), "
-            f"got {type(afm['model']).__name__}"))
-
-    if "skills" in afm:
-        project = _orgs_dir().parent
-        for p in _parse_list(afm["skills"]):
-            if (not isinstance(p, str) or not p
-                    or p.startswith("/") or ".." in Path(p).parts):
-                out.append(Violation(
-                    "error", "skill-source-shape",
-                    f"{slug}: skills source must be a project-relative path "
-                    f"(got {p!r})"))
-                continue
-            src = project / p
-            if not src.is_dir():
-                out.append(Violation(
-                    "error", "skill-source-resolves",
-                    f"{slug}: skills source {p!r} -> not a directory under the "
-                    f"project root"))
-                continue
-            # A declared source must hold >=1 Agent-Spec well-formed skill;
-            # otherwise SkillsMiddleware silently loads nothing from it (the
-            # exact regression that stranded the org playbooks). Specific
-            # per-skill malformations are reported globally by
-            # ``check_skill_roots``; this rule guards the dead declaration.
-            if not _well_formed_skill_dirs(src):
-                out.append(Violation(
-                    "error", "skill-source-resolves",
-                    f"{slug}: skills source {p!r} -> no well-formed skill "
-                    f"(expected <source>/<skill-name>/SKILL.md)"))
-
-    if "response_format" in afm and not isinstance(afm["response_format"], dict):
-        out.append(Violation(
-            "error", "response-format-shape",
-            f"{slug}: response_format must be a JSON-schema mapping, "
-            f"got {type(afm['response_format']).__name__}"))
-
-    if "permissions" in afm:
-        raw = afm["permissions"]
-        allowed_keys = {"operations", "paths", "mode"}
-        allowed_ops = {"read", "write"}
-        allowed_modes = {"allow", "deny", "interrupt"}
-        if not isinstance(raw, list):
-            out.append(Violation(
-                "error", "permissions-shape",
-                f"{slug}: permissions must be a list of mappings, "
-                f"got {type(raw).__name__}"))
-        else:
-            for i, entry in enumerate(raw):
-                if not isinstance(entry, dict):
-                    out.append(Violation(
-                        "error", "permissions-shape",
-                        f"{slug}: permissions[{i}] must be a mapping, "
-                        f"got {type(entry).__name__}"))
-                    continue
-                bad = sorted(k for k in entry if k not in allowed_keys)
-                if bad:
-                    out.append(Violation(
-                        "error", "permissions-shape",
-                        f"{slug}: permissions[{i}] unknown keys {bad}; "
-                        f"allowed: {sorted(allowed_keys)}"))
-                    continue
-                ops = entry.get("operations", [])
-                bad_ops = [o for o in ops if o not in allowed_ops]
-                if not isinstance(ops, list) or bad_ops:
-                    out.append(Violation(
-                        "error", "permissions-shape",
-                        f"{slug}: permissions[{i}].operations must be a list of "
-                        f"'read'/'write'; invalid: {bad_ops!r}"))
-                    continue
-                mode = entry.get("mode", "allow")
-                if mode not in allowed_modes:
-                    out.append(Violation(
-                        "error", "permissions-shape",
-                        f"{slug}: permissions[{i}].mode must be one of "
-                        f"{sorted(allowed_modes)}, got {mode!r}"))
-                    continue
-                # Reuse deepagents' own path validation (leading '/', no '..'/'~').
-                try:
-                    FilesystemPermission(**entry)
-                except (ValueError, TypeError) as e:
-                    out.append(Violation(
-                        "error", "permissions-shape",
-                        f"{slug}: permissions[{i}] invalid: {e}"))
-
-    if "interrupt_on" in afm:
-        raw = afm["interrupt_on"]
-        if (not isinstance(raw, dict)
-                or not all(isinstance(v, bool) for v in raw.values())):
-            out.append(Violation(
-                "error", "interrupt-on-shape",
-                f"{slug}: interrupt_on must be a mapping of tool-name -> bool, "
-                f"got {raw!r}"))
-
-    return out
+    path = _agents_dir() / f"{slug}.py"
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location(f"_pi_agent_{slug}", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod.SUBAGENT  # type: ignore[attr-defined]
 
 
 def check_org(name: str) -> list[Violation]:
     """Validate one org's bundle — fully offline (no server, no tokens).
 
     Rules 1,2,3,5 are structural. Rule 4 (tool-resolution) resolves every
-    agent ``tools:`` entry against ``NATIVE_FS_TOOLS`` ∪
+    agent ``SUBAGENT["tools"]`` entry against ``NATIVE_FS_TOOLS`` ∪
     ``SPECIALIST_TOOL_NAMES`` — both Python constants — so it runs in pytest
     and ``--check-contract`` with nothing live.
     """
@@ -244,43 +145,65 @@ def check_org(name: str) -> list[Violation]:
         return [Violation("error", "org-agents-md",
                           f"{name}: orgs/{name}/AGENTS.md missing")]
 
+    # Rule 2: AGENTS.md is prose-only (no frontmatter). The roster lives in
+    # org.yaml. Permanent tripwire against reintroduction.
     fm, _ = _split_frontmatter(agents_md.read_text())
+    if fm:
+        v.append(Violation(
+            "error", "no-legacy-org-roster",
+            f"{name}: AGENTS.md carries YAML frontmatter — the roster must "
+            f"live in orgs/{name}/org.yaml and AGENTS.md must be prose-only"))
 
-    # Rule 2: org frontmatter keys known.
-    for key in fm:
-        if key not in KNOWN_ORG_KEYS:
-            v.append(Violation("error", "org-frontmatter-keys",
-                               f"{name}: unknown frontmatter key {key!r}; "
-                               f"allowed: {sorted(KNOWN_ORG_KEYS)}"))
+    # Read slugs from org.yaml (the only valid roster source).
+    org_yaml = org_dir / "org.yaml"
+    if org_yaml.is_file():
+        data = yaml.safe_load(org_yaml.read_text()) or {}
+        if not isinstance(data, dict):
+            v.append(Violation(
+                "error", "org-yaml-shape",
+                f"{name}: org.yaml top-level must be a mapping, "
+                f"got {type(data).__name__}"))
+            slugs: list[str] = []
+        else:
+            slugs = _parse_list(data.get("agents"))
+    elif not fm:
+        # No org.yaml AND AGENTS.md has no frontmatter → empty roster (valid
+        # for a CTO-only org with no specialists).
+        slugs = []
+    else:
+        # No org.yaml but AGENTS.md has frontmatter — already reported above.
+        slugs = _parse_list(fm.get("agents", ""))
 
-    slugs = _parse_list(fm.get("agents", ""))
-
-    # Rule 3: every slug resolves to a valid agent file.
-    agent_frontmatter: dict[str, dict[str, str]] = {}
+    # Rule 3: every slug resolves to a valid .py agent with required keys.
+    agent_subagents: dict[str, dict[str, Any]] = {}
     for slug in slugs:
-        agent_file = _agents_dir() / f"{slug}.md"
-        if not agent_file.is_file():
-            v.append(Violation("error", "agent-resolves",
-                               f"{name}: agents: {slug!r} -> "
-                               f"no .pi/agents/{slug}.md"))
+        try:
+            sub = _load_agent_subagent(slug)
+        except Exception as exc:
+            v.append(Violation(
+                "error", "agent-resolves",
+                f"{name}: agents: {slug!r} -> .pi/agents/{slug}.py "
+                f"failed to import: {exc}"))
             continue
-        afm, _ = _split_frontmatter(agent_file.read_text())
-        agent_frontmatter[slug] = afm
-        bad = sorted(k for k in afm if k not in KNOWN_AGENT_KEYS)
-        if bad:
-            v.append(Violation("error", "agent-frontmatter-keys",
-                               f"{name}/{slug}: unknown frontmatter keys {bad}; "
-                               f"allowed: {sorted(KNOWN_AGENT_KEYS)}"))
-        if not afm.get("description"):
-            v.append(Violation("error", "agent-description",
-                               f"{name}/{slug}: missing 'description' "
-                               f"(deepagents needs it for the task tool)"))
+        if sub is None:
+            v.append(Violation(
+                "error", "agent-resolves",
+                f"{name}: agents: {slug!r} -> "
+                f"no .pi/agents/{slug}.py"))
+            continue
+        agent_subagents[slug] = sub
+        missing = sorted(_REQUIRED_AGENT_KEYS - sub.keys())
+        if missing:
+            v.append(Violation(
+                "error", "agent-missing-keys",
+                f"{name}/{slug}: SUBAGENT dict missing required "
+                f"keys: {missing}"))
 
     # Rule 4: tool whitelist resolves against the static native surface
     # (fs tools ∪ the specialist registry). No server probe — both halves are
     # Python constants, so this runs identically in pytest and --check-contract.
-    for slug, afm in agent_frontmatter.items():
-        for raw in _parse_list(afm.get("tools", "")):
+    for slug, sub in agent_subagents.items():
+        for raw in _parse_list(sub.get("tools", [])):
             tool = raw.rsplit("/", 1)[-1]
             if tool in NATIVE_FS_TOOLS:
                 continue
@@ -290,14 +213,6 @@ def check_org(name: str) -> list[Violation]:
                                    f"{name}/{slug}: tool {raw!r} -> "
                                    f"{key!r} not a native fs tool or a "
                                    f"pux_sandbox_* specialist"))
-
-    # Rule 4b: Phase-10 rich SubAgent fields (model/skills/response_format/
-    # permissions/interrupt_on) are structurally valid — offline, mirrors the
-    # runtime resolvers in ``orgs.load_subagents``. A malformed value fails here
-    # rather than aborting a real run.
-    for slug, afm in agent_frontmatter.items():
-        for violation in _validate_rich_fields(afm, f"{name}/{slug}"):
-            v.append(violation)
 
     # Rule 5: policy.yaml parses + valid schema + known sections.
     policy_path = org_dir / "policy.yaml"
@@ -315,14 +230,6 @@ def check_org(name: str) -> list[Violation]:
                                    f"{name}: policy.yaml unknown sections "
                                    f"{bad}; allowed: "
                                    f"{sorted(KNOWN_POLICY_SECTIONS)}"))
-            # Deep schema: the real policy engine (Phase 6 port of the Go
-            # package) catches malformed mounts/creds the shallow section check
-            # misses. Go's parser is lenient on unknown keys, so the strict
-            # unknown-section check above runs first; this catches everything
-            # else — non-mapping sections (load) + bad mount paths/modes +
-            # unset ${VAR} placeholders (resolve_mounts). egress_rules is
-            # intentionally NOT called here: it resolves real DNS (network),
-            # which the contract must not depend on.
             try:
                 pol = policy_mod.load(name, _orgs_dir().parent)
                 policy_mod.resolve_mounts(pol)
@@ -345,18 +252,36 @@ _MANIFEST_RE = re.compile(r"^\s*ORG_AGENTS\s*[:=]", re.MULTILINE)
 
 
 def orphan_agents() -> list[str]:
-    """Agent slugs owned by no org (not listed in any ``agents:``
-    frontmatter). Rule 7 — SHOULD (warn), not blocking."""
+    """Agent slugs owned by no org (not listed in any ``org.yaml``).
+    Rule 7 — SHOULD (warn), not blocking."""
     owned: set[str] = set()
     for org in discover_orgs():
         owned.update(org_agent_slugs(org))
-    all_agents = {p.stem for p in _agents_dir().glob("*.md")}
+    all_agents = {p.stem for p in _agents_dir().glob("*.py")}
     return sorted(all_agents - owned)
 
 
+def _no_legacy_agent_frontmatter() -> list[Violation]:
+    """No .pi/agents/*.md may carry YAML frontmatter — prose-only.
+
+    Permanent tripwire (Phase 2). A new agent added as .md-with-frontmatter is
+    a HARD contract failure, not a silent dual-read. The .py form is the only
+    valid agent config path.
+    """
+    v: list[Violation] = []
+    for md in sorted(_agents_dir().glob("*.md")):
+        text = md.read_text()
+        if text.startswith("---"):
+            v.append(Violation(
+                "error", "no-legacy-agent-frontmatter",
+                f".pi/agents/{md.name}: carries YAML frontmatter — agents "
+                f"must be .py (SUBAGENT dict) + prose-only .md"))
+    return v
+
+
 def check_harness() -> list[Violation]:
-    """Rule 6 (no hardcoded org->agent manifest) + rule 7 (no orphan agents).
-    Global — not per-org."""
+    """Rule 6 (no hardcoded org->agent manifest) + rule 7 (no orphan agents)
+    + permanent legacy tripwires. Global — not per-org."""
     v: list[Violation] = []
     src = Path(__file__).with_name("orgs.py")
     if src.is_file() and _MANIFEST_RE.search(src.read_text()):
@@ -368,6 +293,7 @@ def check_harness() -> list[Violation]:
         v.append(Violation("warn", "no-orphan-agents",
                            f"agent {orphan!r} is owned by no org (not in any "
                            f"`agents:` frontmatter)"))
+    v.extend(_no_legacy_agent_frontmatter())
     return v
 
 

@@ -1,7 +1,3 @@
----
-agents: game-studio-creative, game-studio-design-researcher, game-studio-docs-writer, game-studio-gameplay-programmer, game-studio-narrative-designer, game-studio-qa-tester, game-studio-renderer, game-studio-studio-director, game-studio-technical-artist
----
-
 # Tech Noir Studio — CTO Overlay
 
 You are the **CTO of Tech Noir** — a creative studio that turns operator

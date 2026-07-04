@@ -1,4 +1,4 @@
-"""Green gate for the declarative org contract (Phase 2).
+"""Green gate for the declarative org contract.
 
 Two tiers, mirroring ``contract.py``:
 
@@ -6,10 +6,11 @@ Two tiers, mirroring ``contract.py``:
   org asserts ``check_org(org) == []``. This is the gate — if an org's bundle
   drifts (bad frontmatter, unresolvable slug, malformed policy), this fails.
 * **Tool-resolution** (rule 4): the org contract resolves every agent
-  ``tools:`` entry against ``NATIVE_FS_TOOLS`` ∪ ``SPECIALIST_TOOL_NAMES``
-  (both Python constants). These tests feed a bogus tool so the rule fires
-  loud, and a real native-fs name so it's correctly allowed.
-* **Violation classes** (rules 1,2,3,5): built in a tmp tree, each asserts the
+  ``SUBAGENT["tools"]`` entry against ``NATIVE_FS_TOOLS`` ∪
+  ``SPECIALIST_TOOL_NAMES`` (both Python constants). These tests feed a bogus
+  tool so the rule fires loud, and a real native-fs name so it's correctly
+  allowed.
+* **Violation classes** (rules 1,3,5): built in a tmp tree, each asserts the
   right rule fires. Proves the enforcer catches what it claims to.
 
 Both ``--check-contract`` and these tests resolve against the same static
@@ -17,16 +18,16 @@ surface — no Go server, no Docker, no tokens.
 """
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
 
 from pux_harness import contract
 from pux_harness.contract import (
-    KNOWN_AGENT_KEYS,
-    KNOWN_ORG_KEYS,
     KNOWN_POLICY_SECTIONS,
     NATIVE_FS_TOOLS,
+    _REQUIRED_AGENT_KEYS,
     check_harness,
     check_org,
     discover_orgs,
@@ -50,7 +51,7 @@ def test_discover_orgs_finds_all_ten():
 
 @pytest.mark.parametrize("org", sorted(EXPECTED_ORGS))
 def test_org_bundle_is_green(org):
-    """Structural green: AGENTS.md, frontmatter keys, slug resolution, policy."""
+    """Structural green: AGENTS.md, org.yaml, slug resolution, policy."""
     violations = check_org(org)
     errors = [v for v in violations if v.severity == "error"]
     assert errors == [], f"{org}: {errors}"
@@ -73,7 +74,7 @@ def test_every_org_has_a_forcing_task():
 
 
 def test_harness_has_no_hardcoded_manifest():
-    """Rule 6: the org->agent map lives in frontmatter, not harness code."""
+    """Rule 6: the org->agent map lives in org.yaml, not harness code."""
     assert check_harness() == []
 
 
@@ -84,8 +85,8 @@ def test_rule4_unknown_tool_fails_loud(fake_tree):
     ``pux_sandbox_*`` specialist fails loud — proves the resolver checks the
     static surface rather than trusting the names."""
     add_org, add_agent = fake_tree
-    add_agent("ghost", tools="mcp:pux-sandbox/no_such_tool")
-    add_org("o", agents="ghost")
+    add_agent("ghost", tools=["no_such_tool"])
+    add_org("o", agents=["ghost"])
     vs = check_org("o")
     rules = {v.rule for v in vs}
     assert "tool-resolves" in rules, f"expected tool-resolves error, got: {vs}"
@@ -96,8 +97,8 @@ def test_rule4_native_fs_tool_always_allowed(fake_tree):
     not the specialist registry. Build an agent listing both a native name and
     an unknown specialist tool; ONLY the unknown specialist tool fails."""
     add_org, add_agent = fake_tree
-    add_agent("mix", tools="read_file, mcp:pux-sandbox/bash")
-    add_org("o", agents="mix")
+    add_agent("mix", tools=["read_file", "bash"])
+    add_org("o", agents=["mix"])
     vs = check_org("o")
     resolves = [v for v in vs if v.rule == "tool-resolves"]
     assert len(resolves) == 1, vs
@@ -120,22 +121,33 @@ def fake_tree(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(contract, "_orgs_dir", lambda: tmp_path / "orgs")
     monkeypatch.setattr(contract, "_agents_dir", lambda: tmp_path / ".pi" / "agents")
 
-    def add_agent(slug: str, tools: str = "", desc: str = "a specialist") -> None:
-        fm = f"---\nname: {slug}\ndescription: {desc}\n"
-        if tools:
-            fm += f"tools: {tools}\n"
-        fm += "---\n\nbody\n"
-        (tmp_path / ".pi" / "agents" / f"{slug}.md").write_text(fm)
+    def add_agent(slug: str, tools: list[str] | None = None,
+                  desc: str = "a specialist",
+                  skills: list[str] | None = None) -> None:
+        """Write the NEW-form .pi/agents/<slug>.py + prose-only <slug>.md."""
+        agents_dir = tmp_path / ".pi" / "agents"
+        lines = ["from pathlib import Path", "",
+                 "SUBAGENT = {"]
+        lines.append(f'    "name": "{slug}",')
+        lines.append(f'    "description": "{desc}",')
+        if tools is not None:
+            lines.append(f'    "tools": {tools!r},')
+        if skills is not None:
+            lines.append(f'    "skills": {skills!r},')
+        lines.append('    "system_prompt": Path(__file__).with_suffix(".md").read_text(),')
+        lines.append("}")
+        lines.append("")
+        (agents_dir / f"{slug}.py").write_text("\n".join(lines))
+        (agents_dir / f"{slug}.md").write_text("prose body\n")
 
-    def add_org(org: str, agents: str = "", body: str = "# Org\n",
+    def add_org(org: str, agents: list[str] | None = None, body: str = "# Org\n",
                 policy: str | None = None) -> None:
+        """Write the NEW-form org.yaml + prose-only AGENTS.md."""
         d = tmp_path / "orgs" / org
-        d.mkdir()
-        head = "---\n"
-        if agents:
-            head += f"agents: {agents}\n"
-        head += f"---\n\n{body}"
-        (d / "AGENTS.md").write_text(head)
+        d.mkdir(exist_ok=True)
+        if agents is not None:
+            (d / "org.yaml").write_text(f"agents: [{', '.join(agents)}]\n")
+        (d / "AGENTS.md").write_text(body)
         if policy is not None:
             (d / "policy.yaml").write_text(policy)
 
@@ -150,52 +162,67 @@ def test_rule1_missing_agents_md(fake_tree):
     assert any(v.rule == "org-agents-md" for v in vs)
 
 
-def test_rule2_unknown_org_frontmatter_key(fake_tree):
+def test_rule2_legacy_frontmatter_rejected(fake_tree):
+    """AGENTS.md with any frontmatter is rejected by the no-legacy-org-roster
+    tripwire — the roster must live in org.yaml."""
     add_org, _ = fake_tree
     add_org("badorg")
     (contract._orgs_dir() / "badorg" / "AGENTS.md").write_text(
-        "---\nbogus: yes\n---\n\n# Org\n")
+        "---\nagents: x\n---\n\n# Org\n")
     vs = check_org("badorg")
-    assert any(v.rule == "org-frontmatter-keys" for v in vs)
-    assert KNOWN_ORG_KEYS == {"agents"}
+    assert any(v.rule == "no-legacy-org-roster" for v in vs)
 
 
 def test_rule3_unresolvable_slug(fake_tree):
     add_org, _ = fake_tree
-    add_org("orphan", agents="nope")
+    add_org("orphan", agents=["nope"])
     vs = check_org("orphan")
     assert any(v.rule == "agent-resolves" for v in vs)
 
 
-def test_rule3_agent_missing_description(fake_tree):
+def test_rule3_agent_missing_required_key(fake_tree):
     add_org, add_agent = fake_tree
-    add_agent("nodesc")
-    # rewrite without description
-    (contract._agents_dir() / "nodesc.md").write_text(
-        "---\nname: nodesc\n---\n\nbody\n")
-    add_org("o", agents="nodesc")
+    # Write a .py SUBAGENT dict missing 'description'
+    agents_dir = contract._agents_dir()
+    (agents_dir / "nodesc.py").write_text(
+        "from pathlib import Path\n"
+        "SUBAGENT = {\n"
+        '    "name": "nodesc",\n'
+        '    "system_prompt": Path(__file__).with_suffix(".md").read_text(),\n'
+        "}\n"
+    )
+    (agents_dir / "nodesc.md").write_text("prose\n")
+    add_org("o", agents=["nodesc"])
     vs = check_org("o")
-    assert any(v.rule == "agent-description" for v in vs)
+    assert any(v.rule == "agent-missing-keys" for v in vs)
 
 
-def test_rule3_unknown_agent_frontmatter_key(fake_tree):
-    add_org, add_agent = fake_tree
-    (contract._agents_dir() / "sp.md").write_text(
-        "---\nname: sp\ndescription: x\nweirdkey: 1\n---\n\nbody\n")
-    add_org("o", agents="sp")
+def test_rule3_agent_import_error(fake_tree):
+    """A .py that fails to import is caught as agent-resolves."""
+    add_org, _ = fake_tree
+    agents_dir = contract._agents_dir()
+    (agents_dir / "broken.py").write_text("raise RuntimeError('boom')\n")
+    (agents_dir / "broken.md").write_text("prose\n")
+    add_org("o", agents=["broken"])
     vs = check_org("o")
-    assert any(v.rule == "agent-frontmatter-keys" for v in vs)
-    assert KNOWN_AGENT_KEYS == {
-        "name", "description", "tools", "systemPromptMode", "output",
-        "inheritSkills", "inheritProjectContext", "defaultProgress",
-        "model", "skills", "response_format", "permissions", "interrupt_on",
-    }
+    assert any(v.rule == "agent-resolves" for v in vs)
+
+
+def test_rule3_unknown_agent_key_warned(fake_tree):
+    """A SUBAGENT dict with unexpected keys still loads (extra keys are
+    harmless) — but _REQUIRED_AGENT_KEYS must be present."""
+    add_org, add_agent = fake_tree
+    add_agent("sp", desc="x")
+    add_org("o", agents=["sp"])
+    vs = check_org("o")
+    # No violation — unknown keys are fine, required keys are present
+    assert not any(v.rule == "agent-missing-keys" for v in vs)
 
 
 def test_rule5_policy_parse_error(fake_tree):
     add_org, add_agent = fake_tree
     add_agent("r")
-    add_org("o", agents="r", policy="egress: [this is : : broken\n")
+    add_org("o", agents=["r"], policy="egress: [this is : : broken\n")
     vs = check_org("o")
     assert any(v.rule in {"policy-parse", "policy-shape", "policy-sections"}
                for v in vs)
@@ -204,7 +231,7 @@ def test_rule5_policy_parse_error(fake_tree):
 def test_rule5_policy_unknown_section(fake_tree):
     add_org, add_agent = fake_tree
     add_agent("r")
-    add_org("o", agents="r", policy="teleport:\n  beam: up\n")
+    add_org("o", agents=["r"], policy="teleport:\n  beam: up\n")
     vs = check_org("o")
     assert any(v.rule == "policy-sections" for v in vs)
     assert KNOWN_POLICY_SECTIONS == {
@@ -215,14 +242,14 @@ def test_rule5_policy_unknown_section(fake_tree):
 def test_rule5_policy_empty_is_ok(fake_tree):
     add_org, add_agent = fake_tree
     add_agent("r")
-    add_org("o", agents="r", policy="")  # _demo's real policy.yaml is empty
+    add_org("o", agents=["r"], policy="")  # _demo's real policy.yaml is empty
     assert check_org("o") == []
 
 
 def test_rule5_policy_valid_sections_ok(fake_tree):
     add_org, add_agent = fake_tree
     add_agent("r")
-    add_org("o", agents="r",
+    add_org("o", agents=["r"],
             policy="egress:\n  allow: []\ncredentials:\n  required: []\n")
     assert check_org("o") == []
 
@@ -233,7 +260,7 @@ def test_rule5_policy_non_mapping_section_caught(fake_tree):
     ``policy.load`` raises 'section must be a mapping'. Proves the load layer."""
     add_org, add_agent = fake_tree
     add_agent("r")
-    add_org("o", agents="r", policy="egress: not-a-mapping\n")
+    add_org("o", agents=["r"], policy="egress: not-a-mapping\n")
     vs = check_org("o")
     assert any(v.rule == "policy-schema" for v in vs), vs
     # and the shallow section check must NOT fire — the key IS known
@@ -247,7 +274,7 @@ def test_rule5_policy_bad_mount_caught(fake_tree):
     Proves the resolve_mounts layer (no network — safe offline)."""
     add_org, add_agent = fake_tree
     add_agent("r")
-    add_org("o", agents="r",
+    add_org("o", agents=["r"],
             policy="workspace:\n  mounts:\n    - host: /abs/path\n"
                    "      container: relative/path\n")
     vs = check_org("o")
@@ -255,14 +282,23 @@ def test_rule5_policy_bad_mount_caught(fake_tree):
     assert not any(v.rule == "policy-sections" for v in vs)
 
 
-# --- rule 4b fires (Phase-10 rich SubAgent fields, offline validation) ----
+def test_rule4_tool_resolution_for_agent(fake_tree):
+    """Tool resolution reads from SUBAGENT['tools'] — a bare slug that
+    resolves to pux_sandbox_<name> is checked against the static surface."""
+    add_org, add_agent = fake_tree
+    add_agent("a", tools=["python"])
+    add_org("o", agents=["a"])
+    vs = check_org("o")
+    # python -> pux_sandbox_python -> in SPECIALIST_TOOL_NAMES -> green
+    assert not any(v.rule == "tool-resolves" for v in vs)
 
-def _write_agent(slug: str, extra_fm: str) -> None:
-    """Write an agent file with arbitrary extra frontmatter (the Phase-10 rich
-    fields). Uses contract's patched ``_agents_dir`` so it lands in fake_tree."""
-    (contract._agents_dir() / f"{slug}.md").write_text(
-        f"---\nname: {slug}\ndescription: x\n{extra_fm}---\n\nbody\n")
 
+def test_required_agent_keys():
+    """The required-keys set is exactly name + description + system_prompt."""
+    assert _REQUIRED_AGENT_KEYS == {"name", "description", "system_prompt"}
+
+
+# --- rule 8 — skill hygiene (well-formedness + global root scan) ---------
 
 def _write_skill(root: Path, slug: str, *, name: str | None = None,
                  desc: str = "does a thing", body: str = "# body\n") -> Path:
@@ -274,131 +310,6 @@ def _write_skill(root: Path, slug: str, *, name: str | None = None,
         f"---\nname: {name if name is not None else slug}\n"
         f"description: {desc}\n---\n\n{body}")
     return d
-
-
-def test_rule4b_model_must_be_string(fake_tree):
-    add_org, _ = fake_tree
-    _write_agent("a", "model: 5\n")
-    add_org("o", agents="a")
-    vs = check_org("o")
-    assert any(v.rule == "model-shape" for v in vs), vs
-
-
-def test_rule4b_skill_source_must_resolve(fake_tree):
-    """A skills source that isn't a directory under the project root fails loud
-    (deepagents loads skills via the backend, so a missing source loads nothing)."""
-    add_org, _ = fake_tree
-    _write_agent("a", "skills: nope\n")
-    add_org("o", agents="a")
-    vs = check_org("o")
-    assert any(v.rule == "skill-source-resolves" for v in vs), vs
-
-
-def test_rule4b_skill_source_must_be_relative(fake_tree):
-    """A skills source must be project-relative (deepagents resolves it against
-    the backend); an absolute path or parent-escape is rejected."""
-    add_org, _ = fake_tree
-    _write_agent("a", "skills: /etc\n")
-    add_org("o", agents="a")
-    vs = check_org("o")
-    assert any(v.rule == "skill-source-shape" for v in vs), vs
-
-
-def test_rule4b_skill_source_root_resolves(fake_tree):
-    """A skills ROOT path (project-relative dir whose children are <skill>/) is
-    valid — deepagents scans it for every child skill. The root must hold at
-    least one well-formed skill (an empty root silently loads nothing)."""
-    add_org, _ = fake_tree
-    _write_skill(contract._orgs_dir().parent / ".pi" / "skills", "sample-skill")
-    _write_agent("a", "skills: .pi/skills\n")
-    add_org("o", agents="a")
-    assert check_org("o") == []
-
-
-def test_rule4b_response_format_must_be_mapping(fake_tree):
-    add_org, _ = fake_tree
-    _write_agent("a", "response_format: not-a-map\n")
-    add_org("o", agents="a")
-    vs = check_org("o")
-    assert any(v.rule == "response-format-shape" for v in vs), vs
-
-
-def test_rule4b_permissions_must_be_list(fake_tree):
-    add_org, _ = fake_tree
-    _write_agent("a", "permissions: {operations: [read]}\n")
-    add_org("o", agents="a")
-    vs = check_org("o")
-    assert any(v.rule == "permissions-shape" for v in vs), vs
-
-
-def test_rule4b_permissions_unknown_key(fake_tree):
-    add_org, _ = fake_tree
-    _write_agent("a", "permissions:\n  - operations: [read]\n"
-                       "    paths: [/x]\n    bogus: y\n")
-    add_org("o", agents="a")
-    vs = check_org("o")
-    assert any(v.rule == "permissions-shape" for v in vs), vs
-
-
-def test_rule4b_permissions_bad_mode(fake_tree):
-    add_org, _ = fake_tree
-    _write_agent("a", "permissions:\n  - operations: [read]\n"
-                       "    paths: [/x]\n    mode: teleport\n")
-    add_org("o", agents="a")
-    vs = check_org("o")
-    assert any(v.rule == "permissions-shape" for v in vs), vs
-
-
-def test_rule4b_permissions_bad_path_rejected(fake_tree):
-    """A relative path slips past the key/mode checks but deepagents'
-    ``FilesystemPermission.__post_init__`` rejects it — the contract reuses
-    that validation so a bad path fails here, not mid-run."""
-    add_org, _ = fake_tree
-    _write_agent("a", "permissions:\n  - operations: [read]\n"
-                       "    paths: [relative]\n")
-    add_org("o", agents="a")
-    vs = check_org("o")
-    assert any(v.rule == "permissions-shape" for v in vs), vs
-
-
-def test_rule4b_interrupt_on_must_be_bool_map(fake_tree):
-    add_org, _ = fake_tree
-    _write_agent("a", 'interrupt_on:\n  some_tool: "yes"\n')
-    add_org("o", agents="a")
-    vs = check_org("o")
-    assert any(v.rule == "interrupt-on-shape" for v in vs), vs
-
-
-def test_rule4b_all_rich_fields_green(fake_tree):
-    """All five Phase-10 fields valid -> the org is green (the loader will
-    resolve them; the contract validates them offline without get_model)."""
-    add_org, _ = fake_tree
-    _write_skill(contract._orgs_dir().parent / ".pi" / "skills", "sample-skill")
-    _write_agent(
-        "a",
-        "model: glm-5.2\n"
-        "skills: .pi/skills\n"
-        "response_format:\n  type: object\n"
-        "permissions:\n  - operations: [read, write]\n"
-        "    paths: [/sandbox/workspace]\n"
-        "interrupt_on:\n  task: true\n",
-    )
-    add_org("o", agents="a")
-    assert check_org("o") == [], check_org("o")
-
-
-# --- rule 8 — skill hygiene (well-formedness + global root scan) ---------
-
-def test_rule4b_skill_source_empty_fails(fake_tree):
-    """A declared skills source with no well-formed skill fails
-    skill-source-resolves — SkillsMiddleware would silently load nothing
-    from an empty root (the org-playbook regression this rule prevents)."""
-    add_org, _ = fake_tree
-    # .pi/skills exists (fake_tree) but holds no <skill>/SKILL.md
-    _write_agent("a", "skills: .pi/skills\n")
-    add_org("o", agents="a")
-    vs = check_org("o")
-    assert any(v.rule == "skill-source-resolves" for v in vs), vs
 
 
 def test_skill_well_formed_missing_skill_md(tmp_path):
@@ -480,3 +391,18 @@ def test_check_skill_roots_clean_on_real_repo():
     """The shipped repo: every SKILL.md well-formed, no loose .md under any
     skills root. The regression guard for the skills reorg."""
     assert contract.check_skill_roots() == [], contract.check_skill_roots()
+
+
+def test_no_legacy_agent_frontmatter_on_real_repo():
+    """No .pi/agents/*.md carries YAML frontmatter — prose-only after migration."""
+    vs = [v for v in check_harness()
+          if v.rule == "no-legacy-agent-frontmatter"]
+    assert vs == [], vs
+
+
+def test_no_legacy_org_roster_on_real_repo():
+    """No orgs/*/AGENTS.md carries an agents: key — roster in org.yaml."""
+    for org in discover_orgs():
+        vs = check_org(org)
+        roster_vs = [v for v in vs if v.rule == "no-legacy-org-roster"]
+        assert roster_vs == [], f"{org}: {roster_vs}"

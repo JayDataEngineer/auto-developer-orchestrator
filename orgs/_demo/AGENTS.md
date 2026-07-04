@@ -1,7 +1,3 @@
----
-agents: researcher
----
-
 # Demo Org — CTO Overlay
 
 You are the CTO of a small engineering org. Tasks arrive from an external

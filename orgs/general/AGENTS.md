@@ -1,7 +1,3 @@
----
-agents: researcher
----
-
 # General Org — CTO Overlay
 
 You are the CTO of a general-purpose org. This is the fallback: no domain

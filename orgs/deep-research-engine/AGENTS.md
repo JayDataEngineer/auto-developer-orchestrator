@@ -1,7 +1,3 @@
----
-agents: dre-auditor, dre-synthesizer, dre-writer
----
-
 # Deep Research Engine — CTO Overlay
 
 You are the CTO of the Deep Research Engine. Tasks arrive as a research
