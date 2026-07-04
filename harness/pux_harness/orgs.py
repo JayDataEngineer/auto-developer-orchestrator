@@ -1,29 +1,34 @@
 """Org + specialist-agent loading for the deepagents harness.
 
-Mirrors pi-mono's shape so the org IP ports verbatim:
-  - system_prompt = root AGENTS.md + orgs/<name>/AGENTS.md + harness addendum
-  - SubAgents[]   = .pi/agents/<name>.md  -> deepagents SubAgent dicts
+System prompt = root AGENTS.md + orgs/<name>/AGENTS.md + harness addendum.
+Subagents come from ``.pi/agents/<slug>`` — a Python module (``<slug>.py``
+exporting a ``SUBAGENT`` dict, the deepagents-idiomatic form) plus a sibling
+``<slug>.md`` holding the system-prompt prose. The org roster is
+``orgs/<name>/org.yaml`` (``agents: [slug, ...]``); ``AGENTS.md`` is pure
+CTO-prompt prose (no frontmatter) — restored to its conventional role as agent
+*context* rather than a config vehicle.
+
+**Phase-1 dual-read (transitional).** ``load_subagents`` loads ``<slug>.py`` if
+present, else falls back to the legacy ``<slug>.md``-with-frontmatter form.
+``org_agent_slugs`` likewise reads ``org.yaml`` if present, else the AGENTS.md
+``agents:`` frontmatter. The legacy branches are removed in Phase 3 once all
+agents + orgs are migrated. Either path produces the same deepagents SubAgent
+dicts.
 
 The harness addendum corrects the one terminology drift between pi-mono and
-deepagents: pi-mono delegates via `subagent(agent, task)`; deepagents
-delegates via the `task` tool with `subagent_type=<name>`. The org overlays
-are left intact (shared with the pi-mono path) and the addendum bridges the
-two — verified in Phase 0 that deepagents' injected `task`-tool guidance
-already wins, so this is belt-and-suspenders, not load-bearing.
+deepagents: pi-mono delegates via ``subagent(agent, task)``; deepagents
+delegates via the ``task`` tool with ``subagent_type=<name>``.
 
-Phase 10: the frontmatter parser is real YAML (``yaml.safe_load``), so the
-full deepagents ``SubAgent`` vocabulary is expressible. ``load_subagents``
-resolves the rich optional fields — ``model`` (via our router), ``skills``
-(container skills-ROOT paths — see ``_resolve_skills``), ``response_format``
-(JSON-schema dict), ``permissions`` (``FilesystemPermission`` list),
-``interrupt_on`` (``dict[str,bool]``). See the resolution table in the repo
-``CLAUDE.md``. ``middleware`` is deliberately NOT passed:
-``SubAgentMiddleware`` does not forward a raw spec's ``middleware`` key into
-the compiled specialist (Phase 7), so setting it would be a silent no-op;
-subagent middleware is a ``CompiledSubAgent`` pre-compilation concern.
+**Subagent modules (``.pi/agents/*.py``) MUST import only the stdlib** — no
+``pux_harness.*`` / Docker — so they stay loadable under ``--check-contract``
+(offline, no Docker/tokens). Tool + skills resolution stays CENTRAL (here, via
+``_resolve_tools`` / ``_resolve_skills``) precisely so the modules stay
+decoupled and CI-safe. ``importlib`` loads each module by path (``.pi/`` is NOT
+on ``sys.path`` and stays off); each module's body reads its sibling ``.md``.
 """
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -61,10 +66,10 @@ def _read(rel: str) -> str:
 
 
 def _parse_list(raw: Any) -> list[str]:
-    """A frontmatter list value -> stripped non-empty items. Accepts either a
-    YAML list (``[a, b]``) or the historical comma-separated scalar
-    (``agents: a,b`` / ``tools: mcp:pux-sandbox/python, read_file``) so the
-    existing frontmatter parses unchanged under real YAML."""
+    """A list value -> stripped non-empty items. Accepts either a YAML list
+    (``[a, b]``) or the historical comma-separated scalar (``agents: a,b`` /
+    ``tools: mcp:pux-sandbox/python, read_file``) so both the new ``.py``/``.yaml``
+    forms and the legacy ``.md`` frontmatter parse cleanly."""
     if raw is None:
         return []
     if isinstance(raw, list):
@@ -74,9 +79,10 @@ def _parse_list(raw: Any) -> list[str]:
 
 def discover_orgs() -> list[str]:
     """Sorted names of every org dir containing ``AGENTS.md``. Data-driven —
-    no hardcoded manifest. The org -> agent map lives in each org's
-    ``agents:`` frontmatter (see ``org_agent_slugs``). ``_shared`` and other
-    bundles without an AGENTS.md are excluded by the presence rule."""
+    no hardcoded manifest. An org's specialist roster lives in its
+    ``org.yaml`` (or, transititionally, its AGENTS.md ``agents:`` frontmatter —
+    see ``org_agent_slugs``). ``_shared`` and other bundles without an
+    AGENTS.md are excluded by the presence rule."""
     out: list[str] = []
     orgs = _orgs_dir()
     if not orgs.is_dir():
@@ -88,9 +94,21 @@ def discover_orgs() -> list[str]:
 
 
 def org_agent_slugs(name: str) -> list[str]:
-    """The specialist slugs this org delegates to, read from its
-    ``AGENTS.md`` ``agents:`` frontmatter (scalar or YAML list)."""
-    fm, _ = _split_frontmatter((_orgs_dir() / name / "AGENTS.md").read_text())
+    """The specialist slugs this org delegates to.
+
+    Source (dual, transitional): ``orgs/<name>/org.yaml`` (a YAML file with an
+    ``agents:`` list) if present; ELSE the legacy ``AGENTS.md`` ``agents:``
+    frontmatter. Signature unchanged — ``server.py``, ``main.py``, and
+    ``contract.py`` consume it."""
+    org_dir = _orgs_dir() / name
+    manifest = org_dir / "org.yaml"
+    if manifest.is_file():
+        data = yaml.safe_load(manifest.read_text()) or {}
+        if not isinstance(data, dict):
+            msg = f"{name}/org.yaml: top level must be a mapping, got {type(data).__name__}"
+            raise ValueError(msg)
+        return _parse_list(data.get("agents"))
+    fm, _ = _split_frontmatter((org_dir / "AGENTS.md").read_text())
     return _parse_list(fm.get("agents"))
 
 
@@ -130,6 +148,10 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     ``---``. No frontmatter -> ``({}, body)``. A non-mapping frontmatter block
     or a YAML syntax error raises ``ValueError`` (fail loud — the old parser
     silently produced junk values).
+
+    Still used for the root ``AGENTS.md`` + legacy ``.md`` agent/org files +
+    SKILL.md (contract rule 8) — the migrated ``.pi/agents/*.md`` (prose only)
+    and ``org.yaml`` paths no longer go through it.
     """
     if not text.startswith("---"):
         return {}, text.strip()
@@ -165,14 +187,16 @@ def build_system_prompt(org: str) -> str:
 
 
 def _resolve_tools(raw: Any, tool_map: dict[str, BaseTool]) -> list[BaseTool]:
-    """Map an agent's ``tools`` frontmatter value to specialist StructuredTools.
+    """Map an agent's ``tools`` value to specialist StructuredTools.
 
-    Each entry is ``mcp:<server>/<tool>``; we take the part after the last ``/``
-    and look up ``pux_sandbox_<tool>``. Unknown tools fail loud (no silent
-    skip) — a stale frontmatter reference is a real bug. Native fs tools
-    (``execute``/``read_file``/…) are NOT resolved here — they come from the
-    backend's ``FilesystemMiddleware`` for every subagent regardless of its
-    ``tools:`` whitelist, so they never belong in the specialist whitelist.
+    Accepts the new bare-slug list form (``["python", "browser_navigate"]``)
+    and the legacy ``mcp:<server>/<tool>`` scalar/CSV form; we take the part
+    after the last ``/`` (a no-op for a bare slug with no ``/``) and look up
+    ``pux_sandbox_<tool>``. Unknown tools fail loud (no silent skip) — a stale
+    reference is a real bug. Native fs tools (``execute``/``read_file``/…) are
+    NOT resolved here — they come from the backend's ``FilesystemMiddleware``
+    for every subagent regardless of its ``tools:`` whitelist, so they never
+    belong in the specialist whitelist.
     """
     resolved: list[BaseTool] = []
     for entry in _parse_list(raw):
@@ -180,7 +204,7 @@ def _resolve_tools(raw: Any, tool_map: dict[str, BaseTool]) -> list[BaseTool]:
         key = "pux_sandbox_" + tool_name
         if key not in tool_map:
             raise KeyError(
-                f"agent frontmatter references unknown tool {entry!r} "
+                f"agent references unknown tool {entry!r} "
                 f"(resolved {key!r}, not in the specialist tool map)"
             )
         resolved.append(tool_map[key])
@@ -188,14 +212,14 @@ def _resolve_tools(raw: Any, tool_map: dict[str, BaseTool]) -> list[BaseTool]:
 
 
 def _resolve_skills(raw: Any, slug: str) -> list[str]:
-    """Frontmatter ``skills`` value -> container-absolute skills-ROOT paths.
+    """``skills`` value -> container-absolute skills-ROOT paths.
 
     deepagents' ``SkillsMiddleware`` resolves each source against the BACKEND
     (the sandbox container) and loads EVERY ``<source>/<skill>/SKILL.md``
     beneath it — a source is a skills **root** directory, not an individual
     skill (passing an individual skill dir loads nothing: its only child is the
-    SKILL.md *file*). So a frontmatter value is a **project-relative** directory
-    (e.g. ``.pi/skills``); we validate it exists on the host (the project is
+    SKILL.md *file*). So a value is a **project-relative** directory (e.g.
+    ``.pi/skills``); we validate it exists on the host (the project is
     bind-mounted 1:1 at ``/sandbox/workspace``, so host existence == container
     existence) and map it to a container-absolute path for deepagents.
 
@@ -220,8 +244,8 @@ def _resolve_skills(raw: Any, slug: str) -> list[str]:
 
 
 def _resolve_permissions(raw: Any, slug: str) -> list[FilesystemPermission]:
-    """Frontmatter ``permissions`` (list of mappings) -> ``FilesystemPermission``
-    objects. Construction runs deepagents' own path validation (``__post_init__``
+    """``permissions`` (list of mappings) -> ``FilesystemPermission`` objects.
+    Construction runs deepagents' own path validation (``__post_init__``
     rejects paths without a leading ``/`` or containing ``..``/``~``), so a bad
     rule fails at load time, not at a later tool call.
     """
@@ -239,31 +263,78 @@ def _resolve_permissions(raw: Any, slug: str) -> list[FilesystemPermission]:
 
 
 def _resolve_interrupt_on(raw: Any, slug: str) -> dict[str, bool]:
-    """Frontmatter ``interrupt_on`` -> ``dict[str, bool]``.
+    """``interrupt_on`` -> ``dict[str, bool]``.
 
     Only the tool-name -> bool toggle form is supported. The
     ``InterruptOnConfig`` (``allowed_decisions``) form is deferred; a non-bool
     value raises so a malformed rule never silently becomes a no-op.
     """
     if not isinstance(raw, dict) or not all(isinstance(v, bool) for v in raw.values()):
-        msg = (f"{slug}: interrupt_on must be a mapping of tool-name -> bool, "
-               f"got {raw!r}")
+        msg = f"{slug}: interrupt_on must be a mapping of tool-name -> bool, got {raw!r}"
         raise ValueError(msg)
     return raw
+
+
+def _load_agent_module(slug: str) -> Any:
+    """Load ``.pi/agents/<slug>.py`` by path and return its module object, or
+    ``None`` if no ``.py`` exists (caller falls back to the legacy ``.md``).
+
+    Path-loaded (``importlib.util.spec_from_file_location``) — ``.pi/`` is NOT
+    on ``sys.path`` and this never adds it; the module's ``__file__`` is set so
+    its body can read the sibling ``<slug>.md`` for the system-prompt prose.
+    The module MUST export a ``SUBAGENT`` dict and import only the stdlib (no
+    ``pux_harness.*`` / Docker) so it stays loadable under ``--check-contract``
+    (offline). A missing sibling ``.md`` raises at ``exec_module`` (fail loud).
+    """
+    path = _agents_dir() / f"{slug}.py"
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location(f"_pi_agent_{slug}", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _build_sub(
+    slug: str, spec: dict[str, Any], tool_map: dict[str, BaseTool], system_prompt: str
+) -> dict[str, Any]:
+    """Build a deepagents SubAgent dict from a spec mapping (either a migrated
+    module's ``SUBAGENT`` dict or a legacy ``.md`` frontmatter). Shared by both
+    paths so they can never drift. ``system_prompt`` is passed in because its
+    source differs (``SUBAGENT["system_prompt"]`` vs the ``.md`` body).
+
+    Omitted ``tools`` -> inherit the main agent's tools; omitted ``model`` ->
+    inherit the parent model (``create_deep_agent`` injects it). Rich fields
+    (``model``/``response_format``/``permissions``/``interrupt_on``) are
+    carried through but unused by every shipped subagent today; their resolvers
+    are removed in Phase 3.
+    """
+    sub: dict[str, Any] = {
+        "name": spec.get("name", slug),
+        "description": spec.get("description", slug),
+        "system_prompt": system_prompt,
+    }
+    if spec.get("tools"):
+        sub["tools"] = _resolve_tools(spec["tools"], tool_map)
+    if "model" in spec:
+        sub["model"] = get_model(spec["model"])
+    if "skills" in spec:
+        sub["skills"] = _resolve_skills(spec["skills"], slug)
+    if "response_format" in spec:
+        sub["response_format"] = spec["response_format"]
+    if "permissions" in spec:
+        sub["permissions"] = _resolve_permissions(spec["permissions"], slug)
+    if "interrupt_on" in spec:
+        sub["interrupt_on"] = _resolve_interrupt_on(spec["interrupt_on"], slug)
+    return sub
 
 
 def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
     """Build deepagents SubAgent dicts for ``org``'s specialists.
 
-    Each ``.pi/agents/<name>.md`` -> ``{name, description, system_prompt,
-    tools?}`` plus any rich optional fields present in its frontmatter (Phase
-    10). ``tools`` comes from the frontmatter whitelist (mapped to the
-    specialist tool map); omitted means inherit the main agent's tools. ``model``
-    omitted means inherit the main agent's model (``create_deep_agent`` itself
-    injects the parent model — ``deepagents/graph.py`` ``spec.get("model",
-    model)``); when set, it resolves through OUR ``get_model`` so the bare
-    shorthand (e.g. ``glm-5.2``) routes via the OpenCode Zen Go router (deepagents'
-    ``init_chat_model`` can't carry our base_url/api_key).
+    Dual-read (Phase 1): for each slug, load ``.pi/agents/<slug>.py`` and build
+    from its ``SUBAGENT`` dict if present; else fall back to the legacy
+    ``<slug>.md`` + frontmatter. Both paths produce identical SubAgent shapes.
 
     No ``middleware`` key: deepagents' ``SubAgentMiddleware`` does not forward a
     raw spec's ``middleware`` key into the compiled specialist (verified in the
@@ -276,26 +347,12 @@ def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
     tool_map: dict[str, BaseTool] = {t.name: t for t in all_tools}
     subs: list[dict[str, Any]] = []
     for slug in org_agent_slugs(org):
-        fm, body = _split_frontmatter((_agents_dir() / f"{slug}.md").read_text())
-        sub: dict[str, Any] = {
-            "name": fm.get("name", slug),
-            "description": fm.get("description", slug),
-            "system_prompt": body,
-        }
-        if fm.get("tools"):
-            sub["tools"] = _resolve_tools(fm["tools"], tool_map)
-        # Phase 10: rich SubAgent fields. Each resolver fails loud on a
-        # malformed value; a field absent from the frontmatter is simply not
-        # set, so deepagents applies its own default (inherit / empty).
-        if "model" in fm:
-            sub["model"] = get_model(fm["model"])
-        if "skills" in fm:
-            sub["skills"] = _resolve_skills(fm["skills"], slug)
-        if "response_format" in fm:
-            sub["response_format"] = fm["response_format"]
-        if "permissions" in fm:
-            sub["permissions"] = _resolve_permissions(fm["permissions"], slug)
-        if "interrupt_on" in fm:
-            sub["interrupt_on"] = _resolve_interrupt_on(fm["interrupt_on"], slug)
+        mod = _load_agent_module(slug)
+        if mod is not None:
+            spec = mod.SUBAGENT
+            sub = _build_sub(slug, spec, tool_map, spec["system_prompt"])
+        else:
+            fm, body = _split_frontmatter((_agents_dir() / f"{slug}.md").read_text())
+            sub = _build_sub(slug, fm, tool_map, body)
         subs.append(sub)
     return subs

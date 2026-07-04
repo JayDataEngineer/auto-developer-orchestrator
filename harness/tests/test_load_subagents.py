@@ -61,6 +61,41 @@ def _agent(slug: str, extra_fm: str, root: Path) -> None:
         f"---\nname: {slug}\ndescription: d\n{extra_fm}---\n\nbody\n")
 
 
+def _agent_py(
+    slug: str,
+    root: Path,
+    *,
+    tools: list[str] | None = None,
+    skills: list[str] | None = None,
+    prose: str = "prose body",
+) -> None:
+    """Write the NEW-form ``.pi/agents/<slug>.py`` (a ``SUBAGENT`` dict, bare-slug
+    ``tools`` + path-list ``skills``) plus its sibling ``<slug>.md`` prose file.
+    Mirrors what the Phase-2 one-shot converter emits. The module imports only
+    stdlib (``pathlib``) — the contract's CI-safety guard depends on that."""
+    agents_dir = root / ".pi" / "agents"
+    lines = ["from pathlib import Path", "", "SUBAGENT = {",
+             f'    "name": "{slug}",',
+             f'    "description": "{slug} subagent",']
+    if tools:
+        lines.append(f"    \"tools\": {tools!r},")
+    if skills:
+        lines.append(f"    \"skills\": {skills!r},")
+    lines.append("    \"system_prompt\": Path(__file__).with_suffix(\".md\").read_text(),")
+    lines.append("}")
+    (agents_dir / f"{slug}.py").write_text("\n".join(lines) + "\n")
+    (agents_dir / f"{slug}.md").write_text(prose)
+
+
+def _org_yaml(name: str, agents_list: list[str], root: Path) -> None:
+    """Write ``orgs/<name>/org.yaml`` (the NEW roster source) + a frontmatter-free
+    AGENTS.md (CTO prose only — the migrated shape)."""
+    d = root / "orgs" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "AGENTS.md").write_text(f"# {name}\n\nCTO prose, no frontmatter.\n")
+    (d / "org.yaml").write_text(f"agents: [{', '.join(agents_list)}]\n")
+
+
 def test_resolves_all_rich_fields(fake_tree):
     """All five Phase-10 fields resolve to their deepagents-consumable shapes."""
     root = fake_tree
@@ -158,3 +193,90 @@ def test_skills_accepts_yaml_list(fake_tree):
 
     sub = orgs.load_subagents("o", _specialists())[0]
     assert sub["skills"] == ["/sandbox/workspace/.pi/skills"]
+
+
+# --- Phase 1: the new .py + org.yaml path (dual-read) ----------------------
+# These prove the migrated form loads correctly while the legacy .md branch
+# (covered above) still works. The legacy branch + these tests' legacy helpers
+# are REMOVED in Phase 3 once all 22 agents + 10 orgs are migrated.
+
+def test_py_module_loads(fake_tree):
+    """The new path: a ``.pi/agents/<slug>.py`` SUBAGENT dict loads, with
+    ``tools`` (bare slugs) + ``skills`` (path list) resolved centrally."""
+    root = fake_tree
+    _agent_py("pyagent", root, tools=["python"], skills=[".pi/skills"])
+    _org_yaml("o", ["pyagent"], root)
+
+    subs = orgs.load_subagents("o", _specialists())
+    assert len(subs) == 1
+    sub = subs[0]
+    assert sub["name"] == "pyagent"
+    assert sub["description"] == "pyagent subagent"
+    assert sub["system_prompt"] == "prose body"
+    assert [t.name for t in sub["tools"]] == ["pux_sandbox_python"]
+    assert sub["skills"] == ["/sandbox/workspace/.pi/skills"]
+    # omitted model -> no key -> deepagents injects the parent model
+    assert "model" not in sub
+    # middleware is never set (Phase 7)
+    assert "middleware" not in sub
+
+
+def test_py_path_does_not_split_md_frontmatter(fake_tree):
+    """When a ``.py`` exists, the sibling ``.md`` is PROSE (read verbatim by the
+    module), NOT frontmatter-split — proves the dual-read takes the ``.py``
+    branch even if the prose happens to start with ``---``."""
+    root = fake_tree
+    _agent_py(
+        "p", root, tools=["python"],
+        prose="---\nname: legacy\n---\n\nthis looks like frontmatter but is prose",
+    )
+    _org_yaml("o", ["p"], root)
+
+    sub = orgs.load_subagents("o", _specialists())[0]
+    # name comes from SUBAGENT, NOT the .md pseudo-frontmatter
+    assert sub["name"] == "p"
+    # system_prompt is the WHOLE .md verbatim (frontmatter not split on this path)
+    assert sub["system_prompt"].startswith("---")
+    assert "this looks like frontmatter but is prose" in sub["system_prompt"]
+
+
+def test_py_module_missing_sibling_md_raises(fake_tree):
+    """A ``.py`` whose ``system_prompt`` reads a missing sibling ``.md`` fails
+    loud at load (``exec_module`` raises) — no silent empty prompt."""
+    root = fake_tree
+    (root / ".pi" / "agents" / "orphan.py").write_text(
+        "from pathlib import Path\n"
+        "SUBAGENT = {'name': 'orphan', 'description': 'd', "
+        "'system_prompt': Path(__file__).with_suffix('.md').read_text()}\n"
+    )
+    _org_yaml("o", ["orphan"], root)
+
+    with pytest.raises(FileNotFoundError):
+        orgs.load_subagents("o", _specialists())
+
+
+def test_org_agent_slugs_reads_org_yaml(fake_tree):
+    """``org.yaml`` is the new roster source (a YAML list)."""
+    root = fake_tree
+    _org_yaml("o", ["a", "b"], root)
+    assert orgs.org_agent_slugs("o") == ["a", "b"]
+
+
+def test_org_agent_slugs_falls_back_to_agents_md(fake_tree):
+    """No ``org.yaml`` -> read the AGENTS.md ``agents:`` frontmatter (legacy
+    branch, transitional). Removed in Phase 3."""
+    root = fake_tree
+    _org("o", "a, b", root)
+    assert orgs.org_agent_slugs("o") == ["a", "b"]
+
+
+def test_org_yaml_top_level_must_be_mapping(fake_tree):
+    """A malformed ``org.yaml`` (not a mapping) fails loud rather than silently
+    yielding an empty roster."""
+    root = fake_tree
+    d = root / "orgs" / "o"
+    d.mkdir(parents=True)
+    (d / "AGENTS.md").write_text("# o\n")
+    (d / "org.yaml").write_text("- just\n- a\n- list\n")
+    with pytest.raises(ValueError, match="mapping"):
+        orgs.org_agent_slugs("o")
