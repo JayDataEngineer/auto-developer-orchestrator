@@ -20,9 +20,11 @@ Two validation tiers:
   Both surfaces are Python constants, so this runs offline in pytest and in
   ``--check-contract`` with no container or Go server.
 
-* **Harness-level** (rule 6) and **global** (rule 7):
+* **Harness-level** (rule 6) and **global** (rules 7-8):
   6. No hardcoded org->agent manifest in the harness source.
   7. No orphan agents (every specialist owned by >=1 org).
+  8. Skill hygiene: every ``SKILL.md`` is Agent-Spec well-formed, and no ``.md``
+     sits loose directly under a skills root (``check_skill_roots``).
 
 Rule 4 resolves against the *static* native surface: the specialist names are
 a Python frozenset (the single source of truth shared with ``graph.py``), so a
@@ -85,6 +87,10 @@ NATIVE_FS_TOOLS: frozenset[str] = frozenset({
     "ls", "read_file", "write_file", "edit_file", "glob", "grep", "execute",
 })
 
+# Agent-Skills spec: a skill dir name (and its ``SKILL.md`` ``name``) must be
+# kebab-case — lowercase letters/digits joined by single hyphens.
+_SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
 
 @dataclass(frozen=True)
 class Violation:
@@ -137,11 +143,23 @@ def _validate_rich_fields(afm: dict[str, Any], slug: str) -> list[Violation]:
                     f"{slug}: skills source must be a project-relative path "
                     f"(got {p!r})"))
                 continue
-            if not (project / p).is_dir():
+            src = project / p
+            if not src.is_dir():
                 out.append(Violation(
                     "error", "skill-source-resolves",
                     f"{slug}: skills source {p!r} -> not a directory under the "
                     f"project root"))
+                continue
+            # A declared source must hold >=1 Agent-Spec well-formed skill;
+            # otherwise SkillsMiddleware silently loads nothing from it (the
+            # exact regression that stranded the org playbooks). Specific
+            # per-skill malformations are reported globally by
+            # ``check_skill_roots``; this rule guards the dead declaration.
+            if not _well_formed_skill_dirs(src):
+                out.append(Violation(
+                    "error", "skill-source-resolves",
+                    f"{slug}: skills source {p!r} -> no well-formed skill "
+                    f"(expected <source>/<skill-name>/SKILL.md)"))
 
     if "response_format" in afm and not isinstance(afm["response_format"], dict):
         out.append(Violation(
@@ -350,6 +368,100 @@ def check_harness() -> list[Violation]:
         v.append(Violation("warn", "no-orphan-agents",
                            f"agent {orphan!r} is owned by no org (not in any "
                            f"`agents:` frontmatter)"))
+    return v
+
+
+# --- rule 8 — global skill hygiene ---------------------------------------
+
+def _check_skill_dir(skill_dir: Path) -> list[Violation]:
+    """Agent-Spec well-formedness of one ``<source>/<name>/`` skill dir.
+
+    Well-formed == it contains a ``SKILL.md`` whose YAML frontmatter parses,
+    whose ``name`` equals the dir name (kebab-case), and whose ``description``
+    is non-empty (the spec requires both, and SkillsMiddleware needs the
+    ``description`` for level-1 metadata discovery). Returns one
+    ``skill-well-formed`` error per failure; an empty list means the skill is
+    well-formed.
+    """
+    name = skill_dir.name
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.is_file():
+        return [Violation("error", "skill-well-formed",
+                          f"skill {name!r}: missing SKILL.md "
+                          f"(expected <source>/<name>/SKILL.md)")]
+    try:
+        fm, _ = _split_frontmatter(skill_md.read_text())
+    except ValueError as e:
+        return [Violation("error", "skill-well-formed",
+                          f"skill {name!r}: SKILL.md frontmatter does not "
+                          f"parse: {e}")]
+    out: list[Violation] = []
+    if fm.get("name") != name:
+        out.append(Violation("error", "skill-well-formed",
+                             f"skill {name!r}: frontmatter name "
+                             f"{fm.get('name')!r} must equal the dir name "
+                             f"{name!r}"))
+    if not _SKILL_NAME_RE.match(name):
+        out.append(Violation("error", "skill-well-formed",
+                             f"skill {name!r}: dir name must be kebab-case "
+                             f"(lowercase letters/digits joined by '-')"))
+    if not fm.get("description"):
+        out.append(Violation("error", "skill-well-formed",
+                             f"skill {name!r}: SKILL.md missing a non-empty "
+                             f"'description' (required for skills-middleware "
+                             f"discovery)"))
+    return out
+
+
+def _well_formed_skill_dirs(source: Path) -> list[Path]:
+    """Skill dirs directly under ``source`` that pass well-formedness.
+
+    Used by ``skill-source-resolves`` to require a declared source carry at
+    least one real skill (a source of only malformed/empty dirs silently loads
+    nothing)."""
+    if not source.is_dir():
+        return []
+    return [c for c in sorted(source.iterdir())
+            if c.is_dir() and not _check_skill_dir(c)]
+
+
+def _skill_roots() -> list[Path]:
+    """Every skills-ROOT directory in the project: the global ``.pi/skills``
+    plus each ``orgs/<name>/skills``. Scanned regardless of whether any agent
+    declares the root — a loose playbook or malformed skill is a regression
+    even if undeclared."""
+    orgs = _orgs_dir()
+    roots = [PROJECT_ROOT / ".pi" / "skills"]
+    roots += sorted(p for p in orgs.glob("*/skills") if p.is_dir())
+    return [r for r in roots if r.is_dir()]
+
+
+def check_skill_roots() -> list[Violation]:
+    """Global skill hygiene (rule 8). Scans EVERY skills root in the project
+    whether or not an agent declares it:
+
+    * each ``<root>/<name>/SKILL.md`` is Agent-Spec well-formed
+      (``skill-well-formed`` error);
+    * no ``.md`` sits loose directly under a root (``skill-dir-not-loose``
+      warn) — a loose playbook is invisible to SkillsMiddleware, the exact
+      regression that stranded the org playbooks before this rule.
+
+    The contract CLI runs this alongside ``check_harness``; the per-org pass
+    (``skill-source-resolves``) guards declared sources, this one guards the
+    filesystem as a whole.
+    """
+    v: list[Violation] = []
+    for root in _skill_roots():
+        rel_root = root.relative_to(PROJECT_ROOT)
+        for child in sorted(root.iterdir()):
+            if child.is_dir():
+                v.extend(_check_skill_dir(child))
+            elif child.suffix == ".md":
+                v.append(Violation(
+                    "warn", "skill-dir-not-loose",
+                    f"{rel_root}/{child.name}: loose .md under a skills root "
+                    f"is invisible to SkillsMiddleware — move it into a "
+                    f"<skill-name>/ dir (or its references/)."))
     return v
 
 

@@ -2,6 +2,7 @@
 name: game-studio-qa-tester
 description: Tech Noir QA Tester — runs godot_test.py evaluate harness, analyzes screenshots via MEDIA_QA, produces vibe.json with iterate/yield/abort recommendation. Read-only on game code + art.
 tools: mcp:pux-sandbox/python, mcp:pux-sandbox/describe_image
+skills: orgs/game-studio/skills
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

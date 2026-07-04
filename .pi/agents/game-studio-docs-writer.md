@@ -5,6 +5,7 @@ systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false
 output: docs.md
+skills: orgs/game-studio/skills
 ---
 
 # Documentation Writer

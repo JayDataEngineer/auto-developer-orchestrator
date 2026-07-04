@@ -2,6 +2,7 @@
 name: game-studio-gameplay-programmer
 description: Tech Noir Gameplay Programmer — Godot 4.6 scenes, scripts, shaders, GUT tests. Drives the Godot editor via godot_client.py (HTTP MCP bridge). Owns departments/engineering/game/.
 tools: mcp:pux-sandbox/python
+skills: orgs/game-studio/skills
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

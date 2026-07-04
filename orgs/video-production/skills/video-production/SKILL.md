@@ -37,18 +37,22 @@ $VIDEO_PRODUCTION_ROOT if set, otherwise ~/video-productions/
 └── current -> jobs/latest
 ```
 
-For OpenClaw, run scripts with `{baseDir}`. For other agents, resolve `scripts/...` relative to this skill folder.
+The four helper scripts — `init_video_job`, `synth_kokoro`, `archive_video`,
+`host_video` — are symlinked onto `PATH` by the `video-production` sandbox
+image (see `orgs/video-production/Dockerfile`), so invoke them as **bare
+commands**. In any other environment, resolve `scripts/<name>.py` relative to
+this skill folder (e.g. `python scripts/synth_kokoro.py`).
 
 Initialize every non-trivial video job:
 
 ```bash
-python {baseDir}/scripts/init_video_job.py "Topic or title" --prompt "original user prompt" [--source URL_OR_PATH]
+init_video_job "Topic or title" --prompt "original user prompt" [--source URL_OR_PATH]
 ```
 
 Archive every completed MP4:
 
 ```bash
-python {baseDir}/scripts/archive_video.py path/to/final.mp4 --job "$VIDEO_PRODUCTION_ROOT/current"
+archive_video path/to/final.mp4 --job "$VIDEO_PRODUCTION_ROOT/current"
 ```
 
 Use `/tmp/video-production-<slug>/` only for disposable intermediates. Keep durable sources, scripts, final renders, and QC frames in the job folder.
@@ -89,10 +93,10 @@ export KOKORO_PYTHON=/path/to/python-with-kokoro
 export KOKORO_TTS_DIR=/path/to/kokoro/repo
 export KOKORO_VOICE=af_heart
 
-python {baseDir}/scripts/synth_kokoro.py src/segments.json --out audio
+synth_kokoro src/segments.json --out audio
 ```
 
-Use `python {baseDir}/scripts/synth_kokoro.py --check` to validate Kokoro + ffmpeg availability. If unavailable, fall back to another reliable TTS stack, but preserve the same artifacts: per-segment WAVs, `audio/voice_raw.wav`, normalized `audio/voice.wav`, and `audio/timings.json`.
+Use `synth_kokoro --check` to validate Kokoro + ffmpeg availability. If unavailable, fall back to another reliable TTS stack, but preserve the same artifacts: per-segment WAVs, `audio/voice_raw.wav`, normalized `audio/voice.wav`, and `audio/timings.json`.
 
 ### Manim environment
 
@@ -143,7 +147,7 @@ ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,duration -o
 If Tailscale is available:
 
 ```bash
-python {baseDir}/scripts/host_video.py exports/final.mp4 --port 8791 --slug my-video
+host_video exports/final.mp4 --port 8791 --slug my-video
 ```
 
 Then run the printed server command in the background, verify with `curl -I`, and send the URL. Host only the intended video file.

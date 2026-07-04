@@ -264,6 +264,18 @@ def _write_agent(slug: str, extra_fm: str) -> None:
         f"---\nname: {slug}\ndescription: x\n{extra_fm}---\n\nbody\n")
 
 
+def _write_skill(root: Path, slug: str, *, name: str | None = None,
+                 desc: str = "does a thing", body: str = "# body\n") -> Path:
+    """Write a (by default well-formed) skill at ``<root>/<slug>/SKILL.md`` and
+    return its dir. ``name`` defaults to ``slug`` (spec: they must match)."""
+    d = root / slug
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name if name is not None else slug}\n"
+        f"description: {desc}\n---\n\n{body}")
+    return d
+
+
 def test_rule4b_model_must_be_string(fake_tree):
     add_org, _ = fake_tree
     _write_agent("a", "model: 5\n")
@@ -294,8 +306,10 @@ def test_rule4b_skill_source_must_be_relative(fake_tree):
 
 def test_rule4b_skill_source_root_resolves(fake_tree):
     """A skills ROOT path (project-relative dir whose children are <skill>/) is
-    valid — deepagents scans it for every child skill."""
+    valid — deepagents scans it for every child skill. The root must hold at
+    least one well-formed skill (an empty root silently loads nothing)."""
     add_org, _ = fake_tree
+    _write_skill(contract._orgs_dir().parent / ".pi" / "skills", "sample-skill")
     _write_agent("a", "skills: .pi/skills\n")
     add_org("o", agents="a")
     assert check_org("o") == []
@@ -359,6 +373,7 @@ def test_rule4b_all_rich_fields_green(fake_tree):
     """All five Phase-10 fields valid -> the org is green (the loader will
     resolve them; the contract validates them offline without get_model)."""
     add_org, _ = fake_tree
+    _write_skill(contract._orgs_dir().parent / ".pi" / "skills", "sample-skill")
     _write_agent(
         "a",
         "model: glm-5.2\n"
@@ -370,3 +385,98 @@ def test_rule4b_all_rich_fields_green(fake_tree):
     )
     add_org("o", agents="a")
     assert check_org("o") == [], check_org("o")
+
+
+# --- rule 8 — skill hygiene (well-formedness + global root scan) ---------
+
+def test_rule4b_skill_source_empty_fails(fake_tree):
+    """A declared skills source with no well-formed skill fails
+    skill-source-resolves — SkillsMiddleware would silently load nothing
+    from an empty root (the org-playbook regression this rule prevents)."""
+    add_org, _ = fake_tree
+    # .pi/skills exists (fake_tree) but holds no <skill>/SKILL.md
+    _write_agent("a", "skills: .pi/skills\n")
+    add_org("o", agents="a")
+    vs = check_org("o")
+    assert any(v.rule == "skill-source-resolves" for v in vs), vs
+
+
+def test_skill_well_formed_missing_skill_md(tmp_path):
+    """A skill dir without SKILL.md is not a skill."""
+    from pux_harness.contract import _check_skill_dir
+    (tmp_path / "ghost").mkdir()
+    vs = _check_skill_dir(tmp_path / "ghost")
+    assert [v.rule for v in vs] == ["skill-well-formed"]
+    assert "missing SKILL.md" in vs[0].message
+
+
+def test_skill_well_formed_name_must_match_dir(tmp_path):
+    from pux_harness.contract import _check_skill_dir
+    _write_skill(tmp_path, "real-name", name="wrong-name")
+    vs = _check_skill_dir(tmp_path / "real-name")
+    assert any("must equal the dir name" in v.message for v in vs), vs
+
+
+def test_skill_well_formed_name_must_be_kebab(tmp_path):
+    from pux_harness.contract import _check_skill_dir
+    _write_skill(tmp_path, "Bad_Name", name="Bad_Name")  # caps + underscore
+    vs = _check_skill_dir(tmp_path / "Bad_Name")
+    assert any("kebab-case" in v.message for v in vs), vs
+
+
+def test_skill_well_formed_description_required(tmp_path):
+    from pux_harness.contract import _check_skill_dir
+    d = tmp_path / "no-desc"
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        "---\nname: no-desc\ndescription:\n---\n\n# x\n")
+    vs = _check_skill_dir(d)
+    assert any("description" in v.message for v in vs), vs
+
+
+def test_skill_well_formed_unparseable_frontmatter(tmp_path):
+    """A colon-space in an unquoted scalar fails YAML parsing — caught here
+    as a skill-well-formed error, not mid-run (the game-studio regression)."""
+    from pux_harness.contract import _check_skill_dir
+    d = tmp_path / "broken"
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        "---\nname: broken\ndescription: bad: value\n---\n\n# x\n")
+    vs = _check_skill_dir(d)
+    assert [v.rule for v in vs] == ["skill-well-formed"]
+    assert "parse" in vs[0].message
+
+
+def test_skill_well_formed_clean(tmp_path):
+    from pux_harness.contract import _check_skill_dir
+    _write_skill(tmp_path, "clean-skill", desc="does the thing")
+    assert _check_skill_dir(tmp_path / "clean-skill") == []
+
+
+def test_check_skill_roots_flags_loose_md(fake_tree, monkeypatch):
+    """A loose .md directly under a skills root warns — it's invisible to
+    SkillsMiddleware (the stranded-playbook regression)."""
+    monkeypatch.setattr(contract, "PROJECT_ROOT", contract._orgs_dir().parent)
+    root = contract._orgs_dir().parent / ".pi" / "skills"
+    _write_skill(root, "good-one")
+    (root / "STRAY_PLAYBOOK.md").write_text("# a loose playbook\n")
+    vs = contract.check_skill_roots()
+    assert ("skill-dir-not-loose", "warn") in {
+        (v.rule, v.severity) for v in vs}, vs
+    # the well-formed sibling is NOT flagged
+    assert not any(v.rule == "skill-well-formed" for v in vs), vs
+
+
+def test_check_skill_roots_flags_malformed_skill(fake_tree, monkeypatch):
+    """A malformed skill anywhere under a root surfaces as skill-well-formed."""
+    monkeypatch.setattr(contract, "PROJECT_ROOT", contract._orgs_dir().parent)
+    root = contract._orgs_dir().parent / ".pi" / "skills"
+    _write_skill(root, "mismatch", name="not-the-dir-name")  # name mismatch
+    vs = contract.check_skill_roots()
+    assert any(v.rule == "skill-well-formed" for v in vs), vs
+
+
+def test_check_skill_roots_clean_on_real_repo():
+    """The shipped repo: every SKILL.md well-formed, no loose .md under any
+    skills root. The regression guard for the skills reorg."""
+    assert contract.check_skill_roots() == [], contract.check_skill_roots()

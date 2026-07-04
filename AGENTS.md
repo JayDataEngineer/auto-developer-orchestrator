@@ -26,8 +26,13 @@ Two tool surfaces, all running **inside the Docker container**:
     xdotool + the sandbox's Xvfb desktop (DISPLAY=:99). Pixel coordinates are
     the contract; click the `(cx, cy)` of an element from the latest
     desktop_screenshot.
-  - **list_skills / load_skill** — discover and load project-local skill
-    markdown under `.pi/skills/` and `orgs/<name>/skills/`.
+  - **list_skills / load_skill** — discover and load the **global** project
+    skills under `.pi/skills/` (the only tree these imperative tools scan).
+    Per-org skills under `orgs/<name>/skills/` are NOT browsable here — they
+    are scoped, progressive-disclosure skills attached to a specialist via the
+    `skills:` frontmatter (deepagents `SkillsMiddleware` loads their index at
+    startup and their bodies on demand). You see those only if your subagent
+    declared the root.
 
 All paths the tools report are **inside the sandbox container**. The project
 is bind-mounted at `/sandbox/workspace/`.

@@ -5,6 +5,7 @@ systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false
 output: draft.md
+skills: orgs/twitter-agent/skills
 ---
 
 You are the drafting specialist for the Twitter Agent. The CTO delegates

@@ -2,6 +2,7 @@
 name: game-studio-technical-artist
 description: Tech Noir Technical Artist — pipeline engineer bridging art and code. Converts YAML specs in departments/art/configs/ into Ray cluster jobs (ComfyUI / Forge / TRELLIS / ACE-STEP / Qwen3-TTS), saves to departments/engineering/game/assets/, self-reviews via vision tools.
 tools: mcp:pux-sandbox/python, mcp:pux-sandbox/describe_image
+skills: orgs/game-studio/skills
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

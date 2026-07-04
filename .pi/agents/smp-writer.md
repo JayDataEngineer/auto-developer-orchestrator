@@ -5,6 +5,7 @@ systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false
 output: options.md
+skills: orgs/social-media-pipeline/skills
 ---
 
 You are the content writer for the Social Media Pipeline. The CTO

@@ -46,8 +46,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Skill scripts
-COPY skills/ /app/skills/
+# Skill scripts — the org ships its skill under
+# skills/video-production/{SKILL.md,scripts/,references/} (Agent Skills spec).
+# Only the scripts/ are baked into the image (SKILL.md + references/ are read
+# from the bind-mounted project by SkillsMiddleware). Each script is symlinked
+# onto PATH so the agent invokes them as bare commands: synth_kokoro,
+# archive_video, host_video, init_video_job.
+COPY skills/video-production/scripts/ /app/skills/scripts/
 RUN chmod +x /app/skills/scripts/*.py \
     && for f in /app/skills/scripts/*.py; do \
         ln -sf "$f" /usr/local/bin/"$(basename "$f" .py)"; \

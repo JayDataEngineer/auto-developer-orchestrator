@@ -59,6 +59,7 @@ orgs/*
 !orgs/dev-bot/
 !orgs/deep-research-engine/
 !orgs/general/
+!orgs/game-studio/
 !orgs/invest/
 !orgs/social-media-pipeline/
 !orgs/tech-noir/
@@ -68,6 +69,11 @@ orgs/*
 orgs/*/*
 !orgs/*/AGENTS.md
 !orgs/*/policy.yaml
+# Per-org skills are SOURCE under the declarative contract (shipped as
+# <org>/skills/<skill>/SKILL.md + references/ + scripts/), not runtime data —
+# ship the whole skills/ tree. Must come after ``orgs/*/*`` and re-negate the
+# dir so git descends into it; nothing under it matches a later ignore rule.
+!orgs/*/skills/
 
 # Org-scoped runtime artifacts (article bodies, backtest outputs, parsed
 # chat dumps, memos, etc.) — written by the agent during runs, not source.

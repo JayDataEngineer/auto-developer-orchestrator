@@ -185,9 +185,36 @@ value fails `--check-contract` (and the pytest gate) rather than mid-run.
 Example: `.pi/agents/researcher.md` ships `skills: .pi/skills` (loads
 `source-citation`).
 
-**Adding a skill:** write `.pi/skills/<name>/SKILL.md` with `name` +
-`description` frontmatter. Reached by the agent via the `list_skills` /
-`load_skill` native tools.
+**Adding a skill:** skills follow the Agent-Skills spec — a `<kebab-name>/`
+dir containing `SKILL.md` (frontmatter `name` == dir name, `description`
+required) plus optional `scripts/`, `references/`, `assets/`. There are two
+skill **roots**, both `SkillsMiddleware`-compatible:
+
+- **Global** `.pi/skills/` — cross-cutting skills any agent can declare.
+  Discoverable TWO ways: imperatively (`list_skills` / `load_skill` native
+  tools, which scan ONLY this root) AND via `skills: .pi/skills` frontmatter
+  (progressive disclosure). `source-citation` lives here.
+- **Per-org** `orgs/<name>/skills/` — org-specific skills, declared ONLY via
+  that org's specialists' `skills: orgs/<name>/skills` frontmatter
+  (SkillsMiddleware, progressive disclosure). NOT browsable via `list_skills`
+  — scoped discovery is the point (one org never browses another's skills).
+
+A specialist consumes a skill declaratively: add `skills: <root-path>` to its
+`.pi/agents/<slug>.md` frontmatter (Phase 10). `SkillsMiddleware` resolves the
+root against the bind-mounted project, scans one level deep for every
+`<skill>/SKILL.md`, and serves level-1 metadata at startup → the `SKILL.md`
+body on invocation → `references/`/`scripts/` on demand. A source is a ROOT,
+not an individual skill dir (`.pi/skills/source-citation` would load nothing).
+Consolidate related capabilities into ONE skill that indexes its playbooks as
+`references/` — fewer well-scoped skills outperform many.
+
+The declarative **contract** (`contract.check_skill_roots`, rule 8) enforces
+this globally: every `SKILL.md` must be Agent-Spec well-formed (`name` == dir,
+kebab-case dir, non-empty `description`, parseable frontmatter — a
+colon-space in an unquoted `description` breaks YAML plain-scalar parsing),
+and no `.md` may sit loose directly under a root (the playbook-dump
+regression — invisible to `SkillsMiddleware`). Run `--check-contract` to
+validate; it's a pytest gate too.
 
 ## Lifecycle (`pux sandbox start` / `stop` / `status`)
 

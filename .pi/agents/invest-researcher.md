@@ -2,6 +2,7 @@
 name: invest-researcher
 description: Investment Division research specialist — multi-signal fusion + regime detection + news/filings/on-chain overlay. Produces data/signals.json + research report.
 tools: mcp:pux-sandbox/python
+skills: orgs/invest/skills
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

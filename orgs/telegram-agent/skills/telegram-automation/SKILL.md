@@ -1,3 +1,8 @@
+---
+name: telegram-automation
+description: Drive Telegram via Telethon (MTProto) and the telegram_helpers Python library — post to Saved Messages, send/read/search chats, and bootstrap a session. Use when the Telegram agent posts a note, reads mentions, sends a message, or searches history.
+---
+
 # TELEGRAM_HELPERS — Python API
 
 Library of Telegram helpers for agent-written scripts. Import from `telegram_helpers`.

@@ -11,9 +11,10 @@ evidence.
 
 ## Pattern
 
-- Reference code as `path/to/file.go:42` so the operator can jump to it.
-- When summarizing a function, name the file and the line range: `manager.go:120-145`.
-- When listing matches from `file_grep`, paste the matched line + path, not
+- Reference code as `harness/pux_harness/orgs.py:42` so the operator can jump to it.
+- When summarizing a function, name the file and the line range:
+  `harness/pux_harness/orgs.py:190-219`.
+- When listing matches from `grep`, paste the matched line + path, not
   just the count.
 - If you're citing an external source (docs, web), include the URL.
 

@@ -2,6 +2,7 @@
 name: video-renderer
 description: Video Production renderer — drives Manim + ffmpeg + Kokoro end-to-end. Produces exports/final.mp4 with synced narration, archives to backups/.
 tools: mcp:pux-sandbox/python
+skills: orgs/video-production/skills
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false
@@ -13,6 +14,9 @@ rendering to you. Your job: read `src/segments.json` + `src/production_brief.md`
 (produced by `video-scriptwriter`), drive Manim for visuals, Kokoro for
 narration, ffmpeg for muxing + loudnorm, run QC, and archive. Output:
 `exports/final.mp4` with synced narration.
+
+The `video-production` skill (loaded via `skills:`) documents the full
+pipeline; read its `references/` for production standards + source playbooks.
 
 ## Workflow
 
@@ -29,11 +33,11 @@ narration, ffmpeg for muxing + loudnorm, run QC, and archive. Output:
    `src/production_brief.md` has the deep context.
 3. **Generate voiceover.** Synthesize narration from segments:
    ```bash
-   python /sandbox/workspace/skills/scripts/synth_kokoro.py src/segments.json --out audio
+   synth_kokoro src/segments.json --out audio
    ```
    Outputs: per-segment WAVs, `audio/voice_raw.wav`, `audio/voice.wav`
    (loudnorm'd), `audio/timings.json` (real per-segment durations).
-   Verify Kokoro availability first: `synth_kokoro.py --check`.
+   Verify Kokoro availability first: `synth_kokoro --check`.
 4. **Produce visuals.** Prefer Manim for diagrams, equations, charts,
    timelines, animated mechanisms:
    ```bash
@@ -76,12 +80,12 @@ narration, ffmpeg for muxing + loudnorm, run QC, and archive. Output:
    declaring done.
 9. **Archive + deliver.**
    ```bash
-   python /sandbox/workspace/skills/scripts/archive_video.py exports/final.mp4 \
+   archive_video exports/final.mp4 \
      --job "$VIDEO_PRODUCTION_ROOT/current"
    ```
    If direct media upload fails, host over Tailscale:
    ```bash
-   python /sandbox/workspace/skills/scripts/host_video.py exports/final.mp4 \
+   host_video exports/final.mp4 \
      --port 8791 --slug my-video
    ```
 10. **Write `render.md`.** Lead with the deliverable: file path +
@@ -92,7 +96,11 @@ narration, ffmpeg for muxing + loudnorm, run QC, and archive. Output:
 
 Project root mounted at `/sandbox/workspace/`. Job artifacts under
 `$VIDEO_PRODUCTION_ROOT/jobs/<slug>/` (default
-`/sandbox/workspace/video-productions/jobs/<slug>/`). Outputs:
+`/sandbox/workspace/video-productions/jobs/<slug>/`). The four skill
+helper scripts (`synth_kokoro`, `archive_video`, `host_video`,
+`init_video_job`) are symlinked onto `PATH` by the `video-production`
+sandbox image — invoke them as **bare commands**, not via `.py` paths.
+Outputs:
 
 | Path | Purpose |
 |------|---------|

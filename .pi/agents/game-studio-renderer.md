@@ -2,6 +2,7 @@
 name: game-studio-renderer
 description: Tech Noir pipeline engineer — executes the YAML asset manifest against the Ray cluster (ComfyUI / Forge / TRELLIS / ACE-STEP / Qwen3-TTS). Saves outputs to art/output/.
 tools: mcp:pux-sandbox/python
+skills: orgs/game-studio/skills
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

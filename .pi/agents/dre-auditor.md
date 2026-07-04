@@ -2,6 +2,7 @@
 name: dre-auditor
 description: Deep Research Engine QA specialist — verifies multimodal ingest quality (embedding coverage, transcript completeness, sender cleanliness, topic discovery, cross-modal linking). Read-only; returns gap report. Does NOT re-ingest.
 tools: mcp:pux-sandbox/python
+skills: orgs/deep-research-engine/skills
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false

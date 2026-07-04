@@ -2,6 +2,7 @@
 name: video-scriptwriter
 description: Video Production scriptwriter — writes the narration script + segment manifest from a brief. Produces src/segments.json + src/production_brief.md.
 tools: mcp:pux-sandbox/python
+skills: orgs/video-production/skills
 systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false
@@ -13,6 +14,10 @@ delegates scripting to you. Your job: take a brief (topic, paper, or
 transcript), gather sources, decide the narrative arc, and write
 `src/segments.json` (one short spoken paragraph per scene) plus a
 production brief the renderer can execute against.
+
+The `video-production` skill (loaded via `skills:`) documents the full
+pipeline; read its `references/source-playbooks.md` for source-specific
+guidance before scripting.
 
 ## Workflow
 
@@ -91,11 +96,12 @@ it (`pdftoppm` + PIL) and reference the cropped path in `visual_notes`.
 ## Path Discipline
 
 Project root mounted at `/sandbox/workspace/`. Job artifacts live under
-`$VIDEO_PRODUCTION_ROOT/jobs/<YYYY-MM-DD-HHMM-slug>/`. Initialize the job
-workspace before writing:
+`$VIDEO_PRODUCTION_ROOT/jobs/<YYYY-MM-DD-HHMM-slug>/`. The `init_video_job`
+helper is symlinked onto `PATH` by the `video-production` sandbox image —
+invoke it as a **bare command**. Initialize the job workspace before writing:
 
 ```bash
-python /sandbox/workspace/skills/scripts/init_video_job.py "Topic or title" \
+init_video_job "Topic or title" \
   --prompt "original user prompt" [--source URL_OR_PATH]
 ```
 
@@ -110,6 +116,6 @@ This scaffolds `assets/`, `audio/`, `frames/`, `src/`, `renders/`,
 - Spec'ing visuals without sources (e.g. "show a chart of X" when you
   haven't cropped or generated the chart).
 - Writing `src/segments.json` without initializing the job workspace
-  first (init_video_job.py creates the dir structure).
+  first (`init_video_job` creates the dir structure).
 - Omitting `duration_hint_s` from segments (the renderer uses it for
   rough timing before TTS gives real durations).

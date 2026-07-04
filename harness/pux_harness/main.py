@@ -22,7 +22,12 @@ import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
 
-from pux_harness.contract import check_all, check_harness, has_errors
+from pux_harness.contract import (
+    check_all,
+    check_harness,
+    check_skill_roots,
+    has_errors,
+)
 from pux_harness.docker_exec import get_exec_client
 from pux_harness.graph import build_graph, shared_backend
 from pux_harness.native_tools import build_native_specialists
@@ -330,15 +335,25 @@ def _check_contract() -> int:
     if not harness_vs:
         print("  OK")
 
+    skill_vs = check_skill_roots()
+    print("\n## skills (global)")
+    for x in skill_vs:
+        print(f"  {x}")
+    if not skill_vs:
+        print("  OK")
+
     n_orgs = len(per_org)
     error_orgs = [o for o, vs in per_org.items() if has_errors(vs)]
     harness_errors = has_errors(harness_vs)
+    skill_errors = has_errors(skill_vs)
     print(f"\n{n_orgs} orgs checked.")
     if error_orgs:
         print(f"BLOCKING errors in: {error_orgs}")
     if harness_errors:
         print("BLOCKING errors in harness (global).")
-    return 1 if (error_orgs or harness_errors) else 0
+    if skill_errors:
+        print("BLOCKING errors in skills (global).")
+    return 1 if (error_orgs or harness_errors or skill_errors) else 0
 
 
 def main() -> None:

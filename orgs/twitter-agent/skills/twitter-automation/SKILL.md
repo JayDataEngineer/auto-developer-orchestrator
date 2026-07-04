@@ -1,3 +1,8 @@
+---
+name: twitter-automation
+description: Drive x.com via the cookie session + SeleniumBase — read timeline, draft and post, engage with mentions. Includes the captcha-solving fallback (LLM-via-vision) for Arkose / hCaptcha / Turnstile. Use when the Twitter agent hits a captcha wall or needs to verify a login challenge actually cleared.
+---
+
 # Captcha Solving — LLM-via-Vision
 
 When browser automation hits a captcha (Twitter Arkose funcaptcha, Cloudflare Turnstile, hCaptcha, etc.), solve it through your existing vision tool — no paid service.

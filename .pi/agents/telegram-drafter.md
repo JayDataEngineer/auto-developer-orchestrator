@@ -5,6 +5,7 @@ systemPromptMode: replace
 inheritProjectContext: false
 inheritSkills: false
 output: draft.md
+skills: orgs/telegram-agent/skills
 ---
 
 You are the drafting specialist for the Telegram Agent. The CTO delegates
