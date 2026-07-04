@@ -37,6 +37,37 @@ Two tool surfaces, all running **inside the Docker container**:
 All paths the tools report are **inside the sandbox container**. The project
 is bind-mounted at `/sandbox/workspace/`.
 
+## Architecture
+
+Two-layer model: **harness/** (lifecycle, policy, scheduling, org roster) +
+**bin/pux** (thin CLI entrypoint).
+
+The harness owns the full sandbox lifecycle. There is no Go MCP server,
+no `bridge.py`, no `smoke_mcp.py` — the entire Go sandbox was re-hosted
+in Python and deleted (Phase 8a–8i). The per-org `bootstrap.sh` +
+`docker-compose.yml` shadow lifecycle (Phase 8i) was also deleted outright;
+`policy.yaml` `host_setup` + `sandbox.build` cover host hooks and image
+builds (Phase 13; permanent `no-legacy-sandbox-artifacts` tripwire).
+
+### Two-tier Python separation
+
+Backbone scripts under `/sandbox/*.py` are immutable (chmod 0444).
+Agent-authored scratch lives under `/sandbox/workspace/scripts/`. Don't
+try to edit the backbone.
+
+## Philosophy
+
+1. **One harness, many orgs.** The harness is the single owner of the
+   sandbox lifecycle. Each org is a thin layer on top — a `policy.yaml`,
+   an `AGENTS.md`, a roster.
+2. **Policy over code.** Every org-specific behaviour is declared in
+   `policy.yaml` or the org's `AGENTS.md`. The harness never hard-codes
+   org logic.
+3. **Verify or die.** Run a tool, watch its output, then reason about the
+   result. "Should work" is banned.
+4. **No fallbacks.** If something breaks, surface the error — don't paper
+   over it with a fallback path.
+
 ## Operating principles
 
 - **Verify or die.** Run a tool, watch its output, then reason about the
@@ -65,3 +96,88 @@ your `description`, not your conversation — give it enough context (relevant
 paths, the question, the expected output shape).
 
 Without `--org`, you are the operator — drive tasks directly.
+
+### Specialist roster
+
+| Specialist | Org | Role |
+|---|---|---|
+| `cto` | game-studio | Full-stack dev + project management + creative strategy |
+| `researcher` | game-studio | Research agent |
+| `comms` | game-studio | Communications |
+| `media-buyer` | game-studio | Ad campaign optimization |
+| `social-media` | social-media-pipeline | Social media automation |
+| `researcher` | deep-research-engine | Deep research |
+| `writer` | deep-research-engine | Content writing |
+| `coder` | deep-research-engine | Coding tasks |
+| `analyst` | deep-research-engine | Analysis |
+| `media-buyer` | invest | Ad campaign optimization |
+| `researcher` | invest | Research |
+| `coder` | invest | Coding |
+| `analyst` | invest | Analysis |
+
+## Conventions
+
+- No co-authored-by Claude in git commits.
+- Use astral uv for any Python environments (sandbox scripts, smoke test runner, the harness).
+- Prefer 'prove' (integration-style) over 'assert' (unit-only) when feasible.
+- "Verify or die" — no claiming a thing works without running it.
+- No fallbacks, no deprecation aliases, no backwards-compat shims.
+- No emojis unless the user explicitly requests them.
+- Keep responses concise — fewer than 4 lines unless the user asks for detail.
+
+## Policy engine
+
+`policy.yaml` declares everything the harness needs per org:
+
+- `allowed_commands` / `forbidden_commands` — shell command guardrails
+- `env` — required environment variables
+- `image` / `build` — sandbox image selection or build spec
+- `host_setup` — host-side hooks run before `create()` (cookie extraction, etc.)
+- `tools` — specialist tool whitelist
+- `jobs` — explicit job declarations (warn-and-continue runner)
+
+Jobs are triggered via CLI (`pux jobs run --org X`) or server endpoint
+(`POST /jobs/{org}/run`). Status is queryable via `pux jobs status --org X`
+or `GET /jobs/{org}/status`.
+
+## Testing harness rules
+
+- "Should work" is banned. Verify with a real `pux direct` / `pux dispatch`
+  run (ground-truth answer), or a test that exercises the actual code path.
+- Adding a Python specialist tool → add it to `SPECIALISTS` (drives the
+  contract resolver + the bound surface) and add a test exercising the real
+  code path where feasible.
+- Adding an Agent Protocol endpoint → add a routing test in
+  `harness/tests/test_server.py` (stub graph, no tokens).
+- Adding an org / subagent → it must pass `--check-contract` + the
+  `test_org_contract.py` gate.
+
+## Branch strategy
+
+- **`pi-pivot`** = current branch. The deepagents pivot.
+- **`master`** = pre-pivot MVP. Slim Go MCP server. Frozen.
+- **`v0.2.0-pre-pi-mono`** = tag of master HEAD before the pi-mono pivot. Safety net.
+- **`dev`** + **`v0.1.0-fullstack-legacy`** = the older fullstack predecessor. Frozen.
+
+## What's NOT here (deferred or dropped)
+
+**Dropped** (deepagents does it natively, or wasn't pulling weight):
+
+- ~~pi-mono TS harness~~ — replaced by the Python harness + Agent Protocol server (Phase 4)
+- ~~In-process Go agent loop / Go dispatch surface / Go history recorder / Bubble Tea TUI~~ — replaced by deepagents + the Agent Protocol server
+- ~~Go MCP server + bridge.py + smoke_mcp.py~~ — re-hosted in Python then deleted (Phase 8a–8i)
+- ~~Per-org bootstrap.sh + docker-compose.yml shadow lifecycle~~ — harness owns the full lifecycle now (Phase 13)
+- ~~TOML org config~~ — replaced by per-org `AGENTS.md` markdown
+
+**Deferred** (might land later):
+
+- SSE streaming for Agent Protocol runs (Phase 9)
+- Multi-org orchestration
+- Self-evolving script toolkit (`make_script` / `edit_script`)
+- Diligence evals, safeguard router
+
+## Memory
+
+Auto-memory lives at `~/.claude/projects/.../memory/`. The memory directory
+tracks the strategic context — pivot rationale, fullstack lessons learned,
+decisions deferred. Read `MEMORY.md` first when picking up context.
