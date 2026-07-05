@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ComfyUI client — HTTP wrapper for the Ray cluster's ComfyUI proxy.
 
-Routes through the Tech Noir Ray cluster ingress at $COMFYUI_URL. If ComfyUI
+Routes through the Ray cluster ingress at $COMFYUI_URL. If ComfyUI
 is not currently loaded (cold GPU, worktree swap), returns "COMFYUI_DOWN" and
 the studio-director falls back to Forge for image gen.
 

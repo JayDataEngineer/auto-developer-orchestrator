@@ -1,6 +1,6 @@
 # DOCS_AUTHORING
 
-How to write docs for the Tech Noir docs-site at `~/Documents/programs/creative/tech-noir/docs-site/`.
+How to write docs for the Game Studio docs-site at `~/Documents/programs/creative/game-studio/docs-site/`.
 
 ## Stack
 

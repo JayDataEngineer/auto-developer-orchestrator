@@ -39,7 +39,7 @@ python3 /sandbox/comfyui_client.py post-prompt \
     --workflow '{"3":{"class_type":"KSampler","inputs":{"seed":42,"cfg":7,"model":["4",0]}}}'
 ```
 
-## Common Workflows for Tech Noir
+## Common Workflows for Game Studio
 
 | Workflow file | Purpose |
 |----------------|---------|

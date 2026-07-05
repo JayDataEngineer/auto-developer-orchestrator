@@ -461,7 +461,7 @@ def init_schema(client: SurrealClient) -> dict[str, Any]:
     # USE statement switches context mid-query so DEFINE DATABASE knows
     # which namespace to create the database in.
     # IF NOT EXISTS makes this idempotent. Backtick-escape NS/DB names so
-    # hyphenated identifiers (e.g. "tech-noir") aren't parsed as subtraction.
+    # hyphenated identifiers (e.g. "game-studio") aren't parsed as subtraction.
     root_sql = (
         f"DEFINE NAMESPACE IF NOT EXISTS `{client.ns}`;\n"
         f"USE NS `{client.ns}`;\n"

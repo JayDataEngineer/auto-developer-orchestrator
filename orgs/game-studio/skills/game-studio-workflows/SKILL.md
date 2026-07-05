@@ -1,12 +1,12 @@
 ---
 name: game-studio-workflows
-description: Tech Noir game-studio production workflows — the autonomous dev loop, ComfyUI + Forge art pipelines, Godot 4.6 via MCP, docs/GDD authoring, and media QC. Use when building or shipping the 2.5D anime survival-horror game — generating art, routing models on the Ray cluster, driving the Godot editor, authoring design docs, or QC-ing media.
+description: Game Studio game-studio production workflows — the autonomous dev loop, ComfyUI + Forge art pipelines, Godot 4.6 via MCP, docs/GDD authoring, and media QC. Use when building or shipping the 2.5D anime survival-horror game — generating art, routing models on the Ray cluster, driving the Godot editor, authoring design docs, or QC-ing media.
 ---
 
 # Game Studio Workflows
 
-Tech Noir ships 2.5D anime survival-horror in Godot 4.6 with the art pipeline
-driven by AI models on the Tech Noir Ray cluster. This skill indexes the
+Game Studio ships 2.5D anime survival-horror in Godot 4.6 with the art pipeline
+driven by AI models on the Ray cluster. This skill indexes the
 studio's production playbooks. Read the `references/` file for the work you
 were delegated.
 

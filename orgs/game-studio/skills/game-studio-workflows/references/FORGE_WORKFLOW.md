@@ -1,6 +1,6 @@
 # FORGE_WORKFLOW
 
-How to call Forge on the Tech Noir Ray cluster for image / 3D / music / video generation.
+How to call Forge on the Ray cluster for image / 3D / music / video generation.
 
 ## Health Check (always do this first)
 
@@ -38,7 +38,7 @@ python3 /sandbox/forge_client.py generate \
 | `music` | Audio clip | Soundtrack stingers, ambient beds |
 | `video` | Short video clip (SLOW — minutes) | UI effects, animated logos. Use sparingly. |
 
-## Tech Noir Art Direction
+## Game Studio Art Direction
 
 Always include in the prompt:
 - **Palette hint**: "cyberpunk neon", "teal-and-crimson", "noir desaturated"

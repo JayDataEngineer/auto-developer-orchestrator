@@ -8,7 +8,7 @@
 #   18080 — API Ingress (LLM, TTS, ASR, 3D, music, creative, MCP, jobs)
 #   18265 — Ray Dashboard
 #
-# Host-side SurrealDB (the studio/tech-noir task_run store) is reached via
+# Host-side SurrealDB (the studio/game-studio task_run store) is reached via
 # host.docker.internal — resolved inside the container at boot (see
 # backend/internal/policy/egress.go containerResolvedHosts + apply-egress-policy.sh).
 

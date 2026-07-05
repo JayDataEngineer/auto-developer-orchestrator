@@ -8,7 +8,7 @@ The studio-director's cycle contract. Drives N iterations of build → QA → de
 python3 /sandbox/surreal_client.py init-schema
 ```
 
-Creates the `studio` namespace, `tech-noir` database, and required tables/indexes. Safe to re-run — `DEFINE` is idempotent. Skip once it returns `{"ok": true}`.
+Creates the `studio` namespace, `game-studio` database, and required tables/indexes. Safe to re-run — `DEFINE` is idempotent. Skip once it returns `{"ok": true}`.
 
 ## Phase A — START
 

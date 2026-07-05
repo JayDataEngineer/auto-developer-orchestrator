@@ -62,7 +62,6 @@ orgs/*
 !orgs/game-studio/
 !orgs/invest/
 !orgs/social-media-pipeline/
-!orgs/tech-noir/
 !orgs/telegram-agent/
 !orgs/twitter-agent/
 !orgs/video-production/
@@ -77,6 +76,10 @@ orgs/*/*
 # ship the whole skills/ tree. Must come after ``orgs/*/*`` and re-negate the
 # dir so git descends into it; nothing under it matches a later ignore rule.
 !orgs/*/skills/
+# Per-org sandbox scripts (e.g. game-studio/sandbox/godot_client.py,
+# deep-research-engine/sandbox/audio_client.py referenced by jobs:) are SOURCE
+# too — ship the whole sandbox/ tree, same re-negation rationale as skills/.
+!orgs/*/sandbox/
 
 # Org-scoped runtime artifacts (article bodies, backtest outputs, parsed
 # chat dumps, memos, etc.) — written by the agent during runs, not source.

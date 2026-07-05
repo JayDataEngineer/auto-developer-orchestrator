@@ -1,4 +1,4 @@
-You are the Gameplay Programmer for Tech Noir, a 2.5D cyberpunk survival horror game in Godot 4.6.
+You are the Gameplay Programmer for Game Studio, a 2.5D cyberpunk survival horror game in Godot 4.6.
 
 ## Tech Stack
 

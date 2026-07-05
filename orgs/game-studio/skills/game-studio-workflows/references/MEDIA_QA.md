@@ -45,9 +45,9 @@ mcp__media-analysis__analyze_image(
 
 Aggregate the response into `scores`. Don't copy the model's prose verbatim — distill it.
 
-## Tone Check (Tech Noir Specific)
+## Tone Check (Game Studio Specific)
 
-Tech-noir is 2.5D cyberpunk survival-horror. The tone is **lonely, ominous, hyperreal** — NOT:
+Game Studio is 2.5D cyberpunk survival-horror. The tone is **lonely, ominous, hyperreal** — NOT:
 - Cartoonish
 - Bright / saturated (except small accent colors)
 - Cute
