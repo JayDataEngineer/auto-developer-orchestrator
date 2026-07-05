@@ -610,3 +610,81 @@ def test_profile_yaml_non_mapping_reports_violation(fake_tree):
     vs = check_org("o")
     assert any(v.rule == "profile-schema" and "mapping" in v.message
                for v in vs), vs
+
+
+# --- Phase 18: dev-bot roster redesign + no-general tripwire --------------
+
+def test_dev_bot_roster_on_real_repo():
+    """dev-bot's shipped roster is exactly the three specialists — explorer
+    (recon), code_worker (mechanical one-shot execution), web_agent (e2e
+    verification). The CTO does all the thinking; these three are the only
+    delegation targets."""
+    slugs = orgs.org_agent_slugs("dev-bot")
+    assert slugs == ["dev-bot-explorer", "code_worker", "web_agent"], slugs
+
+
+def test_dev_bot_no_general_subagent_tripwire_on_real_repo():
+    """The permanent tripwire: dev-bot must NOT roster a generic catch-all
+    subagent (general / general-purpose / researcher) — that would let the CTO
+    delegate the DESIGN itself, the exact anti-pattern the roster prevents.
+    The shipped roster is clean."""
+    vs = check_org("dev-bot")
+    assert not any(v.rule == "dev-bot-no-general-subagent" for v in vs), vs
+
+
+@pytest.mark.parametrize("forbidden_slug", ["general", "general-purpose", "researcher"])
+def test_dev_bot_no_general_subagent_tripwire_fires(fake_tree, forbidden_slug):
+    """Adding any forbidden generic slug to dev-bot's roster is a HARD contract
+    failure — the gate blocks the commit, not a silent drift (no-legacy-left-
+    behind). The rule is dev-bot-scoped: only dev-bot's CTO does the thinking."""
+    add_org, add_agent = fake_tree
+    add_agent(forbidden_slug, org="dev-bot")
+    add_org("dev-bot", agents=[forbidden_slug])
+    vs = check_org("dev-bot")
+    rule_vs = [v for v in vs if v.rule == "dev-bot-no-general-subagent"]
+    assert len(rule_vs) == 1, vs
+    assert forbidden_slug in rule_vs[0].message
+
+
+def test_dev_bot_tripwire_does_not_fire_for_other_orgs(fake_tree):
+    """The tripwire is dev-bot-scoped — another org rostering ``researcher``
+    (the shared general-purpose investigator) is fine. Only dev-bot's CTO
+    refuses a generic subagent."""
+    add_org, add_agent = fake_tree
+    add_agent("researcher", org="invest")
+    add_org("invest", agents=["researcher"])
+    vs = check_org("invest")
+    assert not any(v.rule == "dev-bot-no-general-subagent" for v in vs), vs
+
+
+def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
+    """code_worker + web_agent have no frontmatter ``model:`` → both resolve on
+    the ``worker`` role (cheap mimo, the "small one-shot worker" the user asked
+    for). Drives the REAL load_subagents('dev-bot') — no Docker, no tokens.
+    Fake key only (get_model reads it at construction, never sends a request)."""
+    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
+    from pux_harness.agent import orgs as orgs_mod
+    from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
+
+    # Stand-in tools covering the WHOLE specialist registry — load_subagents
+    # only needs .name to resolve each agent's tools whitelist, and web_agent
+    # references the full browser_* surface.
+    class _T:
+        def __init__(self, name):
+            self.name = name
+    specialists = [_T(n) for n in SPECIALIST_TOOL_NAMES]
+    subs = orgs_mod.load_subagents("dev-bot", specialists)
+    by_name = {s["name"]: s for s in subs}
+    assert set(by_name) == {"dev-bot-explorer", "code_worker", "web_agent"}, \
+        set(by_name)
+    # worker role resolves to a concrete model id (mimo-v2.5 default); the
+    # resolved value is NOT a hardcoded literal — it comes from models.yaml.
+    for slug in ("code_worker", "web_agent"):
+        assert by_name[slug]["model"] is not None, f"{slug} model unresolved"
+    # code_worker carries only python (+ native fs always auto-injected at
+    # graph build, not in the whitelist); web_agent carries the browser surface.
+    cw_tools = [t.name for t in by_name["code_worker"]["tools"]]
+    assert cw_tools == ["pux_sandbox_python"], cw_tools
+    web_tools = [t.name for t in by_name["web_agent"]["tools"]]
+    assert "pux_sandbox_browser_navigate" in web_tools
+    assert "pux_sandbox_describe_image" in web_tools

@@ -176,6 +176,24 @@ def check_org(name: str) -> list[Violation]:
         # No org.yaml but AGENTS.md has frontmatter — already reported above.
         slugs = _parse_list(fm.get("agents", ""))
 
+    # Permanent tripwire (Phase 18.A; no-legacy-left-behind): dev-bot is the
+    # Claude-Code-equivalent CODING org — the CTO does all the thinking and
+    # delegates only narrow execution (code_worker) / recon (dev-bot-explorer)
+    # / e2e verification (web_agent). A generic catch-all subagent
+    # (``general`` / ``general-purpose`` / the shared ``researcher``) would let
+    # the CTO delegate the DESIGN itself, which is exactly the anti-pattern the
+    # roster exists to prevent. A future re-add is a HARD contract failure, not
+    # a silent drift.
+    if name == "dev-bot":
+        forbidden = {"general", "general-purpose", "researcher"}
+        bad = sorted(set(slugs) & forbidden)
+        if bad:
+            v.append(Violation(
+                "error", "dev-bot-no-general-subagent",
+                f"dev-bot: roster must not include a generic subagent "
+                f"({bad}); the CTO does the thinking — delegate only to "
+                f"dev-bot-explorer / code_worker / web_agent"))
+
     # Rule 3: every slug resolves to a valid agent .md (org-local or _shared)
     # with required frontmatter keys + a non-empty body (system_prompt).
     agent_subagents: dict[str, dict[str, Any]] = {}

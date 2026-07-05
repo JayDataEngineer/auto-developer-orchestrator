@@ -1,1 +1,1 @@
-agents: [dev-bot-explorer]
+agents: [dev-bot-explorer, code_worker, web_agent]
